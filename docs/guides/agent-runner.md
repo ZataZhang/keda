@@ -5301,7 +5301,7 @@ agent 级字段：
 | `supports_resume` | bool | 是否声明 CLI 支持按会话 id 续传 |
 | `resume_args` | 字面量 argv 模板 | 通用续传参数；支持 `{session_id}` 占位符 |
 
-profile 级字段（`profiles.<profile>`，用途为 4 种闭集：`run` / `deliberate` / `generate` / `repl`）：
+profile 级字段（`profiles.<profile>`，用途为 5 种闭集：`run` / `deliberate` / `generate` / `repl` / `judge`）：
 
 | 字段 | 取值域 | 说明 |
 |---|---|---|
@@ -5402,6 +5402,8 @@ pi · run
 接入后：`--agent` 参数、agent 路由标签、容器认证导入、live 面板协议渲染都会自动识别新 agent，无需任何代码改动。
 
 ### 内置 agent 的形态速查（codebuddy / qoder / opencode）
+
+`judge` 用途（模型评测的评审调用）与 `generate` 的区别：`generate` 的 `read_only` 只承诺"不写文件"，工具仍能读取任意路径；`judge` 要求 agent 声明**禁用全部内置工具**的开关（`claude` / `codebuddy` / `qoder` 为 `--tools ""`，`pi` 为 `--no-tools`），调用时进程 cwd 是新建的空临时目录。没有这类开关的 agent（`codex`、`kimi`、`opencode`）**不声明** `judge`，评测页把它们标为"不可用"，宁可缺用途也不做无法验证的隔离声明。
 
 这三个 agent 与前面四个一样是内置默认，注册块见 `config.toml`。它们各自有一处**容易踩的点**，接入或排障前先看这里：
 

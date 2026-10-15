@@ -5,7 +5,7 @@
 - 使用 stdlib ``sqlite3`` 而非 SQLAlchemy/alembic：CLI 直跑 ``kc run``
   也要写运行记录，不能要求 PostgreSQL 常驻；本地单文件零依赖。
 - WAL + busy_timeout 容忍多个 runner 进程并发收尾写库。
-- 通过 ``PRAGMA user_version`` 做就地迁移（当前版本 14：v5 新增
+- 通过 ``PRAGMA user_version`` 做就地迁移（当前版本 15：v5 新增
   ``prd_lifecycle_runs`` 与 ``prd_lifecycle_events`` 两张 PRD 生命周期账本表；
   v6 为 ``attempt_records`` 附加可空 ``preset`` / ``model`` 观测列；
   v7 把队列与设置两张表按新功能名重建；v8 为 ``prd_lifecycle_events`` 附加
@@ -13,7 +13,9 @@
   ``agent_invocation_events`` 通用调用观测账本表，身份不依赖 PRD；v10 新增
   按仓库与归档变体隔离的 ``backlog_prd_snapshots`` 列表快照表；v11 为
   ``attempt_records`` 附加失败阶段；v12 附加生命周期阶段耗时；v13 为运行历史
-  追加可空的 Issue 标题与 URL 快照；v14 新增单行模型 token 价格设置表）。
+  追加可空的 Issue 标题与 URL 快照；v14 新增单行模型 token 价格设置表；
+  v15 新增模型评测三表 ``evaluation_run`` / ``evaluation_result`` /
+  ``evaluation_score``）。
 - 旁路记录（运行历史 / 审计 / attempt）的写入失败不允许向上抛出阻断
   runner 主流程，降级为日志警告；而 dashboard 事实读取路径（监控快照
   与同步设置）的写入失败必须抛给调用方，避免"刷新成功但数据没更新"。
@@ -32,16 +34,23 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from backend.infrastructure.persistence.console_store_invocations import (
-    CREATE_INVOCATION_EVENT_INDEXES,
-    CREATE_INVOCATION_EVENTS,
-    InvocationEventStoreMixin,
+from backend.infrastructure.persistence.console_store_evaluation import (
+    CREATE_EVALUATION_INDEXES,
+    CREATE_EVALUATION_RESULT,
+    CREATE_EVALUATION_RUN,
+    CREATE_EVALUATION_SCORE,
+    EvaluationStoreMixin,
 )
 from backend.infrastructure.persistence.console_store_history import (
     AttemptRecord,
     AuditEntry,
     RunHistoryReadMixin,
     RunRecord,
+)
+from backend.infrastructure.persistence.console_store_invocations import (
+    CREATE_INVOCATION_EVENT_INDEXES,
+    CREATE_INVOCATION_EVENTS,
+    InvocationEventStoreMixin,
 )
 from backend.infrastructure.persistence.console_store_lifecycle import (
     PrdLifecycleStoreMixin,
@@ -54,7 +63,7 @@ from backend.infrastructure.persistence.console_store_takeover import (
 _logger = logging.getLogger(__name__)
 
 
-_SCHEMA_VERSION = 14
+_SCHEMA_VERSION = 15
 
 _RUN_V13_ADD_ISSUE_TITLE = "ALTER TABLE run_records ADD COLUMN issue_title TEXT"
 _RUN_V13_ADD_ISSUE_URL = "ALTER TABLE run_records ADD COLUMN issue_url TEXT"
@@ -234,6 +243,7 @@ class SqliteConsoleStore(
     PrdLifecycleStoreMixin,
     InvocationEventStoreMixin,
     IssueRunControlMixin,
+    EvaluationStoreMixin,
 ):
     """``IRunHistoryStore`` / ``IBacklogStore`` / ``IMonitorSnapshotStore`` /
     ``IBacklogSnapshotStore`` / ``IConsoleModelPricingStore`` / ``IIssueRunControl``
@@ -360,6 +370,13 @@ class SqliteConsoleStore(
             # 附加式迁移：新增单行模型 token 价格设置表；建表带 IF NOT EXISTS，
             # 重复迁移幂等。接管控制表 issue_run_control 不在版本门内建表。
             connection.execute(_CREATE_MODEL_PRICING_SETTINGS)
+        if current_version < 15:
+            # 附加式迁移：模型评测三张独立表 + 索引，既有表、行与列值原样保留。
+            connection.execute(CREATE_EVALUATION_RUN)
+            connection.execute(CREATE_EVALUATION_RESULT)
+            connection.execute(CREATE_EVALUATION_SCORE)
+            for index_statement in CREATE_EVALUATION_INDEXES:
+                connection.execute(index_statement)
         connection.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
         connection.commit()
 

@@ -17,6 +17,7 @@ import { CONSOLE_NAV_COLLAPSED_KEY, usePersistedBoolean } from "@/lib/console-ui
 import {
   Activity,
   BarChart3,
+  FlaskConical,
   GitBranch,
   LayoutDashboard,
   Lightbulb,
@@ -34,6 +35,7 @@ const navItems = [
   { href: "/app/processes", label: "Processes", icon: Activity },
   { href: "/app/repositories", label: "Repositories", icon: GitBranch },
   { href: "/app/stats", label: "Stats", icon: BarChart3 },
+  { href: "/app/evaluations", label: "Evaluations", icon: FlaskConical },
   { href: "/app/backlog", label: "Backlog", icon: Map },
   { href: "/app/ideas", label: "Ideas", icon: Lightbulb },
   { href: "/app/settings", label: "Settings", icon: Settings },

@@ -589,6 +589,25 @@ class AgentRunnerConsoleSettings(BaseModel):
         return self
 
 
+class AgentRunnerEvaluationSettings(BaseModel):
+    """``[agent_runner.evaluation]``：模型评测（multi-judge）功能配置。
+
+    完全可选：缺段时 Console 正常启动，评测页面显示"未配置评审预设"。
+    评审预设**就是**现有的执行预设（``[agent_runner.presets.*]``），不另设模型目录与
+    密钥：``default_judge_presets`` 只是页面预选的预设名单，单次 run 可覆盖；能否当
+    评审取决于该预设的 agent 是否声明了禁用工具的 ``judge`` 形态。
+    并发刻意收敛：评测是手动离线批量任务，必须尊重与 runner 相同的主机
+    capacity，而不是另开一组无界 worker（PRD §5 架构边界）。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    default_judge_presets: list[str] = Field(default_factory=list)
+    max_concurrency: int = Field(default=2, ge=1, le=4)
+    agent_timeout_seconds: int = Field(default=900, ge=10, le=3600)
+    judge_timeout_seconds: int = Field(default=120, ge=5, le=600)
+
+
 class AgentRunnerDaemonSettings(BaseModel):
     """Long-running daemon polling configuration."""
 

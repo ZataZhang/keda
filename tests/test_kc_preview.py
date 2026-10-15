@@ -130,12 +130,25 @@ class RecordingPreviewManager(SubprocessPreviewProcessManager):
 
 
 def _pid_alive(process_pid: int) -> bool:
-    """检查进程是否仍运行；Linux 僵尸进程已退出，即使信号 0 仍命中。"""
+    """检查进程是否仍运行；僵尸进程已退出，即使信号 0 仍命中。"""
     if sys.platform == "linux":
         process_info = _linux_process_info(process_pid)
         if process_info is not None:
             process_state, _process_group = process_info
             return process_state not in {"Z", "X", "x"}
+    elif sys.platform == "darwin":
+        # macOS 的 orphan 僵尸在 launchd 回收前会让 signal 0 假报存活；
+        # 用 ps 状态位区分真实运行与待回收的进程表残留。
+        ps_result = subprocess.run(  # noqa: S603 - 固定 argv，无 shell
+            ["ps", "-o", "state=", "-p", str(process_pid)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        ps_state = ps_result.stdout.strip()
+        if not ps_state:
+            return False
+        return "Z" not in ps_state
     try:
         os.kill(process_pid, 0)
     except ProcessLookupError:
@@ -185,6 +198,16 @@ def _linux_process_info(process_pid: int) -> tuple[str, int] | None:
     except ValueError:
         return None
     return stat_fields[0], process_group_id
+
+
+def _wait_pid_gone(process_pid: int, *, timeout_seconds: float = 5.0) -> bool:
+    """有限等待一个 pid 退出；真实存活的孤儿（sleep 300）不会因此变绿。"""
+    deadline = time.monotonic() + timeout_seconds
+    while _pid_alive(process_pid):
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.05)
+    return True
 
 
 def _grandchild_pid_from_log(log_path: Path) -> int | None:
@@ -346,7 +369,7 @@ def test_lan_only_address_is_not_ready_and_group_is_reclaimed(
     log_files = list((isolated_state_home / ".kedacode" / "preview").glob("*.log"))
     grandchild_pid = _grandchild_pid_from_log(log_files[0]) if log_files else None
     assert grandchild_pid is not None
-    assert not _pid_alive(grandchild_pid), "孙进程必须随整组退出，不能留下孤儿"
+    assert _wait_pid_gone(grandchild_pid), "孙进程必须随整组退出，不能留下孤儿"
 
 
 def test_silent_dev_command_times_out_without_url(
@@ -477,7 +500,7 @@ def test_stop_terminates_the_whole_owned_group(
     assert stopped.state == PreviewState.NONE
     assert read_preview_record(repo_root) is None
     assert not _process_group_alive(process_group)
-    assert not _pid_alive(grandchild_pid)
+    assert _wait_pid_gone(grandchild_pid), "孙进程必须随整组退出，不能留下孤儿"
 
 
 def test_second_start_reuses_slot_and_does_not_spawn_a_rival(

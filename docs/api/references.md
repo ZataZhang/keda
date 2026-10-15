@@ -340,6 +340,50 @@ curl -sS \
 
 启动单个 PRD。三种 Backlog 视图（依赖图 / 时间轴 / 列表）现在都会经右侧统一详情走这一个端点；成功后该仓的 PRD 列表缓存会立即失效，下一次刷新即可看到新状态。基础请求体为 `{"repo_id": "..."}`；可选的 `auto_merge_prd: true` 会给该 Issue 设置单 PRD 自动合并授权标签，只跳过独立 verifier，保留仓库验证命令、PR checks 和分支保护。该选项要求 `autopilot.enabled = true`，但不要求打开全局 `safety.auto_merge`；合并后不会修改 PRD 人工验收记录。PRD 不在 `tasks/pending/` 或 `tasks/archive/` 内、或仍被上游依赖阻塞时，由既有依赖门禁返回 `400`。
 
+## 模型评测 Console 端点
+
+多执行预设 × 多评审模型的 Agent/模型效果对照评测（Console「Evaluations」页的后端）。功能语义、suite YAML 规范与授权边界见 [评测与测试](../dev/evaluation.md)。所有端点位于 `/api/v1/agent-runner/console/evaluation/` 之下；动作级错误按分类映射 HTTP 状态：`not_found → 404`、`conflict → 409`、`invalid → 400`，`detail` 为可读原因。
+
+### `GET /api/v1/agent-runner/console/evaluation/suites`
+
+列出 `tasks/evaluation-suites/` 下的评测集与逐文件校验结果（维护者自查入口，不需要任何凭据）。条目字段：`file`、`valid`、`errors`；校验通过时另含 `suite_id`、`version`、`repo_path`、`base_ref`、`content_hash`、`rubric_version`、`check_timeout_seconds` 与 `cases`。同一目录内 `suite_id` 重复时，涉及的两个文件**一起**返回 `valid=false`（原因含「重复定义」），与 registry README 口径一致。
+
+### `GET /api/v1/agent-runner/console/evaluation/presets`
+
+页面下拉数据：`execution_presets`（来自既有 `[agent_runner.presets.<name>]`）、`judge_presets`（评审预设即同一份执行预设，逐项带 `agent` / `model` / `reasoning_effort` 与 `available` / `reason` 可用性探针——只检查 agent 是否声明禁用工具的 `judge` 形态且 CLI 在 PATH 上，**不起进程、不发起网络调用**；codex / kimi / opencode 等无该形态的 agent 为 `available=false`）、`default_judge_presets` 与并发/超时配置。所有条目 `cost_status` 固定为 `unknown`。
+
+### `GET /api/v1/agent-runner/console/evaluation/runs` / `POST .../runs`
+
+列表按创建时间倒序返回全部 run；创建请求体 `{"suite_id": "...", "execution_presets": ["..."], "judge_presets": ["..."]}`（`execution_presets` 至少一个；`judge_presets` 可为空，表示本轮只做确定性检查对照、不进入评审授权）。创建是**全量 fail-fast 校验 + 快照冻结**（suite hash、base commit、预设快照、矩阵上限 32 单元），成功返回 `201` 与 `status=created` 的 run；不启动任何执行，也不发起任何 provider 调用。
+
+### `GET /api/v1/agent-runner/console/evaluation/runs/{run_id}`
+
+run 详情：`run`、`results`（逐候选执行）、`scores`（逐评审评分，含全部失败态）、`summary`（只从 `valid` 评分行实时派生的每维中位数 / min / max / N，不落库）与 `payload_state`（`is_active` / `awaiting_consent` / `judge_selected`）。不存在返回 404。
+
+### `POST .../runs/{run_id}/start` / `POST .../runs/{run_id}/cancel` / `DELETE .../runs/{run_id}`
+
+- start：`created → queued` 并排程候选执行；本动作**绝不**触发评审调用。
+- cancel：仅 `created/queued/running/awaiting_judge_consent` 可取消（否则 409，`judging` 已获授权不撤回）；取消把未完成候选落 `cancelled` 状态并清除暂存 payload。在 `awaiting_judge_consent` 上取消时，还会为已产出的候选 × 评审者写入 `cancelled` 评分行（与 deny 的 `unauthorized` 同理，不产生任何分数）。
+- delete：级联删除 run 的 DB 行、结果、评分与本机暂存 payload / worktree；不存在返回 404。
+
+### `GET .../runs/{run_id}/judge-preview`
+
+返回与实际发送**逐字节一致**的 payload 预览：逐条 `payload_preview` / `payload_sha256`、`manifest_hash`、run 冻结的 `frozen_manifest_hash`、`estimated_requests`（条目 × 评审者数）与敏感内容提示。预览上限覆盖评审 payload 的最坏尺寸（diff 字节上限加固定开销）；仅极端超长内容会截断并置 `payload_truncated=true`，此时 hash 仍绑定完整暂存文件。run 不处于 `awaiting_judge_consent` 或暂存 manifest 缺失时返回 409。
+
+### `POST .../runs/{run_id}/judge-consent`
+
+显式授权动作，请求体 `{"decision": "approve" | "deny", "manifest_hash": "..."}`。服务端在发出任何评审请求前重新核对请求 hash == run 冻结 hash == 当前暂存文件重算 hash，任何不一致返回 **409**（过期须重新预览）且零外发：
+
+- approve：`awaiting_judge_consent → judging` 并排程评审调用；
+- deny：run 收尾为 `completed`，为每个候选 × 评审者写入 `unauthorized` 评分行（区分「评审者被拒绝」与「评审者缺席」），并清除暂存 payload。
+
+### 状态枚举与外发/密钥边界
+
+- run 状态：`created / queued / running / awaiting_judge_consent / judging / completed / cancelled / interrupted`（Console 重启时活跃 run 一律自愈为 `interrupted`；不提供续跑，用户删除该 run 后用同一 suite 新建 run 重跑）。
+- 候选结果状态：`pending / running / succeeded / failed / timeout / cancelled`；check 状态：`passed / failed / timeout / not_run`。
+- 评分状态：`valid / invalid / refusal / timeout / provider_error / unauthorized / cancelled`——**任何非 valid 状态都不折算为 0 分**，聚合只统计 valid 行；`unauthorized` / `cancelled` 是授权前 deny / 取消的留痕行，分数恒为空。
+- 默认不开启评审外发：judge 调用只可能发生在 approve 之后；payload 与响应 hash 落本地账本，持久层不保存 raw prompt、完整 patch、密钥值或环境变量。
+
 ### `GET /api/v1/agent-runner/console/runtime/tasks`
 
 值守看板（`/app/dashboard/` 默认视图）的任务摘要，只读。**不新增任何存储**：任务身份与标签来自监控快照，运行终态来自运行账本，阶段 / preset / 模型来自 attempt 账本，PRD 关联来自生命周期账本。

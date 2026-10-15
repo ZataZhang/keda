@@ -199,6 +199,27 @@ model = "Qwen3.8-Max"
 reasoning_effort = "xhigh"
 
 # =============================================================================
+# 模型评测（Console「Evaluations」页）：评审预设
+# =============================================================================
+# 完全可选：不写本节时 Console 正常启动。
+# 评审预设**就是**上面的 [agent_runner.presets.*]，不另设模型目录、不用 API key：
+# 评审由该预设的 agent CLI 以其 `judge` 形态运行——进程 cwd 是空临时目录，且
+# agent 声明了"禁用全部内置工具"的开关（claude/codebuddy/qoder 的 --tools ""、
+# pi 的 --no-tools），所以评审只能读到授权预览过的 payload。没有这类开关的 agent
+# （codex、kimi、opencode）不能当评审，页面会把它们标为"不可用"。
+# default_judge_presets 是页面预选的预设名单，单次 run 可覆盖；不可用的默认项
+# 页面不会预选（勾选框本身是禁用的，预选会留下无法提交也无法取消的选项）。
+# 并发刻意收敛（1–4）：评测是手动离线批量任务，尊重与 runner 相同的主机 capacity。
+# 该上限是**全进程**口径：多个 run 同时在跑时，主机上的在飞候选单元数仍不超过
+# min(max_concurrency, runner.max_concurrent_issues)。
+#
+# [agent_runner.evaluation]
+# default_judge_presets = ["claude-sonnet"]   # 必须是上面已定义的预设名
+# max_concurrency = 2
+# agent_timeout_seconds = 900
+# judge_timeout_seconds = 120
+
+# =============================================================================
 # 阶段 -> 预设 绑定（九键闭集，与生命周期矩阵同键）
 # =============================================================================
 # 绑定后该阶段由预设整体决定 (agent, 模型, 推理档)。覆盖优先级（高到低）：
@@ -312,6 +333,12 @@ prompt_delivery = "argv_tail"
 output_protocol = "plain"
 read_only = true
 
+[agent_runner.agents.claude.profiles.judge]
+args = ["--tools", "", "-p"]
+prompt_delivery = "argv_tail"
+output_protocol = "plain"
+read_only = true
+
 [agent_runner.agents.claude.profiles.repl]
 args = ["--dangerously-skip-permissions", "-p"]
 prompt_delivery = "argv_tail"
@@ -390,6 +417,12 @@ prompt_delivery = "stdin"
 output_protocol = "plain"
 read_only = true
 
+[agent_runner.agents.pi.profiles.judge]
+args = ["--no-tools", "--print"]
+prompt_delivery = "stdin"
+output_protocol = "plain"
+read_only = true
+
 [agent_runner.agents.pi.profiles.repl]
 args = ["--approve", "--print"]
 prompt_delivery = "stdin"
@@ -427,6 +460,12 @@ output_protocol = "claude-stream-json"
 
 [agent_runner.agents.codebuddy.profiles.generate]
 args = ["--dangerously-skip-permissions", "-p"]
+prompt_delivery = "argv_tail"
+output_protocol = "plain"
+read_only = true
+
+[agent_runner.agents.codebuddy.profiles.judge]
+args = ["--tools", "", "-p"]
 prompt_delivery = "argv_tail"
 output_protocol = "plain"
 read_only = true
@@ -473,6 +512,12 @@ output_protocol = "plain"
 
 [agent_runner.agents.qoder.profiles.generate]
 args = ["--dangerously-skip-permissions", "-p"]
+prompt_delivery = "argv_tail"
+output_protocol = "plain"
+read_only = true
+
+[agent_runner.agents.qoder.profiles.judge]
+args = ["--tools", "", "-p"]
 prompt_delivery = "argv_tail"
 output_protocol = "plain"
 read_only = true
