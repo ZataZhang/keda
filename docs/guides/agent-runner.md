@@ -3543,6 +3543,9 @@ verifier 能跑的就是 builder 写进 manifest 的那些 capture 脚本，而�
 
 - **判定按 diff，不按清单文本**：即使某条 Realistic Validation 条目文字没写"截图/png"，只要改动碰了前端目录就要求视觉证据——覆盖"前端条目文本不含格式关键字导致逐项检查漏判"的盲区。
 - **独立于 verifier**：`verifier_enabled = false` 的仓库也照样受本门禁保护；它是确定性机械门禁，与对抗复验互补。
+- **录屏的两道额外检查**：证据目录里的 `.mp4/.mov/.webm` 会再过一遍视频门禁（`agent_runner_video_evidence.py`）。① 健全性：`.mp4/.mov` 必须是 H.264 + yuv420p（HEVC、yuv444 在 Safari/QuickTime 里显示空白），`.webm` 须为 VP8/VP9/AV1，时长 ≥ 1 秒，整段黑屏（blackdetect 占比 ≥ 90%）直接拒绝；本机没有 `ffprobe`/`ffmpeg` 时只告警跳过。② 内嵌：证据报告（`*.evidence-report.md`）已存在时，每个视频都必须出现在 `<video controls src="…">` 播放器里，只放文件或纯链接会被拒。
+- **多步/异步流程选 video**：从 PRD 生成 Issue 时，格式分类 prompt 会把"点击 → 等待 → 出结果"类条目归为 `video`，对应的 RV 条目必须交付录屏而不是单张截图。
+
 - **默认开、可按仓关**：新键默认 `true`，既有 `.kedacode.toml`（无此键）升级后自动获得该门禁；确需关闭在 `[agent_runner.validation]` 写 `frontend_visual_evidence_required = false`，前端目录命名不同则用 `frontend_paths` 覆盖。
 - **只拦不产**：本门禁只保证"缺视觉证据即拦下"，不负责替你把证据跑出来；让 runner 环境能跑前端 e2e 属容器化能力。
 

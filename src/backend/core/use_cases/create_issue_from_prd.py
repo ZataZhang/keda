@@ -858,7 +858,10 @@ _EVIDENCE_FORMAT_PROMPT_TEMPLATE = """\
 
 Item: "{item_text}"
 
-输出 JSON: {{"kind": "screenshot"}} 或 {{"kind": "none"}}
+选择规则：item 描述的是多步交互或异步状态变化的流程（点击 → 等待 → 出结果、
+流式输出、跨页面跳转）时选 video；只是静态页面/单一状态才选 screenshot。
+
+输出 JSON: {{"kind": "video"}}、{{"kind": "screenshot"}} 或 {{"kind": "none"}}
 可选 kind: screenshot, pdf, txt, word, excel, csv, video, none
 """
 
