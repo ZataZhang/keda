@@ -24,7 +24,9 @@ class IGitHubApiBudget(ABC):
 
     @abstractmethod
     def ensure_available(self, api_kind: str) -> None:
-        """额度处于暂停期时抛出 ``GitHubApiRateLimitError``，不发出真实请求。
+        """额度已耗尽（硬暂停）时抛出 ``GitHubApiRateLimitError``，不发出真实请求。
+
+        额度只是偏低（软暂停）时不抛：那最后一小段预留要留给进行中的收尾。
 
         Args:
             api_kind: ``API_KIND_GRAPHQL`` 或 ``API_KIND_REST``。
@@ -60,11 +62,11 @@ class IGitHubApiBudget(ABC):
         limit: int,
         reset_at: datetime,
     ) -> None:
-        """记录一次额度探测结果；剩余量见底时与限流同样进入暂停期。"""
+        """记录一次额度探测结果：耗尽 → 硬暂停；偏低 → 只暂停轮询；充足 → 撤销旧标记。"""
 
     @abstractmethod
     def pause_remaining_seconds(self) -> float:
-        """所有类型里最长的剩余暂停秒数；没有暂停时返回 ``0.0``。"""
+        """“轮询”还应暂停多久（含额度偏低的软暂停）；没有暂停时返回 ``0.0``。"""
 
     @abstractmethod
     def usage_summary(self) -> dict[str, int]:

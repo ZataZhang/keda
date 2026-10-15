@@ -72,15 +72,34 @@ def test_a_later_block_is_not_shortened_by_an_earlier_one(tmp_path: Path) -> Non
     assert budget.pause_remaining_seconds() == pytest.approx(1800)
 
 
-def test_low_probe_pauses_and_healthy_probe_clears_stale_block(tmp_path: Path) -> None:
+def test_low_probe_pauses_polling_but_lets_in_flight_calls_through(tmp_path: Path) -> None:
+    """额度偏低（没耗尽）：只暂停轮询，进行中的收尾调用仍放行。"""
     budget = _budget(tmp_path)
     reset_at = _NOW + timedelta(minutes=40)
-    budget.record_probe("graphql", remaining=10, limit=5000, reset_at=reset_at)
+    budget.record_probe("graphql", remaining=100, limit=5000, reset_at=reset_at)
+
+    budget.ensure_available("graphql")  # 收尾调用（创建 PR、改标签）不受影响
+    assert budget.pause_remaining_seconds() == pytest.approx(2400)  # daemon 轮询要暂停
+
+
+def test_exhausted_probe_blocks_every_call(tmp_path: Path) -> None:
+    budget = _budget(tmp_path)
+    budget.record_probe("graphql", remaining=0, limit=5000, reset_at=_NOW + timedelta(minutes=40))
     with pytest.raises(GitHubApiRateLimitError):
         budget.ensure_available("graphql")
+    assert budget.pause_remaining_seconds() == pytest.approx(2400)
+
+
+def test_healthy_probe_clears_both_kinds_of_stale_pause(tmp_path: Path) -> None:
+    budget = _budget(tmp_path)
+    reset_at = _NOW + timedelta(minutes=40)
+    budget.record_rate_limited("graphql", reset_at)
+    budget.record_probe("graphql", remaining=100, limit=5000, reset_at=reset_at)
+    assert budget.pause_remaining_seconds() > 0  # 偏低：仍暂停轮询，但硬暂停被撤销
+    budget.ensure_available("graphql")
 
     budget.record_probe("graphql", remaining=4900, limit=5000, reset_at=reset_at)
-    budget.ensure_available("graphql")
+    assert budget.pause_remaining_seconds() == 0.0
 
 
 def test_probe_due_respects_interval_across_instances(tmp_path: Path) -> None:
@@ -354,3 +373,15 @@ def test_format_usage_summary_ranks_by_count(tmp_path: Path) -> None:
     for _ in range(3):
         budget.record_call("graphql", "issue list")
     assert format_usage_summary(budget) == "total=4; graphql:issue list=3, rest:api GET a=1"
+
+
+def test_client_can_finish_publication_while_quota_is_low_but_not_empty(tmp_path: Path) -> None:
+    """收尾场景：剩余额度偏低（100/5000）时，创建 PR 这类调用仍能发出去。"""
+    budget = _budget(tmp_path)
+    runner = _GhRunner(graphql_remaining=100)
+    client = GitHubCliClient(tmp_path, runner, api_budget=budget)  # type: ignore[arg-type]
+
+    client._run_with_retry(["gh", "pr", "create", "--draft", "--title", "x"], cwd=tmp_path)
+
+    assert ("gh", "pr", "create", "--draft", "--title", "x") in runner.commands
+    assert budget.pause_remaining_seconds() > 0  # 但 daemon 的轮询已经被叫停

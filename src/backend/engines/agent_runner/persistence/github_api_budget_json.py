@@ -8,6 +8,7 @@
 
     {"version": 1,
      "blocked_until": {"graphql": "<UTC ISO>"},
+     "polling_paused_until": {"graphql": "<UTC ISO>"},
      "last_probe_at": "<UTC ISO>",
      "remaining": {"graphql": {"remaining": 4940, "limit": 5000, "reset_at": "<UTC ISO>"}},
      "usage": {"2026-10-15T22": {"graphql:issue list": 12}}}
@@ -41,9 +42,12 @@ BUDGET_PATH_ENV_VAR = "KC_GITHUB_API_BUDGET_PATH"
 
 _USAGE_RETENTION = timedelta(hours=24)
 _DEFAULT_PROBE_INTERVAL_SECONDS = 300.0
-# 剩余额度低于 max(绝对下限, 比例 × 上限) 就整体暂停到重置时间，给手动操作留余量。
+# 剩余额度低于 max(绝对下限, 比例 × 上限) 时只暂停“轮询”（不再领新任务、不再空转），
+# 把这最后一小段额度留给已经在进行中的收尾（创建 PR、改标签、发评论）和手动操作。
 _LOW_REMAINING_FLOOR = 50
 _LOW_REMAINING_RATIO = 0.05
+# 真正耗尽（剩余 0）才像限流错误一样让所有调用都停下，避免发出注定失败的请求。
+_EXHAUSTED_REMAINING = 0
 _DEFAULT_FLUSH_EVERY_CALLS = 10
 _DEFAULT_FLUSH_INTERVAL_SECONDS = 10.0
 
@@ -115,7 +119,10 @@ class JsonGitHubApiBudget(IGitHubApiBudget):
         return _parse_utc(blocked_map.get(api_kind))
 
     def ensure_available(self, api_kind: str) -> None:
-        """暂停期内直接抛限流异常，不让请求发出去。"""
+        """额度已耗尽（硬暂停）时直接抛限流异常，不让请求发出去。
+
+        只看硬暂停：额度偏低但没耗尽时，进行中的收尾调用仍然放行。
+        """
         blocked_until = self._blocked_until(self._read_state(), api_kind)
         if blocked_until is not None and blocked_until > self._now():
             raise GitHubApiRateLimitError(
@@ -124,17 +131,22 @@ class JsonGitHubApiBudget(IGitHubApiBudget):
             )
 
     def pause_remaining_seconds(self) -> float:
-        """所有类型里最长的剩余暂停秒数。"""
+        """“轮询”还应暂停多久：硬暂停与额度偏低的软暂停里最长的剩余秒数。
+
+        daemon 用它决定要不要跳过整轮轮询；它比 :meth:`ensure_available` 更严格，
+        所以额度偏低时 daemon 不再领新任务，已经在进行中的收尾仍可继续。
+        """
         state = self._read_state()
-        blocked_map = state.get("blocked_until")
-        if not isinstance(blocked_map, dict):
-            return 0.0
         now = self._now()
         longest_pause = 0.0
-        for raw_until in blocked_map.values():
-            blocked_until = _parse_utc(raw_until)
-            if blocked_until is not None:
-                longest_pause = max(longest_pause, (blocked_until - now).total_seconds())
+        for map_name in ("blocked_until", "polling_paused_until"):
+            until_map = state.get(map_name)
+            if not isinstance(until_map, dict):
+                continue
+            for raw_until in until_map.values():
+                paused_until = _parse_utc(raw_until)
+                if paused_until is not None:
+                    longest_pause = max(longest_pause, (paused_until - now).total_seconds())
         return longest_pause
 
     def probe_due(self) -> bool:
@@ -240,7 +252,7 @@ class JsonGitHubApiBudget(IGitHubApiBudget):
         """标记该类型额度耗尽；已有更晚的暂停截止时间时保留更晚的。"""
 
         def _mutate(state: dict[str, Any]) -> None:
-            self._extend_block(state, api_kind, resume_at)
+            self._extend_block(state, "blocked_until", api_kind, resume_at)
 
         self._update(_mutate)
 
@@ -252,7 +264,7 @@ class JsonGitHubApiBudget(IGitHubApiBudget):
         limit: int,
         reset_at: datetime,
     ) -> None:
-        """记录探测结果：见底则进入暂停期；额度充足则撤销旧的暂停标记。"""
+        """记录探测结果：耗尽则硬暂停；偏低只暂停轮询；额度充足则撤销旧的暂停标记。"""
         probed_at = self._now()
 
         def _mutate(state: dict[str, Any]) -> None:
@@ -267,22 +279,35 @@ class JsonGitHubApiBudget(IGitHubApiBudget):
             }
             state["remaining"] = remaining_map
             low_threshold = max(_LOW_REMAINING_FLOOR, int(limit * _LOW_REMAINING_RATIO))
+            if remaining <= _EXHAUSTED_REMAINING:
+                self._extend_block(state, "blocked_until", api_kind, reset_at)
+                return
             if remaining <= low_threshold:
-                self._extend_block(state, api_kind, reset_at)
+                # 偏低：只拦轮询，进行中的收尾可以用掉这最后一段预留。
+                self._extend_block(state, "polling_paused_until", api_kind, reset_at)
+                self._clear_block(state, "blocked_until", api_kind)
                 return
             # 探测结果以服务器为准：额度已经充足，旧的暂停标记不该继续拦人。
-            blocked_map = state.get("blocked_until")
-            if isinstance(blocked_map, dict):
-                blocked_map.pop(api_kind, None)
+            self._clear_block(state, "blocked_until", api_kind)
+            self._clear_block(state, "polling_paused_until", api_kind)
 
         self._update(_mutate)
 
     @staticmethod
-    def _extend_block(state: dict[str, Any], api_kind: str, resume_at: datetime) -> None:
-        blocked_map = state.get("blocked_until")
-        if not isinstance(blocked_map, dict):
-            blocked_map = {}
-        existing_until = _parse_utc(blocked_map.get(api_kind))
+    def _extend_block(
+        state: dict[str, Any], map_name: str, api_kind: str, resume_at: datetime
+    ) -> None:
+        """在 ``map_name`` 里登记暂停截止时间；已有更晚的就保留更晚的。"""
+        until_map = state.get(map_name)
+        if not isinstance(until_map, dict):
+            until_map = {}
+        existing_until = _parse_utc(until_map.get(api_kind))
         if existing_until is None or resume_at > existing_until:
-            blocked_map[api_kind] = resume_at.isoformat()
-        state["blocked_until"] = blocked_map
+            until_map[api_kind] = resume_at.isoformat()
+        state[map_name] = until_map
+
+    @staticmethod
+    def _clear_block(state: dict[str, Any], map_name: str, api_kind: str) -> None:
+        until_map = state.get(map_name)
+        if isinstance(until_map, dict):
+            until_map.pop(api_kind, None)
