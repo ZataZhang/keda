@@ -300,6 +300,43 @@ def test_via_main_issue_never_retargets_base(tmp_path, worktree_path) -> None:
     assert not any(c.get("method") == "set_pull_request_base" for c in github.calls)
 
 
+def test_manual_takeover_hold_is_rechecked_immediately_before_merge(
+    tmp_path, worktree_path, monkeypatch
+) -> None:
+    """队列处理期间落下的接管闸门必须在最终合并操作前拦截。"""
+    branch = "issue-72"
+    github = FakeGitHubClient()
+    runner = FakeProcessRunner(responses=_git_state_responses(branch, "abc1234"))
+    issue = IssueSummary(
+        number=72,
+        title="hold race",
+        url="https://github.com/example/repo/issues/72",
+        body="",
+        labels=("agent/review",),
+    )
+    github.set_pr_context(branch, _make_pr_context(branch=branch, number=72))
+    github._issue_comments[72] = [f"PR Branch: `{branch}`"]
+    hold_checks = iter((False, True))
+    monkeypatch.setattr(
+        merge_queue_module,
+        "autopilot_hold_blocks",
+        lambda **_kwargs: next(hold_checks),
+    )
+
+    outcome = merge_queue_module._process_one(
+        repo_path=tmp_path,
+        config=_make_config(require_verifier_pass=False, auto_sign_off=False),
+        issue=issue,
+        github_client=github,
+        process_runner=runner,
+        supervisor_agent="auto",
+        repo_id="repo-a",
+    )
+
+    assert outcome.action == "skipped_manual_takeover_hold"
+    assert not any(call.get("method") == "merge_pull_request" for call in github.calls)
+
+
 def test_kill_switch_off_returns_no_op(tmp_path, monkeypatch) -> None:
     """Both switches must be on; either off is a no-op."""
     github = FakeGitHubClient()
@@ -345,7 +382,9 @@ def test_fifo_ordering_processes_lowest_issue_first(tmp_path, worktree_path, mon
     cfg = _make_config(merge_check_timeout_seconds=0)
     processed_numbers = []
 
-    def fake_process(repo_path, config, issue, github_client, process_runner, supervisor_agent):  # noqa: ARG001
+    def fake_process(  # noqa: ARG001
+        repo_path, config, issue, github_client, process_runner, supervisor_agent, repo_id
+    ):
         processed_numbers.append(issue.number)
         from backend.core.use_cases.agent_runner_merge_queue import MergeQueueOutcome
 
@@ -952,3 +991,77 @@ def test_diff_unavailable_fails_closed(tmp_path, worktree_path, monkeypatch) -> 
     assert any(c["issue_number"] == 44 for c in blocked_adds)
     comments = github._issue_comments.get(44, [])
     assert any("Diff Unavailable" in body for body in comments)
+
+
+def test_merge_queue_gate_blocks_on_a_store_backed_takeover_hold(
+    tmp_path, worktree_path, monkeypatch
+) -> None:
+    """闸门判定走**真实 SQLite 控制行**，而不是 monkeypatch 掉的 helper。
+
+    monkeypatch ``autopilot_hold_blocks`` 只能证明"队列在正确的位置调用了闸门"；
+    落闸本身（接管请求 CAS 置 ``autopilot_hold`` → 队列在 ``require_verifier_pass``
+    关闭时仍然拒绝合并）必须由存储背书，FR-5 才有回归保护。
+    """
+    from backend.core.shared.interfaces.issue_run_control import (
+        PHASE_VERIFIER,
+        STATE_RUNNING,
+        IssueRunControlRecord,
+    )
+    from backend.core.use_cases import agent_runner_issue_control as issue_control
+    from backend.infrastructure.persistence.console_store import SqliteConsoleStore
+
+    branch = "issue-73"
+    store = SqliteConsoleStore(tmp_path / "console.db")
+    store.register_issue_run(
+        IssueRunControlRecord(
+            repo_id="repo-a",
+            issue_number=73,
+            run_id="run-1",
+            head_sha="abc1234",
+            phase=PHASE_VERIFIER,
+            state=STATE_RUNNING,
+            autopilot_hold=False,
+            started_at="2026-10-12T00:00:00+00:00",
+            pr_number=73,
+        )
+    )
+    monkeypatch.setattr(issue_control, "resolve_issue_run_control", lambda: store)
+
+    def _attempt() -> tuple[str, bool]:
+        github = FakeGitHubClient()
+        runner = FakeProcessRunner(responses=_git_state_responses(branch, "abc1234"))
+        issue = IssueSummary(
+            number=73,
+            title="store backed hold",
+            url="https://github.com/example/repo/issues/73",
+            body="",
+            labels=("agent/review",),
+        )
+        github.set_pr_context(branch, _make_pr_context(branch=branch, number=73))
+        github._issue_comments[73] = [f"PR Branch: `{branch}`"]
+        outcome = merge_queue_module._process_one(
+            repo_path=tmp_path,
+            config=_make_config(require_verifier_pass=False, auto_sign_off=False),
+            issue=issue,
+            github_client=github,
+            process_runner=runner,
+            supervisor_agent="auto",
+            repo_id="repo-a",
+        )
+        merged = any(call.get("method") == "merge_pull_request" for call in github.calls)
+        return outcome.action, merged
+
+    # 对照：没有控制行落闸时，队列照常合并（闸门不是永远为真的挡箭牌）。
+    assert _attempt() == ("merged", True)
+
+    # 接管请求 CAS 落闸后，同一份配置（require_verifier_pass=false）必须停止合并。
+    store.request_issue_takeover(
+        repo_id="repo-a",
+        issue_number=73,
+        run_id="run-1",
+        head_sha="abc1234",
+        request_id="req-1",
+        requested_at="2026-10-12T00:00:01+00:00",
+    )
+    assert store.has_autopilot_hold(repo_id="repo-a", issue_number=73) is True
+    assert _attempt() == ("skipped_manual_takeover_hold", False)

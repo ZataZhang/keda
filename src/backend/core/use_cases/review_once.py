@@ -13,37 +13,47 @@ from backend.core.shared.models.agent_runner import (
     AppConfig,
     IssueSummary,
     PullRequestContext,
+    ReviewEventMarker,
     TokenUsage,
 )
+from backend.core.use_cases.agent_runner_claim_arbitration import ClaimArbitrationLost
 from backend.core.use_cases.agent_runner_events import (
+    extract_pr_branch_from_comments,
     parse_latest_event_marker,
+    parse_latest_pending_rework_marker,
+)
+from backend.core.use_cases.agent_runner_issue_handlers import _process_running_rework
+from backend.core.use_cases.agent_runner_git import (
+    has_changes,
+    pop_worktree_stash,
+    stash_worktree_changes,
 )
 from backend.core.use_cases.agent_runner_lifecycle import (
     LifecycleEventType,
     record_lifecycle_event,
     record_lifecycle_terminal,
 )
+from backend.core.use_cases.agent_runner_issue_control import (
+    autopilot_hold_blocks,
+)
 from backend.core.use_cases.agent_runner_merge_queue import (
     process_merge_queue,
 )
-from backend.core.use_cases.pr_supervisor import (
-    build_rework_intent_comment,
-    guard_supervisor_action_for_pr_state,
-    run_post_pr_supervisor_cycle,
-)
 from backend.core.use_cases.agent_runner_workflow import (
     LEGACY_REVIEW_LABEL,
-    find_latest_unconsumed_marker,
     synchronize_human_review_label,
     transition_issue_workflow_state,
     workflow_state_labels,
 )
-from backend.core.use_cases.agent_runner_git import (
-    has_changes,
-    pop_worktree_stash,
-    stash_worktree_changes,
-)
 from backend.core.use_cases.lifecycle_agent_resolution import attach_prd_lifecycle_overrides
+from backend.core.use_cases.pr_supervisor import (
+    guard_supervisor_action_for_pr_state,
+    run_post_pr_supervisor_cycle,
+)
+from backend.core.use_cases.pr_supervisor_messages import (
+    build_rework_intent_comment,
+    build_rework_superseded_comment,
+)
 from backend.core.use_cases.run_agent_once import (
     create_or_reuse_worktree,
     get_head_sha,
@@ -197,6 +207,9 @@ def _context_changed_wide(
     """Return whether PR context has changed since the last supervisor event."""
     if last_marker is None:
         return True
+    if last_marker.phase in {"rebase_repair_complete", "post_pr_rework_superseded"}:
+        # 修复完成本身不是 supervisor verdict；下一轮必须评估修复后的 PR。
+        return True
     # mark_failed 意味着上一轮 supervision 没有产出有效评审结论（例如 agent
     # 基础设施崩溃重试耗尽，或输出不可解析触发 fail-closed）。Issue 能再次
     # 进入评审队列说明人工已把 label 从 agent/failed 拨回，这本身就是明确的
@@ -224,22 +237,38 @@ def _context_changed_wide(
     return False
 
 
-def _extract_pr_branch_from_comments(comments: list[str]) -> str | None:
-    """Extract the latest known PR branch from Issue comments."""
-    for comment_body in reversed(comments):
-        marker = parse_latest_event_marker([comment_body])
-        if marker is not None and marker.pr_branch:
-            return marker.pr_branch
-
-        branch_patterns = (
-            r"PR Branch:\s*`([^`]+)`",
-            r"Branch:\s*`([^`]+)`",
+def _execute_supervisor_rework(
+    *,
+    issue: IssueSummary,
+    repo_path: Path,
+    config: AppConfig,
+    supervisor_agent: str,
+    github_client: IGitHubClient,
+    process_runner: IProcessRunner,
+    marker: ReviewEventMarker,
+    repo_id: str = "",
+) -> str:
+    """执行一个已写入 Issue 的 post-PR rework marker，保持监督生命周期。"""
+    try:
+        _process_running_rework(
+            issue=issue,
+            repo_path=repo_path,
+            config=config,
+            agent=supervisor_agent,
+            github_client=github_client,
+            process_runner=process_runner,
+            marker=marker,
+            repo_id=repo_id,
+            supervisor_owned=True,
         )
-        for branch_pattern in branch_patterns:
-            branch_match = re.search(branch_pattern, comment_body)
-            if branch_match:
-                return branch_match.group(1)
-    return None
+    except ClaimArbitrationLost as exc:
+        _logger.info(
+            "Issue #%d supervisor rework was claimed by another process: %s",
+            issue.number,
+            exc,
+        )
+        return "skipped_rework_claim_lost"
+    return "processed_supervisor_rework"
 
 
 def _process_review_candidate(
@@ -253,34 +282,92 @@ def _process_review_candidate(
     run_history_store: IRunHistoryStore | None = None,
     repo_id: str = "",
 ) -> str:
-    """Run supervisor cycle for a single review candidate."""
-    comments = github_client.list_issue_comments(issue.number)
+    """Run supervisor cycle for a single review candidate.
 
-    # Guard: if Issue is effectively in agent/running with a pending rework
-    # marker, do not run review; let run consume the marker to avoid overwriting
-    # the pending repair/rebase request with a stale approval.
-    if config.labels.running in issue.labels:
-        pending_rework = find_latest_unconsumed_marker(
-            comments,
-            phase="post_pr_rework_requested",
-            completion_phases={
-                "implementation_complete",
-                "draft_pr_created",
-                "publish_recovered",
-                "rebase_repair_complete",
-            },
+    ``repo_id`` 必须是**注册表**仓库 id：接管控制行按注册表 id 登记，传目录名或留空
+    都查不到那一行，会把正在被人工接管的 Issue 放回监督流程（FR-5）。
+    """
+    # 人工接管闸门（Issue #278）：held Issue 一律不进 review 监督，无论
+    # require_verifier_pass 如何配置——闸门只由同 head 的全新 GREEN 清除。
+    if autopilot_hold_blocks(repo_id=repo_id or None, issue_number=issue.number):
+        _logger.info(
+            "Issue #%d is under manual takeover hold; skipping review supervision.",
+            issue.number,
         )
+        return "skipped_manual_takeover_hold"
+    comments = github_client.list_issue_comments(issue.number)
+    pending_rework = parse_latest_pending_rework_marker(comments)
+
+    # 已处于 running 的旧返工仍由 runner 处理；Supervisor 新发起的修复保持
+    # supervising，并在中断后由后续 review pass 恢复。
+    if config.labels.running in issue.labels:
         if pending_rework is not None:
             _logger.info(
-                "Issue #%d has pending rework marker; skipping review to let run process it.",
+                "Issue #%d has a runner-owned pending rework marker; skipping review.",
                 issue.number,
             )
             return "skipped_pending_rework"
 
     last_marker = parse_latest_event_marker(comments)
 
+    if pending_rework is not None and (
+        config.labels.supervising in issue.labels or config.labels.review in issue.labels
+    ):
+        if config.labels.review in issue.labels:
+            transition_issue_workflow_state(
+                github_client, issue.number, config, config.labels.supervising
+            )
+        pr_branch = pending_rework.pr_branch
+        pending_pr_context = (
+            github_client.get_pull_request_context(pr_branch) if pr_branch is not None else None
+        )
+        if pending_pr_context is None:
+            open_pr_url = (
+                github_client.find_open_pr_by_head(pr_branch) if pr_branch is not None else None
+            )
+            if open_pr_url:
+                return "deferred_pending_rework_pr_context_unavailable"
+            github_client.comment_issue(
+                issue.number,
+                build_rework_superseded_comment(
+                    action=pending_rework.action,
+                    pr_branch=pr_branch,
+                    requested_head=pending_rework.head_sha,
+                    current_head=None,
+                ),
+            )
+            comments = github_client.list_issue_comments(issue.number)
+            last_marker = None
+        elif pending_rework.head_sha and pending_rework.head_sha != pending_pr_context.head_sha:
+            github_client.comment_issue(
+                issue.number,
+                build_rework_superseded_comment(
+                    action=pending_rework.action,
+                    pr_branch=pr_branch,
+                    requested_head=pending_rework.head_sha,
+                    current_head=pending_pr_context.head_sha,
+                ),
+            )
+            comments = github_client.list_issue_comments(issue.number)
+            # 让本轮针对新 head 再运行一次 supervisor；superseded marker 只清理旧请求，
+            # 不作为去重游标。
+            last_marker = None
+        else:
+            issue = attach_prd_lifecycle_overrides(issue, repo_path)
+            supervisor_agent = resolve_supervisor_agent(issue, config, agent)
+            return _execute_supervisor_rework(
+                issue=issue,
+                repo_path=repo_path,
+                config=config,
+                supervisor_agent=supervisor_agent,
+                github_client=github_client,
+                process_runner=process_runner,
+                marker=pending_rework,
+                repo_id=repo_id,
+            )
+
     # Find the linked PR context
-    pr_branch = _extract_pr_branch_from_comments(comments)
+    pr_branch = extract_pr_branch_from_comments(comments)
     if pr_branch is None:
         _logger.warning("Issue #%d has no identifiable PR branch; skipping.", issue.number)
         return "skipped_no_pr_branch"
@@ -322,9 +409,9 @@ def _process_review_candidate(
             "approve_for_human_review": config.labels.review,
             "wait_for_checks": config.labels.supervising,
             "request_human_input": config.labels.blocked,
-            "repair_pr_branch": config.labels.running,
-            "rebase_pr_branch": config.labels.running,
-            "resolve_conflict": config.labels.running,
+            "repair_pr_branch": config.labels.supervising,
+            "rebase_pr_branch": config.labels.supervising,
+            "resolve_conflict": config.labels.supervising,
         }
         target_state = (
             supervisor_action_states.get(last_marker.action or "")
@@ -412,7 +499,9 @@ def _process_review_candidate(
     if action_result.token_usage is not None:
         _record_agent_usage_event(
             run_history_store=run_history_store,
-            repo_id=repo_id,
+            # 记录键与闸门查询键分离：repo_id 是注册表原值（可能为空），观测事件
+            # 沿用目录名回落；闸门只认注册表 id（空值走 Issue 编号兜底）。
+            repo_id=repo_id or repo_path.name,
             issue=issue,
             flow="supervise",
             agent_name=supervisor_agent,
@@ -491,14 +580,35 @@ def _process_review_candidate(
                     gate_reason,
                 )
                 return "ci_repair_policy_blocked"
-            enqueue_approved_auto_repair(
+            enqueued, detail = enqueue_approved_auto_repair(
                 issue=issue,
                 pr_context=pr_context,
                 config=config,
                 github_client=github_client,
                 pr_branch=pr_branch,
+                execution_owner="supervisor",
             )
-            return f"queued_{action_result.action}"
+            if not enqueued:
+                _logger.info("Issue #%d repair request skipped: %s", issue.number, detail)
+                return "skipped_duplicate_rework"
+            pending_rework = parse_latest_pending_rework_marker(
+                github_client.list_issue_comments(issue.number)
+            )
+            if pending_rework is None:
+                raise RuntimeError("Approved repair request was not visible after publishing it")
+            return _execute_supervisor_rework(
+                issue=issue,
+                repo_path=repo_path,
+                config=config,
+                supervisor_agent=supervisor_agent,
+                github_client=github_client,
+                process_runner=process_runner,
+                marker=pending_rework,
+                repo_id=repo_id,
+            )
+        transition_issue_workflow_state(
+            github_client, issue.number, config, config.labels.supervising
+        )
         head_sha = get_head_sha(worktree_path, process_runner)
         github_client.comment_issue(
             issue.number,
@@ -506,10 +616,24 @@ def _process_review_candidate(
                 action=action_result.action,
                 pr_branch=pr_branch,
                 head_sha=head_sha,
+                execution_owner="supervisor",
             ),
         )
-        transition_issue_workflow_state(github_client, issue.number, config, config.labels.running)
-        return f"queued_{action_result.action}"
+        pending_rework = parse_latest_pending_rework_marker(
+            github_client.list_issue_comments(issue.number)
+        )
+        if pending_rework is None:
+            raise RuntimeError("Supervisor rework request was not visible after publishing it")
+        return _execute_supervisor_rework(
+            issue=issue,
+            repo_path=repo_path,
+            config=config,
+            supervisor_agent=supervisor_agent,
+            github_client=github_client,
+            process_runner=process_runner,
+            marker=pending_rework,
+            repo_id=repo_id,
+        )
 
     # Unknown action: block
     if stashed:
@@ -542,8 +666,11 @@ def review_once(
         process_runner: Runner for executing subprocess commands.
         run_history_store: Optional PRD lifecycle side-channel store; ``None``
             keeps the previous behaviour with no lifecycle events.
-        repo_id: Repository id recorded with lifecycle events; defaults to the
-            repository directory name.
+        repo_id: 注册表仓库 id。用于**两件事**：生命周期事件的记录键，以及人工接管
+            闸门（Issue #278）的查询键。记录键缺省回落到仓库目录名；闸门查询键
+            **不**跟着回落——控制行按注册表 id 登记，用目录名去查会查不到行、把正在
+            被人工接管的 Issue 放回监督与合并队列（FR-5）。调用方没给 repo_id 时，
+            闸门按 Issue 编号兜底并 fail closed。
 
     Returns:
         Exit code (0 on success, 1 if any issue failed).
@@ -604,7 +731,7 @@ def review_once(
                 github_client=github_client,
                 process_runner=process_runner,
                 run_history_store=run_history_store,
-                repo_id=effective_repo_id,
+                repo_id=repo_id or "",
             )
             _logger.info(
                 "Review outcome for Issue #%d: %s (%s)",
@@ -647,6 +774,7 @@ def review_once(
                 github_client=github_client,
                 process_runner=process_runner,
                 supervisor_agent=agent,
+                repo_id=repo_id,
             )
             if merge_exit_code != 0:
                 exit_code = merge_exit_code

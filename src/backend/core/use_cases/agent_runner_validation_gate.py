@@ -15,6 +15,11 @@ from backend.core.use_cases.agent_runner_events import (
     parse_latest_event_marker_for_phases,
 )
 from backend.core.use_cases.agent_runner_lifecycle import LifecycleEventType
+from backend.core.use_cases.agent_runner_validation_identity import (
+    EvidenceMarkerV2,
+    PrChangeFingerprintRequest,
+    compute_pr_change_fingerprint,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -41,17 +46,40 @@ def build_validation_passed_comment(*, head_sha: str, pr_url: str) -> str:
     )
 
 
-def build_validation_reset_comment(*, head_sha: str, evidence_head: str) -> str:
-    """构建证据过期后重置签核的通知评论。"""
+def build_validation_reset_comment(
+    *,
+    head_sha: str,
+    evidence_head: str,
+    evidence_patch_id: str | None = None,
+    current_patch_id: str | None = None,
+) -> str:
+    """构建证据身份变化后重置签核的通知评论。
+
+    Args:
+        head_sha: 当前 PR head。
+        evidence_head: 发布证据时的 PR head。
+        evidence_patch_id: v2 marker 的原 PR 改动指纹。
+        current_patch_id: 当前 PR 改动指纹；与原指纹一起提供时用于解释变化。
+    """
     marker = format_event_marker(phase="validation_reset", cycle=1, head_sha=head_sha)
+    if evidence_patch_id is not None and current_patch_id is not None:
+        drift_detail = (
+            f"- PR contribution changed from patch-id `{evidence_patch_id}` to "
+            f"`{current_patch_id}` (evidence head `{evidence_head}`, current head "
+            f"`{head_sha}`)."
+        )
+    else:
+        drift_detail = (
+            f"- New commits were pushed after evidence was captured at "
+            f"`{evidence_head}` (PR head is now `{head_sha}`)."
+        )
     return "\n".join(
         [
             marker,
             "",
             "## Realistic Validation Sign-off Reset",
             "",
-            f"- New commits were pushed after evidence was captured at "
-            f"`{evidence_head}` (PR head is now `{head_sha}`).",
+            drift_detail,
             "- The checklist has been unticked. Fresh evidence and a new "
             "human sign-off are required before merge.",
         ]
@@ -69,6 +97,17 @@ def _ensure_issue_validation_labels(
     if desired_label in issue.labels and obsolete_label not in issue.labels:
         return
     github_client.edit_issue_labels(issue.number, add=[desired_label], remove=[obsolete_label])
+
+
+def _mark_validation_pending(
+    *, issue: IssueSummary, config: AppConfig, github_client: IGitHubClient
+) -> None:
+    """撤销过期验证结论，并把 Issue 留在待验证状态。"""
+    _ensure_issue_validation_labels(
+        issue=issue, config=config, github_client=github_client, target_passed=False
+    )
+    if config.labels.verifier_passed in issue.labels:
+        github_client.edit_issue_labels(issue.number, remove=[config.labels.verifier_passed])
 
 
 def _emit_validation_event(
@@ -89,9 +128,11 @@ def _emit_validation_event(
 
 def _gate_single_issue(
     *,
+    repo_path: Path,
     issue: IssueSummary,
     config: AppConfig,
     github_client: IGitHubClient,
+    process_runner: IProcessRunner,
     on_validation: ValidationLifecycleCallback | None = None,
 ) -> None:
     """运行一个 ``agent/automated-review-passed`` Issue 的验证软门禁。"""
@@ -135,21 +176,55 @@ def _gate_single_issue(
 
     pr_comments = github_client.list_pr_comments(pr_context.number)
     evidence_marker = parse_latest_evidence_marker(pr_comments)
-    if evidence_marker is not None and evidence_marker.head_sha != pr_context.head_sha:
+    current_patch_id: str | None = None
+    if isinstance(evidence_marker, EvidenceMarkerV2):
+        if evidence_marker.head_sha != pr_context.head_sha:
+            current_patch_id = compute_pr_change_fingerprint(
+                PrChangeFingerprintRequest(
+                    repo_path=repo_path,
+                    remote=config.git.remote,
+                    base_sha=pr_context.base_sha,
+                    head_sha=pr_context.head_sha,
+                    process_runner=process_runner,
+                )
+            )
+            if current_patch_id is None:
+                _mark_validation_pending(issue=issue, config=config, github_client=github_client)
+                _emit_validation_event(
+                    on_validation,
+                    issue,
+                    LifecycleEventType.VALIDATION_FAILED,
+                    f"validation_failed:{head_sha}",
+                    {"head_sha": head_sha, "reason": "evidence_identity_unavailable"},
+                )
+                return
+        evidence_stale = (
+            evidence_marker.head_sha != pr_context.head_sha
+            and current_patch_id != evidence_marker.patch_id
+        )
+    else:
+        evidence_stale = (
+            evidence_marker is not None and evidence_marker.head_sha != pr_context.head_sha
+        )
+
+    if evidence_stale and evidence_marker is not None:
         github_client.update_pull_request_body(
             pr_context.number, reset_validation_checklist(pr_context.body)
         )
         github_client.comment_pr(
             pr_context.number,
             build_validation_reset_comment(
-                head_sha=pr_context.head_sha, evidence_head=evidence_marker.head_sha
+                head_sha=pr_context.head_sha,
+                evidence_head=evidence_marker.head_sha,
+                evidence_patch_id=(
+                    evidence_marker.patch_id
+                    if isinstance(evidence_marker, EvidenceMarkerV2)
+                    else None
+                ),
+                current_patch_id=current_patch_id,
             ),
         )
-        _ensure_issue_validation_labels(
-            issue=issue, config=config, github_client=github_client, target_passed=False
-        )
-        if config.labels.verifier_passed in issue.labels:
-            github_client.edit_issue_labels(issue.number, remove=[config.labels.verifier_passed])
+        _mark_validation_pending(issue=issue, config=config, github_client=github_client)
         _emit_validation_event(
             on_validation,
             issue,
@@ -249,9 +324,11 @@ def process_validation_gate(
     for review_issue in review_issues:
         try:
             _gate_single_issue(
+                repo_path=repo_path,
                 issue=review_issue,
                 config=config,
                 github_client=github_client,
+                process_runner=process_runner,
                 on_validation=on_validation,
             )
         except Exception as gate_exc:  # noqa: BLE001 - 单个 Issue 不应阻断其余轮询。

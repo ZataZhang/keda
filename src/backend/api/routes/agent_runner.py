@@ -26,6 +26,7 @@ from backend.core.use_cases.agent_runner_factory import (
     load_fresh_agent_runner_settings,
     resolve_repository_targets_with_diagnostics,
 )
+from backend.core.use_cases.agent_runner_issue_control import active_verifier_projection
 from backend.core.use_cases.agent_runner_monitor import (
     IssueMonitoringSnapshot,
     MonitoringResult,
@@ -347,6 +348,7 @@ def _build_issue_detail_response(issue_number: int, repo_id: str | None = None) 
     github_client_factory, process_runner = _get_monitoring_dependencies()
 
     snapshot: IssueMonitoringSnapshot | None = None
+    matched_repo_id: str | None = None
     for repository_context in repository_contexts:
         github_client = github_client_factory(repository_context.repo_path)
         try:
@@ -386,6 +388,7 @@ def _build_issue_detail_response(issue_number: int, repo_id: str | None = None) 
                     status_code=500,
                     detail=f"Failed to build issue detail: {exc}",
                 ) from exc
+            matched_repo_id = repository_context.repo_id
             break
         if snapshot is not None:
             break
@@ -396,7 +399,21 @@ def _build_issue_detail_response(issue_number: int, repo_id: str | None = None) 
             status_code=404,
             detail=f"Issue #{issue_number} not found in {scope}.",
         )
-    return _serialize_monitoring(snapshot)
+    payload = _serialize_monitoring(snapshot)
+    active_verifier = active_verifier_projection(repo_id=matched_repo_id, issue_number=issue_number)
+    payload["active_verifier"] = (
+        None
+        if active_verifier is None
+        else {
+            "run_id": active_verifier.run_id,
+            "head_sha": active_verifier.head_sha,
+            "state": active_verifier.state,
+            "can_take_over": active_verifier.can_take_over,
+            "pr_number": active_verifier.pr_number,
+            "autopilot_hold": active_verifier.autopilot_hold,
+        }
+    )
+    return payload
 
 
 @router.get("/agent-runner/overview")

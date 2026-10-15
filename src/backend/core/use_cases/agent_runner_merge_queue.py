@@ -45,9 +45,12 @@ from backend.core.use_cases.agent_runner_direct_pr_label import (
     can_auto_merge_issue,
     issue_carries_prd_auto_merge_label,
 )
+from backend.core.use_cases.agent_runner_issue_control import (
+    autopilot_hold_blocks,
+)
 from backend.core.use_cases.agent_runner_events import (
+    extract_pr_branch_from_comments,
     format_event_marker,
-    parse_latest_event_marker,
 )
 from backend.core.use_cases.agent_runner_git import (
     list_changed_paths,
@@ -71,30 +74,6 @@ _MERGED_EVENT_PHASE = "auto_merged"
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _extract_pr_branch_from_comments(comments: list[str]) -> str | None:
-    """Extract the latest known PR branch from Issue comments.
-
-    Mirrors :func:`backend.core.use_cases.review_once._extract_pr_branch_from_comments`
-    so the merge queue and the supervisor cycle agree on which branches are
-    recognized — both parse ``iar:event`` markers first, then fall back to the
-    ``PR Branch: \\`…\\``` / ``Branch: \\`…\\``` plaintext patterns.
-    """
-    for comment_body in reversed(comments):
-        marker = parse_latest_event_marker([comment_body])
-        if marker is not None and marker.pr_branch:
-            return marker.pr_branch
-
-        branch_patterns = (
-            r"PR Branch:\s*`([^`]+)`",
-            r"Branch:\s*`([^`]+)`",
-        )
-        for branch_pattern in branch_patterns:
-            branch_match = re.search(branch_pattern, comment_body)
-            if branch_match:
-                return branch_match.group(1)
-    return None
 
 
 def _tick_sign_off_checklist(pr_body: str) -> str | None:
@@ -301,6 +280,7 @@ def process_merge_queue(
     github_client: IGitHubClient,
     process_runner: IProcessRunner,
     supervisor_agent: str,
+    repo_id: str | None = None,
 ) -> tuple[int, list[MergeQueueOutcome]]:
     """Run the autopilot merge queue for one review pass.
 
@@ -315,6 +295,8 @@ def process_merge_queue(
         process_runner: Process runner for git/verification commands.
         supervisor_agent: Agent used for rebase conflict resolution when
             conflicts emerge during rebase.
+        repo_id: Stable registry repo id (Issue #278) used to consult the
+            manual-takeover ``autopilot_hold`` gate before merging.
 
     Returns:
         ``(exit_code, outcomes)`` where exit_code is 0 on full success and
@@ -348,6 +330,7 @@ def process_merge_queue(
                 github_client=github_client,
                 process_runner=process_runner,
                 supervisor_agent=supervisor_agent,
+                repo_id=repo_id,
             )
         except Exception as exc:  # noqa: BLE001 - report and continue.
             _logger.error("Merge queue crashed for Issue #%d: %s", issue.number, exc)
@@ -377,11 +360,22 @@ def _process_one(
     github_client: IGitHubClient,
     process_runner: IProcessRunner,
     supervisor_agent: str,
+    repo_id: str | None = None,
 ) -> MergeQueueOutcome:
     """Run the 7-step gate chain for a single Issue."""
 
     if not config.autopilot.enabled:
         return MergeQueueOutcome(issue_number=issue.number, action="skipped_disabled")
+
+    # 人工接管闸门（Issue #278）：held Issue 绝不自动合并——即使
+    # require_verifier_pass 关闭或带 prd-auto-merge 显式授权标签；闸门
+    # 只由同 head 的全新 verifier GREEN 清除。
+    if autopilot_hold_blocks(repo_id=repo_id, issue_number=issue.number):
+        _logger.info(
+            "Merge queue skipping Issue #%d: under manual takeover hold.",
+            issue.number,
+        )
+        return MergeQueueOutcome(issue_number=issue.number, action="skipped_manual_takeover_hold")
 
     scoped_prd_auto_merge = issue_carries_prd_auto_merge_label(issue, config)
     if scoped_prd_auto_merge or not config.safety.auto_merge:
@@ -420,7 +414,7 @@ def _process_one(
             return MergeQueueOutcome(issue_number=issue.number, action="skipped_stack_pending")
 
     comments = github_client.list_issue_comments(issue.number)
-    pr_branch = _extract_pr_branch_from_comments(comments)
+    pr_branch = extract_pr_branch_from_comments(comments)
     if pr_branch is None:
         return MergeQueueOutcome(issue_number=issue.number, action="skipped_no_pr")
 
@@ -636,6 +630,15 @@ def _process_one(
         return MergeQueueOutcome(issue_number=issue.number, action="skipped_prd_anchor_changed")
     if not can_auto_merge_issue(merge_issue, config):
         return MergeQueueOutcome(issue_number=issue.number, action="skipped_disabled")
+
+    # 人工接管可能在长时间检查期间被另一个 Console/runner 进程请求。最终合并
+    # 边界再次回读共享 hold，避免队列使用入口处的旧快照继续 merge。
+    if autopilot_hold_blocks(repo_id=repo_id, issue_number=issue.number):
+        _logger.info(
+            "Merge queue stopped Issue #%d at the merge boundary: manual takeover hold.",
+            issue.number,
+        )
+        return MergeQueueOutcome(issue_number=issue.number, action="skipped_manual_takeover_hold")
 
     # Step 7: squash merge + audit
     try:

@@ -5,7 +5,7 @@
 // All write operations map to backend whitelisted actions; the frontend
 // never sends raw shell commands.
 
-import { del, get, patch, post, put } from "./client";
+import { del, get, patch, post, put, ApiRequestError } from "./client";
 import type {
   AuditEntry,
   AgentPerformanceStats,
@@ -130,6 +130,60 @@ export async function executeIssueAction(
     `${BASE_PATH}/console/repositories/${encodeURIComponent(repoId)}/issues/${issueNumber}/actions`,
     { action },
   );
+}
+
+/** 一次接管请求的分类结果，界面据此呈递处理中 / 已交班 / 冲突 / 失败。 */
+export type VerifierTakeoverAttempt =
+  | { kind: "requested"; outcome: string }
+  | { kind: "handed_over"; outcome: string }
+  | { kind: "conflict"; outcome: string; message: string }
+  | { kind: "failed"; message: string };
+
+/**
+ * 按当前 run id 与 HEAD SHA 精确请求接管该 Issue 正在运行的独立 verifier。
+ *
+ * 请求只登记取消意图：后端 CAS 成功后返回 202（进程尚未确认停止），
+ * 已交班返回 200，运行身份或 HEAD 不符返回 409。payload 原样携带 UI 从详情
+ * 读到的 run_id / head_sha，绝不自行构造。
+ *
+ * @param repoId - 目标仓库 id。
+ * @param issueNumber - 目标 Issue 编号。
+ * @param binding - 当前 verifier 的 run id 与 PR HEAD SHA。
+ * @returns 分类后的接管结果。
+ */
+export async function takeOverVerifier(
+  repoId: string,
+  issueNumber: number,
+  binding: { runId: string; headSha: string },
+): Promise<VerifierTakeoverAttempt> {
+  try {
+    const result = await post<ConsoleActionResult>(
+      `${BASE_PATH}/console/repositories/${encodeURIComponent(repoId)}/issues/${issueNumber}/actions`,
+      {
+        action: "take_over_verifier",
+        run_id: binding.runId,
+        head_sha: binding.headSha,
+      },
+    );
+    const outcome = result.takeover_outcome ?? "";
+    if (result.takeover_http_status === 200) {
+      return { kind: "handed_over", outcome };
+    }
+    return { kind: "requested", outcome };
+  } catch (error) {
+    if (error instanceof ApiRequestError) {
+      const message = error.message ?? "";
+      // 409 仍然带回完整的 ConsoleActionResult 正文：从结构化字段读分类，
+      // 不去解析人读的审计 detail 文案（措辞变了界面就静默降级）。
+      const rejected = error.payload as ConsoleActionResult | undefined;
+      const outcome = rejected?.takeover_outcome ?? "";
+      if (error.status === 409) {
+        return { kind: "conflict", outcome, message };
+      }
+      return { kind: "failed", message };
+    }
+    return { kind: "failed", message: String(error) };
+  }
 }
 
 // ── Issue 全量视图 / 标签编辑 / 一句话建 Issue ──────────────────────────────

@@ -1,0 +1,51 @@
+**Verdict: 执行侧交付就绪 — 非独立 verifier PASS（executor 交接报告）**
+
+本报告由执行器（executor）准备，**不声称独立 verifier 已运行或通过**。请勿据此报告归档 PRD 或勾选 `Human-Confirmed`；独立 verifier 复核、PR 发布与 pending→archive 归档均为 runner-owned 门禁（PRD §9 的 `[~]` 项）。
+
+## Gate findings（执行侧证据）
+
+| Gate | Finding | Disposition |
+|---|---|---|
+| RV-1 · 真实跨进程接管与精确进程组取消 | `scripts/rv1_takeover_handoff_probe.py`：接管 CAS 由另一 OS 进程写入同一 console.db WAL，runner `cancel_check` 看门狗 1.0s 内仅对 verifier 进程组 SIGKILL 并回收后抛 InterruptedError；独立探针判定 `FINAL_STATE: taken_over`、`CANCELLED_BY_HUMAN`、`HANDOFF_CONFIRMED`、`AUTOPILOT_HOLD`、`VERIFIER_GROUP_GONE`、`CONTROL_PROCESS_SURVIVED`（对照进程存活）、`MERGE_GATE_HELD` 全 True，`RV1_PROBE_OK: True`。 | Executor evidence present；独立复核。 |
+| RV-1 · 过期 head 绑定负控 | `rv1_negative_control.py`：真实代码对过期 head 返回 `binding_mismatch` 且不取消（`REAL_STALE_HEAD_CANCEL_CHECK: False`）；降级 head 比对后同一过期请求被接受为 `takeover_requested` 并触发取消（`BUGGY_STALE_HEAD_STATUS: accepted`），打印 `RV1_EXPECTED_FAIL` 与 `RV1_NEGATIVE_CONTROL_OK: True`。 | 检查点有效（先红后绿）；独立复核。 |
+| RV-2 · 竞态与过期结果保护 | `rv2_race_and_staleness_probe.py`：真实 SQLite CAS + 真实线程并发覆盖 S1 完成先赢 / S2 接管先赢阻断 verdict / S3 唯一终态 / S4 HEAD 漂移丢弃旧 verdict+置 hold+门阻断 / S5 外部合并停止后续，`RV2_PROBE_OK: True`；S4 初始快照负控红→绿（`S4_NEG_STALE_NOT_RECORDED: True`）。 | Executor evidence present；独立复核。 |
+| 运维可观察性 · 拆分模块的 logger 身份 | `rv1_verifier_log_identity_probe.py`：用生产 `Logger`/handler/formatter 写真实日文件，再按操作员口径 grep 那份文件——接管取消、verifier 超时、响应落盘失败、verdict GREEN 置 label 四类行仍记在 `backend.core.use_cases.run_verifier_agent` 名下，交班回链无法解析一类记在 `backend.core.use_cases.agent_runner_issue_handlers` 名下（`OPERATOR_GREP_HITS: 5/5`、`LOGGER_DRIFT_TO_MODULE_NAMES: {}`）；`--negative-control` 在测试边界把三个拆分模块的 `_logger` 改回随模块文件名走（仓库源码不改），同一批行随即改挂模块名、命中 `0/5` 并打印 `RV1_LOG_EXPECTED_FAIL`。单元层由 `test_split_verifier_modules_keep_the_run_verifier_agent_logger_identity` 与 `test_split_handoff_module_keeps_the_issue_handlers_logger_identity` 钉住。 | 检查点有效（先红后绿）；独立复核。 |
+| 自动化契约层 | rv-1 入口层 135 passed（含 `tests/test_agent_runner_issue_control.py` 及修复层新增用例：接管请求存储异常 fail-closed、SQLite 镜像常量对齐、PR 读失败仍完成 Issue 侧交班、取消分类优先于超时分类）；rv-2 竞态/fail-closed 层 222 passed（merge queue/supervisor/review_once/interactive_decision 对 autopilot_hold 阻断，含 require_verifier_pass 关闭与无 repo_id 兜底）；§9 Validation 第 1 条原列 8 文件合集 281 passed；受影响后端合集（第七轮起 17 文件，加入 `tests/test_agent_runner_recovery.py`）542 passed。 | Executor evidence present；独立复核。 |
+| 前端与真实浏览器 | Dashboard 在交班后重扫所属仓库并重读标签面板；真实入口 E2E 捕获 takeover POST 202，断言 run_id/head_sha 与详情投影一致，并核对停止提示消失、列表和标签编辑器都显示 review。桌面/窄视口截图与 trace 已保存；`pnpm typecheck` 通过、受影响文件 ESLint 0 errors（既有 JSDoc warnings）。 | Executor evidence present；独立复核及人工 prototype 对照仍待完成。 |
+| PRD/evidence 结构 | `check_prd_acceptance_checklist.py --check-provided --archive-ready` PASS；`evidence.json` 两项正整数编号、纯文件名、文件存在、`stdout_assertions` 全为字面 marker（无 `.*`）、命令链无 `|| true`。 | Executor evidence present；独立复核。 |
+| stdout 断言可命中性（runner 口径） | `scripts/rv_stdout_assertions.py` 逐 item 原样执行 manifest 的 `command`，只拿**该 command 自身的 stdout** 逐条比对 `stdout_assertions`：item 1 的 40 条、item 2 的 18 条全部命中，两条 command 均 exit 0，`RV_STDOUT_ASSERTIONS: OK`；两条 command 的原样 stdout 另存为 `rv-1-chain-stdout.txt` / `rv-2-chain-stdout.txt` 供同口径复核。 | 第八轮新增门禁；独立复核。 |
+| 上一轮证据缺陷（runner 报出，非行为红灯） | runner 的 Realistic Validation 检查报「item 1 exit 0，但 stdout 断言 #37 `'2 passed'` 未命中」。根因在证据侧：`rv1_browser_runner_e2e.py` 用 `capture_output=True` 收下 Playwright 输出、只写进 `rv-1-browser-playwright.txt`，那串从未进过 command stdout；执行器上一轮的自查口径又是「在 `.txt` 里 grep 到即算命中」，两者叠起来就是一条声明了打不中的断言。同一口径复查发现 item 2 的 `'281 passed'` / `'542 passed'` 也是同类问题（那两层 pytest 不在它的 `command` 里）。本轮修法：harness 把 Playwright 真实计数摘要原样 `print` 到 stdout（抽不到即报错退出，不造计数），断言改为 `PLAYWRIGHT_TALLY: 2 passed` 并加 `PLAYWRIGHT_TALLY_PASSED: True`；item 2 的 `command` 扩成 探针 → 222 → 281 → 542。**未放宽断言、未改 oracle 判定逻辑、未加 `|| true` 兜底、未改任何入库行为代码**。 | 已修复并纳入上条门禁；行为侧无变化，无需重开 PRD。 |
+
+## Open items（非执行侧可闭合，须独立 verifier / 人工 / CI 处理）
+
+1. **人工视觉对照仍待完成**：隔离真实浏览器入口现已覆盖 `/app/dashboard` → Console API → SQLite → runner → verifier process group，截图和 trace 已生成；但本报告不代替人工将桌面/窄视口页面与交付 prototype 并排核对，也不验证真实 GitHub transport。PRD §9 Human-Confirmed 项仍未勾。
+2. **独立 verifier 复核**：全部执行侧证据（真实跨进程/SQLite、HTTP 接管、隔离浏览器 E2E、负控与 rv-1/rv-2 自动化契约测试）需独立 verifier 在最终 committed tree 上复核并出具 PASS/REJECT。
+3. **tree 绑定**：第八轮把全部 capture（10 份共用绑定头的 `rv-*.txt` + 浏览器 harness 自写的 2 份（`rv-1-browser-runner-e2e.txt` 自带完整绑定块；`rv-1-browser-playwright.txt` 是 Playwright 原样 stdout，本轮起开头加一行 `BINDING=` provenance 回指同次运行的绑定块与 `HEAD`） + 本轮新增的 `rv-1-chain-stdout.txt` / `rv-2-chain-stdout.txt`）在**当前 HEAD 自身的代码状态**上重跑，每份开头的绑定块自记 `HEAD=885ca6f64607f20827a75e2f660666a9dd84b933` / `TREE=e69e7059883a76a9f16b753d77e33a3e1c545ed4`（第七轮的交付 tree 现已成为本 PR 的本地 head）、`CODE_DELTA=(none)`、`CODE_DELTA_PROOF`=`git diff --name-only 885ca6f6 -- src tests docs frontend-public` 输出为空；`PUSHED_ANCHOR` 改为从 `zata/issue-278` 远端跟踪引用现算（`1db934ae` / tree `ed153d9136ae3a51ef3bcf9177a7b8c479e0e7cc`，GitHub 现在仍可解析），不再拿本地 head 冒充可解析锚点；真实浏览器 capture 另自记 `CAPTURE_CODE_HEAD` / `CAPTURE_CODE_WORKTREE_TREE` / `CAPTURE_CODE_DELTA`。本轮没有改动任何入库行为代码，接管/取消/竞态/交班的判定逻辑与日志文本一字未改，改的只有 `tasks/evidence/**` 的记录件与 gitignored 的证据侧脚本。`DELIVERY_TREE` 只写在 `.txt` 绑定块（报告、PRD 与 manifest 都在那棵树内），由 `scripts/rv_bind_tree.sh` 用不碰真索引的临时索引在记录件定稿后绑入并重算校验。远端 `iar-evidence/issue-278` 证据包与 PR marker 由 runner 在本轮提交后按新 head 重发（push 不在执行器权限内）。
+4. **继承自 main 的 CI 红灯**：`Validate Template` 的 1000 行硬门在合并 ref 上因 main 自己的 `src/backend/core/use_cases/pr_supervisor.py`（1015 非空行）变红，本分支与 merge-base 均为 982 行；本轮单跑 main 的那份文件复现该 `[ERROR]` 且 exit 1。不在本 Issue 改动面内，也不按 allowlist/上限放宽，处置次序交人工裁定。
+5. **交付前工作树里有一处与本 Issue 无关的 `config.toml` 改动，已被排除出交付**：开工时索引区已 staged `[agent_runner.autopilot] enabled = true`（仓库根 `config.toml`）。这不是本分支的改动，且交付提交用 `git add -A`，会把「对所有 `prd-auto-merge` PRD 打开自动合并队列」一并带进 PR——与本 Issue「人工接管是人的动作」的方向相反，属安全相关的越界变更。本轮把 `config.toml` 恢复到 HEAD，并把那 21 行 diff 原样保存在 gitignored 的 `.iar/evidence/local-config/issue-278-autopilot-enabled.patch` 以便操作员随时取回。若这条改动本意是给托管 runner 打开队列，它应作为宿主/部署配置单独处理，而不是随本 PR 交付。
+
+## 结论
+
+执行侧对 rv-1、rv-2 已收集符合各自 oracle 的真实跨进程、竞态、Console HTTP、运维触点（日文件 grep 口径）和隔离浏览器证据；浏览器确认交班后 Dashboard 列表和标签面板均显示 `review`，Playwright 还验证 action POST 原样携带当前 run_id/head_sha，其真实计数摘要（`PLAYWRIGHT_TALLY: 2 passed`）本轮起逐字进 command 的 stdout，manifest 的每条 stdout 断言都按 runner 的口径复核过（`RV_STDOUT_ASSERTIONS: OK`）。外部 GitHub transport 使用 file-backed 替身，人工与 prototype 的并排核对、独立 verifier 复核、PR evidence 发布和归档门禁仍未完成。该报告不构成独立验证 PASS；push 后还需确认 runner 发布的 evidence marker 指向正确 PR HEAD。
+
+## 第十二轮勘误（executor，2026-10-15）——计数与绑定口径
+
+本节只更正「把历史实测值写成现在时」的三处口径，正文上方的记录保持原样作为改错痕迹。
+
+1. **交付绑定不变量已撤销。** 上方写的 `DELIVERED_HEAD=27cfc95a` / `DELIVERY_TREE=c34c1a28` 与「`27cfc95a` 是最后一个改动行为代码的提交」「`git diff --name-only 27cfc95a HEAD -- src tests docs frontend-public` 为空」在本轮工作树**不再成立**：该 diff 实测 **20 个文件非空**（`8106c3ae` / `992ae61e` 动的是证据 identity / publication 路径与 `tests/conftest.py`；第十二轮动的是 `agent_runner_publication.py` / `review_once.py` 的 import 排布、`process_runner*.py` 的进程组拆除身份、`agent_runner_verifier_publication.py` 的 logger 名与 5 份测试）。仍可现算的窄口径改为：`git diff --name-only 27cfc95a -- src/backend/infrastructure/persistence/console_store_takeover.py src/backend/core/use_cases/agent_runner_issue_control.py src/backend/core/use_cases/run_verifier_agent.py frontend-public/components/agent-runner/verifier-takeover-card.tsx` **为空**（本轮实测），即接管行为代码与 capture 所跑 tree 逐字一致；交付 head 由 runner 的下一个提交决定，本报告不再自称某个 SHA 为交付 head，capture 的 `DELIVERY_TREE` 仍为 `__PENDING__`，由 `scripts/rv_bind_tree.sh` 在记录件定稿后绑定。
+2. **门禁计数刷新（本轮在同一条命令上实测）。** 入口契约层 **142 passed**（原 141）、§9 原列 8 文件集 **286 passed**（原 284）、rv-2 三层 **223 / 551 passed**（原 222 / 549）、六项门禁集合 **556 passed + 1 skipped**（原 550 + 1）。差值来源可点名：本轮新增 1 条经真实 Console 动作路由的 HTTP 层 `state_change_conflict` 409 用例、1 条 `agent_runner_verifier_publication` 的 logger 身份回归，以及 `8106c3ae` / `992ae61e` 为证据 identity 路径新增的用例。全量 `uv run pytest -o addopts="" -q --no-header tests` = **4309 passed, 1 skipped**。
+3. **rv-2 的真实入口 capture 新增。** `rv-2-real-entry-console-race.txt`（脚本 `scripts/rv2_real_entry_console_race_probe.py`，31 条判定、`RV2_ALL_OK: True`、item 2 整条 manifest command exit 0）进入证据包，路径数 45 → **47**；§7 rv-1 / rv-2 的 `real_entry` 已从打桩 spec 改指可执行真实入口。helper 级 `rv-2-verifier-race.txt` 保留为补充，不再是 real_entry。
+4. **本轮未关闭的一段（不勾成完成）。** rv-1 的「daemon 和第二个 Issue 继续运行」与 `negative_control`（过期 `head_sha` → 409）目前是在**真实 Console HTTP + 真实 SQLite** 层跑绿的（`STALE_HEAD_STATUS: 409 outcome=binding_mismatch other_issue_state=running other_verifier_alive=True other_accepted_audits=0`），**不在同一次浏览器运行内**；harness 的 gh transport 与 runner 脚本模板按单一 issue 写死，扩展点是那里。§9 的 rv-1 项与两条 Human-Confirmed 项因此保持 `[~]` / 空框。
+5. **`Validate Template` 红灯的处置不变。** 唯一剩余超限文件是 `src/backend/core/use_cases/pr_supervisor.py`（本树 1015 非空行、main 已 1091），blob 与 base 一致且不在本 PR 文件集内，属 main 侧既有债（仓库挂在 `fix-ci-python-file-line-limits`），`hooks/max_file_lines.allowlist.txt` 禁止新增豁免——不在本 PR 拆分。
+
+## 第十三轮门禁说明（2026-10-15）
+
+本报告仍是 executor 证据整理，不声称独立 verifier 已运行或通过。Issue #278 明确带有 `prd-auto-merge`，PR body 也记录了该授权；按仓库契约，独立 verifier 与 PRD `Human-Confirmed` hold 可跳过，但真实验证证据、仓库命令、PR checks 和分支保护不得跳过。
+
+本轮 supervisor 生命周期代码在提交 `ea61702470b5be64509b4181a2d4ceaeb1cd9cce` 上完成捕获，manifest 的 stdout 断言全部命中；main-only rebase 稳定性测试 `test_pr_change_fingerprint_survives_main_rebase_and_evidence_updates` 为 1 passed。GitHub `Realistic Validation sign-off` 在签收清单更新前仍失败；由队列在仓库验证通过后执行授权的自动签收，执行前不把它记为通过。
+
+## 第十四轮门禁说明（executor，2026-10-15）
+
+本报告仍是 executor 证据整理，不声称独立 verifier 已运行或通过。本轮修复的是本 PRD 自己写下却未落实的一条行为：交班除 review 态外还要落 `human/awaiting-review`（FR-3、§1 What The User Gets、rv-1 `expected`；rv-1 `expected_fail` 把缺它当负控信号）。真实浏览器入口实测该标签已落（`ISSUE_ADDED_HUMAN_TODO: True`），rv-1 与 rv-2 的其余判定逻辑、HTTP/CLI 契约与 verdict 规则一字未改。
+
+证据绑定与计数见本报告「第十四轮评审修复」小节；`Realistic Validation sign-off` 仍需 PR 证据 marker 指向最终推送 head 后才可能转绿，marker 的 `head_sha` 由 runner 在推送后现取（`agent_runner_validation_gate.py` 在 marker head 与 PR head 不一致时判 stale 并重置清单）。main 新推进带来的三处合并冲突按 PRD §14 第十四轮记的口径在 rebase 侧解决，本分支不预先 merge main。

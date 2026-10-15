@@ -23,9 +23,6 @@ from backend.core.use_cases.agent_candidate_fallback import build_agent_candidat
 from backend.core.use_cases.agent_runner_direct_pr_label import (
     issue_carries_prd_auto_merge_label,
 )
-from backend.core.use_cases.agent_runner_events import (
-    format_event_marker,
-)
 from backend.core.use_cases.agent_runner_commit import (
     read_commit_request,
     remove_commit_request,
@@ -52,6 +49,10 @@ from backend.core.use_cases.pr_supervisor_findings import (
     _extract_supervisor_findings,
     _load_previous_findings,
     _persist_findings,
+)
+from backend.core.use_cases.pr_supervisor_messages import (
+    build_conflict_resolution_prompt,
+    build_supervisor_result_comment,
 )
 from backend.core.use_cases.pr_supervisor_repair import execute_repair
 from backend.core.use_cases.agent_invocation_tracing import (
@@ -513,136 +514,6 @@ def guard_supervisor_action_for_pr_state(
     # 与 sign-off-only 聚合结果都不得改写合法动作（Agent-led CI 决策契约，
     # 见 tasks/archive/P1-BUG-20260924-100212-agent-led-post-pr-ci-decision.md）。
     return action_result
-
-
-def build_supervisor_result_comment(
-    *,
-    action: str,
-    supervisor: str,
-    summary: str,
-    findings_counts: dict[str, int],
-    verification_status: str,
-    head_sha: str | None,
-    cycle: int,
-    base_sha: str | None = None,
-    checks_state: str | None = None,
-    mergeable: bool | None = None,
-    issue_comments_count: int | None = None,
-    pr_comments_count: int | None = None,
-) -> str:
-    """Build the human-readable comment for a supervisor cycle result."""
-    # marker 中记录 action，使下一轮 review pass 能识别 mark_failed 结局，
-    # 在人工恢复 label 后允许同一上下文重新评审
-    marker = format_event_marker(
-        phase="post_pr_supervisor",
-        cycle=cycle,
-        head_sha=head_sha,
-        base_sha=base_sha,
-        action=action,
-        checks_state=checks_state,
-        mergeable=mergeable,
-        issue_comments_count=issue_comments_count,
-        pr_comments_count=pr_comments_count,
-    )
-    high = findings_counts.get("high", 0)
-    medium = findings_counts.get("medium", 0)
-    low = findings_counts.get("low", 0)
-    return "\n".join(
-        [
-            marker,
-            "",
-            "## Agent Runner Post-PR Supervisor",
-            "",
-            f"- Action: {action}",
-            f"- Supervisor: {supervisor}",
-            f"- Summary: {summary}",
-            f"- Findings: {high} high, {medium} medium, {low} low",
-            f"- Verification: {verification_status or 'unknown'}",
-            f"- Head SHA: `{head_sha or 'N/A'}`",
-        ]
-    )
-
-
-def build_rework_intent_comment(
-    *,
-    action: str,
-    pr_branch: str,
-    head_sha: str,
-) -> str:
-    """Build the comment that marks a post-PR rework intent."""
-    marker = format_event_marker(
-        phase="post_pr_rework_requested",
-        cycle=1,
-        head_sha=head_sha,
-        pr_branch=pr_branch,
-        action=action,
-    )
-    return "\n".join(
-        [
-            marker,
-            "",
-            "## Agent Runner Post-PR Rework Requested",
-            "",
-            f"- Action: {action}",
-            f"- PR Branch: `{pr_branch}`",
-            f"- Head SHA: `{head_sha}`",
-            "- A runner will pick this up on the next `kc run` pass.",
-        ]
-    )
-
-
-def build_rebase_repair_complete_comment(
-    *,
-    action: str,
-    head_sha: str,
-    verification_passed: bool,
-) -> str:
-    """Build the comment after a rebase or repair completes."""
-    marker = format_event_marker(
-        phase="rebase_repair_complete",
-        cycle=1,
-        head_sha=head_sha,
-    )
-    return "\n".join(
-        [
-            marker,
-            "",
-            "## Agent Runner Rebase/Repair Complete",
-            "",
-            f"- Action: {action}",
-            f"- Head SHA: `{head_sha}`",
-            f"- Verification: {'passed' if verification_passed else 'failed'}",
-        ]
-    )
-
-
-def build_conflict_resolution_prompt(
-    issue: IssueSummary,
-    pr_branch: str,
-    expected_head: str,
-    conflicted_files: list[str],
-) -> str:
-    """Build the prompt for the rebase conflict resolution agent."""
-    files_text = "\n".join(f"- {f}" for f in conflicted_files) or "(none)"
-    return "\n".join(
-        [
-            f"Resolve rebase conflicts for Issue #{issue.number}: {issue.title}",
-            "",
-            f"Issue URL: {issue.url}",
-            f"PR Branch: `{pr_branch}`",
-            f"Expected HEAD: `{expected_head}`",
-            "",
-            "The rebase onto the remote base branch encountered conflicts in these files:",
-            files_text,
-            "",
-            "Resolve all conflicts and request a commit.",
-            "- Only modify conflicted files inside the current worktree.",
-            "- Do not switch branches, push, or abort the rebase.",
-            "- Do not run `git add` or `git commit`; the runner handles staging.",
-            "- After resolving conflicts, write `.agent-runner/commit-request.json` "
-            "as JSON with `commit_message`.",
-        ]
-    )
 
 
 def execute_rebase(

@@ -29,14 +29,37 @@ export class ApiRequestError extends Error {
    *
    * @param message - Human-readable error message.
    * @param status - Optional HTTP response status code.
+   * @param payload - Optional response body, for endpoints whose error status
+   *   still carries machine-readable fields (e.g. a rejected action that
+   *   returns a classified outcome alongside a 409).
    */
   constructor(
     message: string,
-    public status?: number
+    public status?: number,
+    public payload?: unknown
   ) {
     super(message)
     this.name = "ApiRequestError"
   }
+}
+
+/**
+ * Convert an axios failure into an {@link ApiRequestError}, preserving the
+ * response status and body. Non-axios errors are rethrown untouched.
+ *
+ * @param error - The value caught from an axios request.
+ * @returns Never returns; always throws.
+ */
+function toApiRequestError(error: unknown): never {
+  if (axios.isAxiosError(error)) {
+    const detail = error.response?.data?.detail
+    throw new ApiRequestError(
+      typeof detail === "string" ? detail : error.message,
+      error.response?.status,
+      error.response?.data
+    )
+  }
+  throw error
 }
 
 /**
@@ -51,14 +74,7 @@ export async function apiGet<T>(url: string, config?: AxiosRequestConfig): Promi
     const response = await apiClient.get<T>(url, config)
     return response.data
   } catch (error) {
-    if (axios.isAxiosError(error)) {
-      const detail = error.response?.data?.detail
-      throw new ApiRequestError(
-        typeof detail === "string" ? detail : error.message,
-        error.response?.status
-      )
-    }
-    throw error
+    toApiRequestError(error)
   }
 }
 
@@ -68,14 +84,7 @@ export async function apiPost<T>(url: string, data: unknown): Promise<T> {
     const response = await apiClient.post<T>(url, data)
     return response.data
   } catch (error) {
-    if (axios.isAxiosError(error)) {
-      const detail = error.response?.data?.detail
-      throw new ApiRequestError(
-        typeof detail === "string" ? detail : error.message,
-        error.response?.status
-      )
-    }
-    throw error
+    toApiRequestError(error)
   }
 }
 
@@ -85,14 +94,7 @@ export async function apiPut<T>(url: string, data: unknown): Promise<T> {
     const response = await apiClient.put<T>(url, data)
     return response.data
   } catch (error) {
-    if (axios.isAxiosError(error)) {
-      const detail = error.response?.data?.detail
-      throw new ApiRequestError(
-        typeof detail === "string" ? detail : error.message,
-        error.response?.status
-      )
-    }
-    throw error
+    toApiRequestError(error)
   }
 }
 
@@ -101,14 +103,7 @@ export async function apiDelete(url: string): Promise<void> {
   try {
     await apiClient.delete(url)
   } catch (error) {
-    if (axios.isAxiosError(error)) {
-      const detail = error.response?.data?.detail
-      throw new ApiRequestError(
-        typeof detail === "string" ? detail : error.message,
-        error.response?.status
-      )
-    }
-    throw error
+    toApiRequestError(error)
   }
 }
 
@@ -118,14 +113,7 @@ export async function apiPatch<T>(url: string, data: unknown): Promise<T> {
     const response = await apiClient.patch<T>(url, data)
     return response.data
   } catch (error) {
-    if (axios.isAxiosError(error)) {
-      const detail = error.response?.data?.detail
-      throw new ApiRequestError(
-        typeof detail === "string" ? detail : error.message,
-        error.response?.status
-      )
-    }
-    throw error
+    toApiRequestError(error)
   }
 }
 

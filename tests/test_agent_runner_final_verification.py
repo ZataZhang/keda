@@ -22,6 +22,7 @@ def _request(
     *,
     verified_sha: str | None,
     publish_stage: PublishStage = PublishStage.NORMAL,
+    repo_id: str | None = "repo-a",
 ) -> FinalVerificationRequest:
     """构造带原复核提交的发布请求。"""
     return FinalVerificationRequest(
@@ -33,6 +34,7 @@ def _request(
         verified_sha=verified_sha,
         verifier_verdict=ValidationVerdict(risk="green"),
         publish_stage=publish_stage,
+        repo_id=repo_id,
     )
 
 
@@ -43,6 +45,7 @@ def test_final_verification_rechecks_review_patch(
     from backend.core.use_cases import agent_runner_final_verification as final_gate
 
     calls: list[str] = []
+    verifier_repo_ids: list[object] = []
     monkeypatch.setattr(final_gate, "has_changes", lambda *args: False)
     monkeypatch.setattr(final_gate, "get_head_sha", lambda *args: "review-sha")
     monkeypatch.setattr(
@@ -55,8 +58,9 @@ def test_final_verification_rechecks_review_patch(
         final_gate, "ensure_validation_commands_pass", lambda *args: calls.append("rv")
     )
 
-    def _verify_review_head(*args: object) -> ValidationVerdict:
+    def _verify_review_head(*args: object, **kwargs: object) -> ValidationVerdict:
         calls.append("verifier")
+        verifier_repo_ids.append(kwargs.get("repo_id"))
         return ValidationVerdict(risk="yellow")
 
     monkeypatch.setattr(final_gate, "run_verifier_gate", _verify_review_head)
@@ -65,6 +69,8 @@ def test_final_verification_rechecks_review_patch(
 
     assert calls == ["evidence", "helpers", "rv", "verifier"]
     assert verdict is not None and verdict.risk == "yellow"
+    # 重跑的独立 verifier 必须带上 repo_id，否则这一轮没有人工接管窗口（Issue #278 FR-1）。
+    assert verifier_repo_ids == ["repo-a"]
 
 
 def test_final_verification_reuses_same_commit(
@@ -78,7 +84,7 @@ def test_final_verification_reuses_same_commit(
     monkeypatch.setattr(
         final_gate,
         "run_verifier_gate",
-        lambda *args: pytest.fail("same commit must reuse its verdict"),
+        lambda *args, **kwargs: pytest.fail("same commit must reuse its verdict"),
     )
 
     verdict = ensure_final_verifier_verdict(_request(tmp_path, verified_sha="builder-sha"))
@@ -109,7 +115,9 @@ def test_prd_auto_merge_final_gate_keeps_rv_and_skips_only_verifier(
     monkeypatch.setattr(
         final_gate,
         "run_verifier_gate",
-        lambda *args: pytest.fail("PRD auto-merge must skip only the independent verifier"),
+        lambda *args, **kwargs: pytest.fail(
+            "PRD auto-merge must skip only the independent verifier"
+        ),
     )
 
     verdict = ensure_final_verifier_verdict(

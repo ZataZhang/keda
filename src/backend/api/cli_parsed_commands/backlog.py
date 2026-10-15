@@ -26,7 +26,7 @@ from backend.core.use_cases.backlog_ci_delivery import (
     request_manual_ci_repair,
     set_prd_ci_policy,
 )
-from backend.core.use_cases.review_once import _extract_pr_branch_from_comments
+from backend.core.use_cases.agent_runner_events import extract_pr_branch_from_comments
 from backend.core.shared.models.agent_runner import IssueSummary
 
 
@@ -153,7 +153,7 @@ def _build_status_rows(prds, github_client, config, prd_filter: str | None):
         pr_context = None
         if prd.issue_number is not None:
             issue_comments = github_client.list_issue_comments(prd.issue_number)
-            pr_branch = _extract_pr_branch_from_comments(issue_comments)
+            pr_branch = extract_pr_branch_from_comments(issue_comments)
             if pr_branch is not None:
                 pr_context = github_client.get_pull_request_context(pr_branch)
         rows.append(
@@ -302,7 +302,7 @@ def run_backlog_ci_repair_command(ctx: ParsedCommandContext) -> int:
     if target_prd is None:
         return 1
     comments = github_client.list_issue_comments(target_prd.issue_number)
-    pr_branch = _extract_pr_branch_from_comments(comments)
+    pr_branch = extract_pr_branch_from_comments(comments)
     pr_context = (
         github_client.get_pull_request_context(pr_branch) if pr_branch is not None else None
     )

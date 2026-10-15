@@ -330,6 +330,7 @@ def _recover_publish_issue_owned(
     github_client: IGitHubClient,
     process_runner: IProcessRunner,
     content_generator: IContentGenerator | None = None,
+    repo_id: str | None = None,
 ) -> PublishRecoveryResult:
     """恢复某个 Issue 此前失败的发布（publish）操作。
 
@@ -355,6 +356,9 @@ def _recover_publish_issue_owned(
         content_generator (IContentGenerator | None): 可选的内容生成器。新建 PR 时
             交给正常发布用例生成正文（LLM 正文 + contract anchors + checklist）；
             为 ``None`` 时退回配置的 template / fallback 正文。
+        repo_id (str | None): 稳定仓库标识（Issue #278），透传给 PR 后监督循环
+            做人工接管闸门（``autopilot_hold``）检查；``None`` 时闸门按 Issue
+            编号兜底并 fail closed（读不到状态一律按有闸门处理）。
 
     Returns:
         PublishRecoveryResult: 包含分支名、HEAD SHA、PR 链接及是否复用 PR 的结果。
@@ -694,6 +698,7 @@ def _recover_publish_issue_owned(
                 # 几轮 agent），因此显式留空：`repair_agent = "executor"` 会按 Issue
                 # 标签回落，并在日志里写明来源（PRD D-03）。
                 executor_agent=None,
+                repo_id=repo_id,
             )
             supervisor_action = "supervisor_completed"
     else:
@@ -786,6 +791,7 @@ def recover_publish_issue(
     github_client: IGitHubClient,
     process_runner: IProcessRunner,
     content_generator: IContentGenerator | None = None,
+    repo_id: str | None = None,
 ) -> PublishRecoveryResult:
     """在现有工作树锁内恢复发布，标签 DIRECT 同时复用跨机器认领仲裁。
 
@@ -796,6 +802,7 @@ def recover_publish_issue(
         github_client: GitHub 端口。
         process_runner: 进程执行器。
         content_generator: 可选内容生成器。
+        repo_id: 稳定仓库标识（Issue #278），用于 PR 后监督的人工接管闸门。
 
     Returns:
         发布结果，保留原 NORMAL 恢复与监督行为。
@@ -823,6 +830,7 @@ def recover_publish_issue(
             github_client=github_client,
             process_runner=process_runner,
             content_generator=content_generator,
+            repo_id=repo_id,
         )
     finally:
         _release_blocked_claim_lock(lock_path)

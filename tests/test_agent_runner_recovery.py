@@ -683,8 +683,11 @@ def _prepare_exhaustion_handler(
     """把 ``_process_ready_issue`` 打到"agent 耗尽 → checkpoint → 交接"这一步。
 
     沿用仓库既有的补丁中枢：延迟导入的名字打在 ``run_agent_once`` 上,模块级名字打在
-    ``agent_runner_issue_handlers`` 上。``publish_changes`` 打在 handlers 上,使断言
-    能读到它实际收到的 ``require_prd_archived`` 取值。
+    ``agent_runner_issue_handlers`` 上。``publish_changes`` 与
+    ``format_failure_context_comment`` 打在交接模块
+    ``agent_runner_failure_handoff`` 上（交接链路从 handlers 拆出后,函数在这
+    个命名空间解析它们）,使断言能读到 ``publish_changes`` 实际收到的
+    ``require_prd_archived`` 取值。
     """
     from backend.core.use_cases import agent_runner_issue_handlers as handlers
     from backend.core.use_cases import run_agent_once
@@ -717,7 +720,10 @@ def _prepare_exhaustion_handler(
         publish_calls.append(dict(kwargs))
         return "issue-123", "https://github.com/example/repo/pull/14"
 
-    monkeypatch.setattr(handlers, "publish_changes", _fake_publish_changes)
+    monkeypatch.setattr(
+        "backend.core.use_cases.agent_runner_failure_handoff.publish_changes",
+        _fake_publish_changes,
+    )
     return {"publish_calls": publish_calls}
 
 
@@ -895,7 +901,9 @@ def test_handoff_publish_failure_does_not_mask_original_exhaustion(
     def _boom(*_args: object, **_kwargs: object) -> None:
         raise RuntimeError("gh push rejected: remote is read-only")
 
-    monkeypatch.setattr(handlers, "publish_changes", _boom)
+    monkeypatch.setattr(
+        "backend.core.use_cases.agent_runner_failure_handoff.publish_changes", _boom
+    )
 
     with pytest.raises(MaxRetriesExceededError) as exc_info:
         handlers._process_ready_issue(
@@ -992,7 +1000,10 @@ def test_handoff_render_failure_still_preserves_original_exhaustion(
     def _explode(*_args: object, **_kwargs: object) -> str:
         raise RuntimeError("renderer blew up on an unexpected attempt shape")
 
-    monkeypatch.setattr(handlers, "format_failure_context_comment", _explode)
+    monkeypatch.setattr(
+        "backend.core.use_cases.agent_runner_failure_handoff.format_failure_context_comment",
+        _explode,
+    )
 
     with pytest.raises(MaxRetriesExceededError) as exc_info:
         handlers._process_ready_issue(
@@ -1166,7 +1177,10 @@ def test_exhaustion_with_only_forbidden_changes_publishes_nothing(
         publish_calls.append(dict(kwargs))
         return "issue-123", "https://github.com/example/repo/pull/14"
 
-    monkeypatch.setattr(handlers, "publish_changes", _fake_publish_changes)
+    monkeypatch.setattr(
+        "backend.core.use_cases.agent_runner_failure_handoff.publish_changes",
+        _fake_publish_changes,
+    )
 
     fake_client = FakeGitHubClient()
     real_runner = SubprocessRunner()
@@ -1194,3 +1208,16 @@ def test_exhaustion_with_only_forbidden_changes_publishes_nothing(
     assert "checkpoint=none" in handoff_bodies[0]
     assert publish_calls == []
     assert [c for c in fake_client.calls if c["method"] == "create_draft_pr"] == []
+
+
+def test_split_handoff_module_keeps_the_issue_handlers_logger_identity() -> None:
+    """1000 行门禁拆出去的交接模块仍记在 ``agent_runner_issue_handlers`` 名下。
+
+    交接评论 permalink 取不到、回链跳过、交接写入失败这些关键行原本就在 handlers 的
+    logger 下；名字跟着新模块走，操作者按 docs/guides/agent-runner.md 排查时就查不到。
+    """
+    from backend.core.use_cases import agent_runner_failure_handoff as handoff
+    from backend.core.use_cases import agent_runner_issue_handlers as handlers
+
+    for moved_module in (handoff, handlers):
+        assert moved_module._logger.name == ("backend.core.use_cases.agent_runner_issue_handlers")

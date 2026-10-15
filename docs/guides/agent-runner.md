@@ -173,8 +173,8 @@ kc schema --json | jq '.commands[] | select(.name=="issue list") | .options[] | 
 | 类别 | 标签 | 颜色 | 作用 |
 |---|---|---|---|
 | **AI 执行状态** | `agent/ready` | 🟢 绿色 | 已进入队列，等待 daemon 自主挑选认领；**不是执行的前置条件**——`kc run --issue <N>` 点名任何 open Issue 都不需要该标签 |
-| | `agent/running` | 🟡 黄色 | 代码正在被修改（首次实现或 PR branch rework）。首次认领由 claim marker 选举裁决，同一时刻只有一个持有者；被存活持有者占用的 Issue，定向 run 会报冲突而不是双跑 |
-| | `agent/supervising` | 🔵 浅蓝 | Draft PR 已创建，自动 post-PR supervisor 正在审查或重新处理 |
+| | `agent/running` | 🟡 黄色 | runner 正在执行首次实现或恢复旧的 runner-owned rework。首次认领由 claim marker 选举裁决，同一时刻只有一个持有者；Supervisor 自己发起的 PR 修复留在 `agent/supervising` |
+| | `agent/supervising` | 🔵 浅蓝 | Draft PR 已创建，Supervisor 正在审查、执行 PR branch repair/rebase 或等待外部状态 |
 | | `agent/automated-review-passed` | 🔵 蓝色 | 自动总控审查已通过，后续由人审或获准的自动合并策略处理 |
 | | `agent/failed` | 🔴 红色 | AI runner 执行失败 |
 | | `agent/blocked` | ⬛ 黑色 | AI runner 需要人工介入 |
@@ -742,6 +742,30 @@ runner 在 commit proxy 固定实现提交后复跑 RV，并确认 PRD 执行侧
 
 通过 `closeout_agent_enabled = false` 可以整层关掉，四类收尾失败回到整轮重跑。这个键走的是逐仓库配置路径，在目标仓库自己的 `.kedacode.toml` 里改完下一轮轮询即生效。
 
+### 运行中独立 verifier 的人工接管
+
+独立 verifier 在 Draft PR 发布后启动、要求工作树干净，且可能长时间占用一个 worktree。当操作员判断某个 Issue 的这轮验证方向不对、想立刻自己接手 PR 时，可以在管理终端的该 Issue 详情里点「接管此 Issue」，**只停这一个 Issue 当前正在跑的 verifier**——不动 daemon、不影响同仓其他 Issue、也不停整个 runner。
+
+界面上的状态与动作都来自两个契约名，排查时按这两个键搜：
+
+- **`active_verifier`**：Issue 详情响应（`GET /agent-runner/issues/{issue_number}`）新增的只读字段，由 `active_verifier_projection()` fresh-read 控制行得到，字段为 `run_id`、`head_sha`、`state`、`can_take_over`、`pr_number`、`autopilot_hold`。`state` 取值就是控制行状态机的八个值：`running` / `takeover_requested` / `taken_over` / `takeover_failed` / `verifier_completed` / `verifier_stale` / `pr_merged` / `expired`。没有受控运行时该字段缺省，界面不显示接管按钮——状态**不**从生命周期事件推断。
+- **`take_over_verifier`**：Issue 级白名单动作（`POST /agent-runner/console/repositories/{repo_id}/issues/{issue_number}/actions`，body 带 `action`、`run_id`、`head_sha`），与 `retry_failed` / `blocked_continue` / `recover_failed_publish` 同一入口。缺 `run_id` 或 `head_sha`、或绑定超长（`run_id` > 128、`head_sha` > 64）一律直接 `400`——长度护栏在 handler 里，不让模型校验把它漂成 `422`。它跟 `kc run --takeover`（停 daemon 并接管其**全部**在途 Issue）不是同一件事，后者是全局、破坏性的。
+
+接管的语义边界（这些是刻意设计，不是缺陷）：
+
+- **精确绑定运行身份**。接管请求只携带页面从 Issue 详情读到的 `run_id` 与 PR `head_sha`，后端以共享的本地 SQLite 控制面（`issue_run_control` 表）做 CAS：仅当控制行仍是本次 `run` 且 HEAD 未漂移时，原子登记取消意图并立即落下 `autopilot_hold`。HEAD 已变、运行已结束或找不到受控运行时一律回 `409`，界面据此提示「HEAD 已变化 / 运行已结束 / 状态已变化」，绝不伪装成交班成功。`202` 还多一条持久性前提：CAS 未命中却仍读到同一 `run`/HEAD 的 `running` 行（CAS 与回读之间的并发窗口）时，存储层**重试一次**并要求回读离开 `running`；两次都空手就回 `409` 的 `state_change_conflict`——一个没写进库的取消意图不得被记成受理，也不得在 Console 审计里出现 `accepted`。
+- **停的是进程树，不是队列**。登记后 runner 侧的进程 watchdog 按秒级探针回读控制行，命中即只 `SIGKILL` 该 verifier 子进程组并回收；父 runner 与被监督的进程都存活。终止身份（进程组 + 创建时刻）在 `Popen` 之后只读一次，取消落地后的二次拆除复用它——子进程被回收后 `pid` 可能已被复用，再按 `pid` 取一次进程组就会把信号发给无关进程。
+- **取消≠通过**。被接管的 verifier **不产出任何 verdict**（没有 PASS/RED/YELLOW，也绝不写 `validation/verifier-passed`），并落到 review 态标签（由 `config.labels.review` 承载，当前规范名是 `agent/automated-review-passed`；旧文档与旧 capture 里写作 `agent/review` 的是同一个状态位），**同一次写入补上人工待办标签 `human/awaiting-review`**（`config.labels.human_review`）：交班的语义就是「这轮交给人」，而 `synchronize_human_review_label()` 只给未获自动合并授权的 Issue 补待办，带 `prd-auto-merge` 的 Issue 若走那条路会得到「自动审查已过、却没有人工待办」的空档——保持位已经闸住 supervisor / `review_once` / merge queue，没有人被通知。人工待办是独立维度，不属于互斥的 workflow labels，因此可与 review 态并存；`autopilot_hold` 在接管 CAS 受理时已生效，不等进程树退出。这个保持位让 post-PR supervisor、`review_once` 与 autopilot 合并队列**fail closed**——即便仓库关了 `require_verifier_pass`，也不会把这轮当成验证通过去自动合并。PR 保持 Draft 交人工处理。
+- **交班以回读为准**。请求返回 `202`（处理中）只代表取消意图已登记，界面继续轮询控制行投影，直到状态离开 `running`/`takeover_requested` 落定为「已交给你审查」才确认交班完成；随后重扫所属仓库并重读详情标签，使 Dashboard 列表和标签面板都更新为人工 review 状态。超过阈值仍未确认时提示「仍在停止」，界面绝不自称「已停止」。这条轮询**不**以"请求由本机发出"为前提：接管卡可能在控制行已经是 `takeover_requested` 时才挂载（页面重载、Issue 重开、第二个操作员），此时同样按交班节奏继续重读。`takeover_failed` 是终态但不是死路——界面按可重试呈递（说明本轮不会产出 verdict、保持位仍在），并给出重新读取的入口，新一轮 verifier 登记后即可再次接管。
+
+竞态同样按 fail-closed 收敛：若 verifier 恰好在接管登记的同一刻自然完成，二者只有一个赢家胜出（完成→接管拿到 `completed_conflict`，接管→完成落 `taken_over`）；接管之后 HEAD 又漂移，则该运行标为 `verifier_stale`、旧的 verdict 作废；外部把 PR 合并则控制行转 `pr_merged`。`autopilot_hold` 只会在**同一 run、同一 HEAD 的全新 verifier GREEN 发布前后都通过 GitHub fresh-read 核验后**清除；存储不可读或最终合并前发现 hold 时，自动处理继续 fail closed。
+
+日志关键字：`cancelled by a human takeover` / `timed out after` / `Could not save verifier response to` / `Verifier GREEN for issue`。等待循环的代码因单文件 1000 行上限拆到了 `agent_runner_verifier_response_log.py`（响应落盘、超时、人工接管取消）与 `agent_runner_verdict_pr_effects.py`（verdict 的 PR 侧副作用），但**这些行仍记在 logger `backend.core.use_cases.run_verifier_agent` 名下**——模块文件变了名字没变，按 `grep run_verifier_agent` 依旧能一次看到「被人工接管取消」与「超时」两类关键行，不必按新文件名分别搜。
+
+接管与发布的竞态还有两条行：`takeover race or external change`（verdict 已不适用于当前 HEAD，作废不发）与 `PR merged or HEAD drifted during verdict side effects`（副作用中途 PR 被外部合并/HEAD 漂移，旧 verdict 作废并落保持位）。它们出自 `agent_runner_verifier_publication.py`，同样**记在拆分前的 `backend.core.use_cases.agent_runner_publication` 名下**，按发布流程 `grep agent_runner_publication` 即可与其余发布告警一并看到，不必按新文件名搜。
+
+> 边界与保真度：接管是「单 Issue、精确 run_id+HEAD」的可控停止，作用域由共享 SQLite 控制面而非进程内状态界定，因此跨 runner/daemon 进程同样成立。它**不**等价于停止整个 runner，也**不**是任何「验证通过」的记录——把它当作「把这轮交回给人」的信号。
+
 ### WIP checkpoint 不合并
 
 在实现阶段或 recovery 阶段，runner 可能调用 `checkpoint_uncommitted_progress` 把当前未提交进度保存为 `[Agent][WIP] Issue #N checkpoint` 形式的临时 commit，作为崩溃恢复点和跨 claim 续作的基础。这些 WIP checkpoint 不会被单独推送到远程分支上——它们只在本地分支存在，最终随功能 commit 一起被 push。
@@ -758,7 +782,7 @@ checkpoint 的 `git add` 只使用 git 仍能匹配的路径（非禁改、且�
 
 recovery 预算耗尽不是终点，而是**交班点**。此前只有同一个 claim 内的重试带着失败上下文（`run_agent_execution_loop` 每轮把 `recovery_failure_summary` 拼进 recovery prompt）；跨 claim 的唯一入口 `build_progress_continuation_prompt` 既不读 Issue 评论、也不读 attempt 历史与 agent 自述，而 `_reuse_existing_local_commit` 又**不跑 verifier gate**——于是"上一轮 verifier 为什么判红"没有任何路径跨过 claim 边界，接手的新 claim 只能从 WIP 快照与 PRD 反推，同一个坑反复踩。
 
-现在耗尽路径补上三步（全部在 `agent_runner_issue_handlers._process_ready_issue` 的耗尽 `except` 分支里）：
+现在耗尽路径补上三步（触发点在 `agent_runner_issue_handlers._process_ready_issue` 的耗尽 `except` 分支，实际写入步骤因单文件 1000 行上限拆到了 `agent_runner_failure_handoff.py`，但**这些行仍记在 logger `backend.core.use_cases.agent_runner_issue_handlers` 名下**——模块文件变了名字没变，按 `grep agent_runner_issue_handlers` 依旧能一次看到整条交接链路的告警）：
 
 1. **写交接记录**：一条带 `<!-- iar:failure-context checkpoint=… attempts=… verifier=… evidence=… -->` marker 的 Issue 评论，正文由 `format_failure_context_comment` 渲染，复用既有的 `format_attempt_history`，verifier 结论取自 `MaxRetriesExceededError.attempt_results[*].detail`。
 2. **发布同源的人读表面**：`checkpoint_sha` 非空时调用既有的 `publish_changes(..., require_prd_archived=False)`，发布或按分支复用同一个 Draft PR，并在 PR 正文尾部固定附一段指向该交接评论的回链（`<!-- iar:failure-context-ref -->`，重复耗尽时替换而非叠加）。
@@ -1798,7 +1822,7 @@ agent/ready
     → Issue comment: Draft PR Created
     → post-PR supervisor cycle
     → supervisor approve → agent/automated-review-passed
-    → supervisor repair/rebase → agent/running (existing PR branch rework)
+    → supervisor repair/rebase → configured repair agent runs within agent/supervising → review next pass
     → supervisor human-input-needed → agent/blocked
     → supervisor failed → agent/failed
 ```
@@ -1874,15 +1898,15 @@ Draft PR 创建后，Issue 先进入 `agent/supervising`，并立即运行至少
 3. 如果 worktree 在只读 supervisor cycle 开始前仍有未提交变更，runner 会自动 `git stash push -u` 把它们临时存起来，cycle 结束后再根据 supervisor 决策恢复（pop）或继续保留（`wait_for_checks`）
 4. Supervisor 输出结构化 action：
    - `approve_for_human_review` → 恢复 stash 后若 worktree 干净则进入 `agent/automated-review-passed`，仍有未提交变更则进入 `agent/blocked`
-   - `repair_pr_branch` / `resolve_conflict` → 恢复 stash 后进入 `agent/running` 做现有 PR branch 修复
-   - `rebase_pr_branch` → 恢复 stash 后进入 `agent/running` 做 rebase
+   - `repair_pr_branch` / `resolve_conflict` → 恢复 stash 后调用配置的 repair agent，在 `agent/supervising` 内修复现有 PR branch
+   - `rebase_pr_branch` → 恢复 stash 后在 `agent/supervising` 内执行 rebase
    - `wait_for_checks` → 保持 stash 与 `agent/supervising`，等待 PR checks 完成
    - `request_human_input` → 恢复 stash 后进入 `agent/blocked`，但必须带有可操作 summary
    - `mark_failed` → 恢复 stash 后进入 `agent/failed`
 
-5. 需要代码修改时，runner 先写 `post_pr_rework_requested` event marker，再切到 `agent/running`
-6. 后续 `kc run` 检测到该 pending marker 和 open PR 后，在现有 PR branch 上执行 rework
-7. rework 成功后写 `rebase_repair_complete` marker，再进入后续 supervision/review 流程
+5. 执行前先写 `post_pr_rework_requested` event marker，Issue 保持 `agent/supervising`；post-PR repair/rebase 不重新排进 builder 的 `agent/running` 队列
+6. 修复在当前 supervisor pass 内执行；若进程中断，后续 review pass 会核对 marker 对应的 PR head 后续跑。marker 已过期时记录 `post_pr_rework_superseded` 并针对当前 PR context 重新评审
+7. rework 成功后写 `rebase_repair_complete` marker，后续 review pass 根据 PR、checks 与评论变化继续监督
 
 #### Supervisor diff 分层注入与跨 cycle finding 累积
 
@@ -1903,7 +1927,7 @@ Supervisor 还能跨 cycle 记住未解决的 findings：LLM 可以在 JSON 决�
 supervisor 本身始终是只读审阅；`[agent_runner.post_pr_supervisor].repair_agent` 只决定**判定需要改代码之后由谁动手**，取值语义与 pre-PR 那一段同名同义：
 
 - `self`（默认）：supervisor 自己执行修复，与历史行为一致。
-- `executor`：交回本次实现者。发布路径显式把本次实现者传下去；拿不到本次实现者的入口（独立跑 `kc supervise`、rework 路径等）按 Issue 标签回落，并在日志里写明用的是哪一种来源。
+- `executor`：使用本次实现者作为 repair agent。发布路径显式把本次实现者传下去；拿不到本次实现者的入口（独立跑 `kc supervise`、rework 路径等）按 Issue 标签回落，并在日志里写明用的是哪一种来源。无论选哪个 repair agent，Supervisor 触发的修复都在 `agent/supervising` 生命周期内执行。
 - `<agent 名>`：指定 agent；未注册时该阶段开始前 fail-fast。
 
 两个修复调用点（supervisor 修复循环、rework 路径）共用解析器 `resolve_repair_agent`，避免两条路径语义分叉。修复提示词由 `build_repair_prompt` 生成，带 Issue 上下文与本轮 findings 清单（rework 路径取 `.iar/state/issue-<N>/findings.json` 里未解决的累积 findings），修复者不必自己重新推断要改什么。
@@ -1938,7 +1962,7 @@ uv run kc supervise-daemon
   - Issue comments 数量超过最新 supervisor marker 记录的游标
   - PR review comments 数量增加
 - 任一维度变化时，先移回 `agent/supervising`，运行 supervisor cycle
-- 无变化时不重复启动 supervisor；若最新 `post_pr_supervisor` marker 的 action 与当前标签不一致，则按已完成 action 对齐标签（approve → `agent/automated-review-passed`、wait → `agent/supervising`、request input → `agent/blocked`、repair/rebase → `agent/running`）。这能恢复 supervisor 已写结果 marker、但进程在标签更新前退出时留下的滞后状态。
+- 无变化时不重复启动 supervisor；若最新 `post_pr_supervisor` marker 的 action 与当前标签不一致，则按已完成 action 对齐标签（approve → `agent/automated-review-passed`、wait/repair/rebase → `agent/supervising`、request input → `agent/blocked`）。pending rework marker 在 supervising 下会由 review pass 恢复执行；旧的 runner-owned marker 仍由 `kc run` 消费。
 
 Supervisor 结果评论会把自身写入后的 Issue comment 数量记录进 marker，
 因此 runner 自己写出的 `Agent Runner Post-PR Supervisor` 评论不会触发下一轮重审。
@@ -1964,7 +1988,7 @@ checks 状态：
 - supervisor 输出无法解析、返回未知 action，或返回空 summary 的 `request_human_input` 时，本轮会进入 `agent/failed`，不会生成无原因的 `agent/blocked`；平台不得根据 checks 状态猜测替代动作
 - supervisor agent 进程非零退出且 stdout 中识别不到任何 JSON 决策（如 claude CLI 遇到 API / 网络错误崩溃）时，视为基础设施级失败，会在同一 cycle 内重试至多 `max_agent_crash_retries` 次；重试之间指数退避（从 `crash_retry_initial_backoff_seconds` 起每次翻倍，单次等待封顶 `crash_retry_max_backoff_seconds`，默认 30s 起、上限 10 分钟），以扛住分钟级的 API 提供方中断。重试仍失败才进入 `agent/failed`，summary 会标明是 agent infrastructure failure。非零退出但 stdout 中仍能识别出 JSON 决策时直接使用该决策，不消耗重试次数
 
-这样可以避免 `agent/automated-review-passed` label 覆盖仍需 `kc run` 消费的 rework/rebase 状态。
+这样可确保 pending rework 不被一次新的 supervisor 结果覆盖；supervising 下的请求由 review pass 续跑，只有旧的 runner-owned `agent/running` 请求才由 `kc run` 消费。
 
 注意：merge queue 的自动合并仍会在合并前等待 checks 全绿（见下文"Autopilot 快速档（合并队列）"），这与 supervisor 的动作选择相互独立——进入人工 review 不代表验收完成，也不产生自动合并或归档资格。
 
@@ -1974,13 +1998,13 @@ rebase/repair 仍由下一次 `kc run` 在 PR branch worktree 中执行。
 
 ### Rework Guard
 
-`kc run` 遇到 `agent/running` Issue 时，不会自动视为 rework。只有同时满足以下条件才会进入现有 PR branch rework 路径：
+`kc run` 遇到 `agent/running` Issue 时，不会自动视为 rework。只有同时满足以下条件才会进入旧的 runner-owned PR branch rework 路径：
 
 1. Issue comments 中存在尚未被 `rebase_repair_complete`、`draft_pr_created`、`implementation_complete` 或 `publish_recovered` 消费的 `phase=post_pr_rework_requested` marker
 2. 该 marker 包含 PR branch
 3. 该 PR branch 仍有 open PR，且 marker 中的 `head_sha` 与 open PR 当前 head 一致；不一致说明 PR 已被外部更新，旧的 rework 请求不再安全
 
-后续 `post_pr_supervisor` 这类观察类 marker 不会覆盖 pending rework marker；只有明确的完成/发布类 marker 才会消费旧 rework 请求。
+后续 `post_pr_supervisor` 这类观察类 marker 不会覆盖 pending rework marker；只有明确的完成/发布类 marker 才会消费旧 rework 请求。新的 post-PR supervisor repair 保持 `agent/supervising`，由 review pass 执行或在进程中断后恢复，不走这条 `kc run` 路径。
 
 如果 pending rework 存在但对应 worktree 路径已不存在（例如被手动删除），runner 会将 Issue 转入 `agent/blocked` 并写评论说明缺失路径与恢复步骤，而不是在错误的目录上执行 repair/rebase。
 
@@ -2477,7 +2501,7 @@ agent/ready  →  agent/running  →  agent/supervising  →  agent/automated-re
       └──────  agent/failed  ←───────────────────────────┘
               （人工修复后改回 ready）
 
-agent/supervising ── supervisor 要求 rework ──→ agent/running ── 修复/rebase ──→ agent/supervising
+agent/supervising ── supervisor repair/rebase（同一生命周期内执行）──→ agent/supervising
 
 # recover 恢复路径（supervisor enabled）
 agent/failed ── recover ──→ agent/supervising ── supervisor approve ──→ agent/automated-review-passed
@@ -3387,6 +3411,15 @@ publish                 - diff 混入证据产物（.md 报告以外的证据路
                         验收重点：命令可复现、输出摘要合理、解释成立、
                         风险说明充分、SHA-256 与本地复现结果一致。
 
+当前 Realistic Validation 签收兼容路径使用 PR 改动身份，不把当前 main/base 的提交号当成证据身份；这不是其他验证 provider 必须遵循的通用规则。M12 将把门禁身份与有效性策略迁移到仓库用户定义的验证契约。新发布的
+`iar:validation-evidence version=2` marker 同时记录捕获时的 head/base 与 PR contribution
+patch-id。门禁先取 PR head 与当前 base 的共同祖先，再对 PR 改动计算 `git patch-id --stable`，
+并排除 `tasks/evidence/` 发布产物目录。PRD 本身仍包含在指纹中，因此验收范围变化会使旧签收
+失效。main 单独前进、PR 随后 rebase，或只更新 evidence 发布产物，都不会要求重新跑真实验证；
+PR 的功能改动或 PRD 验收范围变化时才会清空签收并要求重新验证。若本地缺少对应 Git 对象且无法
+从 remote 取回，门禁保持验证待处理，不会把“身份无法计算”伪报成“证据已过期”。旧 `version=1`
+marker 继续按精确 head SHA 检查。
+
 相关 marker 一览（均为 `<!-- iar:... -->` 隐藏注释）：
 
 | Marker | 位置 | 含义 |
@@ -3396,7 +3429,8 @@ publish                 - diff 混入证据产物（.md 报告以外的证据路
 | `iar:evidence-format-waived reason="..."` | Issue body | 按任务关闭逐项格式对账（证据仍必须存在） |
 | `iar:evidence-format item=N kind=xxx` | Issue body | agent 解析的格式要求标记（优先于正则） |
 | `iar:realistic-validation version=1 total=N` … `iar:realistic-validation-end` | PR body | 人工签收清单区块边界 |
-| `iar:validation-evidence version=1 head=<sha> branch=<branch> count=N` | PR comment | 证据评论锚点（head 用于检测勾选后漂移） |
+| `iar:validation-evidence version=1 head=<sha> branch=<branch> count=N` | PR comment | 旧版证据评论锚点（按精确 head 检测漂移） |
+| `iar:validation-evidence version=2 head=<sha> base=<sha> patch=<sha> branch=<branch> count=N` | PR comment | 证据锚点（按 PR 改动 patch-id 检测漂移；base/head 仅供审计） |
 | `iar:event phase=validation_passed` | Issue comment | 人工签收完成审计（按 head 去重） |
 | `iar:event phase=validation_reset` | PR comment | 签收因新 push 失效被重置 |
 
@@ -4900,11 +4934,11 @@ uv run kc backlog advance --repo <repo-id>
 - **单 PRD 覆盖**：`inherit`（跟随全局，默认）/ `on`（强制开启）/ `off`（强制关闭），事实源是对应 GitHub Issue 最新一条 `<!-- iar:ci-auto-repair-policy value=... -->` marker；无 Issue 的 PRD 只能跟随全局。
 - **最终生效值**由服务端按 `显式 on/off ?? fresh 全局值` 计算（`on → true`、`off → false`、`inherit → 全局值`），API/CLI 只回显，前端不得自行推断。
 
-Supervisor 的 `repair_pr_branch` JSON 决策包含 `repair_scope`：纯代码审查问题使用 `code_review`，CI 失败修复或混合问题使用 `ci`。缺失或无效值保守按 `ci` 处理。`auto_repair_ci` 与单 PRD 覆盖只限制 `ci`；`code_review` 可正常交回 executor，避免 CI 全绿时仍因 CI 自动修复关闭而滞留。两类修复共享 `max_repair_attempts` 上限及同一 head 的幂等请求，不扩大总重试预算。Supervisor 评论回显范围，便于核对实际政策。
+Supervisor 的 `repair_pr_branch` JSON 决策包含 `repair_scope`：纯代码审查问题使用 `code_review`，CI 失败修复或混合问题使用 `ci`。缺失或无效值保守按 `ci` 处理。`auto_repair_ci` 与单 PRD 覆盖只限制 `ci`；`code_review` 不受 CI 自动修复开关影响。获准的修复都由 Supervisor 生命周期内的配置 repair agent 执行，Issue 保持 `agent/supervising`，不会重新认领 builder。两类修复共享 `max_repair_attempts` 上限及同一 head 的幂等请求，不扩大总重试预算。Supervisor 评论回显范围，便于核对实际政策。
 
 #### 多轮修复与重入去重
 
-Agent 选择 repair 且策略开启时，复用既有 `execute_repair` 修复同一 PR 分支；推送新 head 后重新等待 checks，允许跨新 head 多轮，直到 `post_pr_supervisor.max_repair_attempts` 上限。轮次事实源是既有 `post_pr_rework_requested` marker（`action=repair_pr_branch`）与 PR head SHA，不新增数据库表；同一 head SHA 的修复请求（daemon 重入、页面重试、手动/自动路径）幂等，最多触发一次。耗尽、repair 失败或 worktree 不可恢复时停止自动副作用，问题保留在右侧详情中，可显式请求一次手动修复（仍受上限、worktree 与禁止路径门禁约束）。
+Agent 选择 repair 且策略开启时，复用既有 `execute_repair` 修复同一 PR 分支；修复由 Supervisor 生命周期内的配置 repair agent 执行，Issue 不退回 `agent/running`。推送新 head 后等待下一轮 review pass 检查 PR/check 状态；允许跨新 head 多轮，直到 `post_pr_supervisor.max_repair_attempts` 上限。轮次事实源是既有 `post_pr_rework_requested` marker（`action=repair_pr_branch`）与 PR head SHA，不新增数据库表；同一 head SHA 的修复请求幂等，最多触发一次。耗尽、repair 失败或 worktree 不可恢复时停止自动副作用，问题保留在右侧详情中，可显式请求一次手动修复（仍受上限、worktree 与禁止路径门禁约束）。
 
 #### CLI 一等入口：kc backlog ci
 

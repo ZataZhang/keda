@@ -107,10 +107,22 @@ def _isolate_ambient_iar_config() -> Iterator[None]:
     托管 runner 向子进程注入 ``KEDACODE_CONFIG`` 与 ``IAR_CONFIG``，指向机器级
     配置。默认解析测试需要从 cwd 查找或临时 HOME 回落，不能被宿主配置覆盖。
     需要覆盖的用例仍用 ``monkeypatch.setenv`` 显式设置；结束恢复两名宿主取值。
+
+    剥离变量只影响**之后重新解析**配置的读取：``settings.config`` 单例在 conftest
+    导入 ``backend`` 时（早于任何 fixture）就已按宿主机注入的机器级 ``config.toml``
+    定型，``build_app_config()`` 会一直吃到那份漂移值。因此这里在剥离宿主变量后
+    重建单例的 ``agent_runner`` 段，让本地/托管 runner 的会话与 CI（无宿主注入、
+    按仓库根解析）看到同一份配置。断言仓库根 ``config.toml`` 里某段真实内容的 golden
+    用例仍应显式 pin 来源（``tests.support.agent_runner.root_config_app_config()``），
+    不依赖本 fixture 的解析结果。
     """
+    from backend.infrastructure.config import settings as app_settings_module
+    from backend.infrastructure.config.settings import AgentRunnerSettings
+
     previous_values = {
         env_name: os.environ.pop(env_name, None) for env_name in ("KEDACODE_CONFIG", "IAR_CONFIG")
     }
+    app_settings_module.config.agent_runner = AgentRunnerSettings()
     try:
         yield
     finally:
@@ -290,6 +302,20 @@ class FakeGitHubClient(IGitHubClient):
         """
         self.calls.append({"method": "get_pull_request_context", "branch": branch})
         return self._pr_contexts.get(branch)
+
+    def get_pull_request_context_by_number(
+        self, pr_number: int, *, require_success: bool = False
+    ) -> object | None:
+        """按编号返回已登记的 PR fixture。"""
+        self.calls.append({"method": "get_pull_request_context_by_number", "pr_number": pr_number})
+        return next(
+            (
+                context
+                for context in self._pr_contexts.values()
+                if getattr(context, "number", None) == pr_number
+            ),
+            None,
+        )
 
     def set_pr_context(self, branch: str, context: object | None) -> None:
         """Inject a deterministic ``get_pull_request_context`` response for tests."""

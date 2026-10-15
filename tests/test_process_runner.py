@@ -670,6 +670,8 @@ def test_process_watchdog_logs_heartbeat_and_kills_on_timeout() -> None:
 
     mock_process = MagicMock()
     mock_process.poll.return_value = None
+    # 真实 pid 才读得出真实进程组：替身 pid 会让身份判定退回无校验路径。
+    mock_process.pid = os.getpid()
     watchdog = process_runner._ProcessWatchdog(
         mock_process,
         ["slow", "command"],
@@ -699,7 +701,14 @@ def test_process_watchdog_logs_heartbeat_and_kills_on_timeout() -> None:
         2,
         "slow command",
     )
-    terminate_mock.assert_called_once_with(mock_process)
+    # 拆除必须带上创建时刻读到的身份，不能只按 pid 现取一次进程组。
+    assert watchdog._expected_process_group == os.getpgid(os.getpid())
+    assert watchdog._expected_process_started_at is not None
+    terminate_mock.assert_called_once_with(
+        mock_process,
+        expected_process_group=watchdog._expected_process_group,
+        expected_process_started_at=watchdog._expected_process_started_at,
+    )
 
 
 def test_process_watchdog_includes_context_label_in_logs() -> None:
@@ -759,6 +768,8 @@ def test_process_watchdog_kills_on_inactivity_timeout() -> None:
 
     mock_process = MagicMock()
     mock_process.poll.return_value = None
+    # 真实 pid 才读得出真实进程组：替身 pid 会让身份判定退回无校验路径。
+    mock_process.pid = os.getpid()
     watchdog = process_runner._ProcessWatchdog(
         mock_process,
         ["slow", "command"],
@@ -777,7 +788,14 @@ def test_process_watchdog_kills_on_inactivity_timeout() -> None:
     ):
         watchdog._run()
 
-    terminate_mock.assert_called_once_with(mock_process)
+    # 拆除必须带上创建时刻读到的身份，不能只按 pid 现取一次进程组。
+    assert watchdog._expected_process_group == os.getpgid(os.getpid())
+    assert watchdog._expected_process_started_at is not None
+    terminate_mock.assert_called_once_with(
+        mock_process,
+        expected_process_group=watchdog._expected_process_group,
+        expected_process_started_at=watchdog._expected_process_started_at,
+    )
 
 
 def test_process_watchdog_does_not_kill_on_inactivity_when_output_is_active() -> None:
@@ -916,6 +934,151 @@ def test_claude_stream_timeout_exception_carries_partial_output(tmp_path: Path) 
         )
 
     assert "checked rv-1" in str(exc_info.value.output or "")
+
+
+def test_claude_stream_honors_takeover_cancel_check(tmp_path: Path) -> None:
+    """claude-stream-json 的捕获路径也必须回收目标进程组并抛取消异常。"""
+    import time
+
+    runner = SubprocessRunner()
+    started_at = time.monotonic()
+    script = "import time\nprint('started', flush=True)\ntime.sleep(60)\n"
+
+    with pytest.raises(InterruptedError, match="takeover cancel request"):
+        runner.run(
+            [sys.executable, "-c", script],
+            cwd=tmp_path,
+            capture_output=True,
+            timeout=30,
+            output_protocol=CLAUDE_STREAM_JSON_PROTOCOL_ID,
+            cancel_check=lambda: time.monotonic() - started_at >= 1,
+        )
+
+
+def _pid_alive(pid: int) -> bool:
+    """进程是否仍在；``PermissionError`` 说明进程存在但不属于当前用户。"""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _wait_pid_gone(pid: int, timeout_seconds: float = 10.0) -> bool:
+    """在限定窗口内确认进程已退出并被回收（直接子进程需要 reap，僵尸不算消失）。"""
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        try:
+            if os.waitpid(pid, os.WNOHANG)[0] == pid:
+                return True
+        except ChildProcessError:
+            return True  # 已由父进程（或被收养的 init）回收。
+        if not _pid_alive(pid):
+            return True
+        time.sleep(0.05)
+    return not _pid_alive(pid)
+
+
+def test_takeover_cancel_kills_only_the_target_process_group(tmp_path: Path) -> None:
+    """取消只终结目标进程组：孙进程一并回收，旁观进程与 runner 自己存活。
+
+    这是 PRD 不变量 2 的回归面。跨进程 oracle
+    （``scripts/rv1_takeover_handoff_probe.py``）已经真跑过一次，但回归套件必须自己
+    守住这条边界——把 ``killpg`` 的范围写错（杀整棵进程树之外的东西、或只杀直接子
+    进程）时必须有测试变红，而不是等 CI 上没人跑的浏览器层去发现。
+    """
+    runner = SubprocessRunner()
+    pid_file = tmp_path / "pids.json"
+    script = (
+        "import json, os, subprocess, sys, time\n"
+        "outside = subprocess.Popen(\n"
+        "    [sys.executable, '-c', 'import time; time.sleep(600)'],\n"
+        "    start_new_session=True,\n"
+        "    stdout=subprocess.DEVNULL,\n"
+        "    stderr=subprocess.DEVNULL,\n"
+        ")\n"
+        "grandchild = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(600)'])\n"
+        "with open(sys.argv[1], 'w', encoding='utf-8') as handle:\n"
+        "    json.dump(\n"
+        "        {\n"
+        "            'pid': os.getpid(),\n"
+        "            'pgid': os.getpgid(0),\n"
+        "            'grandchild': grandchild.pid,\n"
+        "            'outside': outside.pid,\n"
+        "        },\n"
+        "        handle,\n"
+        "    )\n"
+        "time.sleep(600)\n"
+    )
+    started_at = time.monotonic()
+    identities: dict[str, int] = {}
+
+    def _cancel_when_identities_are_known() -> bool:
+        """子进程把三类 PID 都写盘之后才请求取消，否则断言对象还不存在。"""
+        if time.monotonic() - started_at < 0.5:
+            return False
+        try:
+            return bool(json.loads(pid_file.read_text(encoding="utf-8")))
+        except (OSError, ValueError):
+            return False
+
+    try:
+        with pytest.raises(InterruptedError, match="takeover cancel request"):
+            runner.run(
+                [sys.executable, "-c", script, str(pid_file)],
+                cwd=tmp_path,
+                capture_output=True,
+                timeout=30,
+                cancel_check=_cancel_when_identities_are_known,
+            )
+        identities = json.loads(pid_file.read_text(encoding="utf-8"))
+
+        # 子进程确实落在自己的进程组里（组 id == pid），否则"只杀这一组"无从谈起。
+        assert identities["pgid"] == identities["pid"]
+        assert identities["pgid"] != os.getpgid(0)
+        # 目标组整体消失：直接子进程与它拉起的孙进程都被终止并回收。
+        assert _wait_pid_gone(identities["pid"]) is True
+        assert _wait_pid_gone(identities["grandchild"]) is True
+        # 旁观者（另一进程组）没被牵连——daemon / 其他 Issue 的进程走的是这条边界。
+        assert _pid_alive(identities["outside"]) is True
+        # runner 自己（测试进程）当然还活着。
+        assert _pid_alive(os.getpid()) is True
+    finally:
+        for key in ("outside", "grandchild", "pid"):
+            process_id = identities.get(key)
+            if process_id is not None and _pid_alive(process_id):
+                try:
+                    os.kill(process_id, signal.SIGKILL)
+                except OSError:
+                    pass
+
+
+def test_process_watchdog_cancel_classification_wins_over_timeout() -> None:
+    """同一 tick 里取消与超时都置位时，必须按人工接管分类（Issue #278）。
+
+    若 TimeoutExpired 抢先抛出，上层会走 verifier 超时回退路径，错失交班：
+    Issue 不进 agent/review、不写交接评论，把"人停掉了验证"误报成"验证自己超时"。
+    """
+    watchdog = process_runner_module._ProcessWatchdog(
+        MagicMock(),
+        ["verifier", "cli"],
+        timeout=30,
+        heartbeat_seconds=1,
+        base_label="Command",
+    )
+    watchdog._timed_out = True
+    watchdog._cancelled = True
+
+    watchdog.raise_if_timed_out()  # 取消在场时不得抛 TimeoutExpired。
+    with pytest.raises(InterruptedError, match="takeover cancel request"):
+        watchdog.raise_if_cancelled()
+
+    # 纯超时（未取消）仍须按超时上报，保住既有停滞监督语义。
+    watchdog._cancelled = False
+    with pytest.raises(subprocess.TimeoutExpired):
+        watchdog.raise_if_timed_out()
 
 
 def test_subprocess_runner_keeps_active_process_alive(
@@ -1199,7 +1362,7 @@ def test_captured_timeout_reclaims_surviving_pipeline_member(tmp_path: Path) -> 
 
 
 def test_captured_keyboard_interrupt_tears_down_process_group(tmp_path: Path) -> None:
-    """Ctrl-C 也必须整组回收。
+    """Ctrl-C 也必须整组回收，且拆除带着创建时刻读到的身份。
 
     子进程改用独立进程组后，终端产生的 SIGINT 不会再自动送达子进程，
     所以拆除逻辑必须捕获 BaseException 而不只是 Exception。
@@ -1211,11 +1374,99 @@ def test_captured_keyboard_interrupt_tears_down_process_group(tmp_path: Path) ->
         patch.object(process_runner, "_terminate_process_tree") as terminate_mock,
     ):
         fake_process = popen_mock.return_value
+        # 真实 pid 才读得出真实进程组：替身的 pid 会让身份判定退回无校验路径。
+        fake_process.pid = os.getpid()
         fake_process.communicate.side_effect = KeyboardInterrupt
         with pytest.raises(KeyboardInterrupt):
             process_runner._run_captured_process(["sleep", "30"], cwd=tmp_path, timeout=5)
 
-    terminate_mock.assert_called_once_with(fake_process)
+    terminate_mock.assert_called_once()
+    assert terminate_mock.call_args.args == (fake_process,)
+    assert terminate_mock.call_args.kwargs["expected_process_group"] == os.getpgid(os.getpid())
+    assert terminate_mock.call_args.kwargs["expected_process_started_at"] is not None
+
+
+def test_takeover_termination_reuses_identity_captured_at_popen() -> None:
+    """接管取消的两轮拆除都只认创建时刻的进程组，绝不再按 pid 取一次组。
+
+    ``raise_if_cancelled`` 抛进 except 分支时 ``communicate()`` 已经把子进程回收，
+    ``pid`` 随即释放；此时再 ``os.getpgid(process.pid)`` 读到的是**复用该 pid 的别的进程**，
+    据此发 SIGKILL 就会打到无关进程组上（Issue #278 评审 finding）。
+    """
+    from backend.infrastructure import process_runner
+
+    mock_process = MagicMock()
+    mock_process.pid = 4242
+    mock_process.poll.return_value = None
+
+    with (
+        patch.object(process_runner.os, "getpgid", return_value=4242) as getpgid_mock,
+        patch.object(process_runner, "process_start_time", return_value=1234.5),
+        patch.object(process_runner, "_terminate_process_tree") as terminate_mock,
+    ):
+        watchdog = process_runner._ProcessWatchdog(
+            mock_process,
+            ["verifier", "cli"],
+            timeout=30,
+            heartbeat_seconds=1,
+            base_label="Command",
+            cancel_check=lambda: True,
+        )
+        # 身份只在创建时读一次，不是每次拆除都读。
+        assert getpgid_mock.call_count == 1
+        assert watchdog._check_takeover_cancel() is True  # 第一轮：watchdog 命中取消
+        assert watchdog.terminate() is not None  # 第二轮：except 分支的收尾拆除
+
+    assert getpgid_mock.call_count == 1
+    assert terminate_mock.call_count == 2
+    for termination_call in terminate_mock.call_args_list:
+        assert termination_call.args == (mock_process,)
+        assert termination_call.kwargs == {
+            "expected_process_group": 4242,
+            "expected_process_started_at": 1234.5,
+        }
+
+
+def test_claude_stream_takeover_termination_carries_captured_identity(
+    tmp_path: Path,
+) -> None:
+    """claude-stream 的取消收尾拆除同样不得回到"按 pid 现取进程组"的老形状。"""
+    from backend.infrastructure import process_runner
+    from backend.infrastructure.process_runner import run_filtered_claude_stream
+
+    class _InterruptingStdout:
+        """流式读取一开头就被外部取消打断的 stdout 替身。"""
+
+        def __iter__(self):
+            raise KeyboardInterrupt
+
+    mock_process = MagicMock()
+    mock_process.pid = 4242
+    mock_process.stdout = _InterruptingStdout()
+    mock_process.stdin = MagicMock()
+    mock_process.poll.return_value = None
+
+    with (
+        patch.object(process_runner.subprocess, "Popen", return_value=mock_process),
+        patch.object(process_runner.os, "getpgid", return_value=4242) as getpgid_mock,
+        patch.object(process_runner, "process_start_time", return_value=1234.5),
+        patch.object(process_runner, "_terminate_process_tree") as terminate_mock,
+    ):
+        with pytest.raises(KeyboardInterrupt):
+            run_filtered_claude_stream(
+                ["claude", "--output-format", "stream-json"],
+                cwd=tmp_path,
+                timeout=30,
+            )
+        # 抛错前 watchdog 已经构造完，getpgid 只在创建时刻被调用过一次。
+        assert getpgid_mock.call_count == 1
+
+    assert getpgid_mock.call_count == 1
+    terminate_mock.assert_called_once_with(
+        mock_process,
+        expected_process_group=4242,
+        expected_process_started_at=1234.5,
+    )
 
 
 def test_command_result_records_duration(tmp_path: Path) -> None:

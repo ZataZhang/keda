@@ -84,7 +84,7 @@ def test_publication_defers_supervisor_without_full_pr_context(
 
 
 def _make_rework_marker() -> ReviewEventMarker:
-    """Return a queued rebase marker."""
+    """返回待处理的 rebase marker。"""
     return ReviewEventMarker(
         version=1,
         phase="post_pr_rework_requested",
@@ -256,12 +256,65 @@ def test_running_rework_without_supervisor_does_not_require_pr_context(
     )
 
 
+def test_supervisor_owned_rework_stays_supervising_and_skips_inline_rereview(
+    tmp_path: Path,
+) -> None:
+    """Supervisor 返工保持 supervising，并把后续评审留给下一轮。"""
+    github_client = FakeGitHubClient()
+    config = AppConfig()
+
+    with (
+        patch.object(
+            agent_runner_issue_handlers,
+            "_find_worktree_path_for_issue",
+            return_value=tmp_path,
+        ),
+        patch.object(agent_runner_issue_handlers, "_ensure_worktree_branch"),
+        patch.object(
+            agent_runner_issue_handlers,
+            "get_current_branch",
+            return_value="issue-1",
+        ),
+        patch.object(agent_runner_issue_handlers, "choose_agent", return_value="codex"),
+        patch.object(agent_runner_issue_handlers, "execute_rebase", return_value=[]),
+        patch.object(agent_runner_issue_handlers, "get_head_sha", return_value="after-sha"),
+        patch.object(agent_runner_issue_handlers, "arbitrate_first_claim") as arbitrate,
+        patch.object(
+            agent_runner_issue_handlers, "_run_supervisor_with_repair_loop"
+        ) as run_supervisor,
+    ):
+        agent_runner_issue_handlers._process_running_rework(
+            issue=IssueSummary(
+                number=1,
+                title="T",
+                url="U",
+                body="B",
+                labels=(config.labels.supervising,),
+            ),
+            repo_path=tmp_path,
+            config=config,
+            agent="codex",
+            github_client=github_client,
+            process_runner=FakeProcessRunner(),
+            marker=_make_rework_marker(),
+            supervisor_owned=True,
+        )
+
+    assert arbitrate.call_args.kwargs["target_label"] == config.labels.supervising
+    run_supervisor.assert_not_called()
+    assert not any(call["method"] == "get_pull_request_context" for call in github_client.calls)
+    assert not any(
+        call["method"] == "edit_issue_labels" and config.labels.running in call["add"]
+        for call in github_client.calls
+    )
+
+
 @pytest.mark.parametrize("action", ("repair_pr_branch", "rebase_pr_branch"))
 def test_supervisor_loop_defers_after_rework_when_pr_context_refresh_fails(
     action: str,
     tmp_path: Path,
 ) -> None:
-    """A follow-up cycle must not approve after losing complete PR state."""
+    """PR 上下文丢失后不得直接批准进入下一阶段。"""
     github_client = FakeGitHubClient()
     config = AppConfig(post_pr_supervisor=PostPrSupervisorConfig(max_repair_attempts=1))
     pr_context = PullRequestContext(
@@ -302,6 +355,10 @@ def test_supervisor_loop_defers_after_rework_when_pr_context_refresh_fails(
     ]
     assert any("phase=post_pr_rework_requested" in body for body in comment_bodies)
     assert any("phase=rebase_repair_complete" in body for body in comment_bodies)
+    assert not any(
+        call["method"] == "edit_issue_labels" and "agent/running" in call["add"]
+        for call in github_client.calls
+    )
 
 
 def test_supervisor_loop_injects_previous_findings_into_cycle_2_prompt(
