@@ -5186,7 +5186,42 @@ uv run python -c "from importlib.resources import files; print(files('backend.en
 | `session_ttl_seconds` | `28800`（8 小时） | 管理员会话有效期 |
 | `runner_auth_root` | `/run/kedacode/runner-auth` | tmpfs 原生认证文件根（交付给 runner 的目录） |
 | `repository_id` / `repository_path` | 无（需成对配置） | 本 VM 唯一允许启动的仓库 id 与运营者准备的绝对 checkout 路径；checkout 的 `origin` 必须匹配 Console 中验证的 `owner/repo` |
+| `desktop_enabled` | `false` | 仅在该专用 Linux VM 的 Runner 容器中启动可选虚拟桌面；启用时构建桌面 profile 镜像 |
 | `console_db_path` / `credentials_file` / `data_key_file` | 由产品状态目录派生 | 会话/审计存储、加密凭据、加密主密钥；均落在状态目录，不入库不入日志 |
+
+### Hosted Runner 的 Agent 桌面操作与录屏
+
+当 Agent 需要检查真实图形应用（不限于网页）时，运营者可在客户专属 VM 的 `config.toml` 中设置：
+
+```toml
+[agent_runner.hosted]
+desktop_enabled = true
+```
+
+重新启动 Hosted Runner 时，托管控制器会构建 `desktop` 镜像 profile。镜像包含 Xvfb、Openbox、xdotool、scrot 和 ffmpeg；Runner 在容器内以非 root 用户启动 `DISPLAY=:99`。Xvfb 只提供本机 Unix socket、使用 `-nolisten tcp`，Compose 不开放 VNC/noVNC 或其他桌面端口。保持 `desktop_enabled = false` 时使用原有精简镜像并且不启动显示服务。
+
+容器中的任意 shell-capable Agent 都可调用同一 `kc-computer` 工具：
+
+```bash
+kc-computer status
+kc-computer screenshot --output /workspace/repo/current-screen.png
+kc-computer click 420 260 --button left
+kc-computer key Return
+printf '%s' "$FORM_TEXT" | kc-computer type
+kc-computer scroll down --steps 3
+```
+
+只有任务需要展示视觉操作时，Agent 才显式录屏，并将视频放进该 PRD/Issue 的 evidence 目录：
+
+```bash
+kc-computer record start --output /workspace/repo/tasks/evidence/<prd-stem>/rv-1-desktop-operation.webm
+# Agent 在真实 Linux 桌面里启动并操作目标应用
+kc-computer record stop
+```
+
+停止后会用独立 `ffprobe` 校验 WebM，并生成相邻的 `.actions.jsonl`。轨迹记录 UTC 时间、动作种类、坐标/滚动步数或输入字符数，不写入输入文本；视频只录屏幕、不录音，原始视频仍遵循 evidence 原始文件不入 Git 的策略。运行时不预装目标应用或浏览器，目标仓/VM 负责提供应用及其运行依赖。桌面关闭、显示缺失、参数越界或录屏无法结束都会返回非零状态，不伪造成功产物。
+
+通过 `kc container up` 启动本地 runner 的直接 Compose 使用者如需实验桌面 profile，需在 Compose 环境同时设置 `KEDACODE_DESKTOP_ENABLED=true` 与 `KEDACODE_RUNNER_PROFILE=desktop` 并传 `--build`；Hosted Console 会根据 `[agent_runner.hosted].desktop_enabled` 自动传这两个值。
 
 daemon 维护与磁盘相关键（`[agent_runner.daemon]`）：`hosted_maintenance_enabled`（默认 `false`）、`disk_low_watermark_bytes`（默认 10 GiB）、`disk_resume_watermark_bytes`（默认 15 GiB）。
 

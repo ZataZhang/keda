@@ -113,6 +113,8 @@ kc container down
 
 托管模式把 runner 跑在客户专用 Linux VM 上，并用一个**需要认证的 HTTPS Console** 管理运行凭据。它完全可选——**默认 `enabled = false`，本地 `kc daemon` / `kc console` / `kc container` 免费路径不受影响，本机 console 仍只绑 `127.0.0.1` 且无需登录**。开启托管需设 `[agent_runner.hosted].enabled = true` 与 `public_base_url`（必须 HTTPS；明文 http 仅限本机反向代理自检），并由运营者预先准备 checkout、配置唯一的 `repository_id` 与绝对 `repository_path`。
 
+Hosted Runner 也可选择启用 Linux 虚拟桌面：`[agent_runner.hosted].desktop_enabled = true` 会让 Agent 在该 VM 的 Runner 容器内实际操作任意可启动的 Linux GUI，并按任务要求录制 WebM 与动作轨迹。它默认关闭，不开放 VNC/远程桌面端口，也不会自动录制所有任务；配置和命令说明见 Agent Runner 指南。
+
 首次设置顺序（详见 `docs/guides/agent-runner.md` 的「托管模式」章节）：
 
 1. **引导码由运营者在客户 VM 本地签发**：`kc console bootstrap-token create --expires-in 24h`。原码只打印一次、经独立渠道转交、服务端仅存哈希、单次消费、到期作废；再次 `create` 使上一个未消费码失效；托管未开启时该命令退出 `1`。Console **不开放自助注册**。

@@ -30,6 +30,8 @@ ARG JUST_VERSION=1.55.1
 ARG NODE_MAJOR=22
 # KEDA_VERSION 接受 git tag 或 commit SHA；默认 main（开发迭代期方便）。
 ARG KEDA_VERSION=main
+# 仅桌面 profile 安装 X11、输入、截图与视频工具。
+ARG KEDACODE_DESKTOP_SUPPORT=false
 
 # 一次性安装系统级依赖：curl / git / ca-certificates / gnupg（gh 需要）。
 # 先准备 apt 源供 gh / Node 安装，再清理 apt 缓存减小镜像。
@@ -50,6 +52,11 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         gh \
         nodejs \
+    && case "${KEDACODE_DESKTOP_SUPPORT}" in \
+        true) apt-get install -y --no-install-recommends ffmpeg openbox scrot x11-utils xdotool xvfb ;; \
+        false) ;; \
+        *) echo "KEDACODE_DESKTOP_SUPPORT must be true or false" >&2; exit 1 ;; \
+    esac \
     && rm -rf /var/lib/apt/lists/*
 
 # 安装 just（cargo 编译较慢；从官方预编译二进制下载，二进制无依赖）。
@@ -151,7 +158,12 @@ RUN set -eux; \
 # 复制 entrypoint（root 阶段：/usr/local/bin 必须 root 可写；后续 chmod 也在 root）。
 USER root
 COPY kedacode-runner-entrypoint.sh /usr/local/bin/kedacode-runner-entrypoint.sh
-RUN chmod +x /usr/local/bin/kedacode-runner-entrypoint.sh
+COPY kedacode-runner-desktop-entrypoint.sh /usr/local/bin/kedacode-runner-desktop-entrypoint.sh
+COPY kc-computer /usr/local/bin/kc-computer
+RUN chmod +x \
+        /usr/local/bin/kedacode-runner-entrypoint.sh \
+        /usr/local/bin/kedacode-runner-desktop-entrypoint.sh \
+        /usr/local/bin/kc-computer
 
 # 预创建 runtime 目录：状态目录用新名 /home/runner/.kedacode；同时建一个相对
 # 符号链接 /home/runner/.iar -> .kedacode，让仍固定在旧路径的旧组件读到同一目录（legacy-alias）。

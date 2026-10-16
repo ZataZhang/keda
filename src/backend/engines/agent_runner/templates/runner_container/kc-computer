@@ -1,0 +1,476 @@
+#!/usr/bin/env python3
+"""为 Runner 内的 Linux 图形应用提供 Agent 通用桌面操作命令。"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+_MAX_TYPE_CHARACTERS = 8192
+_MAX_SCROLL_STEPS = 20
+_MAX_RECORD_SECONDS = 7200
+_RECORD_STATE_NAME = "kedacode-desktop-recording-{uid}.json"
+_KEY_CHORD_PATTERN = re.compile(r"^[A-Za-z0-9_+:-]{1,64}$")
+
+
+@dataclass(frozen=True)
+class RecordingState:
+    """保存当前录屏进程及其用户指定产物路径。"""
+
+    process_id: int
+    output_path: Path
+    actions_path: Path
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    """创建 `kc-computer` 的命令行契约。"""
+    parser = argparse.ArgumentParser(
+        prog="kc-computer",
+        description="在 Hosted Runner 的 Linux 虚拟桌面中查看屏幕、操作 UI 并录屏。",
+    )
+    subcommands = parser.add_subparsers(dest="command", required=True)
+    subcommands.add_parser("status", help="检查桌面运行状态。")
+
+    screenshot_parser = subcommands.add_parser("screenshot", help="保存当前屏幕 PNG。")
+    screenshot_parser.add_argument("--output", type=Path, required=True, help="PNG 输出路径。")
+
+    click_parser = subcommands.add_parser("click", help="移动鼠标并点击屏幕坐标。")
+    click_parser.add_argument("x", type=int, help="屏幕横坐标。")
+    click_parser.add_argument("y", type=int, help="屏幕纵坐标。")
+    click_parser.add_argument(
+        "--button", choices=("left", "middle", "right"), default="left", help="鼠标按键。"
+    )
+
+    subcommands.add_parser("type", help="从 stdin 读取文本并输入，不写入动作轨迹。")
+
+    key_parser = subcommands.add_parser("key", help="发送一个按键或组合键。")
+    key_parser.add_argument("chord", help="例如 `Return`、`ctrl+l` 或 `alt+F4`。")
+
+    scroll_parser = subcommands.add_parser("scroll", help="在鼠标当前位置滚动。")
+    scroll_parser.add_argument("direction", choices=("up", "down", "left", "right"))
+    scroll_parser.add_argument("--steps", type=int, default=1, help="滚动步数，最多 20。")
+
+    record_parser = subcommands.add_parser("record", help="录制当前 X11 屏幕为 WebM。")
+    record_commands = record_parser.add_subparsers(dest="record_command", required=True)
+    start_parser = record_commands.add_parser("start", help="开始录屏并创建 JSONL 动作轨迹。")
+    start_parser.add_argument("--output", type=Path, required=True, help="必须以 .webm 结尾。")
+    start_parser.add_argument(
+        "--max-seconds",
+        type=int,
+        default=3600,
+        help="最长录制秒数（1–7200；默认 3600）。",
+    )
+    record_commands.add_parser("stop", help="结束录屏并验证 WebM。")
+    return parser
+
+
+def _desktop_display() -> str:
+    """验证功能开关与 X11 会话，并返回当前 DISPLAY。"""
+    if os.environ.get("KEDACODE_DESKTOP_ENABLED", "false").lower() != "true":
+        raise RuntimeError(
+            "Hosted desktop is disabled. Set [agent_runner.hosted].desktop_enabled = true "
+            "and restart the runner."
+        )
+    display_name = os.environ.get("DISPLAY", "")
+    if not display_name:
+        raise RuntimeError("DISPLAY is not set; the runner desktop entrypoint did not start.")
+    _run_tool(["xdpyinfo", "-display", display_name], timeout_seconds=5)
+    return display_name
+
+
+def _run_tool(
+    command_argv: list[str], *, timeout_seconds: int = 30, input_text: str | None = None
+) -> str:
+    """以 argv 形式执行图形工具并返回标准输出。"""
+    try:
+        completed = subprocess.run(
+            command_argv,
+            check=True,
+            capture_output=True,
+            encoding="utf-8",
+            input=input_text,
+            timeout=timeout_seconds,
+        )
+    except FileNotFoundError as missing_tool:
+        raise RuntimeError(f"Required desktop tool is missing: {command_argv[0]}") from missing_tool
+    except subprocess.TimeoutExpired as timed_out:
+        raise RuntimeError(f"Desktop command timed out: {command_argv[0]}") from timed_out
+    except subprocess.CalledProcessError as failed_command:
+        detail = failed_command.stderr.strip()[-1500:] if failed_command.stderr else ""
+        raise RuntimeError(
+            f"Desktop command failed ({failed_command.returncode}): "
+            f"{command_argv[0]} {detail}"
+        ) from failed_command
+    return completed.stdout
+
+
+def _record_state_path() -> Path:
+    """返回容器临时目录中的本用户录屏状态路径。"""
+    return Path(tempfile.gettempdir()) / _RECORD_STATE_NAME.format(uid=os.getuid())
+
+
+def _read_recording_state() -> RecordingState | None:
+    """读取并验证录屏状态文件，忽略损坏或过期记录。"""
+    state_path = _record_state_path()
+    try:
+        payload = json.loads(state_path.read_text(encoding="utf-8"))
+        recording_state = RecordingState(
+            process_id=int(payload["process_id"]),
+            output_path=Path(payload["output_path"]),
+            actions_path=Path(payload["actions_path"]),
+        )
+    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+        return None
+    if not _recording_process_matches(recording_state):
+        return None
+    return recording_state
+
+
+def _recording_process_matches(recording_state: RecordingState) -> bool:
+    """确认 PID 仍指向本 CLI 创建的 ffmpeg 录屏进程。"""
+    command_path = Path(f"/proc/{recording_state.process_id}/cmdline")
+    process_stat_path = Path(f"/proc/{recording_state.process_id}/stat")
+    try:
+        process_arguments = command_path.read_bytes()
+        process_stat = process_stat_path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    process_state = process_stat.rsplit(") ", maxsplit=1)[-1][:1]
+    return (
+        process_state != "Z"
+        and b"ffmpeg" in process_arguments
+        and os.fsencode(recording_state.output_path) in process_arguments
+        and b"x11grab" in process_arguments
+    )
+
+
+def _save_recording_state(recording_state: RecordingState) -> None:
+    """原子替换 0600 录屏状态文件，避免跨用户操作录屏进程。"""
+    serialized_state = json.dumps(
+        {
+            "process_id": recording_state.process_id,
+            "output_path": str(recording_state.output_path),
+            "actions_path": str(recording_state.actions_path),
+        },
+        ensure_ascii=False,
+    )
+    state_tmp_path = _record_state_path().with_name(
+        f"{_record_state_path().name}.{recording_state.process_id}.tmp"
+    )
+    state_fd = os.open(state_tmp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(state_fd, "w", encoding="utf-8") as state_file:
+        state_file.write(serialized_state)
+    os.replace(state_tmp_path, _record_state_path())
+
+
+def _append_action(action_name: str, details: dict[str, int | str] | None = None) -> None:
+    """把安全动作元数据追加到当前录屏轨迹；从不接收输入文本。"""
+    recording_state = _read_recording_state()
+    if recording_state is None:
+        return
+    action_record: dict[str, Any] = {
+        "timestamp_utc": datetime.now(UTC).isoformat(),
+        "action": action_name,
+    }
+    if details:
+        action_record.update(details)
+    action_fd = os.open(
+        recording_state.actions_path,
+        os.O_WRONLY | os.O_APPEND,
+    )
+    with os.fdopen(action_fd, "a", encoding="utf-8") as action_file:
+        action_file.write(json.dumps(action_record, ensure_ascii=False) + "\n")
+
+
+def _read_display_geometry() -> tuple[int, int]:
+    """從運行中的 X server 取得實際寬高。"""
+    display_info = _run_tool(["xdpyinfo", "-display", os.environ["DISPLAY"]])
+    match = re.search(r"dimensions:\s+(\d+)x(\d+) pixels", display_info)
+    if match is None:
+        raise RuntimeError("Could not read X11 display dimensions from xdpyinfo.")
+    return int(match.group(1)), int(match.group(2))
+
+
+def _handle_status() -> None:
+    """展示桌面是否可由 Agent CLI 使用。"""
+    display_name = _desktop_display()
+    display_width, display_height = _read_display_geometry()
+    print(f"Hosted desktop ready: DISPLAY={display_name}, {display_width}x{display_height}")
+
+
+def _handle_screenshot(output_path: Path) -> None:
+    """截取真实 X11 屏幕并在錄屏期间记录截图动作。"""
+    _desktop_display()
+    normalized_path = output_path.expanduser().resolve()
+    if normalized_path.suffix.lower() != ".png":
+        raise ValueError("Screenshot output must end with .png.")
+    normalized_path.parent.mkdir(parents=True, exist_ok=True)
+    _run_tool(["scrot", "--overwrite", str(normalized_path)])
+    if not normalized_path.is_file() or normalized_path.stat().st_size == 0:
+        raise RuntimeError(f"scrot did not create a usable image: {normalized_path}")
+    _append_action("screenshot")
+    print(f"Screenshot saved: {normalized_path}")
+
+
+def _handle_click(x: int, y: int, button: str) -> None:
+    """在屏幕坐标执行真实鼠标点击。"""
+    _desktop_display()
+    display_width, display_height = _read_display_geometry()
+    if x < 0 or y < 0 or x >= display_width or y >= display_height:
+        raise ValueError(f"Click coordinates must be inside {display_width}x{display_height}.")
+    button_number = {"left": "1", "middle": "2", "right": "3"}[button]
+    _run_tool(["xdotool", "mousemove", "--sync", str(x), str(y), "click", button_number])
+    _append_action("click", {"x": x, "y": y, "button": button})
+    print(f"Clicked {button} at ({x}, {y}).")
+
+
+def _handle_type_from_stdin() -> None:
+    """从 stdin 输入有界 UTF-8 文本，不把文本放进 argv、stdout 或轨迹。"""
+    _desktop_display()
+    typed_text_bytes = sys.stdin.buffer.read(_MAX_TYPE_CHARACTERS * 4 + 1)
+    if len(typed_text_bytes) > _MAX_TYPE_CHARACTERS * 4:
+        raise ValueError(f"Input exceeds the {_MAX_TYPE_CHARACTERS}-character limit.")
+    try:
+        typed_text = typed_text_bytes.decode("utf-8")
+    except UnicodeDecodeError as invalid_text:
+        raise ValueError("Typed input must be UTF-8.") from invalid_text
+    if len(typed_text) > _MAX_TYPE_CHARACTERS:
+        raise ValueError(f"Input exceeds the {_MAX_TYPE_CHARACTERS}-character limit.")
+    _run_tool(
+        ["xdotool", "type", "--clearmodifiers", "--delay", "0", "--file", "/dev/stdin"],
+        timeout_seconds=60,
+        input_text=typed_text,
+    )
+    # CLI `type` action只收敛到长度，不把用户输入写到轨迹。
+    _append_action("type", {"character_count": len(typed_text)})
+    print(f"Typed {len(typed_text)} characters from stdin.")
+
+
+def _handle_key(chord: str) -> None:
+    """发送一个受限字符集的 X11 按键或组合键。"""
+    _desktop_display()
+    if _KEY_CHORD_PATTERN.fullmatch(chord) is None:
+        raise ValueError("Key chord may contain only letters, digits, underscore, '+', ':' or '-'.")
+    _run_tool(["xdotool", "key", "--clearmodifiers", chord])
+    _append_action("key")
+    print("Key action sent.")
+
+
+def _handle_scroll(direction: str, steps: int) -> None:
+    """在当前鼠标位置按限定步数滚动。"""
+    _desktop_display()
+    if steps < 1 or steps > _MAX_SCROLL_STEPS:
+        raise ValueError(f"Scroll steps must be between 1 and {_MAX_SCROLL_STEPS}.")
+    button_number = {"up": "4", "down": "5", "left": "6", "right": "7"}[direction]
+    _run_tool(
+        ["xdotool", "click", "--repeat", str(steps), "--delay", "80", button_number]
+    )
+    _append_action("scroll", {"direction": direction, "steps": steps})
+    print(f"Scrolled {direction} by {steps} step(s).")
+
+
+def _start_recording(output_path: Path, max_seconds: int) -> None:
+    """启动 ffmpeg X11 捕获并预留一份权限受限的 JSONL 轨迹。"""
+    display_name = _desktop_display()
+    if max_seconds < 1 or max_seconds > _MAX_RECORD_SECONDS:
+        raise ValueError(f"Maximum recording duration must be between 1 and {_MAX_RECORD_SECONDS} seconds.")
+    normalized_output = output_path.expanduser().resolve()
+    if normalized_output.suffix.lower() != ".webm":
+        raise ValueError("Recording output must end with .webm.")
+    normalized_output.parent.mkdir(parents=True, exist_ok=True)
+    actions_path = normalized_output.with_suffix(".actions.jsonl")
+    if normalized_output.exists() or actions_path.exists():
+        raise FileExistsError("Recording output or its actions trace already exists; choose a new path.")
+    display_width, display_height = _read_display_geometry()
+    state_path = _record_state_path()
+    try:
+        state_fd = os.open(state_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError as existing_state_error:
+        if _read_recording_state() is not None:
+            raise RuntimeError("A desktop recording is already active.") from existing_state_error
+        try:
+            state_age_seconds = time.time() - state_path.stat().st_mtime
+        except OSError:
+            state_age_seconds = 0
+        if state_age_seconds < 30:
+            raise RuntimeError("Another desktop recording is starting; retry in a moment.") from existing_state_error
+        state_path.unlink(missing_ok=True)
+        state_fd = os.open(state_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+
+    trace_fd: int | None = None
+    recording_started_process: subprocess.Popen[bytes] | None = None
+    trace_created = False
+    try:
+        os.write(state_fd, b'{"state":"starting"}')
+        os.close(state_fd)
+        state_fd = -1
+        trace_fd = os.open(actions_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        trace_created = True
+        ffmpeg_log_path = Path(tempfile.gettempdir()) / f"kedacode-desktop-ffmpeg-{os.getuid()}.log"
+        with ffmpeg_log_path.open("w", encoding="utf-8") as ffmpeg_log:
+            recording_started_process = subprocess.Popen(
+                [
+                    "ffmpeg",
+                    "-nostdin",
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-f",
+                    "x11grab",
+                    "-draw_mouse",
+                    "1",
+                    "-framerate",
+                    "10",
+                    "-video_size",
+                    f"{display_width}x{display_height}",
+                    "-i",
+                    display_name,
+                    "-t",
+                    str(max_seconds),
+                    "-an",
+                    "-c:v",
+                    "libvpx-vp9",
+                    "-deadline",
+                    "realtime",
+                    "-cpu-used",
+                    "8",
+                    "-crf",
+                    "34",
+                    "-b:v",
+                    "0",
+                    "-pix_fmt",
+                    "yuv420p",
+                    str(normalized_output),
+                ],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=ffmpeg_log,
+                start_new_session=True,
+            )
+            recording_state = RecordingState(
+                process_id=recording_started_process.pid,
+                output_path=normalized_output,
+                actions_path=actions_path,
+            )
+            _save_recording_state(recording_state)
+            os.close(trace_fd)
+            trace_fd = None
+            time.sleep(0.25)
+            if recording_started_process.poll() is not None:
+                failure_text = ffmpeg_log_path.read_text(encoding="utf-8")[-1500:]
+                raise RuntimeError(f"ffmpeg exited while starting the recording: {failure_text}")
+        _append_action("recording_started")
+        print(f"Recording started: {normalized_output}")
+        print(f"Action trace: {actions_path}")
+    except (OSError, RuntimeError, subprocess.SubprocessError):
+        if state_fd >= 0:
+            os.close(state_fd)
+        if trace_fd is not None:
+            os.close(trace_fd)
+        if recording_started_process is not None and recording_started_process.poll() is None:
+            recording_started_process.send_signal(signal.SIGINT)
+        if recording_started_process is not None:
+            normalized_output.unlink(missing_ok=True)
+        state_path.unlink(missing_ok=True)
+        if trace_created:
+            actions_path.unlink(missing_ok=True)
+        raise
+
+
+def _probe_recording(output_path: Path) -> float:
+    """由独立 ffprobe 进程确认新 WebM 可解码且时长大于零。"""
+    if not output_path.is_file() or output_path.stat().st_size == 0:
+        raise RuntimeError(f"Recording file is missing or empty: {output_path}")
+    output_text = _run_tool(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            str(output_path),
+        ],
+        timeout_seconds=30,
+    ).strip()
+    try:
+        recording_duration = float(output_text)
+    except ValueError as invalid_duration:
+        raise RuntimeError("ffprobe could not read a WebM duration.") from invalid_duration
+    if recording_duration <= 0:
+        raise RuntimeError("WebM duration must be greater than zero.")
+    return recording_duration
+
+
+def _stop_recording() -> None:
+    """停止本用户启动的录屏进程，等待封装後再校验视频产物。"""
+    recording_state = _read_recording_state()
+    if recording_state is None:
+        _record_state_path().unlink(missing_ok=True)
+        raise RuntimeError("No active desktop recording was found.")
+    _append_action("recording_stopped")
+    os.kill(recording_state.process_id, signal.SIGINT)
+    stop_deadline = time.monotonic() + 20
+    while _recording_process_matches(recording_state) and time.monotonic() < stop_deadline:
+        time.sleep(0.2)
+    if _recording_process_matches(recording_state):
+        os.kill(recording_state.process_id, signal.SIGTERM)
+        time.sleep(1)
+    if _recording_process_matches(recording_state):
+        os.kill(recording_state.process_id, signal.SIGKILL)
+        raise RuntimeError("ffmpeg did not stop cleanly; the WebM may be incomplete.")
+    duration_seconds = _probe_recording(recording_state.output_path)
+    _record_state_path().unlink(missing_ok=True)
+    print(f"Recording saved: {recording_state.output_path}")
+    print(f"Duration: {duration_seconds:.2f}s")
+    print(f"Action trace: {recording_state.actions_path}")
+
+
+def _dispatch_command(arguments: argparse.Namespace) -> None:
+    """验证桌面环境后分派一个 CLI 动作。"""
+    if arguments.command == "status":
+        _handle_status()
+    elif arguments.command == "screenshot":
+        _handle_screenshot(arguments.output)
+    elif arguments.command == "click":
+        _handle_click(arguments.x, arguments.y, arguments.button)
+    elif arguments.command == "type":
+        _handle_type_from_stdin()
+    elif arguments.command == "key":
+        _handle_key(arguments.chord)
+    elif arguments.command == "scroll":
+        _handle_scroll(arguments.direction, arguments.steps)
+    elif arguments.command == "record" and arguments.record_command == "start":
+        _start_recording(arguments.output, arguments.max_seconds)
+    elif arguments.command == "record" and arguments.record_command == "stop":
+        _desktop_display()
+        _stop_recording()
+    else:
+        raise ValueError(f"Unsupported desktop command: {arguments.command}")
+
+
+def main() -> int:
+    """解析并执行 Agent 的桌面操作命令。"""
+    arguments = _build_parser().parse_args()
+    try:
+        _dispatch_command(arguments)
+    except (FileExistsError, OSError, RuntimeError, ValueError) as desktop_error:
+        print(f"kc-computer: {desktop_error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

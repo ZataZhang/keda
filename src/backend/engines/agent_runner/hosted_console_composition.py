@@ -86,6 +86,10 @@ class ComposeRunnerControl:
                 {
                     "REPO_PATH": str(repository_path),
                     "KEDACODE_RUNNER_AUTH_DIR": str(auth_directory),
+                    "KEDACODE_DESKTOP_ENABLED": str(self._hosted_settings.desktop_enabled).lower(),
+                    "KEDACODE_RUNNER_PROFILE": (
+                        "desktop" if self._hosted_settings.desktop_enabled else "latest"
+                    ),
                 }
             )
             run_container_down(
@@ -125,11 +129,17 @@ class ComposeRunnerControl:
             _logger.warning("Hosted runner auth directory is unavailable for '%s'.", repo_id)
             return False
 
+        desktop_enabled = self._hosted_settings.desktop_enabled
         hosted_request = ContainerUpRequest(
             repo_path=Path(configured_repo_path),
             repo_id=repo_id,
             hosted=True,
             runner_auth_dir=str(auth_dir),
+            extra_env={
+                "KEDACODE_DESKTOP_ENABLED": str(desktop_enabled).lower(),
+                "KEDACODE_RUNNER_PROFILE": "desktop" if desktop_enabled else "latest",
+            },
+            build=desktop_enabled,
         )
         try:
             ContainerOpsController().run_container_up(

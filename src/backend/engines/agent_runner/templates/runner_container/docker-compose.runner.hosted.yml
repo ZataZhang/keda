@@ -24,9 +24,12 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.runner
-    image: iar-runner:latest
+      args:
+        KEDACODE_DESKTOP_SUPPORT: "${KEDACODE_DESKTOP_ENABLED:-false}"
+    image: "iar-runner:${KEDACODE_RUNNER_PROFILE:-latest}"
     container_name: iar-runner
     restart: unless-stopped
+    init: true
     logging:
       driver: json-file
       options:
@@ -54,6 +57,8 @@ services:
       RUNNER_GID: "${RUNNER_GID:-1000}"
       # 不要让 docker 注入的 PATH 覆盖 agent CLI 路径
       PATH: "/opt/keda/.venv/bin:/home/runner/.local/bin:/usr/local/bin:/usr/bin:/bin"
+      # 只有显式启用的 Hosted VM 才启动容器内虚拟桌面。
+      KEDACODE_DESKTOP_ENABLED: "${KEDACODE_DESKTOP_ENABLED:-false}"
     volumes:
       # 目标仓库挂载为 /workspace/repo
       - "${REPO_PATH}:/workspace/repo"

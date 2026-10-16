@@ -32,6 +32,8 @@ class AgentRunnerHostedSettings(BaseModel):
     repository_id: str = ""
     #: 上述仓库在 VM 上由运营者预先准备的 checkout 绝对路径。
     repository_path: str = ""
+    #: 在该 Hosted Runner 容器内创建虚拟 Linux 桌面；默认关闭。
+    desktop_enabled: bool = False
     #: 身份与会话 SQLite（只存摘要，不存任何凭据明文）。
     console_db_path: str = Field(
         default_factory=lambda: str(product_identity.state_home() / _HOSTED_CONSOLE_DB_NAME)
