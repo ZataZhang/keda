@@ -284,7 +284,10 @@ class GitHubCliClient:
         resource = (resources or {}).get(_RATE_LIMIT_RESOURCE_BY_KIND.get(api_kind, ""))
         if isinstance(resource, dict) and isinstance(resource.get("reset"), int):
             resume_at = datetime.fromtimestamp(resource["reset"], tz=timezone.utc)
-        self._api_budget.record_rate_limited(api_kind, resume_at)
+        try:
+            self._api_budget.record_rate_limited(api_kind, resume_at)
+        except Exception:  # noqa: BLE001 - 记账失败不得盖住限流延期信号。
+            _logger.warning("Could not record the %s rate-limit pause.", api_kind, exc_info=True)
 
     def _probe_budget_if_due(self) -> None:
         """每隔一段时间（跨进程合计）免费探测一次额度，见底就提前整体暂停。"""

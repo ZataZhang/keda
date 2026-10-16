@@ -385,3 +385,54 @@ def test_client_can_finish_publication_while_quota_is_low_but_not_empty(tmp_path
 
     assert ("gh", "pr", "create", "--draft", "--title", "x") in runner.commands
     assert budget.pause_remaining_seconds() > 0  # 但 daemon 的轮询已经被叫停
+
+
+# --- 账本写不进去时不得弄坏 gh 调用 ----------------------------------------
+
+
+def _unwritable(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _deny(*_args: object, **_kwargs: object) -> None:
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(JsonGitHubApiBudget, "_write_state", _deny)
+
+
+def test_unwritable_ledger_never_raises_from_recording(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """只读目录 / 磁盘满：记账降级为告警，不抛异常（且只告警一次）。"""
+    budget = _budget(tmp_path, flush_every_calls=1)
+    _unwritable(monkeypatch)
+
+    budget.record_call("graphql", "issue view")
+    budget.record_rate_limited("graphql", _NOW + timedelta(minutes=5))
+    budget.record_probe("graphql", remaining=100, limit=5000, reset_at=_NOW + timedelta(minutes=5))
+
+    warnings = [record for record in caplog.records if "not writable" in record.getMessage()]
+    assert len(warnings) == 1
+
+
+def test_rate_limit_is_still_deferred_when_the_ledger_is_unwritable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """撞限流时账本写不进去，调用方仍必须收到限流延期信号，而不是 PermissionError。"""
+    budget = _budget(tmp_path, flush_every_calls=1)
+    _unwritable(monkeypatch)
+    runner = _GhRunner(fail_issue_with="GraphQL: API rate limit already exceeded for user ID 1.")
+    client = GitHubCliClient(tmp_path, runner, api_budget=budget)  # type: ignore[arg-type]
+
+    with pytest.raises(GitHubApiRateLimitError):
+        client._run_with_retry(["gh", "issue", "view", "5"], cwd=tmp_path)
+
+
+def test_unwritable_ledger_does_not_break_normal_gh_calls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    budget = _budget(tmp_path, flush_every_calls=1)
+    _unwritable(monkeypatch)
+    runner = _GhRunner()
+    client = GitHubCliClient(tmp_path, runner, api_budget=budget)  # type: ignore[arg-type]
+
+    client._run_with_retry(["gh", "issue", "view", "5"], cwd=tmp_path)
+
+    assert ("gh", "issue", "view", "5") in runner.commands

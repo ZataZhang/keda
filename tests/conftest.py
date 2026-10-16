@@ -759,3 +759,103 @@ def _isolate_github_api_budget(tmp_path_factory: pytest.TempPathFactory) -> Iter
             os.environ.pop(BUDGET_PATH_ENV_VAR, None)
         else:
             os.environ[BUDGET_PATH_ENV_VAR] = previous_value
+
+
+# ---------------------------------------------------------------------------
+# 失败现场落盘：偶发失败（testmon 子集、机器负载、常驻 daemon 并发写状态目录）事后
+# 无法复现，终端输出又常被 tail 截掉。只要有用例失败，就把完整报错与运行环境写到
+# ``logs/test-failures/``（已被 .gitignore 覆盖），不依赖谁、用什么命令跑的测试。
+# ---------------------------------------------------------------------------
+_FAILURE_LOG_DIR_NAME = "test-failures"
+_FAILURE_LOG_KEEP = 30
+_DESELECTED_COUNT_KEY = pytest.StashKey[list]()
+_FAILED_REPORTS: list[pytest.TestReport] = []
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """为本次会话准备失败报告与 deselected 计数的暂存区。"""
+    config.stash[_DESELECTED_COUNT_KEY] = [0]
+
+
+def pytest_deselected(items: Sequence[pytest.Item]) -> None:
+    """累计被 testmon/-m 过滤掉的用例数，复盘时用来判断这次跑的是不是子集。"""
+    # 钩子拿不到 config，借 items 的 session 取暂存区
+    if items:
+        items[0].config.stash[_DESELECTED_COUNT_KEY][0] += len(items)
+
+
+def pytest_runtest_logreport(report: pytest.TestReport) -> None:
+    """收集 setup/call/teardown 任一阶段的失败报告（含捕获的 stdout/stderr/log）。"""
+    if report.failed:
+        _FAILED_REPORTS.append(report)
+
+
+def _describe_competing_processes() -> str:
+    """列出本机可能与测试并发写 ~/.iar、~/.kedacode 的 daemon 进程。"""
+    import subprocess
+
+    try:
+        completed = subprocess.run(
+            ["ps", "-axo", "pid,etime,command"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        return f"(ps 失败: {error})"
+    process_lines = [
+        process_line
+        for process_line in completed.stdout.splitlines()
+        if any(marker in process_line for marker in ("iar daemon", "kc daemon", "iar console"))
+        and "ps -axo" not in process_line
+    ]
+    return "\n".join(process_lines) or "(无)"
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    """有失败时写一份带时间戳的现场文件，并只保留最近 ``_FAILURE_LOG_KEEP`` 份。"""
+    import datetime
+    import platform
+
+    failed_reports = list(_FAILED_REPORTS)
+    _FAILED_REPORTS.clear()
+    if not failed_reports:
+        return
+    try:
+        log_directory = Path(session.config.rootpath) / "logs" / _FAILURE_LOG_DIR_NAME
+        log_directory.mkdir(parents=True, exist_ok=True)
+        started_at = datetime.datetime.now().astimezone()
+        deselected_count = session.config.stash[_DESELECTED_COUNT_KEY][0]
+        header_lines = [
+            f"time: {started_at.isoformat(timespec='seconds')}",
+            f"exitstatus: {int(exitstatus)}",
+            f"argv: {shlex.join(sys.argv)}",
+            f"invocation_args: {shlex.join(session.config.invocation_params.args)}",
+            f"collected: {session.testscollected}  failed: {len(failed_reports)}  "
+            f"deselected: {deselected_count}",
+            f"python: {platform.python_version()}  platform: {platform.platform()}",
+            f"loadavg: {os.getloadavg() if hasattr(os, 'getloadavg') else 'n/a'}",
+            f"cpu_count: {os.cpu_count()}",
+            "competing daemons:",
+            _describe_competing_processes(),
+        ]
+        body_blocks = [
+            f"===== {report.when.upper()} FAILED {report.nodeid} =====\n{report.longreprtext}"
+            + "".join(f"\n--- {name} ---\n{content}" for name, content in report.sections)
+            for report in failed_reports
+        ]
+        log_path = (
+            log_directory / f"failures-{started_at.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}.log"
+        )
+        log_path.write_text(
+            "\n".join(header_lines) + "\n\n" + "\n\n".join(body_blocks) + "\n", encoding="utf-8"
+        )
+        for stale_path in sorted(log_directory.glob("failures-*.log"))[:-_FAILURE_LOG_KEEP]:
+            stale_path.unlink(missing_ok=True)
+        terminal_reporter = session.config.pluginmanager.get_plugin("terminalreporter")
+        if terminal_reporter is not None:
+            terminal_reporter.write_line(f"失败现场已保存: {log_path}")
+    except OSError:
+        # 记录失败现场是尽力而为，不能反过来让测试会话报错
+        pass

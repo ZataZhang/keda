@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import atexit
 import json
+import logging
 import os
 import threading
 import time
@@ -35,6 +36,8 @@ try:
     import fcntl
 except ImportError:  # pragma: no cover - 非 POSIX 平台退化为无锁
     fcntl = None  # type: ignore[assignment]
+
+_logger = logging.getLogger(__name__)
 
 _BUDGET_FILENAME = "github-api-budget.json"
 # 测试与特殊部署可用环境变量把账本指到别处，避免写进真实的本机状态目录。
@@ -93,6 +96,7 @@ class JsonGitHubApiBudget(IGitHubApiBudget):
         self._flush_interval_seconds = flush_interval_seconds
         self._pending_usage: dict[tuple[str, str, str], int] = {}
         self._pending_lock = threading.Lock()
+        self._write_failure_logged = False
         self._last_flush_monotonic = time.monotonic()
         atexit.register(self.flush)
 
@@ -187,17 +191,33 @@ class JsonGitHubApiBudget(IGitHubApiBudget):
                 fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
     def _update(self, mutate: Callable[[dict[str, Any]], None]) -> None:
-        """持锁重读账本、合并待落盘的用量、应用修改后原子写回。"""
+        """持锁重读账本、合并待落盘的用量、应用修改后原子写回。
+
+        记账绝不能弄坏被记账的操作：账本写不进去（只读目录、磁盘满、权限问题）时只
+        告警一次并放弃本次写入，**不抛异常**。否则 ``record_call`` 的异常会让每个
+        ``gh`` 调用失败，``record_rate_limited`` 的异常还会盖住本该抛出的限流延期信号，
+        把"限流"误当成真实失败。代价只是这一次的用量或暂停标记没有落盘。
+        """
         with self._pending_lock:
             drained_usage = self._pending_usage
             self._pending_usage = {}
         self._last_flush_monotonic = time.monotonic()
-        with self._write_lock():
-            state = self._read_state()
-            state["version"] = 1
-            self._merge_usage(state, drained_usage)
-            mutate(state)
-            self._write_state(state)
+        try:
+            with self._write_lock():
+                state = self._read_state()
+                state["version"] = 1
+                self._merge_usage(state, drained_usage)
+                mutate(state)
+                self._write_state(state)
+        except OSError as exc:
+            if not self._write_failure_logged:
+                self._write_failure_logged = True
+                _logger.warning(
+                    "GitHub API budget ledger %s is not writable (%s); usage and pause "
+                    "marks will not be shared across processes until it is.",
+                    self._state_path,
+                    exc,
+                )
 
     def _merge_usage(
         self, state: dict[str, Any], drained_usage: dict[tuple[str, str, str], int]
