@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 # CLI 主命令是 kc，另有同名长写 kedacode 与弃用别名 iar（见 [project.scripts]）。
 # 改名时穷举命令见 PRD 7.5 第 3 条。
 name = "kedacode"
-version = "0.4.0"
+version = "0.4.1"
 description = "KedaCode (kc) — turn GitHub Issues into a local AI agent queue."
 readme = "README.md"
 requires-python = ">=3.11"
