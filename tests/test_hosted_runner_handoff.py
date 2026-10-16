@@ -132,6 +132,7 @@ def test_hosted_runner_control_starts_only_configured_repo_with_auth_dir(
         repository_id="pilot",
         repository_path=str(tmp_path / "checkout"),
         runner_auth_root=str(auth_root),
+        desktop_enabled=False,
     )
     captured_requests = []
 
@@ -190,6 +191,7 @@ def test_hosted_runner_stop_passes_bound_repo_id_to_compose(tmp_path, monkeypatc
         repository_id="pilot",
         repository_path=str(tmp_path / "checkout"),
         runner_auth_root=str(tmp_path / "auth"),
+        desktop_enabled=False,
     )
     captured: list[tuple[Path, dict[str, str]]] = []
 
@@ -218,6 +220,8 @@ def test_hosted_runner_stop_passes_bound_repo_id_to_compose(tmp_path, monkeypatc
         "IAR_REPO_ID": "pilot",
         "REPO_PATH": str(tmp_path / "checkout"),
         "KEDACODE_RUNNER_AUTH_DIR": str(tmp_path / "auth" / "pilot"),
+        "KEDACODE_DESKTOP_ENABLED": "false",
+        "KEDACODE_RUNNER_PROFILE": "latest",
     }
 
 

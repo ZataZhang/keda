@@ -358,7 +358,7 @@ def test_run_once_claim_arbitration_lost_skips_without_marking_failed(
     排在兜底 ``except Exception``（会标 failed）之前——输掉竞争不是执行失败，
     把赢家的 ``agent/running`` 覆盖成 ``agent/failed`` 会让该 Issue 被永久卡死。
     """
-    import backend.core.use_cases.agent_runner_issue_handlers as issue_handlers
+    import backend.core.use_cases.agent_runner_orchestrate as orchestrate
     import backend.core.use_cases.agent_runner_orchestration_runtime as runtime
     import backend.core.use_cases.run_agent_once as run_agent_once
     from backend.core.use_cases.agent_runner_claim_arbitration import ClaimArbitrationLost
@@ -369,7 +369,9 @@ def test_run_once_claim_arbitration_lost_skips_without_marking_failed(
 
     monkeypatch.setattr(run_agent_once, "run_preflight_checks", lambda *a, **k: None)
     monkeypatch.setattr(runtime, "process_validation_gate", lambda **k: None)
-    monkeypatch.setattr(issue_handlers, "arbitrate_first_claim", _lose_arbitration)
+    # 补丁中枢是 orchestrate：派发时会把它的 arbitrate_first_claim 同步给 issue_handlers，
+    # 直接补丁 issue_handlers 会被覆盖，仲裁不落败就会走到 worktree 创建。
+    monkeypatch.setattr(orchestrate, "arbitrate_first_claim", _lose_arbitration)
 
     config = AppConfig()
     client = _TargetedGitHubClient(_issue_summary(7, ()))

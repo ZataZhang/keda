@@ -20,6 +20,8 @@ from typing import Any
 
 from backend.core.shared.models.agent_spec import BUILTIN_AGENT_SPECS
 from backend.core.shared.models.loop import (
+    LoopManager,
+    LoopOutput,
     LoopRecipe,
     LoopSchedule,
 )
@@ -145,6 +147,9 @@ def _coerce_yaml_value(text: str) -> Any:
 
 _REQUIRED_RECIPE_FIELDS: tuple[str, ...] = ("id", "schedule", "repo_id")
 _VALID_ISSUE_TYPES: frozenset[str] = frozenset({"feature", "refactor", "bug"})
+_SKIP_WHEN_PATTERN = re.compile(r"^\w+=[^=,\s]+(,[^=,\s]+)*$")
+_VALID_LOOP_OUTPUTS: frozenset[str] = frozenset(output.value for output in LoopOutput)
+_VALID_LOOP_MANAGERS: frozenset[str] = frozenset(manager.value for manager in LoopManager)
 # 合法 agent 名由 agent 注册表派生；"auto" 是显式的路由别名。
 _VALID_AGENTS: frozenset[str] = frozenset({"auto", *BUILTIN_AGENT_SPECS})
 
@@ -168,6 +173,23 @@ def _validate_recipe_fields(data: dict[str, Any]) -> None:
     if agent_name not in _VALID_AGENTS:
         raise ValueError(
             f"Loop recipe agent must be one of {sorted(_VALID_AGENTS)}; got {agent_name!r}."
+        )
+    managed_by = data.get("managed_by", LoopManager.LOOP_DAEMON.value)
+    if managed_by not in _VALID_LOOP_MANAGERS:
+        raise ValueError(
+            "Loop recipe managed_by must be one of "
+            f"{sorted(_VALID_LOOP_MANAGERS)}; got {managed_by!r}."
+        )
+    output = data.get("output", LoopOutput.ISSUE.value)
+    if output not in _VALID_LOOP_OUTPUTS:
+        raise ValueError(
+            f"Loop recipe output must be one of {sorted(_VALID_LOOP_OUTPUTS)}; got {output!r}."
+        )
+    skip_when = data.get("skip_when")
+    if skip_when is not None and not _SKIP_WHEN_PATTERN.match(str(skip_when).strip()):
+        raise ValueError(
+            "Loop recipe skip_when must look like KEY=value or KEY=value1,value2; "
+            f"got {skip_when!r}."
         )
 
 
@@ -235,6 +257,9 @@ def parse_loop_recipe_text(recipe_text: str, *, source_path: Path) -> LoopRecipe
         run_now=bool(frontmatter.data.get("run_now", False)),
         pre_command=_coerce_optional_string(frontmatter.data.get("pre_command")),
         timezone_name=_coerce_optional_string(frontmatter.data.get("timezone")),
+        managed_by=str(frontmatter.data.get("managed_by", LoopManager.LOOP_DAEMON.value)).strip(),
+        skip_when=_coerce_optional_string(frontmatter.data.get("skip_when")),
+        output=str(frontmatter.data.get("output", LoopOutput.ISSUE.value)).strip(),
         priority=str(frontmatter.data.get("priority", "P2")),
         slug=_coerce_optional_string(frontmatter.data.get("slug")),
     )

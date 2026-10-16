@@ -50,7 +50,11 @@ def _task_from_recipe(
     """
     effective_schedule = schedule or recipe.schedule
     reference = (fire_at or datetime.now(timezone.utc)).astimezone(timezone.utc)
-    next_fire_dt = compute_next_fire(effective_schedule, after=reference)
+    next_fire_dt = compute_next_fire(
+        effective_schedule,
+        after=reference,
+        timezone_name=recipe.timezone_name,
+    )
     return LoopTask(
         id=recipe.id,
         recipe_path=recipe.source_path,
@@ -69,6 +73,9 @@ def _task_from_recipe(
         run_now=recipe.run_now,
         pre_command=recipe.pre_command,
         timezone_name=recipe.timezone_name,
+        managed_by=recipe.managed_by,
+        skip_when=recipe.skip_when,
+        output=recipe.output,
     )
 
 
@@ -138,7 +145,11 @@ def update_loop_schedule(
     if existing is None:
         raise KeyError(f"Loop '{loop_id}' is not registered.")
     reference = (fire_at or datetime.now(timezone.utc)).astimezone(timezone.utc)
-    next_fire_dt = compute_next_fire(new_schedule, after=reference)
+    next_fire_dt = compute_next_fire(
+        new_schedule,
+        after=reference,
+        timezone_name=existing.timezone_name,
+    )
     updated = replace(
         existing,
         schedule=new_schedule,

@@ -415,13 +415,20 @@ jobs:
           TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           git -C "${RUNNER_TEMP}/tap" add Formula/kedacode.rb README.md
-          if git -C "${RUNNER_TEMP}/tap" diff --cached --quiet; then
+          # 只有 resource 块变了才会有暂存差异；版本 pin 在 Seed 步骤里已经落成
+          # 本地 commit，依赖没变时这里的暂存区是空的。所以"是否要推"必须和远端比，
+          # 不能只看暂存区——否则 0.4.1 这种只升版本号的发布会绿灯却什么都没推。
+          if ! git -C "${RUNNER_TEMP}/tap" diff --cached --quiet; then
+            git -C "${RUNNER_TEMP}/tap" \
+              -c user.name="keda-release-bot" \
+              -c user.email="actions@users.noreply.github.com" \
+              commit -m "kedacode ${KEDACODE_VERSION}"
+          fi
+          git -C "${RUNNER_TEMP}/tap" fetch origin main 2>/dev/null || true
+          if git -C "${RUNNER_TEMP}/tap" rev-parse --verify -q origin/main >/dev/null \
+             && git -C "${RUNNER_TEMP}/tap" diff --quiet origin/main HEAD; then
             echo "tap formula already up to date for ${KEDACODE_VERSION}"
             exit 0
           fi
-          git -C "${RUNNER_TEMP}/tap" \
-            -c user.name="keda-release-bot" \
-            -c user.email="actions@users.noreply.github.com" \
-            commit -m "kedacode ${KEDACODE_VERSION}"
           # HEAD:main 同时覆盖"空仓库首推建分支"与"已有内容更新"两条路径
           git -C "${RUNNER_TEMP}/tap" push origin HEAD:main

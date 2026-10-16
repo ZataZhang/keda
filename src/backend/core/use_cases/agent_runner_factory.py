@@ -37,6 +37,7 @@ issue_hosted_bootstrap_code = _engines_hosted_composition_module.issue_hosted_bo
 create_console_store = _engines_factory_module.create_console_store
 create_content_generator = _engines_factory_module.create_content_generator
 create_event_sink = _engines_factory_module.create_event_sink
+create_github_api_budget = _engines_factory_module.create_github_api_budget
 create_github_client = _engines_factory_module.create_github_client
 create_lifecycle_settings_editor = _engines_factory_module.create_lifecycle_settings_editor
 create_loop_clock = _engines_factory_module.create_loop_clock
@@ -84,6 +85,7 @@ __all__ = [
     "hosted_console_enabled",
     "issue_hosted_bootstrap_code",
     "create_lifecycle_settings_editor",
+    "create_github_api_budget",
     "create_loop_clock",
     "create_loop_state_store",
     "create_planner_runner",

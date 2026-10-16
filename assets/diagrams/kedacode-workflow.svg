@@ -281,7 +281,7 @@
     <rect x="280" y="1594" width="420" height="58" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
   </g>
   <text x="490" y="1616" text-anchor="middle" class="h" fill="#1e3a8a">Step 5 · Post-PR Supervisor（可选）</text>
-  <text x="490" y="1634" text-anchor="middle" class="s" fill="#1e3a8a">监控冲突 / rebase / repair 循环 · 否则直接 -> agent/review</text>
+  <text x="490" y="1634" text-anchor="middle" class="s" fill="#1e3a8a">监控冲突 / rebase / repair · 通过后 agent/automated-review-passed，必要时 human/awaiting-review</text>
 
   <line x1="490" y1="1652" x2="490" y2="1668" stroke="#475569" stroke-width="2" marker-end="url(#a)"/>
 

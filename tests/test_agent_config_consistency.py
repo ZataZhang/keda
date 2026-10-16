@@ -18,7 +18,6 @@ from backend.core.use_cases.agent_invocation import (
     resolve_registered_agents,
 )
 from backend.engines.agent_runner.factory import build_app_config
-from tests.support.agent_runner import repository_agent_runner_config
 from backend.infrastructure.config import settings as settings_module
 from backend.infrastructure.config import settings_sources
 from backend.infrastructure.config.settings import (
@@ -30,20 +29,21 @@ from backend.infrastructure.config.settings import (
     AgentRunnerSettings,
 )
 from backend.infrastructure.github_client import LabelConfig as InfraLabelConfig
+from tests.support.agent_runner import root_config_app_config, root_config_toml_path
 
 import pytest
 
 
-def test_agent_runner_reads_root_config_toml(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_agent_runner_reads_root_config_toml() -> None:
     """Agent runner settings should load the repository root config.toml."""
-    # ``IAR_CONFIG`` 优先于仓库根发现；IAR agent 注入的是别的 worktree 的配置，
-    # 会把本用例的"读仓库根 config.toml"前提整个顶掉。
-    monkeypatch.delenv("IAR_CONFIG", raising=False)
     repository_root = Path(__file__).resolve().parents[1]
-    app_config = build_app_config()
+    # ``KEDACODE_CONFIG`` / ``IAR_CONFIG`` 优先于仓库根发现；托管 runner 注入的是机器级
+    # 配置，会把本用例的"读仓库根 config.toml"前提整个顶掉。来源检查走剥离宿主变量后的
+    # 默认发现，装配则显式 pin 仓库根（``build_app_config()`` 读的是导入期定型的单例）。
+    assert root_config_toml_path() == repository_root / "config.toml"
+    app_config = root_config_app_config()
 
     assert settings_module._PROJECT_ROOT_PATH == repository_root
-    assert settings_sources._find_config_toml() == repository_root / "config.toml"
     assert app_config.runner.default_agent == "claude"
     assert app_config.runner.recovery_retry_delay_seconds == 30
     assert app_config.runner.timeout_seconds == 14400
@@ -327,9 +327,8 @@ def test_label_config_includes_waiting() -> None:
 
 def test_factory_build_app_config_maps_waiting() -> None:
     """Factory must map the waiting label through to AppConfig."""
-    from backend.engines.agent_runner.factory import build_app_config
-
-    app_config = build_app_config()
+    # 断言对象是仓库根 config.toml 的真实取值，故显式 pin 来源、绕开导入期定型的单例。
+    app_config = root_config_app_config()
     assert app_config.labels.waiting == "agent/waiting"
 
 
@@ -427,9 +426,50 @@ def test_pre_pr_review_prompt_template_normalizes_string() -> None:
     assert settings_empty.review_prompt_template == []
 
 
-def test_factory_build_app_config_maps_supervising() -> None:
-    """Factory must map the supervising label through to AppConfig."""
-    app_config = repository_agent_runner_config()
+def test_stall_supervisor_is_enabled_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """停滞监督出厂默认开启：settings 默认、领域默认、factory 映射三处一致。
+
+    「默认开」是行为变更而非文案：开启后监督器会按周期调用模型，满足条件时
+    可能终止停滞的 writer。因此和 ``pre_pr_review.enabled`` 同级钉住，取值同样
+    来自空 TOML，不吃宿主机 ``~/.kedacode/config.toml`` 的实际配置。
+    """
+    from backend.core.shared.models.agent_stall import StallSupervisorConfig
+    from backend.engines.agent_runner.factory import (
+        build_app_config_from_settings,
+        load_fresh_agent_runner_settings,
+    )
+
+    empty_config = tmp_path / "config.toml"
+    empty_config.write_text("", encoding="utf-8")
+    monkeypatch.setenv("KEDACODE_CONFIG", str(empty_config))
+    agent_runner_settings = load_fresh_agent_runner_settings()
+
+    assert agent_runner_settings.stall_supervisor.enabled is True
+    assert StallSupervisorConfig().enabled is True
+    assert CoreAppConfig().stall_supervisor.enabled is True
+    assert build_app_config_from_settings(agent_runner_settings).stall_supervisor.enabled is True
+
+
+def test_factory_build_app_config_maps_supervising(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Factory must map the supervising label through to AppConfig.
+
+    断言的是 settings 模型的代码默认值：装配前把全局配置指向空 TOML，避免本用例
+    被宿主机 ``~/.kedacode/config.toml`` 的实际取值改写（那属于机器状态，不是
+    factory 映射契约）。
+    """
+    from backend.engines.agent_runner.factory import (
+        build_app_config_from_settings,
+        load_fresh_agent_runner_settings,
+    )
+
+    empty_config = tmp_path / "config.toml"
+    empty_config.write_text("", encoding="utf-8")
+    monkeypatch.setenv("KEDACODE_CONFIG", str(empty_config))
+    app_config = build_app_config_from_settings(load_fresh_agent_runner_settings())
     assert app_config.labels.supervising == "agent/supervising"
     assert app_config.pre_pr_review.enabled is True
     assert app_config.pre_pr_review.timeout_seconds == 1800

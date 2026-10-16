@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 # CLI 主命令是 kc，另有同名长写 kedacode 与弃用别名 iar（见 [project.scripts]）。
 # 改名时穷举命令见 PRD 7.5 第 3 条。
 name = "kedacode"
-version = "0.3.0"
+version = "0.4.1"
 description = "KedaCode (kc) — turn GitHub Issues into a local AI agent queue."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -93,6 +93,11 @@ db = [
 ]
 backup = [
     "boto3>=1.37.0",
+]
+# 桌面 companion 的可选运行时：未安装时 Web 看板照常可用，
+# Console 侧只会把开启小窗的动作标为「未安装」。
+desktop = [
+    "pywebview>=5.0",
 ]
 
 [tool.setuptools.packages.find]

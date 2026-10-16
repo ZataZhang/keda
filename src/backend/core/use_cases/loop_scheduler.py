@@ -13,7 +13,8 @@ re-runnable in unit tests.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, tzinfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from croniter import croniter
 
@@ -87,11 +88,45 @@ def _ensure_aware_utc(moment: datetime) -> datetime:
     return moment.astimezone(timezone.utc)
 
 
+def resolve_loop_timezone(timezone_name: str | None) -> tzinfo:
+    """解析 loop 使用的 IANA 时区；未配置时保持 UTC 兼容行为。
+
+    Args:
+        timezone_name: IANA 时区名，例如 ``Asia/Shanghai``；为空时返回 UTC。
+
+    Returns:
+        可用于 cron 计算与模板渲染的时区对象。
+
+    Raises:
+        ValueError: 时区名不是有效的 IANA 时区。
+    """
+    if not timezone_name:
+        return timezone.utc
+    try:
+        return ZoneInfo(timezone_name)
+    except (ZoneInfoNotFoundError, ValueError) as exc:
+        raise ValueError(f"Invalid loop timezone {timezone_name!r}.") from exc
+
+
+def localize_loop_datetime(moment: datetime, *, timezone_name: str | None) -> datetime:
+    """把真实瞬间转换为 loop 配置的本地墙钟时间。
+
+    Args:
+        moment: 带时区或无时区的时间；无时区值按 UTC 解释。
+        timezone_name: IANA 时区名；为空时使用 UTC。
+
+    Returns:
+        带目标时区偏移的 datetime。
+    """
+    return _ensure_aware_utc(moment).astimezone(resolve_loop_timezone(timezone_name))
+
+
 def compute_next_fire(
     schedule: LoopSchedule,
     *,
     after: datetime,
     origin: datetime | None = None,
+    timezone_name: str | None = None,
 ) -> datetime:
     """Compute the next fire datetime strictly after ``after``.
 
@@ -101,6 +136,9 @@ def compute_next_fire(
             later than this point.
         origin: Optional starting point for interval schedules. Defaults to
             ``after`` when omitted.
+        timezone_name: Optional IANA timezone used for cron expressions. The
+            returned datetime is always UTC; interval schedules ignore this
+            value because they represent elapsed durations.
 
     Returns:
         The next fire datetime in UTC.
@@ -110,8 +148,9 @@ def compute_next_fire(
     """
     after_utc = _ensure_aware_utc(after)
     if schedule.kind is LoopScheduleKind.CRON:
+        cron_base = after_utc.astimezone(resolve_loop_timezone(timezone_name))
         try:
-            iterator = croniter(schedule.expression, after_utc)
+            iterator = croniter(schedule.expression, cron_base)
         except (ValueError, KeyError) as exc:
             raise ValueError(f"Invalid cron expression {schedule.expression!r}: {exc}") from exc
         return iterator.get_next(datetime).astimezone(timezone.utc)

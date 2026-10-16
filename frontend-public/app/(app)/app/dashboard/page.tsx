@@ -14,6 +14,8 @@ import { MonitorSettingsPanel } from "@/components/agent-runner/monitor-settings
 import { RepositoryOverview } from "@/components/agent-runner/repository-overview";
 import type { IssueScope } from "@/components/agent-runner/repository-overview";
 import { RunnerStatusBar } from "@/components/agent-runner/runner-status-bar";
+import { RuntimeTaskDetail } from "@/components/dashboard/runtime-task-detail";
+import { RuntimeTaskList } from "@/components/dashboard/runtime-task-list";
 import { formatLocalDateTime } from "@/lib/utils";
 import {
   fetchIssueDetail,
@@ -26,13 +28,19 @@ import {
   executeRepositoryAction,
   fetchAllRepositoryIssues,
   fetchCompletionStats,
+  fetchDesktopCompanionStatus,
+  fetchRuntimeTasks,
+  openDesktopCompanionWindow,
 } from "@/lib/api/console";
 import type {
   ConsoleIssueEntry,
+  DesktopCompanionState,
   IssueMonitoringSnapshot,
   MonitorSnapshotsResponse,
   RepositoryCompletionStats,
   RepositoryMonitoringOverview,
+  RuntimeTaskEntry,
+  RuntimeTaskSummary,
   UnreachableRepository,
 } from "@/lib/api/types";
 
@@ -99,6 +107,7 @@ export default function DashboardPage() {
   );
   const [selectedIssue, setSelectedIssue] =
     useState<IssueMonitoringSnapshot | null>(null);
+  const [issueLabelRefreshVersion, setIssueLabelRefreshVersion] = useState(0);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [completionStats, setCompletionStats] = useState<
     RepositoryCompletionStats[]
@@ -123,7 +132,86 @@ export default function DashboardPage() {
     null,
   );
 
+  // 任务值守看板是默认页（FR-1）；原有仓库卡片视图保留在同一入口下，
+  // 因为「跑一轮 / 复核一轮」这类仓库级动作仍挂在那里。
+  const [view, setView] = useState<"runtime" | "monitor">("runtime");
+  const [runtimeSummary, setRuntimeSummary] = useState<RuntimeTaskSummary | null>(
+    null,
+  );
+  const [runtimeError, setRuntimeError] = useState<string | null>(null);
+  const [selectedTask, setSelectedTask] = useState<RuntimeTaskEntry | null>(null);
+  const [companionState, setCompanionState] = useState<DesktopCompanionState | null>(
+    null,
+  );
+  const [companionPending, setCompanionPending] = useState(false);
+  const [companionError, setCompanionError] = useState<string | null>(null);
+
   const refreshAbortRef = useRef<AbortController | null>(null);
+
+  /**
+   * 读运行看板摘要：只走已注册仓库的 Console 观测路径，不掺托管进程日志。
+   *
+   * 失败只影响这块面板，仓库监控视图继续可用。
+   */
+  const loadRuntimeSummary = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const summary = await fetchRuntimeTasks();
+      if (signal?.aborted) return;
+      setRuntimeSummary(summary);
+      // 选中项跟着新一轮摘要刷新（按 task_key 对位）：否则右侧详情的状态 /
+      // 阶段 / 耗时停在点击那一刻，与左侧列表的实时行不一致。
+      setSelectedTask((prev) => {
+        if (!prev) return prev;
+        return summary.tasks.find((task) => task.task_key === prev.task_key) ?? prev;
+      });
+      setRuntimeError(null);
+    } catch (error: unknown) {
+      if (signal?.aborted) return;
+      setRuntimeError(
+        error instanceof Error ? error.message : "无法加载运行看板任务。",
+      );
+    }
+  }, []);
+
+  /** 开启或聚焦桌面小窗：动作结果由后端快照决定，前端不猜测窗口状态。 */
+  const handleOpenCompanion = useCallback(async () => {
+    setCompanionPending(true);
+    setCompanionError(null);
+    try {
+      const snapshot = await openDesktopCompanionWindow();
+      setCompanionState(snapshot);
+    } catch (error: unknown) {
+      setCompanionError(
+        error instanceof Error ? error.message : "桌面小窗开启失败。",
+      );
+    } finally {
+      setCompanionPending(false);
+    }
+  }, []);
+
+  // 首屏读一次 companion 状态：未安装 / 平台不支持要在按钮旁说清楚，
+  // 而不是等用户点了才知道。
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchDesktopCompanionStatus()
+      .then((snapshot) => {
+        if (controller.signal.aborted) return;
+        setCompanionState(snapshot);
+      })
+      .catch(() => {
+        // 状态探针失败不打扰：点击开窗时还会有反馈。
+      });
+    return () => {
+      controller.abort();
+    };
+  }, []);
+
+  // 看板首屏自动选中第一条任务，右侧详情不至于空着。
+  useEffect(() => {
+    if (selectedTask !== null) return;
+    if (!runtimeSummary || runtimeSummary.tasks.length === 0) return;
+    setSelectedTask(runtimeSummary.tasks[0]);
+  }, [runtimeSummary, selectedTask]);
 
   /**
    * 读本地快照并渲染。首屏与 15s 轮询都走这里——快照接口只查本地 SQLite,
@@ -195,15 +283,17 @@ export default function DashboardPage() {
     const controller = new AbortController();
     void loadSnapshots(controller.signal);
     void loadCompletionStats(controller.signal);
+    void loadRuntimeSummary(controller.signal);
     // 轻量轮询本地快照：后台同步一写回，界面最多 15 秒内自动跟上。
     const timer = window.setInterval(() => {
       void loadSnapshots(controller.signal);
+      void loadRuntimeSummary(controller.signal);
     }, POLL_INTERVAL_MS);
     return () => {
       controller.abort();
       window.clearInterval(timer);
     };
-  }, [loadSnapshots, loadCompletionStats]);
+  }, [loadSnapshots, loadCompletionStats, loadRuntimeSummary]);
 
   // 详情加载逻辑（点 issue 时拉一次）。
   useEffect(() => {
@@ -505,6 +595,16 @@ export default function DashboardPage() {
     return readySlots[0]?.repository.repo_id ?? null;
   }, [selectedRepoId, state, selectedIssueNumber, readySlots]);
 
+  /** 接管确认后重扫所属仓库，让列表和 Issue 详情同步显示 agent/review。 */
+  const handleTakeoverSettled = useCallback(async () => {
+    if (selectedIssueRepoId) {
+      await handleRefreshRepo(selectedIssueRepoId);
+    } else {
+      await loadSnapshots();
+    }
+    setIssueLabelRefreshVersion((version) => version + 1);
+  }, [handleRefreshRepo, loadSnapshots, selectedIssueRepoId]);
+
   const statsByRepoId = useMemo(() => {
     const lookup: Record<string, RepositoryCompletionStats> = {};
     for (const entry of completionStats) {
@@ -556,11 +656,35 @@ export default function DashboardPage() {
             Agent Runner 管理终端
           </h2>
           <p className="mt-1 text-sm text-slate-500">
-            多项目队列、事件时间线与异常监控。failed/blocked Issue 可直接重试或
-            继续；进程托管与完成度统计见左侧导航。
+            默认按任务值守看板列出各仓库 Issue 的真实生命周期；切到「仓库监控」看队列、
+            事件时间线与异常，failed/blocked Issue 可直接重试或继续。
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <div
+            className="flex items-center gap-1 rounded-md border border-slate-200 p-0.5 dark:border-slate-700"
+            role="group"
+            aria-label="看板视图切换"
+          >
+            <Button
+              size="sm"
+              variant={view === "runtime" ? "default" : "ghost"}
+              className="h-7 px-2 text-xs"
+              data-testid="dashboard-view-runtime"
+              onClick={() => setView("runtime")}
+            >
+              值守看板
+            </Button>
+            <Button
+              size="sm"
+              variant={view === "monitor" ? "default" : "ghost"}
+              className="h-7 px-2 text-xs"
+              data-testid="dashboard-view-monitor"
+              onClick={() => setView("monitor")}
+            >
+              仓库监控
+            </Button>
+          </div>
           <span
             className="font-mono text-xs text-slate-500"
             data-testid="dashboard-last-sync"
@@ -600,9 +724,100 @@ export default function DashboardPage() {
 
       <RunnerStatusBar />
 
-      {state.kind === "loading" ? <LoadingSkeleton /> : null}
+      {view === "runtime" ? (
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={companionPending}
+              data-testid="dashboard-open-companion"
+              onClick={() => void handleOpenCompanion()}
+            >
+              {companionPending
+                ? "开启中…"
+                : companionState?.window_exists
+                  ? "聚焦桌面小窗"
+                  : "开启桌面小窗"}
+            </Button>
+            {companionState ? (
+              <span
+                className="text-xs text-slate-500"
+                data-testid="dashboard-companion-hint"
+              >
+                {companionState.hint}
+              </span>
+            ) : null}
+            {companionState?.companion_url ? (
+              <a
+                className="font-mono text-[11px] text-slate-400 underline"
+                href={companionState.companion_url}
+                target="_blank"
+                rel="noreferrer"
+                data-testid="dashboard-companion-url"
+              >
+                {companionState.companion_url}
+              </a>
+            ) : null}
+            {companionError ? (
+              <span
+                className="text-xs text-red-700 dark:text-red-300"
+                data-testid="dashboard-companion-error"
+              >
+                {companionError}
+              </span>
+            ) : null}
+          </div>
 
-      {state.kind === "error" ? (
+          {runtimeError ? (
+            <p
+              className="text-sm text-red-700 dark:text-red-300"
+              data-testid="runtime-board-error"
+            >
+              运行看板加载失败：{runtimeError}
+            </p>
+          ) : null}
+
+          {runtimeSummary ? (
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+              <RuntimeTaskList
+                tasks={runtimeSummary.tasks}
+                selectedKey={selectedTask?.task_key ?? null}
+                onSelect={setSelectedTask}
+                unavailableSources={runtimeSummary.unavailable_sources}
+                syncStatus={runtimeSummary.sync_status}
+                missingRepoIds={runtimeSummary.missing_repo_ids}
+                truncated={runtimeSummary.truncated}
+              />
+              <div className="min-h-[24rem]">
+                {selectedTask ? (
+                  <RuntimeTaskDetail
+                    key={selectedTask.task_key}
+                    task={selectedTask}
+                  />
+                ) : (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-sm">任务详情</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-sm text-slate-500">
+                        点击左侧任务行查看阶段、执行者与增量日志。
+                      </p>
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
+            </div>
+          ) : runtimeError ? null : (
+            <Skeleton className="h-40" />
+          )}
+        </div>
+      ) : null}
+
+      {view === "monitor" && state.kind === "loading" ? <LoadingSkeleton /> : null}
+
+      {view === "monitor" && state.kind === "error" ? (
         <Card>
           <CardContent className="pt-6">
             <p className="text-sm text-red-700 dark:text-red-300">
@@ -612,7 +827,9 @@ export default function DashboardPage() {
         </Card>
       ) : null}
 
-      {state.kind === "ready" && state.syncStatus === "pending_first_sync" ? (
+      {view === "monitor" &&
+      state.kind === "ready" &&
+      state.syncStatus === "pending_first_sync" ? (
         <Card data-testid="dashboard-empty-state">
           <CardContent className="flex flex-wrap items-center gap-3 py-6">
             <span className="text-sm text-slate-600 dark:text-slate-300">
@@ -651,7 +868,7 @@ export default function DashboardPage() {
         </Card>
       ) : null}
 
-      {state.kind === "ready" ? (
+      {view === "monitor" && state.kind === "ready" ? (
         <>
           <SummaryStrip
             repositoryCount={state.repos.length}
@@ -695,7 +912,9 @@ export default function DashboardPage() {
                   <IssueDetail
                     issue={selectedIssue}
                     repoId={selectedIssueRepoId ?? undefined}
+                    labelRefreshVersion={issueLabelRefreshVersion}
                     onLabelsChanged={handleIssueLabelsChanged}
+                    onTakeoverSettled={handleTakeoverSettled}
                   />
                 </div>
               ) : selectedEntry ? (
@@ -801,6 +1020,7 @@ function IssueActionBar({
         variant="outline"
         className="ml-auto"
         disabled={pending}
+        data-testid="issue-retry-failed"
         onClick={() => onAction(isFailed ? "retry_failed" : "blocked_continue")}
       >
         {pending ? "执行中…" : isFailed ? "重试" : "继续"}

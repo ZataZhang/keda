@@ -171,7 +171,7 @@ export function PrdDetail({
               <span className="text-xs text-slate-500">Issue #{prd.issue_number}</span>
             ) : null}
           </div>
-          <p className="mt-1 truncate text-sm font-medium" title={prd.title}>
+          <p className="mt-1 truncate text-base font-semibold tracking-tight" title={prd.title}>
             {prd.title}
           </p>
           <p className="truncate text-xs text-slate-500" title={prd.prd_path}>

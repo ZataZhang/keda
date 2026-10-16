@@ -38,7 +38,7 @@ def _issue() -> IssueSummary:
         title="Dedupe users by email case-insensitively",
         url="https://github.com/example/repo/issues/7",
         body="Users with the same email in different case must be treated as one.",
-        labels=("agent/review",),
+        labels=("agent/automated-review-passed",),
     )
 
 
@@ -226,7 +226,7 @@ def _structured_issue() -> IssueSummary:
         title="Demo",
         url="https://github.com/example/repo/issues/7",
         body=body,
-        labels=("agent/review",),
+        labels=("agent/automated-review-passed",),
     )
 
 
@@ -429,6 +429,179 @@ def test_run_verifier_gate_returns_verdict_on_green(
         _structured_issue(), tmp_path, config, FakeProcessRunner(), "claude"
     )
     assert verdict is not None and verdict.risk == "green"
+    assert verdict.verifier_input_sha == "abc1234"
+    assert verdict.verifier_run_id is None
+
+
+def test_verifier_gate_fails_closed_when_completion_cas_raises(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """持久 CAS 失败时不得返回 verdict，避免 published result 与控制行脱节。"""
+    from backend.core.use_cases import run_verifier_agent as rva
+    from backend.core.use_cases.agent_runner_issue_control import VerifierRunHandle
+
+    _patch_gate_deps(monkeypatch, rva, ValidationVerdict(risk="green"), {})
+
+    class _UnavailableStore:
+        def transition_issue_run(self, **_kwargs: object) -> bool:
+            raise OSError("sqlite unavailable")
+
+    monkeypatch.setattr(
+        rva,
+        "begin_verifier_run",
+        lambda **_kwargs: VerifierRunHandle(
+            store=_UnavailableStore(),
+            repo_id="repo-a",
+            issue_number=42,
+            run_id="run-1",
+            head_sha="abc1234",
+        ),
+    )
+    config = AppConfig(validation=ValidationConfig(verifier_enabled=True))
+
+    with pytest.raises(rva.VerifierUnavailableError, match="not published"):
+        rva.run_verifier_gate(
+            _structured_issue(),
+            tmp_path,
+            config,
+            FakeProcessRunner(),
+            "claude",
+            repo_id="repo-a",
+        )
+
+
+def test_verifier_gate_binds_verdict_to_control_run_and_input_sha(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """真实 verdict 返回时带上本轮控制身份和 verifier 输入 SHA。"""
+    from backend.core.use_cases import run_verifier_agent as rva
+    from backend.core.use_cases.agent_runner_issue_control import VerifierRunHandle
+
+    _patch_gate_deps(monkeypatch, rva, ValidationVerdict(risk="green"), {})
+
+    class _Store:
+        def transition_issue_run(self, **_kwargs: object) -> bool:
+            return True
+
+    monkeypatch.setattr(
+        rva,
+        "begin_verifier_run",
+        lambda **_kwargs: VerifierRunHandle(
+            store=_Store(),
+            repo_id="repo-a",
+            issue_number=42,
+            run_id="run-final",
+            head_sha="abc1234",
+        ),
+    )
+    config = AppConfig(validation=ValidationConfig(verifier_enabled=True))
+
+    verdict = rva.run_verifier_gate(
+        _structured_issue(),
+        tmp_path,
+        config,
+        FakeProcessRunner(),
+        "claude",
+        repo_id="repo-a",
+    )
+
+    assert verdict is not None
+    assert verdict.verifier_run_id == "run-final"
+    assert verdict.verifier_input_sha == "abc1234"
+
+
+def test_verifier_gate_reclaims_completed_row_when_verdict_is_red(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """RED 结论不发布：控制行必须从 ``verifier_completed`` 收回，否则界面在整段
+    RED recovery 窗口里对着一个从未落到 PR 上的 verdict 报"验证已完成"（FR-1）。"""
+    from backend.core.use_cases import run_verifier_agent as rva
+    from backend.core.use_cases.agent_runner_issue_control import VerifierRunHandle
+
+    _patch_gate_deps(monkeypatch, rva, ValidationVerdict(risk="red", findings="broke X"), {})
+
+    transitions: list[tuple[tuple[str, ...], str]] = []
+
+    class _RecordingStore:
+        def transition_issue_run(self, **kwargs: object) -> bool:
+            transitions.append((kwargs["from_states"], kwargs["to_state"]))  # type: ignore[arg-type]
+            return True
+
+    monkeypatch.setattr(
+        rva,
+        "begin_verifier_run",
+        lambda **_kwargs: VerifierRunHandle(
+            store=_RecordingStore(),
+            repo_id="repo-a",
+            issue_number=42,
+            run_id="run-1",
+            head_sha="abc1234",
+        ),
+    )
+    config = AppConfig(validation=ValidationConfig(verifier_enabled=True))
+
+    with pytest.raises(ValidationEvidenceError, match="returned RED"):
+        rva.run_verifier_gate(
+            _structured_issue(),
+            tmp_path,
+            config,
+            FakeProcessRunner(),
+            "claude",
+            repo_id="repo-a",
+        )
+
+    assert transitions == [
+        (("running",), "verifier_completed"),
+        (("verifier_completed",), "expired"),
+    ]
+
+
+def test_verifier_gate_reclaims_completed_row_when_tree_drifted(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """verifier 改动代码树时同样收回完成态，且不改写已落地的接管终态。"""
+    from backend.core.use_cases import run_verifier_agent as rva
+    from backend.core.use_cases.agent_runner_issue_control import VerifierRunHandle
+
+    monkeypatch.setattr(rva, "load_evidence_manifest", lambda *a, **k: _manifest())
+    head_reads = iter(["abc1234", "drifted"])
+    monkeypatch.setattr(rva, "get_head_sha", lambda *a, **k: next(head_reads))
+    monkeypatch.setattr(rva, "run_verifier_agent", lambda *a, **k: ValidationVerdict(risk="green"))
+
+    transitions: list[tuple[tuple[str, ...], str]] = []
+
+    class _RecordingStore:
+        def transition_issue_run(self, **kwargs: object) -> bool:
+            transitions.append((kwargs["from_states"], kwargs["to_state"]))  # type: ignore[arg-type]
+            return True
+
+    monkeypatch.setattr(
+        rva,
+        "begin_verifier_run",
+        lambda **_kwargs: VerifierRunHandle(
+            store=_RecordingStore(),
+            repo_id="repo-a",
+            issue_number=42,
+            run_id="run-1",
+            head_sha="abc1234",
+        ),
+    )
+    config = AppConfig(validation=ValidationConfig(verifier_enabled=True))
+
+    with pytest.raises(ValidationEvidenceError, match="changed the committed code tree"):
+        rva.run_verifier_gate(
+            _structured_issue(),
+            tmp_path,
+            config,
+            FakeProcessRunner(),
+            "claude",
+            repo_id="repo-a",
+        )
+
+    assert transitions == [
+        (("running",), "verifier_completed"),
+        (("verifier_completed",), "expired"),
+    ]
 
 
 def test_missing_marker_is_distinguishable_even_with_findings_text() -> None:
@@ -868,3 +1041,36 @@ def test_choose_verifier_agent_prefers_fallback_candidates_array_over_stale_lega
     # 候选数组里没有可用候选时仍回退旧名单语义。
     legacy_only = AppConfig(runner=RunnerConfig(agent_fallback_order=("kimi", "codex")))
     assert rva._choose_verifier_agent(legacy_only, "claude") == "kimi"
+
+
+def test_split_verifier_modules_keep_the_run_verifier_agent_logger_identity() -> None:
+    """1000 行门禁拆出去的模块仍记在 ``run_verifier_agent`` 名下。
+
+    操作者按 docs/guides/agent-runner.md 的排查顺序 grep ``run_verifier_agent`` 分辨
+    「被人工接管取消」与「超时」；logger 名跟着模块文件走会让这些关键行查不到。
+    """
+    from backend.core.use_cases import (
+        agent_runner_verdict_pr_effects as verdict_pr_effects,
+    )
+    from backend.core.use_cases import agent_runner_verifier_response_log as response_log
+    from backend.core.use_cases import run_verifier_agent as rva
+
+    for moved_module in (verdict_pr_effects, response_log, rva):
+        assert moved_module._logger.name == "backend.core.use_cases.run_verifier_agent"
+
+
+def test_split_publication_module_keeps_the_publication_logger_identity() -> None:
+    """拆出去的 verifier 发布模块仍记在 ``agent_runner_publication`` 名下。
+
+    「takeover race or external change」「PR merged or HEAD drifted」这几行是判断
+    接管与发布竞态谁赢了的唯一线索，它们来自发布流程而非验证流程；logger 名跟着模块
+    文件走，按发布流程 grep 的人就查不到这些行。
+    """
+    from backend.core.use_cases import agent_runner_publication as publication
+    from backend.core.use_cases import agent_runner_verifier_publication as verifier_publication
+
+    assert (
+        verifier_publication._logger.name
+        == publication._logger.name
+        == "backend.core.use_cases.agent_runner_publication"
+    )

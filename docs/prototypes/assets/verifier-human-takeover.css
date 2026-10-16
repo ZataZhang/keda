@@ -93,6 +93,7 @@ h1, h2, h3, p { margin-top: 0; }
 .labels-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 13px; }
 .label-chip { padding: 4px 7px; border: 1px solid transparent; border-radius: 6px; font-size: 9px; }
 .label-agent { border-color: #d9d2fa; background: #f3f0ff; color: #5e48be; }
+.label-human { border-color: #f3dfb9; background: #fff8e9; color: #8d661d; }
 .label-event { border-color: #dedfea; background: #f7f7fa; color: #74788a; }
 .label-priority { border-color: #f3dfb9; background: #fff8e9; color: #8d661d; }
 .issue-meta-grid { display: grid; grid-template-columns: 1fr 1fr 1.2fr; gap: 9px; padding-top: 12px; border-top: 1px solid #f0f0f5; }

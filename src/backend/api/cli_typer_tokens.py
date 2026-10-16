@@ -44,6 +44,8 @@ _FLOW_LABELS: dict[str, str] = {
     "supervise": "评审",
     "fix": "修复",
     "closeout": "收尾",
+    "content_generation": "内容生成",
+    "unknown": "未分类",
 }
 
 _DAYS_MIN = 1

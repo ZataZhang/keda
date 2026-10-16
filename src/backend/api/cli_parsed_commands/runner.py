@@ -676,14 +676,33 @@ def run_daemon_command(ctx: ParsedCommandContext) -> int:
         if ctx.parsed.interval is not None
         else ctx.runner_settings.daemon.run_interval_seconds
     )
-    # Parallel execution: --concurrency overrides the toml default
-    # ([agent_runner.runner].max_concurrent_issues; 1 = sequential).
-    # A per-Issue live view (Rich on a TTY, plain otherwise) is created
-    # only when running >1 in parallel; the sequential path is unchanged.
-    daemon_concurrency = (
-        getattr(ctx.parsed, "concurrency", None) or ctx.runner_settings.runner.max_concurrent_issues
+    # --concurrency 是进程级覆盖；未传时由 daemon 按各目标仓库的合并配置解析容量。
+    # 只要任一目标仓库会并行执行，就创建共享实时视图；串行目标不会使用它。
+    daemon_concurrency_override = getattr(ctx.parsed, "concurrency", None)
+    if daemon_concurrency_override is not None:
+        target_repository_concurrency_values = [daemon_concurrency_override] * len(contexts)
+    else:
+        configured_default = getattr(ctx.runner_settings.runner, "max_concurrent_issues", 1)
+        if not isinstance(configured_default, int) or isinstance(configured_default, bool):
+            configured_default = 1
+        target_repository_concurrency_values = []
+        for context in contexts:
+            context_runner_settings = getattr(getattr(context, "config", None), "runner", None)
+            repository_concurrency = getattr(
+                context_runner_settings,
+                "max_concurrent_issues",
+                configured_default,
+            )
+            if not isinstance(repository_concurrency, int) or isinstance(
+                repository_concurrency, bool
+            ):
+                repository_concurrency = configured_default
+            target_repository_concurrency_values.append(repository_concurrency)
+    daemon_output_view = (
+        create_runner_live_view()
+        if any(value > 1 for value in target_repository_concurrency_values)
+        else None
     )
-    daemon_output_view = create_runner_live_view() if daemon_concurrency > 1 else None
 
     def content_generator_factory(repo_path: Path):
         return _cli.create_content_generator(
@@ -722,7 +741,7 @@ def run_daemon_command(ctx: ParsedCommandContext) -> int:
             max_prd_issues=1,
             transcript_runner_factory=transcript_runner_factory,
             max_deliberation_issues=ctx.runner_settings.daemon.max_deliberation_issues,
-            concurrency=daemon_concurrency,
+            concurrency=daemon_concurrency_override,
             output_view=daemon_output_view,
             reconcile_stale_attempts=ctx.runner_settings.daemon.reconcile_stale_attempts,
             reclaim_ttl_seconds=ctx.runner_settings.daemon.reclaim_ttl_seconds,
@@ -732,6 +751,12 @@ def run_daemon_command(ctx: ParsedCommandContext) -> int:
             # --autopilot/--no-autopilot 的按次覆盖（None = 未传，热读配置）。
             backlog_store_factory=_cli.create_backlog_store,
             autopilot_override=getattr(ctx.parsed, "autopilot_override", None),
+            # 普通 daemon 承载 managed_by=agent-daemon 的 persistent loop；
+            # loop-daemon 仍只推进默认的 loop-daemon recipe。
+            loop_state_store_factory=_cli.create_loop_state_store,
+            loop_clock=_cli.create_loop_clock(),
+            # 与 Monitor、CLI 共用同一份额度账本：撞限流或额度见底时全员暂停到重置。
+            api_budget=_cli.create_github_api_budget(),
         )
     finally:
         _cli.release_daemon_locks(acquired_daemon_locks)
@@ -854,6 +879,7 @@ def run_recover_command(ctx: ParsedCommandContext) -> int:
             github_client=github_client,
             process_runner=ctx.process_runner,
             content_generator=content_generator,
+            repo_id=context.repo_id,
         )
         logger.info(
             "Publish recovered for Issue #%d: %s",

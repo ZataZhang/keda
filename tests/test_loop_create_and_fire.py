@@ -59,6 +59,8 @@ issue_type: feature
 agent: auto
 priority: P2
 slug: trending
+# 本文件测 PRD 模式；不写 output 则默认 issue
+output: prd
 labels:
   - area/docs
 ---
@@ -251,10 +253,11 @@ def test_fire_loop_renders_prd_and_creates_issue(
     assert "Run summary for github-trending" in rendered
 
     # The default ``loop/<id>`` label and the recipe's extra labels were
-    # added on top of the create_issue defaults.
-    label_call = next(call for call in github.calls if call.get("method") == "edit_issue_labels")
-    assert "loop/github-trending" in label_call["add"]
-    assert "area/docs" in label_call["add"]
+    # sent with the create call itself.
+    create_call = next(call for call in github.calls if call.get("method") == "create_issue")
+    assert "loop/github-trending" in create_call["labels"]
+    assert "area/docs" in create_call["labels"]
+    assert not [call for call in github.calls if call.get("method") == "edit_issue_labels"]
 
     # State store updated.
     state_store.load()

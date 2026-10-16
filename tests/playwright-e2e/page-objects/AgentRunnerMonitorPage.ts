@@ -209,6 +209,9 @@ export class AgentRunnerMonitorPage {
 
   async goto(): Promise<void> {
     await this.page.goto('/app/dashboard')
+    // 看板默认页现在是值守看板；仓库卡片视图需要先切换，否则本页面对象
+    // 针对仓库卡、异常卡、同步设置的断言都会落在看不见的 DOM 上。
+    await this.page.getByTestId('dashboard-view-monitor').click()
   }
 
   async expectHeading(): Promise<void> {

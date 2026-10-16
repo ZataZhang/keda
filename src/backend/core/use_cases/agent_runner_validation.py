@@ -12,8 +12,8 @@
    进入既有 recovery 循环）。
 4. **证据呈现** — 用 git plumbing（``hash-object``/``mktree``/``commit-tree``）
    构造无父提交并 force-push 到 orphan 证据分支，再在 PR 上发证据评论。
-5. **软门禁** — daemon 轮询 ``agent/review`` Issue，按 PR body 勾选状态维护
-   ``validation/pending`` / ``validation/passed`` label，head 漂移时重置勾选，
+5. **软门禁** — daemon 轮询 ``agent/automated-review-passed`` Issue，按 PR body 勾选状态维护
+   ``validation/pending`` / ``validation/passed`` label，PR 改动身份变化时重置勾选，
    Issue 关闭后清理证据分支。
 
 所有 hidden marker 与 ``agent_runner_events.py`` 的 ``iar:event`` 同型
@@ -27,10 +27,8 @@ import json
 import logging
 import re
 import subprocess
-from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-
 
 from backend.core.shared.interfaces.agent_runner import (
     IProcessRunner,
@@ -44,14 +42,21 @@ from backend.core.shared.models.agent_runner import (
     evidence_dir_uses_task_subdirs,
 )
 from backend.core.use_cases.agent_runner_evidence_format import (
-    EvidenceKindRule as EvidenceKindRule,
     VISUAL_EVIDENCE_SUFFIXES,
     collect_evidence_coverage_problems,
+)
+from backend.core.use_cases.agent_runner_evidence_format import (
+    EvidenceKindRule as EvidenceKindRule,
+)
+from backend.core.use_cases.agent_runner_evidence_format import (
     demanded_evidence_kinds as demanded_evidence_kinds,
+)
+from backend.core.use_cases.agent_runner_evidence_format import (
     extract_evidence_format_markers as extract_evidence_format_markers,
 )
 from backend.core.use_cases.agent_runner_feedback import (
     extract_prd_path,
+    format_result_for_recovery,
 )
 from backend.core.use_cases.agent_runner_git import (
     expand_changed_path,
@@ -69,52 +74,104 @@ from backend.core.use_cases.agent_runner_structured_evidence import (
 )
 from backend.core.use_cases.agent_runner_validation_checklist import (
     ValidationChecklistState as ValidationChecklistState,
-    build_validation_checklist_block as build_validation_checklist_block,
-    parse_validation_checklist_state as parse_validation_checklist_state,
-    reset_validation_checklist as reset_validation_checklist,
 )
-from backend.core.use_cases.agent_runner_validation_parsing import (
-    EVIDENCE_ORACLE_SUBDIR,
-    ValidationOracleBlockError as ValidationOracleBlockError,
-    assert_realistic_validation_oracle_valid as assert_realistic_validation_oracle_valid,
-    build_issue_validation_section as build_issue_validation_section,
-    build_validation_prompt_line as build_validation_prompt_line,
-    evidence_format_check_required as evidence_format_check_required,
-    extract_evidence_format_waiver_reason as extract_evidence_format_waiver_reason,
-    extract_realistic_validation_items as extract_realistic_validation_items,
-    extract_validation_waiver_reason as extract_validation_waiver_reason,
-    format_evidence_format_waiver_marker as format_evidence_format_waiver_marker,
-    format_validation_waiver_marker as format_validation_waiver_marker,
-    has_evidence_format_waiver_marker as has_evidence_format_waiver_marker,
-    has_validation_waiver_marker as has_validation_waiver_marker,
-    validation_required as validation_required,
+from backend.core.use_cases.agent_runner_validation_checklist import (
+    build_validation_checklist_block as build_validation_checklist_block,
+)
+from backend.core.use_cases.agent_runner_validation_checklist import (
+    parse_validation_checklist_state as parse_validation_checklist_state,
+)
+from backend.core.use_cases.agent_runner_validation_checklist import (
+    reset_validation_checklist as reset_validation_checklist,
 )
 from backend.core.use_cases.agent_runner_validation_gate import (
     build_validation_passed_comment as build_validation_passed_comment,
+)
+from backend.core.use_cases.agent_runner_validation_gate import (
     build_validation_reset_comment as build_validation_reset_comment,
+)
+from backend.core.use_cases.agent_runner_validation_gate import (
     cleanup_closed_issue_evidence_branches as cleanup_closed_issue_evidence_branches,
+)
+from backend.core.use_cases.agent_runner_validation_gate import (
     process_validation_gate as process_validation_gate,
+)
+from backend.core.use_cases.agent_runner_validation_identity import (
+    EvidenceMarker as EvidenceMarker,
+)
+from backend.core.use_cases.agent_runner_validation_parsing import (
+    EVIDENCE_ORACLE_SUBDIR,
+)
+from backend.core.use_cases.agent_runner_validation_parsing import (
+    ValidationOracleBlockError as ValidationOracleBlockError,
+)
+from backend.core.use_cases.agent_runner_validation_parsing import (
+    assert_realistic_validation_oracle_valid as assert_realistic_validation_oracle_valid,
+)
+from backend.core.use_cases.agent_runner_validation_parsing import (
+    build_issue_validation_section as build_issue_validation_section,
+)
+from backend.core.use_cases.agent_runner_validation_parsing import (
+    build_validation_prompt_line as build_validation_prompt_line,
+)
+from backend.core.use_cases.agent_runner_validation_parsing import (
+    evidence_format_check_required as evidence_format_check_required,
+)
+from backend.core.use_cases.agent_runner_validation_parsing import (
+    extract_evidence_format_waiver_reason as extract_evidence_format_waiver_reason,
+)
+from backend.core.use_cases.agent_runner_validation_parsing import (
+    extract_realistic_validation_items as extract_realistic_validation_items,
+)
+from backend.core.use_cases.agent_runner_validation_parsing import (
+    extract_validation_waiver_reason as extract_validation_waiver_reason,
+)
+from backend.core.use_cases.agent_runner_validation_parsing import (
+    format_evidence_format_waiver_marker as format_evidence_format_waiver_marker,
+)
+from backend.core.use_cases.agent_runner_validation_parsing import (
+    format_validation_waiver_marker as format_validation_waiver_marker,
+)
+from backend.core.use_cases.agent_runner_validation_parsing import (
+    has_evidence_format_waiver_marker as has_evidence_format_waiver_marker,
+)
+from backend.core.use_cases.agent_runner_validation_parsing import (
+    has_validation_waiver_marker as has_validation_waiver_marker,
+)
+from backend.core.use_cases.agent_runner_validation_parsing import (
+    validation_required as validation_required,
 )
 from backend.core.use_cases.agent_runner_validation_publication import (
     EvidenceUpload as EvidenceUpload,
+)
+from backend.core.use_cases.agent_runner_validation_publication import (
     build_evidence_comment as build_evidence_comment,
+)
+from backend.core.use_cases.agent_runner_validation_publication import (
     evidence_branch_name as evidence_branch_name,
+)
+from backend.core.use_cases.agent_runner_validation_publication import (
     parse_latest_evidence_marker as parse_latest_evidence_marker,
+)
+from backend.core.use_cases.agent_runner_validation_publication import (
     parse_pr_number as parse_pr_number,
+)
+from backend.core.use_cases.agent_runner_validation_publication import (
     publish_validation_evidence as publish_validation_evidence,
+)
+from backend.core.use_cases.agent_runner_validation_publication import (
     publish_validation_evidence_best_effort as publish_validation_evidence_best_effort,
+)
+from backend.core.use_cases.agent_runner_validation_publication import (
     upload_evidence_branch as upload_evidence_branch,
+)
+from backend.core.use_cases.agent_runner_video_evidence import (
+    ensure_video_evidence_embedded,
+    ensure_video_evidence_healthy,
+    list_video_evidence_files,
 )
 
 _logger = logging.getLogger(__name__)
-_EVIDENCE_MARKER_PATTERN = re.compile(
-    r"<!--\s*iar:validation-evidence\s+"
-    r"version=(?P<version>\d+)\s+"
-    r"head=(?P<head>[a-f0-9]+)\s+"
-    r"branch=(?P<branch>[^\s>]+)\s+"
-    r"count=(?P<count>\d+)"
-    r"\s*-->"
-)
 _PR_URL_PATTERN = re.compile(
     r"https?://[^/]+/(?P<owner>[^/]+)/(?P<repo>[^/]+)/pull/(?P<number>\d+)"
 )
@@ -147,15 +204,6 @@ _RV_SCRIPT_SUFFIXES = frozenset(
 )
 _EVIDENCE_UPLOAD_SKIP_DIRS = frozenset({"__pycache__", "node_modules"})
 _EVIDENCE_UPLOAD_SKIP_SUFFIXES = frozenset({".pyc", ".pyo"})
-
-
-@dataclass(frozen=True)
-class EvidenceMarker:
-    """Parsed iar:validation-evidence hidden marker from a PR comment."""
-
-    head_sha: str
-    branch: str
-    count: int
 
 
 # ---------------------------------------------------------------------------
@@ -559,7 +607,16 @@ def ensure_validation_evidence_ready(
             "Actually execute the PRD's Realistic Validation Plan through "
             "real entry points and save evidence files (PNG screenshots for "
             "UI behavior, captured terminal output as .txt for CLI behavior) "
-            "named like `rv-1-<slug>.png` into that directory."
+            "named like `rv-1-<slug>.png` into that directory. Multi-step or "
+            "async UI flows (click → wait → result) need a screen recording "
+            "(`rv-1-<slug>.mp4`) instead of a single still."
+        )
+    video_evidence_files = list_video_evidence_files(evidence_files)
+    if video_evidence_files:
+        if process_runner is not None:
+            ensure_video_evidence_healthy(video_evidence_files, worktree_path, process_runner)
+        ensure_video_evidence_embedded(
+            video_evidence_files, resolve_issue_evidence_dir(worktree_path, config, issue)
         )
     if has_structured_evidence_marker(issue.body):
         checklist_items = extract_realistic_validation_items(issue.body)
@@ -704,7 +761,8 @@ def _validate_stdout_assertions(block: EvidenceBlock, command_result: CommandRes
 
     Raises:
         ValidationEvidenceError: 任一断言未被满足。错误消息指明断言序号、
-            pattern、source，便于 agent 直接定位改哪条。
+            pattern、source，并附带限长后的命令退出码、stdout 与 stderr，便于
+            agent 和 Console 页面直接定位失败输出。
     """
     for assertion_index, assertion in enumerate(block.stdout_assertions, start=1):
         if _is_stdout_assertion_satisfied(assertion, command_result):
@@ -720,7 +778,9 @@ def _validate_stdout_assertions(block: EvidenceBlock, command_result: CommandRes
             f"{assertion.source} (severity={assertion.severity}, "
             f"command `{block.command}`). An exit code of 0 is not proof the "
             "checkpoint holds — remove `|| true` / `|| echo ok` style fallbacks and "
-            "make the command actually assert, or correct the declared assertion."
+            "make the command actually assert, or correct the declared assertion.\n\n"
+            "Captured command result:\n"
+            f"{format_result_for_recovery(command_result)}"
         )
 
 
@@ -745,7 +805,8 @@ def ensure_validation_commands_pass(
     仍由 ``ensure_validation_evidence_ready`` 单独把关,缓存命中不绕过它。
 
     Raises:
-        ValidationEvidenceError: 任一命令被 keda 复跑后未通过或超时。
+        ValidationEvidenceError: 任一命令被 keda 复跑后未通过或超时；非零退出与
+            stdout 断言失败会在错误详情中附带命令、退出码、stdout 和 stderr。
     """
     if not config.validation.reexecute_commands:
         return
@@ -813,7 +874,8 @@ def ensure_validation_commands_pass(
         if result.return_code != 0:
             raise ValidationEvidenceError(
                 f"Realistic Validation item {block.item_number} failed when keda "
-                f"re-ran its command: `{block.command}` exited {result.return_code}. "
+                "re-ran its command.\n\n"
+                f"{format_result_for_recovery(result)}\n\n"
                 "keda re-executes RV commands to confirm they actually pass — the "
                 "agent's evidence file alone is not trusted. Fix the behavior so the "
                 "command passes (or correct the command). Set "
@@ -829,7 +891,7 @@ def ensure_validation_commands_pass(
             result.duration_seconds,
         )
         if cache_key is not None:
-            newly_passed[cache_key] = datetime.now(timezone.utc).isoformat()
+            newly_passed[cache_key] = datetime.now(UTC).isoformat()
 
     if newly_passed:
         cache_entries.update(newly_passed)

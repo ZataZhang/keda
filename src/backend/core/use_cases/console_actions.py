@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -33,6 +34,10 @@ from backend.core.shared.interfaces.runner_console import (
 from backend.core.shared.models.agent_runner import (
     PublishRecoveryRequest,
     RepositoryRunContext,
+)
+from backend.core.use_cases.agent_runner_issue_control import (
+    IssueControlUnavailableError,
+    request_verifier_takeover,
 )
 from backend.core.use_cases.console_processes import (
     ConsoleProcessError,
@@ -54,7 +59,12 @@ REPOSITORY_ACTIONS: dict[str, RunnerProcessKind] = {
 }
 
 #: Issue 级动作白名单。
-ISSUE_ACTIONS = ("retry_failed", "blocked_continue", "recover_failed_publish")
+ISSUE_ACTIONS = (
+    "retry_failed",
+    "blocked_continue",
+    "recover_failed_publish",
+    "take_over_verifier",
+)
 
 
 class ConsoleActionError(ValueError):
@@ -69,6 +79,10 @@ class ConsoleActionResult:
     result: str  # accepted / rejected / error
     detail: str
     process: RunnerProcessRecord | None = None
+    takeover_http_status: int | None = None
+    """人工接管动作的 HTTP 语义（202/200/409）；非接管动作为 ``None``。"""
+    takeover_outcome: str | None = None
+    """接管请求分类（accepted/pending/handed_over/*_conflict/not_found）。"""
 
 
 def _now_iso() -> str:
@@ -220,6 +234,7 @@ def _execute_recover_failed_publish(
             github_client=github_client,
             process_runner=process_runner,
             content_generator=create_content_generator(process_runner, config=context.config),
+            repo_id=context.repo_id,
         )
     except PublishRecoveryError as exc:
         raise ConsoleActionError(
@@ -229,6 +244,87 @@ def _execute_recover_failed_publish(
     return (
         f"Issue #{issue_number} 发布已恢复：{recovery_result.pr_url}{reused_suffix}，"
         f"分支 {recovery_result.branch}。"
+    )
+
+
+def _reject_takeover(
+    store: IRunHistoryStore,
+    *,
+    repo_id: str,
+    issue_number: int,
+    params_json: str,
+    detail: str,
+) -> ConsoleActionError:
+    """记录被拒绝的接管审计并返回待抛出的 ConsoleActionError（路由映射 400）。"""
+    _audit(
+        store,
+        action="take_over_verifier",
+        repo_id=repo_id,
+        issue_number=issue_number,
+        params_json=params_json,
+        result="rejected",
+        detail=detail,
+    )
+    return ConsoleActionError(detail)
+
+
+def _execute_take_over_verifier(
+    *,
+    store: IRunHistoryStore,
+    repo_id: str,
+    issue_number: int,
+    run_id: str | None,
+    head_sha: str | None,
+    params_json: str,
+) -> ConsoleActionResult:
+    """按 run id 与 HEAD SHA 精确请求接管当前 Issue 的独立 verifier。
+
+    接管只登记取消意图（CAS ``running`` → ``takeover_requested``），进程是否真的
+    停下由 runner 侧回收后回读控制行确认——本动作绝不自称"进程已停止"。分类结果
+    映射到 HTTP 语义（202 处理中 / 200 已交班 / 409 状态已变化）。
+    """
+    if not run_id or not head_sha:
+        raise _reject_takeover(
+            store,
+            repo_id=repo_id,
+            issue_number=issue_number,
+            params_json=params_json,
+            detail="take_over_verifier requires run_id and head_sha.",
+        )
+    try:
+        takeover = request_verifier_takeover(
+            repo_id=repo_id,
+            issue_number=issue_number,
+            run_id=run_id,
+            head_sha=head_sha,
+            control_store=store,
+        )
+    except IssueControlUnavailableError as exc:
+        raise _reject_takeover(
+            store,
+            repo_id=repo_id,
+            issue_number=issue_number,
+            params_json=params_json,
+            detail=str(exc),
+        ) from exc
+
+    accepted = takeover.http_status in (200, 202)
+    detail = f"takeover outcome={takeover.outcome}; observed_state={takeover.observed_state}"
+    _audit(
+        store,
+        action="take_over_verifier",
+        repo_id=repo_id,
+        issue_number=issue_number,
+        params_json=params_json,
+        result="accepted" if accepted else "rejected",
+        detail=detail,
+    )
+    return ConsoleActionResult(
+        action="take_over_verifier",
+        result="accepted" if accepted else "rejected",
+        detail=detail,
+        takeover_http_status=takeover.http_status,
+        takeover_outcome=takeover.outcome,
     )
 
 
@@ -244,11 +340,20 @@ def execute_issue_action(
     runner_command: Sequence[str],
     spawn_cwd: Path,
     process_runner: IProcessRunner,
+    run_id: str | None = None,
+    head_sha: str | None = None,
 ) -> ConsoleActionResult:
-    """执行一个 Issue 级动作（retry_failed / blocked_continue / recover_failed_publish）。"""
-    params_json = (
-        f'{{"action": "{action}", "repo_id": "{repo_id}", "issue_number": {issue_number}}}'
-    )
+    """执行一个 Issue 级动作（retry_failed / blocked_continue / recover_failed_publish / take_over_verifier）。"""
+    params_payload: dict[str, object] = {
+        "action": action,
+        "repo_id": repo_id,
+        "issue_number": issue_number,
+    }
+    if run_id is not None:
+        params_payload["run_id"] = run_id
+    if head_sha is not None:
+        params_payload["head_sha"] = head_sha
+    params_json = json.dumps(params_payload)
 
     def _reject(detail: str) -> ConsoleActionError:
         _audit(
@@ -271,6 +376,16 @@ def execute_issue_action(
         context = _find_context(repo_id, contexts)
     except ConsoleActionError as exc:
         raise _reject(str(exc)) from exc
+
+    if action == "take_over_verifier":
+        return _execute_take_over_verifier(
+            store=store,
+            repo_id=repo_id,
+            issue_number=issue_number,
+            run_id=run_id,
+            head_sha=head_sha,
+            params_json=params_json,
+        )
 
     try:
         if action == "retry_failed":

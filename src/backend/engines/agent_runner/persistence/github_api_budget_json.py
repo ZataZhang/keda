@@ -1,0 +1,333 @@
+"""基于 JSON 文件的 GitHub API 额度预算（跨进程共享）。
+
+状态落在 ``<本机状态目录>/github-api-budget.json``，更新时持有旁路 ``.lock`` 文件的
+排他锁、持锁后重新读盘再合并，所以 daemon、Monitor、CLI 同时写也不会互相覆盖。
+读取不加锁：写入是 ``os.replace`` 原子替换，读者永远看到完整文件。
+
+文件内容::
+
+    {"version": 1,
+     "blocked_until": {"graphql": "<UTC ISO>"},
+     "polling_paused_until": {"graphql": "<UTC ISO>"},
+     "last_probe_at": "<UTC ISO>",
+     "remaining": {"graphql": {"remaining": 4940, "limit": 5000, "reset_at": "<UTC ISO>"}},
+     "usage": {"2026-10-15T22": {"graphql:issue list": 12}}}
+"""
+
+from __future__ import annotations
+
+import atexit
+import json
+import logging
+import os
+import threading
+import time
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any
+
+from backend.core.shared.interfaces.agent_runner import GitHubApiRateLimitError
+from backend.core.shared.interfaces.github_api_budget import IGitHubApiBudget
+from backend.core.shared.models import product_identity
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - 非 POSIX 平台退化为无锁
+    fcntl = None  # type: ignore[assignment]
+
+_logger = logging.getLogger(__name__)
+
+_BUDGET_FILENAME = "github-api-budget.json"
+# 测试与特殊部署可用环境变量把账本指到别处，避免写进真实的本机状态目录。
+BUDGET_PATH_ENV_VAR = "KC_GITHUB_API_BUDGET_PATH"
+
+_USAGE_RETENTION = timedelta(hours=24)
+_DEFAULT_PROBE_INTERVAL_SECONDS = 300.0
+# 剩余额度低于 max(绝对下限, 比例 × 上限) 时只暂停“轮询”（不再领新任务、不再空转），
+# 把这最后一小段额度留给已经在进行中的收尾（创建 PR、改标签、发评论）和手动操作。
+_LOW_REMAINING_FLOOR = 50
+_LOW_REMAINING_RATIO = 0.05
+# 真正耗尽（剩余 0）才像限流错误一样让所有调用都停下，避免发出注定失败的请求。
+_EXHAUSTED_REMAINING = 0
+_DEFAULT_FLUSH_EVERY_CALLS = 10
+_DEFAULT_FLUSH_INTERVAL_SECONDS = 10.0
+
+
+def resolve_github_api_budget_path() -> Path:
+    """返回额度账本的位置；环境变量优先，其次本机状态目录。"""
+    override_path = os.environ.get(BUDGET_PATH_ENV_VAR, "").strip()
+    if override_path:
+        return Path(override_path)
+    return product_identity.state_home() / _BUDGET_FILENAME
+
+
+def _parse_utc(value: object) -> datetime | None:
+    """解析账本里的 ISO 时间；格式不对按缺失处理。"""
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+class JsonGitHubApiBudget(IGitHubApiBudget):
+    """跨进程共享的额度账本与暂停闸门。"""
+
+    def __init__(
+        self,
+        state_path: Path | None = None,
+        *,
+        source: str | None = None,
+        now: Callable[[], datetime] | None = None,
+        probe_interval_seconds: float = _DEFAULT_PROBE_INTERVAL_SECONDS,
+        flush_every_calls: int = _DEFAULT_FLUSH_EVERY_CALLS,
+        flush_interval_seconds: float = _DEFAULT_FLUSH_INTERVAL_SECONDS,
+    ) -> None:
+        self._state_path = (state_path or resolve_github_api_budget_path()).resolve()
+        # 来源标签（如 ``kc daemon`` / ``kc console``）：多个进程共用一份账本，靠它回答“谁用的”。
+        self._source = source
+        self._now = now or (lambda: datetime.now(timezone.utc))
+        self._probe_interval = timedelta(seconds=probe_interval_seconds)
+        self._flush_every_calls = flush_every_calls
+        self._flush_interval_seconds = flush_interval_seconds
+        self._pending_usage: dict[tuple[str, str, str], int] = {}
+        self._pending_lock = threading.Lock()
+        self._write_failure_logged = False
+        self._last_flush_monotonic = time.monotonic()
+        atexit.register(self.flush)
+
+    @property
+    def state_path(self) -> Path:
+        """账本文件的磁盘位置。"""
+        return self._state_path
+
+    # --- 读 ---------------------------------------------------------------
+
+    def _read_state(self) -> dict[str, Any]:
+        """读取账本；文件缺失或损坏时按空账本处理，不阻断 gh 调用。"""
+        try:
+            with open(self._state_path, encoding="utf-8") as state_file:
+                payload = json.load(state_file)
+        except (OSError, ValueError):
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
+    def _blocked_until(self, state: dict[str, Any], api_kind: str) -> datetime | None:
+        blocked_map = state.get("blocked_until")
+        if not isinstance(blocked_map, dict):
+            return None
+        return _parse_utc(blocked_map.get(api_kind))
+
+    def ensure_available(self, api_kind: str) -> None:
+        """额度已耗尽（硬暂停）时直接抛限流异常，不让请求发出去。
+
+        只看硬暂停：额度偏低但没耗尽时，进行中的收尾调用仍然放行。
+        """
+        blocked_until = self._blocked_until(self._read_state(), api_kind)
+        if blocked_until is not None and blocked_until > self._now():
+            raise GitHubApiRateLimitError(
+                f"GitHub {api_kind} API budget is paused until "
+                f"{blocked_until.astimezone().strftime('%H:%M:%S')}; request deferred."
+            )
+
+    def pause_remaining_seconds(self) -> float:
+        """“轮询”还应暂停多久：硬暂停与额度偏低的软暂停里最长的剩余秒数。
+
+        daemon 用它决定要不要跳过整轮轮询；它比 :meth:`ensure_available` 更严格，
+        所以额度偏低时 daemon 不再领新任务，已经在进行中的收尾仍可继续。
+        """
+        state = self._read_state()
+        now = self._now()
+        longest_pause = 0.0
+        for map_name in ("blocked_until", "polling_paused_until"):
+            until_map = state.get(map_name)
+            if not isinstance(until_map, dict):
+                continue
+            for raw_until in until_map.values():
+                paused_until = _parse_utc(raw_until)
+                if paused_until is not None:
+                    longest_pause = max(longest_pause, (paused_until - now).total_seconds())
+        return longest_pause
+
+    def probe_due(self) -> bool:
+        """上一次探测（任一进程）距今超过探测间隔。"""
+        last_probe_at = _parse_utc(self._read_state().get("last_probe_at"))
+        return last_probe_at is None or self._now() - last_probe_at >= self._probe_interval
+
+    def usage_summary(self) -> dict[str, int]:
+        """本小时按 ``<kind>:<operation>`` 聚合的调用次数（含尚未落盘的）。"""
+        self.flush()
+        usage_map = self._read_state().get("usage")
+        if not isinstance(usage_map, dict):
+            return {}
+        hour_counts = usage_map.get(self._hour_key(self._now()))
+        if not isinstance(hour_counts, dict):
+            return {}
+        return {str(label): int(count) for label, count in hour_counts.items()}
+
+    # --- 写 ---------------------------------------------------------------
+
+    @staticmethod
+    def _hour_key(moment: datetime) -> str:
+        return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H")
+
+    @contextmanager
+    def _write_lock(self) -> Iterator[None]:
+        """持有账本的排他锁；平台不支持 ``fcntl`` 时不加锁。"""
+        if fcntl is None:
+            yield
+            return
+        self._state_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_path = self._state_path.with_suffix(self._state_path.suffix + ".lock")
+        with open(lock_path, "a", encoding="utf-8") as lock_file:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+    def _update(self, mutate: Callable[[dict[str, Any]], None]) -> None:
+        """持锁重读账本、合并待落盘的用量、应用修改后原子写回。
+
+        记账绝不能弄坏被记账的操作：账本写不进去（只读目录、磁盘满、权限问题）时只
+        告警一次并放弃本次写入，**不抛异常**。否则 ``record_call`` 的异常会让每个
+        ``gh`` 调用失败，``record_rate_limited`` 的异常还会盖住本该抛出的限流延期信号，
+        把"限流"误当成真实失败。代价只是这一次的用量或暂停标记没有落盘。
+        """
+        with self._pending_lock:
+            drained_usage = self._pending_usage
+            self._pending_usage = {}
+        self._last_flush_monotonic = time.monotonic()
+        try:
+            with self._write_lock():
+                state = self._read_state()
+                state["version"] = 1
+                self._merge_usage(state, drained_usage)
+                mutate(state)
+                self._write_state(state)
+        except OSError as exc:
+            if not self._write_failure_logged:
+                self._write_failure_logged = True
+                _logger.warning(
+                    "GitHub API budget ledger %s is not writable (%s); usage and pause "
+                    "marks will not be shared across processes until it is.",
+                    self._state_path,
+                    exc,
+                )
+
+    def _merge_usage(
+        self, state: dict[str, Any], drained_usage: dict[tuple[str, str, str], int]
+    ) -> None:
+        usage_map = state.get("usage")
+        if not isinstance(usage_map, dict):
+            usage_map = {}
+        cutoff_key = self._hour_key(self._now() - _USAGE_RETENTION)
+        usage_map = {hour: counts for hour, counts in usage_map.items() if hour >= cutoff_key}
+        if drained_usage:
+            hour_counts = usage_map.setdefault(self._hour_key(self._now()), {})
+            for (api_kind, operation, source_name), call_count in drained_usage.items():
+                label = f"{api_kind}:{operation}"
+                if source_name:
+                    label = f"{source_name} {label}"
+                hour_counts[label] = int(hour_counts.get(label, 0)) + call_count
+        state["usage"] = usage_map
+
+    def _write_state(self, state: dict[str, Any]) -> None:
+        self._state_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = self._state_path.with_suffix(self._state_path.suffix + ".tmp")
+        with open(tmp_path, "w", encoding="utf-8") as tmp_file:
+            json.dump(state, tmp_file, ensure_ascii=False, indent=2, sort_keys=True)
+            tmp_file.write("\n")
+        os.replace(tmp_path, self._state_path)
+        try:
+            os.chmod(self._state_path, 0o600)
+        except OSError:
+            pass
+
+    def flush(self) -> None:
+        """把内存里攒着的用量计数落盘；没有待落盘内容时什么都不做。"""
+        with self._pending_lock:
+            has_pending = bool(self._pending_usage)
+        if has_pending:
+            self._update(lambda _state: None)
+
+    def record_call(self, api_kind: str, operation: str) -> None:
+        """计数先攒在内存里，达到次数或时间阈值再落盘，避免每次调用都写文件。"""
+        with self._pending_lock:
+            call_key = (api_kind, operation, self._source or "")
+            self._pending_usage[call_key] = self._pending_usage.get(call_key, 0) + 1
+            pending_total = sum(self._pending_usage.values())
+        elapsed_seconds = time.monotonic() - self._last_flush_monotonic
+        if (
+            pending_total >= self._flush_every_calls
+            or elapsed_seconds >= self._flush_interval_seconds
+        ):
+            self.flush()
+
+    def record_rate_limited(self, api_kind: str, resume_at: datetime) -> None:
+        """标记该类型额度耗尽；已有更晚的暂停截止时间时保留更晚的。"""
+
+        def _mutate(state: dict[str, Any]) -> None:
+            self._extend_block(state, "blocked_until", api_kind, resume_at)
+
+        self._update(_mutate)
+
+    def record_probe(
+        self,
+        api_kind: str,
+        *,
+        remaining: int,
+        limit: int,
+        reset_at: datetime,
+    ) -> None:
+        """记录探测结果：耗尽则硬暂停；偏低只暂停轮询；额度充足则撤销旧的暂停标记。"""
+        probed_at = self._now()
+
+        def _mutate(state: dict[str, Any]) -> None:
+            state["last_probe_at"] = probed_at.isoformat()
+            remaining_map = state.get("remaining")
+            if not isinstance(remaining_map, dict):
+                remaining_map = {}
+            remaining_map[api_kind] = {
+                "remaining": remaining,
+                "limit": limit,
+                "reset_at": reset_at.isoformat(),
+            }
+            state["remaining"] = remaining_map
+            low_threshold = max(_LOW_REMAINING_FLOOR, int(limit * _LOW_REMAINING_RATIO))
+            if remaining <= _EXHAUSTED_REMAINING:
+                self._extend_block(state, "blocked_until", api_kind, reset_at)
+                return
+            if remaining <= low_threshold:
+                # 偏低：只拦轮询，进行中的收尾可以用掉这最后一段预留。
+                self._extend_block(state, "polling_paused_until", api_kind, reset_at)
+                self._clear_block(state, "blocked_until", api_kind)
+                return
+            # 探测结果以服务器为准：额度已经充足，旧的暂停标记不该继续拦人。
+            self._clear_block(state, "blocked_until", api_kind)
+            self._clear_block(state, "polling_paused_until", api_kind)
+
+        self._update(_mutate)
+
+    @staticmethod
+    def _extend_block(
+        state: dict[str, Any], map_name: str, api_kind: str, resume_at: datetime
+    ) -> None:
+        """在 ``map_name`` 里登记暂停截止时间；已有更晚的就保留更晚的。"""
+        until_map = state.get(map_name)
+        if not isinstance(until_map, dict):
+            until_map = {}
+        existing_until = _parse_utc(until_map.get(api_kind))
+        if existing_until is None or resume_at > existing_until:
+            until_map[api_kind] = resume_at.isoformat()
+        state[map_name] = until_map
+
+    @staticmethod
+    def _clear_block(state: dict[str, Any], map_name: str, api_kind: str) -> None:
+        until_map = state.get(map_name)
+        if isinstance(until_map, dict):
+            until_map.pop(api_kind, None)

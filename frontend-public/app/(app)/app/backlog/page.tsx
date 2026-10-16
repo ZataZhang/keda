@@ -4,6 +4,11 @@
 // Backlog 页面：左侧受管理仓库栏 + 右侧 PRD 画布（依赖图/时间轴/列表）。
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import type {
+  CSSProperties,
+  KeyboardEvent as ReactKeyboardEvent,
+  PointerEvent as ReactPointerEvent,
+} from "react";
 import { useRouter } from "next/navigation";
 import { PanelLeftClose, PanelLeftOpen, Settings } from "lucide-react";
 import { toast } from "sonner";
@@ -57,6 +62,11 @@ import type {
 const POLL_INTERVAL_MS = 30000;
 // 快照过期（后端 stale=true）时的追平节奏：后台重扫通常几秒内落库，30 秒要等太久。
 const STALE_POLL_INTERVAL_MS = 3000;
+const DEFAULT_BACKLOG_LIST_WIDTH_PERCENT = 45;
+const MIN_BACKLOG_LIST_WIDTH_PERCENT = 25;
+const MAX_BACKLOG_LIST_WIDTH_PERCENT = 70;
+const BACKLOG_SPLITTER_WIDTH_PX = 20;
+const BACKLOG_LIST_WIDTH_KEYBOARD_STEP_PERCENT = 2;
 
 type BacklogView = "graph" | "timeline" | "list";
 
@@ -65,6 +75,14 @@ const VIEW_LABELS: Record<BacklogView, string> = {
   timeline: "时间轴",
   list: "列表",
 };
+
+/** 将列表宽度限制在可用拖动范围内。 */
+function clampBacklogListWidthPercent(widthPercent: number): number {
+  return Math.min(
+    MAX_BACKLOG_LIST_WIDTH_PERCENT,
+    Math.max(MIN_BACKLOG_LIST_WIDTH_PERCENT, widthPercent),
+  );
+}
 
 /**
  * 仓库状态点的颜色：绿 = 启用且路径存在，黄 = 启用但路径缺失，灰 = 未启用。
@@ -141,9 +159,15 @@ export default function BacklogPage() {
   const [view, setView] = useState<BacklogView>("graph");
   const [startingPath, setStartingPath] = useState<string | null>(null);
   const [globalStarting, setGlobalStarting] = useState(false);
-  // 选中 PRD 只在右侧开详情；三种视图共用同一份详情与启动规则，
-  // 选择动作不再替换整个画布（依赖图上下文得以保留）。
+  // 三种视图共用同一份详情与启动规则；打开详情时临时收起左侧导航列，给详情留出空间。
   const [selectedPrd, setSelectedPrd] = useState<BacklogPrd | null>(null);
+  const [leftNavigationExpanded, setLeftNavigationExpanded] = useState(false);
+  const [backlogListWidthPercent, setBacklogListWidthPercent] = useState(
+    DEFAULT_BACKLOG_LIST_WIDTH_PERCENT,
+  );
+  const [backlogListResizing, setBacklogListResizing] = useState(false);
+  const backlogSplitContainerRef = useRef<HTMLDivElement>(null);
+  const [globalControlsExpanded, setGlobalControlsExpanded] = useState(false);
   const [autopilot, setAutopilot] = useState<BacklogAutopilotState | null>(null);
   const [autopilotLoading, setAutopilotLoading] = useState(true);
   const [autopilotSaving, setAutopilotSaving] = useState(false);
@@ -409,6 +433,17 @@ export default function BacklogPage() {
     }
   }
 
+  /** 重读 PRD 快照，并用服务端状态刷新详情。 */
+  async function refreshSelectedBacklogPrd(prdPath: string) {
+    const refreshedPrds = await loadData();
+    const refreshedPrd = refreshedPrds.find(
+      (candidatePrd) => candidatePrd.prd_path === prdPath,
+    );
+    if (refreshedPrd) {
+      handleSelectPrd(refreshedPrd);
+    }
+  }
+
   async function handleStart(prd: BacklogPrd, options?: StartPrdLaunchOptions) {
     setStartingPath(prd.prd_path);
     try {
@@ -416,11 +451,7 @@ export default function BacklogPage() {
       toast.success(`${prd.title} 已开始。`);
       // fresh-state probe：启动成功后重新拉取列表，详情里的状态必须来自服务端
       // 而不是本地乐观值——否则队列/合并状态下的按钮可用性会说谎。
-      const refreshedPrds = await loadData();
-      const refreshedPrd = refreshedPrds.find((item) => item.prd_path === prd.prd_path);
-      if (refreshedPrd) {
-        setSelectedPrd(refreshedPrd);
-      }
+      await refreshSelectedBacklogPrd(prd.prd_path);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "启动 PRD 失败。");
     } finally {
@@ -460,11 +491,7 @@ export default function BacklogPage() {
           : currentPrd,
       );
       toast.success(`${prd.title} 已加入就绪队列（未启动）。`);
-      const refreshedPrds = await loadData();
-      const refreshedPrd = refreshedPrds.find((item) => item.prd_path === prd.prd_path);
-      if (refreshedPrd) {
-        setSelectedPrd(refreshedPrd);
-      }
+      await refreshSelectedBacklogPrd(prd.prd_path);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "加入就绪失败。");
     } finally {
@@ -504,84 +531,153 @@ export default function BacklogPage() {
     ? prds
     : prds.filter((prd) => prd.status === "pending");
 
+  /** 打开 PRD 详情，并在每次选择时默认收起左侧导航。 */
+  function handleSelectPrd(prd: BacklogPrd) {
+    setSelectedPrd(prd);
+    setLeftNavigationExpanded(false);
+  }
+
+  const showRepositoryPanel = !repoPanelCollapsed && (!selectedPrd || leftNavigationExpanded);
+  const showPrdList = !selectedPrd || leftNavigationExpanded;
+  const backlogSplitLayoutStyle = {
+    "--backlog-list-width": `${backlogListWidthPercent}%`,
+  } as CSSProperties;
+
+  /** 开始拖动列表与详情之间的分隔线。 */
+  function handleBacklogSplitterPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!event.isPrimary || event.button !== 0) {
+      return;
+    }
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setBacklogListResizing(true);
+  }
+
+  /** 根据指针位置调整列表面板宽度。 */
+  function handleBacklogSplitterPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!backlogListResizing) {
+      return;
+    }
+    const layoutBounds = backlogSplitContainerRef.current?.getBoundingClientRect();
+    if (!layoutBounds || layoutBounds.width <= BACKLOG_SPLITTER_WIDTH_PX) {
+      return;
+    }
+    const pointerRelativeX = event.clientX - layoutBounds.left - BACKLOG_SPLITTER_WIDTH_PX / 2;
+    const nextWidthPercent = (pointerRelativeX / layoutBounds.width) * 100;
+    setBacklogListWidthPercent(clampBacklogListWidthPercent(nextWidthPercent));
+  }
+
+  /** 用方向键和 Home/End 键调整列表面板宽度。 */
+  function handleBacklogSplitterKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    const keyboardStepPercent = event.shiftKey
+      ? BACKLOG_LIST_WIDTH_KEYBOARD_STEP_PERCENT * 5
+      : BACKLOG_LIST_WIDTH_KEYBOARD_STEP_PERCENT;
+    let nextWidthPercent: number | null = null;
+
+    switch (event.key) {
+      case "ArrowLeft":
+        nextWidthPercent = backlogListWidthPercent - keyboardStepPercent;
+        break;
+      case "ArrowRight":
+        nextWidthPercent = backlogListWidthPercent + keyboardStepPercent;
+        break;
+      case "Home":
+        nextWidthPercent = MIN_BACKLOG_LIST_WIDTH_PERCENT;
+        break;
+      case "End":
+        nextWidthPercent = MAX_BACKLOG_LIST_WIDTH_PERCENT;
+        break;
+      default:
+        return;
+    }
+
+    event.preventDefault();
+    setBacklogListWidthPercent(clampBacklogListWidthPercent(nextWidthPercent));
+  }
+
   return (
     <>
     <div className="flex h-[calc(100svh-4rem)] gap-4">
-      {repoPanelCollapsed ? null : (
-        <aside className="flex w-60 shrink-0 flex-col overflow-hidden rounded-lg border border-slate-200 dark:border-slate-800">
-          <div className="flex items-center justify-between border-b border-slate-200 px-3 py-1.5 dark:border-slate-800">
-            <span className="text-xs font-medium text-slate-500">受管理仓库</span>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              onClick={() => setRepoPanelCollapsed(true)}
-              aria-label="收起仓库栏"
-              title="收起仓库栏"
-            >
-              <PanelLeftClose className="size-4" />
-            </Button>
-          </div>
-          <div className="flex-1 space-y-0.5 overflow-y-auto p-1.5">
-            {reposLoading ? (
-              <div className="space-y-1.5 p-1">
-                <Skeleton className="h-8" />
-                <Skeleton className="h-8" />
-                <Skeleton className="h-8" />
+      <aside
+        id="backlog-repository-panel"
+        className={cn(
+          "flex w-60 shrink-0 flex-col overflow-hidden rounded-lg border border-slate-200 dark:border-slate-800",
+          !showRepositoryPanel && "hidden",
+        )}
+      >
+        <div className="flex items-center justify-between border-b border-slate-200 px-3 py-1.5 dark:border-slate-800">
+          <span className="text-xs font-medium text-slate-500">受管理仓库</span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => setRepoPanelCollapsed(true)}
+            aria-label="收起仓库栏"
+            title="收起仓库栏"
+          >
+            <PanelLeftClose className="size-4" />
+          </Button>
+        </div>
+        <div className="flex-1 space-y-0.5 overflow-y-auto p-1.5">
+          {reposLoading ? (
+            <div className="space-y-1.5 p-1">
+              <Skeleton className="h-8" />
+              <Skeleton className="h-8" />
+              <Skeleton className="h-8" />
+            </div>
+          ) : repositories.length === 0 ? (
+            <p className="p-2 text-xs text-slate-500">无可用仓库。</p>
+          ) : (
+            repositories.map((repo) => (
+              <div key={repo.repo_id} className="flex items-center gap-1">
+                <button
+                  type="button"
+                  disabled={!repo.enabled}
+                  onClick={() => {
+                    selectRepoId(repo.repo_id);
+                    setSelectedPrd(null);
+                      setLeftNavigationExpanded(false);
+                  }}
+                  className={cn(
+                    "flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors",
+                    repo.repo_id === selectedRepoId
+                      ? "bg-slate-100 font-medium dark:bg-slate-800"
+                      : "hover:bg-slate-100 dark:hover:bg-slate-800",
+                    !repo.enabled && "cursor-not-allowed opacity-50",
+                  )}
+                >
+                  <span
+                    className={cn("h-2 w-2 shrink-0 rounded-full", repoStatusDotClass(repo))}
+                    aria-hidden="true"
+                  />
+                  <span className="truncate" title={repo.display_name ?? repo.repo_id}>
+                    {repo.display_name ?? repo.repo_id}
+                  </span>
+                </button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  className="shrink-0"
+                  onClick={() =>
+                    router.push(
+                      `/app/settings/lifecycle/?scope=repository&repo_id=${encodeURIComponent(repo.repo_id)}`,
+                    )
+                  }
+                  data-testid={`repo-agent-gear-${repo.repo_id}`}
+                  aria-label={`${repo.display_name ?? repo.repo_id} 生命周期与模型设置`}
+                >
+                  <Settings className="size-4" />
+                </Button>
               </div>
-            ) : repositories.length === 0 ? (
-              <p className="p-2 text-xs text-slate-500">无可用仓库。</p>
-            ) : (
-              repositories.map((repo) => (
-                <div key={repo.repo_id} className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    disabled={!repo.enabled}
-                    onClick={() => {
-                      selectRepoId(repo.repo_id);
-                      setSelectedPrd(null);
-                    }}
-                    className={cn(
-                      "flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors",
-                      repo.repo_id === selectedRepoId
-                        ? "bg-slate-100 font-medium dark:bg-slate-800"
-                        : "hover:bg-slate-100 dark:hover:bg-slate-800",
-                      !repo.enabled && "cursor-not-allowed opacity-50",
-                    )}
-                  >
-                    <span
-                      className={cn("h-2 w-2 shrink-0 rounded-full", repoStatusDotClass(repo))}
-                      aria-hidden="true"
-                    />
-                    <span className="truncate" title={repo.display_name ?? repo.repo_id}>
-                      {repo.display_name ?? repo.repo_id}
-                    </span>
-                  </button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    className="shrink-0"
-                    onClick={() =>
-                      router.push(
-                        `/app/settings/lifecycle/?scope=repository&repo_id=${encodeURIComponent(repo.repo_id)}`,
-                      )
-                    }
-                    data-testid={`repo-agent-gear-${repo.repo_id}`}
-                    aria-label={`${repo.display_name ?? repo.repo_id} 生命周期与模型设置`}
-                  >
-                    <Settings className="size-4" />
-                  </Button>
-                </div>
-              ))
-            )}
-          </div>
-        </aside>
-      )}
+            ))
+          )}
+        </div>
+      </aside>
 
       <section className="flex min-w-0 flex-1 flex-col gap-3">
         <div className="flex flex-wrap items-center gap-3">
-          {repoPanelCollapsed ? (
+          {repoPanelCollapsed && (!selectedPrd || leftNavigationExpanded) ? (
             <Button
               type="button"
               variant="outline"
@@ -595,6 +691,24 @@ export default function BacklogPage() {
             </Button>
           ) : null}
           <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-50">Backlog</h2>
+          {selectedPrd ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              aria-expanded={leftNavigationExpanded}
+              aria-controls="backlog-repository-panel backlog-prd-list-panel"
+              onClick={() => setLeftNavigationExpanded((expanded) => !expanded)}
+              data-testid="backlog-navigation-toggle"
+            >
+              {leftNavigationExpanded ? (
+                <PanelLeftClose className="size-4" />
+              ) : (
+                <PanelLeftOpen className="size-4" />
+              )}
+              {leftNavigationExpanded ? "收起左侧栏" : "显示左侧栏"}
+            </Button>
+          ) : null}
           <label className="flex items-center gap-2 text-sm">
             <input
               type="checkbox"
@@ -623,6 +737,18 @@ export default function BacklogPage() {
           <span className="text-xs text-slate-500">
             {selectedPrd ? "PRD 详情" : `${visiblePrds.length} 个 PRD`}
           </span>
+          {selectedPrd ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              aria-expanded={globalControlsExpanded}
+              aria-controls="backlog-global-controls"
+              onClick={() => setGlobalControlsExpanded((expanded) => !expanded)}
+            >
+              {globalControlsExpanded ? "收起全局设置" : "显示全局设置"}
+            </Button>
+          ) : null}
           <SnapshotFreshnessLabel
             scannedAt={snapshotScannedAt}
             stale={snapshotStale}
@@ -654,33 +780,47 @@ export default function BacklogPage() {
           </Button>
         </div>
 
-        <BacklogAutopilotControl
-          // 按仓库重建本地组件，避免并发输入草稿跨仓库切换残留、被写到新选中仓库。
-          key={selectedRepoId}
-          state={autopilot}
-          loading={autopilotLoading}
-          saving={autopilotSaving}
-          onToggle={(enabled) => void handleToggleAutopilot(enabled)}
-          policySaving={policySaving}
-          onUpdatePolicy={(maxParallel) => handleUpdatePolicy(maxParallel)}
-        />
-
-        <BacklogCiRepairControl
-          state={ciRepair}
-          loading={ciRepairLoading}
-          saving={ciRepairSaving}
-          onToggle={(enabled) => void handleToggleCiRepair(enabled)}
-        />
-
-        {/* master-detail：左侧保留当前 Backlog 视图（含依赖图上下文），右侧是
-            统一的 PRD 详情；窄屏自动退化为上下堆叠，不引入 modal 或新路由。 */}
         <div
+          id="backlog-global-controls"
+          className={cn("space-y-3", selectedPrd && !globalControlsExpanded && "hidden")}
+        >
+          <BacklogAutopilotControl
+            // 按仓库重建本地组件，避免并发输入草稿跨仓库切换残留、被写到新选中仓库。
+            key={selectedRepoId}
+            state={autopilot}
+            loading={autopilotLoading}
+            saving={autopilotSaving}
+            onToggle={(enabled) => void handleToggleAutopilot(enabled)}
+            policySaving={policySaving}
+            onUpdatePolicy={(maxParallel) => handleUpdatePolicy(maxParallel)}
+          />
+
+          <BacklogCiRepairControl
+            state={ciRepair}
+            loading={ciRepairLoading}
+            saving={ciRepairSaving}
+            onToggle={(enabled) => void handleToggleCiRepair(enabled)}
+          />
+        </div>
+
+        {/* 详情打开时默认占满主区域；左侧 Backlog 视图保持挂载，展开导航时可恢复原上下文。 */}
+        <div
+          ref={backlogSplitContainerRef}
+          style={backlogSplitLayoutStyle}
           className={cn(
             "grid min-h-0 flex-1 gap-3",
-            selectedPrd && "lg:grid-cols-[minmax(0,1fr)_360px] xl:grid-cols-[minmax(0,1fr)_440px]",
+            selectedPrd && !leftNavigationExpanded && "lg:grid-cols-1",
+            selectedPrd && leftNavigationExpanded &&
+              "grid-cols-1 md:gap-0 md:grid-cols-[var(--backlog-list-width)_20px_minmax(0,1fr)]",
           )}
         >
-          <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-slate-200 p-4 dark:border-slate-800">
+          <div
+            id="backlog-prd-list-panel"
+            className={cn(
+              "min-h-0 flex-1 overflow-auto rounded-lg border border-slate-200 p-4 dark:border-slate-800",
+              !showPrdList && "hidden",
+            )}
+          >
             {loading ? (
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
                 <Skeleton className="h-40" />
@@ -698,12 +838,12 @@ export default function BacklogPage() {
                 正在同步…
               </div>
             ) : view === "graph" ? (
-              <BacklogGraph prds={visiblePrds} onOpenContent={setSelectedPrd} />
+              <BacklogGraph prds={visiblePrds} onOpenContent={handleSelectPrd} />
             ) : view === "timeline" ? (
               <BacklogTimeline
                 prds={visiblePrds}
                 onStart={(prd) => void handleStart(prd)}
-                onOpenContent={setSelectedPrd}
+                onOpenContent={handleSelectPrd}
                 startingPath={startingPath}
                 onEnqueueReady={(prd) => void handleEnqueueReady(prd)}
                 enqueuingPath={enqueuingPath}
@@ -712,7 +852,7 @@ export default function BacklogPage() {
               <BacklogList
                 prds={visiblePrds}
                 onStart={(prd) => void handleStart(prd)}
-                onOpenContent={setSelectedPrd}
+                onOpenContent={handleSelectPrd}
                 startingPath={startingPath}
                 onEnqueueReady={(prd) => void handleEnqueueReady(prd)}
                 enqueuingPath={enqueuingPath}
@@ -720,14 +860,50 @@ export default function BacklogPage() {
             )}
           </div>
 
+          {selectedPrd && leftNavigationExpanded ? (
+            <div
+              role="separator"
+              aria-label="调整 Issue 列表与详情宽度"
+              aria-orientation="vertical"
+              aria-valuemin={MIN_BACKLOG_LIST_WIDTH_PERCENT}
+              aria-valuemax={MAX_BACKLOG_LIST_WIDTH_PERCENT}
+              aria-valuenow={Math.round(backlogListWidthPercent)}
+              aria-valuetext={`列表宽度 ${Math.round(backlogListWidthPercent)}%`}
+              tabIndex={0}
+              className={cn(
+                "group relative hidden cursor-col-resize touch-none select-none items-stretch justify-center outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-violet-500 md:flex",
+                backlogListResizing && "bg-violet-50 dark:bg-violet-950/30",
+              )}
+              data-testid="backlog-panel-resizer"
+              title="拖动调整宽度；聚焦后可用左右方向键微调"
+              onPointerDown={handleBacklogSplitterPointerDown}
+              onPointerMove={handleBacklogSplitterPointerMove}
+              onPointerUp={() => setBacklogListResizing(false)}
+              onPointerCancel={() => setBacklogListResizing(false)}
+              onLostPointerCapture={() => setBacklogListResizing(false)}
+              onKeyDown={handleBacklogSplitterKeyDown}
+            >
+              <span
+                className={cn(
+                  "w-1.5 rounded-full bg-slate-300 transition-colors group-hover:bg-violet-500 group-focus-visible:bg-violet-500 dark:bg-slate-700",
+                  backlogListResizing && "bg-violet-500",
+                )}
+                aria-hidden="true"
+              />
+            </div>
+          ) : null}
+
           {selectedPrd ? (
-            <aside className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-slate-200 p-3 dark:border-slate-800">
-              <div className="mb-2 flex shrink-0 items-center justify-between">
+            <aside className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+              <div className="mb-3 flex shrink-0 items-center justify-between border-b border-slate-100 pb-2 dark:border-slate-800">
                 <span className="text-xs font-medium text-slate-500">PRD 详情</span>
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => setSelectedPrd(null)}
+                  onClick={() => {
+                    setSelectedPrd(null);
+                    setLeftNavigationExpanded(false);
+                  }}
                   data-testid="prd-detail-close"
                 >
                   关闭

@@ -20,6 +20,7 @@ import {
   phaseBadgeVariant,
 } from "@/components/backlog/prd-lifecycle-format";
 import { PrdLifecycleTimeline } from "@/components/backlog/prd-lifecycle-timeline";
+import { PrdLifecycleStageTimeline } from "@/components/backlog/prd-lifecycle-stage-timeline";
 import { ResourceErrorAlert } from "@/components/agent-runner/resource-error-alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -33,8 +34,13 @@ import {
 } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { fetchPrdLifecycle } from "@/lib/api/backlog";
-import { formatLocalDateTime } from "@/lib/utils";
-import type { PrdLifecycleDetail, PrdLifecycleEventView } from "@/lib/api/types";
+import { fetchRunExecutionDetails } from "@/lib/api/console";
+import { cn, formatLocalDateTime } from "@/lib/utils";
+import type {
+  PrdLifecycleDetail,
+  PrdLifecycleEventView,
+  RunAttemptDetailEntry,
+} from "@/lib/api/types";
 
 /** 生命周期 run 结果 -> 中文标签。 */
 const OUTCOME_LABELS: Record<string, string> = {
@@ -44,9 +50,15 @@ const OUTCOME_LABELS: Record<string, string> = {
 };
 
 type LifecycleState =
-  | { status: "loading" }
-  | { status: "ready"; detail: PrdLifecycleDetail }
-  | { status: "error"; message: string };
+  | { status: "loading"; requestKey: string }
+  | { status: "ready"; requestKey: string; detail: PrdLifecycleDetail }
+  | { status: "error"; requestKey: string; message: string };
+
+type AttemptDetailsState = {
+  requestKey: string;
+  status: "loading" | "available" | "unavailable" | "not-queryable";
+  attempts: RunAttemptDetailEntry[];
+};
 
 /**
  * 渲染某个 PRD 的“执行过程”标签页内容。
@@ -56,16 +68,60 @@ type LifecycleState =
  * @returns 生命周期明细视图，含空态、错误态与重试。
  */
 export function PrdLifecycleView({ repoId, prdPath }: { repoId: string; prdPath: string }) {
-  const [lifecycleState, setLifecycleState] = useState<LifecycleState>({ status: "loading" });
   const [reloadToken, setReloadToken] = useState(0);
+  const lifecycleRequestKey = JSON.stringify([repoId, prdPath, reloadToken]);
+  const [lifecycleState, setLifecycleState] = useState<LifecycleState>({
+    status: "loading",
+    requestKey: lifecycleRequestKey,
+  });
+  const [attemptDetailsState, setAttemptDetailsState] = useState<AttemptDetailsState>({
+    requestKey: lifecycleRequestKey,
+    status: "loading",
+    attempts: [],
+  });
   const [selectedEvent, setSelectedEvent] = useState<PrdLifecycleEventView | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
-    setLifecycleState({ status: "loading" });
+    let isCurrentRequest = true;
     fetchPrdLifecycle({ repoId, prdPath, signal: controller.signal })
       .then((detail) => {
-        setLifecycleState({ status: "ready", detail });
+        if (controller.signal.aborted) {
+          return;
+        }
+        setLifecycleState({ status: "ready", detail, requestKey: lifecycleRequestKey });
+        if (detail.issue_number === null || detail.started_at === null) {
+          setAttemptDetailsState({
+            requestKey: lifecycleRequestKey,
+            status: "not-queryable",
+            attempts: [],
+          });
+          return;
+        }
+        fetchRunExecutionDetails({
+          repoId: detail.repo_id,
+          issueNumber: detail.issue_number,
+          startedAt: detail.started_at,
+          finishedAt: detail.finished_at ?? new Date().toISOString(),
+        })
+          .then((executionDetails) => {
+            if (isCurrentRequest) {
+              setAttemptDetailsState({
+                requestKey: lifecycleRequestKey,
+                status: "available",
+                attempts: executionDetails.attempts,
+              });
+            }
+          })
+          .catch(() => {
+            if (isCurrentRequest) {
+              setAttemptDetailsState({
+                requestKey: lifecycleRequestKey,
+                status: "unavailable",
+                attempts: [],
+              });
+            }
+          });
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted) {
@@ -73,19 +129,25 @@ export function PrdLifecycleView({ repoId, prdPath }: { repoId: string; prdPath:
         }
         setLifecycleState({
           status: "error",
+          requestKey: lifecycleRequestKey,
           message: error instanceof Error ? error.message : "读取执行过程失败。",
         });
       });
     return () => {
+      isCurrentRequest = false;
       controller.abort();
     };
-  }, [repoId, prdPath, reloadToken]);
+  }, [repoId, prdPath, reloadToken, lifecycleRequestKey]);
 
-  if (lifecycleState.status === "loading") {
+  const currentLifecycleState = lifecycleState.requestKey === lifecycleRequestKey
+    ? lifecycleState
+    : { status: "loading" as const, requestKey: lifecycleRequestKey };
+
+  if (currentLifecycleState.status === "loading") {
     return (
       <div className="space-y-3" data-testid="prd-lifecycle-loading">
         <Skeleton className="h-6 w-1/3" />
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,10rem),1fr))] gap-2">
           <Skeleton className="h-16" />
           <Skeleton className="h-16" />
           <Skeleton className="h-16" />
@@ -97,10 +159,10 @@ export function PrdLifecycleView({ repoId, prdPath }: { repoId: string; prdPath:
     );
   }
 
-  if (lifecycleState.status === "error") {
+  if (currentLifecycleState.status === "error") {
     return (
       <div className="space-y-3" data-testid="prd-lifecycle-error">
-        <ResourceErrorAlert message={lifecycleState.message} testId="prd-lifecycle-error-alert" />
+        <ResourceErrorAlert message={currentLifecycleState.message} testId="prd-lifecycle-error-alert" />
         <Button
           variant="outline"
           size="sm"
@@ -112,7 +174,7 @@ export function PrdLifecycleView({ repoId, prdPath }: { repoId: string; prdPath:
     );
   }
 
-  const detail = lifecycleState.detail;
+  const detail = currentLifecycleState.detail;
 
   if (!detail.has_data) {
     return (
@@ -131,26 +193,57 @@ export function PrdLifecycleView({ repoId, prdPath }: { repoId: string; prdPath:
   const orderedEvents = [...detail.events].sort((left, right) =>
     left.occurred_at.localeCompare(right.occurred_at),
   );
+  const currentAttemptDetailsState = attemptDetailsState.requestKey === lifecycleRequestKey
+    ? attemptDetailsState
+    : { status: "loading" as const, attempts: [] };
   const statusLabel = resolveStatusLabel(detail);
 
   return (
-    <div className="space-y-4" data-testid="prd-lifecycle-view">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <Badge variant={phaseBadgeVariant(detail.current_phase)} data-testid="prd-lifecycle-current-phase">
-          {PHASE_LABELS[detail.current_phase] ?? detail.current_phase}
-        </Badge>
-        <span className="text-sm font-medium">{statusLabel}</span>
-        {detail.run_id ? (
-          <span className="font-mono text-xs text-slate-500" data-testid="prd-lifecycle-run-id">
-            {detail.run_id}
-          </span>
-        ) : null}
-        {detail.issue_number ? (
-          <span className="text-xs text-slate-500">Issue #{detail.issue_number}</span>
-        ) : null}
+    <div className="@container/lifecycle min-w-0 space-y-3" data-testid="prd-lifecycle-view">
+      <div
+        role="group"
+        className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,11rem),1fr))] gap-2"
+        aria-label="生命周期状态概览"
+      >
+        <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-2 dark:border-slate-800 dark:bg-slate-900/60">
+          <p className="text-xs text-slate-500">最近记录阶段</p>
+          <Badge
+            className="mt-1"
+            variant={phaseBadgeVariant(detail.current_phase)}
+            data-testid="prd-lifecycle-current-phase"
+          >
+            {PHASE_LABELS[detail.current_phase] ?? detail.current_phase}
+          </Badge>
+        </div>
+        <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-2 dark:border-slate-800 dark:bg-slate-900/60">
+          <p className="text-xs text-slate-500">执行状态</p>
+          <p className="mt-1 text-sm font-semibold text-slate-900 dark:text-slate-100">
+            {statusLabel}
+          </p>
+        </div>
+        <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-2 dark:border-slate-800 dark:bg-slate-900/60">
+          <p className="text-xs text-slate-500">记录完整性</p>
+          <p
+            className={cn(
+              "mt-1 text-sm font-semibold",
+              detail.history_complete
+                ? "text-emerald-700 dark:text-emerald-300"
+                : "text-amber-700 dark:text-amber-300",
+            )}
+          >
+            {detail.history_complete ? "历史完整" : "存在记录缺口"}
+          </p>
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
+        {detail.run_id ? (
+          <span data-testid="prd-lifecycle-run-id">
+            会话：
+            <span className="font-mono text-slate-700 dark:text-slate-300">{detail.run_id}</span>
+          </span>
+        ) : null}
+        {detail.issue_number ? <span>Issue #{detail.issue_number}</span> : null}
         <span>开始：{formatLocalDateTime(detail.started_at)}</span>
         <span>
           结束：{detail.finished_at ? formatLocalDateTime(detail.finished_at) : "进行中"}
@@ -168,11 +261,12 @@ export function PrdLifecycleView({ repoId, prdPath }: { repoId: string; prdPath:
         </div>
       ) : null}
 
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,10rem),1fr))] gap-2">
         <MetricTile
           label="端到端"
           value={formatLifecycleDuration(detail.durations.end_to_end_seconds)}
           testId="prd-lifecycle-metric-e2e"
+          accent
         />
         <MetricTile
           label="有效执行"
@@ -192,12 +286,39 @@ export function PrdLifecycleView({ repoId, prdPath }: { repoId: string; prdPath:
       </div>
 
       <div className="space-y-2">
-        <p className="text-sm font-medium">生命周期时间线</p>
-        <PrdLifecycleTimeline
+        <div>
+          <p className="text-base font-semibold tracking-tight">生命周期执行过程</p>
+          <p className="mt-1 text-xs text-slate-500">
+            先按业务阶段查看实现、修复、收尾、校验、审核和监督；原始事件与 Agent 尝试轨迹可展开核对。
+          </p>
+        </div>
+        <PrdLifecycleStageTimeline
           events={orderedEvents}
           invocations={detail.invocations}
+          attemptDetails={currentAttemptDetailsState.attempts}
+          attemptDetailsStatus={currentAttemptDetailsState.status}
+          currentPhase={detail.current_phase}
+          inProgress={detail.in_progress}
+          startedAt={detail.started_at}
           onSelectEvent={setSelectedEvent}
         />
+        <details
+          data-testid="prd-lifecycle-raw-timeline-toggle"
+          className="rounded-lg border border-slate-200 bg-slate-50/70 px-3 dark:border-slate-800 dark:bg-slate-900/50"
+        >
+          <summary className="cursor-pointer py-2 text-sm font-medium text-slate-700 dark:text-slate-200">
+            完整事件轨迹与 Agent 尝试（{orderedEvents.length} 条事件 · {orderedEvents.filter((event) => event.event_type === "attempt").length} 次尝试）
+          </summary>
+          <div className="pb-3">
+            <PrdLifecycleTimeline
+              events={orderedEvents}
+              invocations={detail.invocations}
+              attemptDetails={currentAttemptDetailsState.attempts}
+              attemptDetailsStatus={currentAttemptDetailsState.status}
+              onSelectEvent={setSelectedEvent}
+            />
+          </div>
+        </details>
       </div>
 
       <Sheet
@@ -261,26 +382,58 @@ function resolveStatusLabel(detail: PrdLifecycleDetail): string {
   return OUTCOME_LABELS[detail.outcome] ?? detail.outcome;
 }
 
+/**
+ * 展示一项生命周期耗时指标。
+ *
+ * @param props.label - 指标名称。
+ * @param props.value - 格式化后的指标值。
+ * @param props.testId - 自动化定位标识。
+ * @param props.accent - 是否使用重点强调样式。
+ * @returns 生命周期指标卡片。
+ */
 function MetricTile({
   label,
   value,
   testId,
+  accent = false,
 }: {
   label: string;
   value: string;
   testId: string;
+  accent?: boolean;
 }) {
   return (
     <div
       data-testid={testId}
-      className="rounded-md border border-slate-200 p-3 dark:border-slate-800"
+      className={cn(
+        "min-w-0 rounded-lg border p-2",
+        accent
+          ? "border-violet-200 bg-violet-50/80 dark:border-violet-900 dark:bg-violet-950/30"
+          : "border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950",
+      )}
     >
       <p className="text-xs text-slate-500">{label}</p>
-      <p className="mt-1 text-lg font-semibold">{value}</p>
+      <p
+        className={cn(
+          "mt-1 text-lg font-semibold tracking-tight",
+          accent
+            ? "text-violet-700 dark:text-violet-300"
+            : "text-slate-900 dark:text-slate-100",
+        )}
+      >
+        {value}
+      </p>
     </div>
   );
 }
 
+/**
+ * 展示生命周期事件的结构化原始详情。
+ *
+ * @param props.event - 当前选中的生命周期事件。
+ * @param props.runId - 当前 PRD 生命周期标识；为空时不显示。
+ * @returns 事件详情字段列表。
+ */
 function EventDetailRows({
   event,
   runId,
@@ -322,6 +475,13 @@ function EventDetailRows({
   );
 }
 
+/**
+ * 渲染事件详情抽屉中的单个字段。
+ *
+ * @param props.label - 字段名称。
+ * @param props.children - 字段值内容。
+ * @returns 两列对齐的详情行。
+ */
 function DetailRow({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex gap-3 py-2">

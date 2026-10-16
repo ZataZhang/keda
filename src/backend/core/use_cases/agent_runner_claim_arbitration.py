@@ -1,10 +1,11 @@
-"""首次领取的并发仲裁：把 ``agent/ready`` → ``agent/running`` 的领取补成真 CAS。
+"""Issue 认领的并发仲裁：默认把 ready → running 的领取补成真 CAS。
 
 GitHub 的 label 更新没有 compare-and-swap，两个并发领取者写的是同一个标签，所以
 「谁先到」无法用标签判定。本模块改用**认领标记做见证**：先投递自己的认领评论
 （投标），回读线程里同一轮的所有投标，按 ``started_at`` 最早者胜出、同刻按
 ``(host, pid)`` 字典序打破平局。赢家才把 Issue 切到 ``agent/running``；输家把自己
 那条评论改写成撤销说明后退出，**不碰标签**（标签归赢家，动了会把赢家状态改写）。
+Supervisor 发起的返工也复用仲裁，并将目标状态设为 supervising。
 
 守护进程与显式定向共用同一条领取路径，因此两种入口都受保护。
 
@@ -36,6 +37,8 @@ from backend.core.use_cases.agent_runner_workflow import transition_issue_workfl
 #: 来自「每个进程对它看到的同一批投标算出同一个赢家」，宽限只是压缩「双方都还
 #: 看不见对方评论」的传播窗口，不是判据本身，因此取 1 秒而非更大值。
 CLAIM_ARBITRATION_GRACE_SECONDS = 1.0
+_CLAIM_ARBITRATION_READBACK_RETRIES = 2
+_CLAIM_ARBITRATION_READBACK_RETRY_DELAY_SECONDS = 1.0
 
 #: 只有落在这个时间窗内的认领标记才算「同一轮的并发投标」。历史认领（同一个
 #: Issue 的早先轮次、rework、发布恢复）必须被排除，否则一个旧的更早时间戳会让
@@ -200,8 +203,9 @@ def arbitrate_first_claim(
     pid_alive: Callable[[int], bool] = is_pid_alive,
     now: datetime | None = None,
     on_won: Callable[[], None] | None = None,
+    target_label: str | None = None,
 ) -> ClaimBid:
-    """投标 → 回读 → 仲裁 → 赢家切 running；输家撤销并抛出落败。
+    """投标 → 回读 → 仲裁 → 赢家切到目标状态；输家撤销并抛出落败。
 
     赢家是**本进程自己的更早投标**时按重入处理（agent fallback 换 agent 会对同一
     Issue 再走一遍领取）：认领本就属于我们，继续执行而不是落败。
@@ -219,6 +223,7 @@ def arbitrate_first_claim(
         pid_alive: PID 存活探针（测试可注入）。
         now: 当前时间（测试可注入）。
         on_won: 赢家确认后、切换 Issue 标签前执行的互斥准入回调。
+        target_label: 赢家状态；省略时保持普通 runner 认领的 ``agent/running``。
 
     Returns:
         胜出的投标（即调用方自己那条）。
@@ -242,23 +247,35 @@ def arbitrate_first_claim(
     if grace_seconds > 0:
         sleeper(grace_seconds)
 
-    try:
-        entries = github_client.list_issue_comment_entries(issue_number)
-    except Exception as exc:  # noqa: BLE001 - 无法回读就无法证明自己赢，本轮放弃
-        raise ClaimArbitrationLost(
-            f"Could not read back claim comments for Issue #{issue_number}: {exc}"
-        ) from exc
+    own_bid: ClaimBid | None = None
+    bids: list[ClaimBid] = []
+    for read_attempt in range(_CLAIM_ARBITRATION_READBACK_RETRIES + 1):
+        try:
+            entries = github_client.list_issue_comment_entries(issue_number)
+        except Exception as exc:  # noqa: BLE001 - 无法回读就无法证明自己赢，本轮放弃
+            raise ClaimArbitrationLost(
+                f"Could not read back claim comments for Issue #{issue_number}: {exc}"
+            ) from exc
 
-    bids = concurrent_bids(entries, this_host=this_host, now=effective_now, pid_alive=pid_alive)
-    own_bid = next(
-        (
-            candidate
-            for candidate in bids
-            if (candidate.host, candidate.pid, candidate.started_at)
-            == (bid.host, bid.pid, bid.started_at)
-        ),
-        None,
-    )
+        bids = concurrent_bids(
+            entries,
+            this_host=this_host,
+            now=effective_now,
+            pid_alive=pid_alive,
+        )
+        own_bid = next(
+            (
+                candidate
+                for candidate in bids
+                if (candidate.host, candidate.pid, candidate.started_at)
+                == (bid.host, bid.pid, bid.started_at)
+            ),
+            None,
+        )
+        if own_bid is not None or read_attempt == _CLAIM_ARBITRATION_READBACK_RETRIES:
+            break
+        sleeper(_CLAIM_ARBITRATION_READBACK_RETRY_DELAY_SECONDS)
+
     if own_bid is None:
         raise ClaimArbitrationLost(
             f"Own claim marker for Issue #{issue_number} was not visible on read-back; "
@@ -271,7 +288,12 @@ def arbitrate_first_claim(
         # 换 agent 会再走一遍领取），不是竞争。继续执行，不撤销自己的认领。
         if on_won is not None:
             on_won()
-        transition_issue_workflow_state(github_client, issue_number, config, config.labels.running)
+        transition_issue_workflow_state(
+            github_client,
+            issue_number,
+            config,
+            target_label or config.labels.running,
+        )
         return own_bid
     if _bid_sort_key(winner) != _bid_sort_key(own_bid):
         github_client.edit_issue_comment(
@@ -284,7 +306,12 @@ def arbitrate_first_claim(
             winner=winner,
         )
 
-    transition_issue_workflow_state(github_client, issue_number, config, config.labels.running)
+    transition_issue_workflow_state(
+        github_client,
+        issue_number,
+        config,
+        target_label or config.labels.running,
+    )
     return own_bid
 
 

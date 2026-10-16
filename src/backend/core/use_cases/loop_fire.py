@@ -5,9 +5,10 @@ A single :func:`fire_loop` invocation:
 1. Loads the recipe from disk and renders the PRD body template with the
    built-in and ``pre_command`` variables.
 2. Writes a new PRD to ``tasks/pending/`` with a date-stamped filename.
-3. Reuses :func:`create_issue_from_prd` to create a GitHub Issue.
-4. Attaches the default ``loop/<id>`` label (and any extras from the
-   recipe) via :meth:`IGitHubClient.edit_issue_labels`.
+3. Reuses :func:`create_issue_from_prd` (or the plain-Issue path) to create a
+   GitHub Issue.
+4. The default ``loop/<id>`` label (and any extras from the recipe) is part
+   of the create call itself, so an Issue never exists without it.
 5. Updates the loop's persisted state with the new ``last_fire_at``,
    ``next_fire_at`` and ``fire_count`` so the daemon can schedule the
    subsequent run.
@@ -31,16 +32,22 @@ from backend.core.shared.interfaces.agent_runner import (
     IGitHubClient,
     IProcessRunner,
 )
-from backend.core.shared.interfaces.loop_scheduler import ILoopClock
+from backend.core.shared.interfaces.loop_scheduler import ILoopClock, ILoopStateStore
 from backend.core.shared.models.agent_runner import LabelConfig
 from backend.core.shared.models.loop import (
     LoopFireResult,
     LoopFireStatus,
+    LoopManager,
+    LoopOutput,
     LoopTask,
 )
 from backend.core.use_cases.create_issue_from_prd import (
     IssueFromPrdRequest,
     create_issue_from_prd,
+)
+from backend.core.use_cases.create_issue_from_prompt import (
+    IssueFromPromptRequest,
+    create_issue_from_prompt,
 )
 from backend.core.use_cases.loop_recipe import (
     parse_loop_recipe,
@@ -48,7 +55,10 @@ from backend.core.use_cases.loop_recipe import (
     render_loop_recipe,
     render_loop_recipe_title,
 )
-from backend.core.use_cases.loop_scheduler import compute_next_fire
+from backend.core.use_cases.loop_scheduler import (
+    compute_next_fire,
+    localize_loop_datetime,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -127,6 +137,96 @@ def _issue_already_exists(
         )
         return False
     return any(day_token in issue.title for issue in issues)
+
+
+def _active_loop_issue_reason(
+    github_client: IGitHubClient,
+    *,
+    loop_id: str,
+    limit: int = 50,
+) -> str | None:
+    """判断 agent-daemon loop 的上一轮 Issue 是否还没结束。
+
+    规则只有一条：只要带 ``loop/<id>`` 标签的 Issue 仍是开放状态，就不触发下一轮。
+    交付 PR 合并后 ``Closes #N`` 会关闭 Issue，那时才放行；因此“PR 已建、等人工审核”
+    这类中间状态也算未结束，不会让下一轮重复做同一件事、与未合并的 PR 冲突。
+
+    不靠 workflow 标签推断“算不算完成”：标签集合会随 runner 状态演进，漏判一个就会
+    产生重叠任务；而 Issue 是否关闭是 GitHub 上唯一确定的终态。
+
+    Args:
+        github_client: 用于查询 loop Issue 的 GitHub 客户端。
+        loop_id: loop 标识，对应 ``loop/<id>`` 标签。
+        limit: 最多检查的开放 Issue 数量。
+
+    Returns:
+        需要暂停时返回人读原因（含 Issue 编号与当前 workflow 标签）；上一轮已关闭
+        时返回 ``None``。
+
+    Raises:
+        RuntimeError: 无法安全读取 GitHub 状态时抛出（宁可暂停也不重叠触发）。
+    """
+    label = f"loop/{loop_id}"
+    try:
+        issues = github_client.list_issues_by_label(label, limit, state="open")
+    except Exception as exc:  # noqa: BLE001 - pausing is safer than overlap.
+        raise RuntimeError(
+            f"Could not inspect active Issues for loop {loop_id!r}; fire paused."
+        ) from exc
+    if not issues:
+        return None
+    previous_issue = issues[0]
+    workflow_labels = [
+        label_name
+        for label_name in previous_issue.labels
+        if label_name.startswith(("agent/", "human/"))
+    ]
+    state_text = ", ".join(workflow_labels) if workflow_labels else "no runner label"
+    return (
+        f"previous Issue #{previous_issue.number} is still open ({state_text}); "
+        "the next fire waits until it is closed (its PR merged)"
+    )
+
+
+def _skip_when_reason(skip_when: str | None, variables: dict[str, str]) -> str | None:
+    """按 ``pre_command`` 变量求值 ``skip_when``，命中时返回人读原因。
+
+    条件形如 ``KEY=value1,value2``：变量存在且取值在列表内才算命中；变量缺失
+    视为不命中（fail-open），避免前置命令异常时悄悄吞掉本次触发。
+
+    Args:
+        skip_when: recipe 声明的跳过条件；为空表示不跳过。
+        variables: ``pre_command`` 注入的模板变量。
+
+    Returns:
+        命中时的原因文本；否则 ``None``。
+    """
+    if not skip_when:
+        return None
+    variable_name, _, raw_values = skip_when.partition("=")
+    variable_name = variable_name.strip()
+    allowed_values = {value.strip() for value in raw_values.split(",")}
+    actual_value = variables.get(variable_name)
+    if actual_value is not None and actual_value.strip() in allowed_values:
+        return f"skip_when {skip_when!r} matched ({variable_name}={actual_value.strip()})"
+    return None
+
+
+def _persist_skip_reason(
+    state_store: ILoopStateStore,
+    task: LoopTask,
+    *,
+    reason: str,
+    next_fire_at: str | None = None,
+) -> None:
+    """记录本次未造票的原因；内容没变化时不写状态文件，避免每轮重写。"""
+    updated = replace(
+        task,
+        last_skip_reason=reason,
+        next_fire_at=next_fire_at if next_fire_at is not None else task.next_fire_at,
+    )
+    if updated != task:
+        state_store.upsert_task(updated)
 
 
 # ---------------------------------------------------------------------------
@@ -215,9 +315,37 @@ def fire_loop(
         ValueError: When the recipe is malformed.
     """
     recipe = parse_loop_recipe(task.recipe_path)
-    fire_at = clock.now().astimezone(timezone.utc)
+    effective_timezone_name = task.timezone_name or recipe.timezone_name
+    fire_at_utc = clock.now().astimezone(timezone.utc)
+    fire_at = localize_loop_datetime(
+        fire_at_utc,
+        timezone_name=effective_timezone_name,
+    )
     day_token = fire_at.strftime("%Y-%m-%d")
     effective_labels = labels_config or LabelConfig()
+
+    # ``output: issue`` 的 loop 不产生 PRD 文件：配方正文直接成为 Issue 正文。
+    prd_path = (
+        build_prd_path(
+            repo_path,
+            loop_id=task.slug or task.id,
+            priority=task.priority,
+            fire_at=fire_at,
+        )
+        if task.output == LoopOutput.PRD.value
+        else None
+    )
+
+    if not dry_run and task.managed_by == LoopManager.AGENT_DAEMON.value:
+        active_reason = _active_loop_issue_reason(github_client, loop_id=task.id)
+        if active_reason is not None:
+            _persist_skip_reason(state_store, task, reason=active_reason)
+            return LoopFireResult(
+                loop_id=task.id,
+                status=LoopFireStatus.SKIPPED_ACTIVE,
+                skipped_reason=active_reason,
+                next_fire_at=task.next_fire_at,
+            )
 
     extra_variables: dict[str, str] = {}
     if task.pre_command:
@@ -225,6 +353,27 @@ def fire_loop(
             task.pre_command,
             cwd=task.recipe_path.parent,
             process_runner=process_runner,
+        )
+
+    skip_reason = _skip_when_reason(task.skip_when, extra_variables)
+    if skip_reason is not None:
+        next_skip_dt = compute_next_fire(
+            task.schedule,
+            after=fire_at_utc,
+            timezone_name=effective_timezone_name,
+        )
+        if not dry_run:
+            _persist_skip_reason(
+                state_store,
+                task,
+                reason=skip_reason,
+                next_fire_at=next_skip_dt.isoformat(),
+            )
+        return LoopFireResult(
+            loop_id=task.id,
+            status=LoopFireStatus.DRY_RUN if dry_run else LoopFireStatus.SKIPPED_CONDITION,
+            skipped_reason=(f"Would skip: {skip_reason}" if dry_run else skip_reason),
+            next_fire_at=next_skip_dt.isoformat(),
         )
 
     rendered_body = render_loop_recipe(
@@ -238,40 +387,48 @@ def fire_loop(
         extra_variables=extra_variables,
     )
     issue_title = rendered_title or recipe.id
-    prd_path = build_prd_path(
-        repo_path,
-        loop_id=task.slug or task.id,
-        priority=task.priority,
-        fire_at=fire_at,
-    )
-
     if dry_run:
-        next_fire_dt = compute_next_fire(task.schedule, after=fire_at)
+        next_fire_dt = compute_next_fire(
+            task.schedule,
+            after=fire_at_utc,
+            timezone_name=effective_timezone_name,
+        )
+        output_text = (
+            f"render PRD at {prd_path}"
+            if prd_path is not None
+            else "create a plain Issue (no PRD file)"
+        )
         return LoopFireResult(
             loop_id=task.id,
             status=LoopFireStatus.DRY_RUN,
             prd_path=prd_path,
-            relative_prd_path=prd_path.relative_to(repo_path),
+            relative_prd_path=prd_path.relative_to(repo_path) if prd_path is not None else None,
             skipped_reason=(
-                f"Would render PRD at {prd_path} with title "
+                f"Would {output_text} with title "
                 f"{issue_title!r} and labels {list(recipe.all_labels())}; "
                 f"next fire at {next_fire_dt.isoformat()}."
             ),
             next_fire_at=next_fire_dt.isoformat(),
         )
 
-    prd_path.parent.mkdir(parents=True, exist_ok=True)
-    prd_path.write_text(rendered_body, encoding="utf-8")
+    relative_prd_path = prd_path.relative_to(repo_path) if prd_path is not None else None
+    if prd_path is not None:
+        prd_path.parent.mkdir(parents=True, exist_ok=True)
+        prd_path.write_text(rendered_body, encoding="utf-8")
 
     if _issue_already_exists(
         github_client,
         loop_id=task.id,
         day_token=day_token,
     ):
-        next_fire_dt = compute_next_fire(task.schedule, after=fire_at)
+        next_fire_dt = compute_next_fire(
+            task.schedule,
+            after=fire_at_utc,
+            timezone_name=effective_timezone_name,
+        )
         updated = replace(
             task,
-            last_fire_at=fire_at.isoformat(),
+            last_fire_at=fire_at_utc.isoformat(),
             next_fire_at=next_fire_dt.isoformat(),
         )
         state_store.upsert_task(updated)
@@ -279,7 +436,7 @@ def fire_loop(
             loop_id=task.id,
             status=LoopFireStatus.SKIPPED_DUPLICATE,
             prd_path=prd_path,
-            relative_prd_path=prd_path.relative_to(repo_path),
+            relative_prd_path=relative_prd_path,
             skipped_reason=(
                 f"Open Issue with label loop/{task.id} already exists for "
                 f"{day_token}; skipped creation."
@@ -287,48 +444,31 @@ def fire_loop(
             next_fire_at=next_fire_dt.isoformat(),
         )
 
-    relative_prd_path = prd_path.relative_to(repo_path)
-    issue_url = create_issue_from_prd(
-        request=IssueFromPrdRequest(
-            repo_path=repo_path,
-            prd_path=prd_path,
-            issue_type=task.issue_type,
-            title_override=f"[{task.issue_type.title()}] {issue_title}",
-            queue_ready=task.queue_ready,
-            issue_agent=task.agent,
-            labels_config=effective_labels,
-            force=False,
-            publish_prd=task.publish_prd,
-            git_remote="origin",
-            git_base_branch="main",
-            generated_content_config=None,
-            depends_on=(),
-            parse_evidence_format_with_agent=False,
-            validation_language="zh-CN",
-            structured_evidence=True,
-        ),
+    issue_url = _create_loop_issue(
+        task,
+        prd_path=prd_path,
+        rendered_body=rendered_body,
+        issue_title=issue_title,
+        repo_path=repo_path,
+        labels_config=effective_labels,
+        extra_labels=tuple(_effective_extra_labels(task, recipe)),
         github_client=github_client,
         process_runner=process_runner,
         content_generator=content_generator,
     )
     issue_number = _extract_issue_number(issue_url)
 
-    extra_labels = list(_effective_extra_labels(task, recipe))
-    if extra_labels:
-        if issue_number is None:
-            _logger.warning(
-                "Could not derive Issue number from %s; skipping extra labels.",
-                issue_url,
-            )
-        else:
-            github_client.edit_issue_labels(issue_number, add=extra_labels)
-
-    next_fire_dt = compute_next_fire(task.schedule, after=fire_at)
+    next_fire_dt = compute_next_fire(
+        task.schedule,
+        after=fire_at_utc,
+        timezone_name=effective_timezone_name,
+    )
     updated = replace(
         task,
-        last_fire_at=fire_at.isoformat(),
+        last_fire_at=fire_at_utc.isoformat(),
         next_fire_at=next_fire_dt.isoformat(),
         fire_count=task.fire_count + 1,
+        last_skip_reason=None,
     )
     state_store.upsert_task(updated)
 
@@ -340,6 +480,71 @@ def fire_loop(
         issue_url=issue_url,
         issue_number=issue_number,
         next_fire_at=next_fire_dt.isoformat(),
+    )
+
+
+def _create_loop_issue(
+    task: LoopTask,
+    *,
+    prd_path: Path | None,
+    rendered_body: str,
+    issue_title: str,
+    repo_path: Path,
+    labels_config: LabelConfig,
+    extra_labels: tuple[str, ...],
+    github_client: IGitHubClient,
+    process_runner: IProcessRunner,
+    content_generator: IContentGenerator | None,
+) -> str:
+    """按 loop 的产出形态创建 Issue，返回 Issue URL。
+
+    ``output: prd``：PRD 已写入磁盘，走完整的“从 PRD 建 Issue”流程（含 PRD 链接回写）。
+    ``output: issue``：不碰任何 PRD 文件，配方正文原文作为 Issue 正文，Issue 与 PRD
+    生命周期（归档、一对一链接、按 PRD 分目录的证据）完全无关。
+
+    ``loop/<id>`` 与配方标签在创建调用里一并带上，而不是事后补：事后补一旦失败，Issue 已
+    存在却没有 ``loop/<id>``，去重与“上一个未关闭则暂停”都认不出它，下一次触发会重复建。
+    """
+    issue_title_text = f"[{task.issue_type.title()}] {issue_title}"
+    if prd_path is None:
+        return create_issue_from_prompt(
+            request=IssueFromPromptRequest(
+                repo_path=repo_path,
+                prompt_text=rendered_body,
+                issue_type=task.issue_type,
+                title_override=issue_title_text,
+                queue_ready=task.queue_ready,
+                issue_agent=task.agent,
+                labels_config=labels_config,
+                generated_content_config=None,
+                extra_labels=extra_labels,
+            ),
+            github_client=github_client,
+            content_generator=content_generator,
+        )
+    return create_issue_from_prd(
+        request=IssueFromPrdRequest(
+            repo_path=repo_path,
+            prd_path=prd_path,
+            issue_type=task.issue_type,
+            title_override=issue_title_text,
+            queue_ready=task.queue_ready,
+            issue_agent=task.agent,
+            labels_config=labels_config,
+            force=False,
+            publish_prd=task.publish_prd,
+            git_remote="origin",
+            git_base_branch="main",
+            generated_content_config=None,
+            depends_on=(),
+            parse_evidence_format_with_agent=False,
+            validation_language="zh-CN",
+            structured_evidence=True,
+            extra_labels=extra_labels,
+        ),
+        github_client=github_client,
+        process_runner=process_runner,
+        content_generator=content_generator,
     )
 
 

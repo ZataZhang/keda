@@ -79,7 +79,7 @@ def _make_issue(*, number: int, labels: tuple[str, ...] = ()) -> IssueSummary:
 
 
 def _make_pr_context(
-    *, branch: str, head_sha: str = "abc1234", number: int = 50
+    *, branch: str, head_sha: str = "abc1234", number: int = 50, is_draft: bool | None = False
 ) -> PullRequestContext:
     # Default the PR number from the trailing digit if present, else to 50.
     return PullRequestContext(
@@ -91,6 +91,7 @@ def _make_pr_context(
         checks_state="SUCCESS",
         number=number,
         body="",
+        is_draft=is_draft,
     )
 
 
@@ -122,7 +123,7 @@ def test_stack_downstream_skipped_until_upstream_merged(tmp_path) -> None:
         title="downstream",
         url="https://github.com/example/repo/issues/7",
         body='<!-- iar:depends-on #42 mode="stack" -->',
-        labels=("agent/review",),
+        labels=("agent/automated-review-passed",),
     )
     outcome = merge_queue_module._process_one(
         repo_path=tmp_path,
@@ -148,7 +149,7 @@ def test_stack_downstream_converges_after_upstream_merged(tmp_path, worktree_pat
         title="downstream",
         url="https://github.com/example/repo/issues/70",
         body='<!-- iar:depends-on #42 mode="stack" -->',
-        labels=("agent/review",),
+        labels=("agent/automated-review-passed",),
     )
     github.set_pr_context(branch, _make_pr_context(branch=branch, number=70))
     github._issue_comments[70] = [f"PR Branch: `{branch}`"]
@@ -183,7 +184,7 @@ def test_stack_convergence_retarget_failure_skips(tmp_path, worktree_path) -> No
         title="downstream",
         url="https://github.com/example/repo/issues/70",
         body='<!-- iar:depends-on #42 mode="stack" -->',
-        labels=("agent/review",),
+        labels=("agent/automated-review-passed",),
     )
     github.set_pr_context(branch, _make_pr_context(branch=branch, number=70))
     github._issue_comments[70] = [f"PR Branch: `{branch}`"]
@@ -247,7 +248,7 @@ def test_convergence_refreshes_head_before_forbidden_scan(tmp_path, worktree_pat
         title="downstream",
         url="https://github.com/example/repo/issues/70",
         body='<!-- iar:depends-on #42 mode="stack" -->',
-        labels=("agent/review",),
+        labels=("agent/automated-review-passed",),
     )
     github._issue_comments[70] = [f"PR Branch: `{branch}`"]
 
@@ -282,7 +283,7 @@ def test_via_main_issue_never_retargets_base(tmp_path, worktree_path) -> None:
         title="plain",
         url="https://github.com/example/repo/issues/71",
         body="",
-        labels=("agent/review",),
+        labels=("agent/automated-review-passed",),
     )
     github.set_pr_context(branch, _make_pr_context(branch=branch, number=71))
     github._issue_comments[71] = [f"PR Branch: `{branch}`"]
@@ -298,6 +299,164 @@ def test_via_main_issue_never_retargets_base(tmp_path, worktree_path) -> None:
 
     assert outcome.action == "merged"
     assert not any(c.get("method") == "set_pull_request_base" for c in github.calls)
+
+
+def test_draft_pr_is_readied_after_local_gates_and_before_checks_and_merge(
+    tmp_path, worktree_path, monkeypatch
+) -> None:
+    """已获准的 Draft PR 先转 Ready，再读取 checks 并合并。"""
+    branch = "issue-74"
+    github = FakeGitHubClient()
+    github.set_pr_context(
+        branch,
+        _make_pr_context(branch=branch, number=74, is_draft=True),
+    )
+    github._issue_comments[74] = [f"PR Branch: `{branch}`"]
+    runner = FakeProcessRunner(responses=_git_state_responses(branch, "abc1234"))
+    original_wait = merge_queue_module._wait_for_checks_green
+
+    def verify_ready_before_check_wait(pr_context, config, github_client, **kwargs):
+        assert pr_context.is_draft is False
+        assert any(call["method"] == "mark_pull_request_ready" for call in github.calls)
+        return original_wait(pr_context, config, github_client, **kwargs)
+
+    monkeypatch.setattr(
+        merge_queue_module, "_wait_for_checks_green", verify_ready_before_check_wait
+    )
+
+    outcome = merge_queue_module._process_one(
+        repo_path=tmp_path,
+        config=_make_config(require_verifier_pass=False, auto_sign_off=False),
+        issue=_make_issue(number=74, labels=("agent/automated-review-passed",)),
+        github_client=github,
+        process_runner=runner,
+        supervisor_agent="auto",
+    )
+
+    assert outcome.action == "merged"
+    github_methods = [call["method"] for call in github.calls]
+    assert github_methods.index("mark_pull_request_ready") < github_methods.index(
+        "merge_pull_request"
+    )
+
+
+def test_draft_pr_ready_failure_keeps_review_state_and_never_merges(
+    tmp_path, worktree_path
+) -> None:
+    """GitHub 未确认 Ready 时不合并或回退 Issue 生命周期。"""
+    branch = "issue-75"
+
+    class _ReadyFailureGitHub(FakeGitHubClient):
+        def mark_pull_request_ready(self, pr_number: int) -> None:
+            """模拟 GitHub 拒绝 PR 状态转换。"""
+            self.calls.append({"method": "mark_pull_request_ready", "pr_number": pr_number})
+            raise RuntimeError("GitHub unavailable")
+
+    github = _ReadyFailureGitHub()
+    github.set_pr_context(
+        branch,
+        _make_pr_context(branch=branch, number=75, is_draft=True),
+    )
+    github._issue_comments[75] = [f"PR Branch: `{branch}`"]
+    runner = FakeProcessRunner(responses=_git_state_responses(branch, "abc1234"))
+
+    outcome = merge_queue_module._process_one(
+        repo_path=tmp_path,
+        config=_make_config(require_verifier_pass=False, auto_sign_off=False),
+        issue=_make_issue(number=75, labels=("agent/automated-review-passed",)),
+        github_client=github,
+        process_runner=runner,
+        supervisor_agent="auto",
+    )
+
+    github_methods = [call["method"] for call in github.calls]
+    assert outcome.action == "waiting_for_pr_ready"
+    assert "merge_pull_request" not in github_methods
+    assert "edit_issue_labels" not in github_methods
+    assert sum(call["method"] == "comment_issue" for call in github.calls) == 1
+
+
+def test_manual_takeover_hold_is_rechecked_immediately_before_merge(
+    tmp_path, worktree_path, monkeypatch
+) -> None:
+    """队列处理期间落下的接管闸门必须在最终合并操作前拦截。"""
+    branch = "issue-72"
+    github = FakeGitHubClient()
+    runner = FakeProcessRunner(responses=_git_state_responses(branch, "abc1234"))
+    issue = IssueSummary(
+        number=72,
+        title="hold race",
+        url="https://github.com/example/repo/issues/72",
+        body="",
+        labels=("agent/review",),
+    )
+    github.set_pr_context(branch, _make_pr_context(branch=branch, number=72))
+    github._issue_comments[72] = [f"PR Branch: `{branch}`"]
+    hold_checks = iter((False, True))
+    monkeypatch.setattr(
+        merge_queue_module,
+        "autopilot_hold_blocks",
+        lambda **_kwargs: next(hold_checks),
+    )
+
+    outcome = merge_queue_module._process_one(
+        repo_path=tmp_path,
+        config=_make_config(require_verifier_pass=False, auto_sign_off=False),
+        issue=issue,
+        github_client=github,
+        process_runner=runner,
+        supervisor_agent="auto",
+        repo_id="repo-a",
+    )
+
+    assert outcome.action == "skipped_manual_takeover_hold"
+    assert not any(call.get("method") == "merge_pull_request" for call in github.calls)
+
+
+def test_draft_pr_stays_draft_when_takeover_hold_appears_before_ready(
+    tmp_path, worktree_path, monkeypatch
+) -> None:
+    """人工接管在合并期间生效时，队列不能先把 Draft PR 暴露为 Ready。"""
+    branch = "issue-76"
+    github = FakeGitHubClient()
+    github.set_pr_context(
+        branch,
+        _make_pr_context(branch=branch, number=76, is_draft=True),
+    )
+    github._issue_comments[76] = [f"PR Branch: `{branch}`"]
+    runner = FakeProcessRunner(responses=_git_state_responses(branch, "abc1234"))
+    monkeypatch.setattr(merge_queue_module, "execute_rebase", lambda **_kwargs: [])
+    monkeypatch.setattr(
+        merge_queue_module,
+        "run_verification",
+        lambda *_args: [
+            CommandResult(command=("just", "test"), return_code=0, stdout="ok", stderr="")
+        ],
+    )
+    monkeypatch.setattr(
+        merge_queue_module, "_diff_paths", lambda *args, **kwargs: (["src/main.py"], False)
+    )
+    takeover_hold_checks = iter((False, True))
+    monkeypatch.setattr(
+        merge_queue_module,
+        "autopilot_hold_blocks",
+        lambda **_kwargs: next(takeover_hold_checks),
+    )
+
+    outcome = merge_queue_module._process_one(
+        repo_path=tmp_path,
+        config=_make_config(require_verifier_pass=False, auto_sign_off=False),
+        issue=_make_issue(number=76, labels=("agent/automated-review-passed",)),
+        github_client=github,
+        process_runner=runner,
+        supervisor_agent="auto",
+        repo_id="repo-a",
+    )
+
+    github_methods = [call["method"] for call in github.calls]
+    assert outcome.action == "skipped_manual_takeover_hold"
+    assert "mark_pull_request_ready" not in github_methods
+    assert "merge_pull_request" not in github_methods
 
 
 def test_kill_switch_off_returns_no_op(tmp_path, monkeypatch) -> None:
@@ -345,7 +504,9 @@ def test_fifo_ordering_processes_lowest_issue_first(tmp_path, worktree_path, mon
     cfg = _make_config(merge_check_timeout_seconds=0)
     processed_numbers = []
 
-    def fake_process(repo_path, config, issue, github_client, process_runner, supervisor_agent):  # noqa: ARG001
+    def fake_process(  # noqa: ARG001
+        repo_path, config, issue, github_client, process_runner, supervisor_agent, repo_id
+    ):
         processed_numbers.append(issue.number)
         from backend.core.use_cases.agent_runner_merge_queue import MergeQueueOutcome
 
@@ -379,7 +540,9 @@ def test_verifier_missing_label_skips_issue(tmp_path, worktree_path, monkeypatch
     github = FakeGitHubClient()
     runner = FakeProcessRunner()
 
-    github.set_list_issues_by_label_result([_make_issue(number=50, labels=("agent/review",))])
+    github.set_list_issues_by_label_result(
+        [_make_issue(number=50, labels=("agent/automated-review-passed",))]
+    )
 
     issue_body = (
         "## Realistic Validation\n\n- [ ] rv-1: thing\n"  # forces validation_required=True.
@@ -396,7 +559,7 @@ def test_verifier_missing_label_skips_issue(tmp_path, worktree_path, monkeypatch
         title="Issue #50",
         url="https://github.com/example/repo/issues/50",
         body=issue_body,
-        labels=("agent/review",),  # NB: no validation/verifier-passed label
+        labels=("agent/automated-review-passed",),  # NB: no validation/verifier-passed label
     )
     branch_comment = "Build complete on PR Branch: `issue-50`."
     github._issue_comments[50] = [branch_comment]
@@ -447,7 +610,7 @@ def test_prd_hold_prevents_auto_merge_until_the_human_answers(
         title="Human review",
         url="https://github.com/example/repo/issues/70",
         body="PRD path: `tasks/pending/review.md`",
-        labels=("agent/review",),
+        labels=("agent/automated-review-passed",),
     )
     prd_path = worktree_path / "tasks" / prd_directory / "review.md"
     prd_path.parent.mkdir(parents=True)
@@ -503,11 +666,13 @@ def test_scoped_prd_auto_merge_consumes_authorization_without_prd_backfill(
     archive_path.write_text(prd_text, encoding="utf-8")
 
     github = FakeGitHubClient()
-    scoped_issue = _make_issue(number=issue_number, labels=("agent/review", "prd-auto-merge"))
-    unselected_issue = _make_issue(number=89, labels=("agent/review",))
+    scoped_issue = _make_issue(
+        number=issue_number, labels=("agent/automated-review-passed", "prd-auto-merge")
+    )
+    unselected_issue = _make_issue(number=89, labels=("agent/automated-review-passed",))
     github.set_list_issues_by_label_result([scoped_issue, unselected_issue])
     github.set_issue_body(issue_number, prd_body)
-    github.set_issue_labels(issue_number, ("agent/review", "prd-auto-merge"))
+    github.set_issue_labels(issue_number, ("agent/automated-review-passed", "prd-auto-merge"))
     github.set_pr_context(
         branch,
         PullRequestContext(
@@ -519,6 +684,7 @@ def test_scoped_prd_auto_merge_consumes_authorization_without_prd_backfill(
             checks_state=checks_state,
             number=issue_number,
             body=_UNTICKED_BODY,
+            is_draft=False,
         ),
     )
     branch_comment = f"Build complete on PR Branch: `{branch}`."
@@ -545,7 +711,7 @@ def test_scoped_prd_auto_merge_consumes_authorization_without_prd_backfill(
     if revoke_authorization:
 
         def revoke_before_merge(*args, **kwargs):  # noqa: ANN002, ANN003
-            github.set_issue_labels(issue_number, ("agent/review",))
+            github.set_issue_labels(issue_number, ("agent/automated-review-passed",))
             return True, _make_pr_context(branch=branch, number=issue_number)
 
         monkeypatch.setattr(merge_queue_module, "_wait_for_checks_green", revoke_before_merge)
@@ -610,7 +776,7 @@ def test_archived_prd_awaiting_human_holds_until_the_human_answers(tmp_path, wor
         title="Archived PRD awaiting human review",
         url="https://github.com/example/repo/issues/88",
         body="PRD path: `tasks/pending/review.md`",
-        labels=("agent/review", "validation/verifier-passed"),
+        labels=("agent/automated-review-passed", "validation/verifier-passed"),
     )
     github = FakeGitHubClient()
     github.set_list_issues_by_label_result([issue])
@@ -626,6 +792,7 @@ def test_archived_prd_awaiting_human_holds_until_the_human_answers(tmp_path, wor
             checks_state="SUCCESS",
             number=88,
             body=_TICKED_BODY,
+            is_draft=False,
         ),
     )
     branch_comment = f"Build complete on PR Branch: `{branch}`."
@@ -690,9 +857,12 @@ def test_verifier_passed_then_full_path_merges(tmp_path, worktree_path, monkeypa
         checks_state="SUCCESS",
         number=99,
         body=_UNTICKED_BODY,
+        is_draft=False,
     )
     github.set_pr_context(branch, pr)
-    issue = _make_issue(number=99, labels=("agent/review", "validation/verifier-passed"))
+    issue = _make_issue(
+        number=99, labels=("agent/automated-review-passed", "validation/verifier-passed")
+    )
     github._issue_labels[99] = issue.labels
     github.set_list_issues_by_label_result([issue])
 
@@ -752,9 +922,10 @@ def test_idempotent_no_duplicate_sign_off_comment(tmp_path, worktree_path, monke
         checks_state="SUCCESS",
         number=77,
         body=_UNTICKED_BODY,
+        is_draft=False,
     )
     github.set_pr_context(branch, pr)
-    issue = _make_issue(number=77, labels=("agent/review",))
+    issue = _make_issue(number=77, labels=("agent/automated-review-passed",))
     github._issue_labels[77] = issue.labels
     branch_comment = "Build complete on PR Branch: `issue-77`."
     github._issue_comments[77] = [branch_comment, "<!-- iar:auto-sign-off previous -->"]
@@ -804,9 +975,10 @@ def test_forbidden_path_blocks_and_comments(tmp_path, worktree_path, monkeypatch
         checks_state="SUCCESS",
         number=12,
         body="",
+        is_draft=False,
     )
     github.set_pr_context(branch, pr)
-    issue = _make_issue(number=12, labels=("agent/review",))
+    issue = _make_issue(number=12, labels=("agent/automated-review-passed",))
     github._issue_labels[12] = issue.labels
     github._issue_comments[12] = ["Build complete on PR Branch: `issue-12`."]
     github._issue_comment_entries[12] = [(1, "Build complete on PR Branch: `issue-12`.")]
@@ -848,9 +1020,10 @@ def test_verification_red_does_not_merge(tmp_path, worktree_path, monkeypatch) -
         checks_state="SUCCESS",
         number=33,
         body="",
+        is_draft=False,
     )
     github.set_pr_context(branch, pr)
-    issue = _make_issue(number=33, labels=("agent/review",))
+    issue = _make_issue(number=33, labels=("agent/automated-review-passed",))
     github._issue_labels[33] = issue.labels
     github._issue_comments[33] = ["Build complete on PR Branch: `issue-33`."]
     github.set_list_issues_by_label_result([issue])
@@ -914,9 +1087,10 @@ def test_diff_unavailable_fails_closed(tmp_path, worktree_path, monkeypatch) -> 
         checks_state="SUCCESS",
         number=44,
         body="",
+        is_draft=False,
     )
     github.set_pr_context(branch, pr)
-    issue = _make_issue(number=44, labels=("agent/review",))
+    issue = _make_issue(number=44, labels=("agent/automated-review-passed",))
     github._issue_labels[44] = issue.labels
     github._issue_comments[44] = ["Build complete on PR Branch: `issue-44`."]
     github._issue_comment_entries[44] = [(1, "Build complete on PR Branch: `issue-44`.")]
@@ -946,3 +1120,77 @@ def test_diff_unavailable_fails_closed(tmp_path, worktree_path, monkeypatch) -> 
     assert any(c["issue_number"] == 44 for c in blocked_adds)
     comments = github._issue_comments.get(44, [])
     assert any("Diff Unavailable" in body for body in comments)
+
+
+def test_merge_queue_gate_blocks_on_a_store_backed_takeover_hold(
+    tmp_path, worktree_path, monkeypatch
+) -> None:
+    """闸门判定走**真实 SQLite 控制行**，而不是 monkeypatch 掉的 helper。
+
+    monkeypatch ``autopilot_hold_blocks`` 只能证明"队列在正确的位置调用了闸门"；
+    落闸本身（接管请求 CAS 置 ``autopilot_hold`` → 队列在 ``require_verifier_pass``
+    关闭时仍然拒绝合并）必须由存储背书，FR-5 才有回归保护。
+    """
+    from backend.core.shared.interfaces.issue_run_control import (
+        PHASE_VERIFIER,
+        STATE_RUNNING,
+        IssueRunControlRecord,
+    )
+    from backend.core.use_cases import agent_runner_issue_control as issue_control
+    from backend.infrastructure.persistence.console_store import SqliteConsoleStore
+
+    branch = "issue-73"
+    store = SqliteConsoleStore(tmp_path / "console.db")
+    store.register_issue_run(
+        IssueRunControlRecord(
+            repo_id="repo-a",
+            issue_number=73,
+            run_id="run-1",
+            head_sha="abc1234",
+            phase=PHASE_VERIFIER,
+            state=STATE_RUNNING,
+            autopilot_hold=False,
+            started_at="2026-10-12T00:00:00+00:00",
+            pr_number=73,
+        )
+    )
+    monkeypatch.setattr(issue_control, "resolve_issue_run_control", lambda: store)
+
+    def _attempt() -> tuple[str, bool]:
+        github = FakeGitHubClient()
+        runner = FakeProcessRunner(responses=_git_state_responses(branch, "abc1234"))
+        issue = IssueSummary(
+            number=73,
+            title="store backed hold",
+            url="https://github.com/example/repo/issues/73",
+            body="",
+            labels=("agent/review",),
+        )
+        github.set_pr_context(branch, _make_pr_context(branch=branch, number=73))
+        github._issue_comments[73] = [f"PR Branch: `{branch}`"]
+        outcome = merge_queue_module._process_one(
+            repo_path=tmp_path,
+            config=_make_config(require_verifier_pass=False, auto_sign_off=False),
+            issue=issue,
+            github_client=github,
+            process_runner=runner,
+            supervisor_agent="auto",
+            repo_id="repo-a",
+        )
+        merged = any(call.get("method") == "merge_pull_request" for call in github.calls)
+        return outcome.action, merged
+
+    # 对照：没有控制行落闸时，队列照常合并（闸门不是永远为真的挡箭牌）。
+    assert _attempt() == ("merged", True)
+
+    # 接管请求 CAS 落闸后，同一份配置（require_verifier_pass=false）必须停止合并。
+    store.request_issue_takeover(
+        repo_id="repo-a",
+        issue_number=73,
+        run_id="run-1",
+        head_sha="abc1234",
+        request_id="req-1",
+        requested_at="2026-10-12T00:00:01+00:00",
+    )
+    assert store.has_autopilot_hold(repo_id="repo-a", issue_number=73) is True
+    assert _attempt() == ("skipped_manual_takeover_hold", False)

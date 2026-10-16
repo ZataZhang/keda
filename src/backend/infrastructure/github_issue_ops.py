@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, Sequence
 from urllib.parse import quote
 
-from backend.infrastructure.github_helpers import _extract_comment_id_from_url
+from backend.core.shared.interfaces.agent_runner import GitHubApiRateLimitError
 from backend.infrastructure.github_models import IssueSummary
 
 if TYPE_CHECKING:
@@ -51,11 +51,11 @@ class _ClientProtocol(Protocol):
 
 
 def _build_issue_summary(raw_issue: dict[str, object]) -> IssueSummary:
-    """Map a ``gh issue ... --json`` row into an :class:`IssueSummary`."""
+    """将 GitHub REST Issue 响应映射为 :class:`IssueSummary`。"""
     return IssueSummary(
         number=int(raw_issue["number"]),
         title=str(raw_issue.get("title", "")),
-        url=str(raw_issue.get("url", "")),
+        url=str(raw_issue.get("html_url", raw_issue.get("url", ""))),
         body=str(raw_issue.get("body", "") or ""),
         labels=tuple(
             str(raw_label.get("name", ""))
@@ -68,48 +68,14 @@ def _build_issue_summary(raw_issue: dict[str, object]) -> IssueSummary:
 
 def list_ready_issues(client: _ClientProtocol, ready_label: str, limit: int) -> list[IssueSummary]:
     """List open Issues with the ready label."""
-    result = client._run_with_retry(
-        [
-            "gh",
-            "issue",
-            "list",
-            "--state",
-            "open",
-            "--label",
-            ready_label,
-            "--limit",
-            str(limit),
-            "--json",
-            "number,title,url,labels,body,state",
-        ],
-        cwd=client.repo_path,
-    )
-    raw_issues = json.loads(result.stdout or "[]")
-    return [_build_issue_summary(raw_issue) for raw_issue in raw_issues]
+    return list_issues_by_label(client, ready_label, limit, state="open")
 
 
 def list_rework_prd_issues(
     client: _ClientProtocol, rework_prd_label: str, limit: int
 ) -> list[IssueSummary]:
     """List open Issues with the rework-prd label."""
-    result = client._run_with_retry(
-        [
-            "gh",
-            "issue",
-            "list",
-            "--state",
-            "open",
-            "--label",
-            rework_prd_label,
-            "--limit",
-            str(limit),
-            "--json",
-            "number,title,url,labels,body,state",
-        ],
-        cwd=client.repo_path,
-    )
-    raw_issues = json.loads(result.stdout or "[]")
-    return [_build_issue_summary(raw_issue) for raw_issue in raw_issues]
+    return list_issues_by_label(client, rework_prd_label, limit, state="open")
 
 
 def list_review_candidate_issues(
@@ -119,76 +85,63 @@ def list_review_candidate_issues(
     seen_numbers: set[int] = set()
     candidates: list[IssueSummary] = []
     for label in labels:
-        result = client._run_with_retry(
-            [
-                "gh",
-                "issue",
-                "list",
-                "--state",
-                "open",
-                "--label",
-                label,
-                "--limit",
-                str(limit),
-                "--json",
-                "number,title,url,labels,body,state",
-            ],
-            cwd=client.repo_path,
-        )
-        raw_issues = json.loads(result.stdout or "[]")
-        for raw_issue in raw_issues:
-            number = int(raw_issue["number"])
-            if number in seen_numbers:
+        for issue in list_issues_by_label(client, label, limit, state="open"):
+            if issue.number in seen_numbers:
                 continue
-            seen_numbers.add(number)
-            candidates.append(_build_issue_summary(raw_issue))
+            seen_numbers.add(issue.number)
+            candidates.append(issue)
     return candidates
 
 
 def list_issues_by_label(
     client: _ClientProtocol, label: str | None, limit: int, state: str = "all"
 ) -> list[IssueSummary]:
-    """List Issues by label across open and closed states.
+    """通过 REST 按标签读取指定状态的 Issue。
 
-    When ``label`` is ``None``, the ``--label`` flag is omitted so
-    the listing returns issues regardless of label.
+    ``label`` 为 ``None`` 时省略标签参数，返回所有标签状态的 Issue。REST 请求可避免
+    daemon 高频轮询消耗 ``gh issue list`` 使用的 GraphQL 搜索配额。
     """
-    command: list[str] = [
-        "gh",
-        "issue",
-        "list",
-        "--state",
-        state,
-        "--limit",
-        str(limit),
-        "--json",
-        "number,title,url,labels,body,state",
-    ]
+    if limit < 1:
+        return []
+
+    page_size = min(limit, 100)
+    command: list[str] = ["gh", "api", "-X", "GET"]
+    if limit > 100:
+        command.extend(["--paginate", "--slurp"])
+    command.append(f"repos/{client._get_owner_repo()}/issues")
+    command.extend(["-f", f"state={state}", "-F", f"per_page={page_size}"])
     if label is not None:
-        command[3:3] = ["--label", label]
+        command.extend(["-f", f"labels={label}"])
     result = client._run_with_retry(command, cwd=client.repo_path)
     raw_issues = json.loads(result.stdout or "[]")
-    return [_build_issue_summary(raw_issue) for raw_issue in raw_issues]
+    if limit > 100:
+        raw_issues = [raw_issue for page in raw_issues for raw_issue in page]
+    return [
+        _build_issue_summary(raw_issue)
+        for raw_issue in raw_issues[:limit]
+        if "pull_request" not in raw_issue
+    ]
 
 
 def get_issue(client: _ClientProtocol, issue_number: int) -> IssueSummary:
-    """Return the Issue summary for the given issue number."""
-    result = client._run_with_retry(
-        [
-            "gh",
-            "issue",
-            "view",
-            str(issue_number),
-            "--json",
-            "number,title,url,labels,body,state",
-        ],
-        cwd=client.repo_path,
-        check=False,
-    )
-    if result.return_code != 0:
-        raise RuntimeError(
-            f"Failed to fetch Issue #{issue_number}: {result.stderr.strip() or result.stdout}"
+    """读取指定编号的 Issue 摘要。"""
+    try:
+        result = client._run_with_retry(
+            [
+                "gh",
+                "api",
+                "-X",
+                "GET",
+                f"repos/{client._get_owner_repo()}/issues/{issue_number}",
+            ],
+            cwd=client.repo_path,
         )
+        if result.return_code != 0:
+            raise RuntimeError(result.stderr.strip() or result.stdout)
+    except GitHubApiRateLimitError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - add Issue context to adapter failures.
+        raise RuntimeError(f"Failed to fetch Issue #{issue_number}: {exc}") from exc
     raw_issue = json.loads(result.stdout or "{}")
     return _build_issue_summary(raw_issue)
 
@@ -200,14 +153,11 @@ def edit_issue_labels(
     add: Sequence[str] = (),
     remove: Sequence[str] = (),
 ) -> None:
-    """Add and remove Issue labels.
+    """添加或移除 Issue 标签。
 
-    On ``gh issue edit`` failure caused by a missing repository label (not
-    a network or auth error), the missing labels are created with
-    ``gh label create --force`` and the edit is retried. This guards against
-    fresh repositories whose label set does not yet include workflow labels
-    such as ``validation/verifier-passed`` that the runner only attaches in
-    specific code paths.
+    REST 更新因仓库缺少待添加标签而失败时，先用 ``gh label create --force`` 创建标签，
+    再重试更新。这样新仓库即使尚未配置 runner 只在特定路径添加的工作流标签
+    （例如 ``validation/verifier-passed``），也能完成状态更新。
     """
     current_labels = client._list_issue_label_names(issue_number)
     labels_to_add = [label for label in add if label not in current_labels]
@@ -218,38 +168,35 @@ def edit_issue_labels(
     if not labels_to_add and not labels_to_remove:
         return
 
-    command = _build_edit_labels_command(issue_number, labels_to_add, labels_to_remove)
-    try:
-        client._run_with_retry(command, cwd=client.repo_path)
-        return
-    except subprocess.CalledProcessError as exc:
-        if not _is_missing_label_error(exc) or not labels_to_add:
-            raise
-        _logger.info(
-            "gh issue edit reported missing label(s) on #%d; creating %s and retrying.",
-            issue_number,
-            ", ".join(labels_to_add),
-        )
+    owner_repo = client._get_owner_repo()
+    labels_endpoint = f"repos/{owner_repo}/issues/{issue_number}/labels"
+    if labels_to_add:
+        command = ["gh", "api", "-X", "POST", labels_endpoint]
         for label in labels_to_add:
-            client._run_with_retry(
-                _build_ensure_label_command(label),
-                cwd=client.repo_path,
+            command.extend(["-f", f"labels[]={label}"])
+        try:
+            client._run_with_retry(command, cwd=client.repo_path)
+        except subprocess.CalledProcessError as exc:
+            if not _is_missing_label_error(exc):
+                raise
+            _logger.info(
+                "GitHub REST label update reported missing label(s) on #%d; "
+                "creating %s and retrying.",
+                issue_number,
+                ", ".join(labels_to_add),
             )
-        client._run_with_retry(command, cwd=client.repo_path)
-
-
-def _build_edit_labels_command(
-    issue_number: int,
-    labels_to_add: Sequence[str],
-    labels_to_remove: Sequence[str],
-) -> list[str]:
-    """Build the ``gh issue edit`` argv for the requested label deltas."""
-    command = ["gh", "issue", "edit", str(issue_number)]
-    for label in labels_to_add:
-        command.extend(["--add-label", label])
+            for label in labels_to_add:
+                client._run_with_retry(
+                    _build_ensure_label_command(label),
+                    cwd=client.repo_path,
+                )
+            client._run_with_retry(command, cwd=client.repo_path)
     for label in labels_to_remove:
-        command.extend(["--remove-label", label])
-    return command
+        encoded_label = quote(label, safe="")
+        client._run_with_retry(
+            ["gh", "api", "-X", "DELETE", f"{labels_endpoint}/{encoded_label}"],
+            cwd=client.repo_path,
+        )
 
 
 def _is_missing_label_error(exc: subprocess.CalledProcessError) -> bool:
@@ -283,15 +230,14 @@ def _build_ensure_label_command(label: str) -> list[str]:
 
 
 def list_issue_label_names(client: _ClientProtocol, issue_number: int) -> set[str]:
-    """Return the set of label names currently on an Issue."""
+    """读取 Issue 当前标签名集合。"""
     result = client._run_with_retry(
         [
             "gh",
-            "issue",
-            "view",
-            str(issue_number),
-            "--json",
-            "labels",
+            "api",
+            "-X",
+            "GET",
+            f"repos/{client._get_owner_repo()}/issues/{issue_number}",
         ],
         cwd=client.repo_path,
     )
@@ -304,35 +250,38 @@ def list_issue_label_names(client: _ClientProtocol, issue_number: int) -> set[st
 
 
 def comment_issue(client: _ClientProtocol, issue_number: int, body: str) -> None:
-    """Post a Markdown comment to an Issue."""
+    """向 Issue 发布 Markdown 评论。"""
+    owner_repo = client._get_owner_repo()
     with tempfile.TemporaryDirectory(prefix="kc-comment-") as temp_dir:
         comment_path = client._write_body_file(temp_dir, "comment.md", body)
         client._run_with_retry(
             [
                 "gh",
-                "issue",
-                "comment",
-                str(issue_number),
-                "--body-file",
-                str(comment_path),
+                "api",
+                "-X",
+                "POST",
+                f"repos/{owner_repo}/issues/{issue_number}/comments",
+                "-F",
+                f"body=@{comment_path}",
             ],
             cwd=client.repo_path,
         )
 
 
 def edit_issue_body(client: _ClientProtocol, issue_number: int, body: str) -> None:
-    """Replace the body of an Issue."""
+    """替换 Issue 正文。"""
+    owner_repo = client._get_owner_repo()
     with tempfile.TemporaryDirectory(prefix="kc-issue-body-") as temp_dir:
-        body_path = Path(temp_dir) / "issue_body.md"
-        body_path.write_text(body, encoding="utf-8")
+        body_path = client._write_body_file(temp_dir, "issue_body.md", body)
         client._run_with_retry(
             [
                 "gh",
-                "issue",
-                "edit",
-                str(issue_number),
-                "--body-file",
-                str(body_path),
+                "api",
+                "-X",
+                "PATCH",
+                f"repos/{owner_repo}/issues/{issue_number}",
+                "-F",
+                f"body=@{body_path}",
             ],
             cwd=client.repo_path,
         )
@@ -434,29 +383,48 @@ def list_issue_comment_entries(
     Raises:
         RuntimeError: 严格模式无法读取或确认评论结构，或可信模式无法确认作者权限。
     """
-    result = client._run_with_retry(
-        [
-            "gh",
-            "issue",
-            "view",
-            str(issue_number),
-            "--comments",
-            "--json",
-            "comments",
-        ],
-        cwd=client.repo_path,
-        check=False,
-    )
-    if result.return_code != 0:
+    try:
+        result = client._run_with_retry(
+            [
+                "gh",
+                "api",
+                "-X",
+                "GET",
+                "--paginate",
+                "--slurp",
+                f"repos/{client._get_owner_repo()}/issues/{issue_number}/comments",
+                "-F",
+                "per_page=100",
+            ],
+            cwd=client.repo_path,
+        )
+        if result.return_code != 0:
+            raise RuntimeError(result.stderr.strip() or result.stdout)
+    except GitHubApiRateLimitError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - preserve best-effort comment reads.
         if trusted_only or require_success:
-            raise RuntimeError(f"Cannot read Issue #{issue_number} comments.")
+            raise RuntimeError(f"Cannot read Issue #{issue_number} comments: {exc}") from exc
         return []
-    raw_data = json.loads(result.stdout or "{}")
+    raw_pages = json.loads(result.stdout or "[]")
     if (trusted_only or require_success) and (
-        not isinstance(raw_data, dict) or not isinstance(raw_data.get("comments"), list)
+        not isinstance(raw_pages, list)
+        or any(not isinstance(raw_page, list) for raw_page in raw_pages)
     ):
         raise RuntimeError("Issue comment query has no complete comments list.")
-    comments = raw_data.get("comments", [])
+    comments = [
+        raw_comment
+        for raw_page in raw_pages
+        if isinstance(raw_page, list)
+        for raw_comment in raw_page
+    ]
+    current_login: str | None = None
+    if trusted_only:
+        user_result = client._run_with_retry(["gh", "api", "user"], cwd=client.repo_path)
+        raw_user = json.loads(user_result.stdout or "{}")
+        current_login = str(raw_user.get("login", "")) or None
+        if current_login is None:
+            raise RuntimeError("Cannot establish the authenticated GitHub user.")
     author_permissions: dict[str, bool] = {}
     entries: list[tuple[int, str]] = []
     for raw_comment in comments:
@@ -472,10 +440,17 @@ def list_issue_comment_entries(
         if trusted_only:
             if not isinstance(raw_comment, dict):
                 raise RuntimeError("Trusted comment query has malformed comment metadata.")
-            if not _is_trusted_comment_author(client, raw_comment, author_permissions):
+            if not _is_trusted_comment_author(
+                client,
+                raw_comment,
+                current_login=current_login or "",
+                author_permissions=author_permissions,
+            ):
                 continue
-        url = str(raw_comment.get("url", ""))
-        comment_id = _extract_comment_id_from_url(url) or 0
+        try:
+            comment_id = int(raw_comment.get("id", 0))
+        except (TypeError, ValueError):
+            comment_id = 0
         if trusted_only and (comment_id <= 0 or not isinstance(raw_comment.get("body"), str)):
             raise RuntimeError("Trusted comment query has invalid comment identity or body.")
         body = str(raw_comment.get("body", "") or "")
@@ -520,17 +495,20 @@ __all__ = [
 
 
 def _is_trusted_comment_author(
-    client: _ClientProtocol, raw_comment: dict, author_permissions: dict[str, bool]
+    client: _ClientProtocol,
+    raw_comment: dict,
+    *,
+    current_login: str,
+    author_permissions: dict[str, bool],
 ) -> bool:
     """使用当前调用者或实时仓库权限，不用 authorAssociation 推断授权。"""
-    viewer_did_author = raw_comment.get("viewerDidAuthor")
-    author = raw_comment.get("author")
-    if type(viewer_did_author) is not bool or not isinstance(author, dict):
+    author = raw_comment.get("user")
+    if not isinstance(author, dict):
         raise RuntimeError("Trusted comment query has missing author metadata.")
     login = author.get("login")
     if not isinstance(login, str) or not login:
         raise RuntimeError("Trusted comment query has no author login.")
-    if viewer_did_author:
+    if login == current_login:
         return True
     if login not in author_permissions:
         author_permissions[login] = _can_manage_repository_issues(client, login)

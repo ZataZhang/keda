@@ -193,7 +193,7 @@ def has_non_ready_workflow_label(labels: tuple[str, ...], config: AppConfig) -> 
     """该 Issue 是否已带有 ``agent/ready`` 之外的 durable workflow 状态标签。
 
     显式定向的准入放宽只针对「没有状态标签 / 只带就绪标签」的 Issue：已经处于
-    ``agent/review``、``agent/failed`` 等状态的 Issue 仍按原有通道处理，不因放宽
+    ``agent/automated-review-passed``、``agent/failed`` 等状态的 Issue 仍按原有通道处理，不因放宽
     而被当作新任务重跑。
 
     Args:

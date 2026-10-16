@@ -23,7 +23,7 @@ from backend.core.shared.interfaces.loop_scheduler import (
     ILoopStateStore,
 )
 from backend.core.shared.models.agent_runner import LabelConfig
-from backend.core.shared.models.loop import LoopTask
+from backend.core.shared.models.loop import LoopManager, LoopTask
 from backend.core.use_cases.loop_fire import fire_loop
 from backend.core.use_cases.loop_scheduler import list_due_tasks
 
@@ -60,7 +60,11 @@ def _run_daemon_tick(
     """
     state_store.load()
     tasks = state_store.list_tasks()
-    due_tasks = list_due_tasks(tasks, clock=clock)
+    due_tasks = [
+        task
+        for task in list_due_tasks(tasks, clock=clock)
+        if task.managed_by == LoopManager.LOOP_DAEMON.value
+    ]
     if not due_tasks:
         return []
     outcomes: list[tuple[str, str]] = []

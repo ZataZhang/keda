@@ -1,0 +1,26 @@
+# 模型评测集样例：展示全部受支持字段，不含任何私有 Issue 内容。
+# 直接复制到自己的 suite 文件后，把 repo_path 换成候选执行所在的本地仓库路径。
+# 注意：本文件的 id 为 example-suite；若新建 suite 与其重名，两个文件会一起校验失败。
+id: example-suite
+version: 1.0.0
+title: 样例评测集（可运行占位样本）
+# repo_path 必须指向一个真实 git 仓库；候选执行发生在该仓库的隔离 worktree 中。
+repo_path: /absolute/path/to/your/repo
+base_ref: main
+rubric:
+  id: default-rubric
+  version: v1
+check:
+  timeout_seconds: 60
+cases:
+  - id: fizzbuzz
+    prompt: >-
+      在仓库现有代码风格下实现 fizzbuzz(n)：n 为 1 到 100 的整数，
+      3 的倍数输出 "Fizz"，5 的倍数输出 "Buzz"，同时是 3 和 5 的倍数输出
+      "FizzBuzz"；为边界输入补充单元测试。
+    check_recipe: pytest
+  - id: sort-edge-cases
+    prompt: >-
+      修复排序工具函数在空数组、单元素数组和全部重复元素三种输入下的行为，
+      保持现有调用方接口不变，并补充回归测试。
+    check_recipe: pytest

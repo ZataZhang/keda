@@ -22,13 +22,12 @@ from backend.core.use_cases import agent_runner_issue_handlers as handlers
 
 
 def _comment(author="other", *, own=False, body="comment"):
-    """构造 gh 原生评论元数据，不把组织 MEMBER 当授权。"""
+    """构造 REST 评论元数据，不把组织 MEMBER 身份当作授权。"""
     return dict(
-        url="https://github.com/example/repo/issues/7#issuecomment-11",
+        id=11,
+        html_url="https://github.com/example/repo/issues/7#issuecomment-11",
         body=body,
-        viewerDidAuthor=own,
-        author={"login": author},
-        authorAssociation="MEMBER",
+        user={"login": "current" if own else author},
     )
 
 
@@ -39,7 +38,18 @@ def _client(monkeypatch, tmp_path, comments, permissions):
 
     def query(command, *, cwd, check=True):
         calls.append(tuple(command))
-        payload = comments if command[1] == "issue" else permissions
+        if command[1] != "api":
+            payload = {}
+        elif any("comments" in token for token in command):
+            payload = (
+                [comments["comments"]]
+                if isinstance(comments, dict) and "comments" in comments
+                else comments
+            )
+        elif "user" in command:
+            payload = {"login": "current"}
+        else:
+            payload = permissions
         if isinstance(payload, CommandResult):
             return payload
         return CommandResult(
@@ -54,6 +64,7 @@ def _client(monkeypatch, tmp_path, comments, permissions):
 @pytest.mark.parametrize("permission", ["triage", "write", "maintain", "admin"])
 def test_other_author_current_repository_role_is_trusted(monkeypatch, tmp_path, permission):
     """不同机器/账号的授权认领者可恢复；triage 的 scalar read 仍由 role_name 识别。"""
+    retry_comment_payload = {"comments": [_comment()]}
     client, calls = _client(
         monkeypatch,
         tmp_path,
@@ -64,9 +75,9 @@ def test_other_author_current_repository_role_is_trusted(monkeypatch, tmp_path, 
         (11, "comment"),
         (11, "comment"),
     ]
-    assert len([call for call in calls if call[1] == "api"]) == 1
+    assert len([call for call in calls if any("collaborators" in token for token in call)]) == 1
     client.list_issue_comment_entries(7, trusted_only=True)
-    assert len([call for call in calls if call[1] == "api"]) == 2
+    assert len([call for call in calls if any("collaborators" in token for token in call)]) == 2
     permissions = {"permission": "read", "role_name": "read"}
     monkeypatch.setattr(
         client,
@@ -74,7 +85,11 @@ def test_other_author_current_repository_role_is_trusted(monkeypatch, tmp_path, 
         lambda command, **_kwargs: CommandResult(
             command=tuple(command),
             return_code=0,
-            stdout=json.dumps({"comments": [_comment()]} if command[1] == "issue" else permissions),
+            stdout=json.dumps(
+                [retry_comment_payload["comments"]]
+                if any("comments" in token for token in command)
+                else ({"login": "current"} if "user" in command else permissions)
+            ),
             stderr="",
         ),
     )
@@ -85,7 +100,7 @@ def test_self_author_does_not_need_permission_lookup(monkeypatch, tmp_path):
     """当前登录账号自己的检查点可直接回读确认。"""
     client, calls = _client(monkeypatch, tmp_path, {"comments": [_comment(own=True)]}, {})
     assert client.list_issue_comment_entries(7, trusted_only=True) == [(11, "comment")]
-    assert not any(call[1] == "api" for call in calls)
+    assert not any(any("collaborators" in token for token in call) for call in calls)
 
 
 @pytest.mark.parametrize("permission", ["read", "none", "write"])
@@ -163,7 +178,7 @@ def test_trusted_read_failure_never_becomes_empty_checkpoint(monkeypatch, tmp_pa
         else {"permission": "unknown" if fault == "unknown" else "write"}
     )
     if fault == "metadata":
-        comments["comments"][0].pop("viewerDidAuthor")
+        comments["comments"][0].pop("user")
     client, _calls = _client(monkeypatch, tmp_path, comments, permissions)
     with pytest.raises(DirectPrRoundError, match="Cannot read Direct PR checkpoint"):
         read_direct_pr_round(client, _issue())
@@ -203,7 +218,7 @@ def test_checkpoint_filter_does_not_query_unrelated_public_authors(monkeypatch, 
     """普通 Issue 评论不触发权限查询；检查点候选才进入可信作者核验。"""
     client, calls = _client(monkeypatch, tmp_path, {"comments": [_comment()]}, {})
     assert read_direct_pr_round(client, _issue()) is None
-    assert len(calls) == 1 and calls[0][1] == "issue"
+    assert len(calls) == 2 and any("comments" in token for token in calls[0]) and "user" in calls[1]
 
 
 @pytest.mark.parametrize("flag", ["triage", "push", "maintain", "admin"])
@@ -235,4 +250,6 @@ def test_raw_comments_reuse_entry_query_and_preserve_empty_body_semantics(monkey
         {},
     )
     assert client.list_issue_comments(7) == ["kept"]
-    assert len(calls) == 1 and calls[0][1] == "issue"
+    assert (
+        len(calls) == 1 and calls[0][1] == "api" and any("comments" in token for token in calls[0])
+    )

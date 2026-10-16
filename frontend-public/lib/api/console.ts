@@ -5,7 +5,7 @@
 // All write operations map to backend whitelisted actions; the frontend
 // never sends raw shell commands.
 
-import { del, get, patch, post, put } from "./client";
+import { del, get, patch, post, put, ApiRequestError } from "./client";
 import type {
   AuditEntry,
   AgentPerformanceStats,
@@ -15,8 +15,14 @@ import type {
   ConsoleCreatedIssue,
   ConsoleIssueEntry,
   DailyRunTrendEntry,
+  DesktopCompanionState,
   DirectoryBrowseResult,
   DiscoveredRepositoryEntry,
+  EvaluationJudgePreview,
+  EvaluationPresetOptions,
+  EvaluationRun,
+  EvaluationRunDetail,
+  EvaluationSuiteEntry,
   IssueLabelSnapshot,
   IssueLogChunk,
   LaunchOptionsView,
@@ -29,6 +35,7 @@ import type {
   RepositoryCompletionStats,
   RunnerProcessKind,
   RunnerProcessRecord,
+  RuntimeTaskSummary,
   RunAttemptDetailEntry,
   RunInvocationDetailEntry,
   RunRecordEntry,
@@ -130,6 +137,60 @@ export async function executeIssueAction(
     `${BASE_PATH}/console/repositories/${encodeURIComponent(repoId)}/issues/${issueNumber}/actions`,
     { action },
   );
+}
+
+/** 一次接管请求的分类结果，界面据此呈递处理中 / 已交班 / 冲突 / 失败。 */
+export type VerifierTakeoverAttempt =
+  | { kind: "requested"; outcome: string }
+  | { kind: "handed_over"; outcome: string }
+  | { kind: "conflict"; outcome: string; message: string }
+  | { kind: "failed"; message: string };
+
+/**
+ * 按当前 run id 与 HEAD SHA 精确请求接管该 Issue 正在运行的独立 verifier。
+ *
+ * 请求只登记取消意图：后端 CAS 成功后返回 202（进程尚未确认停止），
+ * 已交班返回 200，运行身份或 HEAD 不符返回 409。payload 原样携带 UI 从详情
+ * 读到的 run_id / head_sha，绝不自行构造。
+ *
+ * @param repoId - 目标仓库 id。
+ * @param issueNumber - 目标 Issue 编号。
+ * @param binding - 当前 verifier 的 run id 与 PR HEAD SHA。
+ * @returns 分类后的接管结果。
+ */
+export async function takeOverVerifier(
+  repoId: string,
+  issueNumber: number,
+  binding: { runId: string; headSha: string },
+): Promise<VerifierTakeoverAttempt> {
+  try {
+    const result = await post<ConsoleActionResult>(
+      `${BASE_PATH}/console/repositories/${encodeURIComponent(repoId)}/issues/${issueNumber}/actions`,
+      {
+        action: "take_over_verifier",
+        run_id: binding.runId,
+        head_sha: binding.headSha,
+      },
+    );
+    const outcome = result.takeover_outcome ?? "";
+    if (result.takeover_http_status === 200) {
+      return { kind: "handed_over", outcome };
+    }
+    return { kind: "requested", outcome };
+  } catch (error) {
+    if (error instanceof ApiRequestError) {
+      const message = error.message ?? "";
+      // 409 仍然带回完整的 ConsoleActionResult 正文：从结构化字段读分类，
+      // 不去解析人读的审计 detail 文案（措辞变了界面就静默降级）。
+      const rejected = error.payload as ConsoleActionResult | undefined;
+      const outcome = rejected?.takeover_outcome ?? "";
+      if (error.status === 409) {
+        return { kind: "conflict", outcome, message };
+      }
+      return { kind: "failed", message };
+    }
+    return { kind: "failed", message: String(error) };
+  }
 }
 
 // ── Issue 全量视图 / 标签编辑 / 一句话建 Issue ──────────────────────────────
@@ -355,6 +416,7 @@ export async function fetchRunExecutionDetails(params: {
   issueNumber: number;
   startedAt: string;
   finishedAt: string;
+  signal?: AbortSignal;
 }): Promise<{
   attempts: RunAttemptDetailEntry[];
   invocations: RunInvocationDetailEntry[];
@@ -370,6 +432,41 @@ export async function fetchRunExecutionDetails(params: {
     invocations: RunInvocationDetailEntry[];
   }>(
     `${BASE_PATH}/console/runs/attempts?${searchParams.toString()}`,
+    { signal: params.signal },
+  );
+}
+
+// ── 统一运行时看板与桌面 companion ──────────────────────────────────────────
+
+/** 读取看板任务摘要（只来自已注册仓库的 Console 观测路径）。 */
+export async function fetchRuntimeTasks(): Promise<RuntimeTaskSummary> {
+  return get<RuntimeTaskSummary>(`${BASE_PATH}/console/runtime/tasks`);
+}
+
+/** 读取桌面 companion 状态；helper 与网页看板共用这个只读探针。 */
+export async function fetchDesktopCompanionStatus(): Promise<DesktopCompanionState> {
+  return get<DesktopCompanionState>(
+    `${BASE_PATH}/console/desktop-companion/status`,
+  );
+}
+
+/**
+ * 请求开启或聚焦桌面小窗。
+ *
+ * 后端只接受与当前本机 Console 同源的请求，跨源调用会拿到 403。
+ */
+export async function openDesktopCompanionWindow(): Promise<DesktopCompanionState> {
+  return post<DesktopCompanionState>(
+    `${BASE_PATH}/console/desktop-companion/window`,
+    {},
+  );
+}
+
+/** 请求桌面小窗自行关窗退出（不做进程强杀）。 */
+export async function closeDesktopCompanionWindow(): Promise<DesktopCompanionState> {
+  return post<DesktopCompanionState>(
+    `${BASE_PATH}/console/desktop-companion/window/close`,
+    {},
   );
 }
 
@@ -477,4 +574,89 @@ export async function setRegistryRepositoryEnabled(
  */
 export async function removeRegistryRepository(repoId: string): Promise<void> {
   await del(`${BASE_PATH}/repositories/${encodeURIComponent(repoId)}`);
+}
+
+// ── 模型评测 ────────────────────────────────────────────────────────────────
+
+/** 列出仓库 tasks/evaluation-suites/ 下的评测集及校验状态。 */
+export async function fetchEvaluationSuites(): Promise<EvaluationSuiteEntry[]> {
+  const response = await get<{ suites: EvaluationSuiteEntry[] }>(
+    `${BASE_PATH}/console/evaluation/suites`,
+  );
+  return response.suites;
+}
+
+/** 读取执行预设与评审预设目录（评审可用性探针不发起网络调用）。 */
+export function fetchEvaluationPresetOptions(): Promise<EvaluationPresetOptions> {
+  return get<EvaluationPresetOptions>(`${BASE_PATH}/console/evaluation/presets`);
+}
+
+/** 按创建时间倒序列出全部评测 run。 */
+export async function fetchEvaluationRuns(): Promise<EvaluationRun[]> {
+  const response = await get<{ runs: EvaluationRun[] }>(
+    `${BASE_PATH}/console/evaluation/runs`,
+  );
+  return response.runs;
+}
+
+/** 创建评测 run：校验并冻结快照，不启动任何执行。 */
+export function createEvaluationRun(params: {
+  suite_id: string;
+  execution_presets: string[];
+  judge_presets: string[];
+}): Promise<EvaluationRun> {
+  return post<EvaluationRun>(`${BASE_PATH}/console/evaluation/runs`, params);
+}
+
+/** 读取 run 详情（候选结果 + 逐评审评分 + 派生汇总）。 */
+export function fetchEvaluationRunDetail(
+  runId: string,
+): Promise<EvaluationRunDetail> {
+  return get<EvaluationRunDetail>(
+    `${BASE_PATH}/console/evaluation/runs/${encodeURIComponent(runId)}`,
+  );
+}
+
+/** 显式启动候选执行；该动作绝不触发任何评审调用。 */
+export function startEvaluationRun(runId: string): Promise<EvaluationRun> {
+  return post<EvaluationRun>(
+    `${BASE_PATH}/console/evaluation/runs/${encodeURIComponent(runId)}/start`,
+  );
+}
+
+/** 取消 run（进入 judging 后不可撤回，后端返回 409）。 */
+export function cancelEvaluationRun(runId: string): Promise<EvaluationRun> {
+  return post<EvaluationRun>(
+    `${BASE_PATH}/console/evaluation/runs/${encodeURIComponent(runId)}/cancel`,
+  );
+}
+
+/** 删除 run：级联清除 DB 行与本机暂存 payload / worktree。 */
+export function deleteEvaluationRun(runId: string): Promise<void> {
+  return del(`${BASE_PATH}/console/evaluation/runs/${encodeURIComponent(runId)}`);
+}
+
+/** 读取待授权评审 payload 预览（manifest hash 一并返回）。 */
+export function fetchEvaluationJudgePreview(
+  runId: string,
+): Promise<EvaluationJudgePreview> {
+  return get<EvaluationJudgePreview>(
+    `${BASE_PATH}/console/evaluation/runs/${encodeURIComponent(runId)}/judge-preview`,
+  );
+}
+
+/**
+ * 提交评审授权。
+ *
+ * manifest_hash 必须来自同一次预览；服务端会重新核对冻结值与当前暂存
+ * 文件重算值，过期或不符一律 409 且不发起任何评审调用。
+ */
+export function submitEvaluationConsent(
+  runId: string,
+  params: { decision: "approve" | "deny"; manifest_hash: string },
+): Promise<EvaluationRun> {
+  return post<EvaluationRun>(
+    `${BASE_PATH}/console/evaluation/runs/${encodeURIComponent(runId)}/judge-consent`,
+    params,
+  );
 }

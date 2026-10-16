@@ -1162,11 +1162,13 @@ def test_invocation_run_injection_does_not_change_duration_or_status(
         assert latest_run is not None
         assert latest_run.run_id == "keda-main#7"
 
+    # 事件未收口时耗时算到“当前时刻”；固定 now，避免两次调用的墙钟差跨过舍入边界而偶发失败。
+    fixed_now = datetime(2026, 10, 10, 2, 0, tzinfo=timezone.utc)
     plain_detail = build_prd_lifecycle_detail(
-        store=plain_store, repo_id=_REPO_ID, prd_path=_PRD_PATH
+        store=plain_store, repo_id=_REPO_ID, prd_path=_PRD_PATH, now=fixed_now
     )
     injected_detail = build_prd_lifecycle_detail(
-        store=injected_store, repo_id=_REPO_ID, prd_path=_PRD_PATH
+        store=injected_store, repo_id=_REPO_ID, prd_path=_PRD_PATH, now=fixed_now
     )
     assert [event.phase for event in injected_detail.events] == [
         event.phase for event in plain_detail.events

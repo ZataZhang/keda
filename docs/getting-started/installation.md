@@ -21,6 +21,27 @@ uv tool install kedacode      # 推荐：uv 隔离环境，Windows 原生可用
 pipx install kedacode
 ```
 
+### Shell 自动补全（一次性启用）
+
+`uv tool install` 会安装 `kc` 命令，但不会替应用修改 shell 配置来启用命令补全。安装后按当前使用的 shell 执行一次：
+
+```bash
+# zsh
+kc completion install --shell zsh
+source ~/.zshrc
+
+# bash
+kc completion install --shell bash
+source ~/.bashrc
+
+# fish
+kc completion install --shell fish
+```
+
+当前支持 bash、zsh 和 fish。之后输入 `kc ` 再按 Tab 可查看子命令；例如 `kc is<Tab>` 会补全为 `kc issue`。每台电脑、每个 shell 配置一次即可。
+
+如果还未配置补全，首次在交互式终端运行 `kc` 时会显示选择菜单，默认选中“安装”；按上下方向键可切换到“暂不安装”，按 Enter 确认。提示不会由 `kc<Tab>` 触发，因为此时 shell 尚未启动 `kc`；先运行一次 `kc` 或按上面的命令配置即可。选择安装后，`kc` 会安装补全并退出，不会继续执行刚才的命令；按提示重载 shell 配置，再重新运行刚才的 `kc` 命令。
+
 **curl 一键脚本（macOS / Linux）：**
 
 ```bash

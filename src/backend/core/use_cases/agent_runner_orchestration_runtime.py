@@ -1,12 +1,21 @@
 """Agent Runner 的单轮队列调度实现。"""
 
 from __future__ import annotations
+
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
+
+from backend.core.shared.interfaces.agent_runner import GitHubApiRateLimitError
 from backend.core.shared.interfaces.runner_live_view import NoOpRunnerLiveView
+from backend.core.shared.models.agent_runner import TokenUsage
+from backend.core.shared.models.publish_stage import PublishStage
+from backend.core.use_cases.agent_invocation_tracing import (
+    bound_invocation_trace_context,
+    build_invocation_trace_context,
+)
 from backend.core.use_cases.agent_runner_batch_aggregate_queue import (
     AggregateQueueCompletionRequest,
     check_aggregate_candidate_shortfall,
@@ -21,11 +30,19 @@ from backend.core.use_cases.agent_runner_dependencies import (
     mark_dependency_waiting,
     parse_dependency_marker,
 )
+from backend.core.use_cases.agent_runner_direct_pr_label import PublishStageSelection
 from backend.core.use_cases.agent_runner_failure_marking import (
     _mark_issue_blocked,
     _mark_issue_failed,
 )
+from backend.core.use_cases.agent_runner_lifecycle import (
+    LifecycleEventType,
+    build_attempt_event_detail,
+    record_lifecycle_event,
+    record_lifecycle_terminal,
+)
 from backend.core.use_cases.agent_runner_orchestrate import (
+    _READY_DISCOVERY_LIMIT,
     AppConfig,
     AttemptResult,
     ForbiddenBlockedError,
@@ -35,7 +52,6 @@ from backend.core.use_cases.agent_runner_orchestrate import (
     IRunHistoryStore,
     IRunnerLiveView,
     IssueSummary,
-    _READY_DISCOVERY_LIMIT,
     _append_run_record_locked,
     _guard_blocked_issue_has_resolution,
     _guard_running_issue_is_rework,
@@ -46,48 +62,29 @@ from backend.core.use_cases.agent_runner_orchestrate import (
     _process_running_publish_recovery,
     _process_running_rework,
     choose_agent,
-    create_or_reuse_worktree,
     run_issue_with_agent_fallback,
 )
 from backend.core.use_cases.agent_runner_orchestration_models import (
-    PrdReworkRequest,
     RunOnceRequest,
 )
-from backend.core.shared.models.agent_runner import TokenUsage
-from backend.core.shared.models.publish_stage import PublishStage
-from backend.core.use_cases.agent_invocation_tracing import (
-    bound_invocation_trace_context,
-    build_invocation_trace_context,
-)
-from backend.core.use_cases.agent_runner_direct_pr_label import PublishStageSelection
 from backend.core.use_cases.agent_runner_output_routing import (
     _OutputRoutedProcessRunner,
     issue_output_routing,
-)
-from backend.core.use_cases.agent_runner_queue import issue_priority, sort_ready_issues
-from backend.core.use_cases.agent_runner_validation_gate import process_validation_gate
-from backend.core.use_cases.agent_runner_workflow import claim_blocked_issue
-from backend.core.use_cases.agent_runner_lifecycle import (
-    LifecycleEventType,
-    build_attempt_event_detail,
-    record_lifecycle_event,
-    record_lifecycle_terminal,
-)
-from backend.core.use_cases.lifecycle_agent_resolution import attach_prd_lifecycle_overrides
-from backend.core.use_cases.agent_runner_worktree_probe import (
-    _has_existing_local_commit_ready_for_publish,
-    _worktree_needs_rebase_recovery,
 )
 from backend.core.use_cases.agent_runner_prd_activity import (
     PrdActivityConflictError,
     PrdActivityLease,
 )
-from backend.core.use_cases.create_prd_from_issue import (
-    CreatePrdFromIssueRequest,
-    create_prd_from_issue,
+from backend.core.use_cases.agent_runner_queue import issue_priority, sort_ready_issues
+from backend.core.use_cases.agent_runner_validation_gate import process_validation_gate
+from backend.core.use_cases.agent_runner_workflow import claim_blocked_issue
+from backend.core.use_cases.agent_runner_worktree_probe import (
+    _has_existing_local_commit_ready_for_publish,
+    _worktree_needs_rebase_recovery,
 )
-from backend.core.use_cases.run_target_admission import has_non_ready_workflow_label
 from backend.core.use_cases.backlog_concurrency import count_live_running_issues
+from backend.core.use_cases.lifecycle_agent_resolution import attach_prd_lifecycle_overrides
+from backend.core.use_cases.run_target_admission import has_non_ready_workflow_label
 
 RUNTIME_DEPENDENCY_NAMES = (
     "_process_ready_issue",
@@ -95,7 +92,6 @@ RUNTIME_DEPENDENCY_NAMES = (
     "_process_blocked_resolution",
     "_process_running_publish_recovery",
     "choose_agent",
-    "create_or_reuse_worktree",
     "_worktree_needs_rebase_recovery",
     "_has_existing_local_commit_ready_for_publish",
 )
@@ -114,79 +110,6 @@ def _resolve_lifecycle_prd_path(issue: IssueSummary) -> str:
         return extract_prd_path(issue.body) or ""
     except Exception:  # noqa: BLE001 - observation must not break the run.
         return ""
-
-
-def process_prd_rework_issues(request: PrdReworkRequest) -> None:
-    """处理标记为 PRD rework 的 Issue。
-
-    在正常的 ready Issue 执行之前调用：为每个 Issue 建/复用 ``issue-<N>``
-    worktree，在 worktree 内生成或重写 PRD、commit 进 ``issue-<N>`` 分支并经
-    draft PR 落地，随后更新 Issue body/labels/comments。主工作树保持干净。
-    单个 Issue 失败时记录错误并继续处理后续 Issue，不让 PRD 生成阶段污染
-    ready Issue 执行阶段。
-
-    Args:
-        repo_path: 目标仓库路径。
-        config: 应用配置。
-        github_client: GitHub 客户端。
-        process_runner: git 命令执行器（建/复用 worktree、commit、push）。
-        content_generator: 可选的 AI 内容生成器。
-        max_issues: 本轮最多处理的 rework-prd Issue 数量。
-    """
-    repo_path = request.repo_path
-    config = request.config
-    github_client = request.github_client
-    process_runner = request.process_runner
-    content_generator = request.content_generator
-    issues = github_client.list_rework_prd_issues(
-        config.labels.rework_prd,
-        limit=request.max_issues,
-    )
-    for issue in issues:
-        _logger.info("Processing PRD rework for Issue #%d: %s", issue.number, issue.title)
-        try:
-            worktree_path = create_or_reuse_worktree(repo_path, issue, config, process_runner)
-            create_prd_from_issue(
-                request=CreatePrdFromIssueRequest(
-                    repo_path=repo_path,
-                    issue=issue,
-                    config=config,
-                    generated_content_config=config.generated_content,
-                    content_generator=content_generator,
-                    queue_ready=True,
-                    worktree_path=worktree_path,
-                    process_runner=process_runner,
-                ),
-                github_client=github_client,
-            )
-        except Exception as exc:  # noqa: BLE001 - isolate PRD rework failures.
-            _logger.exception("PRD rework failed for Issue #%d", issue.number)
-            try:
-                github_client.edit_issue_labels(
-                    issue.number,
-                    add=[config.labels.failed],
-                    remove=[config.labels.rework_prd],
-                )
-            except Exception as label_exc:  # noqa: BLE001 - best-effort label update.
-                _logger.error(
-                    "Failed to mark Issue #%d as %s: %s",
-                    issue.number,
-                    config.labels.failed,
-                    label_exc,
-                )
-            try:
-                github_client.comment_issue(
-                    issue.number,
-                    f"PRD generation failed: {exc}\n\n"
-                    "Please review the error and re-add the "
-                    f"`{config.labels.rework_prd}` label to retry.",
-                )
-            except Exception as comment_exc:  # noqa: BLE001 - best-effort comment.
-                _logger.error(
-                    "Failed to comment on Issue #%d PRD failure: %s",
-                    issue.number,
-                    comment_exc,
-                )
 
 
 def _process_single_issue(
@@ -237,7 +160,7 @@ def _process_single_issue(
         event_type=LifecycleEventType.STARTED,
         actor="runner",
         occurred_at=run_started_at.isoformat(timespec="seconds"),
-        detail={"agent": selected_agent, "issue_kind": issue_kind},
+        detail={"agent": selected_agent, "issue_kind": issue_kind, "run_trigger": run_trigger},
     )
     record_lifecycle_event(
         store=run_history_store,
@@ -248,7 +171,7 @@ def _process_single_issue(
         event_type=LifecycleEventType.CLAIMED,
         actor="runner",
         occurred_at=run_started_at.isoformat(timespec="seconds"),
-        detail={"agent": selected_agent, "issue_kind": issue_kind},
+        detail={"agent": selected_agent, "issue_kind": issue_kind, "run_trigger": run_trigger},
     )
 
     def _on_attempt_recorded(result: AttemptResult, attempt_results: list[AttemptResult]) -> None:
@@ -390,6 +313,7 @@ def _process_single_issue(
                     github_client=github_client,
                     process_runner=process_runner,
                     marker=marker,
+                    repo_id=effective_repo_id,
                 ),
             )
         elif issue_kind == "blocked_resolution":
@@ -453,6 +377,7 @@ def _process_single_issue(
                     content_generator=content_generator,
                     publish_stage=publish_stage,
                     stage_selection=stage_selection,
+                    repo_id=effective_repo_id,
                 ),
             )
         _logger.info("Completed Issue #%d: %s", issue.number, issue.title)
@@ -479,6 +404,10 @@ def _process_single_issue(
             started_at=run_started_at,
         )
         return 0
+    except GitHubApiRateLimitError:
+        output_view.update_status(issue.number, "skipped")
+        raise
+
     except ForbiddenBlockedError as exc:
         _mark_issue_blocked(
             issue=issue,
@@ -720,6 +649,8 @@ def run_once(request: RunOnceRequest) -> int:
         )
     else:
         ready_issues = github_client.list_ready_issues(config.labels.ready, ready_discovery_limit)
+        if request.pass_activity is not None:
+            request.pass_activity.ready_found = len(ready_issues)
 
     # 统一并发闸门：仅当调用方解析出生效上限且非定向模式时约束 ready 通道的
     # 新认领。running / blocked / cleanup 通道处理的是已在途或恢复性工作，

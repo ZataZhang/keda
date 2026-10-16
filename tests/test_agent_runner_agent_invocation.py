@@ -212,7 +212,10 @@ def test_run_agent_with_prompt_logs_issue_context(
         )
 
     assert result.return_code == 0
-    assert fake_runner.labels == ["Issue #23: https://github.com/zata-zhangtao/fsense/issues/23"]
+    # 停滞监督默认开启后，observer 的进展采样会经由同一个 runner 发无标签的
+    # git 探测调用；断言只收敛到带标签的 agent 调用本身。
+    agent_labels = [label for label in fake_runner.labels if label is not None]
+    assert agent_labels == ["Issue #23: https://github.com/zata-zhangtao/fsense/issues/23"]
     assert (
         "Starting agent for Issue #23: https://github.com/zata-zhangtao/fsense/issues/23"
         in caplog.text

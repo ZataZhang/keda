@@ -275,7 +275,7 @@ def resolve_batch_sources(request: BatchSourceResolutionRequest) -> tuple[BatchS
     """读取并校验一个显式来源批次，支持同一总 PR 的部分关闭重试。
 
     资格门（逐 Issue 判定，任一不满足即整批拒绝）：Issue 必须仍为 open 且带
-    ``config.labels.review``（默认 ``agent/review``）标签；每个 Issue 仅允许一个未合并
+    ``config.labels.review``（默认 ``agent/automated-review-passed``）标签；每个 Issue 仅允许一个未合并
     来源 PR，且该 PR 的必需 checks 必须已经是 ``SUCCESS``。closed 来源只有在其评论含有
     当前开放总 PR 的 superseded marker 时才可重试。
 

@@ -27,6 +27,7 @@ from backend.core.shared.models.agent_runner import (
     CommandResult,
     IssueSummary,
     LabelConfig,
+    PullRequestContext,
     PullRequestSummary,
 )
 
@@ -107,10 +108,22 @@ def _isolate_ambient_iar_config() -> Iterator[None]:
     托管 runner 向子进程注入 ``KEDACODE_CONFIG`` 与 ``IAR_CONFIG``，指向机器级
     配置。默认解析测试需要从 cwd 查找或临时 HOME 回落，不能被宿主配置覆盖。
     需要覆盖的用例仍用 ``monkeypatch.setenv`` 显式设置；结束恢复两名宿主取值。
+
+    剥离变量只影响**之后重新解析**配置的读取：``settings.config`` 单例在 conftest
+    导入 ``backend`` 时（早于任何 fixture）就已按宿主机注入的机器级 ``config.toml``
+    定型，``build_app_config()`` 会一直吃到那份漂移值。因此这里在剥离宿主变量后
+    重建单例的 ``agent_runner`` 段，让本地/托管 runner 的会话与 CI（无宿主注入、
+    按仓库根解析）看到同一份配置。断言仓库根 ``config.toml`` 里某段真实内容的 golden
+    用例仍应显式 pin 来源（``tests.support.agent_runner.root_config_app_config()``），
+    不依赖本 fixture 的解析结果。
     """
+    from backend.infrastructure.config import settings as app_settings_module
+    from backend.infrastructure.config.settings import AgentRunnerSettings
+
     previous_values = {
         env_name: os.environ.pop(env_name, None) for env_name in ("KEDACODE_CONFIG", "IAR_CONFIG")
     }
+    app_settings_module.config.agent_runner = AgentRunnerSettings()
     try:
         yield
     finally:
@@ -231,6 +244,14 @@ class FakeGitHubClient(IGitHubClient):
         """Inject a failure for ``set_pull_request_base`` (stack convergence tests)."""
         self._set_pr_base_error = error
 
+    def mark_pull_request_ready(self, pr_number: int) -> None:
+        """记录模拟的 Draft-to-Ready 状态转换。"""
+        self.calls.append({"method": "mark_pull_request_ready", "pr_number": pr_number})
+        for pr_branch, pr_context in self._pr_contexts.items():
+            if isinstance(pr_context, PullRequestContext) and pr_context.number == pr_number:
+                self._pr_contexts[pr_branch] = replace(pr_context, is_draft=False)
+                return
+
     def merge_pull_request(self, pr_number: int, *, method: str = "squash") -> None:
         self.calls.append(
             {
@@ -290,6 +311,20 @@ class FakeGitHubClient(IGitHubClient):
         """
         self.calls.append({"method": "get_pull_request_context", "branch": branch})
         return self._pr_contexts.get(branch)
+
+    def get_pull_request_context_by_number(
+        self, pr_number: int, *, require_success: bool = False
+    ) -> object | None:
+        """按编号返回已登记的 PR fixture。"""
+        self.calls.append({"method": "get_pull_request_context_by_number", "pr_number": pr_number})
+        return next(
+            (
+                context
+                for context in self._pr_contexts.values()
+                if getattr(context, "number", None) == pr_number
+            ),
+            None,
+        )
 
     def set_pr_context(self, branch: str, context: object | None) -> None:
         """Inject a deterministic ``get_pull_request_context`` response for tests."""
@@ -484,6 +519,7 @@ class FakeProcessRunner(IProcessRunner):
         self.timeouts: list[int | None] = []
         self.inactivity_timeouts: list[int | None] = []
         self.output_sinks: list[Callable[[str], None] | None] = []
+        self.attempt_keys: list[str | None] = []
 
     def run(
         self,
@@ -498,8 +534,14 @@ class FakeProcessRunner(IProcessRunner):
         label: str | None = None,
         output_sink: Callable[[str], None] | None = None,
         output_protocol: str | None = None,
+        env_profile: str | None = None,
+        env_allow_extra: Sequence[str] = (),
         attempt_key: str | None = None,
     ) -> CommandResult:
+        # attempt_key 是停滞监督的登记键（见 IProcessRunner 端口），假实现不登记
+        # 进程，只做记录供断言。
+        del env_profile, env_allow_extra
+        self.attempt_keys.append(attempt_key)
         command_list = list(command)
         # When the runner wraps verification commands in ``bash -lc``,
         # unwrap transparently so test assertions can keep matching the
@@ -693,3 +735,127 @@ class FakeBacklogStore(IBacklogStore):
     def write_count(self) -> int:
         """Total number of store writes (enqueue + update + clear)."""
         return len(self.enqueue_calls) + len(self.update_calls) + self.clear_calls
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _isolate_github_api_budget(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    """把 GitHub API 额度账本指到临时目录，测试不会写进真实的本机状态目录。
+
+    ``create_github_client`` 现在会给每个 client 接上跨进程共享的额度账本；不隔离的话，
+    任何走工厂创建 client 的测试都可能读到（甚至写入）开发机上真实的暂停状态。
+    """
+    from backend.engines.agent_runner.persistence.github_api_budget_json import (
+        BUDGET_PATH_ENV_VAR,
+    )
+
+    previous_value = os.environ.get(BUDGET_PATH_ENV_VAR)
+    os.environ[BUDGET_PATH_ENV_VAR] = str(
+        tmp_path_factory.mktemp("github-api-budget") / "github-api-budget.json"
+    )
+    try:
+        yield
+    finally:
+        if previous_value is None:
+            os.environ.pop(BUDGET_PATH_ENV_VAR, None)
+        else:
+            os.environ[BUDGET_PATH_ENV_VAR] = previous_value
+
+
+# ---------------------------------------------------------------------------
+# 失败现场落盘：偶发失败（testmon 子集、机器负载、常驻 daemon 并发写状态目录）事后
+# 无法复现，终端输出又常被 tail 截掉。只要有用例失败，就把完整报错与运行环境写到
+# ``logs/test-failures/``（已被 .gitignore 覆盖），不依赖谁、用什么命令跑的测试。
+# ---------------------------------------------------------------------------
+_FAILURE_LOG_DIR_NAME = "test-failures"
+_FAILURE_LOG_KEEP = 30
+_DESELECTED_COUNT_KEY = pytest.StashKey[list]()
+_FAILED_REPORTS: list[pytest.TestReport] = []
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """为本次会话准备失败报告与 deselected 计数的暂存区。"""
+    config.stash[_DESELECTED_COUNT_KEY] = [0]
+
+
+def pytest_deselected(items: Sequence[pytest.Item]) -> None:
+    """累计被 testmon/-m 过滤掉的用例数，复盘时用来判断这次跑的是不是子集。"""
+    # 钩子拿不到 config，借 items 的 session 取暂存区
+    if items:
+        items[0].config.stash[_DESELECTED_COUNT_KEY][0] += len(items)
+
+
+def pytest_runtest_logreport(report: pytest.TestReport) -> None:
+    """收集 setup/call/teardown 任一阶段的失败报告（含捕获的 stdout/stderr/log）。"""
+    if report.failed:
+        _FAILED_REPORTS.append(report)
+
+
+def _describe_competing_processes() -> str:
+    """列出本机可能与测试并发写 ~/.iar、~/.kedacode 的 daemon 进程。"""
+    import subprocess
+
+    try:
+        completed = subprocess.run(
+            ["ps", "-axo", "pid,etime,command"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        return f"(ps 失败: {error})"
+    process_lines = [
+        process_line
+        for process_line in completed.stdout.splitlines()
+        if any(marker in process_line for marker in ("iar daemon", "kc daemon", "iar console"))
+        and "ps -axo" not in process_line
+    ]
+    return "\n".join(process_lines) or "(无)"
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    """有失败时写一份带时间戳的现场文件，并只保留最近 ``_FAILURE_LOG_KEEP`` 份。"""
+    import datetime
+    import platform
+
+    failed_reports = list(_FAILED_REPORTS)
+    _FAILED_REPORTS.clear()
+    if not failed_reports:
+        return
+    try:
+        log_directory = Path(session.config.rootpath) / "logs" / _FAILURE_LOG_DIR_NAME
+        log_directory.mkdir(parents=True, exist_ok=True)
+        started_at = datetime.datetime.now().astimezone()
+        deselected_count = session.config.stash[_DESELECTED_COUNT_KEY][0]
+        header_lines = [
+            f"time: {started_at.isoformat(timespec='seconds')}",
+            f"exitstatus: {int(exitstatus)}",
+            f"argv: {shlex.join(sys.argv)}",
+            f"invocation_args: {shlex.join(session.config.invocation_params.args)}",
+            f"collected: {session.testscollected}  failed: {len(failed_reports)}  "
+            f"deselected: {deselected_count}",
+            f"python: {platform.python_version()}  platform: {platform.platform()}",
+            f"loadavg: {os.getloadavg() if hasattr(os, 'getloadavg') else 'n/a'}",
+            f"cpu_count: {os.cpu_count()}",
+            "competing daemons:",
+            _describe_competing_processes(),
+        ]
+        body_blocks = [
+            f"===== {report.when.upper()} FAILED {report.nodeid} =====\n{report.longreprtext}"
+            + "".join(f"\n--- {name} ---\n{content}" for name, content in report.sections)
+            for report in failed_reports
+        ]
+        log_path = (
+            log_directory / f"failures-{started_at.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}.log"
+        )
+        log_path.write_text(
+            "\n".join(header_lines) + "\n\n" + "\n\n".join(body_blocks) + "\n", encoding="utf-8"
+        )
+        for stale_path in sorted(log_directory.glob("failures-*.log"))[:-_FAILURE_LOG_KEEP]:
+            stale_path.unlink(missing_ok=True)
+        terminal_reporter = session.config.pluginmanager.get_plugin("terminalreporter")
+        if terminal_reporter is not None:
+            terminal_reporter.write_line(f"失败现场已保存: {log_path}")
+    except OSError:
+        # 记录失败现场是尽力而为，不能反过来让测试会话报错
+        pass

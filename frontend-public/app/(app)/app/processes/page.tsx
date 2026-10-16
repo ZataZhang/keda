@@ -323,6 +323,11 @@ function ProcessLogSheet({
               : "日志"}
           </SheetTitle>
         </SheetHeader>
+        {/* 行首 [HH:MM:SS] 由 runner 机器写入，不含日期/时区，浏览器无法可靠
+            换算，原样展示不做转换（见 docs/guides/agent-runner.md）。 */}
+        <p className="px-4 pb-2 text-xs text-slate-400">
+          行首时间 [HH:MM:SS] 为 runner 机器的本地墙钟，不含时区，未做浏览器时区换算。
+        </p>
         <pre
           ref={containerRef}
           className="mx-4 mb-4 h-[80vh] overflow-auto rounded-md bg-slate-950 p-3 font-mono text-[11px] leading-relaxed text-slate-100"

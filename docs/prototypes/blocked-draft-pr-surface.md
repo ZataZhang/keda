@@ -18,7 +18,7 @@
 
 ![Draft PR 正文](assets/blocked-draft-pr-02-draft-pr-body.png)
 
-同一份 payload 的对外表面，由既有只读 content generator 生成。标签区只有既有的 `agent/review`，并显式标出**不存在** `validation/verifier-passed`——不可合并的判定归因给既有门禁，正文写什么都不改变状态。
+同一份 payload 的对外表面，由既有只读 content generator 生成。标签区只有既有的 `agent/automated-review-passed`，并显式标出**不存在** `validation/verifier-passed`——不可合并的判定归因给既有门禁，正文写什么都不改变状态。
 
 ## 关键信息层级
 

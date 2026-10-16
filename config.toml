@@ -120,6 +120,14 @@ enabled = false
 desktop_enabled = false # 仅在专用 Linux VM 上显式开启虚拟桌面和 Agent 屏幕录制
 
 # =============================================================================
+# Native terminal session defaults (`kc` with no subcommand)
+# =============================================================================
+# This machine-wide value is used by bare `kc`; a repository's `.kedacode.toml`
+# may override it, and `kc --agent <name>` overrides it for one invocation.
+[agent_session]
+default_agent = "claude"
+
+# =============================================================================
 # 生命周期 Agent 矩阵（阶段 -> agent）
 # =============================================================================
 # 把"九个生命周期阶段各用哪个 agent"收敛成一张表。键名是闭集（写错键在配置
@@ -194,6 +202,27 @@ reasoning_effort = "max"
 agent = "qoder"
 model = "Qwen3.8-Max"
 reasoning_effort = "xhigh"
+
+# =============================================================================
+# 模型评测（Console「Evaluations」页）：评审预设
+# =============================================================================
+# 完全可选：不写本节时 Console 正常启动。
+# 评审预设**就是**上面的 [agent_runner.presets.*]，不另设模型目录、不用 API key：
+# 评审由该预设的 agent CLI 以其 `judge` 形态运行——进程 cwd 是空临时目录，且
+# agent 声明了"禁用全部内置工具"的开关（claude/codebuddy/qoder 的 --tools ""、
+# pi 的 --no-tools），所以评审只能读到授权预览过的 payload。没有这类开关的 agent
+# （codex、kimi、opencode）不能当评审，页面会把它们标为"不可用"。
+# default_judge_presets 是页面预选的预设名单，单次 run 可覆盖；不可用的默认项
+# 页面不会预选（勾选框本身是禁用的，预选会留下无法提交也无法取消的选项）。
+# 并发刻意收敛（1–4）：评测是手动离线批量任务，尊重与 runner 相同的主机 capacity。
+# 该上限是**全进程**口径：多个 run 同时在跑时，主机上的在飞候选单元数仍不超过
+# min(max_concurrency, runner.max_concurrent_issues)。
+#
+# [agent_runner.evaluation]
+# default_judge_presets = ["claude-sonnet"]   # 必须是上面已定义的预设名
+# max_concurrency = 2
+# agent_timeout_seconds = 900
+# judge_timeout_seconds = 120
 
 # =============================================================================
 # 阶段 -> 预设 绑定（九键闭集，与生命周期矩阵同键）
@@ -309,6 +338,12 @@ prompt_delivery = "argv_tail"
 output_protocol = "plain"
 read_only = true
 
+[agent_runner.agents.claude.profiles.judge]
+args = ["--tools", "", "-p"]
+prompt_delivery = "argv_tail"
+output_protocol = "plain"
+read_only = true
+
 [agent_runner.agents.claude.profiles.repl]
 args = ["--dangerously-skip-permissions", "-p"]
 prompt_delivery = "argv_tail"
@@ -387,6 +422,12 @@ prompt_delivery = "stdin"
 output_protocol = "plain"
 read_only = true
 
+[agent_runner.agents.pi.profiles.judge]
+args = ["--no-tools", "--print"]
+prompt_delivery = "stdin"
+output_protocol = "plain"
+read_only = true
+
 [agent_runner.agents.pi.profiles.repl]
 args = ["--approve", "--print"]
 prompt_delivery = "stdin"
@@ -424,6 +465,12 @@ output_protocol = "claude-stream-json"
 
 [agent_runner.agents.codebuddy.profiles.generate]
 args = ["--dangerously-skip-permissions", "-p"]
+prompt_delivery = "argv_tail"
+output_protocol = "plain"
+read_only = true
+
+[agent_runner.agents.codebuddy.profiles.judge]
+args = ["--tools", "", "-p"]
 prompt_delivery = "argv_tail"
 output_protocol = "plain"
 read_only = true
@@ -474,6 +521,12 @@ prompt_delivery = "argv_tail"
 output_protocol = "plain"
 read_only = true
 
+[agent_runner.agents.qoder.profiles.judge]
+args = ["--tools", "", "-p"]
+prompt_delivery = "argv_tail"
+output_protocol = "plain"
+read_only = true
+
 [agent_runner.agents.qoder.profiles.repl]
 args = ["--dangerously-skip-permissions", "-p"]
 prompt_delivery = "argv_tail"
@@ -517,7 +570,8 @@ output_protocol = "opencode-json-lines"
 ready = "agent/ready"
 running = "agent/running"
 supervising = "agent/supervising"
-review = "agent/review"
+review = "agent/automated-review-passed"
+# human_review = "human/awaiting-review"  # 自动审查通过但仍需人工处理时添加
 failed = "agent/failed"
 blocked = "agent/blocked"
 validation_pending = "validation/pending"
@@ -530,6 +584,7 @@ deliberate = "agent/deliberate"
 # 直发档选择标签：非 workflow 状态标签，认领后 fresh read 命中即按 DIRECT 执行，
 # 一次成功发布后由认领赢家消费（移除）。改名不影响其语义。
 direct_pr = "direct-pr"
+auto_merge = "auto-merge" # 通用 Issue 自动合并授权；不要求 PRD，不跳过验证门禁
 
 [agent_runner.git]
 remote = "zata"
@@ -634,6 +689,8 @@ forbidden_path_patterns = [
 # checks 全绿 → squash 合并。两个开关同时为真才生效（"双同意"），保证
 # 历史上的 `safety.auto_merge = true` 不会单独触发自动合并，需仓库
 # 显式在本段开启 ``enabled = true``。
+# ``enabled = true`` 且 ``safety.auto_merge = false`` 时，也可用 Issue 的
+# ``auto-merge``（通用）或 ``prd-auto-merge``（PRD 专用）标签单独授权。
 #
 # 迁移提示：本段首次落地后，任何已设为 ``safety.auto_merge = true`` 的环境
 # 若不同时把下面 ``enabled`` 设为 ``true``，仍然回到"等人工合并"的现状——
@@ -710,6 +767,7 @@ supervisor_agent = "auto"
 #   executor - 交回本次实现者；拿不到本次实现者时按 Issue 标签回落并在日志中注明来源
 #   其它     - 任意已注册 agent 名
 repair_agent = "self"
+# rebase 按当前待重放提交限制冲突修复次数；成功推进到下一提交后重置
 max_repair_attempts = 2
 max_agent_crash_retries = 5
 crash_retry_initial_backoff_seconds = 30
@@ -867,8 +925,8 @@ prompt = [
 ]
 
 [agent_runner.generated_content.draft_pr]
-# 默认用确定性正文发布；显式开启后才调用 AI 内容生成。
-enabled = false
+# Agent 生成为默认路径；模板仅在 agent 失败时兜底（fallback = "template"）。
+enabled = true
 mode = "agent"
 output = "markdown"
 include_commit_log = true
@@ -877,9 +935,10 @@ title_template = "[Agent] {issue_title}"
 # 未配置自定义模板时复用带提交/证据链接的内置事实正文。
 body_template = ""
 agent = "auto"
-timeout_seconds = 120
+timeout_seconds = 1200
 prompt = [
   "Generate a concise, readable draft PR description.",
+  "The PR title MUST be in English regardless of the issue language.",
   "The first non-empty line must be: Closes #{issue_number}",
   "Use these sections: Summary, Validation, Risk, Reviewer Notes.",
   "",

@@ -147,6 +147,27 @@ agent 注册表按**三层**合并，后一层逐字段覆盖前一层：
 - 完整语义、优先级与命令行一次性旗标（`--preset` / `--model` / `--reasoning-effort`）见
   [Agent 模型预设](model-presets.md)。
 
+## Agent Runner 模型评测配置
+
+Console「Evaluations」页的多评审模型评测读取 `[agent_runner.evaluation]` 段；完全可选，
+缺段时 Console 正常启动：
+
+```toml
+[agent_runner.evaluation]
+default_judge_presets = ["claude-sonnet"]   # 页面预选的评审名单（必须是已定义的执行预设名），单次 run 可覆盖；不可用的默认项不预选
+max_concurrency = 2                         # 1–4：全进程口径的候选并发上限，与 runner 共享主机 capacity
+agent_timeout_seconds = 900
+judge_timeout_seconds = 120
+```
+
+- 评审预设**就是**既有的 `[agent_runner.presets.<name>]`：不新增模型目录，也不需要 API
+  key——认证沿用各 agent CLI 自己的配置。评审以该 agent 的 `judge` 形态运行（空目录 +
+  禁用全部内置工具，见 [评测与测试](../dev/evaluation.md)）；没有该形态的 agent
+  （codex、kimi、opencode）页面标记不可用，创建 run 时 fail-fast，不写入 0 分。
+- 执行侧同样不新增配置：候选执行复用同一份预设。
+- suite YAML、rubric v1、授权流程与结果口径见 [评测与测试](../dev/evaluation.md)，
+  HTTP 契约见 [API 参考](../api/references.md)。
+
 ## Agent Runner Deliberation 配置
 
 `config.toml` 的 `[agent_runner.deliberation]` 段配置多 Agent 合议：

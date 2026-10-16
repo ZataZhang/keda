@@ -25,6 +25,7 @@
 | `docs/ai-standards/testing.md` | **任何代码变更开始前**；制定验证策略、收集证据或声称完成前必须重新核对；写 PRD 的 Realistic Validation Plan；**遇到测试失败或打算修改 `tests/guards/` 守卫测试时** | 仅改注释、纯文档排版或无可执行行为变化的纯配置 |
 | `docs/ai-standards/tooling.md` | 选择运行命令；改 `justfile` / `pre-commit` / `mkdocs` / Docker 配置；处理 PRD 归档流程；处理 lint flag 或重复检测 hooks；**改动 `kc` CLI 表面（子命令 / 旗标 / 退出码 / 机器输出）或随包 `kedacode-operator` skill**；撰写提交信息 | 在已熟悉常用 `just` 命令、且本次不动工具链配置与 CLI 表面时 |
 | `docs/ai-standards/alembic.md` | 新增、重命名或修改 Alembic migration；检查迁移链或 `down_revision` | 不涉及 `alembic/versions/` 时 |
+| `docs/ai-standards/time-display.md` | 新增或改动任何时间展示 / 时间戳输出：Web 时间标签、CLI 人读输出、日志行前缀、`*_at` 字段序列化 | 纯文档排版且不动时间显示与序列化时 |
 
 `tests/playwright-e2e/` 是独立 TypeScript/Node 包，遵循该目录自己的 `README.md`，不强制套用 Python 规范。
 
@@ -44,6 +45,7 @@
 - 变量命名必须具有来源、类型或状态语义，避免 `data`、`item`、`res`
 - 新增或修改代码前先搜索现有实现；禁止复制粘贴后微调，参数超过 4 个时收敛到对象
 - 除非用户明确要求，否则不要自动执行 `git add`、`git commit`、`git push` 等 Git 变更操作
+- 发布（改版本号、打 `v*` tag、发布 draft Release、上传 PyPI）前必须先读 `docs/guides/release-process.md`。PyPI 版本号一经上传永久占用、不能重用：推送 tag 只会生成 draft Release，**把 draft 正式发布（触发 PyPI 上传与 Homebrew tap 更新）必须有用户明确同意**，不得顺手执行
 - 提交信息统一用英文并遵循 Conventional Commits（`type(scope): subject`，标题 ≤ 72 字符，正文解释 why），详见 `docs/ai-standards/tooling.md` 的 Commit Messages 小节
 - 单代码文件非空行不超过 1000 行；`just lint` 会对此发出警告
 - 随手想法先落 `tasks/inbox/`：只在**想法边界**捕获（用户明确要求，或话题收敛到可开 PRD 的状态），条目 = 用户原话逐字**引用** + 标注为 `AI 派生` 的背景块，**只追加**到 `tasks/inbox/ideas.md`（禁止改写已有条目）；AI 维护 `tasks/inbox/summary.md` 做总结；想法成熟后用 PRD 流程升级到 `tasks/pending/`。详见 `docs/guides/idea-inbox.md`
@@ -52,6 +54,7 @@
 - 前端截图必须标注验证层级；临时预览页、直接渲染组件或手工注入状态仅属于 `component preview`，不得称为真实验证。涉及 Dialog、Portal、父级布局或用户流程时，验收证据必须保留对应生产边界；无法走真实入口时必须披露限制
 - 变更代码时同步更新 `docs/` 与 `mkdocs.yml`
 - 改动 `kc` CLI 表面（新增/改名子命令、旗标、退出码或机器可读输出）时，必须同步随包 `kedacode-operator` skill（`src/backend/engines/agent_runner/templates/skills/kedacode-operator/SKILL.md`）与 `docs/`，避免 agent 侧知识漂移；详见 `docs/ai-standards/tooling.md` 的 CLI Surface And Packaged Skill Sync
+- 时间显示统一约定：**机器输出（DB/API JSON/CLI JSON）保持 UTC 带偏移，人读展示按浏览器或执行机器本地时区**；无时区的墙钟标签与 `[HH:MM:SS]` 日志前缀原样展示、不猜测换算，详见 `docs/ai-standards/time-display.md`
 - 守卫测试（`tests/guards/`，文件头标注"守卫测试（guard test）"）失败时，修复触发它的源代码或配置，不要修改守卫测试本身让测试通过；仅当约定本身变更时才改守卫测试，并同步更新对应文档。修改 `tests/guards/**` 需 `GUARD_UPDATE_ACK=1 git commit`
 - 新增给密钥类的配置变量（如 `api_key_env`、密钥别名、provider 注册信息）应放到 `config.toml`，实际密钥值仍由 `.env/.env.local` 注入；默认 env 未填写时，配置加载仍须正常完成
 - `.env.example` 中非密钥类变量应保持 `# KEY=默认值` 的注释状态，仅作为示例；密钥类变量（含 API key、密码、token，以及可能携带凭据的连接字符串如 `DATABASE_URL`、`REDIS_URL`）保留未注释的空值（如 `OPENAI_API_KEY=`），确保变量名可见且不会误用默认值

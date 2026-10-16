@@ -22,6 +22,7 @@ import {
   updatePrdCiPolicy,
 } from "@/lib/api/backlog";
 import type { BacklogCiDelivery, CiDeliveryStatus, CiRepairPolicy } from "@/lib/api/types";
+import { formatLocalDateTime } from "@/lib/utils";
 
 export const PRD_CI_TAB_ID = "ci-delivery";
 
@@ -152,7 +153,7 @@ export function PrdCiView({ repoId, prdPath, issueNumber }: PrdCiViewProps) {
         </Badge>
         <span className="text-xs text-slate-500">
           第 {delivery.round_count}/{delivery.max_rounds} 轮 · 最近同步{" "}
-          {delivery.last_synced_at ?? "—"}
+          {formatLocalDateTime(delivery.last_synced_at)}
         </span>
         {delivery.pr_url ? (
           <Button size="sm" variant="outline" asChild>

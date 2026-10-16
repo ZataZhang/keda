@@ -117,13 +117,13 @@
   <line x1="570" y1="974" x2="570" y2="1000" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
 
   <rect x="290" y="1000" width="560" height="44" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="1.5"/>
-  <text x="570" y="1028" text-anchor="middle" font-size="14" font-weight="650" fill="#1e40af">agent/review · 等人工 review</text>
+  <text x="570" y="1028" text-anchor="middle" font-size="14" font-weight="650" fill="#1e40af">agent/automated-review-passed · 自动审查已通过</text>
 
   <line x1="570" y1="1044" x2="570" y2="1072" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
 
   <rect x="290" y="1072" width="560" height="56" rx="10" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.2"/>
-  <text x="570" y="1094" text-anchor="middle" font-size="13.5" font-weight="650" fill="#0f172a">merge：人工合并；或 autopilot 合并队列（需 autopilot.enabled + safety.auto_merge）</text>
-  <text x="570" y="1114" text-anchor="middle" font-size="11.5" fill="#64748b">verifier 门 → 自动签核 sign-off → rebase → 全量验证 → 禁改路径终扫</text>
+  <text x="570" y="1094" text-anchor="middle" font-size="13.5" font-weight="650" fill="#0f172a">human/awaiting-review：人工待办；或获准后进入 autopilot 合并队列</text>
+  <text x="570" y="1114" text-anchor="middle" font-size="11.5" fill="#64748b">人工签核 / PR review，或 verifier → sign-off → rebase → 验证 → squash</text>
 
   <line x1="570" y1="1128" x2="570" y2="1156" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
 

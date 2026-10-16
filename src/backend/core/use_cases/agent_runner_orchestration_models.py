@@ -14,6 +14,7 @@ from backend.core.shared.interfaces.agent_runner import (
 from backend.core.shared.interfaces.runner_console import IRunHistoryStore
 from backend.core.shared.interfaces.runner_live_view import IRunnerLiveView
 from backend.core.shared.models.agent_runner import AppConfig
+from backend.core.shared.models.pass_activity import PassActivity
 from backend.core.shared.models.publish_stage import PublishStage
 
 
@@ -64,3 +65,5 @@ class RunOnceRequest:
     execution_ceiling: int | None = None
     #: 资源不足时在创建 claim/worktree 前拒绝新任务；None 表示沿用原行为。
     issue_admission_check: Callable[[], bool] | None = None
+    #: daemon 传入的活动信号：``run_once`` 读到 ready 队列后回填数量，daemon 据此判断空闲。
+    pass_activity: PassActivity | None = None

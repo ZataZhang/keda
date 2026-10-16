@@ -29,6 +29,7 @@ from backend.infrastructure.config.agent_runner_settings import (
     AgentRunnerConsoleSettings,
     AgentRunnerDaemonSettings,
     AgentRunnerDeliberationSettings,
+    AgentRunnerEvaluationSettings,
     AgentRunnerGeneratedContentSettings,
     AgentRunnerGeneratedContentTargetSettings,
     AgentRunnerGitSettings,
@@ -256,6 +257,8 @@ class AgentRunnerSettings(BaseSettings):
     validation: AgentRunnerValidationSettings = Field(default_factory=AgentRunnerValidationSettings)
     console: AgentRunnerConsoleSettings = Field(default_factory=AgentRunnerConsoleSettings)
     hosted: AgentRunnerHostedSettings = Field(default_factory=AgentRunnerHostedSettings)
+    # 模型评测（multi-judge）：评审预设引用现有 provider/模型与环境密钥名。
+    evaluation: AgentRunnerEvaluationSettings = Field(default_factory=AgentRunnerEvaluationSettings)
     daemon: AgentRunnerDaemonSettings = Field(default_factory=AgentRunnerDaemonSettings)
     prompts: AgentRunnerPromptSettings = Field(default_factory=AgentRunnerPromptSettings)
     pre_pr_review: AgentRunnerPrePrReviewSettings = Field(

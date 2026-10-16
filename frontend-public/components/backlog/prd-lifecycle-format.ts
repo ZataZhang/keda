@@ -326,6 +326,14 @@ export const INVOCATION_RUN_DETAIL_KEY = "invocation_run";
  */
 export function summarizeEventDetail(event: PrdLifecycleEventView): string {
   const detail = event.detail ?? {};
+  if (event.event_type === "failed" && typeof detail.error_summary === "string") {
+    const failureSummary = detail.error_summary.trim();
+    if (failureSummary) {
+      const summaryPreview = failureSummary.slice(0, 320);
+      const overflowNotice = failureSummary.length > 320 ? "…（点击查看完整原因）" : "";
+      return `失败原因：${summaryPreview}${overflowNotice}`;
+    }
+  }
   if (event.event_type === "attempt") {
     const attemptNumber = detail.attempt_number;
     const parts = [

@@ -22,6 +22,11 @@ from dataclasses import dataclass, replace
 from backend.core.shared.interfaces.agent_runner import IGitHubClient
 from backend.core.shared.models.agent_runner import AppConfig, IssueSummary
 from backend.core.shared.models.publish_stage import PublishStage
+from backend.core.use_cases.agent_runner_merge_authorization import (
+    can_auto_merge_issue,
+    configured_prd_auto_merge_label,
+    issue_carries_prd_auto_merge_label,
+)
 from backend.core.use_cases.agent_runner_direct_pr_round import DirectPrPublicationCandidate
 from backend.core.use_cases.agent_runner_feedback import extract_prd_path
 
@@ -136,18 +141,6 @@ def configured_direct_pr_label(config: AppConfig) -> str | None:
 def issue_carries_direct_pr_label(issue: IssueSummary, config: AppConfig) -> bool:
     """判断 Issue 的标签集合里是否有配置的直发标签（用于快照预筛，不做放行判定）。"""
     label = configured_direct_pr_label(config)
-    return label is not None and label in issue.labels
-
-
-def configured_prd_auto_merge_label(config: AppConfig) -> str | None:
-    """返回配置指定的 PRD 自动合并标签；配置成空串时视为禁用。"""
-    label = (config.labels.prd_auto_merge or "").strip()
-    return label or None
-
-
-def issue_carries_prd_auto_merge_label(issue: IssueSummary, config: AppConfig) -> bool:
-    """检查 Issue 是否带有显式 PRD 自动合并授权标签。"""
-    label = configured_prd_auto_merge_label(config)
     return label is not None and label in issue.labels
 
 
@@ -560,6 +553,7 @@ __all__ = [
     "DirectPrStageConflictError",
     "PublishStageDecision",
     "apply_direct_pr_label_policy",
+    "can_auto_merge_issue",
     "configured_direct_pr_label",
     "configured_prd_auto_merge_label",
     "consume_direct_pr_label",

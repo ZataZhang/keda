@@ -33,7 +33,7 @@ def _make_config(*, supervisor_enabled: bool = False) -> AppConfig:
             ready="agent/ready",
             running="agent/running",
             supervising="agent/supervising",
-            review="agent/review",
+            review="agent/automated-review-passed",
             failed="agent/failed",
         ),
         post_pr_supervisor=PostPrSupervisorConfig(enabled=supervisor_enabled),
@@ -347,7 +347,7 @@ class TestRecoverPublishIssue:
                 ready="agent/ready",
                 running="agent/running",
                 supervising="agent/supervising",
-                review="agent/review",
+                review="agent/automated-review-passed",
                 failed="agent/failed",
             ),
             worktree=config.worktree.__class__(path_command=f"echo {worktree_path}"),
@@ -358,6 +358,7 @@ class TestRecoverPublishIssue:
         github_client = FakeGitHubClient()
         github_client._open_prs["issue-42"] = None
         github_client._issue_title = "Fix login timeout"
+        github_client._issue_labels[42] = ("agent/failed",)
 
         request = PublishRecoveryRequest(issue_number=42)
 
@@ -382,7 +383,7 @@ class TestRecoverPublishIssue:
 
         label_calls = [c for c in github_client.calls if c["method"] == "edit_issue_labels"]
         assert len(label_calls) == 1
-        assert "agent/review" in label_calls[0]["add"]
+        assert "agent/automated-review-passed" in label_calls[0]["add"]
         assert "agent/failed" in label_calls[0]["remove"]
 
     def test_success_uses_generated_pr_body_via_shared_publish_path(self, tmp_path: Path) -> None:
@@ -396,7 +397,7 @@ class TestRecoverPublishIssue:
                 ready="agent/ready",
                 running="agent/running",
                 supervising="agent/supervising",
-                review="agent/review",
+                review="agent/automated-review-passed",
                 failed="agent/failed",
             ),
             worktree=config.worktree.__class__(path_command=f"echo {worktree_path}"),
@@ -443,7 +444,7 @@ class TestRecoverPublishIssue:
                 ready="agent/ready",
                 running="agent/running",
                 supervising="agent/supervising",
-                review="agent/review",
+                review="agent/automated-review-passed",
                 failed="agent/failed",
             ),
             worktree=config.worktree.__class__(path_command=f"echo {worktree_path}"),
@@ -484,7 +485,7 @@ class TestRecoverPublishIssue:
                 ready="agent/ready",
                 running="agent/running",
                 supervising="agent/supervising",
-                review="agent/review",
+                review="agent/automated-review-passed",
                 failed="agent/failed",
             ),
             worktree=config.worktree.__class__(path_command=f"echo {worktree_path}"),
@@ -533,7 +534,7 @@ class TestRecoverPublishIssue:
                 ready="agent/ready",
                 running="agent/running",
                 supervising="agent/supervising",
-                review="agent/review",
+                review="agent/automated-review-passed",
                 failed="agent/failed",
             ),
             worktree=config.worktree.__class__(path_command=f"echo {worktree_path}"),
@@ -568,7 +569,7 @@ class TestRecoverPublishIssue:
                 ready="agent/ready",
                 running="agent/running",
                 supervising="agent/supervising",
-                review="agent/review",
+                review="agent/automated-review-passed",
                 failed="agent/failed",
             ),
             worktree=config.worktree.__class__(path_command=f"echo {worktree_path}"),
@@ -617,7 +618,7 @@ class TestRecoverPublishIssue:
                 ready="agent/ready",
                 running="agent/running",
                 supervising="agent/supervising",
-                review="agent/review",
+                review="agent/automated-review-passed",
                 failed="agent/failed",
             ),
             worktree=config.worktree.__class__(path_command=f"echo {worktree_path}"),
@@ -666,7 +667,7 @@ class TestRecoverPublishIssue:
                 ready="agent/ready",
                 running="agent/running",
                 supervising="agent/supervising",
-                review="agent/review",
+                review="agent/automated-review-passed",
                 failed="agent/failed",
             ),
             worktree=config.worktree.__class__(path_command=f"echo {worktree_path}"),
@@ -716,7 +717,7 @@ class TestRecoverPublishIssue:
                 ready="agent/ready",
                 running="agent/running",
                 supervising="agent/supervising",
-                review="agent/review",
+                review="agent/automated-review-passed",
                 failed="agent/failed",
             ),
             worktree=config.worktree.__class__(path_command=f"echo {worktree_path}"),
@@ -753,7 +754,7 @@ class TestRecoverPublishIssue:
                 ready="agent/ready",
                 running="agent/running",
                 supervising="agent/supervising",
-                review="agent/review",
+                review="agent/automated-review-passed",
                 failed="agent/failed",
             ),
             worktree=config.worktree.__class__(path_command=f"echo {worktree_path}"),

@@ -58,11 +58,13 @@ nav:
       - 文档规范: ai-standards/documentation.md
       - 测试规范: ai-standards/testing.md
       - 工具与命令: ai-standards/tooling.md
+      - 时间显示与时区: ai-standards/time-display.md
   - 使用指南:
       - 配置说明: guides/configuration.md
       - 部署指南: guides/deployment.md
       - 发布流程: guides/release-process.md
-      - Agent Runner 与容器运维: guides/agent-runner.md
+      - Agent Runner:
+          - 完整指南、模块职责、并发调度、统计、成本、会话续接与容器运维: guides/agent-runner.md
       - 生命周期 Agent 矩阵: guides/lifecycle-agent-matrix.md
       - Agent 模型预设: guides/model-presets.md
       - PRD 编写规范: guides/prd-standard.md
@@ -70,11 +72,13 @@ nav:
       - Review Workflow: guides/review-workflow.md
       - Skill Lifecycle: guides/skill-lifecycle.md
       - Codex macOS 通知: guides/codex-notifications.md
+      - 桌面进度小窗: guides/desktop-companion.md
       - 从 iar 迁移到 kc: guides/migrating-from-iar.md
       - Loop 定时任务: guides/loop.md
   - 原型演示:
       - 概览: prototypes/index.md
       - Prototype Hub: prototypes/hub.html
+      - Console 运行时看板与模型评测: prototypes/prd-lifecycle-observability.md
       - Assets 命名规范: prototypes/assets/README.md
   - 核心概念:
       - Prompt 工程: core/prompt_engineering.md

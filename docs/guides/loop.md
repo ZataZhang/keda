@@ -42,18 +42,45 @@ Loop 配方是仓库内的 Markdown 文件，建议存放在 `tasks/loops/<id>.m
 | 字段 | 必填 | 类型 | 默认 | 说明 |
 |---|---|---|---|---|
 | `id` | ✅ | string | — | loop 唯一标识，kebab-case（如 `github-trending`）。必须与文件 `kc loop create <id>` 一致。 |
-| `schedule` | ✅ | string | — | 5 字段 cron 表达式（本地时区），或 interval 简写 `10m` / `1h` / `1d`（`1d` 自动按 `0 0 * * *` 解析）。 |
+| `schedule` | ✅ | string | — | 5 字段 cron 表达式（使用 `timezone` 指定的时区），或 interval 简写 `10m` / `1h` / `1d`（`1d` 自动按 `0 0 * * *` 解析）。 |
 | `repo_id` | ✅ | string | — | 目标仓库在 `config.toml` 中的注册 ID。 |
 | `issue_type` |  | enum | `feature` | `feature` / `refactor` / `bug`，决定初始 `type/*` 标签。 |
 | `agent` |  | enum | `auto` | 合法值由 agent 注册表派生：`auto`（按标签路由）或任一已注册 agent 名（如 `claude` / `codex` / `kimi` / `pi`，以及 `[agent_runner.agents.<name>]` 里自定义注册的 agent）。 |
 | `labels` |  | list | `[]` | 除默认 `loop/<id>` 外附加的 GitHub labels。 |
 | `publish_prd` |  | bool | `true` | 创建 Issue 前是否 commit/push PRD。 |
+| `output` |  | enum | `issue` | 每次触发的产出：`issue`（默认）**不生成任何 PRD**，配方正文原文直接作为普通 Issue 的正文（`publish_prd` 在此模式下无意义）；`prd` 渲染一份带时间戳的 PRD 并与 Issue 一一绑定（走完整 PRD 生命周期，`publish_prd: true` 时还会提交并推送到 base 分支）。已经登记过、状态文件里没有该字段的旧 loop 仍按 `prd` 运行，不受默认值变化影响；重新登记旧配方时才会换成新默认值，需要旧行为请显式写 `output: prd`。 |
 | `queue_ready` |  | bool | `true` | 是否贴 `agent/ready` 标签让 runner 认领。 |
 | `run_now` |  | bool | `false` | 造票后是否立即调用 `run_agent_repositories_once`。 |
 | `pre_command` |  | string | `null` | 触发前执行的 shell 命令，stdout 中 `KEY=value` 行会被注入模板变量。 |
-| `timezone` |  | string | 系统本地 | IANA 时区名（如 `Asia/Shanghai`），用于 cron 调度。 |
+| `timezone` |  | string | UTC | IANA 时区名（如 `Asia/Shanghai`），用于 cron 调度。 |
+| `managed_by` |  | enum | `loop-daemon` | `loop-daemon` 由独立 loop daemon 推进；`agent-daemon` 由普通 `kc daemon` 在每轮前置阶段推进。 |
 | `priority` |  | string | `P2` | 生成 PRD 文件名前缀（`P0`–`P3`）。 |
 | `slug` |  | string | `<id>` | 生成 PRD 文件名中的 slug。 |
+
+`managed_by: agent-daemon` 是需要与现有 Issue runner 串起来的循环任务的推荐模式。
+普通 daemon 停止时不会创建下一轮 Issue；到期但上一轮 `loop/<id>` Issue **仍是开放状态**
+（不论处于 `agent/running`、`agent/failed`，还是“PR 已建、等人工审核”的
+`agent/automated-review-passed` / `human/awaiting-review`）时，本轮会暂停且保留原
+`next_fire_at`。只有上一轮 Issue 被关闭（交付 PR 合并后 `Closes #N` 自动关闭）才会补发
+一次，所以未合并的修复 PR 不会被下一轮重复劳动。未声明 `managed_by` 的旧 recipe 继续由
+`kc loop-daemon` 推进，未声明 `managed_by` 的旧 recipe 继续由 `kc loop-daemon` 推进，
+不会被普通 daemon 重复触发。
+
+`output: issue` 适合“每天重复做同一件事”的 loop（如夜间巡检 CI）：PRD 是一次性的生命周期
+（完成后归档、与 Issue 一对一链接、证据按 PRD 分目录），并不适合每晚复用。该模式下触发只会
+创建一个不带 `PRD path:` 锚点的普通 Issue，因此不会生成 PRD 文件、不往 `main` 推送、也不会
+留下需要清理的本地文件；agent 在 Issue 正文里拿到的是配方的完整规则，证据目录按
+`issue-<N>` 走，Issue 不会出现在按 PRD 扫描的 Backlog 页面里。代价是没有 PRD 的验收清单与
+证据 manifest，交付是否合格由 PR 上的 CI 把关。
+
+`skip_when` 可让 loop 在“无事可做”时不造票，例如 `skip_when: last_ci_status=success,none`：
+触发时先执行 `pre_command`，变量命中列表就跳过本次（不建 Issue、不消耗 agent），并把
+`next_fire_at` 推进到下一个调度点。变量缺失视为不命中，照常触发。`kc loop list` 会在对应行
+下显示“最近未造票”的原因（条件跳过，或因上一轮 Issue 仍未关闭而暂停），成功触发后清空。
+
+所有调度计算使用 recipe 的 `timezone`；状态文件中的 `created_at`、`last_fire_at` 和
+`next_fire_at` 仍以带 `+00:00` 偏移的 UTC 保存，模板里的日期和 Issue 标题使用 recipe
+时区的本地日期。
 
 ### 模板变量
 
@@ -81,6 +108,8 @@ issue_type: feature
 agent: auto
 labels:
   - area/discovery
+# 本例是 PRD 风格（带验收清单）；不写 output 则默认 issue
+output: prd
 publish_prd: true
 queue_ready: true
 run_now: false
@@ -132,8 +161,10 @@ kc loop create github-trending \
 ```
 id                       repo_id                   schedule                     enabled     next_fire
 ---------------------------------------------------------------------------------------------------------
-github-trending          keda                      cron:0 8 * * *               yes         2026-06-24T00:00:00+00:00
+github-trending          keda                      cron:0 8 * * *               yes         2026-06-23T08:00:00+08:00
 ```
+
+- `next_fire` 等时间列按**执行机器本地时区**显示并带本地偏移；账本与 `--json` 机器输出仍是 UTC（`+00:00`）原文，不受显示影响。
 
 ### `kc loop cancel <id>`
 
@@ -159,12 +190,27 @@ github-trending          keda                      cron:0 8 * * *               
 - 同一天同一 loop 已有未关闭的 `loop/<id>` Issue 时，**跳过**重复创建。
 - `--dry-run` 只跑一个 pass，打印 next fire 时间后退出，零副作用。
 
+### 普通 `kc daemon` 承载 loop
+
+将 recipe 的 `managed_by` 设为 `agent-daemon` 后，使用普通 runner daemon：
+
+```bash
+kc loop create nightly-main-ci --recipe tasks/loops/nightly-main-ci.md
+kc daemon --repo-id keda
+```
+
+普通 daemon 每轮会先检查该仓库到期的 `agent-daemon` loop，再进入现有的
+deliberation / PRD rework / ready Issue 执行阶段。因此新建的 loop Issue 可以在同一轮被
+runner 认领。上一轮 Issue 仍在活动状态时不会重复造票；daemon 停止期间也不会偷偷补建
+下一天的 Issue，恢复运行后按保存的 UTC `next_fire_at` 做一次补发。
+
 ## 一次触发（fire）的完整流程
 
 ```mermaid
 flowchart TD
     A[operator] -->|kc loop create| B[LoopStateStore]
     B -->|kc loop-daemon / run --now| C[LoopScheduler]
+    B -->|kc daemon + managed_by=agent-daemon| C
     C -->|due| D[LoopFire]
     D -->|read| E[tasks/loops/<id>.md]
     E -->|render| F[PRD body]
@@ -176,8 +222,11 @@ flowchart TD
 
 ## 已知风险与限制
 
-- **并发 daemon**：MVP 不加文件锁，请只跑一个 `kc loop-daemon` 进程。
-- **时区**：cron 默认本地时区，`time-zone: Asia/Shanghai` 等显式设置更稳。
+- **并发 daemon**：写入状态文件时持有旁路 `.lock` 的排他锁，并在持锁后重新读盘再合并，
+  `kc loop-daemon` 与 `kc daemon` 同时推进各自的 loop 不会互相覆盖。每个 loop 仍应只由
+  一个 daemon 负责（由 `managed_by` 决定）。
+- **时区**：cron 默认 UTC 兼容行为；需要固定墙钟时应填写 IANA `timezone`，例如
+  `Asia/Shanghai`。状态账本仍保存 UTC。
 - **pre_command 失败**：失败时 loop 标记 `last_error` 但不中断 daemon。
 - **同一天去重**：通过 `loop/<id>` 标签 + Issue 标题日期判断；手动改 Issue 标题可能绕过去重。
 
@@ -266,16 +315,22 @@ triage 决策树 recipe 与普通 recipe 字段集完全一致（见上方"完�
 ```yaml
 ---
 id: nightly-cleanup-<scope-coverage-name>
-schedule: "0 2 * * *"   # 或 "30 2 * * *" 等错峰时间
+# 或 "30 2 * * *" 等错峰时间
+schedule: "0 2 * * *"
 repo_id: <registered-repo-id>
-priority: P1            # P1 适合需要长期稳定运行的整理 loop
+# P1 适合需要长期稳定运行的整理 loop
+priority: P1
 issue_type: feature
 agent: auto
 labels:
-  - loop/cleanup        # 默认 loop/<id> 自动加，这里只加额外 label
+  # 默认 loop/<id> 自动加，这里只加额外 label
+  - loop/cleanup
+# PRD 风格；不写 output 则默认 issue
+output: prd
 publish_prd: true
 queue_ready: true
-run_now: true           # 当晚就让 agent runner 接管，不排队
+# 当晚就让 agent runner 接管，不排队
+run_now: true
 timezone: Asia/Shanghai
 slug: nightly-cleanup-<scope-coverage-name>
 pre_command: "<单行 shell 命令，stdout 输出 KEY=value 行>"

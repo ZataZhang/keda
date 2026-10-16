@@ -26,7 +26,6 @@ from backend.core.use_cases.pr_supervisor import (
     _load_previous_findings,
     _persist_findings,
     build_conflict_resolution_prompt,
-    build_rework_intent_comment,
     build_supervisor_prompt,
     contains_supervisor_decision,
     execute_rebase,
@@ -35,6 +34,7 @@ from backend.core.use_cases.pr_supervisor import (
     parse_supervisor_action,
     run_post_pr_supervisor_cycle,
 )
+from backend.core.use_cases.pr_supervisor_messages import build_rework_intent_comment
 from tests.conftest import FakeGitHubClient, FakeProcessRunner
 
 
@@ -2648,6 +2648,7 @@ def test_execute_rebase_real_git_conflict_allows_detached_head(
             capture_output=True,
             input_text=None,
             output_protocol=None,
+            attempt_key: str | None = None,
         ):
             cmd = list(command)
             if (

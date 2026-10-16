@@ -91,11 +91,15 @@ def _recover_from_active_rebase(
     Reuses the same agent-driven conflict resolution strategy as the post-PR
     supervisor: when ``git rebase --continue`` cannot proceed because of
     conflicts, the configured agent is prompted to resolve them and write a
-    commit request. The runner stages the resolved files, verifies them, and
-    continues the rebase. Only after exhausting the configured repair attempts
-    do we fall back to ``git rebase --abort``.
+    commit request. The runner stages the resolved files and continues the
+    rebase, then verifies the completed rebase once. Only after exhausting the
+    configured repair attempts for the current commit do we fall back to
+    ``git rebase --abort``.
     """
-    from backend.core.use_cases.pr_supervisor import build_conflict_resolution_prompt
+    from backend.core.use_cases.pr_supervisor import (
+        _current_rebase_conflict_commit,
+        build_conflict_resolution_prompt,
+    )
 
     def _try_continue_rebase() -> bool:
         continue_result = process_runner.run(
@@ -104,6 +108,10 @@ def _recover_from_active_rebase(
             check=False,
         )
         return continue_result.return_code == 0
+
+    def _verify_completed_rebase() -> None:
+        verification_results = run_verification(worktree_path, config, process_runner)
+        ensure_verification_passed(verification_results)
 
     def _conflicted_files() -> list[str]:
         diff_names_result = process_runner.run(
@@ -114,15 +122,32 @@ def _recover_from_active_rebase(
         return [line.strip() for line in diff_names_result.stdout.splitlines() if line.strip()]
 
     if not _conflicted_files() and _try_continue_rebase():
+        _verify_completed_rebase()
         return
 
     max_attempts = max(0, config.post_pr_supervisor.max_repair_attempts)
-    for _attempt in range(1, max_attempts + 1):
+    attempt = 0
+    invocation_attempt = 0
+    current_conflict_commit = _current_rebase_conflict_commit(worktree_path, process_runner)
+
+    def reset_attempt_budget_for_next_commit() -> None:
+        """rebase 推进到下一提交时重置该提交的冲突修复次数。"""
+        nonlocal attempt, current_conflict_commit
+        next_conflict_commit = _current_rebase_conflict_commit(worktree_path, process_runner)
+        if next_conflict_commit and next_conflict_commit != current_conflict_commit:
+            current_conflict_commit = next_conflict_commit
+            attempt = 0
+
+    while attempt < max_attempts:
+        attempt += 1
+        invocation_attempt += 1
         conflicted = _conflicted_files()
         if not conflicted:
             if _try_continue_rebase():
+                _verify_completed_rebase()
                 return
-            break
+            reset_attempt_budget_for_next_commit()
+            continue
 
         prompt = build_conflict_resolution_prompt(
             issue,
@@ -148,12 +173,12 @@ def _recover_from_active_rebase(
                 config=config,
                 issue=issue,
                 invocation_phase=PHASE_REBASE_RECOVERY,
-                invocation_attempt=_attempt,
+                invocation_attempt=invocation_attempt,
             )
         except (RuntimeError, OSError, subprocess.CalledProcessError) as exc:
             _logger.warning(
                 "Agent conflict resolution attempt %d/%d failed for Issue #%d: %s",
-                _attempt,
+                attempt,
                 max_attempts,
                 issue.number,
                 exc,
@@ -169,14 +194,14 @@ def _recover_from_active_rebase(
             raise RuntimeError("Agent requested a commit but produced no file changes.")
         validate_safe_changes(worktree_path, config, process_runner)
         process_runner.run(["git", "add", "-A"], cwd=worktree_path)
-        verification_results = run_verification(worktree_path, config, process_runner)
-        ensure_verification_passed(verification_results)
         process_runner.run(
             ["git", "commit", "-m", commit_message],
             cwd=worktree_path,
         )
         if _try_continue_rebase():
+            _verify_completed_rebase()
             return
+        reset_attempt_budget_for_next_commit()
 
     process_runner.run(["git", "rebase", "--abort"], cwd=worktree_path, check=False)
     if is_detached_head(worktree_path, process_runner):

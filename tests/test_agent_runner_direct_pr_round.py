@@ -411,7 +411,7 @@ def test_claim_entries_only_handoff_published_round_after_body_change(
     assert completed.round == "501" and completed.pr_url == _URL
     final_labels = set(fresh_client.get_issue(_NUMBER).labels)
     assert "direct-pr" not in final_labels and "test/preserve" in final_labels
-    assert "agent/review" in final_labels
+    assert "agent/automated-review-passed" in final_labels
     assert fresh_client.create_count == 0
     assert not any(list(command)[:2] == ["git", "push"] for command in process_runner.calls)
     assert not any(command and command[0] == "just" for command in process_runner.calls)
@@ -447,7 +447,7 @@ def test_standalone_recover_only_handoffs_published_round(
     completed = read_direct_pr_round(fresh_client, fresh_client.get_issue(_NUMBER))
     assert completed is not None and completed.handoff_complete
     assert "direct-pr" not in fresh_client.get_issue(_NUMBER).labels
-    assert "agent/review" in fresh_client.get_issue(_NUMBER).labels
+    assert "agent/automated-review-passed" in fresh_client.get_issue(_NUMBER).labels
     assert "agent/supervising" not in fresh_client.get_issue(_NUMBER).labels
     assert fresh_client.create_count == 0
     assert not any(list(command)[:2] == ["git", "push"] for command in process_runner.calls)

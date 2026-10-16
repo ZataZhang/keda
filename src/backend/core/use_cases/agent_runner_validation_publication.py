@@ -13,10 +13,19 @@ from backend.core.use_cases.agent_runner_structured_evidence import (
     EvidenceUpload,
     build_evidence_blob_url,
     has_structured_evidence_marker,
-    render_structured_evidence_comment,
     validate_evidence_manifest,
 )
-from backend.core.use_cases import agent_runner_validation as validation
+from backend.core.use_cases.agent_runner_structured_evidence_rendering import (
+    render_structured_evidence_comment,
+)
+from backend.core.use_cases.agent_runner_validation_identity import (
+    EvidenceMarker,
+    EvidenceMarkerV2,
+    PrChangeFingerprintRequest,
+    compute_pr_change_fingerprint,
+    format_validation_evidence_marker,
+)
+from backend.core.use_cases.agent_runner_video_evidence import VIDEO_EVIDENCE_SUFFIXES
 
 _logger = logging.getLogger(__name__)
 _PR_URL_PATTERN = re.compile(
@@ -26,6 +35,7 @@ _EVIDENCE_MARKER_PATTERN = re.compile(
     r"<!--\s*iar:validation-evidence\s+"
     r"version=(?P<version>\d+)\s+"
     r"head=(?P<head>[a-f0-9]+)\s+"
+    r"(?:base=(?P<base>[a-f0-9]+)\s+patch=(?P<patch>[a-f0-9]+)\s+)?"
     r"branch=(?P<branch>[^\s>]+)\s+"
     r"count=(?P<count>\d+)"
     r"\s*-->"
@@ -112,11 +122,16 @@ def upload_evidence_branch(
     Returns:
         EvidenceUpload；证据目录为空时返回 ``None``。
     """
-    evidence_relative_paths = validation.list_evidence_upload_files(worktree_path, config, issue)
+    from backend.core.use_cases.agent_runner_validation import (
+        list_evidence_upload_files,
+        resolve_issue_evidence_dir,
+    )
+
+    evidence_relative_paths = list_evidence_upload_files(worktree_path, config, issue)
     if not evidence_relative_paths:
         return None
 
-    evidence_dir = validation.resolve_issue_evidence_dir(worktree_path, config, issue)
+    evidence_dir = resolve_issue_evidence_dir(worktree_path, config, issue)
     blob_shas_by_path: dict[str, str] = {}
     for relative_path in evidence_relative_paths:
         blob_result = process_runner.run(
@@ -187,6 +202,8 @@ def build_evidence_comment(
     head_sha: str,
     issue_body: str = "",
     evidence_dir: Path | None = None,
+    base_sha: str | None = None,
+    patch_id: str | None = None,
 ) -> str:
     """Build the PR evidence comment with embedded images and quoted text.
 
@@ -197,9 +214,17 @@ def build_evidence_comment(
     Args:
         evidence_dir: 已解析的证据目录（按任务子目录）；为 ``None`` 时使用
             配置根目录，保持旧调用方行为。
+        base_sha: 可选的 PR base 快照；与 ``patch_id`` 同时提供时写入 v2 marker。
+        patch_id: 可选的 PR 改动稳定指纹；与 ``base_sha`` 同时提供时写入 v2 marker。
     """
+    from backend.core.use_cases.agent_runner_validation import evidence_dir_path
+
     if has_structured_evidence_marker(issue_body):
-        checklist_items = validation.extract_realistic_validation_items(issue_body)
+        from backend.core.use_cases.agent_runner_validation import (
+            extract_realistic_validation_items,
+        )
+
+        checklist_items = extract_realistic_validation_items(issue_body)
         report = validate_evidence_manifest(
             issue_body=issue_body,
             checklist_items=checklist_items,
@@ -215,11 +240,24 @@ def build_evidence_comment(
             pr_url=pr_url,
             head_sha=head_sha,
             evidence_dir=evidence_dir,
+            base_sha=base_sha,
+            patch_id=patch_id,
         )
 
-    marker = (
-        f"<!-- iar:validation-evidence version=1 head={head_sha} "
-        f"branch={upload.branch} count={len(upload.file_names)} -->"
+    marker_fields = {
+        "head_sha": head_sha,
+        "branch": upload.branch,
+        "count": len(upload.file_names),
+    }
+    evidence_marker = (
+        EvidenceMarkerV2(**marker_fields, base_sha=base_sha, patch_id=patch_id)
+        if base_sha is not None and patch_id is not None
+        else EvidenceMarker(**marker_fields)
+    )
+    marker = format_validation_evidence_marker(evidence_marker)
+    has_stable_identity = base_sha is not None and patch_id is not None
+    change_identity_lines = (
+        [f"- PR contribution patch-id: `{patch_id}`"] if has_stable_identity else []
     )
     comment_lines = [
         marker,
@@ -229,10 +267,15 @@ def build_evidence_comment(
         f"- Evidence branch: `{upload.branch}` (orphan; never merged; "
         "auto-deleted after the issue closes)",
         f"- Code head at capture time: `{head_sha}`",
+        *change_identity_lines,
         "",
         "Review the evidence below, then tick the Realistic Validation "
         "checklist in the PR description to sign off.",
     ]
+    resolved_evidence_dir = (
+        evidence_dir if evidence_dir is not None else evidence_dir_path(worktree_path, config)
+    )
+    comment_lines.extend(_render_video_evidence_summary(upload.file_names, resolved_evidence_dir))
     for file_name in upload.file_names:
         file_suffix = Path(file_name).suffix.lower()
         file_blob_url = build_evidence_blob_url(pr_url, upload.branch, file_name)
@@ -242,11 +285,6 @@ def build_evidence_comment(
             comment_lines.append(f"[Open image]({file_blob_url})")
             continue
         if file_suffix in _INLINE_TEXT_SUFFIXES:
-            resolved_evidence_dir = (
-                evidence_dir
-                if evidence_dir is not None
-                else validation.evidence_dir_path(worktree_path, config)
-            )
             evidence_file_path = resolved_evidence_dir / file_name
             try:
                 file_text = evidence_file_path.read_text(encoding="utf-8", errors="replace")
@@ -260,16 +298,53 @@ def build_evidence_comment(
     return "\n".join(comment_lines)
 
 
-def parse_latest_evidence_marker(pr_comments: list[str]) -> validation.EvidenceMarker | None:
+def _render_video_evidence_summary(
+    file_names: tuple[str, ...] | list[str], evidence_dir: Path
+) -> list[str]:
+    """Summarize the recordings in the evidence set; empty when there are none.
+
+    只读文件大小，不依赖 ffmpeg：汇总是告知“已产出录屏”，读不到大小也不影响发布。
+    视频不能在评论里内嵌播放，下面各文件小节仍给出打开链接。
+    """
+    video_names = [
+        file_name
+        for file_name in file_names
+        if Path(file_name).suffix.lower() in VIDEO_EVIDENCE_SUFFIXES
+    ]
+    if not video_names:
+        return []
+    summary_lines = ["", f"**Video evidence: {len(video_names)} recording(s)**"]
+    for video_name in video_names:
+        try:
+            size_text = f"{(evidence_dir / video_name).stat().st_size / 1024:.0f} KB"
+        except OSError:
+            size_text = "size unknown"
+        summary_lines.append(f"- `{video_name}` ({size_text})")
+    summary_lines.append(
+        "Recordings cannot play inline in a PR comment; open each file from its section below."
+    )
+    return summary_lines
+
+
+def parse_latest_evidence_marker(
+    pr_comments: list[str],
+) -> EvidenceMarker | EvidenceMarkerV2 | None:
     """Parse the latest iar:validation-evidence marker from PR comments."""
     for comment_body in reversed(pr_comments):
         marker_match = _EVIDENCE_MARKER_PATTERN.search(comment_body)
         if marker_match:
-            return validation.EvidenceMarker(
-                head_sha=marker_match.group("head"),
-                branch=marker_match.group("branch"),
-                count=int(marker_match.group("count")),
-            )
+            marker_fields = {
+                "head_sha": marker_match.group("head"),
+                "branch": marker_match.group("branch"),
+                "count": int(marker_match.group("count")),
+            }
+            base_sha = marker_match.group("base")
+            patch_id = marker_match.group("patch")
+            marker_version = marker_match.group("version")
+            if marker_version == "2" and base_sha is not None and patch_id is not None:
+                return EvidenceMarkerV2(**marker_fields, base_sha=base_sha, patch_id=patch_id)
+            if marker_version == "1":
+                return EvidenceMarker(**marker_fields)
     return None
 
 
@@ -288,7 +363,12 @@ def publish_validation_evidence(
     Returns:
         EvidenceUpload；不要求验证或无证据文件时返回 ``None``。
     """
-    if not validation.validation_required(issue.body, config):
+    from backend.core.use_cases.agent_runner_validation import (
+        resolve_issue_evidence_dir,
+        validation_required,
+    )
+
+    if not validation_required(issue.body, config):
         return None
     upload = upload_evidence_branch(
         issue=issue,
@@ -306,6 +386,28 @@ def publish_validation_evidence(
     pr_number = parse_pr_number(pr_url)
     if pr_number is None:
         raise RuntimeError(f"Cannot post validation evidence: unparsable PR URL {pr_url!r}")
+    base_sha: str | None = None
+    patch_id: str | None = None
+    try:
+        pr_context = github_client.get_pull_request_context_by_number(pr_number)
+    except Exception as context_exc:  # noqa: BLE001 - v1 marker remains compatible.
+        _logger.warning(
+            "Could not read PR #%d context for evidence identity: %s", pr_number, context_exc
+        )
+        pr_context = None
+    if pr_context is not None and pr_context.head_sha == head_sha:
+        fingerprint = compute_pr_change_fingerprint(
+            PrChangeFingerprintRequest(
+                repo_path=worktree_path,
+                remote=config.git.remote,
+                base_sha=pr_context.base_sha,
+                head_sha=pr_context.head_sha,
+                process_runner=process_runner,
+            )
+        )
+        if fingerprint is not None:
+            base_sha = pr_context.base_sha
+            patch_id = fingerprint
     github_client.comment_pr(
         pr_number,
         build_evidence_comment(
@@ -315,7 +417,9 @@ def publish_validation_evidence(
             pr_url=pr_url,
             head_sha=head_sha,
             issue_body=issue.body,
-            evidence_dir=validation.resolve_issue_evidence_dir(worktree_path, config, issue),
+            evidence_dir=resolve_issue_evidence_dir(worktree_path, config, issue),
+            base_sha=base_sha,
+            patch_id=patch_id,
         ),
     )
     return upload

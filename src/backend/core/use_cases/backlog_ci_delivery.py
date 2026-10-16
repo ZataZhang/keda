@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from backend.core.shared.models.agent_runner import PullRequestContext
 from backend.core.shared.models.backlog import (
@@ -249,7 +249,7 @@ def request_manual_ci_repair(
     Returns:
         ``(requested, detail)``：``requested=False`` 表示幂等跳过或被拒绝。
     """
-    from backend.core.use_cases.pr_supervisor import build_rework_intent_comment
+    from backend.core.use_cases.pr_supervisor_messages import build_rework_intent_comment
     from backend.core.use_cases.agent_runner_workflow import transition_issue_workflow_state
 
     comments = github_client.list_issue_comments(issue.number)
@@ -346,14 +346,15 @@ def enqueue_approved_auto_repair(
     config: AppConfig,
     github_client: IGitHubClient,
     pr_branch: str,
+    execution_owner: Literal["runner", "supervisor"] = "runner",
 ) -> tuple[bool, str]:
-    """策略门禁通过后写入修复意图评论并切回 running（复用既有 rework 路径）。
+    """策略门禁通过后写入修复意图并切到对应执行阶段。
 
     幂等键与手动修复一致：同一 head SHA 的 ``post_pr_rework_requested`` +
     ``repair_pr_branch`` marker 已存在时零新增副作用（daemon 重入、页面重试
     或崩溃恢复都不会重复修复同一轮）。
     """
-    from backend.core.use_cases.pr_supervisor import build_rework_intent_comment
+    from backend.core.use_cases.pr_supervisor_messages import build_rework_intent_comment
     from backend.core.use_cases.agent_runner_workflow import transition_issue_workflow_state
 
     comments = github_client.list_issue_comments(issue.number)
@@ -370,10 +371,19 @@ def enqueue_approved_auto_repair(
             action=_REPAIR_ACTION,
             pr_branch=pr_branch,
             head_sha=pr_context.head_sha,
+            execution_owner=execution_owner,
         ),
     )
-    transition_issue_workflow_state(github_client, issue.number, config, config.labels.running)
-    return True, "已排队自动修复（post_pr_rework_requested）。"
+    target_label = (
+        config.labels.supervising if execution_owner == "supervisor" else config.labels.running
+    )
+    transition_issue_workflow_state(github_client, issue.number, config, target_label)
+    detail = (
+        "已在 supervising 阶段启动自动修复。"
+        if execution_owner == "supervisor"
+        else "已排队自动修复（post_pr_rework_requested）。"
+    )
+    return True, detail
 
 
 # 供 API/CLI 层把 dataclass 投影序列化时保持字段命名一致（复用 _serialize）。

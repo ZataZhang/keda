@@ -20,16 +20,16 @@ from backend.core.shared.models.agent_runner import (
     SupervisorActionResult,
 )
 from backend.core.use_cases.agent_candidate_fallback import build_agent_candidates
-from backend.core.use_cases.agent_runner_events import (
-    format_event_marker,
+from backend.core.use_cases.agent_runner_merge_authorization import (
+    issue_carries_prd_auto_merge_label,
 )
 from backend.core.use_cases.agent_runner_commit import (
     read_commit_request,
     remove_commit_request,
 )
+from backend.core.use_cases.agent_runner_git import has_rebase_metadata
 from backend.core.use_cases.agent_runner_feedback import (
     build_recovery_prompt,
-    failed_verification_results,
 )
 from backend.core.use_cases.agent_runner_validation import (
     resolve_issue_evidence_relpath,
@@ -49,6 +49,10 @@ from backend.core.use_cases.pr_supervisor_findings import (
     _extract_supervisor_findings,
     _load_previous_findings,
     _persist_findings,
+)
+from backend.core.use_cases.pr_supervisor_messages import (
+    build_conflict_resolution_prompt,
+    build_supervisor_result_comment,
 )
 from backend.core.use_cases.pr_supervisor_repair import execute_repair
 from backend.core.use_cases.agent_invocation_tracing import (
@@ -114,7 +118,7 @@ def _read_active_rebase_target_branch(
         if rev_parse_result.return_code != 0:
             continue
         head_name_path = worktree_path / Path(rev_parse_result.stdout.strip())
-        if head_name_path.exists():
+        if head_name_path.is_file():
             raw = head_name_path.read_text(encoding="utf-8")
             return _normalize_rebase_target_name(raw)
     return None
@@ -204,6 +208,13 @@ def build_supervisor_prompt(
         if prd_path_match
         else "If the Issue references a PRD, read it before reviewing."
     )
+    scoped_prd_auto_merge_enabled = issue_carries_prd_auto_merge_label(issue, config)
+    automation_context_lines = [
+        "Automation authorization:",
+        f"- Issue-scoped `prd-auto-merge` authorization: {scoped_prd_auto_merge_enabled}",
+        f"- Autopilot merge queue enabled: {config.autopilot.enabled}",
+        f"- PR-body auto sign-off enabled: {config.autopilot.auto_sign_off}",
+    ]
 
     diff_result = process_runner.run(
         ["git", "diff", f"{config.git.base_branch}...{pr_context.head_sha}"],
@@ -244,6 +255,7 @@ def build_supervisor_prompt(
             f"Checks state: {pr_context.checks_state}",
             "Checks summary:",
             "\n".join(f"- {check}" for check in pr_context.checks_summary) or "(none)",
+            "\n".join(automation_context_lines),
             prd_line,
             "",
             "Issue body:",
@@ -289,6 +301,28 @@ def build_supervisor_prompt(
             "assume jobs ran or succeeded. Choose wait_for_checks or "
             "request_human_input according to whether the PRD requires this "
             "remote gate.",
+            "- Read the canonical PRD's Realistic Validation Plan. When an item is "
+            "marked required for acceptance and its `real_entry` / `mock_boundary` "
+            "define an executable path, missing, stubbed, stale, or unpublished "
+            "evidence is an actionable repair. Return `repair_pr_branch` with the "
+            "concrete work needed to run that path and publish evidence; do not ask "
+            "the user to choose between completing the written requirement and "
+            "accepting weaker evidence.",
+            "- Reserve `request_human_input` for a genuine unresolved product or "
+            "acceptance decision, contradictory requirements, or a required external "
+            "credential/permission that the runner actually cannot use. A missing "
+            "test, screenshot, tree binding, or runner-owned evidence publication is "
+            "not by itself a human decision.",
+            "- If the Issue carries `prd-auto-merge`, that label authorizes the "
+            "Issue-scoped merge path, skips only the independent verifier, and lets "
+            "the merge queue bypass the PRD `Human-Confirmed` hold. It does not waive "
+            "required Realistic Validation evidence, repository verification, PR "
+            "checks, or branch protection.",
+            "- When the only failed check is `Realistic Validation sign-off` and the "
+            "automation context says both the merge queue and auto sign-off are "
+            "enabled, do not request a human to tick the PR-body checklist. The merge "
+            "queue completes that checklist after repository verification; this "
+            "never substitutes for running or reviewing required validation evidence.",
             "- Never describe unexecuted or unverified CI as passed, verified, or "
             "acceptance-complete; approve_for_human_review only means entering "
             "human review and never implies acceptance, auto-merge, or archive "
@@ -482,133 +516,63 @@ def guard_supervisor_action_for_pr_state(
     return action_result
 
 
-def build_supervisor_result_comment(
-    *,
-    action: str,
-    supervisor: str,
-    summary: str,
-    findings_counts: dict[str, int],
-    verification_status: str,
-    head_sha: str | None,
-    cycle: int,
-    base_sha: str | None = None,
-    checks_state: str | None = None,
-    mergeable: bool | None = None,
-    issue_comments_count: int | None = None,
-    pr_comments_count: int | None = None,
+def _current_rebase_conflict_commit(
+    worktree_path: Path,
+    process_runner: IProcessRunner,
 ) -> str:
-    """Build the human-readable comment for a supervisor cycle result."""
-    # marker 中记录 action，使下一轮 review pass 能识别 mark_failed 结局，
-    # 在人工恢复 label 后允许同一上下文重新评审
-    marker = format_event_marker(
-        phase="post_pr_supervisor",
-        cycle=cycle,
-        head_sha=head_sha,
-        base_sha=base_sha,
-        action=action,
-        checks_state=checks_state,
-        mergeable=mergeable,
-        issue_comments_count=issue_comments_count,
-        pr_comments_count=pr_comments_count,
+    """读取当前 rebase 正在重放的提交 SHA。"""
+    result = process_runner.run(
+        ["git", "rev-parse", "REBASE_HEAD"],
+        cwd=worktree_path,
+        check=False,
     )
-    high = findings_counts.get("high", 0)
-    medium = findings_counts.get("medium", 0)
-    low = findings_counts.get("low", 0)
-    return "\n".join(
-        [
-            marker,
-            "",
-            "## Agent Runner Post-PR Supervisor",
-            "",
-            f"- Action: {action}",
-            f"- Supervisor: {supervisor}",
-            f"- Summary: {summary}",
-            f"- Findings: {high} high, {medium} medium, {low} low",
-            f"- Verification: {verification_status or 'unknown'}",
-            f"- Head SHA: `{head_sha or 'N/A'}`",
-        ]
-    )
+    return result.stdout.strip() if result.return_code == 0 else ""
 
 
-def build_rework_intent_comment(
+def _is_completed_rebase_for_expected_head(
+    worktree_path: Path,
+    process_runner: IProcessRunner,
     *,
-    action: str,
-    pr_branch: str,
-    head_sha: str,
-) -> str:
-    """Build the comment that marks a post-PR rework intent."""
-    marker = format_event_marker(
-        phase="post_pr_rework_requested",
-        cycle=1,
-        head_sha=head_sha,
-        pr_branch=pr_branch,
-        action=action,
-    )
-    return "\n".join(
-        [
-            marker,
-            "",
-            "## Agent Runner Post-PR Rework Requested",
-            "",
-            f"- Action: {action}",
-            f"- PR Branch: `{pr_branch}`",
-            f"- Head SHA: `{head_sha}`",
-            "- A runner will pick this up on the next `kc run` pass.",
-        ]
-    )
-
-
-def build_rebase_repair_complete_comment(
-    *,
-    action: str,
-    head_sha: str,
-    verification_passed: bool,
-) -> str:
-    """Build the comment after a rebase or repair completes."""
-    marker = format_event_marker(
-        phase="rebase_repair_complete",
-        cycle=1,
-        head_sha=head_sha,
-    )
-    return "\n".join(
-        [
-            marker,
-            "",
-            "## Agent Runner Rebase/Repair Complete",
-            "",
-            f"- Action: {action}",
-            f"- Head SHA: `{head_sha}`",
-            f"- Verification: {'passed' if verification_passed else 'failed'}",
-        ]
-    )
-
-
-def build_conflict_resolution_prompt(
-    issue: IssueSummary,
     pr_branch: str,
     expected_head: str,
-    conflicted_files: list[str],
-) -> str:
-    """Build the prompt for the rebase conflict resolution agent."""
-    files_text = "\n".join(f"- {f}" for f in conflicted_files) or "(none)"
-    return "\n".join(
-        [
-            f"Resolve rebase conflicts for Issue #{issue.number}: {issue.title}",
-            "",
-            f"Issue URL: {issue.url}",
-            f"PR Branch: `{pr_branch}`",
-            f"Expected HEAD: `{expected_head}`",
-            "",
-            "The rebase onto the remote base branch encountered conflicts in these files:",
-            files_text,
-            "",
-            "Resolve all conflicts and request a commit.",
-            "- Only modify conflicted files inside the current worktree.",
-            "- Do not switch branches, push, or abort the rebase.",
-            "- Do not run `git add` or `git commit`; the runner handles staging.",
-            "- After resolving conflicts, write `.agent-runner/commit-request.json` "
-            "as JSON with `commit_message`.",
-        ]
+    remote: str,
+) -> bool:
+    """确认 worktree 自愈已把预期 PR head 成功 rebase 并完成。"""
+    if get_current_branch(worktree_path, process_runner) != pr_branch:
+        return False
+    if has_rebase_metadata(worktree_path, process_runner):
+        return False
+    if has_changes(worktree_path, process_runner):
+        return False
+
+    original_head_result = process_runner.run(
+        ["git", "rev-parse", "ORIG_HEAD"],
+        cwd=worktree_path,
+        check=False,
+    )
+    if (
+        original_head_result.return_code != 0
+        or original_head_result.stdout.strip() != expected_head
+    ):
+        return False
+
+    reflog_result = process_runner.run(
+        ["git", "reflog", "-1", "--format=%gs", "HEAD"],
+        cwd=worktree_path,
+        check=False,
+    )
+    expected_reflog = f"rebase (finish): returning to refs/heads/{pr_branch}"
+    if reflog_result.return_code != 0 or reflog_result.stdout.strip() != expected_reflog:
+        return False
+
+    remote_tracking_ref = f"refs/remotes/{remote}/{pr_branch}"
+    remote_head_result = process_runner.run(
+        ["git", "rev-parse", remote_tracking_ref],
+        cwd=worktree_path,
+        check=False,
+    )
+    return (
+        remote_head_result.return_code == 0 and remote_head_result.stdout.strip() == expected_head
     )
 
 
@@ -637,17 +601,27 @@ def execute_rebase(
     Returns:
         Verification results after rebase.
     """
-    # 校验 HEAD 与分支，防止在错误状态上执行 rebase
-    current_head = get_head_sha(worktree_path, process_runner)
-    if current_head != expected_head:
-        raise RuntimeError(
-            f"Rebase aborted: HEAD {current_head} does not match expected {expected_head}"
-        )
-
-    _ensure_rebase_context_matches_pr_branch(worktree_path, process_runner, pr_branch)
-
     remote = config.git.remote
     base_branch = config.git.base_branch
+
+    # 校验 HEAD 与分支，防止在错误状态上执行 rebase。
+    current_head = get_head_sha(worktree_path, process_runner)
+    if current_head != expected_head:
+        if not _is_completed_rebase_for_expected_head(
+            worktree_path,
+            process_runner,
+            pr_branch=pr_branch,
+            expected_head=expected_head,
+            remote=remote,
+        ):
+            raise RuntimeError(
+                f"Rebase aborted: HEAD {current_head} does not match expected {expected_head}"
+            )
+        # worktree 自愈已把 expected_head 完整 rebase 到新 head；从该结果继续确认
+        # 最新 base，并通过 force-with-lease 发布，避免因旧 head 检查重复失败。
+        expected_head = current_head
+    else:
+        _ensure_rebase_context_matches_pr_branch(worktree_path, process_runner, pr_branch)
 
     # 拉取最新 base，减少再次冲突概率
     process_runner.run(
@@ -664,7 +638,27 @@ def execute_rebase(
 
     if rebase_result.return_code != 0:
         max_attempts = max(0, config.post_pr_supervisor.max_repair_attempts)
-        for attempt in range(1, max_attempts + 1):
+        attempt = 0
+        invocation_attempt = 0
+        current_conflict_commit = _current_rebase_conflict_commit(
+            worktree_path,
+            process_runner,
+        )
+
+        def reset_attempt_budget_for_next_commit() -> None:
+            """rebase 推进到下一提交时重置该提交的冲突修复次数。"""
+            nonlocal attempt, current_conflict_commit
+            next_conflict_commit = _current_rebase_conflict_commit(
+                worktree_path,
+                process_runner,
+            )
+            if next_conflict_commit and next_conflict_commit != current_conflict_commit:
+                current_conflict_commit = next_conflict_commit
+                attempt = 0
+
+        while attempt < max_attempts:
+            attempt += 1
+            invocation_attempt += 1
             diff_names_result = process_runner.run(
                 ["git", "diff", "--name-only", "--diff-filter=U"],
                 cwd=worktree_path,
@@ -695,6 +689,7 @@ def execute_rebase(
                     )
                     return verification_results
                 # continue 失败说明仍有未解决冲突，进入下一轮让 agent 处理
+                reset_attempt_budget_for_next_commit()
                 continue
 
             if conflicted_files:
@@ -723,7 +718,7 @@ def execute_rebase(
                 issue=issue,
                 model_selection=model_selection,
                 invocation_phase=PHASE_SUPERVISOR,
-                invocation_attempt=attempt,
+                invocation_attempt=invocation_attempt,
             )
 
             # Agent 通过 commit-request.json 显式表达提交意图
@@ -737,16 +732,6 @@ def execute_rebase(
                     raise RuntimeError("Agent requested a commit but produced no file changes.")
                 validate_safe_changes(worktree_path, config, process_runner)
                 process_runner.run(["git", "add", "-A"], cwd=worktree_path)
-                # continue 前验证冲突解决结果
-                verification_results = run_verification(worktree_path, config, process_runner)
-                if failed_verification_results(verification_results):
-                    # 验证失败则取消 staging，让 agent 下一轮继续修
-                    process_runner.run(
-                        ["git", "reset", "--mixed"],
-                        cwd=worktree_path,
-                        check=False,
-                    )
-                    continue
                 continue_result = process_runner.run(
                     ["git", "-c", "core.editor=true", "rebase", "--continue"],
                     cwd=worktree_path,
@@ -767,6 +752,7 @@ def execute_rebase(
                         cwd=worktree_path,
                     )
                     return verification_results
+                reset_attempt_budget_for_next_commit()
             else:
                 # Agent 未写 commit-request 却改文件，拒绝
                 if has_changes(worktree_path, process_runner):
@@ -794,6 +780,7 @@ def execute_rebase(
                         cwd=worktree_path,
                     )
                     return verification_results
+                reset_attempt_budget_for_next_commit()
 
         # 重试用尽后回退 rebase
         process_runner.run(

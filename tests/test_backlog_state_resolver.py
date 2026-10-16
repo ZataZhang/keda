@@ -72,10 +72,10 @@ def test_ready_label_maps_to_ready_state() -> None:
 
 
 def test_review_label_maps_to_review_state() -> None:
-    """Issue with agent/review label should map to review state."""
+    """Issue with agent/automated-review-passed label should map to review state."""
     prd = _make_prd("tasks/pending/P1-FEAT-20260101-a.md", issue_number=2)
     client = FakeGitHubClient()
-    client._issue_labels[2] = ("agent/review",)
+    client._issue_labels[2] = ("agent/automated-review-passed",)
     client._issue_comments[2] = ["PR Branch: `issue-2`"]
     client._pr_contexts["issue-2"] = type(
         "FakePrContext",

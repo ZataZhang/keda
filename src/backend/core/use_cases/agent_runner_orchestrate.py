@@ -42,6 +42,7 @@ from backend.core.shared.models.agent_runner import (
     ReviewEventMarker,
     TokenUsage,
 )
+from backend.core.shared.models.pass_activity import PassActivity
 from backend.core.shared.models.publish_stage import (
     PublishStage,
 )
@@ -57,6 +58,7 @@ from backend.core.use_cases.agent_runner_blocked_claim import (
 )
 from backend.core.use_cases.agent_runner_claim_arbitration import (
     ClaimArbitrationLost,
+    arbitrate_first_claim,
 )
 from backend.core.use_cases.agent_runner_publication import (
     _finish_existing_commit_publication,
@@ -105,8 +107,9 @@ from backend.core.use_cases.agent_runner_worktree_probe import (
 
 # 运行时依赖注入面。以下名字在本模块内没有直接调用点，但必须留在命名空间里：
 # ``_orchestration_runtime_module`` 按名取用它们，注入派发层
-# （``agent_runner_orchestration_runtime``）与 Issue 状态处理器
-# （``agent_runner_issue_handlers``）。这两处模块内部按各自
+# （``agent_runner_orchestration_runtime``）、Issue 状态处理器
+# （``agent_runner_issue_handlers``）与 PRD rework 阶段
+# （``agent_runner_orchestration_prd_rework``）。这些模块内部按各自
 # ``RUNTIME_DEPENDENCY_NAMES`` 声明需要哪些名字。测试与集成方替换这些依赖时，
 # 补丁点仍然是本模块——单一中枢，避免同一处替换要打两个模块。
 # **不要因为「本模块内看起来没用到」而删除这些导入。**
@@ -131,12 +134,14 @@ _logger = logging.getLogger(__name__)
 
 # 本列表同时承担两个职责：对外导出，以及声明**运行时依赖同步源**。
 # ``_orchestration_runtime_module`` 通过 ``globals()`` 按名取用这些私有名，
-# 把它们注入 ``agent_runner_orchestration_runtime`` 与
-# ``agent_runner_issue_handlers``，从而让测试与集成方继续可以在本模块上
-# 替换这些依赖（既有 monkeypatch 接缝位置不变）。因此其中若干名字在本模块
+# 把它们注入 ``agent_runner_orchestration_runtime``、
+# ``agent_runner_issue_handlers`` 与
+# ``agent_runner_orchestration_prd_rework``，从而让测试与集成方继续可以在本
+# 模块上替换这些依赖（既有 monkeypatch 接缝位置不变）。因此其中若干名字在本模块
 # 内没有直接调用点，仍必须保留在命名空间里。
 __all__ = [
     "BlockedWorktreeClaimedError",
+    "arbitrate_first_claim",
     "_acquire_blocked_claim_lock",
     "_ensure_worktree_branch",
     "_find_worktree_path_for_issue",
@@ -174,22 +179,25 @@ _READY_DISCOVERY_LIMIT = 100
 def _orchestration_runtime_module():
     """加载实现模块并同步可被测试或集成方替换的运行时依赖。"""
     from backend.core.use_cases import agent_runner_issue_handlers as handlers_module
+    from backend.core.use_cases import agent_runner_orchestration_prd_rework as rework_module
     from backend.core.use_cases import agent_runner_orchestration_runtime as module
 
     for dependency_name in module.RUNTIME_DEPENDENCY_NAMES:
         setattr(module, dependency_name, globals()[dependency_name])
     for dependency_name in handlers_module.RUNTIME_DEPENDENCY_NAMES:
         setattr(handlers_module, dependency_name, globals()[dependency_name])
+    for dependency_name in rework_module.RUNTIME_DEPENDENCY_NAMES:
+        setattr(rework_module, dependency_name, globals()[dependency_name])
     return module
 
 
 def refresh_runtime_dependencies() -> None:
     """把本模块命名空间里的运行时依赖同步给按名解析它们的实现模块。
 
-    ``agent_runner_issue_handlers`` 与 ``agent_runner_orchestration_runtime`` 都在
-    各自模块的命名空间里解析这些协作者（见各自的 ``RUNTIME_DEPENDENCY_NAMES``）。
-    因此测试与集成方在**本模块**上替换依赖后，必须先经过一次同步，替换才会对
-    这两个模块生效。
+    ``agent_runner_issue_handlers``、``agent_runner_orchestration_runtime`` 与
+    ``agent_runner_orchestration_prd_rework`` 都在各自模块的命名空间里解析这些
+    协作者（见各自的 ``RUNTIME_DEPENDENCY_NAMES``）。因此测试与集成方在**本模块**
+    上替换依赖后，必须先经过一次同步，替换才会对这些模块生效。
 
     派发路径（``run_once`` / ``process_prd_rework_issues`` / ``_process_single_issue``）
     会经由 :func:`_orchestration_runtime_module` 自动同步；**其它直接调用状态处理器
@@ -211,9 +219,11 @@ def process_prd_rework_issues(
     max_issues: int = 1,
 ) -> None:
     """处理标记为 PRD rework 的 Issue。"""
-    module = _orchestration_runtime_module()
-    module.process_prd_rework_issues(
-        module.PrdReworkRequest(
+    from backend.core.use_cases import agent_runner_orchestration_prd_rework as rework_module
+
+    _orchestration_runtime_module()
+    rework_module.process_prd_rework_issues(
+        rework_module.PrdReworkRequest(
             repo_path=repo_path,
             config=config,
             github_client=github_client,
@@ -579,6 +589,7 @@ def run_once(
     aggregate_pr: bool = False,
     execution_ceiling: int | None = None,
     issue_admission_check: Callable[[], bool] | None = None,
+    pass_activity: PassActivity | None = None,
 ) -> int:
     """执行一次 Agent Runner 轮询。"""
     module = _orchestration_runtime_module()
@@ -602,5 +613,6 @@ def run_once(
             aggregate_pr=aggregate_pr,
             execution_ceiling=execution_ceiling,
             issue_admission_check=issue_admission_check,
+            pass_activity=pass_activity,
         )
     )

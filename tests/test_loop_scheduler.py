@@ -76,6 +76,17 @@ def test_compute_next_fire_cron_rolls_to_next_day() -> None:
     assert next_fire.hour == 8
 
 
+def test_compute_next_fire_cron_uses_recipe_timezone() -> None:
+    schedule = LoopSchedule(kind=LoopScheduleKind.CRON, expression="0 1 * * *")
+    after = datetime(2026, 6, 23, 16, 30, 0, tzinfo=timezone.utc)
+    next_fire = compute_next_fire(
+        schedule,
+        after=after,
+        timezone_name="Asia/Shanghai",
+    )
+    assert next_fire == datetime(2026, 6, 23, 17, 0, 0, tzinfo=timezone.utc)
+
+
 def test_compute_next_fire_invalid_cron_raises() -> None:
     schedule = LoopSchedule(kind=LoopScheduleKind.CRON, expression="not a cron")
     with pytest.raises(ValueError):
@@ -191,3 +202,30 @@ def test_fixed_clock_advance_and_sleep() -> None:
     clock.advance(hours=1, minutes=1)
     assert clock.now().hour == 1
     assert clock.now().minute == 1
+
+
+def test_state_store_writes_do_not_clobber_other_process_updates(tmp_path: Path) -> None:
+    """两个 store 实例各写不同 loop，后写的不能抹掉先写的（持锁后重新读盘合并）。"""
+    from backend.core.shared.models.loop import LoopSchedule, LoopScheduleKind, LoopTask
+    from backend.engines.agent_runner.persistence.loop_state_json import JsonLoopStateStore
+
+    state_path = tmp_path / "loop-state.json"
+    store_a = JsonLoopStateStore(state_path)
+    store_b = JsonLoopStateStore(state_path)
+    store_a.list_tasks()  # A 先缓存一份空状态
+
+    def _task(loop_id: str) -> LoopTask:
+        return LoopTask(
+            id=loop_id,
+            recipe_path=tmp_path / f"{loop_id}.md",
+            repo_id="r",
+            schedule=LoopSchedule(kind=LoopScheduleKind.CRON, expression="0 1 * * *"),
+        )
+
+    store_b.upsert_task(_task("from-b"))
+    store_a.upsert_task(_task("from-a"))
+
+    assert [task.id for task in JsonLoopStateStore(state_path).list_tasks()] == [
+        "from-a",
+        "from-b",
+    ]

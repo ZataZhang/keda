@@ -18,16 +18,17 @@
       relationships: [{ id: 'blocked-draft-pr-surface', label: '查看验证失败后的 Issue 交接与 Draft PR' }],
     },
     {
-      id: 'prd-lifecycle-observability', title: 'PRD 生命周期观测与执行分析', project: 'keda', module: 'Backlog / 统计',
-      system: 'Keda Console', form: 'code-native', version: 'v2.0', updatedAt: '2026-10-11', availability: 'available', validationLevel: '交互原型',
-      primaryFlow: '从 Backlog 单 PRD 执行时间线按「执行会话 → Agent 尝试 → 调用」展开调用明细、查看事件详情，切换五套场景验证去噪与降级披露，并进入仓库级 PRD 耗时统计后返回',
-      description: '基于真实 Backlog 与 Stats 信息架构设计的可点击原型，时间线与 frontend-public 组件同源：同秒 started/claimed 合并成一行、同秒 attempt/retry 折成标记、观测事件走中性徽章；尝试头显示 Agent/失败类别/耗时/是否恢复，展开后是跨会话的调用行（阶段、执行器、终态、重试链、耗时、模型、日志定位）。不可读台账、无归属旧数据、读取截断三类缺口分别显式披露，永不猜测；调用明细不可用时时间线仍完整渲染。',
-      preview: '', entry: './prd-lifecycle-observability.html', source: './prd-lifecycle-observability/', provenance: [],
+      id: 'prd-lifecycle-observability', title: 'Console 运行时看板与模型评测', project: 'keda', module: 'Agent Runner / Dashboard',
+      system: 'Keda Console', form: 'code-native', version: 'v3.0', updatedAt: '2026-10-12', availability: 'available', validationLevel: '交互原型',
+      primaryFlow: '默认查看运行时任务卡片与详情日志，折叠工具调用；打开四任务桌面悬浮窗预览；进入模型评测配置、查看逐维评分、评审分歧与外发授权流程；也可回到 Backlog 生命周期详情和 Stats',
+      description: '静态 fixture 驱动的 Console 目标态交互原型。Dashboard 卡片用状态颜色与文字呈现 Issue 运行阶段；右侧展示日志和可折叠结构化调用；桌面页用紧凑四任务布局展示改动树触达比例，但不模拟跨应用置顶；评测页展示固定样本对比、多评审模型逐维评分和确切 payload 预览，拒绝与确认都不触发真实网络请求。原型不连接 API、SQLite、Agent 或模型服务。',
+      preview: './assets/runtime-board-preview.png', entry: './prd-lifecycle-observability.html#dashboard', source: './prd-lifecycle-observability.md', provenance: ['./assets/runtime-board-preview.source/', './assets/runtime-widget-preview.source/', './assets/runtime-evaluation-preview.source/', './assets/runtime-consent-preview.source/'],
       relationships: [
         { id: 'roadmap-cicd-repair', label: '继续查看 CI/CD 检查与自动修复轮次' },
         { id: 'roadmap-controls-evidence', label: '查看同一 Backlog 画布上的控制与验收证据入口' },
         { id: 'lifecycle-agent-matrix', label: '查看生命周期执行器与模型设置' },
         { id: 'blocked-draft-pr-surface', label: '查看验证失败后的 Issue 交接与 Draft PR' },
+        { id: 'verifier-human-takeover', label: '查看 Dashboard 上的 verifier 接管流程' },
       ],
     },
     {

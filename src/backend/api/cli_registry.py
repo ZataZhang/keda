@@ -16,6 +16,7 @@ from rich.text import Text
 from backend.api.cli_console import console, error_console
 from backend.api.cli_exit_codes import ExitCode
 from backend.api.cli_helpers import repository_selector_error
+from backend.api.cli_utils import format_local_display_time
 from backend.api.cli_output import (
     OUTPUT_FORMAT_JSON,
     OUTPUT_FORMAT_TABLE,
@@ -570,7 +571,7 @@ def _run_daemon_status_command(
                 status_text,
                 str(record.pid),
                 record.process_id,
-                record.started_at,
+                format_local_display_time(record.started_at),
                 record.log_path or "-",
                 _resolve_executable_from_command(record.command),
                 " ".join(record.command),

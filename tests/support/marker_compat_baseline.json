@@ -534,7 +534,7 @@
             "existing_pr_body": "## Draft PR\n\nbody"
           },
           "method": null,
-          "parser": "backend.core.use_cases.agent_runner_issue_handlers:_with_pr_handoff_ref",
+          "parser": "backend.core.use_cases.agent_runner_pr_handoff:_with_pr_handoff_ref",
           "result": "## Draft PR\n\nbody\n\n<!-- iar:failure-context-ref -->\n\n## Previous Round Handoff\n\nThis Draft PR was published from a **WIP checkpoint** after the runner exhausted its recovery budget (3 attempts). The commits here are mid-progress work, not a finished implementation, and the existence of this PR is not an acceptance result.\n\n- Authoritative handoff record (latest round): <https://github.com/example-org/example-repo/issues/7#issuecomment-999>\n- `validation/verifier-passed` is **absent**, so the existing sign-off, merge and archive gates keep refusing this PR by design. Nothing in this section changes that, and the gates are not modified by this feature.\n",
           "text_kwarg": "handoff_ref_block"
         },
@@ -547,7 +547,7 @@
             "handoff_url": "https://github.com/example-org/example-repo/issues/7#issuecomment-999"
           },
           "method": null,
-          "parser": "backend.core.use_cases.agent_runner_issue_handlers:_build_pr_handoff_ref_block",
+          "parser": "backend.core.use_cases.agent_runner_pr_handoff:_build_pr_handoff_ref_block",
           "result": "<!-- iar:failure-context-ref -->\n\n## Previous Round Handoff\n\nThis Draft PR was published from a **WIP checkpoint** after the runner exhausted its recovery budget (3 attempts). The commits here are mid-progress work, not a finished implementation, and the existence of this PR is not an acceptance result.\n\n- Handoff record could not be posted to this Issue; see the Issue comment list for whatever the runner managed to report: <https://github.com/example-org/example-repo/issues/7#issuecomment-999>\n- `validation/verifier-passed` is **absent**, so the existing sign-off, merge and archive gates keep refusing this PR by design. Nothing in this section changes that, and the gates are not modified by this feature.\n",
           "text_kwarg": null
         }
@@ -555,7 +555,7 @@
       "writers": [
         {
           "as": "comment",
-          "call": "backend.core.use_cases.agent_runner_issue_handlers:_build_pr_handoff_ref_block",
+          "call": "backend.core.use_cases.agent_runner_pr_handoff:_build_pr_handoff_ref_block",
           "const": null,
           "contains": null,
           "kwargs": {
@@ -743,7 +743,7 @@
       "id": "realistic-validation",
       "kind": "iar:realistic-validation",
       "outputs": {
-        "comment": "<!-- iar:realistic-validation version=1 total=2 -->\n## Realistic Validation (human sign-off required)\n\nReview the evidence comment on this PR, then tick each item once you verified it against the evidence:\n\nRun `kc run --issue 7` and capture rv-1 evidence\nTick the checklist after evidence is attached\n\n<!-- iar:realistic-validation-end -->"
+        "comment": "<!-- iar:realistic-validation version=1 total=2 -->\n## Realistic Validation sign-off\n\nComplete each item only after its evidence has been verified. The configured review or authorized auto-sign-off path may complete this checklist:\n\nRun `kc run --issue 7` and capture rv-1 evidence\nTick the checklist after evidence is attached\n\n<!-- iar:realistic-validation-end -->"
       },
       "parses": [
         {
@@ -765,7 +765,7 @@
           "kwargs": {},
           "method": null,
           "parser": "backend.core.use_cases.agent_runner_validation_checklist:reset_validation_checklist",
-          "result": "<!-- iar:realistic-validation version=1 total=2 -->\n## Realistic Validation (human sign-off required)\n\nReview the evidence comment on this PR, then tick each item once you verified it against the evidence:\n\nRun `kc run --issue 7` and capture rv-1 evidence\nTick the checklist after evidence is attached\n<!-- iar:realistic-validation-end -->",
+          "result": "<!-- iar:realistic-validation version=1 total=2 -->\n## Realistic Validation sign-off\n\nComplete each item only after its evidence has been verified. The configured review or authorized auto-sign-off path may complete this checklist:\n\nRun `kc run --issue 7` and capture rv-1 evidence\nTick the checklist after evidence is attached\n<!-- iar:realistic-validation-end -->",
           "text_kwarg": null
         }
       ],
@@ -790,7 +790,7 @@
       "id": "realistic-validation-end",
       "kind": "iar:realistic-validation-end",
       "outputs": {
-        "comment": "<!-- iar:realistic-validation version=1 total=2 -->\n## Realistic Validation (human sign-off required)\n\nReview the evidence comment on this PR, then tick each item once you verified it against the evidence:\n\nRun `kc run --issue 7` and capture rv-1 evidence\nTick the checklist after evidence is attached\n\n<!-- iar:realistic-validation-end -->"
+        "comment": "<!-- iar:realistic-validation version=1 total=2 -->\n## Realistic Validation sign-off\n\nComplete each item only after its evidence has been verified. The configured review or authorized auto-sign-off path may complete this checklist:\n\nRun `kc run --issue 7` and capture rv-1 evidence\nTick the checklist after evidence is attached\n\n<!-- iar:realistic-validation-end -->"
       },
       "parses": [
         {
@@ -1062,7 +1062,9 @@
             "findings": "",
             "marker_found": true,
             "risk": "yellow",
-            "token_usage": null
+            "token_usage": null,
+            "verifier_input_sha": null,
+            "verifier_run_id": null
           },
           "text_kwarg": null
         },
@@ -1079,7 +1081,9 @@
             "findings": "manual findings",
             "marker_found": true,
             "risk": "yellow",
-            "token_usage": null
+            "token_usage": null,
+            "verifier_input_sha": null,
+            "verifier_run_id": null
           },
           "text_kwarg": null
         }
@@ -1116,7 +1120,9 @@
             "findings": "No parseable verifier verdict marker found; treating as blocked (red).",
             "marker_found": false,
             "risk": "red",
-            "token_usage": null
+            "token_usage": null,
+            "verifier_input_sha": null,
+            "verifier_run_id": null
           },
           "text_kwarg": null
         }
@@ -1136,7 +1142,9 @@
                 "findings": "evidence for rv-3 is thin",
                 "marker_found": true,
                 "risk": "yellow",
-                "token_usage": null
+                "token_usage": null,
+                "verifier_input_sha": null,
+                "verifier_run_id": null
               }
             }
           },
@@ -1429,7 +1437,7 @@
     }
   ],
   "generated_by": ".iar/evidence/scripts/rv-3-marker-snapshot.py",
-  "generated_from_ref": "36c3f734bb9da19fd533c0242d3a9517b0a1feed",
+  "generated_from_ref": "a0a170f5f6e614c9f94bcb8292d59095eee5338d",
   "kinds": [
     "iar-attempt-end",
     "iar-attempt-history",

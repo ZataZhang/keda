@@ -34,14 +34,21 @@ class ValidationChecklistState:
 
 
 def build_validation_checklist_block(checklist_items: list[str]) -> str:
-    """Build the marker-wrapped human sign-off checklist for a PR body."""
+    """构造 PR 正文中由标记包裹的验证签收清单。
+
+    Args:
+        checklist_items: 需要签收的验证项文案。
+
+    Returns:
+        带 Realistic Validation 契约标记的清单文本。
+    """
     return "\n".join(
         [
             f"<!-- iar:realistic-validation version=1 total={len(checklist_items)} -->",
-            "## Realistic Validation (human sign-off required)",
+            "## Realistic Validation sign-off",
             "",
-            "Review the evidence comment on this PR, then tick each item "
-            "once you verified it against the evidence:",
+            "Complete each item only after its evidence has been verified. "
+            "The configured review or authorized auto-sign-off path may complete this checklist:",
             "",
             *checklist_items,
             "",
