@@ -45,11 +45,34 @@ Homebrew tap 侧的一次性配置：`ZataZhang/homebrew-tap` 必须是 public �
 
 ## 日常发布步骤
 
-1. **本地产物预检**（打 tag 之前，必做）：`uv build` 构建前端静态产物后打包，`uvx twine check dist/*` 全部 PASSED（twine 不在 dev 依赖里，用 `uvx` 拉起，`uv run twine` 会报 `Failed to spawn`），再把 `dist/*.whl` 装进一个干净 venv，跑 `kc --version`、`kedacode --version` 与 `kc console --no-browser` 确认可用。
-2. 推送 `v*` tag，等 `build` job 全绿，确认 draft release 已带 sdist、wheel 与 `SHA256SUMS`。
-3. 检查 draft release：确认产物文件名是 `kedacode-*`、console 产物在包内、版本号正确。
-4. 在 GitHub 上把该 draft release 正式发布。
-5. 等 `publish-pypi` 与 `update-tap` 全绿后，**不要只看 workflow 日志**：核对 `https://pypi.org/pypi/kedacode/json` 已返回新版本，`kc console` 从公共索引可装，tap 仓库的 `Formula/kedacode.rb` 已更新。
+1. **提升版本号**（单独一个提交）：只改两处——`pyproject.toml` 的 `version`，以及 `uv.lock` 里 `name = "kedacode"` 那个 `[[package]]` 的 `version`；用 `uv lock --check` 确认锁文件一致。提交信息沿用惯例 `chore(release): prepare vX.Y.Z`（参见 `v0.3.0` 的提交 `9cfb5d7a`）。版本号怎么升（补丁 / 次版本）由负责发版的人决定：项目处于 `0.x`，历史上带新功能的批次升次版本（`0.2.x → 0.3.0 → 0.4.0`），只含修复才升补丁。这个提交同样要过 `just test` 门禁——改 `pyproject.toml` 会让增量测试缓存失效，全量约 8 分钟，要预留时间。
+2. **本地产物预检**（打 tag 之前，必做）：照发布 CI 的 build job 在本地走一遍，通过后才打 tag。`dist/` 与 `src/backend/api/static/console` 都在 `.gitignore` 里，构建不会弄脏工作区：
+
+   ```bash
+   pnpm --filter frontend-public install --frozen-lockfile
+   pnpm --filter frontend-public build
+   rm -rf src/backend/api/static/console && cp -R frontend-public/out src/backend/api/static/console
+   rm -rf dist && uv build
+   # 内容断言：wheel 与 sdist 都含 console 静态文件，且都不含内置 skills
+   python3 -m zipfile -l dist/*.whl | grep "backend/api/static/console/index.html"
+   tar -tzf dist/*.tar.gz           | grep "backend/api/static/console/index.html"
+   python3 -m zipfile -l dist/*.whl | grep -E "agent_runner/skills/(prd|code-reviewer)/SKILL.md"   # 不应有输出
+   uvx twine check dist/*           # twine 不在 dev 依赖里，用 uvx 拉起；uv run twine 会报 Failed to spawn
+   ```
+
+   再把 wheel 装进一个**干净 venv**：`uv venv <dir> && uv pip install --python <dir>/bin/python dist/*.whl`，用它跑 `kc --version`、`kedacode --version`（都应是新版本号），并冒烟 `kc console --no-browser --port <不常用的端口>`：请求首页应返回 200。**冒烟端口要选不常用的（例如 `18765`），收尾只按这个进程的 PID 停**——开发机上常有代理、启动器等占着 3000–9999 区间里的端口，按端口区间或进程名批量 `kill` 会误杀它们。
+3. 推送提交和 `v*` tag（用带说明的 tag：`git tag -a vX.Y.Z -m "Release vX.Y.Z"`），等 `build` job 全绿，确认 draft release 已带 sdist、wheel 与 `SHA256SUMS`。此时 `publish-pypi` 与 `update-tap` 两个 job 显示 `skipped` 是**预期**的，它们要等第 5 步。
+4. 检查 draft release：确认产物文件名是 `kedacode-*`、console 产物在包内、版本号正确。几个看起来像异常、其实正常的现象：draft 的链接形如 `releases/tag/untagged-<hash>`，正式发布后才变成 `vX.Y.Z`；CI 上构建的 wheel 与本地构建的**字节数不同**（构建不是逐字节可复现的），所以不要拿本地哈希去比对 `SHA256SUMS`，以 CI 产物与其 `SHA256SUMS` 互相一致为准。
+5. 在 GitHub 上把该 draft release 正式发布。**这一步会触发不可逆的 PyPI 上传，必须有负责人明确同意**；agent 不得自行执行（包括 `gh release edit --draft=false`）。
+6. 等 `publish-pypi` 与 `update-tap` 全绿后，**不要只看 workflow 日志**：核对 `https://pypi.org/pypi/kedacode/json` 已返回新版本，`kc console` 从公共索引可装，tap 仓库的 `Formula/kedacode.rb` 已更新。
+
+### 轮询 CI 的方式
+
+打 tag 之后要等 workflow 跑完。同一个 GitHub 账号的 API 额度（REST 与 GraphQL 各 5000/小时）由所有 `gh`、daemon、Monitor 共用，所以**不要用 `gh run watch`**——它默认每 3 秒刷新一次（`--interval` 默认 3），等十分钟就是 200 次调用。改用每 60 秒一次的 `gh run view <run-id> --json status,conclusion`，直到 `status` 变为 `completed`；run id 用 `gh run list --workflow release.yml --limit 2` 取。额度机制见 [Agent Runner](agent-runner.md) 里“跨进程共享的额度预算与用量账本”一节。
+
+### 升级之后
+
+新版本发布后，**已经在跑的常驻 daemon（`kc daemon` / `kc registry start` 启动的）不会自动换成新代码**，它们在启动时一次性加载。升级（`uv tool install -U kedacode`、`brew upgrade kedacode`）之后要重启这些进程，否则会一直跑旧版本——这也是排查“新版本的修复对某个仓库没生效”时的第一个检查项。
 
 ## 误发与幂等
 

@@ -49,6 +49,7 @@
 - 变量命名必须具有来源、类型或状态语义，避免 `data`、`item`、`res`
 - 新增或修改代码前先搜索现有实现；禁止复制粘贴后微调，参数超过 4 个时收敛到对象
 - 除非用户明确要求，否则不要自动执行 `git add`、`git commit`、`git push` 等 Git 变更操作
+- 发布（改版本号、打 `v*` tag、发布 draft Release、上传 PyPI）前必须先读 `docs/guides/release-process.md`。PyPI 版本号一经上传永久占用、不能重用：推送 tag 只会生成 draft Release，**把 draft 正式发布（触发 PyPI 上传与 Homebrew tap 更新）必须有用户明确同意**，不得顺手执行
 - 提交信息统一用英文并遵循 Conventional Commits（`type(scope): subject`，标题 ≤ 72 字符，正文解释 why），详见 `docs/ai-standards/tooling.md` 的 Commit Messages 小节
 - 单代码文件非空行不超过 1000 行；`just lint` 会对此发出警告
 - 随手想法先落 `tasks/inbox/`：只在**想法边界**捕获（用户明确要求，或话题收敛到可开 PRD 的状态），条目 = 用户原话逐字**引用** + 标注为 `AI 派生` 的背景块，**只追加**到 `tasks/inbox/ideas.md`（禁止改写已有条目）；AI 维护 `tasks/inbox/summary.md` 做总结；想法成熟后用 PRD 流程升级到 `tasks/pending/`。详见 `docs/guides/idea-inbox.md`
