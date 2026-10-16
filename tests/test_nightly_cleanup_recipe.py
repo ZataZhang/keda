@@ -399,11 +399,10 @@ def test_fire_keda_recipe_writes_prd_creates_issue_and_calls_runner(
     create_labels = create_calls[0]["labels"]
     assert "type/feature" in create_labels
     assert "agent/ready" in create_labels  # queue_ready=True
-    # loop-specific label is added in a follow-up edit_issue_labels call.
-    edit_calls = [c for c in fake_github.calls if c["method"] == "edit_issue_labels"]
-    assert len(edit_calls) == 1
-    assert "loop/nightly-cleanup-keda" in edit_calls[0]["add"]
-    assert "loop/cleanup" in edit_calls[0]["add"]
+    # loop-specific labels are part of the create call, not a follow-up edit.
+    assert "loop/nightly-cleanup-keda" in create_labels
+    assert "loop/cleanup" in create_labels
+    assert not [c for c in fake_github.calls if c["method"] == "edit_issue_labels"]
 
     # 3) Loop state updated.
     state_store.load()

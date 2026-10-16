@@ -162,13 +162,11 @@ def test_fire_loop_writes_prd_and_creates_issue(
     assert "type/feature" in create_call["labels"]
     assert "agent/ready" in create_call["labels"]
 
-    # Loop-specific labels are applied in a follow-up edit_issue_labels call.
-    label_edit_calls = [c for c in fake_github.calls if c["method"] == "edit_issue_labels"]
-    assert len(label_edit_calls) == 1
-    edit_call = label_edit_calls[0]
-    assert edit_call["issue_number"] == 101
-    assert "loop/github-trending" in edit_call["add"]
-    assert "area/discovery" in edit_call["add"]
+    # Loop-specific labels ride along in the create call itself: a follow-up edit
+    # that failed would leave an Issue the dedup / wait-for-close rules can't see.
+    assert "loop/github-trending" in create_call["labels"]
+    assert "area/discovery" in create_call["labels"]
+    assert not [c for c in fake_github.calls if c["method"] == "edit_issue_labels"]
 
     # The state was persisted with updated counters / next fire.
     state_store.load()
@@ -709,3 +707,40 @@ def test_legacy_state_entry_without_output_keeps_running_as_prd(tmp_path: Path) 
     )
     legacy_task = JsonLoopStateStore(state_path).get_task("legacy-loop")
     assert legacy_task is not None and legacy_task.output == "prd"
+
+
+@pytest.mark.parametrize("output_mode", ["prd", "issue"])
+def test_loop_labels_are_sent_with_the_create_call_not_a_follow_up_edit(
+    task: LoopTask, repo_path: Path, tmp_path: Path, output_mode: str
+) -> None:
+    """``loop/<id>`` 必须随创建调用一起落下。
+
+    以前是“先建 Issue、再补标签”：补标签一失败，Issue 已存在却没有 ``loop/<id>``，
+    fire 抛错、状态没推进，去重与“上一个未关闭则暂停”都认不出它，下次触发就重复建一个。
+    """
+    fake_github = FakeGitHubClient(issue_url="https://github.com/example/fire-demo/issues/9")
+    fake_github.set_list_issues_by_label_result([])
+
+    def _label_edit_always_fails(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("simulated label edit failure")
+
+    fake_github.edit_issue_labels = _label_edit_always_fails  # type: ignore[method-assign]
+    state_store = JsonLoopStateStore(tmp_path / "loop-state.json")
+
+    result = fire_loop(
+        replace(task, output=output_mode),
+        repo_path=repo_path,
+        github_client=fake_github,
+        process_runner=FakeProcessRunner(),
+        state_store=state_store,
+        clock=FixedClock(datetime(2026, 6, 23, 8, 0, tzinfo=timezone.utc)),
+    )
+
+    assert result.status is LoopFireStatus.FIRED
+    created_issue_calls = [call for call in fake_github.calls if call["method"] == "create_issue"]
+    assert len(created_issue_calls) == 1
+    assert "loop/github-trending" in created_issue_calls[0]["labels"]
+    assert "area/discovery" in created_issue_calls[0]["labels"]
+    state_store.load()
+    persisted = state_store.get_task("github-trending")
+    assert persisted is not None and persisted.fire_count == 1

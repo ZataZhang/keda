@@ -5,9 +5,10 @@ A single :func:`fire_loop` invocation:
 1. Loads the recipe from disk and renders the PRD body template with the
    built-in and ``pre_command`` variables.
 2. Writes a new PRD to ``tasks/pending/`` with a date-stamped filename.
-3. Reuses :func:`create_issue_from_prd` to create a GitHub Issue.
-4. Attaches the default ``loop/<id>`` label (and any extras from the
-   recipe) via :meth:`IGitHubClient.edit_issue_labels`.
+3. Reuses :func:`create_issue_from_prd` (or the plain-Issue path) to create a
+   GitHub Issue.
+4. The default ``loop/<id>`` label (and any extras from the recipe) is part
+   of the create call itself, so an Issue never exists without it.
 5. Updates the loop's persisted state with the new ``last_fire_at``,
    ``next_fire_at`` and ``fire_count`` so the daemon can schedule the
    subsequent run.
@@ -450,21 +451,12 @@ def fire_loop(
         issue_title=issue_title,
         repo_path=repo_path,
         labels_config=effective_labels,
+        extra_labels=tuple(_effective_extra_labels(task, recipe)),
         github_client=github_client,
         process_runner=process_runner,
         content_generator=content_generator,
     )
     issue_number = _extract_issue_number(issue_url)
-
-    extra_labels = list(_effective_extra_labels(task, recipe))
-    if extra_labels:
-        if issue_number is None:
-            _logger.warning(
-                "Could not derive Issue number from %s; skipping extra labels.",
-                issue_url,
-            )
-        else:
-            github_client.edit_issue_labels(issue_number, add=extra_labels)
 
     next_fire_dt = compute_next_fire(
         task.schedule,
@@ -499,6 +491,7 @@ def _create_loop_issue(
     issue_title: str,
     repo_path: Path,
     labels_config: LabelConfig,
+    extra_labels: tuple[str, ...],
     github_client: IGitHubClient,
     process_runner: IProcessRunner,
     content_generator: IContentGenerator | None,
@@ -508,6 +501,9 @@ def _create_loop_issue(
     ``output: prd``：PRD 已写入磁盘，走完整的“从 PRD 建 Issue”流程（含 PRD 链接回写）。
     ``output: issue``：不碰任何 PRD 文件，配方正文原文作为 Issue 正文，Issue 与 PRD
     生命周期（归档、一对一链接、按 PRD 分目录的证据）完全无关。
+
+    ``loop/<id>`` 与配方标签在创建调用里一并带上，而不是事后补：事后补一旦失败，Issue 已
+    存在却没有 ``loop/<id>``，去重与“上一个未关闭则暂停”都认不出它，下一次触发会重复建。
     """
     issue_title_text = f"[{task.issue_type.title()}] {issue_title}"
     if prd_path is None:
@@ -521,6 +517,7 @@ def _create_loop_issue(
                 issue_agent=task.agent,
                 labels_config=labels_config,
                 generated_content_config=None,
+                extra_labels=extra_labels,
             ),
             github_client=github_client,
             content_generator=content_generator,
@@ -543,6 +540,7 @@ def _create_loop_issue(
             parse_evidence_format_with_agent=False,
             validation_language="zh-CN",
             structured_evidence=True,
+            extra_labels=extra_labels,
         ),
         github_client=github_client,
         process_runner=process_runner,

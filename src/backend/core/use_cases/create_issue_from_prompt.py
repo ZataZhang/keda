@@ -75,6 +75,8 @@ class IssueFromPromptRequest:
         structured_evidence: 是否物化 ``iar:structured-evidence`` marker。
         evidence_dir: 证据目录配置根（仓库相对）。
         model_selection: ``content_generation`` 阶段绑定的模型选择。
+        extra_labels: 创建时就一并带上的额外标签（如 loop 的 ``loop/<id>``）。放在创建
+            调用里而不是事后补，避免“Issue 已建成但补标签失败”留下无标签的 Issue。
     """
 
     repo_path: Path
@@ -91,6 +93,7 @@ class IssueFromPromptRequest:
     structured_evidence: bool = True
     evidence_dir: str = DEFAULT_VALIDATION_EVIDENCE_DIR
     model_selection: ModelSelection | None = None
+    extra_labels: tuple[str, ...] = ()
 
 
 # ---------------------------------------------------------------------------
@@ -253,6 +256,7 @@ def create_issue_from_prompt(
         issue_agent=request.issue_agent,
         labels_config=effective_labels_config,
     )
+    labels.extend(label for label in request.extra_labels if label not in labels)
 
     fallback_title = request.title_override or (
         f"[{request.issue_type.title()}] {derive_prompt_title(prompt_text)}"

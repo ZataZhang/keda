@@ -119,6 +119,8 @@ class IssueFromPrdRequest:
         evidence_dir: 证据目录配置根（仓库相对）。默认 ``tasks/evidence`` 时
             Issue body 指向按 PRD stem 解析的子目录；显式配置的 legacy 目录
             原样展示。
+        extra_labels: 创建时就一并带上的额外标签（如 loop 的 ``loop/<id>``），避免
+            “Issue 已建成但事后补标签失败”留下无标签的 Issue。
     """
 
     repo_path: Path
@@ -141,6 +143,7 @@ class IssueFromPrdRequest:
     #: content_generation 阶段绑定的模型选择（CLI ``--preset`` 锚定或配置绑定
     #: 的解析结果）；``None`` 表示不注入模型参数、agent 走既有解析。
     model_selection: ModelSelection | None = None
+    extra_labels: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -360,6 +363,7 @@ def build_issue_labels(
         issue_agent=request.issue_agent,
         labels_config=effective_labels_config,
     )
+    labels.extend(label for label in request.extra_labels if label not in labels)
     return labels
 
 
