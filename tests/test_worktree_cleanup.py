@@ -157,6 +157,26 @@ def test_cleanup_skips_dirty_worktree_by_default(tmp_path: Path) -> None:
     assert worktree_path.exists()
 
 
+def test_cleanup_skips_issue_still_marked_as_running(tmp_path: Path) -> None:
+    """关闭但仍标记为运行中的 Issue 不得触发 worktree 删除。"""
+    repo_path = _init_remote_backed_repository(tmp_path)
+    worktree_path = _create_issue_worktree(repo_path, 32)
+    github_client = _closed_issue_client(32)
+    github_client.edit_issue_labels(32, add=["agent/running"])
+
+    cleanup_result = cleanup_iar_worktrees(
+        WorktreeCleanupRequest(repo_path=repo_path, dry_run=False),
+        github_client=github_client,
+        process_runner=SubprocessRunner(),
+    )
+
+    branch_result = cleanup_result.branches[0]
+    assert branch_result.status is WorktreeCleanupStatus.SKIPPED
+    assert "still has active label agent/running" in branch_result.reason
+    assert "issue-32" in _local_branch_names(repo_path)
+    assert worktree_path.exists()
+
+
 def test_cleanup_skips_when_remote_branch_still_exists(tmp_path: Path) -> None:
     """A closed Issue is not enough; the remote branch must be gone too."""
     repo_path = _init_remote_backed_repository(tmp_path)
@@ -174,6 +194,32 @@ def test_cleanup_skips_when_remote_branch_still_exists(tmp_path: Path) -> None:
     assert branch_result.status is WorktreeCleanupStatus.SKIPPED
     assert "remote branch origin/issue-10 still exists" == branch_result.reason
     assert "issue-10" in _local_branch_names(repo_path)
+    assert worktree_path.exists()
+
+
+def test_cleanup_skips_when_github_issue_status_is_unavailable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """无法确认 GitHub Issue 状态时保留 worktree 与本地分支。"""
+    repo_path = _init_remote_backed_repository(tmp_path)
+    worktree_path = _create_issue_worktree(repo_path, 33)
+    github_client = _closed_issue_client(33)
+
+    def fail_issue_lookup(_issue_number: int) -> object:
+        raise RuntimeError("GitHub API unavailable")
+
+    monkeypatch.setattr(github_client, "get_issue", fail_issue_lookup)
+    cleanup_result = cleanup_iar_worktrees(
+        WorktreeCleanupRequest(repo_path=repo_path, dry_run=False),
+        github_client=github_client,
+        process_runner=SubprocessRunner(),
+    )
+
+    branch_result = cleanup_result.branches[0]
+    assert branch_result.status is WorktreeCleanupStatus.SKIPPED
+    assert "Issue #33 lookup failed: GitHub API unavailable" in branch_result.reason
+    assert "issue-33" in _local_branch_names(repo_path)
     assert worktree_path.exists()
 
 

@@ -113,9 +113,38 @@ def container_logs_command(
     return _run_typer_command("container logs", config=None, follow=not no_follow)
 
 
+@container_app.command("gc")
+def container_gc_command(
+    ctx: typer.Context,
+    apply: Annotated[
+        bool,
+        typer.Option("--apply", help="Delete only the resources reported as eligible."),
+    ] = False,
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="Preview cleanup without deleting (the default)."),
+    ] = False,
+    cache_retention_days: Annotated[
+        int,
+        typer.Option(
+            "--cache-retention-days", min=1, help="Keep build cache used within this many days."
+        ),
+    ] = 90,
+) -> int:
+    """Preview or explicitly apply safe host Docker image and cache cleanup."""
+    return _run_typer_command(
+        "container gc",
+        config=None,
+        apply=apply,
+        dry_run=dry_run,
+        cache_retention_days=cache_retention_days,
+    )
+
+
 __all__ = [
     "container_auth_import_command",
     "container_down_command",
+    "container_gc_command",
     "container_logs_command",
     "container_up_command",
 ]

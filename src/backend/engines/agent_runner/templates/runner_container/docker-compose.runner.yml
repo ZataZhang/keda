@@ -19,9 +19,17 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.runner
-    image: iar-runner:latest
+      args:
+        KEDACODE_DESKTOP_SUPPORT: "${KEDACODE_DESKTOP_ENABLED:-false}"
+    image: "iar-runner:${KEDACODE_RUNNER_PROFILE:-latest}"
     container_name: iar-runner
     restart: unless-stopped
+    init: true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     # 注意：不在 compose 顶层设 user。entrypoint 需要以 root 身份 chown
     # /home/runner 与 .kedacode 全局目录对齐到 RUNNER_UID/RUNNER_GID，再用
     # gosu 切到目标 UID 跑 CMD。这样 gh/claude/codex/kimi 在 ``RUNNER_UID
@@ -46,6 +54,7 @@ services:
       RUNNER_GID: "${RUNNER_GID:-1000}"
       # 不要让 docker 注入的 PATH 覆盖 agent CLI 路径
       PATH: "/opt/keda/.venv/bin:/home/runner/.local/bin:/usr/local/bin:/usr/bin:/bin"
+      KEDACODE_DESKTOP_ENABLED: "${KEDACODE_DESKTOP_ENABLED:-false}"
     volumes:
       # 目标仓库挂载为 /workspace/repo
       - "${REPO_PATH}:/workspace/repo"

@@ -20,6 +20,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 
@@ -74,13 +75,18 @@ class ContainerUpRequest:
 
     Attributes:
         repo_path: 挂载进容器的目标仓库绝对路径。
-        gh_token: GitHub Token（容器内 gh 用此认证）。空串视为未设置。
+        gh_token: GitHub Token（本地容器内 gh 用此认证）。空串视为未设置。
+            **托管模式（``hosted=True``）下必须为空**：secret 不能进入 compose
+            environment，改由 ``runner_auth_dir`` 指向的 tmpfs 原生认证文件交付。
         repo_id: 仓库 registry id，传给容器方便 kc daemon 锁定目标。
         uid: 容器内进程 UID；``None`` 时使用 ``os.getuid()``。
         gid: 容器内进程 GID；``None`` 时使用 ``os.getgid()``。
         extra_env: 其它要注入 compose 的环境变量。
         dry_run: True 时不真调 docker compose，仅打印计划。
         build: True 时 ``docker compose up --build``。
+        hosted: True 时使用托管 compose 变体：不注入 GH_TOKEN，改挂 tmpfs 凭据目录。
+        runner_auth_dir: 托管模式下该仓库专属 tmpfs 认证目录的宿主绝对路径
+            （``KEDACODE_RUNNER_AUTH_DIR``，只含路径不含 key 值）；非托管时为空。
     """
 
     repo_path: Path
@@ -91,6 +97,44 @@ class ContainerUpRequest:
     extra_env: dict[str, str] = field(default_factory=dict)
     dry_run: bool = False
     build: bool = False
+    hosted: bool = False
+    runner_auth_dir: str = ""
+
+
+@dataclass(frozen=True)
+class ContainerGcRequest:
+    """``kc container gc`` 的预览或执行选项。"""
+
+    apply: bool = False
+    cache_retention_days: int = 90
+
+
+@dataclass(frozen=True)
+class ContainerGcEntry:
+    """单个 Docker 镜像或 build cache 的清理判定。"""
+
+    resource_type: str
+    resource_id: str
+    status: str
+    reason: str
+    last_used_at: datetime | None = None
+    is_eligible: bool = False
+
+
+@dataclass(frozen=True)
+class ContainerGcResult:
+    """一次 Docker 资源清理的扫描与执行结果。"""
+
+    request: ContainerGcRequest
+    entries: tuple[ContainerGcEntry, ...]
+    disk_total_bytes: int
+    disk_used_bytes: int
+    disk_free_bytes: int
+    scanned_count: int
+    eligible_count: int
+    deleted_count: int
+    skipped_count: int
+    failed_count: int
 
 
 # docker compose 子进程运行协议；与 engines 实现的 _DockerRunner 等价。
@@ -111,8 +155,12 @@ class IContainerRunnerController(ABC):
     """容器生命周期管理端口。"""
 
     @abstractmethod
-    def resolve_packaged_runner_assets(self) -> RunnerContainerAssets:
-        """从 keda package data 定位 runner 容器资产路径。"""
+    def resolve_packaged_runner_assets(self, *, hosted: bool = False) -> RunnerContainerAssets:
+        """从 keda package data 定位 runner 容器资产路径。
+
+        ``hosted=True`` 时返回托管 compose 变体（environment 不含 secret，凭据走
+        tmpfs 原生认证文件挂载）；``hosted=False`` 返回本地变体（``GH_TOKEN`` 环境变量）。
+        """
 
     @abstractmethod
     def run_container_up(
@@ -126,9 +174,13 @@ class IContainerRunnerController(ABC):
 
     @abstractmethod
     def run_container_down(
-        self, compose_file: Path, *, runner: DockerRunnerCallable | None = None
+        self,
+        compose_file: Path,
+        *,
+        env_overrides: dict[str, str] | None = None,
+        runner: DockerRunnerCallable | None = None,
     ) -> list[str]:
-        """执行 ``docker compose down``。"""
+        """执行 ``docker compose down``，可为托管 Compose 提供 repo 插值变量。"""
 
     @abstractmethod
     def run_container_logs(
@@ -140,11 +192,23 @@ class IContainerRunnerController(ABC):
     ) -> list[str]:
         """执行 ``docker compose logs``（默认 streaming）。"""
 
+    @abstractmethod
+    def run_container_gc(
+        self,
+        request: ContainerGcRequest,
+        *,
+        runner: DockerRunnerCallable | None = None,
+    ) -> ContainerGcResult:
+        """扫描悬空镜像与过期 builder cache，并按显式选项选择是否删除。"""
+
 
 __all__ = [
     "ContainerAgentImportResult",
     "ContainerAuthImportResult",
     "ContainerCommandPlan",
+    "ContainerGcEntry",
+    "ContainerGcRequest",
+    "ContainerGcResult",
     "ContainerUpRequest",
     "DockerRunnerCallable",
     "IContainerAuthImporter",

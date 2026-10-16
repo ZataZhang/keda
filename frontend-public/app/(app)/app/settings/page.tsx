@@ -14,6 +14,8 @@ import {
 import { AgentLabelsEditor } from "@/components/agent-runner/agent-labels-editor"
 import { ModelPricingEditor } from "@/components/agent-runner/model-pricing-editor"
 import { logout, getCurrentSession, type UserSession } from "@/lib/api/auth"
+import { getHostedStatus } from "@/lib/api/hostedConsole"
+import { HostedCredentialsPanel } from "@/components/hosted/hosted-credentials-panel"
 
 type SettingsTabId = "agents" | "cost" | "about"
 
@@ -29,12 +31,17 @@ export default function SettingsPage() {
   const [user, setUser] = useState<UserSession | null>(null)
   const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTabId>("agents")
   const settingsTablistRef = useRef<HTMLElement | null>(null)
+  const [hostedMode, setHostedMode] = useState(false)
 
   useEffect(() => {
     getCurrentSession()
       .then(setUser)
       .catch(() => router.replace("/login"))
   }, [router])
+
+  useEffect(() => {
+    getHostedStatus().then((status) => setHostedMode(status.enabled))
+  }, [])
 
   /** Handle logout and redirect to the home page. */
   async function handleLogout() {
@@ -162,12 +169,17 @@ export default function SettingsPage() {
         <div className="rounded-2xl border bg-muted/30 p-6">
           <h2 className="mb-2 text-lg font-semibold">关于 KedaCode 管理终端</h2>
           <p className="text-sm text-muted-foreground">
-            这是 KedaCode 内置的 Agent Runner 管理终端（本机单用户模式，仅监听
-            127.0.0.1）。仓库队列、托管进程与 backlog 数据均来自本机后端
-            API；runner 的行为由各仓库的 config.toml 与 .kedacode.toml 决定。
-            退出后可通过命令行重新执行 <code>kc console</code> 打开。
+            {hostedMode
+              ? "这是 KedaCode 托管部署的管理终端：会话走 HttpOnly cookie、真实认证保护，外部入口须经 HTTPS 反向代理。运行凭据按仓库加密保存，仅通过 tmpfs 原生配置目录交付给匹配的 runner，绝不进入 URL、日志、Compose environment 或命令行。"
+              : "这是 KedaCode 内置的 Agent Runner 管理终端（本机单用户模式，仅监听 127.0.0.1）。仓库队列、托管进程与 backlog 数据均来自本机后端 API；runner 的行为由各仓库的 config.toml 与 .kedacode.toml 决定。退出后可通过命令行重新执行 kc console 打开。"}
           </p>
         </div>
+        {hostedMode ? (
+          <section className="rounded-2xl border p-6" data-testid="settings-hosted-credentials">
+            <h2 className="mb-3 text-lg font-semibold">托管运行凭据</h2>
+            <HostedCredentialsPanel />
+          </section>
+        ) : null}
         <Button variant="destructive" onClick={handleLogout}>
           退出登录
         </Button>

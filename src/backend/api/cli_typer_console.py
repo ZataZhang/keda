@@ -14,6 +14,7 @@ from __future__ import annotations
 import http.client
 import json
 import logging
+import re
 import socket
 import threading
 import urllib.request
@@ -25,7 +26,11 @@ import typer
 import uvicorn
 
 from backend.api.cli_typer_app import console_app, error_console
-from backend.core.use_cases.agent_runner_factory import load_fresh_agent_runner_settings
+from backend.core.use_cases.agent_runner_factory import (
+    hosted_console_enabled,
+    issue_hosted_bootstrap_code,
+    load_fresh_agent_runner_settings,
+)
 from backend.core.use_cases.model_evaluation_runtime import recover_interrupted
 
 _logger = logging.getLogger(__name__)
@@ -289,6 +294,75 @@ __all__ = [
     "console_callback",
     "find_running_console",
     "launch_console",
+    "parse_expires_in",
     "reopen_running_console",
     "resolve_console_port",
 ]
+
+#: ``kc console bootstrap-token`` 子应用（VM 本地签发一次性引导码）。
+bootstrap_token_app = typer.Typer(help="Issue a one-time hosted Console bootstrap code.")
+console_app.add_typer(bootstrap_token_app, name="bootstrap-token")
+
+_DURATION_RE = re.compile(r"^(\d+)([smhd])$")
+_UNIT_SECONDS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+
+
+def parse_expires_in(value: str) -> int:
+    """把 ``24h`` / ``30m`` / ``2d`` / 纯秒数解析成有效期秒数。
+
+    Args:
+        value: ``--expires-in`` 传入的时长文本。
+
+    Returns:
+        对应的秒数。
+
+    Raises:
+        ValueError: 格式非法或秒数非正。
+    """
+    text = value.strip().lower()
+    if text.isdigit():
+        seconds = int(text)
+    else:
+        match = _DURATION_RE.match(text)
+        if match is None:
+            raise ValueError(f"invalid duration '{value}'; use e.g. 24h, 30m, 2d or seconds")
+        seconds = int(match.group(1)) * _UNIT_SECONDS[match.group(2)]
+    if seconds <= 0:
+        raise ValueError("bootstrap code expiry must be a positive number of seconds")
+    return seconds
+
+
+@bootstrap_token_app.command("create")
+def bootstrap_token_create(
+    expires_in: Annotated[
+        str,
+        typer.Option(
+            "--expires-in",
+            help="Bootstrap code lifetime, e.g. 24h (default), 30m, 2d.",
+        ),
+    ] = "24h",
+) -> None:
+    """在本机 VM 签发一次性托管 Console 引导码并只显示一次。
+
+    原码只打印在终端（服务端仅存哈希、单次消费、到期自动作废）。重复签发会使
+    上一个未消费的码失效。仅托管模式可用：本机 console 无需引导码。
+    """
+    settings = load_fresh_agent_runner_settings()
+    if not hosted_console_enabled(settings):
+        error_console.print(
+            "[red]hosted mode is not enabled ([agent_runner.hosted].enabled=false); "
+            "a local console needs no bootstrap code.[/]"
+        )
+        raise typer.Exit(code=1)
+    try:
+        ttl_seconds = parse_expires_in(expires_in)
+    except ValueError as exc:
+        error_console.print(f"[red]{exc}[/]")
+        raise typer.Exit(code=2) from exc
+    raw_code = issue_hosted_bootstrap_code(settings, bootstrap_ttl_seconds=ttl_seconds)
+    typer.echo(raw_code)
+    typer.echo(
+        f"# one-time bootstrap code, valid {expires_in}; shown once, stored hashed only. "
+        "Re-running invalidates any earlier unconsumed code.",
+        err=True,
+    )

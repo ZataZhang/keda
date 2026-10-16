@@ -94,6 +94,7 @@ def run_worktree_command(ctx: ParsedCommandContext) -> int:
             base_branch=run_context.config.git.base_branch,
             dry_run=ctx.parsed.dry_run or not ctx.parsed.yes,
             force=ctx.parsed.force,
+            active_issue_label=run_context.config.labels.running,
             managed_worktree_root_path=manager.worktree_root,
         )
         cleanup_result = cleanup_iar_worktrees(

@@ -6,7 +6,8 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.api.backlog_sync import (
@@ -27,7 +28,14 @@ from backend.api.routes import (
     agent_runner_idea_inbox,
     agent_runner_lifecycle_agents,
     agent_runner_backlog,
+    hosted_credentials,
     local_auth,
+)
+from backend.core.shared.security.hosted_secrets import SESSION_COOKIE_NAME
+from backend.core.use_cases.agent_runner_factory import (
+    create_hosted_console_service,
+    hosted_console_enabled,
+    load_fresh_agent_runner_settings,
 )
 
 _logger = logging.getLogger(__name__)
@@ -50,20 +58,76 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         stop_monitor_scheduler()
 
 
-app = FastAPI(title="keda backend", lifespan=lifespan)
-app.include_router(agent_runner.router, prefix="/api/v1")
-app.include_router(agent_runner_console.router, prefix="/api/v1")
-app.include_router(agent_runner_console_issues.router, prefix="/api/v1")
-app.include_router(agent_runner_console_runtime.router, prefix="/api/v1")
-app.include_router(agent_runner_console_runs.router, prefix="/api/v1")
-app.include_router(agent_runner_console_evaluation.router, prefix="/api/v1")
-app.include_router(agent_runner_backlog.router, prefix="/api/v1")
-app.include_router(agent_runner_lifecycle_agents.router, prefix="/api/v1")
-app.include_router(agent_runner_idea_inbox.router, prefix="/api/v1")
-app.include_router(local_auth.router, prefix="/api")
+#: 托管模式下允许匿名访问的路径前缀：CLI 复用探测、登录/引导入口与静态资源。
+#: 其余全部 ``/api/*`` 必须携带有效会话 cookie，否则 401。
+_HOSTED_PUBLIC_PATHS: tuple[str, ...] = (
+    "/api/v1/agent-runner/console/version",
+    "/api/auth/login",
+    "/api/auth/logout",
+    "/api/hosted/status",
+    "/api/hosted/bootstrap",
+)
 
 
-def _mount_console_static() -> None:
+def _install_hosted_auth(app: FastAPI) -> None:
+    """挂载托管认证中间件：未认证访问受保护 API 一律 401。
+
+    仅当 ``[agent_runner.hosted].enabled`` 为真时调用。本机 no-op 会话不安装本
+    中间件，保持 PRD 要求的本机模式零变化。
+    """
+
+    @app.middleware("http")
+    async def _hosted_auth_middleware(request: Request, call_next):
+        path = request.url.path
+        is_public = not path.startswith("/api") or any(
+            path == public or path.startswith(f"{public}/") for public in _HOSTED_PUBLIC_PATHS
+        )
+        if is_public or request.method == "OPTIONS":
+            return await call_next(request)
+        session_token = request.cookies.get(SESSION_COOKIE_NAME)
+        authenticated = False
+        if session_token:
+            try:
+                service = create_hosted_console_service(load_fresh_agent_runner_settings())
+                authenticated = service.resolve_session(session_token) is not None
+            except Exception:  # noqa: BLE001 - auth must fail closed on any store error.
+                _logger.exception("Hosted session resolution failed; denying request")
+                authenticated = False
+        if not authenticated:
+            return JSONResponse({"detail": "authentication required"}, status_code=401)
+        return await call_next(request)
+
+
+def create_app() -> FastAPI:
+    """按当前生效设置构建应用（本机模式与托管模式的唯一装配点）。
+
+    托管模式（``[agent_runner.hosted].enabled``）用真实认证路由替换本机
+    ``local_auth`` no-op，并安装未认证即 401 的中间件；本机模式保持原样。
+    """
+    application = FastAPI(title="keda backend", lifespan=lifespan)
+    application.include_router(agent_runner.router, prefix="/api/v1")
+    application.include_router(agent_runner_console.router, prefix="/api/v1")
+    application.include_router(agent_runner_console_issues.router, prefix="/api/v1")
+    application.include_router(agent_runner_console_runtime.router, prefix="/api/v1")
+    application.include_router(agent_runner_console_runs.router, prefix="/api/v1")
+    application.include_router(agent_runner_console_evaluation.router, prefix="/api/v1")
+    application.include_router(agent_runner_backlog.router, prefix="/api/v1")
+    application.include_router(agent_runner_lifecycle_agents.router, prefix="/api/v1")
+    application.include_router(agent_runner_idea_inbox.router, prefix="/api/v1")
+    settings = load_fresh_agent_runner_settings()
+    if hosted_console_enabled(settings):
+        from backend.api.routes import hosted_auth
+
+        application.include_router(hosted_auth.router, prefix="/api")
+        application.include_router(hosted_credentials.router, prefix="/api")
+        _install_hosted_auth(application)
+        _logger.info("Hosted console mode enabled: real authentication installed")
+    else:
+        application.include_router(local_auth.router, prefix="/api")
+    return application
+
+
+def _mount_console_static(application: FastAPI) -> None:
     """挂载随 wheel 分发的前端静态产物（源码模式缺产物时安静跳过）。
 
     必须在全部 ``include_router`` 之后调用：``/`` 挂载是兜底路由，先注册
@@ -80,7 +144,8 @@ def _mount_console_static() -> None:
             "&& copy out/ into src/backend/api/static/console/."
         )
         return
-    app.mount("/", StaticFiles(directory=str(console_dir), html=True), name="console")
+    application.mount("/", StaticFiles(directory=str(console_dir), html=True), name="console")
 
 
-_mount_console_static()
+app = create_app()
+_mount_console_static(app)

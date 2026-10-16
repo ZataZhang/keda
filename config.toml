@@ -114,6 +114,11 @@ minio_seconds = 60
 [agent_runner]
 max_issues = 1
 
+# Hosted Runner 专用功能（默认关闭；客户 VM 上由托管 Console 使用）。
+[agent_runner.hosted]
+enabled = false
+desktop_enabled = false # 仅在专用 Linux VM 上显式开启虚拟桌面和 Agent 屏幕录制
+
 # =============================================================================
 # Native terminal session defaults (`kc` with no subcommand)
 # =============================================================================
