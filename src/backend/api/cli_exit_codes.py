@@ -81,9 +81,14 @@ def translate_exit_code(exc: BaseException) -> int:
         已存在）映射；其余异常按未分类失败处理（``1``）。
     """
     from backend.api.cli_output import CliError  # 延迟导入：cli_output 依赖本模块的常量
+    from backend.core.use_cases.agent_onboarding import PrimaryAgentNotInstalledError
 
     if isinstance(exc, CliError):
         return int(exc.code)
+    if isinstance(exc, PrimaryAgentNotInstalledError):
+        # 启动前门禁 / 进程边界兜底拦下的"这台机器没装这个 CLI"：配置问题，
+        # 语义是"查不到东西"，消息本身已点名阶段 / 预设 / agent / 可执行文件。
+        return int(ExitCode.NOT_FOUND)
     if isinstance(exc, FileNotFoundError):
         return int(ExitCode.NOT_FOUND)
     if isinstance(exc, PermissionError):

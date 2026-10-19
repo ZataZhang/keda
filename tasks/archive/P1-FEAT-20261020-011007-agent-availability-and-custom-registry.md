@@ -5,7 +5,7 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> ⬜ **验收状态**：未开工。
+> 🧍 **验收状态**：待人工验收——执行侧交付已完成（§9 除 `Human-Confirmed` 外全部勾选或标注残留），三项决策与 9.1 呈递物等待人工回复。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 > 本 PRD 分两个 altitude，分别服务不同读者，自上而下阅读：
@@ -412,7 +412,7 @@ flowchart LR
 - id: rv-2
   behavior: "配置把实现阶段绑定到未安装的 Agent 时，启动在领取 Issue、创建 worktree 之前停止，错误点名阶段、预设、Agent 与可执行文件；即使配置了回退候选也不换人，只有进程启动后的运行时失败才走回退。"
   reviewer: human
-  real_entry: "KEDACODE_CONFIG=$KEDA_TEST_CONFIG uv run kc run --issue $KEDA_TEST_ISSUE --dry-run；无凭据替代方案使用同一 core 门禁的集成测试，GitHub client 只在边界 fake。"
+  real_entry: "KEDACODE_CONFIG=$KEDA_TEST_CONFIG uv run kc run --issue $KEDA_TEST_ISSUE --dry-run --json；无凭据替代方案使用同一 core 门禁的集成测试，GitHub client 只在边界 fake。"
   expected: "退出码 3；stderr 包含 implementation、预设名、目标 Agent、bin 与 kc agent setup；即使配置了可用的回退候选也没有替代 Agent 的执行记录；Issue 标签 / 评论、git worktree list 与 attempts 均无新增。"
   mock_boundary: "CLI、配置合并、生命周期预设解析、可用性门禁与配置读取必须真实；GitHub 客户端可在边界 fake；完整验收使用真实测试 Issue（opt-in）。"
   tier: R3
@@ -425,11 +425,11 @@ flowchart LR
   fresh_state_probe: "用新 API 请求读取 Issue 标签与评论；新进程执行 git worktree list --porcelain；读取 attempt 账本确认无新记录。"
   final_tree_evidence: "保存 git rev-parse HEAD、Issue 快照、worktree 清单与 attempts 摘要；任何 claim / 门禁 / 生命周期解析改动后重跑。"
   negative_control: "① 把同一阶段的绑定改成可用的 claude stub；② 保留缺失的主 Agent，同时配置可用的 claude 作为显式回退候选。分别重复同一命令。"
-  expected_fail: "① 命令进入 dry-run 计划（10）而不是被同一个错误拦截，证明门禁不是无条件阻断；② 仍然以 3 退出且没有替代 Agent 的执行记录，证明回退候选不能掩盖缺失。"
+  expected_fail: "① 命令进入 dry-run 计划（`--dry-run --json` 下退出码 10；表格模式 dry-run 按既有语义退出 0，不能用作对照）而不是被同一个错误拦截，证明门禁不是无条件阻断；② 仍然以 3 退出且没有替代 Agent 的执行记录，证明回退候选不能掩盖缺失。"
 - id: rv-3
   behavior: "用户注册一个 Keda 未内置的 Agent（显式 bin 与运行参数）后，它以 run 用途出现在列表、doctor 与阶段选择中；协议 / 参数非法或重名时写入被拒绝。"
   reviewer: human
-  real_entry: "uv run kc agent add myagent --bin $KEDA_TEST_BIN/myagent --arg=--print --write --yes，然后 uv run kc agent doctor myagent --all-profiles --json 与 uv run kc agent list --output json。"
+  real_entry: "uv run kc agent add myagent --bin $KEDA_TEST_BIN/myagent --arg=--print --write --yes，然后 uv run kc agent doctor myagent --json 与 uv run kc agent doctor --lifecycle implementation --json（自定义 Agent 只声明 run 用途，`--all-profiles` 对它没有可比的多 profile），再 uv run kc agent list --output json。"
   expected: "配置新增 [agent_runner.agents.myagent] 与 profiles.run；doctor 输出与预期 argv 一致；list 标记 available 并给出 bin_path；重名或未注册协议返回 2 且文件字节不变。"
   mock_boundary: "CLI、注册表合并、TOML 写入、doctor 的 argv 组装与 PATH 解析必须真实；myagent 是临时目录中的可执行 stub；不访问 GitHub。"
   tier: R2
@@ -444,7 +444,7 @@ flowchart LR
 - id: rv-4
   behavior: "生命周期设置页展示每个 Agent 的可用性，未安装的 Agent 不会被显示成可用选项。"
   reviewer: human
-  real_entry: "KEDACODE_CONFIG=$KEDA_TEST_CONFIG uv run kc console，打开 /app/settings/lifecycle/；配置把某阶段绑定到未安装的 codebuddy。"
+  real_entry: "just console-sync 同步面板静态产物后，KEDACODE_CONFIG=$KEDA_TEST_CONFIG uv run kc console --no-browser --port $FREE_PORT，打开 /app/settings/lifecycle/；配置把某阶段绑定到未安装的 codebuddy。启动日志必须出现 listening on（出现 already running 说明端口被别的实例占着，截图即失真）。"
   expected: "选择器与矩阵行显示 codebuddy 未安装、可用的 claude 正常；页面仍可浏览与编辑，保存语义未改变。"
   mock_boundary: "真实 frontend-public 页面、同源 Console API、core 视图与配置文件；只允许测试配置中的 Agent 不可用，不用 mock 数据替换可用性。"
   tier: R1
@@ -486,6 +486,8 @@ No external validation required; repository evidence was sufficient.
 | 未内置 Agent 可以注册并在 list / doctor 中生效。 | `tasks/evidence/P1-FEAT-20261020-011007-agent-availability-and-custom-registry/rv-3-register.txt` 与 `tasks/evidence/P1-FEAT-20261020-011007-agent-availability-and-custom-registry/rv-3-doctor.json`；在完成消息或 PR 评论中粘贴注册块与 doctor 输出。 | 注册块只含显式参数；doctor 能看到 myagent。 |
 | 设置页把未安装 Agent 与可用 Agent 区分开。 | `tasks/evidence/P1-FEAT-20261020-011007-agent-availability-and-custom-registry/rv-4-settings-availability.png`；在完成消息或 PR 评论中内嵌截图。 | codebuddy 旁有未安装标记，claude 没有。 |
 
+一行汇总入口：`tasks/evidence/P1-FEAT-20261020-011007-agent-availability-and-custom-registry/P1-FEAT-20261020-011007-agent-availability-and-custom-registry.evidence-report.md` 以「人审导航」表开头，把上表四行的关键行与两张截图内嵌在同一页（相对链接，本地打开即可，无需逐个下载）；同目录 `….verifier-report.md` 记录独立 verifier 的逐条判定与两处未闭合项，`….verification-plan.md` 记录逐步口径与偏差登记。
+
 本区刻意不呈递 `reviewer: verifier` 的 seed 单元测试、内置 Agent argv 黄金快照、TOML 写锁、CLI schema、内容生成 / 循环任务 / Skills 路径覆盖等证据；这些由 Agent 与 verifier 自动核对，只有失败需要交由用户查看。
 
 ### 9.2 Acceptance Evidence Package
@@ -499,54 +501,54 @@ No external validation required; repository evidence was sufficient.
 
 #### Architecture Acceptance
 
-- [ ] `_ensure_global_config_toml()` 不再整份复制源码根 `config.toml`；首次 seed 只写最小骨架，已有状态目录文件不被覆盖或迁移。
-- [ ] 可用性判断只有一处 `shutil.which` 事实源；`kc agent list`、setup、claim 前门禁与 Settings 视图共用它，没有第二套探测逻辑。
-- [ ] 配置写入复用现有 lifecycle editor / TOML 写锁；写前校验、写后重读；失败时目标文件字节不变。
-- [ ] 自定义 Agent 仍由 `[agent_runner.agents.<name>]` 声明；`src/` 内没有新增 agent 专有分支，也没有第二份注册表。
-- [ ] 主 Agent 的 bin 缺失时一律阻断，不因显式回退候选而换人；运行时启动失败 / 容量错误仍按现有阶梯执行并注明实际 Agent。
+- [x] `_ensure_global_config_toml()` 不再整份复制源码根 `config.toml`；首次 seed 只写最小骨架，已有状态目录文件不被覆盖或迁移。证据：`src/backend/infrastructure/config/settings_sources.py` 改写为代码内 `_GLOBAL_CONFIG_SEED_TEMPLATE`（仅 `[agent_runner]`）且写前有 `is_file()` 守卫；`rv-1-setup.txt` 里干净 HOME 的骨架 sha256 `842049520c…` 被新进程正常解析；`tests/test_settings_sources_seed.py`。
+- [x] 可用性判断只有一处 `shutil.which` 事实源；`kc agent list`、setup、claim 前门禁与 Settings 视图共用它，没有第二套探测逻辑。证据：唯一新增探测在 `src/backend/core/use_cases/agent_onboarding.py`，list/setup/门禁/首启提示/两个 Console 视图同读 `agent_availability_entries`；`rv-1-setup.txt` 的「本机可用 agent（CLI 自己解析）: ['claude']」与同文件 lifecycle JSON 同源；独立 verifier 核对 `frontend-public/` 无任何探测（见 `….verifier-report.md` #1）。
+- [x] 配置写入复用现有 lifecycle editor / TOML 写锁；写前校验、写后重读；失败时目标文件字节不变。证据：`rv-1-setup.txt` 负控与 `rv-3-register.txt` 三条负控（重名/未注册协议/缺 `--prompt-flag`）均非零退出且 sha256 与写入前逐字节相同；正控写入后由新进程重读（`rv-1-lifecycle-after-setup.json`、`rv-3-list.json`）。
+- [x] 自定义 Agent 仍由 `[agent_runner.agents.<name>]` 声明；`src/` 内没有新增 agent 专有分支，也没有第二份注册表。证据：`rv-3-register.txt` 的注册块即 add 的产物；`grep -rn myagent src/` 无命中（verifier #6）；`tests/test_agent_registry_coverage.py` 全部按生效注册表断言。
+- [x] 主 Agent 的 bin 缺失时一律阻断，不因显式回退候选而换人；运行时启动失败 / 容量错误仍按现有阶梯执行并注明实际 Agent。证据：`agent_runner_orchestrate.py` 在 `AgentUnavailableError` 分支之前重抛 `PrimaryAgentNotInstalledError`；`rv-2-blocked.txt` 负控②（配了可用 claude 回退候选仍 exit 3、attempt 账本 0 条）；`tests/test_agent_availability_gate.py`。
 
 #### Dependency Acceptance
 
-- [ ] 没有新增外部依赖、数据库表、后台服务、模型目录或网络探测。
-- [ ] 缺失 `bin`、未注册协议、缺 `prompt_flag`、重名 Agent 都在写文件或启动 Agent 前返回可诊断的非零退出。
+- [x] 没有新增外部依赖、数据库表、后台服务、模型目录或网络探测。证据：`git diff --name-only` 不含 `alembic/`、`pyproject.toml`、`uv.lock`；rv-1..rv-4 全程禁网（沙箱 `env -i`，rv-2 只对 Issue #291 做只读 `gh api` 读取）。
+- [x] 缺失 `bin`、未注册协议、缺 `prompt_flag`、重名 Agent 都在写文件或启动 Agent 前返回可诊断的非零退出。证据：`rv-1-setup.txt`（exit 3 + 可用清单 + `kc agent add` 指引）、`rv-3-register.txt` 三条 exit 2 且字节不变、`rv-2-blocked.txt`（exit 3 点名阶段/预设/agent/bin/setup）。
 
 #### Behavior Acceptance
 
-- [ ] 干净状态目录下 seed 出的配置不含任何 `[agent_runner.presets.*]` 或 `[agent_runner.lifecycle_presets]`，且能被现有配置加载器正常解析。
-- [ ] `kc agent setup --dry-run --json` 只读列出可用性；`--yes` 只写用户显式选择的键；重复运行不产生差异。
-- [ ] 无 `--preset` 的 setup 会解绑该阶段预设，确保显式 Agent 选择不被遮蔽；带 `--preset` 时先校验预设 Agent 可用。
-- [ ] `kc agent setup --fix` 只清理全局层中 Agent 不可用的阶段绑定，不删除预设定义、不改仓库层。
-- [ ] 实现路径在 claim 前拦截未安装的主 Agent，即使配置了回退候选也不换人；运行时失败回退时输出实际 Agent 与被丢弃的模型绑定。
-- [ ] `kc agent add` 默认预览、`--write` 写入；只生成 run 用途；非法协议 / 缺 prompt_flag / 重名均拒绝且不写文件。
-- [ ] 内容生成、循环任务、`kc init` 标签同步、用户级 Skills 安装与 PRD Skill 候选路径都能识别生效注册表中的自定义 Agent。
-- [ ] `kc agent list --output json` 增加 `available` / `bin_path`，旧字段与顺序不变；`kc agent presets` 补充 Agent 可用性。
+- [x] 干净状态目录下 seed 出的配置不含任何 `[agent_runner.presets.*]` 或 `[agent_runner.lifecycle_presets]`，且能被现有配置加载器正常解析。证据：`rv-1-setup.txt` 「presets: （无）  lifecycle_presets: （无）」与新进程完整 lifecycle JSON；`rv-1-config-diff.txt` 的骨架→引导差异。
+- [x] `kc agent setup --dry-run --json` 只读列出可用性；`--yes` 只写用户显式选择的键；重复运行不产生差异。证据：`rv-1-setup.txt` 第二次 setup `already_satisfied=true` 且 sha256 与首次相同（`2aafa48b67f…`）；`rv-1-setup-second.json`。
+- [x] 无 `--preset` 的 setup 会解绑该阶段预设，确保显式 Agent 选择不被遮蔽；带 `--preset` 时先校验预设 Agent 可用。证据：`tests/test_agent_setup_cli.py::test_setup_unbinds_the_masking_stage_preset`、`test_setup_plan_rejects_unknown_or_unusable_preset`、`test_setup_plan_marks_the_masking_preset_for_unbind`；`rv-2-blocked.txt` 展示预设绑定优先于矩阵。
+- [x] `kc agent setup --fix` 只清理全局层中 Agent 不可用的阶段绑定，不删除预设定义、不改仓库层。证据：`tests/test_agent_setup_cli.py::test_setup_fix_removes_only_global_unavailable_bindings`、`tests/test_agent_onboarding.py::test_fix_plan_lists_only_global_bindings_to_unusable_agents`、`test_apply_fix_plan_batches_unbinds_in_one_transaction`。
+- [x] 实现路径在 claim 前拦截未安装的主 Agent，即使配置了回退候选也不换人；运行时失败回退时输出实际 Agent 与被丢弃的模型绑定。证据：`rv-2-blocked.txt`（exit 3 + Issue #291 标签 3→3、评论 0→0、worktree 摘要前后相同、attempt 0→0）；`agent_runner_issue_handlers.py` 的门禁调用位于认领 CAS 之前。
+- [x] `kc agent add` 默认预览、`--write` 写入；只生成 run 用途；非法协议 / 缺 prompt_flag / 重名均拒绝且不写文件。证据：`rv-3-register.txt` 第一段 `written=false` 且哈希不变、注册块 `声明用途=['run']`、三条负控 exit 2；`rv-3-add-dryrun.json`。
+- [~] 内容生成、循环任务、`kc init` 标签同步、用户级 Skills 安装与 PRD Skill 候选路径都能识别生效注册表中的自定义 Agent。证据：`tests/test_agent_registry_coverage.py`（content_generation 接受/拒绝、loop recipe 接受与拒绝、label 规格与同步转发、skill 安装根与 PRD skill 候选）117 项全绿（含交付的六个测试文件与 doctor CLI 回归）。**残留**：`src/backend/core/use_cases/loop_fire.py` 仍以内置 registry 解析阶段 Agent，故「能建不能发射」，已作为已知限制记入 §12 与 Change Log，不在本次交付内静默扩范围。
+- [x] `kc agent list --output json` 增加 `available` / `bin_path`，旧字段与顺序不变；`kc agent presets` 补充 Agent 可用性。证据：`rv-1-agent-list.json` 与 `rv-3-list.json`（`available=True bin_path=…`）；`tests/test_agent_onboarding.py::test_agent_presets_reports_bound_agent_availability`；旧字段顺序由既有 CLI 测试守护。
 
 #### Frontend Acceptance
 
-- [ ] `/app/settings/lifecycle/` 的 Agent 选择器与矩阵行显示 `agent_availability`；未安装项有明确标记且不显示为可用。
-- [ ] 可用性展示不改变保存语义；保存失败仍由 core 校验返回。
-- [ ] 真实页面截图（rv-4）与生产入口一致，不用组件预览替代。
+- [x] `/app/settings/lifecycle/` 的 Agent 选择器与矩阵行显示 `agent_availability`；未安装项有明确标记且不显示为可用。证据：`rv-4-settings-page.txt` 逐行核对（`implementation=codebuddy → 未安装（PATH 中找不到 codebuddy）`，6 行 claude 只有路径标记）与 `rv-4-page-facts.json`；`option_labels` 里七个候选各自的对错标记；截图 `rv-4-settings-availability.png`、`rv-4-selector-availability.png`。
+- [x] 可用性展示不改变保存语义；保存失败仍由 core 校验返回。证据：diff 只在展示层加标记，写路径未变（`lifecycle_agents_console.py` 的校验分支未改）；e2e spec 明确「只读交互，不点保存」并仍然通过（8 passed，`rv-4-e2e-spec.txt`），落盘语义由 `tests/test_lifecycle_agents_console_api.py` 覆盖。
+- [x] 真实页面截图（rv-4）与生产入口一致，不用组件预览替代。证据：`rv-4-settings-page.sh` 起真实 `kc console`（日志 `kc console listening on`，出现 `already running` 即判失败），真实浏览器打开生产路由 `/app/settings/lifecycle/`（HTTP 200），并把 DOM 标记与同源 API 逐行对照；verifier 确认所服务前端包出自本树。
 
 #### Documentation Acceptance
 
-- [ ] `docs/guides/agent-runner.md`、`docs/guides/model-presets.md`、`docs/guides/configuration.md` 与 `kedacode-operator` skill 一致说明：先检测可用 Agent、再 setup、缺 Agent 时停在哪里、如何注册未内置 Agent。
-- [ ] `kc --help`、`kc agent --help`、`kc agent setup --help`、`kc agent add --help` 与文档逐项一致；机器输出字段与退出码已写入指南。
-- [ ] 默认模板中不再出现维护者私有预设；文档明确“预设属于用户机器级配置，不应写进仓库默认模板”。
-- [ ] `mkdocs.yml` 无需新增页面；如新增任何文档页，导航同步更新。
+- [x] `docs/guides/agent-runner.md`、`docs/guides/model-presets.md`、`docs/guides/configuration.md` 与 `kedacode-operator` skill 一致说明：先检测可用 Agent、再 setup、缺 Agent 时停在哪里、如何注册未内置 Agent。证据：四份文档与 `templates/skills/kedacode-operator/references/setup-and-config.md` 同步更新；漂移守卫 `tests/test_kedacode_operator_skill.py` 通过；verifier #8 逐项比对了旗标清单。
+- [x] `kc --help`、`kc agent --help`、`kc agent setup --help`、`kc agent add --help` 与文档逐项一致；机器输出字段与退出码已写入指南。证据：文档记录的 `--stage/--agent/--preset/--fix/--dry-run/--yes` 与 `--bin/--arg/--prompt-delivery/--prompt-flag/--output-protocol/--auth-home/--label/--write/--yes` 与 `cli_parser_session_commands.py` 一致；退出码 0/1/2/3/4/5/10 语义在 `docs/guides/agent-runner.md` 与 skill 参考中列明。
+- [x] 默认模板中不再出现维护者私有预设；文档明确「预设属于用户机器级配置，不应写进仓库默认模板」。证据：`config.toml` 中 `[agent_runner.presets.*]` 与 `[agent_runner.lifecycle_presets]` 已全部注释为示例，模板头注释改述其归属；`tests/test_product_identity.py` 守护。
+- [x] `mkdocs.yml` 无需新增页面；如新增任何文档页，导航同步更新。证据：本次只改既有指南页，`mkdocs.yml` 未出现在 diff 中。
 
 #### Validation Acceptance
 
-- [ ] rv-1、rv-2、rv-3、rv-4 全部通过；rv-2 的完整验收使用真实测试 Issue（opt-in），无凭据回退只用于集成门禁。
-- [ ] `tests/test_settings_sources_seed.py`、`tests/test_agent_onboarding.py`、`tests/test_agent_availability_gate.py`、`tests/test_agent_registry_coverage.py` 通过；内置 Agent 的 `doctor --all-profiles --json` 与改动前快照逐字节一致。
-- [ ] rv-2 的 negative control 真实执行：可用 Agent 不被拦截，缺失 Agent 被拦截；不是通过生产代码 fault injection 制造。
-- [ ] `tests/playwright-e2e/` 覆盖设置页可用性标记；`just test` 与相关 e2e 在最终代码树上通过。
-- [ ] 记录 `git rev-parse HEAD`、rv-1..rv-4 的产物、配置哈希与 Issue / worktree 快照；任何 seed / 门禁 / 注册路径改动后重跑对应 oracle。
+- [x] rv-1、rv-2、rv-3、rv-4 全部通过；rv-2 的完整验收使用真实测试 Issue（opt-in），无凭据回退只用于集成门禁。证据：`rv-1-setup.txt`、`rv-2-blocked.txt`（真实 Issue #291 只读预览，未影响 #292）、`rv-3-register.txt`、`rv-4-settings-page.txt`；`evidence.json` 四条命令 + stdout 断言已按 runner 的重放口径预校验（`scripts/check-manifest-assertions.py` → `MANIFEST_OK: 4 items`）。
+- [x] `tests/test_settings_sources_seed.py`、`tests/test_agent_onboarding.py`、`tests/test_agent_availability_gate.py`、`tests/test_agent_registry_coverage.py` 通过；内置 Agent 的 `doctor --all-profiles --json` 与改动前快照逐字节一致。证据：最终树重跑七个交付相关文件 `117 passed`；`tests/test_agent_doctor_cli.py` 的 21 项含内置 Agent `--all-profiles` 黄金快照逐字节比对，通过。
+- [x] rv-2 的 negative control 真实执行：可用 Agent 不被拦截，缺失 Agent 被拦截；不是通过生产代码 fault injection 制造。证据：`rv-2-blocked.txt` 负控①（改绑可用 claude → exit 10 并打印 `DRY RUN: would process Issue #291 (ready) with claude`）与负控②（缺失仍拦截 exit 3）；两条都由真实 CLI 改写真实机器级配置达成，脚本内无生产代码注入。
+- [x] `tests/playwright-e2e/` 覆盖设置页可用性标记；`just test` 与相关 e2e 在最终代码树上通过。证据：可用性标记用例（页面渲染逐行对照后端 `agent_availability`）在 `tests/playwright-e2e/tests/workflows/lifecycle-settings.spec.ts`，本轮在最终树重跑 `just e2e tests/workflows/lifecycle-settings.spec.ts` = **8 passed**；`just test all` 在最终树 **4580 passed / 1 skipped / 0 failed**（上一轮的 33 个 `.iar` 改名族失败已按 Change Log「修复 HEAD 遗留的 33 个 `.iar` 改名族测试失败」逐条修复并复现绿，非跳过、非弱化）。
+- [x] 记录 `git rev-parse HEAD`、rv-1..rv-4 的产物、配置哈希与 Issue / worktree 快照；任何 seed / 门禁 / 注册路径改动后重跑对应 oracle。证据：四个 `rv-*.txt` 首块均记录 date + `git HEAD c0e3a084…` + 临时 HOME/配置路径 + PATH 内容，配置哈希逐步给出；Issue/worktree/attempt 快照在 `rv-2-issue-unchanged.json`；改动后重跑口径写在 `….verification-plan.md` 与 `….evidence-report.md`。
 
 #### Delivery Readiness
 
-- [ ] 推荐方案完整实现；没有把“安装引导可用但自定义 Agent 仍失败”或“只提示不阻断”留成下个 PRD。
-- [ ] 最终回复或 PR evidence comment 含 §9.1 全部内容，并内嵌 rv-4 截图；只给证据目录路径不算呈递。
-- [ ] PRD 的 Feature Overview / §1 行为表 / §2 决策 / §10 FR / §9 横幅与最终实现和 fresh evidence 一致；没有未声明的默认回退、配置改写或公开 CLI 变化。
+- [~] 推荐方案完整实现；没有把「安装引导可用但自定义 Agent 仍失败」或「只提示不阻断」留成下个 PRD。证据：三项决策（§2）与 FR-1..FR-7 全部落地并由 rv-1..rv-4 呈递；「只提示不阻断」被 rv-2 的 exit 3 + 零副作用直接否定。**残留披露**：自定义 Agent 在注册表消费面上是一等公民（list/doctor/setup/预设/标签/Skills/内容生成/loop 创建），但 `loop_fire.py` 的发射侧仍用内置 registry 解析，已记入 §12 与 Change Log 作为后续项，未被包装成本次已完成。
+- [x] 最终回复或 PR evidence comment 含 §9.1 全部内容，并内嵌 rv-4 截图；只给证据目录路径不算呈递。证据：交付完成消息内嵌 §9.1 四行摘要与 `rv-4-settings-availability.png` / `rv-4-selector-availability.png`；PR 由 runner 发布时 `evidence.json` + `….evidence-report.md` 为呈递物。
+- [x] PRD 的 Feature Overview / §1 行为表 / §2 决策 / §10 FR / §9 横幅与最终实现和 fresh evidence 一致；没有未声明的默认回退、配置改写或公开 CLI 变化。证据：本节下方的 Final Reconciliation 与 Change Log 按最终代码重写；新增公开 CLI 面（`kc agent setup` / `kc agent add` / `--fix` / list 的 `available`+`bin_path`）在 §3、§10 与文档/skill 中均已声明；未声明的回退或配置自动改写没有——历史坏配置只提示 + 显式 `--fix`（D-06）。
 
 ## 10. Functional Requirements
 
@@ -578,6 +580,8 @@ No external validation required; repository evidence was sufficient.
 - **自定义 Agent 的输出能力**：使用 `plain` 协议会丢失结构化流式渲染；只声明 run 用途的 Agent 不能用于内容生成。文档要明确这些边界，不用自动补齐掩盖。
 - **默认回退行为变化**：主 Agent 未安装时从“静默换人”变为“启动前阻断”，可能影响依赖默认回退的旧用户。决策二要求显式确认；如需临时换人，显式传 `--agent`；运行时失败仍由回退链处理。
 - **模板派生项目**：仓库根 `config.toml` 不再被 seed，派生项目若有自定义 `[agent_runner]` 默认值，需要在自己的机器级配置或代码默认中维护；本 PRD 不提供跨项目迁移工具。
+- **loop 发射侧仍是内置 registry**（已确认的残留，非本次范围）：`src/backend/core/use_cases/loop_fire.py` 解析 recipe 时没有传入生效注册表，因此以自定义 Agent 命名的 loop 能通过创建与校验（`kc loop create` 与 `loop_recipe` 已按生效注册表工作），但在发射时认不出该名字。后续项：把同一份 `agents=` 传进发射路径，并按 rv-3 的口径补一条「注册自定义 Agent → 建 loop → 发射」的端到端 oracle。
+- **仓库层绑定与模板定义分离**（维护者本机事实）：模板删除预设后，本仓库 `.kedacode.toml` 仍把 `implementation` 等阶段绑在 `qoder-qwen3_8-flash_max` / `qoder-qwen3_8-max_xhigh` 上，其定义现在只存在于维护者的机器级配置。实测新机器在无该定义时**优雅降级**（`preset_name=null`，`effective_agent` 回落 legacy/builtin，退出码 0，不报错），因此不影响新安装用户；仓库层那几行注释里「在全局 config.toml 中定义」的说法已过时，属于维护者个人仓库配置，不在本 PRD 内改写。
 
 ## 13. Decision Log
 
@@ -593,4 +597,123 @@ No external validation required; repository evidence was sufficient.
 
 ### Final Reconciliation
 
-这是新建待实施 PRD，尚无生产实现或实现期 fresh evidence 可供核对。初稿已与当前仓库边界对齐：seed 复制行为来自 `settings_sources.py`，默认预设与绑定来自 `config.toml`，可用性缺口来自 `agent list` / `agent presets` / `agent doctor`，自定义 Agent 未覆盖路径来自内容生成、循环任务、Skills 与 `kc init` 标签同步。Section 1 的行为表与 §10 FR、Feature Overview 锚点一致，Section 2 三项人工决策对应 rv-1..rv-3，rv-4 对应设置页呈现。实施后、归档前须按最终代码与 fresh evidence 重做叙事核对，并更新状态横幅与 §9。
+按最终代码与 fresh evidence 重做叙事核对（采集树 `git rev-parse HEAD = c0e3a084`，交付改动以工作树形式叠加，证据目录 `tasks/evidence/P1-FEAT-20261020-011007-agent-availability-and-custom-registry/`）。rv-1..rv-4 已在最终树上整体重跑（最近一轮 2026-10-19T22:11:20Z–22:12:27Z，四条命令全部 exit 0，`evidence.json` 的 stdout 断言逐条命中，配置 sha256 与首轮逐字节相同，两张截图与全部产物出自重跑），原因是恢复轮改了测试与 `kc config migrate` 的预演路径，证据必须出自最终树；`just test all` 与 `just e2e tests/workflows/lifecycle-settings.spec.ts` 也按同一棵树重跑（见下条与 Change Log）。
+
+- **§1 行为表 / §10 FR ↔ 实现的对应是逐条落地的**：seed 改为代码内最小骨架（`settings_sources.py`），可用性单一事实源为 `core/use_cases/agent_onboarding.py` 的 `shutil.which` 判定，`kc agent list/setup/add` 与 claim 前门禁、首启提示、两个 Console 视图都消费它；前端只做渲染，自身没有任何探测。四项真实入口验证（rv-1 干净环境引导与一次性提示、rv-2 claim 前拦截与两条负控、rv-3 自定义注册与三条拒绝、rv-4 真实 `kc console` 页面逐行核对）全部按 PRD 写的真实入口执行，未用组件预览、mock 或 TestClient 替代。
+- **叙事需要修正的地方**：初稿把「回退候选不能掩盖缺失」写成运行期行为，实测语义是**门禁层面忽略候选清单**（`resolve_run_gate_block` 不读 `agent_fallback_candidates`），运行时失败仍走既有阶梯——已在 §2 决策二与 Architecture Acceptance 中按实测表述核对。初稿 rv-2 期望的「退出码 10」需要 `--dry-run --json`（表格模式 dry-run 按既有语义退出 0），rv-3 的 `doctor --all-profiles` 对只声明 run 用途的自定义 Agent 没有多 profile 可比，改用 `doctor --json` + `doctor --lifecycle` 取证；两处偏差登记在下发 Change Log 与 `….verification-plan.md`。
+- **§9 状态**：除 `Human-Confirmed`（三项决策 + 9.1 呈递确认，留给人工）外全部勾选；`Behavior Acceptance` 的「循环任务识别自定义 Agent」与 `Delivery Readiness` 首项标为 `[~]`，因为 `loop_fire.py` 发射侧仍用内置 registry（§12 已列为后续项）。`Validation Acceptance` 的「`just test` 与相关 e2e 在最终代码树上通过」原为 `[~]`（当时 `just test all` 仍有 HEAD `27ad6b57` 遗留的 33 个 `.iar`/改名族失败），恢复轮已逐条修复并在最终树复现 **4580 passed / 0 failed**，据此转为 `[x]`；修复口径见 Change Log 两条新增项，未跳过、未弱化任何门禁。
+- **独立 verifier**：只读调查 agent 对九项质疑给出 8 PASS + 1「属实但披露位置不实」（已补写 Change Log），并提出两项 block：PRD 未对账（本轮已完成）与 `just test` 本机不可复现为绿（恢复轮已复现为绿，见上条与 Change Log）。verifier 未给出无条件 PASS，其回执与未闭合项原样记在 `….verifier-report.md`（保留历史原文，不回写）。
+
+## Change Log
+
+### 2026-10-20 · rv-2 期望的 dry-run 退出码需要机器输出模式
+- Type: validation
+- Before: §7 Realistic Validation Plan 的 rv-2 负控①写作「命令进入 dry-run 计划（10）」。
+- After: 明确该 10 来自 `kc run --issue 291 --dry-run --json`；表格模式 dry-run 按既有语义退出 0，不能用来证明门禁放行。
+- Reason: 实测两种输出模式的退出码不同，按原文跑负控①会得到 0，无法与「被拦截」形成可判别对照。
+- Impact: 只改验收口径，不改行为；rv-2 记录在 `rv-2-blocked.txt` 负控①的 exit 10 与 `DRY RUN: would process Issue #291 (ready) with claude`。
+- Review: 已按最终脚本重跑核对；`evidence.json` 的 stdout 断言按 runner 重放口径预校验通过。
+
+### 2026-10-20 · 门禁在 spawn 边界之前，用启动错误代替预探测
+- Type: architecture
+- Before: §7 Core Logic 的可用性门禁设想在启动子进程前做一次 PATH 探测。
+- After: 阶段级门禁（`assert_run_gate`）保持 PATH 事实判定；进程 spawn 边界由 `run_agent_once.py` 把 `FileNotFoundError` 转成点名 bin / profile / phase 的 `AgentUnavailableError`，不再新增第二条 PATH 检查。
+- Reason: 复用现有执行边界能把「未安装」与「装了但起不来/认证失败」的错误都归到同一可诊断出口，避免第二套探测逻辑与 PATH 判定漂移（§12「认证不可检测」的边界仍成立）。
+- Impact: 错误文案来源不同但字段一致（阶段/预设/agent/bin/修复入口）；rv-2 的拦截与 attempt 账本零记录不受影响。
+- Review: 由 `tests/test_agent_availability_gate.py` 与 rv-2 双向负控覆盖；verifier 判定 PASS。
+
+### 2026-10-20 · `_process_ready_issue` 按配置解析结果而非候选阶梯设门禁
+- Type: behavior
+- Before: 实现期一度考虑在认领后按当前尝试的 Agent 设门禁。
+- After: `agent_runner_issue_handlers.py` 在认领 CAS 之前，对本次**配置解析出的阶段绑定**设门禁。
+- Reason: 「缺失不换人」要求判断的是用户配置声明的那个 Agent；若对阶梯候选判断，配置指向未安装 Agent 时会先换人再放行，正好制造 PRD 要禁止的假象。
+- Impact: 决策二的语义在实现路径与 Issue 处理路径两处一致生效；rv-2 负控②证明配了可用回退候选仍然 exit 3。
+- Review: verifier 核对 `agent_runner_orchestrate.py` 的重抛顺序在 `AgentUnavailableError` 分支之前，判定 PASS。
+
+### 2026-10-20 · `create_loop_from_recipe` 补 `agents=` 参数
+- Type: behavior
+- Before: 由 recipe 建 loop 的路径用内置 registry 校验阶段 Agent 名，注册了自定义 Agent 的用户在建 loop 阶段就被拒。
+- After: `create_loop_from_recipe(..., agents=...)` 接收生效注册表，`kc loop create` 与 `loop_create.py` 都传入生效注册表。
+- Reason: FR-6 要求自定义 Agent 在阶段选择上是一等公民；创建侧的校验必须与列表/doctor 用同一份注册表，否则同一条 recipe 一处能过一处不能过。
+- Impact: 建 loop 通过；**发射侧 `loop_fire.py` 仍用内置 registry**，故「能建不能发射」，已作为残留记入 §12 与 `Behavior Acceptance` 的 `[~]`。
+- Review: `tests/test_agent_registry_coverage.py` 的正反两向用例；残留未包装成已完成。
+
+### 2026-10-20 · 已知限制：loop 发射路径仍解析内置 registry
+- Type: architecture
+- Before: §12 未列出该项。
+- After: §12 新增「loop 发射侧仍是内置 registry」条目，说明现状、后续修法与需要补的端到端 oracle。
+- Reason: 本次范围止于注册表消费面（列表、门禁、预设、标签、Skills、内容生成、loop 创建）；发射侧改动会牵动运行期 Agent 解析与既有回退阶梯，属于可独立验收的一块，不该在交付尾部静默扩大。
+- Impact: 自定义 Agent 的 loop 在发射时认不出名字；相关 §9 项标 `[~]` 而非勾选，人工验收可见该缺口。
+- Review: 独立 verifier 复核 `loop_fire.py:317` 与 `cli_loop.py` / `loop_create.py` 的差异后确认属实。
+
+### 2026-10-20 · 已知限制：仓库层阶段绑定的预设定义移入机器级配置
+- Type: config
+- Before: §12 只说「派生项目需自行维护默认值」，未处理本仓库 `.kedacode.toml` 仍绑 `qoder-qwen3_8-flash_max`。
+- After: §12 新增条目，记录模板删定义后仓库层绑定的实际解析结果与维护者机器的差别。
+- Reason: 决策一要求预设属于用户机器级配置；本仓库的仓库层文件是维护者个人配置，不能反过来把个人预设留在公共模板里，也不能自动改写用户的仓库层绑定。
+- Impact: 新机器解析这些绑定时优雅降级（`preset_name=null`、`effective_agent` 回落 legacy/builtin、退出码 0）；维护者机器由 `~/.kedacode/config.toml` 提供定义。`.kedacode.toml` 里「在全局 config.toml 中定义」的注释已过时，属维护者个人文件，未在本次改动。
+- Review: 在只含 claude stub 的沙箱里实测解析结果并记入 `….verification-plan.md`；未改生产代码。
+
+### 2026-10-20 · rv-3 与 rv-4 的真实入口补充条件
+- Type: validation
+- Before: rv-3 写作 `kc agent doctor myagent --all-profiles --json`；rv-4 只写「打开 `/app/settings/lifecycle/`」。
+- After: rv-3 改用 `doctor myagent --json` 与 `doctor --lifecycle implementation --json` 取证；rv-4 补上「面板静态产物由 `just console-sync` 同步」这一前置，并要求 console 启动日志出现 `listening on`（出现 `already running` 即判失败）。
+- Reason: 只声明 run 用途的自定义 Agent 没有多 profile，`--all-profiles` 对它没有可比对象；rv-4 若命中别的实例，截图就不是本次配置的产物，端口占用会让证据失真。
+- Impact: 取证手段调整，断言强度不变（rv-3 仍验注册块、argv 与三条拒绝；rv-4 仍逐行对照页面与后端事实）。
+- Review: 两条偏差写入 `….verification-plan.md` 与 `evidence.json` 的 risks 字段，verifier 认定技术上成立。
+
+### 2026-10-20 · §9 勾选、状态横幅与 9.1 呈递入口对齐 fresh evidence
+- Type: doc / evidence
+- Before: 验收状态横幅为「⬜ 未开工」，§9.2 的 24 项全部空框，9.1 只列单张 rv-4 截图且没有一处能一次打开全部呈递物。
+- After: 横幅改为「🧍 待人工验收」；除 `Human-Confirmed` 外的项按证据勾选，`loop_fire` 残留与仓库级 `just test` 基线红两项标 `[~]` 并写明原因；9.1 增加一行指向同目录 `….evidence-report.md`（内嵌两张截图与四行关键行）与 `….verifier-report.md`。
+- Reason: 执行侧交付已完成、独立 verifier 已运行，横幅与清单必须投影实际状态而不是初稿状态；PRD 规则要求勾选附带证据，且呈递物必须被 surfaced 而不是只落目录。
+- Impact: 人工只需回答三项决策与 9.1 确认；`Human-Confirmed` 保持空框，不因自动门禁变绿而代填。PRD 仍留 `tasks/pending/`，由 runner 随交付归档。
+- Review: `hooks/shared/check_prd_acceptance_checklist.py` 对该文件退出 0；`tests/test_prd_checklist.py`、`tests/test_prd_acceptance_checklist.py` 与两份 guards 共 106 项通过。
+
+### 2026-10-20 · 补写 Change Log 段落本身
+- Type: doc
+- Before: 独立 verifier 指出：证据报告声称「两条已知限制记入 PRD Change Log」，而 PRD 当时没有 Change Log 段落，属披露位置不实。
+- After: 新增 `## Change Log`，逐条按六字段记录退出码口径、spawn 边界、门禁对象、`create_loop_from_recipe` 的 `agents=`、`loop_fire` 残留、仓库层绑定归属、rv-3/rv-4 真实入口条件、e2e 转录用例修正与本轮对账。
+- Reason: 实现期对 living PRD 的每次偏差必须可追溯，否则人工验收读到的仍是初稿叙事。
+- Impact: 只增加文档段落，不改行为；证据报告与 §12 的交叉引用现在成立。
+- Review: 由 verifier 的第 9 项判定驱动，本轮内闭环。
+
+### 2026-10-20 · e2e 转录用例改为按 API 选择已启用仓库
+- Type: test
+- Before: `lifecycle-settings.spec.ts` 的 Backlog 转录用例拿 `[data-testid^="repo-agent-gear-"]` 的第一个齿轮点击，registry 列出停用仓库时它们同样可点。
+- After: 先读 `/api/v1/agent-runner/repositories`，取 `enabled` 的仓库再定位其齿轮；没有启用仓库时 skip。
+- Reason: 该用例页头声明的前提本就是「已启用的受管理仓库」；点到停用仓库（本机 `transmaster` 自 2026-06-11 起 `enabled = false`）得到的是「仓库不存在或未启用」而不是矩阵，属用例把机器状态当常量。生产代码未改。
+- Impact: `just e2e tests/workflows/lifecycle-settings.spec.ts` 从 7 passed / 1 failed 变为 **8 passed**；可用性标记用例与窄屏/矩阵用例不变。
+- Review: 结果记入 `rv-4-e2e-spec.txt`，含失败根因与前后对照。
+
+### 2026-10-20 · 四条 oracle 在最终树上整体重跑
+- Type: validation / evidence
+- Before: rv-1..rv-4 的产物与 rv-4 截图采集于 21:07Z，而源码文件的 mtime 集中在 21:15Z（含 rv-4 所服务的前端静态包），证据与最终树之间存在一次未被覆盖的改动窗口。
+- After: 重跑四条命令（21:48:41Z–21:49:22Z，全部 exit 0），重新生成全部产物与两张截图，并用 `scripts/check-manifest-assertions.py` 按 runner 的重放口径复验 `evidence.json`；配置 sha256 与首轮逐字节相同，Final Reconciliation 与 `….evidence-report.md` 记录重跑时间与原因。重跑前先执行 `just console-sync`。
+- Reason: §9 Validation 要求「任何 seed / 门禁 / 注册路径改动后重跑对应 oracle」，不能以首轮通过代替最终树通过。
+- Impact: 只刷新证据，不改生产代码；断言全部命中说明 21:07Z→21:48Z 之间的改动未改变被测行为（哈希与退出码一致），未新增任何偏差。
+- Review: `MANIFEST_OK: 4 items, all stdout assertions hit, all evidence files present`；rv-4 日志仍出现 `kc console listening on`（非 `already running`）。
+
+### 2026-10-20 · 修复 HEAD 遗留的 33 个 `.iar` 改名族测试失败（交付门禁前置）
+- Type: test
+- Before: `just test all` 在本树 4551 passed / **33 failed**，失败集中在 `test_repository_local_migration.py`（17）、`test_console_processes.py`（4）、`test_idea_inbox.py`（4）、`test_cli_config_migrate.py`（2）、`test_agent_runner_container.py`（2）、`test_agent_runner_takeover.py`（1）、`test_agent_runner_init.py`（1）、`test_loop_create_and_fire.py`（1）、`test_generated_prd_content.py`（1），用例仍写 `.iar.toml` / `iar` 命令 / `IAR_IDEA_INBOX_INBOUND_SECRET` / 旧状态目录挂载名。
+- After: 把这些用例改成 HEAD `27ad6b57 refactor(cli): remove IAR runtime compatibility` 之后的产品命名（仓库配置走 `product_identity.REPOSITORY_CONFIG_FILENAME`，改名用例改用新增的 `_write_legacy_config` 显式写旧名），命令名断言改为 `kc` / `kedacode`，收件箱 secret 改 `KEDACODE_IDEA_INBOX_INBOUND_SECRET`（签名头 `X-IAR-Signature` 是源码里的既有对外契约，未改），旧状态目录参数化用例改成「只剩旧目录时也不回读旧路径」的单一路径断言；`test_agent_runner_init` 的真实入口子进程从 `iar` 改为 `kc`，`test_console_processes` 的托管进程登记改用 `_sleeper_argv()` 起真实可停止的进程而不是 spawn 不存在的 `iar`。生产代码除下一条外未改。
+- Reason: 本轮交付门禁（`just test all`）必须为绿，而诊断显示这 33 项与本 PRD 无关且**在 HEAD 上逐条同样失败**（在 `c0e3a084` 的隔离 worktree 用同一 venv 复现，结果完全一致：33 failed / 162 passed），属改名提交未同步用例的遗留；不能用「跳过 / 缓存 / 弱化门禁」代替修复，main 上另开的 residual-IAR PRD 尚未落地。
+- Impact: 只改变测试与用例期望，不改任何对外行为；`just test all` 由 33 failed 变为 **4580 passed / 1 skipped / 0 failed**（少的 4 项是刻意合并的 `[.iar]` 参数化）。§9 `Validation Acceptance` 的该 `[~]` 项据此转 `[x]`。
+- Review: 逐条先复现红（同一命令在基线 worktree 失败）、修复后在最终树复现绿；证据为 `just test all` 输出与本节，未新增守卫测试、未改 `tests/guards/`。
+
+### 2026-10-20 · `kc config migrate --dry-run` 在旧名仓库里不再误报「未初始化」
+- Type: behavior
+- Before: 仓库只有 `.iar.toml` 时，`kc config migrate --dry-run` 打印 `would rename .iar.toml to .kedacode.toml` 后因新名文件不存在而抛 `IARRepositoryNotInitializedError`，退出码 3，钉子清理计划完全不显示——与 `config_migrate.py` 模块 docstring「预演与正式执行结论一致」矛盾（正式执行先改名再清钉子，退出 0）。
+- After: `migrate_repository_local_config()` 增加可选 `config_path`（默认仍是当前命名路径），CLI 在预演且改名计划为 `renamed` 时把改名前的旧名文件传给计划计算，因此 dry-run 与正式执行的结论一致：退出 0 并同时给出 `would rename` 与 `Would remove N value(s)`；`tests/test_cli_config_migrate.py` 相应恢复原有断言。同轮把另一处遗留断言（本机步骤后要求 `~/.iar` 留符号链接）改为与既有实现一致的「旧目录不保留」。
+- Reason: 该缺陷由 `27ad6b57` 的改名遗留（`migrate_repository_local_config` 只认新名），是本轮门禁的阻塞项之一；按 PRD 决策一「坏配置只点名、不自动改写」的口径，预演必须如实展示将要发生的改动，不能以报错代替计划。
+- Impact: 只影响 `kc config migrate --dry-run` 在**仍用旧名配置**的仓库上的退出码与输出；正式执行路径、退出码语义与其他 CLI 表面不变，故不需同步 `kedacode-operator` skill 的旗标清单。
+- Review: `tests/test_cli_config_migrate.py`（含原有 dry-run 断言）与 `tests/test_repository_local_migration.py` 25 项在最终树全绿；负向对照为「不传 `config_path` 时预演仍退出 3」，由该用例的断言组合（退出 0 + `Would remove` + 文件字节不变）锁定。
+
+### 2026-10-20 · 修复后在最终树上重跑四条 oracle 与 e2e
+- Type: validation / evidence
+- Before: rv-1..rv-4 产物采集于 21:48Z–21:49Z，早于本轮的测试修复与 `config migrate` 源码改动。
+- After: 重跑四条命令（`22:11:20Z`–`22:12:27Z`，全部 exit 0）重新生成全部产物与两张截图，`evidence.json` 补记 item 3 的三份 stderr `.warn` 产物，并用 `scripts/check-manifest-assertions.py` 按 runner 的重放口径复验。
+- Reason: §9 Validation 要求任何 seed / 门禁 / 注册路径改动后重跑对应 oracle，证据必须出自最终树。
+- Impact: 只刷新证据与 manifest 引用；sha256（骨架 `842049520cf3…`、setup 后 `2aafa48b67f3…`）与全部退出码与上一轮逐字节一致，说明本轮改动未触及被测行为。
+- Review: `MANIFEST_OK: 4 items, all stdout assertions hit, all evidence files present`；rv-2 结论行仍为「正控 exit=3 / 负控① exit=10 / 负控② exit=3，Issue #291 标签 3→3、评论 0→0」。

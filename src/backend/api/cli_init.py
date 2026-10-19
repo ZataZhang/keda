@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from backend.api.cli_console import console, error_console
 from backend.api.cli_skill import sync_user_skills
-from backend.core.shared.models.agent_runner import LabelConfig
+from backend.core.shared.models.agent_spec import AgentSpec
 from backend.core.use_cases.agent_runner_factory import (
+    build_app_config,
     create_github_client,
     create_registry_editor,
     logger,
@@ -36,6 +38,9 @@ if TYPE_CHECKING:
 
 def _run_init_command(parsed: argparse.Namespace, process_runner: IProcessRunner) -> int:
     """渲染或写入本地配置、同步 gitignore、注册表与标签。"""
+    # 机器级生效配置：Skill 安装根与标签同步都按它解析出的注册表走，自定义 agent
+    # （[agent_runner.agents.*]）因此能拿到同一份用户级 skills 目录。
+    app_config = build_app_config()
     try:
         init_result = initialize_repository_local_config(
             RepositoryInitOptions(
@@ -75,7 +80,10 @@ def _run_init_command(parsed: argparse.Namespace, process_runner: IProcessRunner
         print(init_result.config_text, end="")
         _print_gitignore_plan(gitignore_result)
         return _sync_user_skills_or_report_error(
-            process_runner=process_runner, dry_run=True, force=parsed.force
+            process_runner=process_runner,
+            dry_run=True,
+            force=parsed.force,
+            agents=app_config.agents,
         )
     if init_result.wrote_file:
         console.print(f"[green]Wrote KedaCode local config:[/] {init_result.config_path}")
@@ -85,7 +93,10 @@ def _run_init_command(parsed: argparse.Namespace, process_runner: IProcessRunner
         )
     _print_gitignore_summary(gitignore_result)
     skills_exit_code = _sync_user_skills_or_report_error(
-        process_runner=process_runner, dry_run=False, force=parsed.force
+        process_runner=process_runner,
+        dry_run=False,
+        force=parsed.force,
+        agents=app_config.agents,
     )
     if skills_exit_code:
         return skills_exit_code
@@ -109,8 +120,9 @@ def _run_init_command(parsed: argparse.Namespace, process_runner: IProcessRunner
             return 1
     try:
         sync_labels(
-            labels_config=LabelConfig(),
+            labels_config=app_config.labels,
             github_client=create_github_client(init_result.repo_root_path, process_runner),
+            agent_registry=app_config.agents,
         )
         console.print(f"[green]Labels synced for:[/] {init_result.repo_root_path}")
     except Exception as exc:  # noqa: BLE001
@@ -119,11 +131,15 @@ def _run_init_command(parsed: argparse.Namespace, process_runner: IProcessRunner
 
 
 def _sync_user_skills_or_report_error(
-    *, process_runner: IProcessRunner, dry_run: bool, force: bool
+    *,
+    process_runner: IProcessRunner,
+    dry_run: bool,
+    force: bool,
+    agents: Mapping[str, AgentSpec] | None = None,
 ) -> int:
     """同步用户级 Skills，远程模板不可用或冲突时报告原因并以失败退出。"""
     try:
-        sync_user_skills(process_runner=process_runner, dry_run=dry_run, force=force)
+        sync_user_skills(process_runner=process_runner, dry_run=dry_run, force=force, agents=agents)
     except RemoteTemplateSkillInstallError as exc:
         error_console.print(f"[red]Remote template skill installation failed:[/] {exc}")
         return 1

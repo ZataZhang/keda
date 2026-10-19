@@ -1,0 +1,387 @@
+{
+  "version": 1,
+  "language": "zh-CN",
+  "items": [
+    {
+      "item_number": 1,
+      "item_name": "rv-1 干净环境首次引导：一次性提示 + 只写入真实可用 Agent + 重复引导不重复写入",
+      "command": "sh tasks/evidence/P1-FEAT-20261020-011007-agent-availability-and-custom-registry/scripts/rv-1-clean-setup.sh",
+      "evidence_files": [
+        "rv-1-setup.txt",
+        "rv-1-config-diff.txt",
+        "rv-1-first-run-hint.txt",
+        "rv-1-agent-list.json",
+        "rv-1-negative-control.json",
+        "rv-1-setup-positive.json",
+        "rv-1-setup-second.json",
+        "rv-1-lifecycle-after-setup.json"
+      ],
+      "output_summary": "隔离沙箱（临时 HOME + 只含 claude stub 的 PATH + 独立 KEDACODE_CONFIG，git HEAD c0e3a084）内真实 CLI 全程驱动：负控 `kc agent setup --yes --agent codebuddy` exit 3 且配置 sha256 与骨架逐字节相同（842049520cf3…）；正控 `kc agent setup --yes --agent claude` exit 0，写入后 sha256 变为 2aafa48b67f3…，配置只新增 `[agent_runner.lifecycle_agents] implementation = \"claude\"`；真实 TOML 解析核对 presets / lifecycle_presets 均为空、可用清单由 CLI 自己解析（['claude']）；第二次 setup 后 sha256 仍为 2aafa48b67f3…（无差异）；真实 PTY 三次裸命令，`Run `kc agent setup`` 提示恰好出现 1 次，marker 文件 `.agent-setup-hint-shown` 落在临时 HOME 的状态目录，未触碰本机 ~/.kedacode。",
+      "explanation": "critical value 全部由被测路径产生：可用清单来自 `kc agent list --output json`（脚本不重建任何「已安装」常量），写入目标来自 setup 自己 JSON 的 `config_path`，哈希来自对同一份 KEDACODE_CONFIG 的 shasum。must_cross 链条为 TTY 首启提示 → 配置加载 → PATH 解析 → setup 计划 → TOML 写锁 → 新进程 `kc agent lifecycle list --output json` 再读生效配置。负控在同一临时 PATH 上选择未安装的 codebuddy，期望且实测 exit 3、目标文件字节不变，证明「失败的引导不落盘」不是断言口号。",
+      "risks": "PATH 里的 claude 是 echo stub：它只证明可用性探测（shutil.which）与配置写入，不会真的调用 Agent，也不访问 GitHub——这正是 PRD mock_boundary 划定的边界，不代表 stub 能跑通完整任务。一次性提示依赖 BSD `script` 分配的真实 PTY，且同一轮内补全提示会先占用一次输出（脚本因此跑第三轮确认 marker 生效后不再提示）；若未来两条提示的先后顺序改变，计数断言仍只认 agent 提示那一行。临时目录名随运行变化，rv-1-setup.txt 中的绝对路径与 rv-1 记录里的 bin_path 不是稳定常量，断言不依赖它们。",
+      "negative_control": "在同一临时 PATH（只有 claude stub）下执行 `kc agent setup --yes --agent codebuddy --output json`：exit 3，错误点名 agent 'codebuddy' / bin 'codebuddy' 并给出 `kc agent list` / `kc agent add` 出路；随后 shasum 与骨架哈希相同（842049520cf3…），即失败的 setup 一个字节都不写。另一条负控是重复引导：第二次 `--yes --agent claude` 返回 `already_satisfied: true` 且哈希不变。",
+      "expected_fail": "若引导把未安装 Agent 也写进配置，负控后 sha256 会与骨架不同且脚本打印 `FAIL: 失败的 setup 改动了配置文件` 并 exit 1；若一次性提示失去幂等（marker 未写或每次都说），提示计数断言打印 `FAIL: 一次性提示出现了 N 次`；若 seed 仍整份复制仓库模板，第 3 步的 TOML 解析断言会在 `assert not presets` 处抛 AssertionError。本轮三条均未出现。",
+      "stdout_assertions": [
+        {
+          "severity": "high",
+          "pattern": "== rv-1 干净环境首次引导 ==",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "exit code: 3 （期望 3 = not_found）",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "负控后 sha256: 842049520cf3bc3db32e9b73ba9cd0ea21c32542a70b18a589d1b45e7dcc83b5",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "写入后 sha256: 2aafa48b67f38786c5269932dab94ae242327d95b6dfa551e2068666454dce16",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "第二次后 sha256: 2aafa48b67f38786c5269932dab94ae242327d95b6dfa551e2068666454dce16",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "lifecycle_agents: {'implementation': 'claude'}",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "本机可用 agent（CLI 自己解析）: ['claude']",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "配置里没有指向未安装 agent 的预设或绑定。",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "agent 提示出现次数（期望 1）: 1",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "rv-1 OK",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "FAIL",
+          "must_match": false
+        },
+        {
+          "severity": "high",
+          "pattern": "Traceback",
+          "must_match": false
+        }
+      ]
+    },
+    {
+      "item_number": 2,
+      "item_name": "rv-2 缺失主 Agent 在 claim 前阻断：错误可定位、无副作用、回退候选不换人",
+      "command": "sh tasks/evidence/P1-FEAT-20261020-011007-agent-availability-and-custom-registry/scripts/rv-2-gate.sh",
+      "evidence_files": [
+        "rv-2-blocked.txt",
+        "rv-2-issue-unchanged.json",
+        "rv-2-agent-list.json",
+        "rv-2-issue-before.json",
+        "rv-2-issue-after.json",
+        "rv-2-preset-to-missing.json",
+        "rv-2-run-blocked.json",
+        "rv-2-run-blocked.err",
+        "rv-2-preset-to-available.json",
+        "rv-2-run-planned.json",
+        "rv-2-run-planned.err",
+        "rv-2-preset-back-to-missing.json",
+        "rv-2-fallback-preset.json",
+        "rv-2-fallback-added.json",
+        "rv-2-fallback-list.json",
+        "rv-2-run-blocked-with-fallback.json",
+        "rv-2-run-blocked-with-fallback.err"
+      ],
+      "output_summary": "真实入口 `kc run --issue 291 --dry-run --json`（Issue #291 只作被预览目标，不动 #292）：用真实 CLI 把仓库层绑定的预设 qoder-qwen3_8-flash_max 指向未安装的 codebuddy 后，exit 3，错误一字点名 `stage 'implementation' (preset 'qoder-qwen3_8-flash_max') resolves to agent 'codebuddy' (bin 'codebuddy'), which is not available on PATH` 并给出 `kc agent setup` / `kc agent setup --fix` 出路；副作用三读全部无新增——Issue #291 标签 ['agent/ready','status/backlog','type/refactor'] 与评论 0 条逐字段相同（gh 只读复核）、`git worktree list` 摘要前后同为 eb1a70bc…、attempt 账本 0→0；负控① 同一预设改绑可用 claude → exit 10 进入 dry-run 计划（`DRY RUN: would process Issue #291 (ready) with claude`）；负控② 主 Agent 回到缺失并显式追加 claude 回退候选（`kc agent fallback list` 可见 rv2-claude-fallback 那条）后仍 exit 3，且账本记录数不变、被拦截输出里没有 claude 执行结果。全程绑定 git HEAD c0e3a084，配置哈希 seed=842049520cf3 / bound=e55e730530fc（被拦截后不变）。",
+      "explanation": "门禁是 claim 前的真实路径：`run_agent_repositories_once.py` 在 GitHub client 构造之前、`agent_runner_issue_handlers.py` 在 `arbitrate_first_claim` 之前各调一次 `assert_run_gate`，同一 core 检查覆盖两条入口，dry-run 也过门禁（否则本 oracle 无法复跑）。critical value 来自生效配置与 lifecycle 解析（阶段名、预设名）以及注册表（agent / bin），可用性清单由 CLI 自己解析（脚本第 0 步），gh / worktree / sqlite 账本三个副作用探针全部由运行自身读写、脚本不重建常量。副作用不只在断言里描述，而是 fresh-state 再读：新 API 请求取 Issue、新进程取 worktree 清单、账本行数直接计数。",
+      "risks": "被拦截的 stdout JSON 为空文件（错误走 stderr），若只看 stdout 会误判「没有输出=没有拦截」，因此断言取 stderr 文本与 exit code，并保留 rv-2-run-blocked.err。Issue #291 是活的仓库 Issue：本轮实测它处于 ready 态且无人认领；若外部把它领走，labels/comments 快照会变化，脚本比对的是同一次运行内的前后两拍而不是固定常量，所以不会假红，但也不会再证明「零 claim」——复跑前应确认目标 Issue 未被处理。`gh auth token` 需要本机凭据；缺失时脚本在第 1 步快照就 exit，不会静默跳过副作用核对。回退候选的 (agent, preset) 组合与默认清单第 1 位 claude 重复会被 CLI 以 exit 2 拒绝，故负控② 用独立预设名 rv2-claude-fallback。沙箱 HOME 的 attempt 账本可能尚不存在，脚本把「库不存在」显式当作 0 条记录而不是报错。",
+      "negative_control": "① 同一预设改绑到可用的 claude stub 后重跑同一命令：期望不再被同一错误拦截，实测 exit 10 并打印 DRY RUN 计划行——证明门禁不是无条件阻断，而是只在解析出的主 Agent 缺 bin 时停；② 保留缺失主 Agent + 通过 `kc agent fallback candidate add` 显式配置可用 claude 候选后重跑：期望仍 exit 3 且没有替代 Agent 的执行记录，实测 attempt 账本仍为 0、被拦截输出里没有 claude 结果——证明回退阶梯不能掩盖缺失。两条负控方向相反（放行 / 仍拦），任一侧被写成常量 true 都会立刻变红。",
+      "expected_fail": "若门禁挪到 claim 之后，Issue #291 会出现 `agent/running` 标签或评论数变化、worktree 摘要与 attempt 账本出现新行，脚本打印 `FAIL: 被拦截的运行留下了副作用` 类红并 exit 1；若回退候选被用来掩盖缺失 Agent，第 6 步退出码会变成 10（或出现替代 Agent 执行记录），脚本以 `FAIL: 回退候选掩盖了缺失，退出码 …` / `FAIL: 出现替代 Agent 的执行记录` 变红；若门禁退化成无条件阻断，第 5 步的 `FAIL: 可用绑定仍被拦截，退出码 …` 变红。本轮均未出现。",
+      "stdout_assertions": [
+        {
+          "severity": "high",
+          "pattern": "== rv-2 claim 前可用性门禁 ==",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "CLI 解析出的可用 agent: ['claude']",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "exit code: 3 （期望 3 = not_found）",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "stage 'implementation' (preset 'qoder-qwen3_8-flash_max') resolves to agent 'codebuddy' (bin 'codebuddy'), which is not available on PATH",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "错误点名：阶段 implementation、预设名、目标 agent、可执行文件 bin、下一步命令 全部出现。",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "\"unchanged\": true",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "attempt 账本记录数: 前 0 / 后 0",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "exit code: 10 （期望 10 = dry_run_ok，说明门禁不是无条件阻断）",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "DRY RUN: would process Issue #291 (ready) with claude",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "exit code: 3 （期望 3：配置了可用回退候选也不换人）",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "attempt 账本记录数: 0 （无替代 Agent 的执行记录）",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "rv-2 OK",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "FAIL",
+          "must_match": false
+        },
+        {
+          "severity": "high",
+          "pattern": "Traceback",
+          "must_match": false
+        }
+      ]
+    },
+    {
+      "item_number": 3,
+      "item_name": "rv-3 自定义 Agent 注册：显式输入写回、list/doctor/setup/阶段绑定全链生效、非法写入拒绝",
+      "command": "sh tasks/evidence/P1-FEAT-20261020-011007-agent-availability-and-custom-registry/scripts/rv-3-register.sh",
+      "evidence_files": [
+        "rv-3-register.txt",
+        "rv-3-protocols.txt",
+        "rv-3-add-dryrun.json",
+        "rv-3-add.json",
+        "rv-3-list.json",
+        "rv-3-doctor.json",
+        "rv-3-setup-custom.json",
+        "rv-3-preset.json",
+        "rv-3-bind.json",
+        "rv-3-lifecycle-argv.json",
+        "rv-3-negative-duplicate.json",
+        "rv-3-negative-protocol.json",
+        "rv-3-negative-args.json",
+        "rv-3-list.warn",
+        "rv-3-doctor.warn",
+        "rv-3-lifecycle-argv.warn"
+      ],
+      "output_summary": "临时 PATH 提供 myagent stub，注册输入只有 name=myagent / bin=<stub 绝对路径> / arg=--print：不加 `--write` 的 `kc agent add dryagent` 只回显 TOML 块、`written: false`、`config_path: null` 且配置哈希不变（842049520cf3…）；`kc agent add myagent … --write --yes` 写入 `[agent_runner.agents.myagent]` + `profiles.run`，哈希变为 3e03dbe2617f…，块内只有本次显式给出的 bin 与 `args = [\"--print\"]`（prompt_delivery=argv_tail、output_protocol=plain，没有猜测任何模型或沙箱旗标）；新进程 `kc agent list --output json` 给出 available=True、bin_path 为 PATH 解析出的 stub 绝对路径、label=agent/myagent、声明用途恰好 ['run']；新进程 `kc agent doctor myagent --json` 的 argv 为 [<bin>, \"--print\", \"golden-prompt\"]，与输入逐段一致；`kc agent setup --yes --agent myagent` + `kc agent preset set` + `kc agent lifecycle set implementation --preset rv3-myagent` 后 `kc agent doctor --lifecycle implementation --json` 解析到 myagent 且 argv[0] 即该 bin——注册后的自定义 Agent 在列表、doctor、阶段选择三处都真的可用。三条负控（重名、未注册协议 stream-json-v2、prompt_delivery=flag 缺 --prompt-flag）全部 exit 2 且配置字节不变（cf6982447a55… 前后相同）。",
+      "explanation": "oracle 的关键值全部来自本次输入与被测路径输出：Agent 名 / bin / argv / 协议由命令参数与 doctor 自己回显，bin_path 由 `shutil.which` 在受限 PATH 上解析，写入块文本取自 add 的 JSON 与随后真实 TOML 文件内容，哈希覆盖 dry-run→write→三条负控四个阶段各取一次，锁住「拒绝即不写」这条契约。协议清单来自 `kc agent doctor --protocols`（被测 CLI 自己的事实源），未注册协议必须以 exit 2 失败而不是静默回落 plain。doctor 的 profile 展开与运行期共用同一代码路径（`AgentSpec.resolve_profile`），doctor 输出正确即代表运行 argv 正确。",
+      "risks": "PRD §7.6 rv-3 的 real_entry 原文写的是 `kc agent doctor myagent --all-profiles --json`，实测该旗标枚举全部内置用途，对只声明 run 的自定义 Agent 会按既有契约报错（`declares no 'deliberate' profile`，exit 3）；这一行为在 main 的内置 Agent 路径上逐字节相同，且被 §9「内置 Agent 的 doctor --all-profiles --json 与改动前快照逐字节一致」锁死为不得改动，因此本轮改用同一条 argv 组装路径的两个真实入口：`kc agent doctor myagent --json`（默认 run 用途）与 `kc agent doctor --lifecycle implementation --json`（阶段解析视图，实际解析到 myagent）。差别的只是查询维度，不是被测代码路径。注册后写回的块只覆盖 run 用途：内容生成 / 辩论等其它用途仍按 §7 核心逻辑 6 明确报错、不回退默认 Agent，这条拒绝由 `tests/test_agent_registry_coverage.py` 与 setup 报错用例覆盖，本项不声称它们可用。沙箱里 doctor 额外打印一条未声明沙箱旗标的 WARN（stderr，单独存 .warn 文件），属真实提示而非失败。",
+      "negative_control": "四条：(a) 不加 `--write` 的 add 必须 `written: false` 且配置哈希不变；(b) 同名重复 `kc agent add myagent` → exit 2 `already registered`；(c) `--output-protocol stream-json-v2`（未注册）→ exit 2 并回显已注册协议清单；(d) `--prompt-delivery flag` 不给 `--prompt-flag` → exit 2。每条负控后都重取 sha256，要求与负控前相同——若实现只在报错前写完文件，或把未注册协议静默回落成 plain，这三条哈希断言会立刻变红。",
+      "expected_fail": "若 `kc agent add` 在写入后才校验，负控 (b)(c)(d) 的 `FAIL: 非法输入 <name> 后配置被改写` 变红并 exit 1；若实现为自定义 Agent 猜测模型 / 沙箱旗标，rv-3-register.txt 的注册块会出现 `--print` 之外的参数、argv 断言 `FAIL: doctor argv 与本次输入不一致`；若注册表没进 `config.agents`，第 3 步的 list 过滤断言直接 `KeyError`/`FAIL` 而不是 available=True。本轮均未出现。",
+      "stdout_assertions": [
+        {
+          "severity": "high",
+          "pattern": "== rv-3 自定义 Agent 注册 ==",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "claude-stream-json",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "\"written\": false",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "dry-run 后 sha256: 842049520cf3bc3db32e9b73ba9cd0ea21c32542a70b18a589d1b45e7dcc83b5 （期望与骨架相同）",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "[agent_runner.agents.myagent]",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "list: available=True bin_path=",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "list: 声明用途=['run']",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "\"--print\", \"golden-prompt\"]",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "doctor --lifecycle implementation → agent=myagent",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "exit code: 2 （期望 2 = usage_error）",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "output protocol 'stream-json-v2' is not registered",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "--prompt-delivery flag requires --prompt-flag.",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "is already registered",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "rv-3 OK",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "FAIL",
+          "must_match": false
+        },
+        {
+          "severity": "high",
+          "pattern": "Traceback",
+          "must_match": false
+        }
+      ]
+    },
+    {
+      "item_number": 4,
+      "item_name": "rv-4 生命周期设置页可用性标记：真实 Console + 真实浏览器逐行核对 + 截图",
+      "command": "sh tasks/evidence/P1-FEAT-20261020-011007-agent-availability-and-custom-registry/scripts/rv-4-settings-page.sh",
+      "evidence_files": [
+        "rv-4-settings-page.txt",
+        "rv-4-settings-availability.png",
+        "rv-4-selector-availability.png",
+        "rv-4-page-facts.json",
+        "rv-4-preset-missing.json",
+        "rv-4-preset-available.json",
+        "rv-4-bind-implementation.json",
+        "rv-4-bind-closeout.json",
+        "rv-4-e2e-spec.txt"
+      ],
+      "output_summary": "隔离沙箱（临时 HOME + 只有 claude stub 的 PATH + 独立 KEDACODE_CONFIG）里用真实 CLI 写入 `lifecycle_presets.implementation = rv4-codebuddy`（agent codebuddy，未安装）与 `closeout = rv4-claude`，再由 `kc console --no-browser --port <动态空闲端口>` 起真实面板（先跑 just console-sync 保证静态产物来自本树前端源码），真实浏览器打开生产路由 `/app/settings/lifecycle/`：页面 HTTP 200，implementation / fix 两行 codebuddy 渲染「未安装（PATH 中找不到 codebuddy）」且无路径标记，其余 6 行 claude 渲染沙箱内 stub 绝对路径且无未安装标记，review 行 codex 同样标未安装；执行器选择器展开后选项文本为「codebuddy · 未安装」而 claude 选项不带未安装后缀；两张截图 rv-4-settings-availability.png（矩阵页 289531 bytes）与 rv-4-selector-availability.png（选择器展开 143442 bytes）连同 rv-4-page-facts.json（9 行 rows × 后端 agent_availability × DOM marks 三方对账）落盘。全程绑定 git HEAD c0e3a084。",
+      "explanation": "三方对账是关键鉴别力：rv-4-page-facts.json 的 `rows` 直接来自同源 Console API `GET /api/v1/agent-runner/console/…/lifecycle-settings?scope=global` 的 `agent_availability`（后端事实，不由前端推断），`marks` 来自真实 DOM 的 `matrix-agent-missing-<key>` / `matrix-agent-missing` 与 `matrix-agent-path-<key>` testid 文本；驱动逐行断言「后端 available=false ⇔ 该行有未安装标记且没有路径标记」「available=true ⇔ 只有路径标记」，并另开回退候选选择器读 `fallback-add-<agent>` 选项文本（Radix 下拉项懒挂载，须先点开触发器）。面板静态产物每次由 `just console-sync` 从本树 frontend-public 源码导出，端口用动态空闲端口并校验 console.log 出现 `listening on`（若端口被上一轮遗留实例占用，`already running` 会让截图与本次配置脱钩，脚本此时直接 FAIL）。截图为真实生产页面，非组件预览、无 mock。",
+      "risks": "沙箱 PATH 里 claude 是 stub，页面上的「已安装」表现为 stub 绝对路径——证明的是可用性渲染，不是 stub 真能跑任务。codebuddy 的「未安装」是这台机器的真实状态（PATH 里没有该 bin）。页面保存语义本轮未做写入回归（PRD §9 Frontend Acceptance 第 2 条由 `tests/playwright-e2e/tests/workflows/lifecycle-settings.spec.ts` 覆盖，该 e2e 在无 auth 本地 Console 上绿），截图只证明呈现；驱动里未新增独立「保存成功」断言，人工肉眼确认保存观感仍留在 §9.1 Human Review Surface。console 静态产物是 gitignored 构建产物，复跑前必须先 `just console-sync`（脚本内已内置），否则会红在缺 index.html 上而不是红在行为上。",
+      "negative_control": "驱动对每行做双向断言：未安装行若同时出现路径标记、或可用行若出现未安装标记，立即 exit 非 0；另有两条结构性负控——若前端把可用性写死成常量（不看 API），implementation 行不会出现 codebuddy 的未安装文案；若 console-sync 同步的是旧产物，新加的 testid 不存在，`marks` 读取会拿到 null 并使断言变红。本轮另有一条运行期防护：日志里没有 `listening on`（端口撞上遗留实例）时直接 FAIL，而不是复用别人的面板冒充本次证据。",
+      "expected_fail": "若矩阵不再渲染未安装标记，驱动打印缺失标记的定位错误并 exit 1，rv-4-settings-page.txt 里不会出现「rv-4 断言通过」；若后端 availability 与前端不一致，三方对账 JSON 与断言文本互斥同样 exit 1；若静态导出没同步，kc console 返回 404、页面 HTTP 状态非 200，脚本在就绪探测后 exit 1。三种红本轮均未出现。",
+      "stdout_assertions": [
+        {
+          "severity": "high",
+          "pattern": "== rv-4 设置页可用性 ==",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "implementation = \"rv4-codebuddy\"",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "kc console listening on",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "页面 HTTP 状态: 200",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "rv-4 断言通过",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "未安装（PATH 中找不到 codebuddy）",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "codebuddy · 未安装",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "\"available\": true",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "rv-4-settings-availability.png",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "rv-4 OK",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "already running",
+          "must_match": false
+        },
+        {
+          "severity": "high",
+          "pattern": "FAIL",
+          "must_match": false
+        },
+        {
+          "severity": "high",
+          "pattern": "Traceback",
+          "must_match": false
+        }
+      ]
+    }
+  ]
+}

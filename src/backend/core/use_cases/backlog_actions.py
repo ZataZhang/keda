@@ -190,6 +190,7 @@ def _create_issue_for_prd(
         generated_content_config=context.config.generated_content,
         labels_config=context.config.labels,
         evidence_dir=context.config.validation.evidence_dir,
+        agents=context.config.agents,
     )
     issue_url = create_issue_from_prd(
         request=request,

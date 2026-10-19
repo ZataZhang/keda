@@ -36,6 +36,7 @@ from backend.core.shared.models.lifecycle_agent import (
     LIFECYCLE_SOURCE_LEGACY,
     normalize_lifecycle_agent_value,
 )
+from backend.core.use_cases.agent_onboarding import agent_availability_entries
 from backend.core.use_cases.lifecycle_agent_resolution import (
     legacy_configured_agent,
     resolve_lifecycle_agent,
@@ -96,7 +97,8 @@ def build_lifecycle_agents_view(
         repo_id: 仓库级视图的仓库 id；全局视图为 ``None``。
 
     Returns:
-        含 ``lifecycle_agents`` 列表、``agents`` 与视角标注的 JSON 友好字典。
+        含 ``lifecycle_agents`` 列表、``agents``、``agent_availability`` 与视角标注的
+        JSON 友好字典。
 
     Raises:
         LifecycleAgentsUpdateError: ``scope`` 非法。
@@ -171,6 +173,10 @@ def build_lifecycle_agents_view(
         "scope": scope,
         "repo_id": repo_id,
         "agents": list(config.agents),
+        # 注册表的可用性事实（只查 PATH，不起子进程）：前端据此把"未安装"如实标在
+        # 下拉项与矩阵行上。页面只做呈现，不因为不可用而阻止保存——拦截归 core 的
+        # 启动前门禁。
+        "agent_availability": agent_availability_entries(config.agents),
         "lifecycles": lifecycles,
         # 触发入口分组按展示顺序下发（组 id / 中文名 / 一行说明）；前端只按行上的
         # ``entry`` 聚块渲染，组文案一律取自这里，不在前端拼第二份。

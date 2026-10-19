@@ -1022,6 +1022,24 @@ export type LifecycleAgentSource =
 /** 矩阵编辑视角：全局层（config.toml）或仓库层（.kedacode.toml）。 */
 export type LifecycleAgentScope = "global" | "repository";
 
+/**
+ * 单个已注册 agent 在本机的可用性事实。
+ *
+ * 后端只按 PATH 解析注册块声明的可执行文件（不起子进程、不探测 `--help`），
+ * 键名与 `kc agent list --json` 的 `available` / `bin_path` 保持一致。
+ */
+export type AgentAvailabilityEntry = {
+  agent: string;
+  /** 注册块声明的可执行文件名。 */
+  bin: string;
+  /** 可执行文件是否解析得到。 */
+  available: boolean;
+  /** 解析到的绝对路径；未安装时为 null。 */
+  bin_path: string | null;
+  /** 该 agent 声明的非交互用途名。 */
+  declared_profiles: string[];
+};
+
 /** 单个生命周期键在某视角下的生效视图。 */
 export type LifecycleAgentEntry = {
   key: LifecycleAgentKey;
@@ -1082,6 +1100,8 @@ export type PrdAgentOverrideView = {
   prd_path: string;
   overrides: Record<string, string>;
   agents: string[];
+  /** 注册表可用性事实（与矩阵视图同源），抽屉据此标注"未安装"。 */
+  agent_availability: AgentAvailabilityEntry[];
   lifecycles: LifecycleAgentEntry[];
   /** 触发入口分组，按展示顺序排列（PRD 覆盖抽屉沿用同一分组渲染）。 */
   entry_groups: LifecycleAgentEntryGroup[];
@@ -1184,6 +1204,11 @@ export type LifecycleSettingsView = {
   scope: LifecycleAgentScope;
   repo_id: string | null;
   agents: string[];
+  /**
+   * 注册表可用性事实（只查 PATH）。页面把"未安装 / 解析路径"标在 Agent 下拉项、
+   * 矩阵行、预设与回退候选上，只呈现不拦截：真正的阻断在 core 的启动前门禁。
+   */
+  agent_availability: AgentAvailabilityEntry[];
   lifecycles: LifecycleSettingsRow[];
   presets: AgentPresetDefinition[];
   fallback: AgentFallbackCandidatesView;

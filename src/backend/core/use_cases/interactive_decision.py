@@ -611,6 +611,7 @@ def _execute_create_issue_from_prd(
         issue_agent=agent,
         labels_config=context.config.labels,
         evidence_dir=context.config.validation.evidence_dir,
+        agents=context.config.agents,
     )
     issue_url = create_issue_from_prd(
         request=request,

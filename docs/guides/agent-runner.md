@@ -48,6 +48,27 @@ kc run --all-ready --dry-run
 
 `kc init` 本身不受门禁限制，包括 `--dry-run` 和 `--force` 形式。本 PRD 不提供 `--skip-init-check` 等绕过开关。
 
+### 首次使用：先确认这台机器跑得动谁
+
+`config.toml` 是**机器级**文件，"配置里写着某个 agent"不等于这台机器装了它的命令行。装完
+`kc` 先做一次只读确认，再决定哪个 agent 跑哪个阶段：
+
+```bash
+# 只读：逐个 agent 标出 available（解析到的路径）或 missing (not found in PATH)
+kc agent list
+
+# 只读预览本机可用清单与将写的键，再落盘选择（只列装了的 agent）
+kc agent setup --dry-run
+kc agent setup --agent claude --yes
+```
+
+还没有任何显式选择时，首次在**交互式终端**运行 `kc` 会在 stderr 提示一次这件事，并在
+`~/.kedacode/.agent-setup-hint-shown` 落 marker（同机不再重复）；非交互调用、机器输出、
+帮助/版本入口、shell 补全协议与 `kc agent` / `kc completion` 子命令都不会显示它，提示也
+从不改变本轮命令的退出码。之后 `kc run` 与 daemon 在**认领 Issue 之前**复核实现 / 校验 /
+审核三个阶段（含各阶段绑定的预设），指向没装的 CLI 会以 `not_found`（3）退出并点名阶段与
+可执行文件，而不是跑完一轮才失败。完整口径见 [Agent 可用性](#agent-availability)。
+
 ### Shell 自动补全
 
 `kc` 支持生成 shell completion。zsh 用户安装后，输入 `kc is<Tab>` 可补全到 `issue`：
@@ -112,7 +133,7 @@ kc daemon status --json
 | `0` | `ok` | 请求完成（只读输出同样算成功） | 继续 |
 | `1` | `error` | 未归类失败，保持历史语义 | 读 stderr 后重试或升级 |
 | `2` | `usage_error` | 旗标/参数组合不成立（互斥、缺目标、非法 lifecycle key） | 修命令，原样重试必然再失败 |
-| `3` | `not_found` | 目标不存在：仓库、registry 条目、agent、可执行文件、日志；显式定向的 Issue 读不到或已关闭 | 换目标或跑 `suggestion` |
+| `3` | `not_found` | 目标不存在：仓库、registry 条目、agent、可执行文件、日志；显式定向的 Issue 读不到或已关闭；启动前门禁发现某阶段解析到的 agent 本机没装（含其预设） | 换目标或跑 `suggestion`；没装的 agent 装回来或 `kc agent setup` 重选 |
 | `4` | `permission_denied` | 未授权：GitHub 未认证、仓库被禁用 | 提示人来认证或启用，别静默重试 |
 | `5` | `conflict` | 当前状态阻止：`--all-ready` 时同仓 daemon 正在轮询队列、显式定向的 Issue 被存活持有者认领或处于未解除的 `agent/blocked`、workflow 模板文件已安装、loop 条目已存在 | 改名 / 用户明确要求时 `--force` / 先停掉冲突进程 / 按 `suggestion` 走 `kc blocked-continue`（活跃认领的错误会点名持有者 host 与 PID） |
 | `10` | `dry_run_ok` | 计划校验通过且未写入任何东西，可直接当 CI 门禁 | 仅在核对计划正文后视为绿灯 |
@@ -5297,6 +5318,128 @@ uv run python -c "from importlib.resources import files; print(files('backend.en
 - `kc container up` 与 `kc daemon` 是**互斥**选项：同一仓库不能同时跑本机 daemon 和容器 daemon。
 - 不装 Docker 的用户零影响：`kc container` 全部子命令都是 opt-in。
 
+<a id="agent-availability"></a>
+
+## Agent 可用性：确认、本机引导与启动前门禁
+
+配置里写着某个 agent，**不等于**这台机器上有它的可执行文件：`config.toml` 是机器级文件，
+一台机器的选择复制到另一台就会让 runner 指向不存在的 CLI。本节给出"确认装了谁 → 按装了的
+人选 → 跑之前先验证"这条链路，全部结论只来自一个事实源，不猜。
+
+<a id="agent-availability-facts"></a>
+
+### 可用性只有一个事实源
+
+判定就是注册块 `bin` 字段按 `PATH` 解析（`shutil.which`），没有第二套嗅探、不看版本号、
+不试跑。同一个序列化（`core/use_cases/agent_onboarding.py` 的 `agent_availability_entries`）
+被三处消费，因此 CLI 与管理终端不会各说一套：
+
+- `kc agent list`：人类输出把未安装标成 `missing (not found in PATH)`，机读输出给
+  `available` 与解析到的 `bin_path`（未安装时为 `null`）。
+- `kc agent presets`：每个预设附带它绑定的 agent 装没装（`agent_available`）——预设本身
+  合法，仍可能在这台机器上跑不起来。
+- 管理终端的生命周期矩阵与统一设置页：`agent_availability` 逐 agent 标注「未安装 / 路径」。
+
+```bash
+# 这台机器装了谁（只看 PATH，不读任何凭据）
+uv run kc agent list
+uv run kc agent list --json
+```
+
+<a id="agent-setup-guide"></a>
+
+### 本机引导：`kc agent setup`
+
+引导写的是**全局层**（状态目录 `config.toml`）的生命周期矩阵，落点与统一设置页、
+`kc agent lifecycle set` 完全相同——它只是把"这台机器装了谁"变成可选项，不引入第二套配置。
+
+```bash
+# 交互式：按阶段菜单只列出本机可用的 agent（实现 / 校验 / 审核）
+uv run kc agent setup
+
+# 脚本化：显式点名，非 TTY 必须这样给（否则以用法错误退出，绝不猜一个 agent）
+uv run kc agent setup --agent claude --yes
+uv run kc agent setup --stage verifier --agent pi --yes
+uv run kc agent setup --stage review --preset plan --yes   # 绑命名预设而非裸 agent
+
+# 只读预览：打印可用性清单与将写的键，一个写锁都不取
+uv run kc agent setup --dry-run --json
+
+# 批量清理：移除全局层指向本机不可用 agent 的绑定（可用的不动）
+uv run kc agent setup --fix --yes
+```
+
+行为边界，逐条都是可验证的：
+
+- **阶段闭集**：引导只管 `implementation` / `verifier` / `review`（一次轮次里真正会调用
+  agent 的三个入口）。修复 / 收尾沿用实现者，其余阶段走 [Agent 模型预设](model-presets.md)
+  的高级配置。
+- **预设遮蔽必须解绑**：某阶段绑了命名预设时，该预设整体决定 agent，矩阵值永远不生效。
+  所以 `--agent` 写矩阵之前会先解绑该阶段的预设（两次写入在同一把写锁里，顺序是先解绑再写
+  矩阵），机读输出的 `unbind_stage_preset` 字段如实说明有没有发生。
+- **校验失败不触达配置文件**：agent 没注册 → 用法错误（2）并指向 `kc agent add`；注册了但
+  本机没装 → 未找到（3）；阶段名不在闭集里 → 用法错误（2）。三种情况都不取写锁，文件逐字节
+  不变。`--dry-run` 同理，只是它带着合法选择以 0 退出。
+- **`--fix` 只动全局层**：仓库层声明由该仓库维护，不在批量清理范围内；没有坏绑定时报
+  "没有"并以 0 退出，不制造空写入。
+
+<a id="agent-first-run-hint"></a>
+
+### 首启提示：一次性、永不阻断
+
+第一次在**交互式终端**使用 `kc` 时，如果这台机器还没有任何显式选择，或配置指向的 agent
+本机没装，CLI 会在 stderr 提示一次并指向 `kc agent setup` / `kc agent list`，同时在状态目录
+落下 marker 文件 `~/.kedacode/.agent-setup-hint-shown`（同机不再重复）。这条路径有硬性门禁：
+
+- 非 TTY、shell 补全协议进行中、机器输出（`--json` / `--output json`）、`--help` /
+  `--version`，以及 `kc agent` / `kc completion` 子命令本身——一律不提示。提示文字绝不进入
+  agent 消费的 stdout/stderr 数据流。
+- 配置读不起来时静默让位：提示是附加价值，任何异常都不改变本轮命令的退出码与输出。
+
+<a id="agent-pre-run-gate"></a>
+
+### 启动前门禁：跑之前先确认，不要跑挂了才回退
+
+`kc run` 与 daemon 在**认领 Issue、建 worktree 之前**执行同一份判定（实现 / 校验 / 审核三个
+阶段，含各阶段绑定的预设），不可用就 fail-fast，退出码为未找到（3）。这挡住的是历史上最贵
+的一类失败：一轮跑了几十分钟、烧完 token 之后才报"这个 CLI 不存在"。
+
+```bash
+# 被拦下时报出阶段 / 预设 / agent / 可执行文件，并给出下一步命令
+uv run kc run --issue 42 --dry-run
+```
+
+- **回退链不能救"没装的主选"**：`agent_fallback_order` / 候选链的语义是"这个 agent 跑挂了
+  换一个"，不是"这台机器没装就偷偷换人"。主选不可用时按未找到（3）退出，不做任何静默换人；
+  临时换人必须显式 `--agent`（此时该阶段就按换进来的人判定，其余阶段仍按配置解析）。
+- 默认配置不受影响：没有显式声明、或声明为 `auto` / `executor` 的阶段由运行期自己路由，门禁
+  不制造第二条报错口径。绑定指向已删除的预设时同样按既有回落链走。
+- 进程边界仍有兜底：可执行文件在 spawn 瞬间解析不到（PATH 竞态、刚被卸载）时，报错点名是哪个
+  agent 在哪个上下文缺失，不会被误分类成"临时失败"后无谓重试。
+
+<a id="agent-add-registration"></a>
+
+### 自定义 agent 注册：`kc agent add`
+
+接入本机自有的 agent CLI 时，注册块不必手写 TOML：
+
+```bash
+# 默认只预览将要写入的 [agent_runner.agents.<name>] 块，磁盘不动
+uv run kc agent add myagent --bin myagent --arg=--print
+
+# 校验通过才落盘（写全局配置）
+uv run kc agent add myagent --bin myagent --arg=--print --write --yes
+
+# 提示词经指定 flag 投递
+uv run kc agent add myagent --bin myagent --prompt-delivery flag --prompt-flag --prompt --write
+```
+
+注册名非法、与既有 agent 重名、`output_protocol` 未注册、`prompt_delivery = flag` 却缺
+`prompt_flag`——都在触达配置文件之前以用法错误（2）退出，文件字节不变。反过来，**bin 暂时
+不在 `PATH` 上不会阻断注册**："先写配置、后装 CLI"是合法顺序，命令只在 stderr 提醒一句
+not on PATH；装好后用 `kc agent list` 确认可用性，再 `kc agent setup --agent myagent` 选它。
+注册块字段本身见下一节。
+
 <a id="new-agent-registry"></a>
 
 ## 接入一个新 agent（声明式注册表）
@@ -5353,7 +5496,7 @@ uv run kc agent doctor pi --all-profiles --json
 uv run kc agent doctor --protocols
 ```
 
-doctor 对三类坏输入分别非零退出并在 stderr 指名原因：agent 未注册、`bin` 不在 `PATH`、引用未注册协议。改完配置后先跑 doctor，再考虑投真实任务。
+doctor 对三类坏输入分别非零退出并在 stderr 指名原因：agent 未注册、`bin` 不在 `PATH`、引用未注册协议。改完配置后先跑 doctor，再考虑投真实任务。写配置这一步可以用 [`kc agent add`](#agent-add-registration)（预览 / `--write` 落盘）代替手写 TOML；这台机器装了谁看 [`kc agent list`](#agent-availability-facts)，选谁作为阶段执行者用 [`kc agent setup`](#agent-setup-guide)。
 
 ### 完整范例：pi
 

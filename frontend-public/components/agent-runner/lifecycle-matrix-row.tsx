@@ -13,7 +13,10 @@ import {
   displayOptionalField,
 } from "@/components/agent-runner/lifecycle-settings-source-labels";
 import { Label } from "@/components/ui/label";
-import type { LifecycleSettingsRow } from "@/lib/api/types";
+import type {
+  AgentAvailabilityEntry,
+  LifecycleSettingsRow,
+} from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
 export interface MatrixRowProps {
@@ -26,6 +29,11 @@ export interface MatrixRowProps {
   bindingChanged: boolean;
   /** 后端下发的逐字段来源词表。 */
   vocabulary: Record<string, string>;
+  /**
+   * 生效 agent 在本机的可用性事实（未解析到具体 agent 或后端未下发时为 null）。
+   * 只用于呈现"未安装 / 解析路径"，不参与取值、也不阻止保存。
+   */
+  availability: AgentAvailabilityEntry | null;
   /** 绑定变更回调。 */
   onBindingChange: (presetName: string) => void;
 }
@@ -33,7 +41,7 @@ export interface MatrixRowProps {
 /**
  * 单个生命周期阶段的矩阵行（展示生效值 + 绑定预设）。
  *
- * @param props - 行数据、可选预设、当前绑定与改动高亮、来源词表、绑定回调。
+ * @param props - 行数据、可选预设、当前绑定与改动高亮、来源词表、生效 agent 可用性、绑定回调。
  * @returns 一行九阶段矩阵（窄屏纵向堆叠，字段无需横向滚动即可读）。
  */
 export function MatrixRow({
@@ -42,6 +50,7 @@ export function MatrixRow({
   bindingValue,
   bindingChanged,
   vocabulary,
+  availability,
   onBindingChange,
 }: MatrixRowProps) {
   const vocabularySafe = vocabulary;
@@ -87,6 +96,25 @@ export function MatrixRow({
         >
           {agentDisplay}
         </p>
+        {availability ? (
+          availability.available ? (
+            <p
+              className="truncate text-[11px] text-slate-500 dark:text-slate-400"
+              data-testid={`matrix-agent-path-${row.key}`}
+              title={availability.bin_path ?? undefined}
+            >
+              {availability.bin_path ?? "已安装"}
+            </p>
+          ) : (
+            <Badge
+              variant="warning"
+              className="mt-1 text-[10px]"
+              data-testid={`matrix-agent-missing-${row.key}`}
+            >
+              未安装（PATH 中找不到 {availability.bin}）
+            </Badge>
+          )
+        ) : null}
         <p className="text-[11px] text-slate-500 dark:text-slate-400">
           {describeFieldSource(row.field_sources.agent, vocabularySafe)}
         </p>

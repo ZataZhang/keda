@@ -11,10 +11,12 @@
 from __future__ import annotations
 
 import shlex
+from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from backend.api.cli_console import console
+from backend.core.shared.models.agent_spec import AgentSpec
 from backend.core.use_cases.agent_runner_init_assets import (
     PackagedSkillInstallResult,
     RemoteTemplateSkillInstallOptions,
@@ -28,7 +30,13 @@ if TYPE_CHECKING:
     from backend.core.shared.interfaces.agent_runner import IProcessRunner
 
 
-def sync_user_skills(*, process_runner: IProcessRunner, dry_run: bool, force: bool) -> None:
+def sync_user_skills(
+    *,
+    process_runner: IProcessRunner,
+    dry_run: bool,
+    force: bool,
+    agents: Mapping[str, AgentSpec] | None = None,
+) -> None:
     """把远程模板 Skill 与随包 operator Skill 同步到全部用户级安装根。
 
     安装根由安装实现自己解析（``KEDACODE_SKILLS_DIR`` 优先，其后是产品自有目录与
@@ -39,6 +47,8 @@ def sync_user_skills(*, process_runner: IProcessRunner, dry_run: bool, force: bo
         process_runner: 执行受限 Git 命令的端口（远程模板下载使用）。
         dry_run: 是否只打印计划、不触碰文件系统。
         force: 是否覆盖用户改动过的同名 Skill，并直接删除旧名 operator 副本。
+        agents: 生效 agent 注册表（内置 + ``[agent_runner.agents.*]`` 自定义条目），
+            决定还要给哪些 agent 的用户级目录装一份；``None`` 时只认内置注册表。
 
     Raises:
         RemoteTemplateSkillInstallError: 远程模板拉取失败，或远程模板 Skill 已被
@@ -51,6 +61,7 @@ def sync_user_skills(*, process_runner: IProcessRunner, dry_run: bool, force: bo
             process_runner=process_runner,
             dry_run=dry_run,
             force=force,
+            agents=agents,
         )
     )
     _print_remote_template_skill_result(remote_skill_result)

@@ -51,6 +51,7 @@ Checkpoint reads trust the authenticated author or a fresh GitHub repository per
 - Exit `5` naming a live claim holder: the work is already running — view it via 看进度 instead of re-running.
 - The pass built but failed to publish (push/PR/state update): `kc recover --issue <N>` resumes publication without redoing the work. For an unfinished labelled DIRECT round with its PR already confirmed, it only completes that round's label/workflow handoff; do not re-queue a new build.
 - The working directory matched several registered repositories and the command refused: re-run with `--repo-id <id>`.
+- Exit `3` naming a lifecycle stage, preset, agent, and `bin` (「not available on PATH」): the availability gate refused **before** claiming the Issue — nothing was claimed, no worktree was created, and no attempt was billed. Show the human the installed alternatives (`kc agent list`) and let them re-choose (`kc agent setup`, or `kc agent setup --fix` to drop global-layer bindings this machine cannot honor). Never rescue it by editing the fallback chain or passing `--agent` on their behalf — fallback means "this agent failed", not "this machine never had it".
 
 ## Related
 

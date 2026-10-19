@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -43,7 +44,11 @@ from backend.core.shared.models.agent_runner import (
     LabelConfig,
     evidence_dir_uses_task_subdirs,
 )
-from backend.core.shared.models.agent_spec import AGENT_PROFILE_GENERATE, BUILTIN_AGENT_SPECS
+from backend.core.shared.models.agent_spec import (
+    AGENT_PROFILE_GENERATE,
+    BUILTIN_AGENT_SPECS,
+    AgentSpec,
+)
 from backend.core.shared.priority import priority_from_prd_filename
 from backend.core.use_cases.agent_runner_dependencies import (
     format_dependency_marker,
@@ -121,6 +126,8 @@ class IssueFromPrdRequest:
             原样展示。
         extra_labels: 创建时就一并带上的额外标签（如 loop 的 ``loop/<id>``），避免
             “Issue 已建成但事后补标签失败”留下无标签的 Issue。
+        agents: 生效 agent 注册表；用于把 ``issue_agent`` 解析成真正能生成内容的
+            agent。为 ``None`` 时只认内置注册表。
     """
 
     repo_path: Path
@@ -144,6 +151,9 @@ class IssueFromPrdRequest:
     #: 的解析结果）；``None`` 表示不注入模型参数、agent 走既有解析。
     model_selection: ModelSelection | None = None
     extra_labels: tuple[str, ...] = ()
+    #: 生效 agent 注册表（内置 + ``[agent_runner.agents.*]`` 自定义条目）。
+    #: ``None`` 时只认内置注册表，与既有行为一致。
+    agents: Mapping[str, AgentSpec] | None = None
 
 
 @dataclass(frozen=True)
@@ -874,25 +884,53 @@ _KNOWN_EVIDENCE_KINDS: frozenset[str] = frozenset(
 )
 
 
-def resolve_agent_name(agent_name: str, default: str = "claude") -> str:
+def resolve_agent_name(
+    agent_name: str,
+    default: str = "claude",
+    *,
+    agents: Mapping[str, AgentSpec] | None = None,
+) -> str:
     """Return a concrete agent name, falling back to *default* for unknown values.
 
     CLI and config accept ``"auto"`` / ``"none"`` as aliases; this helper
     normalises them to a real agent that ``IContentGenerator`` can execute.
     合法性由 agent 注册表成员校验：只有声明了 ``generate`` 用途（内容
     生成能力）的 agent 会被接受，其余回落默认值。
+
+    Args:
+        agent_name: 请求里的 agent 值（可能是路由别名或未注册名）。
+        default: 别名 / 未注册名回落的 agent 名。
+        agents: 生效注册表；``None`` 时只认内置 ``BUILTIN_AGENT_SPECS``。
+
+    Raises:
+        ValueError: 名字**已注册**但没声明 ``generate`` 用途。显式点名一个不能
+            生成内容的 agent 是配置错误，不能悄悄换成 ``default`` 跑别的 agent；
+            未注册的名字仍按既有行为回落默认值。
     """
-    agent_spec = BUILTIN_AGENT_SPECS.get(agent_name)
-    if agent_spec is not None and AGENT_PROFILE_GENERATE in agent_spec.profiles:
+    registry = agents if agents is not None else BUILTIN_AGENT_SPECS
+    agent_spec = registry.get(agent_name)
+    if agent_spec is None:
+        return default
+    if AGENT_PROFILE_GENERATE in agent_spec.profiles:
         return agent_name
-    return default
+    generate_capable = sorted(
+        name for name, spec in registry.items() if AGENT_PROFILE_GENERATE in spec.profiles
+    )
+    raise ValueError(
+        f"agent '{agent_name}' is registered but does not declare the "
+        f"'{AGENT_PROFILE_GENERATE}' profile, so it cannot generate Issue content. "
+        f"Pick one of {', '.join(generate_capable)} or declare "
+        f"[agent_runner.agents.{agent_name}.profiles.generate] in the config."
+    )
 
 
 def _parse_evidence_format_with_agent(
+    *,
     checklist_items: list[str],
     generator: IContentGenerator | None,
     cwd: Path,
     agent_name: str,
+    agents: Mapping[str, AgentSpec] | None = None,
 ) -> dict[int, str]:
     """Use an agent to parse the required evidence format for each item.
 
@@ -903,7 +941,7 @@ def _parse_evidence_format_with_agent(
     if generator is None or not checklist_items:
         return {}
 
-    resolved_agent = resolve_agent_name(agent_name)
+    resolved_agent = resolve_agent_name(agent_name, agents=agents)
     parsed_formats: dict[int, str] = {}
 
     for item_number, item_text in enumerate(checklist_items, start=1):
@@ -1155,6 +1193,7 @@ def create_issue_from_prd(
                 generator=content_generator,
                 cwd=request.repo_path,
                 agent_name=request.issue_agent,
+                agents=request.agents,
             )
             format_markers = _build_evidence_format_markers(parsed_formats)
         evidence_dir_root = request.evidence_dir.strip("/")
