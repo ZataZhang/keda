@@ -14,7 +14,7 @@
 
 核心契约：
 
-- ``import_container_auth(importer, global_iar_dir=None)`` —— 一次性把本机认证
+- ``import_container_auth(importer, global_state_dir=None)`` —— 一次性把本机认证
   快照写入 ``<本机状态目录>/container-auth/``。
 - ``start_runner_container(controller, options, *, runner=None)`` —— 编排：定位
   资产 → daemon lock 互斥 → 注入环境变量 → 调 docker compose up。
@@ -98,11 +98,11 @@ class StartRunnerContainerResult:
 def import_container_auth(
     importer: IContainerAuthImporter,
     *,
-    global_iar_dir: Path | None = None,
+    global_state_dir: Path | None = None,
 ):
     """执行容器认证导入（薄封装，便于 api 层在 stderr 打印进度）。"""
     _logger.info("Importing agent CLI auth snapshots into container-auth dir.")
-    result = importer.import_container_auth(global_iar_dir=global_iar_dir)
+    result = importer.import_container_auth(global_state_dir=global_state_dir)
     for agent_result in result.agent_results:
         if agent_result.skipped:
             _logger.info(

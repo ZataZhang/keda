@@ -51,7 +51,7 @@ def _isolated_global_config_and_home(tmp_path: Path, monkeypatch: pytest.MonkeyP
     """隔离配置、家目录和进程扫描，真实机器状态不会影响 CLI 断言。"""
     isolated_config_path = tmp_path / "isolated-config.toml"
     isolated_config_path.write_text("[agent_runner]\n", encoding="utf-8")
-    monkeypatch.setenv(product_identity.LEGACY_ENV_PREFIX + "CONFIG", str(isolated_config_path))
+    monkeypatch.setenv("KEDACODE_CONFIG", str(isolated_config_path))
     fake_home_path = tmp_path / "home"
     fake_home_path.mkdir()
     monkeypatch.setenv("HOME", str(fake_home_path))
@@ -68,15 +68,13 @@ def _isolated_global_config_and_home(tmp_path: Path, monkeypatch: pytest.MonkeyP
 def _init_git_repository(tmp_path: Path, name: str, config_text: str | None = None) -> Path:
     repo_path = init_git_repo(tmp_path / name)
     if config_text is not None:
-        (repo_path / product_identity.LEGACY_REPOSITORY_CONFIG_FILENAME).write_text(
-            config_text, encoding="utf-8"
-        )
+        (repo_path / ".iar.toml").write_text(config_text, encoding="utf-8")
     return repo_path
 
 
 def _make_legacy_state_dir(home_path: Path) -> Path:
     """在隔离家目录里造一个有内容的旧状态目录。"""
-    legacy_state_path = home_path / product_identity.LEGACY_STATE_DIR_NAME
+    legacy_state_path = home_path / ".iar"
     legacy_state_path.mkdir(parents=True, exist_ok=True)
     (legacy_state_path / "config.toml").write_text(
         '[agent_runner.console]\nhistory_db_path = "~/.iar/console.db"\n', encoding="utf-8"
@@ -249,12 +247,12 @@ def test_config_migrate_reports_invalid_toml_without_touching_it(
     assert (repo_path / ".kedacode.toml").read_text(encoding="utf-8") == broken_text
 
 
-def test_config_migrate_moves_the_state_home_and_leaves_a_link(
+def test_config_migrate_moves_the_state_home_without_a_link(
     tmp_path: Path,
     _isolated_global_config_and_home: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """仓库内执行时两步都做：状态目录搬走、旧位置成链接、仓库配置改名。"""
+    """仓库内执行时两步都做：状态目录搬走、旧路径移除、仓库配置改名。"""
     home_path = _isolated_global_config_and_home
     legacy_state_path = _make_legacy_state_dir(home_path)
     repo_path = _init_git_repository(tmp_path, "target", CONFIG_WITHOUT_PINS)
@@ -263,8 +261,7 @@ def test_config_migrate_moves_the_state_home_and_leaves_a_link(
 
     new_state_path = home_path / product_identity.STATE_DIR_NAME
     assert new_state_path.is_dir() and not new_state_path.is_symlink()
-    assert legacy_state_path.is_symlink()
-    assert os.readlink(legacy_state_path) == product_identity.STATE_DIR_NAME
+    assert not legacy_state_path.exists()
     assert (new_state_path / "config.toml").read_text(encoding="utf-8").count("~/.kedacode") == 1
     assert (repo_path / ".kedacode.toml").is_file()
     captured_output = capsys.readouterr().out

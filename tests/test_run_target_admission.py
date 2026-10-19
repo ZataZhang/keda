@@ -229,7 +229,7 @@ def _cli_patches(client: FakeGitHubClient, *, live_daemon_pid: int | None):
 
 def _main(argv: list[str], monkeypatch: pytest.MonkeyPatch) -> int:
     """跑一次真实 CLI 分发（不联网：仓库目标与 GitHub 客户端均已打桩）。"""
-    monkeypatch.setenv("IAR_SKIP_GH_AUTH_CHECK", "1")
+    monkeypatch.setenv("KEDACODE_SKIP_GH_AUTH_CHECK", "1")
     from backend.api.cli import main
 
     return main(argv)

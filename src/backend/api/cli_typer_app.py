@@ -190,7 +190,7 @@ backlog_app = typer.Typer(
     context_settings=_HELP_CONTEXT,
 )
 config_app = typer.Typer(
-    help="Maintain local state: move ~/.iar, rename .iar.toml.",  # legacy-alias
+    help="Maintain local configuration and migrate older installations.",
     no_args_is_help=True,
     context_settings=_HELP_CONTEXT,
 )
@@ -476,32 +476,9 @@ def _render_click_exception(exc: typer_click.exceptions.ClickException) -> int:
     )
 
 
-def _emit_legacy_command_notice(raw_args: list[str]) -> None:
-    """以弃用别名直接启动时，往 stderr 给一次改名提醒。
-
-    三个入口指向同一实现，只有旧名 ``iar`` 需要提醒，``kc`` 与 ``kedacode`` 保持
-    安静。两道静音闸门让非人类路径逐字节不变（PRD FR-2）：已安装补全脚本触发的
-    补全协议（补全环境变量存在），以及机器模式（``--json`` / ``--output json``）。
-    提醒必须走 stderr：人类模式的应用日志把 stdout 处理器挂在 root logger 上，
-    而配置加载早于机器模式的日志改绑，用 logger 会让提醒混进 stdout。
-
-    Args:
-        raw_args: 传给 :func:`main` 的原始参数，用于判定机器模式。
-    """
-    invocation_name = sys.argv[0] if sys.argv else ""
-    if not product_identity.is_legacy_command_name(invocation_name):
-        return
-    if product_identity.COMPLETION_ENV_VAR_NAME in os.environ:
-        return
-    if machine_output_requested(raw_args):
-        return
-    product_identity.emit_notice_once(product_identity.LEGACY_COMMAND_HINT)
-
-
 def main(argv: list[str] | None = None) -> int:
-    """Run the Typer-powered CLI (``kc``; also installed as ``kedacode`` / ``iar``)."""
+    """Run the Typer-powered CLI (``kc``; also installed as ``kedacode``)."""
     args = list(sys.argv[1:] if argv is None else argv)
-    _emit_legacy_command_notice(args)
     if maybe_prompt_for_completion_setup(args):
         return 0
     # Typer/Click 会在调用根回调前把空参数处理成成功的帮助输出；保留裸命令既有的

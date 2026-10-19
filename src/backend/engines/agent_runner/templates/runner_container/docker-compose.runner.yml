@@ -33,10 +33,7 @@ services:
       HOME: /home/runner
       # 仓库定位（必须由 .env 显式提供或由 kc container up 注入）
       REPO_PATH: "${REPO_PATH}"
-      # 仓库 id 同时传新旧两个名字：KEDACODE_REPO_ID 供新包读取；
-      # IAR_REPO_ID 供 KEDA_VERSION 钉到旧版本时旧包读取（legacy-alias）
       KEDACODE_REPO_ID: "${KEDACODE_REPO_ID:-}"
-      IAR_REPO_ID: "${IAR_REPO_ID:-}" # legacy-alias
       # gh 认证走 GH_TOKEN 环境变量（macOS keychain 容器读不到）
       GH_TOKEN: "${GH_TOKEN:-}"
       # 宿主 UID/GID 供 kedacode-runner-entrypoint.sh 把 /home/runner chown 到
@@ -54,8 +51,8 @@ services:
       # history / sessions / cache 等状态；只读挂载会导致 agent CLI 写入
       # 失败而中断 ``kedacode daemon``。隔离性由独立路径保证（container-auth
       # 与本机 ~/.claude 是不同目录，本机 cc-switch 切换不影响容器）。
-      # 宿主侧路径来自当前生效状态目录（迁移前 ~/.iar 为 legacy-alias、迁移后 ~/.kedacode），
-      # 由 ``kc container up`` 注入 KEDACODE_HOST_STATE_HOME 的绝对路径；直接跑
+      # 宿主侧路径来自 ``~/.kedacode``，由 ``kc container up`` 注入
+      # KEDACODE_HOST_STATE_HOME 的绝对路径；直接跑
       # compose 未设置该变量时 :? 会立即报错，而不是挂错目录。
       - "${KEDACODE_HOST_STATE_HOME:?set by 'kc container up' or export the effective state dir}/container-auth/claude:/home/runner/.claude"
       - "${KEDACODE_HOST_STATE_HOME:?set by 'kc container up'}/container-auth/codex:/home/runner/.codex"

@@ -6,7 +6,7 @@
 执行器自报的会话 id。
 
 协议**实现**位于 ``engines/agent_runner/output_protocols/``（经
-``iar.agent_output_protocols`` entry point 注册）；core 侧（构造器、
+``kedacode.agent_output_protocols`` entry point 注册）；core 侧（构造器、
 用例）只依赖本接口，满足 ``core`` 不得依赖 ``engines`` 的架构约束；
 ``infrastructure`` 允许导入本模块（白名单 ``core.shared.interfaces``）。
 

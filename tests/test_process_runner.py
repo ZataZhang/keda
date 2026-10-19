@@ -1808,31 +1808,30 @@ def test_run_filtered_claude_stream_without_sanitizer_leaks_poison(
     assert "SERVER__PORT=56469" in child_env_text
 
 
-def test_with_available_own_command_accepts_legacy_and_preserves_wrapper(
+def test_with_available_own_command_uses_current_names_and_preserves_wrapper(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """SubprocessRunner 自有名替换只作用于 argv[0]：旧别名命中即接受，包装形态原样保留。
+    """SubprocessRunner 只在当前自有命令间替换 argv[0]，包装形态原样保留。
 
-    覆盖改名窗口里「配置写 kc、环境只装了 iar」这类错配，同时确认带包装的命令行
-    （``uv run kc daemon``）不会被误改——它的首个 token 不是自有名，交由身份识别在
-    别处处理。
+    覆盖「配置写 kc、环境里只有 kedacode」这类错配，同时确认旧 ``iar`` 名称与带包装
+    的命令行（``uv run kc daemon``）不会被误改。
     """
-    available_command_names = {"iar"}
+    available_command_names = {"kedacode"}
     monkeypatch.setattr(
         process_runner_module.shutil,
         "which",
         lambda name: f"/usr/local/bin/{name}" if name in available_command_names else None,
     )
 
-    # 旧别名 iar 在 PATH 上可用：argv[0] 就是它，原样接受（legacy-alias 长期可用）。
-    assert _with_available_own_command(["iar", "daemon"]) == ["iar", "daemon"]
-
-    # 主名 kc 缺失、仅旧别名可用：换成可用的自有名，其余参数逐字不动。
+    # 主命令 kc 缺失、长命令 kedacode 可用：换成当前支持的自有名。
     assert _with_available_own_command(["kc", "run", "--all-ready"]) == [
-        "iar",
+        "kedacode",
         "run",
         "--all-ready",
     ]
+
+    # 已移除的 iar 不再属于自有入口，不能触发命令名回退。
+    assert _with_available_own_command(["iar", "daemon"]) == ["iar", "daemon"]
 
     # 包装形态：首个 token 是 uv，不是自有命令名，整条命令行原样保留、不做替换。
     assert _with_available_own_command(["uv", "run", "kc", "daemon"]) == [

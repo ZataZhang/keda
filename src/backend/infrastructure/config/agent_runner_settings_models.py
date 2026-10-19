@@ -537,9 +537,8 @@ _CONSOLE_PROCESS_REGISTRY_NAME = "processes.json"
 def _default_runner_command() -> list[str]:
     """解析托管进程的默认启动命令（自有名字优先，见身份模块）。
 
-    解析顺序：① 当前进程就是以 ``kc`` / ``kedacode`` / ``iar`` 之一启动的 → 用它
-    （保证托管 daemon 与安装态同源）；② 按 ``kc`` → ``kedacode`` → ``iar`` 查
-    PATH；③ 都找不到时回落到 ``uv run kc``（keda 源码树场景）。
+    解析顺序：① 当前进程以 ``kc`` 或 ``kedacode`` 启动时沿用该命令；② 按
+    ``kc`` → ``kedacode`` 查 PATH；③ 都找不到时回落到 ``uv run kc``（keda 源码树场景）。
     ``config.toml`` 里显式配置的 ``runner_command`` 始终优先。
     """
     return product_identity.resolve_own_command_argv(sys.argv[0] if sys.argv else "")
@@ -553,9 +552,8 @@ class AgentRunnerConsoleSettings(BaseModel):
     （一行 ``host = "0.0.0.0"`` 就能把可写面板暴露给整个网段）。残留的
     ``host`` 键按 pydantic extra 忽略。远程访问走 SSH 端口转发。
 
-    落库与注册表默认值随**当前生效的状态目录**派生（新旧双读），配置里写死的
-    旧状态路径在加载时归一化到同一个目录，因此迁移前后、旧路径链接存在与否，
-    读到的都是同一份历史。
+    落库与注册表默认值随 ``~/.kedacode`` 派生。显式配置为当前状态目录下的
+    路径会归一化到本机状态目录；旧路径应通过 ``kc config migrate`` 迁移。
     """
 
     history_db_path: str = Field(
@@ -574,7 +572,7 @@ class AgentRunnerConsoleSettings(BaseModel):
 
     @model_validator(mode="after")
     def _normalize_state_home_paths(self) -> "AgentRunnerConsoleSettings":
-        """把写死旧/新状态目录的配置值归一化到当前生效状态目录。"""
+        """把写死当前状态目录的配置值归一化到本机状态目录。"""
         for path_field in ("history_db_path", "process_registry_path", "process_log_dir"):
             setattr(
                 self,

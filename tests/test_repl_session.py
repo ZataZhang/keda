@@ -77,7 +77,7 @@ def _make_config(
 def test_parse_markers_extracts_single_command() -> None:
     text = (
         "Sure, I'll do that.\n"
-        f"{IAR_EXEC_OPEN_MARKER} iar labels sync --dry-run {IAR_EXEC_CLOSE_MARKER}\n"
+        f"{IAR_EXEC_OPEN_MARKER} kc labels sync --dry-run {IAR_EXEC_CLOSE_MARKER}\n"
         "Done."
     )
     requests = parse_iar_exec_markers(text)
@@ -87,8 +87,8 @@ def test_parse_markers_extracts_single_command() -> None:
 
 def test_parse_markers_extracts_multiple_commands() -> None:
     text = (
-        f"{IAR_EXEC_OPEN_MARKER} iar labels sync {IAR_EXEC_CLOSE_MARKER} and "
-        f"{IAR_EXEC_OPEN_MARKER} iar status {IAR_EXEC_CLOSE_MARKER}"
+        f"{IAR_EXEC_OPEN_MARKER} kc labels sync {IAR_EXEC_CLOSE_MARKER} and "
+        f"{IAR_EXEC_OPEN_MARKER} kc status {IAR_EXEC_CLOSE_MARKER}"
     )
     requests = parse_iar_exec_markers(text)
     assert [r.argv for r in requests] == [
@@ -99,7 +99,7 @@ def test_parse_markers_extracts_multiple_commands() -> None:
 
 def test_parse_markers_preserves_quoted_args() -> None:
     text = (
-        f'{IAR_EXEC_OPEN_MARKER} iar issue create --title "Hello World" ' f"{IAR_EXEC_CLOSE_MARKER}"
+        f'{IAR_EXEC_OPEN_MARKER} kc issue create --title "Hello World" ' f"{IAR_EXEC_CLOSE_MARKER}"
     )
     requests = parse_iar_exec_markers(text)
     assert len(requests) == 1
@@ -119,7 +119,7 @@ def test_parse_markers_skips_malformed_body() -> None:
     text = f"{IAR_EXEC_OPEN_MARKER} not a valid shell line " f"{IAR_EXEC_CLOSE_MARKER}"
     # shlex.split can split the body, but the first token "not" is fine.
     # Truly malformed bodies (unterminated quotes) should be skipped.
-    text2 = f'{IAR_EXEC_OPEN_MARKER} iar issue create --title "oops ' f"{IAR_EXEC_CLOSE_MARKER}"
+    text2 = f'{IAR_EXEC_OPEN_MARKER} kc issue create --title "oops ' f"{IAR_EXEC_CLOSE_MARKER}"
     requests = parse_iar_exec_markers(text)
     # First one parses fine; the malformed second one should be skipped.
     assert all(not r.raw_text.endswith("oops ") for r in requests)
@@ -128,11 +128,10 @@ def test_parse_markers_skips_malformed_body() -> None:
 
 
 def test_parse_markers_strips_all_own_command_names_only() -> None:
-    """REPL 用 is_own_command_name 判定自有命令：kc / kedacode / 旧别名 iar 都识别并剥离，git 不识别。"""
+    """REPL 只剥离当前自有命令 kc / kedacode，git 不识别。"""
     for own_command_name in (
         product_identity.PRIMARY_COMMAND_NAME,
         product_identity.LONG_COMMAND_NAME,
-        product_identity.LEGACY_COMMAND_NAME,
     ):
         marker_text = (
             f"{IAR_EXEC_OPEN_MARKER} {own_command_name} labels sync --dry-run "
@@ -232,8 +231,8 @@ def test_executor_runs_auto_confirm_command(monkeypatch: pytest.MonkeyPatch) -> 
 
 def test_executor_prompts_for_confirm_command_and_user_says_yes() -> None:
     runner = _make_process_runner()
-    runner.responses[("iar", "run")] = CommandResult(
-        command=("iar", "run"), return_code=0, stdout="ok", stderr=""
+    runner.responses[("kc", "run")] = CommandResult(
+        command=("kc", "run"), return_code=0, stdout="ok", stderr=""
     )
     prompts: list[str] = []
     responses = iter(["y"])
@@ -293,7 +292,7 @@ def test_executor_eoferror_during_confirm_is_rejected() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_run_repl_executes_iar_command_from_agent_reply(
+def test_run_repl_executes_kc_command_from_agent_reply(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -310,7 +309,7 @@ def test_run_repl_executes_iar_command_from_agent_reply(
     content_generator = FakeContentGenerator(
         response=(
             "I'll sync the labels.\n"
-            f"{IAR_EXEC_OPEN_MARKER} iar labels sync --dry-run "
+            f"{IAR_EXEC_OPEN_MARKER} kc labels sync --dry-run "
             f"{IAR_EXEC_CLOSE_MARKER}"
         )
     )

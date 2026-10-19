@@ -1,7 +1,7 @@
 """生命周期 Agent 解析（优先级链 + 零配置基线 + fail-fast）的测试。
 
 覆盖 PRD rv-1（优先级链与九键零配置基线、`auto` 逐阶段语义）与 rv-5（未注册
-agent fail-fast）。配置值一律来自真实 TOML 文本（``config.toml`` / ``.iar.toml``
+agent fail-fast）。配置值一律来自真实 TOML 文本（``config.toml`` / ``.kedacode.toml``
 临时文件）经 pydantic settings 合并后再被解析函数消费，不直接构造解析结果。
 """
 
@@ -134,9 +134,9 @@ verifier = "codex"
 
 
 def test_repository_layer_wins_over_global_layer(tmp_path: Path, config_toml: Path) -> None:
-    """rv-1：仓库层（.iar.toml）赢过全局层（config.toml）。"""
+    """rv-1：仓库层（.kedacode.toml）赢过全局层（config.toml）。"""
     repo_path = _init_git_repository(tmp_path, "repo")
-    (repo_path / ".iar.toml").write_text(
+    (repo_path / ".kedacode.toml").write_text(
         '[agent_runner]\n[agent_runner.lifecycle_agents]\nfix = "pi"\n',
         encoding="utf-8",
     )
@@ -158,7 +158,7 @@ fix = "kimi"
 def test_repository_layer_unset_falls_back_to_global(tmp_path: Path, config_toml: Path) -> None:
     """rv-1：仓库层未声明的键回落全局层。"""
     repo_path = _init_git_repository(tmp_path, "repo")
-    (repo_path / ".iar.toml").write_text("[agent_runner]\n", encoding="utf-8")
+    (repo_path / ".kedacode.toml").write_text("[agent_runner]\n", encoding="utf-8")
     _global_config_from_toml(
         config_toml,
         """
@@ -175,7 +175,7 @@ fix = "kimi"
 def test_prd_override_wins_over_matrix(tmp_path: Path, config_toml: Path) -> None:
     """rv-1：PRD 文件头部覆盖赢过矩阵（仓库层与全局层）。"""
     repo_path = _init_git_repository(tmp_path, "repo")
-    (repo_path / ".iar.toml").write_text(
+    (repo_path / ".kedacode.toml").write_text(
         '[agent_runner]\n[agent_runner.lifecycle_agents]\nimplementation = "kimi"\n',
         encoding="utf-8",
     )
@@ -323,7 +323,7 @@ def test_auto_review_picks_different_agent_when_same_not_allowed(
 ) -> None:
     """审核 auto 且 allow_same_agent=false 时从注册表取第一个 ≠ 实现者。"""
     repo_path = _init_git_repository(tmp_path, "repo")
-    (repo_path / ".iar.toml").write_text(
+    (repo_path / ".kedacode.toml").write_text(
         '[agent_runner]\n[agent_runner.pre_pr_review]\nreview_agent = "auto"\n'
         "allow_same_agent = false\n",
         encoding="utf-8",

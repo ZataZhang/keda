@@ -1,10 +1,10 @@
 """prd skill Machine Contract 启动预检测试（PRD: iar-prd-skill-alignment, FR-6 / rv-4）。
 
 预检入口：``ensure_prd_machine_contract_available``（挂在 ``run_preflight_checks``，
-即 daemon 起执行循环前）。用 ``IAR_PRD_SKILL_PATH`` env 覆盖指向缺失/低版本/正常
+即 daemon 起执行循环前）。用 ``KEDACODE_PRD_SKILL_PATH`` env 覆盖指向缺失/低版本/正常
 的 fixture，断言 fail fast 与放行路径。
 
-注意：会话级 conftest fixture 已把 ``IAR_PRD_SKILL_PATH`` 指向合法 fixture，
+注意：会话级 conftest fixture 已把 ``KEDACODE_PRD_SKILL_PATH`` 指向合法 fixture，
 这里的失败用例用 ``monkeypatch.setenv`` 再覆盖为坏路径。
 """
 
@@ -60,7 +60,7 @@ def test_skill_preflight_fails_fast_when_skill_missing(
 ) -> None:
     """skill 不可解析 → fail fast，报错含 kc init 修复指引。"""
     missing_path = tmp_path / "missing" / "SKILL.md"
-    monkeypatch.setenv("IAR_PRD_SKILL_PATH", str(missing_path))
+    monkeypatch.setenv("KEDACODE_PRD_SKILL_PATH", str(missing_path))
 
     with pytest.raises(PrdSkillPreflightError, match="kc init"):
         ensure_prd_machine_contract_available()
@@ -71,7 +71,7 @@ def test_skill_preflight_fails_fast_on_version_mismatch(
 ) -> None:
     """旧契约 v1 → fail fast，错误列出受支持版本，不建议盲目覆盖。"""
     stale_skill = _skill_fixture(tmp_path, "# prd\n\nMachine-Contract-Version: 1\n")
-    monkeypatch.setenv("IAR_PRD_SKILL_PATH", str(stale_skill))
+    monkeypatch.setenv("KEDACODE_PRD_SKILL_PATH", str(stale_skill))
 
     with pytest.raises(PrdSkillPreflightError) as exc_info:
         ensure_prd_machine_contract_available()
@@ -85,7 +85,7 @@ def test_skill_preflight_fails_closed_on_unknown_version(
 ) -> None:
     """未知的未来契约版本也 fail closed。"""
     future_skill = _skill_fixture(tmp_path, "# prd\n\nMachine-Contract-Version: 99\n")
-    monkeypatch.setenv("IAR_PRD_SKILL_PATH", str(future_skill))
+    monkeypatch.setenv("KEDACODE_PRD_SKILL_PATH", str(future_skill))
 
     with pytest.raises(PrdSkillPreflightError, match="v99"):
         ensure_prd_machine_contract_available()
@@ -96,7 +96,7 @@ def test_skill_preflight_fails_fast_without_version_marker(
 ) -> None:
     """skill 存在但没有 Machine Contract 标记 → 视为版本不符，fail fast。"""
     unversioned_skill = _skill_fixture(tmp_path, "# prd\n\nno contract section\n")
-    monkeypatch.setenv("IAR_PRD_SKILL_PATH", str(unversioned_skill))
+    monkeypatch.setenv("KEDACODE_PRD_SKILL_PATH", str(unversioned_skill))
 
     with pytest.raises(PrdSkillPreflightError, match="kc init"):
         ensure_prd_machine_contract_available()
@@ -116,7 +116,7 @@ def test_skill_preflight_accepts_every_supported_version(
             tmp_path / f"v{version}",
             f"# prd\n\nMachine-Contract-Version: {version}\n",
         )
-        monkeypatch.setenv("IAR_PRD_SKILL_PATH", str(skill_path))
+        monkeypatch.setenv("KEDACODE_PRD_SKILL_PATH", str(skill_path))
 
         assert ensure_prd_machine_contract_available() == skill_path
 
@@ -129,7 +129,7 @@ def test_skill_preflight_fails_closed_just_above_the_supported_range(
     future_skill = _skill_fixture(
         tmp_path, f"# prd\n\nMachine-Contract-Version: {unsupported_version}\n"
     )
-    monkeypatch.setenv("IAR_PRD_SKILL_PATH", str(future_skill))
+    monkeypatch.setenv("KEDACODE_PRD_SKILL_PATH", str(future_skill))
 
     with pytest.raises(PrdSkillPreflightError, match=f"v{unsupported_version}"):
         ensure_prd_machine_contract_available()
@@ -147,7 +147,7 @@ def test_skill_preflight_fails_fast_when_parser_script_missing(
     half_installed_skill = _skill_fixture(
         tmp_path, "# prd\n\nMachine-Contract-Version: 4\n", with_contract_script=False
     )
-    monkeypatch.setenv("IAR_PRD_SKILL_PATH", str(half_installed_skill))
+    monkeypatch.setenv("KEDACODE_PRD_SKILL_PATH", str(half_installed_skill))
 
     with pytest.raises(PrdSkillPreflightError, match="prd_contract.py"):
         ensure_prd_machine_contract_available()
@@ -157,7 +157,7 @@ def test_skill_preflight_via_run_preflight_checks(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """真实挂接点：daemon 的 run_preflight_checks 在 skill 缺失时 fail fast。"""
-    monkeypatch.setenv("IAR_PRD_SKILL_PATH", str(tmp_path / "missing" / "SKILL.md"))
+    monkeypatch.setenv("KEDACODE_PRD_SKILL_PATH", str(tmp_path / "missing" / "SKILL.md"))
     fake_runner = FakeProcessRunner(
         responses={
             ("git", "remote"): CommandResult(

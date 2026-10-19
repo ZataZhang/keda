@@ -45,35 +45,35 @@ def _make_context(repo_id: str = "keda-main") -> RepositoryRunContext:
 
 
 def test_build_runner_argv_daemon() -> None:
-    """daemon kind should map to `iar daemon --repo-id <id>`."""
+    """daemon kind should map to `kc daemon --repo-id <id>`."""
     argv = build_runner_argv(
-        runner_command=["uv", "run", "iar"],
+        runner_command=["uv", "run", "kc"],
         kind=RunnerProcessKind.DAEMON,
         repo_id="keda-main",
     )
-    assert argv == ("uv", "run", "iar", "daemon", "--repo-id", "keda-main")
+    assert argv == ("uv", "run", "kc", "daemon", "--repo-id", "keda-main")
 
 
 def test_build_runner_argv_blocked_continue_requires_issue() -> None:
     """blocked_continue without an issue number must be rejected."""
     with pytest.raises(ConsoleProcessError):
         build_runner_argv(
-            runner_command=["iar"],
+            runner_command=["kc"],
             kind=RunnerProcessKind.BLOCKED_CONTINUE,
             repo_id="keda-main",
         )
 
 
 def test_build_runner_argv_blocked_continue_with_issue() -> None:
-    """blocked_continue maps to `iar blocked-continue --issue N --repo-id`."""
+    """blocked_continue maps to `kc blocked-continue --issue N --repo-id`."""
     argv = build_runner_argv(
-        runner_command=["iar"],
+        runner_command=["kc"],
         kind=RunnerProcessKind.BLOCKED_CONTINUE,
         repo_id="keda-main",
         issue_number=19,
     )
     assert argv == (
-        "iar",
+        "kc",
         "blocked-continue",
         "--issue",
         "19",
@@ -229,7 +229,7 @@ def test_exited_process_detected(tmp_path: Path) -> None:
 
 
 def test_spawn_injects_parent_config_path(tmp_path: Path) -> None:
-    """托管子进程必须继承父进程生效的 ``config.toml``（注入 ``IAR_CONFIG``）。
+    """托管子进程必须继承父进程生效的 ``config.toml``（注入 ``KEDACODE_CONFIG``）。
 
     子进程 cwd 是目标仓库，cwd 向上查找会命中该仓库自己的应用级
     ``config.toml``；不注入就会与面板展示的机器级配置（生命周期矩阵等）失配——
@@ -245,7 +245,7 @@ def test_spawn_injects_parent_config_path(tmp_path: Path) -> None:
     record = supervisor.spawn(
         repo_id="zata-codes-template",
         kind=RunnerProcessKind.RUN_ONCE,
-        argv=_print_env_argv("IAR_CONFIG"),
+        argv=_print_env_argv("KEDACODE_CONFIG"),
         cwd=tmp_path,
     )
 
@@ -255,13 +255,13 @@ def test_spawn_injects_parent_config_path(tmp_path: Path) -> None:
 def test_spawn_without_config_path_leaves_env_untouched(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """未给 ``config_path`` 时不注入 ``IAR_CONFIG``（子进程按自身 cwd 解析）。"""
-    monkeypatch.delenv("IAR_CONFIG", raising=False)
+    """未给 ``config_path`` 时不注入 ``KEDACODE_CONFIG``（子进程按自身 cwd 解析）。"""
+    monkeypatch.delenv("KEDACODE_CONFIG", raising=False)
     supervisor = _make_supervisor(tmp_path)
     record = supervisor.spawn(
         repo_id="keda-main",
         kind=RunnerProcessKind.RUN_ONCE,
-        argv=_print_env_argv("IAR_CONFIG"),
+        argv=_print_env_argv("KEDACODE_CONFIG"),
         cwd=tmp_path,
     )
 

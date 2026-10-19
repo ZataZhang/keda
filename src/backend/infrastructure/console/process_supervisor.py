@@ -120,10 +120,7 @@ _NON_RUNNER_NESTED_COMMANDS = frozenset({"status"})
 
 
 def _find_own_command_index(cmdline: tuple[str, ...]) -> int | None:
-    """在命令行中定位本产品可执行文件（``kc`` / ``kedacode`` / ``iar`` legacy-alias）的位置。
-
-    兼容 ``kc``、``uv run kc``、``/path/to/iar``（legacy-alias）等形态。
-    """
+    """在命令行中定位本产品可执行文件（``kc`` / ``kedacode``）的位置。"""
     for index, arg in enumerate(cmdline):
         if product_identity.is_own_command_name(arg):
             return index
@@ -219,7 +216,7 @@ class PidfileProcessSupervisor:
             registry_path: JSON pidfile 路径，支持 ``~`` 展开。
             log_dir: 托管进程日志根目录。
             config_path: 父进程当前生效的 ``config.toml``；给定后 spawn 子进程时
-                以配置环境变量（新旧名同时）注入，保证托管进程与创建它的进程读到同一份
+                以 ``KEDACODE_CONFIG`` 注入，保证托管进程与创建它的进程读到同一份
                 机器级配置。``None`` 表示不注入，子进程按自身 cwd 解析。
         """
         self._registry_path = Path(registry_path).expanduser()
@@ -302,17 +299,15 @@ class PidfileProcessSupervisor:
         log_directory.mkdir(parents=True, exist_ok=True)
         log_path = log_directory / f"{kind_value}-{process_id}.log"
 
-        # CONSOLE 标记保持新旧变量兼容，基底使用净化档，避免会话私有变量下传。
+        # CONSOLE 标记使用产品统一前缀，基底使用净化档，避免会话私有变量下传。
         child_env = build_sanitized_child_env()
-        child_env.update(product_identity.build_child_env_aliases({"CONSOLE": "1"}))
+        child_env.update(product_identity.build_child_env({"CONSOLE": "1"}))
         # 托管子进程的 cwd 是目标仓库（见 ``resolve_console_spawn_cwd``），若让它
         # 自行按 cwd 解析配置，会撞上该仓库自己的应用级 ``config.toml``，把机器级
         # 配置（生命周期矩阵、registry、超时…）整份顶掉。配置环境变量是发现顺序里的
         # 最高优先级，显式注入即让父子两进程锁定同一份文件。
         if self._config_path is not None:
-            child_env.update(
-                product_identity.build_child_env_aliases({"CONFIG": str(self._config_path)})
-            )
+            child_env.update(product_identity.build_child_env({"CONFIG": str(self._config_path)}))
         with open(log_path, "ab") as log_file:
             child_process = subprocess.Popen(  # noqa: S603 - argv 由白名单枚举构建。
                 list(argv),

@@ -24,9 +24,7 @@ from backend.api.cli_console import error_console
 from backend.api.cli_output import machine_output_requested
 from backend.core.shared.models import product_identity
 
-# 补全协议环境变量名是已安装补全脚本写死的跨版本契约，永久保留旧拼写，因此这里
-# 不随 prog_name 推导（legacy-alias）。别名入口共享同一协议：协议解析会丢弃首词
-# 命令名，命令名不影响补全结果。
+# 补全协议环境变量名显式绑定当前 CLI 名称，避免随调用方的 prog_name 漂移。
 _PRIMARY_COMMAND_NAME = product_identity.PRIMARY_COMMAND_NAME
 _COMPLETION_ENV_VAR = product_identity.COMPLETION_ENV_VAR_NAME
 # bash 补全脚本的 XDG 配置目录名沿用长命令名（与 PyPI 发行名一致）。
@@ -45,18 +43,20 @@ class CompletionShellChoice(str, Enum):
 
 
 def alias_command_names() -> tuple[str, ...]:
-    """按安装元数据返回与主命令共享入口的别名命令名，按字母序去重。
+    """按安装元数据返回当前支持的非主命令入口，按字母序去重。
 
-    元数据缺失时返回空元组，此时只生成主命令补全；改名前的旧发行版会重复
-    声明同一入口，按命令名去重后不受影响。
+    元数据缺失时返回空元组，此时只生成主命令补全。未知或旧命令名不会生成补全。
 
     Returns:
-        tuple[str, ...]: 别名命令名，例如 ``("iar", "kedacode")``。
+        tuple[str, ...]: 当前支持的非主命令入口，例如 ``("kedacode",)``。
     """
+    supported_alias_names = set(product_identity.OWN_COMMAND_NAMES)
+    supported_alias_names.discard(_PRIMARY_COMMAND_NAME)
     alias_name_set = {
         entry_point.name
         for entry_point in entry_points(group="console_scripts")
         if entry_point.value == _CLI_ENTRY_POINT_TARGET
+        and entry_point.name in supported_alias_names
     }
     alias_name_set.discard(_PRIMARY_COMMAND_NAME)
     return tuple(sorted(alias_name_set))

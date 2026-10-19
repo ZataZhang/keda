@@ -358,8 +358,8 @@ def test_registry_add_rejects_duplicate_path(console_environment) -> None:
 
 
 def _write_iar_toml(repo_root: Path, repo_id: str, display_name: str) -> None:
-    """Helper to write a minimal .iar.toml for discovery tests."""
-    iar_toml = repo_root / ".iar.toml"
+    """Helper to write a minimal .kedacode.toml for discovery tests."""
+    iar_toml = repo_root / ".kedacode.toml"
     iar_toml.write_text(
         "[agent_runner]\n"
         "[agent_runner.repository]\n"

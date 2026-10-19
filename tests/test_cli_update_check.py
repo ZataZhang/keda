@@ -33,7 +33,7 @@ from backend.api.cli_update_check import (
     startup_update_check,
 )
 
-_COMPLETE_ENV = "_IAR_COMPLETE"
+_COMPLETE_ENV = "_KC_COMPLETE"
 
 _INTERACTIVE_ENVIRON: dict[str, str] = {}
 
@@ -105,7 +105,7 @@ def test_skip_in_machine_output_mode() -> None:
 
 
 def test_skip_during_completion_protocol(_always_tty: None) -> None:
-    """补全协议（_IAR_COMPLETE 存在）不打断补全输出。"""
+    """补全协议（_KC_COMPLETE 存在）不打断补全输出。"""
     assert _should_skip_startup_update_check([], environ={_COMPLETE_ENV: "kc complete"})
 
 
@@ -118,13 +118,13 @@ def test_skip_on_help_and_version(_always_tty: None) -> None:
     assert _should_skip_startup_update_check(["--version"], environ=_INTERACTIVE_ENVIRON)
 
 
-def test_skip_when_env_disabled_both_names(_always_tty: None) -> None:
-    """KEDACODE_NO_UPDATE_CHECK / 旧名 IAR_NO_UPDATE_CHECK 都能显式关闭。"""
+def test_skip_when_env_disabled_current_name_only(_always_tty: None) -> None:
+    """只有 KEDACODE_NO_UPDATE_CHECK 能显式关闭更新检查。"""
     assert _should_skip_startup_update_check(
         ["registry", "list"],
         environ={"KEDACODE_NO_UPDATE_CHECK": "1"},
     )
-    assert _should_skip_startup_update_check(
+    assert not _should_skip_startup_update_check(
         ["registry", "list"], environ={"IAR_NO_UPDATE_CHECK": "1"}
     )
     assert not _should_skip_startup_update_check(
@@ -221,10 +221,10 @@ def test_suppressed_cached_notice_is_not_returned(
     assert check_for_update(now_epoch=1_500.0, fetch_latest=_forbidden_fetch) is None
 
 
-def test_cache_uses_legacy_state_directory_when_it_is_the_only_one(
+def test_cache_uses_current_state_directory_when_legacy_directory_exists(
     _isolated_home: Path, _always_tty: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """仅有旧状态目录时，更新检查缓存继续写入 ``~/.iar``。"""
+    """旧状态目录存在时，更新检查缓存仍写入 ``~/.kedacode``。"""
     legacy_state_dir = _isolated_home / ".iar"
     legacy_state_dir.mkdir()
     monkeypatch.setattr(cli_update_check, "resolve_keda_version", lambda: "0.2.1")
@@ -232,8 +232,8 @@ def test_cache_uses_legacy_state_directory_when_it_is_the_only_one(
     notice = check_for_update(now_epoch=1_500.0, fetch_latest=lambda: "0.5.0")
 
     assert notice == UpdateNotice(current_version="0.2.1", latest_version="0.5.0")
-    assert (legacy_state_dir / "update-check.json").is_file()
-    assert not (_isolated_home / ".kedacode").exists()
+    assert not (legacy_state_dir / "update-check.json").exists()
+    assert (_isolated_home / ".kedacode" / "update-check.json").is_file()
 
 
 def test_cache_is_bound_to_installed_version(

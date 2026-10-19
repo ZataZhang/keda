@@ -475,7 +475,7 @@ def test_main_daemon_default_interval_uses_config(monkeypatch) -> None:
     """不传 --interval 时 daemon 使用配置的 120 秒默认值。"""
     from backend.api.cli import main
 
-    monkeypatch.setenv("IAR_SKIP_GH_AUTH_CHECK", "1")
+    monkeypatch.setenv("KEDACODE_SKIP_GH_AUTH_CHECK", "1")
 
     mock_context = MagicMock()
     mock_context.repo_path = Path("/tmp/repo")
@@ -505,7 +505,7 @@ def test_main_review_daemon_default_interval_uses_config(monkeypatch) -> None:
     """Typer review-daemon without --interval should use the configured 120s default."""
     from backend.api.cli import main
 
-    monkeypatch.setenv("IAR_SKIP_GH_AUTH_CHECK", "1")
+    monkeypatch.setenv("KEDACODE_SKIP_GH_AUTH_CHECK", "1")
 
     mock_context = MagicMock()
     mock_context.repo_path = Path("/tmp/repo")
@@ -531,7 +531,7 @@ def test_main_daemon_interval_override(monkeypatch) -> None:
     """daemon 的 --interval 覆盖配置默认值。"""
     from backend.api.cli import main
 
-    monkeypatch.setenv("IAR_SKIP_GH_AUTH_CHECK", "1")
+    monkeypatch.setenv("KEDACODE_SKIP_GH_AUTH_CHECK", "1")
 
     mock_context = MagicMock()
     mock_context.repo_path = Path("/tmp/repo")
@@ -559,7 +559,7 @@ def test_main_daemon_status_shows_managed_and_unmanaged(capsys, monkeypatch) -> 
     """daemon status should list running managed and unmanaged processes."""
     from backend.api.cli import main
 
-    monkeypatch.setenv("IAR_SKIP_GH_AUTH_CHECK", "1")
+    monkeypatch.setenv("KEDACODE_SKIP_GH_AUTH_CHECK", "1")
 
     mock_context = MagicMock()
     mock_context.repo_path = Path("/tmp/repo")
@@ -574,7 +574,7 @@ def test_main_daemon_status_shows_managed_and_unmanaged(capsys, monkeypatch) -> 
         status="running",
         exit_code=None,
         log_path="/tmp/log",
-        command=("iar", "daemon", "--repo-id", "repo"),
+        command=("kc", "daemon", "--repo-id", "repo"),
         started_at="2026-06-23T10:00:00Z",
         stopped_at=None,
     )
@@ -586,7 +586,7 @@ def test_main_daemon_status_shows_managed_and_unmanaged(capsys, monkeypatch) -> 
         status="running",
         exit_code=None,
         log_path="",
-        command=("/usr/bin/iar", "review-daemon", "--repo-id", "repo"),
+        command=("/usr/bin/kc", "review-daemon", "--repo-id", "repo"),
         started_at="2026-06-23T11:00:00Z",
         stopped_at=None,
     )
@@ -625,7 +625,7 @@ def test_main_daemon_status_shows_managed_and_unmanaged(capsys, monkeypatch) -> 
     assert "unmanaged running" in output
     assert "1234" in output
     assert "5678" in output
-    assert "/usr/bin/iar" in output
+    assert "/usr/bin/kc" in output
     assert "log_path" in output
     assert "/tmp/log" in output
 
@@ -634,7 +634,7 @@ def test_main_daemon_status_shows_dash_for_unmanaged_log_path(capsys, monkeypatc
     """Unmanaged processes with empty log_path should show '-' in the table."""
     from backend.api.cli import main
 
-    monkeypatch.setenv("IAR_SKIP_GH_AUTH_CHECK", "1")
+    monkeypatch.setenv("KEDACODE_SKIP_GH_AUTH_CHECK", "1")
 
     mock_context = MagicMock()
     mock_context.repo_path = Path("/tmp/repo")
@@ -649,7 +649,7 @@ def test_main_daemon_status_shows_dash_for_unmanaged_log_path(capsys, monkeypatc
         status="running",
         exit_code=None,
         log_path="",
-        command=("/usr/bin/iar", "daemon", "--repo-id", "repo"),
+        command=("/usr/bin/kc", "daemon", "--repo-id", "repo"),
         started_at="2026-06-23T11:00:00Z",
         stopped_at=None,
     )
@@ -690,7 +690,7 @@ def test_main_daemon_status_empty(capsys, monkeypatch) -> None:
     """daemon status should report when no processes are running."""
     from backend.api.cli import main
 
-    monkeypatch.setenv("IAR_SKIP_GH_AUTH_CHECK", "1")
+    monkeypatch.setenv("KEDACODE_SKIP_GH_AUTH_CHECK", "1")
 
     mock_context = MagicMock()
     mock_context.repo_path = Path("/tmp/repo")
@@ -765,7 +765,7 @@ def test_main_no_args_shows_help_without_traceback(monkeypatch, capsys) -> None:
     combined_output = _strip_ansi(f"{captured.out}\n{captured.err}")
 
     assert exit_code == 1
-    assert "Usage: iar" in combined_output or "Commands" in combined_output
+    assert "Usage: kc" in combined_output or "Commands" in combined_output
     assert "Traceback" not in combined_output
     assert "NoArgsIsHelpError" not in combined_output
 
@@ -825,8 +825,8 @@ def _patch_console_script_entry_points(monkeypatch) -> None:
     monkeypatch.setattr(cli_completion, "entry_points", fake_entry_points)
 
 
-def test_alias_command_names_derives_from_console_scripts(monkeypatch) -> None:
-    """别名命令名应从 console script 元数据派生、去重并排除主命令。"""
+def test_alias_command_names_includes_only_current_commands(monkeypatch) -> None:
+    """补全只为当前支持的 console script 入口生成命令名。"""
     from importlib.metadata import EntryPoint
 
     from backend.api import cli_completion
@@ -842,11 +842,11 @@ def test_alias_command_names_derives_from_console_scripts(monkeypatch) -> None:
 
     monkeypatch.setattr(cli_completion, "entry_points", fake_entry_points)
 
-    assert cli_completion.alias_command_names() == ("iar", "kedacode")
+    assert cli_completion.alias_command_names() == ("kedacode",)
 
 
 def test_main_completion_show_zsh_outputs_script(capsys, monkeypatch) -> None:
-    """completion show should print a zsh script covering iAR and its aliases."""
+    """completion show should print scripts for the current command names."""
     from backend.api.cli import main
 
     _patch_console_script_entry_points(monkeypatch)
@@ -854,11 +854,11 @@ def test_main_completion_show_zsh_outputs_script(capsys, monkeypatch) -> None:
     captured = capsys.readouterr()
 
     assert exit_code == 0
-    assert "#compdef iar" in captured.out
-    assert "_IAR_COMPLETE=complete_zsh" in captured.out
+    assert "#compdef kc" in captured.out
+    assert "#compdef iar" not in captured.out
+    assert "_KC_COMPLETE=complete_zsh" in captured.out
     assert "compdef _kedacode_completion kedacode" in captured.out
-    # 补全协议环境变量固定为 _IAR_COMPLETE，别名段不得派生出独立变量名
-    assert "_KEDACODE_COMPLETE" not in captured.out
+    assert "_IAR_COMPLETE" not in captured.out
 
 
 def test_main_completion_install_zsh_writes_user_files(tmp_path, monkeypatch) -> None:
@@ -874,7 +874,8 @@ def test_main_completion_install_zsh_writes_user_files(tmp_path, monkeypatch) ->
     zshrc_path = tmp_path / ".zshrc"
     assert exit_code == 0
     completion_text = completion_path.read_text(encoding="utf-8")
-    assert "#compdef iar" in completion_text
+    assert "#compdef kc" in completion_text
+    assert "#compdef iar" not in completion_text
     assert "compdef _kedacode_completion kedacode" in completion_text
     zshrc_text = zshrc_path.read_text(encoding="utf-8")
     assert "autoload -Uz compinit && compinit" in zshrc_text
@@ -882,11 +883,11 @@ def test_main_completion_install_zsh_writes_user_files(tmp_path, monkeypatch) ->
 
 
 def test_main_completion_protocol_matches_issue_prefix(capsys, monkeypatch) -> None:
-    """Shell completion protocol should complete iar is<Tab> to issue commands."""
+    """Shell completion protocol should complete kc is<Tab> to issue commands."""
     from backend.api.cli import main
 
-    monkeypatch.setenv("_IAR_COMPLETE", "complete_bash")
-    monkeypatch.setenv("COMP_WORDS", "iar is")
+    monkeypatch.setenv("_KC_COMPLETE", "complete_bash")
+    monkeypatch.setenv("COMP_WORDS", "kc is")
     monkeypatch.setenv("COMP_CWORD", "1")
 
     exit_code = main([])
@@ -900,7 +901,7 @@ def test_main_completion_protocol_matches_issue_prefix_via_alias(capsys, monkeyp
     """Shell completion protocol should complete kedacode is<Tab> to issue commands."""
     from backend.api.cli import main
 
-    monkeypatch.setenv("_IAR_COMPLETE", "complete_bash")
+    monkeypatch.setenv("_KC_COMPLETE", "complete_bash")
     monkeypatch.setenv("COMP_WORDS", "kedacode is")
     monkeypatch.setenv("COMP_CWORD", "1")
 
@@ -1006,7 +1007,7 @@ def test_main_daemon_cwd_matches_enabled_single_repo(monkeypatch) -> None:
     """daemon without selectors should target cwd when it matches one enabled repo."""
     from backend.api.cli import main
 
-    monkeypatch.setenv("IAR_SKIP_GH_AUTH_CHECK", "1")
+    monkeypatch.setenv("KEDACODE_SKIP_GH_AUTH_CHECK", "1")
 
     mock_context = MagicMock()
     mock_context.repo_path = Path("/tmp/repo")
@@ -1035,7 +1036,7 @@ def test_main_daemon_cwd_matches_enabled_single_repo(monkeypatch) -> None:
             return_value=settings,
         ),
         patch(
-            # Isolate from the real ``~/.iar/daemon-locks`` so the test is
+            # Isolate from the real ``~/.kedacode/daemon-locks`` so the test is
             # deterministic regardless of any daemon actually running on the
             # machine; this test checks cwd repo resolution, not
             # single-instance locking.
@@ -1055,7 +1056,7 @@ def test_main_review_daemon_cwd_matches_enabled_single_repo(monkeypatch) -> None
     """review-daemon without selectors should target cwd when it matches one enabled repo."""
     from backend.api.cli import main
 
-    monkeypatch.setenv("IAR_SKIP_GH_AUTH_CHECK", "1")
+    monkeypatch.setenv("KEDACODE_SKIP_GH_AUTH_CHECK", "1")
 
     mock_context = MagicMock()
     mock_context.repo_path = Path("/tmp/repo")
@@ -1095,7 +1096,7 @@ def test_main_daemon_cwd_disabled_repo_rejected(monkeypatch) -> None:
     """daemon should reject cwd when it matches a disabled repository."""
     from backend.api.cli import main
 
-    monkeypatch.setenv("IAR_SKIP_GH_AUTH_CHECK", "1")
+    monkeypatch.setenv("KEDACODE_SKIP_GH_AUTH_CHECK", "1")
 
     settings = MagicMock()
     settings.repositories = {
@@ -1121,7 +1122,7 @@ def test_main_daemon_cwd_ambiguous_repo_rejected(monkeypatch) -> None:
     """daemon should reject cwd when it matches multiple enabled repositories."""
     from backend.api.cli import main
 
-    monkeypatch.setenv("IAR_SKIP_GH_AUTH_CHECK", "1")
+    monkeypatch.setenv("KEDACODE_SKIP_GH_AUTH_CHECK", "1")
 
     settings = MagicMock()
     settings.repositories = {
@@ -1148,7 +1149,7 @@ def test_main_daemon_cwd_no_match_rejected(monkeypatch) -> None:
     """daemon should reject cwd when it matches no registry entry."""
     from backend.api.cli import main
 
-    monkeypatch.setenv("IAR_SKIP_GH_AUTH_CHECK", "1")
+    monkeypatch.setenv("KEDACODE_SKIP_GH_AUTH_CHECK", "1")
 
     settings = MagicMock()
     settings.repositories = {
@@ -1181,7 +1182,7 @@ def test_main_review_daemon_cwd_no_match_rejected(monkeypatch) -> None:
     """review-daemon should reject cwd when it matches no registry entry."""
     from backend.api.cli import main
 
-    monkeypatch.setenv("IAR_SKIP_GH_AUTH_CHECK", "1")
+    monkeypatch.setenv("KEDACODE_SKIP_GH_AUTH_CHECK", "1")
 
     settings = MagicMock()
     settings.repositories = {
@@ -1214,7 +1215,7 @@ def test_main_daemon_cwd_not_git_rejected(monkeypatch) -> None:
     """daemon should reject cwd when it is not inside a git repository."""
     from backend.api.cli import main
 
-    monkeypatch.setenv("IAR_SKIP_GH_AUTH_CHECK", "1")
+    monkeypatch.setenv("KEDACODE_SKIP_GH_AUTH_CHECK", "1")
 
     with (
         patch(
@@ -1236,7 +1237,7 @@ def test_main_daemon_cwd_uninitialized_repo_rejected(monkeypatch) -> None:
     """daemon should reject cwd when the unique matched repo is not initialized."""
     from backend.api.cli import main
 
-    monkeypatch.setenv("IAR_SKIP_GH_AUTH_CHECK", "1")
+    monkeypatch.setenv("KEDACODE_SKIP_GH_AUTH_CHECK", "1")
 
     settings = MagicMock()
     settings.repositories = {
@@ -1251,7 +1252,7 @@ def test_main_daemon_cwd_uninitialized_repo_rejected(monkeypatch) -> None:
         patch(
             "backend.api.cli_helpers.require_iar_repository_initialized",
             side_effect=IARRepositoryNotInitializedError(
-                Path("/tmp/repo"), Path("/tmp/repo/.iar.toml")
+                Path("/tmp/repo"), Path("/tmp/repo/.kedacode.toml")
             ),
         ),
         patch(
@@ -1273,7 +1274,7 @@ def test_main_daemon_explicit_all_targets_all_repositories(monkeypatch) -> None:
     """daemon --all 仍选择所有已启用的仓库条目。"""
     from backend.api.cli import main
 
-    monkeypatch.setenv("IAR_SKIP_GH_AUTH_CHECK", "1")
+    monkeypatch.setenv("KEDACODE_SKIP_GH_AUTH_CHECK", "1")
 
     mock_context = MagicMock()
     mock_context.repo_path = Path("/tmp/repo")
@@ -1316,7 +1317,7 @@ def test_main_daemon_with_repo_id_does_not_default_to_all(monkeypatch) -> None:
     """daemon with --repo-id should still target only the specified repository."""
     from backend.api.cli import main
 
-    monkeypatch.setenv("IAR_SKIP_GH_AUTH_CHECK", "1")
+    monkeypatch.setenv("KEDACODE_SKIP_GH_AUTH_CHECK", "1")
 
     mock_context = MagicMock()
     mock_context.repo_path = Path("/tmp/repo")
@@ -1332,7 +1333,7 @@ def test_main_daemon_with_repo_id_does_not_default_to_all(monkeypatch) -> None:
         patch("backend.api.cli_helpers.require_iar_repository_initialized"),
         patch("backend.api.cli.require_iar_repository_initialized"),
         patch(
-            # 隔离真实 ``~/.iar/daemon-locks``：本机常驻的 keda daemon 持有同
+            # 隔离真实 ``~/.kedacode/daemon-locks``：本机常驻的 keda daemon 持有同
             # 名锁，否则本测试结果随宿主机进程状态漂移。锁的获取/释放语义由
             # daemon_single_instance 与单实例冲突测试覆盖，这里只断言仓库选择。
             "backend.api.cli.acquire_daemon_locks",
@@ -2377,7 +2378,7 @@ def test_main_blocked_continue_failure_prints_error(capsys) -> None:
 
 
 def test_main_run_rebase_conflict_detached_head() -> None:
-    """iar run should dispatch without error for rework rebase with detached HEAD."""
+    """kc run should dispatch without error for rework rebase with detached HEAD."""
     from backend.api.cli import main
 
     mock_context = MagicMock()
@@ -2802,7 +2803,7 @@ def test_main_ask_execute_confirmation_wrong_input_skips_action(monkeypatch) -> 
 
 
 def _init_bare_git_repository(tmp_path: Path, name: str) -> Path:
-    """Create a throwaway Git repository without .iar.toml."""
+    """Create a throwaway Git repository without .kedacode.toml."""
     repo_path = tmp_path / name
     repo_path.mkdir()
     subprocess.run(
@@ -2919,7 +2920,7 @@ def test_main_init_succeeds_when_repository_not_initialized(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """`iar init` must be exempt from the initialization gate."""
+    """`kc init` must be exempt from the initialization gate."""
     repo_path = _init_bare_git_repository(tmp_path, "uninitialized")
     monkeypatch.chdir(repo_path)
 
@@ -2929,8 +2930,8 @@ def test_main_init_succeeds_when_repository_not_initialized(
 
 
 def _write_iar_toml(repo_root: Path, repo_id: str) -> None:
-    """Write a minimal .iar.toml for CLI discovery tests."""
-    iar_toml = repo_root / ".iar.toml"
+    """Write a minimal .kedacode.toml for CLI discovery tests."""
+    iar_toml = repo_root / ".kedacode.toml"
     iar_toml.write_text(
         "[agent_runner]\n" "[agent_runner.repository]\n" f'id = "{repo_id}"\n',
         encoding="utf-8",
@@ -2942,7 +2943,7 @@ def test_main_registry_scan_lists_discovered_repos(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`iar registry scan` should print discovered repositories."""
+    """`kc registry scan` should print discovered repositories."""
     scan_root = tmp_path / "code"
     scan_root.mkdir()
     repo_path = scan_root / "foo"
@@ -2963,11 +2964,11 @@ def test_main_registry_sync_dry_run(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`iar registry sync --dry-run` should not write config.toml."""
+    """`kc registry sync --dry-run` should not write config.toml."""
     monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "config.toml"
     config_path.write_text("[agent_runner]\n", encoding="utf-8")
-    monkeypatch.setenv("IAR_CONFIG", str(config_path))
+    monkeypatch.setenv("KEDACODE_CONFIG", str(config_path))
 
     scan_root = tmp_path / "code"
     scan_root.mkdir()
@@ -2989,11 +2990,11 @@ def test_main_registry_sync_registers_new_repo(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`iar registry sync` should write discovered repos to config.toml."""
+    """`kc registry sync` should write discovered repos to config.toml."""
     monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "config.toml"
     config_path.write_text("[agent_runner]\n", encoding="utf-8")
-    monkeypatch.setenv("IAR_CONFIG", str(config_path))
+    monkeypatch.setenv("KEDACODE_CONFIG", str(config_path))
 
     scan_root = tmp_path / "code"
     scan_root.mkdir()
@@ -3014,7 +3015,7 @@ def test_main_registry_reinit_updates_remote(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`iar registry reinit` should rewrite .iar.toml with the given remote."""
+    """`kc registry reinit` should rewrite .kedacode.toml with the given remote."""
     monkeypatch.chdir(tmp_path)
     repo_path = _init_bare_git_repository(tmp_path, "fsense")
     config_path = tmp_path / "config.toml"
@@ -3023,7 +3024,7 @@ def test_main_registry_reinit_updates_remote(
         f'path = "{repo_path}"\nenabled = true\ndisplay_name = "fsense"\n',
         encoding="utf-8",
     )
-    monkeypatch.setenv("IAR_CONFIG", str(config_path))
+    monkeypatch.setenv("KEDACODE_CONFIG", str(config_path))
 
     _write_iar_toml(repo_path, "zata-zhangtao-fsense")
 
@@ -3034,7 +3035,7 @@ def test_main_registry_reinit_updates_remote(
     assert "Reinitialized" in _strip_ansi(captured.out)
     config_text = config_path.read_text(encoding="utf-8")
     assert "[agent_runner.repositories.zata-zhangtao-fsense]" in config_text
-    iar_toml_text = (repo_path / ".iar.toml").read_text(encoding="utf-8")
+    iar_toml_text = (repo_path / ".kedacode.toml").read_text(encoding="utf-8")
     assert 'remote = "origin"' in iar_toml_text
 
 
@@ -3043,7 +3044,7 @@ def test_main_registry_reinit_missing_repo(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`iar registry reinit` should fail when repo_id is not in registry."""
+    """`kc registry reinit` should fail when repo_id is not in registry."""
     monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "config.toml"
     config_path.write_text("[agent_runner]\n", encoding="utf-8")
@@ -3060,7 +3061,7 @@ def test_main_registry_reinit_start_daemons_uses_config_directory_cwd(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`iar registry reinit --start-daemons` should spawn daemons from the directory containing the effective config.toml so they read the same registry as the parent CLI."""
+    """`kc registry reinit --start-daemons` should spawn daemons from the directory containing the effective config.toml so they read the same registry as the parent CLI."""
     monkeypatch.chdir(tmp_path)
     repo_path = _init_bare_git_repository(tmp_path, "fsense")
     config_path = tmp_path / "config.toml"
@@ -3069,7 +3070,7 @@ def test_main_registry_reinit_start_daemons_uses_config_directory_cwd(
         f'path = "{repo_path}"\nenabled = true\ndisplay_name = "fsense"\n',
         encoding="utf-8",
     )
-    monkeypatch.setenv("IAR_CONFIG", str(config_path))
+    monkeypatch.setenv("KEDACODE_CONFIG", str(config_path))
 
     _write_iar_toml(repo_path, "zata-zhangtao-fsense")
 
@@ -3077,7 +3078,7 @@ def test_main_registry_reinit_start_daemons_uses_config_directory_cwd(
     fake_context.repo_id = "zata-zhangtao-fsense"
 
     fake_settings = MagicMock()
-    fake_settings.console.runner_command = ["iar"]
+    fake_settings.console.runner_command = ["kc"]
 
     from backend.infrastructure.console.process_supervisor import RunnerProcessRecord
 
@@ -3161,7 +3162,7 @@ def test_main_registry_remove_deletes_entry(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`iar registry remove` should drop the entry and never touch the repository."""
+    """`kc registry remove` should drop the entry and never touch the repository."""
     monkeypatch.chdir(tmp_path)
     repo_path = _init_bare_git_repository(tmp_path, "fsense")
     config_path = tmp_path / "config.toml"
@@ -3170,8 +3171,8 @@ def test_main_registry_remove_deletes_entry(
         f'path = "{repo_path}"\nenabled = true\ndisplay_name = "fsense"\n',
         encoding="utf-8",
     )
-    monkeypatch.setenv("IAR_CONFIG", str(config_path))
-    # 用临时 pidfile 隔离，避免测试停掉真实 ~/.iar/processes.json 里的进程。
+    monkeypatch.setenv("KEDACODE_CONFIG", str(config_path))
+    # 用临时 pidfile 隔离，避免测试停掉真实 ~/.kedacode/processes.json 里的进程。
     monkeypatch.setattr(
         cli_registry,
         "create_process_supervisor",
@@ -3205,7 +3206,7 @@ def test_main_registry_list_shows_repositories_and_daemon_status(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`iar registry list` should print registered repos and daemon status."""
+    """`kc registry list` should print registered repos and daemon status."""
     monkeypatch.chdir(tmp_path)
     repo_a = _init_bare_git_repository(tmp_path, "repo-a")
     repo_b = _init_bare_git_repository(tmp_path, "repo-b")
@@ -3218,7 +3219,7 @@ def test_main_registry_list_shows_repositories_and_daemon_status(
         f'path = "{repo_b}"\nenabled = true\ndisplay_name = "Repo B"\n',
         encoding="utf-8",
     )
-    monkeypatch.setenv("IAR_CONFIG", str(config_path))
+    monkeypatch.setenv("KEDACODE_CONFIG", str(config_path))
 
     from backend.infrastructure.console.process_supervisor import RunnerProcessRecord
 
@@ -3231,7 +3232,7 @@ def test_main_registry_list_shows_repositories_and_daemon_status(
             status="running",
             exit_code=None,
             log_path="/tmp/d1.log",
-            command=("iar", "daemon"),
+            command=("kc", "daemon"),
             started_at="2026-06-22T00:00:00+00:00",
             stopped_at=None,
         ),
@@ -3243,7 +3244,7 @@ def test_main_registry_list_shows_repositories_and_daemon_status(
             status="running",
             exit_code=None,
             log_path="/tmp/r1.log",
-            command=("iar", "review-daemon"),
+            command=("kc", "review-daemon"),
             started_at="2026-06-22T00:00:00+00:00",
             stopped_at=None,
         ),
@@ -3280,11 +3281,11 @@ def test_main_registry_list_empty_registry(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`iar registry list` should succeed with an empty registry."""
+    """`kc registry list` should succeed with an empty registry."""
     monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "config.toml"
     config_path.write_text("[agent_runner]\n", encoding="utf-8")
-    monkeypatch.setenv("IAR_CONFIG", str(config_path))
+    monkeypatch.setenv("KEDACODE_CONFIG", str(config_path))
 
     mock_supervisor = MagicMock()
     mock_supervisor.list_processes.return_value = []
@@ -3338,7 +3339,7 @@ def test_main_registry_start_single_repo(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`iar registry start --repo-id` should start daemon + review-daemon."""
+    """`kc registry start --repo-id` should start daemon + review-daemon."""
     monkeypatch.chdir(tmp_path)
     repo_path = _init_bare_git_repository(tmp_path, "keda")
     config_path = tmp_path / "config.toml"
@@ -3350,13 +3351,13 @@ def test_main_registry_start_single_repo(
         'display_name = "Keda Main"\n',
         encoding="utf-8",
     )
-    monkeypatch.setenv("IAR_CONFIG", str(config_path))
+    monkeypatch.setenv("KEDACODE_CONFIG", str(config_path))
 
     fake_context = MagicMock()
     fake_context.repo_id = "keda-main"
 
     fake_settings = MagicMock()
-    fake_settings.console.runner_command = ["iar"]
+    fake_settings.console.runner_command = ["kc"]
     fake_settings.repositories = {
         "keda-main": MagicMock(path=str(repo_path), enabled=True),
     }
@@ -3425,7 +3426,7 @@ def test_main_registry_start_no_review_daemon(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`iar registry start --repo-id --no-review-daemon` should only start daemon."""
+    """`kc registry start --repo-id --no-review-daemon` should only start daemon."""
     monkeypatch.chdir(tmp_path)
     repo_path = _init_bare_git_repository(tmp_path, "keda")
     config_path = tmp_path / "config.toml"
@@ -3436,10 +3437,10 @@ def test_main_registry_start_no_review_daemon(
         "enabled = true\n",
         encoding="utf-8",
     )
-    monkeypatch.setenv("IAR_CONFIG", str(config_path))
+    monkeypatch.setenv("KEDACODE_CONFIG", str(config_path))
 
     fake_settings = MagicMock()
-    fake_settings.console.runner_command = ["iar"]
+    fake_settings.console.runner_command = ["kc"]
     fake_settings.repositories = {
         "keda-main": MagicMock(path=str(repo_path), enabled=True),
     }
@@ -3503,7 +3504,7 @@ def test_main_registry_start_all(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`iar registry start --all` should start daemons for all enabled repos."""
+    """`kc registry start --all` should start daemons for all enabled repos."""
     monkeypatch.chdir(tmp_path)
     repo_a = _init_bare_git_repository(tmp_path, "repo-a")
     repo_b = _init_bare_git_repository(tmp_path, "repo-b")
@@ -3516,10 +3517,10 @@ def test_main_registry_start_all(
         f'path = "{tmp_path / "disabled"}"\nenabled = false\n',
         encoding="utf-8",
     )
-    monkeypatch.setenv("IAR_CONFIG", str(config_path))
+    monkeypatch.setenv("KEDACODE_CONFIG", str(config_path))
 
     fake_settings = MagicMock()
-    fake_settings.console.runner_command = ["iar"]
+    fake_settings.console.runner_command = ["kc"]
     fake_settings.repositories = {
         "repo-a": MagicMock(path=str(repo_a), enabled=True),
         "repo-b": MagicMock(path=str(repo_b), enabled=True),
@@ -3586,11 +3587,11 @@ def test_main_registry_stop_single_repo(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`iar registry stop --repo-id` should stop daemon + review-daemon."""
+    """`kc registry stop --repo-id` should stop daemon + review-daemon."""
     monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "config.toml"
     config_path.write_text("[agent_runner]\n", encoding="utf-8")
-    monkeypatch.setenv("IAR_CONFIG", str(config_path))
+    monkeypatch.setenv("KEDACODE_CONFIG", str(config_path))
 
     from backend.infrastructure.console.process_supervisor import RunnerProcessRecord
 
@@ -3603,7 +3604,7 @@ def test_main_registry_stop_single_repo(
             status="running",
             exit_code=None,
             log_path="/tmp/d1.log",
-            command=("iar", "daemon", "--repo-id", "keda-main"),
+            command=("kc", "daemon", "--repo-id", "keda-main"),
             started_at="2026-06-22T00:00:00+00:00",
             stopped_at=None,
         ),
@@ -3615,7 +3616,7 @@ def test_main_registry_stop_single_repo(
             status="running",
             exit_code=None,
             log_path="/tmp/r1.log",
-            command=("iar", "review-daemon", "--repo-id", "keda-main"),
+            command=("kc", "review-daemon", "--repo-id", "keda-main"),
             started_at="2026-06-22T00:00:00+00:00",
             stopped_at=None,
         ),
@@ -3627,7 +3628,7 @@ def test_main_registry_stop_single_repo(
             status="running",
             exit_code=None,
             log_path="/tmp/d2.log",
-            command=("iar", "daemon", "--repo-id", "fsense"),
+            command=("kc", "daemon", "--repo-id", "fsense"),
             started_at="2026-06-22T00:00:00+00:00",
             stopped_at=None,
         ),
@@ -3658,11 +3659,11 @@ def test_main_registry_stop_all(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`iar registry stop --all` should stop all running daemon processes."""
+    """`kc registry stop --all` should stop all running daemon processes."""
     monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "config.toml"
     config_path.write_text("[agent_runner]\n", encoding="utf-8")
-    monkeypatch.setenv("IAR_CONFIG", str(config_path))
+    monkeypatch.setenv("KEDACODE_CONFIG", str(config_path))
 
     from backend.infrastructure.console.process_supervisor import RunnerProcessRecord
 
@@ -3675,7 +3676,7 @@ def test_main_registry_stop_all(
             status="running",
             exit_code=None,
             log_path="/tmp/d1.log",
-            command=("iar", "daemon", "--repo-id", "keda-main"),
+            command=("kc", "daemon", "--repo-id", "keda-main"),
             started_at="2026-06-22T00:00:00+00:00",
             stopped_at=None,
         ),
@@ -3687,7 +3688,7 @@ def test_main_registry_stop_all(
             status="running",
             exit_code=None,
             log_path="/tmp/r1.log",
-            command=("iar", "review-daemon", "--repo-id", "keda-main"),
+            command=("kc", "review-daemon", "--repo-id", "keda-main"),
             started_at="2026-06-22T00:00:00+00:00",
             stopped_at=None,
         ),
@@ -3717,7 +3718,7 @@ def test_main_registry_start_rejects_disabled_repo(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`iar registry start --repo-id` should fail for disabled repositories."""
+    """`kc registry start --repo-id` should fail for disabled repositories."""
     monkeypatch.chdir(tmp_path)
     repo_path = _init_bare_git_repository(tmp_path, "keda")
     config_path = tmp_path / "config.toml"
@@ -3728,7 +3729,7 @@ def test_main_registry_start_rejects_disabled_repo(
         "enabled = false\n",
         encoding="utf-8",
     )
-    monkeypatch.setenv("IAR_CONFIG", str(config_path))
+    monkeypatch.setenv("KEDACODE_CONFIG", str(config_path))
 
     fake_settings = MagicMock()
     fake_settings.repositories = {
@@ -3909,7 +3910,7 @@ def test_main_takeover_noninteractive_repos(capsys, monkeypatch) -> None:
     """takeover --repos should bypass interactive selection and execute."""
     from backend.api.cli import main
 
-    monkeypatch.setenv("IAR_SKIP_GH_AUTH_CHECK", "1")
+    monkeypatch.setenv("KEDACODE_SKIP_GH_AUTH_CHECK", "1")
 
     auth_client = MagicMock()
     auth_client.check_auth_status.return_value = MagicMock(
@@ -3964,7 +3965,7 @@ def test_main_takeover_noninteractive_repos(capsys, monkeypatch) -> None:
 
 
 def test_cli_parser_logs() -> None:
-    """`iar logs` should accept --repo-id, --kind, --lines, --follow."""
+    """`kc logs` should accept --repo-id, --kind, --lines, --follow."""
     parser = build_parser()
     parsed = parser.parse_args(
         ["logs", "--repo-id", "keda", "--kind", "review_daemon", "--lines", "50", "-f"]
@@ -3977,7 +3978,7 @@ def test_cli_parser_logs() -> None:
 
 
 def test_cli_parser_logs_defaults() -> None:
-    """`iar logs` should default --kind=None (normalized to daemon downstream), --lines=200, --follow=False.
+    """`kc logs` should default --kind=None (normalized to daemon downstream), --lines=200, --follow=False.
 
     The parser keeps ``kind=None`` when the flag is absent so the logs handler
     can distinguish "user explicitly passed --kind" (mutually exclusive with
@@ -3992,7 +3993,7 @@ def test_cli_parser_logs_defaults() -> None:
 
 
 def test_cli_parser_logs_issue_flag() -> None:
-    """`iar logs --issue N` should parse an issue number without touching --kind."""
+    """`kc logs --issue N` should parse an issue number without touching --kind."""
     parser = build_parser()
     parsed = parser.parse_args(["logs", "--repo-id", "keda", "--issue", "42"])
     assert parsed.issue == 42
@@ -4000,11 +4001,11 @@ def test_cli_parser_logs_issue_flag() -> None:
 
 
 def test_main_logs_prints_last_n_lines(capsys, monkeypatch) -> None:
-    """`iar logs` should print the last N lines of a managed process log."""
+    """`kc logs` should print the last N lines of a managed process log."""
     from backend.api.cli import main
     from backend.core.shared.interfaces.runner_console import ProcessLogChunk
 
-    monkeypatch.setenv("IAR_SKIP_GH_AUTH_CHECK", "1")
+    monkeypatch.setenv("KEDACODE_SKIP_GH_AUTH_CHECK", "1")
 
     tmp_log = Path("/tmp/iar-test-logs-output.log")
     log_lines = [f"line {i}\n" for i in range(1, 31)]
@@ -4022,7 +4023,7 @@ def test_main_logs_prints_last_n_lines(capsys, monkeypatch) -> None:
         status="running",
         exit_code=None,
         log_path=str(tmp_log),
-        command=("iar", "daemon", "--repo-id", "repo"),
+        command=("kc", "daemon", "--repo-id", "repo"),
         started_at="2026-06-23T10:00:00Z",
         stopped_at=None,
     )
@@ -4071,10 +4072,10 @@ def test_main_logs_prints_last_n_lines(capsys, monkeypatch) -> None:
 
 
 def test_main_logs_fallback_no_running_process(capsys, monkeypatch) -> None:
-    """`iar logs` should print fallback guidance when no running process exists."""
+    """`kc logs` should print fallback guidance when no running process exists."""
     from backend.api.cli import main
 
-    monkeypatch.setenv("IAR_SKIP_GH_AUTH_CHECK", "1")
+    monkeypatch.setenv("KEDACODE_SKIP_GH_AUTH_CHECK", "1")
 
     mock_context = MagicMock()
     mock_context.repo_path = Path("/tmp/repo")
@@ -4104,10 +4105,10 @@ def test_main_logs_fallback_no_running_process(capsys, monkeypatch) -> None:
 
 
 def test_main_logs_fallback_with_historical_log(capsys, monkeypatch) -> None:
-    """`iar logs` should fall back to historical log path when no running process."""
+    """`kc logs` should fall back to historical log path when no running process."""
     from backend.api.cli import main
 
-    monkeypatch.setenv("IAR_SKIP_GH_AUTH_CHECK", "1")
+    monkeypatch.setenv("KEDACODE_SKIP_GH_AUTH_CHECK", "1")
 
     mock_context = MagicMock()
     mock_context.repo_path = Path("/tmp/repo")
@@ -4120,8 +4121,8 @@ def test_main_logs_fallback_with_historical_log(capsys, monkeypatch) -> None:
         pid=2222,
         status="exited",
         exit_code=0,
-        log_path="/var/log/iar/historical.log",
-        command=("iar", "daemon", "--repo-id", "repo"),
+        log_path="/var/log/kc/historical.log",
+        command=("kc", "daemon", "--repo-id", "repo"),
         started_at="2026-06-20T10:00:00Z",
         stopped_at="2026-06-20T11:00:00Z",
     )
@@ -4154,10 +4155,10 @@ def test_main_logs_fallback_with_historical_log(capsys, monkeypatch) -> None:
 
 
 def test_main_run_passes_transcript_runner_factory(monkeypatch) -> None:
-    """``iar run`` should inject a transcript runner factory so Phase 0 runs."""
+    """``kc run`` should inject a transcript runner factory so Phase 0 runs."""
     from backend.api.cli import main
 
-    monkeypatch.setenv("IAR_SKIP_GH_AUTH_CHECK", "1")
+    monkeypatch.setenv("KEDACODE_SKIP_GH_AUTH_CHECK", "1")
 
     mock_context = MagicMock()
     mock_context.repo_path = Path("/tmp/repo")
@@ -4185,7 +4186,7 @@ def test_main_daemon_passes_transcript_runner_factory(monkeypatch) -> None:
     """daemon 入口也会注入 transcript runner factory。"""
     from backend.api.cli import main
 
-    monkeypatch.setenv("IAR_SKIP_GH_AUTH_CHECK", "1")
+    monkeypatch.setenv("KEDACODE_SKIP_GH_AUTH_CHECK", "1")
 
     mock_context = MagicMock()
     mock_context.repo_path = Path("/tmp/repo")
@@ -4211,7 +4212,7 @@ def test_main_daemon_passes_transcript_runner_factory(monkeypatch) -> None:
 
 
 def test_main_run_phase0_deliberation_real_entry_point(monkeypatch, tmp_path: Path) -> None:
-    """A ``agent/deliberate`` Issue encountered by ``iar run`` gets a question list."""
+    """A ``agent/deliberate`` Issue encountered by ``kc run`` gets a question list."""
     from backend.api.cli import main
     from backend.core.shared.models.agent_runner import (
         AppConfig,
@@ -4221,7 +4222,7 @@ def test_main_run_phase0_deliberation_real_entry_point(monkeypatch, tmp_path: Pa
     )
     from tests.conftest import FakeGitHubClient
 
-    monkeypatch.setenv("IAR_SKIP_GH_AUTH_CHECK", "1")
+    monkeypatch.setenv("KEDACODE_SKIP_GH_AUTH_CHECK", "1")
 
     issue = IssueSummary(
         number=42,
@@ -4301,7 +4302,7 @@ def test_main_run_phase0_deliberation_real_entry_point(monkeypatch, tmp_path: Pa
 
 
 def test_main_run_dry_run_skips_deliberation_phase(monkeypatch, tmp_path: Path) -> None:
-    """``iar run --dry-run`` must not actually run Phase 0 deliberation."""
+    """``kc run --dry-run`` must not actually run Phase 0 deliberation."""
     from backend.api.cli import main
     from backend.core.shared.models.agent_runner import (
         AppConfig,
@@ -4310,7 +4311,7 @@ def test_main_run_dry_run_skips_deliberation_phase(monkeypatch, tmp_path: Path) 
     )
     from tests.conftest import FakeGitHubClient
 
-    monkeypatch.setenv("IAR_SKIP_GH_AUTH_CHECK", "1")
+    monkeypatch.setenv("KEDACODE_SKIP_GH_AUTH_CHECK", "1")
 
     issue = IssueSummary(
         number=77,
@@ -4361,16 +4362,16 @@ def test_main_run_dry_run_skips_deliberation_phase(monkeypatch, tmp_path: Path) 
 
 
 # ---------------------------------------------------------------------------
-# REPL (`iar` no args / `iar repl`)
+# REPL (`kc` no args / `kc repl`)
 # ---------------------------------------------------------------------------
 
 
 def _init_iar_repo(tmp_path: Path) -> Path:
-    """Create a bare git repository and seed ``.iar.toml``."""
+    """Create a bare git repository and seed ``.kedacode.toml``."""
     from tests.test_agent_runner_cli import _init_bare_git_repository
 
     repo_path = _init_bare_git_repository(tmp_path, "repl-test-repo")
-    (repo_path / ".iar.toml").write_text(
+    (repo_path / ".kedacode.toml").write_text(
         "[agent_runner]\n"
         "[agent_runner.repository]\n"
         'id = "repl-test-repo"\n'
@@ -4381,7 +4382,7 @@ def _init_iar_repo(tmp_path: Path) -> Path:
 
 
 def test_main_repl_subcommand_starts_session(monkeypatch, tmp_path: Path) -> None:
-    """`iar repl --repo <path>` should drive the REPL use case once."""
+    """`kc repl --repo <path>` should drive the REPL use case once."""
     from backend.api.cli import main
     from backend.core.use_cases.repl_session import (
         EXIT_COMMAND,
@@ -4415,7 +4416,7 @@ def test_main_repl_subcommand_starts_session(monkeypatch, tmp_path: Path) -> Non
             return_code=0,
             stdout=(
                 "I'll sync the labels.\n"
-                f"{IAR_EXEC_OPEN_MARKER} iar labels sync --dry-run "
+                f"{IAR_EXEC_OPEN_MARKER} kc labels sync --dry-run "
                 f"{IAR_EXEC_CLOSE_MARKER}"
             ),
             stderr="",
@@ -4449,7 +4450,7 @@ def test_main_repl_subcommand_starts_session(monkeypatch, tmp_path: Path) -> Non
 
 
 def test_main_repl_rejects_auto_agent_override(monkeypatch, tmp_path: Path, capsys) -> None:
-    """`iar repl --agent auto` should fall back to the config default."""
+    """`kc repl --agent auto` should fall back to the config default."""
     from backend.api.cli import main
 
     repo_path = _init_iar_repo(tmp_path)
@@ -4490,7 +4491,7 @@ def test_main_repl_rejects_auto_agent_override(monkeypatch, tmp_path: Path, caps
 
 
 def test_main_no_args_non_tty_shows_help_and_exits_nonzero(monkeypatch, capsys) -> None:
-    """`iar` with no args in non-TTY mode prints help and exits non-zero."""
+    """`kc` with no args in non-TTY mode prints help and exits non-zero."""
     from backend.api.cli import main
 
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
@@ -4500,7 +4501,7 @@ def test_main_no_args_non_tty_shows_help_and_exits_nonzero(monkeypatch, capsys) 
     captured = capsys.readouterr()
     assert exit_code == 1
     combined = captured.out + captured.err
-    assert "Usage:" in combined or "iar" in combined
+    assert "Usage:" in combined or "kc" in combined
 
 
 def test_main_no_args_tty_launches_native_executor(monkeypatch, tmp_path: Path) -> None:
@@ -4561,7 +4562,7 @@ def test_main_repl_requires_initialized_repo(monkeypatch, tmp_path: Path, capsys
     )
 
     repo_path = _init_iar_repo(tmp_path)
-    (repo_path / ".iar.toml").unlink()
+    (repo_path / ".kedacode.toml").unlink()
 
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("builtins.input", lambda _prompt="": "/exit")
@@ -4580,7 +4581,7 @@ def test_main_repl_requires_initialized_repo(monkeypatch, tmp_path: Path, capsys
             "backend.api.cli.require_iar_repository_initialized",
             side_effect=IARRepositoryNotInitializedError(
                 repo_root_path=repo_path,
-                config_path=repo_path / ".iar.toml",
+                config_path=repo_path / ".kedacode.toml",
             ),
         ):
             exit_code = main(["repl", "--repo", str(repo_path)])
@@ -4713,7 +4714,7 @@ def test_agent_fallback_candidate_repository_scope_lands_in_repo_file(
     import tomllib
 
     repo_path = _init_bare_git_repository(tmp_path, "fbrepo")
-    (repo_path / ".iar.toml").write_text("[agent_runner]\n", encoding="utf-8")
+    (repo_path / ".kedacode.toml").write_text("[agent_runner]\n", encoding="utf-8")
     config_path = tmp_path / "config.toml"
     config_path.write_text(
         "[agent_runner]\n\n"
@@ -4722,7 +4723,7 @@ def test_agent_fallback_candidate_repository_scope_lands_in_repo_file(
         "enabled = true\n",
         encoding="utf-8",
     )
-    monkeypatch.setenv("IAR_CONFIG", str(config_path))
+    monkeypatch.setenv("KEDACODE_CONFIG", str(config_path))
     global_bytes_before = config_path.read_bytes()
 
     exit_code = run_agent_fallback_candidate_add_command(
@@ -4733,7 +4734,7 @@ def test_agent_fallback_candidate_repository_scope_lands_in_repo_file(
     capsys.readouterr()
 
     assert exit_code == 0
-    repository_config = tomllib.loads((repo_path / ".iar.toml").read_text(encoding="utf-8"))
+    repository_config = tomllib.loads((repo_path / ".kedacode.toml").read_text(encoding="utf-8"))
     written_candidates = repository_config["agent_runner"]["runner"]["agent_fallback_candidates"]
     assert written_candidates[-1] == {"agent": "qoder"}
     assert config_path.read_bytes() == global_bytes_before

@@ -59,9 +59,8 @@ HELP_COMMAND = "/help"
 DEFAULT_PROMPT_SUFFIX = f"{product_identity.PRIMARY_COMMAND_NAME}> "
 MAX_TURNS = 64
 
-_IAR_AVAILABLE_SUBCOMMAND_HINT = (
-    "Available `kc` subcommands (`kedacode` and the deprecated `iar` "
-    "alias run the same code): "
+_AVAILABLE_SUBCOMMAND_HINT = (
+    "Available `kc` subcommands (`kedacode` is an equivalent command name): "
     "init, labels, issue, run, daemon, supervise, supervise-daemon, recover, "
     "blocked-continue, ask, deliberate, takeover, worktree, registry, "
     "workflow, completion."
@@ -159,8 +158,7 @@ def parse_iar_exec_markers(text: str) -> tuple[IarExecRequest, ...]:
         if not argv:
             continue
         # 剥掉首个命令名 token，执行器才不会拿到 ``["kc", "kc", ...]``。
-        # 协议要求标记体内带命令名，而三个自有名字（kc / kedacode / 旧别名
-        # legacy-alias）都算，新旧 agent 混跑时任意一种写法都能解析。
+        # 协议要求标记体内带命令名；当前支持的入口是 kc 与 kedacode。
         if product_identity.is_own_command_name(argv[0]):
             argv = argv[1:]
         if not argv:
@@ -253,7 +251,7 @@ def _build_system_prompt(
         "invoke a `kc` subcommand on the user's behalf, follow the "
         "command-execution protocol strictly.\n\n"
         f"{protocol}\n\n"
-        f"{_IAR_AVAILABLE_SUBCOMMAND_HINT}\n"
+        f"{_AVAILABLE_SUBCOMMAND_HINT}\n"
     )
     parts.append(f"## Repository .kedacode.toml summary\n{config_summary}\n")
     parts.append(
@@ -433,7 +431,7 @@ def run_repl_session(inputs: ReplSessionInputs, deps: ReplSessionDeps) -> int:
                     f"  {EXIT_COMMAND}    quit the session\n"
                     f"  {HELP_COMMAND}    show this help\n"
                     "  anything else     forwarded to the agent\n\n"
-                    f"{_IAR_AVAILABLE_SUBCOMMAND_HINT}"
+                    f"{_AVAILABLE_SUBCOMMAND_HINT}"
                 )
                 continue
 

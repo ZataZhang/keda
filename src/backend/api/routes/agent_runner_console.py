@@ -546,7 +546,7 @@ class BatchAddRepositoriesRequest(BaseModel):
 def get_console_context() -> dict:
     """返回 console 进程 cwd 匹配到的 registry 仓库。
 
-    这是面板首屏默认仓库的事实来源：在哪个仓库目录敲 ``iar console``，前端就
+    这是面板首屏默认仓库的事实来源：在哪个仓库目录敲 ``kc console``，前端就
     优先选中哪个仓库。cwd 匹配不上是正常状态（不在 git 仓库 / 未登记 / 停用），
     由 ``status`` 字段表达，因此不返回 4xx。
     """

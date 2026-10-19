@@ -1,8 +1,8 @@
 """Typer commands under ``kc config``.
 
 Currently a single command — ``kc config migrate`` — which moves the local state
-directory from the legacy ``~/.iar`` (legacy-alias) to ``~/.kedacode``, renames the
-repository's legacy ``.iar.toml`` (legacy-alias) to ``.kedacode.toml``, and removes
+directory from ``~/.iar`` to ``~/.kedacode``, renames the repository's ``.iar.toml``
+to ``.kedacode.toml``, and removes
 the generated-content defaults an older ``kc init`` pinned into it.
 """
 
@@ -44,7 +44,7 @@ def config_migrate_command(
         ),
     ] = None,
 ) -> int:
-    """Move ~/.iar (legacy-alias) to ~/.kedacode, rename .iar.toml, drop pinned values."""
+    """Move ~/.iar to ~/.kedacode, rename .iar.toml, and drop pinned values."""
     return _run_typer_repository_command(
         ctx,
         "config migrate",

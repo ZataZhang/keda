@@ -233,7 +233,7 @@ def create_process_supervisor() -> IRunnerProcessSupervisor:
     """创建托管 runner 进程的监管器（pidfile + 日志目录已解析）。
 
     同时把本进程当前生效的 ``config.toml`` 交给监管器注入子进程的
-    ``KEDACODE_CONFIG``（旧前缀同名注入）：托管子进程的 cwd 是目标仓库，若由它自行按 cwd 解析配置，
+    ``KEDACODE_CONFIG``：托管子进程的 cwd 是目标仓库，若由它自行按 cwd 解析配置，
     会读到该仓库自己的应用级 ``config.toml``，与面板展示的机器级配置失配。
     """
     console_settings = get_agent_runner_settings().console

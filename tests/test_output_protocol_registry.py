@@ -13,7 +13,6 @@ import pytest
 
 from backend.engines.agent_runner.output_protocols import (
     ENTRY_POINT_GROUP,
-    LEGACY_ENTRY_POINT_GROUP,
     EntryPointProtocolRegistry,
     OutputProtocolLoadError,
     get_output_protocol_registry,
@@ -62,7 +61,7 @@ def _fake_entry_points(
 def _fake_grouped_entry_points(
     entries_by_group: dict[str, list[tuple[str, Any]]],
 ) -> Any:
-    """按分组返回假 entry points，用于验证新旧两个分组的双读发现。"""
+    """按分组返回假 entry points。"""
 
     def list_entry_points(group: str) -> list[_StubEntryPoint]:
         return [
@@ -125,32 +124,30 @@ def _relay_returning(marker: str) -> Any:
 # ---------------------------------------------------------------------------
 
 
-def test_legacy_group_protocols_are_discovered(monkeypatch: pytest.MonkeyPatch) -> None:
-    """只注册在旧分组里的第三方插件仍然被发现（改名不让既有插件消失）。"""
+def test_legacy_group_protocols_are_not_discovered(monkeypatch: pytest.MonkeyPatch) -> None:
+    """只扫描当前分组，旧分组注册的插件不再作为兼容入口加载。"""
     monkeypatch.setattr(
         "backend.engines.agent_runner.output_protocols.entry_points",
         _fake_grouped_entry_points(
             {
                 ENTRY_POINT_GROUP: [],
-                LEGACY_ENTRY_POINT_GROUP: [("legacy-only", _relay_returning("legacy"))],
+                "iar.agent_output_protocols": [("legacy-only", _relay_returning("legacy"))],
             }
         ),
     )
     registry = EntryPointProtocolRegistry()
-    assert "legacy-only" in registry.list_ids()
-    assert registry.resolve("legacy-only").relay() == "legacy"
+    assert registry.list_ids() == ()
 
 
-def test_new_group_wins_on_duplicate_protocol_id(monkeypatch: pytest.MonkeyPatch) -> None:
-    """同一 id 在两个分组都注册时以新分组为准，且该 id 只枚举一次。"""
+def test_current_group_protocols_are_discovered(monkeypatch: pytest.MonkeyPatch) -> None:
+    """当前分组中的每个协议 id 只枚举一次。"""
     monkeypatch.setattr(
         "backend.engines.agent_runner.output_protocols.entry_points",
         _fake_grouped_entry_points(
             {
-                ENTRY_POINT_GROUP: [("shared", _relay_returning("new"))],
-                LEGACY_ENTRY_POINT_GROUP: [
-                    ("shared", _relay_returning("legacy")),
-                    ("legacy-only", _relay_returning("legacy")),
+                ENTRY_POINT_GROUP: [
+                    ("shared", _relay_returning("current")),
+                    ("shared", _relay_returning("duplicate")),
                 ],
             }
         ),
@@ -158,8 +155,7 @@ def test_new_group_wins_on_duplicate_protocol_id(monkeypatch: pytest.MonkeyPatch
     registry = EntryPointProtocolRegistry()
     listed_ids = list(registry.list_ids())
     assert listed_ids.count("shared") == 1
-    assert registry.resolve("shared").relay() == "new"
-    assert "legacy-only" in listed_ids
+    assert registry.resolve("shared").relay() == "current"
 
 
 # ---------------------------------------------------------------------------

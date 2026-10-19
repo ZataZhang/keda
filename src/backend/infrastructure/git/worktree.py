@@ -1,6 +1,6 @@
 """Worktree lifecycle helpers — owns the canonical worktree path layout.
 
-All worktree paths used by the iAR agent runner flow through this module
+All worktree paths used by the KedaCode agent runner flow through this module
 so the ``create`` and ``path`` shell commands cannot drift apart.
 """
 
@@ -32,7 +32,7 @@ class WorktreeProcessRunner(Protocol):
 
 
 class WorktreeManager:
-    """Create, locate, and remove iAR-owned Git worktrees.
+    """Create, locate, and remove KedaCode-owned Git worktrees.
 
     The path layout is fixed: every worktree for a given branch lives at
     ``{repo_root}/.iar-worktrees/{branch}``. Both ``create`` and ``path``

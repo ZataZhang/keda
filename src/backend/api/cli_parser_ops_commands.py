@@ -350,13 +350,13 @@ def add_ops_commands(subparsers: argparse._SubParsersAction) -> None:
 
     config_parser = subparsers.add_parser(
         "config",
-        help="Maintain local state: move ~/.iar, rename .iar.toml.",  # legacy-alias
+        help="Maintain local configuration and migrate older installations.",
     )
     config_subparsers = config_parser.add_subparsers(dest="config_command", required=True)
 
     config_migrate_parser = config_subparsers.add_parser(
         "migrate",
-        help="Move ~/.iar to ~/.kedacode, rename .iar.toml, drop pinned values.",  # legacy-alias
+        help="Move ~/.iar to ~/.kedacode, rename .iar.toml, drop pinned values.",
     )
     config_migrate_parser.set_defaults(command="config migrate")
     config_migrate_parser.add_argument(

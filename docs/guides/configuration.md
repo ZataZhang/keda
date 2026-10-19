@@ -79,10 +79,9 @@ Issue 后执行同一流程。数据库 URL 支持 PostgreSQL（`postgresql...`�
 - `enabled`：是否启用该仓库，默认为 `true`。
 - `display_name`：前端展示名称，默认为 `repo_id`。
 
-registry 用的 `config.toml` 是**全局共享**的一份，解析顺序为：`KEDACODE_CONFIG` 优先，未设置时由旧名
-`IAR_CONFIG` 兜底（仅在旧名被显式设置时提醒一次） <!-- legacy-alias -->
-→ `<本机状态目录>/config.toml` → 源码根 `config.toml`。本机状态目录取 `~/.kedacode`，
-只有旧目录的机器继续用旧目录 `~/.iar` <!-- legacy-alias -->。源码根模板存在时，首次调用会把默认配置 seed 进状态目录；
+registry 用的 `config.toml` 是**全局共享**的一份，解析顺序为：`KEDACODE_CONFIG`
+→ `<本机状态目录>/config.toml` → 源码根 `config.toml`。本机状态目录固定为 `~/.kedacode`。
+源码根模板存在时，首次调用会把默认配置 seed 进状态目录；
 全局安装的 `kc`（`uv tool install kedacode`，没有源码根模板可拷）则在状态目录里创建一份只含
 `[agent_runner]` 空表的最小配置作为 registry 载体，已有文件不会被覆盖。
 

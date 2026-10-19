@@ -65,7 +65,7 @@ def _init_git_repository(tmp_path: Path, name: str) -> Path:
 
 
 def _write_local_iar_config(repo_path: Path, content: str) -> None:
-    (repo_path / ".iar.toml").write_text(content, encoding="utf-8")
+    (repo_path / ".kedacode.toml").write_text(content, encoding="utf-8")
 
 
 def _make_settings(**kwargs) -> AgentRunnerSettings:
@@ -93,7 +93,7 @@ def isolate_agent_runner_toml(monkeypatch: pytest.MonkeyPatch) -> None:
         load_toml_section_without_agent_repositories,
     )
     # Registry repositories are loaded from a separate config path; keep those
-    # isolated from the developer's ~/.iar/config.toml as well.
+    # isolated from the developer's ~/.kedacode/config.toml as well.
     monkeypatch.setattr(
         settings_sources,
         "_load_registry_toml_section_data",
@@ -255,7 +255,7 @@ def test_resolve_repository_targets_ad_hoc_repo(tmp_path: Path) -> None:
 def test_resolve_repository_targets_repo_path_loads_local_config(
     tmp_path: Path,
 ) -> None:
-    """--repo should merge the target repository's .iar.toml."""
+    """--repo should merge the target repository's .kedacode.toml."""
     repo_path = _init_git_repository(tmp_path, "target")
     _write_local_iar_config(
         repo_path,
@@ -284,7 +284,7 @@ def test_resolve_repository_targets_local_config_disables_validation(
     """A repository-local [agent_runner.validation] override must reach AppConfig.
 
     Regression guard: the local-settings repack used to drop the validation
-    section, so `enabled = false` in .iar.toml was silently ignored and the
+    section, so `enabled = false` in .kedacode.toml was silently ignored and the
     evidence gate still fired.
     """
     repo_path = _init_git_repository(tmp_path, "target")
@@ -572,7 +572,7 @@ def test_generated_content_targets_default_to_agent_mode() -> None:
 
 
 def test_merge_repository_config_ignores_empty_template_overrides() -> None:
-    """Empty .iar.toml template/prompt placeholders must not wipe config.toml defaults."""
+    """Empty .kedacode.toml template/prompt placeholders must not wipe config.toml defaults."""
     from backend.engines.agent_runner.factory import merge_repository_config
 
     global_config = AppConfig(
@@ -606,7 +606,7 @@ def test_merge_repository_config_ignores_empty_template_overrides() -> None:
 def test_require_iar_repository_initialized_accepts_valid_config(
     tmp_path: Path,
 ) -> None:
-    """A valid .iar.toml with non-empty repository.id should pass."""
+    """A valid .kedacode.toml with non-empty repository.id should pass."""
     repo_path = _init_git_repository(tmp_path, "initialized")
     _write_local_iar_config(
         repo_path,
@@ -642,7 +642,7 @@ id = ""
     )
     with pytest.raises(IARRepositoryNotInitializedError) as exc_info:
         require_iar_repository_initialized(repo_path)
-    assert str(repo_path / ".iar.toml") in str(exc_info.value)
+    assert str(repo_path / ".kedacode.toml") in str(exc_info.value)
 
 
 def test_require_iar_repository_initialized_rejects_invalid_toml(
@@ -653,7 +653,7 @@ def test_require_iar_repository_initialized_rejects_invalid_toml(
     _write_local_iar_config(repo_path, "this is not valid toml")
     with pytest.raises(IARRepositoryNotInitializedError) as exc_info:
         require_iar_repository_initialized(repo_path)
-    assert str(repo_path / ".iar.toml") in str(exc_info.value)
+    assert str(repo_path / ".kedacode.toml") in str(exc_info.value)
 
 
 def test_require_iar_repository_initialized_rejects_missing_agent_runner_section(
@@ -664,7 +664,7 @@ def test_require_iar_repository_initialized_rejects_missing_agent_runner_section
     _write_local_iar_config(repo_path, '[other]\nkey = "value"\n')
     with pytest.raises(IARRepositoryNotInitializedError) as exc_info:
         require_iar_repository_initialized(repo_path)
-    assert str(repo_path / ".iar.toml") in str(exc_info.value)
+    assert str(repo_path / ".kedacode.toml") in str(exc_info.value)
 
 
 def test_merge_repository_config_inherits_generated_content() -> None:
@@ -719,7 +719,7 @@ def test_build_app_config_maps_validation_language_and_structured_evidence(
 def test_merge_repository_config_overrides_validation_language(
     tmp_path: Path,
 ) -> None:
-    """Repository-local .iar.toml can override validation language."""
+    """Repository-local .kedacode.toml can override validation language."""
     repo_path = _init_git_repository(tmp_path, "target")
     _write_local_iar_config(
         repo_path,
@@ -792,7 +792,7 @@ def test_merge_repository_config_inherits_deliberation_profiles() -> None:
 def test_resolve_repository_targets_merges_local_deliberation(
     tmp_path: Path,
 ) -> None:
-    """Repository-local .iar.toml can override deliberation settings."""
+    """Repository-local .kedacode.toml can override deliberation settings."""
     repo_path = _init_git_repository(tmp_path, "target")
     _write_local_iar_config(
         repo_path,
@@ -1025,7 +1025,7 @@ def test_merge_repository_config_overrides_backlog_auto_advance() -> None:
 
 
 def test_local_iar_toml_overrides_autopilot(tmp_path: Path) -> None:
-    """.iar.toml-level autopilot overrides flow through ``resolve_repository_targets``."""
+    """.kedacode.toml-level autopilot overrides flow through ``resolve_repository_targets``."""
     from backend.engines.agent_runner.factory import resolve_repository_targets
 
     repo_path = _init_git_repository(tmp_path, "target")

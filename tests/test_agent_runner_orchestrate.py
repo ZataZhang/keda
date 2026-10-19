@@ -359,7 +359,7 @@ def test_run_once_unknown_machine_contract_performs_no_github_writes(
     """Unknown Skill contract must fail before the runner mutates GitHub."""
     skill_path = tmp_path / "SKILL.md"
     skill_path.write_text("Machine-Contract-Version: 99\n", encoding="utf-8")
-    monkeypatch.setenv("IAR_PRD_SKILL_PATH", str(skill_path))
+    monkeypatch.setenv("KEDACODE_PRD_SKILL_PATH", str(skill_path))
     fake_client = FakeGitHubClient()
 
     exit_code = run_once(

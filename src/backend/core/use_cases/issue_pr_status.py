@@ -94,8 +94,7 @@ class IssueListResult:
 def _has_local_iar_repo(cwd: Path) -> bool:
     """Return True when ``cwd`` holds a repository-local KedaCode config.
 
-    新旧两个配置文件名按「新名优先」解析，因此只有 ``.kedacode.toml`` 的
-    仓库与只有旧 ``.iar.toml`` 的仓库同样被识别（legacy-alias）。
+    只识别当前名称 ``.kedacode.toml``。
     """
     return product_identity.has_repository_config(cwd)
 

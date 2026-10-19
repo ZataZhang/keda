@@ -115,7 +115,7 @@ def _fake_resolve_factory(contexts):
 
 
 def test_resolve_targets_with_cwd_autodetect_single_repo() -> None:
-    """cwd with .iar.toml → equivalent to --repo cwd."""
+    """cwd with .kedacode.toml → equivalent to --repo cwd."""
     requests_seen: list[dict[str, object]] = []
 
     def _fake_resolve(*, repo_id, repo_path_override, all_repositories):
@@ -146,7 +146,7 @@ def test_resolve_targets_with_cwd_autodetect_single_repo() -> None:
 
 
 def test_resolve_targets_with_cwd_autodetect_all_registered() -> None:
-    """cwd without .iar.toml → equivalent to --all-registered."""
+    """cwd without .kedacode.toml → equivalent to --all-registered."""
     requests_seen: list[dict[str, object]] = []
 
     def _fake_resolve(*, repo_id, repo_path_override, all_repositories):

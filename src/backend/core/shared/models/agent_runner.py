@@ -108,7 +108,7 @@ class CommandResult:
             caller constructed the result synthetically instead of running a
             process.
         output_protocol: 产出本结果的输出协议 id（见
-            ``iar.agent_output_protocols`` 注册表）。``"plain"`` 表示通用
+            ``kedacode.agent_output_protocols`` 注册表）。``"plain"`` 表示通用
             文本中继；agent 响应文本提取等消费方以此判断 stdout 是否为
             渲染后的结构化流，而不再嗅探命令行里的 agent 名。
         token_usage: 输出自报的 token 用量；协议未提供或解析不出时为

@@ -103,15 +103,15 @@ def test_ensure_gh_auth_or_prompt_exits_on_failure(tmp_path: Path) -> None:
 
 
 def test_ensure_gh_auth_or_prompt_skips_with_env_var(tmp_path: Path) -> None:
-    """IAR_SKIP_GH_AUTH_CHECK=1 should skip the auth check."""
+    """KEDACODE_SKIP_GH_AUTH_CHECK=1 should skip the auth check."""
     from backend.api.cli import _ensure_gh_auth_or_prompt
 
     fake_runner = FakeProcessRunner()
-    os.environ["IAR_SKIP_GH_AUTH_CHECK"] = "1"
+    os.environ["KEDACODE_SKIP_GH_AUTH_CHECK"] = "1"
     try:
         _ensure_gh_auth_or_prompt(tmp_path, fake_runner)
     finally:
-        del os.environ["IAR_SKIP_GH_AUTH_CHECK"]
+        del os.environ["KEDACODE_SKIP_GH_AUTH_CHECK"]
 
 
 def test_ensure_gh_auth_or_prompt_passes_when_authenticated(tmp_path: Path) -> None:

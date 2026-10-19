@@ -16,7 +16,7 @@
 
 > 把 GitHub Issue 变成本地 AI Agent 队列。给 Issue 打上 `agent/ready`，`kc` 就会创建隔离 worktree、驱动 Claude / Codex / Kimi 改代码、跑验证、做 code review、推分支开 Draft PR，并可按配置检查 PR 上的 CI 与评论变化；需要持续跟进时，可以显式启动监督 daemon。你不想用命令行时，`kc console` 一条命令打开内置的管理面板。
 >
-> 装什么、敲什么：`uv tool install kedacode` 之后主命令是 `kc`，也可以直接敲包名 `kedacode`（两者完全等价，见下方安装一节）；不想安装时可用 `uvx --from kedacode kc <命令>` 临时运行。旧命令 `iar` 长期作为弃用别名保留，新旧对照与迁移步骤见 `docs/guides/migrating-from-iar.md`。<!-- legacy-alias -->
+> 装什么、敲什么：`uv tool install kedacode` 之后主命令是 `kc`，也可以直接敲包名 `kedacode`（两者完全等价，见下方安装一节）；不想安装时可用 `uvx --from kedacode kc <命令>` 临时运行。从旧版 IAR 升级的迁移步骤见 `docs/guides/migrating-from-iar.md`。
 >
 > 仓库同时是一套可复用的 Python 工程骨架——Clean Architecture 四层依赖由 pre-commit 强制校验，配套 worktree 脚本、PRD 驱动流程与 `just` 工具链，可以整体拿去起新项目。
 >

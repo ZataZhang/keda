@@ -7,7 +7,7 @@
 - 生成 PRD 草稿 / 草稿确认入 pending
 - 通用签名 inbound endpoint
 
-签名 secret 来自环境变量 ``KEDACODE_IDEA_INBOX_INBOUND_SECRET``（旧名兜底），不写入
+签名 secret 来自环境变量 ``KEDACODE_IDEA_INBOX_INBOUND_SECRET``，不写入
 ``config.toml`` / ``.kedacode.toml``。所有 DTO 转换、HTTP 状态码与签名校
 验在本模块完成；append-only 约束、状态机与命名规范在 core use case。
 """
@@ -55,10 +55,10 @@ _logger = logging.getLogger(__name__)
 router = APIRouter(tags=["agent-runner-idea-inbox"])
 
 _INBOUND_SECRET_ENV_SUFFIX = "IDEA_INBOX_INBOUND_SECRET"
-"""双读用的环境变量后缀：新旧两个名字都会读取。"""
+"""入站签名 secret 的环境变量后缀。"""
 
 INBOUND_SECRET_ENV = f"{product_identity.ENV_PREFIX}{_INBOUND_SECRET_ENV_SUFFIX}"
-"""对外报告的变量名（新名）；读取时旧名同样生效。"""
+"""对外报告的入站签名 secret 环境变量名。"""
 INBOUND_SIGNATURE_HEADER = "X-IAR-Signature"
 
 

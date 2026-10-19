@@ -1,4 +1,4 @@
-"""Clean up stale iAR issue worktrees and local branches."""
+"""Clean up stale KedaCode issue worktrees and local branches."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ class WorktreeCleanupStatus(str, Enum):
 
 @dataclass(frozen=True)
 class WorktreeCleanupRequest:
-    """Options controlling stale iAR worktree cleanup."""
+    """Options controlling stale KedaCode worktree cleanup."""
 
     repo_path: Path
     remote: str = "origin"
@@ -38,7 +38,7 @@ class WorktreeCleanupRequest:
 
 @dataclass(frozen=True)
 class IssueBranchCandidate:
-    """Local branch that follows the configured iAR issue branch pattern."""
+    """Local branch that follows the configured KedaCode issue branch pattern."""
 
     branch: str
     issue_number: int
@@ -96,7 +96,7 @@ def cleanup_iar_worktrees(
     A branch is eligible only when all default safety checks pass:
     its name matches ``issue-<number>``, the corresponding remote branch is
     gone after ``git fetch --prune``, the GitHub Issue is closed, the worktree
-    is iAR-managed, the worktree is clean, and the branch is merged into the
+    is KedaCode-managed, the worktree is clean, and the branch is merged into the
     configured remote base branch. ``force`` bypasses the dirty and merged
     checks, but still requires a closed Issue and missing remote branch.
     """

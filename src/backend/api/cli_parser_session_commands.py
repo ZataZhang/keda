@@ -423,7 +423,7 @@ def add_session_commands(subparsers: argparse._SubParsersAction) -> None:
 
     worktree_parser = subparsers.add_parser(
         "worktree",
-        help="Manage iAR-owned Git worktrees for the current repository.",
+        help="Manage KedaCode-owned Git worktrees for the current repository.",
     )
     worktree_subparsers = worktree_parser.add_subparsers(dest="worktree_command", required=True)
     worktree_create_parser = worktree_subparsers.add_parser(

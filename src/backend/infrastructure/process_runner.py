@@ -254,7 +254,7 @@ def _with_available_own_command(command: Sequence[str]) -> Sequence[str]:
     """自有命令名在当前 PATH 上不存在时，换成一个可用的自有名字。
 
     覆盖「改动已合并、可编辑安装尚未重装」的窗口：仓库配置里写的是 ``kc``，
-    虚拟环境里却还只有 ``iar``。只替换 argv[0]，其余参数逐字不动；argv[0]
+    虚拟环境里却只有 ``kedacode``。只替换 argv[0]，其余参数逐字不动；argv[0]
     不是自有名字（``git`` / ``gh`` / agent CLI），或本来就能找到时原样返回。
 
     Args:

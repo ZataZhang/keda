@@ -131,7 +131,7 @@ def test_stats_overview_cache_hit_within_ttl(
     monkeypatch.setattr(
         console_routes,
         "load_fresh_agent_runner_settings",
-        lambda: AgentRunnerSettings(console=AgentRunnerConsoleSettings(runner_command=["iar"])),
+        lambda: AgentRunnerSettings(console=AgentRunnerConsoleSettings(runner_command=["kc"])),
     )
     client = TestClient(app)
 

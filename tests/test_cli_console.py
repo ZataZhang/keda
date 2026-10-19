@@ -416,15 +416,15 @@ class TestDefaultRunnerCommand:
 
     def test_explicit_config_wins_over_runtime_resolution(self) -> None:
         """config.toml 显式配置的 runner_command 始终优先于运行时默认解析。"""
-        console_settings = AgentRunnerConsoleSettings(runner_command=["/custom/iar"])
-        assert console_settings.runner_command == ["/custom/iar"]
+        console_settings = AgentRunnerConsoleSettings(runner_command=["/custom/kc"])
+        assert console_settings.runner_command == ["/custom/kc"]
 
-    def test_argv0_named_iar_is_used_directly(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """自有入口（含旧别名 iar）直接运行时取 sys.argv[0]，保证与当前安装态同源。"""
+    def test_argv0_named_kc_is_used_directly(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """以当前 CLI 入口启动时直接沿用 sys.argv[0]。"""
         monkeypatch.setattr(
-            agent_runner_settings.sys, "argv", ["/tmp/iar-clean/bin/iar", "console"]
+            agent_runner_settings.sys, "argv", ["/tmp/kedacode-clean/bin/kc", "console"]
         )
-        assert agent_runner_settings._default_runner_command() == ["/tmp/iar-clean/bin/iar"]
+        assert agent_runner_settings._default_runner_command() == ["/tmp/kedacode-clean/bin/kc"]
 
     def test_exe_suffixed_argv0_is_used_directly(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Windows 上 argv[0] 带 .exe 后缀，按 stem 比较才不会漏判。
@@ -435,16 +435,16 @@ class TestDefaultRunnerCommand:
         monkeypatch.setattr(
             agent_runner_settings.sys,
             "argv",
-            ["/c/Users/zata/.local/bin/iar.exe", "console"],
+            ["/c/Users/zata/.local/bin/kedacode.exe", "console"],
         )
         assert agent_runner_settings._default_runner_command() == [
-            "/c/Users/zata/.local/bin/iar.exe"
+            "/c/Users/zata/.local/bin/kedacode.exe"
         ]
 
-    def test_falls_back_to_which_when_argv0_is_not_iar(
+    def test_falls_back_to_which_when_argv0_is_not_a_current_command(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """uvicorn 等其它入口启动后端时，按 kc 优先从 PATH 解析（旧名兜底）。
+        """uvicorn 等其它入口启动后端时，只按当前命令名从 PATH 解析。
 
         which_command 是 resolve_own_command_argv 的默认参数，绑定的是真实
         ``shutil.which``，无法用 monkeypatch 替换其函数对象；改为钉死 PATH 让其在
@@ -461,7 +461,7 @@ class TestDefaultRunnerCommand:
         monkeypatch.setenv("PATH", str(bin_dir))
         assert agent_runner_settings._default_runner_command() == [str(kc_path)]
 
-    def test_falls_back_to_uv_run_when_iar_not_found(
+    def test_falls_back_to_uv_run_when_no_current_command_is_found(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         """既非自有入口、PATH 也找不到任一自有名时兜底 ``uv run kc``。"""

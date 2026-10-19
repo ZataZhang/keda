@@ -10,7 +10,7 @@ Issue #223 要求 per-Issue 实时输出带上时间线，但时间戳属于**�
 - per-Issue 输出路由 sink：``core/use_cases/agent_runner_output_routing.py``
   在写日志文件 / 上看板 / 镜像回前台之前统一加前缀，三个消费端因此逐行一致。
 
-合议（``iar deliberate``）的 workspace 文件与 live 面板读的是生产者原文，
+合议（``kc deliberate``）的 workspace 文件与 live 面板读的是生产者原文，
 所以不带时间戳——那些文件是要能渲染、能复制的 markdown 答案。
 
 放在 ``core/shared/interfaces/`` 是因为两侧消费端都要用同一份实现：架构检查

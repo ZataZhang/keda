@@ -27,34 +27,26 @@ from backend.core.shared.models import product_identity
 ENTRY_POINT_GROUP = product_identity.OUTPUT_PROTOCOL_ENTRY_POINT_GROUP
 """entry point group 名：第三方包与内置协议都在此组注册输出协议。"""
 
-LEGACY_ENTRY_POINT_GROUP = product_identity.LEGACY_OUTPUT_PROTOCOL_ENTRY_POINT_GROUP
-"""旧 entry point group 名，永久保留：第三方插件可能仍注册在这里。"""
-
-#: 扫描顺序即优先级：同一协议 id 先命中的分组胜出，因此新分组优先。
-_DISCOVERY_GROUP_ORDER: tuple[str, ...] = (ENTRY_POINT_GROUP, LEGACY_ENTRY_POINT_GROUP)
-
 
 class OutputProtocolLoadError(RuntimeError):
     """输出协议解析或加载失败。"""
 
 
 def _discover_entry_points() -> dict[str, EntryPoint]:
-    """按分组优先级收集协议 entry point，同一 id 保留先命中的那个。
+    """收集当前输出协议分组中的 entry point。
 
     Returns:
         协议 id 到 entry point 的映射；插入顺序即 ``list_ids`` 的输出顺序。
     """
     discovered_entry_points: dict[str, EntryPoint] = {}
-    for group_name in _DISCOVERY_GROUP_ORDER:
-        for discovered_entry_point in entry_points(group=group_name):
-            discovered_entry_points.setdefault(discovered_entry_point.name, discovered_entry_point)
+    for discovered_entry_point in entry_points(group=ENTRY_POINT_GROUP):
+        discovered_entry_points.setdefault(discovered_entry_point.name, discovered_entry_point)
     return discovered_entry_points
 
 
 class EntryPointProtocolRegistry(IAgentOutputProtocolRegistry):
     """基于 importlib entry points 的协议注册表。
 
-    新旧两个分组都会扫描，同一 id 以新分组为准。
     ``list_ids`` 只枚举元数据、不触发加载；``resolve`` 首次解析成功后
     缓存实例。加载失败抛 :class:`OutputProtocolLoadError`，不降级。
     """
@@ -124,7 +116,6 @@ def get_output_protocol_registry() -> EntryPointProtocolRegistry:
 
 __all__ = [
     "ENTRY_POINT_GROUP",
-    "LEGACY_ENTRY_POINT_GROUP",
     "EntryPointProtocolRegistry",
     "OutputProtocolLoadError",
     "get_output_protocol_registry",

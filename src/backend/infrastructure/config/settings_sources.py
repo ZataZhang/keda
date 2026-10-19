@@ -2,8 +2,8 @@
 
 本模块是 ``settings.py`` 的最低层：负责 ``.kedacode.toml`` / ``config.toml`` 的
 定位，以及把 TOML 段落接入 pydantic-settings 的自定义 source。它不依赖任何设置
-模型，``settings.py`` 与 ``agent_runner_settings.py`` 都从这里取用。新旧名字的
-解析规则一律交给 :mod:`backend.core.shared.models.product_identity`。
+模型，``settings.py`` 与 ``agent_runner_settings.py`` 都从这里取用。产品路径和环境
+变量名称由 :mod:`backend.core.shared.models.product_identity` 提供。
 """
 
 import tomllib
@@ -46,11 +46,7 @@ _PROJECT_ROOT_PATH: Path = _resolve_project_root_from_settings_path(_SETTINGS_FI
 
 
 def _global_state_dir() -> Path:
-    """Return the effective KedaCode state directory under the user's home.
-
-    新旧目录双读（新目录优先，只有旧目录时沿用旧目录并提示迁移），提示由身份
-    模块一次性写到 stderr。
-    """
+    """Return the KedaCode state directory under the user's home."""
     return product_identity.state_home()
 
 
@@ -58,8 +54,7 @@ def _ensure_global_config_toml() -> Path | None:
     """确保状态目录的全局配置存在；仅在首次创建时从 Keda 源码配置播种。
 
     正常运行时，状态目录文件是唯一全局配置源；源码根配置不会按 cwd 被直接读取。
-    只有解析结果指向新目录时才可能新建目录；机器上只有旧目录时沿用旧目录，
-    不会悄悄新建 ``~/.kedacode``。
+    首次需要写入时在 ``~/.kedacode`` 创建状态目录。
     """
     global_dir = _global_state_dir()
     global_config = global_dir / "config.toml"
@@ -110,10 +105,10 @@ def _is_product_config_toml(candidate: Path) -> bool:
 
 
 def _resolve_env_config_toml() -> Path | None:
-    """``KEDACODE_CONFIG``（旧前缀写法继续兜底）指向的配置文件；不可达时 ``None``。
+    """``KEDACODE_CONFIG`` 指向的配置文件；不可达时返回 ``None``。
 
     环境变量在两种解析里都是最高优先级，故提取共用；静默退回默认配置是被禁止的，
-    所以取值解析与提示都由身份模块负责。
+    所以取值解析与空值处理都由身份模块负责。
     """
     env_config = product_identity.read_product_env_value("CONFIG")
     if not env_config:
@@ -134,8 +129,7 @@ def _seed_registry_config_in_state_home() -> Path | None:
     全局安装的 ``kc``（``uv tool install kedacode``）跑在任何目录里都找不到 keda 源码根的
     ``config.toml``，此前 ``resolve_registry_config_toml_path()`` 会返回那个不存在的路径，
     读取时抛 ``FileNotFoundError``，`kc registry list` / `sync` 直接以退出码 3 失败。
-    这里改成在状态目录里创建只含 ``[agent_runner]`` 空表的最小配置：状态目录本来就优先
-    解析到 ``~/.kedacode``，只有旧目录的机器仍写到 ``~/.iar``（legacy-alias），不新建目录。
+    这里改成在状态目录里创建只含 ``[agent_runner]`` 空表的最小配置。
 
     Returns:
         创建成功或已存在时返回该路径；目录或文件写失败时返回 ``None``。
@@ -177,7 +171,7 @@ def _find_config_toml() -> Path | None:
     任何同名文件；KedaCode 自己的机器级配置见 :func:`_find_product_config_toml`。
 
     Search order:
-    1. ``KEDACODE_CONFIG`` (or its legacy-prefixed equivalent) environment variable, if set.
+    1. ``KEDACODE_CONFIG`` environment variable, if set.
     2. Walk upward from the current working directory.
     3. ``<state home>/config.toml`` (seeded from the source root if missing).
     4. keda source root config.toml.
@@ -226,8 +220,7 @@ def resolve_registry_config_toml_path() -> Path:
     用户在某个项目目录内执行命令就写入该项目的 config.toml。
 
     解析顺序：
-    1. ``KEDACODE_CONFIG`` 环境变量（旧前缀写法继续兜底，如果显式设置），
-       用于测试或高级用户覆盖。
+    1. ``KEDACODE_CONFIG`` 环境变量，用于测试或高级用户覆盖。
     2. ``<state home>/config.toml``（首次调用时从源码根目录 seed 默认配置）。
     3. keda 源码根目录 ``config.toml`` 作为 fallback。
     4. 源码根也没有模板时（全局安装的 ``kc``），在状态目录里创建最小配置承接 registry。
@@ -290,7 +283,7 @@ def _load_registry_toml_section_data(section_name: str) -> dict[str, Any]:
     """从 registry 专用的 config.toml 加载指定 section。
 
     Registry 与通用配置解耦：仓库列表必须全局共享，因此优先读取
-    ``KEDACODE_CONFIG``（旧名兜底）或 ``<state home>/config.toml``；仅当全局
+    ``KEDACODE_CONFIG`` 或 ``<state home>/config.toml``；仅当全局
     registry 不存在时 fallback 到当前生效的 config.toml（兼容 legacy 项目级
     registry）。
 

@@ -43,6 +43,9 @@ REMOTE_TEMPLATE_SKILLS_REF = "main"
 REMOTE_TEMPLATE_SKILL_NAMES: tuple[str, ...] = ("prd", "code-reviewer")
 """KedaCode 安装且仅安装的远程模板 Skills。"""
 
+_PRE_RENAME_OPERATOR_SKILL_NAME = "iar-operator"
+"""清理旧发行版安装过的 skill 副本；当前运行时不再加载它。"""
+
 _SKILLS_DIR_ENV_SUFFIX = "SKILLS_DIR"
 
 _REMOTE_SKILL_PROTECTED_FILENAME = "SKILL.md"
@@ -194,7 +197,7 @@ def install_packaged_operator_skill(
     legacy_action = _LEGACY_ACTION_ABSENT
     legacy_notice: str | None = None
     if cleanup_legacy:
-        legacy_skill_path = target_skills_root / product_identity.LEGACY_OPERATOR_SKILL_NAME
+        legacy_skill_path = target_skills_root / _PRE_RENAME_OPERATOR_SKILL_NAME
         legacy_action, legacy_notice = _resolve_legacy_operator_skill(
             legacy_skill_path=legacy_skill_path,
             packaged_relative_paths=_packaged_relative_file_paths(source_path),

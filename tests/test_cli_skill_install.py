@@ -152,7 +152,7 @@ def test_skill_install_removes_pristine_legacy_copy_and_keeps_modified_one(
         (pristine_root, pristine_contract_text),
         (modified_root, modified_contract_text),
     ):
-        legacy_skill_path = skills_root / product_identity.LEGACY_OPERATOR_SKILL_NAME
+        legacy_skill_path = skills_root / "iar-operator"
         legacy_skill_path.mkdir(parents=True)
         (legacy_skill_path / "SKILL.md").write_text(contract_text, encoding="utf-8")
     monkeypatch.setattr(
@@ -166,11 +166,9 @@ def test_skill_install_removes_pristine_legacy_copy_and_keeps_modified_one(
     assert main(["skill", "install"]) == 0
 
     output = " ".join(capsys.readouterr().out.split())
-    assert not (pristine_root / product_identity.LEGACY_OPERATOR_SKILL_NAME).exists()
+    assert not (pristine_root / "iar-operator").exists()
     assert "Removed the legacy operator skill copy at" in output
-    preserved_contract_path = (
-        modified_root / product_identity.LEGACY_OPERATOR_SKILL_NAME / "SKILL.md"
-    )
+    preserved_contract_path = modified_root / "iar-operator" / "SKILL.md"
     assert preserved_contract_path.read_text(encoding="utf-8") == modified_contract_text
     assert "Kept the modified legacy operator skill copy at" in output
     assert str(preserved_contract_path.parent) in output

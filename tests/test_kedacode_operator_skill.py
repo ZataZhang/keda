@@ -46,7 +46,7 @@ _PACKAGED_REFERENCES_DIR = _PACKAGED_SKILL_DIR / "references"
 _EXPECTED_REFERENCE_COUNT = 10
 
 #: 改名前随包发行的旧名 skill 目录（安装根里遗留的副本，只用于清理判定）。
-_LEGACY_SKILL_NAME = product_identity.LEGACY_OPERATOR_SKILL_NAME
+_LEGACY_SKILL_NAME = "iar-operator"
 
 
 # ── 随包文件枚举：主文件 + 全部子命令说明 ────────────────────────────────────

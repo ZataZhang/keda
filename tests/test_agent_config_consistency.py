@@ -37,7 +37,7 @@ import pytest
 def test_agent_runner_reads_root_config_toml() -> None:
     """Agent runner settings should load the repository root config.toml."""
     repository_root = Path(__file__).resolve().parents[1]
-    # ``KEDACODE_CONFIG`` / ``IAR_CONFIG`` 优先于仓库根发现；托管 runner 注入的是机器级
+    # ``KEDACODE_CONFIG`` / ``KEDACODE_CONFIG`` 优先于仓库根发现；托管 runner 注入的是机器级
     # 配置，会把本用例的"读仓库根 config.toml"前提整个顶掉。来源检查走剥离宿主变量后的
     # 默认发现，装配则显式 pin 仓库根（``build_app_config()`` 读的是导入期定型的单例）。
     assert root_config_toml_path() == repository_root / "config.toml"
@@ -58,11 +58,11 @@ def test_iar_config_resolution_skips_application_config_toml(
 
     模板派生项目的仓库根有一份应用配置（``[app]`` / ``[preview]`` …），而面板
     托管 runner 的 cwd 正是目标仓库。若 IAR 自己的配置也命中它，
-    ``~/.iar/config.toml`` 里的生命周期矩阵等设置会被整份顶掉——这正是"面板显示
+    ``~/.kedacode/config.toml`` 里的生命周期矩阵等设置会被整份顶掉——这正是"面板显示
     implementation=codebuddy、实际领活却是 claude"的根因。应用自己的段落仍要读
     本仓这份文件（``preview_env.py`` 依赖）。
     """
-    monkeypatch.delenv("IAR_CONFIG", raising=False)
+    monkeypatch.delenv("KEDACODE_CONFIG", raising=False)
     iar_home = tmp_path / "iar-home"
     iar_home.mkdir()
     machine_config = iar_home / "config.toml"
@@ -100,7 +100,7 @@ def test_iar_config_resolution_uses_global_config_inside_source_checkout(
     ``~/.kedacode/config.toml`` 成为运行时全局配置。
     """
     monkeypatch.delenv("KEDACODE_CONFIG", raising=False)
-    monkeypatch.delenv("IAR_CONFIG", raising=False)
+    monkeypatch.delenv("KEDACODE_CONFIG", raising=False)
     iar_home = tmp_path / "iar-home"
     iar_home.mkdir()
     machine_config = iar_home / "config.toml"
@@ -245,7 +245,7 @@ def test_root_config_toml_declares_closeout_settings() -> None:
 
 
 def test_iar_toml_key_table_documents_closeout_settings() -> None:
-    """逐仓库 .iar.toml 的键说明表必须登记三项新键，否则生成的文件里没有注释。"""
+    """逐仓库 .kedacode.toml 的键说明表必须登记三项新键，否则生成的文件里没有注释。"""
     from backend.engines.agent_runner.repository_local import _IAR_FIELD_COMMENTS
 
     assert "runner.closeout_agent_enabled" in _IAR_FIELD_COMMENTS
@@ -269,7 +269,7 @@ def test_generated_content_settings_defaults_match_core_defaults() -> None:
 
 
 def test_root_config_toml_generated_content_matches_code_defaults() -> None:
-    """根 config.toml 播种给 ~/.iar/config.toml 的 mode / output 必须与代码默认值一致。"""
+    """根 config.toml 播种给 ~/.kedacode/config.toml 的 mode / output 必须与代码默认值一致。"""
     seed_config_path = Path(__file__).resolve().parents[1] / "config.toml"
     seed_generated_content = tomllib.loads(seed_config_path.read_text(encoding="utf-8"))[
         "agent_runner"
@@ -595,12 +595,12 @@ def test_content_generation_codex_read_only_flag() -> None:
 
 
 def test_local_iar_toml_can_override_repl_section(tmp_path: Path) -> None:
-    """.iar.toml's [agent_runner.repl] must be honored by load_agent_runner_local_settings."""
+    """.kedacode.toml's [agent_runner.repl] must be honored by load_agent_runner_local_settings."""
     from backend.infrastructure.config.settings import (
         load_agent_runner_local_settings,
     )
 
-    (tmp_path / ".iar.toml").write_text(
+    (tmp_path / ".kedacode.toml").write_text(
         "[agent_runner]\n"
         "[agent_runner.repository]\n"
         'id = "repl-local-test"\n'
@@ -696,7 +696,7 @@ def test_root_config_toml_declares_repair_agent() -> None:
 
 
 def test_iar_toml_key_table_documents_repair_agent() -> None:
-    """逐仓库 .iar.toml 的键说明表必须登记两个新键，否则生成的文件里没有注释。"""
+    """逐仓库 .kedacode.toml 的键说明表必须登记两个新键，否则生成的文件里没有注释。"""
     from backend.engines.agent_runner.repository_local import _IAR_FIELD_COMMENTS
 
     assert "pre_pr_review.repair_agent" in _IAR_FIELD_COMMENTS

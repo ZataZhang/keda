@@ -59,7 +59,7 @@ def _find_usable_prd_skill() -> Path | None:
     from backend.core.shared.prd_skill_location import resolve_prd_skill_path
 
     candidate_skill_paths: list[Path] = [resolve_prd_skill_path()]
-    ambient_skill_path = os.environ.get("IAR_PRD_SKILL_PATH")
+    ambient_skill_path = os.environ.get("KEDACODE_PRD_SKILL_PATH")
     if ambient_skill_path:
         candidate_skill_paths.append(Path(ambient_skill_path).expanduser())
     for candidate_skill_path in candidate_skill_paths:
@@ -70,13 +70,13 @@ def _find_usable_prd_skill() -> Path | None:
 
 @pytest.fixture(autouse=True, scope="session")
 def _prd_skill_contract_env() -> Iterator[Path | None]:
-    """把会话级 ``IAR_PRD_SKILL_PATH`` 指向真实安装的 prd skill。
+    """把会话级 ``KEDACODE_PRD_SKILL_PATH`` 指向真实安装的 prd skill。
 
     解析到真实 skill 时固定为会话级取值，让依赖 PRD 解析的用例确定性地走同一份
     契约实现；解析不到时不设置变量（保持环境原样），让运行时按用户级安装解析——
     缺失会由 ``prd_contract_client`` 报出可行动的错，而不是在这里静默跳过用例。
 
-    要触发预检失败路径的用例照旧用 ``monkeypatch.setenv("IAR_PRD_SKILL_PATH", ...)``
+    要触发预检失败路径的用例照旧用 ``monkeypatch.setenv("KEDACODE_PRD_SKILL_PATH", ...)``
     覆盖，用例结束后会还原到这里的会话级取值。宿主的新变量仅用于找到真实
     skill；进入测试会话后移除它，防止覆盖单测显式设置的旧变量。双名优先级
     由专门的解析测试显式设置两名验证，会话结束恢复两名宿主取值。
@@ -87,10 +87,10 @@ def _prd_skill_contract_env() -> Iterator[Path | None]:
         return
     previous_values = {
         env_name: os.environ.get(env_name)
-        for env_name in ("KEDACODE_PRD_SKILL_PATH", "IAR_PRD_SKILL_PATH")
+        for env_name in ("KEDACODE_PRD_SKILL_PATH", "KEDACODE_PRD_SKILL_PATH")
     }
     os.environ.pop("KEDACODE_PRD_SKILL_PATH", None)
-    os.environ["IAR_PRD_SKILL_PATH"] = str(usable_skill_path)
+    os.environ["KEDACODE_PRD_SKILL_PATH"] = str(usable_skill_path)
     try:
         yield usable_skill_path
     finally:
@@ -105,7 +105,7 @@ def _prd_skill_contract_env() -> Iterator[Path | None]:
 def _isolate_ambient_iar_config() -> Iterator[None]:
     """在 pytest 会话期间剥离宿主注入的新旧 CONFIG，保证默认配置解析可测。
 
-    托管 runner 向子进程注入 ``KEDACODE_CONFIG`` 与 ``IAR_CONFIG``，指向机器级
+    托管 runner 向子进程注入 ``KEDACODE_CONFIG`` 与 ``KEDACODE_CONFIG``，指向机器级
     配置。默认解析测试需要从 cwd 查找或临时 HOME 回落，不能被宿主配置覆盖。
     需要覆盖的用例仍用 ``monkeypatch.setenv`` 显式设置；结束恢复两名宿主取值。
 
@@ -121,7 +121,8 @@ def _isolate_ambient_iar_config() -> Iterator[None]:
     from backend.infrastructure.config.settings import AgentRunnerSettings
 
     previous_values = {
-        env_name: os.environ.pop(env_name, None) for env_name in ("KEDACODE_CONFIG", "IAR_CONFIG")
+        env_name: os.environ.pop(env_name, None)
+        for env_name in ("KEDACODE_CONFIG", "KEDACODE_CONFIG")
     }
     app_settings_module.config.agent_runner = AgentRunnerSettings()
     try:

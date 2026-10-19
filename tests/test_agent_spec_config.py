@@ -4,7 +4,7 @@
 全新 agent 注册的最小字段校验、非法值 fail-fast、旧版
 ``[agent_runner.labels]`` 三个 agent 键的兼容覆盖（FR-12）、
 config.toml 内置注册块与代码默认（BUILTIN_AGENT_SPECS）的一致性守卫，
-以及仓库级 .iar.toml 覆盖的合并语义。
+以及仓库级 .kedacode.toml 覆盖的合并语义。
 """
 
 from __future__ import annotations
@@ -223,7 +223,7 @@ def test_app_config_default_registry_is_builtin() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 两层合并：仓库级 .iar.toml 覆盖全局
+# 两层合并：仓库级 .kedacode.toml 覆盖全局
 # ---------------------------------------------------------------------------
 
 
@@ -233,7 +233,7 @@ def test_repository_level_agent_override(tmp_path: Path) -> None:
 
     repo_path = tmp_path / "repo"
     repo_path.mkdir()
-    (repo_path / ".iar.toml").write_text(
+    (repo_path / ".kedacode.toml").write_text(
         """
 [agent_runner]
 id = "demo-repo"

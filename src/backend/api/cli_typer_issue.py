@@ -175,7 +175,7 @@ def issue_list_command(
         bool,
         typer.Option(
             "--all-registered",
-            help="Force multi-repository scan even when cwd is an iAR project repo.",
+            help="Force multi-repository scan even when cwd is a KedaCode project repo.",
         ),
     ] = False,
     state: Annotated[

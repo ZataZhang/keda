@@ -38,7 +38,7 @@ def keda_owned_skills_root(user_home_path: Path | None = None) -> Path:
     目录归 agent / 用户所有，随时可能被删除或替换（实测：本机三个 agent 目录里的
     ``prd`` 都是指向共享副本的符号链接）。``kc init`` 会把一份副本写进产品自己的
     状态目录下，解析时优先取它，于是"用户删掉 agent 里的 prd skill"不再影响
-    runner 正常工作。状态目录本身按新旧两个名字双读，因此迁移前后的机器都指向同一处。
+    runner 正常工作。状态目录统一使用 ``~/.kedacode``。
 
     Args:
         user_home_path: 用户主目录覆盖，主要供测试使用；``None`` 时取实际主目录。

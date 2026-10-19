@@ -39,6 +39,8 @@ from backend.infrastructure.config.agent_runner_settings import (
 from backend.core.shared.models import product_identity
 
 _GENERATED_CONTENT_TABLE_NAME = "agent_runner.generated_content"
+#: 仅供显式 ``kc config migrate`` 将旧配置改名；运行时不再读取该文件名。
+_PRE_RENAME_REPOSITORY_CONFIG_FILENAME = ".iar.toml"
 
 # 旧脚手架写入 generated_content 的历史值。这是冻结的历史，不能从当前默认值推导：
 # 当前默认已经变了（mode / output），而旧仓库里的钉子不会跟着变。
@@ -555,7 +557,7 @@ def rename_repository_local_config_file(
     """
     resolved_root_path = Path(repo_root_path)
     new_config_path = resolved_root_path / product_identity.REPOSITORY_CONFIG_FILENAME
-    legacy_config_path = resolved_root_path / product_identity.LEGACY_REPOSITORY_CONFIG_FILENAME
+    legacy_config_path = resolved_root_path / _PRE_RENAME_REPOSITORY_CONFIG_FILENAME
     new_config_exists = new_config_path.is_file()
     legacy_config_exists = legacy_config_path.is_file()
 

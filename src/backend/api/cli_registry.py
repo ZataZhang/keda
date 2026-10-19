@@ -29,6 +29,7 @@ from backend.core.shared.interfaces.runner_console import (
     RunnerProcessKind,
     RunnerProcessRecord,
 )
+from backend.core.shared.models import product_identity
 from backend.core.use_cases.agent_runner_factory import (
     create_process_supervisor,
     create_registry_editor,
@@ -478,15 +479,14 @@ def _resolve_executable_from_command(command: tuple[str, ...]) -> str:
 
     For direct invocations such as ``/path/bin/kc daemon ...`` the first
     argument is returned. For Python wrapper invocations such as
-    ``/path/python /path/bin/kc daemon ...`` the legacy ``iar`` script path
-    is returned (the deprecated alias keeps working).
+    ``/path/python /path/bin/kc daemon ...`` the KedaCode script path is returned.
     """
     if not command:
         return ""
     first = command[0]
     if len(command) >= 2 and ("python" in Path(first).name.lower()):
         second = command[1]
-        if Path(second).name == "iar" or second.endswith("/iar"):  # legacy-alias
+        if product_identity.is_own_command_name(second):
             return second
     return first
 

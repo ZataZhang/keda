@@ -22,7 +22,7 @@ Use this skill when the user asks to operate the KedaCode CLI or its managed run
 | CI 交付 | CI 状态 / checks 怎么样 / 自动修复 / 修一下 CI / backlog ci | `${CODEBUDDY_SKILL_DIR}/references/ci.md` |
 | 装环境与查 Agent 配置 | 装环境 / 初始化仓库 / kc init / 重装 skill / 刷新 skill / kc skill install / 修复 operator skill / kc skill repair-operator / 有哪些模型预设 / agent doctor / 生命周期矩阵 / 九阶段生效模型 / kc agent lifecycle / kc agent preset / 回退候选 / kc agent fallback / 这个命令收什么旗标 / 裸 kc 进哪个入口 / kc session 与 kc repl 的区别 / 起个预览 / 起 dev server | `${CODEBUDDY_SKILL_DIR}/references/setup-and-config.md` |
 
-Use the repository guide as the authoritative command reference. Start with `kc --help` or the relevant subcommand `--help` when command details differ by KedaCode version. Do not claim `--dry-run` executes work. Every example uses the current command name `kc`; the legacy `iar` command still works as a permanent deprecated alias, but do not write it into new scripts. <!-- legacy-alias -->
+Use the repository guide as the authoritative command reference. Start with `kc --help` or the relevant subcommand `--help` when command details differ by KedaCode version. Do not claim `--dry-run` executes work. The supported command names are `kc` and `kedacode`; the old `iar` command is no longer installed. Update old scripts and CI commands to use `kc`.
 
 ## Shared baselines (apply to every route)
 

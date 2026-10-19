@@ -181,7 +181,7 @@ def test_main_run_with_daemon_running_rejects_by_default(
     from backend.api.cli import main
     from backend.api.cli_exit_codes import ExitCode as Code
 
-    monkeypatch.setenv("IAR_SKIP_GH_AUTH_CHECK", "1")
+    monkeypatch.setenv("KEDACODE_SKIP_GH_AUTH_CHECK", "1")
     context = _mock_run_context(tmp_path)
     with (
         patch(
@@ -206,7 +206,7 @@ def test_main_run_takeover_yes_stops_daemon_and_runs(
     from backend.api.cli import main
     from backend.api.cli_run_takeover import DaemonTakeoverResult
 
-    monkeypatch.setenv("IAR_SKIP_GH_AUTH_CHECK", "1")
+    monkeypatch.setenv("KEDACODE_SKIP_GH_AUTH_CHECK", "1")
     context = _mock_run_context(tmp_path)
     captured: dict = {}
 
@@ -250,7 +250,7 @@ def test_main_run_takeover_declined_leaves_daemon_alone(
     """接管确认被拒绝时不动作、不停 daemon（rv-6 negative control）。"""
     from backend.api.cli import main
 
-    monkeypatch.setenv("IAR_SKIP_GH_AUTH_CHECK", "1")
+    monkeypatch.setenv("KEDACODE_SKIP_GH_AUTH_CHECK", "1")
     monkeypatch.setattr("sys.stdin", MagicMock(isatty=lambda: True))
     context = _mock_run_context(tmp_path)
     with (
@@ -723,31 +723,31 @@ def test_daemon_policy_read_failure_falls_back_to_capacity(
 
 
 def test_build_runner_argv_run_once_with_issue_targets_issue() -> None:
-    """RUN_ONCE 带 issue_number → ``iar run --issue N``（Console 开始此 PRD）。"""
+    """RUN_ONCE 带 issue_number → ``kc run --issue N``（Console 开始此 PRD）。"""
     argv = build_runner_argv(
-        runner_command=["uv", "run", "iar"],
+        runner_command=["uv", "run", "kc"],
         kind=RunnerProcessKind.RUN_ONCE,
         repo_id=REPO_ID,
         issue_number=11,
     )
-    assert argv == ("uv", "run", "iar", "run", "--issue", "11", "--repo-id", REPO_ID)
+    assert argv == ("uv", "run", "kc", "run", "--issue", "11", "--repo-id", REPO_ID)
 
 
 def test_build_runner_argv_run_once_without_issue_is_all_ready() -> None:
-    """RUN_ONCE 不带 issue_number → 显式 ``--all-ready``（等价旧 iar run）。"""
+    """RUN_ONCE 不带 issue_number → 显式 ``--all-ready``。"""
     argv = build_runner_argv(
-        runner_command=["uv", "run", "iar"],
+        runner_command=["uv", "run", "kc"],
         kind=RunnerProcessKind.RUN_ONCE,
         repo_id=REPO_ID,
     )
-    assert argv == ("uv", "run", "iar", "run", "--all-ready", "--repo-id", REPO_ID)
+    assert argv == ("uv", "run", "kc", "run", "--all-ready", "--repo-id", REPO_ID)
 
 
 def test_build_runner_argv_rejects_non_positive_issue_for_run_once() -> None:
     """RUN_ONCE 传非法 issue_number 与 BLOCKED_CONTINUE 一致拒绝。"""
     with pytest.raises(ConsoleProcessError):
         build_runner_argv(
-            runner_command=["iar"],
+            runner_command=["kc"],
             kind=RunnerProcessKind.RUN_ONCE,
             repo_id=REPO_ID,
             issue_number=0,

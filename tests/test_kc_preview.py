@@ -759,7 +759,7 @@ def _initialized_repo(tmp_path: Path) -> Path:
 
 def _repo_with_preview_profile(repo_path: Path, argv: tuple[str, ...]) -> None:
     """把 ``[agent_session.preview]`` 写进仓库配置文件。"""
-    config_path = repo_path / ".iar.toml"
+    config_path = repo_path / ".kedacode.toml"
     config_text = config_path.read_text(encoding="utf-8")
     config_path.write_text(
         config_text

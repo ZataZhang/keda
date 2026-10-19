@@ -166,7 +166,7 @@ def build_container_up_env(request: ContainerUpRequest) -> dict[str, str]:
     if request.gh_token:
         base_env["GH_TOKEN"] = request.gh_token
     if request.repo_id:
-        base_env.update(product_identity.build_child_env_aliases({"REPO_ID": request.repo_id}))
+        base_env.update(product_identity.build_child_env({"REPO_ID": request.repo_id}))
     base_env.update(_build_host_state_env())
     base_env.update(request.extra_env)
     return base_env

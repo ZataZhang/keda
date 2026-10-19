@@ -16,14 +16,14 @@ from backend.infrastructure.config.settings import (
 
 
 def test_local_settings_round_trip_daemon_override(tmp_path: Path) -> None:
-    """写入 .iar.toml 含 [agent_runner.daemon] 字段 → load 出来字段值正确。
+    """写入 .kedacode.toml 含 [agent_runner.daemon] 字段 → load 出来字段值正确。
 
     验证:用户取消 _IAR_DAEMON_EXAMPLE 注释修改 reclaim_ttl_seconds 后,
     load_agent_runner_local_settings 能正确读出并保持其他字段默认。
     """
     repo = tmp_path / "fake-repo"
     repo.mkdir()
-    iar_toml = repo / ".iar.toml"
+    iar_toml = repo / ".kedacode.toml"
     iar_toml.write_text(
         "[agent_runner.repository]\n"
         'id = "fake-repo"\n'
@@ -38,7 +38,7 @@ def test_local_settings_round_trip_daemon_override(tmp_path: Path) -> None:
     assert loaded.daemon is not None
     assert loaded.daemon.reclaim_ttl_seconds == 600
     assert loaded.daemon.reconcile_stale_attempts is False
-    # 未在 .iar.toml 写出的字段 → 继承全局默认(来自 AgentRunnerDaemonSettings)
+    # 未在 .kedacode.toml 写出的字段 → 继承全局默认(来自 AgentRunnerDaemonSettings)
     assert loaded.daemon.review_interval_seconds == 120
 
 
@@ -46,7 +46,7 @@ def test_local_settings_without_daemon_override(tmp_path: Path) -> None:
     """不写 [agent_runner.daemon] → loaded.daemon is None(由 merge 层兜底全局默认)。"""
     repo = tmp_path / "fake-repo"
     repo.mkdir()
-    iar_toml = repo / ".iar.toml"
+    iar_toml = repo / ".kedacode.toml"
     iar_toml.write_text(
         "[agent_runner.repository]\n" 'id = "fake-repo"\n',
         encoding="utf-8",
@@ -99,7 +99,7 @@ def test_merge_repository_config_applies_daemon_reconcile_override(
 
     repo = tmp_path / "fake-repo"
     repo.mkdir()
-    (repo / ".iar.toml").write_text(
+    (repo / ".kedacode.toml").write_text(
         "[agent_runner.repository]\n"
         'id = "fake-repo"\n'
         "[agent_runner.daemon]\n"
@@ -125,7 +125,7 @@ def test_merge_repository_config_keeps_daemon_unset_when_absent(tmp_path: Path) 
 
     repo = tmp_path / "fake-repo"
     repo.mkdir()
-    (repo / ".iar.toml").write_text(
+    (repo / ".kedacode.toml").write_text(
         '[agent_runner.repository]\nid = "fake-repo"\n',
         encoding="utf-8",
     )

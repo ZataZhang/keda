@@ -152,7 +152,7 @@ def test_start_runner_container_passes_env_to_runner(tmp_path: Path, fake_global
     assert env["RUNNER_UID"] == "501"
     assert env["RUNNER_GID"] == "20"
     assert env["GH_TOKEN"] == "ghp_test"
-    assert env["IAR_REPO_ID"] == "keda"
+    assert env["KEDACODE_REPO_ID"] == "keda"
 
     assert result.repo_id == "keda"
     assert result.daemon_lock_check_skipped is False

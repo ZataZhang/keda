@@ -126,7 +126,7 @@ def add_setup_commands(subparsers: argparse._SubParsersAction) -> None:
     issue_list_parser.add_argument(
         "--all-registered",
         action="store_true",
-        help="Force multi-repository scan even when cwd is an iAR project repo.",
+        help="Force multi-repository scan even when cwd is a KedaCode project repo.",
     )
     issue_list_parser.add_argument(
         "--state",

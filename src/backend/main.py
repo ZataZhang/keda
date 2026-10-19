@@ -1,6 +1,6 @@
 """Backend application entrypoint.
 
-Supports both FastAPI (``uvicorn backend.main:app``) and CLI (``iar``) modes.
+Supports both FastAPI (``uvicorn backend.main:app``) and CLI (``kc``) modes.
 The CLI entry point lives in ``backend.api.cli:main`` and is registered via
 ``[project.scripts]`` in ``pyproject.toml``.
 """

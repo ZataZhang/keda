@@ -44,5 +44,5 @@ export KEDACODE_HOME="${KEDACODE_HOME:-${RUNNER_HOME}/.kedacode}"
 # 用 gosu 切到目标 UID/GID 跑 CMD(默认 ``kedacode daemon``)。
 # gosu 接受 ``UID:GID`` 数字形式直接走 syscall,无需 passwd 记录。
 # HOME 必须在 env 显式列出,否则 gosu 改回 /。
-# 仓库 id 同时透传新旧两个名字,便于 ``KEDA_VERSION`` 钉到旧版本时旧包也能读到;IAR_REPO_ID 为 legacy-alias。
-exec gosu "${TARGET_UID}:${TARGET_GID}" env HOME="${HOME}" KEDACODE_HOME="${KEDACODE_HOME}" KEDACODE_REPO_ID="${KEDACODE_REPO_ID:-}" IAR_REPO_ID="${IAR_REPO_ID:-}" REPO_PATH="${REPO_PATH:-}" GH_TOKEN="${GH_TOKEN:-}" PATH="${PATH}" "$@" # legacy-alias
+# 只向容器进程传递当前版本使用的 KedaCode 环境变量。
+exec gosu "${TARGET_UID}:${TARGET_GID}" env HOME="${HOME}" KEDACODE_HOME="${KEDACODE_HOME}" KEDACODE_REPO_ID="${KEDACODE_REPO_ID:-}" REPO_PATH="${REPO_PATH:-}" GH_TOKEN="${GH_TOKEN:-}" PATH="${PATH}" "$@"

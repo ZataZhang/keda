@@ -196,7 +196,7 @@ class IProcessRunner(ABC):
             output_protocol: agent 调用路径专用的输出协议 id（来自
                 ``build_agent_invocation`` 的声明式 spec）。``None`` 或
                 ``"plain"`` 表示通用命令，按既有路径执行；非 plain 值由
-                执行层经 ``iar.agent_output_protocols`` 注册表解析出中继
+                执行层经 ``kedacode.agent_output_protocols`` 注册表解析出中继
                 实现。通用命令（git/gh/验证命令）永远传 ``None``。
             env_profile: 可选的子进程环境变量档名。``None`` 时实现端按
                 denylist 净化档组装子进程环境（剔除 ``SERVER__PORT`` 等

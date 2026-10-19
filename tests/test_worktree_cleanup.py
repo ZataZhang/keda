@@ -254,7 +254,7 @@ def test_iar_worktree_cleanup_yes_deletes_eligible_branch(
 ) -> None:
     """The real CLI entry should wire cleanup to the GitHub client factory."""
     repo_path = _init_remote_backed_repository(tmp_path)
-    (repo_path / ".iar.toml").write_text(
+    (repo_path / ".kedacode.toml").write_text(
         """
 [agent_runner.repository]
 id = "target"
@@ -268,7 +268,7 @@ base_branch = "main"
     worktree_path = _create_issue_worktree(repo_path, 12)
     github_client = _closed_issue_client(12)
     monkeypatch.chdir(repo_path)
-    monkeypatch.setenv("IAR_SKIP_GH_AUTH_CHECK", "1")
+    monkeypatch.setenv("KEDACODE_SKIP_GH_AUTH_CHECK", "1")
 
     with patch("backend.api.cli.create_github_client", return_value=github_client):
         exit_code = main(["worktree", "cleanup", "--yes"])

@@ -560,7 +560,7 @@ def test_execute_takeover_initializes_with_origin_remote(
 
     This guards against stale branch upstream remotes (e.g. a local branch
     tracking a no-longer-existent remote named after the old owner) being
-    written into .iar.toml.
+    written into .kedacode.toml.
     """
     clone_root = tmp_path / "repos"
     repo_path = _clone_target_path(clone_root, "owner/repo-a")
@@ -574,7 +574,7 @@ def test_execute_takeover_initializes_with_origin_remote(
         nonlocal captured_options
         captured_options = options
         repo_root = repo_path
-        config_path = repo_root / ".iar.toml"
+        config_path = repo_root / ".kedacode.toml"
         config_path.write_text(
             f'[agent_runner.repository]\nid = "{options.repo_id_override}"\n'
             f'[agent_runner.git]\nremote = "{options.remote_override}"\n',

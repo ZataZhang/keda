@@ -117,16 +117,16 @@ SUPPORTED_AGENT_SPECS: tuple[AgentImportSpec, ...] = build_agent_import_specs()
 """本模块支持的全部 agent 导入规格（由内置 agent 注册表派生）。"""
 
 
-def container_auth_dir(global_iar_dir: Path | None = None) -> Path:
+def container_auth_dir(global_state_dir: Path | None = None) -> Path:
     """返回容器专用认证目录的绝对路径。
 
     Args:
-        global_iar_dir: 全局状态目录（默认按新旧名双读解析），便于测试注入临时目录。
+        global_state_dir: 全局状态目录；省略时使用 KedaCode 默认目录。
 
     Returns:
         解析后的 ``container-auth/`` 绝对路径。
     """
-    base = global_iar_dir if global_iar_dir is not None else product_identity.state_home()
+    base = global_state_dir if global_state_dir is not None else product_identity.state_home()
     return base / CONTAINER_AUTH_DIR_NAME
 
 
@@ -255,26 +255,26 @@ def ensure_container_auth_root(target_root: Path) -> None:
     _safe_chmod(target_root, CONTAINER_AUTH_PERMISSIONS)
 
 
-def _ensure_global_iar_gitignore(
+def _ensure_global_state_gitignore(
     *,
-    global_iar_dir: Path,
+    global_state_dir: Path,
     protected_relative_paths: tuple[str, ...],
 ) -> bool:
     """将 ``container-auth`` 路径加入状态目录 ``info/exclude`` 的 gitignore。
 
     Args:
-        global_iar_dir: 全局状态目录。
-        protected_relative_paths: 需要排除的相对路径（相对 ``global_iar_dir``），
+        global_state_dir: 全局状态目录。
+        protected_relative_paths: 需要排除的相对路径（相对 ``global_state_dir``），
             通常是 ``("container-auth",)``。
 
     Returns:
-        是否成功更新 gitignore；``global_iar_dir`` 不是 git 仓库时也返回 ``False``。
+        是否成功更新 gitignore；``global_state_dir`` 不是 git 仓库时也返回 ``False``。
     """
-    git_dir = global_iar_dir / ".git"
+    git_dir = global_state_dir / ".git"
     if not git_dir.exists():
         return False
 
-    exclude_file = global_iar_dir / "info" / "exclude"
+    exclude_file = global_state_dir / "info" / "exclude"
     try:
         existing_text = exclude_file.read_text(encoding="utf-8") if exclude_file.exists() else ""
     except OSError as exc:  # noqa: BLE001 - best-effort.
@@ -300,19 +300,19 @@ def _ensure_global_iar_gitignore(
 
 def import_container_auth(
     *,
-    global_iar_dir: Path | None = None,
+    global_state_dir: Path | None = None,
     specs: tuple[AgentImportSpec, ...] = SUPPORTED_AGENT_SPECS,
 ) -> ContainerAuthImportResult:
     """导入全部受支持 agent 的认证到 ``container_auth_dir``。
 
     Args:
-        global_iar_dir: 全局状态目录；为 ``None`` 时按新旧名双读解析。
+        global_state_dir: 全局状态目录；为 ``None`` 时使用 KedaCode 默认目录。
         specs: 参与导入的 agent 规格列表，便于测试或将来扩展。
 
     Returns:
         聚合结果，包含每个 agent 的子结果与 gitignore 保护标记。
     """
-    base = global_iar_dir if global_iar_dir is not None else product_identity.state_home()
+    base = global_state_dir if global_state_dir is not None else product_identity.state_home()
     target_root = base / CONTAINER_AUTH_DIR_NAME
     ensure_container_auth_root(target_root)
 
@@ -320,8 +320,8 @@ def import_container_auth(
     for spec in specs:
         results.append(import_agent_auth(spec, target_root))
 
-    gitignore_protected = _ensure_global_iar_gitignore(
-        global_iar_dir=base,
+    gitignore_protected = _ensure_global_state_gitignore(
+        global_state_dir=base,
         protected_relative_paths=(CONTAINER_AUTH_DIR_NAME,),
     )
 
@@ -340,10 +340,10 @@ class ContainerAuthController(IContainerAuthImporter):
     """
 
     def import_container_auth(
-        self, *, global_iar_dir: Path | None = None
+        self, *, global_state_dir: Path | None = None
     ) -> ContainerAuthImportResult:
         """把本机当前 cc-switch profile 的认证 + skills 复制到 container-auth。"""
-        return import_container_auth(global_iar_dir=global_iar_dir)
+        return import_container_auth(global_state_dir=global_state_dir)
 
 
 __all__ = [

@@ -41,8 +41,8 @@ _EXPECTED_FILES = (
 
 
 def _init_iar(repo_root: Path) -> None:
-    """Write a minimal valid ``.iar.toml`` + ``config.toml`` into ``repo_root``."""
-    iar_path = repo_root / ".iar.toml"
+    """Write a minimal valid ``.kedacode.toml`` + ``config.toml`` into ``repo_root``."""
+    iar_path = repo_root / ".kedacode.toml"
     iar_path.write_text(
         "[agent_runner.repository]\n" 'id = "sample"\n' "enabled = true\n",
         encoding="utf-8",
@@ -237,7 +237,7 @@ def test_install_workflow_unknown_name_raises(tmp_path: Path) -> None:
 
 
 def test_install_workflow_requires_iar_init(tmp_path: Path) -> None:
-    """Missing ``.iar.toml`` must raise ``IARRepositoryNotInitializedError``."""
+    """Missing ``.kedacode.toml`` must raise ``IARRepositoryNotInitializedError``."""
     fake_runner = _make_fake_runner(tmp_path)
     with pytest.raises(IARRepositoryNotInitializedError):
         install_workflow(
