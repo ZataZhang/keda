@@ -446,7 +446,7 @@ def test_stop_repository_persistent_processes_reports_failures() -> None:
 
 
 def test_find_own_command_index() -> None:
-    """自有命令名可能出现在包装器之后，或以绝对路径形式出现在首位。"""
+    """三个自有命令名都可能出现在包装器之后或绝对路径形式的位置。"""
     assert _find_own_command_index(("uv", "run", "kc", "daemon")) == 2
     assert _find_own_command_index(("/Users/x/.local/bin/kc", "daemon")) == 0
     assert _find_own_command_index(("kc", "daemon", "--repo-id", "keda")) == 0

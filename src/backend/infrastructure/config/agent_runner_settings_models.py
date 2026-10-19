@@ -618,8 +618,9 @@ class AgentRunnerDaemonSettings(BaseModel):
     reconcile_stale_attempts: bool = True
     # claim 老化阈值(秒):claim marker 含 ``started_at`` 且距 now 超过此值时,
     # 即便 PID 仍存活也视为 stale（"daemon 自身持锁 claim 但已卡死"的死锁兜底）。
-    # 默认 3 小时。仅在 ``reconcile_stale_attempts=True`` 时生效。
-    reclaim_ttl_seconds: int = 10800
+    # 默认 5 小时：必须大于 ``runner.timeout_seconds``（默认 4 小时），否则仍在正常运行
+    # 的 attempt 会被误判 ttl_expired。仅在 ``reconcile_stale_attempts=True`` 时生效。
+    reclaim_ttl_seconds: int = 18000
 
 
 class AgentRunnerPromptSettings(BaseModel):

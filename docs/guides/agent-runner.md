@@ -404,8 +404,10 @@ recovery 轮次。
 ```toml
 [agent_runner.daemon]
 reconcile_stale_attempts = true   # 主开关；设为 false 即回到本特性落地前的现状
-reclaim_ttl_seconds = 10800       # claim 含 started_at 且超过该时长，即便 PID 仍活也判为 stale
+reclaim_ttl_seconds = 18000       # claim 含 started_at 且超过该时长，即便 PID 仍活也判为 stale
 ```
+
+`reclaim_ttl_seconds` 必须大于 `runner.timeout_seconds`（默认 14400 秒）：否则运行时间超过 TTL 的 attempt 即便仍在正常工作也会被按 `ttl_expired` 误回收。配置加载时若发现 TTL 不大于超时会打 WARNING（不拒绝加载）。
 
 `reconcile_stale_attempts = false` 时 Phase -1 整轮空转，僵尸 Issue 保持 `agent/running` 不被触碰、
 不留任何 comment（负控口径见 `.iar/evidence/`：rv-1 关掉开关后僵尸确实纹丝不动）。
@@ -3104,7 +3106,7 @@ run_interval_seconds = 120
 # 保守判定:仅当 claim 标记的 host 是本机、且记录的 PID 已死或 claim 已老化时才处置。默认开。
 reconcile_stale_attempts = true
 # claim 老化阈值(秒):claim 含 started_at 且距 now 超过此值,即便 PID 仍活也视为 stale
-reclaim_ttl_seconds = 10800
+reclaim_ttl_seconds = 18000
 ```
 
 硬中断(SIGKILL / 崩溃 / 关机)不会把 Issue 从 `agent/running` 退回,而 daemon 只认领 `agent/ready`,任务会就此卡死。开启 `reconcile_stale_attempts` 后,daemon 每轮开头会对本机认领、进程已死的 running Issue 做对账:worktree 完好且可续传时回 `agent/ready` 并续上原会话,否则回 `agent/ready` 全新重跑,worktree 不可解析或恢复预算耗尽时判 `agent/failed`,三种出口都留一条对账 comment。关闭该开关即回到本特性落地前的现状。跨机器的孤儿需在同一台机器上重启 daemon 才会被回收。判定细节、幂等机制与配置优先级见前面「崩溃对账与 Agent 会话续传」一节。

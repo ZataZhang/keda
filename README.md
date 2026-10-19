@@ -18,8 +18,6 @@
 >
 > 装什么、敲什么：`uv tool install kedacode` 之后主命令是 `kc`，也可以直接敲包名 `kedacode`（两者完全等价，见下方安装一节）；不想安装时可用 `uvx --from kedacode kc <命令>` 临时运行。从旧版 IAR 升级的迁移步骤见 `docs/guides/migrating-from-iar.md`。
 >
-> 仓库同时是一套可复用的 Python 工程骨架——Clean Architecture 四层依赖由 pre-commit 强制校验，配套 worktree 脚本、PRD 驱动流程与 `just` 工具链，可以整体拿去起新项目。
->
 > 注：本仓库与 CNCF 毕业项目 KEDA（keda.sh，Kubernetes 事件驱动自动扩缩）无关。
 
 <p align="center">
@@ -446,6 +444,10 @@ src/backend/
 ```
 
 依赖方向严格向下：`api → core → engines → infrastructure`，由 `hooks/shared/check_architecture.py` 在 pre-commit 强制校验。
+
+### 作为工程骨架复用
+
+除 `kc` 本身外，仓库也是一套可整体拿去起新项目的 Python 工程骨架：四层依赖由 pre-commit 强制校验，配套 worktree 脚本、PRD 驱动流程与 `just` 工具链。`scripts/shared/`、`hooks/shared/`、`docs/ai-standards/` 等由上游模板仓 [`zata-codes-template`](https://github.com/ZataZhang/zata-codes-template) 同步维护，下游项目不要手改。只想使用 `kc` 的读者可以跳过本节。
 
 ## Docker 部署
 

@@ -144,15 +144,15 @@ def migrate_repository_local_config(
     repo_root_path: Path,
     *,
     dry_run: bool = False,
-    config_path: Path | None = None,
+    source_config_path: Path | None = None,
 ) -> ConfigMigrationResult:
     """清掉旧脚手架在仓库本地配置里钉死的 generated_content 默认值。
 
     Args:
         repo_root_path: 目标 Git 仓库根目录。
         dry_run: 为 True 时只计算并返回结果，不写文件。
-        config_path: 要读取的仓库本地配置；默认取当前命名的配置文件。预演改名时由
-            调用方传入改名前的旧名文件，否则预演会因为新名文件还不存在而失败。
+        source_config_path: 显式指定要读取的配置文件。预演时旧名文件尚未改名，
+            调用方传入改名计划里的旧名路径，否则只会去找新名文件而误报未初始化。
 
     Returns:
         迁移结果；``wrote_file`` 表示是否真的写了文件。
@@ -161,16 +161,14 @@ def migrate_repository_local_config(
         IARRepositoryNotInitializedError: 仓库根目录没有仓库本地配置。
         ConfigMigrationError: 仓库本地配置不是合法 TOML，或迁移结果未通过写回前校验。
     """
-    resolved_config_path = (
-        product_identity.effective_repository_config_path(repo_root_path)
-        if config_path is None
-        else config_path
+    config_path = source_config_path or product_identity.effective_repository_config_path(
+        repo_root_path
     )
-    if not resolved_config_path.is_file():
-        raise IARRepositoryNotInitializedError(repo_root_path, resolved_config_path)
+    if not config_path.is_file():
+        raise IARRepositoryNotInitializedError(repo_root_path, config_path)
 
-    original_text = resolved_config_path.read_bytes().decode("utf-8")
-    original_config = _parse_toml(original_text, source_label=str(resolved_config_path))
+    original_text = config_path.read_bytes().decode("utf-8")
+    original_config = _parse_toml(original_text, source_label=str(config_path))
 
     removable_pins, intentionally_kept_pins = _plan_pins(original_config)
     toml_lines = _LINE_PATTERN.findall(original_text)
@@ -188,7 +186,7 @@ def migrate_repository_local_config(
     if wrote_file:
         # 先写同目录临时文件再替换，进程中途退出也不会留下写了一半的配置；
         # 解析符号链接后替换真实文件，保留原文件权限。
-        target_path = resolved_config_path.resolve()
+        target_path = config_path.resolve()
         temporary_path = target_path.with_name(f"{target_path.name}.migrating")
         try:
             temporary_path.write_bytes(migrated_text.encode("utf-8"))
@@ -198,7 +196,7 @@ def migrate_repository_local_config(
             temporary_path.unlink(missing_ok=True)
 
     return ConfigMigrationResult(
-        config_path=resolved_config_path,
+        config_path=config_path,
         original_text=original_text,
         migrated_text=migrated_text,
         removed_pins=tuple(located_pins),

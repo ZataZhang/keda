@@ -37,11 +37,11 @@ enabled = false
 
 # 与旧脚手架里出现过的同名键：`enabled` / `default_agent` 也存在于 generated_content 之外。
 CONFIG_AFTER_GENERATED_CONTENT = """\
-# 交互式决策（iar ask）配置
+# 交互式决策（kc ask）配置
 [agent_runner.interactive_decision]
-# 是否启用 iar ask 交互式决策
+# 是否启用 kc ask 交互式决策
 enabled = true
-# iar ask 默认使用的 agent
+# kc ask 默认使用的 agent
 default_agent = "auto"
 """
 
@@ -83,7 +83,7 @@ include_commit_log = true
 include_diff_stat = true
 """
 
-# 旧 `iar init` 写入的完整 generated_content 区块：各 target 的 mode 取当时的默认值。
+# 旧 `kc init` 写入的完整 generated_content 区块：各 target 的 mode 取当时的默认值。
 LEGACY_GENERATED_CONTENT = "\n".join(
     [
         LEGACY_SECTION_TABLE,
@@ -124,9 +124,13 @@ CONFIG_FILENAME = product_identity.REPOSITORY_CONFIG_FILENAME
 LEGACY_CONFIG_FILENAME = migration_module._PRE_RENAME_REPOSITORY_CONFIG_FILENAME
 
 
-def _write_config(repo_root_path: Path, *config_parts: str) -> Path:
-    """把若干段配置文本按空行拼接写成当前命名的仓库本地配置。"""
-    config_path = repo_root_path / CONFIG_FILENAME
+def _write_config(
+    repo_root_path: Path,
+    *config_parts: str,
+    config_file_name: str = CONFIG_FILENAME,
+) -> Path:
+    """按需指定文件名，把若干段配置文本按空行拼接写成仓库配置文件。"""
+    config_path = repo_root_path / config_file_name
     config_path.write_text("\n".join(config_parts), encoding="utf-8")
     return config_path
 
@@ -549,7 +553,7 @@ def test_migration_preserves_crlf_line_endings(tmp_path: Path) -> None:
 
 
 def test_migration_writes_through_symlinks_and_keeps_permissions(tmp_path: Path) -> None:
-    """仓库配置是符号链接时改的是链接目标，链接本身与文件权限都保持不变。"""
+    """``.kedacode.toml`` 是符号链接时改的是链接目标，链接本身与文件权限都保持不变。"""
     shared_config_path = tmp_path / "shared" / "kedacode.toml"
     shared_config_path.parent.mkdir()
     shared_config_path.write_text(
@@ -581,7 +585,7 @@ def test_migration_rejects_invalid_toml_and_leaves_it_alone(tmp_path: Path) -> N
 
 
 def test_migration_requires_an_initialized_repository(tmp_path: Path) -> None:
-    """没有仓库本地配置时抛统一的“未初始化”错误，由 CLI 统一提示 ``kc init``。"""
+    """没有 ``.kedacode.toml`` 时抛统一的“未初始化”错误，由 CLI 统一提示 ``kc init``。"""
     with pytest.raises(IARRepositoryNotInitializedError) as exc_info:
         migrate_repository_local_config(tmp_path)
 
@@ -718,7 +722,9 @@ def test_rename_dry_run_writes_nothing(tmp_path: Path) -> None:
 
 def test_rename_is_idempotent_when_already_named(tmp_path: Path) -> None:
     """已是新名时报告 already_named，不做任何改动。"""
-    _write_config(tmp_path, '[agent_runner.repository]\nid = "target-local"\n')
+    _write_legacy_config(tmp_path, '[agent_runner.repository]\nid = "target-local"\n')
+    first_result = rename_repository_local_config_file(tmp_path)
+    assert first_result.outcome == "renamed"
 
     second_result = rename_repository_local_config_file(tmp_path)
 

@@ -346,6 +346,24 @@ def _label_config_scalar_field_names() -> list[str]:
     return [f.name for f in dataclasses.fields(CoreLabelConfig) if f.name != "agent_labels"]
 
 
+def test_label_settings_and_infra_label_config_do_not_drift_from_core() -> None:
+    """settings 的标签字段必须都落在 core ``LabelConfig``；infra 不得另有副本。
+
+    现有哨兵测试只从 core 字段正向构造 settings，settings 新增而 core 漏加的字段
+    会被静默丢弃；infra 曾是手写副本并缺 ``verifier_passed`` / ``prd_auto_merge``。
+    """
+    import dataclasses
+
+    legacy_agent_route_keys = {"codex", "claude", "kimi"}
+    core_field_names = {field.name for field in dataclasses.fields(CoreLabelConfig)}
+    settings_only_names = (
+        set(AgentRunnerLabelSettings.model_fields) - core_field_names - legacy_agent_route_keys
+    )
+
+    assert not settings_only_names, f"settings 标签字段未映射到 core: {settings_only_names}"
+    assert InfraLabelConfig is CoreLabelConfig
+
+
 def test_factory_maps_every_label_config_field() -> None:
     """build_app_config_from_settings must forward every LabelConfig field.
 

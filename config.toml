@@ -1170,7 +1170,7 @@ max_deliberation_issues = 1
 # （续传 / 重新入队 / 判失败三出口，均留对账 comment）。设为 false 即关闭该层。
 reconcile_stale_attempts = true
 # claim 老化阈值(秒)：claim 带 started_at 且超过该时长，即便 PID 仍活也判为 stale。
-reclaim_ttl_seconds = 10800
+reclaim_ttl_seconds = 18000
 
 [agent_runner.lifecycle_agents]
 implementation = "codebuddy"

@@ -222,13 +222,14 @@ def run_config_migrate_command(ctx: ParsedCommandContext) -> int:
         return exit_code
 
     try:
-        # 预演不会真的改名，仓库里仍是旧名文件，钉子清理的计划要读这一份，
-        # 否则会因为新名文件还不存在而报「仓库未初始化」。
+        # 预演不会真的改名；只有计划改名时才从旧名路径读取清理计划。
         pending_rename_source = (
             rename_result.source_path if dry_run and rename_result.outcome == "renamed" else None
         )
         migration_result = migrate_repository_local_config(
-            target_repository_path, dry_run=dry_run, config_path=pending_rename_source
+            target_repository_path,
+            dry_run=dry_run,
+            source_config_path=pending_rename_source,
         )
     except ValueError as exc:
         # 迁移校验失败（ConfigMigrationError）是未分类失败；未初始化
