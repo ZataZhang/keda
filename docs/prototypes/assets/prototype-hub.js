@@ -1,6 +1,14 @@
 (() => {
   const prototypeRegistry = [
     {
+      id: 'tailscale-machine-management', title: 'Keda 多机连接与远程文档', project: 'keda', module: 'Console / 机器管理', system: 'Keda Console',
+      form: 'code-native', version: 'v1.0', updatedAt: '2026-10-18', availability: 'available', validationLevel: '交互原型',
+      primaryFlow: '从机器管理开始添加电脑，查看 Tailscale 入网、系统远程登录和授权目录三个步骤；再浏览远程文档或管理指定机器上的 Runner',
+      description: '基于现有 Keda Console 风格的多机连接与远程文档目标态。固定数据演示首次连接中 Agent 与人的分工、只读目录授权、远程文件预览和 Runner 启停确认；不连接真实设备、Tailscale、SSH、文件系统或 API。',
+      preview: '', entry: './tailscale-machine-management/index.html', source: './tailscale-machine-management/prototype.md', provenance: [],
+      relationships: [],
+    },
+    {
       id: 'blocked-draft-pr-surface', title: '失败上下文交接与失败 Draft PR', project: 'keda', module: 'Agent Runner / 跨 claim 交接',
       form: 'image-state', version: 'v2.0', updatedAt: '2026-09-23', availability: 'available', validationLevel: '概念原型',
       primaryFlow: '看两层表面：面板 A 是带 iar:failure-context marker 的 Issue 交接评论（下一轮 agent 读它），面板 B 是同一 payload 渲染出的 Draft PR 正文（人读）',
