@@ -1,14 +1,15 @@
 # 验证计划（执行侧）— Agent 可用性引导与自定义 Agent 注册
 
 PRD：`tasks/pending/P1-FEAT-20261020-011007-agent-availability-and-custom-registry.md` §7.6 Realistic Validation Plan
-被验证代码：`git rev-parse HEAD` = `c0e3a084efd2fee4414915d23d129842a2c031f3` + 本工作树未提交的实现改动（`src/` / `tests/` / `docs/` / `frontend-public/` / `config.toml`）
-采集时间：2026-10-19T20:39Z–21:12Z（UTC），四条 oracle 在**最终脚本版本**上重跑一遍后再定稿记录件。
+被验证代码：基线 `c0e3a084efd2fee4414915d23d129842a2c031f3`；实现改动（`src/` / `tests/` / `docs/` / `frontend-public/` / `config.toml`）已提交为 `90a66e13d14df508bb7e09887f2b2181f771b09e`，本轮证据在该 HEAD 上重跑
+采集时间：2026-10-19T20:39Z–21:12Z（UTC），四条 oracle 在**最终脚本版本**上重跑一遍后再定稿记录件；第二轮恢复后按 runner 口径重跑于 22:41:40Z–22:42:12Z。
 
 ## 口径
 
 - 四条 oracle 全部走真实入口：`kc agent setup` / `kc agent add` / `kc agent list` / `kc agent doctor` / `kc agent preset set` / `kc agent lifecycle set` / `kc agent fallback candidate add` / `kc run --issue … --dry-run --json` / `kc console` + 真实浏览器。没有用组件预览、手工注入状态或 TestClient 替代任何一项。
 - 每条都可由 `evidence.json` 的 `command` 原样复跑（runner 会用 `bash -lc` 在工作树根目录重执行并按字面 substring 断言其 stdout）。断言里没有 `|| true` 兜底，脚本任一检查点失败即 exit 1。
 - 关键值（可用 Agent 清单、bin 路径、配置哈希、Issue 快照、worktree 摘要、attempt 账本行数）都由被测路径自己产生并被脚本原样记录，脚本不重建「已安装」常量。
+- 脚本内的断言解释器一律钉到项目环境（`PYBIN=$(uv run --no-sync python -c 'import sys; print(sys.executable)')`），不依赖 PATH 上的 `python3`：runner 用 `bash -lc` 复跑时那是系统 3.9，没有 rv-1 配置核对需要的 `tomllib`（3.11+），而项目 `requires-python = ">=3.11"` 保证钉过去的解释器够用。
 
 ## 隔离方式（四条共用）
 

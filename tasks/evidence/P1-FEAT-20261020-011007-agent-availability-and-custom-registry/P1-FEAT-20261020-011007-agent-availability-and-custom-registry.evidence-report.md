@@ -1,7 +1,7 @@
 # rv-1..rv-4 验收证据报告 — Agent 可用性引导与自定义 Agent 注册
 
 PRD：`tasks/pending/P1-FEAT-20261020-011007-agent-availability-and-custom-registry.md`
-验证树：`git rev-parse HEAD = c0e3a084efd2fee4414915d23d129842a2c031f3`（交付改动以工作树形式叠加在该树上）
+验证树：基线 `c0e3a084efd2fee4414915d23d129842a2c031f3`；交付改动已由上一轮提交为 `90a66e13d14df508bb7e09887f2b2181f771b09e`，本轮证据在该 HEAD 上重跑
 执行时间：首轮 2026-10-19T21:07Z（四条 rv）/ 21:29Z（rv-4 的 e2e 复跑）；**最终树重跑 21:48:41Z–21:49:22Z**（rv-1..rv-4 全部 exit 0，`evidence.json` 的 stdout 断言逐条命中，配置 sha256 与首轮逐字节相同）。
 重跑原因：源码文件 mtime 出现于首轮取证之后（含 rv-4 所服务的前端包），因此按 §9「任何 seed / 门禁 / 注册路径改动后重跑对应 oracle」重取全套证据，本目录内的产物与两张截图均来自重跑后的最终树。
 
@@ -32,6 +32,8 @@ PRD：`tasks/pending/P1-FEAT-20261020-011007-agent-availability-and-custom-regis
 四条 rv 都在同一套隔离沙箱里跑：`env -i HOME=<临时 home> PATH=<stub 目录> KEDACODE_CONFIG=<临时配置>` + `uv run --no-sync`，因此「未安装」是这台机器的真实状态而不是测试常量；所有配置写入都由真实 CLI 完成（`kc agent setup` / `preset set` / `lifecycle set` / `fallback candidate add` / `agent add`），脚本没有手改过 TOML。逐步口径与负面控制矩阵在 `….verification-plan.md`。
 
 恢复轮（测试命名族修复 + `kc config migrate --dry-run` 缺陷修复）之后，四条命令已在最终树整体重跑：`2026-10-19T22:11:20Z`–`22:12:27Z`，四条 exit 0，两张 PNG 与全部产物均为重跑产物；`evidence.json` 的 stdout 断言按 runner 重放口径复验为 `MANIFEST_OK: 4 items`，rv-1 / rv-3 的配置 sha256（骨架 `842049520cf3…`、setup 后 `2aafa48b67f3…`）与上一轮逐字节相同，rv-2 结论行仍为「正控 exit=3 / 负控① exit=10 / 负控② exit=3，Issue #291 标签 3→3、评论 0→0」。同轮 `just test all` = 4580 passed / 0 failed、`just e2e tests/workflows/lifecycle-settings.spec.ts` = 8 passed、`SKIP=check-test-flag uv run pre-commit run --all-files` 全钩子通过。文档与证据文件定稿后又完整重跑一次 `just test all`（同样 4580 passed / 1 skipped / 0 failed），`.last_tested_commit` 与 `.last_linted_commit` 两个标记随之刷新，独立的 `just lint --full` 亦返回「just test 标记有效，允许提交」。
+
+第二轮恢复（runner 复跑 rv-1 报 `ModuleNotFoundError: No module named 'tomllib'`）的根因是**证据脚本自身的解释器假设**，不是产品行为：runner 以 `bash -lc 'sh …'` 复跑，登录 shell 的 `python3` 是系统 `/usr/bin/python3` = 3.9.6，而 rv-1 的配置事实核对用了 3.11+ 才有的标准库 `tomllib`；我这边取证时 PATH 上是仓库 `.venv` 的 3.13，所以同一脚本一处绿一处红。修复是把四条脚本的断言解释器钉到项目环境（`PYBIN=$(uv run --no-sync python -c 'import sys; print(sys.executable)')`，项目 `requires-python = ">=3.11"`），沙箱 PATH 里的 `python3` 软链也指向同一个解释器，rv-1 的取证头部现在直接打印所用解释器与版本。修复后**按 runner 的原样命令**（`bash -lc 'sh …'`，此时 `python3` 仍是 3.9）逐条重跑：rv-2 `22:41:48Z`、rv-3 `22:42:05Z`、rv-4 `22:42:12Z`、rv-1 `22:45:48Z`（取证头改造后再跑一次），四条 exit 0，`MANIFEST_OK: 4 items`，rv-4 的 e2e 在 `22:44Z` 于 HEAD `90a66e13` 重取为 8 passed；且 rv-1 / rv-2 / rv-3 的配置 sha256（骨架 `842049520cf3…`、setup 后 `2aafa48b67f3…`、bound `e55e730530fc…`、注册块 `c292ae43b9e0…`）与上一轮逐字节相同——脚本改动没有移动任何被验证事实。
 
 ### rv-1 · 干净环境引导只写入真实可用 Agent
 

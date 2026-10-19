@@ -717,3 +717,11 @@ No external validation required; repository evidence was sufficient.
 - Reason: §9 Validation 要求任何 seed / 门禁 / 注册路径改动后重跑对应 oracle，证据必须出自最终树。
 - Impact: 只刷新证据与 manifest 引用；sha256（骨架 `842049520cf3…`、setup 后 `2aafa48b67f3…`）与全部退出码与上一轮逐字节一致，说明本轮改动未触及被测行为。
 - Review: `MANIFEST_OK: 4 items, all stdout assertions hit, all evidence files present`；rv-2 结论行仍为「正控 exit=3 / 负控① exit=10 / 负控② exit=3，Issue #291 标签 3→3、评论 0→0」。
+
+### 2026-10-20 · 证据脚本的断言解释器钉到项目环境（runner 复跑 rv-1 曾红）
+- Type: validation / evidence
+- Before: runner 以 `bash -lc 'sh …/rv-1-clean-setup.sh'` 复跑 item 1 时报 `ModuleNotFoundError: No module named 'tomllib'`（traceback 落在 `<stdin>` 第 4 行，即脚本第 3 步的配置事实核对），exit 1、stdout 为空；同一脚本在我这边是绿的，因为取证时 PATH 上的 `python3` 是仓库 `.venv` 的 3.13，而登录 shell 解析到 `/usr/bin/python3` = 3.9.6，`tomllib` 是 3.11+ 才有的标准库。
+- After: 四条脚本的断言解释器统一钉到项目环境——`PYBIN=$(uv run --no-sync python -c 'import sys; print(sys.executable)')`（项目 `requires-python = ">=3.11"`），原先裸调 `python3` 的 21 处（json 计数、TOML 核对、端口分配等）改用 `"$PYBIN"`，沙箱 PATH 里的 `python3` 软链也指向同一解释器；rv-1 取证头改成打印实际解释器与版本（`…/.venv/bin/python3 (Python 3.13.3)`），不再写死上一轮的 lint 标记。改后按 runner 的原样命令重跑：rv-1 `22:45:48Z`、rv-2 `22:41:48Z`、rv-3 `22:42:05Z`、rv-4 `22:42:12Z`，四条 exit 0，`MANIFEST_OK: 4 items`，rv-4 的 e2e 与截图在 HEAD `90a66e13` 上重取为 8 passed。
+- Reason: 这是**证据脚本自身的可移植性缺陷**，不是产品行为回退，也不能靠「本机 PATH 恰好有 3.13」当作通过；runner 明确复跑 RV 命令，脚本必须与验收执行环境（登录 shell、系统 python3）无耦合。项目解释器同时是被测 CLI 的运行环境，钉过去比依赖 PATH 更符合 §9「断言值由被测路径自己产生」的口径。
+- Impact: 只改 `tasks/evidence/**/scripts/` 下的取证脚本（该目录按仓库 `.gitignore` 约定不进代码历史），生产代码、测试用例、门禁与 `evidence.json` 的断言模式均未改动；被验证的事实没移动——骨架 `842049520cf3…`、setup 后 `2aafa48b67f3…`、rv-2 bound `e55e730530fc…`、rv-3 注册块 `c292ae43b9e0…` 与上一轮逐字节相同。manifest item 1 的 `risks` 补记这条环境约束，验证计划在「口径」里补记解释器钉定规则。
+- Review: 红→绿两侧都有实证——红：`bash -lc` 复跑时 tomllib 缺失导致 exit 1（runner 回执原文）；绿：同一条命令在最终树 exit 0 且 10 条 stdout 断言逐条命中。未新增 `|| true`、未降低任何断言。
