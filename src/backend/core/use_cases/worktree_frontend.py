@@ -464,7 +464,8 @@ def ensure_frontend_node_modules(
     """**可恢复地**为 worktree 内的前端项目准备 ``node_modules``。
 
     遍历 ``worktree_path``（剪掉 :data:`FRONTEND_SCAN_PRUNED_DIR_NAMES`）找出含
-    ``package.json`` 的目录，对每个尚未拥有可用 ``node_modules`` 的项目：
+    ``package.json`` 的项目，以及仅由 ``pnpm-workspace.yaml`` 定义的 workspace 根；
+    对每个尚未拥有可用 ``node_modules`` 的目录：
 
     1. 识别包管理器（packageManager 字段 + workspace 根配置 + 锁文件；冲突不硬选）。
     2. 锁文件一致时优先复用主检出的 ``node_modules``，跳过不必要的安装。
@@ -536,10 +537,13 @@ def ensure_frontend_node_modules(
 
 
 def _scan_frontend_project_paths(worktree_path: Path) -> list[Path]:
-    """按目录名字典序遍历 worktree，收集含 ``package.json`` 的项目目录。
+    """按目录名字典序收集前端项目与 pnpm workspace 根目录。
 
     显式排序子目录（而非 ``os.walk`` 的文件系统返回顺序）：诊断记录会进 Issue 评论和
     prompt，顺序不稳定会让同一份代码两次跑出不同文本，无法逐字节比对。
+
+    pnpm workspace 根可以只有 ``pnpm-workspace.yaml`` 和锁文件而没有
+    ``package.json``；仍需把根目录作为准备目标，才能记录缺失 pnpm 的命令与诊断。
     """
     project_dir_paths: list[Path] = []
     for current_dir_text, child_dir_names, child_file_names in os.walk(worktree_path):
@@ -548,7 +552,10 @@ def _scan_frontend_project_paths(worktree_path: Path) -> list[Path]:
             for child_dir_name in child_dir_names
             if child_dir_name not in FRONTEND_SCAN_PRUNED_DIR_NAMES
         )
-        if PACKAGE_MANIFEST_FILE_NAME in child_file_names:
+        if (
+            PACKAGE_MANIFEST_FILE_NAME in child_file_names
+            or PNPM_WORKSPACE_FILE_NAME in child_file_names
+        ):
             project_dir_paths.append(Path(current_dir_text))
     return project_dir_paths
 

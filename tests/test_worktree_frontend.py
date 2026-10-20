@@ -651,6 +651,31 @@ class TestEnsureFrontendNodeModules:
         assert project_record.outcome == OUTCOME_SKIPPED
         assert project_record.reason == REASON_WORKSPACE_COVERED
 
+    def test_pnpm_workspace_without_root_manifest_reports_missing_manager(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """只有 pnpm workspace 配置的根仍记录缺失工具，成员继续归根安装。"""
+        _stub_toolchain(monkeypatch, available=False)
+        repo_path = tmp_path / "repo"
+        worktree_path = tmp_path / "worktree"
+        _write_file(worktree_path / "pnpm-workspace.yaml", 'packages:\n  - "packages/*"\n')
+        _write_file(worktree_path / "pnpm-lock.yaml", "lockfileVersion: '9.0'\n")
+        _write_file(worktree_path / "packages" / "app" / "package.json", '{"name":"app"}\n')
+        process_runner = _installer_runner()
+
+        preparation_report = ensure_frontend_node_modules(repo_path, worktree_path, process_runner)
+        root_record = _record_for(preparation_report, ".")
+        member_record = _record_for(preparation_report, "packages/app")
+
+        assert process_runner.calls == []
+        assert root_record.outcome == OUTCOME_NOT_PREPARED
+        assert root_record.reason == REASON_TOOL_MISSING
+        assert root_record.package_manager == "pnpm"
+        assert root_record.attempted_commands == ("pnpm install --ignore-scripts",)
+        assert any("this directory is a workspace root" in line for line in root_record.selection_evidence)
+        assert member_record.outcome == OUTCOME_SKIPPED
+        assert member_record.reason == REASON_WORKSPACE_COVERED
+
     def test_workspace_member_conflict_is_recorded_as_unprepared(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

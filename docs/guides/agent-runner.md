@@ -1168,7 +1168,7 @@ CI 容器镜像预装浏览器运行时是后续工作；首版只保证本地 r
 
 ## worktree 中的前端依赖（node_modules）
 
-同理，gitignored 的 `node_modules` 也不会被 `git worktree add` 物化，否则 worktree 里跑 `vite` 等构建会报 `vite: command not found`。runner 在补齐 env 文件之后，会对 worktree（而非主仓库）中所有含 `package.json` 的前端项目做**可恢复的准备 + 诊断**：装得上就装，装不上就把证据交给 Agent，绝不因此把 Issue 判为失败。
+同理，gitignored 的 `node_modules` 也不会被 `git worktree add` 物化，否则 worktree 里跑 `vite` 等构建会报 `vite: command not found`。runner 在补齐 env 文件之后，会对 worktree（而非主仓库）中所有含 `package.json` 的前端项目，以及仅由 `pnpm-workspace.yaml` 定义的 workspace 根，做**可恢复的准备 + 诊断**：装得上就装，装不上就把证据交给 Agent，绝不因此把 Issue 判为失败。
 
 1. **识别包管理器**：同时看 `package.json` 的 `packageManager` 字段、workspace 根配置（`pnpm-workspace.yaml` / 根 `package.json` 的 `workspaces`）与锁文件。
    - 单一锁文件：按锁文件选择 `pnpm install` / `npm ci` / `yarn install` / `bun install`（均带 `--ignore-scripts`）。
