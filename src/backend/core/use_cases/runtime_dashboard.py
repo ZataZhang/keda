@@ -50,7 +50,7 @@ _LABEL_STATUS_MAP: dict[str, RuntimeTaskStatus] = {
     "agent/review": RuntimeTaskStatus.WAITING,
     "agent/automated-review-passed": RuntimeTaskStatus.WAITING,
     "agent/blocked": RuntimeTaskStatus.BLOCKED,
-    "agent/failed": RuntimeTaskStatus.BLOCKED,
+    "agent/failed": RuntimeTaskStatus.FAILED,
 }
 
 #: 运行账本只能证明交付结果；历史失败不能证明 Issue 当前仍然阻塞。
@@ -68,7 +68,9 @@ SOURCE_ATTEMPT_LEDGER = "attempt_ledger"
 _UNTRUSTED_SYNC_STATUSES = frozenset({"pending_first_sync"})
 
 #: 只为这些分桶回查 attempt 账本，避免对整表任务做无界读取。
-_ATTEMPT_ENRICHED_STATUSES = frozenset({RuntimeTaskStatus.RUNNING, RuntimeTaskStatus.BLOCKED})
+_ATTEMPT_ENRICHED_STATUSES = frozenset(
+    {RuntimeTaskStatus.RUNNING, RuntimeTaskStatus.BLOCKED, RuntimeTaskStatus.FAILED}
+)
 
 #: 运行账本一次扫描的最大行数：窗口内正常量级远小于此，超出即属历史复盘（Stats 页面）。
 _RUN_SCAN_LIMIT = 1000
@@ -178,14 +180,6 @@ def _timeline_phase(issue_entry: Mapping[str, Any]) -> str | None:
     return None
 
 
-def _anomaly_reason(issue_entry: Mapping[str, Any]) -> str | None:
-    """把异常类型列表拼成一句可读的分桶依据；无异常时返回 ``None``。"""
-    anomaly_types = issue_entry.get("anomaly_types")
-    if not isinstance(anomaly_types, list) or not anomaly_types:
-        return None
-    return "检测到异常：" + "、".join(str(item) for item in anomaly_types)
-
-
 def _snapshot_task(
     *,
     repo_id: str,
@@ -199,13 +193,24 @@ def _snapshot_task(
     if not isinstance(issue_number, int):
         return None
     labels = tuple(label for label in (issue_entry.get("labels") or ()) if isinstance(label, str))
+    raw_anomaly_types = issue_entry.get("anomaly_types")
+    anomaly_types = (
+        tuple(anomaly_type for anomaly_type in raw_anomaly_types if isinstance(anomaly_type, str))
+        if isinstance(raw_anomaly_types, (list, tuple))
+        else ()
+    )
     issue_is_closed = str(issue_entry.get("state") or "").lower() == "closed"
     if issue_is_closed:
         status = RuntimeTaskStatus.CLOSED
         status_reason = "GitHub Issue 已关闭"
     else:
         status = status_for_labels(labels)
-        status_reason = "、".join(labels) if labels else None
+        status_labels = tuple(
+            label
+            for label in labels
+            if status is not None and _LABEL_STATUS_MAP.get(label) is status
+        )
+        status_reason = f"当前监控标签：{'、'.join(status_labels)}" if status_labels else None
         if status is None:
             if run_record is not None and run_record.outcome in _OUTCOME_STATUS_MAP:
                 status = _OUTCOME_STATUS_MAP[run_record.outcome]
@@ -213,8 +218,6 @@ def _snapshot_task(
             else:
                 status = RuntimeTaskStatus.UNKNOWN
                 status_reason = "监控快照没有可判定的生命周期标签"
-    if status in {RuntimeTaskStatus.BLOCKED, RuntimeTaskStatus.UNKNOWN}:
-        status_reason = _anomaly_reason(issue_entry) or status_reason
 
     title = issue_entry.get("title")
     url = issue_entry.get("url")
@@ -234,6 +237,7 @@ def _snapshot_task(
         last_outcome=run_record.outcome if run_record else None,
         prd_path=prd_path,
         labels=labels,
+        anomaly_types=anomaly_types,
     )
 
 
@@ -338,6 +342,7 @@ def _enrich_from_attempt(
         duration_seconds=duration_seconds,
         last_outcome=task.last_outcome,
         labels=task.labels,
+        anomaly_types=task.anomaly_types,
     )
 
 

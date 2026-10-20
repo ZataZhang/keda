@@ -29,13 +29,15 @@ class RuntimeTaskStatus(str, Enum):
     """Issue Agent 任务在运行看板上的生命周期分桶。
 
     分桶来源是 Console 已观察到的事实（GitHub Issue 状态、监控标签与运行账本），
-    不是推测：关闭的 Issue 归入 :attr:`CLOSED`；无法判定时返回 :attr:`UNKNOWN`
-    并附带原因，而不是猜一个。
+    不是推测：`agent/blocked` 与 `agent/failed` 分别归入 :attr:`BLOCKED` 和
+    :attr:`FAILED`；关闭的 Issue 归入 :attr:`CLOSED`；无法判定时返回
+    :attr:`UNKNOWN` 并附带原因，而不是猜一个。
     """
 
     RUNNING = "running"
     WAITING = "waiting"
     BLOCKED = "blocked"
+    FAILED = "failed"
     COMPLETED = "completed"
     CLOSED = "closed"
     UNKNOWN = "unknown"
@@ -49,10 +51,11 @@ class RuntimeTaskStatus(str, Enum):
 _STATUS_DISPLAY_ORDER: dict["RuntimeTaskStatus", int] = {
     RuntimeTaskStatus.RUNNING: 0,
     RuntimeTaskStatus.BLOCKED: 1,
-    RuntimeTaskStatus.WAITING: 2,
-    RuntimeTaskStatus.COMPLETED: 3,
-    RuntimeTaskStatus.CLOSED: 4,
-    RuntimeTaskStatus.UNKNOWN: 5,
+    RuntimeTaskStatus.FAILED: 2,
+    RuntimeTaskStatus.WAITING: 3,
+    RuntimeTaskStatus.COMPLETED: 4,
+    RuntimeTaskStatus.CLOSED: 5,
+    RuntimeTaskStatus.UNKNOWN: 6,
 }
 
 
@@ -70,7 +73,8 @@ class RuntimeTask:
         issue_title: Issue 标题；来源缺失时为 ``None``。
         issue_url: Issue 网页链接；来源缺失时为 ``None``。
         status: 生命周期分桶。
-        status_reason: 分桶依据，或无法判定时的原因。
+        status_reason: 当前分桶的直接来源，例如监控标签或 Issue 关闭状态。
+        anomaly_types: 监控快照发现的异常类型；异常与任务状态分开记录。
         phase: 最近一次观测到的生命周期阶段名。
         agent: 最近一次运行选择的 Agent 名称。
         preset: 最近一次 attempt 使用的模型 preset；旧记录为 ``None``。
@@ -102,6 +106,7 @@ class RuntimeTask:
     duration_seconds: float | None = None
     last_outcome: str | None = None
     labels: tuple[str, ...] = ()
+    anomaly_types: tuple[str, ...] = ()
 
     @property
     def task_key(self) -> str:

@@ -23,6 +23,7 @@ const STATUS_PRESENTATION: Record<RuntimeTaskStatus, { label: string; variant: B
   running: { label: "运行中", variant: "running" },
   waiting: { label: "等待值守", variant: "review" },
   blocked: { label: "阻塞", variant: "error" },
+  failed: { label: "失败", variant: "error" },
   completed: { label: "已完成", variant: "ready" },
   closed: { label: "已关闭", variant: "default" },
   unknown: { label: "状态未知", variant: "default" },
@@ -32,6 +33,7 @@ const STATUS_PRESENTATION: Record<RuntimeTaskStatus, { label: string; variant: B
 const STATUS_FILTERS: RuntimeTaskStatus[] = [
   "running",
   "blocked",
+  "failed",
   "waiting",
   "completed",
   "closed",

@@ -109,7 +109,7 @@ def test_status_for_labels_picks_the_most_urgent_bucket() -> None:
     """标签切换窗口内同时命中多个标签时，取最需要盯的分桶。"""
     assert status_for_labels(["agent/review"]) is RuntimeTaskStatus.WAITING
     assert status_for_labels(["agent/automated-review-passed"]) is RuntimeTaskStatus.WAITING
-    assert status_for_labels(["documentation", "agent/failed"]) is RuntimeTaskStatus.BLOCKED
+    assert status_for_labels(["documentation", "agent/failed"]) is RuntimeTaskStatus.FAILED
     assert status_for_labels(["agent/failed", "agent/running"]) is RuntimeTaskStatus.RUNNING
     assert status_for_labels(["bug"]) is None
 
@@ -156,7 +156,7 @@ def test_snapshot_labels_drive_status_and_running_duration(tmp_path) -> None:
     assert tasks[7].phase == "executing"
     assert tasks[6].status is RuntimeTaskStatus.WAITING
     assert tasks[5].status is RuntimeTaskStatus.BLOCKED
-    assert tasks[5].status_reason == "检测到异常：stalled"
+    assert tasks[5].status_reason == "当前监控标签：agent/blocked"
     assert tasks[4].status is RuntimeTaskStatus.CLOSED
     assert tasks[4].status_reason == "GitHub Issue 已关闭"
     assert summary.status_counts["running"] == 1

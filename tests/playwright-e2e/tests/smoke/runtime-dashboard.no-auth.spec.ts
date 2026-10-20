@@ -24,7 +24,8 @@ const RUNNING_TASK = {
   issue_title: 'Running Issue',
   issue_url: 'https://example.test/21',
   status: 'running',
-  status_reason: 'agent/running',
+  status_reason: '当前监控标签：agent/running',
+  anomaly_types: [],
   phase: 'implement',
   agent: 'codex',
   preset: 'default',
@@ -38,15 +39,16 @@ const RUNNING_TASK = {
   labels: ['agent/running'],
 }
 
-const BLOCKED_TASK = {
+const FAILED_TASK = {
   repo_id: 'keda-main',
   issue_number: 19,
   task_key: 'keda-main#19',
   repo_display_name: 'Keda Main',
   issue_title: 'Broken Issue',
   issue_url: 'https://example.test/19',
-  status: 'blocked',
-  status_reason: '检测到异常：label_pr_mismatch',
+  status: 'failed',
+  status_reason: '当前监控标签：agent/failed',
+  anomaly_types: ['label_pr_mismatch'],
   phase: 'publish',
   agent: 'claude',
   preset: null,
@@ -64,12 +66,14 @@ const BLOCKED_TASK = {
 function tasksPayload(overrides: Record<string, unknown> = {}) {
   return {
     generated_at: '2026-06-11T10:05:00+00:00',
-    tasks: [RUNNING_TASK, BLOCKED_TASK],
+    tasks: [RUNNING_TASK, FAILED_TASK],
     status_counts: {
       running: 1,
       waiting: 0,
-      blocked: 1,
+      blocked: 0,
+      failed: 1,
       completed: 0,
+      closed: 0,
       unknown: 0,
     },
     unavailable_sources: [],
@@ -173,7 +177,7 @@ test.describe('runtime board (mocked API)', () => {
     ).toContainText('运行中')
     await expect(
       page.getByTestId('runtime-task-row-keda-main-19'),
-    ).toContainText('阻塞')
+    ).toContainText('失败')
     // 默认视图不再铺仓库卡片：仓库级动作收在「仓库监控」一侧。
     await expect(page.getByTestId('dashboard-repo-header')).toHaveCount(0)
   })
@@ -182,7 +186,7 @@ test.describe('runtime board (mocked API)', () => {
     await mockBoardApi(page)
     await page.goto('/app/dashboard')
 
-    await page.getByTestId('runtime-filter-blocked').click()
+    await page.getByTestId('runtime-filter-failed').click()
     await expect(page.getByTestId('runtime-task-row-keda-main-19')).toBeVisible()
     await expect(page.getByTestId('runtime-task-row-keda-main-21')).toHaveCount(0)
   })
@@ -223,7 +227,7 @@ test.describe('runtime board (mocked API)', () => {
     await mockBoardApi(page)
     await page.goto('/app/dashboard')
 
-    // 自动选中的是无 PRD 的阻塞任务以外的第一条：这里显式点未关联 PRD 的行。
+    // 默认选中运行任务；这里显式点开无 PRD 的失败任务。
     await page.getByTestId('runtime-task-row-keda-main-19').click()
     await expect(page.getByTestId('runtime-impact-no-prd')).toContainText('未关联 PRD')
     await expect(page.getByTestId('runtime-impact-bar')).toHaveCount(0)
@@ -239,7 +243,9 @@ test.describe('runtime board (mocked API)', () => {
           running: 0,
           waiting: 0,
           blocked: 0,
+          failed: 0,
           completed: 0,
+          closed: 0,
           unknown: 0,
         },
         unavailable_sources: ['run_history'],
@@ -290,10 +296,21 @@ test.describe('desktop companion page (mocked API)', () => {
           issue_number: 294 + index,
           task_key: `keda-main#${294 + index}`,
           status: 'blocked',
-          status_reason: 'agent/blocked',
+          status_reason: '当前监控标签：agent/blocked',
+          anomaly_types: [],
+          labels: ['agent/blocked'],
           phase,
           prd_path: null,
         })),
+        status_counts: {
+          running: 0,
+          waiting: 0,
+          blocked: phases.length,
+          failed: 0,
+          completed: 0,
+          closed: 0,
+          unknown: 0,
+        },
       },
     })
     await page.goto('/app/companion')
@@ -301,7 +318,7 @@ test.describe('desktop companion page (mocked API)', () => {
     for (const [index, label] of labels.entries()) {
       const row = page.getByTestId(`desktop-companion-row-keda-main-${294 + index}`)
       await expect(row.getByTestId('runtime-task-phase')).toHaveText(`阶段：${label}`)
-      await expect(row.getByTestId('runtime-task-blocked-reason')).toContainText('agent/blocked')
+      await expect(row.getByTestId('runtime-task-status-reason')).toContainText('agent/blocked')
     }
     await expect(page.getByTestId('desktop-companion-list')).toBeVisible()
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy()
@@ -322,7 +339,9 @@ test.describe('desktop companion page (mocked API)', () => {
           running: activeTasks.length,
           waiting: 0,
           blocked: 0,
+          failed: 0,
           completed: 0,
+          closed: 0,
           unknown: 0,
         },
       },
