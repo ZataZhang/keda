@@ -31,10 +31,10 @@
   成员而不是当前目录，且退出码仍为 0——那是「安装成功但依赖缺失」的假绿灯。
 - 安装退出码为 0 但目录里没出现 ``node_modules`` 时不判成功，记
   ``install_produced_no_dependencies`` 并继续走复用回退。
-- 复用主检出的 ``node_modules`` 前先比对锁文件内容：不一致说明分支依赖已漂移，
-  链接过来会让后续命令在错误环境里运行并伪装成就绪，宁可不复用。
-- worktree 内已存在的 ``node_modules``（目录或符号链接）永不覆盖——对已有
-  worktree 重跑只补空缺。
+- 复用主检出的 ``node_modules`` 前先比对 ``package.json`` 和锁文件：两边必须至少有
+  一份内容相同的锁文件；依赖输入不同或没有锁文件时不复用，避免把未知环境伪装成就绪。
+- worktree 内已存在的有效 ``node_modules``（目录或符号链接）永不覆盖；悬空符号链接
+  保留但记录为未就绪，对已有 worktree 重跑只补空缺。
 - 符号链接通过 ``info/exclude`` 排除出 git（见
   :func:`exclude_frontend_node_modules_from_git`），避免 agent 的 ``git add -A``
   提交机器本地绝对链接。
@@ -57,6 +57,7 @@ from backend.core.use_cases.worktree_dependency_context import (
     OUTCOME_PRESENT,
     OUTCOME_REUSED,
     OUTCOME_SKIPPED,
+    REASON_DANGLING_NODE_MODULES_SYMLINK,
     REASON_INSTALL_FAILED,
     REASON_INSTALL_NO_OUTPUT,
     REASON_LAUNCH_FAILED,
@@ -288,14 +289,30 @@ def _pnpm_workspace_patterns(workspace_file_path: Path) -> tuple[str, ...]:
 
 
 def _matches_workspace_pattern(relative_posix_path: str, pattern: str) -> bool:
-    """workspace 成员匹配：支持精确路径与简单 glob，容忍 trailing slash。"""
+    """按路径段匹配 workspace pattern；`*` 不跨 `/`，`**` 可以跨层级。"""
     normalized_pattern = pattern.strip().rstrip("/")
     if not normalized_pattern:
         return False
-    candidate_path = relative_posix_path.rstrip("/")
-    if fnmatch.fnmatch(candidate_path, normalized_pattern):
-        return True
-    return fnmatch.fnmatch(f"{candidate_path}/", normalized_pattern)
+    pattern_segments = normalized_pattern.split("/")
+    candidate_segments = relative_posix_path.strip("/").split("/")
+    matched_segment_counts = {0}
+    for pattern_segment in pattern_segments:
+        if pattern_segment == "**":
+            minimum_segment_count = min(matched_segment_counts, default=len(candidate_segments) + 1)
+            matched_segment_counts = set(range(minimum_segment_count, len(candidate_segments) + 1))
+            continue
+        matched_segment_counts = {
+            candidate_segment_count + 1
+            for candidate_segment_count in matched_segment_counts
+            if candidate_segment_count < len(candidate_segments)
+            and fnmatch.fnmatchcase(
+                candidate_segments[candidate_segment_count],
+                pattern_segment,
+            )
+        }
+        if not matched_segment_counts:
+            return False
+    return len(candidate_segments) in matched_segment_counts
 
 
 def _workspace_member_patterns(parent_dir_path: Path) -> tuple[str, ...]:
@@ -558,11 +575,21 @@ def _try_install_frontend_dependencies(
     )
 
 
-def _lockfiles_match_across_checkouts(
-    repo_project_path: Path,
-    worktree_project_path: Path,
-) -> bool:
-    """主检出与 worktree 的锁文件内容是否一致（不一致即依赖已漂移）。"""
+def _dependency_inputs_match_across_checkouts(reuse_target: _ReuseTarget) -> bool:
+    """package.json 和至少一份锁文件都相同时，才允许复用主检出依赖。"""
+    repo_project_path = reuse_target.repo_root_path / reuse_target.relative_project_path
+    worktree_project_path = reuse_target.project_dir_path
+    repo_manifest_path = repo_project_path / PACKAGE_MANIFEST_FILE_NAME
+    worktree_manifest_path = worktree_project_path / PACKAGE_MANIFEST_FILE_NAME
+    if not repo_manifest_path.is_file() or not worktree_manifest_path.is_file():
+        return False
+    try:
+        if repo_manifest_path.read_bytes() != worktree_manifest_path.read_bytes():
+            return False
+    except OSError:
+        return False
+
+    matching_lockfile_count = 0
     for lockfile_name in _LOCKFILE_PACKAGE_MANAGERS:
         repo_lockfile_path = repo_project_path / lockfile_name
         worktree_lockfile_path = worktree_project_path / lockfile_name
@@ -570,12 +597,13 @@ def _lockfiles_match_across_checkouts(
             return False
         if not repo_lockfile_path.is_file():
             continue
+        matching_lockfile_count += 1
         try:
             if repo_lockfile_path.read_bytes() != worktree_lockfile_path.read_bytes():
                 return False
         except OSError:
             return False
-    return True
+    return matching_lockfile_count > 0
 
 
 def _try_reuse_main_checkout_dependencies(
@@ -583,8 +611,9 @@ def _try_reuse_main_checkout_dependencies(
 ) -> _ReuseAttempt:
     """安全可行时复用主检出的 ``node_modules``（零成本回退）。
 
-    只在两棵树的锁文件一致时复用：把漂移过的依赖链进 worktree 会让后续命令在错误的
-    环境里运行，并把「缺失」伪装成「就绪」。
+    只在两棵树的 ``package.json`` 相同且至少有一份锁文件一致时复用：把漂移过的依赖链进
+    worktree 会让后续命令在错误的环境里运行，并把「缺失」伪装成「就绪」。没有锁文件时
+    无法证明依赖版本相同，因此不复用。
 
     Args:
         reuse_target: 复用所需的三元组路径（主检出根、worktree 项目目录、相对路径）。
@@ -604,16 +633,13 @@ def _try_reuse_main_checkout_dependencies(
                 f"({repo_project_path})"
             ),
         )
-    if not _lockfiles_match_across_checkouts(
-        repo_project_path,
-        reuse_target.project_dir_path,
-    ):
+    if not _dependency_inputs_match_across_checkouts(reuse_target):
         return _ReuseAttempt(
             succeeded=False,
             reason=REASON_REUSABLE_STALE,
             detail=(
-                "main checkout lockfiles differ from this branch; reusing them would "
-                "present a stale environment as ready"
+                "package.json and at least one lockfile must exist and match in both checkouts; "
+                "dependency inputs are missing, different, or unverifiable"
             ),
         )
     try:
@@ -640,8 +666,13 @@ def _prepare_frontend_project(
         preparation_request.worktree_path,
     )
     target_node_modules_path = preparation_request.project_dir_path / NODE_MODULES_DIR_NAME
-    # is_symlink() 兜住断链：exists() 会跟随链接目标，悬空符号链接会被误判为缺失而被覆盖。
-    if target_node_modules_path.exists() or target_node_modules_path.is_symlink():
+    if target_node_modules_path.is_symlink() and not target_node_modules_path.exists():
+        project_outcome = _ProjectOutcome(
+            outcome=OUTCOME_NOT_PREPARED,
+            reason=REASON_DANGLING_NODE_MODULES_SYMLINK,
+            detail="node_modules is a dangling symlink; it was preserved and dependencies are not ready",
+        )
+    elif target_node_modules_path.exists():
         project_outcome = _ProjectOutcome(
             outcome=OUTCOME_PRESENT,
             reason=REASON_NO_ACTION_NEEDED,
@@ -721,7 +752,7 @@ def ensure_frontend_node_modules(
 
     1. 识别包管理器（packageManager 字段 + workspace 根配置 + 锁文件；冲突不硬选）。
     2. 安全可行时执行一次仓库内安装（可执行文件缺失或启动失败只记诊断）。
-    3. 安装没做成时尝试复用主检出的依赖（锁文件一致才复用）。
+    3. 安装没做成时尝试复用主检出的依赖（package.json 与至少一份锁文件都一致才复用）。
     4. 三步都没得到可用依赖时只记录诊断并继续下一个项目——**Agent 仍会启动**，
        由它决定下一步。
 

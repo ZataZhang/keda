@@ -6,7 +6,7 @@
   准备逻辑自身崩溃，全部只写成结构化诊断记录。
 - 包管理器识别结合 ``packageManager`` 字段、workspace 根配置与锁文件三类证据，
   互相矛盾时不静默硬选，而是把证据全部交给 Agent。
-- 复用主检出 ``node_modules`` 之前先做锁文件漂移检查，宁可不复用也不伪装就绪。
+- 复用主检出 ``node_modules`` 之前先核对 ``package.json`` 与锁文件，证据不足时宁可不复用。
 
 ``create_or_reuse_worktree`` 的真实接线见 ``tests/test_worktree_cli.py``。
 """
@@ -27,6 +27,7 @@ from backend.core.use_cases.worktree_dependency_context import (
     OUTCOME_PRESENT,
     OUTCOME_REUSED,
     OUTCOME_SKIPPED,
+    REASON_DANGLING_NODE_MODULES_SYMLINK,
     REASON_INSTALL_FAILED,
     REASON_INSTALL_NO_OUTPUT,
     REASON_MANAGER_CONFLICT,
@@ -570,7 +571,9 @@ class TestEnsureFrontendNodeModules:
         preparation_report = ensure_frontend_node_modules(repo_path, worktree_path, process_runner)
 
         assert process_runner.calls == []
-        assert _record_for(preparation_report, "frontend").outcome == OUTCOME_PRESENT
+        project_record = _record_for(preparation_report, "frontend")
+        assert project_record.outcome == OUTCOME_NOT_PREPARED
+        assert project_record.reason == REASON_DANGLING_NODE_MODULES_SYMLINK
         assert (worktree_path / "frontend" / "node_modules").readlink() == dangling_target
 
     def test_launch_failure_is_recorded_without_aborting(
