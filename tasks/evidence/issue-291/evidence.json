@@ -91,11 +91,11 @@
       "evidence_files": [
         "rv-4-packaging-diff-test.txt"
       ],
-      "output_summary": "真实 `uv run pytest tests/test_kedacode_operator_skill.py -q` 的负控为 1 failed / 27 passed，守卫指出注入的无效 flag；正式全文件运行 28 passed。范围以 `git merge-base main HEAD`（e6b60d94）为基线检查整个工作树：Skill 目录下恰好两份文件（SKILL.md、references/create-issue.md），src/ 其余路径零改动，publish_prd_file 无差异。上一轮 `just test all` 失败的 6 个 node id 现在全部通过（6 passed）；它们的测试文件与 `main`@4d6bde3d 对应文件逐字节一致，属从主线同步的基线修复，不是本 Issue 的产出。",
-      "explanation": "脚本临时把无效 kc flag 写入受管 references 文件并运行真实目标 pytest，确认发行包命令漂移守卫转红；恢复原字节后以 `PYTEST_ADDOPTS=--no-testmon` 强制完整运行同一 pytest 文件。范围检查用 `git diff --name-only <merge-base>` 覆盖已提交与工作区内容：只允许两份 Skill 文档；`tests/` 下的每个改动都用 `git show main:<path>` 逐字节比对，任何与主线当前版本不一致的自创测试改动都会被拒绝；其余 `src/` 路径必须零改动。最后真实运行上一轮失败的 6 个 node id，证明 `just test all` 的门禁失败已随主线修复同步消失，而不是被忽略或豁免。",
-      "risks": "testmon 被关闭以确保目标 Skill 测试文件完整运行；28 项通过。三个测试文件来自 `main` 的 `fix(ci): restore main validation`，本分支只是把它们同步到较旧的 merge base，因此相对当前主线的净改动仍只有两份 Skill 文档；如果评审只看相对 merge base 的三点差异，会看到这三个测试文件，但它们与主线逐字节一致。SKILL.md 新增一条共享底线后触发了 70 行非空行上限守卫，因此把原有 First-time bootstrap 一句并入相邻的 Confirmation 底线（内容未丢失），这是保持结构守卫通过所必需的最小调整。合并后仍需按验收要求执行 `kc skill install` 刷新用户级安装副本。证据验证的是随包文档措辞、受管文件守卫与门禁回归，没有创建真实 GitHub Issue。",
+      "output_summary": "真实 `uv run pytest tests/test_kedacode_operator_skill.py -q` 的负控为 1 failed / 27 passed，守卫指出注入的无效 flag；正式全文件运行 28 passed。范围以 `git merge-base main HEAD`（e6b60d94）为基线枚举整个工作树并逐条分类：`skill_changes=2`、`test_changes_match_main=3`、`runner_manifest=1`、`unexpected=0`；三个测试文件与当前 `main` 逐字节一致，`tasks/evidence/issue-291/evidence.json` 是 runner 强制要求的结构化证据 manifest，除此之外没有任何非允许路径。`publish_prd_file` 无差异。安装检查用 `KEDACODE_SKILLS_DIR` 把 `kc skill install --force` 落到隔离目录，命令 exit 0，11 个受管 Markdown 文件全部与随包源逐字节一致（mismatched=0）。上一轮 `just test all` 失败的 6 个 node id 现在全部通过（6 passed）。",
+      "explanation": "脚本临时把无效 kc flag 写入受管 references 文件并运行真实目标 pytest，确认发行包命令漂移守卫转红；恢复原字节后以 `PYTEST_ADDOPTS=--no-testmon` 强制完整运行同一 pytest 文件。范围检查用 `git diff --name-only <merge-base>` 覆盖已提交与工作区内容，并对每条路径分类：两份 Skill 文档是唯一实现改动；`tests/` 下的每个改动都用 `git show main:<path>` 逐字节比对，只接受主线已有版本；结构化证据 manifest 单独计数；任何未列入这三类的路径都会让脚本 exit 1，因此不会再出现'清单漏检但仍报绿'。安装检查执行与合并后相同的 `kc skill install --force`，仅通过 `KEDACODE_SKILLS_DIR` 把写入根限制在 worktree 内的隔离目录，然后逐字节比较全部受管 `*.md` 文件。最后真实运行上一轮失败的 6 个 node id，证明 `just test all` 的门禁失败已随主线修复同步消失。",
+      "risks": "testmon 被关闭以确保目标 Skill 测试文件完整运行；28 项通过。三个测试文件来自 `main` 的 `fix(ci): restore main validation`，本分支只是把它们同步到较旧的 merge base，因此相对当前主线的净改动仍只有两份 Skill 文档；如果评审只看相对 merge base 的三点差异，会看到这三个测试文件，但它们与主线逐字节一致。`tasks/evidence/issue-291/evidence.json` 是 runner 对带 `iar:structured-evidence` marker 的 Issue 强制要求的结构化 manifest：本轮证据门禁与 verifier 都要读取它，删除它会让交付直接失败，因此它被显式列为一个受控路径而不是被静默放行；范围 oracle 对任何额外路径仍然 exit 1。安装副本检查在合并前执行，但使用的是与合并后相同的 `kc skill install --force` 和同一套随包文件；合并不会改变这些文件内容，合并后只需重跑同一幂等命令。SKILL.md 新增一条共享底线后触发了 70 行非空行上限守卫，因此把原有 First-time bootstrap 一句并入相邻的 Confirmation 底线（内容未丢失），这是保持结构守卫通过所必需的最小调整。证据验证的是随包文档措辞、受管文件守卫、安装副本一致性与门禁回归，没有创建真实 GitHub Issue。",
       "negative_control": "脚本临时向 `references/create-issue.md` 追加 `kc issue create --rv-not-a-real-flag tasks/pending/example.md`，运行真实 `uv run pytest tests/test_kedacode_operator_skill.py -q`，随后在 finally 中按原始字节恢复文件；守卫必须拒绝该 flag 并 exit 1。",
-      "expected_fail": "命令漂移守卫 exit 1，输出 `references/create-issue.md: kc issue create --rv-not-a-real-flag ... 使用了 --help 中不存在的 flag`，汇总 1 failed / 27 passed；恢复后 exit 0 且 28 passed。绿色路径输出 `scope_vs_base: skill_changes=2; test_changes_match_main=3; non_skill_source_changes=0` 与 `previously_failing_gate_tests=passed (6)`。",
+      "expected_fail": "命令漂移守卫 exit 1，输出 `references/create-issue.md: kc issue create --rv-not-a-real-flag ... 使用了 --help 中不存在的 flag`，汇总 1 failed / 27 passed；恢复后 exit 0 且 28 passed。绿色路径输出 `scope_paths: skill_changes=2; test_changes_match_main=3; runner_manifest=1; unexpected=0`、`install_command_exit=0`、`installed_copy_matches_packaged_source=true` 与 `previously_failing_gate_tests=passed (6)`。",
       "stdout_assertions": [
         {
           "pattern": "negative_control_exit=1",
@@ -110,7 +110,11 @@
           "must_match": true
         },
         {
-          "pattern": "scope_vs_base: skill_changes=2; test_changes_match_main=3; non_skill_source_changes=0",
+          "pattern": "scope_paths: skill_changes=2; test_changes_match_main=3; runner_manifest=1; unexpected=0",
+          "must_match": true
+        },
+        {
+          "pattern": "scope_non_allowed_paths=0",
           "must_match": true
         },
         {
@@ -119,6 +123,14 @@
         },
         {
           "pattern": "publish_prd_file implementation unchanged; no CLI source file changed",
+          "must_match": true
+        },
+        {
+          "pattern": "install_command_exit=0",
+          "must_match": true
+        },
+        {
+          "pattern": "installed_copy_matches_packaged_source=true",
           "must_match": true
         },
         {
