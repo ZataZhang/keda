@@ -4134,8 +4134,9 @@ kc console --api-only --no-browser
   里取 URL 或配合 SSH 端口转发（`ssh -L 8313:127.0.0.1:8313 <host>`）。
 - 源码开发模式缺少静态面板产物时，默认 `kc console` 会在监听前报错退出。
   在仓库根目录运行 `just console-sync` 构建并同步 `frontend-public` 产物，
-  或安装内置静态产物的发布 wheel。若本次只需要 API，可显式运行
-  `kc console --api-only`；服务会正常提供 API，但 `/` 没有面板并返回 404。
+  或安装内置静态产物的发布 wheel。若产物缺失但仍需启动 API，可显式运行
+  `kc console --api-only`；此时服务会正常提供 API，但 `/` 返回 404。产物存在时，
+  该选项仍按默认行为挂载面板。
   前后端并行开发仍可沿用 `just run` / `pnpm --filter frontend-public dev`。
 - 面板与 API 同源，开发代理仅在 `frontend-public dev` 模式生效。
 - 改后端路由后必须**重启** `kc console` 才生效；`just console-sync` 只替换

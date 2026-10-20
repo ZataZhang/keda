@@ -241,7 +241,10 @@ def console_callback(
         bool,
         typer.Option(
             "--api-only",
-            help="Allow startup without assets; the panel at / is unavailable.",
+            help=(
+                "Allow API-only startup when dashboard assets are missing; "
+                "/ then returns 404. Existing assets keep the panel enabled."
+            ),
         ),
     ] = False,
     no_browser: Annotated[

@@ -440,8 +440,12 @@ def test_api_only_help_explains_that_the_panel_is_unavailable() -> None:
 
     assert result.exit_code == 0
     assert "--api-only" in result.output
-    assert "Allow startup without assets" in result.output
-    assert "panel at / is unavailable" in result.output
+    assert "Allow API-only startup" in result.output
+    assert "dashboard" in result.output
+    assert "assets are missing" in result.output
+    assert "/ then returns" in result.output
+    assert "Existing assets keep the panel" in result.output
+    assert "enabled." in result.output
 
 
 class FakeTimer:

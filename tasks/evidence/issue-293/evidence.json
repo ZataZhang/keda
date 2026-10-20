@@ -30,9 +30,9 @@
       "item_name": "静态产物存在时默认启动并通过根路径返回面板 HTML",
       "command": "bash tasks/evidence/issue-293/scripts/rv-3-static-panel.sh",
       "evidence_files": ["rv-3-panel-served.txt"],
-      "output_summary": "just console-sync 成功并生成 index.html。负控移走产物后用 API-only 启动，/ 返回 404。恢复产物后不加 --api-only 的真实 kc console 返回 / HTTP 200、Content-Type text/html，响应含 <!DOCTYPE html> 与 <html。uv build 成功生成 wheel，归档内含 backend/api/static/console/index.html。",
-      "explanation": "脚本通过仓库实际构建入口生成面板，分别启动真实 CLI 服务并用 curl 请求根路径；此外构建 wheel 并直接检查归档成员，证明发行包仍打入静态 index.html。负控与通过结果覆盖真实静态挂载边界，没有替换服务或响应。",
-      "risks": "wheel 资源已验证打包，但未在隔离环境安装后再启动 CLI；API 进程的 monitor scheduler 启动并完成本地初始扫描，console 配置和数据库隔离在 evidence scripts 目录。",
+      "output_summary": "just console-sync 成功并生成 index.html。负控移走产物后用 API-only 启动，/ 返回 404。恢复产物后默认 kc console 返回 / HTTP 200、Content-Type text/html，响应含 HTML 标记。构建的 wheel 内含静态 index.html；从仓库外的隔离目录用该 wheel 启动 kc console 后，/ 同样返回 HTTP 200 text/html。",
+      "explanation": "脚本通过仓库实际构建入口生成面板，分别启动真实 CLI 服务并用 curl 请求根路径；脚本还构建 wheel 并检查归档成员。另将 wheel 在仓库外目录通过 uv 隔离运行真实 kc console 并请求根路径，证明运行时由 wheel 提供面板资源；负控与通过结果都没有替换服务或响应。",
+      "risks": "隔离 wheel 运行时的 monitor scheduler 因临时工作目录不属于 Git 仓库而记录设置读取警告；这不影响面板路由与 HTML 响应。其他 API 进程的配置和数据库隔离在 evidence scripts 目录。",
       "negative_control": "bash tasks/evidence/issue-293/scripts/rv-3-static-panel.sh 中的真实变体：将已构建的 console 静态目录临时移走，再运行 uv run kc console --api-only --no-browser --port <空闲端口>，请求 /。",
       "expected_fail": "静态产物缺失的负控根路径返回 HTTP 404，Content-Type 不满足面板 HTML 断言；因此要求默认面板 HTTP 200 的 item 3 oracle 变红。恢复目录后真实默认启动返回 HTTP 200 与 text/html。"
     },

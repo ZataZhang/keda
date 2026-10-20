@@ -84,7 +84,7 @@ def _mount_console_static() -> None:
     if not console_dir.is_dir():
         _logger.warning(
             "Console static assets not found at backend.api.static/console; "
-            "serving API-only mode. From a source checkout, run "
+            "the dashboard is unavailable. From a source checkout, run "
             "`just console-sync` from the repository root, or install a "
             "release wheel with the assets bundled."
         )
