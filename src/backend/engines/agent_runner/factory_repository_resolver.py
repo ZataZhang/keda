@@ -11,6 +11,7 @@ part of :mod:`backend.engines.agent_runner.factory`.
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 from pathlib import Path
 
 from backend.core.shared.models.agent_model_preset import AgentModelPreset
@@ -420,20 +421,49 @@ def _anchor_memory_config(
     - 先对每个字符串调用 :meth:`Path.expanduser`（处理 ``~``）。
     - 剩余为相对路径者，与 ``repo_root_path`` 拼接形成绝对路径。
     - 已经是绝对路径（含 ``expanduser`` 产物）的字符串原样保留。
+    - 默认 ``base_dir`` 只让短期记忆移到本机状态目录；长期记忆仍留在仓库中。
+      显式自定义 ``base_dir`` 继续同时控制短期与长期记忆。
 
     ``MemoryConfig`` 是 frozen dataclass，构造替换通过
     :func:`dataclasses.replace` 完成。
     """
-    resolved_base = _resolve_anchor_path(memory.base_dir, repo_root_path)
-    resolved_drafts = _resolve_anchor_path(memory.skill_drafts_dir, repo_root_path)
+    canonical_repo_root = repo_root_path.resolve()
+    resolved_base = _resolve_anchor_path(memory.base_dir, canonical_repo_root)
+    resolved_drafts = _resolve_anchor_path(memory.skill_drafts_dir, canonical_repo_root)
     resolved_promoted = tuple(
-        _resolve_anchor_path(directory, repo_root_path) for directory in memory.promoted_skills_dirs
+        _resolve_anchor_path(directory, canonical_repo_root)
+        for directory in memory.promoted_skills_dirs
     )
+    if memory.short_term_base_dir is not None:
+        resolved_short_term_base = _resolve_anchor_path(
+            memory.short_term_base_dir,
+            canonical_repo_root,
+        )
+    elif memory.base_dir == ".kedacode/memory":
+        resolved_short_term_base = str(product_identity.state_home() / "memory")
+    else:
+        # 自定义 base_dir 仍是短期记忆的显式落点；默认值只改变短期记忆的位置。
+        resolved_short_term_base = resolved_base
+    repository_local_legacy_base = str(canonical_repo_root / ".kedacode" / "memory")
+    if memory.base_dir == ".kedacode/memory":
+        default_legacy_base_dirs = (repository_local_legacy_base,)
+    else:
+        # 自定义路径上的旧 repo_id 分区也要可读；旧默认仓库路径继续只读兼容。
+        default_legacy_base_dirs = (resolved_base, repository_local_legacy_base)
+    legacy_short_term_base_dirs = memory.legacy_short_term_base_dirs or tuple(
+        dict.fromkeys(default_legacy_base_dirs)
+    )
+    short_term_repository_identity = hashlib.sha256(
+        str(canonical_repo_root).encode("utf-8")
+    ).hexdigest()
     return dataclasses.replace(
         memory,
         base_dir=resolved_base,
         skill_drafts_dir=resolved_drafts,
         promoted_skills_dirs=resolved_promoted,
+        short_term_base_dir=resolved_short_term_base,
+        short_term_repository_identity=short_term_repository_identity,
+        legacy_short_term_base_dirs=legacy_short_term_base_dirs,
     )
 
 

@@ -5155,29 +5155,31 @@ PRD 的 `Delivery Dependencies` 小节会解析为两类依赖边（Issue 与 PR
 
 ## 本地记忆持久化与 Skill 蒸馏（Memory Persistence & Skill Distillation）
 
-Agent Runner 默认开启两层**本地**记忆与 skill 蒸馏循环，用于把同类 Issue 的成功修复经验沉淀给后续 Issue 复用。所有数据保存在**目标仓库的主检出** `.kedacode/memory/` 与 `.kedacode/skills/` 下（默认被 `.gitignore` 排除），不引入外部数据库或服务。即使每个 Issue 在独立的工作副本里跑，记忆与 skill 也都在主检出里累积并跨 Issue 共享——目录的解析由 `backend.engines.agent_runner.factory._anchor_memory_config` 在构造 `RepositoryRunContext` 时一次性绝对化到 `repo_path`。
+Agent Runner 默认开启本地记忆与 skill 蒸馏，用于把成功修复经验沉淀为待审阅的 skill 草稿。短期执行详情默认保存在 Keda 用户状态目录；长期记忆和 skill 目录仍按现有 `base_dir` / skill 配置落在仓库。即使 Issue 在独立工作副本里运行，工厂也会在构造 `RepositoryRunContext` 时用主检出根生成稳定的本地仓库身份，因此同一仓库的 worktree 共用短期记录、不同路径下的同名仓库互相隔离。
 
 ### 数据落点
 
 | 用途 | 路径 | 格式 |
 |---|---|---|
-| 短期记忆（每个 Issue 的执行轨迹） | `<repo_path>/.kedacode/memory/short_term/<repo_id>/<issue_number>/context.json` | JSON |
+| 短期记忆摘要与详情引用 | `~/.kedacode/memory/short_term/<repo_identity>/<issue_number>/context.json` | JSON |
+| 完整 attempt detail | 同目录下 `attempt-details/<sha256>.log` | UTF-8 文本 |
 | 长期记忆（项目约定 / 模式） | `<repo_path>/.kedacode/memory/long_term/<category>/<topic>.md` | Markdown + YAML front matter |
 | Skill 草稿 | `<repo_path>/.kedacode/skills/drafts/<name>.md` | Markdown + YAML front matter (`draft: true`) |
 | 已晋升 skill | `<repo_path>/.kedacode/skills/<name>.md`（默认；可配置） | Markdown + YAML front matter (`draft: false`) |
 
 注：相对路径 **相对目标仓库主检出根** 解析，而不是相对每个 Issue 的工作副本。
 
-- 短期记忆目录使用 runner 注入的稳定 registry `repo_id`，再按 Issue 编号分区；不使用
-  `issue-<N>` worktree 名作为仓库身份。读取时会兼容旧版 `issue-<N>/<N>/context.json`，
-  下一次写入时落到稳定仓库分区。
-- 每轮 attempt 都追加到历史；未显式提供任务摘要时，`summary` 更新为最近 attempt 的详情。
-  `updated_at` 在每次写入时刷新。
+- `<repo_identity>` 是 canonical 主检出路径的 SHA-256；哈希只用于本机短期目录隔离，不依赖仓库名或 registry `repo_id`。迁移主检出路径会生成新的本机身份。
+- `context.json` 的 `summary` 和每个 attempt 的 `detail` 只保留详情中的首条有效诊断行（跳过空行、代码围栏和 `stdout:` / `stderr:` 标签），最多 240 个字符；完整文本通过相对 `detail_log_path` 引用。`final_solution` 也使用同样的摘要与日志引用格式。
+- 读取新格式时，store 会把可用详情日志还原成完整文本，因此成功后的 Skill 蒸馏仍会收到完整 attempt history 和 final solution。缺失、非法、越界或指向目录外的符号链接会保留 JSON 中的摘要，不中断读取。
+- 旧版仓库内 `<repo_path>/.kedacode/memory/short_term/<repo_id>/<issue_number>/context.json` 仅作为只读 fallback；自定义 `base_dir` 还会只读查找该路径下的旧 `repo_id` 分区。旧版 `issue-<N>` 分区也兼容。读取不会迁移、覆盖或删除旧文件。全局默认目录不会按 `repo_id` 猜测或读取无身份的旧分区。
 
 ### 锚点与并发语义
 
-- `config.toml` `[agent_runner.memory]` 的 `base_dir` / `skill_drafts_dir` / `promoted_skills_dirs` 中的**相对路径**在 engines 层会被解析为 `<repo_path>/<rel>` 的绝对路径；**绝对路径或 ``~``** 会被原样使用，不再挂到任何锚点下。
-- 想把记忆放在仓库外（防 `git clean -fdx` 误删或多机共享），运营者把上述字段改为绝对路径即可，例如：
+- `config.toml` `[agent_runner.memory]` 的相对 `base_dir` / `skill_drafts_dir` / `promoted_skills_dirs` 仍解析到 `<repo_path>/<rel>`；绝对路径或 ``~`` 展开后的路径原样使用。
+- `base_dir` 恰好等于默认字符串 `.kedacode/memory` 时，短期记忆默认写入 `~/.kedacode/memory`，长期记忆继续写入仓库下 `.kedacode/memory`。显式写出同一个默认字符串也采用此行为，因为无法区分它是默认值还是显式配置。
+- 如需显式把短期与长期记忆都放回仓库，可把 `base_dir` 写成 `./.kedacode/memory` 或该仓库内的绝对路径；任意非默认自定义 `base_dir` 会同时控制短期和长期记忆。Skill 草稿与晋升路径保持现有独立配置。
+- 例如，下面的配置会把短期与长期记忆都放到用户状态目录：
 
 ```toml
 [agent_runner.memory]
@@ -5186,14 +5188,14 @@ skill_drafts_dir = "~/.kedacode/memory/keda-main/skills/drafts"
 promoted_skills_dirs = ["~/.kedacode/memory/keda-main/skills"]
 ```
 
-- 共享锚点下三个 store 的写入统一为 ``tmp + os.replace`` 原子替换；并发场景是 ``last-write-wins``，不会出现半写损坏文件。
+- 写入通过共享 ``tmp + os.replace`` 原子写入器落盘；并发 context 更新采用 ``last-write-wins``，不会出现半写损坏文件。
 - 运行时 `build_default_memory_services(worktree_path, config.memory)` 收到相对路径时会发 `logger.warning`，提示预期由 factory 绝对化；这是防回归告警，正常生产路径不应出现。
 
 ### 触发点
 
 - `kc run <issue>` 启动：`build_prompt` 通过 `core/agent/memory/memory_loader.load_relevant_memory` 检索与当前 Issue 标签/标题/正文相关的长期记忆和已晋升 skills，以**目录形式**（name / description / 路径，不含全文）注入 prompt。
-- `run_agent_until_committed` 每轮尝试结束：调用 `core/agent/memory/short_term_memory.save_short_term_memory` 写入 `context.json`，记录尝试序号、失败类型、完整详情；成功时另存最终方案摘要，供后续提炼回看。
-- `run_agent_until_committed` 成功返回、`_finish_implementation_publication` 开头：只对明确记录为成功且带实际 Agent 名称的执行生成 skill。蒸馏会读取该 Issue 的完整短期尝试历史、已记录的最终方案、相对 base branch 的真实提交 diff 与验证命令结果，再由最后一个成功 Agent 的只读 `generate` 能力提炼。生成内容必须包含触发条件、步骤、验证、陷阱和证据，并通过格式与本地路径 / Issue 编号过滤后才写入草稿；证据、生成或写盘失败都不阻塞后续 push / review / PR。
+- `run_agent_until_committed` 每轮尝试结束：调用 `core/agent/memory/short_term_memory.save_short_term_memory` 保存紧凑上下文和独立详情日志；摘要由首条有效诊断行确定性生成，不调用模型，也不生成已完成事项清单。
+- 当前短期记录的真实消费者是成功发布后的 Skill 蒸馏，不是自动 retry 恢复。`_finish_implementation_publication` 只对明确记录为成功且带实际 Agent 名称的执行生成 skill；蒸馏读取已还原的完整 attempt history、final solution、相对 base branch 的提交 diff 与验证命令结果，再由最后一个成功 Agent 的只读 `generate` 能力提炼。生成内容必须包含触发条件、步骤、验证、陷阱和证据，并通过格式与本地路径 / Issue 编号过滤后才写入草稿；证据、生成或写盘失败都不阻塞后续 push / review / PR。
 - 自动提炼只会创建 `draft: true` 草稿。生成草稿时 `usage_count` 和 `success_count` 保持为 0，因为 runner 目前无法确认 Agent 是否实际读取并采用了被推荐的 skill；因此不能把“被检索到”或“本次 Issue 成功”误作技能使用效果，草稿不会自动晋升。维护者审阅后再手动晋升。
 
 ### 关闭与降级

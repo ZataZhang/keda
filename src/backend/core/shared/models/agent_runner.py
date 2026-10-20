@@ -611,7 +611,7 @@ class RunnerConfig:
 
 @dataclass(frozen=True)
 class MemoryConfig:
-    """Local memory and skill distillation configuration.
+    """Agent Runner 的本地记忆与 Skill 蒸馏配置。
 
     Anchor semantics for ``base_dir`` / ``skill_drafts_dir`` /
     ``promoted_skills_dirs``:
@@ -619,9 +619,11 @@ class MemoryConfig:
     - 相对路径由 :mod:`backend.engines.agent_runner.factory` 在构建
       :class:`RepositoryRunContext` 时解析到目标仓库主检出根，并在
       该点展开 ``~``。
+    - 默认 ``base_dir`` 字符串 ``.kedacode/memory`` 仅把短期记忆放到
+      Keda 用户状态目录；长期记忆仍保留在仓库。显式自定义 ``base_dir``
+      同时决定短期与长期记忆路径。
     - 绝对路径（含 ``expanduser`` 后变绝对者）保持原样，不再挂到任何
-      锚点下；运营者把目录移出仓库外（防 ``git clean -fdx`` 误删或
-      多机共享）只需把相对路径改为绝对路径即可。
+      锚点下。
     - ``worktree_path`` 在组装 store 时仍作为实参传入，但只要上述
       目录已是绝对路径就不会被使用——是 Zero-signature-disturbance
       修复路径的副作用。
@@ -630,7 +632,7 @@ class MemoryConfig:
         enabled: Master switch — when ``False`` the runner skips every memory
             read/write and skill distillation step. Existing happy-path
             behaviour must not change in that mode.
-        base_dir: 短期/长期记忆的相对或绝对目录；详见上方"锚点语义"。
+        base_dir: 长期记忆目录，以及自定义时的短期记忆目录；详见上方"锚点语义"。
         skill_drafts_dir: 等待晋升的 skill 草稿目录；锚点语义同上。
         promoted_skills_dirs: 已晋升 skill 的扫描目录列表（有序），
             同样遵循上述锚点语义；第一个存在的目录在按名查找 skill
@@ -645,6 +647,9 @@ class MemoryConfig:
             auto-promote a draft.
         auto_promote_min_success_rate: Minimum ``success_count /
             usage_count`` ratio required to auto-promote a draft.
+        short_term_base_dir: 短期记忆的运行期路径；由 engines 工厂锚定，不从用户配置直接读取。
+        short_term_repository_identity: 当前主检出仓库的稳定本地身份，仅用于短期记忆隔离。
+        legacy_short_term_base_dirs: 只读兼容旧短期记忆的仓库内路径列表。
     """
 
     enabled: bool = True
@@ -656,6 +661,10 @@ class MemoryConfig:
     auto_promote: bool = True
     auto_promote_threshold: int = 3
     auto_promote_min_success_rate: float = 1.0
+    # 以下字段只由 engines 工厂在仓库解析时填入，不映射到 config.toml。
+    short_term_base_dir: str | None = field(default=None, repr=False, compare=False)
+    short_term_repository_identity: str | None = field(default=None, repr=False, compare=False)
+    legacy_short_term_base_dirs: tuple[str, ...] = field(default=(), repr=False, compare=False)
 
 
 @dataclass(frozen=True)

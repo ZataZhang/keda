@@ -73,9 +73,16 @@ def _build_short_term_impl(worktree_path: Path, memory_config: "MemoryConfig"):
         base_dir=memory_config.base_dir,
         skill_drafts_dir=memory_config.skill_drafts_dir,
         promoted_skills_dirs=memory_config.promoted_skills_dirs,
+        short_term_base_dir=memory_config.short_term_base_dir,
+        short_term_repository_identity=memory_config.short_term_repository_identity,
+        legacy_short_term_base_dirs=memory_config.legacy_short_term_base_dirs,
     )
     bundle = infra_pkg.build_memory_stores()
-    return bundle.short_term(paths["short_term_base"])
+    return bundle.short_term(
+        paths["short_term_base"],
+        repository_identity=paths["short_term_repository_identity"],
+        legacy_base_dirs=paths["legacy_short_term_base_dirs"],
+    )
 
 
 def _build_long_term_impl(worktree_path: Path, memory_config: "MemoryConfig"):
