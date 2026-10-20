@@ -533,7 +533,7 @@ class TestEnsureFrontendNodeModules:
 
         assert project_record.outcome == OUTCOME_NOT_PREPARED
         assert not (worktree_path / "frontend" / "node_modules").exists()
-        assert "lockfiles differ" in project_record.detail
+        assert "dependency inputs are missing, different, or unverifiable" in project_record.detail
 
     def test_existing_node_modules_is_left_untouched(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

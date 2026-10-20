@@ -16,13 +16,13 @@ from pathlib import Path
 import pytest
 
 from backend.api.cli import main
-from backend.core.use_cases import worktree_frontend
 from backend.core.shared.models.agent_runner import (
     AppConfig,
     IssueSummary,
     WorktreeConfig,
 )
 from backend.core.use_cases import agent_runner_worktree_create as worktree_create_module
+from backend.core.use_cases import worktree_frontend
 from backend.core.use_cases.run_agent_once import create_or_reuse_worktree
 from backend.infrastructure.git.worktree import WorktreeManager, WORKTREE_DIR_NAME
 from backend.infrastructure.process_runner import SubprocessRunner
@@ -282,12 +282,11 @@ def test_create_or_reuse_worktree_links_frontend_node_modules(
     (repo_path / ".gitignore").write_text("node_modules/\n.agent-runner/\n", encoding="utf-8")
     (repo_path / "frontend").mkdir()
     (repo_path / "frontend" / "package.json").write_text("{}\n", encoding="utf-8")
-    (repo_path / "frontend" / "pnpm-lock.yaml").write_text(
-        "lockfileVersion: '9.0'\nsettings: {}\nimporters:\n  .: {}\n",
-        encoding="utf-8",
-    )
+    (repo_path / "frontend" / "pnpm-lock.yaml").write_text("lockfile\n", encoding="utf-8")
     _run_git(repo_path, "add", ".gitignore", "frontend/package.json", "frontend/pnpm-lock.yaml")
     _run_git(repo_path, "commit", "-m", "track frontend manifest")
+    # 固定走复用回退分支，避免测试调用主机 pnpm 执行安装。
+    monkeypatch.setattr(worktree_frontend.shutil, "which", lambda _executable: None)
     # Installed dependencies live only in the (gitignored) main checkout.
     main_vite_path = repo_path / "frontend" / "node_modules" / ".bin" / "vite"
     main_vite_path.parent.mkdir(parents=True)
@@ -313,7 +312,6 @@ def test_create_or_reuse_worktree_links_frontend_node_modules(
         labels=(),
     )
 
-    monkeypatch.setattr(worktree_frontend.shutil, "which", lambda _program: None)
     resolved_worktree_path = create_or_reuse_worktree(repo_path, issue, config, SubprocessRunner())
 
     assert resolved_worktree_path == worktree_path.resolve()
@@ -321,7 +319,7 @@ def test_create_or_reuse_worktree_links_frontend_node_modules(
     assert worktree_node_modules.is_symlink()
     assert (worktree_node_modules / ".bin" / "vite").exists()
     # The symlink keeps the worktree git-clean (node_modules is gitignored),
-    # so `kc worktree cleanup` can still remove it later.
+    # so `iar worktree cleanup` can still remove it later.
     status_result = _run_git(worktree_path, "status", "--porcelain")
     assert status_result.stdout.strip() == ""
 
