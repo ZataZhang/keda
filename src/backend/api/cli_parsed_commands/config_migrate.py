@@ -222,7 +222,12 @@ def run_config_migrate_command(ctx: ParsedCommandContext) -> int:
         return exit_code
 
     try:
-        migration_result = migrate_repository_local_config(target_repository_path, dry_run=dry_run)
+        # 预演时旧名文件还没改名，要读改名计划里的旧名路径，否则会误报未初始化。
+        migration_result = migrate_repository_local_config(
+            target_repository_path,
+            dry_run=dry_run,
+            source_config_path=rename_result.source_path if dry_run else None,
+        )
     except ValueError as exc:
         # 迁移校验失败（ConfigMigrationError）是未分类失败；未初始化
         # （IARRepositoryNotInitializedError）不是 ValueError，交给统一入口给

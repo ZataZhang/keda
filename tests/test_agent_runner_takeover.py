@@ -84,16 +84,11 @@ def _gh_list_response(repositories: list[dict]) -> CommandResult:
     )
 
 
-@pytest.mark.parametrize("state_directory", [".kedacode", ".iar"])
-def test_build_takeover_options_defaults(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, state_directory: str
-) -> None:
-    """新家目录使用新状态名，只有旧目录时沿用旧目录，其他默认选项不变。"""
+def test_build_takeover_options_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """clone 根目录落在新状态目录 ``~/.kedacode`` 下，其他默认选项不变。"""
     monkeypatch.setenv("HOME", str(tmp_path))
-    if state_directory == ".iar":
-        (tmp_path / state_directory).mkdir()
     options = build_takeover_options()
-    assert options.clone_root == tmp_path / state_directory / "repos"
+    assert options.clone_root == tmp_path / ".kedacode" / "repos"
     assert options.owner is None
     assert options.limit == 100
     assert options.selected_repos == ()

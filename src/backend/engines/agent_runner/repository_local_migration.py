@@ -141,13 +141,18 @@ class _Statement:
 
 
 def migrate_repository_local_config(
-    repo_root_path: Path, *, dry_run: bool = False
+    repo_root_path: Path,
+    *,
+    dry_run: bool = False,
+    source_config_path: Path | None = None,
 ) -> ConfigMigrationResult:
     """清掉旧脚手架在仓库本地配置里钉死的 generated_content 默认值。
 
     Args:
         repo_root_path: 目标 Git 仓库根目录。
         dry_run: 为 True 时只计算并返回结果，不写文件。
+        source_config_path: 显式指定要读取的配置文件。预演时旧名文件尚未改名，
+            调用方传入改名计划里的旧名路径，否则只会去找新名文件而误报未初始化。
 
     Returns:
         迁移结果；``wrote_file`` 表示是否真的写了文件。
@@ -156,7 +161,9 @@ def migrate_repository_local_config(
         IARRepositoryNotInitializedError: 仓库根目录没有仓库本地配置。
         ConfigMigrationError: 仓库本地配置不是合法 TOML，或迁移结果未通过写回前校验。
     """
-    config_path = product_identity.effective_repository_config_path(repo_root_path)
+    config_path = source_config_path or product_identity.effective_repository_config_path(
+        repo_root_path
+    )
     if not config_path.is_file():
         raise IARRepositoryNotInitializedError(repo_root_path, config_path)
 

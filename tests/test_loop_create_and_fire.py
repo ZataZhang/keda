@@ -367,15 +367,10 @@ def test_build_prd_path_uses_timestamp(
     assert prd_path.parent == (tmp_path / "tasks" / "pending").resolve()
 
 
-@pytest.mark.parametrize("state_directory", [".kedacode", ".iar"])
-def test_resolve_loop_state_path_default(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, state_directory: str
-) -> None:
-    """新家目录使用新状态名，只有旧状态目录时保持读取旧位置。"""
+def test_resolve_loop_state_path_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """loop 状态文件默认落在新状态目录 ``~/.kedacode`` 下。"""
     monkeypatch.setenv("HOME", str(tmp_path))
-    if state_directory == ".iar":
-        (tmp_path / state_directory).mkdir()
-    assert resolve_loop_state_path() == tmp_path / state_directory / "loop-state.json"
+    assert resolve_loop_state_path() == tmp_path / ".kedacode" / "loop-state.json"
 
 
 def test_parse_loop_recipe_round_trip(recipe_path: Path) -> None:

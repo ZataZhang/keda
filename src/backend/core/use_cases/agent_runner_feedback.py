@@ -281,6 +281,10 @@ def build_prompt(
 ) -> str:
     """Build the prompt sent to the local AI agent from a template.
 
+    ``{dependency_context_block}`` 由 worktree 内 runner 落盘的依赖准备诊断
+    （``.agent-runner/dependency-preparation.json``）渲染而来；没准备过或无记录时渲染
+    为空串，prompt 与改动前逐字一致。模板里没有该占位符时（自定义模板）自动忽略。
+
     Args:
         issue: 当前处理的 Issue。
         worktree_path: agent 工作的 worktree 路径。
@@ -297,10 +301,6 @@ def build_prompt(
             the loader is skipped (used in tests and recursive prompts).
         long_term_store: Optional injected long-term store.
         skill_store: Optional injected skill store.
-
-    ``{dependency_context_block}`` 由 worktree 内 runner 落盘的依赖准备诊断
-    （``.agent-runner/dependency-preparation.json``）渲染而来；没准备过或无记录时渲染
-    为空串，prompt 与改动前逐字一致。模板里没有该占位符时（自定义模板）自动忽略。
     """
     template = prompt_config.phases.get(phase, _DEFAULT_EXECUTION_TEMPLATE)
     prd_line = _build_prd_context_block(issue, worktree_path)
