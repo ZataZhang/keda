@@ -17,11 +17,16 @@ from pathlib import Path
 import pytest
 
 from backend.core.shared.models.agent_runner import (
+    AttemptResult,
     CommandResult,
+    FailureType,
     IssueSummary,
     PromptConfig,
 )
-from backend.core.use_cases.agent_runner_failure import DependencyEnvironmentBlockedError
+from backend.core.use_cases.agent_runner_failure import (
+    DependencyEnvironmentBlockedError,
+    MaxRetriesExceededError,
+)
 from backend.core.use_cases.agent_runner_feedback import (
     VerificationFailedError,
     build_prompt,
@@ -151,10 +156,18 @@ class TestSanitizeDetailText:
             ("ERR_PNPM 401 //registry.npmjs.org/:_authToken=abc123secret", "abc123secret"),
             ("npm error code E401 _authToken=abc123secret", "abc123secret"),
             ("Authorization: Bearer sk-abcdefghijklmnop", "sk-abcdefghijklmnop"),
+            ("Authorization: Basic dGVzdDp0ZXN0", "dGVzdDp0ZXN0"),
             ("failed with https://user:hunter2@registry.internal/x", "hunter2"),
             ("npm_config__auth = supersecretvalue", "supersecretvalue"),
         ],
-        ids=["pnpm-registry", "auth-token", "bearer", "url-credentials", "npm-config-auth"],
+        ids=[
+            "pnpm-registry",
+            "auth-token",
+            "bearer",
+            "basic-authorization",
+            "url-credentials",
+            "npm-config-auth",
+        ],
     )
     def test_credential_shapes_are_redacted(self, raw_text: str, leaked_fragment: str) -> None:
         """常见凭据形状被替换掉，原文不会进落盘报告或 Issue。"""
@@ -323,6 +336,62 @@ class TestEscalateDependencyEnvironmentFailure:
         escalated_error = escalate_dependency_environment_failure(original_error, tmp_path)
 
         assert isinstance(escalated_error, DependencyEnvironmentBlockedError)
+
+    def test_missing_executable_in_agent_attempt_is_reclassified(self, tmp_path: Path) -> None:
+        """Agent attempt 自身明确报缺工具时也应进入可恢复阻塞。"""
+        missing_tool_record = FrontendProjectRecord(
+            project_path="frontend",
+            outcome=OUTCOME_NOT_PREPARED,
+            reason=REASON_TOOL_MISSING,
+            package_manager="npm",
+            attempted_commands=("npm ci --ignore-scripts",),
+            detail="npm is not on PATH",
+        )
+        _write_report(tmp_path, (missing_tool_record,))
+        failed_attempt = AttemptResult(
+            attempt_number=1,
+            failure_type=FailureType.AGENT_ERROR,
+            recovered=False,
+            detail="Agent command failed: /bin/sh: npm: command not found",
+        )
+
+        escalated_error = escalate_dependency_environment_failure(
+            MaxRetriesExceededError([failed_attempt]),
+            tmp_path,
+        )
+
+        assert isinstance(escalated_error, DependencyEnvironmentBlockedError)
+        assert "Missing required executable(s): npm." in escalated_error.issue_comment_body
+
+    def test_human_action_in_agent_attempt_is_reclassified(self, tmp_path: Path) -> None:
+        """Agent attempt 明确点名 npm 凭据错误时也应请求人工处理。"""
+        credential_record = FrontendProjectRecord(
+            project_path="frontend",
+            outcome=OUTCOME_NOT_PREPARED,
+            reason=REASON_INSTALL_FAILED,
+            package_manager="npm",
+            attempted_commands=("npm ci --ignore-scripts",),
+            requires_user_action=USER_ACTION_CREDENTIALS,
+            detail="npm ERR! code E401 [redacted]",
+        )
+        _write_report(tmp_path, (credential_record,))
+        failed_attempt = AttemptResult(
+            attempt_number=1,
+            failure_type=FailureType.AGENT_ERROR,
+            recovered=False,
+            detail="Agent command failed: npm ERR! code E401 _authToken=very-secret-token",
+        )
+
+        escalated_error = escalate_dependency_environment_failure(
+            MaxRetriesExceededError([failed_attempt]),
+            tmp_path,
+        )
+
+        assert isinstance(escalated_error, DependencyEnvironmentBlockedError)
+        assert f"Required human action(s): {USER_ACTION_CREDENTIALS}." in (
+            escalated_error.issue_comment_body
+        )
+        assert "very-secret-token" not in escalated_error.issue_comment_body
 
     @pytest.mark.parametrize(
         ("user_action", "failure_text"),

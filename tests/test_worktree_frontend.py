@@ -29,6 +29,7 @@ from backend.core.use_cases.worktree_dependency_context import (
     OUTCOME_SKIPPED,
     REASON_INSTALL_FAILED,
     REASON_INSTALL_NO_OUTPUT,
+    REASON_LINK_FAILED,
     REASON_MANAGER_CONFLICT,
     REASON_NO_ACTION_NEEDED,
     REASON_NO_LOCKFILE,
@@ -804,6 +805,40 @@ class TestEnsureFrontendNodeModules:
 
 class TestLinkFrontendNodeModules:
     """Legacy symlink-only fallback behavior."""
+
+    def test_exclude_failure_removes_link_and_records_unprepared(self, tmp_path: Path) -> None:
+        """git 忽略文件无法更新时清掉本轮软链，且把失败交给 Agent。"""
+        repo_path = tmp_path / "repo"
+        worktree_path = tmp_path / "worktree"
+        project_path = worktree_path / "frontend"
+        source_modules_path = repo_path / "frontend" / "node_modules"
+        source_modules_path.mkdir(parents=True)
+        project_path.mkdir(parents=True)
+        target_modules_path = project_path / "node_modules"
+        target_modules_path.symlink_to(source_modules_path, target_is_directory=True)
+        preparation_report = DependencyPreparationReport(
+            worktree_path=str(worktree_path),
+            records=(
+                FrontendProjectRecord(
+                    project_path="frontend",
+                    outcome=OUTCOME_REUSED,
+                    reason=REASON_NO_ACTION_NEEDED,
+                    package_manager="npm",
+                ),
+            ),
+        )
+
+        failed_report = worktree_frontend.exclude_frontend_node_modules_from_git(
+            worktree_path,
+            preparation_report,
+            _ExplodingProcessRunner(),
+        )
+
+        failed_record = _record_for(failed_report, "frontend")
+        assert not target_modules_path.is_symlink()
+        assert failed_record.outcome == OUTCOME_NOT_PREPARED
+        assert failed_record.reason == REASON_LINK_FAILED
+        assert "could not update git info/exclude" in failed_record.detail
 
     def test_links_node_modules_for_root_and_nested_projects(self, tmp_path: Path) -> None:
         """Every frontend project in the worktree gets a symlink to main's deps."""

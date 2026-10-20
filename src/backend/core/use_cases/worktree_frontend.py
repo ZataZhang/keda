@@ -552,9 +552,9 @@ def link_frontend_node_modules(
 
 def exclude_frontend_node_modules_from_git(
     worktree_path: Path,
-    linked_relative_paths: list[Path],
+    preparation_report: DependencyPreparationReport,
     process_runner: IProcessRunner,
-) -> None:
+) -> DependencyPreparationReport:
     """把符号链接的 ``node_modules`` 排除出 worktree 的 git status。
 
     为每个被链接项目的 ``node_modules`` 往 ``info/exclude`` 追加一条**锚定且不带尾部
@@ -570,49 +570,105 @@ def exclude_frontend_node_modules_from_git(
 
     Args:
         worktree_path: 目标 worktree 绝对路径。
-        linked_relative_paths: ``node_modules`` 为符号链接、需要排除的项目相对路径。
+        preparation_report: 本轮依赖准备结果；无法排除的软链会被移除并标为未准备。
         process_runner: 用于通过 ``git rev-parse`` 解析 ``info/exclude`` 位置。
+
+    Returns:
+        已更新的依赖准备报告。更新忽略规则失败时，对应软链会被尽力删除，避免
+        Agent 将机器本地的绝对路径软链误提交。
     """
+    linked_relative_paths = preparation_report.linked_relative_paths
     if not linked_relative_paths:
-        return
-    exclude_path_result = process_runner.run(
-        ["git", "rev-parse", "--git-path", "info/exclude"],
-        cwd=worktree_path,
-        check=False,
-    )
-    exclude_path_text = exclude_path_result.stdout.strip()
-    if exclude_path_result.return_code != 0 or not exclude_path_text:
-        _logger.warning(
-            "Could not resolve git info/exclude for %s; symlinked "
-            "node_modules may show as untracked.",
-            worktree_path,
+        return preparation_report
+
+    exclusion_failure_detail = ""
+    try:
+        exclude_path_result = process_runner.run(
+            ["git", "rev-parse", "--git-path", "info/exclude"],
+            cwd=worktree_path,
+            check=False,
         )
-        return
-    exclude_path = Path(exclude_path_text)
-    if not exclude_path.is_absolute():
-        exclude_path = worktree_path / exclude_path
-    if exclude_path.is_dir():
-        _logger.warning(
-            "Resolved info/exclude path is a directory (%s); skipping node_modules exclusion.",
-            exclude_path,
-        )
-        return
-    existing_text = exclude_path.read_text(encoding="utf-8") if exclude_path.exists() else ""
-    known_lines = set(existing_text.splitlines())
-    appended_lines: list[str] = []
-    for relative_project_path in linked_relative_paths:
-        posix_project_path = relative_project_path.as_posix().strip("/")
-        if posix_project_path in {"", "."}:
-            exclude_line = f"/{NODE_MODULES_DIR_NAME}"
+        exclude_path_text = exclude_path_result.stdout.strip()
+        if exclude_path_result.return_code != 0 or not exclude_path_text:
+            command_error_detail = (
+                exclude_path_result.stderr.strip() or exclude_path_result.stdout.strip()
+            )
+            exclusion_failure_detail = sanitize_detail_text(
+                "git could not resolve info/exclude"
+                + (f": {command_error_detail}" if command_error_detail else "")
+            )
         else:
-            exclude_line = f"/{posix_project_path}/{NODE_MODULES_DIR_NAME}"
-        if exclude_line not in known_lines:
-            appended_lines.append(exclude_line)
-            known_lines.add(exclude_line)
-    if not appended_lines:
-        return
-    exclude_path.parent.mkdir(parents=True, exist_ok=True)
-    prefix_text = existing_text
-    if prefix_text and not prefix_text.endswith("\n"):
-        prefix_text += "\n"
-    exclude_path.write_text(prefix_text + "\n".join(appended_lines) + "\n", encoding="utf-8")
+            exclude_path = Path(exclude_path_text)
+            if not exclude_path.is_absolute():
+                exclude_path = worktree_path / exclude_path
+            if exclude_path.is_dir():
+                exclusion_failure_detail = (
+                    f"resolved info/exclude path is a directory: {exclude_path}"
+                )
+            else:
+                existing_text = (
+                    exclude_path.read_text(encoding="utf-8") if exclude_path.exists() else ""
+                )
+                known_lines = set(existing_text.splitlines())
+                appended_lines: list[str] = []
+                for relative_project_path in linked_relative_paths:
+                    posix_project_path = relative_project_path.as_posix().strip("/")
+                    if posix_project_path in {"", "."}:
+                        exclude_line = f"/{NODE_MODULES_DIR_NAME}"
+                    else:
+                        exclude_line = f"/{posix_project_path}/{NODE_MODULES_DIR_NAME}"
+                    if exclude_line not in known_lines:
+                        appended_lines.append(exclude_line)
+                        known_lines.add(exclude_line)
+                if appended_lines:
+                    exclude_path.parent.mkdir(parents=True, exist_ok=True)
+                    with exclude_path.open("a", encoding="utf-8") as exclude_file:
+                        if existing_text and not existing_text.endswith("\n"):
+                            exclude_file.write("\n")
+                        exclude_file.write("\n".join(appended_lines) + "\n")
+    except Exception as exclusion_error:  # noqa: BLE001 - ignore 仅本地防误提交的副作用。
+        exclusion_failure_detail = sanitize_detail_text(
+            f"could not update git info/exclude: {type(exclusion_error).__name__}: "
+            f"{exclusion_error}"
+        )
+
+    if not exclusion_failure_detail:
+        return preparation_report
+
+    failed_link_details: dict[Path, str] = {}
+    for relative_project_path in linked_relative_paths:
+        target_node_modules_path = worktree_path / relative_project_path / NODE_MODULES_DIR_NAME
+        cleanup_detail = ""
+        try:
+            if target_node_modules_path.is_symlink():
+                target_node_modules_path.unlink()
+        except OSError as cleanup_error:
+            cleanup_detail = sanitize_detail_text(
+                f"; symlink cleanup failed: {type(cleanup_error).__name__}: {cleanup_error}"
+            )
+        failure_detail = sanitize_detail_text(
+            "could not exclude reused node_modules symlink from git: "
+            f"{exclusion_failure_detail}; the symlink was removed to avoid committing a "
+            f"machine-local path{cleanup_detail}"
+        )
+        _logger.warning(
+            "Could not exclude reused node_modules for %s; recorded as unprepared: %s",
+            relative_project_path,
+            failure_detail,
+        )
+        failed_link_details[relative_project_path] = failure_detail
+
+    return dataclasses.replace(
+        preparation_report,
+        records=tuple(
+            dataclasses.replace(
+                project_record,
+                outcome=OUTCOME_NOT_PREPARED,
+                reason=REASON_LINK_FAILED,
+                detail=failed_link_details[Path(project_record.project_path)],
+            )
+            if Path(project_record.project_path) in failed_link_details
+            else project_record
+            for project_record in preparation_report.records
+        ),
+    )

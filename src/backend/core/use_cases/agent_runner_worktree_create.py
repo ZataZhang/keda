@@ -279,9 +279,11 @@ def create_or_reuse_worktree(
     # 环境缺口绝不终止 Issue，Agent 仍会启动并拿到结构化上下文自行决定下一步。
     # 已有 worktree 重跑时同样只补缺空，永不覆盖已存在的 node_modules。
     dependency_report = ensure_frontend_node_modules(repo_path, worktree_path, process_runner)
-    linked_frontend_paths = dependency_report.linked_relative_paths
-    if linked_frontend_paths:
-        exclude_frontend_node_modules_from_git(worktree_path, linked_frontend_paths, process_runner)
+    dependency_report = exclude_frontend_node_modules_from_git(
+        worktree_path,
+        dependency_report,
+        process_runner,
+    )
     # 只有真的有前端项目时才落盘：无前端仓库不需要交给 Agent 的上下文，也不该在
     # worktree 里凭空造出 .agent-runner/ 目录。
     if dependency_report.records:

@@ -73,7 +73,7 @@ _CREDENTIAL_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"(_auth(?:Token|TokenEnv|Password|Login)\s*=\s*)\S+", re.IGNORECASE),
     re.compile(r"([A-Za-z][A-Za-z0-9+.-]*://)[^\s/@:]+:[^\s@]+@", re.IGNORECASE),
     re.compile(r"(Bearer\s+)[A-Za-z0-9._~+/-]{8,}", re.IGNORECASE),
-    re.compile(r"(Authorization:\s*)\S+", re.IGNORECASE),
+    re.compile(r"(Authorization:\s*)[^\r\n]+", re.IGNORECASE),
     re.compile(r"(npm_config__?auth\s*[=:]\s*)\S+", re.IGNORECASE),
     re.compile(r"\b((?:api[_-]?key|password|passwd|secret|token)\s*[=:]\s*)\S+", re.IGNORECASE),
 )
@@ -419,8 +419,9 @@ def escalate_dependency_environment_failure(
     """把「环境缺工具」导致的失败转成可恢复状态，而不是 ``agent/failed``.
 
     ``agent/failed`` 表示 Agent/执行本身失败。准备工作已经把缺工具、选择依据与失败
-    原因写成结构化记录，因此当失败可归因到这些记录（缺可执行文件、或验证命令以 127
-    / ``command not found`` 结束）时，应改判为需要人类决定的可恢复阻塞。
+    原因写成结构化记录，因此当失败可归因到这些记录（缺可执行文件、验证命令以 127
+    / ``command not found`` 结束，或 Agent attempt 明确输出同一包管理器的环境错误）时，
+    应改判为需要人类决定的可恢复阻塞。
 
     归属判据刻意保守：只在能对上记录里的工具名时才转判，其余失败原样返回，
     保持既有 ``agent/failed`` 语义不被稀释。
@@ -448,14 +449,23 @@ def escalate_dependency_environment_failure(
     }
     mentioned_tools = _tools_named_by_failure(raw_error, blocked_tools)
     failure_command_results = _failure_command_results(raw_error)
+    failure_attempt_details = _failure_attempt_details(raw_error)
     action_records = tuple(
         record
         for record in records
-        if not record.has_usable_dependencies
-        and record.requires_user_action in {USER_ACTION_PRIVILEGE, USER_ACTION_CREDENTIALS}
-        and any(
-            _command_result_matches_user_action(command_result, record)
-            for command_result in failure_command_results
+        if (
+            not record.has_usable_dependencies
+            and record.requires_user_action in {USER_ACTION_PRIVILEGE, USER_ACTION_CREDENTIALS}
+            and (
+                any(
+                    _command_result_matches_user_action(command_result, record)
+                    for command_result in failure_command_results
+                )
+                or any(
+                    _attempt_detail_matches_user_action(attempt_detail, record)
+                    for attempt_detail in failure_attempt_details
+                )
+            )
         )
     )
     if not mentioned_tools and not action_records:
@@ -480,7 +490,7 @@ def _tools_named_by_failure(
     failure_error: BaseException,
     blocked_tools: set[str],
 ) -> set[str]:
-    """从失败异常里找出被点名的缺失工具（结构化字段 + 127 退出码证据）."""
+    """从异常字段、验证结果或 Agent 诊断中找出被点名的缺失工具。"""
     named_tools: set[str] = set()
     missing_filename = getattr(failure_error, "filename", None)
     if isinstance(missing_filename, str):
@@ -491,20 +501,39 @@ def _tools_named_by_failure(
         if not _looks_like_missing_command(command_result, blocked_tools):
             continue
         named_tools.update(tool for tool in blocked_tools if tool in command_result.stderr)
+    for attempt_detail in _failure_attempt_details(failure_error):
+        named_tools.update(
+            tool
+            for tool in blocked_tools
+            if _attempt_detail_names_missing_executable(attempt_detail, tool)
+        )
     return named_tools
 
 
-def _failure_command_results(failure_error: BaseException) -> list[object]:
-    """取出异常及其包装 cause 携带的验证命令结果。"""
+def _failure_chain_errors(failure_error: BaseException) -> tuple[BaseException, ...]:
+    """返回异常及其 cause/context 链，供失败诊断提取复用。"""
     pending_errors = [failure_error]
     visited_error_ids: set[int] = set()
-    collected_results: list[object] = []
+    chained_errors: list[BaseException] = []
     while pending_errors:
         current_error = pending_errors.pop()
         if id(current_error) in visited_error_ids:
             continue
         visited_error_ids.add(id(current_error))
+        chained_errors.append(current_error)
+        for chained_error in (
+            getattr(current_error, "__cause__", None),
+            getattr(current_error, "__context__", None),
+        ):
+            if isinstance(chained_error, BaseException):
+                pending_errors.append(chained_error)
+    return tuple(chained_errors)
 
+
+def _failure_command_results(failure_error: BaseException) -> list[object]:
+    """取出异常及其包装 cause 携带的验证命令结果。"""
+    collected_results: list[object] = []
+    for current_error in _failure_chain_errors(failure_error):
         direct_results = getattr(current_error, "verification_results", None)
         if isinstance(direct_results, list):
             collected_results.extend(direct_results)
@@ -514,14 +543,53 @@ def _failure_command_results(failure_error: BaseException) -> list[object]:
                 attempt_outputs = getattr(attempt_result, "verification_results", None)
                 if isinstance(attempt_outputs, list):
                     collected_results.extend(attempt_outputs)
-
-        for chained_error in (
-            getattr(current_error, "__cause__", None),
-            getattr(current_error, "__context__", None),
-        ):
-            if isinstance(chained_error, BaseException):
-                pending_errors.append(chained_error)
     return collected_results
+
+
+def _failure_attempt_details(failure_error: BaseException) -> tuple[str, ...]:
+    """取出异常链中 Agent attempt 的自由文本诊断。"""
+    attempt_details: list[str] = []
+    for current_error in _failure_chain_errors(failure_error):
+        attempt_results = getattr(current_error, "attempt_results", None)
+        if not isinstance(attempt_results, (list, tuple)):
+            continue
+        attempt_details.extend(
+            attempt_detail
+            for attempt_result in attempt_results
+            if isinstance((attempt_detail := getattr(attempt_result, "detail", None)), str)
+        )
+    return tuple(attempt_details)
+
+
+def _attempt_detail_names_missing_executable(attempt_detail: str, executable_name: str) -> bool:
+    """仅匹配明确点名工具的 command-not-found / ENOENT 诊断。"""
+    escaped_executable = re.escape(executable_name)
+    executable_token = rf"(?<![\w-]){escaped_executable}(?![\w-])"
+    missing_signatures = (
+        rf"{executable_token}\s*:?\s*command not found",
+        rf"command not found\s*:\s*['\"`]?{escaped_executable}(?![\w-])",
+        rf"no such file or directory:\s*['\"`]?{escaped_executable}['\"`]?(?![\w-])",
+        rf"spawn\s+['\"`]?{escaped_executable}['\"`]?\s+enoent",
+    )
+    return any(
+        re.search(signature, attempt_detail, re.IGNORECASE) for signature in missing_signatures
+    )
+
+
+def _attempt_detail_matches_user_action(
+    attempt_detail: str,
+    dependency_record: FrontendProjectRecord,
+) -> bool:
+    """Agent attempt 的诊断明确点名包管理器和已记录动作时，允许归类为阻塞。"""
+    if not dependency_record.package_manager or not dependency_record.requires_user_action:
+        return False
+    manager_pattern = rf"(?<![\w-]){re.escape(dependency_record.package_manager)}(?![\w-])"
+    if re.search(manager_pattern, attempt_detail, re.IGNORECASE) is None:
+        return False
+    return (
+        classify_user_action_from_failure_text(attempt_detail)
+        == dependency_record.requires_user_action
+    )
 
 
 def _looks_like_missing_command(command_result: object, blocked_tools: set[str]) -> bool:
