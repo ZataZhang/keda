@@ -39,6 +39,9 @@ from backend.core.use_cases.agent_runner_structured_evidence import (
     has_structured_evidence_marker,
     parse_structured_evidence_marker,
 )
+from backend.core.use_cases.worktree_dependency_context import (
+    render_dependency_context_section,
+)
 
 _MAX_RECOVERY_OUTPUT_LENGTH = 12000
 
@@ -109,6 +112,7 @@ _DEFAULT_EXECUTION_TEMPLATE = "\n".join(
         "Worktree: {worktree_path}",
         "{prd_line}",
         "{validation_line}",
+        "{dependency_context_block}",
         "{memory_block}",
         "",
         "Issue body:",
@@ -293,9 +297,14 @@ def build_prompt(
             the loader is skipped (used in tests and recursive prompts).
         long_term_store: Optional injected long-term store.
         skill_store: Optional injected skill store.
+
+    ``{dependency_context_block}`` 由 worktree 内 runner 落盘的依赖准备诊断
+    （``.agent-runner/dependency-preparation.json``）渲染而来；没准备过或无记录时渲染
+    为空串，prompt 与改动前逐字一致。模板里没有该占位符时（自定义模板）自动忽略。
     """
     template = prompt_config.phases.get(phase, _DEFAULT_EXECUTION_TEMPLATE)
     prd_line = _build_prd_context_block(issue, worktree_path)
+    dependency_context_block = render_dependency_context_section(worktree_path)
     memory_block = _build_memory_block(
         issue,
         worktree_path,
@@ -313,6 +322,7 @@ def build_prompt(
         prd_line=prd_line,
         validation_line=validation_line,
         verification_commands_summary=verification_commands_summary,
+        dependency_context_block=dependency_context_block,
         memory_block=memory_block,
     )
 
@@ -968,6 +978,7 @@ def build_recovery_prompt(
             verification_section,
             structured_evidence_line,
             memory_section,
+            render_dependency_context_section(worktree_path),
             "Recovery rules:",
             *_VERIFICATION_TRIAGE_RULES,
             "- Inspect the current worktree and fix the failure.",

@@ -25,6 +25,7 @@ from backend.core.use_cases.agent_runner_events import format_event_marker
 from backend.core.use_cases.agent_runner_failure import (
     AgentExecutionError,
     AgentUnavailableError,
+    DependencyEnvironmentBlockedError,
     ForbiddenBlockedError,
     MaxRetriesExceededError,
     ProviderCapacityError,
@@ -39,6 +40,14 @@ from backend.core.use_cases.agent_runner_orchestrate import (
     process_prd_rework_issues,
     run_issue_with_agent_fallback,
     run_once,
+)
+from backend.core.use_cases.worktree_dependency_context import (
+    OUTCOME_NOT_PREPARED,
+    REASON_TOOL_MISSING,
+    USER_ACTION_HOST_TOOLCHAIN,
+    DependencyPreparationReport,
+    FrontendProjectRecord,
+    write_dependency_preparation_report,
 )
 from backend.infrastructure.process_runner import SubprocessRunner
 from tests.conftest import FakeGitHubClient, FakeProcessRunner
@@ -468,6 +477,48 @@ def test_mark_issue_blocked_sets_blocked_label() -> None:
     assert "blocked_forbidden" in body
     assert ".env.example" in body
     assert "blocked-continue" in body
+
+
+def _dependency_block_error() -> DependencyEnvironmentBlockedError:
+    """构造一条「缺主机工具链」的依赖环境阻塞。"""
+    return DependencyEnvironmentBlockedError(
+        "Missing required executable(s): pnpm.",
+        [
+            FrontendProjectRecord(
+                project_path="frontend",
+                outcome=OUTCOME_NOT_PREPARED,
+                reason=REASON_TOOL_MISSING,
+                package_manager="pnpm",
+                requires_user_action=USER_ACTION_HOST_TOOLCHAIN,
+                detail="pnpm is not on PATH",
+            )
+        ],
+    )
+
+
+def test_mark_issue_blocked_uses_prepared_dependency_comment() -> None:
+    """Dependency-environment blocks reuse the runner's own comment, not the forbidden template."""
+    fake_client = FakeGitHubClient()
+    issue = _make_ready_issue(43, "Issue #43", "", ("agent/running",))
+
+    _mark_issue_blocked(
+        issue=issue,
+        config=AppConfig(),
+        github_client=fake_client,
+        exc=_dependency_block_error(),
+    )
+
+    label_calls = [c for c in fake_client.calls if c["method"] == "edit_issue_labels"]
+    assert len(label_calls) == 1
+    assert "agent/blocked" in label_calls[0]["add"]
+    assert "agent/failed" not in label_calls[0].get("remove", [])
+    comment_calls = [c for c in fake_client.calls if c["method"] == "comment_issue"]
+    assert len(comment_calls) == 1
+    body = comment_calls[0]["body"]
+    assert "## Agent Runner Blocked" in body
+    assert "blocked_dependency_environment" in body
+    assert "Missing required executable(s): pnpm." in body
+    assert "blocked_forbidden" not in body
 
 
 def test_guard_blocked_issue_has_resolution_finds_marker() -> None:
@@ -1062,6 +1113,22 @@ def test_fallback_does_not_switch_on_forbidden_blocked() -> None:
     assert calls == ["claude"]
 
 
+def test_fallback_does_not_switch_on_dependency_blocked() -> None:
+    """环境缺工具是主机事实，不是某个 agent 的能力问题：换人重跑没有意义。"""
+    config = AppConfig(runner=RunnerConfig(agent_fallback_order=("claude", "codex")))
+    process_for_agent, calls = _agent_outcomes({"claude": _dependency_block_error(), "codex": None})
+
+    with pytest.raises(DependencyEnvironmentBlockedError):
+        run_issue_with_agent_fallback(
+            issue=_fallback_issue("agent/claude"),
+            config=config,
+            agent="auto",
+            process_for_agent=process_for_agent,
+        )
+
+    assert calls == ["claude"]
+
+
 def test_fallback_skips_unavailable_agent() -> None:
     """An unavailable agent CLI is skipped to the next candidate."""
     config = AppConfig(runner=RunnerConfig(agent_fallback_order=("claude", "codex")))
@@ -1518,6 +1585,117 @@ def test_run_once_marks_failed_with_merged_history_when_all_agents_fail(
     failure_comment = [c for c in fake_client.calls if c["method"] == "comment_issue"][-1]["body"]
     assert "| codex |" in failure_comment
     assert "| claude |" in failure_comment
+
+
+def _record_missing_pnpm_worktree(worktree_path: Path) -> None:
+    """在指定 worktree 里落一份「pnpm 缺失、依赖未就绪」的准备诊断。"""
+    write_dependency_preparation_report(
+        worktree_path,
+        DependencyPreparationReport(
+            worktree_path=str(worktree_path),
+            records=(
+                FrontendProjectRecord(
+                    project_path="frontend",
+                    outcome=OUTCOME_NOT_PREPARED,
+                    reason=REASON_TOOL_MISSING,
+                    package_manager="pnpm",
+                    requires_user_action=USER_ACTION_HOST_TOOLCHAIN,
+                    detail="pnpm is not on PATH",
+                ),
+            ),
+        ),
+    )
+
+
+def _missing_tool_error() -> FileNotFoundError:
+    """复刻真实缺可执行文件时 subprocess 抛出的异常形状。"""
+    launch_error = FileNotFoundError(2, "No such file or directory")
+    launch_error.filename = "pnpm"
+    return launch_error
+
+
+def _run_issue_that_crashes_on_missing_pnpm(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_client: FakeGitHubClient,
+    tmp_path: Path,
+) -> int:
+    """走真实 run_once 派发：Agent 执行阶段缺 pnpm 可执行文件时的失败归属。
+
+    补丁点在中枢 ``orchestrate``（派发时同步给 runtime），让
+    ``_process_ready_issue`` 抛出与 subprocess 一致的 :class:`FileNotFoundError`。
+    """
+    from backend.core.use_cases import agent_runner_orchestrate as orchestrate
+
+    issue = _make_ready_issue(123, "Example", "", ("agent/ready", "agent/codex"))
+    fake_client.list_ready_issues = lambda ready_label, limit: [issue]
+
+    def _raise_missing_tool(*, agent: str, **_kwargs: object) -> None:
+        del agent
+        raise _missing_tool_error()
+
+    monkeypatch.setattr(orchestrate, "_process_ready_issue", _raise_missing_tool)
+    config = AppConfig(
+        runner=RunnerConfig(agent_fallback_order=("codex",)),
+        worktree=WorktreeConfig(path_command="echo wt-{issue_number}"),
+    )
+    process_runner = _preflight_ok_runner()
+    process_runner.responses[("echo", "wt-123")] = CommandResult(
+        command=("echo", "wt-123"), return_code=0, stdout="wt-123\n", stderr=""
+    )
+
+    return run_once(
+        repo_path=tmp_path,
+        config=config,
+        dry_run=False,
+        agent="auto",
+        max_issues=1,
+        github_client=fake_client,
+        process_runner=process_runner,
+    )
+
+
+def _label_transitions(fake_client: FakeGitHubClient) -> list[set[str]]:
+    """收集本轮对 Issue 做过的工作流标签迁移集合。"""
+    return [
+        set(call.get("add", []))
+        for call in fake_client.calls
+        if call["method"] == "edit_issue_labels"
+    ]
+
+
+def test_run_once_routes_dependency_environment_block_to_blocked(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """失败能归因到「主机缺 pnpm」时改判成可恢复的 agent/blocked，不是 agent/failed。
+
+    回归护点：Issue #290 要求环境事实走等人决定的可恢复状态（``kc blocked-continue``
+    可续），而 ``agent/failed`` 只表示 Agent/执行本身失败。
+    """
+    fake_client = FakeGitHubClient()
+    _record_missing_pnpm_worktree(tmp_path / "wt-123")
+
+    exit_code = _run_issue_that_crashes_on_missing_pnpm(monkeypatch, fake_client, tmp_path)
+
+    assert exit_code == 1
+    assert any("agent/blocked" in added for added in _label_transitions(fake_client))
+    assert not any("agent/failed" in added for added in _label_transitions(fake_client))
+    comment_bodies = [c["body"] for c in fake_client.calls if c["method"] == "comment_issue"]
+    assert any("blocked_dependency_environment" in body for body in comment_bodies)
+    assert any("Missing required executable(s): pnpm." in body for body in comment_bodies)
+
+
+def test_run_once_keeps_failed_without_dependency_evidence(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """worktree 里没有依赖诊断可对账时，同样的异常仍是 agent/failed：判据不被稀释。"""
+    fake_client = FakeGitHubClient()
+    (tmp_path / "wt-123").mkdir(parents=True, exist_ok=True)
+
+    exit_code = _run_issue_that_crashes_on_missing_pnpm(monkeypatch, fake_client, tmp_path)
+
+    assert exit_code == 1
+    assert not any("agent/blocked" in added for added in _label_transitions(fake_client))
+    assert any("agent/failed" in added for added in _label_transitions(fake_client))
 
 
 def test_run_once_parallel_runs_issues_concurrently(monkeypatch, tmp_path) -> None:

@@ -80,6 +80,7 @@ from backend.core.use_cases.run_agent_once import (
 from backend.core.use_cases.agent_runner_failure import (
     AgentExecutionError,
     AgentUnavailableError,
+    DependencyEnvironmentBlockedError,
     ForbiddenBlockedError,
     MaxRetriesExceededError,
     ProviderCapacityError,
@@ -506,9 +507,15 @@ def run_issue_with_agent_fallback(
         try:
             process_for_agent(**process_kwargs)
             return candidate_agent
-        except (UnrecoverableError, ForbiddenBlockedError, ClaimArbitrationLost):
+        except (
+            UnrecoverableError,
+            ForbiddenBlockedError,
+            DependencyEnvironmentBlockedError,
+            ClaimArbitrationLost,
+        ):
             # Every agent would hit the same wall; do not switch. 首次领取仲裁
             # 落败同理：Issue 已归更早的认领者，换 agent 只会变成双跑。
+            # 依赖环境缺口同理：缺的是主机工具链/凭据，不是某个 agent 的能力问题。
             raise
         except AgentUnavailableError as exc:
             last_switch_exc = exc

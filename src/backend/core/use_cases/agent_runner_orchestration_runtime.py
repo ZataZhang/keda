@@ -45,6 +45,7 @@ from backend.core.use_cases.agent_runner_orchestrate import (
     _READY_DISCOVERY_LIMIT,
     AppConfig,
     AttemptResult,
+    DependencyEnvironmentBlockedError,
     ForbiddenBlockedError,
     IContentGenerator,
     IGitHubClient,
@@ -53,6 +54,7 @@ from backend.core.use_cases.agent_runner_orchestrate import (
     IRunnerLiveView,
     IssueSummary,
     _append_run_record_locked,
+    _find_worktree_path_for_issue,
     _guard_blocked_issue_has_resolution,
     _guard_running_issue_is_rework,
     _logger,
@@ -85,6 +87,9 @@ from backend.core.use_cases.agent_runner_worktree_probe import (
 from backend.core.use_cases.backlog_concurrency import count_live_running_issues
 from backend.core.use_cases.lifecycle_agent_resolution import attach_prd_lifecycle_overrides
 from backend.core.use_cases.run_target_admission import has_non_ready_workflow_label
+from backend.core.use_cases.worktree_dependency_context import (
+    escalate_dependency_environment_failure,
+)
 
 RUNTIME_DEPENDENCY_NAMES = (
     "_process_ready_issue",
@@ -92,6 +97,7 @@ RUNTIME_DEPENDENCY_NAMES = (
     "_process_blocked_resolution",
     "_process_running_publish_recovery",
     "choose_agent",
+    "_find_worktree_path_for_issue",
     "_worktree_needs_rebase_recovery",
     "_has_existing_local_commit_ready_for_publish",
 )
@@ -263,26 +269,50 @@ def _process_single_issue(
         if issue_kind != "ready":
             prd_activity_lease.start()
         if issue_kind == "ready":
-            used_agent = run_issue_with_agent_fallback(
-                issue=issue,
-                config=config,
-                agent=agent,
-                process_for_agent=partial(
-                    _process_ready_issue,
+            try:
+                used_agent = run_issue_with_agent_fallback(
                     issue=issue,
-                    repo_path=repo_path,
                     config=config,
-                    github_client=github_client,
-                    process_runner=process_runner,
-                    content_generator=content_generator,
-                    publish_stage=publish_stage,
-                    stage_selection=stage_selection,
-                    repo_id=effective_repo_id,
-                    on_claimed=prd_activity_lease.start,
-                ),
-                on_attempt_recorded=_on_attempt_recorded,
-                on_agent_usage=_emit_agent_usage_event,
-            )
+                    agent=agent,
+                    process_for_agent=partial(
+                        _process_ready_issue,
+                        issue=issue,
+                        repo_path=repo_path,
+                        config=config,
+                        github_client=github_client,
+                        process_runner=process_runner,
+                        content_generator=content_generator,
+                        publish_stage=publish_stage,
+                        stage_selection=stage_selection,
+                        repo_id=effective_repo_id,
+                        on_claimed=prd_activity_lease.start,
+                    ),
+                    on_attempt_recorded=_on_attempt_recorded,
+                    on_agent_usage=_emit_agent_usage_event,
+                )
+            except Exception as execution_exc:  # noqa: BLE001 - 只做归属判断后原样抛出
+                # 依赖准备是「可恢复的准备 + 诊断」，绝不提前终止 Issue；因此当执行
+                # 确实失败且能归因到记录在案的环境缺口（缺可执行文件 / 验证命令 127）
+                # 时，改判为可恢复阻塞，而不是 agent/failed。
+                dependency_block_exc: BaseException = execution_exc
+                try:
+                    claimed_worktree_path = _find_worktree_path_for_issue(
+                        repo_path, issue, config, process_runner
+                    )
+                except Exception as locate_exc:  # noqa: BLE001 - 定位不到 worktree 就不做归属
+                    _logger.debug(
+                        "Issue #%d: worktree path not locatable, skipping dependency "
+                        "environment attribution: %s",
+                        issue.number,
+                        locate_exc,
+                    )
+                else:
+                    dependency_block_exc = escalate_dependency_environment_failure(
+                        execution_exc, claimed_worktree_path
+                    )
+                if dependency_block_exc is not execution_exc:
+                    raise dependency_block_exc from execution_exc
+                raise
         elif issue_kind == "running_rework":
             _, marker = _guard_running_issue_is_rework(issue, config, github_client)
             if marker is None:
@@ -408,7 +438,9 @@ def _process_single_issue(
         output_view.update_status(issue.number, "skipped")
         raise
 
-    except ForbiddenBlockedError as exc:
+    except (ForbiddenBlockedError, DependencyEnvironmentBlockedError) as exc:
+        # 两者都是「等人」而非「执行失败」：Issue 进入可恢复的 agent/blocked，
+        # 人给出决定后 `kc blocked-continue` 继续，不占用 agent/failed 语义。
         _mark_issue_blocked(
             issue=issue,
             config=config,

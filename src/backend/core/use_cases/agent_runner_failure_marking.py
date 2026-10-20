@@ -90,13 +90,16 @@ def _mark_issue_blocked(
     github_client: IGitHubClient,
     exc: Exception,
 ) -> None:
-    """将 Issue 标记为 blocked 状态（forbidden path 拦截）。
+    """将 Issue 标记为 blocked 状态（可恢复的人工介入）。
+
+    forbidden path 拦截与依赖环境缺口都走这里：两者都是「等人给决定」，不是
+    Agent/执行失败，因此用 ``agent/blocked`` 而非 ``agent/failed`` 呈现。
 
     Args:
         issue: Issue 对象
         config: 应用配置
         github_client: GitHub 客户端
-        exc: 捕获的异常对象
+        exc: 捕获的异常对象；带 ``issue_comment_body`` 时以它为评论成稿
     """
     from backend.core.use_cases.agent_runner_failure import (
         ForbiddenBlockedError,
@@ -114,7 +117,12 @@ def _mark_issue_blocked(
         )
 
     attempt_results = getattr(exc, "attempt_results", None)
-    if isinstance(exc, ForbiddenBlockedError) and attempt_results is not None:
+    prepared_comment_body = getattr(exc, "issue_comment_body", None)
+    if isinstance(prepared_comment_body, str) and prepared_comment_body.strip():
+        # 异常自带面向人的成稿说明（如依赖环境阻塞：缺什么、为什么、人能选什么），
+        # 直接用，不再套 forbidden-path 模板。
+        comment_body = prepared_comment_body
+    elif isinstance(exc, ForbiddenBlockedError) and attempt_results is not None:
         comment_body = format_blocked_failure_comment(
             exc, attempt_results, issue_number=issue.number
         )

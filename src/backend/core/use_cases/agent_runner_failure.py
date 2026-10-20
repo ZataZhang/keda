@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import re
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from backend.core.shared.models.agent_runner import (
     AttemptResult,
@@ -33,11 +35,16 @@ from backend.core.use_cases.agent_runner_failure_format import (
     summarize_failure_exception,
 )
 
+if TYPE_CHECKING:
+    # 仅注解使用：运行时无需依赖依赖准备上下文模块，避免 use case 之间成环。
+    from backend.core.use_cases.worktree_dependency_context import FrontendProjectRecord
+
 __all__ = [
     "ATTEMPT_HISTORY_HEADING",
     "AgentExecutionError",
     "AgentRunnerAttemptError",
     "AgentUnavailableError",
+    "DependencyEnvironmentBlockedError",
     "ForbiddenBlockedError",
     "MaxRetriesExceededError",
     "ProviderCapacityError",
@@ -104,6 +111,39 @@ class ForbiddenBlockedError(AgentRunnerAttemptError):
         attempt_results: list[AttemptResult],
     ) -> None:
         super().__init__(message, attempt_results)
+
+
+class DependencyEnvironmentBlockedError(RuntimeError):
+    """项目依赖准备需要人类决定时的**可恢复阻塞**。
+
+    与 :class:`ForbiddenBlockedError` 同属「等人」而非「执行失败」：
+    ``agent/failed`` 表示 Agent/执行本身失败，而缺主机工具链、缺凭据、需要提权这类
+    环境事实只能由人决定，因此走 ``agent/blocked``（可用 ``kc blocked-continue`` 续）。
+
+    Attributes:
+        issue_comment_body: 面向 Issue 的完整 Markdown 说明（诊断 + 可选动作），
+            由 runner 直接发出，不复用 forbidden-path 模板（那是另一种阻塞）。
+        dependency_records: 触发本次判定的依赖准备诊断记录。
+    """
+
+    def __init__(
+        self,
+        message: str,
+        dependency_records: Sequence[FrontendProjectRecord],
+    ) -> None:
+        super().__init__(message)
+        self.dependency_records = tuple(dependency_records)
+        self.issue_comment_body = "\n".join(
+            [
+                "## Agent Runner Blocked",
+                "",
+                "- Block type: `blocked_dependency_environment`",
+                "- Meaning: project dependency preparation is recoverable but needs a "
+                "human decision; the agent was **not** failed for it.",
+                "",
+                message,
+            ]
+        )
 
 
 class ProviderCapacityError(AgentRunnerAttemptError):

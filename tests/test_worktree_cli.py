@@ -9,6 +9,7 @@ absolute worktree location, so the historical
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -274,7 +275,9 @@ def test_create_or_reuse_worktree_links_frontend_node_modules(
     found`` even though the main checkout has dependencies installed.
     """
     repo_path = _init_git_repository(tmp_path, "target")
-    (repo_path / ".gitignore").write_text("node_modules/\n", encoding="utf-8")
+    # .agent-runner/ 是 runner 的 worktree 状态目录（kc init 会把它写进 .gitignore）；
+    # 依赖准备诊断就落在这里，必须保持被忽略，否则 worktree 会被判为有未提交改动。
+    (repo_path / ".gitignore").write_text("node_modules/\n.agent-runner/\n", encoding="utf-8")
     (repo_path / "frontend").mkdir()
     (repo_path / "frontend" / "package.json").write_text("{}\n", encoding="utf-8")
     _run_git(repo_path, "add", ".gitignore", "frontend/package.json")
@@ -314,6 +317,14 @@ def test_create_or_reuse_worktree_links_frontend_node_modules(
     # so `iar worktree cleanup` can still remove it later.
     status_result = _run_git(worktree_path, "status", "--porcelain")
     assert status_result.stdout.strip() == ""
+
+    # 依赖准备诊断随真实入口落进 worktree 状态目录，供 prompt 组装阶段读回交给 Agent。
+    report_path = worktree_path / ".agent-runner" / "dependency-preparation.json"
+    assert report_path.is_file()
+    report_payload = json.loads(report_path.read_text(encoding="utf-8"))
+    project_entries = report_payload["projects"]
+    assert [entry["project_path"] for entry in project_entries] == ["frontend"]
+    assert project_entries[0]["outcome"] == "reused"
 
 
 def test_create_or_reuse_worktree_anchors_relative_path_output_to_repo(
