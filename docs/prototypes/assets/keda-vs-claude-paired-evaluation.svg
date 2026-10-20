@@ -1,0 +1,115 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1100" viewBox="0 0 1440 1100" role="img" aria-labelledby="title desc">
+  <title id="title">Keda 工作流与 Claude 单次执行的配对评测结果</title>
+  <desc id="desc">低保真目标图，基于现有 Evaluations run detail card，展示相同题目下两组的重复判分、稳定性、Keda 阶段、耗时和 Agent 调用数。</desc>
+  <defs>
+    <style>
+      .ui { font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #172033; }
+      .muted { fill: #687386; }
+      .small { font-size: 14px; }
+      .body { font-size: 16px; }
+      .heading { font-size: 20px; font-weight: 650; }
+      .title { font-size: 25px; font-weight: 700; }
+      .label { font-size: 13px; font-weight: 650; letter-spacing: .02em; }
+      .card { fill: #ffffff; stroke: #dce2ea; stroke-width: 1; }
+      .line { stroke: #e6eaf0; stroke-width: 1; }
+      .green { fill: #16794b; }
+      .red { fill: #ad3c34; }
+      .violet { fill: #6843b8; }
+    </style>
+  </defs>
+  <rect width="1440" height="1100" fill="#f6f7fb"/>
+  <rect x="80" y="38" width="1280" height="138" rx="18" fill="#fff" stroke="#e2e5ed"/>
+  <rect x="106" y="61" width="146" height="25" rx="13" fill="#f4efff" stroke="#e2d7ff"/>
+  <text x="121" y="78" class="ui violet" font-size="10" font-weight="700" letter-spacing="1.5">MODEL EVALUATION</text>
+  <text x="106" y="120" class="ui title">模型评测</text>
+  <text x="106" y="149" class="ui muted small">同一评测集下观察直接 Agent 执行与 Keda 工作流的配对结果；调用次数不代表费用。</text>
+
+  <rect x="80" y="198" width="1280" height="880" rx="14" class="card"/>
+  <rect x="80" y="198" width="1280" height="102" rx="14" fill="#fff"/>
+  <text x="108" y="234" class="ui heading">run-20261019-01</text>
+  <rect x="322" y="213" width="76" height="28" rx="14" fill="#e9f7ef"/>
+  <text x="340" y="232" class="ui green small" font-weight="650">已完成</text>
+  <rect x="1109" y="215" width="72" height="34" rx="8" fill="#fff" stroke="#d7dce5"/>
+  <text x="1128" y="237" class="ui small">刷新</text>
+  <rect x="1192" y="215" width="76" height="34" rx="8" fill="#fff" stroke="#d7dce5"/>
+  <text x="1212" y="237" class="ui small">删除</text>
+  <text x="108" y="270" class="ui muted small">suite keda-history-v1 v1 · 基线 main（a81c2f4…）· rubric v1 · 创建于 2026-10-19 18:09</text>
+  <line x1="80" y1="300" x2="1360" y2="300" class="line"/>
+
+  <text x="108" y="333" class="ui muted small">执行预设：claude-sonnet（claude · sonnet · high）</text>
+  <text x="108" y="357" class="ui muted small">评审预设：未选择（仅确定性检查对照）</text>
+  <rect x="108" y="378" width="1224" height="48" rx="9" fill="#f1f5ff" stroke="#dbe5fb"/>
+  <text x="128" y="408" class="ui small" font-weight="650">相同题目、冻结起点和判分测试；Keda 阶段状态、耗时与 Agent 调用数分别记录，不产生费用或胜者结论。</text>
+
+  <text x="108" y="469" class="ui heading">配对结果 · CASE-07</text>
+  <text x="108" y="495" class="ui muted small">修复任务队列的重试边界 · pytest 判分 · 同一冻结提交 a81c2f4…</text>
+
+  <rect x="108" y="516" width="592" height="102" rx="11" fill="#f2fbf6" stroke="#d2ebdc"/>
+  <text x="132" y="547" class="ui label muted">CLAUDE 单次执行</text>
+  <text x="132" y="582" class="ui green" font-size="24" font-weight="700">3 / 3 通过</text>
+  <text x="342" y="581" class="ui green body" font-weight="650">稳定 · 每次 1 个 Agent CLI 调用</text>
+  <rect x="720" y="516" width="612" height="102" rx="11" fill="#fff7f5" stroke="#f0d7d2"/>
+  <text x="744" y="547" class="ui label muted">KEDA 工作流</text>
+  <text x="744" y="582" class="ui red" font-size="24" font-weight="700">1 / 3 通过</text>
+  <text x="950" y="581" class="ui red body" font-weight="650">不稳定 · 每次最多 6 个调用</text>
+
+  <rect x="108" y="642" width="1224" height="48" rx="8" fill="#f8fafc"/>
+  <text x="128" y="672" class="ui label muted">重复</text>
+  <text x="230" y="672" class="ui label muted">候选</text>
+  <text x="448" y="672" class="ui label muted">判分</text>
+  <text x="585" y="672" class="ui label muted">Keda 阶段摘要</text>
+  <text x="1030" y="672" class="ui label muted">耗时</text>
+  <text x="1178" y="672" class="ui label muted">Agent CLI</text>
+  <text x="1266" y="672" class="ui label muted">结果状态</text>
+
+  <line x1="108" y1="690" x2="1332" y2="690" class="line"/>
+  <text x="128" y="724" class="ui small">第 1 次</text>
+  <text x="230" y="724" class="ui small" font-weight="650">Claude 单次</text>
+  <text x="448" y="724" class="ui green small" font-weight="650">通过</text>
+  <text x="585" y="724" class="ui muted small">—</text>
+  <text x="1030" y="724" class="ui small">02:14</text>
+  <text x="1178" y="724" class="ui small">1 次</text>
+  <text x="1266" y="724" class="ui green small">完成</text>
+  <line x1="108" y1="742" x2="1332" y2="742" class="line"/>
+  <text x="128" y="776" class="ui small">第 1 次</text>
+  <text x="230" y="776" class="ui small" font-weight="650">Keda 工作流</text>
+  <text x="448" y="776" class="ui green small" font-weight="650">通过</text>
+  <text x="585" y="776" class="ui small">实现 ✓　验证 ✓　review ✓　修复 ✓</text>
+  <text x="1030" y="776" class="ui small">08:37</text>
+  <text x="1178" y="776" class="ui small">4 次</text>
+  <text x="1266" y="776" class="ui green small">完成</text>
+  <line x1="108" y1="794" x2="1332" y2="794" class="line"/>
+  <text x="128" y="828" class="ui small">第 2 次</text>
+  <text x="230" y="828" class="ui small" font-weight="650">Claude 单次</text>
+  <text x="448" y="828" class="ui green small" font-weight="650">通过</text>
+  <text x="585" y="828" class="ui muted small">—</text>
+  <text x="1030" y="828" class="ui small">03:02</text>
+  <text x="1178" y="828" class="ui small">1 次</text>
+  <text x="1266" y="828" class="ui green small">完成</text>
+  <line x1="108" y1="846" x2="1332" y2="846" class="line"/>
+  <text x="128" y="880" class="ui small">第 2 次</text>
+  <text x="230" y="880" class="ui small" font-weight="650">Keda 工作流</text>
+  <text x="448" y="880" class="ui red small" font-weight="650">未通过</text>
+  <text x="585" y="880" class="ui small">实现 ✓　验证 ✓　review 未通过</text>
+  <text x="1030" y="880" class="ui small">06:22</text>
+  <text x="1178" y="880" class="ui small">3 次</text>
+  <text x="1266" y="880" class="ui red small">完成</text>
+
+  <line x1="108" y1="898" x2="1332" y2="898" class="line"/>
+  <text x="128" y="932" class="ui small">第 3 次</text>
+  <text x="230" y="932" class="ui small" font-weight="650">Claude 单次</text>
+  <text x="448" y="932" class="ui green small" font-weight="650">通过</text>
+  <text x="585" y="932" class="ui muted small">—</text>
+  <text x="1030" y="932" class="ui small">01:58</text>
+  <text x="1178" y="932" class="ui small">1 次</text>
+  <text x="1266" y="932" class="ui green small">完成</text>
+  <line x1="108" y1="950" x2="1332" y2="950" class="line"/>
+  <text x="128" y="984" class="ui small">第 3 次</text>
+  <text x="230" y="984" class="ui small" font-weight="650">Keda 工作流</text>
+  <text x="448" y="984" class="ui red small" font-weight="650">未通过</text>
+  <text x="585" y="984" class="ui small">实现 ✓　验证未通过</text>
+  <text x="1030" y="984" class="ui small">04:51</text>
+  <text x="1178" y="984" class="ui small">2 次</text>
+  <text x="1266" y="984" class="ui red small">完成</text>
+  <text x="108" y="1044" class="ui muted small">原型目标图 · 固定示例数据 · 不是运行记录或生产页面截图</text>
+</svg>
