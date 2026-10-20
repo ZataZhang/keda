@@ -1650,6 +1650,7 @@ kc registry list
 > **Managed vs Unmanaged**：
 > - 通过 `kc registry start` / console / `kc takeover` 启动的 daemon 是**托管进程**，会写入 `~/.kedacode/processes.json`，状态显示为 `running (<process_id>)`，可用 `kc registry stop` 停止。
 > - 直接在命令行执行 `kc daemon` / `kc supervise-daemon` 启动的进程是**未托管进程**。`kc registry list` 会通过扫描系统进程把它们识别出来，状态显示为 `running (unmanaged)`，但**不会**被 `kc registry stop` 停止，也没有独立的日志文件被 `registry` 命令管理。
+> - 如果系统权限阻止读取完整进程表，`kc registry list` 会记录 warning 并跳过未托管进程扫描；注册仓库和托管进程状态仍会正常显示，此时手动启动的 daemon 可能不会出现在列表中。
 > - 同时存在托管与未托管进程时，列表优先显示托管状态。
 
 > **不要混用**：同一时间、同一仓库，建议要么只使用 `kc registry start` 管理 daemon，要么只手动运行 `kc daemon`。混用可能导致两个进程同时 claim 同一仓库的 Issues，且 `registry stop` 不会清理手动启动的进程。
