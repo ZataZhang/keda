@@ -41,7 +41,7 @@ PRD 的章节结构、Human Review Map（介入与风险地图）、Realistic Va
 
 #### 不要把 runner 自持的门禁写成验收条目
 
-agent runner 的归档动作（`ensure_prd_delivery_ready`,执行循环 Phase 3）跑在它自己的 independent verifier（Phase 3.6）、PR 创建与评审**之前**。因此像"独立 verifier 对 rv-1～rv-N 全链证据 PASS 后才归档"这样的条目在被检查的那一刻永远无法成立：勾上是撒谎,不勾就被门禁打回,attempt 只能在同一行上空转（实证：freshai Issue #111 连续 5 次 attempt 失败在同一条上）。
+agent runner 的归档动作（`ensure_prd_delivery_ready`,执行循环 Phase 3）跑在它自己的 independent verifier（Phase 3.6）、PR 创建与评审**之前**。因此像"独立 verifier 对 rv-1～rv-N 全链证据 PASS 后才归档"这样的条目在被检查的那一刻永远无法成立：勾上是撒谎,不勾就被门禁打回,attempt 只能在同一行上空转（实证：示例仓库 Issue #111 连续 5 次 attempt 失败在同一条上）。
 
 - 写 PRD 时：验收条目只写**本轮执行 agent 能自己产出证据**的事；verifier / PR / 归档顺序这类 runner 门禁不进清单。
 - 已经写进去了：改成 `- [~] <原文> — runner-owned gate: <哪道门禁>`,把门禁本身交回 runner。

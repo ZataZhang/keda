@@ -566,7 +566,7 @@ kc skill install             # 安装/刷新全部用户级 Skill
 
 代码层面的默认值只有 `git diff --check`（避免在未 `kc init` 的仓库里因缺少 mkdocs/pytest 而直接失败）。`kc init` 会按上述规则生成更完整的项目专属命令列表。
 
-> **autofix 钩子的一次幂等重试**：`ruff-format`、`trailing-whitespace`、`end-of-file-fixer` 这类钩子会**就地重写文件**再以非零码退出（`files were modified by this hook`），这是纯格式化、幂等可恢复的失败。`commit_requested_changes` 对**两道门禁都**做同一处理（`_run_commit_gate_with_autofix_retry`）：门禁非零时先看 `git diff --quiet` —— 若跟踪文件被改写过，就校验禁改路径、`git add -u` 重新 stage 并**再跑一次**；只有「非零但没改任何文件」（真实 lint/检查错误）或「重新 stage 后第二次仍非零」才判 `VerificationFailedError`。此处刻意只用 `-u`（本函数处理的是 autofix 就地重写已跟踪文件，重跑门禁才是目的）；门禁自己生成的未跟踪新文件由提交前那道 `_verification_left_unstaged_worktree_changes` 兜底补 `git add -A`。这一点对 `verification_commands` 尤其重要：它排在 `pre_commit_verification_command` 之前，而 `just test` / `just lint --full` 内部往往就是同一批 pre-commit 钩子，早期只给后者加容错时纯格式化失败会在更早的门被直接判死（实证：freshai Issue #96 的 pre-PR review 补丁）。注意 `just test` 一类配方常把 lint 输出重定向掉（`just lint --full >/dev/null 2>&1`），失败时 GitHub 评论里只剩 `ERROR: Lint failed`；判断是不是 autofix 可比对被改文件的 mtime 与失败时间戳，并在 worktree 里原地重跑一次同一条命令。
+> **autofix 钩子的一次幂等重试**：`ruff-format`、`trailing-whitespace`、`end-of-file-fixer` 这类钩子会**就地重写文件**再以非零码退出（`files were modified by this hook`），这是纯格式化、幂等可恢复的失败。`commit_requested_changes` 对**两道门禁都**做同一处理（`_run_commit_gate_with_autofix_retry`）：门禁非零时先看 `git diff --quiet` —— 若跟踪文件被改写过，就校验禁改路径、`git add -u` 重新 stage 并**再跑一次**；只有「非零但没改任何文件」（真实 lint/检查错误）或「重新 stage 后第二次仍非零」才判 `VerificationFailedError`。此处刻意只用 `-u`（本函数处理的是 autofix 就地重写已跟踪文件，重跑门禁才是目的）；门禁自己生成的未跟踪新文件由提交前那道 `_verification_left_unstaged_worktree_changes` 兜底补 `git add -A`。这一点对 `verification_commands` 尤其重要：它排在 `pre_commit_verification_command` 之前，而 `just test` / `just lint --full` 内部往往就是同一批 pre-commit 钩子，早期只给后者加容错时纯格式化失败会在更早的门被直接判死（实证：示例仓库 Issue #96 的 pre-PR review 补丁）。注意 `just test` 一类配方常把 lint 输出重定向掉（`just lint --full >/dev/null 2>&1`），失败时 GitHub 评论里只剩 `ERROR: Lint failed`；判断是不是 autofix 可比对被改文件的 mtime 与失败时间戳，并在 worktree 里原地重跑一次同一条命令。
 
 探测出的命令列表会被 runner 写入首次实现 prompt、Fix Agent prompt 和 Recovery Agent prompt，让 Agent 在编码和修复阶段都能看到完整的交付门禁。所有 prompt 都会提醒 Agent 在请求 commit 前检查项目规范（AGENTS.md、命名、依赖方向、文件编码、行长度限制等）。
 
@@ -1534,15 +1534,15 @@ kc daemon --no-autopilot
 [agent_runner]
 max_issues = 1
 
-[agent_runner.repositories.keda]
-path = "/Users/zata/code/keda"
+[agent_runner.repositories.example_service]
+path = "/path/to/your/repo"
 enabled = true
 # Optional ``owner/name`` for ``gh pr list --repo`` (PR column on
 # ``kc issue list``). 缺省时 PR 列为空 + stderr 一次性 WARN。
-github_repo = "ZataZhang/keda"
+github_repo = "owner/repo"
 
 [agent_runner.repositories.backend_service]
-path = "/Users/zata/code/backend-service"
+path = "/path/to/your/backend-service"
 enabled = true
 github_repo = "owner/backend-service"
 ```
@@ -1559,7 +1559,7 @@ github_repo = "owner/backend-service"
 ```toml
 # 旧 config.toml
 [agent_runner.repositories.backend_service]
-path = "/Users/zata/code/backend-service"
+path = "/path/to/your/backend-service"
 enabled = true
 display_name = "Backend Service"
 
@@ -1574,16 +1574,16 @@ verification_commands = ["git diff --check", "uv run pytest"]
 迁移后保留轻量 registry：
 
 ```toml
-# keda/config.toml
+# config.toml
 [agent_runner.repositories.backend_service]
-path = "/Users/zata/code/backend-service"
+path = "/path/to/your/backend-service"
 enabled = true
 ```
 
 把仓库细节放到目标仓库：
 
 ```toml
-# /Users/zata/code/backend-service/.kedacode.toml
+# /path/to/your/backend-service/.kedacode.toml
 [agent_runner.repository]
 id = "backend_service"
 enabled = true
@@ -1607,13 +1607,13 @@ verification_commands = ["git diff --check", "uv run pytest"]
 
 ```bash
 # 默认把 remote 重置为 origin，覆盖现有 .kedacode.toml
-kc registry reinit --repo-id ZataZhang-fsense
+kc registry reinit --repo-id example-repo
 
 # 显式指定 remote 和 base_branch
-kc registry reinit --repo-id ZataZhang-fsense --remote upstream --base-branch develop
+kc registry reinit --repo-id example-repo --remote upstream --base-branch develop
 
 # 重新初始化后立刻重启 daemon 和 supervise-daemon
-kc registry reinit --repo-id ZataZhang-fsense --start-daemons
+kc registry reinit --repo-id example-repo --start-daemons
 ```
 
 #### 取消托管（`kc registry remove`）
@@ -1621,7 +1621,7 @@ kc registry reinit --repo-id ZataZhang-fsense --start-daemons
 停止 daemon/supervise-daemon 并从 registry 移除条目：
 
 ```bash
-kc registry remove --repo-id ZataZhang-fsense
+kc registry remove --repo-id example-repo
 ```
 
 该命令只删除 `config.toml` 中的注册条目，**永不删除本地仓库目录**：托管 clone 与开发工作区都只能由人工在外部自行处理。管理终端「项目接入」页的「移除」按钮走同一条语义。
@@ -1639,9 +1639,9 @@ kc registry list
 ┏━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━┓
 ┃ repo_id               ┃ display... ┃ path                   ┃ daemon  ┃ supervise-daemon ┃
 ┡━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━━┩
-│ ZataZhang-fsense  │ fsense     │ /Users/.../fsense      │ running │ running       │
+│ example-legacy    │ Legacy     │ /path/to/legacy       │ running │ running       │
 │                       │            │                        │ (p123)  │ (p124)        │
-│ another-owner-repo    │ another    │ /Users/.../another     │ stopped │ stopped       │
+│ another-owner-repo    │ another    │ /path/to/another      │ stopped │ stopped       │
 └───────────────────────┴────────────┴────────────────────────┴─────────┴───────────────┘
 ```
 
@@ -3700,14 +3700,14 @@ Agent Runner 同时暴露只读状态端点：
 Agent Runner 在启动和结束一次 agent 执行时，会显式记录当前处理的 GitHub Issue 编号和完整 URL：
 
 ```text
-Starting agent for Issue #23: https://github.com/ZataZhang/fsense/issues/23
-Agent finished for Issue #23: https://github.com/ZataZhang/fsense/issues/23 (exit_code=0)
+Starting agent for Issue #23: https://github.com/owner/example-repo/issues/23
+Agent finished for Issue #23: https://github.com/owner/example-repo/issues/23 (exit_code=0)
 ```
 
 对于运行时间超过心跳阈值（默认 60 秒）的长命令，process runner 的 watchdog 心跳日志也会携带 Issue 上下文：
 
 ```text
-Claude stream (Issue #23: https://github.com/ZataZhang/fsense/issues/23) still running after 60s: claude --dangerously-skip-permissions ...
+Claude stream (Issue #23: https://github.com/owner/example-repo/issues/23) still running after 60s: claude --dangerously-skip-permissions ...
 ```
 
 这样即使命令摘要因 `_summarize_command` 的 240 字符限制被截断，Issue URL 仍以独立字段完整保留，便于从日志直接定位当前处理的 Issue。

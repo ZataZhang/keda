@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "language": "zh-CN",
+  "items": [
+    {
+      "item_number": 1,
+      "item_name": "模板不含维护者绝对路径或生效仓库段",
+      "command": "python3 tasks/evidence/issue-294/scripts/rv_1_config_paths.py",
+      "evidence_files": ["rv-1-config-paths.txt"],
+      "output_summary": "注入的负例被两条 grep 检出；实际 config.toml 的 /Users/ 与生效 repositories 表 grep 均无输出，两个示例路径为 /path/to/your/repo 与 /path/to/your/worktree。",
+      "explanation": "脚本通过实际 grep 检查仓库根 config.toml，并先用同样的 grep 命令验证注入的坏配置会命中；真实文件中没有命中且仅保留中性注释路径。",
+      "risks": "grep 无匹配时退出码为 1；脚本显式检查无输出和该退出码，不以退出码 0 代替断言。",
+      "negative_control": "在临时 TOML fixture 中注入一个生效的 [agent_runner.repositories.negative_control] 段和 /Users/example/repo 路径，再对 fixture 执行同样两条 grep。",
+      "expected_fail": "两条 grep 都返回 0 并输出命中行，表明模板 oracle 在存在私有路径或生效仓库时变红。",
+      "stdout_assertions": [
+        {
+          "severity": "high",
+          "pattern": "PASS: no /Users/ path or active repository table; both examples use neutral paths.",
+          "must_match": true
+        }
+      ]
+    },
+    {
+      "item_number": 2,
+      "item_name": "TOML 可解析且 agent_runner 不含 repositories",
+      "command": "UV_CACHE_DIR=/private/tmp/issue-294-uv-cache uv run --no-sync python tasks/evidence/issue-294/scripts/rv_2_toml_config.py",
+      "evidence_files": ["rv-2-toml-config.txt"],
+      "output_summary": "负例注入 repositories 后断言以 AssertionError 退出；实际文件输出 agent_runner 存在为 True、repositories 缺失为 True，且除移除 registry 外所有解析值与当前 zata/main 相同。",
+      "explanation": "使用 Python 3.13 的 tomllib 解析真实模板并断言子键不存在；同时将当前 TOML 与主干版本比较，仅从主干解析结果移除 repositories 后逐值相等。",
+      "risks": "需要仓库的 uv 项目环境；脚本使用现有 .venv，UV_CACHE_DIR 指向临时缓存目录。",
+      "negative_control": "将合法的 [agent_runner.repositories.negative_control] 表追加到临时 config.toml fixture，再运行相同 TOML 解析和 repositories 缺失断言。",
+      "expected_fail": "负例解析成功但 repositories 缺失断言失败，输出 False 和 AssertionError: agent_runner.repositories must be absent。",
+      "stdout_assertions": [
+        {
+          "severity": "high",
+          "pattern": "PASS: tomllib loads the template, agent_runner exists, repositories is absent, and all other parsed values match.",
+          "must_match": true
+        }
+      ]
+    },
+    {
+      "item_number": 3,
+      "item_name": "全新状态目录首启后 kc registry list 为空",
+      "command": "UV_CACHE_DIR=/private/tmp/issue-294-uv-cache uv run --no-sync python tasks/evidence/issue-294/scripts/rv_3_fresh_registry.py",
+      "evidence_files": ["rv-3-fresh-registry.txt"],
+      "output_summary": "负例和全新 HOME 下的真实 kc registry list 均在输出 registry 前退出 4；macOS sysctl() 返回 Operation not permitted。清单为空的绿结果尚未取得。",
+      "explanation": "真实 kc 命令已通过负例显式配置和全新临时 HOME 各尝试一次，但沙箱在 psutil 系统进程枚举阶段中止命令，未产生可断言的 registry 输出；此文件仅记录诊断，不能证明验收条件成立。",
+      "risks": "INCONCLUSIVE：当前执行沙箱拒绝系统进程枚举。必须在具备进程读取权限的普通 macOS Terminal 重跑；没有使用 mock、TestClient 或替代入口，也没有把该结果记为通过。",
+      "negative_control": "把 KEDACODE_CONFIG 指向临时配置，其中包含一个 enabled=false 的 negative_control 仓库，再运行真实 uv run --no-sync kc registry list --json。",
+      "expected_fail": "预期 JSON 输出列出 repo_id=negative_control，使空 registry 断言变红；当前实际在列表输出前因 sysctl() EPERM 退出 4，预期的负例输出未观察到。"
+    },
+    {
+      "item_number": 4,
+      "item_name": "diff 范围、#292 合入与文档示例审计",
+      "command": "UV_CACHE_DIR=/private/tmp/issue-294-uv-cache uv run --no-sync python tasks/evidence/issue-294/scripts/rv_4_diff_docs.py",
+      "evidence_files": ["rv-4-diff-docs.txt"],
+      "output_summary": "文档 stale-id 搜索与未授权 diff 路径两个负例均被检出；真实 diff 涉及配置、直接相关文档/原型，以及为修复既有全量验证失败而更新的 3 个测试夹具/断言文件。docs/ 中已无旧 registry id 或维护者本机绝对路径示例。#292 已关闭，PR #296 已合入且其合入提交是当前 zata/main 的祖先。",
+      "explanation": "脚本使用实际 git diff 检查改动文件集、检查配置 TOML 除 repositories 外与主干完全相等，并用 rg 检查文档示例；GitHub 只读查询与 git ancestry 同时证明依赖已合入。原型旧仓库行已中性化；测试更新只修正受宿主配置覆盖的测试设置、为依赖复用样例补充匹配锁文件并对齐当前诊断文案，没有运行时代码变更。",
+      "risks": "验证恢复需要扩展到 3 个既有测试文件；它们与 Issue 产品改动无关，但修复了 runner 报告的基线失败。GitHub 状态核对依赖 gh 已认证并可联网；本次只读查询成功。mkdocs.yml 未变更，因为没有新增导航页。",
+      "negative_control": "临时文档 fixture 注入被删除的仓库 id，再用 rg 搜索；另将临时未授权文件与 /dev/null 运行 git diff --no-index --name-only。",
+      "expected_fail": "rg 输出 stale id 命中行；git diff 输出未授权文件路径并被改动范围 allowlist 拒绝。",
+      "stdout_assertions": [
+        {
+          "severity": "high",
+          "pattern": "PASS: change scope, docs references, current mainline, and #292 merge checks are consistent.",
+          "must_match": true
+        }
+      ]
+    }
+  ]
+}

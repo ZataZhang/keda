@@ -533,7 +533,7 @@ class TestEnsureFrontendNodeModules:
 
         assert project_record.outcome == OUTCOME_NOT_PREPARED
         assert not (worktree_path / "frontend" / "node_modules").exists()
-        assert "lockfiles differ" in project_record.detail
+        assert "dependency inputs are missing, different, or unverifiable" in project_record.detail
 
     def test_existing_node_modules_is_left_untouched(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -683,11 +683,13 @@ class TestLinkFrontendNodeModules:
         repo_path = tmp_path / "repo"
         worktree_path = tmp_path / "worktree"
         # Main checkout has installed dependencies for both frontends.
-        _make_frontend_project(repo_path / "frontend")
-        _make_frontend_project(repo_path / "frontend-admin")
+        _make_frontend_project(repo_path / "frontend", lockfile_names=("pnpm-lock.yaml",))
+        _make_frontend_project(repo_path / "frontend-admin", lockfile_names=("pnpm-lock.yaml",))
         # Worktree has the manifests (materialized by git) but no node_modules.
         _write_file(worktree_path / "frontend" / "package.json", "{}\n")
+        _write_file(worktree_path / "frontend" / "pnpm-lock.yaml", "lockfile\n")
         _write_file(worktree_path / "frontend-admin" / "package.json", "{}\n")
+        _write_file(worktree_path / "frontend-admin" / "pnpm-lock.yaml", "lockfile\n")
 
         linked_relative_paths = link_frontend_node_modules(repo_path, worktree_path)
 
