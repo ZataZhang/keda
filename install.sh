@@ -13,7 +13,7 @@
 #   * Prefers `uv` (bootstrap if missing), then `pipx`, then `pip --user`.
 #   * Installs from the GitHub Release tarball by default (--source auto).
 #   * --source pypi installs the published PyPI package `kedacode`（主命令 kc，
-#     长别名 kedacode，另有永久弃用别名 iar）；  # legacy-alias
+#     长别名 kedacode；旧别名 iar 已停止随包构建，只在卸载时清理残留死链接）；  # legacy-alias
 #     PyPI 不可达或版本不存在时直接报错，绝不静默回退到 tarball。
 #   * Verifies `kc --version` exits 0 and emits a clear PATH hint if needed.
 #   * Refuses to use sudo; never touches system package managers.
@@ -38,9 +38,11 @@ readonly PY_MIN_MINOR=11
 readonly DEFAULT_TOOL_NAME="kedacode"
 readonly TOOL_BIN_NAME="kc"
 # wheel 实际装出来的全部 console script（pyproject [project.scripts] 的镜像）。
-# 卸载必须逐个清理：只删主名会在 ~/.local/bin 里留下指向已删环境的死链接。
-# kedacode 是长别名，iar 是永久弃用别名。  # legacy-alias
-readonly TOOL_BIN_NAMES="kc kedacode iar" # legacy-alias
+# 安装计划只报这两个：iar 已停发，把它写在计划里等于承诺一个不会再被装出来的命令。
+readonly TOOL_BUILT_BIN_NAMES="kc kedacode"
+# 卸载要逐个清理的名单 = 本次装出的 + 历史遗留：只删主名会在 ~/.local/bin 里留下
+# 指向已删环境的死链接，旧版本装出来的 iar 链接同样要清掉。  # legacy-alias
+readonly TOOL_BIN_NAMES="${TOOL_BUILT_BIN_NAMES} iar" # legacy-alias
 
 INSTALL_METHOD="${KEDA_INSTALL_METHOD:-}"
 VERSION_TAG="${KEDA_VERSION:-}"
@@ -282,7 +284,7 @@ print_plan() {
   method:    ${INSTALL_METHOD}
   version:   ${VERSION_TAG:-<unset>}
   source:    $(source_label)
-  tool:      ${DEFAULT_TOOL_NAME} (binaries: ${TOOL_BIN_NAMES})
+  tool:      ${DEFAULT_TOOL_NAME} (binaries: ${TOOL_BUILT_BIN_NAMES})
 EOF
 }
 

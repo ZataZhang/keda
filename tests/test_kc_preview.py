@@ -23,6 +23,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
+import psutil
 
 from backend.core.shared.interfaces.agent_session import PreviewStartOutcome, PreviewStartRequest
 from backend.core.shared.models.agent_runner import AppConfig
@@ -138,17 +139,14 @@ def _pid_alive(process_pid: int) -> bool:
             return process_state not in {"Z", "X", "x"}
     elif sys.platform == "darwin":
         # macOS 的 orphan 僵尸在 launchd 回收前会让 signal 0 假报存活；
-        # 用 ps 状态位区分真实运行与待回收的进程表残留。
-        ps_result = subprocess.run(  # noqa: S603 - 固定 argv，无 shell
-            ["ps", "-o", "state=", "-p", str(process_pid)],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        ps_state = ps_result.stdout.strip()
-        if not ps_state:
+        # 用 psutil 读取状态，避免沙箱禁止启动 ps 子进程。
+        try:
+            process_state = psutil.Process(process_pid).status()
+        except psutil.NoSuchProcess:
             return False
-        return "Z" not in ps_state
+        except psutil.AccessDenied:
+            return True
+        return process_state != psutil.STATUS_ZOMBIE
     try:
         os.kill(process_pid, 0)
     except ProcessLookupError:

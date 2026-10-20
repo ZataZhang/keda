@@ -86,6 +86,16 @@
             <polyline points="20 6 9 17 4 12"></polyline>
           </svg>
         </button>
+        <!-- 在系统中打开：把当前文件交给系统默认应用（macOS open / Windows 资源管理器 /
+             Linux xdg-open）。查看器渲染不了的二进制与超大文件靠它出去；可见性与
+             「复制路径」一致——头部没有真实路径就收起。 -->
+        <button type="button" id="open-in-system" class="open-system" aria-label="在系统中打开" title="用系统默认应用打开" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+            <polyline points="15 3 21 3 21 9"></polyline>
+            <line x1="10" y1="14" x2="21" y2="3"></line>
+          </svg>
+        </button>
 
         <!-- 预览控件：只在当前文件支持预览时出现。默认停在「源码」，预览是一次显式切换。 -->
         <div class="segmented preview-switch" id="preview-switch" role="tablist" aria-label="预览切换" hidden>

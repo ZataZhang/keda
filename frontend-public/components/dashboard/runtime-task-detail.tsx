@@ -26,11 +26,13 @@ import { fetchRunExecutionDetails } from "@/lib/api/console";
 import { fetchPrdProgress } from "@/lib/api/backlog";
 import type {
   BacklogPrdProgress,
+  AnomalyType,
   RuntimeTaskEntry,
   RunInvocationDetailEntry,
 } from "@/lib/api/types";
 import { formatLocalDateTime } from "@/lib/utils";
 
+import { runtimePhaseDescription, RuntimeTaskPhase } from "./runtime-task-phase";
 import { runtimeStatusPresentation } from "./runtime-task-list";
 
 /** `worktree_status` 独有原因：`impact_status` 里没有对应取值，只能在这里补。 */
@@ -54,6 +56,40 @@ function describeImpactUnavailability(progress: BacklogPrdProgress): string | un
     WORKTREE_REASON[progress.worktree_status] ??
     explainImpactStatus(progress) ??
     `影响树暂不可用（${progress.impact_status}）`
+  );
+}
+
+interface RuntimeTaskAnomaliesProps {
+  /** 当前监控快照检测到的异常类型。 */
+  anomalyTypes: AnomalyType[];
+  /** 紧凑布局（桌面小窗）使用更小字号并允许长标识换行。 */
+  compact?: boolean;
+}
+
+/**
+ * 独立呈现监控异常，避免把状态不一致告警显示成任务失败原因。
+ *
+ * @param props - 监控快照提供的异常类型与展示密度。
+ * @returns 有异常时返回告警说明，否则返回 ``null``。
+ */
+export function RuntimeTaskAnomalies({
+  anomalyTypes,
+  compact = false,
+}: RuntimeTaskAnomaliesProps) {
+  if (anomalyTypes.length === 0) {
+    return null;
+  }
+  return (
+    <p
+      className={
+        compact
+          ? "break-words text-[11px] text-amber-700 dark:text-amber-300"
+          : "text-amber-700 dark:text-amber-300"
+      }
+      data-testid="runtime-task-anomalies"
+    >
+      监控告警（与任务状态分开）：{anomalyTypes.join("、")}
+    </p>
   );
 }
 
@@ -295,6 +331,7 @@ export function RuntimeTaskDetail({ task }: RuntimeTaskDetailProps) {
         <CardHeader className="pb-2">
           <CardTitle className="flex flex-wrap items-center gap-2 text-sm">
             <Badge variant={presentation.variant}>{presentation.label}</Badge>
+            <RuntimeTaskPhase phase={task.phase} />
             <span>{identity}</span>
             {task.issue_url ? (
               <a
@@ -312,9 +349,12 @@ export function RuntimeTaskDetail({ task }: RuntimeTaskDetailProps) {
           ) : null}
         </CardHeader>
         <CardContent className="flex flex-col gap-2 text-xs text-slate-600 dark:text-slate-300">
-          <p data-testid="runtime-task-status-reason">分桶依据：{task.status_reason ?? "未提供"}</p>
+          <p data-testid="runtime-task-status-reason">状态来源：{task.status_reason ?? "未提供"}</p>
+          <p data-testid="runtime-task-phase-description">
+            阶段说明：{runtimePhaseDescription(task.phase)}
+          </p>
+          <RuntimeTaskAnomalies anomalyTypes={task.anomaly_types ?? []} />
           <div className="flex flex-wrap gap-x-4 gap-y-1">
-            <span>阶段：{task.phase ?? "未知"}</span>
             <span>
               执行：{task.agent ?? "未知"}
               {task.preset ? ` · preset ${task.preset}` : ""}

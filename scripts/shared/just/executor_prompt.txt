@@ -33,7 +33,7 @@ If none of those can make the oracle go red, record it in the evidence report as
 negative_control: not feasible — <one-line reason>
 ```
 
-and move on. "Not feasible" is an accepted outcome. It is never a licence to reshape the product for its own test.
+and move on. "Not feasible" is an accepted outcome, as is `negative_control: not needed — <one-line reason>` when red is already guaranteed or proven by another test in the same change. It is never a licence to reshape the product for its own test.
 
 ## Evidence collection conventions
 

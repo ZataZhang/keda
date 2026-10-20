@@ -119,7 +119,7 @@ const COMPLETION_STATS = {  repositories: [
 
 /**
  * 值守看板任务摘要 fixture：与快照 fixture 同一份仓库/Issue 身份，
- * 覆盖「运行中」和「阻塞」两个分桶，用于断言默认视图渲染的是任务而不是仓库卡片。
+ * 覆盖「运行中」和「失败」两个分桶，用于断言默认视图渲染的是任务而不是仓库卡片。
  */
 const RUNTIME_TASKS = {
   generated_at: '2026-06-11T10:05:00+00:00',
@@ -132,7 +132,8 @@ const RUNTIME_TASKS = {
       issue_title: 'Running Issue',
       issue_url: 'https://example.test/21',
       status: 'running',
-      status_reason: 'agent/running',
+      status_reason: '当前监控标签：agent/running',
+      anomaly_types: [],
       phase: 'implement',
       agent: 'codex',
       preset: 'default',
@@ -152,8 +153,9 @@ const RUNTIME_TASKS = {
       repo_display_name: 'Keda Main',
       issue_title: 'Broken Issue',
       issue_url: 'https://example.test/19',
-      status: 'blocked',
-      status_reason: 'agent/failed',
+      status: 'failed',
+      status_reason: '当前监控标签：agent/failed',
+      anomaly_types: [],
       phase: null,
       agent: null,
       preset: null,
@@ -167,7 +169,15 @@ const RUNTIME_TASKS = {
       labels: ['agent/failed'],
     },
   ],
-  status_counts: { running: 1, waiting: 0, blocked: 1, completed: 0, unknown: 0 },
+  status_counts: {
+    running: 1,
+    waiting: 0,
+    blocked: 0,
+    failed: 1,
+    completed: 0,
+    closed: 0,
+    unknown: 0,
+  },
   unavailable_sources: [],
   missing_repo_ids: [],
   sync_status: 'ready',

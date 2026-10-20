@@ -1545,7 +1545,9 @@ export type RuntimeTaskStatus =
   | "running"
   | "waiting"
   | "blocked"
+  | "failed"
   | "completed"
+  | "closed"
   | "unknown";
 
 /**
@@ -1562,7 +1564,10 @@ export type RuntimeTaskEntry = {
   issue_title: string | null;
   issue_url: string | null;
   status: RuntimeTaskStatus;
+  /** 当前状态的直接来源，例如监控标签或 Issue 关闭状态。 */
   status_reason: string | null;
+  /** 监控异常类型，与状态来源分开呈现。 */
+  anomaly_types: AnomalyType[];
   phase: string | null;
   agent: string | null;
   preset: string | null;

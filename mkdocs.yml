@@ -64,15 +64,16 @@ nav:
       - 部署指南: guides/deployment.md
       - 发布流程: guides/release-process.md
       - Agent Runner:
-          - 完整指南、模块职责、并发调度、统计、成本与会话续接: guides/agent-runner.md
+          - 完整指南、值守看板、模块职责、并发调度、统计、成本与会话续接: guides/agent-runner.md
       - 生命周期 Agent 矩阵: guides/lifecycle-agent-matrix.md
       - Agent 模型预设: guides/model-presets.md
       - PRD 编写规范: guides/prd-standard.md
       - 想法收集（Idea Inbox）: guides/idea-inbox.md
+      - 本机文件与改动查看器: guides/file-viewer.md
       - Review Workflow: guides/review-workflow.md
       - Skill Lifecycle: guides/skill-lifecycle.md
       - Codex macOS 通知: guides/codex-notifications.md
-      - 桌面进度小窗: guides/desktop-companion.md
+      - macOS 菜单栏 App 安装与状态面板: guides/desktop-companion.md
       - 从 IAR 升级到 KedaCode: guides/migrating-from-iar.md
       - Loop 定时任务: guides/loop.md
   - 原型演示:
