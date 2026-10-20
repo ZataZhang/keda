@@ -17,7 +17,10 @@ from backend.core.use_cases.agent_invocation import (
     build_agent_invocation,
     resolve_registered_agents,
 )
-from backend.engines.agent_runner.factory import build_app_config
+from backend.engines.agent_runner.factory import (
+    build_app_config_from_settings,
+    load_fresh_agent_runner_settings,
+)
 from backend.infrastructure.config import settings as settings_module
 from backend.infrastructure.config import settings_sources
 from backend.infrastructure.config.settings import (
@@ -98,14 +101,18 @@ def test_iar_config_resolution_uses_global_config_inside_source_checkout(
 
     源码根的 ``config.toml`` 即使含有 ``[agent_runner]``，也不能抢先于
     ``~/.kedacode/config.toml`` 成为运行时全局配置。
+
+    装配走 :func:`load_fresh_agent_runner_settings` 而非 ``build_app_config()``：
+    后者转换的是导入期定型的进程单例，本用例对状态目录的 monkeypatch 到不了它，
+    在宿主机上断言的会是那份机器配置的内容。机器级取值刻意区别于代码默认
+    （``auto``）与项目级取值（``codex``），断言成立只剩一条来路。
     """
-    monkeypatch.delenv("KEDACODE_CONFIG", raising=False)
     monkeypatch.delenv("KEDACODE_CONFIG", raising=False)
     iar_home = tmp_path / "iar-home"
     iar_home.mkdir()
     machine_config = iar_home / "config.toml"
     machine_config.write_text(
-        '[agent_runner]\n[agent_runner.runner]\ndefault_agent = "claude"\n',
+        '[agent_runner]\n[agent_runner.runner]\ndefault_agent = "kimi"\n',
         encoding="utf-8",
     )
     monkeypatch.setattr(settings_sources, "_global_state_dir", lambda: iar_home)
@@ -122,7 +129,8 @@ def test_iar_config_resolution_uses_global_config_inside_source_checkout(
 
     assert settings_sources._find_product_config_toml() == machine_config
     assert settings_sources.resolve_config_toml_path() == machine_config
-    assert build_app_config().runner.default_agent == "claude"
+    global_app_config = build_app_config_from_settings(load_fresh_agent_runner_settings())
+    assert global_app_config.runner.default_agent == "kimi"
     # 宿主应用配置仍然按 cwd 搜索。
     assert settings_sources._find_config_toml() == project_config
 
