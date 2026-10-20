@@ -126,14 +126,28 @@ def _pnpm_workspace_patterns(workspace_file_path: Path) -> tuple[str, ...]:
 
 
 def _matches_workspace_pattern(relative_posix_path: str, pattern: str) -> bool:
-    """workspace 成员匹配：支持精确路径与简单 glob，容忍 trailing slash。"""
+    """按路径段匹配 workspace 成员 glob；``*`` 不跨目录，``**`` 可递归。"""
     normalized_pattern = pattern.strip().rstrip("/")
     if not normalized_pattern:
         return False
-    candidate_path = relative_posix_path.rstrip("/")
-    if fnmatch.fnmatch(candidate_path, normalized_pattern):
-        return True
-    return fnmatch.fnmatch(f"{candidate_path}/", normalized_pattern)
+    candidate_parts = relative_posix_path.strip("/").split("/")
+    pattern_parts = normalized_pattern.split("/")
+    matched_path_part_counts = {0}
+    for pattern_part in pattern_parts:
+        next_matched_path_part_counts: set[int] = set()
+        for path_part_count in matched_path_part_counts:
+            if pattern_part == "**":
+                next_matched_path_part_counts.update(
+                    range(path_part_count, len(candidate_parts) + 1)
+                )
+            elif path_part_count < len(candidate_parts) and fnmatch.fnmatchcase(
+                candidate_parts[path_part_count], pattern_part
+            ):
+                next_matched_path_part_counts.add(path_part_count + 1)
+        matched_path_part_counts = next_matched_path_part_counts
+        if not matched_path_part_counts:
+            return False
+    return len(candidate_parts) in matched_path_part_counts
 
 
 def _workspace_member_patterns(parent_dir_path: Path) -> tuple[str, ...]:

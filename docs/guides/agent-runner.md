@@ -1172,7 +1172,7 @@ CI 容器镜像预装浏览器运行时是后续工作；首版只保证本地 r
 
 1. **识别包管理器**：同时看 `package.json` 的 `packageManager` 字段、workspace 根配置（`pnpm-workspace.yaml` / 根 `package.json` 的 `workspaces`）与锁文件。
    - 单一锁文件：按锁文件选择 `pnpm install` / `npm ci` / `yarn install` / `bun install`（均带 `--ignore-scripts`）。
-   - workspace 成员：若目录被某个 workspace 根的成员 pattern 覆盖，跳过本地安装（根安装会覆盖它），只记录证据。
+   - workspace 成员：若目录被某个 workspace 根的成员 pattern 覆盖，跳过本地安装（根安装会覆盖它），只记录证据。glob 按路径段匹配：`*` 只匹配一层目录，`**` 才可覆盖多层。
    - 冲突：多个锁文件指向不同包管理器，`packageManager` 与锁文件不一致，或 workspace 根与成员声明不一致时**不静默选定**，只记 `manager_conflict` 并保留全部证据。
 2. **先复用主检出依赖**：只要两棵树的锁文件**内容一致**，先把主检出的 `node_modules` 软链进 worktree，跳过不必要的安装；锁文件漂移时拒绝复用（避免把过期环境伪装成就绪）。
 3. **无法安全复用时再安装**：包管理器可执行文件不在 PATH 时**不运行任何命令**，直接记 `tool_missing`；运行后非零退出、或退出 0 却没有产出 `node_modules`，都按失败记录（不会伪报安装成功）。

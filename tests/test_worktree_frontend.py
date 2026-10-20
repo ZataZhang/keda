@@ -295,6 +295,50 @@ class TestPlanPackageManager:
             for evidence_line in install_plan.evidence
         )
 
+    def test_single_star_workspace_pattern_does_not_cover_nested_package(
+        self, tmp_path: Path
+    ) -> None:
+        """单层 ``*`` 不应把 workspace 下一层之外的独立包跳过。"""
+        worktree_path = tmp_path / "worktree"
+        _write_file(
+            worktree_path / "package.json",
+            json.dumps({"workspaces": ["packages/*"]}),
+        )
+        _write_file(
+            worktree_path / "packages" / "client" / "nested" / "package.json",
+            '{"name":"nested"}\n',
+        )
+        _write_file(
+            worktree_path / "packages" / "client" / "nested" / "pnpm-lock.yaml",
+            "lockfileVersion: '9.0'\n",
+        )
+
+        install_plan = plan_package_manager(
+            worktree_path / "packages" / "client" / "nested", worktree_path
+        )
+
+        assert install_plan.is_workspace_member is False
+        assert install_plan.package_manager == "pnpm"
+        assert any(
+            "pnpm install runs with --ignore-workspace" in evidence_line
+            for evidence_line in install_plan.evidence
+        )
+
+    def test_double_star_workspace_pattern_covers_nested_package(self, tmp_path: Path) -> None:
+        """完整路径段 ``**`` 可显式覆盖多层 workspace 包。"""
+        worktree_path = tmp_path / "worktree"
+        _write_file(worktree_path / "pnpm-workspace.yaml", 'packages:\n  - "packages/**"\n')
+        _write_file(
+            worktree_path / "packages" / "client" / "nested" / "package.json",
+            '{"name":"nested"}\n',
+        )
+
+        install_plan = plan_package_manager(
+            worktree_path / "packages" / "client" / "nested", worktree_path
+        )
+
+        assert install_plan.is_workspace_member is True
+
     def test_workspace_root_itself_is_not_a_member(self, tmp_path: Path) -> None:
         """workspace 根不在成员集合里，它自己需要执行整仓安装。"""
         worktree_path = tmp_path / "worktree"
