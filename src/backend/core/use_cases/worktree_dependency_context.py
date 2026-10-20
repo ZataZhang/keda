@@ -47,6 +47,7 @@ OUTCOME_NOT_PREPARED = "not_prepared"
 
 # 原因码（reason）：机器可读，避免把自由文本当分类依据。
 REASON_TOOL_MISSING = "tool_missing"
+REASON_EXISTING_NODE_MODULES_UNUSABLE = "existing_node_modules_unusable"
 REASON_LAUNCH_FAILED = "launch_failed"
 REASON_INSTALL_FAILED = "install_failed"
 REASON_INSTALL_NO_OUTPUT = "install_produced_no_dependencies"
@@ -707,6 +708,7 @@ __all__ = [
     "OUTCOME_SKIPPED",
     "REASON_INSTALL_FAILED",
     "REASON_INSTALL_NO_OUTPUT",
+    "REASON_EXISTING_NODE_MODULES_UNUSABLE",
     "REASON_LAUNCH_FAILED",
     "REASON_LINK_FAILED",
     "REASON_MANAGER_CONFLICT",

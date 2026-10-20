@@ -9,11 +9,11 @@
       "evidence_files": [
         "rv-1-real-entry.txt"
       ],
-      "output_summary": "真实 kc run 负对照 1 在修复前源码上复现 npm 不在 PATH 时 Agent 未启动并标记 agent/failed；负对照 2 注入缺工具需 host_toolchain 人工决定，prompt oracle 拒绝；负对照 3 注入依赖复用失败后真实 npm ci 替代安全复用，oracle 拒绝；负对照 4 恢复 fnmatch 跨斜线匹配，packages/* 错误覆盖 packages/client/nested，oracle 拒绝；负对照 5 忽略 pnpm 的 !packages/client/nested 排除规则，嵌套独立包被错误跳过，oracle 拒绝。修复后真实 kc run 的缺工具场景会启动 Agent；packages/* 不覆盖更深层的独立项目；packages/** 配合 ! 排除 pattern 时，被排除项目仍按自己的 pnpm 锁文件生成 tool_missing 诊断和计划命令并传给 Agent。匹配依赖复用、EACCES 权限和 npm E401 凭据路径保留诊断，按需进入 agent/blocked。末尾输出 `RESULT: ALL PASS (5 real kc run negative controls + 5 isolated green scenarios)`，退出码 0。",
-      "explanation": "通过生产 CLI kc run --issue 执行真实 worktree 创建、依赖扫描与准备、报告落盘、Agent prompt 组装/派发、验证归因及 Issue 状态转换。五条真实 kc run 负对照分别复现修复前缺 npm 导致 Agent 启动前失败、错误的 host_toolchain 人工前置要求、跳过安全依赖复用、fnmatch 的跨路径段错误，以及忽略 pnpm workspace 的 ! 排除规则。最后一条使用 packages/** 与 !packages/client/nested，证明故障时独立嵌套项目被错误记录为 workspace_covered，修复后的真实入口则将其记录为 pnpm tool_missing 并把诊断交给 Agent。绿色场景覆盖单层 glob、递归 glob 加排除、缺工具时的 Agent 决策、真实 npm 复用、EACCES 与本机 401 registry。",
+      "output_summary": "真实 kc run 负对照 1 在修复前源码上复现 npm 不在 PATH 时 Agent 未启动并标记 agent/failed；负对照 2 注入缺工具需 host_toolchain 人工决定，prompt oracle 拒绝；负对照 3 注入依赖复用失败后真实 npm ci 替代安全复用，oracle 拒绝；负对照 4 恢复 fnmatch 跨斜线匹配，packages/* 错误覆盖 packages/client/nested，oracle 拒绝；负对照 5 忽略 pnpm 的 ! 排除规则，嵌套独立包被错误跳过，oracle 拒绝；负对照 6 注入旧 node_modules 存在性判断，断裂软链被误报为 present，npm 缺失诊断未进入 Agent，真实入口标记 agent/failed。修复后缺工具、workspace/锁文件冲突与断链依赖场景均启动 Agent，缺失工具及断链原因与计划命令进入上下文，安全复用仍优先；EACCES 和 E401 保留诊断并按需进入 agent/blocked。末尾输出 `RESULT: ALL PASS (6 real kc run negative controls + 6 isolated green scenarios)`，退出码 0。",
+      "explanation": "通过生产 CLI kc run --issue 执行真实 worktree 创建、依赖扫描与准备、报告落盘、Agent prompt 组装/派发、验证归因及 Issue 状态转换。六条负对照分别复现修复前 npm 缺失、错误要求用户预先配置工具链、跳过安全复用、fnmatch 跨路径段匹配、忽略 pnpm ! 排除规则，以及断裂 node_modules 软链被误报 present。最后一条使用被 git 跟踪的 dangling node_modules 软链和缺失 npm，在临时源码副本恢复旧存在性判断；Agent 未收到 npm tool_missing 上下文，prompt oracle 拒绝且真实 kc run 失败。修复后的真实入口保留软链原状，记录 not_prepared/tool_missing、npm ci 计划命令和断链原因，并将诊断传给 Agent。绿色场景还覆盖 packageManager、workspace 与锁文件冲突、workspace 排除、匹配依赖复用、真实 npm EACCES/E401。",
       "risks": "外部 Codex 执行器与 GitHub API 使用隔离 fixture；Codex fixture 读取真实 prompt/报告并按 JSON 计划作确定性选择，因此证明上下文交付和安全分支处理，不证明真实模型的推理质量。被测 kc CLI、Python use cases、Git/worktree、npm ci、复用符号链接、文件系统权限和 401 HTTP 请求均真实执行。registry 和仓库只在本机临时目录/回环接口，不触及生产服务或业务数据；证据与脚本不含凭据。",
-      "negative_control": "依次执行五条真实 kc run 负对照：1) 用修复前源码在 PATH 移除 npm 后运行 CLI；2) 临时修改 prompt，让 tool_missing 错误要求 host_toolchain 人工决定；3) 在临时源码副本中注入复用失败，验证真实 npm ci 替代匹配的 node_modules；4) 临时恢复 fnmatch 跨斜线匹配，验证 packages/* 错误覆盖 packages/client/nested；5) 临时恢复忽略以 ! 开头 workspace pattern 的逻辑，在 packages/** 加 !packages/client/nested 时验证嵌套项目被错误跳过。所有故障注入只作用于临时源码副本。",
-      "expected_fail": "负对照 1：npm 缺失在 Agent 启动前抛 FileNotFoundError 并标记 agent/failed。负对照 2：prompt 错误要求 host_toolchain，Agent 上下文 oracle 拒绝。负对照 3：真实 npm ci 替代复用软链，复用 oracle 拒绝。负对照 4：旧 fnmatch 将 packages/client/nested 错误记为 workspace_covered。负对照 5：忽略 ! 排除 pattern 后，同一嵌套项目错误记为 workspace_covered；Agent 未收到 tool_missing 诊断，真实 kc run 失败。修复后的绿色入口必须把被 ! 排除的项目记录为 pnpm tool_missing，保留计划命令并将诊断传给 Agent。",
+      "negative_control": "依次执行六条真实 kc run 负对照：1) 用修复前源码在 PATH 移除 npm 后运行 CLI；2) 临时修改 prompt，让 tool_missing 错误要求 host_toolchain 人工决定；3) 在临时源码副本中注入复用失败，验证真实 npm ci 替代匹配的 node_modules；4) 临时恢复 fnmatch 跨斜线匹配，验证 packages/* 错误覆盖 packages/client/nested；5) 临时恢复忽略以 ! 开头 workspace pattern 的逻辑，在 packages/** 加 !packages/client/nested 时验证嵌套项目被错误跳过。故障注入只作用于临时源码副本；6) 在临时源码副本中把 node_modules 的目录检查恢复为 `exists() or is_symlink()`，通过真实 kc run 处理 Git 已跟踪的断链软链，并让 Agent prompt oracle 检查 npm 缺失上下文。",
+      "expected_fail": "负对照 1：npm 缺失在 Agent 启动前抛 FileNotFoundError 并标记 agent/failed。负对照 2：prompt 错误要求 host_toolchain，Agent 上下文 oracle 拒绝。负对照 3：真实 npm ci 替代复用软链，复用 oracle 拒绝。负对照 4：旧 fnmatch 将 packages/client/nested 错误记为 workspace_covered。负对照 5：忽略 ! 排除 pattern 后，同一嵌套项目错误记为 workspace_covered；Agent 未收到 tool_missing 诊断，真实 kc run 失败。修复后的绿色入口必须把被 ! 排除的项目记录为 pnpm tool_missing，保留计划命令并将诊断传给 Agent。负对照 6：报告将断链项目记为 present/no_action_needed，npm 缺失 prompt oracle 为 false，Agent 被真实入口标记 agent/failed；修复后必须记为 not_prepared/tool_missing，保留 npm ci 计划命令和断链原因，且 Agent 启动。",
       "stdout_assertions": [
         {
           "severity": "high",
@@ -148,7 +148,49 @@
         },
         {
           "severity": "high",
-          "pattern": "RESULT: ALL PASS (5 real kc run negative controls + 5 isolated green scenarios)",
+          "pattern": "DANGLING_NEGATIVE_OUTCOME: present",
+          "source": "stdout",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "DANGLING_NEGATIVE_REASON: no_action_needed",
+          "source": "stdout",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "DANGLING_NEGATIVE_AGENT_NPM_CHECK: False",
+          "source": "stdout",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "RESULT: RED AS EXPECTED (dangling node_modules was reported ready)",
+          "source": "stdout",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "[CHECK] 断链依赖场景仍启动 Agent: PASS",
+          "source": "stdout",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "[CHECK] 断链 node_modules 保留 npm 缺失诊断和计划命令: PASS",
+          "source": "stdout",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "[CHECK] 断链符号链接保持原状，准备器未覆盖 worktree 状态: PASS",
+          "source": "stdout",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "RESULT: ALL PASS (6 real kc run negative controls + 6 isolated green scenarios)",
           "source": "stdout",
           "must_match": true
         }

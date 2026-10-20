@@ -29,6 +29,7 @@ from backend.core.use_cases.worktree_dependency_context import (
     OUTCOME_SKIPPED,
     REASON_INSTALL_FAILED,
     REASON_INSTALL_NO_OUTPUT,
+    REASON_EXISTING_NODE_MODULES_UNUSABLE,
     REASON_LINK_FAILED,
     REASON_MANAGER_CONFLICT,
     REASON_NO_ACTION_NEEDED,
@@ -721,10 +722,10 @@ class TestEnsureFrontendNodeModules:
         assert _record_for(preparation_report, "frontend").outcome == OUTCOME_PRESENT
         assert _record_for(preparation_report, "frontend").reason == REASON_NO_ACTION_NEEDED
 
-    def test_dangling_symlink_is_left_untouched(
+    def test_dangling_symlink_is_reported_unprepared_and_left_untouched(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """悬空符号链接也是「已存在」，不能被覆盖（exists() 跟随链接会误判缺失）。"""
+        """悬空依赖链接不能伪报就绪，也不能被准备流程覆盖。"""
         _stub_toolchain(monkeypatch, available=True)
         repo_path = tmp_path / "repo"
         worktree_path = tmp_path / "worktree"
@@ -738,8 +739,42 @@ class TestEnsureFrontendNodeModules:
         preparation_report = ensure_frontend_node_modules(repo_path, worktree_path, process_runner)
 
         assert process_runner.calls == []
-        assert _record_for(preparation_report, "frontend").outcome == OUTCOME_PRESENT
+        dangling_record = _record_for(preparation_report, "frontend")
+        assert dangling_record.outcome == OUTCOME_NOT_PREPARED
+        assert dangling_record.reason == REASON_EXISTING_NODE_MODULES_UNUSABLE
+        assert "dangling symbolic link" in dangling_record.detail
+        assert "was not run" in dangling_record.detail
         assert (worktree_path / "frontend" / "node_modules").readlink() == dangling_target
+
+    def test_dangling_symlink_with_missing_manager_reports_tool_missing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """断链阻止安装时仍把缺失包管理器命令和原因交给 Agent。"""
+        _stub_toolchain(monkeypatch, available=False)
+        repo_path = tmp_path / "repo"
+        worktree_path = tmp_path / "worktree"
+        _write_file(
+            worktree_path / "frontend" / "package.json",
+            '{"packageManager":"npm@10.2.0"}\n',
+        )
+        _write_file(worktree_path / "frontend" / "package-lock.json", '{"lockfileVersion":3}\n')
+        dangling_target = tmp_path / "missing-deps"
+        node_modules_path = worktree_path / "frontend" / "node_modules"
+        node_modules_path.symlink_to(dangling_target, target_is_directory=True)
+        process_runner = _installer_runner()
+
+        preparation_report = ensure_frontend_node_modules(repo_path, worktree_path, process_runner)
+
+        assert process_runner.calls == []
+        dangling_record = _record_for(preparation_report, "frontend")
+        assert dangling_record.outcome == OUTCOME_NOT_PREPARED
+        assert dangling_record.reason == REASON_TOOL_MISSING
+        assert dangling_record.package_manager == "npm"
+        assert dangling_record.attempted_commands == ("npm ci --ignore-scripts",)
+        assert "dangling symbolic link" in dangling_record.detail
+        assert "npm' is not on PATH" in dangling_record.detail
+        assert "npm ci --ignore-scripts" in dangling_record.detail
+        assert node_modules_path.is_symlink()
 
     def test_launch_failure_is_recorded_without_aborting(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

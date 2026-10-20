@@ -57,6 +57,7 @@ from backend.core.use_cases.worktree_dependency_context import (
     OUTCOME_SKIPPED,
     REASON_INSTALL_FAILED,
     REASON_INSTALL_NO_OUTPUT,
+    REASON_EXISTING_NODE_MODULES_UNUSABLE,
     REASON_LAUNCH_FAILED,
     REASON_LINK_FAILED,
     REASON_MANAGER_CONFLICT,
@@ -324,6 +325,48 @@ def _try_reuse_main_checkout_dependencies(
     return _ReuseAttempt(succeeded=True)
 
 
+def _diagnose_unusable_worktree_node_modules(
+    node_modules_path: Path,
+    install_plan: PackageManagerPlan,
+) -> _ProjectOutcome:
+    """保留不可用的既有路径，并把修复所需信息交给 Agent。"""
+    if node_modules_path.is_symlink() and not node_modules_path.exists():
+        path_state = "existing node_modules is a dangling symbolic link"
+    elif node_modules_path.is_symlink():
+        path_state = "existing node_modules symbolic link does not point to a directory"
+    else:
+        path_state = "existing node_modules path is not a directory"
+
+    if install_plan.package_manager is None:
+        return _ProjectOutcome(
+            outcome=OUTCOME_NOT_PREPARED,
+            reason=install_plan.reason or REASON_EXISTING_NODE_MODULES_UNUSABLE,
+            detail=f"{path_state}; path was left untouched",
+        )
+
+    install_command = _build_install_command(install_plan)
+    formatted_command = format_command_text(install_command)
+    if shutil.which(install_command[0]) is None:
+        return _ProjectOutcome(
+            outcome=OUTCOME_NOT_PREPARED,
+            reason=REASON_TOOL_MISSING,
+            attempted_commands=(formatted_command,),
+            detail=(
+                f"{path_state}; path was left untouched; '{install_command[0]}' is not on "
+                f"PATH, so '{formatted_command}' was not run"
+            ),
+        )
+    return _ProjectOutcome(
+        outcome=OUTCOME_NOT_PREPARED,
+        reason=REASON_EXISTING_NODE_MODULES_UNUSABLE,
+        attempted_commands=(formatted_command,),
+        detail=(
+            f"{path_state}; path was left untouched and '{formatted_command}' was not run "
+            "to avoid overwriting existing worktree state"
+        ),
+    )
+
+
 def _prepare_frontend_project(
     preparation_request: _ProjectPreparationRequest,
 ) -> FrontendProjectRecord:
@@ -333,11 +376,15 @@ def _prepare_frontend_project(
         preparation_request.worktree_path,
     )
     target_node_modules_path = preparation_request.project_dir_path / NODE_MODULES_DIR_NAME
-    # is_symlink() 兜住断链：exists() 会跟随链接目标，悬空符号链接会被误判为缺失而被覆盖。
-    if target_node_modules_path.exists() or target_node_modules_path.is_symlink():
+    if target_node_modules_path.is_dir():
         project_outcome = _ProjectOutcome(
             outcome=OUTCOME_PRESENT,
             reason=REASON_NO_ACTION_NEEDED,
+        )
+    elif target_node_modules_path.exists() or target_node_modules_path.is_symlink():
+        project_outcome = _diagnose_unusable_worktree_node_modules(
+            target_node_modules_path,
+            install_plan,
         )
     elif install_plan.is_workspace_member:
         if install_plan.reason == REASON_MANAGER_CONFLICT:
@@ -417,7 +464,7 @@ def ensure_frontend_node_modules(
     """**可恢复地**为 worktree 内的前端项目准备 ``node_modules``。
 
     遍历 ``worktree_path``（剪掉 :data:`FRONTEND_SCAN_PRUNED_DIR_NAMES`）找出含
-    ``package.json`` 的目录，对每个尚未拥有 ``node_modules`` 的项目：
+    ``package.json`` 的目录，对每个尚未拥有可用 ``node_modules`` 的项目：
 
     1. 识别包管理器（packageManager 字段 + workspace 根配置 + 锁文件；冲突不硬选）。
     2. 锁文件一致时优先复用主检出的 ``node_modules``，跳过不必要的安装。
@@ -425,7 +472,8 @@ def ensure_frontend_node_modules(
     4. 两种准备方式都没有得到可用依赖时只记录诊断并继续下一个项目——**Agent 仍会启动**，
        由它决定下一步。
 
-    worktree 内已有的 ``node_modules`` 永不覆盖。
+    worktree 内已有的有效目录或目录软链永不覆盖。断链、指向非目录的软链和普通文件
+    会保留原状并记录为未准备，避免误报依赖可用。
 
     Args:
         repo_root_path: 主检出根目录（其前端项目可能已装好依赖，可被复用）。

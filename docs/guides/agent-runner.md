@@ -1184,7 +1184,7 @@ CI 容器镜像预装浏览器运行时是后续工作；首版只保证本地 r
 
 行为约束：
 
-- 只处理 worktree 中**缺失**的 `node_modules`：worktree 内已有的真实目录或软链（例如已 `npm install` 过）永远不会被覆盖
+- 只处理 worktree 中**缺失**的 `node_modules`：有效的真实目录或目录软链（例如已 `npm install` 过）永远不会被覆盖；断链或指向非目录的 `node_modules` 会保留原状并记录为未准备，避免误报可用，也避免覆盖已有 worktree 状态
 - 复用已有 worktree 时同样补齐：旧 worktree 缺 `node_modules` 的，下一次 `kc run` 会自动治愈
 - 准备流程不会执行 `sudo`、不写主机全局前缀/工具链、不使用未提供的凭据；需要提权、改全局环境或凭据的动作只归类为 `privilege` / `credentials` 并交给人决定
 - 诊断写入、扫描与软链都是 best effort：单个项目失败只记日志，不会中断 agent run
