@@ -85,8 +85,9 @@ def _gh_list_response(repositories: list[dict]) -> CommandResult:
 
 
 def test_build_takeover_options_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """clone 根目录落在新状态目录 ``~/.kedacode`` 下，其他默认选项不变。"""
+    """默认克隆根目录落在当前状态目录下；只有旧 ``.iar`` 目录的机器也不会沿用旧路径。"""
     monkeypatch.setenv("HOME", str(tmp_path))
+    (tmp_path / ".iar").mkdir()
     options = build_takeover_options()
     assert options.clone_root == tmp_path / ".kedacode" / "repos"
     assert options.owner is None

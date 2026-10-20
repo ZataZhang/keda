@@ -77,6 +77,7 @@ from backend.core.use_cases.run_agent_once import (
     get_head_sha,
     resolve_agent_fallback_candidate_specs,
 )
+from backend.core.use_cases.agent_onboarding import PrimaryAgentNotInstalledError
 from backend.core.use_cases.agent_runner_failure import (
     AgentExecutionError,
     AgentUnavailableError,
@@ -516,6 +517,10 @@ def run_issue_with_agent_fallback(
             # Every agent would hit the same wall; do not switch. 首次领取仲裁
             # 落败同理：Issue 已归更早的认领者，换 agent 只会变成双跑。
             # 依赖环境缺口同理：缺的是主机工具链/凭据，不是某个 agent 的能力问题。
+            raise
+        except PrimaryAgentNotInstalledError:
+            # 门禁 / 进程边界拦下的是"这台机器没装这个 CLI"，属于配置错误：
+            # 回退链的语义是"这个 agent 跑挂了换一个"，不能把没装悄悄变成换人。
             raise
         except AgentUnavailableError as exc:
             last_switch_exc = exc

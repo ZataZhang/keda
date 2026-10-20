@@ -143,7 +143,7 @@ def add_session_commands(subparsers: argparse._SubParsersAction) -> None:
     add_common_options(deliberate_parser)
 
     agent_parser = subparsers.add_parser(
-        "agent", help="Inspect registered agents and output protocols (read-only)."
+        "agent", help="Inspect registered agents and choose or register the ones to run."
     )
     agent_subparsers = agent_parser.add_subparsers(dest="agent_command", required=True)
     agent_list_parser = agent_subparsers.add_parser(
@@ -222,6 +222,90 @@ def add_session_commands(subparsers: argparse._SubParsersAction) -> None:
     )
     agent_presets_parser.set_defaults(command="agent presets")
     add_machine_output_options(agent_presets_parser)
+
+    # kc agent setup / kc agent add：可用性与自定义注册的写入口。
+    # 两者都写机器级 config.toml（全局层），因此不挂 add_common_options——
+    # 容忍仓库选择器只会让"我以为改了某个仓库"落到机器级配置上。
+    agent_setup_parser = agent_subparsers.add_parser(
+        "setup",
+        help="Guide lifecycle stage selection by what is actually installed (global layer).",
+    )
+    agent_setup_parser.set_defaults(command="agent setup")
+    agent_setup_parser.add_argument(
+        "--stage",
+        default=None,
+        help="Lifecycle stage to configure (default: implementation).",
+    )
+    agent_setup_parser.add_argument(
+        "--agent",
+        choices=agent_choices_with(),
+        default=None,
+        help="Registered agent to bind to the stage (must be installed on this machine).",
+    )
+    agent_setup_parser.add_argument(
+        "--preset",
+        default=None,
+        help="Named model preset to bind instead of a bare agent.",
+    )
+    agent_setup_parser.add_argument(
+        "--fix",
+        action="store_true",
+        help="Remove global-layer stage bindings that point at an unavailable agent.",
+    )
+    agent_setup_parser.add_argument(
+        "--dry-run", dest="dry_run", action="store_true", help="Read-only: plan without writing."
+    )
+    agent_setup_parser.add_argument(
+        "--yes", action="store_true", help="Skip the confirmation prompt."
+    )
+    add_machine_output_options(agent_setup_parser)
+
+    agent_add_parser = agent_subparsers.add_parser(
+        "add",
+        help="Register a custom agent (prints the TOML block; --write persists it).",
+    )
+    agent_add_parser.set_defaults(command="agent add")
+    agent_add_parser.add_argument("name", help="New agent name (not already registered).")
+    agent_add_parser.add_argument(
+        "--bin", required=True, help="Executable name to look up in PATH."
+    )
+    agent_add_parser.add_argument(
+        "--arg",
+        action="append",
+        default=None,
+        help="Base argv for the run profile (repeatable: --arg=--print --arg=--model).",
+    )
+    agent_add_parser.add_argument(
+        "--prompt-delivery",
+        choices=("argv_tail", "flag", "stdin"),
+        default="argv_tail",
+        help="How the prompt reaches the executable.",
+    )
+    agent_add_parser.add_argument(
+        "--prompt-flag",
+        dest="prompt_flag",
+        default=None,
+        help="Flag that carries the prompt (required with --prompt-delivery flag).",
+    )
+    agent_add_parser.add_argument(
+        "--output-protocol",
+        dest="output_protocol",
+        default="plain",
+        help="Registered output protocol id (see `kc agent doctor --protocols`).",
+    )
+    agent_add_parser.add_argument(
+        "--auth-home", default=None, help="HOME override used when running this agent."
+    )
+    agent_add_parser.add_argument(
+        "--label", default=None, help="GitHub routing label (default: agent/<name>)."
+    )
+    agent_add_parser.add_argument(
+        "--write", action="store_true", help="Persist the registration into the global config."
+    )
+    agent_add_parser.add_argument(
+        "--yes", action="store_true", help="Skip the confirmation prompt (implies non-interactive)."
+    )
+    add_machine_output_options(agent_add_parser)
 
     # kc agent lifecycle / preset / fallback：生命周期统一设置的 argparse 门面。
     # list 是机读命令（--output 枚举），必须与 Typer 侧同口径挂 add_machine_output_options，

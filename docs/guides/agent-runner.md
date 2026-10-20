@@ -48,6 +48,27 @@ kc run --all-ready --dry-run
 
 `kc init` 本身不受门禁限制，包括 `--dry-run` 和 `--force` 形式。本 PRD 不提供 `--skip-init-check` 等绕过开关。
 
+### 首次使用：先确认这台机器跑得动谁
+
+`config.toml` 是**机器级**文件，"配置里写着某个 agent"不等于这台机器装了它的命令行。装完
+`kc` 先做一次只读确认，再决定哪个 agent 跑哪个阶段：
+
+```bash
+# 只读：逐个 agent 标出 available（解析到的路径）或 missing (not found in PATH)
+kc agent list
+
+# 只读预览本机可用清单与将写的键，再落盘选择（只列装了的 agent）
+kc agent setup --dry-run
+kc agent setup --agent claude --yes
+```
+
+还没有任何显式选择时，首次在**交互式终端**运行 `kc` 会在 stderr 提示一次这件事，并在
+`~/.kedacode/.agent-setup-hint-shown` 落 marker（同机不再重复）；非交互调用、机器输出、
+帮助/版本入口、shell 补全协议与 `kc agent` / `kc completion` 子命令都不会显示它，提示也
+从不改变本轮命令的退出码。之后 `kc run` 与 daemon 在**认领 Issue 之前**复核实现 / 校验 /
+审核三个阶段（含各阶段绑定的预设），指向没装的 CLI 会以 `not_found`（3）退出并点名阶段与
+可执行文件，而不是跑完一轮才失败。完整口径见 [Agent 可用性](#agent-availability)。
+
 ### Shell 自动补全
 
 `kc` 支持生成 shell completion。zsh 用户安装后，输入 `kc is<Tab>` 可补全到 `issue`：
@@ -112,7 +133,7 @@ kc daemon status --json
 | `0` | `ok` | 请求完成（只读输出同样算成功） | 继续 |
 | `1` | `error` | 未归类失败，保持历史语义 | 读 stderr 后重试或升级 |
 | `2` | `usage_error` | 旗标/参数组合不成立（互斥、缺目标、非法 lifecycle key） | 修命令，原样重试必然再失败 |
-| `3` | `not_found` | 目标不存在：仓库、registry 条目、agent、可执行文件、日志；显式定向的 Issue 读不到或已关闭 | 换目标或跑 `suggestion` |
+| `3` | `not_found` | 目标不存在：仓库、registry 条目、agent、可执行文件、日志；显式定向的 Issue 读不到或已关闭；启动前门禁发现某阶段解析到的 agent 本机没装（含其预设） | 换目标或跑 `suggestion`；没装的 agent 装回来或 `kc agent setup` 重选 |
 | `4` | `permission_denied` | 未授权：GitHub 未认证、仓库被禁用 | 提示人来认证或启用，别静默重试 |
 | `5` | `conflict` | 当前状态阻止：`--all-ready` 时同仓 daemon 正在轮询队列、显式定向的 Issue 被存活持有者认领或处于未解除的 `agent/blocked`、workflow 模板文件已安装、loop 条目已存在 | 改名 / 用户明确要求时 `--force` / 先停掉冲突进程 / 按 `suggestion` 走 `kc blocked-continue`（活跃认领的错误会点名持有者 host 与 PID） |
 | `10` | `dry_run_ok` | 计划校验通过且未写入任何东西，可直接当 CI 门禁 | 仅在核对计划正文后视为绿灯 |
@@ -383,8 +404,10 @@ recovery 轮次。
 ```toml
 [agent_runner.daemon]
 reconcile_stale_attempts = true   # 主开关；设为 false 即回到本特性落地前的现状
-reclaim_ttl_seconds = 10800       # claim 含 started_at 且超过该时长，即便 PID 仍活也判为 stale
+reclaim_ttl_seconds = 18000       # claim 含 started_at 且超过该时长，即便 PID 仍活也判为 stale
 ```
+
+`reclaim_ttl_seconds` 必须大于 `runner.timeout_seconds`（默认 14400 秒）：否则运行时间超过 TTL 的 attempt 即便仍在正常工作也会被按 `ttl_expired` 误回收。配置加载时若发现 TTL 不大于超时会打 WARNING（不拒绝加载）。
 
 `reconcile_stale_attempts = false` 时 Phase -1 整轮空转，僵尸 Issue 保持 `agent/running` 不被触碰、
 不留任何 comment（负控口径见 `.iar/evidence/`：rv-1 关掉开关后僵尸确实纹丝不动）。
@@ -3086,7 +3109,7 @@ run_interval_seconds = 120
 # 保守判定:仅当 claim 标记的 host 是本机、且记录的 PID 已死或 claim 已老化时才处置。默认开。
 reconcile_stale_attempts = true
 # claim 老化阈值(秒):claim 含 started_at 且距 now 超过此值,即便 PID 仍活也视为 stale
-reclaim_ttl_seconds = 10800
+reclaim_ttl_seconds = 18000
 ```
 
 硬中断(SIGKILL / 崩溃 / 关机)不会把 Issue 从 `agent/running` 退回,而 daemon 只认领 `agent/ready`,任务会就此卡死。开启 `reconcile_stale_attempts` 后,daemon 每轮开头会对本机认领、进程已死的 running Issue 做对账:worktree 完好且可续传时回 `agent/ready` 并续上原会话,否则回 `agent/ready` 全新重跑,worktree 不可解析或恢复预算耗尽时判 `agent/failed`,三种出口都留一条对账 comment。关闭该开关即回到本特性落地前的现状。跨机器的孤儿需在同一台机器上重启 daemon 才会被回收。判定细节、幂等机制与配置优先级见前面「崩溃对账与 Agent 会话续传」一节。
@@ -5136,29 +5159,31 @@ PRD 的 `Delivery Dependencies` 小节会解析为两类依赖边（Issue 与 PR
 
 ## 本地记忆持久化与 Skill 蒸馏（Memory Persistence & Skill Distillation）
 
-Agent Runner 默认开启两层**本地**记忆与 skill 蒸馏循环，用于把同类 Issue 的成功修复经验沉淀给后续 Issue 复用。所有数据保存在**目标仓库的主检出** `.kedacode/memory/` 与 `.kedacode/skills/` 下（默认被 `.gitignore` 排除），不引入外部数据库或服务。即使每个 Issue 在独立的工作副本里跑，记忆与 skill 也都在主检出里累积并跨 Issue 共享——目录的解析由 `backend.engines.agent_runner.factory._anchor_memory_config` 在构造 `RepositoryRunContext` 时一次性绝对化到 `repo_path`。
+Agent Runner 默认开启本地记忆与 skill 蒸馏，用于把成功修复经验沉淀为待审阅的 skill 草稿。短期执行详情默认保存在 Keda 用户状态目录；长期记忆和 skill 目录仍按现有 `base_dir` / skill 配置落在仓库。即使 Issue 在独立工作副本里运行，工厂也会在构造 `RepositoryRunContext` 时用主检出根生成稳定的本地仓库身份，因此同一仓库的 worktree 共用短期记录、不同路径下的同名仓库互相隔离。
 
 ### 数据落点
 
 | 用途 | 路径 | 格式 |
 |---|---|---|
-| 短期记忆（每个 Issue 的执行轨迹） | `<repo_path>/.kedacode/memory/short_term/<repo_id>/<issue_number>/context.json` | JSON |
+| 短期记忆摘要与详情引用 | `~/.kedacode/memory/short_term/<repo_identity>/<issue_number>/context.json` | JSON |
+| 完整 attempt detail | 同目录下 `attempt-details/<sha256>.log` | UTF-8 文本 |
 | 长期记忆（项目约定 / 模式） | `<repo_path>/.kedacode/memory/long_term/<category>/<topic>.md` | Markdown + YAML front matter |
 | Skill 草稿 | `<repo_path>/.kedacode/skills/drafts/<name>.md` | Markdown + YAML front matter (`draft: true`) |
 | 已晋升 skill | `<repo_path>/.kedacode/skills/<name>.md`（默认；可配置） | Markdown + YAML front matter (`draft: false`) |
 
 注：相对路径 **相对目标仓库主检出根** 解析，而不是相对每个 Issue 的工作副本。
 
-- 短期记忆目录使用 runner 注入的稳定 registry `repo_id`，再按 Issue 编号分区；不使用
-  `issue-<N>` worktree 名作为仓库身份。读取时会兼容旧版 `issue-<N>/<N>/context.json`，
-  下一次写入时落到稳定仓库分区。
-- 每轮 attempt 都追加到历史；未显式提供任务摘要时，`summary` 更新为最近 attempt 的详情。
-  `updated_at` 在每次写入时刷新。
+- `<repo_identity>` 是 canonical 主检出路径的 SHA-256；哈希只用于本机短期目录隔离，不依赖仓库名或 registry `repo_id`。迁移主检出路径会生成新的本机身份。
+- `context.json` 的 `summary` 和每个 attempt 的 `detail` 只保留详情中的首条有效诊断行（跳过空行、代码围栏和 `stdout:` / `stderr:` 标签），最多 240 个字符；完整文本通过相对 `detail_log_path` 引用。`final_solution` 也使用同样的摘要与日志引用格式。
+- 读取新格式时，store 会把可用详情日志还原成完整文本，因此成功后的 Skill 蒸馏仍会收到完整 attempt history 和 final solution。缺失、非法、越界或指向目录外的符号链接会保留 JSON 中的摘要，不中断读取。
+- 旧版仓库内 `<repo_path>/.kedacode/memory/short_term/<repo_id>/<issue_number>/context.json` 仅作为只读 fallback；自定义 `base_dir` 还会只读查找该路径下的旧 `repo_id` 分区。旧版 `issue-<N>` 分区也兼容。读取不会迁移、覆盖或删除旧文件。全局默认目录不会按 `repo_id` 猜测或读取无身份的旧分区。
 
 ### 锚点与并发语义
 
-- `config.toml` `[agent_runner.memory]` 的 `base_dir` / `skill_drafts_dir` / `promoted_skills_dirs` 中的**相对路径**在 engines 层会被解析为 `<repo_path>/<rel>` 的绝对路径；**绝对路径或 ``~``** 会被原样使用，不再挂到任何锚点下。
-- 想把记忆放在仓库外（防 `git clean -fdx` 误删或多机共享），运营者把上述字段改为绝对路径即可，例如：
+- `config.toml` `[agent_runner.memory]` 的相对 `base_dir` / `skill_drafts_dir` / `promoted_skills_dirs` 仍解析到 `<repo_path>/<rel>`；绝对路径或 ``~`` 展开后的路径原样使用。
+- `base_dir` 恰好等于默认字符串 `.kedacode/memory` 时，短期记忆默认写入 `~/.kedacode/memory`，长期记忆继续写入仓库下 `.kedacode/memory`。显式写出同一个默认字符串也采用此行为，因为无法区分它是默认值还是显式配置。
+- 如需显式把短期与长期记忆都放回仓库，可把 `base_dir` 写成 `./.kedacode/memory` 或该仓库内的绝对路径；任意非默认自定义 `base_dir` 会同时控制短期和长期记忆。Skill 草稿与晋升路径保持现有独立配置。
+- 例如，下面的配置会把短期与长期记忆都放到用户状态目录：
 
 ```toml
 [agent_runner.memory]
@@ -5167,14 +5192,14 @@ skill_drafts_dir = "~/.kedacode/memory/keda-main/skills/drafts"
 promoted_skills_dirs = ["~/.kedacode/memory/keda-main/skills"]
 ```
 
-- 共享锚点下三个 store 的写入统一为 ``tmp + os.replace`` 原子替换；并发场景是 ``last-write-wins``，不会出现半写损坏文件。
+- 写入通过共享 ``tmp + os.replace`` 原子写入器落盘；并发 context 更新采用 ``last-write-wins``，不会出现半写损坏文件。
 - 运行时 `build_default_memory_services(worktree_path, config.memory)` 收到相对路径时会发 `logger.warning`，提示预期由 factory 绝对化；这是防回归告警，正常生产路径不应出现。
 
 ### 触发点
 
 - `kc run <issue>` 启动：`build_prompt` 通过 `core/agent/memory/memory_loader.load_relevant_memory` 检索与当前 Issue 标签/标题/正文相关的长期记忆和已晋升 skills，以**目录形式**（name / description / 路径，不含全文）注入 prompt。
-- `run_agent_until_committed` 每轮尝试结束：调用 `core/agent/memory/short_term_memory.save_short_term_memory` 写入 `context.json`，记录尝试序号、失败类型、完整详情；成功时另存最终方案摘要，供后续提炼回看。
-- `run_agent_until_committed` 成功返回、`_finish_implementation_publication` 开头：只对明确记录为成功且带实际 Agent 名称的执行生成 skill。蒸馏会读取该 Issue 的完整短期尝试历史、已记录的最终方案、相对 base branch 的真实提交 diff 与验证命令结果，再由最后一个成功 Agent 的只读 `generate` 能力提炼。生成内容必须包含触发条件、步骤、验证、陷阱和证据，并通过格式与本地路径 / Issue 编号过滤后才写入草稿；证据、生成或写盘失败都不阻塞后续 push / review / PR。
+- `run_agent_until_committed` 每轮尝试结束：调用 `core/agent/memory/short_term_memory.save_short_term_memory` 保存紧凑上下文和独立详情日志；摘要由首条有效诊断行确定性生成，不调用模型，也不生成已完成事项清单。
+- 当前短期记录的真实消费者是成功发布后的 Skill 蒸馏，不是自动 retry 恢复。`_finish_implementation_publication` 只对明确记录为成功且带实际 Agent 名称的执行生成 skill；蒸馏读取已还原的完整 attempt history、final solution、相对 base branch 的提交 diff 与验证命令结果，再由最后一个成功 Agent 的只读 `generate` 能力提炼。生成内容必须包含触发条件、步骤、验证、陷阱和证据，并通过格式与本地路径 / Issue 编号过滤后才写入草稿；证据、生成或写盘失败都不阻塞后续 push / review / PR。
 - 自动提炼只会创建 `draft: true` 草稿。生成草稿时 `usage_count` 和 `success_count` 保持为 0，因为 runner 目前无法确认 Agent 是否实际读取并采用了被推荐的 skill；因此不能把“被检索到”或“本次 Issue 成功”误作技能使用效果，草稿不会自动晋升。维护者审阅后再手动晋升。
 
 ### 关闭与降级
@@ -5301,6 +5326,128 @@ uv run python -c "from importlib.resources import files; print(files('backend.en
 - `kc container up` 与 `kc daemon` 是**互斥**选项：同一仓库不能同时跑本机 daemon 和容器 daemon。
 - 不装 Docker 的用户零影响：`kc container` 全部子命令都是 opt-in。
 
+<a id="agent-availability"></a>
+
+## Agent 可用性：确认、本机引导与启动前门禁
+
+配置里写着某个 agent，**不等于**这台机器上有它的可执行文件：`config.toml` 是机器级文件，
+一台机器的选择复制到另一台就会让 runner 指向不存在的 CLI。本节给出"确认装了谁 → 按装了的
+人选 → 跑之前先验证"这条链路，全部结论只来自一个事实源，不猜。
+
+<a id="agent-availability-facts"></a>
+
+### 可用性只有一个事实源
+
+判定就是注册块 `bin` 字段按 `PATH` 解析（`shutil.which`），没有第二套嗅探、不看版本号、
+不试跑。同一个序列化（`core/use_cases/agent_onboarding.py` 的 `agent_availability_entries`）
+被三处消费，因此 CLI 与管理终端不会各说一套：
+
+- `kc agent list`：人类输出把未安装标成 `missing (not found in PATH)`，机读输出给
+  `available` 与解析到的 `bin_path`（未安装时为 `null`）。
+- `kc agent presets`：每个预设附带它绑定的 agent 装没装（`agent_available`）——预设本身
+  合法，仍可能在这台机器上跑不起来。
+- 管理终端的生命周期矩阵与统一设置页：`agent_availability` 逐 agent 标注「未安装 / 路径」。
+
+```bash
+# 这台机器装了谁（只看 PATH，不读任何凭据）
+uv run kc agent list
+uv run kc agent list --json
+```
+
+<a id="agent-setup-guide"></a>
+
+### 本机引导：`kc agent setup`
+
+引导写的是**全局层**（状态目录 `config.toml`）的生命周期矩阵，落点与统一设置页、
+`kc agent lifecycle set` 完全相同——它只是把"这台机器装了谁"变成可选项，不引入第二套配置。
+
+```bash
+# 交互式：按阶段菜单只列出本机可用的 agent（实现 / 校验 / 审核）
+uv run kc agent setup
+
+# 脚本化：显式点名，非 TTY 必须这样给（否则以用法错误退出，绝不猜一个 agent）
+uv run kc agent setup --agent claude --yes
+uv run kc agent setup --stage verifier --agent pi --yes
+uv run kc agent setup --stage review --preset plan --yes   # 绑命名预设而非裸 agent
+
+# 只读预览：打印可用性清单与将写的键，一个写锁都不取
+uv run kc agent setup --dry-run --json
+
+# 批量清理：移除全局层指向本机不可用 agent 的绑定（可用的不动）
+uv run kc agent setup --fix --yes
+```
+
+行为边界，逐条都是可验证的：
+
+- **阶段闭集**：引导只管 `implementation` / `verifier` / `review`（一次轮次里真正会调用
+  agent 的三个入口）。修复 / 收尾沿用实现者，其余阶段走 [Agent 模型预设](model-presets.md)
+  的高级配置。
+- **预设遮蔽必须解绑**：某阶段绑了命名预设时，该预设整体决定 agent，矩阵值永远不生效。
+  所以 `--agent` 写矩阵之前会先解绑该阶段的预设（两次写入在同一把写锁里，顺序是先解绑再写
+  矩阵），机读输出的 `unbind_stage_preset` 字段如实说明有没有发生。
+- **校验失败不触达配置文件**：agent 没注册 → 用法错误（2）并指向 `kc agent add`；注册了但
+  本机没装 → 未找到（3）；阶段名不在闭集里 → 用法错误（2）。三种情况都不取写锁，文件逐字节
+  不变。`--dry-run` 同理，只是它带着合法选择以 0 退出。
+- **`--fix` 只动全局层**：仓库层声明由该仓库维护，不在批量清理范围内；没有坏绑定时报
+  "没有"并以 0 退出，不制造空写入。
+
+<a id="agent-first-run-hint"></a>
+
+### 首启提示：一次性、永不阻断
+
+第一次在**交互式终端**使用 `kc` 时，如果这台机器还没有任何显式选择，或配置指向的 agent
+本机没装，CLI 会在 stderr 提示一次并指向 `kc agent setup` / `kc agent list`，同时在状态目录
+落下 marker 文件 `~/.kedacode/.agent-setup-hint-shown`（同机不再重复）。这条路径有硬性门禁：
+
+- 非 TTY、shell 补全协议进行中、机器输出（`--json` / `--output json`）、`--help` /
+  `--version`，以及 `kc agent` / `kc completion` 子命令本身——一律不提示。提示文字绝不进入
+  agent 消费的 stdout/stderr 数据流。
+- 配置读不起来时静默让位：提示是附加价值，任何异常都不改变本轮命令的退出码与输出。
+
+<a id="agent-pre-run-gate"></a>
+
+### 启动前门禁：跑之前先确认，不要跑挂了才回退
+
+`kc run` 与 daemon 在**认领 Issue、建 worktree 之前**执行同一份判定（实现 / 校验 / 审核三个
+阶段，含各阶段绑定的预设），不可用就 fail-fast，退出码为未找到（3）。这挡住的是历史上最贵
+的一类失败：一轮跑了几十分钟、烧完 token 之后才报"这个 CLI 不存在"。
+
+```bash
+# 被拦下时报出阶段 / 预设 / agent / 可执行文件，并给出下一步命令
+uv run kc run --issue 42 --dry-run
+```
+
+- **回退链不能救"没装的主选"**：`agent_fallback_order` / 候选链的语义是"这个 agent 跑挂了
+  换一个"，不是"这台机器没装就偷偷换人"。主选不可用时按未找到（3）退出，不做任何静默换人；
+  临时换人必须显式 `--agent`（此时该阶段就按换进来的人判定，其余阶段仍按配置解析）。
+- 默认配置不受影响：没有显式声明、或声明为 `auto` / `executor` 的阶段由运行期自己路由，门禁
+  不制造第二条报错口径。绑定指向已删除的预设时同样按既有回落链走。
+- 进程边界仍有兜底：可执行文件在 spawn 瞬间解析不到（PATH 竞态、刚被卸载）时，报错点名是哪个
+  agent 在哪个上下文缺失，不会被误分类成"临时失败"后无谓重试。
+
+<a id="agent-add-registration"></a>
+
+### 自定义 agent 注册：`kc agent add`
+
+接入本机自有的 agent CLI 时，注册块不必手写 TOML：
+
+```bash
+# 默认只预览将要写入的 [agent_runner.agents.<name>] 块，磁盘不动
+uv run kc agent add myagent --bin myagent --arg=--print
+
+# 校验通过才落盘（写全局配置）
+uv run kc agent add myagent --bin myagent --arg=--print --write --yes
+
+# 提示词经指定 flag 投递
+uv run kc agent add myagent --bin myagent --prompt-delivery flag --prompt-flag --prompt --write
+```
+
+注册名非法、与既有 agent 重名、`output_protocol` 未注册、`prompt_delivery = flag` 却缺
+`prompt_flag`——都在触达配置文件之前以用法错误（2）退出，文件字节不变。反过来，**bin 暂时
+不在 `PATH` 上不会阻断注册**："先写配置、后装 CLI"是合法顺序，命令只在 stderr 提醒一句
+not on PATH；装好后用 `kc agent list` 确认可用性，再 `kc agent setup --agent myagent` 选它。
+注册块字段本身见下一节。
+
 <a id="new-agent-registry"></a>
 
 ## 接入一个新 agent（声明式注册表）
@@ -5357,7 +5504,7 @@ uv run kc agent doctor pi --all-profiles --json
 uv run kc agent doctor --protocols
 ```
 
-doctor 对三类坏输入分别非零退出并在 stderr 指名原因：agent 未注册、`bin` 不在 `PATH`、引用未注册协议。改完配置后先跑 doctor，再考虑投真实任务。
+doctor 对三类坏输入分别非零退出并在 stderr 指名原因：agent 未注册、`bin` 不在 `PATH`、引用未注册协议。改完配置后先跑 doctor，再考虑投真实任务。写配置这一步可以用 [`kc agent add`](#agent-add-registration)（预览 / `--write` 落盘）代替手写 TOML；这台机器装了谁看 [`kc agent list`](#agent-availability-facts)，选谁作为阶段执行者用 [`kc agent setup`](#agent-setup-guide)。
 
 ### 完整范例：pi
 

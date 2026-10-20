@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from backend.core.shared.models import product_identity
 from backend.core.shared.models.agent_runner import (
     GeneratedContentConfig,
     GeneratedContentTargetConfig,
@@ -305,7 +306,9 @@ def test_resolve_prd_skill_path_precedence(tmp_path: Path, monkeypatch: pytest.M
     monkeypatch.delenv("KEDACODE_SKILLS_DIR")
     monkeypatch.delenv("KEDACODE_SKILLS_DIR", raising=False)
 
-    keda_owned_skill_path = tmp_path / ".kedacode" / "skills" / "prd" / "SKILL.md"
+    keda_owned_skill_path = (
+        tmp_path / product_identity.STATE_DIR_NAME / "skills" / "prd" / "SKILL.md"
+    )
     codex_skill_path = tmp_path / ".codex" / "skills" / "prd" / "SKILL.md"
     claude_skill_path = tmp_path / ".claude" / "skills" / "prd" / "SKILL.md"
     kimi_code_skill_path = tmp_path / ".kimi-code" / "skills" / "prd" / "SKILL.md"

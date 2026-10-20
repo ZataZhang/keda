@@ -27,11 +27,17 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import type { AgentPresetPayload } from "@/lib/api/types";
+import { agentOptionLabel } from "@/components/agent-runner/lifecycle-agent-matrix";
+import type {
+  AgentAvailabilityEntry,
+  AgentPresetPayload,
+} from "@/lib/api/types";
 
 export interface PresetCardProps {
   name: string;
   agents: string[];
+  /** agent 名 → 本机可用性事实（下拉项据此标注"未安装"）。 */
+  availabilityByAgent: Map<string, AgentAvailabilityEntry>;
   values: AgentPresetPayload;
   boundStages: string[];
   sourceLabel: string;
@@ -42,12 +48,13 @@ export interface PresetCardProps {
 /**
  * 模型预设编辑卡片（编辑已有预设的 agent / model / effort）。
  *
- * @param props - 预设名、可选 agent 名单、当前值、绑定阶段、来源标签与回调。
+ * @param props - 预设名、可选 agent 名单、可用性查找表、当前值、绑定阶段、来源标签与回调。
  * @returns 一张预设卡片，含删除入口。
  */
 export function PresetCard({
   name,
   agents,
+  availabilityByAgent,
   values,
   boundStages,
   sourceLabel,
@@ -98,7 +105,7 @@ export function PresetCard({
                       value={agentName}
                       data-testid={`preset-agent-${name}-${agentName}`}
                     >
-                      {agentName}
+                      {agentOptionLabel(agentName, availabilityByAgent)}
                     </DropdownMenuRadioItem>
                   ))}
                 </DropdownMenuRadioGroup>
@@ -158,6 +165,8 @@ export interface NewPresetDraft {
 
 export interface NewPresetFormProps {
   agents: string[];
+  /** agent 名 → 本机可用性事实（下拉项据此标注"未安装"）。 */
+  availabilityByAgent: Map<string, AgentAvailabilityEntry>;
   existingNames: string[];
   onAdd: (draft: NewPresetDraft) => void;
 }
@@ -165,11 +174,12 @@ export interface NewPresetFormProps {
 /**
  * 新建预设表单。
  *
- * @param props - 可选 agent 名单、已存在的预设名、提交回调。
+ * @param props - 可选 agent 名单、可用性查找表、已存在的预设名、提交回调。
  * @returns 新建预设的草稿表单（提交后由页面并入待保存队列）。
  */
 export function NewPresetForm({
   agents,
+  availabilityByAgent,
   existingNames,
   onAdd,
 }: NewPresetFormProps) {
@@ -247,7 +257,7 @@ export function NewPresetForm({
                     value={agentName}
                     data-testid={`new-preset-agent-${agentName}`}
                   >
-                    {agentName}
+                    {agentOptionLabel(agentName, availabilityByAgent)}
                   </DropdownMenuRadioItem>
                 ))}
               </DropdownMenuRadioGroup>

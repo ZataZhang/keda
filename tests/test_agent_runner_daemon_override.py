@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+
+import pytest
 
 from backend.engines.agent_runner.repository_local import (
     settings_to_toml_string,
 )
 from backend.infrastructure.config.settings import (
     AgentRunnerDaemonSettings,
+    AgentRunnerRunnerSettings,
+    AgentRunnerSettings,
     AgentRunnerLocalSettings as LiveAgentRunnerLocalSettings,
     AgentRunnerRepositoryMetadataSettings,
     load_agent_runner_local_settings,
@@ -72,18 +77,19 @@ def test_init_renders_daemon_default_fields() -> None:
     assert "review_interval_seconds" in rendered
     assert "run_interval_seconds" in rendered
     assert "max_deliberation_issues" in rendered
-    # 示例默认 3 小时(10800)出现在注释里
-    assert "10800" in rendered
+    # 示例默认 5 小时(18000)出现在注释里
+    assert "18000" in rendered
     # daemon section 注释存在
     assert "Daemon 轮询与崩溃对账配置" in rendered
 
 
-def test_global_daemon_default_is_3_hours() -> None:
-    """默认 reclaim_ttl_seconds = 10800(3 小时)"""
+def test_global_daemon_default_exceeds_agent_timeout() -> None:
+    """默认 reclaim_ttl_seconds = 18000(5 小时)，且严格大于默认 agent 超时。"""
     from backend.infrastructure.config.settings import AgentRunnerDaemonSettings
 
     settings = AgentRunnerDaemonSettings()
-    assert settings.reclaim_ttl_seconds == 10800
+    assert settings.reclaim_ttl_seconds == 18000
+    assert settings.reclaim_ttl_seconds > AgentRunnerRunnerSettings().timeout_seconds
 
 
 def test_merge_repository_config_applies_daemon_reconcile_override(
@@ -135,3 +141,23 @@ def test_merge_repository_config_keeps_daemon_unset_when_absent(tmp_path: Path) 
 
     assert merged.daemon.reconcile_stale_attempts is None
     assert merged.daemon.reclaim_ttl_seconds is None
+
+
+def test_reclaim_ttl_not_above_agent_timeout_warns(caplog: pytest.LogCaptureFixture) -> None:
+    """TTL 不大于 agent 超时会误回收正常运行的 attempt，加载时必须告警。"""
+    # 该配置类里 init 参数优先级最低（会被 config.toml 盖掉），故构造后改字段再复跑校验。
+    runner_settings = AgentRunnerSettings()
+    runner_settings.runner = AgentRunnerRunnerSettings(timeout_seconds=14400)
+    runner_settings.daemon = AgentRunnerDaemonSettings(reclaim_ttl_seconds=10800)
+    with caplog.at_level(logging.WARNING):
+        runner_settings._warn_reclaim_ttl_not_above_agent_timeout()
+
+    assert "reclaim_ttl_seconds=10800" in caplog.text
+
+
+def test_default_reclaim_ttl_does_not_warn(caplog: pytest.LogCaptureFixture) -> None:
+    """默认配置自洽，不应产生 TTL 告警。"""
+    with caplog.at_level(logging.WARNING):
+        AgentRunnerSettings()
+
+    assert "reclaim_ttl_seconds" not in caplog.text

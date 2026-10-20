@@ -12,9 +12,10 @@ for backward compatibility with existing import paths.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
-from backend.core.shared.models.agent_spec import BUILTIN_AGENT_SPECS
+# ``LabelConfig`` 的唯一定义在 core；此处仅 re-export，避免手写副本漂移（曾缺 verifier_passed / prd_auto_merge）。
+from backend.core.shared.models.agent_runner import LabelConfig
 
 # GitHub rejects POST bodies above ~65,536 characters; stay well below it.
 _MAX_GITHUB_BODY_LENGTH = 60000
@@ -56,34 +57,6 @@ class PullRequestSummary:
     is_draft: bool
     merged: bool
     title: str
-
-
-@dataclass(frozen=True)
-class LabelConfig:
-    """GitHub labels used for runner workflow state and human follow-up."""
-
-    ready: str = "agent/ready"
-    running: str = "agent/running"
-    supervising: str = "agent/supervising"
-    review: str = "agent/automated-review-passed"
-    human_review: str = "human/awaiting-review"
-    failed: str = "agent/failed"
-    blocked: str = "agent/blocked"
-    waiting: str = "agent/waiting"
-    validation_pending: str = "validation/pending"
-    validation_passed: str = "validation/passed"
-    rework_prd: str = "agent/rework-prd"
-    deliberate: str = "agent/deliberate"
-    # 直发档选择标签（非 workflow 状态标签）；与 core ``LabelConfig`` 保持一致。
-    direct_pr: str = "direct-pr"
-    # 通用 Issue 自动合并授权；与 core ``LabelConfig`` 保持一致。
-    auto_merge: str = "auto-merge"
-    # agent 路由标签由 agent 注册表派生（agent 名 -> spec.label）。
-    agent_labels: dict[str, str] = field(
-        default_factory=lambda: {
-            agent_name: agent_spec.label for agent_name, agent_spec in BUILTIN_AGENT_SPECS.items()
-        }
-    )
 
 
 @dataclass(frozen=True)

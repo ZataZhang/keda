@@ -179,12 +179,19 @@ class AgentUnavailableError(AgentRunnerAttemptError):
         self,
         agent: str,
         attempt_results: list[AttemptResult] | None = None,
+        *,
+        context: str | None = None,
     ) -> None:
         super().__init__(
             f"Agent '{agent}' is unavailable (command not found).",
             attempt_results or [],
         )
         self.agent = agent
+        #: 哪一次调用发现它不可用（阶段 / profile / 可执行文件名）。异常分类不变，
+        #: 只是让"没装"在日志与失败评论里能被点名，而不是只剩一句 command not found。
+        self.context = context
+        if context is not None:
+            self.args = (f"{self.args[0]} While {context}.",)
 
 
 class PublishFailureError(RuntimeError):

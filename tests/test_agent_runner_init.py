@@ -115,7 +115,7 @@ def test_iar_init_dry_run_real_entry(tmp_path: Path) -> None:
             "run",
             "--project",
             str(REPOSITORY_ROOT),
-            "iar",
+            "kc",
             "init",
             "--dry-run",
         ],

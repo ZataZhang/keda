@@ -20,6 +20,8 @@ class ShortTermAttempt:
     failure_type: str
     detail: str
     recovered: bool = False
+    detail_log_path: str = ""
+    detail_summary: str = ""
 
 
 @dataclass
@@ -35,6 +37,8 @@ class ShortTermContextPayload:
     final_solution: str = ""
     key_files: tuple[str, ...] = ()
     updated_at: str = ""
+    final_solution_log_path: str = ""
+    final_solution_summary: str = ""
 
 
 @dataclass

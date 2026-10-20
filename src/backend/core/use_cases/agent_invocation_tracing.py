@@ -42,6 +42,7 @@ from backend.core.shared.interfaces.runner_console import (
     InvocationEventRecord,
 )
 from backend.core.shared.models.agent_runner import CommandResult
+from backend.core.use_cases.agent_runner_failure import AgentUnavailableError
 from backend.core.use_cases.agent_runner_output_routing import active_issue_log_binding
 
 _logger = logging.getLogger(__name__)
@@ -194,6 +195,9 @@ def classify_invocation_failure(exc: BaseException) -> str:
     if isinstance(exc, subprocess.TimeoutExpired):
         return FAILURE_TIMEOUT
     if isinstance(exc, FileNotFoundError):
+        return FAILURE_AGENT_UNAVAILABLE
+    if isinstance(exc, AgentUnavailableError):
+        # 起跑边界把 FileNotFoundError 收敛成领域异常后，观测口径仍是"agent 不可用"。
         return FAILURE_AGENT_UNAVAILABLE
     if isinstance(exc, subprocess.CalledProcessError):
         return FAILURE_NONZERO_EXIT

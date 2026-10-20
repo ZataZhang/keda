@@ -255,6 +255,109 @@ def agent_presets_command(
     return _run_typer_command("agent presets", output=_enum_value(output), as_json=as_json)
 
 
+@agent_app.command("setup")
+def agent_setup_command(
+    stage: Annotated[
+        str | None,
+        typer.Option("--stage", help="Lifecycle stage to configure (default: implementation)."),
+    ] = None,
+    agent: Annotated[
+        RunAgentChoice | None,
+        typer.Option("--agent", help="Registered agent to bind (must be installed locally)."),
+    ] = None,
+    preset: Annotated[
+        str | None,
+        typer.Option("--preset", help="Named model preset to bind instead of a bare agent."),
+    ] = None,
+    fix: Annotated[
+        bool,
+        typer.Option("--fix", help="Remove global-layer bindings pointing at unavailable agents."),
+    ] = False,
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="Read-only: plan without writing."),
+    ] = False,
+    yes: Annotated[
+        bool,
+        typer.Option("--yes", help="Skip the confirmation prompt."),
+    ] = False,
+    output: OutputOption = OutputFormat.table,
+    as_json: JsonOutputOption = False,
+) -> int:
+    """Guide lifecycle stage selection by what is actually installed (global layer)."""
+    return _run_typer_command(
+        "agent setup",
+        stage=stage,
+        agent=_enum_value(agent) if agent is not None else None,
+        preset=preset,
+        fix=fix,
+        dry_run=dry_run,
+        yes=yes,
+        output=_enum_value(output),
+        as_json=as_json,
+    )
+
+
+@agent_app.command("add")
+def agent_add_command(
+    name: Annotated[str, typer.Argument(help="New agent name (not already registered).")],
+    bin: Annotated[  # noqa: A002
+        str,
+        typer.Option("--bin", help="Executable name to look up in PATH."),
+    ],
+    arg: Annotated[
+        list[str] | None,
+        typer.Option("--arg", help="Base argv for the run profile (repeatable)."),
+    ] = None,
+    prompt_delivery: Annotated[
+        str,
+        typer.Option("--prompt-delivery", help="How the prompt reaches the executable."),
+    ] = "argv_tail",
+    prompt_flag: Annotated[
+        str | None,
+        typer.Option("--prompt-flag", help="Flag that carries the prompt (delivery=flag)."),
+    ] = None,
+    output_protocol: Annotated[
+        str,
+        typer.Option("--output-protocol", help="Registered output protocol id."),
+    ] = "plain",
+    auth_home: Annotated[
+        str | None,
+        typer.Option("--auth-home", help="HOME override used when running this agent."),
+    ] = None,
+    label: Annotated[
+        str | None,
+        typer.Option("--label", help="GitHub routing label (default: agent/<name>)."),
+    ] = None,
+    write: Annotated[
+        bool,
+        typer.Option("--write", help="Persist the registration into the global config."),
+    ] = False,
+    yes: Annotated[
+        bool,
+        typer.Option("--yes", help="Skip the confirmation prompt."),
+    ] = False,
+    output: OutputOption = OutputFormat.table,
+    as_json: JsonOutputOption = False,
+) -> int:
+    """Register a custom agent (prints the TOML block; --write persists it)."""
+    return _run_typer_command(
+        "agent add",
+        name=name,
+        bin=bin,
+        arg=arg,
+        prompt_delivery=prompt_delivery,
+        prompt_flag=prompt_flag,
+        output_protocol=output_protocol,
+        auth_home=auth_home,
+        label=label,
+        write=write,
+        yes=yes,
+        output=_enum_value(output),
+        as_json=as_json,
+    )
+
+
 @agent_app.command("doctor")
 def agent_doctor_command(
     agent_names: Annotated[
@@ -324,8 +427,10 @@ def agent_doctor_command(
 
 
 __all__ = [
+    "agent_add_command",
     "agent_doctor_command",
     "agent_list_command",
+    "agent_setup_command",
     "ask_command",
     "deliberate_command",
     "repl_command",

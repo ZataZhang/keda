@@ -177,26 +177,21 @@ default_agent = "claude"
 #
 # 用 `kc agent presets` 枚举全部预设；`kc agent doctor <agent> --preset <名>`
 # 预览将被执行的完整命令行。
-
-[agent_runner.presets.codebuddy-glm5_3-flash-max]
-agent = "codebuddy"
-model = "glm-5.3-flash"
-reasoning_effort = "max"
-
-[agent_runner.presets.codebuddy-deepseek-v4_1-flash]
-agent = "codebuddy"
-model = "deepseek-v4.1-flash"
-reasoning_effort = "high"
-
-[agent_runner.presets.qoder-qwen3_8-flash_max]
-agent = "qoder"
-model = "Qwen3.8-Flash"
-reasoning_effort = "max"
-
-[agent_runner.presets.qoder-qwen3_8-max_xhigh]
-agent = "qoder"
-model = "Qwen3.8-Max"
-reasoning_effort = "xhigh"
+#
+# 本文件是**仓库模板**，不再作为新用户机器级配置的播种源（首启写入的是代码内
+# 最小骨架）；因此这里刻意不保留任何生效的预设与阶段绑定——把某个 agent 的
+# 个人偏好绑定到实现阶段，会让从未配置过的机器指向本机没安装的可执行文件。
+# 下面是本机存在对应 agent 时可取消注释的示例：
+#
+# [agent_runner.presets.codebuddy-glm5_3-flash-max]
+# agent = "codebuddy"
+# model = "glm-5.3-flash"
+# reasoning_effort = "max"
+#
+# [agent_runner.presets.qoder-qwen3_8-flash_max]
+# agent = "qoder"
+# model = "Qwen3.8-Flash"
+# reasoning_effort = "max"
 
 # =============================================================================
 # 模型评测（Console「Evaluations」页）：评审预设
@@ -228,13 +223,13 @@ reasoning_effort = "xhigh"
 #   > 仓库 .kedacode.toml > 本文件（全局层）。
 # fix / closeout 未自绑预设时跟随实现者并继承实现的模型绑定（同一 agent）。
 # 回退换人 / 显式换 agent 时丢弃模型绑定并在日志与 attempt 记录中标注。
-# 下面是当前生效的阶段 -> 预设绑定；未列出的阶段继续走生命周期矩阵 /
-# 既有散落键 / 内置默认（fix、closeout 未绑时默认跟随实现者并继承其模型）。
-[agent_runner.lifecycle_presets]
-implementation = "codebuddy-deepseek-v4_1-flash"
-verifier = "qoder-qwen3_8-flash_max"
-fix = "codebuddy-glm5_3-flash-max"
-closeout = "codebuddy-glm5_3-flash-max"
+# 本节刻意不保留任何生效绑定（模板不该替所有机器决定阶段用谁）；未绑定的阶段
+# 继续走生命周期矩阵 / 既有散落键 / 内置默认（fix、closeout 未绑时默认跟随
+# 实现者并继承其模型）。本机存在对应 agent 与预设时可参考：
+#
+# [agent_runner.lifecycle_presets]
+# implementation = "codebuddy-deepseek-v4_1-flash"
+# verifier = "qoder-qwen3_8-flash_max"
 
 # =============================================================================
 # Agent 注册表（声明式 agent 调用形态）
@@ -1178,7 +1173,7 @@ max_deliberation_issues = 1
 # （续传 / 重新入队 / 判失败三出口，均留对账 comment）。设为 false 即关闭该层。
 reconcile_stale_attempts = true
 # claim 老化阈值(秒)：claim 带 started_at 且超过该时长，即便 PID 仍活也判为 stale。
-reclaim_ttl_seconds = 10800
+reclaim_ttl_seconds = 18000
 
 [agent_runner.lifecycle_agents]
 implementation = "codebuddy"

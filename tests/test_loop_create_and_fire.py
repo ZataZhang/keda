@@ -368,8 +368,9 @@ def test_build_prd_path_uses_timestamp(
 
 
 def test_resolve_loop_state_path_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """loop 状态文件默认落在新状态目录 ``~/.kedacode`` 下。"""
+    """循环状态固定落在当前状态目录；机器上只剩旧目录也不回读旧位置。"""
     monkeypatch.setenv("HOME", str(tmp_path))
+    (tmp_path / ".iar").mkdir()
     assert resolve_loop_state_path() == tmp_path / ".kedacode" / "loop-state.json"
 
 

@@ -26,6 +26,7 @@ import typer
 from typer import _click as typer_click
 
 from backend.api.cli import _run_parsed_command, error_console
+from backend.api.cli_agent_hint import maybe_prompt_for_agent_setup
 from backend.api.cli_completion import (
     maybe_prompt_for_completion_setup,
     register_completion_commands,
@@ -205,7 +206,7 @@ console_app = typer.Typer(
     context_settings=_HELP_CONTEXT,
 )
 agent_app = typer.Typer(
-    help="Inspect registered agents and output protocols (read-only).",
+    help="Inspect registered agents and choose or register the ones to run.",
     no_args_is_help=True,
     context_settings=_HELP_CONTEXT,
 )
@@ -481,6 +482,8 @@ def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     if maybe_prompt_for_completion_setup(args):
         return 0
+    # 首启 Agent 可用性提示（FR-4）：一次性、写 stderr、永不阻断本轮命令。
+    maybe_prompt_for_agent_setup(args)
     # Typer/Click 会在调用根回调前把空参数处理成成功的帮助输出；保留裸命令既有的
     # no-TTY 非零退出语义，TTY 下直接交给原生会话。
     if not args and product_identity.COMPLETION_ENV_VAR_NAME not in os.environ:

@@ -12,6 +12,10 @@
  *
  * 依赖数据：仓库范围用例需要一个**已启用**的受管理仓库（Backlog 齿轮用）；缺失时对应用例
  * skip 而不是失败，这样在没有预置仓库的环境里也能稳定跑通。
+ *
+ * 可用性标记（agent-availability PRD 的 rv-4 自动化部分）：最后一条用例把页面上的
+ * 「未安装 / 已安装路径」标记与后端 `agent_availability` 逐行对照——前端漏接这段事实时
+ * 标记整体消失，断言即失败；本机没装的 agent 由真实机器状态决定，不做 stub。
  */
 
 import { expect, test } from '../../fixtures/session.fixture'
@@ -27,6 +31,31 @@ const LIFECYCLE_KEYS = [
   'content_generation',
   'deliberate',
 ] as const
+
+/** `agent_availability` 条目：core 与 Console 共用的那份可用性事实。 */
+interface AgentAvailabilityFact {
+  agent: string
+  bin: string
+  available: boolean
+  bin_path: string | null
+}
+
+/** 聚合设置视图里本用例关心的字段（矩阵行 + 注册表 + 可用性事实）。 */
+interface LifecycleSettingsFacts {
+  agents: string[]
+  agent_availability?: AgentAvailabilityFact[]
+  lifecycles: { key: string; effective_agent: string | null }[]
+}
+
+/** Backlog 仓库选择器读的 registry 列表（转录用例只用这两个字段）。 */
+interface RegistryRepositoryEntry {
+  repo_id: string
+  enabled: boolean
+}
+
+interface RegistryRepositories {
+  repositories?: RegistryRepositoryEntry[]
+}
 
 test.describe('生命周期统一设置页 (lifecycle-settings)', () => {
   test('Settings「Agent 管理」入口可进入统一设置页', async ({ page }) => {
@@ -107,15 +136,21 @@ test.describe('生命周期统一设置页 (lifecycle-settings)', () => {
 
   test('Backlog 仓库齿轮带 repo_id 进入统一页并预选仓库范围', async ({ page }) => {
     await page.goto('/app/backlog/')
-    // Backlog 是 SPA：仓库列表是独立请求，等网络静默再计数，否则刚 goto 完就 count 会
-    // 稳定拿到 0，把有仓库的情况误判成"没有受管理仓库"而跳过本用例。
+    // Backlog 是 SPA：仓库列表是独立请求，等网络静默，否则刚 goto 完齿轮还不在 DOM 里。
     await page.waitForLoadState('networkidle')
 
-    const gearButtons = page.locator('[data-testid^="repo-agent-gear-"]')
-    const gearCount = await gearButtons.count()
-    test.skip(gearCount === 0, '当前 registry 没有启用中的受管理仓库，跳转过录用例。')
+    // registry 也列出停用的仓库，且它们的齿轮照样可点——点进停用仓库得到的是
+    // "仓库 'x' 不存在或未启用" 而不是矩阵。本页头声明的前提是**已启用**的受管理仓库，
+    // 所以按 API 的 enabled 挑齿轮，而不是拿第一个齿轮赌机器上仓库的启停状态。
+    const reposResponse = await page.request.get('/api/v1/agent-runner/repositories')
+    expect(reposResponse.ok(), `repositories 端点非 200：${await reposResponse.text()}`).toBe(true)
+    const registry = (await reposResponse.json()) as RegistryRepositories
+    const enabledRepoId = (registry.repositories ?? []).find((entry) => entry.enabled)?.repo_id
+    test.skip(!enabledRepoId, '当前 registry 没有启用中的受管理仓库，跳转过录用例。')
 
-    await gearButtons.first().click()
+    const gear = page.getByTestId(`repo-agent-gear-${enabledRepoId}`)
+    await expect(gear).toBeVisible()
+    await gear.click()
     await expect(page).toHaveURL(/\/app\/settings\/lifecycle\/\?scope=repository&repo_id=/)
     await expect(page.getByTestId('lifecycle-settings-page')).toBeVisible()
     for (const lifecycleKey of LIFECYCLE_KEYS) {
@@ -145,5 +180,63 @@ test.describe('生命周期统一设置页 (lifecycle-settings)', () => {
       expect(box).not.toBeNull()
       expect(box?.width).toBeGreaterThan(300)
     }
+  })
+
+  test('矩阵按后端下发的可用性事实标注每个生效 Agent：未安装点名可执行文件，已安装给路径', async ({
+    page,
+  }) => {
+    await page.goto('/app/settings/lifecycle/')
+    await expect(page.getByTestId('lifecycle-settings-page')).toBeVisible()
+    await page.waitForLoadState('networkidle')
+
+    const response = await page.request.get('/api/v1/agent-runner/lifecycle-settings?scope=global')
+    expect(response.ok(), `lifecycle-settings 端点非 200：${await response.text()}`).toBe(true)
+    const view = (await response.json()) as LifecycleSettingsFacts
+
+    // 契约：可用性条目覆盖注册表里的每一个名字，且 bin_path 与 available 同起同落。
+    const availabilityByAgent = new Map(
+      (view.agent_availability ?? []).map((fact) => [fact.agent, fact]),
+    )
+    expect(view.agent_availability, '视图未下发 agent_availability').toBeDefined()
+    for (const agentName of view.agents) {
+      const fact = availabilityByAgent.get(agentName)
+      expect(fact, `注册表里的 ${agentName} 没有对应的可用性条目`).toBeDefined()
+      expect(Boolean(fact?.available)).toBe(fact?.bin_path !== null)
+    }
+
+    for (const row of view.lifecycles) {
+      const pathMark = page.getByTestId(`matrix-agent-path-${row.key}`)
+      const missingMark = page.getByTestId(`matrix-agent-missing-${row.key}`)
+      const fact = row.effective_agent ? availabilityByAgent.get(row.effective_agent) : undefined
+      if (!fact) {
+        // 生效值没解析到具体 agent（auto / 未声明）或后端未下发事实：页面不猜测。
+        await expect(pathMark).toHaveCount(0)
+        await expect(missingMark).toHaveCount(0)
+        continue
+      }
+      if (fact.available) {
+        await expect(pathMark).toContainText(String(fact.bin_path))
+        await expect(missingMark).toHaveCount(0)
+      } else {
+        await expect(missingMark).toContainText('未安装')
+        await expect(missingMark).toContainText(fact.bin)
+        await expect(pathMark).toHaveCount(0)
+      }
+    }
+
+    // 下拉候选共用同一份事实：不可用的 agent 在候选里点名"未安装"，可用的不带后缀。
+    await page.getByTestId('settings-tab-fallback').click()
+    await page.getByTestId('fallback-add').click()
+    for (const agentName of view.agents) {
+      const option = page.getByTestId(`fallback-add-${agentName}`)
+      if ((await option.count()) === 0) continue
+      const label = await option.innerText()
+      if (availabilityByAgent.get(agentName)?.available === false) {
+        expect(label, `未安装的 ${agentName} 在候选里没有任何提示`).toContain('未安装')
+      } else {
+        expect(label).not.toContain('未安装')
+      }
+    }
+    await page.keyboard.press('Escape')
   })
 })

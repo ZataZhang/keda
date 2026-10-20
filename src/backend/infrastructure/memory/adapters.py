@@ -20,7 +20,13 @@ from typing import Iterable, Protocol
 class MemoryStores(Protocol):
     """Bundle of factory callables that produce the three memory stores."""
 
-    def short_term(self, base_dir: str | Path) -> object: ...
+    def short_term(
+        self,
+        base_dir: str | Path,
+        *,
+        repository_identity: str | None = None,
+        legacy_base_dirs: Iterable[str | Path] = (),
+    ) -> object: ...
     def long_term(self, base_dir: str | Path) -> object: ...
     def skill(self, drafts_dir: str | Path) -> object: ...
 
@@ -38,8 +44,20 @@ def build_memory_stores() -> MemoryStores:
     )
 
     class _Bundle:
-        def short_term(self, base_dir):
-            return _ShortTermAdapter(ShortTermMemoryStore(base_dir))
+        def short_term(
+            self,
+            base_dir,
+            *,
+            repository_identity=None,
+            legacy_base_dirs=(),
+        ):
+            return _ShortTermAdapter(
+                ShortTermMemoryStore(
+                    base_dir,
+                    repository_identity=repository_identity,
+                    legacy_base_dirs=legacy_base_dirs,
+                )
+            )
 
         def long_term(self, base_dir):
             return _LongTermAdapter(LongTermMemoryStore(base_dir))
@@ -56,6 +74,9 @@ def resolve_memory_paths(
     base_dir: str,
     skill_drafts_dir: str,
     promoted_skills_dirs: Iterable[str],
+    short_term_base_dir: str | None = None,
+    short_term_repository_identity: str | None = None,
+    legacy_short_term_base_dirs: Iterable[str] = (),
 ) -> dict[str, object]:
     """Resolve the absolute memory-related paths.
 
@@ -76,7 +97,8 @@ def resolve_memory_paths(
 
     Returns:
         字典 ``{"short_term_base", "long_term_base", "skill_drafts_dir",
-        "promoted_skills_dirs"}``，所有路径都是 :class:`pathlib.Path`。
+        "promoted_skills_dirs"}``，以及短期记忆身份和只读旧目录。路径为
+        :class:`pathlib.Path`；未设置身份时保留旧的 ``repo_id`` 分区语义。
     """
 
     def anchor(rel: str) -> Path:
@@ -85,7 +107,11 @@ def resolve_memory_paths(
         return worktree_path / rel
 
     return {
-        "short_term_base": anchor(base_dir),
+        "short_term_base": anchor(short_term_base_dir or base_dir),
+        "short_term_repository_identity": short_term_repository_identity,
+        "legacy_short_term_base_dirs": tuple(
+            anchor(directory) for directory in legacy_short_term_base_dirs
+        ),
         "long_term_base": anchor(base_dir),
         "skill_drafts_dir": anchor(skill_drafts_dir),
         "promoted_skills_dirs": tuple(anchor(rel) for rel in promoted_skills_dirs),
@@ -119,6 +145,8 @@ class _ShortTermAdapter:
                 failure_type=a.failure_type,
                 detail=a.detail,
                 recovered=a.recovered,
+                detail_log_path=a.detail_log_path,
+                detail_summary=a.detail_summary,
             )
             for a in payload.attempts
         ]
@@ -132,6 +160,8 @@ class _ShortTermAdapter:
             final_solution=payload.final_solution,
             key_files=payload.key_files,
             updated_at=payload.updated_at,
+            final_solution_log_path=payload.final_solution_log_path,
+            final_solution_summary=payload.final_solution_summary,
         )
         return self._inner.save(repo_id, issue_number, context)
 
@@ -281,6 +311,8 @@ def _short_term_context_to_protocol(context):
     payload.final_solution = context.final_solution
     payload.key_files = context.key_files
     payload.updated_at = context.updated_at
+    payload.final_solution_log_path = context.final_solution_log_path
+    payload.final_solution_summary = context.final_solution_summary
     return payload
 
 
@@ -295,6 +327,8 @@ def _attempt_to_protocol(record):
     attempt.failure_type = record.failure_type
     attempt.detail = record.detail
     attempt.recovered = record.recovered
+    attempt.detail_log_path = record.detail_log_path
+    attempt.detail_summary = record.detail_summary
     return attempt
 
 

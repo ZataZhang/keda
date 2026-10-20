@@ -29,6 +29,7 @@ from backend.core.shared.models.lifecycle_agent import (
 from backend.core.use_cases.agent_candidate_fallback import (
     effective_fallback_candidates,
 )
+from backend.core.use_cases.agent_onboarding import agent_availability_entries
 from backend.core.use_cases.lifecycle_agent_resolution import (
     legacy_configured_agent,
     resolve_lifecycle_agent,
@@ -358,7 +359,8 @@ def build_lifecycle_settings_view(
         global_config: ``scope=repository`` 时独立加载的全局配置，用于区分预设来源层。
 
     Returns:
-        含 ``lifecycles`` / ``presets`` / ``fallback`` 三段与视角标注的 JSON 字典。
+        含 ``lifecycles`` / ``presets`` / ``fallback`` 三段、``agent_availability``
+        与视角标注的 JSON 字典。
 
     Raises:
         LifecycleAgentsUpdateError: ``scope`` 非法。
@@ -400,6 +402,10 @@ def build_lifecycle_settings_view(
         "scope": scope,
         "repo_id": repo_id,
         "agents": list(config.agents),
+        # 注册表可用性事实（与 Agent-only 矩阵视图同一份来源、同一套键名）：页面把
+        # "未安装 / 解析路径"标在下拉项、矩阵行、预设与回退候选上，只呈现不拦截，
+        # 真正的阻断在 core 的启动前门禁。
+        "agent_availability": agent_availability_entries(config.agents),
         "lifecycles": lifecycles,
         "presets": presets,
         "fallback": build_fallback_candidates_view(config),

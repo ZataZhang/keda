@@ -41,6 +41,7 @@ from backend.core.use_cases.agent_runner_blocked_claim import (
     worktree_claim_lock_path,
 )
 from backend.core.use_cases.agent_runner_claim_arbitration import arbitrate_first_claim
+from backend.core.use_cases.agent_onboarding import assert_run_gate
 from backend.core.use_cases.agent_runner_direct_pr_label import (
     PublishStageDecision,
     PublishStageSelection,
@@ -395,6 +396,12 @@ def _process_ready_issue(
         issue=issue,
         fallback_preset=fallback_preset,
     )
+    # 启动前门禁（FR-5）：在投递认领标记、建 worktree 之前确认配置层解析出的阶段
+    # agent 在本机可执行。配置指向没装的 CLI 是配置错误，必须在 GitHub 上留下认领
+    # 痕迹之前停下。判定只看配置解析结果、不看 ``agent``：本函数会被回退阶梯按候选
+    # 逐个调用，候选没装属于运行时失败（起进程时 FileNotFoundError → AgentUnavailableError），
+    # 由阶梯跳过，不是配置错误。显式 ``--agent`` 由仓库轮询入口的那次预检负责。
+    assert_run_gate(config)
 
     # 步骤 1: 声明 Issue —— 真 CAS：先投递认领标记，回读后确认最早认领者才切 running。
     # 落败方不碰标签、worktree 或 agent，由派发层按 skip 处理。
