@@ -9,11 +9,11 @@
       "evidence_files": [
         "rv-1-real-entry.txt"
       ],
-      "output_summary": "真实 kc run 负对照 1 在修复前源码上复现 npm 不在 PATH 时 Agent 未启动并标记 agent/failed；负对照 2 注入缺工具需 host_toolchain 人工决定，prompt oracle 拒绝；负对照 3 在安装优先实现上提供锁文件一致且已有 node_modules 的主检出，真实 npm ci 仍运行，worktree 未复用链接，复用 oracle 失败。修复后真实 kc run 的缺 pnpm/npm 场景启动 Agent；Agent 读取 packageManager、workspace 与冲突锁文件证据、计划命令和缺工具原因，无 requires_user_action，选择继续无关检查。npm 可执行且主检出有匹配依赖时，报告 outcome=reused、attempted_commands 为空，Agent 收到并选择复用，生产验证确认 worktree 是带标记的符号链接。真实 npm ci 遇到 EACCES 与本机临时 401 registry 的 E401 均保留 install_failed 诊断，Agent 启动后准确请求权限/凭据并以 agent/blocked 呈现。末尾输出 `RESULT: ALL PASS (3 real kc run negative controls + 4 isolated green scenarios)`，退出码 0。",
-      "explanation": "通过生产 CLI `kc run --issue` 执行真实 worktree 创建、依赖扫描与准备、报告落盘、Agent prompt 组装/派发、验证归因及 Issue 状态转换。两个工具链负对照分别复现修复前缺 npm 导致 Agent 启动前失败，以及注入错误的 host_toolchain 人工前置要求后被 Agent prompt oracle 拒绝。复用负对照运行当前分支改动前的安装优先实现；主检出具有锁文件匹配的 node_modules，真实 npm 执行 `npm ci --ignore-scripts`，随后符号链接验收失败，证明旧行为会漏掉安全复用。绿色缺工具执行中，plan-driven Codex 边界 fixture 检查真实收到的 prompt 和 JSON 报告并按诊断作确定性选择；复用场景使用真实 npm 可执行文件并通过生产验证命令检查符号链接和依赖标记；权限与凭据场景使用真实 npm 子进程、只读目录故障和本机 401 HTTP registry，证明失败保留且只在需要授权时转为可恢复阻塞。GitHub 状态由持久化文件型边界 fixture 记录，供 CLI 退出后检查。",
+      "output_summary": "真实 kc run 负对照 1 在修复前源码上复现 npm 不在 PATH 时 Agent 未启动并标记 agent/failed；负对照 2 注入缺工具需 host_toolchain 人工决定，prompt oracle 拒绝；负对照 3 在当前源码临时副本中注入复用判断失败，提供锁文件一致且已有 node_modules 的主检出，真实 npm ci 仍运行，worktree 未复用链接，复用 oracle 失败。修复后真实 kc run 的缺 pnpm/npm 场景启动 Agent；Agent 读取 packageManager、workspace 与冲突锁文件证据、计划命令和缺工具原因，无 requires_user_action，选择继续无关检查。npm 可执行且主检出有匹配依赖时，报告 outcome=reused、attempted_commands 为空，Agent 收到并选择复用，生产验证确认 worktree 是带标记的符号链接。真实 npm ci 遇到 EACCES 与本机临时 401 registry 的 E401 均保留 install_failed 诊断，Agent 启动后准确请求权限/凭据并以 agent/blocked 呈现。末尾输出 `RESULT: ALL PASS (3 real kc run negative controls + 4 isolated green scenarios)`，退出码 0。",
+      "explanation": "通过生产 CLI `kc run --issue` 执行真实 worktree 创建、依赖扫描与准备、报告落盘、Agent prompt 组装/派发、验证归因及 Issue 状态转换。两个工具链负对照分别复现修复前缺 npm 导致 Agent 启动前失败，以及注入错误的 host_toolchain 人工前置要求后被 Agent prompt oracle 拒绝。复用负对照从当前 src 树创建隔离副本，精确注入复用失败；主检出具有锁文件匹配的 node_modules，真实 npm 执行 `npm ci --ignore-scripts`，随后符号链接验收失败，证明 oracle 能识别漏掉安全复用的行为，且重跑不依赖特定 HEAD 或历史提交。绿色缺工具执行中，plan-driven Codex 边界 fixture 检查真实收到的 prompt 和 JSON 报告并按诊断作确定性选择；复用场景使用真实 npm 可执行文件并通过生产验证命令检查符号链接和依赖标记；权限与凭据场景使用真实 npm 子进程、只读目录故障和本机 401 HTTP registry，证明失败保留且只在需要授权时转为可恢复阻塞。GitHub 状态由持久化文件型边界 fixture 记录，供 CLI 退出后检查。",
       "risks": "外部 Codex 执行器与 GitHub API 使用隔离 fixture；Codex fixture 读取真实 prompt/报告并按 JSON 计划作确定性选择，因此证明上下文交付和安全分支处理，不证明真实模型的推理质量。被测 kc CLI、Python use cases、Git/worktree、npm ci、复用符号链接、文件系统权限和 401 HTTP 请求均真实执行。registry 和仓库只在本机临时目录/回环接口，不触及生产服务或业务数据；证据与脚本不含凭据。",
-      "negative_control": "依次执行三条真实 kc run 负对照：1) 将 `RV_PRE_FIX_REF` 设为修复前提交（默认使用 `git merge-base HEAD main`），在 PATH 移除 npm 后执行 `uv run --project <repo-root> kc run --issue 290 --repo <fixture-repo> --agent codex`；2) 只在临时源码副本中修改 prompt 渲染，让 tool_missing 错误地要求 `host_toolchain` 人工决定，再运行同一真实入口；3) 将 `RV_INSTALL_FIRST_REF` 设为当前分支的安装优先版本（默认 HEAD），在主检出预置与 worktree 锁文件相同且带 `.rv-ready` 标记的 node_modules，再经真实 kc run 执行 npm 安装，并让真实验证命令要求 worktree 使用带标记的复用符号链接。三条 oracle 均应变红。",
-      "expected_fail": "负对照 1：退出码 1，输出缺少 npm 的 FileNotFoundError，Agent 未启动，最终 label 为 agent/failed。负对照 2：Agent 收到 `needs a human decision (host_toolchain)`；缺工具上下文 oracle 返回 false，真实 kc run 非零结束并标记 agent/failed。负对照 3：报告 outcome=installed、attempted_commands 包含 `npm ci --ignore-scripts`，主检出标记存在但 worktree_modules 不是复用链接，要求复用的真实验证失败，最终 label 为 agent/failed。修复后的绿色复用场景必须不运行 npm ci，记录 outcome=reused，并通过相同的符号链接与标记验证。",
+      "negative_control": "依次执行三条真实 kc run 负对照：1) 将 `RV_PRE_FIX_REF` 设为修复前提交（默认使用 `git merge-base HEAD main`），在 PATH 移除 npm 后执行 `uv run --project <repo-root> kc run --issue 290 --repo <fixture-repo> --agent codex`；2) 只在临时源码副本中修改 prompt 渲染，让 tool_missing 错误地要求 `host_toolchain` 人工决定，再运行同一真实入口；3) 将当前 src 树复制到 RV 临时目录并注入复用失败，在主检出预置与 worktree 锁文件相同且带 `.rv-ready` 标记的 node_modules，再经真实 kc run 执行 npm 安装，并让真实验证命令要求 worktree 使用带标记的复用符号链接。三条 oracle 均应变红。",
+      "expected_fail": "负对照 1：退出码 1，输出缺少 npm 的 FileNotFoundError，Agent 未启动，最终 label 为 agent/failed。负对照 2：Agent 收到 `needs a human decision (host_toolchain)`；缺工具上下文 oracle 返回 false，真实 kc run 非零结束并标记 agent/failed。负对照 3：注入复用失败后报告 outcome=installed、attempted_commands 包含 `npm ci --ignore-scripts`，主检出标记存在但 worktree_modules 不是复用链接，要求复用的真实验证失败，最终 label 为 agent/failed。修复后的绿色复用场景必须不运行 npm ci，记录 outcome=reused，并通过相同的符号链接与标记验证。",
       "stdout_assertions": [
         {
           "severity": "high",
@@ -83,7 +83,7 @@
         },
         {
           "severity": "high",
-          "pattern": "RESULT: RED AS EXPECTED (baseline ran npm ci instead of reusing matching node_modules)",
+          "pattern": "RESULT: RED AS EXPECTED (injected reuse miss ran npm ci instead of reusing matching node_modules)",
           "source": "stdout",
           "must_match": true
         },
