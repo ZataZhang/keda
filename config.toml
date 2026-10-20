@@ -782,6 +782,8 @@ findings_artifact_dir = ".iar/state"
 #   {issue_body}    - Full Issue body markdown
 #   {prd_line}      - Auto-generated PRD reference line
 #   {validation_line} - Auto-generated Realistic Validation evidence rule
+#   {dependency_context_block} - worktree 前端依赖准备的可恢复诊断（缺失工具、
+#     选择依据、尝试过的命令与失败原因）；未准备或无缺口时为空串
 # 另注：execution 模板中的 "PRD map check (before coding):" 段是**固定规则文本**，
 # 不对应任何占位符；语义与收尾声明格式见 docs/guides/agent-runner.md。
 [agent_runner.prompts]
@@ -795,6 +797,7 @@ execution = [
   "Worktree: {worktree_path}",
   "{prd_line}",
   "{validation_line}",
+  "{dependency_context_block}",
   "",
   "Issue body:",
   "{issue_body}",

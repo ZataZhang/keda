@@ -1191,25 +1191,28 @@ CI 容器镜像预装浏览器运行时是后续工作；首版只保证本地 r
 
 ## worktree 中的前端依赖（node_modules）
 
-同理，gitignored 的 `node_modules` 也不会被 `git worktree add` 物化，否则 worktree 里跑 `vite` 等构建会报 `vite: command not found`。runner 在补齐 env 文件之后，会按以下优先级处理 worktree 中的前端依赖：
+同理，gitignored 的 `node_modules` 也不会被 `git worktree add` 物化，否则 worktree 里跑 `vite` 等构建会报 `vite: command not found`。runner 在补齐 env 文件之后，会对 worktree（而非主仓库）中所有含 `package.json` 的前端项目做**可恢复的准备 + 诊断**：装得上就装，装不上就把证据交给 Agent，绝不因此把 Issue 判为失败。
 
-1. **优先在 worktree 内真实安装**：扫描 worktree（而非主仓库）中所有含 `package.json` 的前端项目，根据锁文件自动选择包管理器并执行安装：
-   - `pnpm-lock.yaml` → `pnpm install --ignore-scripts`
-   - `package-lock.json` → `npm ci --ignore-scripts`
-   - `yarn.lock` → `yarn install --ignore-scripts`
-   - `bun.lock` / `bun.lockb` → `bun install --ignore-scripts`
-2. **无锁文件或安装失败时回退到软链**：如果项目没有锁文件，或者安装命令非零退出，则把 `node_modules` 软链到主仓库对应目录（等价于 `just worktree` 脚本旧的 `symlink-from-main` 策略）。
+1. **识别包管理器**：同时看 `package.json` 的 `packageManager` 字段、workspace 根配置（`pnpm-workspace.yaml` / 根 `package.json` 的 `workspaces`）与锁文件。
+   - 单一锁文件：按锁文件选择 `pnpm install` / `npm ci` / `yarn install` / `bun install`（均带 `--ignore-scripts`）。
+   - workspace 成员：若目录被某个 workspace 根的成员 pattern 覆盖，跳过本地安装（根安装会覆盖它），只记录证据。
+   - 冲突：多个锁文件指向不同包管理器，或 `packageManager` 与锁文件不一致时**不静默选定**，只记 `manager_conflict` 并保留全部证据。
+2. **安全可行时安装**：包管理器可执行文件不在 PATH 时**不运行任何命令**，直接记 `tool_missing`；运行后非零退出、或退出 0 却没有产出 `node_modules`，都按失败记录（不会伪报安装成功）。
+3. **回退复用主检出依赖**：安装没成时，只有两棵树的 `package.json` 与至少一份锁文件都存在且内容一致，才把主检出的 `node_modules` 软链进来；所有已识别锁文件的存在状态和内容也必须一致。缺少锁文件或依赖输入无法核实时拒绝复用，避免把未知环境伪装成就绪。
+4. **记录诊断并继续**：三步都没得到可用依赖时只写记录，**Agent 仍会启动**。
+
+诊断落在 worktree 的 `.agent-runner/dependency-preparation.json`（该目录被 runner 写进 gitignore，不会进代码 diff）。每个项目记录 outcome（`installed` / `reused` / `present` / `skipped` / `not_prepared`）、原因码、选择依据、尝试过的命令、退出码与脱敏后的 stderr 片段。Agent 的 prompt 通过 `{dependency_context_block}` 拿到这份上下文与处置规则：默认由 Agent 自主决定安全的仓库级安装或替代方式，不要求用户预先逐项配置项目工具链。
 
 行为约束：
 
-- 只处理 worktree 中**缺失**的 `node_modules`：worktree 内已有的真实目录或软链（例如已 `npm install` 过）永远不会被覆盖
+- 只处理 worktree 中**缺失**的 `node_modules`：worktree 内已有的真实目录或有效软链（例如已 `npm install` 过）永远不会被覆盖；悬空软链会保留并记录为未就绪
 - 复用已有 worktree 时同样补齐：旧 worktree 缺 `node_modules` 的，下一次 `kc run` 会自动治愈
-- 真实安装优先是为了兼容所有前端工具链（包括 Next.js/Turbopack 等不允许跨根目录软链的工具）；pnpm 等内容可寻址存储会复用本机缓存，通常不会明显慢于软链
-- 主仓库该项目缺 `node_modules` 且无法安装时**无法软链**，会记一条 `warning`（而非静默跳过），方便把后续 `vite: command not found` 追溯到"主仓库没装依赖"或"安装失败"
-- 处理是 best effort：单个项目失败（权限、竞态、网络）只记日志，不会中断 agent run
-- 软链同样保持 gitignored 状态，不会让 worktree 变脏
+- 准备流程不会执行 `sudo`、不写主机全局前缀/工具链、不使用未提供的凭据；需要提权、改全局环境或凭据的动作只归类为 `privilege` / `credentials` 并交给人决定
+- 诊断写入、扫描与软链都是 best effort：单个项目失败只记日志，不会中断 agent run
+- 新建、复用或已存在的 `node_modules` 软链都会加入 worktree 的 Git `info/exclude`，避免被 Agent 误提交
+- `agent/failed` 只表示 Agent/执行本身失败：若后续执行失败能被记录在案的缺失可执行文件（或验证命令以 127 / `command not found` 结束）解释，runner 会改判为可恢复的 `agent/blocked` 并发出诊断评论，人处理后用 `kc blocked-continue` 继续；与依赖无关的失败仍按原语义落 `agent/failed`
 
-> 守护进程路径（`kc worktree create` / `kc run`）不读 `WORKTREE_FRONTEND_STRATEGY` 环境变量——该变量只对手动 `just worktree`（`scripts/shared/worktree/create.sh`）生效。daemon 路径固定采用上面的"先安装、后软链回退"策略。
+> 守护进程路径（`kc worktree create` / `kc run`）不读 `WORKTREE_FRONTEND_STRATEGY` 环境变量——该变量只对手动 `just worktree`（`scripts/shared/worktree/create.sh`）生效。daemon 路径固定采用上面的"可恢复准备 + 诊断"策略。
 
 ## worktree 分支安全与自动修复
 
@@ -2452,7 +2455,7 @@ Issue 执行失败后会被标记为 `agent/failed`，runner 不会再自动处�
 2. **执行器超时续跑**：agent 子进程被墙钟或 inactivity timeout 杀掉，且 runner 收到了该 session id 时，默认在同一会话增加一个当前阶段时限的执行窗口。`timeout_resume_attempts` 限制同一 session 的额外超时续跑轮数；其他错误不消耗此预算。
 3. **同 agent recovery**：验证失败、未产出 commit、其他可修复的请求级错误走既有的 recovery 循环——带着失败摘要重新调用同一个 agent 修复，最多 `max_recovery_attempts` 轮。超时续跑预算耗尽后，recovery 可继续，但会从新 session 开始。
 4. **跨 agent fallback（Level 2）**：当某 agent **耗尽 recovery 预算仍失败**，或命中**供应商容量限制**（429 usage limit、529 overloaded、`daily count exceeded` 这类每日额度——同一供应商重试也只会继续失败，所以**不做原地重试**，直接换人），runner 会切换到 `agent_fallback_order` 里的下一个 agent，在已落盘的进度上接力。判定读的是失败异常里的 stdout/stderr 文本，因此流式 agent（`stream-json` 协议，如 qoder）的失败原因必须能进到异常里：整条 assistant 文本消息之后只跟一个不带文本的 `error` result 时（qoder 额度耗尽就是这种形态），runner 会把最近一条 assistant 文本作为 `[agent error]` 行带出；同时流式调用的 stderr 始终被收集（只保留最后 200 行），随失败异常一起进入 Issue 失败评论，不再只剩 `The command streamed its details to the terminal.`。有 `display_sink` 时 stderr 仍只交给回调，没有时照旧回显到终端。切换次数受 `max_agent_switches` 封顶。配置中列出但本机未安装的 agent（命令不存在）会被自动跳过。
-5. **不切换的情况**：安全违规（禁改路径、分支异常）等不可恢复错误换谁都失败，runner 直接停止、不浪费配额。
+5. **不切换的情况**：安全违规（禁改路径、分支异常）等不可恢复错误换谁都失败，runner 直接停止、不浪费配额。依赖环境阻塞同理：失败能归因到 worktree 依赖准备记录里的缺失可执行文件（或验证命令以 127 / `command not found` 结束）时，缺的是**主机工具链**而不是某个 agent 的能力，runner 不换人，直接落 `agent/blocked`。
 
 `agent_fallback_order` 默认包含 `["claude", "kimi", "codex"]`，主 agent 失败后会依次尝试链中的下一个可用 agent。未安装的 agent（命令不存在）会被自动跳过。将 `agent_fallback_order` 设为空列表即可关闭跨 agent fallback，回退到单 agent 行为。所有尝试（含跨 agent）都会汇总进失败评论的 **Attempt History** 表，表格包含 **Started (UTC)**（本轮开始时间）、**Agent**（执行 agent）、**Duration**（耗时）和 **Detail**（失败摘要）列；同时每轮 attempt 会实时写入本地 SQLite 运行历史库的 `attempt_records` 表，并更新 GitHub Issue 上一条带 `<!-- iar-attempt-history -->` marker 的增量评论。该实时评论按 `(repo_id, issue_number)` 从 SQLite 轨迹整表重渲染，因此跨 agent fallback 和重新 claim 都会**追加**到同一张表，不会把上一个 agent 的历史行覆盖掉；轨迹超过 50 行时只保留最近 50 行，并在表格上方注明 `Older attempts omitted`。
 
@@ -3123,6 +3126,7 @@ Prompt 模板支持以下变量占位符：
 | `{worktree_path}` | 当前 worktree 的绝对路径 |
 | `{issue_body}` | Issue 完整正文 |
 | `{prd_line}` | 自动生成的 PRD 引用行（有 PRD 时提示读取，无 PRD 时给出通用建议） |
+| `{dependency_context_block}` | worktree 前端依赖准备的可恢复诊断（缺失工具、选择依据、尝试过的命令与失败原因）及处置规则；未准备或没有缺口时为空串 |
 
 ### PRD map check（执行开工前的 PRD 引用核验）
 

@@ -6,7 +6,9 @@
    ``reuse_command`` / ``path_command``）渲染成 argv。
 2. :func:`create_or_reuse_worktree` —— 按 create → reuse → path 三段流水线
    取得 worktree 的权威绝对路径，并补齐 gitignore 掉、``git worktree add``
-   不会落地的产物（``.env*``、前端 ``node_modules``）。
+   不会落地的产物（``.env*``、前端 ``node_modules``）。依赖准备是**可恢复**的：
+   装不动只把诊断写进 ``.agent-runner/dependency-preparation.json`` 交给 Agent，
+   绝不因环境缺口终止 Issue。
 
 ``_SHARED_GIT_LOCK`` 用于串行化共享仓库上的 ``git worktree add`` 写入：并行
 Issue worker（``kc daemon --concurrency``）会同时写主仓库的
@@ -39,8 +41,12 @@ from backend.core.use_cases.worktree_database import (
     WorktreeDatabaseProvisionRequest,
     provision_worktree_database,
 )
+from backend.core.use_cases.worktree_dependency_context import (
+    write_dependency_preparation_report,
+)
 from backend.core.use_cases.worktree_env import copy_missing_env_files
 from backend.core.use_cases.worktree_frontend import (
+    NODE_MODULES_DIR_NAME,
     ensure_frontend_node_modules,
     exclude_frontend_node_modules_from_git,
 )
@@ -270,25 +276,37 @@ def create_or_reuse_worktree(
             process_runner,
         )
     # node_modules is gitignored, so `git worktree add` never materializes it.
-    # Install deps directly in the worktree when a lockfile is present; this is
-    # the only form guaranteed to work with every frontend toolchain (including
-    # Next.js/Turbopack). If no lockfile exists or the install fails, fall back
-    # to symlinking from the main checkout. Reused worktrees are healed the same
-    # way; existing node_modules are left untouched.
-    installed_frontend_paths, linked_frontend_paths = ensure_frontend_node_modules(
-        repo_path, worktree_path, process_runner
-    )
-    if linked_frontend_paths:
-        exclude_frontend_node_modules_from_git(worktree_path, linked_frontend_paths, process_runner)
-    handled_frontend_paths = installed_frontend_paths + linked_frontend_paths
-    if handled_frontend_paths:
-        _logger.info(
-            "Prepared node_modules for %d frontend project(s) in worktree %s: "
-            "installed=%s, linked=%s",
-            len(handled_frontend_paths),
+    # 准备只做「安全可行」的动作（复用已有依赖、按锁文件装），装不动只写诊断：
+    # 环境缺口绝不终止 Issue，Agent 仍会启动并拿到结构化上下文自行决定下一步。
+    # 已有 worktree 重跑时同样只补缺空，永不覆盖已存在的 node_modules。
+    dependency_report = ensure_frontend_node_modules(repo_path, worktree_path, process_runner)
+    symlinked_frontend_paths = [
+        Path(project_record.project_path)
+        for project_record in dependency_report.records
+        if (worktree_path / project_record.project_path / NODE_MODULES_DIR_NAME).is_symlink()
+    ]
+    if symlinked_frontend_paths:
+        exclude_frontend_node_modules_from_git(
             worktree_path,
-            ", ".join(str(frontend_path) for frontend_path in installed_frontend_paths),
-            ", ".join(str(frontend_path) for frontend_path in linked_frontend_paths),
+            symlinked_frontend_paths,
+            process_runner,
+        )
+    # 只有真的有前端项目时才落盘：无前端仓库不需要交给 Agent 的上下文，也不该在
+    # worktree 里凭空造出 .agent-runner/ 目录。
+    if dependency_report.records:
+        write_dependency_preparation_report(worktree_path, dependency_report)
+    unprepared_records = [
+        project_record
+        for project_record in dependency_report.records
+        if not project_record.has_usable_dependencies
+    ]
+    if unprepared_records:
+        _logger.warning(
+            "Frontend dependencies are not ready for %d project(s) in worktree %s; "
+            "diagnostics go to the agent instead of failing the Issue: %s",
+            len(unprepared_records),
+            worktree_path,
+            ", ".join(f"{record.project_path} ({record.reason})" for record in unprepared_records),
         )
     expected_branch = f"issue-{issue.number}"
     _ensure_worktree_branch(worktree_path, expected_branch, issue, config, process_runner)
