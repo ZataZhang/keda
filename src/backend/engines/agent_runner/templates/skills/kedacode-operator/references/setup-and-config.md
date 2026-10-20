@@ -12,6 +12,10 @@ The user says 「装环境」「初始化仓库」「把这个仓库登记进来
 4. **Repository ambiguity** — when the working directory matches several registered repositories, later commands refuse to guess; init reports the repo id it registered, and other routes pass it as `--repo-id <id>`.
 5. **`kc agent setup` and `kc agent add --write` write machine-level config** — the first edits the global lifecycle matrix in `~/.kedacode/config.toml`, the second appends an agent registration to the same file. Both refuse to choose for the user: preview with `kc agent setup --dry-run` (or `kc agent add` without `--write`, which only prints the TOML), then apply the choice the user named. Never run either to make a failing run "go through" by swapping the user's agent without saying so.
 
+## Local console
+
+The default `kc console` startup requires the bundled dashboard assets. When a source checkout is missing them, run `just console-sync` from the repository root or install a release wheel that includes the assets. Use `kc console --api-only` only when an API without the web panel is sufficient; `/` will not serve the panel.
+
 ## The native executor entry (`kc session`)
 
 Bare `kc` in a terminal **is** `kc session`: KedaCode resolves `[agent_session].default_agent` (repository `.kedacode.toml` override > machine-wide `config.toml`, default `~/.kedacode/config.toml`; `--agent` overrides one invocation), checks and refreshes the packaged operator Skill in that Agent's own Skill directory, hands the terminal over, and returns the provider's exit code unchanged. Exact prior packaged versions refresh automatically; user-edited managed files remain untouched and block startup. It does not interpret the conversation, does not change permission policy, and does not start project services. Non-TTY `kc` prints help and exits **1** so pipes and CI cannot read a wrapped failure as success. The Keda REPL that interprets Agent output stays at `kc repl` with its own `[agent_runner.repl]` section — the two entries are deliberately separate risk surfaces.

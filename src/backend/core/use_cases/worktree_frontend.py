@@ -575,35 +575,37 @@ def _try_install_frontend_dependencies(
     )
 
 
-def _dependency_inputs_match_across_checkouts(reuse_target: _ReuseTarget) -> bool:
-    """package.json 和至少一份锁文件都相同时，才允许复用主检出依赖。"""
+def _dependency_inputs_mismatch_detail(reuse_target: _ReuseTarget) -> str | None:
+    """返回主检出与 worktree 的依赖输入差异，输入匹配时返回 ``None``。"""
     repo_project_path = reuse_target.repo_root_path / reuse_target.relative_project_path
     worktree_project_path = reuse_target.project_dir_path
     repo_manifest_path = repo_project_path / PACKAGE_MANIFEST_FILE_NAME
     worktree_manifest_path = worktree_project_path / PACKAGE_MANIFEST_FILE_NAME
     if not repo_manifest_path.is_file() or not worktree_manifest_path.is_file():
-        return False
+        return "package.json is missing in one or both checkouts"
     try:
         if repo_manifest_path.read_bytes() != worktree_manifest_path.read_bytes():
-            return False
+            return "package.json differs between main checkout and worktree"
     except OSError:
-        return False
+        return "package.json cannot be read in one or both checkouts"
 
     matching_lockfile_count = 0
     for lockfile_name in _LOCKFILE_PACKAGE_MANAGERS:
         repo_lockfile_path = repo_project_path / lockfile_name
         worktree_lockfile_path = worktree_project_path / lockfile_name
         if repo_lockfile_path.is_file() != worktree_lockfile_path.is_file():
-            return False
+            return f"lockfiles differ between main checkout and worktree ({lockfile_name} presence)"
         if not repo_lockfile_path.is_file():
             continue
         matching_lockfile_count += 1
         try:
             if repo_lockfile_path.read_bytes() != worktree_lockfile_path.read_bytes():
-                return False
+                return f"lockfiles differ between main checkout and worktree ({lockfile_name})"
         except OSError:
-            return False
-    return matching_lockfile_count > 0
+            return f"lockfile cannot be read in one or both checkouts ({lockfile_name})"
+    if matching_lockfile_count == 0:
+        return "no lockfile exists in both checkouts"
+    return None
 
 
 def _try_reuse_main_checkout_dependencies(
@@ -633,14 +635,12 @@ def _try_reuse_main_checkout_dependencies(
                 f"({repo_project_path})"
             ),
         )
-    if not _dependency_inputs_match_across_checkouts(reuse_target):
+    dependency_mismatch_detail = _dependency_inputs_mismatch_detail(reuse_target)
+    if dependency_mismatch_detail is not None:
         return _ReuseAttempt(
             succeeded=False,
             reason=REASON_REUSABLE_STALE,
-            detail=(
-                "package.json and at least one lockfile must exist and match in both checkouts; "
-                "dependency inputs are missing, different, or unverifiable"
-            ),
+            detail=dependency_mismatch_detail,
         )
     try:
         os.symlink(

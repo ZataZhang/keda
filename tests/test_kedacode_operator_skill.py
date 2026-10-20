@@ -431,6 +431,8 @@ _ALLOWED_FLAGS: dict[tuple[str, ...], set[str]] = {
     # 旗标集合取自 ``kc schema --json`` 的真实命令树。
     ("labels", "sync"): {"--repo", "--repo-id", "--config", "--all"},
     ("init",): {"--dry-run", "--force"},
+    # console is an executable callback group without nested commands.
+    ("console",): {"--port", "--api-only", "--no-browser"},
     # issue-245：随包 Skill 写明 skill 重装/刷新的独立入口；它不带仓库 selector。
     ("skill", "install"): {"--dry-run", "--force"},
     # 单目录 operator 修复不触碰其它安装根或远程模板 Skill。
@@ -627,15 +629,15 @@ def _group_callback_flags_by_path() -> dict[tuple[str, ...], set[str]]:
 
     def _walk(command: Any, path: tuple[str, ...]) -> None:
         children = getattr(command, "commands", None)
-        if not children:
-            return
         own_flags = {
             name
             for param in getattr(command, "params", ())
             for name in list(param.opts) + list(getattr(param, "secondary_opts", None) or [])
         }
-        if path and own_flags:
+        if path and own_flags and (children or getattr(command, "invoke_without_command", False)):
             flags_by_path[path] = own_flags
+        if not children:
+            return
         context = click.Context(command)
         for name in command.list_commands(context):
             subcommand = command.get_command(context, name)

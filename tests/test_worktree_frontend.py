@@ -683,11 +683,13 @@ class TestLinkFrontendNodeModules:
         repo_path = tmp_path / "repo"
         worktree_path = tmp_path / "worktree"
         # Main checkout has installed dependencies for both frontends.
-        _make_frontend_project(repo_path / "frontend")
-        _make_frontend_project(repo_path / "frontend-admin")
+        _make_frontend_project(repo_path / "frontend", lockfile_names=("pnpm-lock.yaml",))
+        _make_frontend_project(repo_path / "frontend-admin", lockfile_names=("pnpm-lock.yaml",))
         # Worktree has the manifests (materialized by git) but no node_modules.
         _write_file(worktree_path / "frontend" / "package.json", "{}\n")
+        _write_file(worktree_path / "frontend" / "pnpm-lock.yaml", "lockfile\n")
         _write_file(worktree_path / "frontend-admin" / "package.json", "{}\n")
+        _write_file(worktree_path / "frontend-admin" / "pnpm-lock.yaml", "lockfile\n")
 
         linked_relative_paths = link_frontend_node_modules(repo_path, worktree_path)
 

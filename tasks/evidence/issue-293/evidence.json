@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "language": "zh-CN",
+  "subject": "Issue #293 kc console 缺少静态面板产物时默认失败并提供显式 API-only 选项",
+  "items": [
+    {
+      "item_number": 1,
+      "item_name": "缺少静态产物时默认非零退出且未开始监听",
+      "command": "bash tasks/evidence/issue-293/scripts/rv-1-default-failure.sh",
+      "evidence_files": ["rv-1-missing-assets-default-fails.txt"],
+      "output_summary": "静态产物缺失时，显式 --api-only 负控真实启动服务并使 / 返回 404，证明 item 1 的默认不监听断言会变红。修复后默认 kc console 退出码为 1；stderr 给出 just console-sync、发布 wheel 与 kc console --api-only 三种路径；curl 监听探测退出码 7、HTTP 状态 000，确认没有服务监听。",
+      "explanation": "脚本临时移走真实静态产物目录，先通过真实 kc console --api-only 运行负控，再运行默认 kc console 并检查真实进程退出码、stderr 和 HTTP 监听状态；没有调用 TestClient、模拟 CLI 或伪造响应。",
+      "risks": "端口由系统分配后释放再交给 CLI，极低概率存在并发抢占；脚本显式检查 CLI 退出码与监听探测，若端口被占用或命令行为异常则失败。状态目录和 uv 缓存限定在证据脚本目录。",
+      "negative_control": "bash tasks/evidence/issue-293/scripts/rv-1-default-failure.sh：移走静态目录后，通过真实入口运行 kc console --api-only --no-browser --port <空闲端口> 并请求 /。",
+      "expected_fail": "API-only 负控保持服务监听且 / 返回 404，因此要求默认命令在监听前非零退出的 item 1 oracle 变红；脚本随后运行默认命令并验证退出码 1 与 HTTP 000。"
+    },
+    {
+      "item_number": 2,
+      "item_name": "缺少静态产物时显式 API-only 正常启动并提供版本 JSON",
+      "command": "bash tasks/evidence/issue-293/scripts/rv-2-api-only.sh",
+      "evidence_files": ["rv-2-api-only-starts.txt"],
+      "output_summary": "负控省略 --api-only 后退出码 1，版本 API 探测为连接拒绝/HTTP 000。修复路径使用 kc console --api-only --no-browser 启动真实服务，版本端点返回 HTTP 200 和 {\"version\":\"0.4.1\"}，启动日志无 ERROR，并由脚本按 PID 停止。",
+      "explanation": "脚本分别通过真实 kc CLI 启动负控与显式 API-only 服务，再使用 curl 请求运行实例的 /api/v1/agent-runner/console/version；没有以 TestClient、mock 或假 HTTP server 替代产品入口。",
+      "risks": "服务 lifespan 启动了 monitor scheduler；配置文件与 console 数据库位于 evidence scripts 下，证据证明本地 API 路径可用，但不覆盖远程仓库集成行为。进程通过本次启动的 PID 清理。",
+      "negative_control": "bash tasks/evidence/issue-293/scripts/rv-2-api-only.sh 内的真实变体：静态产物缺失时执行 uv run kc console --no-browser --port <空闲端口>，刻意省略 --api-only，并请求同一版本端点。",
+      "expected_fail": "负控命令退出码 1，版本端点 curl 退出码 7、HTTP 状态 000，无法取得含 version 的 JSON；如果 API-only 放行逻辑失效，目标检查点将变红。"
+    },
+    {
+      "item_number": 3,
+      "item_name": "静态产物存在时默认启动并通过根路径返回面板 HTML",
+      "command": "bash tasks/evidence/issue-293/scripts/rv-3-static-panel.sh",
+      "evidence_files": ["rv-3-panel-served.txt"],
+      "output_summary": "just console-sync 成功并生成 index.html。负控移走产物后用 API-only 启动，/ 返回 404。恢复产物后不加 --api-only 的真实 kc console 返回 / HTTP 200、Content-Type text/html，响应含 <!DOCTYPE html> 与 <html。uv build 成功生成 wheel，归档内含 backend/api/static/console/index.html。",
+      "explanation": "脚本通过仓库实际构建入口生成面板，分别启动真实 CLI 服务并用 curl 请求根路径；此外构建 wheel 并直接检查归档成员，证明发行包仍打入静态 index.html。负控与通过结果覆盖真实静态挂载边界，没有替换服务或响应。",
+      "risks": "wheel 资源已验证打包，但未在隔离环境安装后再启动 CLI；API 进程的 monitor scheduler 启动并完成本地初始扫描，console 配置和数据库隔离在 evidence scripts 目录。",
+      "negative_control": "bash tasks/evidence/issue-293/scripts/rv-3-static-panel.sh 中的真实变体：将已构建的 console 静态目录临时移走，再运行 uv run kc console --api-only --no-browser --port <空闲端口>，请求 /。",
+      "expected_fail": "静态产物缺失的负控根路径返回 HTTP 404，Content-Type 不满足面板 HTML 断言；因此要求默认面板 HTTP 200 的 item 3 oracle 变红。恢复目录后真实默认启动返回 HTTP 200 与 text/html。"
+    },
+    {
+      "item_number": 4,
+      "item_name": "agent-runner 文档记录 api-only 语义且删除旧静默降级说明",
+      "command": "bash tasks/evidence/issue-293/scripts/rv-4-docs.sh",
+      "evidence_files": ["rv-4-api-only-docs.txt"],
+      "output_summary": "修复前基线文档中 grep -n api-only 退出 1，且仍有缺产物时默认 API-only 的旧说明。当前文档 grep 返回两处命中：启动命令示例与行为说明；旧说明缺失。",
+      "explanation": "脚本按清单执行 grep -n \"api-only\" docs/guides/agent-runner.md，并将其与修复前 Git 基线的同一搜索结果对照；同时断言当前文档不含旧静默降级文字。",
+      "risks": "检查覆盖 agent-runner 启动说明的文本一致性，不解析 MkDocs 渲染后的页面。",
+      "negative_control": "bash tasks/evidence/issue-293/scripts/rv-4-docs.sh 从修复前提交 e6b60d94014c3a66cc10b51f7fc9b6a03bc70d96 读取旧 guide，再运行 grep -n 'api-only'。",
+      "expected_fail": "修复前 grep 退出码为 1、没有 api-only 命中，且文档保留旧的静默 API-only 声明；当前清单 grep 退出码为 0 并输出两处命中。"
+    }
+  ]
+}

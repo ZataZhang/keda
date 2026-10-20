@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from backend.api.cli import main
+from backend.core.use_cases import worktree_frontend
 from backend.core.shared.models.agent_runner import (
     AppConfig,
     IssueSummary,
@@ -267,6 +268,7 @@ def test_create_or_reuse_worktree_provisions_database_when_enabled(
 
 def test_create_or_reuse_worktree_links_frontend_node_modules(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Reusing a worktree symlinks frontend ``node_modules`` from main.
 
@@ -280,7 +282,11 @@ def test_create_or_reuse_worktree_links_frontend_node_modules(
     (repo_path / ".gitignore").write_text("node_modules/\n.agent-runner/\n", encoding="utf-8")
     (repo_path / "frontend").mkdir()
     (repo_path / "frontend" / "package.json").write_text("{}\n", encoding="utf-8")
-    _run_git(repo_path, "add", ".gitignore", "frontend/package.json")
+    (repo_path / "frontend" / "pnpm-lock.yaml").write_text(
+        "lockfileVersion: '9.0'\nsettings: {}\nimporters:\n  .: {}\n",
+        encoding="utf-8",
+    )
+    _run_git(repo_path, "add", ".gitignore", "frontend/package.json", "frontend/pnpm-lock.yaml")
     _run_git(repo_path, "commit", "-m", "track frontend manifest")
     # Installed dependencies live only in the (gitignored) main checkout.
     main_vite_path = repo_path / "frontend" / "node_modules" / ".bin" / "vite"
@@ -307,6 +313,7 @@ def test_create_or_reuse_worktree_links_frontend_node_modules(
         labels=(),
     )
 
+    monkeypatch.setattr(worktree_frontend.shutil, "which", lambda _program: None)
     resolved_worktree_path = create_or_reuse_worktree(repo_path, issue, config, SubprocessRunner())
 
     assert resolved_worktree_path == worktree_path.resolve()
@@ -314,7 +321,7 @@ def test_create_or_reuse_worktree_links_frontend_node_modules(
     assert worktree_node_modules.is_symlink()
     assert (worktree_node_modules / ".bin" / "vite").exists()
     # The symlink keeps the worktree git-clean (node_modules is gitignored),
-    # so `iar worktree cleanup` can still remove it later.
+    # so `kc worktree cleanup` can still remove it later.
     status_result = _run_git(worktree_path, "status", "--porcelain")
     assert status_result.stdout.strip() == ""
 

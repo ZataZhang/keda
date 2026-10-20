@@ -237,6 +237,13 @@ def console_callback(
             ),
         ),
     ] = None,
+    api_only: Annotated[
+        bool,
+        typer.Option(
+            "--api-only",
+            help="Allow startup without assets; the panel at / is unavailable.",
+        ),
+    ] = False,
     no_browser: Annotated[
         bool,
         typer.Option("--no-browser", help="Do not open the console in a browser tab."),
@@ -274,6 +281,32 @@ def console_callback(
     except ConsolePortUnavailableError as exc:
         error_console.print(f"[red]{exc}[/]")
         raise typer.Exit(code=1) from exc
+    if not api_only:
+        from backend.api.app import console_static_dir
+
+        if not console_static_dir().is_dir():
+            error_console.print(
+                "Console frontend static assets are missing.",
+                style="red",
+                markup=False,
+            )
+            error_console.print(
+                "In a source checkout, run `just console-sync` from the repository root.",
+                markup=False,
+            )
+            error_console.print(
+                "Alternatively, install a release wheel; it includes the frontend assets.",
+                markup=False,
+            )
+            error_console.print(
+                "If you only need the API, pass `kc console --api-only`.",
+                markup=False,
+            )
+            error_console.print(
+                "The web panel will be unavailable.",
+                markup=False,
+            )
+            raise typer.Exit(code=1)
     launch_console(
         host=CONSOLE_HOST,
         port=resolved_port,

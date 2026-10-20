@@ -56,6 +56,7 @@ def console_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         "enabled = true\n",
         encoding="utf-8",
     )
+    monkeypatch.setenv("KEDACODE_CONFIG", str(config_path))
     contexts = [
         RepositoryRunContext(
             repo_id="keda-main",

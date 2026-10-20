@@ -12,9 +12,11 @@ from pathlib import Path
 from typing import ClassVar
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
+import backend.api.app as api_app
 import backend.api.cli_typer_console as cli_console
 from backend.api.app import app
 from backend.api.cli_typer_console import (
@@ -62,6 +64,11 @@ def _stub_console_settings(monkeypatch: pytest.MonkeyPatch, *, port: int) -> Non
         "load_fresh_agent_runner_settings",
         lambda: type("_Settings", (), {"console": AgentRunnerConsoleSettings(port=port)})(),
     )
+
+
+def _stub_console_static_dir(monkeypatch: pytest.MonkeyPatch, *, directory: Path) -> None:
+    """让 CLI 静态产物检查使用指定目录。"""
+    monkeypatch.setattr(api_app, "console_static_dir", lambda: directory)
 
 
 def _fail_uvicorn_run(*args, **kwargs):
@@ -222,6 +229,37 @@ def test_probe_path_exists_on_the_console_app() -> None:
     assert "version" in probe_response.json()
 
 
+def test_static_mount_and_cli_check_share_the_console_static_dir(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """挂载与 CLI 预检必须共同使用 app.py 提供的资源路径。"""
+    static_dir = tmp_path / "console"
+    static_dir.mkdir()
+    resolved_directories: list[Path] = []
+
+    def _shared_console_static_dir() -> Path:
+        resolved_directories.append(static_dir)
+        return static_dir
+
+    mounted_app = FastAPI()
+    monkeypatch.setattr(api_app, "app", mounted_app)
+    monkeypatch.setattr(api_app, "console_static_dir", _shared_console_static_dir)
+    api_app._mount_console_static()
+
+    mounted_static_route = mounted_app.router.routes[-1]
+    assert mounted_static_route.path == ""
+    assert mounted_static_route.app.directory == str(static_dir)
+
+    _stub_console_settings(monkeypatch, port=58429)
+    _stub_port_probe(monkeypatch, occupied=set())
+    monkeypatch.setattr(cli_console, "launch_console", lambda **kwargs: None)
+    result = CliRunner().invoke(console_app, ["--no-browser"])
+
+    assert result.exit_code == 0
+    assert resolved_directories == [static_dir, static_dir]
+
+
 class TestConsoleCandidatePorts:
     """console_candidate_ports 的探测范围。"""
 
@@ -296,6 +334,11 @@ class TestConsoleReusesRunningInstance:
         """--no-browser 复用现有实例时不拉起浏览器，但仍要告知 URL。"""
         _stub_console_settings(monkeypatch, port=58431)
         _stub_port_probe(monkeypatch, occupied={58431}, console_ports={58431})
+        monkeypatch.setattr(
+            api_app,
+            "console_static_dir",
+            lambda: (_ for _ in ()).throw(AssertionError("reuse must skip the static check")),
+        )
         monkeypatch.setattr(cli_console.uvicorn, "run", _fail_uvicorn_run)
         monkeypatch.setattr(
             cli_console.webbrowser,
@@ -332,6 +375,7 @@ class TestConsoleReusesRunningInstance:
         launched: list[tuple[str, int]] = []
         _stub_console_settings(monkeypatch, port=58434)
         _stub_port_probe(monkeypatch, occupied=set())
+        _stub_console_static_dir(monkeypatch, directory=Path("."))
         monkeypatch.setattr(
             cli_console,
             "launch_console",
@@ -342,6 +386,62 @@ class TestConsoleReusesRunningInstance:
 
         assert result.exit_code == 0
         assert launched == [(CONSOLE_HOST, 58434)]
+
+
+def test_console_missing_static_assets_fails_with_repair_options(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """缺少面板产物时默认退出并给出可执行修复路径。"""
+    _stub_console_settings(monkeypatch, port=58435)
+    _stub_port_probe(monkeypatch, occupied=set())
+    _stub_console_static_dir(monkeypatch, directory=tmp_path / "missing-console")
+    launched_ports: list[int] = []
+    monkeypatch.setattr(
+        cli_console,
+        "launch_console",
+        lambda *, host, port, open_browser: launched_ports.append(port),
+    )
+
+    result = CliRunner().invoke(console_app, ["--no-browser"])
+
+    assert result.exit_code == 1
+    assert "just console-sync" in result.output
+    assert "release wheel" in result.output
+    assert "kc console --api-only" in result.output
+    assert "The web panel will be unavailable." in result.output
+    assert launched_ports == []
+
+
+def test_api_only_console_starts_when_static_assets_are_missing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """显式 --api-only 允许缺产物时启动 API。"""
+    _stub_console_settings(monkeypatch, port=58436)
+    _stub_port_probe(monkeypatch, occupied=set())
+    _stub_console_static_dir(monkeypatch, directory=tmp_path / "missing-console")
+    launched_ports: list[int] = []
+    monkeypatch.setattr(
+        cli_console,
+        "launch_console",
+        lambda *, host, port, open_browser: launched_ports.append(port),
+    )
+
+    result = CliRunner().invoke(console_app, ["--api-only", "--no-browser"])
+
+    assert result.exit_code == 0
+    assert launched_ports == [58436]
+
+
+def test_api_only_help_explains_that_the_panel_is_unavailable() -> None:
+    """--api-only 的帮助明确说明只提供 API 的代价。"""
+    result = CliRunner().invoke(console_app, ["--help"])
+
+    assert result.exit_code == 0
+    assert "--api-only" in result.output
+    assert "Allow startup without assets" in result.output
+    assert "panel at / is unavailable" in result.output
 
 
 class FakeTimer:
@@ -506,6 +606,7 @@ class TestListenHostIsNotConfigurable:
         )
         launched: list[tuple[str, int]] = []
         _stub_port_probe(monkeypatch, occupied=set())
+        _stub_console_static_dir(monkeypatch, directory=Path("."))
         monkeypatch.setattr(
             cli_console,
             "launch_console",
