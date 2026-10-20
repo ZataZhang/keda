@@ -100,7 +100,7 @@ wheel 提供两个完全等价的 console script，都指向 `backend.api.cli:ma
 
 新增或改名 console script 时，除了 `pyproject.toml` 的 `[project.scripts]`，还要同步这几处：
 
-1. `install.sh` 的 `TOOL_BIN_NAMES`（卸载逐个清理 `~/.local/bin/`，漏掉会留死链接）。
+1. `install.sh` 的 `TOOL_BUILT_BIN_NAMES`（wheel 实际装出来的名单，安装计划按它播报；卸载名单 `TOOL_BIN_NAMES` 由它派生并追加已停发别名的死链接，逐个清理 `~/.local/bin/`，漏掉会留死链接）。
 2. `.github/workflows/install-smoke.yml` 的 5 个安装验证步骤（editable / wheel×2 / PyPI×2）。
 3. `.github/workflows/release.yml` 里的 formula skeleton。
 4. **tap 仓库里已存在的 formula——必须手工改。** skeleton 那段外面套着 `if [ ! -f .../Formula/kedacode.rb ]`，只在 formula 缺失时才 bootstrap；`ZataZhang/homebrew-tap` 里的 formula 早已存在，而 `brew update-python-resources` 只重写 resource 块。也就是说新增的 `bin.install_symlink` 行不会被任何自动化补上，得去 tap 仓库手动加，否则 brew 装出来的用户永远拿不到新命令，而 CI 全绿。

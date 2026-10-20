@@ -27,6 +27,7 @@ from backend.api.cli_output import (
     render_cli_error,
 )
 from backend.api.cli_parsed_commands import agent as agent_cli
+from backend.api.cli_parsed_commands import agent_onboarding_commands as onboarding_cli
 from backend.api.cli_parsed_commands.agent import (
     run_agent_add_command,
     run_agent_list_command,
@@ -126,8 +127,8 @@ def _config(
 def installed_config(monkeypatch: pytest.MonkeyPatch) -> AppConfig:
     """把 setup 读到的全局配置换成替身（不读磁盘上的 ``config.toml``）。"""
     config = _config()
-    monkeypatch.setattr(agent_cli, "load_fresh_agent_runner_settings", lambda: object())
-    monkeypatch.setattr(agent_cli, "build_app_config_from_settings", lambda _: config)
+    monkeypatch.setattr(onboarding_cli, "load_fresh_agent_runner_settings", lambda: object())
+    monkeypatch.setattr(onboarding_cli, "build_app_config_from_settings", lambda _: config)
     return config
 
 
@@ -135,7 +136,7 @@ def installed_config(monkeypatch: pytest.MonkeyPatch) -> AppConfig:
 def recording_editor(monkeypatch: pytest.MonkeyPatch) -> RecordingEditor:
     """setup / add 的写回落点换成替身编辑器。"""
     editor = RecordingEditor()
-    monkeypatch.setattr(agent_cli, "create_lifecycle_settings_editor", lambda *_: editor)
+    monkeypatch.setattr(onboarding_cli, "create_lifecycle_settings_editor", lambda *_: editor)
     return editor
 
 
@@ -292,7 +293,7 @@ def test_setup_skips_write_when_the_global_layer_already_matches(
     path_lookup.add("claude")
     config = _config(lifecycle_agents={"implementation": "claude"})
     assert build_setup_plan(config, stage="implementation", agent="claude").already_satisfied
-    monkeypatch.setattr(agent_cli, "build_app_config_from_settings", lambda _: config)
+    monkeypatch.setattr(onboarding_cli, "build_app_config_from_settings", lambda _: config)
 
     code, document, _, _ = _run(
         _make_context(agent="claude", as_json=True), run_agent_setup_command, capsys
@@ -314,7 +315,7 @@ def test_setup_unbinds_the_masking_stage_preset(
         presets={"fast": AgentModelPreset(agent="claude")},
         lifecycle_presets={"implementation": "fast"},
     )
-    monkeypatch.setattr(agent_cli, "build_app_config_from_settings", lambda _: config)
+    monkeypatch.setattr(onboarding_cli, "build_app_config_from_settings", lambda _: config)
     code, document, _, _ = _run(
         _make_context(agent="claude", as_json=True), run_agent_setup_command, capsys
     )
@@ -370,7 +371,7 @@ def test_setup_fix_removes_only_global_unavailable_bindings(
         lifecycle_agents={"implementation": "claude", "verifier": "kimi"},
         lifecycle_presets={"review": "fast"},
     )
-    monkeypatch.setattr(agent_cli, "build_app_config_from_settings", lambda _: config)
+    monkeypatch.setattr(onboarding_cli, "build_app_config_from_settings", lambda _: config)
 
     code, document, _, _ = _run(
         _make_context(fix=True, as_json=True), run_agent_setup_command, capsys
@@ -423,7 +424,7 @@ def test_add_previews_registration_without_writing(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """默认只预览 TOML：注册校验通过但磁盘不动。"""
-    monkeypatch.setattr(agent_cli, "build_app_config", lambda: _config())
+    monkeypatch.setattr(onboarding_cli, "build_app_config", lambda: _config())
     code, document, _, _ = _run(
         _make_context(name="myagent", bin="myagent", as_json=True),
         run_agent_add_command,
@@ -442,7 +443,7 @@ def test_add_write_persists_the_validated_block(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """``--write`` 才落盘；bin 还没装时给出提醒而不是假装可用。"""
-    monkeypatch.setattr(agent_cli, "build_app_config", lambda: _config())
+    monkeypatch.setattr(onboarding_cli, "build_app_config", lambda: _config())
     code, document, _, stderr_text = _run(
         _make_context(name="myagent", bin="myagent", arg=("--print",), write=True, as_json=True),
         run_agent_add_command,
@@ -471,7 +472,7 @@ def test_add_invalid_registration_exits_usage_without_writing(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """非法协议 / 重名 / 缺 prompt_flag 一律 USAGE(2)，配置文件逐字节不动。"""
-    monkeypatch.setattr(agent_cli, "build_app_config", lambda: _config())
+    monkeypatch.setattr(onboarding_cli, "build_app_config", lambda: _config())
     cases: list[dict[str, Any]] = [
         {"name": "claude", "bin": "claude"},
         {"name": "myagent", "bin": "myagent", "output_protocol": "nope"},

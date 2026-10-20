@@ -4606,11 +4606,11 @@ def _stub_lifecycle_config(monkeypatch: pytest.MonkeyPatch) -> None:
     from backend.core.shared.models.agent_runner import AppConfig
 
     monkeypatch.setattr(
-        "backend.api.cli_parsed_commands.agent.load_fresh_agent_runner_settings",
+        "backend.api.cli_parsed_commands.agent_lifecycle.load_fresh_agent_runner_settings",
         lambda: MagicMock(),
     )
     monkeypatch.setattr(
-        "backend.api.cli_parsed_commands.agent.build_app_config_from_settings",
+        "backend.api.cli_parsed_commands.agent_lifecycle.build_app_config_from_settings",
         lambda _settings: AppConfig(),
     )
 
@@ -4813,12 +4813,12 @@ def test_agent_fallback_candidate_add_reads_baseline_under_write_lock(
     """
     import fcntl
 
-    from backend.api.cli_parsed_commands import agent as agent_commands
+    from backend.api.cli_parsed_commands import agent_lifecycle as agent_lifecycle_commands
 
     config_path = _global_config_env(tmp_path, monkeypatch, "[agent_runner]\n")
     lock_path = config_path.with_name(config_path.name + ".lock")
     lock_held_at_baseline: list[bool] = []
-    original_reader = agent_commands._current_candidate_entries
+    original_reader = agent_lifecycle_commands._current_candidate_entries
 
     def _probe(config):
         with open(lock_path, "a", encoding="utf-8") as probe_handle:
@@ -4831,7 +4831,9 @@ def test_agent_fallback_candidate_add_reads_baseline_under_write_lock(
                 lock_held_at_baseline.append(False)
         return original_reader(config)
 
-    monkeypatch.setattr("backend.api.cli_parsed_commands.agent._current_candidate_entries", _probe)
+    monkeypatch.setattr(
+        "backend.api.cli_parsed_commands.agent_lifecycle._current_candidate_entries", _probe
+    )
 
     assert (
         run_agent_fallback_candidate_add_command(
