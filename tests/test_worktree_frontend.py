@@ -257,6 +257,31 @@ class TestPlanPackageManager:
             "covered by root '.'" in evidence_line for evidence_line in install_plan.evidence
         )
 
+    def test_workspace_root_member_manager_conflict_is_exposed(self, tmp_path: Path) -> None:
+        """成员与 workspace 根的 packageManager 冲突不能被 workspace skip 吞掉。"""
+        worktree_path = tmp_path / "worktree"
+        _write_file(
+            worktree_path / "package.json",
+            json.dumps({"packageManager": "pnpm@9.12.3"}),
+        )
+        _write_file(worktree_path / "pnpm-workspace.yaml", 'packages:\n  - "apps/*"\n')
+        _write_file(worktree_path / "pnpm-lock.yaml", "lockfile\n")
+        _write_file(
+            worktree_path / "apps" / "web" / "package.json",
+            json.dumps({"packageManager": "npm@10.2.0"}),
+        )
+
+        install_plan = plan_package_manager(worktree_path / "apps" / "web", worktree_path)
+
+        assert install_plan.is_workspace_member is True
+        assert install_plan.package_manager is None
+        assert install_plan.reason == REASON_MANAGER_CONFLICT
+        assert any(
+            "workspace root '.' package.json packageManager declares 'pnpm'" in line
+            for line in install_plan.evidence
+        )
+        assert any("packageManager declares 'npm'" in line for line in install_plan.evidence)
+
     def test_nested_workspace_member_matches_ancestor_pattern(self, tmp_path: Path) -> None:
         """祖先 workspace 用 glob 声明成员时同样识别为被覆盖。"""
         worktree_path = tmp_path / "worktree"
@@ -364,9 +389,11 @@ class TestEnsureFrontendNodeModules:
         assert project_record.reason == REASON_TOOL_MISSING
         assert project_record.package_manager == "pnpm"
         assert project_record.requires_user_action == USER_ACTION_HOST_TOOLCHAIN
-        # 命令从未运行：FileNotFoundError 无从产生，Agent 照常启动。
+        # 命令计划已结构化记录，但因可执行文件缺失而没有实际运行。
         assert process_runner.calls == []
-        assert project_record.attempted_commands == ()
+        assert project_record.attempted_commands == (
+            "pnpm install --ignore-scripts --ignore-workspace",
+        )
         assert project_record.missing_executables == ("pnpm",)
         assert "not on PATH" in project_record.detail
 
@@ -513,6 +540,38 @@ class TestEnsureFrontendNodeModules:
         assert process_runner.calls == []
         assert project_record.outcome == OUTCOME_SKIPPED
         assert project_record.reason == REASON_WORKSPACE_COVERED
+
+    def test_workspace_member_conflict_is_recorded_as_unprepared(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """根成员包管理器冲突时要交给 Agent 判断，不能报告为已被 workspace 覆盖。"""
+        _stub_toolchain(monkeypatch, available=False)
+        repo_path = tmp_path / "repo"
+        worktree_path = tmp_path / "worktree"
+        _write_file(
+            worktree_path / "package.json",
+            json.dumps({"packageManager": "pnpm@9.12.3"}),
+        )
+        _write_file(worktree_path / "pnpm-workspace.yaml", 'packages:\n  - "apps/*"\n')
+        _write_file(worktree_path / "pnpm-lock.yaml", "lockfile\n")
+        _write_file(
+            worktree_path / "apps" / "web" / "package.json",
+            json.dumps({"packageManager": "npm@10.2.0"}),
+        )
+
+        preparation_report = ensure_frontend_node_modules(
+            repo_path,
+            worktree_path,
+            _installer_runner(),
+        )
+        member_record = _record_for(preparation_report, "apps/web")
+
+        assert member_record.outcome == OUTCOME_NOT_PREPARED
+        assert member_record.reason == REASON_MANAGER_CONFLICT
+        assert any(
+            "workspace root '.' package.json packageManager declares 'pnpm'" in line
+            for line in member_record.selection_evidence
+        )
 
     def test_stale_main_checkout_lockfiles_are_not_reused(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

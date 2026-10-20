@@ -76,6 +76,7 @@ _CREDENTIAL_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"(Bearer\s+)[A-Za-z0-9._~+/-]{8,}", re.IGNORECASE),
     re.compile(r"(Authorization:\s*)\S+", re.IGNORECASE),
     re.compile(r"(npm_config__?auth\s*[=:]\s*)\S+", re.IGNORECASE),
+    re.compile(r"\b((?:api[_-]?key|password|passwd|secret|token)\s*[=:]\s*)\S+", re.IGNORECASE),
 )
 
 #: shell 里「命令不存在」的退出码（127），用于把失败归属到缺失的可执行文件。
@@ -93,8 +94,8 @@ class FrontendProjectRecord:
         package_manager: 选定（或候选）的包管理器名；无法判定时为 ``None``。
         selection_evidence: 选择依据证据行，逐条列出 ``packageManager`` 字段、
             workspace 根配置与锁文件等来源，冲突时全部保留交给 Agent。
-        attempted_commands: 实际尝试过的命令（argv 的 shell 可读形式）；
-            未尝试（例如可执行文件缺失）时为空元组。
+        attempted_commands: 计划执行或已尝试过的命令（argv 的 shell 可读形式）；
+            若可执行文件缺失，仍记录计划命令，``detail`` 说明它没有真正运行。
         exit_code: 安装命令退出码；未运行为 ``None``。
         requires_user_action: 需要人类决定的类别（``USER_ACTION_*``）；
             Agent 可自行处理时为 ``None``。
@@ -198,6 +199,44 @@ def sanitize_detail_text(detail_text: str) -> str:
 def format_command_text(command: tuple[str, ...] | list[str]) -> str:
     """把 argv 渲染成 shell 可读文本，用于诊断展示与复现。"""
     return shlex.join(str(token) for token in command)
+
+
+def classify_user_action_from_failure_text(failure_text: str) -> str | None:
+    """将包管理器失败输出归类为需要人类决定的凭据或权限问题。
+
+    Args:
+        failure_text: 包管理器返回的 stdout / stderr 文本。
+
+    Returns:
+        ``privilege``、``credentials`` 或 ``None``。
+    """
+    lowered_text = failure_text.lower()
+    if any(signature in lowered_text for signature in _PRIVILEGE_FAILURE_SIGNATURES):
+        return USER_ACTION_PRIVILEGE
+    if any(signature in lowered_text for signature in _CREDENTIAL_FAILURE_SIGNATURES):
+        return USER_ACTION_CREDENTIALS
+    return None
+
+
+_CREDENTIAL_FAILURE_SIGNATURES = (
+    "401 unauthorized",
+    "403 forbidden",
+    "e401",
+    "e403",
+    "authentication token",
+    "unable to authenticate",
+    "npm token",
+    "registry login",
+    "_auth",
+)
+_PRIVILEGE_FAILURE_SIGNATURES = (
+    "eacces",
+    "eperm",
+    "operation not permitted",
+    "permission denied",
+    "cannot write files",
+    "sudo",
+)
 
 
 def write_dependency_preparation_report(
@@ -334,9 +373,11 @@ def render_dependency_context_section(worktree_path: Path) -> str:
         for evidence_line in record.selection_evidence:
             lines.append(f"  - selection evidence: {evidence_line}")
         if record.attempted_commands:
-            lines.append(f"  - attempted commands: {'; '.join(record.attempted_commands)}")
+            lines.append(f"  - planned/attempted commands: {'; '.join(record.attempted_commands)}")
         else:
-            lines.append("  - attempted commands: none (nothing was safe to run)")
+            lines.append(
+                "  - planned/attempted commands: none (no safe install command was selected)"
+            )
         if record.exit_code is not None:
             lines.append(f"  - exit code: {record.exit_code}")
         if record.detail:
@@ -403,15 +444,30 @@ def escalate_dependency_environment_failure(
         for tool in record.missing_executables
         if not record.has_usable_dependencies
     }
-    if not blocked_tools:
-        return raw_error
     mentioned_tools = _tools_named_by_failure(raw_error, blocked_tools)
-    if not mentioned_tools:
+    failure_command_results = _failure_command_results(raw_error)
+    action_records = tuple(
+        record
+        for record in records
+        if not record.has_usable_dependencies
+        and record.requires_user_action in {USER_ACTION_PRIVILEGE, USER_ACTION_CREDENTIALS}
+        and any(
+            _command_result_matches_user_action(command_result, record)
+            for command_result in failure_command_results
+        )
+    )
+    if not mentioned_tools and not action_records:
         return raw_error
+    relevant_records = tuple(
+        record
+        for record in records
+        if (record.reason == REASON_TOOL_MISSING and record.package_manager in mentioned_tools)
+        or record in action_records
+    )
     return DependencyEnvironmentBlockedError(
         build_environment_block_message(
             tuple(sorted(mentioned_tools)),
-            records,
+            relevant_records,
             root_cause=f"{type(raw_error).__name__}: {raw_error}",
         ),
         records,
@@ -437,18 +493,33 @@ def _tools_named_by_failure(
 
 
 def _failure_command_results(failure_error: BaseException) -> list[object]:
-    """取出异常携带的命令结果列表（``VerificationFailedError`` 等）。"""
-    results = getattr(failure_error, "verification_results", None)
-    if isinstance(results, list):
-        return results
-    attempt_results = getattr(failure_error, "attempt_results", None)
-    collected: list[object] = []
-    if isinstance(attempt_results, list):
-        for attempt_result in attempt_results:
-            attempt_outputs = getattr(attempt_result, "verification_results", None)
-            if isinstance(attempt_outputs, list):
-                collected.extend(attempt_outputs)
-    return collected
+    """取出异常及其包装 cause 携带的验证命令结果。"""
+    pending_errors = [failure_error]
+    visited_error_ids: set[int] = set()
+    collected_results: list[object] = []
+    while pending_errors:
+        current_error = pending_errors.pop()
+        if id(current_error) in visited_error_ids:
+            continue
+        visited_error_ids.add(id(current_error))
+
+        direct_results = getattr(current_error, "verification_results", None)
+        if isinstance(direct_results, list):
+            collected_results.extend(direct_results)
+        attempt_results = getattr(current_error, "attempt_results", None)
+        if isinstance(attempt_results, list):
+            for attempt_result in attempt_results:
+                attempt_outputs = getattr(attempt_result, "verification_results", None)
+                if isinstance(attempt_outputs, list):
+                    collected_results.extend(attempt_outputs)
+
+        for chained_error in (
+            getattr(current_error, "__cause__", None),
+            getattr(current_error, "__context__", None),
+        ):
+            if isinstance(chained_error, BaseException):
+                pending_errors.append(chained_error)
+    return collected_results
 
 
 def _looks_like_missing_command(command_result: object, blocked_tools: set[str]) -> bool:
@@ -463,6 +534,36 @@ def _looks_like_missing_command(command_result: object, blocked_tools: set[str])
     return return_code == _COMMAND_NOT_FOUND_EXIT_CODE or "command not found" in stderr_text
 
 
+def _command_result_matches_user_action(
+    command_result: object,
+    dependency_record: FrontendProjectRecord,
+) -> bool:
+    """仅当失败命令针对该包管理器且输出命中已知权限/凭据特征时才阻塞。"""
+    if dependency_record.requires_user_action is None or not dependency_record.package_manager:
+        return False
+    command_value = getattr(command_result, "command", ())
+    if isinstance(command_value, (tuple, list)):
+        command_tokens = tuple(str(token) for token in command_value)
+    else:
+        command_tokens = ()
+    manager_name = dependency_record.package_manager
+    command_mentions_manager = any(
+        Path(command_token).name == manager_name or manager_name in command_token
+        for command_token in command_tokens
+    )
+    if not command_mentions_manager:
+        return False
+    stdout_text = getattr(command_result, "stdout", "")
+    stderr_text = getattr(command_result, "stderr", "")
+    failure_text = "\n".join(
+        output_text for output_text in (stdout_text, stderr_text) if isinstance(output_text, str)
+    )
+    return (
+        classify_user_action_from_failure_text(failure_text)
+        == dependency_record.requires_user_action
+    )
+
+
 def build_environment_block_message(
     blocked_tools: tuple[str, ...],
     records: tuple[FrontendProjectRecord, ...],
@@ -470,12 +571,21 @@ def build_environment_block_message(
     root_cause: str,
 ) -> str:
     """组装面向人的阻塞说明：缺什么、为什么、人能选什么。"""
-    lines = [
-        "Project dependency preparation needs a human decision.",
-        f"Missing required executable(s): {', '.join(blocked_tools)}.",
-        "",
-        "Runner diagnostics:",
-    ]
+    lines = ["Project dependency preparation needs a human decision."]
+    if blocked_tools:
+        lines.append(f"Missing required executable(s): {', '.join(blocked_tools)}.")
+    action_labels = tuple(
+        sorted(
+            {
+                record.requires_user_action
+                for record in records
+                if record.requires_user_action is not None
+            }
+        )
+    )
+    if action_labels:
+        lines.append(f"Required human action(s): {', '.join(action_labels)}.")
+    lines.extend(("", "Runner diagnostics:"))
     for record in records:
         if record.requires_user_action is None and record.reason != REASON_TOOL_MISSING:
             continue
@@ -487,18 +597,28 @@ def build_environment_block_message(
             lines.append(f"  - evidence: {evidence_line}")
         if record.detail:
             lines.append(f"  - diagnostics: {record.detail}")
+    lines.extend(("", "Options for the operator:"))
+    if blocked_tools or USER_ACTION_HOST_TOOLCHAIN in action_labels:
+        lines.append(
+            f"- Install the toolchain on this host so `{', '.join(blocked_tools)}` is on PATH, "
+            "or use a runner environment that provides it."
+        )
+    if USER_ACTION_PRIVILEGE in action_labels:
+        lines.append(
+            "- Use a repository-local or rootless install path, or have an operator adjust "
+            "the required filesystem permissions."
+        )
+    if USER_ACTION_CREDENTIALS in action_labels:
+        lines.append(
+            "- Provide the required registry credentials through the runner's secret or "
+            "environment configuration; do not paste credentials into the Issue."
+        )
     lines.extend(
         [
-            "",
-            "Options for the operator (any one unblocks the Issue):",
-            f"- Install the toolchain on this host so `{', '.join(blocked_tools)}` is on PATH, "
-            "then resume with `kc blocked-continue`.",
             "- Pre-install the project dependencies in the main checkout so the worktree can "
-            "reuse them, then resume.",
-            "- Point the runner at a container/agent environment that already provides the "
-            "toolchain.",
+            "reuse them, then resume with `kc blocked-continue`.",
             "",
-            f"Root cause: {root_cause}",
+            f"Root cause: {sanitize_detail_text(root_cause)}",
         ]
     )
     return "\n".join(lines)
@@ -529,6 +649,7 @@ __all__ = [
     "USER_ACTION_HOST_TOOLCHAIN",
     "USER_ACTION_PRIVILEGE",
     "build_environment_block_message",
+    "classify_user_action_from_failure_text",
     "escalate_dependency_environment_failure",
     "format_command_text",
     "load_dependency_preparation_records",

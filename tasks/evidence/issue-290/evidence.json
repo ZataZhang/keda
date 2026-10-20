@@ -4,35 +4,56 @@
   "items": [
     {
       "item_number": 1,
-      "item_name": "通过真实入口验证 worktree 项目依赖准备改为「可恢复准备 + 诊断」：缺工具不中止 Agent、Agent 收到缺失工具上下文、真实安装失败保留诊断且不伪报成功、权限/凭据缺失清楚阻塞、包管理器选择覆盖 packageManager/workspace/冲突锁文件",
-      "command": "bash tasks/evidence/issue-290/scripts/rv-1-package-manager-selection.sh tasks/evidence/issue-290/rv-1-package-manager-selection.txt && bash tasks/evidence/issue-290/scripts/rv-1-dependency-recovery.sh tasks/evidence/issue-290/rv-1-dependency-recovery.txt",
+      "item_name": "通过真实 kc run 入口验证 worktree 依赖准备可恢复：缺工具仍启动 Agent 并交付诊断；真实 EACCES / E401 安装失败保留原因且转为清楚的 agent/blocked；packageManager、workspace 声明和冲突锁文件均被正确识别或交给 Agent 判断",
+      "command": "bash tasks/evidence/issue-290/scripts/rv-1-real-entry.sh tasks/evidence/issue-290/rv-1-real-entry.txt",
       "evidence_files": [
-        "rv-1-package-manager-selection.txt",
-        "rv-1-package-manager-selection-negative.txt",
-        "rv-1-dependency-recovery.txt",
-        "rv-1-dependency-recovery-negative.txt"
+        "rv-1-real-entry.txt"
       ],
-      "output_summary": "真实入口 ensure_frontend_node_modules（传入 production SubprocessRunner）+ render_dependency_context_section + escalate_dependency_environment_failure 全部走通：包管理器识别 6 项检查全 PASS（workspace 根=pnpm、成员=skipped、packageManager 与锁文件冲突=manager_conflict 且 package_manager 留空、多锁文件冲突同样只交证据不硬选、识别阶段零安装命令）；依赖恢复 22 项检查全 PASS（缺 npm 时不抛异常、outcome=not_prepared reason=tool_missing requires_user_action=host_toolchain、报告落盘进 .agent-runner/ 且可回读、Agent 上下文含缺失工具与处置规则、FileNotFoundError('npm') 被改判为 DependencyEnvironmentBlockedError、与依赖无关的 ValueError 原样返回、真实失败子进程保留诊断不伪报 installed、EACCES→privilege、E401→credentials、退出 0 无 node_modules→install_produced_no_dependencies）。两份绿证据均打印 RESULT: ALL PASS 且退出码 0。",
-      "explanation": "证据直接调用 runner 供给阶段逐字使用的公开 use-case API（ensure_frontend_node_modules / write+load+render 上下文 / escalate），安装命令由真实 SubprocessRunner 以真实子进程执行（受控的假 npm 只替换外部工具，被测代码解读的是真实退出码与 stderr，非 mock 被测逻辑）。这些正是 Issue 要求的验收面：缺可执行包管理器不在 Agent 启动前中止、Agent 拿到结构化缺失工具上下文、真实安装失败保留诊断且不伪报成功、需要提权/凭据时清楚归类为人类决定、包管理器选择同时覆盖 packageManager、workspace 根与冲突锁文件。全 PASS 证明目标行为达成。",
-      "risks": "假 npm 是受控外部可执行文件，不代表真实 registry 网络行为；本项验证的是准备流程对真实子进程退出码/stderr 的解读与归类，而非包管理器自身的安装正确性。识别阶段在 PATH 剥离工具链环境下运行，故不产生真实网络调用（这恰是「零子进程」断言的前提）。",
-      "negative_control": "bash tasks/evidence/issue-290/scripts/rv-negative-control.sh tasks/evidence/issue-290/scripts/rv_driver_selection.py tasks/evidence/issue-290/rv-1-package-manager-selection-negative.txt && bash tasks/evidence/issue-290/scripts/rv-negative-control.sh tasks/evidence/issue-290/scripts/rv_driver_recovery.py tasks/evidence/issue-290/rv-1-dependency-recovery-negative.txt —— 把同一 oracle 驱动跑在分支基线（HEAD 与 main 的 merge-base，即本轮改动落地前）导出的「修复前」代码树上。",
-      "expected_fail": "两份负对照都以非零码变红：rv-1-package-manager-selection-negative.txt 在修复前树上复现原始 bug——FileNotFoundError: [Errno 2] No such file or directory: 'pnpm'（缺工具直接越过 best-effort 回退、在 Agent 启动前终止），结尾打印 RESULT: RED AS EXPECTED (exit=1)；rv-1-dependency-recovery-negative.txt 在修复前树上 ImportError: cannot import name 'DependencyEnvironmentBlockedError'（可恢复阻塞与结构化上下文 API 尚不存在），同样 RESULT: RED AS EXPECTED (exit=1)。",
+      "output_summary": "修复前负对照通过真实 `kc run --issue 290` 复现 npm 不在 PATH 时 FileNotFoundError、Agent 未启动且最终标签为 agent/failed（退出码 1）。修复后真实入口的三个隔离场景全 PASS：缺 pnpm/npm 时 Agent 启动并读取 5 条结构化诊断，packageManager、workspace 根/成员冲突和多锁文件冲突均保留；真实 npm ci 遇到 EACCES 时 Agent 启动、安装错误保留、最终标签为 agent/blocked 并生成权限处置评论；真实 npm ci 请求本机临时 401 registry 时保留 E401，Agent 启动并生成凭据阻塞评论。脚本最终输出 `RESULT: ALL PASS (real kc run negative control + 3 isolated green scenarios)` 且退出码为 0。",
+      "explanation": "证据执行项目真实 `kc run --issue` CLI，覆盖真实 worktree 创建、依赖准备、prompt 注入、Agent 派发、验证失败归因与 Issue 标签/评论状态。负对照把同一真实入口指向分支基线源码，确实在 Agent 启动前以 npm 缺失失败；修复后的真实流程由 Agent fixture 检查实际 prompt 与结构化报告，并完成一次本地 checkpoint。缺工具场景直接验证 Agent 启动和包管理器选择依据；权限与凭据场景使用真实 npm 子进程及真实文件系统权限失败/本机 HTTP 401 响应，验证安装错误未伪报成功，且可恢复的人类阻塞信息清楚呈现。",
+      "risks": "为避免接触真实 GitHub 或业务数据，GitHub CLI 和 Codex executor 的外部边界由临时 fixture 替代，Git 远端是本地 bare repository；被测 KedaCode CLI、worktree 与依赖准备逻辑仍是真实执行。权限场景只对临时 worktree 目录注入只读权限并在进程结束时恢复；凭据场景只访问本机临时 401 registry。真实 npm 可复现权限/认证错误处理，但不覆盖真实公共 registry 的可用性。证据和脚本不包含凭据。",
+      "negative_control": "脚本先执行 `git merge-base HEAD main` 导出的修复前 `src/`，然后在隔离仓库中执行同一真实入口 `uv run --project <repo-root> kc run --issue 290 --repo <fixture-repo> --agent codex`，环境 PATH 中没有 npm；不是 mock 或 TestClient 替代被测入口。",
+      "expected_fail": "修复前真实入口退出码为 1，日志包含 `Failed Issue #290: [Errno 2] No such file or directory: 'npm'`，`BASELINE_AGENT_STARTED: False`，最终标签为 `['agent/failed']`，并输出 `RESULT: RED AS EXPECTED (dependency preparation failed before agent start)`。修复后同一依赖缺口场景启动 Agent 并读取上下文，作为绿对照；EACCES 与 E401 场景则都启动 Agent、保留 npm 失败诊断，并以 `agent/blocked` 和具体的人类处置选项收尾。",
       "stdout_assertions": [
         {
           "severity": "high",
-          "pattern": "RESULT: ALL PASS",
+          "pattern": "RESULT: RED AS EXPECTED (dependency preparation failed before agent start)",
+          "source": "stdout",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "BASELINE_AGENT_STARTED: False",
+          "source": "stdout",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "[CHECK] Agent 处理了包管理器缺失与冲突上下文: PASS",
+          "source": "stdout",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "[CHECK] 真实 npm ci 输出保留 EACCES: PASS",
+          "source": "stdout",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "[CHECK] 真实 npm ci 401 诊断得到保留: PASS",
+          "source": "stdout",
+          "must_match": true
+        },
+        {
+          "severity": "high",
+          "pattern": "RESULT: ALL PASS (real kc run negative control + 3 isolated green scenarios)",
           "source": "stdout",
           "must_match": true
         },
         {
           "severity": "high",
           "pattern": "Traceback",
-          "source": "stdout",
-          "must_match": false
-        },
-        {
-          "severity": "high",
-          "pattern": "FileNotFoundError",
           "source": "stdout",
           "must_match": false
         }

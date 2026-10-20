@@ -992,6 +992,11 @@ def test_a_second_diagnosis_chance_after_a_failed_one(
         worktree=worktree_path,
         attempt_key="issue-77-implement-1-retry",
         diagnose=_flaky_diagnose,
+        config=StallSupervisorConfig(
+            enabled=True,
+            check_interval_seconds=_TICK_SECONDS,
+            stalled_after_seconds=1,
+        ),
     )
 
     outcome, _, _ = _run_supervised_writer(
@@ -999,7 +1004,7 @@ def test_a_second_diagnosis_chance_after_a_failed_one(
         worktree=worktree_path,
         writer_argv=writer_argv,
         request=request,
-        runtime_seconds=3.0,
+        runtime_seconds=5.0,
     )
 
     assert len(diagnose_calls) >= 2, diagnose_calls

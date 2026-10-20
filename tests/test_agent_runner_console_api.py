@@ -56,6 +56,9 @@ def console_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         "enabled = true\n",
         encoding="utf-8",
     )
+    # AgentRunnerSettings 是 BaseSettings；隔离用户级 config.toml，避免本机
+    # runner_command 覆盖下面显式传入的假命令。
+    monkeypatch.setenv("KEDACODE_CONFIG", str(config_path))
     contexts = [
         RepositoryRunContext(
             repo_id="keda-main",

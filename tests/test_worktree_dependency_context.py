@@ -33,10 +33,13 @@ from backend.core.use_cases.worktree_dependency_context import (
     OUTCOME_NOT_PREPARED,
     OUTCOME_REUSED,
     OUTCOME_SKIPPED,
+    REASON_INSTALL_FAILED,
     REASON_MANAGER_CONFLICT,
     REASON_TOOL_MISSING,
     REASON_WORKSPACE_COVERED,
     USER_ACTION_HOST_TOOLCHAIN,
+    USER_ACTION_CREDENTIALS,
+    USER_ACTION_PRIVILEGE,
     DependencyPreparationReport,
     FrontendProjectRecord,
     build_environment_block_message,
@@ -55,7 +58,7 @@ _RECORDS = (
         reason=REASON_TOOL_MISSING,
         package_manager="pnpm",
         selection_evidence=("lockfile(s): pnpm-lock.yaml",),
-        attempted_commands=(),
+        attempted_commands=("pnpm install --ignore-scripts",),
         exit_code=None,
         requires_user_action=USER_ACTION_HOST_TOOLCHAIN,
         detail="pnpm is not on PATH",
@@ -192,7 +195,7 @@ class TestRenderDependencyContextSection:
         assert render_dependency_context_section(tmp_path) == ""
 
     def test_renders_diagnostics_and_rules(self, tmp_path: Path) -> None:
-        """缺工具的项目带出证据、未尝试命令与人类决定标记，并附处理规则。"""
+        """缺工具的项目带出计划命令、证据与人类决定标记，并附处理规则。"""
         _write_report(tmp_path, _RECORDS)
 
         section_text = render_dependency_context_section(tmp_path)
@@ -200,7 +203,7 @@ class TestRenderDependencyContextSection:
         assert "## Worktree dependency preparation context (runner diagnostics)" in section_text
         assert "`frontend` - NOT ready" in section_text
         assert "lockfile(s): pnpm-lock.yaml" in section_text
-        assert "attempted commands: none (nothing was safe to run)" in section_text
+        assert "planned/attempted commands: pnpm install --ignore-scripts" in section_text
         assert "needs a human decision (host_toolchain)" in section_text
         assert "`frontend-admin` - ready" in section_text
         assert "  - exit code: 0" in section_text
@@ -303,6 +306,76 @@ class TestEscalateDependencyEnvironmentFailure:
 
         assert isinstance(escalated_error, DependencyEnvironmentBlockedError)
 
+    @pytest.mark.parametrize(
+        ("user_action", "failure_text"),
+        [
+            (USER_ACTION_CREDENTIALS, "npm ERR! code E401 _authToken=very-secret-token"),
+            (USER_ACTION_PRIVILEGE, "npm ERR! EACCES: permission denied /usr/local/lib"),
+        ],
+        ids=("registry-credentials", "filesystem-permission"),
+    )
+    def test_human_action_failure_is_reclassified_without_leaking_secrets(
+        self,
+        tmp_path: Path,
+        user_action: str,
+        failure_text: str,
+    ) -> None:
+        """异常被 recovery 包装后仍能识别 npm 凭据/权限错误并脱敏阻塞说明。"""
+        action_record = FrontendProjectRecord(
+            project_path="frontend",
+            outcome=OUTCOME_NOT_PREPARED,
+            reason=REASON_INSTALL_FAILED,
+            package_manager="npm",
+            attempted_commands=("npm ci --ignore-scripts",),
+            requires_user_action=user_action,
+            detail=sanitize_detail_text(failure_text),
+        )
+        _write_report(tmp_path, (action_record,))
+        verification_result = CommandResult(
+            command=("npm", "ci", "--ignore-scripts"),
+            return_code=1,
+            stdout="",
+            stderr=failure_text,
+        )
+
+        try:
+            raise RuntimeError("Failed after 1 attempts.") from VerificationFailedError(
+                [verification_result]
+            )
+        except RuntimeError as wrapped_failure:
+            escalated_error = escalate_dependency_environment_failure(wrapped_failure, tmp_path)
+
+        assert isinstance(escalated_error, DependencyEnvironmentBlockedError)
+        assert f"Required human action(s): {user_action}." in escalated_error.issue_comment_body
+        if "very-secret-token" in failure_text:
+            assert "very-secret-token" not in escalated_error.issue_comment_body
+            assert "[redacted]" in escalated_error.issue_comment_body
+
+    def test_unrelated_command_does_not_trigger_recorded_credential_block(
+        self, tmp_path: Path
+    ) -> None:
+        """其他命令报错时，frontend 的凭据记录不会把任务误判成环境阻塞。"""
+        credential_record = FrontendProjectRecord(
+            project_path="frontend",
+            outcome=OUTCOME_NOT_PREPARED,
+            reason=REASON_INSTALL_FAILED,
+            package_manager="npm",
+            requires_user_action=USER_ACTION_CREDENTIALS,
+        )
+        _write_report(tmp_path, (credential_record,))
+        original_error = VerificationFailedError(
+            [
+                CommandResult(
+                    command=("pytest", "tests"),
+                    return_code=1,
+                    stdout="",
+                    stderr="401 unauthorized",
+                )
+            ]
+        )
+
+        assert escalate_dependency_environment_failure(original_error, tmp_path) is original_error
+
     def test_tool_that_got_usable_dependencies_is_not_blamed(self, tmp_path: Path) -> None:
         """工具虽曾缺失、但已复用主检出依赖时，失败仍是执行失败。"""
         resolved_record = FrontendProjectRecord(
@@ -346,6 +419,25 @@ class TestBuildEnvironmentBlockMessage:
         assert "`frontend-admin`" not in message_text
         assert "Options for the operator" in message_text
         assert "Root cause: FileNotFoundError: pnpm" in message_text
+
+    def test_redacts_credentials_from_root_cause(self) -> None:
+        """验证异常的原始输出也必须脱敏后才能写进 Issue 阻塞评论。"""
+        message_text = build_environment_block_message(
+            (),
+            (
+                FrontendProjectRecord(
+                    project_path="frontend",
+                    outcome=OUTCOME_NOT_PREPARED,
+                    reason=REASON_INSTALL_FAILED,
+                    package_manager="npm",
+                    requires_user_action=USER_ACTION_CREDENTIALS,
+                ),
+            ),
+            root_cause="VerificationFailedError: _authToken=very-secret-token",
+        )
+
+        assert "very-secret-token" not in message_text
+        assert "Root cause: VerificationFailedError: _authToken=[redacted]" in message_text
 
 
 def test_outcome_and_missing_executable_properties() -> None:

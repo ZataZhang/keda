@@ -106,7 +106,7 @@ def _assert_toml_includes_non_null_model_fields(
                     )
 
 
-def test_iar_init_dry_run_real_entry(tmp_path: Path) -> None:
+def test_kc_init_dry_run_real_entry(tmp_path: Path) -> None:
     """`kc init --dry-run` must print the TOML without writing the repo config."""
     repo_path = _init_git_repository(tmp_path, "target")
     completed = subprocess.run(
@@ -115,7 +115,7 @@ def test_iar_init_dry_run_real_entry(tmp_path: Path) -> None:
             "run",
             "--project",
             str(REPOSITORY_ROOT),
-            "iar",
+            "kc",
             "init",
             "--dry-run",
         ],
