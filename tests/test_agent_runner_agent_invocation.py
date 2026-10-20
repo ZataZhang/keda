@@ -462,14 +462,19 @@ class TestSessionResumeInvocation:
         assert len(runner.calls) == 1
 
     def test_non_exit_failure_is_not_re_run(self, tmp_path: Path) -> None:
-        """没有退出码的失败（CLI 缺失、环境异常）不属于续传被拒，不触发降级重跑。"""
+        """没有退出码的失败（CLI 缺失、环境异常）不属于续传被拒，不触发降级重跑。
+
+        CLI 缺失在起跑边界被点名成 :class:`AgentUnavailableError`（附带阶段与
+        可执行文件名），不再是裸 ``FileNotFoundError``——仍然只调用一次。
+        """
         runner = _SequencedAgentRunner([FileNotFoundError("claude")])
 
-        with pytest.raises(FileNotFoundError):
+        with pytest.raises(AgentUnavailableError) as exc_info:
             run_agent_with_prompt(
                 "claude", "Continue.", tmp_path, runner, resume_session_id="sess-old"
             )
 
+        assert "bin 'claude'" in str(exc_info.value)
         assert len(runner.calls) == 1
 
 

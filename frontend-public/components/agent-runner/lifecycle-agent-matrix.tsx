@@ -7,6 +7,7 @@
 // 前端不持有第二份生命周期映射。
 
 import type {
+  AgentAvailabilityEntry,
   LifecycleAgentEntry,
   LifecycleAgentEntryGroup,
 } from "@/lib/api/types";
@@ -125,20 +126,69 @@ export function lifecycleBaselineValue(entry: LifecycleAgentEntry): string {
 }
 
 /**
+ * 把后端下发的可用性条目索引成「agent 名 → 事实」查找表。
+ *
+ * 视图里的 `agents` 只是名字数组，可用性另有 `agent_availability` 一段；所有需要
+ * 标注"未安装 / 路径"的下拉与行都从这张表取，不再各自 `find` 一遍。
+ *
+ * @param entries - 后端 `agent_availability`（视图尚未加载时为 undefined）。
+ * @returns agent 名到可用性事实的映射。
+ */
+export function indexAgentAvailability(
+  entries: AgentAvailabilityEntry[] | undefined,
+): Map<string, AgentAvailabilityEntry> {
+  return new Map((entries ?? []).map((entry) => [entry.agent, entry]));
+}
+
+/**
+ * agent 下拉项文案：本机解析不到可执行文件时点名"未安装"。
+ *
+ * @param agentName - agent 名。
+ * @param availabilityByAgent - indexAgentAvailability 建出的查找表。
+ * @returns 下拉项标题（未下发可用性事实时保持原名）。
+ */
+export function agentOptionLabel(
+  agentName: string,
+  availabilityByAgent: Map<string, AgentAvailabilityEntry>,
+): string {
+  const fact = availabilityByAgent.get(agentName);
+  if (fact && !fact.available) {
+    return `${agentName} · 未安装`;
+  }
+  return agentName;
+}
+
+/**
  * 构建某行下拉框的候选值：只包含真实可取的值（已注册 agent + 允许的 auto/executor）。
+ *
+ * 传入可用性表时，每个 agent 候选附带一行说明：已安装给出解析到的路径，未安装给出
+ * PATH 中找不到哪个可执行文件——页面只呈现，不因此禁用候选（阻断在 core 门禁）。
  *
  * @param entry - 矩阵行视图。
  * @param agents - 已注册 agent 列表。
+ * @param availabilityByAgent - 可选的可用性查找表。
  * @returns 候选值列表。
  */
 export function buildLifecycleOptions(
   entry: LifecycleAgentEntry,
   agents: string[],
+  availabilityByAgent?: Map<string, AgentAvailabilityEntry>,
 ): LifecycleOption[] {
-  const options: LifecycleOption[] = agents.map((agentName) => ({
-    value: agentName,
-    label: agentName,
-  }));
+  const availability =
+    availabilityByAgent ?? new Map<string, AgentAvailabilityEntry>();
+  const options: LifecycleOption[] = agents.map((agentName) => {
+    const fact = availability.get(agentName);
+    return {
+      value: agentName,
+      label: agentOptionLabel(agentName, availability),
+      description:
+        fact === undefined
+          ? undefined
+          : fact.available
+            ? fact.bin_path ?? undefined
+            : `未安装：PATH 中找不到 ${fact.bin}`,
+    };
+  });
   if (entry.auto_allowed) {
     options.push({
       value: LIFECYCLE_AGENT_AUTO,
@@ -156,7 +206,10 @@ export function buildLifecycleOptions(
   // 兜底：当前取值不在候选里（理论上不应发生）时补进来，避免下拉框显示为空。
   const current = lifecycleBaselineValue(entry);
   if (current && !options.some((option) => option.value === current)) {
-    options.unshift({ value: current, label: current });
+    options.unshift({
+      value: current,
+      label: agentOptionLabel(current, availability),
+    });
   }
   return options;
 }

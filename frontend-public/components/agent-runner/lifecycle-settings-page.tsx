@@ -53,6 +53,10 @@ import type {
 
 import { MatrixRow } from "@/components/agent-runner/lifecycle-matrix-row";
 import {
+  agentOptionLabel,
+  indexAgentAvailability,
+} from "@/components/agent-runner/lifecycle-agent-matrix";
+import {
   NewPresetForm,
   PresetCard,
   type NewPresetDraft,
@@ -187,6 +191,26 @@ export function LifecycleSettingsPage({
   }, [scope, repoId, applyView]);
 
   const agents = view?.agents ?? [];
+
+  // agent 名 → 本机可用性事实。下拉项与矩阵行的"未安装 / 路径"一律取自后端下发的
+  // 这一份，页面不自己再判一次可用性（唯一判定是后端的 PATH 解析）。
+  const availabilityByAgent = useMemo(
+    () => indexAgentAvailability(view?.agent_availability),
+    [view],
+  );
+
+  /**
+   * 取某个生效 agent 的可用性事实。
+   *
+   * @param agentName - agent 名（跟随实现者等场景下可能为 null）。
+   * @returns 可用性事实；未下发该 agent 的事实时为 null。
+   */
+  function availabilityFor(agentName: string | null) {
+    if (!agentName) {
+      return null;
+    }
+    return availabilityByAgent.get(agentName) ?? null;
+  }
 
   // 视图身份必须与当前选择一致：切换后、新视角请求落定前，内存里的视图还属于旧选择，
   // 此时按加载态渲染并禁止保存，防止把旧视角的编辑写进新视角的目标文件。
@@ -601,6 +625,7 @@ export function LifecycleSettingsPage({
                 bindingDraft[row.key] !== (row.preset_name ?? null)
               }
               vocabulary={currentView.field_source_vocabulary}
+              availability={availabilityFor(row.effective_agent)}
               onBindingChange={(presetName) =>
                 setBindingDraft((current) => ({
                   ...current,
@@ -668,6 +693,7 @@ export function LifecycleSettingsPage({
                     key={preset.name}
                     name={preset.name}
                     agents={agents}
+                    availabilityByAgent={availabilityByAgent}
                     values={presetValues(preset.name)}
                     boundStages={preset.bound_stages}
                     sourceLabel={PRESET_SOURCE_LABELS[preset.source] ?? preset.source}
@@ -715,6 +741,7 @@ export function LifecycleSettingsPage({
 
           <NewPresetForm
             agents={agents}
+            availabilityByAgent={availabilityByAgent}
             existingNames={Array.from(
               new Set([
                 ...currentView.presets.map((preset) => preset.name),
@@ -804,7 +831,7 @@ export function LifecycleSettingsPage({
                                 value={agentName}
                                 data-testid={`fallback-agent-${index + 1}-${agentName}`}
                               >
-                                {agentName}
+                                {agentOptionLabel(agentName, availabilityByAgent)}
                               </DropdownMenuRadioItem>
                             ))}
                           </DropdownMenuRadioGroup>
@@ -906,7 +933,7 @@ export function LifecycleSettingsPage({
                       onSelect={() => addCandidate(agentName, null)}
                       data-testid={`fallback-add-${agentName}`}
                     >
-                      {agentName}
+                      {agentOptionLabel(agentName, availabilityByAgent)}
                     </DropdownMenuItem>
                   ))}
                 </DropdownMenuContent>

@@ -17,10 +17,11 @@ skill 的事"，而消费它的一般是 ``core/shared`` 下的模块（如 PRD 
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 
 from backend.core.shared.models import product_identity
-from backend.core.shared.models.agent_spec import BUILTIN_AGENT_SPECS
+from backend.core.shared.models.agent_spec import BUILTIN_AGENT_SPECS, AgentSpec
 
 _PRD_SKILL_PATH_ENV_SUFFIX = "PRD_SKILL_PATH"
 _SKILLS_DIR_ENV_SUFFIX = "SKILLS_DIR"
@@ -49,7 +50,11 @@ def keda_owned_skills_root(user_home_path: Path | None = None) -> Path:
     return product_identity.state_home(user_home_path) / _SKILLS_ROOT_DIRECTORY_NAME
 
 
-def default_prd_skill_candidate_paths(user_home_path: Path | None = None) -> tuple[Path, ...]:
+def default_prd_skill_candidate_paths(
+    user_home_path: Path | None = None,
+    *,
+    agents: Mapping[str, AgentSpec] | None = None,
+) -> tuple[Path, ...]:
     """按优先级返回 prd skill 的候选 ``SKILL.md`` 路径。
 
     优先级：``SKILLS_DIR`` 产品环境变量覆盖（设置时即唯一候选）→ 产品自有
@@ -60,6 +65,8 @@ def default_prd_skill_candidate_paths(user_home_path: Path | None = None) -> tup
 
     Args:
         user_home_path: 用户主目录覆盖，主要供测试使用；``None`` 时取实际主目录。
+        agents: 生效 agent 注册表（内置 + ``[agent_runner.agents.*]`` 自定义条目）；
+            ``None`` 时只遍历内置注册表。
 
     Returns:
         候选路径元组（均不保证存在）。
@@ -74,7 +81,7 @@ def default_prd_skill_candidate_paths(user_home_path: Path | None = None) -> tup
     ]
     candidate_skill_paths.extend(
         skills_dir / _PRD_SKILL_RELATIVE_PATH
-        for agent_spec in BUILTIN_AGENT_SPECS.values()
+        for agent_spec in (agents if agents is not None else BUILTIN_AGENT_SPECS).values()
         if (skills_dir := agent_spec.user_skills_dir(effective_home_path)) is not None
     )
     return tuple(candidate_skill_paths)

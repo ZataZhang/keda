@@ -20,6 +20,7 @@ import {
 import {
   buildLifecycleOptions,
   groupLifecycleEntriesByEntry,
+  indexAgentAvailability,
   LIFECYCLE_AGENT_AUTO,
   LifecycleEntryGroupHeader,
   lifecycleBaselineValue,
@@ -146,6 +147,9 @@ export function PrdAgentOverrideSheet({
     }
   }
 
+  // 与矩阵页同一份来源：下拉项按后端下发的可用性事实标注"未安装 / 路径"。
+  const availabilityByAgent = indexAgentAvailability(view?.agent_availability);
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="w-full sm:max-w-2xl">
@@ -187,7 +191,11 @@ export function PrdAgentOverrideSheet({
                       enabled: false,
                       value: defaultOverrideValue(entry),
                     };
-                    const options = buildLifecycleOptions(entry, view.agents);
+                    const options = buildLifecycleOptions(
+                      entry,
+                      view.agents,
+                      availabilityByAgent,
+                    );
                     return (
                       <div
                         key={entry.key}

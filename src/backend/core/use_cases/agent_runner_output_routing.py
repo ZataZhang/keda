@@ -112,6 +112,7 @@ class _OutputRoutedProcessRunner:
         output_sink: Callable[[str], None] | None = None,
         output_protocol: str | None = None,
         attempt_key: str | None = None,
+        cancel_check: Callable[[], bool] | None = None,
     ) -> CommandResult:
         # jscpd:ignore-end
         """Delegate to the wrapped runner, defaulting ``output_sink`` per Issue.
@@ -131,6 +132,7 @@ class _OutputRoutedProcessRunner:
             "output_sink": output_sink if output_sink is not None else self._sink,
             "output_protocol": output_protocol,
             "attempt_key": attempt_key,
+            "cancel_check": cancel_check,
         }
         if self._accepted_params:
             run_kwargs = {

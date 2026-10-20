@@ -12,7 +12,10 @@
 - agent 回退顺序 -> ``[agent_runner.runner]`` 的 ``agent_fallback_order`` /
   ``max_agent_switches``（``config.toml``）；
 - agent 标签 -> ``[agent_runner.agents.<name>]`` 的 ``label`` /
-  ``label_color`` / ``label_description``（``config.toml``）。
+  ``label_color`` / ``label_description``（``config.toml``）；
+- 自定义 agent 注册块 -> ``[agent_runner.agents.<name>]`` 与
+  ``[agent_runner.agents.<name>.profiles.run]``（``kc agent add --write``，
+  一次读-改-写同时落段与用途子表）。
 
 一次用户操作若同时改多个段（预设 + 绑定、候选链 + 预算、多个 agent 的标签），
 走本模块的 ``update_*`` **批量**方法：它们把这些段收敛成
@@ -212,6 +215,38 @@ class TomlLifecycleSettingsEditor:
             [
                 TableKeyUpdate((*_AGENTS_TABLE_PATH, agent_name), label_fields)
                 for agent_name, label_fields in labels.items()
+            ],
+        )
+
+    def update_agent_registration(
+        self,
+        agent_name: str,
+        fields: Mapping[str, object],
+        profile_run_fields: Mapping[str, object],
+    ) -> None:
+        """一次落盘自定义 agent 注册块与其 ``run`` 用途子表（``kc agent add --write``）。
+
+        注册表段与用途子表是分开的两次 read-modify-write 时，第二次失败会留下
+        "bin 已注册、没有可用用途"的半套注册块——配置加载会直接拒绝它。收敛成
+        一次 :func:`apply_toml_updates` 后，任一阶段失败都不触达文件。
+
+        Args:
+            agent_name: 注册名（``[agent_runner.agents.<name>]`` 的表键）。
+            fields: 注册块顶层字段（``bin`` / ``label`` / 可选 ``auth_home``）。
+            profile_run_fields: ``profiles.run`` 子表字段。
+
+        Raises:
+            OSError: 读取或替换目标文件失败。
+            ConfigDocumentInvalidError: 现有文件不是合法 TOML。
+        """
+        apply_toml_updates(
+            self._config_path,
+            [
+                TableKeyUpdate((*_AGENTS_TABLE_PATH, agent_name), fields),
+                TableKeyUpdate(
+                    (*_AGENTS_TABLE_PATH, agent_name, "profiles", "run"),
+                    profile_run_fields,
+                ),
             ],
         )
 

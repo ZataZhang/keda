@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -132,7 +133,9 @@ def test_registry_config_seeds_state_home_without_source_template(
     expected_path = fake_home / identity.STATE_DIR_NAME / "config.toml"
     assert resolved_path == expected_path
     assert resolved_path.is_file()
-    assert settings_sources._is_product_config_toml(resolved_path) is True  # noqa: SLF001
+    with open(resolved_path, "rb") as seeded_file:
+        seeded_config = tomllib.load(seeded_file)
+    assert isinstance(seeded_config.get("agent_runner"), dict)
 
 
 def test_registry_config_ignores_legacy_state_home_without_source_template(

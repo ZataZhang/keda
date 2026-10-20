@@ -22,6 +22,18 @@ from backend.infrastructure.config.toml_section_editor import config_write_lock
 _SETTINGS_FILE_PATH: Path = Path(__file__).resolve()
 #: 全局安装的 ``kc`` 拿不到源码模板时，用来承载 ``[agent_runner.repositories]`` 的最小配置。
 _MINIMAL_REGISTRY_CONFIG = "[agent_runner]\n"
+#: 状态目录全局配置首次创建时写入的代码内骨架。**绝不复制源码根 config.toml**：
+#: 仓库模板里的段落（示例预设、阶段绑定等）属于仓库维护者，播种给所有机器会让
+#: runner 在从未配置过的机器上指向本机根本没安装的 agent。
+_GLOBAL_CONFIG_SEED_TEMPLATE = (
+    "# KedaCode 机器级配置（首次需要写入时由 kc 自动创建）。\n"
+    "# 生命周期矩阵、模型预设、agent 注册表等可配置段落见 docs/guides/agent-runner.md\n"
+    "# 与 docs/guides/lifecycle-agent-matrix.md；示例段落取消注释后即可生效。\n"
+    "[agent_runner]\n"
+    "\n"
+    "# [agent_runner.lifecycle_agents]\n"
+    '# # implementation = "auto"\n'
+)
 _CONFIG_DIR_PATH: Path = _SETTINGS_FILE_PATH.parent
 _INFRASTRUCTURE_DIR_PATH: Path = _CONFIG_DIR_PATH.parent
 _BACKEND_DIR_PATH: Path = _INFRASTRUCTURE_DIR_PATH.parent
@@ -51,18 +63,16 @@ def _global_state_dir() -> Path:
 
 
 def _ensure_global_config_toml() -> Path | None:
-    """确保状态目录的全局配置存在；仅在首次创建时从 Keda 源码配置播种。
+    """确保状态目录的全局配置存在；首次创建时写入代码内的最小骨架。
 
-    正常运行时，状态目录文件是唯一全局配置源；源码根配置不会按 cwd 被直接读取。
-    首次需要写入时在 ``~/.kedacode`` 创建状态目录。
+    正常运行时，状态目录文件是唯一全局配置源；源码根配置不会被读取、复制或覆盖。
+    骨架刻意不含任何预设与阶段绑定——仓库模板内容播种给所有机器会让 runner
+    指向本机未安装的 agent。首次需要写入时在 ``~/.kedacode`` 创建状态目录。
     """
     global_dir = _global_state_dir()
     global_config = global_dir / "config.toml"
     if global_config.is_file():
         return global_config
-    source_config = _PROJECT_ROOT_PATH / "config.toml"
-    if not source_config.is_file() or not _is_product_config_toml(source_config):
-        return None
     try:
         global_dir.mkdir(parents=True, exist_ok=True)
         with config_write_lock(global_config):
@@ -70,38 +80,13 @@ def _ensure_global_config_toml() -> Path | None:
             # 就会各写一份 seed，把先一步的 registry 写入者刚落的段一起截掉。
             if global_config.is_file():
                 return global_config
-            global_config.write_text(
-                source_config.read_text(encoding="utf-8"),
-                encoding="utf-8",
-            )
+            global_config.write_text(_GLOBAL_CONFIG_SEED_TEMPLATE, encoding="utf-8")
         return global_config
     except OSError:
         return None
     except ConfigLockBusyError:
         # 已有写入者持锁在这份配置上动手：本次 seed 退出，交回它写出的结果。
         return global_config if global_config.is_file() else None
-
-
-def _is_product_config_toml(candidate: Path) -> bool:
-    """判断 ``candidate`` 是否包含可用于首次播种的 KedaCode 配置。
-
-    运行时全局配置固定来自状态目录；源码根文件只用于首次创建状态目录配置。
-    模板派生项目仓库根的应用级 ``config.toml`` 通常不含 ``[agent_runner]``，
-    因此不能拿来播种全局设置。
-
-    Args:
-        candidate: 待判定的 ``config.toml`` 路径。
-
-    Returns:
-        文件可解析且含顶层 ``agent_runner`` 表时为 ``True``；读取或解析失败时
-        为 ``False``（发现阶段不该因为一个坏文件而崩溃）。
-    """
-    try:
-        with open(candidate, "rb") as config_file:
-            parsed_config: dict[str, Any] = tomllib.load(config_file)
-    except (OSError, tomllib.TOMLDecodeError):
-        return False
-    return isinstance(parsed_config.get("agent_runner"), dict)
 
 
 def _resolve_env_config_toml() -> Path | None:
@@ -173,7 +158,7 @@ def _find_config_toml() -> Path | None:
     Search order:
     1. ``KEDACODE_CONFIG`` environment variable, if set.
     2. Walk upward from the current working directory.
-    3. ``<state home>/config.toml`` (seeded from the source root if missing).
+    3. ``<state home>/config.toml`` (seeded with an in-code skeleton if missing).
     4. keda source root config.toml.
     """
     env_config = _resolve_env_config_toml()
@@ -193,8 +178,8 @@ def _find_product_config_toml() -> Path:
     """解析 KedaCode 的全局 ``config.toml``。
 
     显式 ``KEDACODE_CONFIG`` 是可覆盖入口；未设置时始终使用状态目录配置，
-    不按当前工作目录寻找 ``config.toml``。源码根文件只可能在状态目录首次创建时
-    被复制一次，不会在已有全局配置时覆盖它。
+    不按当前工作目录寻找 ``config.toml``。状态目录文件首次创建时写入代码内
+    最小骨架，不会复制源码根配置，也不会在已有全局配置时覆盖它。
     """
     env_config = _resolve_env_config_toml()
     if env_config is not None:
@@ -221,7 +206,7 @@ def resolve_registry_config_toml_path() -> Path:
 
     解析顺序：
     1. ``KEDACODE_CONFIG`` 环境变量，用于测试或高级用户覆盖。
-    2. ``<state home>/config.toml``（首次调用时从源码根目录 seed 默认配置）。
+    2. ``<state home>/config.toml``（首次调用时写入代码内最小骨架）。
     3. keda 源码根目录 ``config.toml`` 作为 fallback。
     4. 源码根也没有模板时（全局安装的 ``kc``），在状态目录里创建最小配置承接 registry。
     """

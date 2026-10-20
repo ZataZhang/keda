@@ -676,7 +676,21 @@ def run_agent_with_prompt(
             run_kwargs["attempt_key"] = stall_request.attempt_key
 
         def _run_attempt() -> CommandResult:
-            return process_runner.run(**run_kwargs)
+            try:
+                return process_runner.run(**run_kwargs)
+            except FileNotFoundError as exc:
+                # 进程边界兜底：PATH 的判定权留给 claim 之前的门禁与用户可见的
+                # ``kc agent setup``，这里只在真实起跑失败时把阶段、用途与可执行文件名
+                # 补进异常，让日志与失败评论不再只剩一句 command not found。不在起跑前
+                # 主动查 PATH——注入的 runner 与本机 PATH 无关，提前查会让 CI（不安装任何
+                # agent CLI）里的真实流程测试全线变红。
+                raise AgentUnavailableError(
+                    agent_name,
+                    context=(
+                        f"launching bin '{attempt_invocation.argv[0]}' for phase "
+                        f"'{invocation_phase}' with profile '{profile}'"
+                    ),
+                ) from exc
 
         try:
             attempt_result = (

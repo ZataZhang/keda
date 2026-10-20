@@ -221,7 +221,7 @@ def test_config_migrate_outside_a_repository_handles_the_local_step_only(
     assert "Not inside a repository" in captured_output
     new_state_path = _isolated_global_config_and_home / product_identity.STATE_DIR_NAME
     assert new_state_path.is_dir()
-    assert legacy_state_path.is_symlink()
+    assert not legacy_state_path.exists()
 
 
 def test_config_migrate_rejects_repo_id(capsys: pytest.CaptureFixture[str]) -> None:

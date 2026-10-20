@@ -393,7 +393,7 @@ def _process_record(
         status=status,
         exit_code=None,
         log_path="/tmp/log",
-        command=("iar", "daemon", "--repo-id", repo_id),
+        command=("kc", "daemon", "--repo-id", repo_id),
         started_at="2026-09-20T00:00:00+00:00",
         stopped_at=None,
     )
@@ -446,9 +446,9 @@ def test_stop_repository_persistent_processes_reports_failures() -> None:
 
 
 def test_find_own_command_index() -> None:
-    """三个自有命令名都可能出现在包装器之后或绝对路径形式的位置。"""
-    assert _find_own_command_index(("uv", "run", "iar", "daemon")) == 2
-    assert _find_own_command_index(("/Users/x/.local/bin/iar", "daemon")) == 0
+    """自有命令名可能出现在包装器之后，或以绝对路径形式出现在首位。"""
+    assert _find_own_command_index(("uv", "run", "kc", "daemon")) == 2
+    assert _find_own_command_index(("/Users/x/.local/bin/kc", "daemon")) == 0
     assert _find_own_command_index(("kc", "daemon", "--repo-id", "keda")) == 0
     assert _find_own_command_index(("/opt/bin/kedacode", "review")) == 0
     assert _find_own_command_index(("python", "-m", "backend.api.cli")) is None
@@ -457,19 +457,19 @@ def test_find_own_command_index() -> None:
 
 def test_parse_unmanaged_kind() -> None:
     """Detect daemon and review-daemon subcommands, ignoring options."""
-    assert _parse_unmanaged_kind(("uv", "run", "iar", "daemon", "--repo-id", "keda")) == "daemon"
+    assert _parse_unmanaged_kind(("uv", "run", "kc", "daemon", "--repo-id", "keda")) == "daemon"
     assert (
-        _parse_unmanaged_kind(("iar", "review-daemon", "--repo-id", "keda", "--agent", "claude"))
+        _parse_unmanaged_kind(("kc", "review-daemon", "--repo-id", "keda", "--agent", "claude"))
         == "review_daemon"
     )
-    assert _parse_unmanaged_kind(("iar", "run", "--repo-id", "keda")) is None
+    assert _parse_unmanaged_kind(("kc", "run", "--repo-id", "keda")) is None
     assert _parse_unmanaged_kind(("python", "-m", "backend.api.cli")) is None
 
 
 def test_parse_repo_id_from_argv() -> None:
     """Extract --repo-id value from command line."""
-    assert _parse_repo_id_from_argv(("iar", "daemon", "--repo-id", "keda-main")) == "keda-main"
-    assert _parse_repo_id_from_argv(("iar", "daemon")) is None
+    assert _parse_repo_id_from_argv(("kc", "daemon", "--repo-id", "keda-main")) == "keda-main"
+    assert _parse_repo_id_from_argv(("kc", "daemon")) is None
 
 
 def test_resolve_repo_id_from_cwd(tmp_path: Path) -> None:
@@ -494,7 +494,7 @@ def test_list_unmanaged_processes_skips_managed_pids(
 ) -> None:
     """A pid already present in processes.json must not be reported as unmanaged."""
     supervisor = _make_supervisor(tmp_path)
-    fake_cmdline = ["iar", "daemon", "--repo-id", "keda-main"]
+    fake_cmdline = ["kc", "daemon", "--repo-id", "keda-main"]
 
     class _FakeProc:
         info = {
@@ -521,7 +521,7 @@ def test_list_unmanaged_processes_skips_managed_pids(
     managed_record = supervisor.spawn(
         repo_id="keda-main",
         kind=RunnerProcessKind.DAEMON,
-        argv=fake_cmdline,
+        argv=_sleeper_argv(),
         cwd=tmp_path,
     )
     # Force the managed record to use the same pid as the fake scanner.
@@ -534,19 +534,20 @@ def test_list_unmanaged_processes_skips_managed_pids(
     registry_entries = [type("_Entry", (), {"repo_id": "keda-main", "path": str(tmp_path)})()]
     unmanaged = supervisor.list_unmanaged_processes(registry_entries)
     assert unmanaged == []
+    supervisor.stop(managed_record.process_id, timeout_seconds=5)
 
 
 def test_list_unmanaged_processes_reports_unmanaged_by_repo_id(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """An unmanaged iar daemon with --repo-id is reported as running unmanaged."""
+    """An unmanaged kc daemon with --repo-id is reported as running unmanaged."""
     supervisor = _make_supervisor(tmp_path)
 
     class _FakeProc:
         info = {
             "pid": 12345,
             "username": "testuser",
-            "cmdline": ["iar", "daemon", "--repo-id", "keda-main"],
+            "cmdline": ["kc", "daemon", "--repo-id", "keda-main"],
             "create_time": 1_700_000_000.0,
         }
 

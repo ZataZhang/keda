@@ -13,6 +13,7 @@ from backend.api.cli_exit_codes import ExitCode
 from backend.api.cli_output import CliError
 from backend.api.cli_parsed_context import ParsedCommandContext
 from backend.api.cli_skill import repair_operator_skill, sync_user_skills
+from backend.core.use_cases.agent_runner_factory import build_app_config
 from backend.core.use_cases.agent_runner_init_assets import RemoteTemplateSkillInstallError
 
 
@@ -47,6 +48,8 @@ def run_skill_install_command(ctx: ParsedCommandContext) -> int:
             process_runner=ctx.process_runner,
             dry_run=ctx.parsed.dry_run,
             force=ctx.parsed.force,
+            # 自定义 agent 装在机器级配置里，本命令与目标仓库无关，因此取全局配置。
+            agents=build_app_config().agents,
         )
     except RemoteTemplateSkillInstallError as exc:
         # 与 ``kc init`` 对同一失败给出同一退出码：这个异常既覆盖远程模板不可用，

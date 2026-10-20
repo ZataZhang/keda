@@ -529,6 +529,8 @@ def get_prd_agent_overrides(encoded_path: str, repo_id: str) -> dict:
         "prd_path": prd_path,
         "overrides": overrides,
         "agents": list(context.config.agents),
+        # 与矩阵视图同源的可用性事实：PRD 覆盖抽屉同样把"未安装"标在下拉项上。
+        "agent_availability": inherited_view["agent_availability"],
         "lifecycles": [
             lifecycle_row
             for lifecycle_row in inherited_view["lifecycles"]
