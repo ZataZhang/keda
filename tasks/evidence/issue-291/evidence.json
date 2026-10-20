@@ -86,18 +86,16 @@
     },
     {
       "item_number": 4,
-      "item_name": "随包 Skill 守卫、差异范围与门禁失败归属检查通过",
+      "item_name": "随包 Skill 守卫、净改动范围与门禁回归检查通过",
       "command": "UV_CACHE_DIR=\"${TMPDIR:-/tmp}/keda-issue-291-uv-cache\" uv run python tasks/evidence/issue-291/scripts/rv-4-packaging-diff-test.py",
       "evidence_files": [
-        "rv-4-packaging-diff-test.txt",
-        "rv-4-gate-failure-attribution.txt",
-        "rv-4-follow-up-actions.md"
+        "rv-4-packaging-diff-test.txt"
       ],
-      "output_summary": "真实 `uv run pytest tests/test_kedacode_operator_skill.py -q` 的负控为 1 failed / 27 passed，守卫指出注入的无效 flag；正式全文件运行 28 passed。差异范围以 `git merge-base main HEAD`（e6b60d94）为基线：Skill 目录下恰好两份文件（SKILL.md、references/create-issue.md），src/ 其余路径零改动，publish_prd_file 无差异。末尾追加的归属子进程（`rv-4-gate-failure-attribution.py`）给出 `attribution_ok=true`：`src`/`tests` 下 Python 改动数为 0；HEAD 上失败的 6 个 node id 在 `main`@e6b0df59 的隔离导出树里同样全红（`target_ref_pre_existence=confirmed`、`target_ref_missing_ids=[]`）；控制台 3 项默认 HOME exit 1 / 隔离 HOME exit 0，且生效 config.toml 把 `runner_command` 钉成已退役的 `['iar']`。同一命令还生成 `rv-4-follow-up-actions.md`：逐项列出 6 个失败用例的归属、两条人工处置动作（删掉本机 `runner_command = [\"iar\"]`；另开 Issue 同步 3 个过期断言）及其代码位置。单变量实验进一步定位最小修复：把生效 config.toml 原样复制到临时家目录、仅删掉 1 行 `runner_command` 钉值后，3 个控制台用例全部转绿（`console_single_line_repair_exit=0`）。",
-      "explanation": "脚本临时把无效 kc flag 写入受管 references 文件并运行真实目标 pytest，确认发行包命令漂移守卫转红；恢复原字节后以 `PYTEST_ADDOPTS=--no-testmon` 强制完整运行同一 pytest 文件，再用真实 `git diff --name-only <merge-base>..HEAD` 检查范围与实现文件。改动已由 runner 提交，工作区自身是干净的，因此只能与分支基线比对——这正是上一轮该项误报 `changed paths were []` 的原因。随后以子进程调用归属脚本 `rv-4-gate-failure-attribution.py`：先用 `git diff` 证明本轮零 Python 改动，再用 `git archive` 把 `main` 尖端的 `src`/`tests` 导出到临时目录，以同一解释器、同一依赖锁（先比对 `pyproject.toml`/`uv.lock` 零漂移）重跑 HEAD 上失败的那批 node id——只要有任一 id 在 `main` 上转绿，就判定为本分支回归并 exit 1；最后用 `resolve_config_toml_path()` 与 `AgentRunnerSettings().console.runner_command` 读出本机状态目录残留的退役 `iar` 命令，并以隔离 HOME 的复跑证明控制台组只受本机配置影响。归属结论同时落成 markdown 阻塞项清单，随本交付一起进入仓库（`tasks/evidence` 只放行 `*.md` 与 evidence.json），使「门禁为何仍红、需要谁做什么」不依赖对话记录。该实验只改变一个变量（其余配置逐行保持），因此能断言这 3 项失败由那一行单独引起，而不是笼统的「本机环境问题」；副本落在 0700 临时目录、文件权限 0600，跑完即删，不回显内容。",
-      "risks": "testmon 被关闭以确保目标 Skill 测试文件完整运行；28 项通过。范围断言只看已提交的 HEAD 相对 merge base，本轮新增的证据脚本尚未提交，故不在清单内；提交后它们只落在 `tasks/evidence/issue-291/`，不触碰 src/。`just test all` 附加门禁仍为红：控制台 3 项源于本机状态目录 `~/.kedacode/config.toml` 残留 `runner_command = [\"iar\"]`。机制已核实两点：配置源顺序是 `(env, registry, toml, session_toml, init)`（`src/backend/infrastructure/config/settings.py:341-347`），TOML 高于 init kwargs，所以测试用 `AgentRunnerSettings(console=...)` 注入的 fake runner 命令按现有约定**必然**被覆盖 —— 这是测试隔离方式与配置优先级不匹配（fixture 应改指临时 `KEDACODE_CONFIG`），不是产品缺陷；而 `kc config migrate` 的钉子清理表（`repository_local_migration.py:51-57` 的 `_LEGACY_SECTION_PIN_VALUES`）不含 `runner_command`，它**不会**清掉这一行，owner 必须手工删除或注释 `~/.kedacode/config.toml` 里的该行。本轮执行规则禁止写 worktree 之外的文件，因此只做只读取证，未代为修改用户环境。，worktree 前端 3 项是 PR #295 改写 `worktree_frontend.py` 后未同步的过期断言（期望 detail 含 `lockfiles differ`、期望无锁文件也能符号链接），属基线缺陷，需在独立 Issue 修复；本 Issue 的验收标准要求差异只含两份 Skill 文档，因此不能顺手改测试或生产代码。归属结论绑定当前 `main` 尖端与本机状态目录：owner 一旦在主线上修好这 6 项，oracle 会转成 `target_ref_pre_existence=not_needed`（HEAD 已全绿）而不是报错；反过来，若本分支真的引入回归，它会 exit 1 拦住交付，因此这不是对失败的豁免或缓存。另外目标树复跑只在依赖文件零漂移时才下判定，漂移时记为 `not_comparable` 并交由范围证明兜底。该 markdown 由 oracle 每次重写：主线修好后它会改写成「无需处置」，因此不会留下过期的待办结论；它只是证据与待办说明，不构成对 `just test all` 门禁的豁免。归属核对修正：此前把这两类失败挂到 `P1-REFACTOR-20261020-021715-purge-residual-iar-naming` 是错的——该 PRD 只覆盖协议标记、目录名与代码标识符，且明确不搬动用户磁盘状态；2026-10-20 对 `tasks/pending/` 全量 grep `runner_command` 与相关用例名均无命中，说明两类失败当前无人认领，必须新开 Issue，等它落地不会自动清掉本门禁。充分性已实测：在 detached worktree 应用上述测试补丁、并用「仅删掉 runner_command 钉值」的复制状态目录跑全量 pytest，得到 `4642 passed / 1 skipped / 0 failed`，与基线 `6 failed + 4636 passed + 1 skipped` 同为 4643 条收集数，说明这两项处置做完本门禁即可转绿（该测量为一次性本地复现，非 CI 结论）。",
-      "negative_control": "两段负控：① 脚本临时追加 `kc issue create --rv-not-a-real-flag tasks/pending/example.md`，运行真实 `uv run pytest tests/test_kedacode_operator_skill.py -q`，随后在 finally 中按原始字节恢复 references/create-issue.md；② 归属脚本的范围函数指向 `e9c03080^`（HEAD 相对该基线确实改了 worktree_frontend.py 等 12 个 Python 源/测试文件），必须在「Python 改动数 > 0」这一步拒绝归属；③ 回归探测器指向 PR #295 之前的 `e687f44b`，那里 `test_create_or_reuse_worktree_links_frontend_node_modules` 与 `test_links_node_modules_for_root_and_nested_projects` 是绿的，探测器必须报出回归信号并 exit 1 （证明「pre-existing」结论不是橡皮图章）。三处都没有向生产代码注入开关。",
-      "expected_fail": "① 命令漂移守卫 exit 1，输出 `references/create-issue.md: kc issue create --rv-not-a-real-flag ... 使用了 --help 中不存在的 flag`，汇总 1 failed / 27 passed，恢复后 exit 0 且 28 passed；② 范围函数 exit 1，输出 `executable_paths_changed_vs_base=12` 与 `FAIL: scope attribution rejected at e9c03080^`；③ 回归探测器 exit 1，输出 `green_at_compare_ref=['tests/test_worktree_cli.py::...', ...]` 与 `regression_signal: failures are NOT pre-existing at e687f44b`。绿色路径则输出 `target_ref_pre_existence=confirmed` + `attribution_ok=true`，rv-4 打印 `attribution_exit=0`。",
+      "output_summary": "真实 `uv run pytest tests/test_kedacode_operator_skill.py -q` 的负控为 1 failed / 27 passed，守卫指出注入的无效 flag；正式全文件运行 28 passed。范围以 `git merge-base main HEAD`（e6b60d94）为基线检查整个工作树：Skill 目录下恰好两份文件（SKILL.md、references/create-issue.md），src/ 其余路径零改动，publish_prd_file 无差异。上一轮 `just test all` 失败的 6 个 node id 现在全部通过（6 passed）；它们的测试文件与 `main`@4d6bde3d 对应文件逐字节一致，属从主线同步的基线修复，不是本 Issue 的产出。",
+      "explanation": "脚本临时把无效 kc flag 写入受管 references 文件并运行真实目标 pytest，确认发行包命令漂移守卫转红；恢复原字节后以 `PYTEST_ADDOPTS=--no-testmon` 强制完整运行同一 pytest 文件。范围检查用 `git diff --name-only <merge-base>` 覆盖已提交与工作区内容：只允许两份 Skill 文档；`tests/` 下的每个改动都用 `git show main:<path>` 逐字节比对，任何与主线当前版本不一致的自创测试改动都会被拒绝；其余 `src/` 路径必须零改动。最后真实运行上一轮失败的 6 个 node id，证明 `just test all` 的门禁失败已随主线修复同步消失，而不是被忽略或豁免。",
+      "risks": "testmon 被关闭以确保目标 Skill 测试文件完整运行；28 项通过。三个测试文件来自 `main` 的 `fix(ci): restore main validation`，本分支只是把它们同步到较旧的 merge base，因此相对当前主线的净改动仍只有两份 Skill 文档；如果评审只看相对 merge base 的三点差异，会看到这三个测试文件，但它们与主线逐字节一致。SKILL.md 新增一条共享底线后触发了 70 行非空行上限守卫，因此把原有 First-time bootstrap 一句并入相邻的 Confirmation 底线（内容未丢失），这是保持结构守卫通过所必需的最小调整。合并后仍需按验收要求执行 `kc skill install` 刷新用户级安装副本。证据验证的是随包文档措辞、受管文件守卫与门禁回归，没有创建真实 GitHub Issue。",
+      "negative_control": "脚本临时向 `references/create-issue.md` 追加 `kc issue create --rv-not-a-real-flag tasks/pending/example.md`，运行真实 `uv run pytest tests/test_kedacode_operator_skill.py -q`，随后在 finally 中按原始字节恢复文件；守卫必须拒绝该 flag 并 exit 1。",
+      "expected_fail": "命令漂移守卫 exit 1，输出 `references/create-issue.md: kc issue create --rv-not-a-real-flag ... 使用了 --help 中不存在的 flag`，汇总 1 failed / 27 passed；恢复后 exit 0 且 28 passed。绿色路径输出 `scope_vs_base: skill_changes=2; test_changes_match_main=3; non_skill_source_changes=0` 与 `previously_failing_gate_tests=passed (6)`。",
       "stdout_assertions": [
         {
           "pattern": "negative_control_exit=1",
@@ -112,6 +110,10 @@
           "must_match": true
         },
         {
+          "pattern": "scope_vs_base: skill_changes=2; test_changes_match_main=3; non_skill_source_changes=0",
+          "must_match": true
+        },
+        {
           "pattern": "green_diff_exit=0",
           "must_match": true
         },
@@ -120,28 +122,16 @@
           "must_match": true
         },
         {
-          "pattern": "attribution_exit=0",
+          "pattern": "gate_regression_tests_exit=0",
           "must_match": true
         },
         {
-          "pattern": "regression_detector_negative_control_exit=1",
-          "must_match": true
-        },
-        {
-          "pattern": "target_ref_pre_existence=",
+          "pattern": "previously_failing_gate_tests=passed (6)",
           "must_match": true
         },
         {
           "pattern": "Traceback (most recent call last)",
           "must_match": false
-        },
-        {
-          "pattern": "follow_up_actions_written=rv-4-follow-up-actions.md",
-          "must_match": true
-        },
-        {
-          "pattern": "console_cleared_by_dropping_runner_command_line=",
-          "must_match": true
         }
       ]
     }
