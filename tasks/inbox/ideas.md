@@ -505,3 +505,46 @@ Attempt    Started (UTC)    Agent    Failure Type    Recovered    Duration    De
 - 方案设想：把 `ROADMAP.md` 瘦成一页——愿景、产品边界、现在 / 下一步 / 以后、核心指标、未决问题；已交付清单（Completed）、按日期的路线更新、M0–M12 的详细里程碑与历史验收清单移到 `docs/` 下作为状态与历史页，并保留到新页的链接。同时顺手修正文档里仍沿用 `iar` 命令名的地方（现为 `kc`）。
 - 边界/约束：不丢信息，只是换位置；历史内容在迁移后仍要可检索；`mkdocs.yml` 导航要同步（见 `docs/ai-standards/documentation.md`）。
 - 待澄清：历史页放在哪（`docs/` 下新建 status / history 页，还是并入已有页面）；`ROADMAP.md` 是否仍留在仓库根目录；“已知漂移”由谁、在什么时机校准，避免瘦身后又堆积成同样的文档。
+
+## 2026-10-19 11:44 · keda-agent-工程证据
+
+> 把这些优化方案都记录到keda那个里吧
+
+**AI 派生（非用户原话）**
+- 对话脉络：用户结合 Agent 职业规划，询问相关能力缺口是否都能放进 Keda；AI 建议将 Agent 评测、运行可靠性与安全治理纳入 Keda，将代码任务的耗时、成功率、人工接管和成本作为 Keda 的业务结果；货代单证与运价流程的业务收益仍由 ai-assistant 案例证明。随后用户要求把这些方案记录到 Keda。
+- 背景/动机：把 Keda 的产品路线与 Agent 平台岗位所需的可验证职业证据连接起来，优先形成可复现、可审查的工程成果。
+- 方案设想：① 沿 Keda M13 补齐版本化评测集与可复现 harness，对比原生 Agent 和 Keda，记录成功率、耗时、成本、人工介入与回归，并补齐合并/人工事件及 Token 统计口径；② 逐步补充队列、任务中断与恢复、daemon 健康等可靠性数据；③ 建立代码执行场景的威胁模型和攻击回归，覆盖沙箱、凭据范围、网络访问、恶意 Issue/仓库指令与审计；④ 在真实使用中记录 Keda 编码任务的交付收益；⑤ 通过外部用户、贡献者和可公开或匿名案例证明采用与个人技术责任。
+- 边界/约束：货代业务指标留在 ai-assistant 案例，不强行并入 Keda；先用真实使用需求驱动可靠性与规模建设，不预先扩大到重型分布式架构；评测结果用于比较与回归，避免把测试数量或单次成功当成 Agent 效果证明。
+- 收敛结论：先承接 Keda 已规划的 M13 评测基线，梳理并复用现有度量能力，再按真实使用情况补可靠性、安全与采用证据；不重复创建与 M13 重叠的路线项。
+- 待澄清：评测首批任务集、基线对照组和最低样本量；可靠性与安全建设的验收阈值；是否需要把后续候选拆成独立 PRD。
+
+## 2026-10-19 17:10 · sample-construction
+
+> 关于keda项目数据集的构建， 之前一般来讲，我一个数据集是一个commmit或者说一个pr 但是在当前这个场景下面，我是涉及到部署的，我可能多个commit才解决了一个问题。那这样的话，我要怎么样去构建数据集呢？
+>
+> 还有我原始的输入问题其实是没有被记下来的。
+>
+> 所以我们应该构建一个可以用于构建样本的系统 ， 我先问你，现在有看项目在做这样的事情吗？
+>
+> 记录到KEDA项目里面。
+
+**AI 派生（非用户原话）**
+- 对话脉络：（按先后顺序）用户提出部署类任务可能跨多个 commit 才解决一个问题，并指出原始输入没有被记录；AI 建议按独立任务/Issue 聚合多个 commit、PR、Keda 执行尝试、部署状态与验收证据，缺失原文时明确标成重建输入；用户进一步提出构建样本系统并询问已有项目，调研发现 SWE-bench、SWE-agent、OpenHands 与 LangSmith 分别覆盖任务到 patch、执行轨迹、评测轨迹或 trace 人工整理，但没有找到开箱即用地覆盖 Keda 输入、跨 commit 与部署全链路的单一系统；随后用户要求将想法记录到 KEDA。
+- 背景/动机：当前按单个 commit 或 PR 建样本会拆散同一问题的完整修复；没有原始任务输入，也难以判断结果是否解决了当初的问题；部署结果和验证证据还需与代码状态对应。
+- 方案设想：构建 Keda 样本整理能力，以一个可独立验收的任务/Issue 为样本主键，保存原始输入及其来源、初始 `base_sha`、关联 PR 与有序 commit 列表、最终 `final_sha`、Keda run/attempt、部署版本或镜像摘要、验收与部署验证证据，并支持人工筛选、标注与版本化导出。
+- 边界/约束：任务开始时优先保存原始输入快照；历史记录无法找回原文时标记为 reconstructed，不能伪装成 verbatim。优先复用现有 Issue/PR、Keda 执行记录和证据目录；通用轨迹/数据集工具可作参考，不默认重建完整 tracing 或部署平台。
+- 与既有想法的关系：细化 `2026-06-26 16:01 · test · benchmark` 与 `2026-10-19 11:44 · keda-agent-工程证据` 中的评测集方向，聚焦样本构建与原始输入、commit 链、部署结果之间的关联，不重复立项泛化评测基线。
+- 待澄清：首期数据源是仅采集 GitHub Issue/PR，还是也接入非 Issue 的临时输入；部署结果的最小验收字段；首期采用文件清单/JSONL 导出还是 Keda 页面管理。
+
+## 2026-10-19 17:13 · sample-construction-refs
+
+> 我发现你前面给我说的那些项目，你没有放进去，可以把项目也放进去。
+
+**AI 派生（非用户原话）**
+- 关联：补充 `2026-10-19 17:10 · sample-construction`，把调研中提到的项目和可借鉴能力显式纳入该想法；按 Inbox 只追加约定保留原条目。
+- 已调研项目：
+  - [SWE-bench](https://github.com/SWE-bench/SWE-bench)：参考 Issue/问题描述、代码库基线和最终 patch 组成一个任务样本，并用容器环境复现评测。
+  - [SWE-agent Trajectories](https://github.com/SWE-agent/SWE-agent/blob/main/docs/usage/trajectories.md)：参考按任务保存 Agent 的输入、动作、观察、运行配置和日志。
+  - [OpenHands Index](https://www.openhands.dev/blog/analyzing-and-improving-openhands-index)：参考将评测实例与完整 Agent 轨迹关联，并提供轨迹查看。
+  - [LangSmith Dataset Management](https://docs.langchain.com/langsmith/manage-datasets-in-application)：参考从 traces 筛选/导入数据集、人工标注与样本管理。
+- 边界/约束：这些是分层参考，不意味着 Keda 要直接依赖或完整照搬；仍需补足 Keda 场景里的原始任务输入、跨 commit/PR 关联和部署结果。
