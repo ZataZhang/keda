@@ -69,10 +69,11 @@ nav:
       - Agent 模型预设: guides/model-presets.md
       - PRD 编写规范: guides/prd-standard.md
       - 想法收集（Idea Inbox）: guides/idea-inbox.md
+      - 本机文件与改动查看器: guides/file-viewer.md
       - Review Workflow: guides/review-workflow.md
       - Skill Lifecycle: guides/skill-lifecycle.md
       - Codex macOS 通知: guides/codex-notifications.md
-      - macOS 菜单栏状态面板: guides/desktop-companion.md
+      - macOS 菜单栏 App 安装与状态面板: guides/desktop-companion.md
       - 从 IAR 升级到 KedaCode: guides/migrating-from-iar.md
       - Loop 定时任务: guides/loop.md
   - 原型演示:

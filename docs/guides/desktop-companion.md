@@ -17,14 +17,24 @@ macOS 上优先使用 KedaCode 菜单栏 App：顶部常驻图标，点击后展
 
 ### 构建与安装
 
-从 macOS 本机源码构建并安装：
+用户可通过 `uv tool install kedacode` 安装 CLI；首次在 macOS 交互式终端运行 `kc` 时，可选择下载与 CLI 版本和 CPU 架构匹配的菜单栏 App。也可稍后运行：
+
+```bash
+kc desktop install
+```
+
+安装器校验同一 GitHub Release 的 `SHA256SUMS`，并将 App 安装或升级到 `~/Applications/KedaCode.app`。CLI 仍由原安装器（例如 `uv`）管理；菜单栏 App 不会另装一份 CLI。安装后需从 Finder 打开该 App，菜单栏图标才会出现。首次交互提示只出现一次；脚本和机器输出不会被打断。它与 shell 补全设置菜单互相独立；两者都未配置时，App 菜单先出现。
+
+公开 Release 的 DMG 按 Apple Silicon（arm64）和 Intel（x64）分别构建。当前 CI 使用 ad-hoc 签名，未进行 Apple 公证；macOS 首次打开可能要求用户到「系统设置 → 隐私与安全性」允许，或在 Finder 中按住 Control 点击 App 并选择「打开」。
+
+源码开发者也可以在 macOS 本机执行：
 
 ```bash
 just desktop-install
 ```
 
 这会构建 `KedaCode.app` 并复制到 `~/Applications`。构建需要 macOS 12+、Rust（rustup）、
-Xcode Command Line Tools 和 pnpm。该 App 是本机自用构建，不签名、不公证，也不用于公开分发。
+Xcode Command Line Tools 和 pnpm。本机源码构建不签名、不公证，也不用于公开分发。
 
 双击 `~/Applications/KedaCode.app` 后，菜单栏出现 KedaCode 图标。点击图标展开状态面板；
 点击「固定悬浮」切换成带原生标题栏的置顶窗口；「取消固定」返回图标面板。popover 失焦后
@@ -44,9 +54,11 @@ App 查找 `kc` 的位置依次包括 `~/.local/bin/kc`、`/opt/homebrew/bin/kc`
 
 ### 数据与行为
 
-任务卡片首行并列显示状态与中文阶段（例如「失败 · 阶段：PR 前审查」），悬停阶段可查看原始标识。
-未记录阶段时明确标注；未知阶段保留原文。阻塞和失败卡片展示当前状态来源；监控告警另行展示，
-不会冒充任务状态或失败原因。网页看板列表与详情沿用相同状态和阶段标签。
+任务卡片首行并列显示状态与中文阶段（例如「失败 · 阶段：PR 前审查」），标题下方直接说明该阶段在做什么；
+悬停阶段可查看原始标识和说明。未记录阶段时明确标注；未知阶段保留原文并说明尚未配置解释。
+阶段优先采用最近一次 attempt 记录的失败阶段；没有失败阶段记录时回退到 Issue 时间线的最后阶段事件。
+因此阶段说明解释处理环节，不一定就是失败原因；阻塞和失败卡片另显示当前状态来源，监控告警单独展示，
+不会冒充任务状态或失败原因。网页看板列表与详情沿用相同的阶段说明。
 
 面板紧凑呈现前 4 项活动任务，其余可在窗口内滚动。横条表示「改动树触达」，即这次运行碰到
 PRD 影响计划中的节点，**触碰不等于改对**。不可读、不可比或没有基准时会说明原因，不画空条、

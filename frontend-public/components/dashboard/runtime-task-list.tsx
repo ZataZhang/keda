@@ -16,7 +16,7 @@ import { prettyLabel } from "@/components/agent-runner/label-variant";
 import type { RuntimeTaskEntry, RuntimeTaskStatus } from "@/lib/api/types";
 import { formatLocalDateTime } from "@/lib/utils";
 
-import { RuntimeTaskPhase } from "./runtime-task-phase";
+import { runtimePhaseDescription, RuntimeTaskPhase } from "./runtime-task-phase";
 
 /** 状态分桶的人读文案与配色（唯一事实源，列表/详情/小窗共用）。 */
 const STATUS_PRESENTATION: Record<RuntimeTaskStatus, { label: string; variant: BadgeVariant }> = {
@@ -291,6 +291,12 @@ function RuntimeTaskRow({
           <span className="truncate text-slate-600 dark:text-slate-300">
             {task.issue_title ?? "（账本未记录标题）"}
           </span>
+        </span>
+        <span
+          className="mt-1 block text-xs text-slate-500"
+          data-testid="runtime-task-phase-description"
+        >
+          阶段说明：{runtimePhaseDescription(task.phase)}
         </span>
         <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
           {task.agent ? (

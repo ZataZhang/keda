@@ -18,7 +18,7 @@ import { closeDesktopCompanionWindow, fetchRuntimeTasks } from "@/lib/api/consol
 import type { RuntimeTaskEntry, RuntimeTaskSummary } from "@/lib/api/types";
 import { formatLocalDateTime } from "@/lib/utils";
 
-import { RuntimeTaskPhase } from "./runtime-task-phase";
+import { runtimePhaseDescription, RuntimeTaskPhase } from "./runtime-task-phase";
 import { RuntimeTaskAnomalies, RuntimeTaskImpact } from "./runtime-task-detail";
 import { runtimeStatusPresentation, runtimeTaskKey } from "./runtime-task-list";
 
@@ -241,6 +241,12 @@ function CompanionTaskRow({
       <span className="truncate text-[11px] text-slate-600 dark:text-slate-300">
         {task.issue_title ?? "（账本未记录标题）"}
       </span>
+      <p
+        className="line-clamp-2 text-[11px] leading-snug text-slate-500 dark:text-slate-400"
+        data-testid="runtime-task-phase-description"
+      >
+        阶段说明：{runtimePhaseDescription(task.phase)}
+      </p>
       <span className="flex flex-wrap gap-x-2 text-[11px] text-slate-500">
         {task.agent ? (
           <span>

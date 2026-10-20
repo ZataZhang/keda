@@ -86,7 +86,7 @@ kc completion show --shell zsh
 
 `completion install` 同时支持 `--shell bash` 和 `--shell fish`。
 
-尚未配置补全时，首次在交互式终端运行 `kc` 会询问是否安装 shell 补全，默认选中安装；按上下方向键选择，按 Enter 确认。选择安装后，本次 `kc` 会安装补全并退出，提示用户重载 shell；重载后重新运行刚才的命令。选择“暂不安装”后不再重复询问。非交互调用、机器输出、帮助/版本入口和 shell 补全协议不会显示此菜单。
+尚未配置补全时，首次在交互式终端运行 `kc` 会询问是否安装 shell 补全，默认选中安装；按上下方向键选择，按 Enter 确认。macOS 缺少菜单栏 App 时，独立的 App 安装菜单会先出现。选择补全安装后，本次 `kc` 会安装补全并退出，提示用户重载 shell；重载后重新运行刚才的命令。选择“暂不安装”后不再重复询问。非交互调用、机器输出、帮助/版本入口和 shell 补全协议不会显示此菜单。
 
 补全同时覆盖 `kedacode` 别名入口（别名清单从分发的 `[project.scripts]` 元数据派生），
 `kedacode is<Tab>` 与 `kc is<Tab>` 行为一致；旧版本安装的补全重跑一次
@@ -4020,8 +4020,8 @@ PATCH  /api/v1/agent-runner/console/monitor/settings   {sync_enabled, sync_inter
 
 `/app/dashboard/` 的**默认视图**是任务值守看板（「仓库监控」仍保留原有的仓库卡片视图，
 仓库级「跑一轮 / 复核一轮」和同步设置都在那一侧）。看板以 Issue 运行为单位列出
-生命周期分桶（运行中 / 等待值守 / 阻塞 / 失败 / 已完成 / 已关闭 / 状态未知）、仓库与 Issue 身份、阶段、
-执行者与耗时，可按状态筛选、按仓库 / 编号 / 标题搜索，选中项复用既有的 Issue 增量日志与
+生命周期分桶（运行中 / 等待值守 / 阻塞 / 失败 / 已完成 / 已关闭 / 状态未知）、仓库与 Issue 身份、
+阶段及其简明说明、执行者与耗时，可按状态筛选、按仓库 / 编号 / 标题搜索，选中项复用既有的 Issue 增量日志与
 调用账本端点（结构化调用默认折叠，折叠只是展示层，原文不做截断）。
 
 数据来源仍然只有已注册仓库的 Console 观测路径（快照 + 运行 / attempt / 生命周期三本账），
@@ -4030,7 +4030,10 @@ PATCH  /api/v1/agent-runner/console/monitor/settings   {sync_enabled, sync_inter
 状态标签分桶，关闭状态优先于残留标签。`agent/blocked` 显示为「阻塞」，`agent/failed` 显示为
 「失败」；前者表示需要人工决策，后者表示本轮执行失败，两者应分别排查。「已完成」仅表示运行账本
 记录了成功终态。状态来源根据 Issue 关闭状态、当前监控标签或运行账本终态显示；监控异常类型单独放在
-`anomaly_types`，不会替换状态来源，也不直接充当失败原因。
+`anomaly_types`，不会替换状态来源，也不直接充当失败原因。阶段优先采用最近一次 attempt 记录的失败环节；
+没有时回退到 Issue 时间线最后一条阶段事件。阶段说明描述该环节的职责，例如
+`post_pr_rework_requested` 显示为「PR 后返工请求」，表示 PR 检查后需要继续修改或同步分支；
+具体失败原因仍应查看状态来源和运行详情。
 快照未收录时，运行账本和未收口的生命周期账本只补充最近 7 天内开始的记录。超出窗口的未收口
 记录不再作为当前运行任务计数，历史复盘仍使用统计页。
 
@@ -5400,6 +5403,10 @@ uv run kc agent setup --fix --yes
   "没有"并以 0 退出，不制造空写入。
 
 <a id="agent-first-run-hint"></a>
+
+### macOS 菜单栏 App 首次提示
+
+首次在 macOS 交互式终端运行 `kc` 时，如果 `~/Applications` 和 `/Applications` 都没有 `KedaCode.app`，CLI 会先询问是否安装与当前 CLI 版本匹配的菜单栏 App。接受后下载对应架构的 DMG、校验 Release 校验和，并安装到 `~/Applications`；拒绝后可随时运行 `kc desktop install`。提示只出现一次，不显示在非 TTY、shell 补全协议、机器输出、帮助/版本和 `kc agent` / `kc completion` / `kc desktop` / `kc schema` 调用中。安装 App 不会改变 CLI 的 `uv` 安装方式；首次打开 App 仍可能需要 macOS 安全性确认。更多安装细节见[菜单栏 App 指南](desktop-companion.md)。
 
 ### 首启提示：一次性、永不阻断
 

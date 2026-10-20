@@ -2,7 +2,7 @@
 
 Owns the :data:`app` instance, every sub-application (``labels_app``,
 ``issue_app``, ``registry_app``, ``daemon_app``, ``worktree_app``,
-``workflow_app``, ``loop_app``, ``completion_app``), the shared
+``workflow_app``, ``loop_app``, ``completion_app``, ``desktop_app``), the shared
 ``Annotated[...]`` option types, and the small ``_run_typer_*`` /
 ``_typer_selector_options`` helpers used by every Typer command module
 under :mod:`backend.api.cli_typer_*`.
@@ -30,6 +30,10 @@ from backend.api.cli_agent_hint import maybe_prompt_for_agent_setup
 from backend.api.cli_completion import (
     maybe_prompt_for_completion_setup,
     register_completion_commands,
+)
+from backend.api.cli_desktop import (
+    maybe_prompt_for_desktop_app_setup,
+    register_desktop_commands,
 )
 from backend.api.cli_exit_codes import EXIT_CODE_HELP, ExitCode
 from backend.api.cli_output import (
@@ -73,6 +77,7 @@ __all__ = [
     "agent_app",
     "auth_app",
     "completion_app",
+    "desktop_app",
     "config_app",
     "container_app",
     "console_app",
@@ -160,6 +165,11 @@ completion_app = typer.Typer(
     no_args_is_help=True,
     context_settings=_HELP_CONTEXT,
 )
+desktop_app = typer.Typer(
+    help="Install the macOS menu bar app.",
+    no_args_is_help=True,
+    context_settings=_HELP_CONTEXT,
+)
 worktree_app = typer.Typer(
     help="Manage KedaCode-owned Git worktrees for the current repository.",
     no_args_is_help=True,
@@ -231,6 +241,8 @@ app.add_typer(issue_app, name="issue")
 app.add_typer(pr_app, name="pr")
 app.add_typer(completion_app, name="completion")
 register_completion_commands(completion_app)
+app.add_typer(desktop_app, name="desktop")
+register_desktop_commands(desktop_app)
 app.add_typer(worktree_app, name="worktree")
 app.add_typer(registry_app, name="registry")
 app.add_typer(daemon_app, name="daemon")
@@ -480,6 +492,7 @@ def _render_click_exception(exc: typer_click.exceptions.ClickException) -> int:
 def main(argv: list[str] | None = None) -> int:
     """Run the Typer-powered CLI (``kc``; also installed as ``kedacode``)."""
     args = list(sys.argv[1:] if argv is None else argv)
+    maybe_prompt_for_desktop_app_setup(args)
     if maybe_prompt_for_completion_setup(args):
         return 0
     # 首启 Agent 可用性提示（FR-4）：一次性、写 stderr、永不阻断本轮命令。

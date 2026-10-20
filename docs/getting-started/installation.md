@@ -42,6 +42,14 @@ kc completion install --shell fish
 
 如果还未配置补全，首次在交互式终端运行 `kc` 时会显示选择菜单，默认选中“安装”；按上下方向键可切换到“暂不安装”，按 Enter 确认。提示不会由 `kc<Tab>` 触发，因为此时 shell 尚未启动 `kc`；先运行一次 `kc` 或按上面的命令配置即可。选择安装后，`kc` 会安装补全并退出，不会继续执行刚才的命令；按提示重载 shell 配置，再重新运行刚才的 `kc` 命令。
 
+### macOS 菜单栏 App（可选）
+
+`uv tool install kedacode` 仍只安装 CLI，不会改变安装方式。macOS 用户首次在交互式终端运行 `kc` 时，如果 `~/Applications` 和 `/Applications` 中都没有 KedaCode App，会看到一次菜单栏 App 安装菜单；选择安装后，CLI 会下载与当前 `kedacode` 版本和 CPU 架构匹配的发布包，校验 SHA-256，并安装到 `~/Applications/KedaCode.app`。CLI 仍由 `uv` 管理，菜单栏 App 是可选的独立桌面程序。
+
+这个菜单与上面的 shell 补全菜单是两次独立选择；若两者都还未设置，菜单栏 App 菜单先出现，随后才会显示补全菜单。
+
+如果选择暂不安装，之后可手动执行 `kc desktop install`。自动提示只在 macOS 交互式终端出现，不影响脚本、机器输出、帮助或版本调用。安装后从 Finder 打开 `~/Applications/KedaCode.app` 即可显示菜单栏图标。当前公开构建使用 ad-hoc 签名且未公证；首次打开时 macOS 可能要求在「系统设置 → 隐私与安全性」中允许，详见[菜单栏 App 指南](../guides/desktop-companion.md)。
+
 **curl 一键脚本（macOS / Linux）：**
 
 ```bash
