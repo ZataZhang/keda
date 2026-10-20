@@ -43,6 +43,7 @@ from backend.api.cli_output import (
     machine_output_requested,
     render_cli_error,
 )
+from backend.api.cli_startup_skill_sync import startup_skill_sync
 from backend.api.cli_update_check import startup_update_check
 from backend.api.version_info import resolve_keda_version
 from backend.core.shared.models import product_identity
@@ -521,6 +522,9 @@ def main(argv: list[str] | None = None) -> int:
     # 启动更新检查（Issue #264）：内部自带全部跳过判定——机器模式、补全协议、
     # --help、非 TTY、显式关闭都在这条路径上原样不发生。
     startup_update_check(args)
+    # 随包 operator Skill 启动自动同步：仅当已安装包版本变化时刷新，复用与更新检查
+    # 相同的跳过判定，永不阻断命令；升级 pip/uv/pipx 后无需再手动 `kc skill install`。
+    startup_skill_sync(args)
     try:
         result = app(
             args=args,

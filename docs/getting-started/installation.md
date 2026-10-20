@@ -137,6 +137,18 @@ kc container down
 - **机器路径零打扰**：以下场景更新检查整段不发生（不联网、不提示、不询问）——`--json` / `--output json` 机器模式、shell 补全协议、`--help` / `-h`、`--version`、无参数调用（只打印用法）、非交互终端（管道 / CI / agent 子进程）。
 - **显式关闭**：设置 `KEDACODE_NO_UPDATE_CHECK=1` 永久停用；想手动升级时按上方安装方式对应的升级命令操作即可。
 
+## 随包 operator Skill 自动同步
+
+随发行包发行的 `kedacode-operator` Skill 会安装进 wheel，但用户级安装根（`~/.claude/skills`、`~/.codex/skills` 等）里的副本需要单独刷新，过去只能手动跑 `kc skill install`。现在 `kc` 启动时会**按已安装包版本比对**：版本相对上次同步记录发生变化时，自动把随包 operator Skill 刷新到全部安装根，之后同一版本不再重复触碰文件系统——升级 `kedacode` 后无需再手动同步。
+
+要点：
+
+- **只刷随包 operator Skill**：不下载、不覆盖 `prd` / `code-reviewer` 等远程模板 Skill；你本地改过的 operator 副本会被保留（冲突时不动它），手动 `kc skill install` 仍是刷新远程模板的入口。
+- **缓存**：同步到的版本记录在 `~/.kedacode/skill-sync.json`，与更新检查缓存相互独立；包版本变化会让记录自动失效并重新同步。
+- **不联网**：该钩子只读本地 wheel 与用户目录，离线照常工作。
+- **机器路径零打扰**：复用更新检查同一套跳过判定——`--json` / `--output json`、shell 补全协议、`--help` / `-h`、`--version`、无参数、非交互终端（管道 / CI / agent 子进程）下整段不发生。
+- **显式关闭**：设置 `KEDACODE_NO_SKILL_SYNC=1` 停用自动同步（`KEDACODE_NO_UPDATE_CHECK=1` 同样会一并跳过），需要时手动 `kc skill install` 即可。
+
 ## 排错
 
 - `command -v kc` 没命中：把 `~/.local/bin` 加入 `PATH`，或在新 shell 中重试。
