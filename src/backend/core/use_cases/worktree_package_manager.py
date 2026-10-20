@@ -150,6 +150,28 @@ def _matches_workspace_pattern(relative_posix_path: str, pattern: str) -> bool:
     return len(candidate_parts) in matched_path_part_counts
 
 
+def _matching_workspace_member_pattern(
+    relative_posix_path: str,
+    workspace_patterns: tuple[str, ...],
+) -> str | None:
+    """判断成员是否被包含 pattern 覆盖，并应用 ``!`` 排除 pattern。"""
+    matched_include_pattern: str | None = None
+    excluded_by_pattern = False
+    for declared_pattern in workspace_patterns:
+        normalized_pattern = declared_pattern.strip()
+        if not normalized_pattern:
+            continue
+        is_exclusion_pattern = normalized_pattern.startswith("!")
+        matching_pattern = normalized_pattern[1:] if is_exclusion_pattern else normalized_pattern
+        if not _matches_workspace_pattern(relative_posix_path, matching_pattern):
+            continue
+        if is_exclusion_pattern:
+            excluded_by_pattern = True
+        elif matched_include_pattern is None:
+            matched_include_pattern = normalized_pattern
+    return None if excluded_by_pattern else matched_include_pattern
+
+
 def _workspace_member_patterns(parent_dir_path: Path) -> tuple[str, ...]:
     """``parent_dir_path`` 作为 workspace 根时声明的成员 pattern 集合。"""
     pnpm_patterns = _pnpm_workspace_patterns(parent_dir_path / PNPM_WORKSPACE_FILE_NAME)
@@ -177,13 +199,9 @@ def _find_covering_workspace(
         ancestor_parts = project_path_parts[:kept_ancestor_part_count]
         parent_dir_path = worktree_root_path.joinpath(*ancestor_parts)
         member_relative_posix_path = "/".join(project_path_parts[kept_ancestor_part_count:])
-        matched_pattern = next(
-            (
-                member_pattern
-                for member_pattern in _workspace_member_patterns(parent_dir_path)
-                if _matches_workspace_pattern(member_relative_posix_path, member_pattern)
-            ),
-            None,
+        matched_pattern = _matching_workspace_member_pattern(
+            member_relative_posix_path,
+            _workspace_member_patterns(parent_dir_path),
         )
         if matched_pattern is None:
             continue

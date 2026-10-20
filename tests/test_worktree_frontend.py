@@ -340,6 +340,43 @@ class TestPlanPackageManager:
 
         assert install_plan.is_workspace_member is True
 
+    @pytest.mark.parametrize(
+        "workspace_pattern_order",
+        [
+            ("packages/**", "!packages/client/nested"),
+            ("!packages/client/nested", "packages/**"),
+            (
+                "packages/**",
+                "!packages/client/nested",
+                "packages/client/nested",
+            ),
+        ],
+        ids=["include-before-exclude", "exclude-before-include", "later-include"],
+    )
+    def test_pnpm_workspace_exclusion_overrides_included_patterns(
+        self,
+        tmp_path: Path,
+        workspace_pattern_order: tuple[str, ...],
+    ) -> None:
+        """pnpm 的 ``!`` pattern 排除成员，即使其他 pattern 也能匹配。"""
+        worktree_path = tmp_path / "worktree"
+        workspace_pattern_lines = "\n".join(
+            f'  - "{workspace_pattern}"' for workspace_pattern in workspace_pattern_order
+        )
+        _write_file(
+            worktree_path / "pnpm-workspace.yaml",
+            f"packages:\n{workspace_pattern_lines}\n",
+        )
+        excluded_project_path = worktree_path / "packages" / "client" / "nested"
+        _write_file(excluded_project_path / "package.json", '{"name":"nested"}\n')
+        _write_file(excluded_project_path / "pnpm-lock.yaml", "lockfileVersion: '9.0'\n")
+
+        install_plan = plan_package_manager(excluded_project_path, worktree_path)
+
+        assert install_plan.is_workspace_member is False
+        assert install_plan.package_manager == "pnpm"
+        assert install_plan.reason != REASON_WORKSPACE_COVERED
+
     def test_workspace_root_itself_is_not_a_member(self, tmp_path: Path) -> None:
         """workspace 根不在成员集合里，它自己需要执行整仓安装。"""
         worktree_path = tmp_path / "worktree"
