@@ -389,8 +389,8 @@ run 详情：`run`、`results`（逐候选执行）、`scores`（逐评审评分
 值守看板（`/app/dashboard/` 默认视图）的任务摘要，只读。**不新增任何存储**：任务身份与标签来自监控快照，运行终态来自运行账本，阶段 / preset / 模型来自 attempt 账本，PRD 关联来自生命周期账本。
 
 - 数据范围严格绑定当前 registry 的启用仓库：账本按 `repo_id` 逐仓库读取，已删除或禁用的仓库即使仍有历史运行行也不会回到看板。
-- 状态分桶由 `agent/*` 标签推导（`agent/review` 与 `agent/ready` 同归 `waiting`）；没有可判定标签时依次回落到「Issue 已关闭」、运行账本终态、`unknown`，未知不折算成零。
-- 分桶顺序为 `running` → `waiting` → `blocked` → `completed` → `unknown`，同状态内按开始时间新者在前。
+- GitHub Issue 为 closed 时优先归入 `closed`，不受残留 `agent/*` 标签影响，也不表示 Agent 已成功完成；open Issue 再按 `agent/*` 标签推导状态（`agent/review` 与 `agent/ready` 同归 `waiting`），没有可判定标签时依次回落到运行账本终态、`unknown`，未知不折算成零。
+- 分桶顺序为 `running` → `blocked` → `waiting` → `completed` → `closed` → `unknown`，同状态内按开始时间新者在前。
 - `duration_seconds` 对运行中的任务由「attempt 开始时间 → 生成时间」推算，是如实的已耗时，不是任何百分比。
 
 ```json
@@ -419,7 +419,7 @@ run 详情：`run`、`results`（逐候选执行）、`scores`（逐评审评分
       "labels": ["agent/running"]
     }
   ],
-  "status_counts": { "running": 1, "waiting": 0, "blocked": 0, "completed": 0, "unknown": 0 },
+  "status_counts": { "running": 1, "waiting": 0, "blocked": 0, "completed": 0, "closed": 0, "unknown": 0 },
   "unavailable_sources": [],
   "missing_repo_ids": [],
   "sync_status": "ready",

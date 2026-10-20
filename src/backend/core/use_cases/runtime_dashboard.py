@@ -48,15 +48,14 @@ _LABEL_STATUS_MAP: dict[str, RuntimeTaskStatus] = {
     "agent/supervising": RuntimeTaskStatus.RUNNING,
     "agent/ready": RuntimeTaskStatus.WAITING,
     "agent/review": RuntimeTaskStatus.WAITING,
+    "agent/automated-review-passed": RuntimeTaskStatus.WAITING,
     "agent/blocked": RuntimeTaskStatus.BLOCKED,
     "agent/failed": RuntimeTaskStatus.BLOCKED,
 }
 
-#: 运行账本 outcome 到分桶的回落映射（快照里没有该 Issue 时才用）。
+#: 运行账本只能证明交付结果；历史失败不能证明 Issue 当前仍然阻塞。
 _OUTCOME_STATUS_MAP: dict[str, RuntimeTaskStatus] = {
     "completed": RuntimeTaskStatus.COMPLETED,
-    "failed": RuntimeTaskStatus.BLOCKED,
-    "blocked": RuntimeTaskStatus.BLOCKED,
 }
 
 #: ``unavailable_sources`` 的取值：前端据此把对应面板标为不可用。
@@ -93,6 +92,12 @@ def parse_runtime_timestamp(value: str | None) -> datetime | None:
     if parsed.utcoffset() is None:
         return parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+def _is_before_runtime_window(started_at: str | None, window_start: datetime) -> bool:
+    """判断账本记录是否早于运行看板的有效时间窗口。"""
+    parsed_started_at = parse_runtime_timestamp(started_at)
+    return parsed_started_at is not None and parsed_started_at < window_start
 
 
 def status_for_labels(labels: Sequence[str]) -> RuntimeTaskStatus | None:
@@ -194,18 +199,20 @@ def _snapshot_task(
     if not isinstance(issue_number, int):
         return None
     labels = tuple(label for label in (issue_entry.get("labels") or ()) if isinstance(label, str))
-    status = status_for_labels(labels)
-    status_reason = "、".join(labels) if labels else None
-    if status is None:
-        if str(issue_entry.get("state") or "").lower() == "closed":
-            status = RuntimeTaskStatus.COMPLETED
-            status_reason = "Issue 已关闭，无 agent/* 标签"
-        elif run_record is not None and run_record.outcome in _OUTCOME_STATUS_MAP:
-            status = _OUTCOME_STATUS_MAP[run_record.outcome]
-            status_reason = f"运行账本终态：{run_record.outcome}"
-        else:
-            status = RuntimeTaskStatus.UNKNOWN
-            status_reason = "监控快照没有可判定的生命周期标签"
+    issue_is_closed = str(issue_entry.get("state") or "").lower() == "closed"
+    if issue_is_closed:
+        status = RuntimeTaskStatus.CLOSED
+        status_reason = "GitHub Issue 已关闭"
+    else:
+        status = status_for_labels(labels)
+        status_reason = "、".join(labels) if labels else None
+        if status is None:
+            if run_record is not None and run_record.outcome in _OUTCOME_STATUS_MAP:
+                status = _OUTCOME_STATUS_MAP[run_record.outcome]
+                status_reason = f"运行账本终态：{run_record.outcome}"
+            else:
+                status = RuntimeTaskStatus.UNKNOWN
+                status_reason = "监控快照没有可判定的生命周期标签"
     if status in {RuntimeTaskStatus.BLOCKED, RuntimeTaskStatus.UNKNOWN}:
         status_reason = _anomaly_reason(issue_entry) or status_reason
 
@@ -243,7 +250,7 @@ def _run_record_task(run_record: RunRecord, prd_path: str | None) -> RuntimeTask
         status_reason=(
             f"运行账本终态：{run_record.outcome}"
             if status is not RuntimeTaskStatus.UNKNOWN
-            else f"运行账本记录了未知终态：{run_record.outcome}"
+            else f"缺少当前 Issue 状态；上次运行结果：{run_record.outcome}"
         ),
         agent=run_record.agent,
         started_at=run_record.started_at,
@@ -431,18 +438,19 @@ def build_runtime_task_summary(
 
     for key, run_record in runs_by_issue.items():
         # 快照里没有、运行账本里有的 Issue：快照过期或已脱离监控标签，
-        # 仍列出并把身份交给账本，未知字段保持未知。
+        # 仍列出最近七天的记录并把身份交给账本，未知字段保持未知。
         if key in seen_keys:
             continue
-        parsed_start = parse_runtime_timestamp(run_record.started_at)
-        if parsed_start is not None and parsed_start < window_start:
+        if _is_before_runtime_window(run_record.started_at, window_start):
             continue
         seen_keys.add(key)
         tasks.append(_run_record_task(run_record, prd_path_by_issue.get(key)))
 
     for key, lifecycle_run in lifecycle_by_issue.items():
-        # 未收口的 lifecycle run：进程还在跑但运行账本没有行，状态必须是 running。
+        # 未收口的近期 lifecycle run 可补充运行账本缺少的任务；旧记录不能永久冒充运行中。
         if key in seen_keys or lifecycle_run.finished_at:
+            continue
+        if _is_before_runtime_window(lifecycle_run.started_at, window_start):
             continue
         seen_keys.add(key)
         tasks.append(_attempt_record_task(lifecycle_run, None))

@@ -16,12 +16,15 @@ import { prettyLabel } from "@/components/agent-runner/label-variant";
 import type { RuntimeTaskEntry, RuntimeTaskStatus } from "@/lib/api/types";
 import { formatLocalDateTime } from "@/lib/utils";
 
+import { RuntimeTaskPhase } from "./runtime-task-phase";
+
 /** 状态分桶的人读文案与配色（唯一事实源，列表/详情/小窗共用）。 */
 const STATUS_PRESENTATION: Record<RuntimeTaskStatus, { label: string; variant: BadgeVariant }> = {
   running: { label: "运行中", variant: "running" },
   waiting: { label: "等待值守", variant: "review" },
   blocked: { label: "阻塞", variant: "error" },
   completed: { label: "已完成", variant: "ready" },
+  closed: { label: "已关闭", variant: "default" },
   unknown: { label: "状态未知", variant: "default" },
 };
 
@@ -31,6 +34,7 @@ const STATUS_FILTERS: RuntimeTaskStatus[] = [
   "blocked",
   "waiting",
   "completed",
+  "closed",
   "unknown",
 ];
 
@@ -280,13 +284,13 @@ function RuntimeTaskRow({
       >
         <span className="flex flex-wrap items-center gap-2">
           <Badge variant={presentation.variant}>{presentation.label}</Badge>
+          <RuntimeTaskPhase phase={task.phase} />
           <span className="font-medium text-slate-900 dark:text-slate-100">{identity}</span>
           <span className="truncate text-slate-600 dark:text-slate-300">
             {task.issue_title ?? "（账本未记录标题）"}
           </span>
         </span>
         <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
-          {task.phase ? <span>阶段：{task.phase}</span> : null}
           {task.agent ? (
             <span>
               执行：{task.agent}

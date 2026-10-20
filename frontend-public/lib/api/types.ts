@@ -1546,6 +1546,7 @@ export type RuntimeTaskStatus =
   | "waiting"
   | "blocked"
   | "completed"
+  | "closed"
   | "unknown";
 
 /**

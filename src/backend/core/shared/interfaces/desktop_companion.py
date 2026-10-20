@@ -1,4 +1,4 @@
-"""可选桌面 companion 的 core 端口与状态语义。
+"""桌面 companion 的 core 端口与状态语义。
 
 Console 面板本身跑在浏览器里，离开浏览器后没有能留在其他桌面应用上方的入口。
 本端口只描述「开启 / 聚焦 / 关闭一个紧凑系统窗口」这件事，**不描述窗口里显示
@@ -20,7 +20,7 @@ class DesktopCompanionStatus(str, Enum):
     """桌面 companion 的可观察状态。
 
     每个状态都要能被前端渲染成一句人话，不允许「静默失败」：``NOT_INSTALLED``
-    与 ``FAILED`` 分开，因为前者提示安装、后者提示重试；``IDLE`` 与
+    与 ``FAILED`` 分开，因为前者提示修复依赖环境、后者提示重试；``IDLE`` 与
     ``RUNNING`` 分开，因为前者是「可以开」，后者是「已经在屏幕上」。
     """
 
@@ -32,7 +32,7 @@ class DesktopCompanionStatus(str, Enum):
     RUNNING = "running"
     #: 没有窗口，但桌面运行时可用、当前平台支持，随时可开。
     IDLE = "idle"
-    #: 桌面运行时未安装：Web 看板继续可用，页面给出安装指引。
+    #: 默认桌面运行时缺失：Web 看板继续可用，页面提示恢复依赖环境。
     NOT_INSTALLED = "not_installed"
     #: 当前平台不支持系统窗口。
     UNSUPPORTED_PLATFORM = "unsupported_platform"
@@ -47,7 +47,7 @@ STATUS_HINTS: dict[DesktopCompanionStatus, str] = {
     DesktopCompanionStatus.RUNNING: "桌面小窗正在运行。",
     DesktopCompanionStatus.IDLE: "桌面小窗未开启。",
     DesktopCompanionStatus.NOT_INSTALLED: (
-        "桌面运行时未安装：安装可选依赖 `kedacode[desktop]` 后可开启小窗，网页看板不受影响。"
+        "桌面运行时缺失：源码环境执行 `uv sync` 并重启 Console，网页看板不受影响。"
     ),
     DesktopCompanionStatus.UNSUPPORTED_PLATFORM: "当前操作系统不支持系统窗口，网页看板不受影响。",
     DesktopCompanionStatus.FAILED: "桌面小窗启动失败，网页看板不受影响；可稍后重试。",

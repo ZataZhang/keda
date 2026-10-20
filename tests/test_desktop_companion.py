@@ -126,7 +126,7 @@ def test_missing_runtime_reports_not_installed_without_spawning(
 
     assert snapshot.status is DesktopCompanionStatus.NOT_INSTALLED
     assert calls == []
-    assert "kedacode[desktop]" in snapshot.hint
+    assert "uv sync" in snapshot.hint
 
 
 def test_close_window_requests_exit_and_returns_idle(

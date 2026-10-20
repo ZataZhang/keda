@@ -258,12 +258,12 @@ test.describe('runtime board (mocked API)', () => {
     await mockBoardApi(page, {
       companion: {
         status: 'not_installed',
-        hint: '桌面运行时未安装：安装可选依赖 `kedacode[desktop]` 后可开启小窗，网页看板不受影响。',
+        hint: '桌面运行时缺失：源码环境执行 `uv sync` 并重启 Console，网页看板不受影响。',
       },
     })
     await page.goto('/app/dashboard')
 
-    await expect(page.getByTestId('dashboard-companion-hint')).toContainText('桌面运行时未安装')
+    await expect(page.getByTestId('dashboard-companion-hint')).toContainText('桌面运行时缺失')
     await expect(page.getByTestId('runtime-task-list')).toBeVisible()
   })
 
@@ -280,6 +280,34 @@ test.describe('runtime board (mocked API)', () => {
 })
 
 test.describe('desktop companion page (mocked API)', () => {
+  test('shows readable stages beside blocked status in a narrow window', async ({ page }) => {
+    await page.setViewportSize({ width: 380, height: 760 })
+    const phases = ['rv_reexec', 'implementation_complete', 'pre_pr_review', null, 'future_phase']
+    await mockBoardApi(page, {
+      tasks: {
+        tasks: phases.map((phase, index) => ({
+          ...RUNNING_TASK,
+          issue_number: 294 + index,
+          task_key: `keda-main#${294 + index}`,
+          status: 'blocked',
+          status_reason: 'agent/blocked',
+          phase,
+          prd_path: null,
+        })),
+      },
+    })
+    await page.goto('/app/companion')
+    const labels = ['提交后验收重跑', '实现完成', 'PR 前审查', '未记录阶段', 'future_phase']
+    for (const [index, label] of labels.entries()) {
+      const row = page.getByTestId(`desktop-companion-row-keda-main-${294 + index}`)
+      await expect(row.getByTestId('runtime-task-phase')).toHaveText(`阶段：${label}`)
+      await expect(row.getByTestId('runtime-task-blocked-reason')).toContainText('agent/blocked')
+    }
+    await expect(page.getByTestId('desktop-companion-list')).toBeVisible()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy()
+    await page.screenshot({ path: '/tmp/keda-runtime-phase-narrow.png', fullPage: true })
+  })
+
   test('lists active tasks compactly and keeps the overflow scrollable', async ({ page }) => {
     const activeTasks = [1, 2, 3, 4, 5].map((index) => ({
       ...RUNNING_TASK,

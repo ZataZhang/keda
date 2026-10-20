@@ -419,13 +419,23 @@ uv run mkdocs build --strict
 - `chat_model.*` — LLM 模型配置（provider、temperature 等）
 - `agent_runner.*` — Agent Runner 完整配置（labels、git、worktree、runner、safety、prompts）
 
-wheel 默认只装轻量核心依赖；以下能力按需安装 extras（源码开发用 `uv sync --all-extras` 一次装齐）：
+默认安装包含 CLI、Console 与桌面小窗运行时；数据库、LLM 和云备份能力按需安装 extras
+（源码开发用 `uv sync --all-extras` 一次装齐）：
 
 ```bash
 uv pip install "kedacode[db]"       # 数据库能力：alembic、psycopg2、pymysql
 uv pip install "kedacode[llm]"      # LLM 能力：langchain-openai / anthropic / core
 uv pip install "kedacode[backup]"   # 云备份：boto3
 ```
+
+`pywebview` 已包含在默认依赖中，Console 看板的「开启独立窗口」会打开一个临时桌面窗口。
+macOS 菜单栏状态面板（点击顶部图标展开，并可固定成悬浮窗）从源码构建：
+
+```bash
+just desktop-install
+```
+
+安装后双击 `~/Applications/KedaCode.app`。该 App 只用于本机自用构建，不签名、不公证、不公开分发。
 
 ## 架构概览
 

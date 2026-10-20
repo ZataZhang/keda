@@ -108,6 +108,7 @@ def test_parse_runtime_timestamp_keeps_unknown_as_none() -> None:
 def test_status_for_labels_picks_the_most_urgent_bucket() -> None:
     """标签切换窗口内同时命中多个标签时，取最需要盯的分桶。"""
     assert status_for_labels(["agent/review"]) is RuntimeTaskStatus.WAITING
+    assert status_for_labels(["agent/automated-review-passed"]) is RuntimeTaskStatus.WAITING
     assert status_for_labels(["documentation", "agent/failed"]) is RuntimeTaskStatus.BLOCKED
     assert status_for_labels(["agent/failed", "agent/running"]) is RuntimeTaskStatus.RUNNING
     assert status_for_labels(["bug"]) is None
@@ -123,7 +124,7 @@ def test_snapshot_labels_drive_status_and_running_duration(tmp_path) -> None:
             _issue(7, labels=["agent/running"], title="正在跑"),
             _issue(6, labels=["agent/ready"]),
             _issue(5, labels=["agent/blocked"], anomaly_types=["stalled"]),
-            _issue(4, labels=[], state="closed", title="已完成"),
+            _issue(4, labels=["agent/blocked"], state="closed", title="已手动关闭"),
         ],
     )
     store.append_attempt(
@@ -156,8 +157,10 @@ def test_snapshot_labels_drive_status_and_running_duration(tmp_path) -> None:
     assert tasks[6].status is RuntimeTaskStatus.WAITING
     assert tasks[5].status is RuntimeTaskStatus.BLOCKED
     assert tasks[5].status_reason == "检测到异常：stalled"
-    assert tasks[4].status is RuntimeTaskStatus.COMPLETED
+    assert tasks[4].status is RuntimeTaskStatus.CLOSED
+    assert tasks[4].status_reason == "GitHub Issue 已关闭"
     assert summary.status_counts["running"] == 1
+    assert summary.status_counts["closed"] == 1
     # 排序把运行中的任务放在最前，值守者不必翻页去找正在跑的东西。
     assert summary.tasks[0].issue_number == 7
 
@@ -189,6 +192,59 @@ def test_run_ledger_fills_issues_the_snapshot_no_longer_lists(tmp_path) -> None:
     assert completed.repo_display_name == "KEDA"
     assert completed.issue_title == "历史任务"
     assert completed.last_outcome == "completed"
+
+
+@pytest.mark.parametrize("outcome", ["failed", "blocked"])
+@pytest.mark.parametrize("snapshot_labels", [None, [], ["agent/automated-review-passed"]])
+def test_historical_failure_does_not_imply_current_blockage(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, outcome: str, snapshot_labels: list[str] | None
+) -> None:
+    """历史失败不冒充当前阻塞；真实队列状态仍由快照标签决定。"""
+    store = _store(tmp_path)
+    _seed_snapshot(
+        store, "keda", [] if snapshot_labels is None else [_issue(278, labels=snapshot_labels)]
+    )
+    store.append_run(
+        RunRecord(
+            repo_id="keda",
+            repo_path="/tmp/keda",
+            issue_number=278,
+            trigger="console_run",
+            agent="qoder",
+            outcome=outcome,
+            error_summary="历史错误",
+            started_at=datetime.now(timezone.utc).isoformat(),
+            finished_at=datetime.now(timezone.utc).isoformat(),
+            duration_seconds=1200.0,
+        )
+    )
+
+    summary = _summary(store, ["keda"])
+    historical_task = summary.tasks[0]
+    expected_status = RuntimeTaskStatus.WAITING if snapshot_labels else RuntimeTaskStatus.UNKNOWN
+    assert historical_task.status is expected_status
+    assert historical_task.last_outcome == outcome
+    assert summary.status_counts["blocked"] == 0
+    if snapshot_labels is None:
+        assert historical_task.status_reason == f"缺少当前 Issue 状态；上次运行结果：{outcome}"
+
+    # 穿过生产 HTTP 路由与 JSON 序列化；仅替换 registry 和存储工厂，SQLite 重新打开读取。
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from backend.api.routes import agent_runner_console_runtime as runtime_routes
+
+    monkeypatch.setattr(runtime_routes, "_enabled_repo_ids", lambda: ["keda"])
+    monkeypatch.setattr(runtime_routes, "create_console_store", lambda: _store(tmp_path))
+    runtime_app = FastAPI()
+    runtime_app.include_router(runtime_routes.router)
+    with TestClient(runtime_app) as runtime_client:
+        runtime_response = runtime_client.get("/agent-runner/console/runtime/tasks")
+    assert runtime_response.status_code == 200
+    runtime_payload = runtime_response.json()
+    assert runtime_payload["status_counts"]["blocked"] == 0
+    assert runtime_payload["tasks"][0]["status"] == expected_status.value
+    assert runtime_payload["tasks"][0]["last_outcome"] == outcome
 
 
 def test_unregistered_repository_history_stays_off_the_board(tmp_path) -> None:

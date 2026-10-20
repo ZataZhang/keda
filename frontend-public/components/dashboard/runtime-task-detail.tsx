@@ -31,6 +31,7 @@ import type {
 } from "@/lib/api/types";
 import { formatLocalDateTime } from "@/lib/utils";
 
+import { runtimePhaseLabel, RuntimeTaskPhase } from "./runtime-task-phase";
 import { runtimeStatusPresentation } from "./runtime-task-list";
 
 /** `worktree_status` 独有原因：`impact_status` 里没有对应取值，只能在这里补。 */
@@ -295,6 +296,7 @@ export function RuntimeTaskDetail({ task }: RuntimeTaskDetailProps) {
         <CardHeader className="pb-2">
           <CardTitle className="flex flex-wrap items-center gap-2 text-sm">
             <Badge variant={presentation.variant}>{presentation.label}</Badge>
+            <RuntimeTaskPhase phase={task.phase} />
             <span>{identity}</span>
             {task.issue_url ? (
               <a
@@ -314,7 +316,7 @@ export function RuntimeTaskDetail({ task }: RuntimeTaskDetailProps) {
         <CardContent className="flex flex-col gap-2 text-xs text-slate-600 dark:text-slate-300">
           <p data-testid="runtime-task-status-reason">分桶依据：{task.status_reason ?? "未提供"}</p>
           <div className="flex flex-wrap gap-x-4 gap-y-1">
-            <span>阶段：{task.phase ?? "未知"}</span>
+            <span>阶段：{runtimePhaseLabel(task.phase)}</span>
             <span>
               执行：{task.agent ?? "未知"}
               {task.preset ? ` · preset ${task.preset}` : ""}

@@ -28,14 +28,16 @@ RUNTIME_TASK_WINDOW_SECONDS = 7 * 24 * 60 * 60
 class RuntimeTaskStatus(str, Enum):
     """Issue Agent 任务在运行看板上的生命周期分桶。
 
-    分桶来源是 Console 已观察到的事实（监控标签与运行账本），不是推测：
-    无法判定时返回 :attr:`UNKNOWN` 并附带原因，而不是猜一个。
+    分桶来源是 Console 已观察到的事实（GitHub Issue 状态、监控标签与运行账本），
+    不是推测：关闭的 Issue 归入 :attr:`CLOSED`；无法判定时返回 :attr:`UNKNOWN`
+    并附带原因，而不是猜一个。
     """
 
     RUNNING = "running"
     WAITING = "waiting"
     BLOCKED = "blocked"
     COMPLETED = "completed"
+    CLOSED = "closed"
     UNKNOWN = "unknown"
 
     @property
@@ -49,7 +51,8 @@ _STATUS_DISPLAY_ORDER: dict["RuntimeTaskStatus", int] = {
     RuntimeTaskStatus.BLOCKED: 1,
     RuntimeTaskStatus.WAITING: 2,
     RuntimeTaskStatus.COMPLETED: 3,
-    RuntimeTaskStatus.UNKNOWN: 4,
+    RuntimeTaskStatus.CLOSED: 4,
+    RuntimeTaskStatus.UNKNOWN: 5,
 }
 
 
