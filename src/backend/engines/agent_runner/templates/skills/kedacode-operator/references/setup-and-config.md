@@ -14,7 +14,7 @@ The user says 「装环境」「初始化仓库」「把这个仓库登记进来
 
 ## Local console
 
-The default `kc console` startup requires the bundled dashboard assets. When a source checkout is missing them, run `just console-sync` from the repository root or install a release wheel that includes the assets. Use `kc console --api-only` only when an API without the web panel is sufficient; `/` will not serve the panel.
+The default `kc console` startup requires complete bundled dashboard assets: the panel is considered ready only when its `index.html` entry file is present, so a missing directory and a half-synced one both fail before anything listens. Run `just console-sync` from the repository root or install a release wheel that includes the assets. Use `kc console --api-only` only when an API without the web panel is sufficient; `/` will not serve the panel.
 
 ## The native executor entry (`kc session`)
 

@@ -463,7 +463,11 @@ jobs:
       - name: Probe the installed console
         run: |
           kc --version
-          kc console --no-browser --port 8899 &
+          # editable 安装只有源码检出，`static/console/` 是 gitignore 的构建产物，
+          # 默认启动会因缺少面板产物按 issue-293 的约定报错退出。本档验证的是
+          # 旧 ambient python 下装出来的 CLI 能否正常起 API，故显式 --api-only，
+          # 面板产物由 real-install 档（内置产物的 wheel）覆盖。
+          kc console --api-only --no-browser --port 8899 &
           for _ in $(seq 1 20); do
             if curl -fsS -o /dev/null "http://127.0.0.1:8899/api/v1/agent-runner/health"; then
               echo "console reachable with a 3.10 ambient python"

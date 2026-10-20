@@ -4132,11 +4132,13 @@ kc console --api-only --no-browser
   显式端口被**非 console** 的服务占用时仍按原样报错退出。
 - 复用现有实例时 `--no-browser` 依旧有效：只打印 URL、不拉起浏览器，适合脚本
   里取 URL 或配合 SSH 端口转发（`ssh -L 8313:127.0.0.1:8313 <host>`）。
-- 源码开发模式缺少静态面板产物时，默认 `kc console` 会在监听前报错退出。
+- 源码开发模式缺少静态面板产物（整个目录不在，或目录在但缺 `index.html`
+  这类只同步了一半的残缺产物）时，默认 `kc console` 会在监听前报错退出。
   在仓库根目录运行 `just console-sync` 构建并同步 `frontend-public` 产物，
-  或安装内置静态产物的发布 wheel。若产物缺失但仍需启动 API，可显式运行
-  `kc console --api-only`；此时服务会正常提供 API，但 `/` 返回 404。产物存在时，
-  该选项仍按默认行为挂载面板。
+  或安装内置静态产物的发布 wheel。若产物不可用但仍需启动 API，可显式运行
+  `kc console --api-only`；此时服务会正常提供 API，但 `/` 返回 404。产物完整时，
+  该选项仍按默认行为挂载面板。库模式（直接 `import backend.api.app` 或自行起
+  uvicorn）不走强校验，只在 import 时记一条 warning。
   前后端并行开发仍可沿用 `just run` / `pnpm --filter frontend-public dev`。
 - 面板与 API 同源，开发代理仅在 `frontend-public dev` 模式生效。
 - 改后端路由后必须**重启** `kc console` 才生效；`just console-sync` 只替换
