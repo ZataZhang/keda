@@ -117,8 +117,9 @@ class DependencyEnvironmentBlockedError(RuntimeError):
     """项目依赖准备需要人类决定时的**可恢复阻塞**。
 
     与 :class:`ForbiddenBlockedError` 同属「等人」而非「执行失败」：
-    ``agent/failed`` 表示 Agent/执行本身失败，而缺主机工具链、缺凭据、需要提权这类
-    环境事实只能由人决定，因此走 ``agent/blocked``（可用 ``kc blocked-continue`` 续）。
+    ``agent/failed`` 表示 Agent/执行本身失败。缺工具只在 Agent 已收到诊断并尝试安全
+    选择、但实际任务仍被该工具阻塞时才升级为人类决定；缺凭据或需提权也走
+    ``agent/blocked``（可用 ``kc blocked-continue`` 续）。
 
     Attributes:
         issue_comment_body: 面向 Issue 的完整 Markdown 说明（诊断 + 可选动作），

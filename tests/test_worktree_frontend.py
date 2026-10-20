@@ -36,7 +36,6 @@ from backend.core.use_cases.worktree_dependency_context import (
     REASON_TOOL_MISSING,
     REASON_WORKSPACE_COVERED,
     USER_ACTION_CREDENTIALS,
-    USER_ACTION_HOST_TOOLCHAIN,
     USER_ACTION_PRIVILEGE,
     DependencyPreparationReport,
     FrontendProjectRecord,
@@ -388,7 +387,7 @@ class TestEnsureFrontendNodeModules:
         assert project_record.outcome == OUTCOME_NOT_PREPARED
         assert project_record.reason == REASON_TOOL_MISSING
         assert project_record.package_manager == "pnpm"
-        assert project_record.requires_user_action == USER_ACTION_HOST_TOOLCHAIN
+        assert project_record.requires_user_action is None
         # 命令计划已结构化记录，但因可执行文件缺失而没有实际运行。
         assert process_runner.calls == []
         assert project_record.attempted_commands == (
@@ -400,7 +399,7 @@ class TestEnsureFrontendNodeModules:
     def test_missing_executable_still_reuses_main_checkout_dependencies(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """装不动但主检出已有依赖时复用之：项目就绪，不再要求人做什么。"""
+        """缺少包管理器时优先复用锁文件匹配的主检出依赖。"""
         _stub_toolchain(monkeypatch, available=False)
         repo_path = tmp_path / "repo"
         worktree_path = tmp_path / "worktree"
@@ -413,8 +412,11 @@ class TestEnsureFrontendNodeModules:
         project_record = _record_for(preparation_report, "frontend")
 
         assert project_record.outcome == OUTCOME_REUSED
+        assert project_record.reason == REASON_NO_ACTION_NEEDED
         assert project_record.has_usable_dependencies is True
         assert project_record.requires_user_action is None
+        assert process_runner.calls == []
+        assert "reused before installation" in project_record.detail
         assert (worktree_path / "frontend" / "node_modules").is_symlink()
         assert preparation_report.linked_relative_paths == [Path("frontend")]
 
@@ -457,10 +459,10 @@ class TestEnsureFrontendNodeModules:
         assert "no node_modules appeared" in project_record.detail
         assert not (worktree_path / "frontend" / "node_modules").exists()
 
-    def test_install_failure_keeps_diagnostics_and_falls_back_to_reuse(
+    def test_matching_main_checkout_dependencies_are_reused_before_install(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """真实安装失败：失败原因与命令都留在记录里，同时回退复用主检出依赖。"""
+        """包管理器可用时也先复用锁文件匹配的依赖，不启动不必要的安装。"""
         _stub_toolchain(monkeypatch, available=True)
         repo_path = tmp_path / "repo"
         worktree_path = tmp_path / "worktree"
@@ -473,11 +475,36 @@ class TestEnsureFrontendNodeModules:
         project_record = _record_for(preparation_report, "frontend")
 
         assert project_record.outcome == OUTCOME_REUSED
+        assert project_record.reason == REASON_NO_ACTION_NEEDED
+        assert process_runner.calls == []
+        assert project_record.exit_code is None
+        assert project_record.attempted_commands == ()
+        assert "reused before installation" in project_record.detail
+        assert project_record.has_usable_dependencies is True
+
+    def test_stale_reuse_does_not_hide_install_failure(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """锁文件漂移时不复用主检出依赖，并保留随后安装失败的诊断。"""
+        _stub_toolchain(monkeypatch, available=True)
+        repo_path = tmp_path / "repo"
+        worktree_path = tmp_path / "worktree"
+        _make_frontend_project(repo_path / "frontend", lockfile_names=("pnpm-lock.yaml",))
+        _write_file(repo_path / "frontend" / "pnpm-lock.yaml", "old-lockfile\n")
+        _write_file(worktree_path / "frontend" / "package.json", "{}\n")
+        _write_file(worktree_path / "frontend" / "pnpm-lock.yaml", "new-lockfile\n")
+        process_runner = _installer_runner(return_code=1, stderr="ERR_PNPM_OUTDATED_LOCKFILE")
+
+        preparation_report = ensure_frontend_node_modules(repo_path, worktree_path, process_runner)
+        project_record = _record_for(preparation_report, "frontend")
+
+        assert project_record.outcome == OUTCOME_NOT_PREPARED
         assert project_record.reason == REASON_INSTALL_FAILED
         assert project_record.exit_code == 1
         assert project_record.attempted_commands == (" ".join(_PNPM_MEMBER_COMMAND),)
         assert "ERR_PNPM_OUTDATED_LOCKFILE" in project_record.detail
-        assert project_record.has_usable_dependencies is True
+        assert "lockfiles differ" in project_record.detail
+        assert not (worktree_path / "frontend" / "node_modules").exists()
 
     def test_privilege_failure_is_flagged_as_human_action(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

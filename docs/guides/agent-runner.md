@@ -1174,11 +1174,13 @@ CI 容器镜像预装浏览器运行时是后续工作；首版只保证本地 r
    - 单一锁文件：按锁文件选择 `pnpm install` / `npm ci` / `yarn install` / `bun install`（均带 `--ignore-scripts`）。
    - workspace 成员：若目录被某个 workspace 根的成员 pattern 覆盖，跳过本地安装（根安装会覆盖它），只记录证据。
    - 冲突：多个锁文件指向不同包管理器，`packageManager` 与锁文件不一致，或 workspace 根与成员声明不一致时**不静默选定**，只记 `manager_conflict` 并保留全部证据。
-2. **安全可行时安装**：包管理器可执行文件不在 PATH 时**不运行任何命令**，直接记 `tool_missing`；运行后非零退出、或退出 0 却没有产出 `node_modules`，都按失败记录（不会伪报安装成功）。
-3. **回退复用主检出依赖**：安装没成时，仅当两棵树的锁文件**内容一致**才把主检出的 `node_modules` 软链进来；锁文件漂移时拒绝复用（避免把过期环境伪装成就绪）。
-4. **记录诊断并继续**：三步都没得到可用依赖时只写记录，**Agent 仍会启动**。
+2. **先复用主检出依赖**：只要两棵树的锁文件**内容一致**，先把主检出的 `node_modules` 软链进 worktree，跳过不必要的安装；锁文件漂移时拒绝复用（避免把过期环境伪装成就绪）。
+3. **无法安全复用时再安装**：包管理器可执行文件不在 PATH 时**不运行任何命令**，直接记 `tool_missing`；运行后非零退出、或退出 0 却没有产出 `node_modules`，都按失败记录（不会伪报安装成功）。
+4. **记录诊断并继续**：复用与安装都没得到可用依赖时只写记录，**Agent 仍会启动**。
 
 诊断落在 worktree 的 `.agent-runner/dependency-preparation.json`（该目录被 runner 写进 gitignore，不会进代码 diff）。每个项目记录 outcome（`installed` / `reused` / `present` / `skipped` / `not_prepared`）、原因码、选择依据、计划或实际执行的命令、退出码与脱敏后的 stderr 片段。即使工具缺失，Agent 也会看到本来准备运行的完整命令及“未执行”的原因。Agent 的 prompt 通过 `{dependency_context_block}` 拿到这份上下文与处置规则：默认由 Agent 自主决定安全的仓库级安装或替代方式，不要求用户预先逐项配置项目工具链。
+
+缺少包管理器本身只记为 `tool_missing`，不标成 `requires_user_action`，也不会在 Agent 启动前要求用户改主机 PATH。Agent 应先判断任务是否真的需要该前端依赖，并自行选择安全的仓库级替代方式；只有执行仍被缺失工具阻塞、且剩余路径需要明确授权时，才把具体选择交给人处理。
 
 行为约束：
 

@@ -37,7 +37,6 @@ from backend.core.use_cases.worktree_dependency_context import (
     REASON_MANAGER_CONFLICT,
     REASON_TOOL_MISSING,
     REASON_WORKSPACE_COVERED,
-    USER_ACTION_HOST_TOOLCHAIN,
     USER_ACTION_CREDENTIALS,
     USER_ACTION_PRIVILEGE,
     DependencyPreparationReport,
@@ -60,7 +59,6 @@ _RECORDS = (
         selection_evidence=("lockfile(s): pnpm-lock.yaml",),
         attempted_commands=("pnpm install --ignore-scripts",),
         exit_code=None,
-        requires_user_action=USER_ACTION_HOST_TOOLCHAIN,
         detail="pnpm is not on PATH",
     ),
     FrontendProjectRecord(
@@ -195,7 +193,7 @@ class TestRenderDependencyContextSection:
         assert render_dependency_context_section(tmp_path) == ""
 
     def test_renders_diagnostics_and_rules(self, tmp_path: Path) -> None:
-        """缺工具的项目带出计划命令、证据与人类决定标记，并附处理规则。"""
+        """缺工具的项目带出计划命令、证据与 Agent 处理规则。"""
         _write_report(tmp_path, _RECORDS)
 
         section_text = render_dependency_context_section(tmp_path)
@@ -204,12 +202,32 @@ class TestRenderDependencyContextSection:
         assert "`frontend` - NOT ready" in section_text
         assert "lockfile(s): pnpm-lock.yaml" in section_text
         assert "planned/attempted commands: pnpm install --ignore-scripts" in section_text
-        assert "needs a human decision (host_toolchain)" in section_text
+        assert "needs a human decision" not in section_text
+        assert "decide the next step autonomously" in section_text
         assert "`frontend-admin` - ready" in section_text
         assert "  - exit code: 0" in section_text
         assert "npm ci --ignore-scripts" in section_text
         assert "Never run ``sudo``" in section_text
         assert "do not mark the task failed for it" in section_text
+
+    def test_missing_tool_is_not_an_upfront_human_decision(self, tmp_path: Path) -> None:
+        """缺失包管理器只作为诊断交给 Agent，不要求用户预先配置主机工具链。"""
+        missing_tool_record = FrontendProjectRecord(
+            project_path="frontend",
+            outcome=OUTCOME_NOT_PREPARED,
+            reason=REASON_TOOL_MISSING,
+            package_manager="pnpm",
+            attempted_commands=("pnpm install --ignore-scripts",),
+            detail="pnpm is not on PATH",
+        )
+        _write_report(tmp_path, (missing_tool_record,))
+
+        section_text = render_dependency_context_section(tmp_path)
+
+        assert "needs a human decision" not in section_text
+        assert "pnpm install --ignore-scripts" in section_text
+        assert "pnpm is not on PATH" in section_text
+        assert "repository-local" in section_text
 
     def test_workspace_member_skip_is_visible(self, tmp_path: Path) -> None:
         """被根 workspace 覆盖的成员也要出现在段落里（Agent 需知道去哪装）。"""
@@ -418,6 +436,8 @@ class TestBuildEnvironmentBlockMessage:
         assert "`frontend`" in message_text
         assert "`frontend-admin`" not in message_text
         assert "Options for the operator" in message_text
+        assert "repository-local alternative" in message_text
+        assert "explicit approval" in message_text
         assert "Root cause: FileNotFoundError: pnpm" in message_text
 
     def test_redacts_credentials_from_root_cause(self) -> None:

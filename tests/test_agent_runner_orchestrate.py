@@ -44,9 +44,9 @@ from backend.core.use_cases.agent_runner_orchestrate import (
 from backend.core.use_cases.worktree_dependency_context import (
     OUTCOME_NOT_PREPARED,
     REASON_TOOL_MISSING,
-    USER_ACTION_HOST_TOOLCHAIN,
     DependencyPreparationReport,
     FrontendProjectRecord,
+    build_environment_block_message,
     write_dependency_preparation_report,
 )
 from backend.infrastructure.process_runner import SubprocessRunner
@@ -480,19 +480,21 @@ def test_mark_issue_blocked_sets_blocked_label() -> None:
 
 
 def _dependency_block_error() -> DependencyEnvironmentBlockedError:
-    """构造一条「缺主机工具链」的依赖环境阻塞。"""
+    """构造一条 Agent 执行触及缺失包管理器后的可恢复阻塞。"""
+    dependency_record = FrontendProjectRecord(
+        project_path="frontend",
+        outcome=OUTCOME_NOT_PREPARED,
+        reason=REASON_TOOL_MISSING,
+        package_manager="pnpm",
+        detail="pnpm is not on PATH",
+    )
     return DependencyEnvironmentBlockedError(
-        "Missing required executable(s): pnpm.",
-        [
-            FrontendProjectRecord(
-                project_path="frontend",
-                outcome=OUTCOME_NOT_PREPARED,
-                reason=REASON_TOOL_MISSING,
-                package_manager="pnpm",
-                requires_user_action=USER_ACTION_HOST_TOOLCHAIN,
-                detail="pnpm is not on PATH",
-            )
-        ],
+        build_environment_block_message(
+            ("pnpm",),
+            (dependency_record,),
+            root_cause="FileNotFoundError: pnpm",
+        ),
+        [dependency_record],
     )
 
 
@@ -518,6 +520,8 @@ def test_mark_issue_blocked_uses_prepared_dependency_comment() -> None:
     assert "## Agent Runner Blocked" in body
     assert "blocked_dependency_environment" in body
     assert "Missing required executable(s): pnpm." in body
+    assert "repository-local alternative" in body
+    assert "explicit approval" in body
     assert "blocked_forbidden" not in body
 
 
@@ -1599,7 +1603,6 @@ def _record_missing_pnpm_worktree(worktree_path: Path) -> None:
                     outcome=OUTCOME_NOT_PREPARED,
                     reason=REASON_TOOL_MISSING,
                     package_manager="pnpm",
-                    requires_user_action=USER_ACTION_HOST_TOOLCHAIN,
                     detail="pnpm is not on PATH",
                 ),
             ),

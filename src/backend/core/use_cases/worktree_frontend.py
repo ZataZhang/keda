@@ -4,8 +4,8 @@
 永远不会出现在新 worktree 里。本模块负责补齐前端依赖，但**绝不**把环境缺口
 变成 Issue 的致命错误：
 
-- 准备只做安全可行的动作：能复用就复用（worktree 内已有依赖、主检出的依赖），
-  装得动就按锁文件装；可执行文件缺失、安装失败、锁文件互相冲突都只记录诊断。
+- 准备只做安全可行的动作：能复用就先复用（worktree 内已有依赖、主检出的依赖），
+  无法复用再按锁文件安装；可执行文件缺失、安装失败、锁文件互相冲突都只记录诊断。
 - 任何失败都不向上抛异常。缺失的工具、选择依据、尝试过的命令、失败原因都写成
   :class:`~backend.core.use_cases.worktree_dependency_context.FrontendProjectRecord`，
   由调用方落盘并作为结构化上下文交给 Agent，由 Agent 自主决定安全的仓库级安装
@@ -30,7 +30,7 @@
   ``--ignore-workspace``：非 workspace 根目录执行 ``pnpm install`` 会去装 workspace
   成员而不是当前目录，且退出码仍为 0——那是「安装成功但依赖缺失」的假绿灯。
 - 安装退出码为 0 但目录里没出现 ``node_modules`` 时不判成功，记
-  ``install_produced_no_dependencies`` 并继续走复用回退。
+  ``install_produced_no_dependencies`` 并保留「复用不可行」的诊断。
 - 复用主检出的 ``node_modules`` 前先比对锁文件内容：不一致说明分支依赖已漂移，
   链接过来会让后续命令在错误环境里运行并伪装成就绪，宁可不复用。
 - worktree 内已存在的 ``node_modules``（目录或符号链接）永不覆盖——对已有
@@ -66,7 +66,6 @@ from backend.core.use_cases.worktree_dependency_context import (
     REASON_REUSABLE_STALE,
     REASON_TOOL_MISSING,
     REASON_WORKSPACE_COVERED,
-    USER_ACTION_HOST_TOOLCHAIN,
     DependencyPreparationReport,
     FrontendProjectRecord,
     classify_user_action_from_failure_text,
@@ -200,11 +199,11 @@ def _try_install_frontend_dependencies(
         return _InstallAttempt(
             succeeded=False,
             reason=REASON_TOOL_MISSING,
-            requires_user_action=USER_ACTION_HOST_TOOLCHAIN,
             attempted_commands=attempted_commands,
             detail=(
                 f"'{install_command[0]}' is not on PATH; Keda does not install host "
-                "toolchains, so the command was never run"
+                "toolchains, so the command was never run. The agent can choose a "
+                "safe repository-local alternative"
             ),
         )
     _logger.info(
@@ -275,7 +274,7 @@ def _lockfiles_match_across_checkouts(
 def _try_reuse_main_checkout_dependencies(
     reuse_target: _ReuseTarget,
 ) -> _ReuseAttempt:
-    """安全可行时复用主检出的 ``node_modules``（零成本回退）。
+    """锁文件一致时优先复用主检出的 ``node_modules``。
 
     只在两棵树的锁文件一致时复用：把漂移过的依赖链进 worktree 会让后续命令在错误的
     环境里运行，并把「缺失」伪装成「就绪」。
@@ -357,41 +356,38 @@ def _prepare_frontend_project(
                 detail="an ancestor workspace install owns this directory's dependencies",
             )
     else:
-        install_attempt = _try_install_frontend_dependencies(
-            preparation_request.project_dir_path,
-            install_plan,
-            preparation_request.process_runner,
+        reuse_attempt = _try_reuse_main_checkout_dependencies(
+            _ReuseTarget(
+                repo_root_path=preparation_request.repo_root_path,
+                project_dir_path=preparation_request.project_dir_path,
+                relative_project_path=preparation_request.relative_project_path,
+            )
         )
-        if install_attempt.succeeded:
+        if reuse_attempt.succeeded:
             project_outcome = _ProjectOutcome(
-                outcome=OUTCOME_INSTALLED,
-                reason="",
-                attempted_commands=install_attempt.attempted_commands,
-                exit_code=install_attempt.exit_code,
+                outcome=OUTCOME_REUSED,
+                reason=REASON_NO_ACTION_NEEDED,
+                detail="matching main checkout dependencies were reused before installation",
             )
         else:
-            reuse_attempt = _try_reuse_main_checkout_dependencies(
-                _ReuseTarget(
-                    repo_root_path=preparation_request.repo_root_path,
-                    project_dir_path=preparation_request.project_dir_path,
-                    relative_project_path=preparation_request.relative_project_path,
-                )
+            install_attempt = _try_install_frontend_dependencies(
+                preparation_request.project_dir_path,
+                install_plan,
+                preparation_request.process_runner,
             )
-            diagnostic_detail = " | ".join(
-                detail_part
-                for detail_part in (install_attempt.detail, reuse_attempt.detail)
-                if detail_part
-            )
-            if reuse_attempt.succeeded:
-                # 依赖已经可用，不再要求人做什么：项目是就绪状态，装不上的原因仍留在 reason/detail。
+            if install_attempt.succeeded:
                 project_outcome = _ProjectOutcome(
-                    outcome=OUTCOME_REUSED,
-                    reason=install_attempt.reason,
+                    outcome=OUTCOME_INSTALLED,
+                    reason="",
                     attempted_commands=install_attempt.attempted_commands,
                     exit_code=install_attempt.exit_code,
-                    detail=diagnostic_detail,
                 )
             else:
+                diagnostic_detail = " | ".join(
+                    detail_part
+                    for detail_part in (install_attempt.detail, reuse_attempt.detail)
+                    if detail_part
+                )
                 project_outcome = _ProjectOutcome(
                     outcome=OUTCOME_NOT_PREPARED,
                     reason=install_attempt.reason or reuse_attempt.reason,
@@ -424,9 +420,9 @@ def ensure_frontend_node_modules(
     ``package.json`` 的目录，对每个尚未拥有 ``node_modules`` 的项目：
 
     1. 识别包管理器（packageManager 字段 + workspace 根配置 + 锁文件；冲突不硬选）。
-    2. 安全可行时执行一次仓库内安装（可执行文件缺失或启动失败只记诊断）。
-    3. 安装没做成时尝试复用主检出的依赖（锁文件一致才复用）。
-    4. 三步都没得到可用依赖时只记录诊断并继续下一个项目——**Agent 仍会启动**，
+    2. 锁文件一致时优先复用主检出的 ``node_modules``，跳过不必要的安装。
+    3. 无法安全复用时，安全可行就尝试一次仓库内安装（可执行文件缺失或启动失败只记诊断）。
+    4. 两种准备方式都没有得到可用依赖时只记录诊断并继续下一个项目——**Agent 仍会启动**，
        由它决定下一步。
 
     worktree 内已有的 ``node_modules`` 永不覆盖。

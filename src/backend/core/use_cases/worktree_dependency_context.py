@@ -60,7 +60,6 @@ REASON_PREPARATION_CRASHED = "preparation_crashed"
 REASON_NO_ACTION_NEEDED = "no_action_needed"
 
 # 需要人来决定的类别：Keda 与 Agent 都不代做这些动作。
-USER_ACTION_HOST_TOOLCHAIN = "host_toolchain"
 USER_ACTION_PRIVILEGE = "privilege"
 USER_ACTION_CREDENTIALS = "credentials"
 
@@ -156,7 +155,7 @@ class DependencyPreparationReport:
 
     @property
     def escalation_requests(self) -> tuple[FrontendProjectRecord, ...]:
-        """需要人类决定的记录（提权 / 主机全局安装 / 凭据）。"""
+        """需要人类决定的记录（提权或凭据）。"""
         return tuple(record for record in self.records if record.requires_user_action)
 
     def to_json_object(self) -> dict[str, object]:
@@ -375,9 +374,12 @@ def render_dependency_context_section(worktree_path: Path) -> str:
         if record.attempted_commands:
             lines.append(f"  - planned/attempted commands: {'; '.join(record.attempted_commands)}")
         else:
-            lines.append(
-                "  - planned/attempted commands: none (no safe install command was selected)"
-            )
+            no_command_reason = {
+                OUTCOME_REUSED: "matching main checkout dependencies were reused before installation",
+                OUTCOME_PRESENT: "the worktree already contained node_modules",
+                OUTCOME_SKIPPED: "an ancestor workspace owns the dependency install",
+            }.get(record.outcome, "no safe install command was selected")
+            lines.append(f"  - planned/attempted commands: none ({no_command_reason})")
         if record.exit_code is not None:
             lines.append(f"  - exit code: {record.exit_code}")
         if record.detail:
@@ -598,10 +600,12 @@ def build_environment_block_message(
         if record.detail:
             lines.append(f"  - diagnostics: {record.detail}")
     lines.extend(("", "Options for the operator:"))
-    if blocked_tools or USER_ACTION_HOST_TOOLCHAIN in action_labels:
+    if blocked_tools:
         lines.append(
-            f"- Install the toolchain on this host so `{', '.join(blocked_tools)}` is on PATH, "
-            "or use a runner environment that provides it."
+            f"- The Agent reached a task command that needs `{', '.join(blocked_tools)}`, "
+            "which is unavailable. First consider a repository-local alternative or "
+            "matching preinstalled dependencies. If the task still requires that tool, "
+            "ask for explicit approval before changing the host toolchain or runner image."
         )
     if USER_ACTION_PRIVILEGE in action_labels:
         lines.append(
@@ -646,7 +650,6 @@ __all__ = [
     "REASON_TOOL_MISSING",
     "REASON_WORKSPACE_COVERED",
     "USER_ACTION_CREDENTIALS",
-    "USER_ACTION_HOST_TOOLCHAIN",
     "USER_ACTION_PRIVILEGE",
     "build_environment_block_message",
     "classify_user_action_from_failure_text",
