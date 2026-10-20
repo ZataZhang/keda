@@ -65,6 +65,7 @@ from backend.core.use_cases.issue_prd_github_link import append_prd_github_link
 from backend.core.use_cases.lifecycle_agent_resolution import parse_prd_lifecycle_overrides
 
 from backend.core.use_cases.create_issue_from_prd_helpers import (
+    ISSUE_LINE_RE as ISSUE_LINE_RE,
     ISSUE_LINK_LINE_RE,
     ISSUE_NUMBER_RE,
     IssueFromPrdRequest,
