@@ -4,7 +4,7 @@
 Issue 的正文就是唯一需求来源，写入 ``- PRD path:`` 会让 runner 去定位一个不存在
 的 PRD 并卡在交付门上。因此这里不复用
 :func:`backend.core.use_cases.generated_content.generate_issue_content`（它硬校验
-锚点*存在*），而是自成一条 ``agent → template → fallback`` 级联，并把校验反向做：
+锚点*存在*），而是复用内部 ``agent → template → fallback`` 级联，并注入相反校验：
 产物出现 PRD 指涉即判为不合格，退回确定性模板。
 """
 
@@ -23,14 +23,8 @@ from backend.core.shared.models.agent_runner import (
 )
 from backend.core.use_cases.agent_runner_feedback import extract_prd_path
 from backend.core.use_cases.generated_content import (
-    _MAX_TITLE_LENGTH,
-    _parse_json_output,
-    _parse_markdown_output,
-    _render_template,
-    _resolve_generation_agent,
-    _run_content_generator,
-    _try_render_templates,
-    _truncate_text,
+    RepositoryContentRequest,
+    _generate_issue_with_fallback,
 )
 
 _logger = logging.getLogger(__name__)
@@ -146,57 +140,11 @@ def generate_issue_prompt_content(
     Returns:
         包含 title、body 和 source 的 ``GeneratedIssueContent`` 实例。
     """
-    target = config.issue_from_prompt
-    if not config.enabled or not target.enabled:
-        return GeneratedIssueContent(title=fallback_title, body=fallback_body, source="fallback")
-
-    generated_title = ""
-    generated_body = ""
-
-    if target.mode == "template":
-        generated_title, generated_body = _try_render_templates(target, context)
-    elif target.mode == "agent" and generator is not None and cwd is not None:
-        agent_name = (
-            model_selection.agent
-            if model_selection is not None
-            else _resolve_generation_agent(
-                target.agent, config.default_agent, override_agent=config.lifecycle_default_agent
-            )
-        )
-        prompt = _render_template(target.prompt, context)
-        prompt = _truncate_text(prompt, config.max_input_chars)
-        output_text = _run_content_generator(
-            generator,
-            agent_name,
-            prompt,
-            cwd,
-            target.timeout_seconds,
-            model_selection=model_selection,
-        )
-        # 与 issue_from_prd 一致：解析方式跟随 target 的 output，配错不会静默退化。
-        if target.output == "json":
-            generated_title, generated_body = _parse_json_output(output_text)
-        else:
-            generated_title, generated_body = _parse_markdown_output(output_text)
-
-    if generated_title:
-        generated_title = generated_title[:_MAX_TITLE_LENGTH]
-    if generated_body:
-        generated_body = generated_body[: config.max_input_chars]
-
-    if generated_title and generated_body and _validate_prompt_body(generated_body):
-        return GeneratedIssueContent(title=generated_title, body=generated_body, source=target.mode)
-
-    if target.mode == "agent" and config.fallback == "template":
-        _logger.warning("issue_from_prompt: agent produced no usable content, rendering templates")
-        generated_title, generated_body = _try_render_templates(target, context)
-        if generated_title:
-            generated_title = generated_title[:_MAX_TITLE_LENGTH]
-        if generated_body:
-            generated_body = generated_body[: config.max_input_chars]
-        if generated_title and generated_body and _validate_prompt_body(generated_body):
-            return GeneratedIssueContent(
-                title=generated_title, body=generated_body, source="template"
-            )
-
-    return GeneratedIssueContent(title=fallback_title, body=fallback_body, source="fallback")
+    return _generate_issue_with_fallback(
+        RepositoryContentRequest(
+            config, config.issue_from_prompt, context, cwd, model_selection, "issue"
+        ),
+        generator,
+        GeneratedIssueContent(title=fallback_title, body=fallback_body, source="fallback"),
+        _validate_prompt_body,
+    )

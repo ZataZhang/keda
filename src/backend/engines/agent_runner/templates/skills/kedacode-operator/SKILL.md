@@ -86,3 +86,7 @@ Whenever the reader of the output is a program rather than a human, pass `--json
 For repository setup, Issue/PRD commands, one-shot runs, viewing and triaging agent output, registry-managed daemons, logs, and shutdown steps, read [`docs/guides/agent-runner.md`](docs/guides/agent-runner.md). In particular, use its daemon lifecycle section before starting persistent processes.
 
 - Draft PR title/body generation defaults to deterministic publication (`generated_content.draft_pr.enabled = false`), with commit facts and tracked validation-report references. Set this target to `enabled = true` to opt into AI writing; this does not change review, validation, verifier, or merge gates. The body itself never establishes PASS. Existing explicit target settings are respected.
+
+## Target repository templates
+
+AI content generation for PRD/prompt Issues and ordinary Draft PRs automatically reads local repository Issue/PR templates (including YAML Issue Forms as Markdown guidance). Template metadata does not change routing. Existing ordinary PRs are reused; preserve template sections and human content in later edits. Disabled/failed AI generation uses the existing deterministic fallback without template guarantees; aggregate PRs and organization-level defaults are outside this support.
