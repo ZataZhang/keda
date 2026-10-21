@@ -1,0 +1,117 @@
+[CHECK] 真实 PRD skill 可供运行器预检: PASS
+== negative control: pre-fix source through real kc run --issue
+[CHECK] 修复前源码已导出: PASS
+BASELINE_KC_OUTPUT_BEGIN
+2026-10-21 12:06:35 - backend.core.use_cases.run_agent_repositories_once - INFO - run_agent_repositories_once.py:101 - Running once for repository 'issue-290-rv' (ad-hoc).
+2026-10-21 12:06:37 - backend.core.use_cases.agent_runner_direct_pr_label - INFO - agent_runner_direct_pr_label.py:258 - Issue #290 publish stage resolved: normal (origin: caller request).
+2026-10-21 12:06:37 - backend.core.use_cases.worktree_frontend - INFO - worktree_frontend.py:153 - Installing frontend dependencies for tools/declared with npm: npm ci --ignore-scripts
+2026-10-21 12:06:38 - backend.core.use_cases.agent_runner_orchestrate - ERROR - agent_runner_orchestration_runtime.py:473 - Failed Issue #290: [Errno 2] No such file or directory: 'npm'
+
+
+BASELINE_KC_OUTPUT_END
+[CHECK] 修复前真实 kc run 返回失败: PASS
+[CHECK] 修复前复现 npm 缺失异常: PASS
+[CHECK] 修复前 Agent 未启动: PASS
+[CHECK] 修复前被标记 agent/failed: PASS
+BASELINE_EXIT: 1
+BASELINE_FAILURE: 2026-10-21 12:06:38 - backend.core.use_cases.agent_runner_orchestrate - ERROR - agent_runner_orchestration_runtime.py:473 - Failed Issue #290: [Errno 2] No such file or directory: 'npm'
+BASELINE_AGENT_STARTED: False
+BASELINE_LABELS: ['agent/failed']
+RESULT: RED AS EXPECTED (dependency preparation failed before agent start)
+== negative control: inject upfront host-toolchain demand into the Agent prompt
+UPFRONT_TOOLCHAIN_NEGATIVE_EXIT: 1
+UPFRONT_TOOLCHAIN_PROMPT_MARKER_PRESENT: True
+UPFRONT_TOOLCHAIN_ORACLE_REJECTED: True
+UPFRONT_TOOLCHAIN_FINAL_LABELS: ['agent/failed']
+[CHECK] 人工作为缺工具前置条件时真实 kc run 失败: PASS
+[CHECK] 故障注入使 Agent 收到错误的人工作为缺工具前置条件: PASS
+[CHECK] 真实入口 oracle 拒绝预先要求用户配置工具链: PASS
+[CHECK] 错误上下文未通过 Agent oracle: PASS
+RESULT: RED AS EXPECTED (Agent prompt oracle rejects upfront host-toolchain demand)
+== negative control: injected reuse miss runs npm before the reuse oracle
+REUSE_NEGATIVE_EXIT: 1
+REUSE_NEGATIVE_OUTCOME: installed
+REUSE_NEGATIVE_ATTEMPTED_COMMANDS: ['npm ci --ignore-scripts']
+REUSE_NEGATIVE_MAIN_MARKER_EXISTS: True
+REUSE_NEGATIVE_WORKTREE_IS_REUSE_LINK: False
+REUSE_NEGATIVE_LABELS: ['agent/failed']
+[CHECK] 注入复用失败后的真实依赖复用 oracle 返回失败: PASS
+[CHECK] 复用失败时真实 npm ci 运行且未复用现有依赖: PASS
+[CHECK] 主检出存在可复用依赖标记: PASS
+[CHECK] 负对照 worktree 由 npm 新装而非复用链接产生: PASS
+[CHECK] 安装优先流程未通过复用 oracle: PASS
+RESULT: RED AS EXPECTED (injected reuse miss ran npm ci instead of reusing matching node_modules)
+== negative control: inject cross-directory matching for workspace '*'
+WORKSPACE_GLOB_NEGATIVE_EXIT: 1
+WORKSPACE_GLOB_NEGATIVE_NESTED_OUTCOME: skipped
+WORKSPACE_GLOB_NEGATIVE_NESTED_REASON: workspace_covered
+WORKSPACE_GLOB_NEGATIVE_AGENT_CHECK: False
+WORKSPACE_GLOB_NEGATIVE_LABELS: ['agent/failed']
+[CHECK] 故障注入使 packages/* 错误覆盖嵌套项目: PASS
+[CHECK] 真实 Agent prompt oracle 检出被错误跳过的嵌套项目: PASS
+[CHECK] 跨层级 glob 故障使真实 kc run 失败: PASS
+[CHECK] 负对照被真实入口标为 agent/failed: PASS
+RESULT: RED AS EXPECTED (workspace '*' incorrectly skipped a nested standalone project)
+== negative control: ignore a matching pnpm workspace exclusion
+WORKSPACE_EXCLUSION_NEGATIVE_EXIT: 1
+WORKSPACE_EXCLUSION_NEGATIVE_OUTCOME: skipped
+WORKSPACE_EXCLUSION_NEGATIVE_REASON: workspace_covered
+WORKSPACE_EXCLUSION_NEGATIVE_AGENT_CHECK: False
+WORKSPACE_EXCLUSION_NEGATIVE_LABELS: ['agent/failed']
+[CHECK] 忽略 pnpm 排除 pattern 时嵌套独立项目被错误跳过: PASS
+[CHECK] 真实 Agent prompt oracle 检出被忽略的排除规则: PASS
+[CHECK] 忽略 workspace 排除规则使真实 kc run 失败: PASS
+[CHECK] 负对照被真实入口标为 agent/failed: PASS
+RESULT: RED AS EXPECTED (pnpm workspace exclusion was ignored)
+== negative control: treat a dangling node_modules link as ready
+DANGLING_NEGATIVE_EXIT: 1
+DANGLING_NEGATIVE_OUTCOME: present
+DANGLING_NEGATIVE_REASON: no_action_needed
+DANGLING_NEGATIVE_AGENT_NPM_CHECK: False
+DANGLING_NEGATIVE_SYMLINK_PRESERVED: True
+DANGLING_NEGATIVE_LABELS: ['agent/failed']
+[CHECK] 负对照复现断链被误报 ready: PASS
+[CHECK] Agent oracle 拒绝缺失的 npm 诊断: PASS
+[CHECK] 断链误报 ready 使真实 kc run 失败: PASS
+[CHECK] 负对照以 agent/failed 收尾: PASS
+RESULT: RED AS EXPECTED (dangling node_modules was reported ready)
+== negative control: omit a pnpm workspace root without package.json
+MANIFESTLESS_WORKSPACE_NEGATIVE_EXIT: 1
+MANIFESTLESS_WORKSPACE_NEGATIVE_ROOT_RECORD: None
+MANIFESTLESS_WORKSPACE_NEGATIVE_AGENT_CHECK: False
+MANIFESTLESS_WORKSPACE_NEGATIVE_LABELS: ['agent/failed']
+[CHECK] 旧扫描逻辑遗漏无 package.json 的 workspace 根: PASS
+[CHECK] 真实 Agent prompt oracle 拒绝缺失 workspace 根诊断: PASS
+[CHECK] 缺失 workspace 根上下文使真实 kc run 失败: PASS
+[CHECK] workspace 根缺工具诊断遗漏被 Agent oracle 标记失败: PASS
+RESULT: RED AS EXPECTED (manifestless pnpm workspace root was omitted)
+== green: real kc run prepares a pnpm workspace without root package.json
+== real kc run: workspace-no-root-manifest
+KC_RUN_EXIT: 1
+AGENT_STARTED: True
+AGENT_INVOCATION_COUNT: 1
+AUXILIARY_EXECUTOR_INVOCATION_COUNT: 0
+AGENT_PROCESSED_CONTEXT: False
+AGENT_DECISION: continue_non_dependency_work
+AGENT_RECORD_COUNT: 2
+FINAL_LABELS: ['agent/failed']
+BLOCK_COMMENT_HAS_REQUIRED_ACTION: False
+PRIVILEGE_FAULT_APPLIED: False
+KC_RUN_OUTPUT_BEGIN
+2026-10-21 12:07:17 - backend.core.use_cases.run_agent_repositories_once - INFO - run_agent_repositories_once.py:101 - Running once for repository 'issue-290-rv' (ad-hoc).
+2026-10-21 12:07:19 - backend.core.use_cases.agent_runner_direct_pr_label - INFO - agent_runner_direct_pr_label.py:258 - Issue #290 publish stage resolved: normal (origin: caller request).
+2026-10-21 12:07:19 - backend.core.use_cases.agent_runner_worktree_create - WARNING - agent_runner_worktree_create.py:297 - Frontend dependencies are not ready for 2 project(s) in worktree /private/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/rv290-real-entry-jszy4c_p/workspace-no-root-manifest/repository/.iar-worktrees/issue-290; diagnostics go to the agent instead of failing the Issue: . (tool_missing), packages/app (workspace_covered)
+2026-10-21 12:07:19 - backend.core.use_cases.run_agent_once - INFO - run_agent_once.py:477 - Starting agent for Issue #290: https://github.com/example/issue-290-rv/issues/290
+2026-10-21 12:07:19 - backend.core.use_cases.agent_invocation_tracing - INFO - agent_invocation_tracing.py:635 - [iar-invocation-start] invocation=inv-cd23535d46a7 run=issue-290-rv#issue-290#20261021T040717Z-62961eaae022 issue=290 attempt=1 phase=implementation role=implementer executor=codex model_requested=未下发 retry_of=- retry_reason=- log=agent-runner/issues/issue-290-rv/issue-290-20261021-120717.log
+[12:07:20] RV_AGENT_ORACLE_FAILED: {"agent_chooses_safe_unrelated_work": true, "agent_invocation_has_prompt": true, "all_prompt_checks_pass": false, "manifestless_pnpm_workspace_root_is_discovered": true, "missing_tool_is_not_human_prerequisite": true, "prompt_has_dependency_context": true, "prompt_says_diagnose_not_fail": true, "report_is_readable": true, "workspace_member_is_covered_by_root": true, "workspace_root_diagnostic_reaches_prompt": true, "workspace_root_install_command_is_planned": true, "workspace_root_lockfile_selects_pnpm": true, "workspace_root_missing_tool_detail_is_recorded": false}
+2026-10-21 12:07:20 - backend.core.use_cases.agent_invocation_tracing - INFO - agent_invocation_tracing.py:760 - [iar-invocation-end] invocation=inv-cd23535d46a7 run=issue-290-rv#issue-290#20261021T040717Z-62961eaae022 issue=290 attempt=1 phase=implementation role=implementer executor=codex outcome=error exit_code=91 duration_s=1.15 model_requested=未下发 model_reported=未提供 model_source=unknown retry_of=- failure_category=nonzero_exit
+2026-10-21 12:07:21 - backend.core.use_cases.agent_runner_issue_handlers - INFO - agent_runner_failure_handoff.py:219 - Issue #290 exhausted recovery without a safely publishable commit; handoff record written, no Draft PR published.
+2026-10-21 12:07:21 - backend.core.use_cases.agent_runner_orchestrate - ERROR - agent_runner_orchestration_runtime.py:505 - Failed Issue #290: Failed after 1 attempts.
+
+
+KC_RUN_OUTPUT_END
+KC_RUN_DIAGNOSTICS: 2026-10-21 12:07:21 - backend.core.use_cases.agent_runner_orchestrate - ERROR - agent_runner_orchestration_runtime.py:505 - Failed Issue #290: Failed after 1 attempts.
+[CHECK] 无根 package.json 的 pnpm workspace 缺工具不阻断真实 kc run: FAIL
+  observed: 1
+RESULT: FAILED (AssertionError: 无根 package.json 的 pnpm workspace 缺工具不阻断真实 kc run)
+FAILED_SCENE_PRESERVED: /var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/rv290-real-entry-jszy4c_p

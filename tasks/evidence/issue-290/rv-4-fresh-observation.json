@@ -1,0 +1,75 @@
+{
+  "verdict": "PASS",
+  "code_commit": "f53b4a0de54bedb10afca160a6b17de0b4a613c5",
+  "src_tree": "78014345ef10cc7c17fbb6bdca853242760f8aed",
+  "observations": {
+    "workspace-no-root-manifest": {
+      "labels": [
+        "agent/supervising"
+      ],
+      "implementer_prompt_checks": true,
+      "records": 2,
+      "root_record": {
+        "project_path": ".",
+        "outcome": "not_prepared",
+        "reason": "tool_missing",
+        "package_manager": "pnpm",
+        "selection_evidence": [
+          "manifest: package.json could not be read: [Errno 2] No such file or directory: '/private/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/rv290-real-entry-rcxmf2ht/workspace-no-root-manifest/repository/.iar-worktrees/issue-290/package.json'",
+          "pnpm-workspace.yaml declares pnpm",
+          "lockfile(s): pnpm-lock.yaml",
+          "this directory is a workspace root (its install covers members)"
+        ],
+        "attempted_commands": [
+          "pnpm install --ignore-scripts"
+        ],
+        "exit_code": null,
+        "requires_user_action": null,
+        "detail": "'pnpm' is not on PATH; Keda does not install host toolchains, so the command was never run. The agent can choose a safe repository-local alternative | main checkout has no node_modules for this project (/private/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/rv290-real-entry-rcxmf2ht/workspace-no-root-manifest/repository)"
+      }
+    },
+    "missing": {
+      "labels": [
+        "agent/supervising"
+      ],
+      "implementer_prompt_checks": true,
+      "records": 8
+    },
+    "dangling-node-modules": {
+      "labels": [
+        "agent/supervising"
+      ],
+      "implementer_prompt_checks": true,
+      "records": 8
+    },
+    "workspace-exclusion": {
+      "labels": [
+        "agent/supervising"
+      ],
+      "implementer_prompt_checks": true,
+      "records": 8
+    },
+    "reuse": {
+      "labels": [
+        "agent/supervising"
+      ],
+      "implementer_prompt_checks": true,
+      "records": 2,
+      "reused_link_ignored_by_git": true
+    },
+    "privilege": {
+      "labels": [
+        "agent/blocked"
+      ],
+      "implementer_prompt_checks": true,
+      "records": 2
+    },
+    "credentials": {
+      "labels": [
+        "agent/blocked"
+      ],
+      "implementer_prompt_checks": true,
+      "records": 1
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "code_commit": "f53b4a0de54bedb10afca160a6b17de0b4a613c5",
+  "src_tree": "78014345ef10cc7c17fbb6bdca853242760f8aed",
+  "script_sha256": {
+    "scripts/rv-1-real-entry.py": "5783ebf68962f7feb7b57036c9fab1e78d066195457ce2e3ba7fc3058d3fdade",
+    "scripts/rv-1-real-entry.sh": "07353f6a8c6267e1a7d5200164b16eddecf6467fa03d29e4958d8eb56b015de3"
+  },
+  "real_entry_log": "rv-1-independent-final-rerun.txt",
+  "real_entry_result": "7 positive + 7 negative controls passed",
+  "fresh_observation": "rv-4-fresh-observation.json"
+}

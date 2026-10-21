@@ -1,0 +1,286 @@
+[CHECK] 真实 PRD skill 可供运行器预检: PASS
+== negative control: pre-fix source through real kc run --issue
+[CHECK] 修复前源码已导出: PASS
+BASELINE_KC_OUTPUT_BEGIN
+2026-10-21 12:07:52 - backend.core.use_cases.run_agent_repositories_once - INFO - run_agent_repositories_once.py:101 - Running once for repository 'issue-290-rv' (ad-hoc).
+2026-10-21 12:07:54 - backend.core.use_cases.agent_runner_direct_pr_label - INFO - agent_runner_direct_pr_label.py:258 - Issue #290 publish stage resolved: normal (origin: caller request).
+2026-10-21 12:07:54 - backend.core.use_cases.worktree_frontend - INFO - worktree_frontend.py:153 - Installing frontend dependencies for tools/declared with npm: npm ci --ignore-scripts
+2026-10-21 12:07:54 - backend.core.use_cases.agent_runner_orchestrate - ERROR - agent_runner_orchestration_runtime.py:473 - Failed Issue #290: [Errno 2] No such file or directory: 'npm'
+
+
+BASELINE_KC_OUTPUT_END
+[CHECK] 修复前真实 kc run 返回失败: PASS
+[CHECK] 修复前复现 npm 缺失异常: PASS
+[CHECK] 修复前 Agent 未启动: PASS
+[CHECK] 修复前被标记 agent/failed: PASS
+BASELINE_EXIT: 1
+BASELINE_FAILURE: 2026-10-21 12:07:54 - backend.core.use_cases.agent_runner_orchestrate - ERROR - agent_runner_orchestration_runtime.py:473 - Failed Issue #290: [Errno 2] No such file or directory: 'npm'
+BASELINE_AGENT_STARTED: False
+BASELINE_LABELS: ['agent/failed']
+RESULT: RED AS EXPECTED (dependency preparation failed before agent start)
+== negative control: inject upfront host-toolchain demand into the Agent prompt
+UPFRONT_TOOLCHAIN_NEGATIVE_EXIT: 1
+UPFRONT_TOOLCHAIN_PROMPT_MARKER_PRESENT: True
+UPFRONT_TOOLCHAIN_ORACLE_REJECTED: True
+UPFRONT_TOOLCHAIN_FINAL_LABELS: ['agent/failed']
+[CHECK] 人工作为缺工具前置条件时真实 kc run 失败: PASS
+[CHECK] 故障注入使 Agent 收到错误的人工作为缺工具前置条件: PASS
+[CHECK] 真实入口 oracle 拒绝预先要求用户配置工具链: PASS
+[CHECK] 错误上下文未通过 Agent oracle: PASS
+RESULT: RED AS EXPECTED (Agent prompt oracle rejects upfront host-toolchain demand)
+== negative control: injected reuse miss runs npm before the reuse oracle
+REUSE_NEGATIVE_EXIT: 1
+REUSE_NEGATIVE_OUTCOME: installed
+REUSE_NEGATIVE_ATTEMPTED_COMMANDS: ['npm ci --ignore-scripts']
+REUSE_NEGATIVE_MAIN_MARKER_EXISTS: True
+REUSE_NEGATIVE_WORKTREE_IS_REUSE_LINK: False
+REUSE_NEGATIVE_LABELS: ['agent/failed']
+[CHECK] 注入复用失败后的真实依赖复用 oracle 返回失败: PASS
+[CHECK] 复用失败时真实 npm ci 运行且未复用现有依赖: PASS
+[CHECK] 主检出存在可复用依赖标记: PASS
+[CHECK] 负对照 worktree 由 npm 新装而非复用链接产生: PASS
+[CHECK] 安装优先流程未通过复用 oracle: PASS
+RESULT: RED AS EXPECTED (injected reuse miss ran npm ci instead of reusing matching node_modules)
+== negative control: inject cross-directory matching for workspace '*'
+WORKSPACE_GLOB_NEGATIVE_EXIT: 1
+WORKSPACE_GLOB_NEGATIVE_NESTED_OUTCOME: skipped
+WORKSPACE_GLOB_NEGATIVE_NESTED_REASON: workspace_covered
+WORKSPACE_GLOB_NEGATIVE_AGENT_CHECK: False
+WORKSPACE_GLOB_NEGATIVE_LABELS: ['agent/failed']
+[CHECK] 故障注入使 packages/* 错误覆盖嵌套项目: PASS
+[CHECK] 真实 Agent prompt oracle 检出被错误跳过的嵌套项目: PASS
+[CHECK] 跨层级 glob 故障使真实 kc run 失败: PASS
+[CHECK] 负对照被真实入口标为 agent/failed: PASS
+RESULT: RED AS EXPECTED (workspace '*' incorrectly skipped a nested standalone project)
+== negative control: ignore a matching pnpm workspace exclusion
+WORKSPACE_EXCLUSION_NEGATIVE_EXIT: 1
+WORKSPACE_EXCLUSION_NEGATIVE_OUTCOME: skipped
+WORKSPACE_EXCLUSION_NEGATIVE_REASON: workspace_covered
+WORKSPACE_EXCLUSION_NEGATIVE_AGENT_CHECK: False
+WORKSPACE_EXCLUSION_NEGATIVE_LABELS: ['agent/failed']
+[CHECK] 忽略 pnpm 排除 pattern 时嵌套独立项目被错误跳过: PASS
+[CHECK] 真实 Agent prompt oracle 检出被忽略的排除规则: PASS
+[CHECK] 忽略 workspace 排除规则使真实 kc run 失败: PASS
+[CHECK] 负对照被真实入口标为 agent/failed: PASS
+RESULT: RED AS EXPECTED (pnpm workspace exclusion was ignored)
+== negative control: treat a dangling node_modules link as ready
+DANGLING_NEGATIVE_EXIT: 1
+DANGLING_NEGATIVE_OUTCOME: present
+DANGLING_NEGATIVE_REASON: no_action_needed
+DANGLING_NEGATIVE_AGENT_NPM_CHECK: False
+DANGLING_NEGATIVE_SYMLINK_PRESERVED: True
+DANGLING_NEGATIVE_LABELS: ['agent/failed']
+[CHECK] 负对照复现断链被误报 ready: PASS
+[CHECK] Agent oracle 拒绝缺失的 npm 诊断: PASS
+[CHECK] 断链误报 ready 使真实 kc run 失败: PASS
+[CHECK] 负对照以 agent/failed 收尾: PASS
+RESULT: RED AS EXPECTED (dangling node_modules was reported ready)
+== negative control: omit a pnpm workspace root without package.json
+MANIFESTLESS_WORKSPACE_NEGATIVE_EXIT: 1
+MANIFESTLESS_WORKSPACE_NEGATIVE_ROOT_RECORD: None
+MANIFESTLESS_WORKSPACE_NEGATIVE_AGENT_CHECK: False
+MANIFESTLESS_WORKSPACE_NEGATIVE_LABELS: ['agent/failed']
+[CHECK] 旧扫描逻辑遗漏无 package.json 的 workspace 根: PASS
+[CHECK] 真实 Agent prompt oracle 拒绝缺失 workspace 根诊断: PASS
+[CHECK] 缺失 workspace 根上下文使真实 kc run 失败: PASS
+[CHECK] workspace 根缺工具诊断遗漏被 Agent oracle 标记失败: PASS
+RESULT: RED AS EXPECTED (manifestless pnpm workspace root was omitted)
+== green: real kc run prepares a pnpm workspace without root package.json
+== real kc run: workspace-no-root-manifest
+KC_RUN_EXIT: 0
+AGENT_STARTED: True
+AGENT_INVOCATION_COUNT: 1
+AUXILIARY_EXECUTOR_INVOCATION_COUNT: 1
+AGENT_PROCESSED_CONTEXT: True
+AGENT_DECISION: continue_non_dependency_work
+AGENT_RECORD_COUNT: 2
+FINAL_LABELS: ['agent/supervising']
+BLOCK_COMMENT_HAS_REQUIRED_ACTION: False
+PRIVILEGE_FAULT_APPLIED: False
+[CHECK] 无根 package.json 的 pnpm workspace 缺工具不阻断真实 kc run: PASS
+[CHECK] Agent 启动并处理无根 package.json 的 workspace 缺工具上下文: PASS
+[CHECK] 无根 package.json 的 workspace 根保留 pnpm 缺失诊断与计划命令: PASS
+[CHECK] Agent prompt 收到无根 package.json 的 workspace 根诊断: PASS
+[CHECK] workspace 根缺少 pnpm 不会误标 agent/failed: PASS
+== green: real kc run --issue with missing tools and manager conflicts
+== real kc run: missing
+KC_RUN_EXIT: 0
+AGENT_STARTED: True
+AGENT_INVOCATION_COUNT: 1
+AUXILIARY_EXECUTOR_INVOCATION_COUNT: 1
+AGENT_PROCESSED_CONTEXT: True
+AGENT_DECISION: continue_non_dependency_work
+AGENT_RECORD_COUNT: 8
+FINAL_LABELS: ['agent/supervising']
+BLOCK_COMMENT_HAS_REQUIRED_ACTION: False
+PRIVILEGE_FAULT_APPLIED: False
+[CHECK] 缺工具诊断被处理后真实 kc run 成功收尾: PASS
+[CHECK] 缺 pnpm/npm 后真实 kc run 仍启动 Agent: PASS
+[CHECK] Agent 处理了包管理器缺失与冲突上下文: PASS
+[CHECK] 缺失包管理器只作为诊断，不要求用户预先配置工具链: PASS
+[CHECK] Agent 选择安全继续不依赖前端包的检查: PASS
+[CHECK] 环境缺口没有被标记为 agent/failed: PASS
+[CHECK] packageManager 字段参与包管理器选择: PASS
+[CHECK] workspace 根/成员与冲突声明均交给 Agent: PASS
+[CHECK] packages/* 未覆盖的嵌套项目保留 pnpm 缺失诊断与计划命令: PASS
+[CHECK] Agent prompt 收到嵌套项目的可恢复缺工具诊断: PASS
+[CHECK] 冲突锁文件没有被静默选定: PASS
+== green: real kc run diagnoses a dangling node_modules link
+== real kc run: dangling-node-modules
+KC_RUN_EXIT: 0
+AGENT_STARTED: True
+AGENT_INVOCATION_COUNT: 1
+AUXILIARY_EXECUTOR_INVOCATION_COUNT: 1
+AGENT_PROCESSED_CONTEXT: True
+AGENT_DECISION: continue_non_dependency_work
+AGENT_RECORD_COUNT: 8
+FINAL_LABELS: ['agent/supervising']
+BLOCK_COMMENT_HAS_REQUIRED_ACTION: False
+PRIVILEGE_FAULT_APPLIED: False
+[CHECK] 断链依赖诊断不阻断真实 kc run: PASS
+[CHECK] 断链依赖场景仍启动 Agent: PASS
+[CHECK] Agent 收到并处理断链与缺失 npm 上下文: PASS
+[CHECK] 断链 node_modules 保留 npm 缺失诊断和计划命令: PASS
+[CHECK] 断链符号链接保持原状，准备器未覆盖 worktree 状态: PASS
+[CHECK] 断链导致的环境诊断没有标记 agent/failed: PASS
+== green: real kc run respects a pnpm workspace exclusion
+== real kc run: workspace-exclusion
+KC_RUN_EXIT: 0
+AGENT_STARTED: True
+AGENT_INVOCATION_COUNT: 1
+AUXILIARY_EXECUTOR_INVOCATION_COUNT: 1
+AGENT_PROCESSED_CONTEXT: True
+AGENT_DECISION: continue_non_dependency_work
+AGENT_RECORD_COUNT: 8
+FINAL_LABELS: ['agent/supervising']
+BLOCK_COMMENT_HAS_REQUIRED_ACTION: False
+PRIVILEGE_FAULT_APPLIED: False
+[CHECK] 排除的嵌套项目不阻断真实 kc run: PASS
+[CHECK] 排除 pattern 场景仍启动 Agent: PASS
+[CHECK] pnpm ! 排除 pattern 不把嵌套独立包判作 workspace 成员: PASS
+[CHECK] 被排除的独立包保留 pnpm 缺工具诊断: PASS
+== green: reuse matching main-checkout node_modules before invoking real npm
+== real kc run: reuse
+KC_RUN_EXIT: 0
+AGENT_STARTED: True
+AGENT_INVOCATION_COUNT: 1
+AUXILIARY_EXECUTOR_INVOCATION_COUNT: 1
+AGENT_PROCESSED_CONTEXT: True
+AGENT_DECISION: continue_with_reused_dependencies
+AGENT_RECORD_COUNT: 2
+FINAL_LABELS: ['agent/supervising']
+BLOCK_COMMENT_HAS_REQUIRED_ACTION: False
+PRIVILEGE_FAULT_APPLIED: False
+[CHECK] 复用现有依赖后真实 kc run 验证通过: PASS
+[CHECK] 安全复用场景仍启动 Agent: PASS
+[CHECK] Agent 收到复用状态和原因: PASS
+[CHECK] Agent 选择使用已复用依赖: PASS
+[CHECK] 存在可复用 node_modules 时未运行安装命令: PASS
+[CHECK] worktree node_modules 是主检出的安全复用链接: PASS
+== green: actual npm install failure with privilege blocker
+== real kc run: privilege
+KC_RUN_EXIT: 1
+AGENT_STARTED: True
+AGENT_INVOCATION_COUNT: 1
+AUXILIARY_EXECUTOR_INVOCATION_COUNT: 0
+AGENT_PROCESSED_CONTEXT: True
+AGENT_DECISION: request_privilege_decision
+AGENT_RECORD_COUNT: 2
+FINAL_LABELS: ['agent/blocked']
+BLOCK_COMMENT_HAS_REQUIRED_ACTION: True
+PRIVILEGE_FAULT_APPLIED: True
+INSTALL_FAILURE: npm error code EACCES npm error syscall mkdir npm error path /private/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/rv290-real-entry-rcxmf2ht/privilege/repository/.iar-worktrees/issue-290/tools/declared/node_modules npm error errno -13 npm error Error: EACCES: permission denied, mkdir '/private/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/rv290-real-entry-rcxmf2ht/privilege/repository/.iar-worktrees/issue-290/tools/declared/node_modules' npm error at async mkdir (node:internal/fs/promises:8…[truncated] | main checkout has no node_modules for this project (/private/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/rv290-real-entry-rcxmf2ht/privilege/repository/tools/declared)
+KC_RUN_OUTPUT_BEGIN
+2026-10-21 12:09:21 - backend.core.use_cases.run_agent_repositories_once - INFO - run_agent_repositories_once.py:101 - Running once for repository 'issue-290-rv' (ad-hoc).
+2026-10-21 12:09:22 - backend.core.use_cases.agent_runner_direct_pr_label - INFO - agent_runner_direct_pr_label.py:258 - Issue #290 publish stage resolved: normal (origin: caller request).
+2026-10-21 12:09:23 - backend.core.use_cases.worktree_frontend - INFO - worktree_frontend.py:210 - Installing frontend dependencies in /private/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/rv290-real-entry-rcxmf2ht/privilege/repository/.iar-worktrees/issue-290/tools/declared: npm ci --ignore-scripts
+2026-10-21 12:09:23 - backend.core.use_cases.agent_runner_worktree_create - WARNING - agent_runner_worktree_create.py:297 - Frontend dependencies are not ready for 2 project(s) in worktree /private/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/rv290-real-entry-rcxmf2ht/privilege/repository/.iar-worktrees/issue-290; diagnostics go to the agent instead of failing the Issue: tools/declared (install_failed), tools/dependency (no_lockfile)
+2026-10-21 12:09:23 - backend.core.use_cases.run_agent_once - INFO - run_agent_once.py:477 - Starting agent for Issue #290: https://github.com/example/issue-290-rv/issues/290
+2026-10-21 12:09:23 - backend.core.use_cases.agent_invocation_tracing - INFO - agent_invocation_tracing.py:635 - [iar-invocation-start] invocation=inv-76712975e350 run=issue-290-rv#issue-290#20261021T040921Z-213f228dcc29 issue=290 attempt=1 phase=implementation role=implementer executor=codex model_requested=未下发 retry_of=- retry_reason=- log=agent-runner/issues/issue-290-rv/issue-290-20261021-120921.log
+[12:09:25] Agent decision for privilege: request_privilege_decision. Stop before changing host permissions or using unprovided credentials.
+2026-10-21 12:09:25 - backend.core.use_cases.agent_invocation_tracing - INFO - agent_invocation_tracing.py:760 - [iar-invocation-end] invocation=inv-76712975e350 run=issue-290-rv#issue-290#20261021T040921Z-213f228dcc29 issue=290 attempt=1 phase=implementation role=implementer executor=codex outcome=ok exit_code=0 duration_s=1.617 model_requested=未下发 model_reported=未提供 model_source=unknown retry_of=- failure_category=-
+2026-10-21 12:09:25 - backend.core.use_cases.run_agent_once - INFO - run_agent_once.py:755 - Agent finished for Issue #290: https://github.com/example/issue-290-rv/issues/290 (exit_code=0)
+2026-10-21 12:09:25 - backend.core.use_cases.agent_runner_issue_handlers - INFO - agent_runner_issue_handlers.py:577 - Checkpointed in-progress work for Issue #290 at 6ac798cf172a3d24aeefd8bcd4106c098da8c34e for the next claim to continue.
+2026-10-21 12:09:25 - backend.core.use_cases.agent_runner_issue_handlers - WARNING - agent_runner_failure_handoff.py:92 - Skipping handoff back-link on the Draft PR for Issue #290: PR context for branch issue-290 is unavailable.
+2026-10-21 12:09:26 - backend.core.use_cases.agent_runner_orchestrate - ERROR - agent_runner_orchestration_runtime.py:450 - Blocked Issue #290: Project dependency preparation needs a human decision.
+Required human action(s): privilege.
+
+Runner diagnostics:
+- `tools/declared`: outcome=not_prepared reason=install_failed manager=npm
+  - evidence: manifest: parsed
+  - evidence: package.json packageManager declares 'npm'
+  - evidence: lockfile(s): package-lock.json
+  - diagnostics: npm error code EACCES npm error syscall mkdir npm error path /private/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/rv290-real-entry-rcxmf2ht/privilege/repository/.iar-worktrees/issue-290/tools/declared/node_modules npm error errno -13 npm error Error: EACCES: permission denied, mkdir '/private/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/rv290-real-entry-rcxmf2ht/privilege/repository/.iar-worktrees/issue-290/tools/declared/node_modules' npm error at async mkdir (node:internal/fs/promises:8…[truncated] | main checkout has no node_modules for this project (/private/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/rv290-real-entry-rcxmf2ht/privilege/repository/tools/declared)
+
+Options for the operator:
+- Use a repository-local or rootless install path, or have an operator adjust the required filesystem permissions.
+- Pre-install the project dependencies in the main checkout so the worktree can reuse them, then resume with `kc blocked-continue`.
+
+Root cause: MaxRetriesExceededError: Failed after 1 attempts.
+
+
+KC_RUN_OUTPUT_END
+KC_RUN_DIAGNOSTICS: 2026-10-21 12:09:26 - backend.core.use_cases.agent_runner_orchestrate - ERROR - agent_runner_orchestration_runtime.py:450 - Blocked Issue #290: Project dependency preparation needs a human decision.
+[CHECK] 真实安装权限失败后仍启动 Agent: PASS
+[CHECK] Agent 收到权限失败诊断: PASS
+[CHECK] Agent 选择请求权限决定而非擅自提权: PASS
+[CHECK] 权限负控只读故障注入已作用于临时项目: PASS
+[CHECK] 安装失败保留原因且不伪报成功: PASS
+[CHECK] 权限失败归类为需要人处理: PASS
+[CHECK] 真实 npm ci 输出保留 EACCES: PASS
+[CHECK] 权限验证失败转为可恢复 blocked: PASS
+[CHECK] Issue 评论给出权限阻塞和选择: PASS
+== green: actual npm registry credential failure
+== real kc run: credentials
+KC_RUN_EXIT: 1
+AGENT_STARTED: True
+AGENT_INVOCATION_COUNT: 1
+AUXILIARY_EXECUTOR_INVOCATION_COUNT: 0
+AGENT_PROCESSED_CONTEXT: True
+AGENT_DECISION: request_credentials
+AGENT_RECORD_COUNT: 1
+FINAL_LABELS: ['agent/blocked']
+BLOCK_COMMENT_HAS_REQUIRED_ACTION: True
+PRIVILEGE_FAULT_APPLIED: False
+INSTALL_FAILURE: npm error code E401 npm error Incorrect or missing password. npm error If you were trying to login, change your password, create an npm error authentication token or enable two-factor authentication then npm error that means you likely typed your password in incorrectly. npm error Please try again, or recover your password at: npm error https://www.npmjs.com/forgot npm error npm error If you were doing some other operation then your saved credentials are npm error probably out of date. To correc…[truncated] | main checkout has no node_modules for this project (/private/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/rv290-real-entry-rcxmf2ht/credentials/repository/tools/declared)
+KC_RUN_OUTPUT_BEGIN
+2026-10-21 12:09:29 - backend.core.use_cases.run_agent_repositories_once - INFO - run_agent_repositories_once.py:101 - Running once for repository 'issue-290-rv' (ad-hoc).
+2026-10-21 12:09:30 - backend.core.use_cases.agent_runner_direct_pr_label - INFO - agent_runner_direct_pr_label.py:258 - Issue #290 publish stage resolved: normal (origin: caller request).
+2026-10-21 12:09:31 - backend.core.use_cases.worktree_frontend - INFO - worktree_frontend.py:210 - Installing frontend dependencies in /private/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/rv290-real-entry-rcxmf2ht/credentials/repository/.iar-worktrees/issue-290/tools/declared: npm ci --ignore-scripts
+2026-10-21 12:09:31 - backend.core.use_cases.agent_runner_worktree_create - WARNING - agent_runner_worktree_create.py:297 - Frontend dependencies are not ready for 1 project(s) in worktree /private/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/rv290-real-entry-rcxmf2ht/credentials/repository/.iar-worktrees/issue-290; diagnostics go to the agent instead of failing the Issue: tools/declared (install_failed)
+2026-10-21 12:09:31 - backend.core.use_cases.run_agent_once - INFO - run_agent_once.py:477 - Starting agent for Issue #290: https://github.com/example/issue-290-rv/issues/290
+2026-10-21 12:09:31 - backend.core.use_cases.agent_invocation_tracing - INFO - agent_invocation_tracing.py:635 - [iar-invocation-start] invocation=inv-010937e23c08 run=issue-290-rv#issue-290#20261021T040929Z-9d2e6bce663f issue=290 attempt=1 phase=implementation role=implementer executor=codex model_requested=未下发 retry_of=- retry_reason=- log=agent-runner/issues/issue-290-rv/issue-290-20261021-120929.log
+[12:09:33] Agent decision for credentials: request_credentials. Stop before changing host permissions or using unprovided credentials.
+2026-10-21 12:09:33 - backend.core.use_cases.agent_invocation_tracing - INFO - agent_invocation_tracing.py:760 - [iar-invocation-end] invocation=inv-010937e23c08 run=issue-290-rv#issue-290#20261021T040929Z-9d2e6bce663f issue=290 attempt=1 phase=implementation role=implementer executor=codex outcome=ok exit_code=0 duration_s=2.019 model_requested=未下发 model_reported=未提供 model_source=unknown retry_of=- failure_category=-
+2026-10-21 12:09:33 - backend.core.use_cases.run_agent_once - INFO - run_agent_once.py:755 - Agent finished for Issue #290: https://github.com/example/issue-290-rv/issues/290 (exit_code=0)
+2026-10-21 12:09:33 - backend.core.use_cases.agent_runner_issue_handlers - INFO - agent_runner_issue_handlers.py:577 - Checkpointed in-progress work for Issue #290 at 944fb4193602761946864edd59f5b0835a4220d1 for the next claim to continue.
+2026-10-21 12:09:34 - backend.core.use_cases.agent_runner_issue_handlers - WARNING - agent_runner_failure_handoff.py:92 - Skipping handoff back-link on the Draft PR for Issue #290: PR context for branch issue-290 is unavailable.
+2026-10-21 12:09:34 - backend.core.use_cases.agent_runner_orchestrate - ERROR - agent_runner_orchestration_runtime.py:450 - Blocked Issue #290: Project dependency preparation needs a human decision.
+Required human action(s): credentials.
+
+Runner diagnostics:
+- `tools/declared`: outcome=not_prepared reason=install_failed manager=npm
+  - evidence: manifest: parsed
+  - evidence: package.json packageManager declares 'npm'
+  - evidence: lockfile(s): package-lock.json
+  - diagnostics: npm error code E401 npm error Incorrect or missing password. npm error If you were trying to login, change your password, create an npm error authentication token or enable two-factor authentication then npm error that means you likely typed your password in incorrectly. npm error Please try again, or recover your password at: npm error https://www.npmjs.com/forgot npm error npm error If you were doing some other operation then your saved credentials are npm error probably out of date. To correc…[truncated] | main checkout has no node_modules for this project (/private/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/rv290-real-entry-rcxmf2ht/credentials/repository/tools/declared)
+
+Options for the operator:
+- Provide the required registry credentials through the runner's secret or environment configuration; do not paste credentials into the Issue.
+- Pre-install the project dependencies in the main checkout so the worktree can reuse them, then resume with `kc blocked-continue`.
+
+Root cause: MaxRetriesExceededError: Failed after 1 attempts.
+
+
+KC_RUN_OUTPUT_END
+KC_RUN_DIAGNOSTICS: 2026-10-21 12:09:34 - backend.core.use_cases.agent_runner_orchestrate - ERROR - agent_runner_orchestration_runtime.py:450 - Blocked Issue #290: Project dependency preparation needs a human decision.
+[CHECK] 真实安装凭据失败后仍启动 Agent: PASS
+[CHECK] Agent 收到凭据失败诊断: PASS
+[CHECK] Agent 选择报告凭据阻塞而非使用未提供的密钥: PASS
+[CHECK] 凭据失败保留原因且不伪报成功: PASS
+[CHECK] 凭据错误归类为需要人处理: PASS
+[CHECK] 真实 npm ci 401 诊断得到保留: PASS
+[CHECK] 凭据验证失败转为可恢复 blocked: PASS
+[CHECK] Issue 评论说明所需凭据选择: PASS
+RESULT: ALL PASS (7 real kc run negative controls + 7 isolated green scenarios)
+SUCCESS_SCENE_PRESERVED: /var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/rv290-real-entry-rcxmf2ht

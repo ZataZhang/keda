@@ -1,0 +1,17 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.13, pytest-9.0.2, pluggy-1.6.0
+testmon: deactivated through --no-testmon
+rootdir: /Users/zata/code/keda/.iar-worktrees/issue-290
+configfile: pyproject.toml
+plugins: anyio-4.12.1, timeout-2.4.0, langsmith-0.6.2, testmon-2.2.0
+collected 162 items
+
+tests/test_worktree_frontend.py ...................................      [ 21%]
+tests/test_worktree_package_manager.py ................                  [ 31%]
+tests/test_worktree_dependency_context.py .............................. [ 50%]
+............                                                             [ 57%]
+tests/test_worktree_cli.py ............                                  [ 64%]
+tests/test_agent_runner_orchestrate.py ................................. [ 85%]
+........................                                                 [100%]
+
+============================= 162 passed in 2.05s ==============================
