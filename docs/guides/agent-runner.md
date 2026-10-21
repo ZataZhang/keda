@@ -1191,17 +1191,17 @@ CI 容器镜像预装浏览器运行时是后续工作；首版只保证本地 r
 
 ## worktree 中的前端依赖（node_modules）
 
-同理，gitignored 的 `node_modules` 也不会被 `git worktree add` 物化，否则 worktree 里跑 `vite` 等构建会报 `vite: command not found`。runner 在补齐 env 文件之后，会对 worktree（而非主仓库）中所有含 `package.json` 的前端项目做**可恢复的准备 + 诊断**：装得上就装，装不上就把证据交给 Agent，绝不因此把 Issue 判为失败。
+同理，gitignored 的 `node_modules` 也不会被 `git worktree add` 物化，否则 worktree 里跑 `vite` 等构建会报 `vite: command not found`。runner 在补齐 env 文件之后，会对 worktree（而非主仓库）中所有含 `package.json` 的前端项目，以及仅由 `pnpm-workspace.yaml` 定义的 workspace 根，做**可恢复的准备 + 诊断**：安全时先复用，无法复用再尝试安装，装不动就把证据交给 Agent，绝不因此把 Issue 判为失败。
 
-1. **识别包管理器**：同时看 `package.json` 的 `packageManager` 字段、workspace 根配置（`pnpm-workspace.yaml` / 根 `package.json` 的 `workspaces`）与锁文件。
+1. **识别包管理器**：同时看 `package.json` 的 `packageManager` 字段、workspace 根配置（`pnpm-workspace.yaml` / 根 `package.json` 的 `workspaces`）与锁文件。`pnpm-workspace.yaml` 本身也表示 pnpm workspace，根目录即使没有 `package.json` 也会扫描并准备。
    - 单一锁文件：按锁文件选择 `pnpm install` / `npm ci` / `yarn install` / `bun install`（均带 `--ignore-scripts`）。
    - workspace 成员：若目录被某个 workspace 根的成员 pattern 覆盖，跳过本地安装（根安装会覆盖它），只记录证据。
-   - 冲突：多个锁文件指向不同包管理器，或 `packageManager` 与锁文件不一致时**不静默选定**，只记 `manager_conflict` 并保留全部证据。
-2. **安全可行时安装**：包管理器可执行文件不在 PATH 时**不运行任何命令**，直接记 `tool_missing`；运行后非零退出、或退出 0 却没有产出 `node_modules`，都按失败记录（不会伪报安装成功）。
-3. **回退复用主检出依赖**：安装没成时，只有两棵树的 `package.json` 与至少一份锁文件都存在且内容一致，才把主检出的 `node_modules` 软链进来；所有已识别锁文件的存在状态和内容也必须一致。缺少锁文件或依赖输入无法核实时拒绝复用，避免把未知环境伪装成就绪。
+   - 冲突：多个锁文件指向不同包管理器、`packageManager` 与锁文件不一致，或 `pnpm-workspace.yaml` 与 npm/yarn/bun 证据冲突时**不静默选定**，只记 `manager_conflict` 并保留全部证据；冲突成员不会被当作已由根安装覆盖。
+2. **优先复用主检出依赖**：仅当两棵树的项目及 workspace 成员 `package.json` 集合和内容、workspace 配置、所有锁文件的存在状态与内容都一致，且至少有一份锁文件时，才把主检出的 `node_modules` 软链进来。无根 `package.json` 的 pnpm workspace 仅在两边 `pnpm-workspace.yaml`、成员 manifest 和根锁文件均一致时复用。缺少或无法核实输入时拒绝复用。
+3. **无法安全复用时安装**：包管理器可执行文件不在 PATH 时不运行命令，但会把计划命令、选择证据和缺失原因记为 `tool_missing`；运行后非零退出、或退出 0 却没有产出 `node_modules`，都按失败记录（不会伪报安装成功）。缺工具属于 Agent 可自主处理的诊断，不要求用户预先安装主机工具链。
 4. **记录诊断并继续**：三步都没得到可用依赖时只写记录，**Agent 仍会启动**。
 
-诊断落在 worktree 的 `.agent-runner/dependency-preparation.json`（该目录被 runner 写进 gitignore，不会进代码 diff）。每个项目记录 outcome（`installed` / `reused` / `present` / `skipped` / `not_prepared`）、原因码、选择依据、尝试过的命令、退出码与脱敏后的 stderr 片段。Agent 的 prompt 通过 `{dependency_context_block}` 拿到这份上下文与处置规则：默认由 Agent 自主决定安全的仓库级安装或替代方式，不要求用户预先逐项配置项目工具链。
+诊断落在 worktree 的 `.agent-runner/dependency-preparation.json`（该目录被 runner 写进 gitignore，不会进代码 diff）。每个项目记录 outcome（`installed` / `reused` / `present` / `skipped` / `not_prepared`）、原因码、选择依据、计划或实际运行的命令、退出码与脱敏后的 stderr 片段。Agent 的 prompt 通过 `{dependency_context_block}` 拿到这份上下文与处置规则：默认由 Agent 自主决定安全的仓库级安装或替代方式，不要求用户预先逐项配置项目工具链。
 
 行为约束：
 
@@ -1210,7 +1210,7 @@ CI 容器镜像预装浏览器运行时是后续工作；首版只保证本地 r
 - 准备流程不会执行 `sudo`、不写主机全局前缀/工具链、不使用未提供的凭据；需要提权、改全局环境或凭据的动作只归类为 `privilege` / `credentials` 并交给人决定
 - 诊断写入、扫描与软链都是 best effort：单个项目失败只记日志，不会中断 agent run
 - 新建、复用或已存在的 `node_modules` 软链都会加入 worktree 的 Git `info/exclude`，避免被 Agent 误提交
-- `agent/failed` 只表示 Agent/执行本身失败：若后续执行失败能被记录在案的缺失可执行文件（或验证命令以 127 / `command not found` 结束）解释，runner 会改判为可恢复的 `agent/blocked` 并发出诊断评论，人处理后用 `kc blocked-continue` 继续；与依赖无关的失败仍按原语义落 `agent/failed`
+- `agent/failed` 只表示 Agent/执行本身失败：若后续命令以 127 / `command not found` 结束，或 Agent attempt 明确报告记录中的缺工具、凭据或权限问题，runner 会改判为可恢复的 `agent/blocked` 并给出诊断；与依赖无关的失败仍按原语义落 `agent/failed`
 
 > 守护进程路径（`kc worktree create` / `kc run`）不读 `WORKTREE_FRONTEND_STRATEGY` 环境变量——该变量只对手动 `just worktree`（`scripts/shared/worktree/create.sh`）生效。daemon 路径固定采用上面的"可恢复准备 + 诊断"策略。
 
