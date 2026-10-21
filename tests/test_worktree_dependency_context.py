@@ -464,7 +464,7 @@ class TestEscalateDependencyEnvironmentFailure:
         assert escalate_dependency_environment_failure(original_error, tmp_path) is original_error
 
     @pytest.mark.parametrize(
-        ("command", "return_code", "stdout", "stderr", "should_block"),
+        "case",
         [
             (
                 ("bash", "-lc", "npm ci --ignore-scripts"),
@@ -487,13 +487,10 @@ class TestEscalateDependencyEnvironmentFailure:
     def test_credential_block_requires_failed_matching_manager_command(
         self,
         tmp_path: Path,
-        command: tuple[str, ...],
-        return_code: int,
-        stdout: str,
-        stderr: str,
-        should_block: bool,
+        case: tuple[tuple[str, ...], int, str, str, bool],
     ) -> None:
         """凭据阻塞需由非零退出的匹配 npm 命令触发，而非输出里的子串。"""
+        command, return_code, stdout, stderr, should_block = case
         credential_record = FrontendProjectRecord(
             project_path="frontend",
             outcome=OUTCOME_NOT_PREPARED,
