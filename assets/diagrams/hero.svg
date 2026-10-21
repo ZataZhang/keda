@@ -8,32 +8,17 @@
       <stop offset="0%" stop-color="#60a5fa"/>
       <stop offset="100%" stop-color="#a78bfa"/>
     </linearGradient>
-    <linearGradient id="layer1" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#3b82f6"/>
-      <stop offset="100%" stop-color="#06b6d4"/>
-    </linearGradient>
-    <linearGradient id="layer2" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#8b5cf6"/>
-      <stop offset="100%" stop-color="#d946ef"/>
-    </linearGradient>
-    <linearGradient id="layer3" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#10b981"/>
-      <stop offset="100%" stop-color="#84cc16"/>
-    </linearGradient>
-    <linearGradient id="layer4" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#f59e0b"/>
-      <stop offset="100%" stop-color="#ef4444"/>
-    </linearGradient>
   </defs>
 
   <rect width="960" height="220" fill="url(#heroBg)" rx="14"/>
 
-  <!-- Logo mark: stacked layers forming a stylized K -->
-  <g transform="translate(60, 50)">
-    <rect x="0"  y="0"   width="120" height="22" rx="4" fill="url(#layer1)"/>
-    <rect x="14" y="30"  width="92"  height="22" rx="4" fill="url(#layer2)"/>
-    <rect x="28" y="60"  width="64"  height="22" rx="4" fill="url(#layer3)"/>
-    <rect x="42" y="90"  width="36"  height="22" rx="4" fill="url(#layer4)"/>
+  <!-- Logo mark: KedaCode app icon (desktop/src-tauri/icons/keda.svg) -->
+  <g transform="translate(60, 40) scale(0.1171875)">
+    <rect width="1024" height="1024" rx="208" fill="#111111"/>
+    <g fill="none" stroke="#dededb" stroke-width="48">
+      <path d="M570 290H410c-66 0-120 54-120 120v204c0 66 54 120 120 120h204c66 0 120-54 120-120V454"/>
+      <path d="M469 567V459h108" stroke-linejoin="round"/>
+    </g>
   </g>
 
   <!-- Wordmark -->
