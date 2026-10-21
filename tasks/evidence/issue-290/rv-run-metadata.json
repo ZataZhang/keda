@@ -7,5 +7,9 @@
   },
   "real_entry_log": "rv-1-independent-final-rerun.txt",
   "real_entry_result": "7 positive + 7 negative controls passed",
-  "fresh_observation": "rv-4-fresh-observation.json"
+  "fresh_observation": "rv-4-fresh-observation.json",
+  "final_code_commit": "9b19ad3d74f94a1a17541fbca3ed6ae41f42dba0",
+  "tests_tree": "7fa3bfa54c4f27193d125557b9d897301cfa8e26",
+  "test_split_ast_unchanged": true,
+  "final_local_gate": "rv-7-final-local-gate.txt"
 }

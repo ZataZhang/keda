@@ -12,7 +12,7 @@
         "rv-3-independent-orchestrate.txt",
         "rv-4-fresh-observation.json"
       ],
-      "output_summary": "f53b4a0d 最终实现的真实 CLI 7 正例和 7 负控全部通过；主审独立定向测试 105+57=162 passed。新进程回读 7 正例落盘状态，确认根缺 pnpm 诊断/计划命令到达执行器且不要求预装主机工具链，真实 npm 权限/401 安装失败保持 not_prepared 并进入 agent/blocked，复用链接有效且被 Git 忽略。src tree=78014345ef10cc7c17fbb6bdca853242760f8aed；tests tree=af9b97fb7752068eab80bc163eddf99dfb291e8f。",
+      "output_summary": "f53b4a0d 最终实现的真实 CLI 7 正例和 7 负控全部通过；主审独立定向测试 105+57=162 passed。新进程回读 7 正例落盘状态，确认根缺 pnpm 诊断/计划命令到达执行器且不要求预装主机工具链，真实 npm 权限/401 安装失败保持 not_prepared 并进入 agent/blocked，复用链接有效且被 Git 忽略。src tree=78014345ef10cc7c17fbb6bdca853242760f8aed；tests tree=7fa3bfa54c4f27193d125557b9d897301cfa8e26。",
       "explanation": "执行真实 kc run --issue，穿过生产配置、runner 装配、worktree、依赖准备、subprocess、prompt 和状态更新边界。覆盖无根 package.json 的 pnpm workspace、成员/排除与 npm/pnpm 冲突证据、断链诊断、先复用后安装、安装失败不伪报成功、权限和凭据阻塞。新进程读取报告和执行器探针并通过真实 Git 检查链接状态。",
       "risks": "GitHub 与模型执行器为隔离替身，不能证明真实模型必然自主采取同一动作；权限是真实临时目录限制，凭据通过真实 npm 和本地 401 registry 验证，无线上 registry 或真实 GitHub 测试写入。原始日志和脚本在 iar-evidence/issue-290-manual-20261021 分支，代码分支仅保留报告及此既有跟踪清单的更新。",
       "negative_control": "同一 command 自动执行 7 个负控；原始缺 npm 行为固定到 #295 之前的 e687f44b987a9404def52dc42a7df81725ba3fb2；其他故障只改临时源码副本，未在 src 增加故障开关。",

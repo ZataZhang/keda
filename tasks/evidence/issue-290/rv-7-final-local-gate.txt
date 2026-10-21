@@ -1,0 +1,7 @@
+🔍 Running full lint checks...
+✅ Lint passed. Proceeding to tests...
+........................................................................ [ 69%]
+................................                                         [100%]
+104 passed in 7.48s
+✅ just test flag updated: issue-290 @ f53b4a0de54bedb10afca160a6b17de0b4a613c5
+✅ just lint --full flag updated: issue-290 @ f53b4a0de54bedb10afca160a6b17de0b4a613c5
