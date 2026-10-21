@@ -37,7 +37,17 @@
         { id: 'lifecycle-agent-matrix', label: '查看生命周期执行器与模型设置' },
         { id: 'blocked-draft-pr-surface', label: '查看验证失败后的 Issue 交接与 Draft PR' },
         { id: 'verifier-human-takeover', label: '查看 Dashboard 上的 verifier 接管流程' },
+        { id: 'm13-keda-vs-claude-paired-evaluation', label: '查看 Keda 工作流与 Claude 单次执行的配对结果目标图' },
       ],
+    },
+    {
+      id: 'm13-keda-vs-claude-paired-evaluation', title: 'Keda 工作流与 Claude 单次执行配对评测', project: 'keda', module: 'Agent Runner / Model Evaluation',
+      system: 'Keda Console', form: 'image-state', version: 'v1.0', updatedAt: '2026-10-19', availability: 'available', validationLevel: '设计意图（静态目标图）',
+      primaryFlow: '在同一题详情里并列查看 Claude 单次执行与 Keda 工作流的重复通过情况、阶段、耗时和调用次数',
+      description: 'M13 配对评测详情页的单张静态目标图，展示 direct 与 Keda 两组重复结果。示例数据只表达目标信息结构；没有交互，不连接 API、SQLite 或 Agent，也不是生产页面验证证据。',
+      preview: './assets/keda-vs-claude-paired-evaluation.svg', entry: './assets/keda-vs-claude-paired-evaluation.svg', source: './assets/keda-vs-claude-paired-evaluation.source.md',
+      provenance: ['./assets/keda-vs-claude-paired-evaluation.source.md'],
+      relationships: [{ id: 'prd-lifecycle-observability', label: '查看现有 Console 模型评测入口与页面结构' }],
     },
     {
       id: 'roadmap-cicd-repair', title: 'CI/CD 监控与自动修复', project: 'keda', module: 'Backlog',
@@ -137,7 +147,9 @@
         : `<span class="related-unavailable">${escapeHtml(relatedPrototype.title)}（暂不可用）</span>`}<small>${escapeHtml(relationship.label)}</small></li>`;
     }).join('');
     const provenanceMarkup = (prototype.provenance ?? []).map((sidecarPath) => {
-      const sidecarName = `${sidecarPath.replace(/\/$/, '').split('/').pop()}.md`;
+      const sidecarName = sidecarPath.endsWith('.md')
+        ? sidecarPath.split('/').pop()
+        : sidecarPath.replace(/\/$/, '').split('/').pop() + '.md';
       return `<a href="${escapeHtml(sidecarPath)}" target="_blank" rel="noreferrer">${escapeHtml(sidecarName)}</a>`;
     }).join('');
     elements.detail.innerHTML = `

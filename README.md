@@ -18,8 +18,6 @@
 >
 > 装什么、敲什么：`uv tool install kedacode` 之后主命令是 `kc`，也可以直接敲包名 `kedacode`（两者完全等价，见下方安装一节）；不想安装时可用 `uvx --from kedacode kc <命令>` 临时运行。从旧版 IAR 升级的迁移步骤见 `docs/guides/migrating-from-iar.md`。
 >
-> 仓库同时是一套可复用的 Python 工程骨架——Clean Architecture 四层依赖由 pre-commit 强制校验，配套 worktree 脚本、PRD 驱动流程与 `just` 工具链，可以整体拿去起新项目。
->
 > 注：本仓库与 CNCF 毕业项目 KEDA（keda.sh，Kubernetes 事件驱动自动扩缩）无关。
 
 <p align="center">
@@ -77,7 +75,9 @@ uv tool install kedacode      # 推荐：uv 隔离环境，Windows 原生可用
 pipx install kedacode
 ```
 
-`uv tool install` 不会自动配置 shell 补全。在 bash、zsh 或 fish 中，若尚未配置，首次在交互式终端运行 `kc` 时会显示选择菜单，默认选中安装；选择安装后本次命令会先退出，提示重载 shell，再重新运行刚才的 `kc` 命令。也可以按所用 shell 执行一次 `kc completion install --shell <bash|zsh|fish>`（选择其中一个）。详细步骤见下方「安装 shell 自动补全」。
+`uv tool install` 不会自动配置 shell 补全。在 bash、zsh 或 fish 中，若尚未配置，首次在交互式终端运行 `kc` 时会显示选择菜单，默认选中安装；选择安装后本次命令会先退出，提示重载 shell，再重新运行刚才的 `kc` 命令。macOS 若也尚未安装菜单栏 App，会先显示一个独立的 App 安装菜单。也可以按所用 shell 执行一次 `kc completion install --shell <bash|zsh|fish>`（选择其中一个）。详细步骤见下方「安装 shell 自动补全」。
+
+macOS 用户首次交互运行 `kc` 时，如果尚未安装菜单栏 App，还会看到一次可选的 App 安装菜单；它和补全设置是两次独立选择，安装不会替换 `uv` 管理的 CLI。之后也可执行 `kc desktop install`，完整说明见[安装指南](docs/getting-started/installation.md#macos-菜单栏-app-可选)。
 
 **install.sh（自动选择 `uv` / `pipx` / `pip --user`，零 sudo，失败有明确提示）：**
 
@@ -421,13 +421,23 @@ uv run mkdocs build --strict
 - `chat_model.*` — LLM 模型配置（provider、temperature 等）
 - `agent_runner.*` — Agent Runner 完整配置（labels、git、worktree、runner、safety、prompts）
 
-wheel 默认只装轻量核心依赖；以下能力按需安装 extras（源码开发用 `uv sync --all-extras` 一次装齐）：
+默认安装包含 CLI、Console 与桌面小窗运行时；数据库、LLM 和云备份能力按需安装 extras
+（源码开发用 `uv sync --all-extras` 一次装齐）：
 
 ```bash
 uv pip install "kedacode[db]"       # 数据库能力：alembic、psycopg2、pymysql
 uv pip install "kedacode[llm]"      # LLM 能力：langchain-openai / anthropic / core
 uv pip install "kedacode[backup]"   # 云备份：boto3
 ```
+
+`pywebview` 已包含在默认依赖中，Console 看板的「开启独立窗口」会打开一个临时桌面窗口。
+macOS 菜单栏状态面板（点击顶部图标展开，并可固定成悬浮窗）从源码构建：
+
+```bash
+just desktop-install
+```
+
+安装后双击 `~/Applications/KedaCode.app`。该 App 只用于本机自用构建，不签名、不公证、不公开分发。
 
 ## 架构概览
 
@@ -446,6 +456,10 @@ src/backend/
 ```
 
 依赖方向严格向下：`api → core → engines → infrastructure`，由 `hooks/shared/check_architecture.py` 在 pre-commit 强制校验。
+
+### 作为工程骨架复用
+
+除 `kc` 本身外，仓库也是一套可整体拿去起新项目的 Python 工程骨架：四层依赖由 pre-commit 强制校验，配套 worktree 脚本、PRD 驱动流程与 `just` 工具链。`scripts/shared/`、`hooks/shared/`、`docs/ai-standards/` 等由上游模板仓 [`zata-codes-template`](https://github.com/ZataZhang/zata-codes-template) 同步维护，下游项目不要手改。只想使用 `kc` 的读者可以跳过本节。
 
 ## Docker 部署
 

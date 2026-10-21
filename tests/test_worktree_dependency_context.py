@@ -463,6 +463,63 @@ class TestEscalateDependencyEnvironmentFailure:
 
         assert escalate_dependency_environment_failure(original_error, tmp_path) is original_error
 
+    @pytest.mark.parametrize(
+        ("command", "return_code", "stdout", "stderr", "should_block"),
+        [
+            (
+                ("bash", "-lc", "npm ci --ignore-scripts"),
+                1,
+                "",
+                "npm ERR! code E401 Unauthorized",
+                True,
+            ),
+            (("pnpm", "test"), 1, "", "E401 Unauthorized", False),
+            (("bash", "-lc", "pytest tests/test_npm_auth.py"), 1, "", "E401", False),
+            (("npm", "ci"), 0, "npm WARN E401 Unauthorized", "", False),
+        ],
+        ids=(
+            "shell-wrapped-npm-failure",
+            "pnpm-is-not-npm",
+            "test-path-is-not-npm",
+            "successful-npm",
+        ),
+    )
+    def test_credential_block_requires_failed_matching_manager_command(
+        self,
+        tmp_path: Path,
+        command: tuple[str, ...],
+        return_code: int,
+        stdout: str,
+        stderr: str,
+        should_block: bool,
+    ) -> None:
+        """凭据阻塞需由非零退出的匹配 npm 命令触发，而非输出里的子串。"""
+        credential_record = FrontendProjectRecord(
+            project_path="frontend",
+            outcome=OUTCOME_NOT_PREPARED,
+            reason=REASON_INSTALL_FAILED,
+            package_manager="npm",
+            requires_user_action=USER_ACTION_CREDENTIALS,
+        )
+        _write_report(tmp_path, (credential_record,))
+        original_error = VerificationFailedError(
+            [
+                CommandResult(
+                    command=command,
+                    return_code=return_code,
+                    stdout=stdout,
+                    stderr=stderr,
+                )
+            ]
+        )
+
+        escalated_error = escalate_dependency_environment_failure(original_error, tmp_path)
+
+        if should_block:
+            assert isinstance(escalated_error, DependencyEnvironmentBlockedError)
+        else:
+            assert escalated_error is original_error
+
     def test_tool_that_got_usable_dependencies_is_not_blamed(self, tmp_path: Path) -> None:
         """工具虽曾缺失、但已复用主检出依赖时，失败仍是执行失败。"""
         resolved_record = FrontendProjectRecord(

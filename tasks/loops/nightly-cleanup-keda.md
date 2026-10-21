@@ -8,9 +8,11 @@ agent: auto
 labels:
   - loop/cleanup
 publish_prd: true
+output: prd
 queue_ready: true
 run_now: true
 timezone: Asia/Shanghai
+managed_by: agent-daemon
 slug: nightly-cleanup-keda
 # pre_command uses a single-line shell command; the simple-YAML frontmatter parser
 # does not support `|` block scalars. Use `;` to chain so both KEY=value lines

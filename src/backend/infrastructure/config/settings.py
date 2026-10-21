@@ -6,6 +6,7 @@
 3. 代码中的默认值
 """
 
+import logging
 import os
 from pathlib import Path
 from urllib.parse import quote_plus
@@ -14,6 +15,7 @@ from pydantic import (
     Field,
     SecretStr,
     field_validator,
+    model_validator,
 )
 from pydantic_settings import (
     BaseSettings,
@@ -86,6 +88,8 @@ from backend.infrastructure.config.settings_sources import (
 
 #: 日志保留天数默认值：与既有硬编码保持一致，未配置时行为不变。
 _DEFAULT_LOG_RETENTION_DAYS = 14
+
+_logger = logging.getLogger(__name__)
 
 
 class DatabaseSettings(BaseSettings):
@@ -300,6 +304,20 @@ class AgentRunnerSettings(BaseSettings):
     # 内置默认在 core.shared.models.agent_spec.BUILTIN_AGENT_SPECS；
     # 此处只存显式声明，逐字段覆盖内置值（见 factory_config_builder）。
     agents: dict[str, AgentRunnerAgentSettings] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _warn_reclaim_ttl_not_above_agent_timeout(self) -> "AgentRunnerSettings":
+        """claim 老化阈值不大于 agent 超时会把仍在正常运行的 attempt 误回收，仅告警不拒载。"""
+        reclaim_ttl_seconds = self.daemon.reclaim_ttl_seconds
+        agent_timeout_seconds = self.runner.timeout_seconds
+        if self.daemon.reconcile_stale_attempts and reclaim_ttl_seconds <= agent_timeout_seconds:
+            _logger.warning(
+                "daemon.reclaim_ttl_seconds=%d 不大于 runner.timeout_seconds=%d：运行时间超过 TTL "
+                "的 attempt 会被对账按 ttl_expired 误回收，请把 TTL 调到超时之上。",
+                reclaim_ttl_seconds,
+                agent_timeout_seconds,
+            )
+        return self
 
     @classmethod
     def settings_customise_sources(

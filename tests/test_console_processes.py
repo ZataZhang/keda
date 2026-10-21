@@ -521,7 +521,7 @@ def test_list_unmanaged_processes_skips_managed_pids(
     managed_record = supervisor.spawn(
         repo_id="keda-main",
         kind=RunnerProcessKind.DAEMON,
-        argv=fake_cmdline,
+        argv=_sleeper_argv(),
         cwd=tmp_path,
     )
     # Force the managed record to use the same pid as the fake scanner.
@@ -534,6 +534,7 @@ def test_list_unmanaged_processes_skips_managed_pids(
     registry_entries = [type("_Entry", (), {"repo_id": "keda-main", "path": str(tmp_path)})()]
     unmanaged = supervisor.list_unmanaged_processes(registry_entries)
     assert unmanaged == []
+    supervisor.stop(managed_record.process_id, timeout_seconds=5)
 
 
 def test_list_unmanaged_processes_reports_unmanaged_by_repo_id(

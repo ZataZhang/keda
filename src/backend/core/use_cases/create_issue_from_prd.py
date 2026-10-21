@@ -27,8 +27,8 @@ from __future__ import annotations
 
 import json
 import logging
-import re
-from dataclasses import dataclass, replace
+from collections.abc import Mapping
+from dataclasses import replace
 from pathlib import Path
 
 from backend.core.shared.interfaces.agent_runner import (
@@ -36,15 +36,15 @@ from backend.core.shared.interfaces.agent_runner import (
     IGitHubClient,
     IProcessRunner,
 )
-from backend.core.shared.models.agent_model_preset import ModelSelection
 from backend.core.shared.models.agent_runner import (
-    DEFAULT_VALIDATION_EVIDENCE_DIR,
-    GeneratedContentConfig,
     LabelConfig,
     evidence_dir_uses_task_subdirs,
 )
-from backend.core.shared.models.agent_spec import AGENT_PROFILE_GENERATE, BUILTIN_AGENT_SPECS
-from backend.core.shared.priority import priority_from_prd_filename
+from backend.core.shared.models.agent_spec import (
+    AGENT_PROFILE_GENERATE,
+    BUILTIN_AGENT_SPECS,
+    AgentSpec,
+)
 from backend.core.use_cases.agent_runner_dependencies import (
     format_dependency_marker,
     parse_dependency_marker,
@@ -59,518 +59,31 @@ from backend.core.use_cases.agent_runner_validation import (
 )
 from backend.core.use_cases.generated_content import (
     build_issue_context,
-    extract_first_h2_section,
-    extract_prd_section,
     generate_issue_content,
 )
-from backend.core.use_cases.issue_labels import apply_routing_labels
 from backend.core.use_cases.issue_prd_github_link import append_prd_github_link
 from backend.core.use_cases.lifecycle_agent_resolution import parse_prd_lifecycle_overrides
 
+from backend.core.use_cases.create_issue_from_prd_helpers import (
+    ISSUE_LINE_RE as ISSUE_LINE_RE,
+    ISSUE_LINK_LINE_RE,
+    ISSUE_NUMBER_RE,
+    IssueFromPrdRequest,
+    PrdPublishContext,
+    build_issue_body,
+    build_issue_labels,
+    current_git_branch,
+    extract_acceptance_items,
+    extract_title,
+    parse_issue_number,
+    publish_prd_file,
+    resolve_prd_paths,
+    validate_ready_publish_branch,
+    validate_staged_changes_are_prd_only,
+    write_issue_link,
+)  # noqa: F401  # 保留既有 use case 导入路径
+
 _logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# 正则表达式：PRD 元数据解析
-# ---------------------------------------------------------------------------
-
-# 定位 "- GitHub Issue:" 元数据行（不校验值），用于创建 Issue 后替换该行。
-# 值可能是真实 Issue URL，也可能是 "(待创建)"、"(to be created)" 等占位符。
-ISSUE_LINE_RE = re.compile(r"^- GitHub Issue:")
-
-# 仅匹配值为 URL 的链接行，用于判断 PRD 是否已关联真实 Issue；
-# 占位符不视为已关联，创建 Issue 时会被真实链接替换。
-ISSUE_LINK_LINE_RE = re.compile(r"^- GitHub Issue:\s*https?://")
-
-# 从 GitHub Issue URL（如 ``https://github.com/org/repo/issues/42``）
-# 中提取数字 Issue 编号。
-ISSUE_NUMBER_RE = re.compile(r"/issues/(?P<issue_number>\d+)(?:\D*$|$)")
-
-
-# ---------------------------------------------------------------------------
-# 数据传输对象
-# ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class IssueFromPrdRequest:
-    """从 PRD 创建 GitHub Issue 的输入参数。
-
-    Attributes:
-        repo_path: 仓库根目录的绝对路径。
-        prd_path: PRD 文件路径。可以是绝对路径，也可以相对于 ``repo_path``。
-        issue_type: 用于构建初始标签的类别，例如 ``"feature"`` → ``"type/feature"``。
-        title_override: 如果提供，将同时覆盖 AI 生成的标题和 PRD 派生的 fallback 标题。
-        queue_ready: 是否在 Issue 创建后立即添加 ``agent/ready`` 标签
-            （当 ``publish_prd=True`` 时则在发布后添加）。
-        issue_agent: 要附加的 agent 路由标签。必须是 ``LabelConfig.agent_labels``
-            中的键（如 ``"claude"``、``"kimi"``），或 ``"auto"`` / ``"none"``。
-        labels_config: 显式指定的标签名称。为 ``None`` 时使用默认值。
-        force: 为 ``True`` 时替换 PRD 中已有的 ``- GitHub Issue:`` 行，
-            而不是抛出 ``ValueError``。
-        publish_prd: 为 ``True`` 时在 Issue 创建后对 PRD 文件执行 stage、commit、push。
-        git_remote: 要 push 到的 Git remote 名称（默认 ``"origin"``）。
-        git_base_branch: 基础分支名称。当 ``queue_ready=True`` 且 ``publish_prd=True`` 时必需。
-        generated_content_config: 可选的 AI 内容生成配置。
-            为 ``None`` 或 ``enabled=False`` 时使用确定性 fallback 正文。
-        depends_on: 显式指定的上游 Issue 编号列表（与 PRD 声明合并去重）。
-        parse_evidence_format_with_agent: 是否用 agent 解析 PRD 中的格式要求。
-        validation_language: Realistic Validation 固定标签语言，如 ``zh-CN``。
-        structured_evidence: 是否为该 Issue 物化 ``iar:structured-evidence`` marker。
-        evidence_dir: 证据目录配置根（仓库相对）。默认 ``tasks/evidence`` 时
-            Issue body 指向按 PRD stem 解析的子目录；显式配置的 legacy 目录
-            原样展示。
-        extra_labels: 创建时就一并带上的额外标签（如 loop 的 ``loop/<id>``），避免
-            “Issue 已建成但事后补标签失败”留下无标签的 Issue。
-    """
-
-    repo_path: Path
-    prd_path: Path
-    issue_type: str
-    title_override: str | None = None
-    queue_ready: bool = False
-    issue_agent: str = "auto"
-    labels_config: LabelConfig | None = None
-    force: bool = False
-    publish_prd: bool = False
-    git_remote: str = "origin"
-    git_base_branch: str = "main"
-    generated_content_config: GeneratedContentConfig | None = None
-    depends_on: tuple[int, ...] = ()
-    parse_evidence_format_with_agent: bool = True
-    validation_language: str = "zh-CN"
-    structured_evidence: bool = True
-    evidence_dir: str = DEFAULT_VALIDATION_EVIDENCE_DIR
-    #: content_generation 阶段绑定的模型选择（CLI ``--preset`` 锚定或配置绑定
-    #: 的解析结果）；``None`` 表示不注入模型参数、agent 走既有解析。
-    model_selection: ModelSelection | None = None
-    extra_labels: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True)
-class PrdPublishContext:
-    """单个目标 PRD 文件的 Git 发布上下文。
-
-    Attributes:
-        repo_path: 仓库的绝对路径。
-        relative_prd_path: 相对于 ``repo_path`` 的 PRD 路径。
-        git_remote: 要 push 到的 remote 名称。
-        current_branch: 当前检出的分支（用作 push 目标）。
-    """
-
-    repo_path: Path
-    relative_prd_path: Path
-    git_remote: str
-    current_branch: str
-
-
-# ---------------------------------------------------------------------------
-# PRD 元数据提取辅助函数
-# ---------------------------------------------------------------------------
-
-
-def extract_title(prd_text: str, fallback_title: str) -> str:
-    """从 PRD 文档中提取人类可读的标题。
-
-    逐行扫描 PRD，查找第一个 Markdown H1 标题（``# ...``）。
-    如果存在 ``PRD:`` / ``PRD：`` 前缀则将其去除。
-    跳过 Part A / Part B 这类章节标题，避免把结构标题误当成 feature 标题。
-    未找到 H1 时回退到 ``fallback_title``。
-
-    Args:
-        prd_text: PRD 文件的完整文本。
-        fallback_title: 未找到 H1 标题时返回的标题。
-
-    Returns:
-        提取的标题或 ``fallback_title``。
-    """
-
-    for line in prd_text.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("# "):
-            title = re.sub(r"^PRD[:：]\s*", "", stripped[2:]).strip()
-            if title and not re.match(r"^Part\s+[AB]\b", title, re.IGNORECASE):
-                return title or fallback_title
-    return fallback_title
-
-
-def extract_acceptance_items(prd_text: str) -> list[str]:
-    """从 PRD 中提取验收清单条目。
-
-    搜索 H2 标题中包含 ``"acceptance"`` 或 ``"验收"``（不区分大小写）的章节。
-    在该章节内，收集所有以 ``"- ["`` 开头的 Markdown 复选框行。
-    已有的勾选状态（``[x]``、``[X]``）会被规范化为未勾选 ``[ ]``，
-    因为 Issue 代表的是*待完成*的工作。
-
-    如果未找到验收章节或没有清单条目，则返回默认的三项清单，
-    确保 Issue 不会在没有可执行项的情况下被创建。
-
-    Args:
-        prd_text: PRD 文件的完整文本。
-
-    Returns:
-        Markdown 复选框字符串列表。
-    """
-
-    items: list[str] = []
-    in_acceptance = False
-    for line in prd_text.splitlines():
-        stripped = line.strip()
-        # 根据 H2 标题进入/退出验收章节。
-        if stripped.startswith("## "):
-            in_acceptance = bool(re.search(r"acceptance|验收", stripped, re.IGNORECASE))
-            continue
-        if in_acceptance and stripped.startswith("- ["):
-            items.append(re.sub(r"^- \[[ xX]\]", "- [ ]", stripped))
-    return items or [
-        "- [ ] Review the canonical PRD acceptance checklist",
-        "- [ ] Implement the linked task",
-        "- [ ] Run the required verification",
-    ]
-
-
-# ---------------------------------------------------------------------------
-# Issue 正文构建
-# ---------------------------------------------------------------------------
-
-
-def build_issue_body(
-    *,
-    relative_prd_path: Path,
-    title: str,
-    acceptance_items: list[str],
-    prd_text: str,
-    dependency_marker: str = "",
-) -> str:
-    """基于 PRD 元数据构建确定的 Issue 正文。
-
-    这是 AI 内容生成被禁用或失败时的 *hard fallback*。正文包含：
-
-    1. 带有 Issue 标题的摘要行。
-    2. PRD 引言章节（如果存在），使读者无需打开 PRD 文件即可理解需求。
-    3. 机器可读的 ``- PRD path: ...`` 锚点，runner 依赖它定位规范 PRD。
-    4. 从 PRD 复制的验收清单。
-    5. 交付说明（分支命名、worktree 命令、PR 规范）。
-    6. 可选的 ``iar:depends-on`` hidden marker（当依赖门禁启用时）。
-
-    Args:
-        relative_prd_path: 相对于仓库根目录的 PRD 路径。
-        title: Issue 标题（用于摘要行）。
-        acceptance_items: 从 PRD 提取的清单条目。
-        prd_text: 完整 PRD 文本，用于提取引言章节。
-        dependency_marker: 物化的 ``iar:depends-on`` marker 字符串，为空时不写入。
-
-    Returns:
-        完整的 Issue 正文 Markdown 字符串。
-    """
-
-    # 从 PRD 中提取引言/目标章节，使 Issue 正文自成一体。
-    # 使用与 AI 上下文构建器相同的关键词列表，确保 template、agent、
-    # fallback 三条路径保持一致。若未匹配到关键词，则兜底取第一个 ## 标题
-    # 下的全部内容，避免中文 PRD（如“背景与目标”）出现空引言。
-    introduction = extract_prd_section(prd_text, ("introduction", "intro", "引言", "概述"))
-    if not introduction:
-        introduction = extract_first_h2_section(prd_text)
-    body_parts: list[str] = [
-        "## Summary",
-        "",
-        f"Tracked implementation task for `{title}`.",
-    ]
-    if introduction:
-        body_parts.extend(["", introduction])
-    body_parts.extend(
-        [
-            "",
-            "## Canonical PRD",
-            "",
-            f"- PRD path: `{relative_prd_path.as_posix()}`",
-            "",
-            "## Acceptance Summary",
-            "",
-            *acceptance_items,
-            "",
-            "## Delivery Notes",
-            "",
-            "- Recommended branch: `task/<issue-number>-<slug>`",
-            "- Worktree command: `just worktree --issue <issue-number>`",
-            "- PR should include: `Closes #<issue-number>`",
-            "",
-        ]
-    )
-    if dependency_marker:
-        body_parts.append(dependency_marker)
-        body_parts.append("")
-    return "\n".join(body_parts)
-
-
-# ---------------------------------------------------------------------------
-# 路径与标签辅助函数
-# ---------------------------------------------------------------------------
-
-
-def resolve_prd_paths(repo_path: Path, prd_path: Path) -> tuple[Path, Path]:
-    """解析 PRD 的绝对路径和仓库相对路径。
-
-    Args:
-        repo_path: 目标仓库路径。
-        prd_path: PRD 文件路径。
-
-    Returns:
-        ``(absolute_prd_path, relative_prd_path)`` 元组。
-    """
-
-    absolute_prd_path = (repo_path / prd_path).resolve() if not prd_path.is_absolute() else prd_path
-    relative_prd_path = absolute_prd_path.relative_to(repo_path.resolve())
-    return absolute_prd_path, relative_prd_path
-
-
-def build_issue_labels(
-    request: IssueFromPrdRequest, effective_labels_config: LabelConfig
-) -> list[str]:
-    """构建 GitHub Issue 创建时的初始标签。
-
-    默认标签集合为::
-
-        ["type/{issue_type}", "status/backlog", "source/prd"]
-
-    当 ``queue_ready=True``（且 ``publish_prd=False``）时，
-    立即添加 ``agent/ready`` 标签，使 daemon 无需额外手动打标即可拾取该 Issue。
-
-    当 ``issue_agent`` 为显式 agent 键（非 ``"auto"`` 或 ``"none"``）时，
-    追加对应的 agent 路由标签。
-
-    Args:
-        request: Issue 创建请求。
-        effective_labels_config: 要应用的标签名称配置。
-
-    Returns:
-        Issue 的初始标签列表。
-
-    Raises:
-        ValueError: 当 ``issue_agent`` 不是可识别的值时。
-    """
-
-    labels = [f"type/{request.issue_type}", "status/backlog", "source/prd"]
-    prd_priority = priority_from_prd_filename(request.prd_path.name)
-    if prd_priority is not None:
-        labels.append(f"priority/{prd_priority}")
-    # 仅在用户显式要求且本次命令不发布 PRD 时才添加 "ready"。
-    # 当 publish_prd=True 时，ready 在 push 成功*之后*再添加，
-    # 避免在未发布的 PRD 上就开始工作。
-    apply_routing_labels(
-        labels,
-        queue_ready=request.queue_ready,
-        ready_deferred_until_publish=request.publish_prd,
-        issue_agent=request.issue_agent,
-        labels_config=effective_labels_config,
-    )
-    labels.extend(label for label in request.extra_labels if label not in labels)
-    return labels
-
-
-# ---------------------------------------------------------------------------
-# Issue URL 解析与 PRD 回写
-# ---------------------------------------------------------------------------
-
-
-def parse_issue_number(issue_url: str) -> int:
-    """从 Issue URL 中解析 GitHub Issue 编号。
-
-    Args:
-        issue_url: 客户端返回的 GitHub Issue URL。
-
-    Returns:
-        解析出的 Issue 编号。
-
-    Raises:
-        ValueError: 当 URL 中不包含 Issue 编号时。
-    """
-
-    issue_number_match = ISSUE_NUMBER_RE.search(issue_url)
-    if issue_number_match is None:
-        raise ValueError(f"Could not parse GitHub Issue number from URL: {issue_url}")
-    return int(issue_number_match.group("issue_number"))
-
-
-def write_issue_link(
-    *, prd_text: str, absolute_prd_path: Path, issue_url: str, force: bool
-) -> None:
-    """将 GitHub Issue URL 回写到 PRD 中。
-
-    链接以 ``- GitHub Issue: <url>`` 的形式插入。
-
-    * 如果 ``force=True``，则就地替换已有的 ``- GitHub Issue:`` 行。
-    * 如果 ``force=False``，已有行只可能是占位符（真实链接已被调用方的
-      防重复检查拦截），该行会被移除，真实链接插入到 H1 标题之后。
-    * 如果不存在这样的行，则在 H1 标题行之后立即插入。
-    * 最后的兜底（未找到 H1）时，将链接插入文件最顶部。
-
-    Args:
-        prd_text: 原始 PRD 文本。
-        absolute_prd_path: 要更新的 PRD 文件路径。
-        issue_url: 创建的 GitHub Issue URL。
-        force: 是否替换已有的 Issue URL。
-    """
-
-    link_line = f"- GitHub Issue: {issue_url}"
-    updated_lines: list[str] = []
-    link_written = False
-    for line in prd_text.splitlines():
-        if ISSUE_LINE_RE.match(line):
-            if force:
-                updated_lines.append(link_line)
-                link_written = True
-            # 跳过旧行（占位符，或 force=True 时已被替换的旧链接）。
-            continue
-        updated_lines.append(line)
-        # 如果尚未替换已有链接，则在第一个 H1 标题后插入链接。
-        if not link_written and line.startswith("# "):
-            updated_lines.extend(["", link_line])
-            link_written = True
-    if not link_written:
-        # 未找到 H1 标题 —— 安全起见前置插入。
-        updated_lines.insert(0, link_line)
-
-    absolute_prd_path.write_text("\n".join(updated_lines) + "\n", encoding="utf-8")
-
-
-# ---------------------------------------------------------------------------
-# PRD 发布的 Git 辅助函数
-# ---------------------------------------------------------------------------
-
-
-def current_git_branch(repo_path: Path, process_runner: IProcessRunner) -> str:
-    """返回当前 Git 分支名称。
-
-    Args:
-        repo_path: 目标仓库路径。
-        process_runner: 执行 Git 命令的 runner。
-
-    Returns:
-        当前分支名称。
-
-    Raises:
-        RuntimeError: 当仓库处于 detached HEAD 状态时。
-    """
-
-    branch_result = process_runner.run(["git", "branch", "--show-current"], cwd=repo_path)
-    current_branch = branch_result.stdout.strip()
-    if not current_branch:
-        raise RuntimeError("Cannot publish a PRD from a detached HEAD checkout.")
-    return current_branch
-
-
-def validate_ready_publish_branch(
-    *, current_branch: str, git_base_branch: str, queue_ready: bool
-) -> None:
-    """验证 ready PRD 必须从 runner 基础分支发布。
-
-    从功能分支发布 ``ready`` PRD 会在该分支上创建提交，而这个提交可能永远
-    无法进入 ``main``，导致 daemon 检出基础分支时找不到该 PRD。
-
-    Args:
-        current_branch: 当前 Git 分支名称。
-        git_base_branch: 配置的 runner 基础分支。
-        queue_ready: 用户是否要求添加 ready 标签。
-
-    Raises:
-        RuntimeError: 当 ready PRD 试图从错误分支发布时。
-    """
-
-    if queue_ready and current_branch != git_base_branch:
-        raise RuntimeError(
-            "Cannot publish a ready PRD from branch "
-            f"'{current_branch}'. Switch to base branch '{git_base_branch}' "
-            "or use --no-ready."
-        )
-
-
-def validate_staged_changes_are_prd_only(
-    repo_path: Path, relative_prd_path: Path, process_runner: IProcessRunner
-) -> None:
-    """当暂存区包含非目标文件时拒绝发布。
-
-    防止将无关工作意外打包进 PRD 发布提交。
-
-    Args:
-        repo_path: 目标仓库路径。
-        relative_prd_path: 相对于 repo_path 的 PRD 路径。
-        process_runner: 执行 Git 命令的 runner。
-
-    Raises:
-        RuntimeError: 当暂存区包含非目标 PRD 文件时。
-    """
-
-    staged_result = process_runner.run(
-        ["git", "diff", "--cached", "--name-only", "--"], cwd=repo_path
-    )
-    target_prd_path_text = relative_prd_path.as_posix()
-    staged_path_texts = [
-        staged_line.strip()
-        for staged_line in staged_result.stdout.splitlines()
-        if staged_line.strip()
-    ]
-    non_target_staged_paths = [
-        staged_path_text
-        for staged_path_text in staged_path_texts
-        if staged_path_text != target_prd_path_text
-    ]
-    if non_target_staged_paths:
-        staged_paths_text = ", ".join(sorted(non_target_staged_paths))
-        raise RuntimeError(
-            "Refusing to publish PRD because Git index contains staged changes "
-            f"outside target PRD: {staged_paths_text}"
-        )
-
-
-def build_prd_commit_message(relative_prd_path: Path) -> str:
-    """构建 PRD 发布的提交信息。
-
-    从文件名 ``-prd-`` 之后的段提取 slug。
-    示例::
-
-        tasks/pending/P2-FEAT-20260527-190923-prd-example.md
-        → "docs(prd): publish example"
-
-    Args:
-        relative_prd_path: 相对于仓库的 PRD 路径。
-
-    Returns:
-        PRD 发布的提交信息。
-    """
-
-    prd_slug = relative_prd_path.stem.split("-prd-", maxsplit=1)[-1]
-    return f"docs(prd): publish {prd_slug}"
-
-
-def publish_prd_file(publish_context: PrdPublishContext, process_runner: IProcessRunner) -> None:
-    """仅暂存、提交并推送目标 PRD 文件。
-
-    使用 ``git add -- <path>``、``git commit -m <msg> -- <path>`` 和
-    ``git push <remote> <branch>``，确保发布提交中*仅*包含该 PRD 文件。
-
-    Args:
-        publish_context: Git 发布上下文。
-        process_runner: 执行 Git 命令的 runner。
-    """
-
-    relative_prd_path_text = publish_context.relative_prd_path.as_posix()
-    process_runner.run(["git", "add", "--", relative_prd_path_text], cwd=publish_context.repo_path)
-    process_runner.run(
-        [
-            "git",
-            "commit",
-            "-m",
-            build_prd_commit_message(publish_context.relative_prd_path),
-            "--",
-            relative_prd_path_text,
-        ],
-        cwd=publish_context.repo_path,
-    )
-    process_runner.run(
-        ["git", "push", publish_context.git_remote, publish_context.current_branch],
-        cwd=publish_context.repo_path,
-    )
-
 
 # ---------------------------------------------------------------------------
 # Dependency resolution helpers
@@ -874,25 +387,53 @@ _KNOWN_EVIDENCE_KINDS: frozenset[str] = frozenset(
 )
 
 
-def resolve_agent_name(agent_name: str, default: str = "claude") -> str:
+def resolve_agent_name(
+    agent_name: str,
+    default: str = "claude",
+    *,
+    agents: Mapping[str, AgentSpec] | None = None,
+) -> str:
     """Return a concrete agent name, falling back to *default* for unknown values.
 
     CLI and config accept ``"auto"`` / ``"none"`` as aliases; this helper
     normalises them to a real agent that ``IContentGenerator`` can execute.
     合法性由 agent 注册表成员校验：只有声明了 ``generate`` 用途（内容
     生成能力）的 agent 会被接受，其余回落默认值。
+
+    Args:
+        agent_name: 请求里的 agent 值（可能是路由别名或未注册名）。
+        default: 别名 / 未注册名回落的 agent 名。
+        agents: 生效注册表；``None`` 时只认内置 ``BUILTIN_AGENT_SPECS``。
+
+    Raises:
+        ValueError: 名字**已注册**但没声明 ``generate`` 用途。显式点名一个不能
+            生成内容的 agent 是配置错误，不能悄悄换成 ``default`` 跑别的 agent；
+            未注册的名字仍按既有行为回落默认值。
     """
-    agent_spec = BUILTIN_AGENT_SPECS.get(agent_name)
-    if agent_spec is not None and AGENT_PROFILE_GENERATE in agent_spec.profiles:
+    registry = agents if agents is not None else BUILTIN_AGENT_SPECS
+    agent_spec = registry.get(agent_name)
+    if agent_spec is None:
+        return default
+    if AGENT_PROFILE_GENERATE in agent_spec.profiles:
         return agent_name
-    return default
+    generate_capable = sorted(
+        name for name, spec in registry.items() if AGENT_PROFILE_GENERATE in spec.profiles
+    )
+    raise ValueError(
+        f"agent '{agent_name}' is registered but does not declare the "
+        f"'{AGENT_PROFILE_GENERATE}' profile, so it cannot generate Issue content. "
+        f"Pick one of {', '.join(generate_capable)} or declare "
+        f"[agent_runner.agents.{agent_name}.profiles.generate] in the config."
+    )
 
 
 def _parse_evidence_format_with_agent(
+    *,
     checklist_items: list[str],
     generator: IContentGenerator | None,
     cwd: Path,
     agent_name: str,
+    agents: Mapping[str, AgentSpec] | None = None,
 ) -> dict[int, str]:
     """Use an agent to parse the required evidence format for each item.
 
@@ -903,7 +444,7 @@ def _parse_evidence_format_with_agent(
     if generator is None or not checklist_items:
         return {}
 
-    resolved_agent = resolve_agent_name(agent_name)
+    resolved_agent = resolve_agent_name(agent_name, agents=agents)
     parsed_formats: dict[int, str] = {}
 
     for item_number, item_text in enumerate(checklist_items, start=1):
@@ -1155,6 +696,7 @@ def create_issue_from_prd(
                 generator=content_generator,
                 cwd=request.repo_path,
                 agent_name=request.issue_agent,
+                agents=request.agents,
             )
             format_markers = _build_evidence_format_markers(parsed_formats)
         evidence_dir_root = request.evidence_dir.strip("/")

@@ -1,4 +1,4 @@
-"""桌面 companion 的系统窗口实现（可选 pywebview 运行时）。
+"""桌面 companion 的系统窗口实现（pywebview 运行时）。
 
 进程与窗口边界全部收在本子树：
 
@@ -11,8 +11,8 @@
 - helper 反过来只读当前 loopback Console 的状态与工单接口，窗口内容仍是
   Console 自己的精简 route。
 
-桌面运行时是**可选**依赖：未安装时本模块仍可 import，:meth:`snapshot` 如实返回
-``not_installed``，Web Dashboard 继续可用。
+pywebview 随 KedaCode 默认安装；若运行环境仍缺失，本模块仍可 import，
+:meth:`snapshot` 如实返回 ``not_installed``，Web Dashboard 继续可用。
 """
 
 from __future__ import annotations

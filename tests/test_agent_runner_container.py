@@ -298,9 +298,10 @@ def test_container_operations_inject_effective_state_home(
     monkeypatch: pytest.MonkeyPatch,
     operation: str,
 ) -> None:
-    """停止与日志命令无需继承 up 的临时环境，也能解析状态挂载。"""
+    """停止与日志命令无需继承 up 的临时环境，也能解析生效状态挂载。"""
     expected_state_home = fake_global_iar / ".kedacode"
     expected_state_home.mkdir()
+    (fake_global_iar / ".iar").mkdir()
     monkeypatch.delenv("KEDACODE_HOST_STATE_HOME", raising=False)
     controller = ContainerOpsController()
     compose_file = controller.resolve_packaged_runner_assets().compose_file

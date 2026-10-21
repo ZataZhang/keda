@@ -992,11 +992,6 @@ def test_a_second_diagnosis_chance_after_a_failed_one(
         worktree=worktree_path,
         attempt_key="issue-77-implement-1-retry",
         diagnose=_flaky_diagnose,
-        config=StallSupervisorConfig(
-            enabled=True,
-            check_interval_seconds=_TICK_SECONDS,
-            stalled_after_seconds=1,
-        ),
     )
 
     outcome, _, _ = _run_supervised_writer(
@@ -1004,7 +999,7 @@ def test_a_second_diagnosis_chance_after_a_failed_one(
         worktree=worktree_path,
         writer_argv=writer_argv,
         request=request,
-        runtime_seconds=5.0,
+        runtime_seconds=3.0,
     )
 
     assert len(diagnose_calls) >= 2, diagnose_calls
@@ -1018,27 +1013,14 @@ def test_a_transient_read_failure_at_the_anchor_does_not_disable_supervision(
     runner = SubprocessRunner()
     frozen = ProgressSnapshot(signature="frozen", observed_at_mono=time.monotonic(), detail="d")
     samples = iter([None, None, frozen])
-
-    attempt_key = "issue-77-implement-1-anchor-retry"
-    writer_marker = worktree_path.parent / f"writer-{attempt_key}.json"
-
-    def _snapshot_after_writer_is_ready(
-        _request: StallSupervisionRequest,
-    ) -> ProgressSnapshot | None:
-        try:
-            writer_identity = json.loads(writer_marker.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return None
-        if not writer_identity:
-            return None
-        return next(samples, frozen)
-
-    monkeypatch.setattr(supervision, "build_progress_snapshot", _snapshot_after_writer_is_ready)
+    monkeypatch.setattr(
+        supervision, "build_progress_snapshot", lambda _request: next(samples, frozen)
+    )
     diagnose_calls: list[StallDiagnosisRequest] = []
     request = _supervision_request(
         runner=runner,
         worktree=worktree_path,
-        attempt_key=attempt_key,
+        attempt_key="issue-77-implement-1-anchor-retry",
         diagnose=_verdict_diagnose(diagnose_calls, _STALLED_ANSWER),
     )
 

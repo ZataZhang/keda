@@ -252,11 +252,73 @@ def _try_install_frontend_dependencies(
     )
 
 
-def _lockfiles_match_across_checkouts(
-    repo_project_path: Path,
-    worktree_project_path: Path,
-) -> bool:
-    """主检出与 worktree 的锁文件内容是否一致（不一致即依赖已漂移）。"""
+def _package_manifest_inputs(project_dir_path: Path) -> tuple[tuple[str, bytes], ...] | None:
+    """收集项目及其 workspace 成员的 manifest 输入；不可读时返回 ``None``。"""
+    manifest_inputs: list[tuple[str, bytes]] = []
+    walk_errors: list[OSError] = []
+    for current_dir_text, child_dir_names, child_file_names in os.walk(
+        project_dir_path,
+        onerror=walk_errors.append,
+    ):
+        child_dir_names[:] = sorted(
+            child_dir_name
+            for child_dir_name in child_dir_names
+            if child_dir_name not in FRONTEND_SCAN_PRUNED_DIR_NAMES
+            and not (Path(current_dir_text) / child_dir_name).is_symlink()
+        )
+        if PACKAGE_MANIFEST_FILE_NAME not in child_file_names:
+            continue
+        manifest_path = Path(current_dir_text) / PACKAGE_MANIFEST_FILE_NAME
+        try:
+            manifest_content = manifest_path.read_bytes()
+        except OSError:
+            return None
+        manifest_inputs.append(
+            (manifest_path.relative_to(project_dir_path).as_posix(), manifest_content)
+        )
+    if walk_errors:
+        return None
+    return tuple(manifest_inputs)
+
+
+def _dependency_inputs_match_across_checkouts(reuse_target: _ReuseTarget) -> bool:
+    """所有 manifest、workspace 声明和锁文件输入都匹配时才允许复用。"""
+    repo_project_path = reuse_target.repo_root_path / reuse_target.relative_project_path
+    worktree_project_path = reuse_target.project_dir_path
+
+    repo_manifest_path = repo_project_path / PACKAGE_MANIFEST_FILE_NAME
+    worktree_manifest_path = worktree_project_path / PACKAGE_MANIFEST_FILE_NAME
+    repo_has_manifest = repo_manifest_path.is_file()
+    worktree_has_manifest = worktree_manifest_path.is_file()
+    if repo_has_manifest != worktree_has_manifest:
+        return False
+
+    repo_workspace_path = repo_project_path / PNPM_WORKSPACE_FILE_NAME
+    worktree_workspace_path = worktree_project_path / PNPM_WORKSPACE_FILE_NAME
+    repo_has_workspace = repo_workspace_path.is_file()
+    worktree_has_workspace = worktree_workspace_path.is_file()
+    if repo_has_workspace != worktree_has_workspace:
+        return False
+    if repo_has_workspace:
+        try:
+            if repo_workspace_path.read_bytes() != worktree_workspace_path.read_bytes():
+                return False
+        except OSError:
+            return False
+    elif not repo_has_manifest:
+        # Manifestless 项目只有在可验证的 pnpm workspace 声明存在时才可复用。
+        return False
+
+    repo_manifest_inputs = _package_manifest_inputs(repo_project_path)
+    worktree_manifest_inputs = _package_manifest_inputs(worktree_project_path)
+    if (
+        repo_manifest_inputs is None
+        or worktree_manifest_inputs is None
+        or repo_manifest_inputs != worktree_manifest_inputs
+    ):
+        return False
+
+    matching_lockfile_count = 0
     for lockfile_name in _LOCKFILE_PACKAGE_MANAGERS:
         repo_lockfile_path = repo_project_path / lockfile_name
         worktree_lockfile_path = worktree_project_path / lockfile_name
@@ -264,21 +326,23 @@ def _lockfiles_match_across_checkouts(
             return False
         if not repo_lockfile_path.is_file():
             continue
+        matching_lockfile_count += 1
         try:
             if repo_lockfile_path.read_bytes() != worktree_lockfile_path.read_bytes():
                 return False
         except OSError:
             return False
-    return True
+    return matching_lockfile_count > 0
 
 
 def _try_reuse_main_checkout_dependencies(
     reuse_target: _ReuseTarget,
 ) -> _ReuseAttempt:
-    """锁文件一致时优先复用主检出的 ``node_modules``。
+    """所有依赖输入一致时优先复用主检出的 ``node_modules``。
 
-    只在两棵树的锁文件一致时复用：把漂移过的依赖链进 worktree 会让后续命令在错误的
-    环境里运行，并把「缺失」伪装成「就绪」。
+    两棵树必须有完全相同的 manifest、workspace 配置和至少一份锁文件；缺少可比较的
+    输入或存在差异时不复用，避免把漂移过的依赖伪装成就绪。无根 manifest 的 pnpm
+    workspace 仅在 workspace 文件、成员 manifest 和根锁文件都匹配时可复用。
 
     Args:
         reuse_target: 复用所需的三元组路径（主检出根、worktree 项目目录、相对路径）。
@@ -298,16 +362,14 @@ def _try_reuse_main_checkout_dependencies(
                 f"({repo_project_path})"
             ),
         )
-    if not _lockfiles_match_across_checkouts(
-        repo_project_path,
-        reuse_target.project_dir_path,
-    ):
+    if not _dependency_inputs_match_across_checkouts(reuse_target):
         return _ReuseAttempt(
             succeeded=False,
             reason=REASON_REUSABLE_STALE,
             detail=(
-                "main checkout lockfiles differ from this branch; reusing them would "
-                "present a stale environment as ready"
+                "dependency inputs (package manifests, workspace config, and at least one "
+                "lockfile) must exist and match in both checkouts before dependencies can "
+                "be reused"
             ),
         )
     try:
@@ -610,7 +672,7 @@ def exclude_frontend_node_modules_from_git(
     preparation_report: DependencyPreparationReport,
     process_runner: IProcessRunner,
 ) -> DependencyPreparationReport:
-    """把符号链接的 ``node_modules`` 排除出 worktree 的 git status。
+    """把报告中所有符号链接的 ``node_modules`` 排除出 worktree 的 git status。
 
     为每个被链接项目的 ``node_modules`` 往 ``info/exclude`` 追加一条**锚定且不带尾部
     斜杠**的规则（例如 ``/frontend/node_modules``）。``node_modules/`` 这类目录规则不
@@ -625,14 +687,18 @@ def exclude_frontend_node_modules_from_git(
 
     Args:
         worktree_path: 目标 worktree 绝对路径。
-        preparation_report: 本轮依赖准备结果；无法排除的软链会被移除并标为未准备。
+        preparation_report: 本轮依赖准备结果；无法排除时新建软链会被移除，已有软链保留并标为未准备。
         process_runner: 用于通过 ``git rev-parse`` 解析 ``info/exclude`` 位置。
 
     Returns:
-        已更新的依赖准备报告。更新忽略规则失败时，对应软链会被尽力删除，避免
-        Agent 将机器本地的绝对路径软链误提交。
+        已更新的依赖准备报告。更新忽略规则失败时不会中断 Agent 启动；本轮新建的
+        软链会被尽力删除，已有软链保留并在诊断中标明。
     """
-    linked_relative_paths = preparation_report.linked_relative_paths
+    linked_relative_paths = [
+        Path(project_record.project_path)
+        for project_record in preparation_report.records
+        if (worktree_path / project_record.project_path / NODE_MODULES_DIR_NAME).is_symlink()
+    ]
     if not linked_relative_paths:
         return preparation_report
 
@@ -691,20 +757,27 @@ def exclude_frontend_node_modules_from_git(
         return preparation_report
 
     failed_link_details: dict[Path, str] = {}
+    reusable_paths = set(preparation_report.linked_relative_paths)
     for relative_project_path in linked_relative_paths:
         target_node_modules_path = worktree_path / relative_project_path / NODE_MODULES_DIR_NAME
         cleanup_detail = ""
-        try:
-            if target_node_modules_path.is_symlink():
-                target_node_modules_path.unlink()
-        except OSError as cleanup_error:
-            cleanup_detail = sanitize_detail_text(
-                f"; symlink cleanup failed: {type(cleanup_error).__name__}: {cleanup_error}"
-            )
+        is_new_reuse = relative_project_path in reusable_paths
+        if is_new_reuse:
+            try:
+                if target_node_modules_path.is_symlink():
+                    target_node_modules_path.unlink()
+            except OSError as cleanup_error:
+                cleanup_detail = sanitize_detail_text(
+                    f"; symlink cleanup failed: {type(cleanup_error).__name__}: {cleanup_error}"
+                )
+        preservation_note = (
+            "the newly created symlink was removed to avoid committing a machine-local path"
+            if is_new_reuse
+            else "the existing symlink was preserved; do not stage this machine-local path"
+        )
         failure_detail = sanitize_detail_text(
-            "could not exclude reused node_modules symlink from git: "
-            f"{exclusion_failure_detail}; the symlink was removed to avoid committing a "
-            f"machine-local path{cleanup_detail}"
+            "could not exclude node_modules symlink from git: "
+            f"{exclusion_failure_detail}; {preservation_note}{cleanup_detail}"
         )
         _logger.warning(
             "Could not exclude reused node_modules for %s; recorded as unprepared: %s",

@@ -283,6 +283,27 @@ class TestPlanPackageManager:
         )
         assert any("packageManager declares 'npm'" in line for line in install_plan.evidence)
 
+    def test_pnpm_workspace_file_conflicts_with_npm_root_and_member(self, tmp_path: Path) -> None:
+        """pnpm workspace 文件不能与 npm 根声明混用后再跳过成员安装。"""
+        worktree_path = tmp_path / "worktree"
+        _write_file(
+            worktree_path / "package.json",
+            json.dumps({"packageManager": "npm@10.2.0"}),
+        )
+        _write_file(worktree_path / "package-lock.json", '{"lockfileVersion":3}\n')
+        _write_file(worktree_path / "pnpm-workspace.yaml", 'packages:\n  - "packages/*"\n')
+        member_path = worktree_path / "packages" / "app"
+        _write_file(member_path / "package.json", '{"name":"app"}\n')
+
+        root_plan = plan_package_manager(worktree_path, worktree_path)
+        member_plan = plan_package_manager(member_path, worktree_path)
+
+        assert root_plan.reason == REASON_MANAGER_CONFLICT
+        assert member_plan.reason == REASON_MANAGER_CONFLICT
+        assert root_plan.package_manager is None
+        assert member_plan.package_manager is None
+        assert any("pnpm-workspace.yaml declares pnpm" in line for line in root_plan.evidence)
+
     def test_nested_workspace_member_matches_ancestor_pattern(self, tmp_path: Path) -> None:
         """祖先 workspace 用 glob 声明成员时同样识别为被覆盖。"""
         worktree_path = tmp_path / "worktree"
@@ -565,6 +586,73 @@ class TestEnsureFrontendNodeModules:
         assert "reused before installation" in project_record.detail
         assert project_record.has_usable_dependencies is True
 
+    def test_manifestless_pnpm_workspace_reuses_only_matching_inputs(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """无根 manifest 的 pnpm workspace 可在配置、成员 manifest 和锁均匹配时复用。"""
+        _stub_toolchain(monkeypatch, available=False)
+        repo_path = tmp_path / "repo"
+        worktree_path = tmp_path / "worktree"
+        for checkout_path in (repo_path, worktree_path):
+            _write_file(
+                checkout_path / "pnpm-workspace.yaml",
+                'packages:\n  - "packages/*"\n',
+            )
+            _write_file(checkout_path / "pnpm-lock.yaml", "lockfileVersion: '9.0'\n")
+            _write_file(
+                checkout_path / "packages" / "app" / "package.json",
+                '{"name":"app"}\n',
+            )
+        _write_file(repo_path / "node_modules" / "marker.txt", "installed\n")
+        process_runner = _installer_runner()
+
+        preparation_report = ensure_frontend_node_modules(repo_path, worktree_path, process_runner)
+        root_record = _record_for(preparation_report, ".")
+        member_record = _record_for(preparation_report, "packages/app")
+
+        assert process_runner.calls == []
+        assert root_record.outcome == OUTCOME_REUSED
+        assert root_record.reason == REASON_NO_ACTION_NEEDED
+        assert (worktree_path / "node_modules").is_symlink()
+        assert member_record.outcome == OUTCOME_SKIPPED
+        assert member_record.reason == REASON_WORKSPACE_COVERED
+
+    def test_manifestless_workspace_member_change_blocks_reuse(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """成员 manifest 漂移时不能把主检出的 node_modules 当作可复用依赖。"""
+        _stub_toolchain(monkeypatch, available=False)
+        repo_path = tmp_path / "repo"
+        worktree_path = tmp_path / "worktree"
+        for checkout_path in (repo_path, worktree_path):
+            _write_file(
+                checkout_path / "pnpm-workspace.yaml",
+                'packages:\n  - "packages/*"\n',
+            )
+            _write_file(checkout_path / "pnpm-lock.yaml", "lockfileVersion: '9.0'\n")
+        _write_file(
+            repo_path / "packages" / "app" / "package.json",
+            '{"name":"app","version":"1"}\n',
+        )
+        _write_file(
+            worktree_path / "packages" / "app" / "package.json",
+            '{"name":"app","version":"2"}\n',
+        )
+        _write_file(repo_path / "node_modules" / "marker.txt", "installed\n")
+        process_runner = _installer_runner()
+
+        preparation_report = ensure_frontend_node_modules(repo_path, worktree_path, process_runner)
+        root_record = _record_for(preparation_report, ".")
+
+        assert root_record.outcome == OUTCOME_NOT_PREPARED
+        assert root_record.reason == REASON_TOOL_MISSING
+        assert "dependency inputs" in root_record.detail
+        assert not (worktree_path / "node_modules").is_symlink()
+
     def test_stale_reuse_does_not_hide_install_failure(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -586,7 +674,7 @@ class TestEnsureFrontendNodeModules:
         assert project_record.exit_code == 1
         assert project_record.attempted_commands == (" ".join(_PNPM_MEMBER_COMMAND),)
         assert "ERR_PNPM_OUTDATED_LOCKFILE" in project_record.detail
-        assert "lockfiles differ" in project_record.detail
+        assert "dependency inputs" in project_record.detail
         assert not (worktree_path / "frontend" / "node_modules").exists()
 
     def test_privilege_failure_is_flagged_as_human_action(
@@ -672,9 +760,39 @@ class TestEnsureFrontendNodeModules:
         assert root_record.reason == REASON_TOOL_MISSING
         assert root_record.package_manager == "pnpm"
         assert root_record.attempted_commands == ("pnpm install --ignore-scripts",)
-        assert any("this directory is a workspace root" in line for line in root_record.selection_evidence)
+        assert any(
+            "this directory is a workspace root" in line for line in root_record.selection_evidence
+        )
         assert member_record.outcome == OUTCOME_SKIPPED
         assert member_record.reason == REASON_WORKSPACE_COVERED
+
+    def test_pnpm_workspace_conflicting_with_npm_evidence_is_not_installed_or_skipped(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """pnpm workspace 与 npm 锁文件冲突时根与成员都交给 Agent 判断。"""
+        _stub_toolchain(monkeypatch, available=True)
+        repo_path = tmp_path / "repo"
+        worktree_path = tmp_path / "worktree"
+        _write_file(
+            worktree_path / "package.json",
+            '{"packageManager":"npm@10.2.0"}\n',
+        )
+        _write_file(worktree_path / "package-lock.json", '{"lockfileVersion":3}\n')
+        _write_file(worktree_path / "pnpm-workspace.yaml", 'packages:\n  - "packages/*"\n')
+        _write_file(worktree_path / "packages" / "app" / "package.json", '{"name":"app"}\n')
+        process_runner = _installer_runner()
+
+        preparation_report = ensure_frontend_node_modules(repo_path, worktree_path, process_runner)
+        root_record = _record_for(preparation_report, ".")
+        member_record = _record_for(preparation_report, "packages/app")
+
+        assert process_runner.calls == []
+        assert root_record.outcome == OUTCOME_NOT_PREPARED
+        assert root_record.reason == REASON_MANAGER_CONFLICT
+        assert member_record.outcome == OUTCOME_NOT_PREPARED
+        assert member_record.reason == REASON_MANAGER_CONFLICT
 
     def test_workspace_member_conflict_is_recorded_as_unprepared(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -726,7 +844,7 @@ class TestEnsureFrontendNodeModules:
 
         assert project_record.outcome == OUTCOME_NOT_PREPARED
         assert not (worktree_path / "frontend" / "node_modules").exists()
-        assert "lockfiles differ" in project_record.detail
+        assert "dependency inputs" in project_record.detail
 
     def test_existing_node_modules_is_left_untouched(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -903,24 +1021,94 @@ class TestEnsureFrontendNodeModules:
 class TestLinkFrontendNodeModules:
     """Legacy symlink-only fallback behavior."""
 
-    def test_exclude_failure_removes_link_and_records_unprepared(self, tmp_path: Path) -> None:
-        """git 忽略文件无法更新时清掉本轮软链，且把失败交给 Agent。"""
-        repo_path = tmp_path / "repo"
+    def test_exclude_adds_anchored_rules_for_all_symlinked_projects(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """根项目和嵌套项目的 node_modules 软链都写入 git info/exclude。"""
         worktree_path = tmp_path / "worktree"
-        project_path = worktree_path / "frontend"
-        source_modules_path = repo_path / "frontend" / "node_modules"
-        source_modules_path.mkdir(parents=True)
-        project_path.mkdir(parents=True)
-        target_modules_path = project_path / "node_modules"
-        target_modules_path.symlink_to(source_modules_path, target_is_directory=True)
+        worktree_path.mkdir()
+        exclude_file_path = worktree_path / ".git" / "info" / "exclude"
+        exclude_file_path.parent.mkdir(parents=True)
+        (worktree_path / "node_modules").symlink_to(
+            tmp_path / "fresh-node-modules",
+            target_is_directory=True,
+        )
+        (worktree_path / "apps" / "web").mkdir(parents=True)
+        (worktree_path / "apps" / "web" / "node_modules").symlink_to(
+            tmp_path / "existing-node-modules",
+            target_is_directory=True,
+        )
+        git_resolve_command = ("git", "rev-parse", "--git-path", "info/exclude")
+        process_runner = FakeProcessRunner(
+            responses={
+                git_resolve_command: CommandResult(
+                    command=git_resolve_command,
+                    return_code=0,
+                    stdout=str(exclude_file_path),
+                    stderr="",
+                )
+            }
+        )
+
         preparation_report = DependencyPreparationReport(
             worktree_path=str(worktree_path),
             records=(
                 FrontendProjectRecord(
-                    project_path="frontend",
+                    project_path=".",
                     outcome=OUTCOME_REUSED,
                     reason=REASON_NO_ACTION_NEEDED,
-                    package_manager="npm",
+                    package_manager="pnpm",
+                ),
+                FrontendProjectRecord(
+                    project_path="apps/web",
+                    outcome=OUTCOME_PRESENT,
+                    reason=REASON_NO_ACTION_NEEDED,
+                    package_manager="pnpm",
+                ),
+            ),
+        )
+
+        worktree_frontend.exclude_frontend_node_modules_from_git(
+            worktree_path,
+            preparation_report,
+            process_runner,
+        )
+
+        assert exclude_file_path.read_text(encoding="utf-8").splitlines() == [
+            "/node_modules",
+            "/apps/web/node_modules",
+        ]
+
+    def test_exclude_failure_does_not_abort_and_preserves_existing_symlink(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """无法写 ignore 时移除本轮新链接、保留旧链接并返回未准备诊断。"""
+        worktree_path = tmp_path / "worktree"
+        worktree_path.mkdir()
+        root_modules_path = worktree_path / "node_modules"
+        root_modules_path.symlink_to(tmp_path / "fresh-modules", target_is_directory=True)
+        existing_modules_path = worktree_path / "apps" / "web" / "node_modules"
+        existing_modules_path.parent.mkdir(parents=True)
+        existing_modules_path.symlink_to(
+            tmp_path / "existing-modules",
+            target_is_directory=True,
+        )
+        preparation_report = DependencyPreparationReport(
+            worktree_path=str(worktree_path),
+            records=(
+                FrontendProjectRecord(
+                    project_path=".",
+                    outcome=OUTCOME_REUSED,
+                    reason=REASON_NO_ACTION_NEEDED,
+                    package_manager="pnpm",
+                ),
+                FrontendProjectRecord(
+                    project_path="apps/web",
+                    outcome=OUTCOME_PRESENT,
+                    reason=REASON_NO_ACTION_NEEDED,
+                    package_manager="pnpm",
                 ),
             ),
         )
@@ -931,22 +1119,29 @@ class TestLinkFrontendNodeModules:
             _ExplodingProcessRunner(),
         )
 
-        failed_record = _record_for(failed_report, "frontend")
-        assert not target_modules_path.is_symlink()
-        assert failed_record.outcome == OUTCOME_NOT_PREPARED
-        assert failed_record.reason == REASON_LINK_FAILED
-        assert "could not update git info/exclude" in failed_record.detail
+        assert not root_modules_path.is_symlink()
+        assert existing_modules_path.is_symlink()
+        for project_path in (".", "apps/web"):
+            failed_record = _record_for(failed_report, project_path)
+            assert failed_record.outcome == OUTCOME_NOT_PREPARED
+            assert failed_record.reason == REASON_LINK_FAILED
+            assert "could not update git info/exclude" in failed_record.detail
 
     def test_links_node_modules_for_root_and_nested_projects(self, tmp_path: Path) -> None:
         """Every frontend project in the worktree gets a symlink to main's deps."""
         repo_path = tmp_path / "repo"
         worktree_path = tmp_path / "worktree"
         # Main checkout has installed dependencies for both frontends.
-        _make_frontend_project(repo_path / "frontend")
-        _make_frontend_project(repo_path / "frontend-admin")
+        _make_frontend_project(repo_path / "frontend", lockfile_names=("pnpm-lock.yaml",))
+        _make_frontend_project(
+            repo_path / "frontend-admin",
+            lockfile_names=("pnpm-lock.yaml",),
+        )
         # Worktree has the manifests (materialized by git) but no node_modules.
         _write_file(worktree_path / "frontend" / "package.json", "{}\n")
+        _write_file(worktree_path / "frontend" / "pnpm-lock.yaml", "lockfile\n")
         _write_file(worktree_path / "frontend-admin" / "package.json", "{}\n")
+        _write_file(worktree_path / "frontend-admin" / "pnpm-lock.yaml", "lockfile\n")
 
         linked_relative_paths = link_frontend_node_modules(repo_path, worktree_path)
 

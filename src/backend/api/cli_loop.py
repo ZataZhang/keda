@@ -28,6 +28,7 @@ from backend.api.cli_output import (
 )
 from backend.core.shared.models import product_identity
 from backend.core.shared.models.loop import LoopSchedule, LoopScheduleKind, LoopTask
+from backend.core.use_cases.agent_runner_factory import build_app_config
 from backend.core.use_cases.loop_create import (
     LoopAlreadyExistsError,
     cancel_loop,
@@ -176,7 +177,10 @@ def run_loop_create_command(
             suggestion="kc loop create my-daily-triage --recipe tasks/loop/my-daily-triage.md",
         )
     recipe_path = validate_recipe_path(getattr(parsed, "recipe", ""))
-    recipe = parse_loop_recipe(recipe_path)
+    # 生效注册表（内置 + [agent_runner.agents.*] 自定义条目）：配方点名自定义
+    # agent 时必须认得，否则合法的自定义名会被当成拼写错误拒掉。
+    agent_registry = build_app_config().agents
+    recipe = parse_loop_recipe(recipe_path, agents=agent_registry)
     if recipe.id != loop_id:
         raise CliError(
             f"Recipe frontmatter id {recipe.id!r} does not match command-line id {loop_id!r}.",
@@ -198,6 +202,7 @@ def run_loop_create_command(
             state_store=state_store,
             schedule=schedule_override,
             overwrite=bool(getattr(parsed, "force", False)),
+            agents=agent_registry,
         )
     except LoopAlreadyExistsError as exc:
         raise CliError(

@@ -107,3 +107,7 @@ tasks/evidence/**
 
 # Agent
 .workbuddy-ai/
+
+# Tauri / Rust 构建产物与自动生成的 schema
+/desktop/src-tauri/target/
+/desktop/src-tauri/gen/schemas/

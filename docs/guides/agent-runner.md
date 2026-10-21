@@ -48,6 +48,27 @@ kc run --all-ready --dry-run
 
 `kc init` 本身不受门禁限制，包括 `--dry-run` 和 `--force` 形式。本 PRD 不提供 `--skip-init-check` 等绕过开关。
 
+### 首次使用：先确认这台机器跑得动谁
+
+`config.toml` 是**机器级**文件，"配置里写着某个 agent"不等于这台机器装了它的命令行。装完
+`kc` 先做一次只读确认，再决定哪个 agent 跑哪个阶段：
+
+```bash
+# 只读：逐个 agent 标出 available（解析到的路径）或 missing (not found in PATH)
+kc agent list
+
+# 只读预览本机可用清单与将写的键，再落盘选择（只列装了的 agent）
+kc agent setup --dry-run
+kc agent setup --agent claude --yes
+```
+
+还没有任何显式选择时，首次在**交互式终端**运行 `kc` 会在 stderr 提示一次这件事，并在
+`~/.kedacode/.agent-setup-hint-shown` 落 marker（同机不再重复）；非交互调用、机器输出、
+帮助/版本入口、shell 补全协议与 `kc agent` / `kc completion` 子命令都不会显示它，提示也
+从不改变本轮命令的退出码。之后 `kc run` 与 daemon 在**认领 Issue 之前**复核实现 / 校验 /
+审核三个阶段（含各阶段绑定的预设），指向没装的 CLI 会以 `not_found`（3）退出并点名阶段与
+可执行文件，而不是跑完一轮才失败。完整口径见 [Agent 可用性](#agent-availability)。
+
 ### Shell 自动补全
 
 `kc` 支持生成 shell completion。zsh 用户安装后，输入 `kc is<Tab>` 可补全到 `issue`：
@@ -65,7 +86,7 @@ kc completion show --shell zsh
 
 `completion install` 同时支持 `--shell bash` 和 `--shell fish`。
 
-尚未配置补全时，首次在交互式终端运行 `kc` 会询问是否安装 shell 补全，默认选中安装；按上下方向键选择，按 Enter 确认。选择安装后，本次 `kc` 会安装补全并退出，提示用户重载 shell；重载后重新运行刚才的命令。选择“暂不安装”后不再重复询问。非交互调用、机器输出、帮助/版本入口和 shell 补全协议不会显示此菜单。
+尚未配置补全时，首次在交互式终端运行 `kc` 会询问是否安装 shell 补全，默认选中安装；按上下方向键选择，按 Enter 确认。macOS 缺少菜单栏 App 时，独立的 App 安装菜单会先出现。选择补全安装后，本次 `kc` 会安装补全并退出，提示用户重载 shell；重载后重新运行刚才的命令。选择“暂不安装”后不再重复询问。非交互调用、机器输出、帮助/版本入口和 shell 补全协议不会显示此菜单。
 
 补全同时覆盖 `kedacode` 别名入口（别名清单从分发的 `[project.scripts]` 元数据派生），
 `kedacode is<Tab>` 与 `kc is<Tab>` 行为一致；旧版本安装的补全重跑一次
@@ -112,7 +133,7 @@ kc daemon status --json
 | `0` | `ok` | 请求完成（只读输出同样算成功） | 继续 |
 | `1` | `error` | 未归类失败，保持历史语义 | 读 stderr 后重试或升级 |
 | `2` | `usage_error` | 旗标/参数组合不成立（互斥、缺目标、非法 lifecycle key） | 修命令，原样重试必然再失败 |
-| `3` | `not_found` | 目标不存在：仓库、registry 条目、agent、可执行文件、日志；显式定向的 Issue 读不到或已关闭 | 换目标或跑 `suggestion` |
+| `3` | `not_found` | 目标不存在：仓库、registry 条目、agent、可执行文件、日志；显式定向的 Issue 读不到或已关闭；启动前门禁发现某阶段解析到的 agent 本机没装（含其预设） | 换目标或跑 `suggestion`；没装的 agent 装回来或 `kc agent setup` 重选 |
 | `4` | `permission_denied` | 未授权：GitHub 未认证、仓库被禁用 | 提示人来认证或启用，别静默重试 |
 | `5` | `conflict` | 当前状态阻止：`--all-ready` 时同仓 daemon 正在轮询队列、显式定向的 Issue 被存活持有者认领或处于未解除的 `agent/blocked`、workflow 模板文件已安装、loop 条目已存在 | 改名 / 用户明确要求时 `--force` / 先停掉冲突进程 / 按 `suggestion` 走 `kc blocked-continue`（活跃认领的错误会点名持有者 host 与 PID） |
 | `10` | `dry_run_ok` | 计划校验通过且未写入任何东西，可直接当 CI 门禁 | 仅在核对计划正文后视为绿灯 |
@@ -383,8 +404,10 @@ recovery 轮次。
 ```toml
 [agent_runner.daemon]
 reconcile_stale_attempts = true   # 主开关；设为 false 即回到本特性落地前的现状
-reclaim_ttl_seconds = 10800       # claim 含 started_at 且超过该时长，即便 PID 仍活也判为 stale
+reclaim_ttl_seconds = 18000       # claim 含 started_at 且超过该时长，即便 PID 仍活也判为 stale
 ```
+
+`reclaim_ttl_seconds` 必须大于 `runner.timeout_seconds`（默认 14400 秒）：否则运行时间超过 TTL 的 attempt 即便仍在正常工作也会被按 `ttl_expired` 误回收。配置加载时若发现 TTL 不大于超时会打 WARNING（不拒绝加载）。
 
 `reconcile_stale_attempts = false` 时 Phase -1 整轮空转，僵尸 Issue 保持 `agent/running` 不被触碰、
 不留任何 comment（负控口径见 `.iar/evidence/`：rv-1 关掉开关后僵尸确实纹丝不动）。
@@ -1168,28 +1191,26 @@ CI 容器镜像预装浏览器运行时是后续工作；首版只保证本地 r
 
 ## worktree 中的前端依赖（node_modules）
 
-同理，gitignored 的 `node_modules` 也不会被 `git worktree add` 物化，否则 worktree 里跑 `vite` 等构建会报 `vite: command not found`。runner 在补齐 env 文件之后，会对 worktree（而非主仓库）中所有含 `package.json` 的前端项目，以及仅由 `pnpm-workspace.yaml` 定义的 workspace 根，做**可恢复的准备 + 诊断**：装得上就装，装不上就把证据交给 Agent，绝不因此把 Issue 判为失败。
+同理，gitignored 的 `node_modules` 也不会被 `git worktree add` 物化，否则 worktree 里跑 `vite` 等构建会报 `vite: command not found`。runner 在补齐 env 文件之后，会对 worktree（而非主仓库）中所有含 `package.json` 的前端项目，以及仅由 `pnpm-workspace.yaml` 定义的 workspace 根，做**可恢复的准备 + 诊断**：安全时先复用，无法复用再尝试安装，装不动就把证据交给 Agent，绝不因此把 Issue 判为失败。
 
-1. **识别包管理器**：同时看 `package.json` 的 `packageManager` 字段、workspace 根配置（`pnpm-workspace.yaml` / 根 `package.json` 的 `workspaces`）与锁文件。
+1. **识别包管理器**：同时看 `package.json` 的 `packageManager` 字段、workspace 根配置（`pnpm-workspace.yaml` / 根 `package.json` 的 `workspaces`）与锁文件。`pnpm-workspace.yaml` 本身也表示 pnpm workspace，根目录即使没有 `package.json` 也会扫描并准备。
    - 单一锁文件：按锁文件选择 `pnpm install` / `npm ci` / `yarn install` / `bun install`（均带 `--ignore-scripts`）。
-   - workspace 成员：若目录被某个 workspace 根的成员 pattern 覆盖，且没有命中 `!` 排除 pattern，则跳过本地安装（根安装会覆盖它），只记录证据。glob 按路径段匹配：`*` 只匹配一层目录，`**` 才可覆盖多层；任何匹配的 `!pattern` 都会将目录排除出成员集合。
-   - 冲突：多个锁文件指向不同包管理器，`packageManager` 与锁文件不一致，或 workspace 根与成员声明不一致时**不静默选定**，只记 `manager_conflict` 并保留全部证据。
-2. **先复用主检出依赖**：只要两棵树的锁文件**内容一致**，先把主检出的 `node_modules` 软链进 worktree，跳过不必要的安装；锁文件漂移时拒绝复用（避免把过期环境伪装成就绪）。
-3. **无法安全复用时再安装**：包管理器可执行文件不在 PATH 时**不运行任何命令**，直接记 `tool_missing`；运行后非零退出、或退出 0 却没有产出 `node_modules`，都按失败记录（不会伪报安装成功）。
-4. **记录诊断并继续**：复用与安装都没得到可用依赖时只写记录，**Agent 仍会启动**。
+   - workspace 成员：若目录被某个 workspace 根的成员 pattern 覆盖，跳过本地安装（根安装会覆盖它），只记录证据。
+   - 冲突：多个锁文件指向不同包管理器、`packageManager` 与锁文件不一致，或 `pnpm-workspace.yaml` 与 npm/yarn/bun 证据冲突时**不静默选定**，只记 `manager_conflict` 并保留全部证据；冲突成员不会被当作已由根安装覆盖。
+2. **优先复用主检出依赖**：仅当两棵树的项目及 workspace 成员 `package.json` 集合和内容、workspace 配置、所有锁文件的存在状态与内容都一致，且至少有一份锁文件时，才把主检出的 `node_modules` 软链进来。无根 `package.json` 的 pnpm workspace 仅在两边 `pnpm-workspace.yaml`、成员 manifest 和根锁文件均一致时复用。缺少或无法核实输入时拒绝复用。
+3. **无法安全复用时安装**：包管理器可执行文件不在 PATH 时不运行命令，但会把计划命令、选择证据和缺失原因记为 `tool_missing`；运行后非零退出、或退出 0 却没有产出 `node_modules`，都按失败记录（不会伪报安装成功）。缺工具属于 Agent 可自主处理的诊断，不要求用户预先安装主机工具链。
+4. **记录诊断并继续**：三步都没得到可用依赖时只写记录，**Agent 仍会启动**。
 
-诊断落在 worktree 的 `.agent-runner/dependency-preparation.json`（该目录被 runner 写进 gitignore，不会进代码 diff）。每个项目记录 outcome（`installed` / `reused` / `present` / `skipped` / `not_prepared`）、原因码、选择依据、计划或实际执行的命令、退出码与脱敏后的 stderr 片段。即使工具缺失，Agent 也会看到本来准备运行的完整命令及“未执行”的原因。Agent 的 prompt 通过 `{dependency_context_block}` 拿到这份上下文与处置规则：默认由 Agent 自主决定安全的仓库级安装或替代方式，不要求用户预先逐项配置项目工具链。
-
-缺少包管理器本身只记为 `tool_missing`，不标成 `requires_user_action`，也不会在 Agent 启动前要求用户改主机 PATH。Agent 应先判断任务是否真的需要该前端依赖，并自行选择安全的仓库级替代方式；只有执行仍被缺失工具阻塞、且剩余路径需要明确授权时，才把具体选择交给人处理。
+诊断落在 worktree 的 `.agent-runner/dependency-preparation.json`（该目录被 runner 写进 gitignore，不会进代码 diff）。每个项目记录 outcome（`installed` / `reused` / `present` / `skipped` / `not_prepared`）、原因码、选择依据、计划或实际运行的命令、退出码与脱敏后的 stderr 片段。Agent 的 prompt 通过 `{dependency_context_block}` 拿到这份上下文与处置规则：默认由 Agent 自主决定安全的仓库级安装或替代方式，不要求用户预先逐项配置项目工具链。
 
 行为约束：
 
-- 只处理 worktree 中**缺失**的 `node_modules`：有效的真实目录或目录软链（例如已 `npm install` 过）永远不会被覆盖；断链或指向非目录的 `node_modules` 会保留原状并记录为未准备，避免误报可用，也避免覆盖已有 worktree 状态
+- 只处理 worktree 中**缺失**的 `node_modules`：worktree 内已有的真实目录或有效软链（例如已 `npm install` 过）永远不会被覆盖；悬空软链会保留并记录为未就绪
 - 复用已有 worktree 时同样补齐：旧 worktree 缺 `node_modules` 的，下一次 `kc run` 会自动治愈
 - 准备流程不会执行 `sudo`、不写主机全局前缀/工具链、不使用未提供的凭据；需要提权、改全局环境或凭据的动作只归类为 `privilege` / `credentials` 并交给人决定
 - 诊断写入、扫描与软链都是 best effort：单个项目失败只记日志，不会中断 agent run
-- 软链同样保持 gitignored 状态，不会让 worktree 变脏
-- `agent/failed` 只表示 Agent/执行本身失败：若后续执行失败能被记录在案的缺失可执行文件、同一包管理器命令的凭据错误（401/403）或权限错误（EACCES/EPERM）解释，runner 会改判为可恢复的 `agent/blocked` 并发出脱敏诊断评论，人处理后用 `kc blocked-continue` 继续；与依赖无关的失败仍按原语义落 `agent/failed`
+- 新建、复用或已存在的 `node_modules` 软链都会加入 worktree 的 Git `info/exclude`，避免被 Agent 误提交
+- `agent/failed` 只表示 Agent/执行本身失败：若后续命令以 127 / `command not found` 结束，或 Agent attempt 明确报告记录中的缺工具、凭据或权限问题，runner 会改判为可恢复的 `agent/blocked` 并给出诊断；与依赖无关的失败仍按原语义落 `agent/failed`
 
 > 守护进程路径（`kc worktree create` / `kc run`）不读 `WORKTREE_FRONTEND_STRATEGY` 环境变量——该变量只对手动 `just worktree`（`scripts/shared/worktree/create.sh`）生效。daemon 路径固定采用上面的"可恢复准备 + 诊断"策略。
 
@@ -2434,7 +2455,7 @@ Issue 执行失败后会被标记为 `agent/failed`，runner 不会再自动处�
 2. **执行器超时续跑**：agent 子进程被墙钟或 inactivity timeout 杀掉，且 runner 收到了该 session id 时，默认在同一会话增加一个当前阶段时限的执行窗口。`timeout_resume_attempts` 限制同一 session 的额外超时续跑轮数；其他错误不消耗此预算。
 3. **同 agent recovery**：验证失败、未产出 commit、其他可修复的请求级错误走既有的 recovery 循环——带着失败摘要重新调用同一个 agent 修复，最多 `max_recovery_attempts` 轮。超时续跑预算耗尽后，recovery 可继续，但会从新 session 开始。
 4. **跨 agent fallback（Level 2）**：当某 agent **耗尽 recovery 预算仍失败**，或命中**供应商容量限制**（429 usage limit、529 overloaded、`daily count exceeded` 这类每日额度——同一供应商重试也只会继续失败，所以**不做原地重试**，直接换人），runner 会切换到 `agent_fallback_order` 里的下一个 agent，在已落盘的进度上接力。判定读的是失败异常里的 stdout/stderr 文本，因此流式 agent（`stream-json` 协议，如 qoder）的失败原因必须能进到异常里：整条 assistant 文本消息之后只跟一个不带文本的 `error` result 时（qoder 额度耗尽就是这种形态），runner 会把最近一条 assistant 文本作为 `[agent error]` 行带出；同时流式调用的 stderr 始终被收集（只保留最后 200 行），随失败异常一起进入 Issue 失败评论，不再只剩 `The command streamed its details to the terminal.`。有 `display_sink` 时 stderr 仍只交给回调，没有时照旧回显到终端。切换次数受 `max_agent_switches` 封顶。配置中列出但本机未安装的 agent（命令不存在）会被自动跳过。
-5. **不切换的情况**：安全违规（禁改路径、分支异常）等不可恢复错误换谁都失败，runner 直接停止、不浪费配额。依赖环境阻塞同理：Agent attempt 诊断明确点名依赖记录里的缺失可执行文件，或验证命令以 127 / `command not found` 结束时，缺的是**主机工具链**而不是某个 agent 的能力，runner 不换人，直接落 `agent/blocked`。同一包管理器的 attempt 诊断或验证输出明确命中记录里的权限 / 凭据失败时，也以可恢复阻塞呈现。
+5. **不切换的情况**：安全违规（禁改路径、分支异常）等不可恢复错误换谁都失败，runner 直接停止、不浪费配额。依赖环境阻塞同理：失败能归因到 worktree 依赖准备记录里的缺失可执行文件（或验证命令以 127 / `command not found` 结束）时，缺的是**主机工具链**而不是某个 agent 的能力，runner 不换人，直接落 `agent/blocked`。
 
 `agent_fallback_order` 默认包含 `["claude", "kimi", "codex"]`，主 agent 失败后会依次尝试链中的下一个可用 agent。未安装的 agent（命令不存在）会被自动跳过。将 `agent_fallback_order` 设为空列表即可关闭跨 agent fallback，回退到单 agent 行为。所有尝试（含跨 agent）都会汇总进失败评论的 **Attempt History** 表，表格包含 **Started (UTC)**（本轮开始时间）、**Agent**（执行 agent）、**Duration**（耗时）和 **Detail**（失败摘要）列；同时每轮 attempt 会实时写入本地 SQLite 运行历史库的 `attempt_records` 表，并更新 GitHub Issue 上一条带 `<!-- iar-attempt-history -->` marker 的增量评论。该实时评论按 `(repo_id, issue_number)` 从 SQLite 轨迹整表重渲染，因此跨 agent fallback 和重新 claim 都会**追加**到同一张表，不会把上一个 agent 的历史行覆盖掉；轨迹超过 50 行时只保留最近 50 行，并在表格上方注明 `Older attempts omitted`。
 
@@ -3088,7 +3109,7 @@ run_interval_seconds = 120
 # 保守判定:仅当 claim 标记的 host 是本机、且记录的 PID 已死或 claim 已老化时才处置。默认开。
 reconcile_stale_attempts = true
 # claim 老化阈值(秒):claim 含 started_at 且距 now 超过此值,即便 PID 仍活也视为 stale
-reclaim_ttl_seconds = 10800
+reclaim_ttl_seconds = 18000
 ```
 
 硬中断(SIGKILL / 崩溃 / 关机)不会把 Issue 从 `agent/running` 退回,而 daemon 只认领 `agent/ready`,任务会就此卡死。开启 `reconcile_stale_attempts` 后,daemon 每轮开头会对本机认领、进程已死的 running Issue 做对账:worktree 完好且可续传时回 `agent/ready` 并续上原会话,否则回 `agent/ready` 全新重跑,worktree 不可解析或恢复预算耗尽时判 `agent/failed`,三种出口都留一条对账 comment。关闭该开关即回到本特性落地前的现状。跨机器的孤儿需在同一台机器上重启 daemon 才会被回收。判定细节、幂等机制与配置优先级见前面「崩溃对账与 Agent 会话续传」一节。
@@ -3999,16 +4020,27 @@ PATCH  /api/v1/agent-runner/console/monitor/settings   {sync_enabled, sync_inter
 
 `/app/dashboard/` 的**默认视图**是任务值守看板（「仓库监控」仍保留原有的仓库卡片视图，
 仓库级「跑一轮 / 复核一轮」和同步设置都在那一侧）。看板以 Issue 运行为单位列出
-生命周期分桶（运行中 / 等待值守 / 阻塞 / 已完成 / 状态未知）、仓库与 Issue 身份、阶段、
-执行者与耗时，可按状态筛选、按仓库 / 编号 / 标题搜索，选中项复用既有的 Issue 增量日志与
+生命周期分桶（运行中 / 等待值守 / 阻塞 / 失败 / 已完成 / 已关闭 / 状态未知）、仓库与 Issue 身份、
+阶段及其简明说明、执行者与耗时，可按状态筛选、按仓库 / 编号 / 标题搜索，选中项复用既有的 Issue 增量日志与
 调用账本端点（结构化调用默认折叠，折叠只是展示层，原文不做截断）。
 
 数据来源仍然只有已注册仓库的 Console 观测路径（快照 + 运行 / attempt / 生命周期三本账），
 **不与托管进程日志混列**；任一来源读取失败只把该来源标为不可用，不会折叠成「没有任务」。
+快照中的任务先按 Issue 是否关闭分桶：关闭 Issue 显示「已关闭」，open Issue 再按最近同步到的
+状态标签分桶，关闭状态优先于残留标签。`agent/blocked` 显示为「阻塞」，`agent/failed` 显示为
+「失败」；前者表示需要人工决策，后者表示本轮执行失败，两者应分别排查。「已完成」仅表示运行账本
+记录了成功终态。状态来源根据 Issue 关闭状态、当前监控标签或运行账本终态显示；监控异常类型单独放在
+`anomaly_types`，不会替换状态来源，也不直接充当失败原因。阶段优先采用最近一次 attempt 记录的失败环节；
+没有时回退到 Issue 时间线最后一条阶段事件。阶段说明描述该环节的职责，例如
+`post_pr_rework_requested` 显示为「PR 后返工请求」，表示 PR 检查后需要继续修改或同步分支；
+具体失败原因仍应查看状态来源和运行详情。
+快照未收录时，运行账本和未收口的生命周期账本只补充最近 7 天内开始的记录。超出窗口的未收口
+记录不再作为当前运行任务计数，历史复盘仍使用统计页。
 
-看板上方还有一个「开启桌面小窗」入口，通过可选的原生 helper 开出一个可置顶的紧凑窗口。
-它未安装时不影响网页看板，只有窗口动作本身不可用。安装、平台依赖、Console origin
-约束与离线排查见 [桌面进度小窗](desktop-companion.md)。
+看板上方的「开启独立窗口」入口通过 pywebview 打开一个临时紧凑窗口；该入口不负责菜单栏驻留。
+macOS 菜单栏版需要从 `~/Applications/KedaCode.app` 启动，点击顶部图标展开状态，再用「固定悬浮」
+保持为置顶窗口。构建、平台依赖、Console origin 约束与排查见
+[macOS 菜单栏状态面板与独立桌面窗口](desktop-companion.md)。
 
 ### 异常检测
 
@@ -5138,29 +5170,31 @@ PRD 的 `Delivery Dependencies` 小节会解析为两类依赖边（Issue 与 PR
 
 ## 本地记忆持久化与 Skill 蒸馏（Memory Persistence & Skill Distillation）
 
-Agent Runner 默认开启两层**本地**记忆与 skill 蒸馏循环，用于把同类 Issue 的成功修复经验沉淀给后续 Issue 复用。所有数据保存在**目标仓库的主检出** `.kedacode/memory/` 与 `.kedacode/skills/` 下（默认被 `.gitignore` 排除），不引入外部数据库或服务。即使每个 Issue 在独立的工作副本里跑，记忆与 skill 也都在主检出里累积并跨 Issue 共享——目录的解析由 `backend.engines.agent_runner.factory._anchor_memory_config` 在构造 `RepositoryRunContext` 时一次性绝对化到 `repo_path`。
+Agent Runner 默认开启本地记忆与 skill 蒸馏，用于把成功修复经验沉淀为待审阅的 skill 草稿。短期执行详情默认保存在 Keda 用户状态目录；长期记忆和 skill 目录仍按现有 `base_dir` / skill 配置落在仓库。即使 Issue 在独立工作副本里运行，工厂也会在构造 `RepositoryRunContext` 时用主检出根生成稳定的本地仓库身份，因此同一仓库的 worktree 共用短期记录、不同路径下的同名仓库互相隔离。
 
 ### 数据落点
 
 | 用途 | 路径 | 格式 |
 |---|---|---|
-| 短期记忆（每个 Issue 的执行轨迹） | `<repo_path>/.kedacode/memory/short_term/<repo_id>/<issue_number>/context.json` | JSON |
+| 短期记忆摘要与详情引用 | `~/.kedacode/memory/short_term/<repo_identity>/<issue_number>/context.json` | JSON |
+| 完整 attempt detail | 同目录下 `attempt-details/<sha256>.log` | UTF-8 文本 |
 | 长期记忆（项目约定 / 模式） | `<repo_path>/.kedacode/memory/long_term/<category>/<topic>.md` | Markdown + YAML front matter |
 | Skill 草稿 | `<repo_path>/.kedacode/skills/drafts/<name>.md` | Markdown + YAML front matter (`draft: true`) |
 | 已晋升 skill | `<repo_path>/.kedacode/skills/<name>.md`（默认；可配置） | Markdown + YAML front matter (`draft: false`) |
 
 注：相对路径 **相对目标仓库主检出根** 解析，而不是相对每个 Issue 的工作副本。
 
-- 短期记忆目录使用 runner 注入的稳定 registry `repo_id`，再按 Issue 编号分区；不使用
-  `issue-<N>` worktree 名作为仓库身份。读取时会兼容旧版 `issue-<N>/<N>/context.json`，
-  下一次写入时落到稳定仓库分区。
-- 每轮 attempt 都追加到历史；未显式提供任务摘要时，`summary` 更新为最近 attempt 的详情。
-  `updated_at` 在每次写入时刷新。
+- `<repo_identity>` 是 canonical 主检出路径的 SHA-256；哈希只用于本机短期目录隔离，不依赖仓库名或 registry `repo_id`。迁移主检出路径会生成新的本机身份。
+- `context.json` 的 `summary` 和每个 attempt 的 `detail` 只保留详情中的首条有效诊断行（跳过空行、代码围栏和 `stdout:` / `stderr:` 标签），最多 240 个字符；完整文本通过相对 `detail_log_path` 引用。`final_solution` 也使用同样的摘要与日志引用格式。
+- 读取新格式时，store 会把可用详情日志还原成完整文本，因此成功后的 Skill 蒸馏仍会收到完整 attempt history 和 final solution。缺失、非法、越界或指向目录外的符号链接会保留 JSON 中的摘要，不中断读取。
+- 旧版仓库内 `<repo_path>/.kedacode/memory/short_term/<repo_id>/<issue_number>/context.json` 仅作为只读 fallback；自定义 `base_dir` 还会只读查找该路径下的旧 `repo_id` 分区。旧版 `issue-<N>` 分区也兼容。读取不会迁移、覆盖或删除旧文件。全局默认目录不会按 `repo_id` 猜测或读取无身份的旧分区。
 
 ### 锚点与并发语义
 
-- `config.toml` `[agent_runner.memory]` 的 `base_dir` / `skill_drafts_dir` / `promoted_skills_dirs` 中的**相对路径**在 engines 层会被解析为 `<repo_path>/<rel>` 的绝对路径；**绝对路径或 ``~``** 会被原样使用，不再挂到任何锚点下。
-- 想把记忆放在仓库外（防 `git clean -fdx` 误删或多机共享），运营者把上述字段改为绝对路径即可，例如：
+- `config.toml` `[agent_runner.memory]` 的相对 `base_dir` / `skill_drafts_dir` / `promoted_skills_dirs` 仍解析到 `<repo_path>/<rel>`；绝对路径或 ``~`` 展开后的路径原样使用。
+- `base_dir` 恰好等于默认字符串 `.kedacode/memory` 时，短期记忆默认写入 `~/.kedacode/memory`，长期记忆继续写入仓库下 `.kedacode/memory`。显式写出同一个默认字符串也采用此行为，因为无法区分它是默认值还是显式配置。
+- 如需显式把短期与长期记忆都放回仓库，可把 `base_dir` 写成 `./.kedacode/memory` 或该仓库内的绝对路径；任意非默认自定义 `base_dir` 会同时控制短期和长期记忆。Skill 草稿与晋升路径保持现有独立配置。
+- 例如，下面的配置会把短期与长期记忆都放到用户状态目录：
 
 ```toml
 [agent_runner.memory]
@@ -5169,14 +5203,14 @@ skill_drafts_dir = "~/.kedacode/memory/keda-main/skills/drafts"
 promoted_skills_dirs = ["~/.kedacode/memory/keda-main/skills"]
 ```
 
-- 共享锚点下三个 store 的写入统一为 ``tmp + os.replace`` 原子替换；并发场景是 ``last-write-wins``，不会出现半写损坏文件。
+- 写入通过共享 ``tmp + os.replace`` 原子写入器落盘；并发 context 更新采用 ``last-write-wins``，不会出现半写损坏文件。
 - 运行时 `build_default_memory_services(worktree_path, config.memory)` 收到相对路径时会发 `logger.warning`，提示预期由 factory 绝对化；这是防回归告警，正常生产路径不应出现。
 
 ### 触发点
 
 - `kc run <issue>` 启动：`build_prompt` 通过 `core/agent/memory/memory_loader.load_relevant_memory` 检索与当前 Issue 标签/标题/正文相关的长期记忆和已晋升 skills，以**目录形式**（name / description / 路径，不含全文）注入 prompt。
-- `run_agent_until_committed` 每轮尝试结束：调用 `core/agent/memory/short_term_memory.save_short_term_memory` 写入 `context.json`，记录尝试序号、失败类型、完整详情；成功时另存最终方案摘要，供后续提炼回看。
-- `run_agent_until_committed` 成功返回、`_finish_implementation_publication` 开头：只对明确记录为成功且带实际 Agent 名称的执行生成 skill。蒸馏会读取该 Issue 的完整短期尝试历史、已记录的最终方案、相对 base branch 的真实提交 diff 与验证命令结果，再由最后一个成功 Agent 的只读 `generate` 能力提炼。生成内容必须包含触发条件、步骤、验证、陷阱和证据，并通过格式与本地路径 / Issue 编号过滤后才写入草稿；证据、生成或写盘失败都不阻塞后续 push / review / PR。
+- `run_agent_until_committed` 每轮尝试结束：调用 `core/agent/memory/short_term_memory.save_short_term_memory` 保存紧凑上下文和独立详情日志；摘要由首条有效诊断行确定性生成，不调用模型，也不生成已完成事项清单。
+- 当前短期记录的真实消费者是成功发布后的 Skill 蒸馏，不是自动 retry 恢复。`_finish_implementation_publication` 只对明确记录为成功且带实际 Agent 名称的执行生成 skill；蒸馏读取已还原的完整 attempt history、final solution、相对 base branch 的提交 diff 与验证命令结果，再由最后一个成功 Agent 的只读 `generate` 能力提炼。生成内容必须包含触发条件、步骤、验证、陷阱和证据，并通过格式与本地路径 / Issue 编号过滤后才写入草稿；证据、生成或写盘失败都不阻塞后续 push / review / PR。
 - 自动提炼只会创建 `draft: true` 草稿。生成草稿时 `usage_count` 和 `success_count` 保持为 0，因为 runner 目前无法确认 Agent 是否实际读取并采用了被推荐的 skill；因此不能把“被检索到”或“本次 Issue 成功”误作技能使用效果，草稿不会自动晋升。维护者审阅后再手动晋升。
 
 ### 关闭与降级
@@ -5303,6 +5337,132 @@ uv run python -c "from importlib.resources import files; print(files('backend.en
 - `kc container up` 与 `kc daemon` 是**互斥**选项：同一仓库不能同时跑本机 daemon 和容器 daemon。
 - 不装 Docker 的用户零影响：`kc container` 全部子命令都是 opt-in。
 
+<a id="agent-availability"></a>
+
+## Agent 可用性：确认、本机引导与启动前门禁
+
+配置里写着某个 agent，**不等于**这台机器上有它的可执行文件：`config.toml` 是机器级文件，
+一台机器的选择复制到另一台就会让 runner 指向不存在的 CLI。本节给出"确认装了谁 → 按装了的
+人选 → 跑之前先验证"这条链路，全部结论只来自一个事实源，不猜。
+
+<a id="agent-availability-facts"></a>
+
+### 可用性只有一个事实源
+
+判定就是注册块 `bin` 字段按 `PATH` 解析（`shutil.which`），没有第二套嗅探、不看版本号、
+不试跑。同一个序列化（`core/use_cases/agent_onboarding.py` 的 `agent_availability_entries`）
+被三处消费，因此 CLI 与管理终端不会各说一套：
+
+- `kc agent list`：人类输出把未安装标成 `missing (not found in PATH)`，机读输出给
+  `available` 与解析到的 `bin_path`（未安装时为 `null`）。
+- `kc agent presets`：每个预设附带它绑定的 agent 装没装（`agent_available`）——预设本身
+  合法，仍可能在这台机器上跑不起来。
+- 管理终端的生命周期矩阵与统一设置页：`agent_availability` 逐 agent 标注「未安装 / 路径」。
+
+```bash
+# 这台机器装了谁（只看 PATH，不读任何凭据）
+uv run kc agent list
+uv run kc agent list --json
+```
+
+<a id="agent-setup-guide"></a>
+
+### 本机引导：`kc agent setup`
+
+引导写的是**全局层**（状态目录 `config.toml`）的生命周期矩阵，落点与统一设置页、
+`kc agent lifecycle set` 完全相同——它只是把"这台机器装了谁"变成可选项，不引入第二套配置。
+
+```bash
+# 交互式：按阶段菜单只列出本机可用的 agent（实现 / 校验 / 审核）
+uv run kc agent setup
+
+# 脚本化：显式点名，非 TTY 必须这样给（否则以用法错误退出，绝不猜一个 agent）
+uv run kc agent setup --agent claude --yes
+uv run kc agent setup --stage verifier --agent pi --yes
+uv run kc agent setup --stage review --preset plan --yes   # 绑命名预设而非裸 agent
+
+# 只读预览：打印可用性清单与将写的键，一个写锁都不取
+uv run kc agent setup --dry-run --json
+
+# 批量清理：移除全局层指向本机不可用 agent 的绑定（可用的不动）
+uv run kc agent setup --fix --yes
+```
+
+行为边界，逐条都是可验证的：
+
+- **阶段闭集**：引导只管 `implementation` / `verifier` / `review`（一次轮次里真正会调用
+  agent 的三个入口）。修复 / 收尾沿用实现者，其余阶段走 [Agent 模型预设](model-presets.md)
+  的高级配置。
+- **预设遮蔽必须解绑**：某阶段绑了命名预设时，该预设整体决定 agent，矩阵值永远不生效。
+  所以 `--agent` 写矩阵之前会先解绑该阶段的预设（两次写入在同一把写锁里，顺序是先解绑再写
+  矩阵），机读输出的 `unbind_stage_preset` 字段如实说明有没有发生。
+- **校验失败不触达配置文件**：agent 没注册 → 用法错误（2）并指向 `kc agent add`；注册了但
+  本机没装 → 未找到（3）；阶段名不在闭集里 → 用法错误（2）。三种情况都不取写锁，文件逐字节
+  不变。`--dry-run` 同理，只是它带着合法选择以 0 退出。
+- **`--fix` 只动全局层**：仓库层声明由该仓库维护，不在批量清理范围内；没有坏绑定时报
+  "没有"并以 0 退出，不制造空写入。
+
+<a id="agent-first-run-hint"></a>
+
+### macOS 菜单栏 App 首次提示
+
+首次在 macOS 交互式终端运行 `kc` 时，如果 `~/Applications` 和 `/Applications` 都没有 `KedaCode.app`，CLI 会先询问是否安装与当前 CLI 版本匹配的菜单栏 App。接受后下载对应架构的 DMG、校验 Release 校验和，并安装到 `~/Applications`；拒绝后可随时运行 `kc desktop install`。提示只出现一次，不显示在非 TTY、shell 补全协议、机器输出、帮助/版本和 `kc agent` / `kc completion` / `kc desktop` / `kc schema` 调用中。安装 App 不会改变 CLI 的 `uv` 安装方式；首次打开 App 仍可能需要 macOS 安全性确认。更多安装细节见[菜单栏 App 指南](desktop-companion.md)。
+
+### 首启提示：一次性、永不阻断
+
+第一次在**交互式终端**使用 `kc` 时，如果这台机器还没有任何显式选择，或配置指向的 agent
+本机没装，CLI 会在 stderr 提示一次并指向 `kc agent setup` / `kc agent list`，同时在状态目录
+落下 marker 文件 `~/.kedacode/.agent-setup-hint-shown`（同机不再重复）。这条路径有硬性门禁：
+
+- 非 TTY、shell 补全协议进行中、机器输出（`--json` / `--output json`）、`--help` /
+  `--version`，以及 `kc agent` / `kc completion` 子命令本身——一律不提示。提示文字绝不进入
+  agent 消费的 stdout/stderr 数据流。
+- 配置读不起来时静默让位：提示是附加价值，任何异常都不改变本轮命令的退出码与输出。
+
+<a id="agent-pre-run-gate"></a>
+
+### 启动前门禁：跑之前先确认，不要跑挂了才回退
+
+`kc run` 与 daemon 在**认领 Issue、建 worktree 之前**执行同一份判定（实现 / 校验 / 审核三个
+阶段，含各阶段绑定的预设），不可用就 fail-fast，退出码为未找到（3）。这挡住的是历史上最贵
+的一类失败：一轮跑了几十分钟、烧完 token 之后才报"这个 CLI 不存在"。
+
+```bash
+# 被拦下时报出阶段 / 预设 / agent / 可执行文件，并给出下一步命令
+uv run kc run --issue 42 --dry-run
+```
+
+- **回退链不能救"没装的主选"**：`agent_fallback_order` / 候选链的语义是"这个 agent 跑挂了
+  换一个"，不是"这台机器没装就偷偷换人"。主选不可用时按未找到（3）退出，不做任何静默换人；
+  临时换人必须显式 `--agent`（此时该阶段就按换进来的人判定，其余阶段仍按配置解析）。
+- 默认配置不受影响：没有显式声明、或声明为 `auto` / `executor` 的阶段由运行期自己路由，门禁
+  不制造第二条报错口径。绑定指向已删除的预设时同样按既有回落链走。
+- 进程边界仍有兜底：可执行文件在 spawn 瞬间解析不到（PATH 竞态、刚被卸载）时，报错点名是哪个
+  agent 在哪个上下文缺失，不会被误分类成"临时失败"后无谓重试。
+
+<a id="agent-add-registration"></a>
+
+### 自定义 agent 注册：`kc agent add`
+
+接入本机自有的 agent CLI 时，注册块不必手写 TOML：
+
+```bash
+# 默认只预览将要写入的 [agent_runner.agents.<name>] 块，磁盘不动
+uv run kc agent add myagent --bin myagent --arg=--print
+
+# 校验通过才落盘（写全局配置）
+uv run kc agent add myagent --bin myagent --arg=--print --write --yes
+
+# 提示词经指定 flag 投递
+uv run kc agent add myagent --bin myagent --prompt-delivery flag --prompt-flag --prompt --write
+```
+
+注册名非法、与既有 agent 重名、`output_protocol` 未注册、`prompt_delivery = flag` 却缺
+`prompt_flag`——都在触达配置文件之前以用法错误（2）退出，文件字节不变。反过来，**bin 暂时
+不在 `PATH` 上不会阻断注册**："先写配置、后装 CLI"是合法顺序，命令只在 stderr 提醒一句
+not on PATH；装好后用 `kc agent list` 确认可用性，再 `kc agent setup --agent myagent` 选它。
+注册块字段本身见下一节。
+
 <a id="new-agent-registry"></a>
 
 ## 接入一个新 agent（声明式注册表）
@@ -5359,7 +5519,7 @@ uv run kc agent doctor pi --all-profiles --json
 uv run kc agent doctor --protocols
 ```
 
-doctor 对三类坏输入分别非零退出并在 stderr 指名原因：agent 未注册、`bin` 不在 `PATH`、引用未注册协议。改完配置后先跑 doctor，再考虑投真实任务。
+doctor 对三类坏输入分别非零退出并在 stderr 指名原因：agent 未注册、`bin` 不在 `PATH`、引用未注册协议。改完配置后先跑 doctor，再考虑投真实任务。写配置这一步可以用 [`kc agent add`](#agent-add-registration)（预览 / `--write` 落盘）代替手写 TOML；这台机器装了谁看 [`kc agent list`](#agent-availability-facts)，选谁作为阶段执行者用 [`kc agent setup`](#agent-setup-guide)。
 
 ### 完整范例：pi
 

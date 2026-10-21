@@ -431,6 +431,8 @@ _ALLOWED_FLAGS: dict[tuple[str, ...], set[str]] = {
     # 旗标集合取自 ``kc schema --json`` 的真实命令树。
     ("labels", "sync"): {"--repo", "--repo-id", "--config", "--all"},
     ("init",): {"--dry-run", "--force"},
+    # 菜单栏 App 可在首次提示被跳过后通过此命令手动安装，无专属旗标。
+    ("desktop", "install"): set(),
     # issue-245：随包 Skill 写明 skill 重装/刷新的独立入口；它不带仓库 selector。
     ("skill", "install"): {"--dry-run", "--force"},
     # 单目录 operator 修复不触碰其它安装根或远程模板 Skill。
@@ -451,6 +453,32 @@ _ALLOWED_FLAGS: dict[tuple[str, ...], set[str]] = {
     ("blocked-continue",): {"--issue", "--agent", "--repo", "--repo-id"},
     ("worktree", "path"): {"--branch"},
     ("agent", "presets"): set(),
+    # issue-292：可用性与本机引导的命令面（``kc agent list`` / ``setup`` / ``add``）。
+    # 旗标集合照抄 ``kc schema --json`` 的真实命令树，不凭记忆放行。
+    ("agent", "list"): {"--json", "--output"},
+    ("agent", "setup"): {
+        "--stage",
+        "--agent",
+        "--preset",
+        "--fix",
+        "--dry-run",
+        "--yes",
+        "--json",
+        "--output",
+    },
+    ("agent", "add"): {
+        "--bin",
+        "--arg",
+        "--prompt-delivery",
+        "--prompt-flag",
+        "--output-protocol",
+        "--auth-home",
+        "--label",
+        "--write",
+        "--yes",
+        "--json",
+        "--output",
+    },
     # issue-262：生命周期 / 预设 / 回退候选的持久化命令面；旗标集合取自
     # ``kc schema --json`` 真实命令树（写入均需显式 --scope，repo 层 --repo-id）。
     ("agent", "lifecycle", "list"): {

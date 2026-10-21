@@ -9,11 +9,13 @@ layer remains decoupled from the JSON file format.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 
 from backend.core.shared.interfaces.loop_scheduler import ILoopStateStore
+from backend.core.shared.models.agent_spec import AgentSpec
 from backend.core.shared.models.loop import (
     LoopRecipe,
     LoopSchedule,
@@ -86,6 +88,7 @@ def create_loop_from_recipe(
     schedule: LoopSchedule | None = None,
     overwrite: bool = False,
     fire_at: datetime | None = None,
+    agents: Mapping[str, AgentSpec] | None = None,
 ) -> LoopTask:
     """Register a loop recipe into the persistent state store.
 
@@ -96,6 +99,7 @@ def create_loop_from_recipe(
         overwrite: When True, replace an existing task with the same id.
         fire_at: Reference time used to compute ``next_fire_at``; defaults
             to the current UTC instant.
+        agents: 生效 agent 注册表；点名自定义 agent 的配方要靠它才认得这个名字。
 
     Returns:
         The persisted :class:`LoopTask`.
@@ -106,7 +110,7 @@ def create_loop_from_recipe(
         LoopAlreadyExistsError: When the loop id is already registered and
             ``overwrite`` is False.
     """
-    recipe = parse_loop_recipe(recipe_path)
+    recipe = parse_loop_recipe(recipe_path, agents=agents)
     state_store.load()
     existing = state_store.get_task(recipe.id)
     if existing is not None and not overwrite:

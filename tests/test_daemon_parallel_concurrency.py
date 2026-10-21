@@ -161,6 +161,26 @@ def test_output_routed_runner_forwards_full_run_contract(tmp_path: Path) -> None
     assert base.labels[-1] == "mktree"
 
 
+def test_output_routed_runner_forwards_cancel_check(tmp_path: Path) -> None:
+    """The wrapper forwards the verifier's cancel probe instead of raising TypeError."""
+
+    class _CancelAwareRunner:
+        def __init__(self) -> None:
+            self.cancel_checks: list[object] = []
+
+        def run(self, command, *, cwd, cancel_check=None):
+            self.cancel_checks.append(cancel_check)
+            return CommandResult(tuple(command), 0, "", "")
+
+    base = _CancelAwareRunner()
+    wrapped = _OutputRoutedProcessRunner(base, lambda _c: None)
+    probe = lambda: False  # noqa: E731 - the identity is the assertion.
+
+    wrapped.run(["git", "status"], cwd=tmp_path, cancel_check=probe)
+
+    assert base.cancel_checks == [probe]
+
+
 def test_output_routed_runner_tolerates_partial_fake_signature(tmp_path: Path) -> None:
     """精简签名的运行器不认识的参数必须被过滤，而不是炸 TypeError。
 

@@ -17,7 +17,10 @@ from backend.core.use_cases.agent_invocation import (
     build_agent_invocation,
     resolve_registered_agents,
 )
-from backend.engines.agent_runner.factory import build_app_config
+from backend.engines.agent_runner.factory import (
+    build_app_config_from_settings,
+    load_fresh_agent_runner_settings,
+)
 from backend.infrastructure.config import settings as settings_module
 from backend.infrastructure.config import settings_sources
 from backend.infrastructure.config.settings import (
@@ -98,14 +101,18 @@ def test_iar_config_resolution_uses_global_config_inside_source_checkout(
 
     源码根的 ``config.toml`` 即使含有 ``[agent_runner]``，也不能抢先于
     ``~/.kedacode/config.toml`` 成为运行时全局配置。
+
+    装配走 :func:`load_fresh_agent_runner_settings` 而非 ``build_app_config()``：
+    后者转换的是导入期定型的进程单例，本用例对状态目录的 monkeypatch 到不了它，
+    在宿主机上断言的会是那份机器配置的内容。机器级取值刻意区别于代码默认
+    （``auto``）与项目级取值（``codex``），断言成立只剩一条来路。
     """
-    monkeypatch.delenv("KEDACODE_CONFIG", raising=False)
     monkeypatch.delenv("KEDACODE_CONFIG", raising=False)
     iar_home = tmp_path / "iar-home"
     iar_home.mkdir()
     machine_config = iar_home / "config.toml"
     machine_config.write_text(
-        '[agent_runner]\n[agent_runner.runner]\ndefault_agent = "claude"\n',
+        '[agent_runner]\n[agent_runner.runner]\ndefault_agent = "kimi"\n',
         encoding="utf-8",
     )
     monkeypatch.setattr(settings_sources, "_global_state_dir", lambda: iar_home)
@@ -122,7 +129,8 @@ def test_iar_config_resolution_uses_global_config_inside_source_checkout(
 
     assert settings_sources._find_product_config_toml() == machine_config
     assert settings_sources.resolve_config_toml_path() == machine_config
-    assert build_app_config().runner.default_agent == "claude"
+    global_app_config = build_app_config_from_settings(load_fresh_agent_runner_settings())
+    assert global_app_config.runner.default_agent == "kimi"
     # 宿主应用配置仍然按 cwd 搜索。
     assert settings_sources._find_config_toml() == project_config
 
@@ -344,6 +352,24 @@ def _label_config_scalar_field_names() -> list[str]:
     import dataclasses
 
     return [f.name for f in dataclasses.fields(CoreLabelConfig) if f.name != "agent_labels"]
+
+
+def test_label_settings_and_infra_label_config_do_not_drift_from_core() -> None:
+    """settings 的标签字段必须都落在 core ``LabelConfig``；infra 不得另有副本。
+
+    现有哨兵测试只从 core 字段正向构造 settings，settings 新增而 core 漏加的字段
+    会被静默丢弃；infra 曾是手写副本并缺 ``verifier_passed`` / ``prd_auto_merge``。
+    """
+    import dataclasses
+
+    legacy_agent_route_keys = {"codex", "claude", "kimi"}
+    core_field_names = {field.name for field in dataclasses.fields(CoreLabelConfig)}
+    settings_only_names = (
+        set(AgentRunnerLabelSettings.model_fields) - core_field_names - legacy_agent_route_keys
+    )
+
+    assert not settings_only_names, f"settings 标签字段未映射到 core: {settings_only_names}"
+    assert InfraLabelConfig is CoreLabelConfig
 
 
 def test_factory_maps_every_label_config_field() -> None:

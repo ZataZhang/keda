@@ -737,9 +737,12 @@ export default function DashboardPage() {
               {companionPending
                 ? "开启中…"
                 : companionState?.window_exists
-                  ? "聚焦桌面小窗"
-                  : "开启桌面小窗"}
+                  ? "聚焦独立窗口"
+                  : "开启独立窗口"}
             </Button>
+            <span className="text-xs text-slate-500" data-testid="dashboard-menubar-hint">
+              macOS 菜单栏模式请启动 ~/Applications/KedaCode.app，再点击顶部图标。
+            </span>
             {companionState ? (
               <span
                 className="text-xs text-slate-500"

@@ -230,13 +230,18 @@ def _workspace_root_manager_context(
     workspace_root_manifest, manifest_error_note = _read_package_manifest(workspace_root_path)
     declared_root_manager = _declared_package_manager(workspace_root_manifest)
     root_lockfile_names = _present_lockfile_names(workspace_root_path)
+    has_pnpm_workspace_file = (workspace_root_path / PNPM_WORKSPACE_FILE_NAME).is_file()
     root_lockfile_managers = tuple(
         dict.fromkeys(_LOCKFILE_PACKAGE_MANAGERS[name] for name in root_lockfile_names)
     )
     manager_sources = tuple(
         dict.fromkeys(
             manager
-            for manager in (declared_root_manager, *root_lockfile_managers)
+            for manager in (
+                declared_root_manager,
+                "pnpm" if has_pnpm_workspace_file else None,
+                *root_lockfile_managers,
+            )
             if manager is not None
         )
     )
@@ -250,6 +255,11 @@ def _workspace_root_manager_context(
                 if manifest_error_note
                 else f"workspace root '{covering_root}' packageManager: absent"
             )
+        ),
+        (
+            f"workspace root '{covering_root}' pnpm-workspace.yaml declares pnpm"
+            if has_pnpm_workspace_file
+            else f"workspace root '{covering_root}' pnpm-workspace.yaml: absent"
         ),
         f"workspace root '{covering_root}' lockfile(s): "
         f"{', '.join(root_lockfile_names) if root_lockfile_names else 'none'}",
@@ -278,6 +288,9 @@ def plan_package_manager(project_dir_path: Path, worktree_root_path: Path) -> Pa
     declared_manager = _declared_package_manager(manifest_object)
     if declared_manager:
         evidence_lines.append(f"package.json packageManager declares '{declared_manager}'")
+    has_pnpm_workspace_file = (project_dir_path / PNPM_WORKSPACE_FILE_NAME).is_file()
+    if has_pnpm_workspace_file:
+        evidence_lines.append("pnpm-workspace.yaml declares pnpm")
     lockfile_names = _present_lockfile_names(project_dir_path)
     evidence_lines.append(
         "lockfile(s): " + (", ".join(lockfile_names) if lockfile_names else "none")
@@ -299,9 +312,7 @@ def plan_package_manager(project_dir_path: Path, worktree_root_path: Path) -> Pa
             workspace_manager_conflict,
         ) = _workspace_root_manager_context(worktree_root_path, covering_root)
         evidence_lines.extend(workspace_manager_evidence)
-    is_workspace_root = (project_dir_path / PNPM_WORKSPACE_FILE_NAME).is_file() or bool(
-        _workspace_patterns(manifest_object)
-    )
+    is_workspace_root = has_pnpm_workspace_file or bool(_workspace_patterns(manifest_object))
     if is_workspace_root:
         evidence_lines.append("this directory is a workspace root (its install covers members)")
 
@@ -313,6 +324,7 @@ def plan_package_manager(project_dir_path: Path, worktree_root_path: Path) -> Pa
             manager
             for manager in (
                 declared_manager,
+                "pnpm" if has_pnpm_workspace_file else None,
                 *lockfile_managers,
                 *workspace_manager_sources,
             )

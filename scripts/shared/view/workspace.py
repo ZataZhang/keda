@@ -9,6 +9,11 @@
 不丢弃、不取消暂存。这条边界由用户拍板从「完全不写」放宽为一个受控写口（2026-09-22），因此
 本文件开头的这段说明与守卫测试里的相应条目都已同步改写；再要开新
 的写口之前请先读这两处，别把它当成「顺手就能加」。
+
+另有一个**不写仓库**的机器侧动作：:func:`open_path_in_system`（``POST /api/open``）把仓库内的
+文件交给系统默认应用打开。它对仓库零写入，但在用户机器上有副作用（会拉起应用），因此在 HTTP
+层走与暂存同一条写口径：只从 POST 来、只认 JSON 对象体、路径逐字过 :func:`resolve_repository_path`
+的越界断言；交给系统命令的永远是 ``resolve()`` 之后的单个 argv 元素，绝不经过 shell。
 特别地，未跟踪文件的改动**不**靠 ``git add -N`` 取得：那一条会写索引，而我们读它靠的是
 ``git diff --no-index -- /dev/null <文件>``。唯一的例外是「工作区删除 + 未跟踪新文件」这种
 用普通 ``mv`` 造出来的重命名：它在真实索引上永远配不出对，因此另起一个落在系统临时目录的
@@ -74,6 +79,7 @@ import posixpath
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
@@ -720,6 +726,66 @@ def stage_all_changes(repository_root: Path) -> WorkspacePayload:
     """
     _run_git(repository_root, "add", "-A")
     return WorkspacePayload(status_code=200, payload={"scope": STAGE_SCOPE_ALL})
+
+
+#: 「在系统中打开」交给系统命令的等待上限。``open`` / ``xdg-open`` 正常情况下立即返回；
+#: 超过它更可能是环境坏了，此时给出一条明确的失败比让请求线程无限挂着好。
+_OPEN_COMMAND_TIMEOUT_SECONDS = 10.0
+
+
+def open_path_in_system(repository_root: Path, requested_path: str) -> WorkspacePayload:
+    """用系统默认应用打开仓库内的一个文件——不写仓库的机器侧动作。
+
+    macOS 走 ``open``、Windows 走 :func:`os.startfile`（等价于在资源管理器里双击）、其余
+    走 ``xdg-open``，与 ``launch.py`` 拉起浏览器用的是同一张平台表。查看器渲染不了的
+    二进制、超大文件正是靠这个口子出去的；它不动仓库的任何一个字节，但会在用户机器上
+    拉起应用，因此与暂存共用同一条 HTTP 写口径（见本模块 docstring）。
+
+    平台命令以参数列表执行，路径整团作为最后一个 argv 元素：没有任何一个字符会被 shell
+    解释，以 ``-`` 开头的路径也不会被当成选项。命令失败（没有关联应用等）按拒绝应答返回，
+    失败说明取自命令自己的 stderr。
+
+    Args:
+        repository_root (Path): 仓库根绝对路径。
+        requested_path (str): 界面传来的仓库相对路径。
+
+    Returns:
+        WorkspacePayload: 成功时是 ``{"opened": ...}``；路径越界、为空、指向不存在的路径，
+            或系统命令失败/超时时为拒绝应答。
+    """
+    resolved_path = resolve_repository_path(repository_root, requested_path)
+    if resolved_path is None:
+        return build_refusal_payload(403, OUTSIDE_REPOSITORY_REFUSAL_MESSAGE)
+
+    normalized_relative_path = Path(requested_path).as_posix() if requested_path else ""
+    if not normalized_relative_path:
+        return build_refusal_payload(400, "拒绝：打开需要给出一个仓库内的路径。")
+    if not resolved_path.exists():
+        return build_refusal_payload(404, f"这个路径不存在：{normalized_relative_path}")
+
+    try:
+        if sys.platform == "win32":
+            # Windows 的系统关联打开器，不经 shell、也没有退出码可查；失败以异常冒出。
+            os.startfile(str(resolved_path))  # noqa: S606 - 仅接受仓库内已解析路径
+            return WorkspacePayload(status_code=200, payload={"opened": normalized_relative_path})
+        open_command = ("open",) if sys.platform == "darwin" else ("xdg-open",)
+        completed_process = subprocess.run(
+            (*open_command, str(resolved_path)),
+            capture_output=True,
+            timeout=_OPEN_COMMAND_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as open_error:
+        return build_refusal_payload(500, f"打开失败：{open_error}")
+
+    if completed_process.returncode != 0:
+        # 失败说明来自命令自己的 stderr（例如「没有应用知道怎么打开这个文件」），
+        # 比一个光秃秃的退出码有用得多。
+        failure_text = completed_process.stderr.decode("utf-8", errors="replace").strip()
+        return build_refusal_payload(
+            500, f"打开失败：{failure_text or f'退出码 {completed_process.returncode}'}"
+        )
+    return WorkspacePayload(status_code=200, payload={"opened": normalized_relative_path})
 
 
 def build_changes_payload(repository_root: Path) -> WorkspacePayload:

@@ -1,6 +1,6 @@
 # 一键安装 kc CLI
 
-> PyPI / Homebrew 分发包名为 `kedacode`（避免与 CNCF KEDA 混淆）。安装后有两个完全等价的命令：主命令 `kc`，以及与安装名对齐的别名 `kedacode`——装完想不起来敲什么时，直接敲包名也能用。本文其余部分统一写 `kc`。
+> PyPI / Homebrew 分发包名为 `kedacode`（避免与 CNCF KEDA 混淆）。安装后有两个完全等价的命令：主命令 `kc`，以及与安装名对齐的别名 `kedacode`——装完想不起来敲什么时，直接敲包名也能用。旧命令 `iar` 已不再安装；旧脚本请改用 `kc`。本文其余部分统一写 `kc`。
 >
 > 刻意**不**提供 `keda` 命令：`bin/keda` 会与 CNCF KEDA 将来可能进入 homebrew-core 的同名 formula 抢符号链接，那时用户 `brew install` 会直接失败。
 
@@ -41,6 +41,14 @@ kc completion install --shell fish
 当前支持 bash、zsh 和 fish。之后输入 `kc ` 再按 Tab 可查看子命令；例如 `kc is<Tab>` 会补全为 `kc issue`。每台电脑、每个 shell 配置一次即可。
 
 如果还未配置补全，首次在交互式终端运行 `kc` 时会显示选择菜单，默认选中“安装”；按上下方向键可切换到“暂不安装”，按 Enter 确认。提示不会由 `kc<Tab>` 触发，因为此时 shell 尚未启动 `kc`；先运行一次 `kc` 或按上面的命令配置即可。选择安装后，`kc` 会安装补全并退出，不会继续执行刚才的命令；按提示重载 shell 配置，再重新运行刚才的 `kc` 命令。
+
+### macOS 菜单栏 App（可选）
+
+`uv tool install kedacode` 仍只安装 CLI，不会改变安装方式。macOS 用户首次在交互式终端运行 `kc` 时，如果 `~/Applications` 和 `/Applications` 中都没有 KedaCode App，会看到一次菜单栏 App 安装菜单；选择安装后，CLI 会下载与当前 `kedacode` 版本和 CPU 架构匹配的发布包，校验 SHA-256，并安装到 `~/Applications/KedaCode.app`。CLI 仍由 `uv` 管理，菜单栏 App 是可选的独立桌面程序。
+
+这个菜单与上面的 shell 补全菜单是两次独立选择；若两者都还未设置，菜单栏 App 菜单先出现，随后才会显示补全菜单。
+
+如果选择暂不安装，之后可手动执行 `kc desktop install`。自动提示只在 macOS 交互式终端出现，不影响脚本、机器输出、帮助或版本调用。安装后从 Finder 打开 `~/Applications/KedaCode.app` 即可显示菜单栏图标。当前公开构建使用 ad-hoc 签名且未公证；首次打开时 macOS 可能要求在「系统设置 → 隐私与安全性」中允许，详见[菜单栏 App 指南](../guides/desktop-companion.md)。
 
 **curl 一键脚本（macOS / Linux）：**
 
@@ -92,7 +100,7 @@ Skill，再安装到用户级目录；不会写入项目内 `.claude/skills`、`
 
 `kc` 还提供 `kc container` 子命令组，把 agent runner 跑进 Docker 容器：
 
-- 容器内预装 claude / codex / kimi 三个 agent CLI + gh + Node + uv + just + git，避免污染本机工具链。内置注册表里另有 `codebuddy` / `qoder` / `opencode`，但**容器镜像尚未预装它们**——容器里选中这些 agent 会在启动子进程时报可执行文件不存在；需要时请在本机跑，或自行在镜像里补装。
+- 容器内预装 claude / codex / kimi 三个 agent CLI + gh + Node + uv + just + git，避免污染本机工具链。内置注册表里另有 `codebuddy` / `qoder` / `opencode`，但**容器镜像尚未预装它们**——容器里选中这些 agent 会在认领 Issue 之前被启动前门禁拦下（未找到 3，点名阶段与可执行文件），不做静默换人；需要时请在本机跑，或自行在镜像里补装。
 - 认证通过 `kc container auth import` 一次性快照到 `~/.kedacode/container-auth/`，与本机 cc-switch 当前 profile 隔离——本机切账号不影响容器内 agent 认证。
 - 目标仓库挂载进容器，agent 在挂载目录的 `.iar-worktrees/` 建 worktree，宿主机可直接 `kc worktree open` 接管。
 - runner 容器资产（Dockerfile / compose / .env.example）随 `kc` 包发布，无需克隆 keda 源码，全局安装后即可使用。

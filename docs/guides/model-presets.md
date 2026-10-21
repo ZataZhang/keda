@@ -32,6 +32,15 @@ reasoning_effort = "high"
 
 枚举全部预设：`kc agent presets`。
 
+**预设属于机器，不属于默认模板。** 具体模型选择是维护者或某台机器上用户的偏好，不是产品
+默认值，所以仓库根 `config.toml` 只保留**注释掉的写法示例**，不携带任何生效的
+`[agent_runner.presets.*]` 或 `[agent_runner.lifecycle_presets]` 绑定；首次创建
+`~/.kedacode/config.toml` 时写入的是代码内最小骨架（不含任何预设与阶段绑定，见
+[配置说明](configuration.md#agent-runner-repo-config)）。把个人预设写在自己的机器级配置里，
+或用 `kc agent preset set … --scope global` / `kc agent setup` 落盘；已经存在的历史配置
+不会被自动改写，但其中的个人预设与本机可用性无关，指向没装的 agent 时会被启动前门禁点名
+（见 [Agent Runner 使用指南](agent-runner.md#agent-pre-run-gate)）。
+
 ## 2. Agent 级模型参数模板
 
 模型参数怎么注入由**每个 agent 自己声明**（`[agent_runner.agents.<name>]`）：
@@ -115,10 +124,19 @@ supervisor / planner / content_generation / deliberate）。
 
 ## 6. 排查与观测
 
-- `kc agent presets`：列出全部预设。
+- `kc agent presets`：列出全部预设，并附带该预设绑定的 agent 在本机**装没装**
+  （机读字段 `agent_available`）。预设本身合法不代表这台机器跑得动它。
 - `kc agent doctor <agent> --preset <名>`：预览将被执行的完整 argv。
 - `kc agent doctor --lifecycle <键>`：按阶段视角打印"解析出的 agent + 绑定的模型参数"；
   fix / closeout 在无实现者上下文时如实返回 `follows_implementation`。
+- `kc agent list` / `kc agent setup --dry-run`：打印这台机器逐个 agent 的可用性
+  （`available` + 解析到的 `bin_path`，未安装为 `null`），与 Settings 页面读同一份事实。
+- **绑预设的 agent 没装时，改的是预设不是矩阵**：启动前门禁按"预设优先于矩阵"解析，
+  因此报错点名的是预设（`stage 'review' (preset 'fast') resolves to agent 'kimi' …`），
+  要么装回该 CLI，要么换/改预设。`kc agent setup --stage <键> --preset <名>` 是引导式
+  绑定入口，它只接受本机装了的 agent；`kc agent setup --agent <名>` 写矩阵时会**先解绑**
+  该阶段的预设，否则新选择永远不会生效。完整口径见
+  [Agent Runner 使用指南](agent-runner.md#agent-pre-run-gate)。
 - attempt 账本 `attempt_records` 新增 `preset` / `model` 可空列（schema v6，自动迁移）。
 
 ## 7. 统一设置页与持久化 CLI（生命周期 Agent / 模型 / 推理深度）

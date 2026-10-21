@@ -63,6 +63,8 @@ REASON_NO_ACTION_NEEDED = "no_action_needed"
 # 需要人来决定的类别：Keda 与 Agent 都不代做这些动作。
 USER_ACTION_PRIVILEGE = "privilege"
 USER_ACTION_CREDENTIALS = "credentials"
+# 兼容 schema v1 的历史记录；当前缺工具诊断不再要求用户预装主机工具链。
+USER_ACTION_HOST_TOOLCHAIN = "host_toolchain"
 
 #: 处置结论 → 该项目是否已经拥有可用依赖。
 _USABLE_OUTCOMES = frozenset({OUTCOME_INSTALLED, OUTCOME_REUSED, OUTCOME_PRESENT})
@@ -81,6 +83,9 @@ _CREDENTIAL_PATTERNS: tuple[re.Pattern[str], ...] = (
 
 #: shell 里「命令不存在」的退出码（127），用于把失败归属到缺失的可执行文件。
 _COMMAND_NOT_FOUND_EXIT_CODE = 127
+
+# ``bash -lc`` 等包装命令的 ``-c`` 参数里包含待执行的命令文本。
+_SHELL_COMMAND_INTERPRETERS = frozenset({"bash", "dash", "fish", "ksh", "sh", "zsh"})
 
 
 @dataclass(frozen=True)
@@ -612,17 +617,16 @@ def _command_result_matches_user_action(
     """仅当失败命令针对该包管理器且输出命中已知权限/凭据特征时才阻塞。"""
     if dependency_record.requires_user_action is None or not dependency_record.package_manager:
         return False
+    return_code = getattr(command_result, "return_code", None)
+    if not isinstance(return_code, int) or return_code == 0:
+        return False
     command_value = getattr(command_result, "command", ())
     if isinstance(command_value, (tuple, list)):
         command_tokens = tuple(str(token) for token in command_value)
     else:
         command_tokens = ()
     manager_name = dependency_record.package_manager
-    command_mentions_manager = any(
-        Path(command_token).name == manager_name or manager_name in command_token
-        for command_token in command_tokens
-    )
-    if not command_mentions_manager:
+    if not _command_mentions_package_manager(command_tokens, manager_name):
         return False
     stdout_text = getattr(command_result, "stdout", "")
     stderr_text = getattr(command_result, "stderr", "")
@@ -633,6 +637,39 @@ def _command_result_matches_user_action(
         classify_user_action_from_failure_text(failure_text)
         == dependency_record.requires_user_action
     )
+
+
+def _command_mentions_package_manager(
+    command_tokens: tuple[str, ...],
+    manager_name: str,
+) -> bool:
+    """按 argv 完整 token 匹配包管理器，也解析常见 shell 的 ``-c`` 参数。"""
+    if any(Path(command_token).name == manager_name for command_token in command_tokens):
+        return True
+    for interpreter_index, command_token in enumerate(command_tokens):
+        if Path(command_token).name not in _SHELL_COMMAND_INTERPRETERS:
+            continue
+        for option_index in range(interpreter_index + 1, len(command_tokens)):
+            shell_option = command_tokens[option_index]
+            has_command_string = shell_option == "-c" or (
+                shell_option.startswith("-")
+                and not shell_option.startswith("--")
+                and "c" in shell_option[1:]
+            )
+            if has_command_string:
+                command_string_index = option_index + 1
+                if command_string_index >= len(command_tokens):
+                    break
+                try:
+                    shell_command_tokens = tuple(shlex.split(command_tokens[command_string_index]))
+                except ValueError:
+                    break
+                if any(Path(token).name == manager_name for token in shell_command_tokens):
+                    return True
+                break
+            if not shell_option.startswith("-"):
+                break
+    return False
 
 
 def build_environment_block_message(
@@ -720,6 +757,7 @@ __all__ = [
     "REASON_TOOL_MISSING",
     "REASON_WORKSPACE_COVERED",
     "USER_ACTION_CREDENTIALS",
+    "USER_ACTION_HOST_TOOLCHAIN",
     "USER_ACTION_PRIVILEGE",
     "build_environment_block_message",
     "classify_user_action_from_failure_text",
