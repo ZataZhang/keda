@@ -1816,10 +1816,11 @@ def test_evidence_branch_name_uses_prefix() -> None:
 def test_run_agent_until_committed_fails_without_evidence(tmp_path: Path) -> None:
     """Missing evidence exhausts recovery and surfaces the gate failure."""
     from backend.core.shared.models.agent_runner import RunnerConfig
-    from backend.core.use_cases.run_agent_once import (
-        MaxRetriesExceededError,
-        run_agent_until_committed,
+    from backend.core.use_cases.run_agent_execution_loop import (
+        AgentExecutionRequest,
+        execute_agent_request,
     )
+    from backend.core.use_cases.run_agent_once import MaxRetriesExceededError
 
     config = AppConfig(
         runner=RunnerConfig(
@@ -1831,14 +1832,17 @@ def test_run_agent_until_committed_fails_without_evidence(tmp_path: Path) -> Non
     fake_runner = FakeProcessRunner()
 
     with pytest.raises(MaxRetriesExceededError) as exc_info:
-        run_agent_until_committed(
-            selected_agent="claude",
-            issue=_issue(),
-            worktree_path=tmp_path,
-            config=config,
-            process_runner=fake_runner,
-            before_sha="abc1111",
-            expected_branch="task/42",
+        execute_agent_request(
+            AgentExecutionRequest(
+                selected_agent="claude",
+                issue=_issue(),
+                worktree_path=tmp_path,
+                config=config,
+                process_runner=fake_runner,
+                before_sha="abc1111",
+                expected_branch="task/42",
+                github_client=FakeGitHubClient(),
+            )
         )
 
     assert any(

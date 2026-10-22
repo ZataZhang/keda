@@ -76,7 +76,7 @@ def test_run_once_completes_recovery_or_closed_noop(
                 self._agent_calls += 1
                 if self._agent_calls == 1:
                     if close_without_changes:
-                        fake_client._issue_states[issue.number] = "CLOSED"
+                        fake_client.close_issue(issue.number)
                     # First attempt: produce no commits
                     return CommandResult(command_tuple, 0, "", "")
                 if self._agent_calls == 2:
@@ -200,6 +200,9 @@ def test_recovery_loop_exhausted_raises_max_retries(tmp_path: Path) -> None:
     )
 
     assert exit_code == 1
+    # 干净树 + HEAD 未前进会触发 fresh read，但 GitHub 上仍是 OPEN：
+    # 无改动闭合门禁必须被问过、并且没有放行，Issue 照旧落到 agent/failed。
+    assert any(call["method"] == "get_issue" for call in fake_client.calls)
     failed_calls = [
         c
         for c in fake_client.calls

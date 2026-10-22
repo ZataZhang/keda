@@ -105,8 +105,9 @@ class AgentExecutionRequest:
     process_runner: IProcessRunner
     before_sha: str
     expected_branch: str
-    #: 用于确认「执行期间关闭且无变更」的 Issue 最新状态；缺失时保持原 no-commit recovery 行为。
-    github_client: IGitHubClient | None = None
+    #: 读取 Issue 最新状态的 GitHub 客户端。必填：「执行期间关闭且无变更」门禁依赖它，
+    #: 漏传客户端的调用面应当在构造请求时直接报错，而不是静默退回 no-commit 失败行为。
+    github_client: IGitHubClient
     prompt_override: str | None = None
     on_attempt_recorded: Callable[[AttemptResult, list[AttemptResult]], None] | None = None
     #: 旁路观测回调：本 Issue 处理期间每次非 attempt 主体的 agent 调用
@@ -203,13 +204,8 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
     最终随失败评论一起发布到 GitHub Issue。
 
     Args:
-        selected_agent: 使用的 AI agent 名称（claude / kimi / codex）。
-        issue: 当前处理的 Issue。
-        worktree_path: agent 工作的 git worktree 路径。
-        config: Agent Runner 配置。
-        process_runner: 命令执行器。
-        before_sha: 循环开始前的 HEAD SHA，用于检测是否有新提交。
-        expected_branch: 期望的分支名，防止 agent 切换分支。
+        request: Agent 执行请求，携带所选 agent、Issue、worktree、配置、命令执行器、
+            执行前 HEAD SHA、期望分支，以及用于 fresh read Issue 状态的 GitHub 客户端。
 
     Returns:
         AgentCommitResult，包含最终验证结果和尝试历史。
@@ -416,9 +412,10 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
 
         # 无 PRD 的 Issue 可以在确认无剩余工作后被明确关闭。此时没有可验证或发布的
         # 代码树；重新读取到 CLOSED 才把本轮当作正常收敛，读取失败仍走原 recovery。
+        # has_changes 走 `git status --porcelain`，**含未跟踪文件**：留下任何未跟踪产物
+        # （被 .gitignore 排除的 runner 文件除外）都不算「无改动」，仍按原流程失败。
         if (
-            request.github_client is not None
-            and prd_relative_path is None
+            prd_relative_path is None
             and get_head_sha(worktree_path, process_runner) == before_sha
             and not has_changes(worktree_path, process_runner)
         ):

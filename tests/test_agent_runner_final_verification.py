@@ -203,6 +203,7 @@ def test_execution_loop_commits_before_verifier_gate(
             process_runner=verification_request.process_runner,
             before_sha="old",
             expected_branch="issue-7",
+            github_client=FakeGitHubClient(),
             publish_stage=publish_stage,
         )
     )

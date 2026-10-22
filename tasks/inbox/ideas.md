@@ -548,3 +548,15 @@ Attempt    Started (UTC)    Agent    Failure Type    Recovered    Duration    De
   - [OpenHands Index](https://www.openhands.dev/blog/analyzing-and-improving-openhands-index)：参考将评测实例与完整 Agent 轨迹关联，并提供轨迹查看。
   - [LangSmith Dataset Management](https://docs.langchain.com/langsmith/manage-datasets-in-application)：参考从 traces 筛选/导入数据集、人工标注与样本管理。
 - 边界/约束：这些是分层参考，不意味着 Keda 要直接依赖或完整照搬；仍需补足 Keda 场景里的原始任务输入、跨 commit/PR 关联和部署结果。
+
+## 2026-10-23 05:09 · loop-patrol-unknown-reason
+
+> Root cause of the pre-trigger 'unknown' counts was never diagnosed
+> The Issue requires diagnosing a failed GitHub state read rather than treating it as an empty queue. […] nothing explains why the 30-minute trigger reported `unknown` — that condition may recur every round. State the diagnosis, or record it as an explicit open item on the patrol Issue.
+
+**AI 派生（非用户原话）**
+- 对话脉络：Issue #310 的审查意见指出「触发前计数为 `unknown`」这一现象没有被解释。本轮已把诊断写进 `docs/guides/loop.md` 的「巡查计数显示 `unknown` 时先查什么」，但 recipe 本身没改，条件仍可能每轮复发。
+- 背景/动机：巡查配方用 `gh issue list ... 2>/dev/null` 统计 `agent/blocked` / `agent/failed`，失败时打印 `unknown` 并以 0 退出；报错文本在 shell 侧被丢弃，loop 侧也没有失败记录（`last_error` 无写入方），所以事后无从判断是认证、PATH 还是限流。
+- 方案设想：让 pre_command 保留 `gh` 的 stderr，把原因随哨兵值一起输出（例如新增 `state_read_error` 变量并在模板里展示），或在 loop 侧把 `needs_attention=unknown` 当成一次失败记账并跳过建 Issue，使「读不到状态」与「队列为空」在证据上可区分。
+- 边界/约束：改的是在跑的巡查配方，模板占位符必须与 pre_command 输出一一对应，写错会让后续每一轮都不再建 Issue（静默失效），因此需要独立的验证与排期，不夹带进 bugfix PR。`~/.kedacode/loop-state.json` 的 `recipe_path` 指向主检出，改动要合并回主干才生效。
+- 待澄清：哨兵值应该「建 Issue 但标注读取失败」还是「直接跳过本轮」；失败原因放在 Issue 正文还是 loop-state.json；是否顺带补上 `last_error` 的写入方。
