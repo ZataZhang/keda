@@ -20,7 +20,8 @@
 - **起点记的是真正的"分叉点"**（FR-3）：复用一个已经有提交的旧工作目录时，记录的代码起点是它与基线分支的分叉点，而不是工作目录当前的最新提交。
 - **记录失败不影响交付**（FR-4）：写快照出错（目录不可写、磁盘满）只记一条警告日志，Issue 继续正常执行。
 - **数据集导出优先用快照**（FR-5）：导出样本时，任务输入取自最早的快照并标明"认领时快照"；若 Issue 之后又被改过，样本会标出"认领后被编辑"。没有快照的旧 Issue 行为不变。
-- **文档同步**（FR-6）：运行指南与数据集导出指南说明快照的位置、内容和限制。
+- **记录格式可演进**（FR-7）：每条快照自带格式版本号；以后加字段只增不改，读取方遇到不认识的版本会跳过并告警，不会读错。
+- **文档同步**（FR-6）：运行指南与数据集导出指南说明快照的位置、内容、"只记事实"的边界和限制。
 
 ---
 
@@ -40,17 +41,17 @@
 
 ### Interpretation (解读回显)
 
-我对这个需求的理解：**在 runner 认领一个"待实现"Issue 的那一刻，把 Agent 即将看到的任务输入原样留一份，之后永不改写；任何事后编辑都只能追加，不能覆盖。**
+我对这个需求的理解：**在 runner 认领一个"待实现"Issue 的那一刻，把 Agent 即将看到的任务输入原样留一份，之后永不改写；任何事后编辑都只能追加，不能覆盖。KedaCode 只负责记录事实（原文、代码起点），不负责判断这条数据好不好——筛选、补验证命令、改写、脱敏由后续的人工与更强的 Agent 在单独的整理层完成。**
 
 #### 行为样例
 
 | 验证方式 | 输入 / 操作 | 期望观察到的结果 |
 |---|---|---|
-| 👀 人审 + 自动验证 | `kc run` 认领 Issue #7（标题"修复登录页"，正文 B1，当前基线 `abc123`），Agent 随后正常完成 | 该仓库日志目录下出现 `issue-7.snapshots.jsonl`，恰好 1 行，包含标题、正文 B1 原文、正文的 SHA-256、标签、状态、链接、认领时间和代码起点 `abc123` |
+| 👀 人审 + 自动验证 | `kc run` 认领 Issue #7（标题"修复登录页"，正文 B1，当前基线 `abc123`），Agent 随后正常完成 | 本机 KedaCode 状态目录里出现一个按仓库和 Issue 归档的快照文件（Issue #7 一个），恰好 1 行，包含格式版本号、标题、正文 B1 原文、正文的 SHA-256、标签、状态、链接、认领时间和代码起点 `abc123`；被处理的项目目录里没有新增任何文件 |
 | 🤖 自动验证 | 同一个 Issue #7 因为失败换了第二个 Agent 重试（正文仍是 B1） | 文件仍然只有 1 行，没有重复 |
 | 🤖 自动验证 | 有人在 GitHub 上把 #7 正文改成 B2，之后再次认领运行 | 文件变成 2 行：第 1 行（B1）逐字节不变，第 2 行是 B2 和新的 SHA-256 |
 | 🤖 自动验证 | #7 的旧工作目录里已有上次留下的两个提交，runner 复用它再次运行 | 快照的代码起点是该工作目录与基线分支的分叉点，不是工作目录当前最新提交；当前最新提交另存为单独字段 |
-| 🤖 自动验证 | 日志目录不可写（例如路径被一个同名文件占住） | 本次运行照常执行并交付；日志里有一条写快照失败的警告；没有产生快照文件 |
+| 🤖 自动验证 | 快照目录不可写（例如路径被一个同名文件占住） | 本次运行照常执行并交付；日志里有一条写快照失败的警告；没有产生快照文件 |
 | 👀 人审 + 自动验证 | 数据集导出遇到一个有快照、且正文后来被改过的 Issue | 样本里的任务输入是 B1（来自快照），来源标为"认领时快照"，并标出"认领后被编辑 = 是" |
 | 🤖 自动验证 | 数据集导出遇到本功能上线前就完成的旧 Issue | 导出结果与现在完全一致（仍走 GitHub 事后抓取或仅标题），不出现错误 |
 
@@ -59,7 +60,9 @@
 #### 我默默定了这些
 
 - 只对"待实现"（ready）类 Issue 留快照；辩论（deliberate）、PRD 重写（rework-prd）、巡检类运行不留。
-- 快照只存在本机，放在已有的 Issue 日志目录里（该目录已被 git 忽略）；不进 git，不上传 GitHub。
+- 快照只存在本机，放在 KedaCode 自己的状态目录里（不在任何被处理的项目内）；不进任何项目的 git，不上传 GitHub。这样用 KedaCode 处理别的项目时，也不会在那些项目里留下文件，所有项目的快照集中在一处，便于汇总。
+- **只记事实，不记评判**：快照里没有"可用作评测""难度""是否巡检"这类标签；这些判断属于整理层，由人工和更强的 Agent 做，并且可以随时重做。
+- 数据集会不断优化修改，所以原始记录只增不改；每条记录带格式版本号，字段只增不改，旧记录永远可读。
 - 快照写入是"观察性"的：写失败只告警，绝不阻断认领、实现或交付。
 - 快照里的正文是**逐字原文**，不做脱敏、不截断；它和 Issue 日志一样留在本机，不引入新的暴露面。
 - 以正文的 SHA-256 判断"有没有改"；标题或标签单独变化不触发追加（正文才是 Agent 要读的任务）。
@@ -68,6 +71,7 @@
 #### 我理解为不做
 
 - 不记 Issue 评论（认领之后的评论属于过程中的反馈，不是原始输入；是否纳入等有真实需求再议）。
+- 不做数据集整理与评判（筛选、补验证命令、改写、脱敏、分难度），也不定义整理层的版本管理；那是后续单独的工作。
 - 不新增数据库表或字段，Console 页面本期不展示快照。
 - 不改变 Agent 能看到什么：Agent 读到的任务输入与现在完全一致，快照只是留底。
 
@@ -77,7 +81,7 @@
 
 ### What The User Gets
 
-- **运维者（运行 `kc` 的人）**：运行流程不变，只是在日志目录里多出一个很小的快照文件；写失败不影响任何运行。
+- **运维者（运行 `kc` 的人）**：运行流程不变，只是在本机状态目录里多出一个很小的快照文件；被处理的项目不受影响；写失败不影响任何运行。
 - **数据集维护者**：导出的每个新样本都带有"认领时的任务原文"，并能知道它后来有没有被改；评测题的 prompt 与 Agent 当时看到的一致。
 
 ### Measurable Objectives
@@ -89,13 +93,15 @@
 
 ## 2. Human Review Map (介入与风险地图)
 
-### 决策一：快照存放在日志目录旁，不改数据库
+### 决策一：快照存放在本机状态目录里，不进项目、不改数据库
 
-我建议把快照存成每个 Issue 一个只追加的文本文件，放在已有的 Issue 日志目录里，而不是新建数据库表。理由有两个：一是本功能不需要数据库迁移，不会和待办中同样要升级数据库版本的 M13 评测 PRD 争抢版本号；二是快照的读者目前只有导出脚本，文件足够。代价是：快照和日志一样只存在本机，清理日志目录就会一并清掉；Console 页面也暂时看不到它。
+我建议把快照存成每个 Issue 一个只追加的文本文件，放在 KedaCode 自己的本机状态目录（与全局配置、`console.db` 同处）下的一个专用区，而不是放进被处理的项目，也不新建数据库表。理由：一是用 KedaCode 处理别的项目时，不会在那些项目里留下文件或弄脏它们的 git；二是所有项目的快照集中在一处，导出脚本一次就能汇总；三是不需要数据库迁移，不会和待办中同样要升级数据库版本的 M13 评测 PRD 争抢版本号。代价是：快照绑定在这台机器上，删除状态目录或换电脑就会丢；Console 页面也暂时看不到它。
 
-**请确认：** 接受"快照存在本机日志目录旁、随日志一起可能被清理"这一取舍吗？如果希望快照长期保留、可被 Console 查询，就应该改成数据库表，但那会引入数据库迁移并需要与 M13 排序。
+本机状态目录只是**采集缓存**，不是长期保存的地方：长期保存的那一份是导出的样本——样本里自带最早快照的任务原文，导出后提交到数据集仓库，本机快照丢了也不影响已导出的样本。风险窗口只在"认领"到"第一次导出"之间，所以建议把导出定期跑起来（该归档动作是单独的后续工作，见 §12）。改成数据库表**不能**解决这个问题（`console.db` 同样绑定本机），只会引入迁移并与 M13 争版本号。
 
-**验收：** 实际运行后，在 Issue 日志目录里能打开快照文件，看到当时的任务原文；数据库版本号与改动前相同。
+**请确认：** 接受"快照先落本机状态目录作采集缓存，长期保存靠导出样本进入数据集仓库"这一做法吗？
+
+**验收：** 实际运行后，在本机状态目录的专用区能打开该 Issue 的快照文件，看到当时的任务原文；被处理的项目里没有新增文件；数据库版本号与改动前相同。
 
 ### 决策二：快照的内容范围
 
@@ -121,7 +127,7 @@
 
 ### 运维者（运行 `kc run` / `kc daemon` 的人）
 
-入口不变。认领一个待实现 Issue 后，仓库的 `logs/agent-runner/issues/<repo_id>/` 下会多出 `issue-<N>.snapshots.jsonl`。他不需要做任何事；若日志里出现"写快照失败"警告，说明该目录不可写，运行本身不受影响。
+入口不变。认领一个待实现 Issue 后，本机 KedaCode 状态目录下会多出该 Issue 的快照文件；被处理项目的目录和 git 状态不受影响。他不需要做任何事；若日志里出现"写快照失败"警告，说明状态目录不可写，运行本身不受影响。
 
 ### 数据集维护者（运行 `python -m scripts.dataset_export` 的人）
 
@@ -156,7 +162,8 @@
 - 认领与准备发生在 `src/backend/core/use_cases/agent_runner_issue_handlers.py` 的 `_process_ready_issue`：`arbitrate_first_claim` 赢得认领 → `create_or_reuse_worktree` → `before_sha = get_head_sha(...)`。**快照的天然落点是 `before_sha` 之后、Agent 启动之前。**
 - `_process_ready_issue` 会被换人阶梯（`run_issue_with_agent_fallback`）对每个候选 Agent 反复调用，因此写入必须幂等（正文不变不重复）。
 - worktree 可能是复用的：`create_or_reuse_worktree` 会复用并"修复"旧目录，所以 `get_head_sha` 得到的不一定是基线起点，而是旧目录里最新提交。起点必须另算分叉点。
-- Issue 级日志子树 `logs/agent-runner/issues/<repo_id>/`（`src/backend/infrastructure/console/issue_log_reader.py`）只匹配 `issue-<N>-<时间戳>.log`；`logs/` 已被仓库 `.gitignore` 忽略。
+- 本机状态目录由 `src/backend/core/shared/models/product_identity.py` 的 `state_home()` 解析（`STATE_DIR_NAME = ".kedacode"`），core 层可直接使用；全局配置与 `console.db` 都在这里。
+- 不放进被处理项目的 `logs/`：keda 自己的 `.gitignore` 忽略了 `logs/`，但 `kc init` 只替目标项目忽略 `.kedacode/`、`.agent-runner/`、`.iar-worktrees/` 和 `tasks/evidence/**`（见 `src/backend/engines/agent_runner/repository_gitignore.py`），别的项目里的 `logs/` 可能没被忽略。
 
 ### 可复用
 
@@ -189,7 +196,7 @@
 
 ### Recommended Approach
 
-在 `core/use_cases` 新增一个很小的快照模块，提供"构造快照""追加（正文变了才写）""读取全部快照"三个函数；在 `_process_ready_issue` 的 `before_sha` 之后调用一次；导出脚本读取快照并优先使用。快照存为每 Issue 一个 JSON Lines 文件，只追加。
+在 `core/use_cases` 新增一个很小的快照模块，提供"构造快照""追加（正文变了才写）""读取全部快照"三个函数；在 `_process_ready_issue` 的 `before_sha` 之后调用一次；导出脚本读取快照并优先使用。快照存为每 Issue 一个 JSON Lines 文件，只追加，放在本机状态目录的专用区。
 
 ### Why This Fits
 
@@ -203,12 +210,13 @@
 
 ### Proposed Solution Summary (实现机制)
 
-- **核心机制**：新增 `src/backend/core/use_cases/agent_runner_issue_snapshot.py`，含数据类 `IssueInputSnapshot`（`captured_at`、`repo_id`、`issue_number`、`title`、`body`、`body_sha256`、`labels`、`state`、`url`、`base_sha`、`head_sha`、`base_ref`）与函数 `build_issue_snapshot`、`append_snapshot_if_changed`、`read_issue_snapshots`。
+- **核心机制**：新增 `src/backend/core/use_cases/agent_runner_issue_snapshot.py`，含数据类 `IssueInputSnapshot`（`schema_version`、`captured_at`、`repo_id`、`issue_number`、`title`、`body`、`body_sha256`、`labels`、`state`、`url`、`base_sha`、`head_sha`、`base_ref`）与函数 `build_issue_snapshot`、`append_snapshot_if_changed`、`read_issue_snapshots`。
 - **输入由谁提供**：全部来自认领时已在内存里的 `IssueSummary` 与 worktree 的 git 查询；系统不推断、不抓取额外信息。
 - **接入点**：`_process_ready_issue` 中 `before_sha = get_head_sha(...)` 之后调用一次，外层 `try/except Exception` 只记 `warning`，不重新抛出。
 - **起点计算**：`head_sha` 记 `get_head_sha`；`base_sha` 记 worktree HEAD 与创建该 worktree 所用基线（现有 `_resolve_fork_base` 解析出的分叉基线，含堆叠场景）的 `git merge-base`；解析不出时 `base_sha` 为 `null`，并保留 `head_sha`。
-- **文件**：`<repo_path>/logs/agent-runner/issues/<repo_id>/issue-<N>.snapshots.jsonl`；追加时读取最后一行，`body_sha256` 相同则不写，否则 `open(..., "a")` 追加一行（单行小于管道原子写阈值，使用追加模式；并发重复由"最后一行比对"收敛）。
-- **导出器**：`scripts/dataset_export/export_samples.py` 读取快照；有快照时 `input.provenance = "snapshot_at_claim"`，正文取**最早**一行，`input.edited_since_claim` 为"最新快照或 GitHub 现状的正文哈希 ≠ 最早快照"；快照里的 `base_sha` 优先于推断值，并在 `code` 里标出来源。无快照则走原逻辑。
+- **文件**：`<product_identity.state_home()>/dataset/issue-snapshots/<repo_id>/issue-<N>.snapshots.jsonl`（目录按需创建）；追加时读取最后一行，`body_sha256` 相同则不写，否则 `open(..., "a")` 追加一行（单行小于管道原子写阈值，使用追加模式；并发重复由"最后一行比对"收敛）。
+- **版本与只记事实**：每行带 `schema_version`（本 PRD 为 `1`）；读取时遇到更高或未知版本的行，跳过并告警，不抛错；后续只允许新增可选字段。快照中不含任何评判类字段。
+- **导出器**：`scripts/dataset_export/export_samples.py` 读取快照（状态目录解析规则以 `rg -n "def state_home" src/backend/core/shared/models/product_identity.py` 为准）；有快照时 `input.provenance = "snapshot_at_claim"`，正文取**最早**一行，`input.edited_since_claim` 为"最新快照或 GitHub 现状的正文哈希 ≠ 最早快照"；快照里的 `base_sha` 优先于推断值，并在 `code` 里标出来源。无快照则走原逻辑。导出器里的 `eval_ready` / `size_band` / `task_kind` 等属于启发式提示，文档中须明确写作"提示，非结论"。
 - **刻意避免的复杂度**：数据库表与迁移、Issue 对象改造、评论归档、Console 展示、历史回填。
 
 ### Alternatives Considered
@@ -281,13 +289,14 @@ _process_ready_issue
 ```bash
 rg -n "def _process_ready_issue|get_head_sha\(worktree_path" src/backend/core/use_cases/agent_runner_issue_handlers.py
 rg -n "_resolve_fork_base" src/backend/core/use_cases
-rg -n "agent-runner/issues|issue_output_routing" src/backend --glob '*.py'
+rg -n "state_home" src/backend --glob '*.py'
 rg -n "classify_input|provenance" scripts/dataset_export tests/test_dataset_export.py docs/guides/dataset-export.md
 ```
 
 - `_resolve_fork_base` 若为模块私有，不要跨模块导入私有名；改为在 `agent_runner_worktree_create.py` 暴露一个公开的小函数，或让调用方传入已解析的基线引用（先 `rg` 确认现有可复用的公开入口）。
-- 快照文件名必须不能被 `issue_log_reader` 的 `issue-<N>-<时间戳>.log` 匹配；以测试保证。
-- 失败排查顺序：路径（`logs/` 是否存在且可写）→ 工作目录是否有基线引用 → `body` 是否为空字符串（空正文也应留快照，哈希照算）。
+- 快照路径由 `state_home(home_path)` 派生，`build`/`append` 函数接收调用方算好的路径或 `home_path` 参数，便于测试注入临时目录（不要在函数内部硬读环境变量）；快照路径必须由 `state_home()` 派生，不得出现被处理项目的仓库路径；以测试保证（被处理项目的 `git status --porcelain` 在运行前后相同）。
+- `repo_id` 用作目录名前，先确认它不含路径分隔符（`rg -n "repo_id" src/backend/core/use_cases/agent_runner_output_routing.py` 看现有日志目录如何处理同样问题，复用其做法）。
+- 失败排查顺序：状态目录是否存在且可写 → 工作目录是否有基线引用 → `body` 是否为空字符串（空正文也应留快照，哈希照算）。
 
 ### 7.4 Flow Or Architecture Diagram
 
@@ -317,7 +326,7 @@ No data model changes in this PRD.（快照是只追加文件，不是数据库�
   behavior: 认领一个待实现 Issue 后，日志目录里出现快照文件，最早一行的正文与认领时 Issue 的正文逐字一致，代码起点正确。
   reviewer: human
   real_entry: "在隔离临时环境（临时 git 仓库 + 一个固定返回 Issue 正文 B1 的假 gh 可执行文件放在 PATH 最前 + 探针 Agent）里执行 kc run --issue 7；按 references/rv-harness-cookbook.md 的隔离场景写法编写 tasks/evidence/<prd-stem>/scripts/rv-1-run.sh"
-  expected: "运行结束后 logs/agent-runner/issues/<repo_id>/issue-7.snapshots.jsonl 恰好 1 行；该行 body 与假 gh 返回的 B1 逐字节相同、body_sha256 等于 B1 的 SHA-256、base_sha 等于临时仓库基线分支提交、labels/state/url 与假 gh 返回一致。"
+  expected: "运行结束后本机状态目录（隔离环境中用 HOME 环境变量指向临时目录，`state_home()` 取 `Path.home()`）下 dataset/issue-snapshots/<repo_id>/issue-7.snapshots.jsonl 恰好 1 行，schema_version 为 1，临时被处理项目的 git status --porcelain 为空；该行 body 与假 gh 返回的 B1 逐字节相同、body_sha256 等于 B1 的 SHA-256、base_sha 等于临时仓库基线分支提交、labels/state/url 与假 gh 返回一致。"
   mock_boundary: "只有 gh 命令行和 Agent CLI 可替换（假 gh 对未预期的调用直接失败）；git、worktree、runner 编排、文件系统必须真实。"
   tier: R2
   test_layer: e2e
@@ -349,7 +358,7 @@ No data model changes in this PRD.（快照是只追加文件，不是数据库�
 - id: rv-3
   behavior: 写快照失败时，Issue 仍然完整执行，只留一条警告。
   reviewer: verifier
-  real_entry: "pytest tests/test_agent_runner_issue_snapshot.py -q -k snapshot_failure（日志目录路径被一个同名普通文件占住；驱动 _process_ready_issue 的真实编排到 Agent 调用）"
+  real_entry: "pytest tests/test_agent_runner_issue_snapshot.py -q -k snapshot_failure（快照目录路径被一个同名普通文件占住；驱动 _process_ready_issue 的真实编排到 Agent 调用）"
   expected: "Agent 被正常调用且 _process_ready_issue 正常返回；caplog 中有一条包含 snapshot 的 warning；无快照文件产生。"
   mock_boundary: "沿用 tests/test_agent_runner_orchestrate.py 的外部边界替身（GitHub 客户端与 Agent CLI）；快照写入与文件系统必须真实。"
   tier: R1
@@ -418,13 +427,13 @@ No external validation required; repository evidence was sufficient.
 
 #### Human-Confirmed (来自 Part A 风险地图)
 
-- [ ] 决策一：接受"快照存在本机日志目录旁、随日志可能被清理，不入数据库"。证据：rv-1 实际运行后的数据库版本号与改动前相同；快照文件位于日志目录。
+- [ ] 决策一：接受"快照先落本机状态目录作采集缓存，长期保存靠导出样本进入数据集仓库；不进被处理项目、不入数据库"。证据：rv-1 实际运行后快照位于状态目录的专用区、被处理项目的 git 状态无变化、数据库版本号与改动前相同。
 - [ ] 决策二：接受"快照只含标题、正文、标签、状态和代码起点，不含评论"。证据：rv-1 快照文件的字段清单。
 - [ ] 已查看 9.1 呈递区的两项结果并认可。
 
 #### Behavior Acceptance
 
-- [ ] 认领 ready Issue 后，`issue-<N>.snapshots.jsonl` 存在，最早一行 `body_sha256` 等于认领时正文的 SHA-256。证据：`rv-1-snapshot-file.md`。
+- [ ] 认领 ready Issue 后，状态目录专用区下 `issue-<N>.snapshots.jsonl` 存在，`schema_version` 为 1，最早一行 `body_sha256` 等于认领时正文的 SHA-256。证据：`rv-1-snapshot-file.md`。
 - [ ] 同正文重复运行行数恒为 1；正文改动后追加且旧行字节不变。证据：rv-2 的 pytest 输出。
 - [ ] 复用带提交的旧工作目录时，`base_sha` 为分叉点且不等于 `head_sha`。证据：rv-2 的 pytest 输出。
 - [ ] 写快照失败时 Issue 照常执行并有 warning。证据：rv-3 的 pytest 输出。
@@ -435,7 +444,8 @@ No external validation required; repository evidence was sufficient.
 - [ ] 新代码仅位于 `src/backend/core/use_cases/` 与 `scripts/`，无新增跨层导入。证据：`rg -n "^from backend\.(engines|infrastructure|api)" src/backend/core/use_cases/agent_runner_issue_snapshot.py` 无输出。
 - [ ] `agent_runner_issue_handlers.py` 非空行仍 < 1000。证据：`wc -l` 输出与 `just lint` 无新增文件行数警告。
 - [ ] 数据库版本号未改变。证据：`rg -n "_SCHEMA_VERSION = " src/backend/infrastructure/persistence/console_store.py` 仍为 15。
-- [ ] 快照文件名不会被 Issue 日志读取器当作日志。证据：rv-2 所在测试文件中的对应用例通过。
+- [ ] 快照路径由 `state_home()` 派生，运行前后被处理项目的 `git status --porcelain` 不变。证据：rv-1 记录的两次 `git status --porcelain` 输出。
+- [ ] 读取方遇到未知 `schema_version` 的行时跳过并告警、不抛错。证据：`tests/test_agent_runner_issue_snapshot.py` 对应用例通过。
 
 #### Frontend Acceptance
 
@@ -443,7 +453,7 @@ No external validation required; repository evidence was sufficient.
 
 #### Documentation Acceptance
 
-- [ ] `docs/guides/agent-runner.md` 与 `docs/guides/dataset-export.md` 描述快照位置、字段、限制与 `provenance` 取值。证据：`rg -n "snapshots.jsonl|snapshot_at_claim" docs/guides` 命中两个文件。
+- [ ] `docs/guides/agent-runner.md` 与 `docs/guides/dataset-export.md` 描述快照位置、字段、"只记事实"的边界、格式版本规则、限制与 `provenance` 取值，并说明导出器的 `eval_ready` 等为启发式提示。证据：`rg -n "snapshots.jsonl|snapshot_at_claim" docs/guides` 命中两个文件。
 - [ ] `uv run mkdocs build -q` 无报错。
 
 #### Validation Acceptance
@@ -459,12 +469,13 @@ No external validation required; repository evidence was sufficient.
 
 ## 10. Functional Requirements
 
-- **FR-1**：runner 认领一个 ready Issue 成功、工作目录就绪后、Agent 启动前，必须在 `logs/agent-runner/issues/<repo_id>/issue-<N>.snapshots.jsonl` 追加一条快照，含 `captured_at`、`repo_id`、`issue_number`、`title`、`body`（逐字）、`body_sha256`、`labels`、`state`、`url`、`base_sha`、`head_sha`、`base_ref`。
+- **FR-1**：runner 认领一个 ready Issue 成功、工作目录就绪后、Agent 启动前，必须在本机状态目录（`state_home()`）下的 `dataset/issue-snapshots/<repo_id>/issue-<N>.snapshots.jsonl` 追加一条快照，含 `schema_version`、`captured_at`、`repo_id`、`issue_number`、`title`、`body`（逐字）、`body_sha256`、`labels`、`state`、`url`、`base_sha`、`head_sha`、`base_ref`。
 - **FR-2**：追加前读取文件最后一行；`body_sha256` 与之相同则不写，不同或文件不存在则追加；已有行永不改写、不删除。
 - **FR-3**：`base_sha` 必须是工作目录 HEAD 与创建该工作目录所用基线的 merge-base；`head_sha` 记工作目录当前 HEAD；基线无法解析时 `base_sha` 为 `null`。
 - **FR-4**：快照写入的任何异常只记 `warning` 日志，不得改变 Issue 的认领、执行、重试或交付结果。
 - **FR-5**：数据集导出器在存在快照时，`input.provenance` 为 `snapshot_at_claim`，`input.body` 取最早一行，`input.edited_since_claim` 表示最新已知正文是否不同于最早快照；`code.base_sha` 优先取快照值并标明来源；没有快照时行为与现状一致。
 - **FR-6**：`docs/guides/agent-runner.md` 与 `docs/guides/dataset-export.md` 同步说明上述行为与限制。
+- **FR-7**：每行快照带整数 `schema_version`（初版为 `1`）；之后只允许新增可选字段，不得改名、改义或删除；读取方遇到无法识别的版本时跳过该行并记 `warning`。快照字段中不得出现评判类标签（可用性、难度、任务类型等）。
 
 ## 11. Non-Goals
 
@@ -475,10 +486,13 @@ No external validation required; repository evidence was sufficient.
 - 不覆盖辩论、PRD 重写、巡检类运行。
 - 不记录 commit 链、PR、部署结果（属于数据集样本的其他部分）。
 - 不改变 Agent 看到的任务输入。
+- 不做数据集整理层（筛选、补验证命令、改写、脱敏、难度分档）及其版本管理。
+- 不在被处理的项目里创建任何文件。
 
 ## 12. Risks And Follow-Ups
 
-- **快照随日志被清理**：已作为 §2 决策一交人确认；若日后需要长期保留，可迁入数据库（需单独 PRD，并与届时的数据库版本排序）。
+- **快照绑定本机**：删除状态目录或换电脑会丢，风险窗口在"认领"到"第一次导出"之间；已作为 §2 决策一交人确认。后续（单独 PRD）：用 `kc loop` 定期运行导出并把样本归档进数据集仓库，把窗口缩到一个周期以内。
+- **数据集会持续优化修改**：本 PRD 只保证原始层可靠——只增不改、带格式版本号、字段只增不改，因此整理层可以随时基于它重新生成。整理层本身的版本管理（每次修改的来源、由谁改、可回滚）不在本 PRD 范围，应在单独的数据集仓库方案里设计。
 - **认领前的评论澄清不在快照里**：已作为 §2 决策二交人确认；需要时可在快照里追加字段，向后兼容。
 - **并发重复写**：两个进程同时认领同一 Issue 理论上可能各追加一行相同内容；认领仲裁（`arbitrate_first_claim`）只让赢家继续，因此实际不可达；若出现，只会多一行相同哈希，不影响"最早一行"语义。
 
@@ -486,8 +500,11 @@ No external validation required; repository evidence was sufficient.
 
 | ID | Decision | Chosen | Rejected | Rationale |
 |---|---|---|---|---|
-| D-01 | 快照存放形式 | 每 Issue 一个只追加的 JSON Lines 文件，放在 Issue 日志目录旁 | 新增数据库表 `issue_snapshots` | 当前读者只有导出脚本，文件足够；避免数据库迁移，也避免与 M13 评测 PRD 争抢数据库版本号。 |
+| D-01 | 快照存放形式 | 每 Issue 一个只追加的 JSON Lines 文件，放在本机状态目录专用区 | 新增数据库表 `issue_snapshots` | 当前读者只有导出脚本，文件足够；避免数据库迁移，也避免与 M13 评测 PRD 争抢数据库版本号。 |
 | D-02 | 是否改动 `IssueSummary` | 不改，快照由独立模块构造与写入 | 给 `IssueSummary` 增加持久化方法 | 数据对象与存储职责分离，避免 Issue 对象承担 I/O。 |
 | D-03 | 何时判定"正文变了" | 比较正文 SHA-256 | 同时比较标题与标签 | 正文才是 Agent 读取的任务；标题或标签的单独变化会造成无意义的重复记录。 |
 | D-04 | 写失败的语义 | 只告警，不阻断 | 写失败即中止认领 | 快照是观察性数据，不应让数据集需求拖累交付。 |
 | D-05 | 起点字段 | 记分叉点 `base_sha` 并另存 `head_sha` | 只记工作目录 HEAD | 复用旧工作目录时 HEAD 含历史提交，不是任务的真实起点。 |
+| D-06 | 快照放在哪个目录 | 本机状态目录（`state_home()`）下的 `dataset/issue-snapshots/` | 被处理项目的 `logs/agent-runner/issues/<repo_id>/` | `kc init` 不替目标项目忽略 `logs/`，放进项目会弄脏其 git；放全局目录还能让导出脚本一次汇总所有项目。 |
+| D-07 | KedaCode 与数据集质量的分工 | KedaCode 只记录事实，整理与评判留给人工和更强的 Agent | 在 KedaCode 内用规则给样本打"可用/难度"等结论 | 前期抽查已发现启发式规则会出错，评判需要更多信息且应能随时重做。 |
+| D-08 | 记录格式如何演进 | 每行带 `schema_version`，字段只增不改，未知版本跳过并告警 | 不带版本号、事后靠推断 | 数据集会持续优化，旧记录必须永远可读，读取方不能在新版本前崩溃。 |
