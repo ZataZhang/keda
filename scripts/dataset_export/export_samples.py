@@ -83,6 +83,8 @@ class ExportOptions:
     pr_limit: int = DEFAULT_PR_LIMIT
     agent_session_repo_paths: tuple[Path, ...] = ()
     sessions_root: Path | None = None
+    codex_session_repo_paths: tuple[Path, ...] = ()
+    codex_sessions_root: Path | None = None
 
 
 @dataclass
@@ -812,7 +814,8 @@ def build_session_sample(
     labels["eval_ready"] = is_eval_ready(labels=labels, input_provenance="session_first_prompt")
     return {
         "schema_version": SCHEMA_VERSION,
-        "sample_id": f"{repo_slug}#session-{parsed.session_id[:8]}",
+        # 取后 8 位：codex 的 id 是 uuid7，前 8 位基本是时间戳，会撞。
+        "sample_id": f"{repo_slug}#session-{parsed.session_id[-8:]}",
         "origin": ORIGIN_AGENT_SESSION,
         "repo_id": repo_slug,
         "alias_repo_ids": [],
@@ -833,6 +836,7 @@ def build_session_sample(
         "size": size,
         "session": {
             "id": parsed.session_id,
+            "agent": parsed.agent,
             "entrypoint": parsed.entrypoint,
             "started_at": parsed.started_at,
             "ended_at": parsed.ended_at,
@@ -845,31 +849,58 @@ def build_session_sample(
     }
 
 
+def _samples_from_parsed_sessions(
+    parsed_sessions: list[agent_sessions.ParsedSession],
+    *,
+    repo_path: Path,
+    summary_label: str,
+) -> list[dict[str, Any]]:
+    """把解析好的真人会话对照本地 git 变成样本，并把各环节的留存数量打到 stderr。"""
+    repo_slug = resolve_repo_slug(repo_path)
+    built = [
+        sample
+        for parsed in parsed_sessions
+        if (sample := build_session_sample(parsed, repo_path=repo_path, repo_slug=repo_slug))
+    ]
+    print(
+        f"{repo_path} [{summary_label}]: 真人会话 {len(parsed_sessions)}，有可对照提交 {len(built)}",
+        file=sys.stderr,
+    )
+    return built
+
+
 def export_agent_session_samples(options: ExportOptions) -> list[dict[str, Any]]:
-    """为 ``--agent-sessions-repo`` 指定的仓库导出真人 Claude Code 会话样本。"""
+    """导出 ``--agent-sessions-repo`` / ``--codex-sessions-repo`` 指定仓库的真人会话样本。"""
     samples: list[dict[str, Any]] = []
     for repo_path in options.agent_session_repo_paths:
         project_dir = agent_sessions.claude_project_dir(
             repo_path=repo_path, projects_root=options.sessions_root
         )
-        repo_slug = resolve_repo_slug(repo_path)
-        session_files = sorted(project_dir.glob("*.jsonl"))
-        human_sessions = [
-            parse_result
-            for path in session_files
-            if (parse_result := agent_sessions.parse_session_file(path))
+        parsed_sessions = [
+            parsed
+            for path in sorted(project_dir.glob("*.jsonl"))
+            if (parsed := agent_sessions.parse_session_file(path))
         ]
-        built = [
-            sample
-            for parsed in human_sessions
-            if (sample := build_session_sample(parsed, repo_path=repo_path, repo_slug=repo_slug))
-        ]
-        print(
-            f"{repo_path}: 会话文件 {len(session_files)}，真人会话 {len(human_sessions)}，"
-            f"有可对照提交 {len(built)}",
-            file=sys.stderr,
+        samples += _samples_from_parsed_sessions(
+            parsed_sessions, repo_path=repo_path, summary_label="Claude Code"
         )
-        samples.extend(built)
+    codex_root = options.codex_sessions_root or agent_sessions.CODEX_SESSIONS_ROOT
+    for repo_path in options.codex_session_repo_paths:
+        # codex 会话按日期分区，先只读第一行元数据按 cwd 归属，再完整解析匹配的文件。
+        matching_paths = [
+            path
+            for path in sorted(codex_root.glob("*/*/*/*.jsonl"))
+            if (meta := agent_sessions.read_codex_session_meta(path))
+            and agent_sessions.codex_session_belongs_to_repo(meta, repo_path=repo_path)
+        ]
+        parsed_sessions = [
+            parsed
+            for path in matching_paths
+            if (parsed := agent_sessions.parse_codex_session_file(path))
+        ]
+        samples += _samples_from_parsed_sessions(
+            parsed_sessions, repo_path=repo_path, summary_label="codex"
+        )
     return samples
 
 
@@ -962,6 +993,16 @@ def parse_args(argv: list[str] | None) -> ExportOptions:
     parser.add_argument(
         "--sessions-root", type=Path, help="Claude Code 会话根目录，缺省 ~/.claude/projects"
     )
+    parser.add_argument(
+        "--codex-sessions-repo",
+        action="append",
+        type=Path,
+        default=[],
+        help="额外导出该本地仓库的真人 codex 会话（按会话 cwd 归属；首句会脱敏；需显式开启），可重复",
+    )
+    parser.add_argument(
+        "--codex-sessions-root", type=Path, help="codex 会话根目录，缺省 ~/.codex/sessions"
+    )
     namespace = parser.parse_args(argv)
     return ExportOptions(
         db_path=namespace.db,
@@ -973,13 +1014,19 @@ def parse_args(argv: list[str] | None) -> ExportOptions:
         pr_limit=namespace.pr_limit,
         agent_session_repo_paths=tuple(namespace.agent_sessions_repo),
         sessions_root=namespace.sessions_root,
+        codex_session_repo_paths=tuple(namespace.codex_sessions_repo),
+        codex_sessions_root=namespace.codex_sessions_root,
     )
 
 
 def main(argv: list[str] | None = None) -> int:
     """命令行入口：写出 JSONL，并把统计摘要打印到 stderr。"""
     options = parse_args(argv)
-    has_extra_sources = options.github_pr_repo_paths or options.agent_session_repo_paths
+    has_extra_sources = (
+        options.github_pr_repo_paths
+        or options.agent_session_repo_paths
+        or options.codex_session_repo_paths
+    )
     if not options.db_path.is_file() and not has_extra_sources:
         print(f"数据库不存在: {options.db_path}", file=sys.stderr)
         return 2

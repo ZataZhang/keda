@@ -20,7 +20,7 @@ uv run python -m scripts.dataset_export --repo keda --with-gh --output samples.j
 |---|---|---|---|
 | `keda_run` | `console.db` 里的运行记录 | 认领时快照 > 事后抓取的 Issue 原文 > 仅标题 | 有（可构成偏好对） |
 | `github_pr` | `--github-pr-repo <本地仓库>`：该仓库已合并、且不是 keda 导出过的 PR | 关联 Issue 的正文（`verbatim_issue_body`）；没有关联 Issue 时只有 PR 描述（`pr_description`） | 无 |
-| `agent_session` | `--agent-sessions-repo <本地仓库>`：该仓库的真人 Claude Code 会话 | 会话里用户**逐字**的首句，脱敏后导出（`session_first_prompt`） | 无（不导出完整轨迹） |
+| `agent_session` | `--agent-sessions-repo <本地仓库>`（Claude Code）或 `--codex-sessions-repo <本地仓库>`（codex）：该仓库的真人会话 | 会话里用户**逐字**的首句，脱敏后导出（`session_first_prompt`） | 无（不导出完整轨迹） |
 
 ```bash
 # 额外导出一个仓库里与 keda 无关的已合并 PR（需要 gh 已登录；可重复；不依赖 console.db）
@@ -31,23 +31,28 @@ uv run python -m scripts.dataset_export --github-pr-repo ~/code/some-project --p
 - **`pr_description` 不能当评测题**：PR 描述写的是"改了什么"，不是任务本身，等于泄露答案；这类样本只作重建记录保留，永远不计入 `eval_ready`。要让非 keda 的任务成为合格评测题，需要它有关联的 Issue（PR 描述里写 `Closes #N`）。
 - 非 keda 来源没有 attempt，所以 `has_preference_pair` 恒为 `false`，不能产出偏好对。
 - 为避开 GitHub GraphQL 的节点上限，先列出轻量信息筛选，再逐个取剩下 PR 的详情；每个 PR 至少一次网络调用（有关联 Issue 再加一次），80 个 PR 大约一分多钟。
-- 尚未支持：没有 PR 也没有会话记录的普通提交；codex 的会话记录。
+- 尚未支持：没有 PR 也没有会话记录的普通提交。
 
 ### 会话记录（`agent_session`）
 
-交互式会话的 jsonl 里有当时逐字的用户首句、会话期间做过的提交，以及会话与 PR 的链接（`pr-link`）。这是 keda 之外最接近"原始输入"的数据，也最敏感，所以**必须显式开启**：
+交互式会话的 jsonl 里有当时逐字的用户首句、会话期间做过的提交；Claude Code 的会话还带与 PR 的链接（`pr-link`）。支持两种 Agent，`session.agent` 标明是 `claude_code` 还是 `codex`。这是 keda 之外最接近"原始输入"的数据，也最敏感，所以**必须显式开启**：
 
 ```bash
-uv run python -m scripts.dataset_export --agent-sessions-repo ~/code/some-project --output samples.jsonl
+# Claude Code 与 codex 可同时开启，仓库参数都可重复
+uv run python -m scripts.dataset_export \
+  --agent-sessions-repo ~/code/some-project \
+  --codex-sessions-repo ~/code/some-project \
+  --output samples.jsonl
 ```
 
-- 只读该仓库对应的会话目录（`~/.claude/projects/<仓库绝对路径，非字母数字换成 ->`，可用 `--sessions-root` 改根目录）。
-- **只取真人会话**：`entrypoint=sdk-cli` 的程序化会话（keda runner、verifier、探针）一律排除——它们已经是 `keda_run` 样本。斜杠命令注入、子代理、元消息也不算用户首句。
-- **只有能对上本地 git 的会话才构成样本**：从 `git commit` 的工具输出里取提交哈希，再对照本地仓库；改写历史（rebase、amend）后哈希对不上的提交直接丢弃，不猜。没有任何可对照提交的会话（纯讨论、纯排查）不导出。
+- **Claude Code**：只读该仓库对应的会话目录（`~/.claude/projects/<仓库绝对路径，非字母数字换成 ->`，可用 `--sessions-root` 改根目录）。
+- **codex**：会话按日期分区（`~/.codex/sessions/年/月/日/*.jsonl`，可用 `--codex-sessions-root` 改根目录），不按仓库分，所以先只读每个文件第一行的元数据，按会话的 `cwd` 是否等于该仓库或其子目录来归属，再完整解析匹配的文件。
+- **只取真人会话**：Claude Code 的 `entrypoint=sdk-cli`、codex 的 `codex exec`（`originator=codex_exec`）以及 codex 子代理线程，都是程序化会话（keda runner、verifier、探针），一律排除——它们已经是 `keda_run` 样本。斜杠命令注入、子代理、元消息、codex 注入的 `# AGENTS.md instructions` 与环境上下文也不算用户首句。
+- **只有能对上本地 git 的会话才构成样本**：从 `git commit` 的工具输出（codex 是 `exec` 工具调用的输出）里取提交哈希，再对照本地仓库；改写历史（rebase、amend）后哈希对不上的提交直接丢弃，不猜。没有任何可对照提交的会话（纯讨论、纯排查）不导出。
 - `code.base_sha` 是第一个提交的父提交，`final_sha` 是最后一个提交；`resolved` 表示 `final_sha` 已在默认分支上（`resolved_basis=on_default_branch`）。
 - **输入永远偏弱，永远不计入 `eval_ready`**：首句往往是对话式的（"你看一下这个"），不是任务规格。样本只是原始输入的事实记录，是否能当题由后续人工与更强的 Agent 判断。
 - **不导出完整轨迹，也不带本机路径**；`session` 里只有会话 id、入口、起止时间、真人发言轮数、使用的模型、分支和 `linked_prs`。首句超过 2 万字符会截断并标 `truncated`。
-- 与其他来源互相链接：会话里的 `pr-link` 若能对上 `github_pr` 样本或带 `--with-gh` 的 `keda_run` 样本，会话样本的 `session.linked_sample_ids` 列出对应样本，对方样本的 `linked_session_ids` 列出会话 id。这样可以把"当时说了什么"和"最后做成了什么"放在一起看。
+- 与其他来源互相链接（仅 Claude Code，codex 会话没有 `pr-link`）：会话里的 `pr-link` 若能对上 `github_pr` 样本或带 `--with-gh` 的 `keda_run` 样本，会话样本的 `session.linked_sample_ids` 列出对应样本，对方样本的 `linked_session_ids` 列出会话 id。这样可以把"当时说了什么"和"最后做成了什么"放在一起看。
 
 #### 脱敏的边界
 
