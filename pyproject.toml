@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 # CLI 主命令是 kc，另有同名长写 kedacode（见 [project.scripts]）。
 # 改名时穷举命令见 PRD 7.5 第 3 条。
 name = "kedacode"
-version = "0.4.1"
+version = "0.5.0"
 description = "KedaCode (kc) — turn GitHub Issues into a local AI agent queue."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -28,9 +28,8 @@ classifiers = [
     "Topic :: Software Development",
     "Typing :: Typed",
 ]
-# 依赖分组原则（FR-11 / PRD 决策二）：默认依赖只保留 console / CLI / daemon
-# 主路径真正 import 的包；云 SDK 与数据库驱动按使用场景收进 extras，
-# README「安装」一节说明各自何时需要。
+# 默认依赖覆盖 Console / CLI / daemon 主路径，以及桌面小窗的开箱即用运行时；
+# 云 SDK 与数据库驱动仍按使用场景收进 extras，README「安装」一节说明各自何时需要。
 dependencies = [
     "croniter>=3.0.0",
     "fastapi>=0.115.0",
@@ -46,6 +45,8 @@ dependencies = [
     "python-dotenv>=1.1.0",
     "pyyaml>=6.0.3",
     "rich>=13.0.0",
+    # Console 的桌面 companion 默认可用；helper 只在用户开启小窗时导入 GUI 运行时。
+    "pywebview>=5.0",
     "tomli-w>=1.0.0",
     "tomlkit>=0.15.0",
     "typer>=0.26.7",
@@ -88,11 +89,6 @@ db = [
 ]
 backup = [
     "boto3>=1.37.0",
-]
-# 桌面 companion 的可选运行时：未安装时 Web 看板照常可用，
-# Console 侧只会把开启小窗的动作标为「未安装」。
-desktop = [
-    "pywebview>=5.0",
 ]
 
 [tool.setuptools.packages.find]

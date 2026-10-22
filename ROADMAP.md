@@ -56,7 +56,7 @@
 - **原生执行器入口与按需项目预览已落地**：TTY 下裸 `kc` 即 `kc session`——KC 只解析默认执行器、核对随包 operator skill、投递 bootstrap 后把终端交出去，并**原样转发 provider 退出码**（非 TTY 回落帮助且退出 1，管道/CI 不会把失败读成成功）；`kc preview start|status|stop` 承载按需预览，argv 必须是精确参数数组（不经 `sh -c`），ready 地址主机限定回环闭集且非回环是**加载期错误**，只终止 KC 自己登记的进程组。隧道、外部预览平台、以及"用模型猜用户是否想要预览"仍是明确非目标（PRD `P1-FEAT-20261009-123512`）。
 - **停滞监督已落地（默认开启）**：`[agent_runner.stall_supervisor]` 为活跃 attempt 起一个只读 observer，按现场指纹（HEAD/branch/status/diff/调用终态数/最近事件时间，**刻意不含 stdout**）判定疑似停滞，请模型在 `progress / blocked / stalled / uncertain` 闭集里下一次结论；只有 `stalled` 且摘要与证据齐全、且处置前现场与进程归属复核通过，才终止该进程组并把 `AgentStallCancelledError` 交回既有失败分类与恢复阶梯——不新增恢复路径、不改标签。结论解析容忍中英键名、markdown/表格/JSON/换行续写与 provider 追加字段（两个线上误报：追加字段解析失败、三字段齐全仍判 uncertain），容错只到"读法"为止，取值仍落闭集（PRD `P1-FEAT-20261009-123512`，含 P2 复盘）。
 - **文档与测试基础已落地**：已有 Agent Runner 使用指南、配置说明、架构规范、归档 PRD、pytest 覆盖和 `just test` 验证入口。
-- **包管理器分发链路已落地**：PyPI 分发包定名 `kedacode`（命令名仍是 `iar`，避免与 CNCF KEDA 撞名），发布走"tag 构建 draft release → 人工正式发布 → OIDC Trusted Publishing 上传 PyPI → 自动更新 Homebrew tap"两步走；用户侧三条等价入口 `brew install ZataZhang/tap/kedacode`、`uv tool install kedacode` / `pipx install kedacode`、`curl -fsSL .../install.sh | bash`（`--source auto|pypi|tarball`，pypi 来源失败不静默回退）。明确不做原生安装包：macOS 不签名不公证在 Sequoia 是硬阻断，Homebrew 5.0 起下架过不了 Gatekeeper 的 cask，原生 .app 需要每年 $99 的开发者账号，而 CLI 包管理器路径完全不碰 Gatekeeper、成本为零（PRD `P1-FEAT-20260910-125248` 决策一 / "本次明确不涉及"）。
+- **包管理器分发链路已落地**：PyPI 分发包定名 `kedacode`（命令名仍是 `iar`，避免与 CNCF KEDA 撞名），发布走"tag 构建 draft release → 人工正式发布 → OIDC Trusted Publishing 上传 PyPI → 自动更新 Homebrew tap"两步走；用户侧三条等价入口 `brew install ZataZhang/tap/kedacode`、`uv tool install kedacode` / `pipx install kedacode`、`curl -fsSL .../install.sh | bash`（`--source auto|pypi|tarball`，pypi 来源失败不静默回退）。公开分发仍不提供原生安装包：未签名/公证的 `.app` 不适合公开分发；本机自用的菜单栏 App 已由 PRD `P1-FEAT-20260913-204531` 单独实现，不改变 PyPI 与 Homebrew tap 链路。
 
 ### Partially Completed
 
@@ -152,10 +152,10 @@
 
 1. `P1-FEAT-20261006-122336`（**任意 Issue 可执行**）：执行侧已随本 PR 交付——首次真实端到端实证（Issue #216 → Draft PR #217）、文档边界撤销、`iar issue create --from-prompt` 与 `--direct-pr` 档位、daemon 互斥收窄与首次领取 CAS 全部落地；待人工验收与合并后从本清单移除。归入 M1 与 M8。
 2. `P1-FEAT-20261006-013227`（Stats 页 Token 用量补按 PRD 维度汇总）：执行侧已交付为 Draft PR #211，待人工验收与合并后从本清单移除。
+3. `P1-FEAT-20260913-204531`（Tauri 菜单栏状态面板）：菜单栏 App 与固定悬浮窗已实现，待真实 UI 交互验收。
 
 **hold（已成形但暂缓，不参与排期）**
 
-- `P1-FEAT-20260913-204531`（Tauri 桌面壳）：2026-10-05 移入。
 - `P1-FEAT-20261006-024434`（`iar run --quick` 轻量档）：2026-10-06 移入。方向被「任意 Issue 可执行」取代——它优化「出了 PRD 之后跑得慢」，而后者消除「必须出 PRD」这个前提；其识别出的行数债已由 PR #212 承接。
 
 ### 已知漂移（下次大更新时校准）

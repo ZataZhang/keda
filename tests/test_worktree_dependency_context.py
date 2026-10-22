@@ -17,11 +17,16 @@ from pathlib import Path
 import pytest
 
 from backend.core.shared.models.agent_runner import (
+    AttemptResult,
     CommandResult,
+    FailureType,
     IssueSummary,
     PromptConfig,
 )
-from backend.core.use_cases.agent_runner_failure import DependencyEnvironmentBlockedError
+from backend.core.use_cases.agent_runner_failure import (
+    DependencyEnvironmentBlockedError,
+    MaxRetriesExceededError,
+)
 from backend.core.use_cases.agent_runner_feedback import (
     VerificationFailedError,
     build_prompt,
@@ -33,10 +38,12 @@ from backend.core.use_cases.worktree_dependency_context import (
     OUTCOME_NOT_PREPARED,
     OUTCOME_REUSED,
     OUTCOME_SKIPPED,
+    REASON_INSTALL_FAILED,
     REASON_MANAGER_CONFLICT,
     REASON_TOOL_MISSING,
     REASON_WORKSPACE_COVERED,
-    USER_ACTION_HOST_TOOLCHAIN,
+    USER_ACTION_CREDENTIALS,
+    USER_ACTION_PRIVILEGE,
     DependencyPreparationReport,
     FrontendProjectRecord,
     build_environment_block_message,
@@ -55,9 +62,8 @@ _RECORDS = (
         reason=REASON_TOOL_MISSING,
         package_manager="pnpm",
         selection_evidence=("lockfile(s): pnpm-lock.yaml",),
-        attempted_commands=(),
+        attempted_commands=("pnpm install --ignore-scripts",),
         exit_code=None,
-        requires_user_action=USER_ACTION_HOST_TOOLCHAIN,
         detail="pnpm is not on PATH",
     ),
     FrontendProjectRecord(
@@ -150,10 +156,18 @@ class TestSanitizeDetailText:
             ("ERR_PNPM 401 //registry.npmjs.org/:_authToken=abc123secret", "abc123secret"),
             ("npm error code E401 _authToken=abc123secret", "abc123secret"),
             ("Authorization: Bearer sk-abcdefghijklmnop", "sk-abcdefghijklmnop"),
+            ("Authorization: Basic dGVzdDp0ZXN0", "dGVzdDp0ZXN0"),
             ("failed with https://user:hunter2@registry.internal/x", "hunter2"),
             ("npm_config__auth = supersecretvalue", "supersecretvalue"),
         ],
-        ids=["pnpm-registry", "auth-token", "bearer", "url-credentials", "npm-config-auth"],
+        ids=[
+            "pnpm-registry",
+            "auth-token",
+            "bearer",
+            "basic-authorization",
+            "url-credentials",
+            "npm-config-auth",
+        ],
     )
     def test_credential_shapes_are_redacted(self, raw_text: str, leaked_fragment: str) -> None:
         """常见凭据形状被替换掉，原文不会进落盘报告或 Issue。"""
@@ -192,7 +206,7 @@ class TestRenderDependencyContextSection:
         assert render_dependency_context_section(tmp_path) == ""
 
     def test_renders_diagnostics_and_rules(self, tmp_path: Path) -> None:
-        """缺工具的项目带出证据、未尝试命令与人类决定标记，并附处理规则。"""
+        """缺工具的项目带出计划命令、证据与 Agent 处理规则。"""
         _write_report(tmp_path, _RECORDS)
 
         section_text = render_dependency_context_section(tmp_path)
@@ -200,13 +214,33 @@ class TestRenderDependencyContextSection:
         assert "## Worktree dependency preparation context (runner diagnostics)" in section_text
         assert "`frontend` - NOT ready" in section_text
         assert "lockfile(s): pnpm-lock.yaml" in section_text
-        assert "attempted commands: none (nothing was safe to run)" in section_text
-        assert "needs a human decision (host_toolchain)" in section_text
+        assert "planned/attempted commands: pnpm install --ignore-scripts" in section_text
+        assert "needs a human decision" not in section_text
+        assert "decide the next step autonomously" in section_text
         assert "`frontend-admin` - ready" in section_text
         assert "  - exit code: 0" in section_text
         assert "npm ci --ignore-scripts" in section_text
         assert "Never run ``sudo``" in section_text
         assert "do not mark the task failed for it" in section_text
+
+    def test_missing_tool_is_not_an_upfront_human_decision(self, tmp_path: Path) -> None:
+        """缺失包管理器只作为诊断交给 Agent，不要求用户预先配置主机工具链。"""
+        missing_tool_record = FrontendProjectRecord(
+            project_path="frontend",
+            outcome=OUTCOME_NOT_PREPARED,
+            reason=REASON_TOOL_MISSING,
+            package_manager="pnpm",
+            attempted_commands=("pnpm install --ignore-scripts",),
+            detail="pnpm is not on PATH",
+        )
+        _write_report(tmp_path, (missing_tool_record,))
+
+        section_text = render_dependency_context_section(tmp_path)
+
+        assert "needs a human decision" not in section_text
+        assert "pnpm install --ignore-scripts" in section_text
+        assert "pnpm is not on PATH" in section_text
+        assert "repository-local" in section_text
 
     def test_workspace_member_skip_is_visible(self, tmp_path: Path) -> None:
         """被根 workspace 覆盖的成员也要出现在段落里（Agent 需知道去哪装）。"""
@@ -303,6 +337,186 @@ class TestEscalateDependencyEnvironmentFailure:
 
         assert isinstance(escalated_error, DependencyEnvironmentBlockedError)
 
+    def test_missing_executable_in_agent_attempt_is_reclassified(self, tmp_path: Path) -> None:
+        """Agent attempt 自身明确报缺工具时也应进入可恢复阻塞。"""
+        missing_tool_record = FrontendProjectRecord(
+            project_path="frontend",
+            outcome=OUTCOME_NOT_PREPARED,
+            reason=REASON_TOOL_MISSING,
+            package_manager="npm",
+            attempted_commands=("npm ci --ignore-scripts",),
+            detail="npm is not on PATH",
+        )
+        _write_report(tmp_path, (missing_tool_record,))
+        failed_attempt = AttemptResult(
+            attempt_number=1,
+            failure_type=FailureType.AGENT_ERROR,
+            recovered=False,
+            detail="Agent command failed: /bin/sh: npm: command not found",
+        )
+
+        escalated_error = escalate_dependency_environment_failure(
+            MaxRetriesExceededError([failed_attempt]),
+            tmp_path,
+        )
+
+        assert isinstance(escalated_error, DependencyEnvironmentBlockedError)
+        assert "Missing required executable(s): npm." in escalated_error.issue_comment_body
+
+    def test_human_action_in_agent_attempt_is_reclassified(self, tmp_path: Path) -> None:
+        """Agent attempt 明确点名 npm 凭据错误时也应请求人工处理。"""
+        credential_record = FrontendProjectRecord(
+            project_path="frontend",
+            outcome=OUTCOME_NOT_PREPARED,
+            reason=REASON_INSTALL_FAILED,
+            package_manager="npm",
+            attempted_commands=("npm ci --ignore-scripts",),
+            requires_user_action=USER_ACTION_CREDENTIALS,
+            detail="npm ERR! code E401 [redacted]",
+        )
+        _write_report(tmp_path, (credential_record,))
+        failed_attempt = AttemptResult(
+            attempt_number=1,
+            failure_type=FailureType.AGENT_ERROR,
+            recovered=False,
+            detail="Agent command failed: npm ERR! code E401 _authToken=very-secret-token",
+        )
+
+        escalated_error = escalate_dependency_environment_failure(
+            MaxRetriesExceededError([failed_attempt]),
+            tmp_path,
+        )
+
+        assert isinstance(escalated_error, DependencyEnvironmentBlockedError)
+        assert f"Required human action(s): {USER_ACTION_CREDENTIALS}." in (
+            escalated_error.issue_comment_body
+        )
+        assert "very-secret-token" not in escalated_error.issue_comment_body
+
+    @pytest.mark.parametrize(
+        ("user_action", "failure_text"),
+        [
+            (USER_ACTION_CREDENTIALS, "npm ERR! code E401 _authToken=very-secret-token"),
+            (USER_ACTION_PRIVILEGE, "npm ERR! EACCES: permission denied /usr/local/lib"),
+        ],
+        ids=("registry-credentials", "filesystem-permission"),
+    )
+    def test_human_action_failure_is_reclassified_without_leaking_secrets(
+        self,
+        tmp_path: Path,
+        user_action: str,
+        failure_text: str,
+    ) -> None:
+        """异常被 recovery 包装后仍能识别 npm 凭据/权限错误并脱敏阻塞说明。"""
+        action_record = FrontendProjectRecord(
+            project_path="frontend",
+            outcome=OUTCOME_NOT_PREPARED,
+            reason=REASON_INSTALL_FAILED,
+            package_manager="npm",
+            attempted_commands=("npm ci --ignore-scripts",),
+            requires_user_action=user_action,
+            detail=sanitize_detail_text(failure_text),
+        )
+        _write_report(tmp_path, (action_record,))
+        verification_result = CommandResult(
+            command=("npm", "ci", "--ignore-scripts"),
+            return_code=1,
+            stdout="",
+            stderr=failure_text,
+        )
+
+        try:
+            raise RuntimeError("Failed after 1 attempts.") from VerificationFailedError(
+                [verification_result]
+            )
+        except RuntimeError as wrapped_failure:
+            escalated_error = escalate_dependency_environment_failure(wrapped_failure, tmp_path)
+
+        assert isinstance(escalated_error, DependencyEnvironmentBlockedError)
+        assert f"Required human action(s): {user_action}." in escalated_error.issue_comment_body
+        if "very-secret-token" in failure_text:
+            assert "very-secret-token" not in escalated_error.issue_comment_body
+            assert "[redacted]" in escalated_error.issue_comment_body
+
+    def test_unrelated_command_does_not_trigger_recorded_credential_block(
+        self, tmp_path: Path
+    ) -> None:
+        """其他命令报错时，frontend 的凭据记录不会把任务误判成环境阻塞。"""
+        credential_record = FrontendProjectRecord(
+            project_path="frontend",
+            outcome=OUTCOME_NOT_PREPARED,
+            reason=REASON_INSTALL_FAILED,
+            package_manager="npm",
+            requires_user_action=USER_ACTION_CREDENTIALS,
+        )
+        _write_report(tmp_path, (credential_record,))
+        original_error = VerificationFailedError(
+            [
+                CommandResult(
+                    command=("pytest", "tests"),
+                    return_code=1,
+                    stdout="",
+                    stderr="401 unauthorized",
+                )
+            ]
+        )
+
+        assert escalate_dependency_environment_failure(original_error, tmp_path) is original_error
+
+    @pytest.mark.parametrize(
+        "case",
+        [
+            (
+                ("bash", "-lc", "npm ci --ignore-scripts"),
+                1,
+                "",
+                "npm ERR! code E401 Unauthorized",
+                True,
+            ),
+            (("pnpm", "test"), 1, "", "E401 Unauthorized", False),
+            (("bash", "-lc", "pytest tests/test_npm_auth.py"), 1, "", "E401", False),
+            (("npm", "ci"), 0, "npm WARN E401 Unauthorized", "", False),
+        ],
+        ids=(
+            "shell-wrapped-npm-failure",
+            "pnpm-is-not-npm",
+            "test-path-is-not-npm",
+            "successful-npm",
+        ),
+    )
+    def test_credential_block_requires_failed_matching_manager_command(
+        self,
+        tmp_path: Path,
+        case: tuple[tuple[str, ...], int, str, str, bool],
+    ) -> None:
+        """凭据阻塞需由非零退出的匹配 npm 命令触发，而非输出里的子串。"""
+        command, return_code, stdout, stderr, should_block = case
+        credential_record = FrontendProjectRecord(
+            project_path="frontend",
+            outcome=OUTCOME_NOT_PREPARED,
+            reason=REASON_INSTALL_FAILED,
+            package_manager="npm",
+            requires_user_action=USER_ACTION_CREDENTIALS,
+        )
+        _write_report(tmp_path, (credential_record,))
+        original_error = VerificationFailedError(
+            [
+                CommandResult(
+                    command=command,
+                    return_code=return_code,
+                    stdout=stdout,
+                    stderr=stderr,
+                )
+            ]
+        )
+
+        escalated_error = escalate_dependency_environment_failure(original_error, tmp_path)
+
+        if should_block:
+            assert isinstance(escalated_error, DependencyEnvironmentBlockedError)
+        else:
+            assert escalated_error is original_error
+
     def test_tool_that_got_usable_dependencies_is_not_blamed(self, tmp_path: Path) -> None:
         """工具虽曾缺失、但已复用主检出依赖时，失败仍是执行失败。"""
         resolved_record = FrontendProjectRecord(
@@ -345,7 +559,28 @@ class TestBuildEnvironmentBlockMessage:
         assert "`frontend`" in message_text
         assert "`frontend-admin`" not in message_text
         assert "Options for the operator" in message_text
+        assert "repository-local alternative" in message_text
+        assert "explicit approval" in message_text
         assert "Root cause: FileNotFoundError: pnpm" in message_text
+
+    def test_redacts_credentials_from_root_cause(self) -> None:
+        """验证异常的原始输出也必须脱敏后才能写进 Issue 阻塞评论。"""
+        message_text = build_environment_block_message(
+            (),
+            (
+                FrontendProjectRecord(
+                    project_path="frontend",
+                    outcome=OUTCOME_NOT_PREPARED,
+                    reason=REASON_INSTALL_FAILED,
+                    package_manager="npm",
+                    requires_user_action=USER_ACTION_CREDENTIALS,
+                ),
+            ),
+            root_cause="VerificationFailedError: _authToken=very-secret-token",
+        )
+
+        assert "very-secret-token" not in message_text
+        assert "Root cause: VerificationFailedError: _authToken=[redacted]" in message_text
 
 
 def test_outcome_and_missing_executable_properties() -> None:

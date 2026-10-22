@@ -18,7 +18,8 @@ import { closeDesktopCompanionWindow, fetchRuntimeTasks } from "@/lib/api/consol
 import type { RuntimeTaskEntry, RuntimeTaskSummary } from "@/lib/api/types";
 import { formatLocalDateTime } from "@/lib/utils";
 
-import { RuntimeTaskImpact } from "./runtime-task-detail";
+import { runtimePhaseDescription, RuntimeTaskPhase } from "./runtime-task-phase";
+import { RuntimeTaskAnomalies, RuntimeTaskImpact } from "./runtime-task-detail";
 import { runtimeStatusPresentation, runtimeTaskKey } from "./runtime-task-list";
 
 /** 小窗轮询间隔：与网页看板同一节奏（PRD §7.1.5「沿用现有 Dashboard 监控刷新」）。 */
@@ -30,12 +31,18 @@ const MAX_ACTIVE_TASKS = 4;
 /** 每轮读取触达读数的条数上限：滚动到的行不擅自增加取数量。 */
 const MAX_IMPACT_READS_PER_ROUND = 4;
 
-/** 活动分桶：值守者离开浏览器后仍需要盯的三类状态。 */
-const ACTIVE_STATUSES = new Set(["running", "blocked", "waiting"]);
+/** 活动分桶：值守者离开浏览器后仍需要盯的运行、阻塞、失败和等待状态。 */
+const ACTIVE_STATUSES = new Set(["running", "blocked", "failed", "waiting"]);
 
 interface DesktopCompanionProps {
   /** 关闭按钮的目标动作；在原生窗口里由 helper 关窗，在浏览器里退化为隐藏。 */
   onClose?: () => void;
+  /** 菜单栏 App 中切换 popover 与悬浮窗模式的动作。 */
+  onTogglePinned?: () => void;
+  /** 当前是否已固定为悬浮窗。 */
+  isPinned?: boolean;
+  /** 关闭按钮文案；菜单栏 App 中使用「隐藏」。 */
+  closeLabel?: string;
 }
 
 /**
@@ -44,7 +51,12 @@ interface DesktopCompanionProps {
  * @param props.onClose - 关闭动作回调；缺省时不渲染关闭按钮。
  * @returns 紧凑任务面板，附带来源可用性与断连披露。
  */
-export function DesktopCompanion({ onClose }: DesktopCompanionProps) {
+export function DesktopCompanion({
+  onClose,
+  onTogglePinned,
+  isPinned = false,
+  closeLabel = "关闭",
+}: DesktopCompanionProps) {
   const [summary, setSummary] = useState<RuntimeTaskSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [paused, setPaused] = useState(false);
@@ -83,15 +95,33 @@ export function DesktopCompanion({ onClose }: DesktopCompanionProps) {
   const overflowCount = Math.max(0, activeTasks.length - MAX_ACTIVE_TASKS);
 
   return (
-    <div
-      className="flex min-h-0 flex-1 flex-col gap-2 p-3"
-      data-testid="desktop-companion"
-    >
+    <div className="flex min-h-0 flex-1 flex-col gap-2 p-3" data-testid="desktop-companion">
       <div className="flex items-center justify-between gap-2 text-[11px] text-slate-500">
-        <span data-testid="desktop-companion-sync">
-          {summary && !error ? `更新于 ${formatLocalDateTime(summary.generated_at)}` : "等待读数…"}
+        <span className="min-w-0">
+          {onTogglePinned ? (
+            <span className="mr-2 font-semibold text-slate-900 dark:text-slate-100">
+              KedaCode 运行时
+            </span>
+          ) : null}
+          <span data-testid="desktop-companion-sync">
+            {summary && !error
+              ? `更新于 ${formatLocalDateTime(summary.generated_at)}`
+              : "等待读数…"}
+          </span>
         </span>
         <span className="flex items-center gap-1">
+          {onTogglePinned ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-6 px-2 text-[11px]"
+              onClick={onTogglePinned}
+              data-testid="desktop-companion-pin"
+              aria-label={isPinned ? "取消固定悬浮窗" : "固定为悬浮窗"}
+            >
+              {isPinned ? "取消固定" : "固定悬浮"}
+            </Button>
+          ) : null}
           <Button
             size="sm"
             variant="ghost"
@@ -109,7 +139,7 @@ export function DesktopCompanion({ onClose }: DesktopCompanionProps) {
               onClick={onClose}
               data-testid="desktop-companion-close"
             >
-              关闭
+              {closeLabel}
             </Button>
           ) : null}
         </span>
@@ -144,7 +174,7 @@ export function DesktopCompanion({ onClose }: DesktopCompanionProps) {
           className="rounded-md border border-dashed border-slate-200 p-4 text-center text-xs text-slate-500 dark:border-slate-800"
           data-testid="desktop-companion-empty"
         >
-          {summary ? "当前没有运行中、阻塞或等待值守的任务。" : "还没有读到任务。"}
+          {summary ? "当前没有运行中、阻塞、失败或等待值守的任务。" : "还没有读到任务。"}
         </p>
       ) : null}
 
@@ -158,7 +188,7 @@ export function DesktopCompanion({ onClose }: DesktopCompanionProps) {
       ) : null}
 
       <ul
-        className={`min-h-0 flex-1 flex flex-col gap-2 overflow-auto ${error ? "opacity-60" : ""}`}
+        className={`flex min-h-0 flex-1 flex-col gap-2 overflow-auto ${error ? "opacity-60" : ""}`}
         data-testid="desktop-companion-list"
         data-stale={error ? "true" : "false"}
       >
@@ -203,6 +233,7 @@ function CompanionTaskRow({
     >
       <span className="flex flex-wrap items-center gap-1.5 text-xs">
         <Badge variant={presentation.variant}>{presentation.label}</Badge>
+        <RuntimeTaskPhase phase={task.phase} />
         <span className="font-medium text-slate-900 dark:text-slate-100">
           {task.repo_display_name ?? task.repo_id}#{task.issue_number}
         </span>
@@ -210,8 +241,13 @@ function CompanionTaskRow({
       <span className="truncate text-[11px] text-slate-600 dark:text-slate-300">
         {task.issue_title ?? "（账本未记录标题）"}
       </span>
+      <p
+        className="line-clamp-2 text-[11px] leading-snug text-slate-500 dark:text-slate-400"
+        data-testid="runtime-task-phase-description"
+      >
+        阶段说明：{runtimePhaseDescription(task.phase)}
+      </p>
       <span className="flex flex-wrap gap-x-2 text-[11px] text-slate-500">
-        {task.phase ? <span>{task.phase}</span> : null}
         {task.agent ? (
           <span>
             {task.agent}
@@ -220,6 +256,15 @@ function CompanionTaskRow({
         ) : null}
         <span>{formatLifecycleDuration(task.duration_seconds)}</span>
       </span>
+      {["blocked", "failed"].includes(task.status) ? (
+        <p
+          className="text-[11px] break-words text-red-700 dark:text-red-300"
+          data-testid="runtime-task-status-reason"
+        >
+          状态来源：{task.status_reason ?? "未提供，请查看任务详情"}
+        </p>
+      ) : null}
+      <RuntimeTaskAnomalies anomalyTypes={task.anomaly_types ?? []} compact />
       <RuntimeTaskImpact
         repoId={task.repo_id}
         prdPath={task.prd_path}

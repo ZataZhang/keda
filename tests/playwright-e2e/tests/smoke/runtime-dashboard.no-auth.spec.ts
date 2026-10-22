@@ -24,7 +24,8 @@ const RUNNING_TASK = {
   issue_title: 'Running Issue',
   issue_url: 'https://example.test/21',
   status: 'running',
-  status_reason: 'agent/running',
+  status_reason: '当前监控标签：agent/running',
+  anomaly_types: [],
   phase: 'implement',
   agent: 'codex',
   preset: 'default',
@@ -38,15 +39,16 @@ const RUNNING_TASK = {
   labels: ['agent/running'],
 }
 
-const BLOCKED_TASK = {
+const FAILED_TASK = {
   repo_id: 'keda-main',
   issue_number: 19,
   task_key: 'keda-main#19',
   repo_display_name: 'Keda Main',
   issue_title: 'Broken Issue',
   issue_url: 'https://example.test/19',
-  status: 'blocked',
-  status_reason: '检测到异常：label_pr_mismatch',
+  status: 'failed',
+  status_reason: '当前监控标签：agent/failed',
+  anomaly_types: ['label_pr_mismatch'],
   phase: 'publish',
   agent: 'claude',
   preset: null,
@@ -64,12 +66,14 @@ const BLOCKED_TASK = {
 function tasksPayload(overrides: Record<string, unknown> = {}) {
   return {
     generated_at: '2026-06-11T10:05:00+00:00',
-    tasks: [RUNNING_TASK, BLOCKED_TASK],
+    tasks: [RUNNING_TASK, FAILED_TASK],
     status_counts: {
       running: 1,
       waiting: 0,
-      blocked: 1,
+      blocked: 0,
+      failed: 1,
       completed: 0,
+      closed: 0,
       unknown: 0,
     },
     unavailable_sources: [],
@@ -173,7 +177,7 @@ test.describe('runtime board (mocked API)', () => {
     ).toContainText('运行中')
     await expect(
       page.getByTestId('runtime-task-row-keda-main-19'),
-    ).toContainText('阻塞')
+    ).toContainText('失败')
     // 默认视图不再铺仓库卡片：仓库级动作收在「仓库监控」一侧。
     await expect(page.getByTestId('dashboard-repo-header')).toHaveCount(0)
   })
@@ -182,7 +186,7 @@ test.describe('runtime board (mocked API)', () => {
     await mockBoardApi(page)
     await page.goto('/app/dashboard')
 
-    await page.getByTestId('runtime-filter-blocked').click()
+    await page.getByTestId('runtime-filter-failed').click()
     await expect(page.getByTestId('runtime-task-row-keda-main-19')).toBeVisible()
     await expect(page.getByTestId('runtime-task-row-keda-main-21')).toHaveCount(0)
   })
@@ -223,7 +227,7 @@ test.describe('runtime board (mocked API)', () => {
     await mockBoardApi(page)
     await page.goto('/app/dashboard')
 
-    // 自动选中的是无 PRD 的阻塞任务以外的第一条：这里显式点未关联 PRD 的行。
+    // 默认选中运行任务；这里显式点开无 PRD 的失败任务。
     await page.getByTestId('runtime-task-row-keda-main-19').click()
     await expect(page.getByTestId('runtime-impact-no-prd')).toContainText('未关联 PRD')
     await expect(page.getByTestId('runtime-impact-bar')).toHaveCount(0)
@@ -239,7 +243,9 @@ test.describe('runtime board (mocked API)', () => {
           running: 0,
           waiting: 0,
           blocked: 0,
+          failed: 0,
           completed: 0,
+          closed: 0,
           unknown: 0,
         },
         unavailable_sources: ['run_history'],
@@ -258,12 +264,12 @@ test.describe('runtime board (mocked API)', () => {
     await mockBoardApi(page, {
       companion: {
         status: 'not_installed',
-        hint: '桌面运行时未安装：安装可选依赖 `kedacode[desktop]` 后可开启小窗，网页看板不受影响。',
+        hint: '桌面运行时缺失：源码环境执行 `uv sync` 并重启 Console，网页看板不受影响。',
       },
     })
     await page.goto('/app/dashboard')
 
-    await expect(page.getByTestId('dashboard-companion-hint')).toContainText('桌面运行时未安装')
+    await expect(page.getByTestId('dashboard-companion-hint')).toContainText('桌面运行时缺失')
     await expect(page.getByTestId('runtime-task-list')).toBeVisible()
   })
 
@@ -280,6 +286,45 @@ test.describe('runtime board (mocked API)', () => {
 })
 
 test.describe('desktop companion page (mocked API)', () => {
+  test('shows readable stages beside blocked status in a narrow window', async ({ page }) => {
+    await page.setViewportSize({ width: 380, height: 760 })
+    const phases = ['rv_reexec', 'implementation_complete', 'pre_pr_review', null, 'future_phase']
+    await mockBoardApi(page, {
+      tasks: {
+        tasks: phases.map((phase, index) => ({
+          ...RUNNING_TASK,
+          issue_number: 294 + index,
+          task_key: `keda-main#${294 + index}`,
+          status: 'blocked',
+          status_reason: '当前监控标签：agent/blocked',
+          anomaly_types: [],
+          labels: ['agent/blocked'],
+          phase,
+          prd_path: null,
+        })),
+        status_counts: {
+          running: 0,
+          waiting: 0,
+          blocked: phases.length,
+          failed: 0,
+          completed: 0,
+          closed: 0,
+          unknown: 0,
+        },
+      },
+    })
+    await page.goto('/app/companion')
+    const labels = ['提交后验收重跑', '实现完成', 'PR 前审查', '未记录阶段', 'future_phase']
+    for (const [index, label] of labels.entries()) {
+      const row = page.getByTestId(`desktop-companion-row-keda-main-${294 + index}`)
+      await expect(row.getByTestId('runtime-task-phase')).toHaveText(`阶段：${label}`)
+      await expect(row.getByTestId('runtime-task-status-reason')).toContainText('agent/blocked')
+    }
+    await expect(page.getByTestId('desktop-companion-list')).toBeVisible()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy()
+    await page.screenshot({ path: '/tmp/keda-runtime-phase-narrow.png', fullPage: true })
+  })
+
   test('lists active tasks compactly and keeps the overflow scrollable', async ({ page }) => {
     const activeTasks = [1, 2, 3, 4, 5].map((index) => ({
       ...RUNNING_TASK,
@@ -294,7 +339,9 @@ test.describe('desktop companion page (mocked API)', () => {
           running: activeTasks.length,
           waiting: 0,
           blocked: 0,
+          failed: 0,
           completed: 0,
+          closed: 0,
           unknown: 0,
         },
       },

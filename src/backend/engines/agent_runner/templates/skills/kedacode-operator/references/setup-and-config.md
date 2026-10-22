@@ -2,7 +2,7 @@
 
 ## When to use
 
-The user says 「装环境」「初始化仓库」「把这个仓库登记进来」「kc init」, 「重装 skill」「刷新 skill」「kc skill install」, 「修复 operator skill」「kc skill repair-operator」, 「这台机器装了哪些 agent」「该用哪个 agent」「跑不起来说 CLI 不存在」「注册一个自己的 agent」, or asks what agents/models/presets exist (「有哪些模型预设」「这条命令收什么旗标」), or translates the CLI directly: `kc init` / `kc skill install` / `kc skill repair-operator` / `kc agent list` / `kc agent setup` / `kc agent add` / `kc agent presets` / `kc agent doctor` / `kc schema`. This route also owns the two interactive surfaces: 「裸 kc 进哪个入口」「 kc session 和 kc repl 有什么区别」「起个预览」「dev server 起不起来」 — `kc session` and `kc preview start|status|stop` are documented below.
+The user says 「装环境」「初始化仓库」「把这个仓库登记进来」「kc init」, 「重装 skill」「刷新 skill」「kc skill install」, 「修复 operator skill」「kc skill repair-operator」, 「安装菜单栏 App」「kc desktop install」, 「这台机器装了哪些 agent」「该用哪个 agent」「跑不起来说 CLI 不存在」「注册一个自己的 agent」, or asks what agents/models/presets exist (「有哪些模型预设」「这条命令收什么旗标」), or translates the CLI directly: `kc init` / `kc skill install` / `kc skill repair-operator` / `kc desktop install` / `kc agent list` / `kc agent setup` / `kc agent add` / `kc agent presets` / `kc agent doctor` / `kc schema`. This route also owns the two interactive surfaces: 「裸 kc 进哪个入口」「 kc session 和 kc repl 有什么区别」「起个预览」「dev server 起不起来」 — `kc session` and `kc preview start|status|stop` are documented below.
 
 ## Confirm before acting
 
@@ -15,6 +15,10 @@ The user says 「装环境」「初始化仓库」「把这个仓库登记进来
 ## Local console
 
 The default `kc console` startup requires complete bundled dashboard assets: the panel is considered ready only when its `index.html` entry file is present, so a missing directory and a half-synced one both fail before anything listens. Run `just console-sync` from the repository root or install a release wheel that includes the assets. Use `kc console --api-only` only when an API without the web panel is sufficient; `/` will not serve the panel.
+
+## macOS menu bar app
+
+On the first interactive macOS `kc` invocation, the CLI may ask once whether to install the matching menu bar app. Accepting downloads the DMG for the installed CLI version and CPU architecture, checks its Release SHA-256, and copies `KedaCode.app` to `~/Applications`; it does not replace or reinstall the `uv`-managed CLI. A declined prompt can be revisited with `kc desktop install`. The command is macOS-only. The public DMG is ad-hoc signed and not notarized, so macOS may require the user to approve the first launch in Privacy & Security settings. See the repository's `docs/guides/desktop-companion.md` for more.
 
 ## The native executor entry (`kc session`)
 

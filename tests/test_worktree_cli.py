@@ -277,6 +277,7 @@ def test_create_or_reuse_worktree_links_frontend_node_modules(
     found`` even though the main checkout has dependencies installed.
     """
     repo_path = _init_git_repository(tmp_path, "target")
+    monkeypatch.setattr(worktree_frontend.shutil, "which", lambda _: None)
     # .agent-runner/ 是 runner 的 worktree 状态目录（kc init 会把它写进 .gitignore）；
     # 依赖准备诊断就落在这里，必须保持被忽略，否则 worktree 会被判为有未提交改动。
     (repo_path / ".gitignore").write_text("node_modules/\n.agent-runner/\n", encoding="utf-8")

@@ -56,11 +56,10 @@ jobs:
         run: |
           uv tool install --reinstall --editable .
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          # 三个 console script 都要验：漏掉别名时 pyproject 的 [project.scripts]
-          # 改动不会在这里冒烟出来。永久弃用别名只在本档探测一次。
+          # 两个受支持的 console script 都要验：漏掉别名时 pyproject 的 [project.scripts]
+          # 改动不会在这里冒烟出来。
           kc --version
           kedacode --version
-          iar --version  # legacy-alias
 
       - name: Exercise kc init in a throwaway git repo
         run: |

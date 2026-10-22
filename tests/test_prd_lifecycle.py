@@ -49,6 +49,11 @@ def _store(tmp_path: Path) -> SqliteConsoleStore:
     return SqliteConsoleStore(tmp_path / "console.db")
 
 
+def _recent_lifecycle_timestamp_utc() -> datetime:
+    """返回窗口内的最近账本时间，避免端点测试依赖固定日期。"""
+    return datetime.now(timezone.utc) - timedelta(days=1)
+
+
 def _record(
     store: SqliteConsoleStore,
     event_type: LifecycleEventType,
@@ -508,6 +513,8 @@ def test_backlog_lifecycle_endpoint_empty_state(api_environment) -> None:
 def test_console_prd_lifecycle_stats_endpoint(api_environment) -> None:
     """Stats 端点返回完成分位数与被排除的旧记录条数。"""
     store = api_environment
+    recent_run_started_at_utc = _recent_lifecycle_timestamp_utc()
+    recent_run_finished_at_utc = recent_run_started_at_utc + timedelta(minutes=5)
     store.append_run(
         RunRecord(
             repo_id=_REPO_ID,
@@ -517,8 +524,8 @@ def test_console_prd_lifecycle_stats_endpoint(api_environment) -> None:
             agent="claude",
             outcome="completed",
             error_summary=None,
-            started_at="2026-09-21T09:00:00+00:00",
-            finished_at="2026-09-21T09:05:00+00:00",
+            started_at=recent_run_started_at_utc.isoformat(timespec="seconds"),
+            finished_at=recent_run_finished_at_utc.isoformat(timespec="seconds"),
             duration_seconds=300.0,
         )
     )
@@ -687,10 +694,11 @@ def test_prd_lifecycle_stats_includes_token_usage(tmp_path: Path) -> None:
 def test_stats_endpoint_transparently_exposes_token_usage(api_environment) -> None:
     """端点零改动断言：HTTP 响应自动透出 token_usage（dataclass 序列化）。"""
     store = api_environment
+    recent_attempt_at_utc = _recent_lifecycle_timestamp_utc()
     _record(
         store,
         LifecycleEventType.ATTEMPT,
-        "2026-09-21T10:01:00+00:00",
+        recent_attempt_at_utc.isoformat(timespec="seconds"),
         event_key="a1",
         detail={
             "agent": "claude",
@@ -746,6 +754,9 @@ def _seed_prd_runs(
 
     run id 追加 rN 后缀：同一 Issue 重试 / 重执行在账本里各占一条 run 记录。
     """
+    recent_run_started_at_utc = _recent_lifecycle_timestamp_utc()
+    recent_run_finished_at_utc = recent_run_started_at_utc + timedelta(minutes=5)
+    recent_attempt_at_utc = recent_run_started_at_utc + timedelta(minutes=1)
     for index, usage in enumerate(usages, start=1):
         run_id = f"{_REPO_ID}#{issue_number}r{index}"
         store.upsert_lifecycle_run(
@@ -755,8 +766,8 @@ def _seed_prd_runs(
                 prd_path=prd_path,
                 issue_number=issue_number,
                 trigger="cli_run",
-                started_at="2026-09-21T10:00:00+00:00",
-                finished_at="2026-09-21T10:05:00+00:00",
+                started_at=recent_run_started_at_utc.isoformat(timespec="seconds"),
+                finished_at=recent_run_finished_at_utc.isoformat(timespec="seconds"),
                 outcome="completed",
                 history_complete=True,
             )
@@ -768,7 +779,7 @@ def _seed_prd_runs(
                 event_type="attempt",
                 phase="executing",
                 actor="runner",
-                occurred_at="2026-09-21T10:01:00+00:00",
+                occurred_at=recent_attempt_at_utc.isoformat(timespec="seconds"),
                 detail_json=json.dumps({"agent": "claude", "token_usage": usage}),
             )
         )
@@ -819,7 +830,7 @@ def test_prd_lifecycle_stats_mounts_token_usage_by_prd(tmp_path: Path) -> None:
         store=store,
         repo_id=_REPO_ID,
         days=30,
-        now=datetime(2026, 9, 21, 12, 0, tzinfo=timezone.utc),
+        now=datetime.now(timezone.utc),
     )
 
     assert [entry.issue_number for entry in stats.token_usage_by_prd] == [7, 9]
@@ -839,7 +850,7 @@ def test_prd_lifecycle_stats_reuses_ledger_reads_for_by_prd(tmp_path: Path) -> N
         store=store,
         repo_id=_REPO_ID,
         days=30,
-        now=datetime(2026, 9, 21, 12, 0, tzinfo=timezone.utc),
+        now=datetime.now(timezone.utc),
     )
 
     assert stats.token_usage_by_prd, "by_prd 应已挂载（前置：确有用量数据）"
