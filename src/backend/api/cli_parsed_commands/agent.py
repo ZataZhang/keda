@@ -480,6 +480,24 @@ def _doctor_lifecycle_profile(lifecycle: str) -> str:
     return "run"
 
 
+# 内置 agent 中带 macOS seatbelt 沙箱（``--sandbox workspace-write``）的，沙箱会被子进程继承，
+# 导致真实 Chromium 起不来；作 verifier 时浏览器类验证无法被独立复现（见 agent-runner 指南）。
+_SANDBOXED_VERIFIER_AGENTS = frozenset({"codex"})
+
+
+def _sandboxed_verifier_warning(lifecycle: str, agent_name: str) -> str | None:
+    """verifier 阶段解析到带沙箱的 agent 时返回提示，否则 ``None``。"""
+    if lifecycle != "verifier" or agent_name not in _SANDBOXED_VERIFIER_AGENTS:
+        return None
+    return (
+        f"verifier agent '{agent_name}' runs inside a sandbox (--sandbox workspace-write); "
+        "browser-based and real-model-session validation items cannot be reproduced "
+        "independently and will be judged red. Use a non-sandboxed verifier "
+        "(qoder, claude, kimi) for tasks with such items. "
+        "See docs/guides/agent-runner.md, section 'verifier 为 codex 时的沙箱限制'."
+    )
+
+
 def _doctor_lifecycle_entry(
     lifecycle: str,
     prompt: str,
@@ -521,6 +539,9 @@ def _doctor_lifecycle_entry(
     entry, warnings = _doctor_entry(
         agent_name, profile_name, prompt, cwd, config, model_selection=model_selection
     )
+    sandbox_warning = _sandboxed_verifier_warning(lifecycle, agent_name)
+    if sandbox_warning is not None:
+        warnings.append(sandbox_warning)
     return {"lifecycle": lifecycle, **entry}, warnings
 
 

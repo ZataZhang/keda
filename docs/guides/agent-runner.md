@@ -3605,6 +3605,25 @@ verifier 拿到的任务是"自己复跑真实入口 + 逐个跑 negative contro
 - Issue 的失败评论只贴命令名 + 超时秒数 + 部分输出尾部。`subprocess.TimeoutExpired.__str__` 会把整条命令原样拼进消息，而 agent 命令里带着完整 prompt——以前一次 verifier 超时会把几千行 prompt 贴进评论，真正有用的信息反而被埋掉。
 - 超时不进 builder 的 recovery 循环（那是 `red` 的语义）：Issue 判 `agent/failed`，人看清原因后再 relabel 重跑。
 
+### verifier 为 codex 时的沙箱限制
+
+内置的 `codex` agent 以 `--sandbox workspace-write` 运行（macOS 上是 seatbelt 沙箱），沙箱会被子进程继承。结果是：**由它担任 verifier 时，真实 Chromium 无法启动**（日志里是 `bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer.<pid>: Permission denied (1100)`），因此：
+
+- 浏览器类的验证项（真实页面、截图、E2E）和需要真实模型会话的验证项，verifier **结构上不可能独立复现**；
+- 验证协议规定"无法独立确认即判红"，这类任务会一直判红、永不收敛；
+- 同一台机器上，builder（qoder、claude、kimi 不带沙箱）用同一个脚本却能通过，所以这不是机器或 Chromium 安装的问题。
+
+**怎么避免**：对含浏览器类或真实模型会话验证项的任务，不要让 `codex` 担任 verifier；把 verifier 阶段绑到不带沙箱的 agent（qoder、claude、kimi），例如在仓库的 `.kedacode.toml` 里：
+
+```toml
+[agent_runner.lifecycle_agents]
+verifier = "claude"
+```
+
+**怎么发现**：`kc agent doctor --lifecycle verifier` 在 verifier 解析到 `codex` 时会打印一条 `WARN`，说明上述限制。
+
+这是已知限制，不是修复：放开 codex 的沙箱会扩大 verifier 的本机权限，需要单独评估信任边界；把浏览器类验证降级为"builder 产物 + verifier 文件级核验"则会削弱这类验证的独立性。两个方向都留在 Issue #308 里等决定。
+
 ### verifier 复跑不得覆盖 builder 的最终树证据
 
 verifier 能跑的就是 builder 写进 manifest 的那些 capture 脚本，而脚本会把输出写回同一批 `rv-*.txt`；跑 negative control 时它还会故意把代码改红。于是 verifier 一跑，已经通过门禁的证据就被它自己的复跑结果覆盖，被超时杀掉时更糟——证据目录停在最后一个 negative control 的破坏态，而门禁早就通过了，这份自相矛盾的证据会照原样发布给人审。

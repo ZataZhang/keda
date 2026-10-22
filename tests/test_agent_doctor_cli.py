@@ -427,6 +427,52 @@ def test_doctor_lifecycle_view_unbound_stage_has_no_model_args(
     assert "--model" not in entry["argv"]
 
 
+@pytest.mark.parametrize(
+    ("verifier_agent", "expect_warning"),
+    [("codex", True), ("codebuddy", False)],
+)
+def test_doctor_warns_when_the_verifier_runs_in_a_sandbox(
+    monkeypatch: pytest.MonkeyPatch,
+    stub_executables_exist,  # noqa: ANN001
+    capsys: pytest.CaptureFixture[str],
+    verifier_agent: str,
+    expect_warning: bool,
+) -> None:
+    """codex 带沙箱，作 verifier 时浏览器类验证无法独立复现，doctor 要提前提示；其他 agent 不提示。"""
+    from backend.core.shared.models.lifecycle_agent import LifecycleAgentsConfig
+
+    config = AppConfig(
+        lifecycle_agents=LifecycleAgentsConfig(global_layer={"verifier": verifier_agent})
+    )
+    monkeypatch.setattr("backend.api.cli_parsed_commands.agent.build_app_config", lambda: config)
+
+    exit_code = run_agent_doctor_command(_make_context(as_json=True, lifecycle="verifier"))
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    # 终端会按宽度折行，先把空白归一化再匹配。
+    assert ("cannot be reproduced" in " ".join(captured.err.split())) is expect_warning
+    assert json.loads(captured.out)[0]["agent"] == verifier_agent
+
+
+def test_doctor_does_not_warn_about_the_sandbox_for_other_stages(
+    monkeypatch: pytest.MonkeyPatch,
+    stub_executables_exist,  # noqa: ANN001
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """沙箱限制只对 verifier 阶段成立：同一个 codex 绑在实现阶段不应触发该提示。"""
+    from backend.core.shared.models.lifecycle_agent import LifecycleAgentsConfig
+
+    config = AppConfig(
+        lifecycle_agents=LifecycleAgentsConfig(global_layer={"implementation": "codex"})
+    )
+    monkeypatch.setattr("backend.api.cli_parsed_commands.agent.build_app_config", lambda: config)
+
+    run_agent_doctor_command(_make_context(as_json=True, lifecycle="implementation"))
+
+    assert "cannot be reproduced" not in " ".join(capsys.readouterr().err.split())
+
+
 def test_doctor_lifecycle_rejects_unknown_key(
     monkeypatch: pytest.MonkeyPatch,
     stub_executables_exist,  # noqa: ANN001
