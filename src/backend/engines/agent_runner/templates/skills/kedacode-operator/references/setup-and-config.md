@@ -2,7 +2,7 @@
 
 ## When to use
 
-The user says 「装环境」「初始化仓库」「把这个仓库登记进来」「kc init」, 「重装 skill」「刷新 skill」「kc skill install」, 「修复 operator skill」「kc skill repair-operator」, 「这台机器装了哪些 agent」「该用哪个 agent」「跑不起来说 CLI 不存在」「注册一个自己的 agent」, or asks what agents/models/presets exist (「有哪些模型预设」「这条命令收什么旗标」), or translates the CLI directly: `kc init` / `kc skill install` / `kc skill repair-operator` / `kc agent list` / `kc agent setup` / `kc agent add` / `kc agent presets` / `kc agent doctor` / `kc schema`. This route also owns the two interactive surfaces: 「裸 kc 进哪个入口」「 kc session 和 kc repl 有什么区别」「起个预览」「dev server 起不起来」 — `kc session` and `kc preview start|status|stop` are documented below.
+The user says 「装环境」「初始化仓库」「把这个仓库登记进来」「kc init」, 「重装 skill」「刷新 skill」「kc skill install」, 「修复 operator skill」「kc skill repair-operator」, 「安装菜单栏 App」「kc desktop install」, 「这台机器装了哪些 agent」「该用哪个 agent」「跑不起来说 CLI 不存在」「注册一个自己的 agent」, or asks what agents/models/presets exist (「有哪些模型预设」「这条命令收什么旗标」), or translates the CLI directly: `kc init` / `kc skill install` / `kc skill repair-operator` / `kc desktop install` / `kc agent list` / `kc agent setup` / `kc agent add` / `kc agent presets` / `kc agent doctor` / `kc schema`. This route also owns the two interactive surfaces: 「裸 kc 进哪个入口」「 kc session 和 kc repl 有什么区别」「起个预览」「dev server 起不起来」 — `kc session` and `kc preview start|status|stop` are documented below.
 
 ## Confirm before acting
 
@@ -11,6 +11,10 @@ The user says 「装环境」「初始化仓库」「把这个仓库登记进来
 3. **The remote template download needs network and GitHub access** — `kc init` and `kc skill install` both clone the `prd` / `code-reviewer` template skills; a label-sync failure during init is reported, not fatal, but the user should hear why.
 4. **Repository ambiguity** — when the working directory matches several registered repositories, later commands refuse to guess; init reports the repo id it registered, and other routes pass it as `--repo-id <id>`.
 5. **`kc agent setup` and `kc agent add --write` write machine-level config** — the first edits the global lifecycle matrix in `~/.kedacode/config.toml`, the second appends an agent registration to the same file. Both refuse to choose for the user: preview with `kc agent setup --dry-run` (or `kc agent add` without `--write`, which only prints the TOML), then apply the choice the user named. Never run either to make a failing run "go through" by swapping the user's agent without saying so.
+
+## macOS menu bar app
+
+On the first interactive macOS `kc` invocation, the CLI may ask once whether to install the matching menu bar app. Accepting downloads the DMG for the installed CLI version and CPU architecture, checks its Release SHA-256, and copies `KedaCode.app` to `~/Applications`; it does not replace or reinstall the `uv`-managed CLI. A declined prompt can be revisited with `kc desktop install`. The command is macOS-only. The public DMG is ad-hoc signed and not notarized, so macOS may require the user to approve the first launch in Privacy & Security settings. See the repository's `docs/guides/desktop-companion.md` for more.
 
 ## The native executor entry (`kc session`)
 

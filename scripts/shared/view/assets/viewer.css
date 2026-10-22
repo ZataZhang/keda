@@ -253,16 +253,16 @@ button, input, select { font: inherit; color: inherit; }
   border-bottom: 1px solid var(--border); padding: 9px 14px; font-size: 12.5px;
 }
 .viewer-path { overflow: hidden; font-family: var(--mono); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-/* 复制路径按钮：贴着路径放，图标按钮不参与撑宽，`[hidden]` 要显式压过 display */
-.copy-path {
+/* 复制路径 / 在系统中打开：贴着路径放的两个图标按钮，不参与撑宽，`[hidden]` 要显式压过 display */
+.copy-path, .open-system {
   display: inline-flex; flex: none; align-items: center; justify-content: center;
   width: 22px; height: 22px; border: 1px solid transparent; border-radius: 6px;
   background: transparent; color: var(--muted-foreground); cursor: pointer;
 }
-.copy-path:hover { background: var(--secondary); color: var(--foreground); }
-.copy-path:focus-visible { border-color: var(--ring); outline: none; }
-.copy-path[hidden] { display: none; }
-.copy-path svg {
+.copy-path:hover, .open-system:hover { background: var(--secondary); color: var(--foreground); }
+.copy-path:focus-visible, .open-system:focus-visible { border-color: var(--ring); outline: none; }
+.copy-path[hidden], .open-system[hidden] { display: none; }
+.copy-path svg, .open-system svg {
   width: 14px; height: 14px; fill: none; stroke: currentColor;
   stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round;
 }

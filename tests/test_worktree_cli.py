@@ -22,7 +22,7 @@ from backend.core.shared.models.agent_runner import (
     WorktreeConfig,
 )
 from backend.core.use_cases import agent_runner_worktree_create as worktree_create_module
-from backend.core.use_cases import worktree_frontend as worktree_frontend_module
+from backend.core.use_cases import worktree_frontend
 from backend.core.use_cases.run_agent_once import create_or_reuse_worktree
 from backend.infrastructure.git.worktree import WorktreeManager, WORKTREE_DIR_NAME
 from backend.infrastructure.process_runner import SubprocessRunner
@@ -267,7 +267,8 @@ def test_create_or_reuse_worktree_provisions_database_when_enabled(
 
 
 def test_create_or_reuse_worktree_links_frontend_node_modules(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Reusing a worktree symlinks frontend ``node_modules`` from main.
 
@@ -276,7 +277,7 @@ def test_create_or_reuse_worktree_links_frontend_node_modules(
     found`` even though the main checkout has dependencies installed.
     """
     repo_path = _init_git_repository(tmp_path, "target")
-    monkeypatch.setattr(worktree_frontend_module.shutil, "which", lambda _: None)
+    monkeypatch.setattr(worktree_frontend.shutil, "which", lambda _: None)
     # .agent-runner/ 是 runner 的 worktree 状态目录（kc init 会把它写进 .gitignore）；
     # 依赖准备诊断就落在这里，必须保持被忽略，否则 worktree 会被判为有未提交改动。
     (repo_path / ".gitignore").write_text("node_modules/\n.agent-runner/\n", encoding="utf-8")
@@ -285,6 +286,8 @@ def test_create_or_reuse_worktree_links_frontend_node_modules(
     (repo_path / "frontend" / "pnpm-lock.yaml").write_text("lockfile\n", encoding="utf-8")
     _run_git(repo_path, "add", ".gitignore", "frontend/package.json", "frontend/pnpm-lock.yaml")
     _run_git(repo_path, "commit", "-m", "track frontend manifest")
+    # 固定走复用回退分支，避免测试调用主机 pnpm 执行安装。
+    monkeypatch.setattr(worktree_frontend.shutil, "which", lambda _executable: None)
     # Installed dependencies live only in the (gitignored) main checkout.
     main_vite_path = repo_path / "frontend" / "node_modules" / ".bin" / "vite"
     main_vite_path.parent.mkdir(parents=True)

@@ -29,8 +29,10 @@ import json
 import logging
 import re
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from backend.core.shared.interfaces.agent_runner import (
     IContentGenerator,
@@ -50,6 +52,9 @@ from backend.core.use_cases.agent_invocation_tracing import (
     finish_invocation,
     start_invocation,
 )
+from backend.core.use_cases.repository_content_templates import (
+    append_repository_template_context,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -57,7 +62,9 @@ _logger = logging.getLogger(__name__)
 _MAX_TITLE_LENGTH = 256
 
 # 整行只有 GitHub closing keyword + Issue 引用（如 ``Closes #42``）是正文锚点，不是标题。
-_CLOSING_REFERENCE_TITLE = re.compile(r"(?:close|fix|resolve)(?:e?[sd])?:?\s*#\d+\.?", re.I)
+_CLOSING_REFERENCE_TITLE = re.compile(
+    r"(?:close|fix|resolve)(?:e?[sd])?:?\s*#\d+\.?", re.IGNORECASE
+)
 
 
 # ---------------------------------------------------------------------------
@@ -571,7 +578,7 @@ def _parse_markdown_output(output_text: str) -> tuple[str, str]:
 _PREAMBLE_LEAD = re.compile(
     r"^(?:here(?:'s| is)\b|sure\b|certainly\b|okay\b|of course\b|below is\b|"
     r"the following\b|i(?:'ll| will)\b|as requested\b)",
-    re.I,
+    re.IGNORECASE,
 )
 # 水平分隔线（``---`` / ``***`` / ``___`` / ``===``），常见于开场白与正文之间。
 _HORIZONTAL_RULE = re.compile(r"^(?:[-*_=]\s*){3,}$")
@@ -647,6 +654,96 @@ def _strip_markdown_preamble(output_text: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class RepositoryContentRequest:
+    """仓库正文生成的一次调用上下文。"""
+
+    config: GeneratedContentConfig
+    target: GeneratedContentTargetConfig
+    context: object
+    cwd: Path | None
+    model_selection: ModelSelection | None
+    kind: Literal["issue", "pr"]
+
+
+def _generate_repository_content(
+    generator: IContentGenerator | None, request: RepositoryContentRequest
+) -> tuple[str, str]:
+    """统一正文生成的模型选择、输入裁剪与仓库模板参考注入。"""
+    if request.target.mode == "template":
+        return _bound_repository_content(
+            _try_render_templates(request.target, request.context), request
+        )
+    if request.target.mode != "agent" or generator is None or request.cwd is None:
+        return "", ""
+    selected_agent = (
+        request.model_selection.agent
+        if request.model_selection is not None
+        else _resolve_generation_agent(
+            request.target.agent,
+            request.config.default_agent,
+            override_agent=request.config.lifecycle_default_agent,
+        )
+    )
+    rendered_prompt = _render_template(request.target.prompt, request.context)
+    bounded_prompt = _truncate_text(rendered_prompt, request.config.max_input_chars)
+    repository_prompt = append_repository_template_context(
+        bounded_prompt, request.cwd, request.kind
+    )
+    output_text = _run_content_generator(
+        generator,
+        selected_agent,
+        repository_prompt,
+        request.cwd,
+        request.target.timeout_seconds,
+        model_selection=request.model_selection,
+    )
+    if request.target.output == "json":
+        parsed_content = _parse_json_output(output_text)
+    else:
+        markdown_output = (
+            _strip_markdown_preamble(output_text) if request.kind == "pr" else output_text
+        )
+        parsed_content = _parse_markdown_output(markdown_output)
+    return _bound_repository_content(parsed_content, request)
+
+
+def _bound_repository_content(
+    parsed_content: tuple[str, str], request: RepositoryContentRequest
+) -> tuple[str, str]:
+    """统一标题和正文的长度边界，排除被误作 PR 标题的关闭引用。"""
+    parsed_title, parsed_body = parsed_content
+    if request.kind == "pr" and _CLOSING_REFERENCE_TITLE.fullmatch(parsed_title):
+        parsed_title = ""
+    return parsed_title[:_MAX_TITLE_LENGTH], parsed_body[: request.config.max_input_chars]
+
+
+def _generate_issue_with_fallback(
+    request: RepositoryContentRequest,
+    generator: IContentGenerator | None,
+    fallback: GeneratedIssueContent,
+    validate_body: Callable[[str], bool],
+) -> GeneratedIssueContent:
+    """复用两类 Issue 的生成级联，由调用方提供相反的 PRD 锚点判据。"""
+    if not request.config.enabled or not request.target.enabled:
+        return fallback
+    generated_title, generated_body = _generate_repository_content(generator, request)
+    if generated_title and generated_body and validate_body(generated_body):
+        return GeneratedIssueContent(
+            title=generated_title, body=generated_body, source=request.target.mode
+        )
+    if request.target.mode == "agent" and request.config.fallback == "template":
+        _logger.warning("Issue agent produced no usable content, rendering templates")
+        template_title, template_body = _bound_repository_content(
+            _try_render_templates(request.target, request.context), request
+        )
+        if template_title and template_body and validate_body(template_body):
+            return GeneratedIssueContent(
+                title=template_title, body=template_body, source="template"
+            )
+    return fallback
+
+
 def generate_issue_content(
     *,
     config: GeneratedContentConfig,
@@ -681,76 +778,14 @@ def generate_issue_content(
     Returns:
         包含 title、body 和 source 的 ``GeneratedIssueContent`` 实例。
     """
-    target = config.issue_from_prd
-    if not config.enabled or not target.enabled:
-        return GeneratedIssueContent(title=fallback_title, body=fallback_body, source="fallback")
-
-    generated_title = ""
-    generated_body = ""
-
-    # 根据配置模式选择生成策略。
-    if target.mode == "template":
-        generated_title, generated_body = _try_render_templates(target, context)
-    elif target.mode == "agent" and generator is not None and cwd is not None:
-        # 解析 agent：显式优先 → 全局默认 → 两者皆 auto 时收敛到 claude。
-        # 阶段绑定预设时预设整体决定该阶段的 agent（遮蔽矩阵同键声明）。
-        agent_name = (
-            model_selection.agent
-            if model_selection is not None
-            else _resolve_generation_agent(
-                target.agent, config.default_agent, override_agent=config.lifecycle_default_agent
-            )
-        )
-        # 渲染 prompt 模板并截断，防止超出模型上下文限制。
-        prompt = _render_template(target.prompt, context)
-        prompt = _truncate_text(prompt, config.max_input_chars)
-        output_text = _run_content_generator(
-            generator,
-            agent_name,
-            prompt,
-            cwd,
-            target.timeout_seconds,
-            model_selection=model_selection,
-        )
-        # 根据配置的输出格式解析 agent 返回内容。
-        if target.output == "json":
-            generated_title, generated_body = _parse_json_output(output_text)
-        else:
-            generated_title, generated_body = _parse_markdown_output(output_text)
-
-    # 截断至安全长度。
-    if generated_title:
-        generated_title = generated_title[:_MAX_TITLE_LENGTH]
-    if generated_body:
-        generated_body = generated_body[: config.max_input_chars]
-
-    # 验证并返回主模式结果。
-    if (
-        generated_title
-        and generated_body
-        and _validate_issue_body(generated_body, context.relative_prd_path)
-    ):
-        return GeneratedIssueContent(title=generated_title, body=generated_body, source=target.mode)
-
-    # Agent 失败：按配置尝试 template 中间兜底。
-    if target.mode == "agent" and config.fallback == "template":
-        _logger.warning("issue_from_prd: agent produced no usable content, rendering templates")
-        generated_title, generated_body = _try_render_templates(target, context)
-        if generated_title:
-            generated_title = generated_title[:_MAX_TITLE_LENGTH]
-        if generated_body:
-            generated_body = generated_body[: config.max_input_chars]
-        if (
-            generated_title
-            and generated_body
-            and _validate_issue_body(generated_body, context.relative_prd_path)
-        ):
-            return GeneratedIssueContent(
-                title=generated_title, body=generated_body, source="template"
-            )
-
-    # 所有生成方式均失败，返回 hard fallback。
-    return GeneratedIssueContent(title=fallback_title, body=fallback_body, source="fallback")
+    return _generate_issue_with_fallback(
+        RepositoryContentRequest(
+            config, config.issue_from_prd, context, cwd, model_selection, "issue"
+        ),
+        generator,
+        GeneratedIssueContent(title=fallback_title, body=fallback_body, source="fallback"),
+        lambda body: _validate_issue_body(body, context.relative_prd_path),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -896,47 +931,13 @@ def generate_pr_content(
         包含 title、body 和 source 的 ``GeneratedPrContent`` 实例。
     """
     target = config.draft_pr
+    generation_request = RepositoryContentRequest(
+        config, target, context, cwd, model_selection, "pr"
+    )
     if not config.enabled or not target.enabled:
         return GeneratedPrContent(title=fallback_title, body=fallback_body, source="fallback")
 
-    generated_title = ""
-    generated_body = ""
-
-    if target.mode == "template":
-        generated_title, generated_body = _try_render_templates(target, context)
-    elif target.mode == "agent" and generator is not None and cwd is not None:
-        # 阶段绑定预设时预设整体决定该阶段的 agent（遮蔽矩阵同键声明）。
-        agent_name = (
-            model_selection.agent
-            if model_selection is not None
-            else _resolve_generation_agent(
-                target.agent, config.default_agent, override_agent=config.lifecycle_default_agent
-            )
-        )
-        prompt = _render_template(target.prompt, context)
-        prompt = _truncate_text(prompt, config.max_input_chars)
-        output_text = _run_content_generator(
-            generator,
-            agent_name,
-            prompt,
-            cwd,
-            target.timeout_seconds,
-            model_selection=model_selection,
-        )
-        if target.output == "json":
-            generated_title, generated_body = _parse_json_output(output_text)
-        else:
-            # 先剥离开场白与最外层代码围栏，避免 agent 的开场白被当成标题、正文被围栏包住。
-            generated_title, generated_body = _parse_markdown_output(
-                _strip_markdown_preamble(output_text)
-            )
-
-    # markdown 首个非空行按约定是 ``Closes #N``，会被解析成标题；此类标题作废，落到 fallback_title。
-    if _CLOSING_REFERENCE_TITLE.fullmatch(generated_title):
-        generated_title = ""
-    generated_title = generated_title[:_MAX_TITLE_LENGTH]
-    if generated_body:
-        generated_body = generated_body[: config.max_input_chars]
+    generated_title, generated_body = _generate_repository_content(generator, generation_request)
 
     if generated_body and _validate_pr_body(generated_body, context.issue_number):
         return GeneratedPrContent(

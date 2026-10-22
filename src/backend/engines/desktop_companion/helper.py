@@ -107,7 +107,7 @@ def _build_parser() -> argparse.ArgumentParser:
     """构造 helper 的固定 argv 解析器（只认 ``--origin`` / ``--session``）。"""
     parser = argparse.ArgumentParser(
         prog="python -m backend.engines.desktop_companion.helper",
-        description="KedaCode 桌面进度小窗（可选 companion 运行时）。",
+        description="KedaCode 桌面进度小窗 companion helper。",
     )
     parser.add_argument(
         "--origin",
@@ -253,7 +253,7 @@ def main(argv: list[str] | None = None) -> int:
         import webview
     except ImportError:
         print(
-            "desktop companion 拒绝启动：未安装桌面运行时（pip install 'kedacode[desktop]'）。",
+            "desktop companion 拒绝启动：无法导入 pywebview；请确认 KedaCode 默认依赖已安装。",
             file=sys.stderr,
         )
         return 3

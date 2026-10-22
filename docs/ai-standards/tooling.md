@@ -28,6 +28,7 @@
 | `just worktree <branch>` | 仅能从 Git primary worktree 创建；自动分配端口、创建专用 PostgreSQL 空库并执行迁移，开发与 E2E 共用该 Worktree 的数据库 |
 | `just worktree -o <worktree-name>` | 打开已有 worktree；名称接受分支全名、分支最后一段、PRD slug、PRD 文件名（可带 `.md`）与 `tasks/pending/....md` 路径，歧义时报错列候选、未命中时列可用 worktree |
 | `just test` | 运行本地测试 |
+| `just view [路径]` | 打开本机只读文件与改动查看器；可查看改动、暂存文件或交给系统默认应用打开，详见[查看器指南](../guides/file-viewer.md) |
 | `just bench-test` | 验证 warm / after-edit 场景的 `just test` 是否满足 30 秒预算 |
 | `uv run mkdocs build` | 验证文档站点 |
 | `just docs-serve` | 本地预览文档 |
@@ -97,7 +98,7 @@
 - 触发背景：`next dev`(turbopack) 在陈旧 `.next` 产物下会无上限 spawn postcss worker，每个 worker 自带 `tailwindcss-oxide` 的 rayon 线程池（50–78MB / ~9 线程）且任务完成后不回收。实测一个页面请求即 spawn 159 个，数分钟可堆到数千进程、耗尽内存把机器压进 swap。撞上上限的代价只是该次构建失败，远小于整机失去响应。
 - 上限按 **当前用户进程数 + 余量** 动态计算：`RLIMIT_NPROC` 统计的是整个 uid 的进程数而非本 shell 的子进程，写死一个小值会连启动命令自身都 fork 不出来。
 - 余量默认 400；用 `RUN_PROCESS_HEADROOM=<n>` 调整，`RUN_PROCESS_HEADROOM=0` 关闭保护。
-- 脚本缺失、余量非法或 hard limit 低于目标值时，打印告警并放行，不阻断启动。
+- 脚本缺失、余量非法、无法统计当前进程数或 hard limit 低于目标值时，打印告警并放行，不阻断启动。
 
 ## Project Database Isolation
 

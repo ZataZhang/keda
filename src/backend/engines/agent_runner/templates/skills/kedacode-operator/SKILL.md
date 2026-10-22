@@ -20,7 +20,7 @@ Use this skill when the user asks to operate the KedaCode CLI or its managed run
 | 定时任务 | 每天几点跑 / 定时检查 / 周期性任务 / 夜间巡检 / loop / kc loop | `${CODEBUDDY_SKILL_DIR}/references/loop.md` |
 | 后台跑 | 挂后台 / 让它自己跑 / daemon / 起守护 / 停掉它 | `${CODEBUDDY_SKILL_DIR}/references/daemon.md` |
 | CI 交付 | CI 状态 / checks 怎么样 / 自动修复 / 修一下 CI / backlog ci | `${CODEBUDDY_SKILL_DIR}/references/ci.md` |
-| 装环境与查 Agent 配置 | 装环境 / 初始化仓库 / kc init / 重装 skill / 刷新 skill / kc skill install / 修复 operator skill / kc skill repair-operator / 有哪些模型预设 / agent doctor / 生命周期矩阵 / 九阶段生效模型 / kc agent lifecycle / kc agent preset / 回退候选 / kc agent fallback / 这台机器装了哪些 agent / kc agent list / 该用哪个 agent / kc agent setup / 注册一个自己的 agent / kc agent add / 这个命令收什么旗标 / 裸 kc 进哪个入口 / kc session 与 kc repl 的区别 / 起个预览 / 起 dev server | `${CODEBUDDY_SKILL_DIR}/references/setup-and-config.md` |
+| 装环境与查 Agent 配置 | 装环境 / 初始化仓库 / kc init / 重装 skill / 刷新 skill / kc skill install / 修复 operator skill / kc skill repair-operator / 安装菜单栏 App / kc desktop install / 有哪些模型预设 / agent doctor / 生命周期矩阵 / 九阶段生效模型 / kc agent lifecycle / kc agent preset / 回退候选 / kc agent fallback / 这台机器装了哪些 agent / kc agent list / 该用哪个 agent / kc agent setup / 注册一个自己的 agent / kc agent add / 这个命令收什么旗标 / 裸 kc 进哪个入口 / kc session 与 kc repl 的区别 / 起个预览 / 起 dev server | `${CODEBUDDY_SKILL_DIR}/references/setup-and-config.md` |
 
 Use the repository guide as the authoritative command reference. Start with `kc --help` or the relevant subcommand `--help` when command details differ by KedaCode version. Do not claim `--dry-run` executes work. The supported command names are `kc` and `kedacode`; the old `iar` command is no longer installed. Update old scripts and CI commands to use `kc`.
 
@@ -81,8 +81,8 @@ Whenever the reader of the output is a program rather than a human, pass `--json
 - Ready Issue priority comes from `priority/P0` through `priority/P3` labels. Selection order is P0, P1, P2, P3, then Issues without one of those labels; ties use ascending Issue number. Dry-run and execution share this ordering.
 - The runner orders the candidate window returned by GitHub (currently at most 100 ready Issues per pass); do not describe it as a global sort across Issues outside that window.
 
-## Lifecycle reference
-
-For repository setup, Issue/PRD commands, one-shot runs, viewing and triaging agent output, registry-managed daemons, logs, and shutdown steps, read [`docs/guides/agent-runner.md`](docs/guides/agent-runner.md). In particular, use its daemon lifecycle section before starting persistent processes.
+**Lifecycle reference:** For repository setup, Issue/PRD commands, one-shot runs, viewing and triaging agent output, registry-managed daemons, logs, and shutdown steps, read [`docs/guides/agent-runner.md`](docs/guides/agent-runner.md). In particular, use its daemon lifecycle section before starting persistent processes.
 
 - Draft PR title/body generation defaults to deterministic publication (`generated_content.draft_pr.enabled = false`), with commit facts and tracked validation-report references. Set this target to `enabled = true` to opt into AI writing; this does not change review, validation, verifier, or merge gates. The body itself never establishes PASS. Existing explicit target settings are respected.
+
+**Target repository templates:** AI content generation for PRD/prompt Issues and ordinary Draft PRs automatically reads local repository Issue/PR templates (including YAML Issue Forms as Markdown guidance). Template metadata does not change routing. Existing ordinary PRs are reused; preserve template sections and human content in later edits. Disabled/failed AI generation uses the existing deterministic fallback without template guarantees; aggregate PRs and organization-level defaults are outside this support.

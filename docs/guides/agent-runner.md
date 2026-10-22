@@ -86,7 +86,7 @@ kc completion show --shell zsh
 
 `completion install` 同时支持 `--shell bash` 和 `--shell fish`。
 
-尚未配置补全时，首次在交互式终端运行 `kc` 会询问是否安装 shell 补全，默认选中安装；按上下方向键选择，按 Enter 确认。选择安装后，本次 `kc` 会安装补全并退出，提示用户重载 shell；重载后重新运行刚才的命令。选择“暂不安装”后不再重复询问。非交互调用、机器输出、帮助/版本入口和 shell 补全协议不会显示此菜单。
+尚未配置补全时，首次在交互式终端运行 `kc` 会询问是否安装 shell 补全，默认选中安装；按上下方向键选择，按 Enter 确认。macOS 缺少菜单栏 App 时，独立的 App 安装菜单会先出现。选择补全安装后，本次 `kc` 会安装补全并退出，提示用户重载 shell；重载后重新运行刚才的命令。选择“暂不安装”后不再重复询问。非交互调用、机器输出、帮助/版本入口和 shell 补全协议不会显示此菜单。
 
 补全同时覆盖 `kedacode` 别名入口（别名清单从分发的 `[project.scripts]` 元数据派生），
 `kedacode is<Tab>` 与 `kc is<Tab>` 行为一致；旧版本安装的补全重跑一次
@@ -1191,17 +1191,17 @@ CI 容器镜像预装浏览器运行时是后续工作；首版只保证本地 r
 
 ## worktree 中的前端依赖（node_modules）
 
-同理，gitignored 的 `node_modules` 也不会被 `git worktree add` 物化，否则 worktree 里跑 `vite` 等构建会报 `vite: command not found`。runner 在补齐 env 文件之后，会对 worktree（而非主仓库）中所有含 `package.json` 的前端项目做**可恢复的准备 + 诊断**：装得上就装，装不上就把证据交给 Agent，绝不因此把 Issue 判为失败。
+同理，gitignored 的 `node_modules` 也不会被 `git worktree add` 物化，否则 worktree 里跑 `vite` 等构建会报 `vite: command not found`。runner 在补齐 env 文件之后，会对 worktree（而非主仓库）中所有含 `package.json` 的前端项目，以及仅由 `pnpm-workspace.yaml` 定义的 workspace 根，做**可恢复的准备 + 诊断**：安全时先复用，无法复用再尝试安装，装不动就把证据交给 Agent，绝不因此把 Issue 判为失败。
 
-1. **识别包管理器**：同时看 `package.json` 的 `packageManager` 字段、workspace 根配置（`pnpm-workspace.yaml` / 根 `package.json` 的 `workspaces`）与锁文件。
+1. **识别包管理器**：同时看 `package.json` 的 `packageManager` 字段、workspace 根配置（`pnpm-workspace.yaml` / 根 `package.json` 的 `workspaces`）与锁文件。`pnpm-workspace.yaml` 本身也表示 pnpm workspace，根目录即使没有 `package.json` 也会扫描并准备。
    - 单一锁文件：按锁文件选择 `pnpm install` / `npm ci` / `yarn install` / `bun install`（均带 `--ignore-scripts`）。
    - workspace 成员：若目录被某个 workspace 根的成员 pattern 覆盖，跳过本地安装（根安装会覆盖它），只记录证据。
-   - 冲突：多个锁文件指向不同包管理器，或 `packageManager` 与锁文件不一致时**不静默选定**，只记 `manager_conflict` 并保留全部证据。
-2. **安全可行时安装**：包管理器可执行文件不在 PATH 时**不运行任何命令**，直接记 `tool_missing`；运行后非零退出、或退出 0 却没有产出 `node_modules`，都按失败记录（不会伪报安装成功）。
-3. **回退复用主检出依赖**：安装没成时，只有两棵树的 `package.json` 与至少一份锁文件都存在且内容一致，才把主检出的 `node_modules` 软链进来；所有已识别锁文件的存在状态和内容也必须一致。缺少锁文件或依赖输入无法核实时拒绝复用，避免把未知环境伪装成就绪。
+   - 冲突：多个锁文件指向不同包管理器、`packageManager` 与锁文件不一致，或 `pnpm-workspace.yaml` 与 npm/yarn/bun 证据冲突时**不静默选定**，只记 `manager_conflict` 并保留全部证据；冲突成员不会被当作已由根安装覆盖。
+2. **优先复用主检出依赖**：仅当两棵树的项目及 workspace 成员 `package.json` 集合和内容、workspace 配置、所有锁文件的存在状态与内容都一致，且至少有一份锁文件时，才把主检出的 `node_modules` 软链进来。无根 `package.json` 的 pnpm workspace 仅在两边 `pnpm-workspace.yaml`、成员 manifest 和根锁文件均一致时复用。缺少或无法核实输入时拒绝复用。
+3. **无法安全复用时安装**：包管理器可执行文件不在 PATH 时不运行命令，但会把计划命令、选择证据和缺失原因记为 `tool_missing`；运行后非零退出、或退出 0 却没有产出 `node_modules`，都按失败记录（不会伪报安装成功）。缺工具属于 Agent 可自主处理的诊断，不要求用户预先安装主机工具链。
 4. **记录诊断并继续**：三步都没得到可用依赖时只写记录，**Agent 仍会启动**。
 
-诊断落在 worktree 的 `.agent-runner/dependency-preparation.json`（该目录被 runner 写进 gitignore，不会进代码 diff）。每个项目记录 outcome（`installed` / `reused` / `present` / `skipped` / `not_prepared`）、原因码、选择依据、尝试过的命令、退出码与脱敏后的 stderr 片段。Agent 的 prompt 通过 `{dependency_context_block}` 拿到这份上下文与处置规则：默认由 Agent 自主决定安全的仓库级安装或替代方式，不要求用户预先逐项配置项目工具链。
+诊断落在 worktree 的 `.agent-runner/dependency-preparation.json`（该目录被 runner 写进 gitignore，不会进代码 diff）。每个项目记录 outcome（`installed` / `reused` / `present` / `skipped` / `not_prepared`）、原因码、选择依据、计划或实际运行的命令、退出码与脱敏后的 stderr 片段。Agent 的 prompt 通过 `{dependency_context_block}` 拿到这份上下文与处置规则：默认由 Agent 自主决定安全的仓库级安装或替代方式，不要求用户预先逐项配置项目工具链。
 
 行为约束：
 
@@ -1210,7 +1210,7 @@ CI 容器镜像预装浏览器运行时是后续工作；首版只保证本地 r
 - 准备流程不会执行 `sudo`、不写主机全局前缀/工具链、不使用未提供的凭据；需要提权、改全局环境或凭据的动作只归类为 `privilege` / `credentials` 并交给人决定
 - 诊断写入、扫描与软链都是 best effort：单个项目失败只记日志，不会中断 agent run
 - 新建、复用或已存在的 `node_modules` 软链都会加入 worktree 的 Git `info/exclude`，避免被 Agent 误提交
-- `agent/failed` 只表示 Agent/执行本身失败：若后续执行失败能被记录在案的缺失可执行文件（或验证命令以 127 / `command not found` 结束）解释，runner 会改判为可恢复的 `agent/blocked` 并发出诊断评论，人处理后用 `kc blocked-continue` 继续；与依赖无关的失败仍按原语义落 `agent/failed`
+- `agent/failed` 只表示 Agent/执行本身失败：若后续命令以 127 / `command not found` 结束，或 Agent attempt 明确报告记录中的缺工具、凭据或权限问题，runner 会改判为可恢复的 `agent/blocked` 并给出诊断；与依赖无关的失败仍按原语义落 `agent/failed`
 
 > 守护进程路径（`kc worktree create` / `kc run`）不读 `WORKTREE_FRONTEND_STRATEGY` 环境变量——该变量只对手动 `just worktree`（`scripts/shared/worktree/create.sh`）生效。daemon 路径固定采用上面的"可恢复准备 + 诊断"策略。
 
@@ -1650,6 +1650,7 @@ kc registry list
 > **Managed vs Unmanaged**：
 > - 通过 `kc registry start` / console / `kc takeover` 启动的 daemon 是**托管进程**，会写入 `~/.kedacode/processes.json`，状态显示为 `running (<process_id>)`，可用 `kc registry stop` 停止。
 > - 直接在命令行执行 `kc daemon` / `kc supervise-daemon` 启动的进程是**未托管进程**。`kc registry list` 会通过扫描系统进程把它们识别出来，状态显示为 `running (unmanaged)`，但**不会**被 `kc registry stop` 停止，也没有独立的日志文件被 `registry` 命令管理。
+> - 如果系统权限阻止读取完整进程表，`kc registry list` 会记录 warning 并跳过未托管进程扫描；注册仓库和托管进程状态仍会正常显示，此时手动启动的 daemon 可能不会出现在列表中。
 > - 同时存在托管与未托管进程时，列表优先显示托管状态。
 
 > **不要混用**：同一时间、同一仓库，建议要么只使用 `kc registry start` 管理 daemon，要么只手动运行 `kc daemon`。混用可能导致两个进程同时 claim 同一仓库的 Issues，且 `registry stop` 不会清理手动启动的进程。
@@ -3271,13 +3272,18 @@ output = "markdown"
 include_commit_log = true
 include_diff_stat = true
 title_template = "[Agent] {issue_title}"
-body_template = [
-  "Closes #{issue_number}",
-  "",
-  "Generated by issue-agent-runner.",
-]
+# 留空以使用调用方内置的事实型正文；避免失败时回退到只有 closing anchor 的模板。
+body_template = ""
 agent = "auto"
-timeout_seconds = 60
+timeout_seconds = 1200
+prompt = [
+  "Generate a concise, readable draft PR description.",
+  "The PR title MUST be in English regardless of the issue language.",
+  "The first non-empty line must be: Closes #{issue_number}",
+  "Use these sections: Summary, Validation, Risk, Reviewer Notes.",
+  "When the Issue body contains a '本轮处置摘要（供 PR 描述生成）' section, include its target Issue references, symptom/root cause, fix, validation results, and unresolved decisions.",
+  "Keep the Closes anchor for the patrol Issue. Refer to unresolved target Issues as Addresses/Related to; use a closing keyword only when a target Issue is fully resolved.",
+]
 ```
 
 ### PRD-from-Issue 生成变量
@@ -4020,16 +4026,27 @@ PATCH  /api/v1/agent-runner/console/monitor/settings   {sync_enabled, sync_inter
 
 `/app/dashboard/` 的**默认视图**是任务值守看板（「仓库监控」仍保留原有的仓库卡片视图，
 仓库级「跑一轮 / 复核一轮」和同步设置都在那一侧）。看板以 Issue 运行为单位列出
-生命周期分桶（运行中 / 等待值守 / 阻塞 / 已完成 / 状态未知）、仓库与 Issue 身份、阶段、
-执行者与耗时，可按状态筛选、按仓库 / 编号 / 标题搜索，选中项复用既有的 Issue 增量日志与
+生命周期分桶（运行中 / 等待值守 / 阻塞 / 失败 / 已完成 / 已关闭 / 状态未知）、仓库与 Issue 身份、
+阶段及其简明说明、执行者与耗时，可按状态筛选、按仓库 / 编号 / 标题搜索，选中项复用既有的 Issue 增量日志与
 调用账本端点（结构化调用默认折叠，折叠只是展示层，原文不做截断）。
 
 数据来源仍然只有已注册仓库的 Console 观测路径（快照 + 运行 / attempt / 生命周期三本账），
 **不与托管进程日志混列**；任一来源读取失败只把该来源标为不可用，不会折叠成「没有任务」。
+快照中的任务先按 Issue 是否关闭分桶：关闭 Issue 显示「已关闭」，open Issue 再按最近同步到的
+状态标签分桶，关闭状态优先于残留标签。`agent/blocked` 显示为「阻塞」，`agent/failed` 显示为
+「失败」；前者表示需要人工决策，后者表示本轮执行失败，两者应分别排查。「已完成」仅表示运行账本
+记录了成功终态。状态来源根据 Issue 关闭状态、当前监控标签或运行账本终态显示；监控异常类型单独放在
+`anomaly_types`，不会替换状态来源，也不直接充当失败原因。阶段优先采用最近一次 attempt 记录的失败环节；
+没有时回退到 Issue 时间线最后一条阶段事件。阶段说明描述该环节的职责，例如
+`post_pr_rework_requested` 显示为「PR 后返工请求」，表示 PR 检查后需要继续修改或同步分支；
+具体失败原因仍应查看状态来源和运行详情。
+快照未收录时，运行账本和未收口的生命周期账本只补充最近 7 天内开始的记录。超出窗口的未收口
+记录不再作为当前运行任务计数，历史复盘仍使用统计页。
 
-看板上方还有一个「开启桌面小窗」入口，通过可选的原生 helper 开出一个可置顶的紧凑窗口。
-它未安装时不影响网页看板，只有窗口动作本身不可用。安装、平台依赖、Console origin
-约束与离线排查见 [桌面进度小窗](desktop-companion.md)。
+看板上方的「开启独立窗口」入口通过 pywebview 打开一个临时紧凑窗口；该入口不负责菜单栏驻留。
+macOS 菜单栏版需要从 `~/Applications/KedaCode.app` 启动，点击顶部图标展开状态，再用「固定悬浮」
+保持为置顶窗口。构建、平台依赖、Console origin 约束与排查见
+[macOS 菜单栏状态面板与独立桌面窗口](desktop-companion.md)。
 
 ### 异常检测
 
@@ -5392,6 +5409,10 @@ uv run kc agent setup --fix --yes
   "没有"并以 0 退出，不制造空写入。
 
 <a id="agent-first-run-hint"></a>
+
+### macOS 菜单栏 App 首次提示
+
+首次在 macOS 交互式终端运行 `kc` 时，如果 `~/Applications` 和 `/Applications` 都没有 `KedaCode.app`，CLI 会先询问是否安装与当前 CLI 版本匹配的菜单栏 App。接受后下载对应架构的 DMG、校验 Release 校验和，并安装到 `~/Applications`；拒绝后可随时运行 `kc desktop install`。提示只出现一次，不显示在非 TTY、shell 补全协议、机器输出、帮助/版本和 `kc agent` / `kc completion` / `kc desktop` / `kc schema` 调用中。安装 App 不会改变 CLI 的 `uv` 安装方式；首次打开 App 仍可能需要 macOS 安全性确认。更多安装细节见[菜单栏 App 指南](desktop-companion.md)。
 
 ### 首启提示：一次性、永不阻断
 

@@ -431,6 +431,8 @@ _ALLOWED_FLAGS: dict[tuple[str, ...], set[str]] = {
     # 旗标集合取自 ``kc schema --json`` 的真实命令树。
     ("labels", "sync"): {"--repo", "--repo-id", "--config", "--all"},
     ("init",): {"--dry-run", "--force"},
+    # 菜单栏 App 可在首次提示被跳过后通过此命令手动安装，无专属旗标。
+    ("desktop", "install"): set(),
     # issue-245：随包 Skill 写明 skill 重装/刷新的独立入口；它不带仓库 selector。
     ("skill", "install"): {"--dry-run", "--force"},
     # 单目录 operator 修复不触碰其它安装根或远程模板 Skill。

@@ -33,6 +33,12 @@ pre_command: 'blocked="$(gh issue list --repo ZataZhang/keda --state open --labe
 5. 不接管仍处于 `agent/running` 的 Issue，也不因日志暂时安静就杀进程或创建第二个执行进程。运行中的任务由 daemon 的 stall supervisor 和原执行流程负责恢复。
 6. 处理后再次读取目标 Issue 状态及日志，确认恢复动作确实生效。若重新检查时已没有需要处理的 Issue，关闭本巡查 Issue 并说明本轮没有遗留阻塞；若本轮产生了修复 PR 或仍需人工决定，则保留本巡查 Issue 与其关联信息，不要谎报已解决。
 
+## 巡查结果与 PR 描述
+
+- 若本轮产生代码修复 PR，在本巡查 Issue 正文末尾追加 `## 本轮处置摘要（供 PR 描述生成）`，逐个列出目标 Issue、相关 PR、问题症状与根因、本轮修复、实际验证命令及结果、目标 Issue 当前状态和剩余人工决定。不要只把这些信息写在 Issue 评论里，因为 PR 描述生成读取 Issue 正文、提交记录和 diff，不读取评论。
+- 修复提交标题或正文应包含目标 Issue 编号和具体改动，保证 PR 描述生成回退时，提交记录仍能说明改了什么。
+- Draft PR 正文必须写明目标 Issue、症状/根因、修复内容、验证结果和未完成事项。保留 `Closes #<本巡查 Issue>` 以关闭本轮巡查并允许下一轮调度；目标 Issue 仍有未完成验收或待人决策时，只用 `Addresses #<目标 Issue>` / `Related to #<目标 Issue>`，不要用会自动关闭目标 Issue 的关键词。
+
 ## 约束
 
 - 只处理 Keda 仓库的 `agent/blocked` 与 `agent/failed` Issues，不扩大到普通待办或人工审核中的 Issue。

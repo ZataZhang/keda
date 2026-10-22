@@ -6,6 +6,7 @@ import dataclasses
 import json
 import sys
 import time
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -535,6 +536,53 @@ def test_list_unmanaged_processes_skips_managed_pids(
     unmanaged = supervisor.list_unmanaged_processes(registry_entries)
     assert unmanaged == []
     supervisor.stop(managed_record.process_id, timeout_seconds=5)
+
+
+def test_list_unmanaged_processes_discards_partial_scan_on_permission_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """系统进程表扫描被拒时不返回不完整的未托管进程列表。"""
+    supervisor = _make_supervisor(tmp_path)
+
+    class _FakeProcess:
+        """扫描中先成功读取到的未托管 runner 进程。"""
+
+        info: dict[str, object] = {
+            "pid": 12345,
+            "username": "testuser",
+            "cmdline": ["kc", "daemon", "--repo-id", "keda-main"],
+            "create_time": 1_700_000_000.0,
+        }
+
+    class _FakeCurrentProcess:
+        """返回测试用户，避免依赖宿主进程权限。"""
+
+        def username(self) -> str:
+            """返回固定的测试用户名。"""
+            return "testuser"
+
+    class _DeniedProcessIterator:
+        """模拟进程表迭代中途被系统拒绝。"""
+
+        def __iter__(self) -> Iterator[_FakeProcess]:
+            yield _FakeProcess()
+            raise PermissionError("sysctl access denied")
+
+    monkeypatch.setattr(
+        "backend.infrastructure.console.process_supervisor.psutil.Process",
+        lambda: _FakeCurrentProcess(),
+    )
+    monkeypatch.setattr(
+        "backend.infrastructure.console.process_supervisor.psutil.process_iter",
+        lambda _attributes: _DeniedProcessIterator(),
+    )
+
+    unmanaged_records = supervisor.list_unmanaged_processes([])
+
+    assert unmanaged_records == []
+    assert "系统进程表扫描失败" in caplog.text
 
 
 def test_list_unmanaged_processes_reports_unmanaged_by_repo_id(
