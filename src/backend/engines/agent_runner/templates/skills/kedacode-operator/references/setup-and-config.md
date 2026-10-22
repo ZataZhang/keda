@@ -12,6 +12,10 @@ The user says 「装环境」「初始化仓库」「把这个仓库登记进来
 4. **Repository ambiguity** — when the working directory matches several registered repositories, later commands refuse to guess; init reports the repo id it registered, and other routes pass it as `--repo-id <id>`.
 5. **`kc agent setup` and `kc agent add --write` write machine-level config** — the first edits the global lifecycle matrix in `~/.kedacode/config.toml`, the second appends an agent registration to the same file. Both refuse to choose for the user: preview with `kc agent setup --dry-run` (or `kc agent add` without `--write`, which only prints the TOML), then apply the choice the user named. Never run either to make a failing run "go through" by swapping the user's agent without saying so.
 
+## Local console
+
+The default `kc console` startup requires complete bundled dashboard assets: the panel is considered ready only when its `index.html` entry file is present, so a missing directory and a half-synced one both fail before anything listens. Run `just console-sync` from the repository root or install a release wheel that includes the assets. Use `kc console --api-only` only when an API without the web panel is sufficient; `/` will not serve the panel.
+
 ## macOS menu bar app
 
 On the first interactive macOS `kc` invocation, the CLI may ask once whether to install the matching menu bar app. Accepting downloads the DMG for the installed CLI version and CPU architecture, checks its Release SHA-256, and copies `KedaCode.app` to `~/Applications`; it does not replace or reinstall the `uv`-managed CLI. A declined prompt can be revisited with `kc desktop install`. The command is macOS-only. The public DMG is ad-hoc signed and not notarized, so macOS may require the user to approve the first launch in Privacy & Security settings. See the repository's `docs/guides/desktop-companion.md` for more.
