@@ -26,6 +26,14 @@ The user says 「把 tasks/pending/xxx.md 建成 issue」「建个 issue」「�
 - Wrong or duplicate Issue: close the extra one (`gh issue close <N> --comment "duplicate of <M>"`) and keep the one the PRD links back to; fix the PRD's `- GitHub Issue:` line if it now points at a closed Issue.
 - Creation does not run an implementation Agent or create its Issue worktree. For `--from-prompt`, cleanup is GitHub-side only; for a PRD-path creation, also inspect the back-written local link and any already-published PRD commit. Correct the link through the normal authorized publication flow; do not reset Git history or discard unrelated changes.
 
+## Target repository templates
+
+AI content generation for PRD/prompt Issues and ordinary Draft PRs automatically reads the local repository's Issue/PR templates, including YAML Issue Forms (used as Markdown guidance). Template metadata does not change routing: the Issue/PRD commands and their gates stay exactly as documented in `docs/guides/agent-runner.md`.
+
+- Existing ordinary PRs are reused rather than replaced; preserve template sections and human-written content in later edits.
+- Disabled or failed AI generation falls back to the existing deterministic output without template guarantees, so do not describe a fallback Issue/PR body as template-compliant.
+- Aggregate PRs and organization-level default templates are outside this support; do not claim the repository template was applied there.
+
 ## Related
 
 When the user wants this Issue run right away after creation, continue with the 跑一次 route (`${CODEBUDDY_SKILL_DIR}/references/run-once.md`).
