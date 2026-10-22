@@ -113,6 +113,11 @@ forbidden_path_patterns = [
     "secrets/*",
     "docker-compose.prod.yml",
 ]
+# 仅放行明确安全的环境模板；例外会覆盖上方任意禁改模式，保持范围狭窄。
+forbidden_path_exceptions = [
+    ".env.example",
+    ".env.*.example",
+]
 
 # Autopilot 快速档（合并队列）：supervisor 之后串行合并；需配合 safety.auto_merge = true 同时启用
 [agent_runner.autopilot]

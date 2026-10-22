@@ -848,6 +848,11 @@ forbidden_path_patterns = [
     "secrets/*",
     "docker-compose.prod.yml",
 ]
+# 例外匹配后会覆盖上方任意禁改模式；仅配置范围明确的安全模板。
+forbidden_path_exceptions = [
+    ".env.example",
+    ".env.*.example",
+]
 
 # Autopilot 快速档（合并队列）
 # ---------------------------------------------------------------------------
@@ -2585,11 +2590,11 @@ agent/running ── forbidden path 拦截 ──→ agent/blocked ── blocke
 
 ## Forbidden Path 阻塞恢复
 
-当 Agent 在 commit 阶段触发了 `forbidden_path_patterns`（如修改了 `.env.example`），runner 会将 Issue 标记为 `agent/blocked` 而不是 `agent/failed`，因为人工确认后可以继续完成剩余任务。
+当 Agent 在 commit 阶段修改的路径匹配 `forbidden_path_patterns`，且没有匹配 `forbidden_path_exceptions` 时，runner 会将 Issue 标记为 `agent/blocked` 而不是 `agent/failed`。例如默认禁止模式 `.env.*` 会拦截 `.env.local`；若配置 `.env.example` 与 `.env.*.example` 例外，则这些模板可提交。
 
 ### 触发条件
 
-- Agent 的变更中包含匹配 `forbidden_path_patterns` 的文件
+- Agent 的变更中包含匹配 `forbidden_path_patterns`、且未匹配 `forbidden_path_exceptions` 的文件
 - `validate_safe_changes()` 在 `commit_requested_changes()` 阶段拦截
 - Issue 进入 `agent/blocked`，评论中包含被拦截的文件列表和恢复命令
 
@@ -3051,6 +3056,10 @@ forbidden_path_patterns = [
   ".env.*",
   "secrets/*",
   "docker-compose.prod.yml",
+]
+forbidden_path_exceptions = [
+  ".env.example",
+  ".env.*.example",
 ]
 
 [agent_runner.prompts]
@@ -3654,10 +3663,10 @@ verifier 能跑的就是 builder 写进 manifest 的那些 capture 脚本，而�
 
 - `auto_merge` 固定为 `false`，不会自动合并 PR
 - `kc labels sync` 只同步 GitHub labels，不校验发布 remote；`kc run` 在领取 Issue 前会校验 `[agent_runner.git].remote` 必须存在，不存在时直接失败并列出当前可用 remote
-- 发布变更前会检查 `forbidden_path_patterns`，拒绝匹配的文件变更
+- 发布变更前会检查 `forbidden_path_patterns`，拒绝命中且未被 `forbidden_path_exceptions` 覆盖的文件变更
 - Agent 执行在隔离 worktree 中进行，不影响主工作区
 - Agent 不直接执行 `git add` 或 `git commit`；完成修改后写入 `.agent-runner/commit-request.json` 请求 runner 在 host 侧提交
-- `commit-request.json` 必须提供 `commit_message`；pre-PR reviewer 可额外提供 `verdict`、`summary` 和 `findings_*` 元数据作为空提交兜底。runner 会校验当前 branch 未变化、删除请求文件、检查 `forbidden_path_patterns`，再执行 `git add -A` 和 `git commit`
+- `commit-request.json` 必须提供 `commit_message`；pre-PR reviewer 可额外提供 `verdict`、`summary` 和 `findings_*` 元数据作为空提交兜底。runner 会校验当前 branch 未变化、删除请求文件、检查 `forbidden_path_patterns`（例外覆盖也会生效），再执行 `git add -A` 和 `git commit`
 - 不同仓库应在 `verification_commands` 中配置自己的验证命令，例如 `just test`、`npm test`、`pnpm lint` 或 `make test`
 - runner 会在提交前先运行一次 `verification_commands`；发现未提交变更并执行 `git add -A` 后，会再次运行同一组验证命令，覆盖依赖 staged 状态的 commit hook 或测试标记
 - 如果验证过程结束后工作区还剩下任何 `git add -A` 仍会 stage 的内容，runner 会在安全路径校验后补一次 `git add -A`，避免 `.last_tested_commit` 指向 working tree 而 commit hook 检查到过期 staged tree。探测口径（`_verification_left_unstaged_worktree_changes`）覆盖两类残留：formatter / lint 自动修复的**已跟踪**文件（`git diff --quiet`），以及门禁自己生成、**未跟踪且未被 gitignore** 的新文件（`git ls-files --others --exclude-standard`，如新增快照或 golden 文件）。第二类曾是 `check-test-flag` 硬失败的盲区：`just test` 写标记用的路径集包含未跟踪未 ignore 的文件，而 commit 钩子比对 staged 树，只补 `git add -u` 时这些新文件永远进不了索引，钩子会给出「请运行 `git add -A` 归一」——恰好是 runner 漏做的那一步。判定与首次入索引的 `git add -A` 同口径，被 gitignore 的构建产物两边都看不见，因此不会被卷进提交
@@ -4814,7 +4823,7 @@ enabled = true               # 新键：仓库级显式打开
 2. **签收清单**：若 `autopilot.auto_sign_off = true`，普通队列在 verifier 通过后签收；单 PRD 自动合并路径在仓库验证命令通过后签收并写审计评论。GitHub check 只检查 PR body 清单是否完成；清单必须对应已经实际完成的验证。这个 PR body 清单不等于 PRD 的 `Human-Confirmed` 清单。
 3. **rebase**：复用 `pr_supervisor.execute_rebase` 把 PR 分支 rebase 到最新 remote base；冲突走既有 conflict-resolution agent 路径。失败→转 `agent/supervising`，本 PR 跳过。
 4. **全量验证**：在该 Issue 的 worktree 内调用 `agent_runner_git.run_verification(...)` 重跑 `runner.verification_commands`；红→转验证修复路径，本 PR 跳过不合并。
-5. **禁改路径终扫**：取 PR diff 文件清单，用 `safety.forbidden_path_patterns` 做最终匹配（复用 `agent_runner_publish.is_forbidden_path(...)`）；命中→打 `agent/blocked` + 评论，永不自动合并。
+5. **禁改路径终扫**：取 PR diff 文件清单，用 `safety.forbidden_path_patterns` 与 `safety.forbidden_path_exceptions` 做最终匹配（复用 `agent_runner_publish.is_forbidden_path(...)`）；命中且未命中例外→打 `agent/blocked` + 评论，永不自动合并。
 6. **PR 就绪与 checks**：本地验证及禁改路径终扫通过后，重新读取 Issue 的自动合并授权；只有 `prd-auto-merge` 路径还要求 PRD 锚点与开始时一致。再检查 `autopilot_hold`；任一未通过都保持 Draft。门禁仍通过时，若 PR 为 Draft，调用 `IGitHubClient.mark_pull_request_ready(pr_number)` 转为 Ready；重新读取 PR 状态，未确认 Ready 就保留 `agent/automated-review-passed` 并留待下一轮重试。Ready 转换后才轮询 checks，避免使用 Draft 时的旧状态快照；超时上限 `autopilot.merge_check_timeout_seconds`。GitHub branch protection 始终保留。
 7. **合并前复核**：checks 等待期间再次读取 Issue 的自动合并授权；只有 `prd-auto-merge` 路径还复核 PRD 锚点。授权撤销、适用的锚点变化或人工接管均停止本轮，不回退 Issue 生命周期。
 8. **合并**：调用 `IGitHubClient.merge_pull_request(pr_number, method="squash")`（gh 实现 `gh pr merge <n> --squash`）；对"already merged"响应归一为幂等成功。成功后发 `iar:event (auto-merged)` 评论、摘除 `agent/automated-review-passed` 标签。

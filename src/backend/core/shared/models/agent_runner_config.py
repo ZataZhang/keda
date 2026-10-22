@@ -359,6 +359,7 @@ class SafetyConfig:
         "secrets/*",
         "docker-compose.prod.yml",
     )
+    forbidden_path_exceptions: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

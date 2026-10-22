@@ -750,6 +750,7 @@ def build_app_config_from_settings(
         safety=SafetyConfig(
             auto_merge=safety_settings.auto_merge,
             forbidden_path_patterns=tuple(safety_settings.forbidden_path_patterns),
+            forbidden_path_exceptions=tuple(safety_settings.forbidden_path_exceptions),
         ),
         autopilot=AutopilotConfig(
             enabled=autopilot_settings.enabled,

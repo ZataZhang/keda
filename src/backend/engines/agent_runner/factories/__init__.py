@@ -170,6 +170,7 @@ def get_agent_runner_status_data() -> dict:
             "remote": app_config.git.remote,
             "auto_merge": app_config.safety.auto_merge,
             "forbidden_path_patterns": list(app_config.safety.forbidden_path_patterns),
+            "forbidden_path_exceptions": list(app_config.safety.forbidden_path_exceptions),
             "autopilot_enabled": app_config.autopilot.enabled,
             "autopilot_merge_method": app_config.autopilot.merge_method,
             "autopilot_require_verifier_pass": app_config.autopilot.require_verifier_pass,

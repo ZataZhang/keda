@@ -603,9 +603,8 @@ def _process_one(
         github_client.comment_issue(
             issue.number,
             "## Agent Runner Merge Queue — Forbidden Path\n\n"
-            "PR diff 命中 ``safety.forbidden_path_patterns`` 中至少一条，永不自动合并：\n\n"
-            + "\n".join(f"- `{path}`" for path in forbidden_hits)
-            + "\n",
+            "PR diff 命中 ``safety.forbidden_path_patterns`` 且未被 ``safety.forbidden_path_exceptions`` 覆盖，"
+            "永不自动合并：\n\n" + "\n".join(f"- `{path}`" for path in forbidden_hits) + "\n",
         )
         return MergeQueueOutcome(issue_number=issue.number, action="blocked_forbidden")
 

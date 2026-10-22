@@ -60,6 +60,8 @@
 
 响应示例：
 
+`forbidden_path_exceptions` 使用与 `forbidden_path_patterns` 相同的 `fnmatch` 通配语义；路径或文件名命中例外后会跳过禁改拦截。例外会覆盖任意禁改模式，因此应只列出范围明确的安全文件。
+
 ```json
 {
   "daemon_mode": false,
@@ -75,7 +77,8 @@
     "base_branch": "main",
     "remote": "origin",
     "auto_merge": false,
-    "forbidden_path_patterns": [".env", ".env.*", "secrets/*"]
+    "forbidden_path_patterns": [".env", ".env.*", "secrets/*"],
+    "forbidden_path_exceptions": [".env.example", ".env.*.example"]
   },
   "repositories": [
     {

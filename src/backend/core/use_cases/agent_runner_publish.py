@@ -77,20 +77,41 @@ __all__ = [
 
 
 def is_forbidden_path(changed_path_text: str, config: AppConfig) -> bool:
-    """Whether a changed path matches any configured forbidden pattern.
+    """Whether a changed path matches a forbidden pattern without an exception.
 
     Matches both the full repo-relative path and its basename against
-    ``config.safety.forbidden_path_patterns`` (fnmatch), so a pattern like
-    ``.env`` blocks ``.env`` anywhere in the tree.
+    ``config.safety.forbidden_path_patterns`` and
+    ``config.safety.forbidden_path_exceptions`` (fnmatch), so a pattern like
+    ``.env`` blocks ``.env`` anywhere in the tree unless an exception matches.
     """
+    matches_forbidden_pattern = any(
+        _is_path_matching_pattern(
+            changed_path_text=changed_path_text,
+            path_pattern=forbidden_pattern,
+        )
+        for forbidden_pattern in config.safety.forbidden_path_patterns
+    )
+    matches_forbidden_exception = any(
+        _is_path_matching_pattern(
+            changed_path_text=changed_path_text,
+            path_pattern=exception_pattern,
+        )
+        for exception_pattern in config.safety.forbidden_path_exceptions
+    )
+    return matches_forbidden_pattern and not matches_forbidden_exception
+
+
+def _is_path_matching_pattern(
+    *,
+    changed_path_text: str,
+    path_pattern: str,
+) -> bool:
+    """判断仓库相对路径或文件名是否匹配给定通配模式。"""
     changed_path_name = Path(changed_path_text).name
-    for forbidden_pattern in config.safety.forbidden_path_patterns:
-        if fnmatch(changed_path_text, forbidden_pattern) or fnmatch(
-            changed_path_name,
-            forbidden_pattern,
-        ):
-            return True
-    return False
+    return fnmatch(changed_path_text, path_pattern) or fnmatch(
+        changed_path_name,
+        path_pattern,
+    )
 
 
 def validate_safe_changes(
