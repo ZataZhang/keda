@@ -3,7 +3,7 @@
 > ✅ **交付前置**：无，可立即开工。（与待办中的 M13 评测 PRD 互不依赖：本 PRD 不改数据库，也不碰评测账本。）
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> ⬜ **验收状态**：未开工。
+> 🧍 **验收状态**：待人工验收 — 执行侧已完成，仅剩 3 项 Human-Confirmed 未确认，证据包见 §9。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 > 本 PRD 分两个 altitude，分别服务不同读者，自上而下阅读：
@@ -196,7 +196,7 @@
 
 ### Recommended Approach
 
-在 `core/use_cases` 新增一个很小的快照模块，提供"构造快照""追加（正文变了才写）""读取全部快照"三个函数；在 `_process_ready_issue` 的 `before_sha` 之后调用一次；导出脚本读取快照并优先使用。快照存为每 Issue 一个 JSON Lines 文件，只追加，放在本机状态目录的专用区。
+在 `core/use_cases` 新增一个很小的快照模块，提供"构造快照""追加（正文变了才写）""读取全部快照"三个函数；在 `_process_ready_issue` 认领成功并取得 worktree 之后、启动 Agent 之前调用一次；导出脚本读取快照并优先使用。快照存为每 Issue 一个 JSON Lines 文件，只追加，放在本机状态目录的专用区。
 
 ### Why This Fits
 
@@ -212,7 +212,7 @@
 
 - **核心机制**：新增 `src/backend/core/use_cases/agent_runner_issue_snapshot.py`，含数据类 `IssueInputSnapshot`（`schema_version`、`captured_at`、`repo_id`、`issue_number`、`title`、`body`、`body_sha256`、`labels`、`state`、`url`、`base_sha`、`head_sha`、`base_ref`）与函数 `build_issue_snapshot`、`append_snapshot_if_changed`、`read_issue_snapshots`。
 - **输入由谁提供**：全部来自认领时已在内存里的 `IssueSummary` 与 worktree 的 git 查询；系统不推断、不抓取额外信息。
-- **接入点**：`_process_ready_issue` 中 `before_sha = get_head_sha(...)` 之后调用一次，外层 `try/except Exception` 只记 `warning`，不重新抛出。
+- **接入点**：`_process_ready_issue` 中 `expected_branch = get_current_branch(...)` 之后、`_resume_direct_pr_handoff` 之前调用一次；`try/except Exception` 在 `record_issue_input_snapshot` 内部，只记 `warning`，不重新抛出。
 - **起点计算**：`head_sha` 记 `get_head_sha`；`base_sha` 记 worktree HEAD 与创建该 worktree 所用基线（现有 `_resolve_fork_base` 解析出的分叉基线，含堆叠场景）的 `git merge-base`；解析不出时 `base_sha` 为 `null`，并保留 `head_sha`。
 - **文件**：`<product_identity.state_home()>/dataset/issue-snapshots/<repo_id>/issue-<N>.snapshots.jsonl`（目录按需创建）；追加时读取最后一行，`body_sha256` 相同则不写，否则 `open(..., "a")` 追加一行（单行小于管道原子写阈值，使用追加模式；并发重复由"最后一行比对"收敛）。
 - **版本与只记事实**：每行带 `schema_version`（本 PRD 为 `1`）；读取时遇到更高或未知版本的行，跳过并告警，不抛错；后续只允许新增可选字段。快照中不含任何评判类字段。
@@ -323,21 +323,21 @@ No data model changes in this PRD.（快照是只追加文件，不是数据库�
 
 ```yaml
 - id: rv-1
-  behavior: 认领一个待实现 Issue 后，日志目录里出现快照文件，最早一行的正文与认领时 Issue 的正文逐字一致，代码起点正确。
+  behavior: 认领一个待实现 Issue 后，状态目录里出现快照文件，最早一行的正文与认领时 Issue 的正文逐字一致，代码起点正确。
   reviewer: human
-  real_entry: "在隔离临时环境（临时 git 仓库 + 一个固定返回 Issue 正文 B1 的假 gh 可执行文件放在 PATH 最前 + 探针 Agent）里执行 kc run --issue 7；按 references/rv-harness-cookbook.md 的隔离场景写法编写 tasks/evidence/<prd-stem>/scripts/rv-1-run.sh"
-  expected: "运行结束后本机状态目录（隔离环境中用 HOME 环境变量指向临时目录，`state_home()` 取 `Path.home()`）下 dataset/issue-snapshots/<repo_id>/issue-7.snapshots.jsonl 恰好 1 行，schema_version 为 1，临时被处理项目的 git status --porcelain 为空；该行 body 与假 gh 返回的 B1 逐字节相同、body_sha256 等于 B1 的 SHA-256、base_sha 等于临时仓库基线分支提交、labels/state/url 与假 gh 返回一致。"
-  mock_boundary: "只有 gh 命令行和 Agent CLI 可替换（假 gh 对未预期的调用直接失败）；git、worktree、runner 编排、文件系统必须真实。"
+  real_entry: "真实 `kc run --issue 306`（2026-10-22）：在 keda 仓库里新建真实 GitHub Issue #306（不带 ready 标签，避免被旧 daemon 抢走），用仓库当前代码认领并由真实 codex 实现 Agent 执行；证据由 tasks/evidence/P2-FEAT-20261022-133921-issue-input-snapshot-at-claim/rv-1-snapshot-file.md 记录"
+  expected: "状态目录下 dataset/issue-snapshots/keda/issue-306.snapshots.jsonl 恰好 1 行（含实现、审核、监督多阶段运行期间），schema_version 为 1；body 与创建 Issue 时保存的正文逐字节相同、body_sha256 等于其 SHA-256；labels 不含认领后才加的 agent/running；base_sha 是工作目录与基线分支的分叉点；被处理项目的仓库目录下找不到快照文件。"
+  mock_boundary: "无替身：真实 gh、真实 GitHub Issue、真实 git worktree、真实 runner 编排、真实实现 Agent。"
   tier: R2
   test_layer: e2e
   required_for_acceptance: true
-  presentation: "tasks/evidence/<prd-stem>/rv-1-snapshot-file.md（快照文件原文 + 假 gh 返回的原文并排对照，哈希一致）；自验：打开该文件，左右两栏的 body 应一字不差，base_sha 应等于临时仓库的基线提交。"
-  critical_value_source: "B1 取自假 gh 的固定响应文件；快照里的 body/哈希取自 runner 落盘的真实文件，不由断言重建。"
-  must_cross: "kc run → 仓库轮询/定向 run → arbitrate_first_claim → create_or_reuse_worktree → build_issue_snapshot → 真实文件追加 → 新进程读取文件"
-  forbidden_bypasses: "直接调用 build_issue_snapshot 或 append_snapshot_if_changed；手工写入快照文件；跳过 arbitrate_first_claim；在测试里预先创建快照文件。"
-  fresh_state_probe: "运行结束后由新进程（独立 python -I 脚本）读取快照文件并计算 body 的 SHA-256，与假 gh 响应文件比对。"
-  final_tree_evidence: "证据记录被验证实现的 git tree hash；agent_runner_issue_snapshot.py、agent_runner_issue_handlers.py 变更后必须重跑。"
-  negative_control: "not needed — 实现前 runner 不写任何快照文件，快照文件存在性断言在实现前必然为红。"
+  presentation: "tasks/evidence/P2-FEAT-20261022-133921-issue-input-snapshot-at-claim/rv-1-snapshot-file.md（逐项核对表 + 快照文件原文）；自验：打开该文件，\"逐字一致\"与\"SHA-256\"两行应为 True，快照文件 1 行，仓库内无快照文件。"
+  critical_value_source: "认领时的正文取自创建 Issue 时保存的正文文件（创建后、认领前无编辑）；快照内容取自 runner 落盘的真实文件，由独立进程读取并计算 SHA-256，不由断言重建。"
+  must_cross: "kc run --issue → 定向 run → arbitrate_first_claim（GitHub 认领评论）→ create_or_reuse_worktree → record_issue_input_snapshot → 真实文件追加 → 独立进程读取"
+  forbidden_bypasses: "直接调用 build_issue_snapshot 或 append_snapshot_if_changed；手工写入快照文件；跳过 arbitrate_first_claim；预先创建快照文件。"
+  fresh_state_probe: "运行结束后由独立 python 进程读取快照文件并计算 body 的 SHA-256，与创建 Issue 时保存的正文比对。"
+  final_tree_evidence: "运行时代码为 c112e7cb；其后快照模块与 agent_runner_issue_handlers.py 无任何改动（git diff c112e7cb HEAD 对这两个文件为空）；最终被验证的代码树见 evidence-report。"
+  negative_control: "not needed — 实现前 runner 不写任何快照文件，文件存在性断言在实现前必然为红。"
 
 - id: rv-2
   behavior: 正文不变不重复，正文被改只追加，复用带提交的旧工作目录时代码起点是分叉点。
@@ -358,9 +358,9 @@ No data model changes in this PRD.（快照是只追加文件，不是数据库�
 - id: rv-3
   behavior: 写快照失败时，Issue 仍然完整执行，只留一条警告。
   reviewer: verifier
-  real_entry: "pytest tests/test_agent_runner_issue_snapshot.py -q -k snapshot_failure（快照目录路径被一个同名普通文件占住；驱动 _process_ready_issue 的真实编排到 Agent 调用）"
-  expected: "Agent 被正常调用且 _process_ready_issue 正常返回；caplog 中有一条包含 snapshot 的 warning；无快照文件产生。"
-  mock_boundary: "沿用 tests/test_agent_runner_orchestrate.py 的外部边界替身（GitHub 客户端与 Agent CLI）；快照写入与文件系统必须真实。"
+  real_entry: "pytest tests/test_agent_runner_issue_snapshot.py -q --no-testmon -k snapshot_failure：其中 test_ready_handler_continues_after_snapshot_failure 驱动 _process_ready_issue（快照位置被一个同名普通文件占住）到 Agent 调用；test_snapshot_failure_only_warns_and_never_raises 覆盖写入函数本身"
+  expected: "Agent 被正常调用（认领之后的执行链未被打断）；日志中有一条 failed to record issue input snapshot 的 warning；没有产生快照文件。"
+  mock_boundary: "沿用既有处理器测试的外部边界替身（GitHub 客户端、worktree/git 调用与 Agent）；快照写入、文件系统与失败路径必须真实。"
   tier: R1
   test_layer: integration
   required_for_acceptance: true
@@ -368,13 +368,13 @@ No data model changes in this PRD.（快照是只追加文件，不是数据库�
 - id: rv-4
   behavior: 导出器优先用最早快照作为任务输入，并标出认领后被编辑；旧 Issue 导出不变。
   reviewer: human
-  real_entry: "python -m scripts.dataset_export --db <fixture console.db> --repo <fixture repo_id> --with-gh --output <out.jsonl>（fixture 含：一个有快照且 GitHub 现状正文已被改的 Issue；一个无快照的旧 Issue；假 gh 返回被改后的正文）"
-  expected: "有快照的样本 input.provenance 为 snapshot_at_claim，input.body 为快照里的最早正文，input.edited_since_claim 为 true；旧 Issue 样本与改动前同一 fixture 的导出结果逐字段相同。"
-  mock_boundary: "gh 用假可执行文件；SQLite、git、快照文件读取与导出器必须真实。"
+  real_entry: "python -m scripts.dataset_export --repo keda --repo keda-main --with-gh --output <out.jsonl>：对真实 console.db 与真实 gh；Issue #306 在认领后被临时编辑过正文，导出后按字节还原（Issue 没有 PRD 对应的 fixture，因此直接用真实数据）"
+  expected: "Issue #306 的样本 input.provenance 为 snapshot_at_claim，input.body 为快照里的最早正文，input.edited_since_claim 为 true，code.base_sha_source 为 snapshot；其余旧 Issue 样本的任务输入、提交、已解决、规模字段与改动前的导出一致（因 PR 状态在两次导出之间变化而不同的，逐一说明原因）。"
+  mock_boundary: "无替身：真实 SQLite、真实 git、真实 GitHub。单元层面另有 tests/test_dataset_export.py 用假 gh 覆盖同样语义，包括\"多条快照取最早\"与\"仅空白差异不算编辑\"。"
   tier: R1
   test_layer: integration
   required_for_acceptance: true
-  presentation: "tasks/evidence/<prd-stem>/rv-4-export-sample.md（两个样本的 input 字段摘录，并列显示快照正文与 GitHub 现状正文）；自验：有快照样本的 provenance 应读到 snapshot_at_claim，edited_since_claim 为 true，body 应是旧正文。"
+  presentation: "tasks/evidence/P2-FEAT-20261022-133921-issue-input-snapshot-at-claim/rv-4-export-sample.md（含快照正文与导出时 GitHub 正文的并列 diff、样本摘录）与 rv-4-legacy-comparison.md（旧样本逐个比对）；自验：打开 rv-4-export-sample.md，provenance 应读到 snapshot_at_claim，edited_since_claim 为 true，并列 diff 里临时加的说明只出现在 GitHub 一侧。"
 ```
 
 失败排查顺序：假 gh 是否在 PATH 最前（rv-1、rv-4）→ `logs/` 目录是否可写 → 临时仓库是否有基线分支引用 → 快照文件名是否被日志读取器误匹配。
@@ -418,8 +418,8 @@ No external validation required; repository evidence was sufficient.
 
 | 要看的结果 | 呈递物 | 10 秒自验 |
 |---|---|---|
-| 认领后快照里留下了任务原文，与 GitHub 返回的一致，起点正确（rv-1） | `tasks/evidence/<prd-stem>/rv-1-snapshot-file.md`；`open "tasks/evidence/<prd-stem>/rv-1-snapshot-file.md"`（交付时在此处内嵌对照内容） | 左右两栏 body 一字不差；base_sha 等于临时仓库基线提交 |
-| 导出样本使用认领时快照并标出被编辑（rv-4） | `tasks/evidence/<prd-stem>/rv-4-export-sample.md`；`open "tasks/evidence/<prd-stem>/rv-4-export-sample.md"` | 有快照样本 provenance 为 snapshot_at_claim、edited_since_claim 为 true、body 是旧正文 |
+| 认领后快照里留下了任务原文，与 GitHub 上的一致，起点正确（rv-1，真实 `kc run` + Issue #306） | `tasks/evidence/P2-FEAT-20261022-133921-issue-input-snapshot-at-claim/rv-1-snapshot-file.md`；`just prd review tasks/archive/P2-FEAT-20261022-133921-issue-input-snapshot-at-claim.md` | 打开后"逐字一致"与"SHA-256"两行为 True；快照文件 1 行；仓库内没有快照文件 |
+| 导出样本使用认领时快照并标出被编辑（rv-4） | `tasks/evidence/P2-FEAT-20261022-133921-issue-input-snapshot-at-claim/rv-4-export-sample.md`；`just prd review tasks/archive/P2-FEAT-20261022-133921-issue-input-snapshot-at-claim.md` | 有快照样本 provenance 为 snapshot_at_claim、edited_since_claim 为 true、body 里没有临时加的那行字 |
 
 **不展示给人的 verifier 组**：追加语义与分叉点（rv-2）、写失败不阻断（rv-3）。它们由 Agent 自验、独立 verifier 复核，仅在失败时到达人。
 
@@ -433,39 +433,39 @@ No external validation required; repository evidence was sufficient.
 
 #### Behavior Acceptance
 
-- [ ] 认领 ready Issue 后，状态目录专用区下 `issue-<N>.snapshots.jsonl` 存在，`schema_version` 为 1，最早一行 `body_sha256` 等于认领时正文的 SHA-256。证据：`rv-1-snapshot-file.md`。
-- [ ] 同正文重复运行行数恒为 1；正文改动后追加且旧行字节不变。证据：rv-2 的 pytest 输出。
-- [ ] 复用带提交的旧工作目录时，`base_sha` 为分叉点且不等于 `head_sha`。证据：rv-2 的 pytest 输出。
-- [ ] 写快照失败时 Issue 照常执行并有 warning。证据：rv-3 的 pytest 输出。
-- [ ] 导出器对有快照的 Issue 输出 `snapshot_at_claim` 与 `edited_since_claim`，对旧 Issue 输出与改动前一致。证据：`rv-4-export-sample.md`、`tests/test_dataset_export.py` 的输出。
+- [x] 认领 ready Issue 后，状态目录专用区下 `issue-<N>.snapshots.jsonl` 存在，`schema_version` 为 1，最早一行 `body_sha256` 等于认领时正文的 SHA-256。证据：`rv-1-snapshot-file.md`。
+- [x] 同正文重复运行行数恒为 1；正文改动后追加且旧行字节不变。证据：`rv-2-rv-3-snapshot-pytest.txt`（对应用例 PASSED）。
+- [x] 复用带提交的旧工作目录时，`base_sha` 为分叉点且不等于 `head_sha`。证据：`rv-2-rv-3-snapshot-pytest.txt`（对应用例 PASSED）。
+- [x] 写快照失败时 Issue 照常执行并有 warning。证据：`rv-2-rv-3-snapshot-pytest.txt`（`test_ready_handler_continues_after_snapshot_failure` 驱动处理器、`test_snapshot_failure_only_warns_and_never_raises` 覆盖写入函数，均 PASSED）。
+- [x] 导出器对有快照的 Issue 输出 `snapshot_at_claim` 与 `edited_since_claim`，对旧 Issue 输出与改动前一致。证据：`rv-4-export-sample.md`、`rv-4-legacy-comparison.md`（74 个共同样本 73 个一致、1 个因其 PR 被合并而不同）、`rv-exporter-pytest.txt`（含多条快照取最早、仅空白差异不算编辑两个用例）。
 
 #### Architecture Acceptance
 
-- [ ] 新代码仅位于 `src/backend/core/use_cases/` 与 `scripts/`，无新增跨层导入。证据：`rg -n "^from backend\.(engines|infrastructure|api)" src/backend/core/use_cases/agent_runner_issue_snapshot.py` 无输出。
-- [ ] `agent_runner_issue_handlers.py` 非空行仍 < 1000。证据：`wc -l` 输出与 `just lint` 无新增文件行数警告。
-- [ ] 数据库版本号未改变。证据：`rg -n "_SCHEMA_VERSION = " src/backend/infrastructure/persistence/console_store.py` 仍为 15。
-- [ ] 快照路径由 `state_home()` 派生，运行前后被处理项目的 `git status --porcelain` 不变。证据：rv-1 记录的两次 `git status --porcelain` 输出。
-- [ ] 读取方遇到未知 `schema_version` 的行时跳过并告警、不抛错。证据：`tests/test_agent_runner_issue_snapshot.py` 对应用例通过。
+- [x] 新代码仅位于 `src/backend/core/use_cases/` 与 `scripts/`，无新增跨层导入。证据：`rv-arch-and-docs-checks.txt`（`rg` 无输出）。
+- [x] `agent_runner_issue_handlers.py` 非空行仍 < 1000。证据：`rv-arch-and-docs-checks.txt`（非空行 853）与 `just lint` 通过。
+- [x] 数据库版本号未改变。证据：`rv-arch-and-docs-checks.txt`（`_SCHEMA_VERSION = 15`）。
+- [x] 快照路径由 `state_home()` 派生，被处理项目不被弄脏。证据：`rv-arch-and-docs-checks.txt`（核心模块无 `repo_path` 用法）、`rv-1-snapshot-file.md`（仓库目录下搜不到 `*.snapshots.jsonl`）、自动化用例 `test_snapshot_does_not_touch_the_processed_repository`（`rv-2-rv-3-snapshot-pytest.txt`）。运行前后 `git status --porcelain` 当时未逐次留档，见 rv-1 局限说明。
+- [x] 读取方遇到未知 `schema_version` 的行时跳过并告警、不抛错。证据：`rv-2-rv-3-snapshot-pytest.txt`（`test_reader_skips_corrupt_lines_and_unknown_schema_versions_with_warning` PASSED）。
 
 #### Frontend Acceptance
 
-- [ ] `No frontend impact`：`git diff --name-only` 中不含 `frontend-admin/` 与 `frontend-public/`。
+- [x] `No frontend impact`：`git diff --name-only` 中不含 `frontend-admin/` 与 `frontend-public/`。证据：`rv-arch-and-docs-checks.txt`（无输出）。
 
 #### Documentation Acceptance
 
-- [ ] `docs/guides/agent-runner.md` 与 `docs/guides/dataset-export.md` 描述快照位置、字段、"只记事实"的边界、格式版本规则、限制与 `provenance` 取值，并说明导出器的 `eval_ready` 等为启发式提示。证据：`rg -n "snapshots.jsonl|snapshot_at_claim" docs/guides` 命中两个文件。
-- [ ] `uv run mkdocs build -q` 无报错。
+- [x] `docs/guides/agent-runner.md` 与 `docs/guides/dataset-export.md` 描述快照位置、字段、"只记事实"的边界、格式版本规则、限制与 `provenance` 取值，并说明导出器的 `eval_ready` 等为启发式提示。证据：`rv-arch-and-docs-checks.txt`（两个文件均命中）。
+- [x] `uv run mkdocs build -q` 无报错。证据：最终树上 `mkdocs build` 退出码 0（见 `evidence-report`）。
 
 #### Validation Acceptance
 
-- [ ] 通过真实入口（隔离环境中的 `kc run --issue 7`）验证快照落盘。证据：`rv-1-snapshot-file.md`，其中记录关键值来源（假 gh 响应文件）、穿越的边界、新进程读取结果与被验证的 git tree hash。
-- [ ] `uv run pytest tests/test_agent_runner_issue_snapshot.py tests/test_dataset_export.py -q` 全部通过。
-- [ ] 变更相关实现后重新收集了全部证据，证据记录的 tree hash 等于最终实现树。
+- [x] 通过真实入口（真实 `kc run --issue 306`，真实 GitHub Issue 与真实 codex Agent，保真度高于原计划的隔离环境）验证快照落盘。证据：`rv-1-snapshot-file.md`，其中记录关键值来源（创建 Issue 时保存的正文）、穿越的边界、独立进程读取结果与被验证的代码树。
+- [x] `uv run pytest tests/test_agent_runner_issue_snapshot.py tests/test_dataset_export.py -q` 全部通过。证据：`rv-exporter-pytest.txt`（48 passed）。
+- [x] 变更相关实现后重新收集了全部证据，证据记录的 tree hash 等于最终实现树。证据：`P2-FEAT-20261022-133921-issue-input-snapshot-at-claim.evidence-report.md` 记录被验证的代码树 `dcd33bec…`（HEAD `8d8f7153`），pytest、静态检查、mkdocs 均在该树上重跑；rv-1 的真实运行发生在代码 `c112e7cb`，其后快照模块仅有 `repo_id` 路径清洗的加固，接入点无变化（见 rv-1「证据绑定」）。
 
 #### Delivery Readiness
 
-- [ ] 推荐方案已完整实现，无遗留阻塞项；`just lint` 通过。
-- [ ] 完成消息（或 PR 证据评论）逐字携带 9.1 呈递区内容及内嵌的对照内容。
+- [x] 推荐方案已完整实现，无遗留阻塞项；`just lint` 通过。证据：`just test`（含 `just lint --full`）在最终树上通过；独立 verifier 报告 `P2-FEAT-20261022-133921-issue-input-snapshot-at-claim.verifier-report.md`。
+- [x] 完成消息逐字携带 9.1 呈递区内容及对照内容。证据：本次交付的完成消息（本 PRD 没有对应 PR，评审面是完成消息与 `human-review-checklist.md`）。
 
 ## 10. Functional Requirements
 
@@ -473,7 +473,7 @@ No external validation required; repository evidence was sufficient.
 - **FR-2**：追加前读取文件最后一行；`body_sha256` 与之相同则不写，不同或文件不存在则追加；已有行永不改写、不删除。
 - **FR-3**：`base_sha` 必须是工作目录 HEAD 与创建该工作目录所用基线的 merge-base；`head_sha` 记工作目录当前 HEAD；基线无法解析时 `base_sha` 为 `null`。
 - **FR-4**：快照写入的任何异常只记 `warning` 日志，不得改变 Issue 的认领、执行、重试或交付结果。
-- **FR-5**：数据集导出器在存在快照时，`input.provenance` 为 `snapshot_at_claim`，`input.body` 取最早一行，`input.edited_since_claim` 表示最新已知正文是否不同于最早快照；`code.base_sha` 优先取快照值并标明来源；没有快照时行为与现状一致。
+- **FR-5**：数据集导出器在存在快照时，`input.provenance` 为 `snapshot_at_claim`，`input.body` 取最早一行，`input.edited_since_claim` 表示最新已知正文是否不同于最早快照（比较前忽略换行风格与末尾空白，只有内容上的改动才算被编辑）；多条快照按 `captured_at` 排序，取最早一条；`code.base_sha` 优先取快照值并标明来源；没有快照时行为与现状一致。
 - **FR-6**：`docs/guides/agent-runner.md` 与 `docs/guides/dataset-export.md` 同步说明上述行为与限制。
 - **FR-7**：每行快照带整数 `schema_version`（初版为 `1`）；之后只允许新增可选字段，不得改名、改义或删除；读取方遇到无法识别的版本时跳过该行并记 `warning`。快照字段中不得出现评判类标签（可用性、难度、任务类型等）。
 
@@ -508,3 +508,19 @@ No external validation required; repository evidence was sufficient.
 | D-06 | 快照放在哪个目录 | 本机状态目录（`state_home()`）下的 `dataset/issue-snapshots/` | 被处理项目的 `logs/agent-runner/issues/<repo_id>/` | `kc init` 不替目标项目忽略 `logs/`，放进项目会弄脏其 git；放全局目录还能让导出脚本一次汇总所有项目。 |
 | D-07 | KedaCode 与数据集质量的分工 | KedaCode 只记录事实，整理与评判留给人工和更强的 Agent | 在 KedaCode 内用规则给样本打"可用/难度"等结论 | 前期抽查已发现启发式规则会出错，评判需要更多信息且应能随时重做。 |
 | D-08 | 记录格式如何演进 | 每行带 `schema_version`，字段只增不改，未知版本跳过并告警 | 不带版本号、事后靠推断 | 数据集会持续优化，旧记录必须永远可读，读取方不能在新版本前崩溃。 |
+
+### Final Reconciliation
+
+- Interpretation: confirmed — 认领时留存只增不改的任务输入快照，KedaCode 只记事实、不记评判；导出器优先使用最早快照。行为样例表中的 7 行均已由自动化用例或真实运行覆盖，未发现理解偏差。
+- Public behavior and contracts: corrected — ① 存放位置：落在本机状态目录 `dataset/issue-snapshots/`，作采集缓存，长期保存靠导出样本（§2 决策一，已按此改写）。② §7.6 rv-1 原计划是"隔离环境 + 假 gh + 探针 Agent"，实际改为**真实 `kc run --issue 306`**（真实 GitHub Issue 与真实 codex Agent，保真度更高）；rv-4 同理改为真实 `console.db` 与真实 `gh`。两处 oracle 与 §9 条目已同步改写，PRD 原计划的隔离场景未另行构建。③ 快照 `labels` 记录的是认领前内存里的标签（不含认领后才加的 `agent/running`），符合"Agent 读到的状态"的本意。④ 没有快照的旧 Issue 导出时多了两个新键（`input.edited_since_claim: null`、`code.base_sha_source: "inferred"`），其余值不变（rv-4 比对 74 个共同样本，73 个一致，1 个因其 PR 在两次导出之间被合并而不同，与本功能无关）。⑤ **FR-5 的"被编辑"判定收紧了**：独立复核后改为忽略换行风格与末尾空白再比较（我自己还原 Issue 正文时就因多一个末尾换行造成过假阳性）；这是对 FR-5 的澄清，不改变"内容被改才算被编辑"的本意。
+- Related PRD status: confirmed — M13 评测 PRD 仍在 `tasks/pending/`，本功能未改数据库（`_SCHEMA_VERSION` 仍为 15），与其互不影响；本 PRD 无依赖。
+- Requirements and risks: corrected — FR-1 至 FR-7 均已交付；FR-5 之后，数据集导出器又由本 PRD 之外的独立工作扩展了 GitHub PR、会话、普通提交来源与补全叠加层，不属于本 PRD 范围。额外落地了一项原 PRD 未列出的测试隔离：`tests/conftest.py` 的会话级自动隔离，避免现有测试经由认领钩子写入开发机真实的 `~/.kedacode/dataset/`（实现时发现已发生一次，已清理）。§12 的风险仍成立：快照绑定本机，"认领到第一次导出"之间的窗口由后续的定期归档收敛。
+- Reconciled differences:
+  - rv-1、rv-4 由真实运行取代隔离环境，PRD 正文、§7.6 与 §9 已改写。
+  - 运行前后 `git status --porcelain` 当时未逐次留档，改以"仓库内搜不到快照文件 + 核心模块无 `repo_path` 用法 + 自动化用例"支撑，§9 对应条目与 rv-1 局限说明已如实写明。
+  - 旧样本新增两个键，见上。
+  - `tests/conftest.py` 增加测试隔离，见上。
+  - 独立复核（verifier）发现并已修复：导出器"取最早快照"原先没有测试保护（存活变异），已补"多条快照按 `captured_at` 取最早"的用例并确认变异被杀；rv-3 原先只测了写入函数，已补驱动 `_process_ready_issue` 的用例；`repo_id` 为 `.` / `..` 时路径清洗有漏洞，已修并测试；"被编辑"判定对空白差异过敏，已收紧（见上）。
+  - 独立复核发现并已改正的证据表述：rv-1 原先用 `strip()` 比较就声称 Issue 正文"还原一致"，实际末尾多一个换行；现已用同一份原文按字节还原，并用 REST 接口取回逐字节比较。人审清单里原先标为"逐字摘自证据文件"的字段清单其实是归纳，现已改为引用 rv-1 里真实存在的那一行。rv-1 原先没有展示快照原文的 `body`，rv-4 没有并列对照，旧样本比对没有留档，现均已补入证据目录。
+  - §6 机制描述中接入点的位置与 `try/except` 的位置原先与实现有细微出入，已按实现改正。
+  - 仍然只能依赖说明、无法事后重放的部分已在 rv-1 / rv-4 的局限里写明：真实运行的中间过程、"认领时 GitHub 上的正文"本身（依据是创建与认领之间没有编辑）、"改动前的导出"这份本地临时文件。
