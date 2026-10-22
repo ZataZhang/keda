@@ -16,6 +16,7 @@ import pytest
 
 from backend.core.shared.models.agent_runner import AppConfig, IssueSummary
 from backend.core.use_cases import agent_runner_issue_handlers as handlers
+from backend.core.use_cases import agent_runner_issue_snapshot as snapshot_module
 from backend.core.use_cases.agent_runner_claim_arbitration import ClaimArbitrationLost
 from backend.core.use_cases.agent_runner_issue_snapshot import (
     SNAPSHOT_SCHEMA_VERSION,
@@ -279,3 +280,52 @@ def test_claim_loser_writes_no_snapshot(monkeypatch) -> None:
         )
 
     assert recorded == []
+
+
+@pytest.mark.parametrize("repo_id", ["..", ".", "../evil/repo"])
+def test_snapshot_path_never_leaves_the_snapshot_area(tmp_path: Path, repo_id: str) -> None:
+    path = snapshot_file_path(repo_id=repo_id, issue_number=7, home_path=tmp_path)
+
+    snapshot_area = tmp_path / ".kedacode" / "dataset" / "issue-snapshots"
+    assert path.resolve().is_relative_to(snapshot_area.resolve())
+    assert path.parent != snapshot_area
+
+
+def test_ready_handler_continues_after_snapshot_failure(
+    monkeypatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """快照写入失败时，认领后的执行链照常走到 Agent；只留一条警告，不产生快照文件。"""
+    blocked_home_path = tmp_path / "blocked-home"
+    blocked_home_path.write_text("i am a file", encoding="utf-8")
+    original_snapshot_file_path = snapshot_module.snapshot_file_path
+    monkeypatch.setattr(
+        snapshot_module,
+        "snapshot_file_path",
+        lambda *, repo_id, issue_number, home_path=None: original_snapshot_file_path(
+            repo_id=repo_id, issue_number=issue_number, home_path=blocked_home_path
+        ),
+    )
+    events: list[str] = []
+
+    def run_agent(*_args, **_kwargs):
+        events.append("agent")
+        raise _StopAfterAgentStarted
+
+    _patch_ready_handler(monkeypatch, run_agent=run_agent)
+    monkeypatch.setattr(
+        handlers, "arbitrate_first_claim", lambda **_kwargs: SimpleNamespace(comment_id=91)
+    )
+
+    with caplog.at_level(logging.WARNING), pytest.raises(_StopAfterAgentStarted):
+        handlers._process_ready_issue(
+            issue=_label_issue(),
+            repo_path=Path("."),
+            config=config_with_review_disabled(),
+            agent="auto",
+            github_client=_client(),
+            process_runner=FakeProcessRunner(),
+        )
+
+    assert events == ["agent"]
+    assert "failed to record issue input snapshot" in caplog.text
+    assert blocked_home_path.read_text(encoding="utf-8") == "i am a file"

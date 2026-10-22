@@ -11,7 +11,6 @@
 from __future__ import annotations
 
 import fnmatch
-import hashlib
 import json
 import re
 import sqlite3
@@ -423,21 +422,25 @@ def is_eval_ready(*, labels: dict[str, Any], input_provenance: str) -> bool:
     )
 
 
+def _normalize_issue_body(text: str) -> str:
+    """忽略换行风格与末尾空白：GitHub 返回的正文常带这类差异，不应被算作"被编辑"。"""
+    return text.replace("\r\n", "\n").rstrip()
+
+
 def is_edited_since_claim(
     snapshots: list[dict[str, Any]], *, gh_issue: dict[str, Any] | None
 ) -> bool | None:
     """认领后正文是否被改过；没有快照时无从判断，返回 ``None``。
 
-    最新已知正文优先取 GitHub 现状（``--with-gh``），否则取最后一条快照。
+    最新已知正文优先取 GitHub 现状（``--with-gh``），否则取最后一条快照；比较前先忽略
+    换行风格与末尾空白，只有内容上的改动才算被编辑。
     """
     if not snapshots:
         return None
-    latest_known_sha256 = (
-        hashlib.sha256(str(gh_issue["body"]).encode("utf-8")).hexdigest()
-        if gh_issue and gh_issue.get("body") is not None
-        else snapshots[-1]["body_sha256"]
+    latest_body = (
+        gh_issue["body"] if gh_issue and gh_issue.get("body") is not None else snapshots[-1]["body"]
     )
-    return latest_known_sha256 != snapshots[0]["body_sha256"]
+    return _normalize_issue_body(str(latest_body)) != _normalize_issue_body(snapshots[0]["body"])
 
 
 def build_sample(

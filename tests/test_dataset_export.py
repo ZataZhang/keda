@@ -555,3 +555,46 @@ def test_conventional_commit_docs_and_chore_titles_are_maintenance(
     title: str, expected: str
 ) -> None:
     assert classify_task_kind(title) == expected
+
+
+def test_exporter_uses_the_earliest_of_several_snapshots_regardless_of_file_order(
+    console_db: Path, tmp_path: Path
+) -> None:
+    """文件里先写了后认领的快照，导出仍须按认领时间取最早的那条作为任务输入。"""
+    home_path = tmp_path / "home"
+    _write_snapshot(
+        home_path, body="后来的正文 B2", base_sha=None, captured_at="2026-10-05T00:00:00+00:00"
+    )
+    _write_snapshot(
+        home_path, body="最初的正文 B1", base_sha=None, captured_at="2026-10-01T00:00:00+00:00"
+    )
+
+    sample = export_samples(
+        ExportOptions(db_path=console_db, output_path=None, home_path=home_path)
+    )[0]
+
+    assert sample["input"]["body"] == "最初的正文 B1"
+    assert sample["input"]["edited_since_claim"] is True
+
+
+def test_whitespace_only_difference_is_not_an_edit(
+    console_db: Path, sample_repo: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """GitHub 返回的正文常多一个末尾换行或换行风格不同，不能被当成"认领后被编辑"。"""
+    home_path = tmp_path / "home"
+    _write_snapshot(home_path, body="第一行\n第二行", base_sha=None)
+    pull_request = _pull_request_fixture(sample_repo, state="MERGED")
+    monkeypatch.setattr(
+        export_module,
+        "collect_gh_facts",
+        lambda **_: {
+            "issue": {"title": "t", "body": "第一行\r\n第二行\n\n", "url": "u"},
+            "pull_requests": [pull_request],
+        },
+    )
+
+    sample = export_samples(
+        ExportOptions(db_path=console_db, output_path=None, use_gh=True, home_path=home_path)
+    )[0]
+
+    assert sample["input"]["edited_since_claim"] is False

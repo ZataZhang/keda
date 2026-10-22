@@ -84,6 +84,9 @@ def snapshot_file_path(*, repo_id: str, issue_number: int, home_path: Path | Non
         home_path: 家目录；省略时取当前用户家目录（便于测试注入临时目录）。
     """
     safe_repo_dirname = _UNSAFE_DIRNAME_PATTERN.sub("_", repo_id) or "_"
+    if set(safe_repo_dirname) == {"."}:
+        # ``.`` / ``..`` 会让路径停在原地或上跳一级，逃出快照专用区。
+        safe_repo_dirname = f"_{safe_repo_dirname}"
     return (
         product_identity.state_home(home_path)
         / _SNAPSHOT_DIR_RELPATH
