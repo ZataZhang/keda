@@ -1374,6 +1374,22 @@ GitHub 的标签写入没有 compare-and-swap，所以"谁先领走这条 Issue"
 历史 marker（没有 `started_at` 的旧格式）与并发窗口外的投标都不算投标，所以 rework / 重新认领不会被自己过去的评论永久锁死。同一进程在 agent fallback 换 agent 时会再走一遍领取：读到的是**自己更早的那次投标**，按重入处理并继续执行。
 
 
+### 认领时的任务输入快照
+
+数据集样本最需要的是"任务当时到底是怎么说的"，而 Issue 正文可以被随时编辑。runner 在认领一个 **ready** Issue 成功、worktree 就绪后、Agent 启动前，把 Agent 即将读到的任务输入追加一条到本机状态目录：
+
+```text
+~/.kedacode/dataset/issue-snapshots/<repo_id>/issue-<N>.snapshots.jsonl
+```
+
+- **只追加、不改写**：正文（SHA-256）与最后一行相同则不写，所以重试、换 Agent、续跑不会产生重复行；正文被改过才追加一行，旧行逐字节不变。
+- **每行内容**：`schema_version`、`captured_at`、`repo_id`、`issue_number`、`title`、`body`（逐字原文）、`body_sha256`、`labels`、`state`、`url`，以及代码起点 `base_sha`（worktree HEAD 与基线分支的**分叉点**，不是 HEAD——复用旧 worktree 时 HEAD 可能含上次留下的提交；`stack` 排序时基线是上游 Issue 分支）、`head_sha`、`base_ref`。
+- **只记事实，不记评判**：没有"可用于评测""难度"之类标签；筛选、补验证命令、改写、脱敏属于后续由人工与更强 Agent 完成的整理层。
+- **可演进**：每行带整数 `schema_version`（当前 `1`），之后只新增可选字段；读取方遇到未知更高版本的行会跳过并告警。
+- **不影响运行**：写入失败只记一条 warning，认领、实现、交付照常进行。
+- **不进任何项目**：快照在状态目录而不是被处理项目里，所以用 KedaCode 处理别的项目不会弄脏它们的 git；所有项目的快照集中一处。
+- **它是采集缓存**：快照绑定这台机器，删除状态目录会丢；长期保存靠[数据集导出](dataset-export.md)——导出的样本自带最早快照的任务原文，导出后提交进数据集仓库。只对 ready Issue 留快照（辩论、PRD 重写、巡检类运行不留），不含 Issue 评论，不回填历史 Issue。
+
 ### 快速合并旗标 `--fast-merge`
 
 默认 run 在 builder 提交、PRD 执行侧收尾和仓库验证通过后，先开一个未签核 Draft PR，再运行独立 verifier；通过后才进入常规 pre-PR review 与最终 HEAD 复核。`--fast-merge` 是**本次 run 的一次性快速通道**：builder 提交后**跳过这两道验证门禁**，沿原发布流程开 Draft PR，并在正文里显式标注该 PR **未经自动化验证**。

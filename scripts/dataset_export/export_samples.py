@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import hashlib
 import json
 import re
 import sqlite3
@@ -23,6 +24,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from backend.core.use_cases import agent_runner_issue_snapshot as issue_snapshot
 
 SCHEMA_VERSION = 1
 DEFAULT_DB_PATH = Path.home() / ".kedacode" / "console.db"
@@ -55,6 +58,7 @@ class ExportOptions:
     repo_ids: tuple[str, ...] = ()
     exclude_repo_patterns: tuple[str, ...] = DEFAULT_EXCLUDE_REPO_PATTERNS
     use_gh: bool = False
+    home_path: Path | None = None
 
 
 @dataclass
@@ -324,8 +328,26 @@ def has_failed_then_succeeded(attempts: list[dict[str, Any]]) -> bool:
     return False
 
 
-def classify_input(*, gh_issue: dict[str, Any] | None, runs: list[dict[str, Any]]) -> str:
-    """判定任务输入的可信度：原文 > 仅标题 > 缺失。"""
+def load_issue_snapshots(group: IssueGroup, *, options: ExportOptions) -> list[dict[str, Any]]:
+    """读回某 Issue 的全部认领时快照（含别名 repo_id），按认领时间升序。"""
+    records: list[dict[str, Any]] = []
+    for repo_id in (group.repo_id, *group.alias_repo_ids):
+        snapshot_path = issue_snapshot.snapshot_file_path(
+            repo_id=repo_id, issue_number=group.issue_number, home_path=options.home_path
+        )
+        records.extend(issue_snapshot.read_issue_snapshots(snapshot_path))
+    return sorted(records, key=lambda record: record.get("captured_at", ""))
+
+
+def classify_input(
+    *,
+    gh_issue: dict[str, Any] | None,
+    runs: list[dict[str, Any]],
+    snapshots: list[dict[str, Any]],
+) -> str:
+    """判定任务输入的可信度：认领时快照 > 事后抓取的原文 > 仅标题 > 缺失。"""
+    if snapshots:
+        return "snapshot_at_claim"
     if gh_issue and gh_issue.get("body"):
         return "verbatim_issue_body"
     if any(run.get("issue_title") for run in runs):
@@ -349,6 +371,23 @@ def is_eval_ready(*, labels: dict[str, Any], input_provenance: str) -> bool:
     )
 
 
+def is_edited_since_claim(
+    snapshots: list[dict[str, Any]], *, gh_issue: dict[str, Any] | None
+) -> bool | None:
+    """认领后正文是否被改过；没有快照时无从判断，返回 ``None``。
+
+    最新已知正文优先取 GitHub 现状（``--with-gh``），否则取最后一条快照。
+    """
+    if not snapshots:
+        return None
+    latest_known_sha256 = (
+        hashlib.sha256(str(gh_issue["body"]).encode("utf-8")).hexdigest()
+        if gh_issue and gh_issue.get("body") is not None
+        else snapshots[-1]["body_sha256"]
+    )
+    return latest_known_sha256 != snapshots[0]["body_sha256"]
+
+
 def build_sample(
     group: IssueGroup, *, repo_path: Path | None, options: ExportOptions
 ) -> dict[str, Any]:
@@ -358,6 +397,8 @@ def build_sample(
         if options.use_gh and repo_path
         else {"issue": None, "pull_requests": None}
     )
+    snapshots = load_issue_snapshots(group, options=options)
+    earliest_snapshot = snapshots[0] if snapshots else None
     pull_request = pick_pull_request(gh_facts["pull_requests"])
     if pull_request and repo_path:
         git_facts = collect_pull_request_commits(repo_path=repo_path, pull_request=pull_request)
@@ -365,6 +406,16 @@ def build_sample(
         git_facts = collect_branch_commits(repo_path=repo_path, issue_number=group.issue_number)
     else:
         git_facts = None
+    if git_facts is not None:
+        # 认领时记录的分叉点优先于事后推断：它是 Agent 实际开始工作的起点。
+        has_snapshot_base = bool(earliest_snapshot and earliest_snapshot.get("base_sha"))
+        git_facts = {
+            **git_facts,
+            "base_sha": earliest_snapshot["base_sha"]
+            if has_snapshot_base
+            else git_facts["base_sha"],
+            "base_sha_source": "snapshot" if has_snapshot_base else "inferred",
+        }
     size = (
         {
             "files": pull_request["changedFiles"],
@@ -389,8 +440,9 @@ def build_sample(
     else:
         resolved = any(run["outcome"] == COMPLETED_OUTCOME for run in group.runs)
         resolved_basis = RESOLVED_BASIS_RUN_COMPLETED
-    input_provenance = classify_input(gh_issue=gh_issue, runs=group.runs)
-    issue_title = (gh_issue or {}).get("title") or next(
+    input_provenance = classify_input(gh_issue=gh_issue, runs=group.runs, snapshots=snapshots)
+    input_source = earliest_snapshot or gh_issue or {}
+    issue_title = input_source.get("title") or next(
         (run["issue_title"] for run in group.runs if run.get("issue_title")), None
     )
     labels = {
@@ -413,9 +465,10 @@ def build_sample(
         "input": {
             "provenance": input_provenance,
             "title": issue_title,
-            "body": (gh_issue or {}).get("body"),
-            "url": (gh_issue or {}).get("url")
+            "body": input_source.get("body"),
+            "url": input_source.get("url")
             or next((r["issue_url"] for r in group.runs if r.get("issue_url")), None),
+            "edited_since_claim": is_edited_since_claim(snapshots, gh_issue=gh_issue),
         },
         "code": git_facts,
         "pull_requests": gh_facts["pull_requests"],
@@ -477,6 +530,8 @@ def summarize_samples(samples: list[dict[str, Any]]) -> dict[str, int]:
         counts["has_preference_pair"] += labels["has_preference_pair"]
         counts["input_verbatim"] += sample["input"]["provenance"] == "verbatim_issue_body"
         counts["input_title_only"] += sample["input"]["provenance"] == "title_only"
+        counts["input_snapshot_at_claim"] += sample["input"]["provenance"] == "snapshot_at_claim"
+        counts["edited_since_claim"] += bool(sample["input"]["edited_since_claim"])
         counts["resolved_by_merged_pr"] += (
             labels["resolved"] and labels["resolved_basis"] == RESOLVED_BASIS_PR_MERGED
         )

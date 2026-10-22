@@ -762,6 +762,34 @@ def _isolate_github_api_budget(tmp_path_factory: pytest.TempPathFactory) -> Iter
             os.environ[BUDGET_PATH_ENV_VAR] = previous_value
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _isolate_issue_snapshot_dir(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    """把认领快照指到临时家目录，测试不会写进真实的本机状态目录。
+
+    ``_process_ready_issue`` 在认领路径上会追加任务输入快照；不隔离的话，任何驱动该
+    处理器的测试都会在开发机真实的 ``~/.kedacode/dataset/`` 下留下假 Issue 的快照。
+    显式传入 ``home_path`` 的用例不受影响。
+    """
+    from backend.core.use_cases import agent_runner_issue_snapshot as snapshot_module
+
+    isolated_home_path = tmp_path_factory.mktemp("issue-snapshot-home")
+    original_snapshot_file_path = snapshot_module.snapshot_file_path
+
+    def _isolated_snapshot_file_path(
+        *, repo_id: str, issue_number: int, home_path: Path | None = None
+    ) -> Path:
+        return original_snapshot_file_path(
+            repo_id=repo_id, issue_number=issue_number, home_path=home_path or isolated_home_path
+        )
+
+    session_monkeypatch = pytest.MonkeyPatch()
+    session_monkeypatch.setattr(snapshot_module, "snapshot_file_path", _isolated_snapshot_file_path)
+    try:
+        yield
+    finally:
+        session_monkeypatch.undo()
+
+
 # ---------------------------------------------------------------------------
 # 失败现场落盘：偶发失败（testmon 子集、机器负载、常驻 daemon 并发写状态目录）事后
 # 无法复现，终端输出又常被 tail 截掉。只要有用例失败，就把完整报错与运行环境写到

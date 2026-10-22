@@ -63,6 +63,10 @@ from backend.core.use_cases.agent_runner_git import (
     get_current_branch,
     has_changes,
 )
+from backend.core.use_cases.agent_runner_issue_snapshot import (
+    IssueSnapshotRequest,
+    record_issue_input_snapshot,
+)
 from backend.core.use_cases.agent_runner_publication import (
     LocalCommitReuseRequest,
     PreVerifierDraftPublicationRequest,
@@ -426,6 +430,17 @@ def _process_ready_issue(
     worktree_path = create_or_reuse_worktree(repo_path, issue, config, process_runner)
     before_sha = get_head_sha(worktree_path, process_runner)
     expected_branch = get_current_branch(worktree_path, process_runner)
+
+    # 认领成功、工作目录就绪后、Agent 启动前：留存任务输入快照（只追加、失败只告警）。
+    record_issue_input_snapshot(
+        IssueSnapshotRequest(
+            issue=issue,
+            repo_id=repo_id or repo_path.name,
+            worktree_path=worktree_path,
+            config=config,
+            process_runner=process_runner,
+        )
+    )
 
     if _resume_direct_pr_handoff(
         github_client,

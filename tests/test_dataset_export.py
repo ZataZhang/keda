@@ -320,3 +320,86 @@ def test_unverified_merge_history_is_not_eval_ready(
 
     assert sample["labels"]["merge_commit_count"] is None
     assert sample["labels"]["eval_ready"] is False
+
+
+def _write_snapshot(
+    home_path: Path,
+    *,
+    body: str,
+    base_sha: str | None,
+    captured_at: str = "2026-10-01T00:00:00+00:00",
+) -> None:
+    """在注入的临时家目录里为 keda#7 写一条认领时快照。"""
+    import hashlib
+
+    from backend.core.use_cases import agent_runner_issue_snapshot as issue_snapshot
+
+    snapshot = issue_snapshot.IssueInputSnapshot(
+        schema_version=issue_snapshot.SNAPSHOT_SCHEMA_VERSION,
+        captured_at=captured_at,
+        repo_id="keda",
+        issue_number=7,
+        title="认领时标题",
+        body=body,
+        body_sha256=hashlib.sha256(body.encode("utf-8")).hexdigest(),
+        labels=("agent/ready",),
+        state="OPEN",
+        url="https://github.com/example/repo/issues/7",
+        base_sha=base_sha,
+        head_sha=None,
+        base_ref="main",
+    )
+    snapshot_path = issue_snapshot.snapshot_file_path(
+        repo_id="keda", issue_number=7, home_path=home_path
+    )
+    issue_snapshot.append_snapshot_if_changed(snapshot_path=snapshot_path, snapshot=snapshot)
+
+
+def test_snapshot_at_claim_is_preferred_and_edit_after_claim_is_flagged(
+    console_db: Path, sample_repo: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    home_path = tmp_path / "home"
+    pull_request = _pull_request_fixture(sample_repo, state="MERGED")
+    _write_snapshot(home_path, body="认领时的原文 B1", base_sha="a" * 40)
+    monkeypatch.setattr(
+        export_module,
+        "collect_gh_facts",
+        lambda **_: {
+            "issue": {"title": "现在的标题", "body": "被改过的正文 B2", "url": "u"},
+            "pull_requests": [pull_request],
+        },
+    )
+
+    sample = export_samples(
+        ExportOptions(db_path=console_db, output_path=None, use_gh=True, home_path=home_path)
+    )[0]
+
+    assert sample["input"]["provenance"] == "snapshot_at_claim"
+    assert sample["input"]["body"] == "认领时的原文 B1"
+    assert sample["input"]["title"] == "认领时标题"
+    assert sample["input"]["edited_since_claim"] is True
+    assert sample["code"]["base_sha"] == "a" * 40
+    assert sample["code"]["base_sha_source"] == "snapshot"
+
+
+def test_snapshot_without_later_edit_is_not_flagged(console_db: Path, tmp_path: Path) -> None:
+    home_path = tmp_path / "home"
+    _write_snapshot(home_path, body="B1", base_sha=None)
+
+    sample = export_samples(
+        ExportOptions(db_path=console_db, output_path=None, home_path=home_path)
+    )[0]
+
+    assert sample["input"]["provenance"] == "snapshot_at_claim"
+    assert sample["input"]["edited_since_claim"] is False
+    assert sample["code"]["base_sha_source"] == "inferred"
+
+
+def test_issue_without_snapshot_exports_exactly_as_before(console_db: Path, tmp_path: Path) -> None:
+    sample = export_samples(
+        ExportOptions(db_path=console_db, output_path=None, home_path=tmp_path / "empty-home")
+    )[0]
+
+    assert sample["input"]["provenance"] == "title_only"
+    assert sample["input"]["edited_since_claim"] is None
+    assert sample["input"]["body"] is None

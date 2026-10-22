@@ -16,9 +16,10 @@ uv run python -m scripts.dataset_export --repo keda --with-gh --output samples.j
 
 | 字段 | 来源 | 说明 |
 |---|---|---|
-| `input.provenance` | 推断 | `verbatim_issue_body`（`--with-gh` 取到原文）/ `title_only`（仅 `run_records.issue_title`）/ `missing`。**拿不到原文不会伪装成原文**。 |
-| `input.title` / `body` / `url` | `gh` 或 `run_records` | Issue 内容是导出时刻的快照，Issue 之后被编辑不会回溯。 |
-| `code` | PR（`--with-gh`）或本地 `issue-N` 分支 | `source` 为 `pull_request` 时以 PR 的提交链为准（`base_sha` 是第一个 PR 提交的父提交，`final_sha` 是 PR head）；否则退回本地分支（与默认分支的 merge-base 到分支末端）。本地分支可能落后于 PR 后续推送，所以有 gh 时不用它。两者都没有时为 `null`。 |
+| `input.provenance` | 推断 | `snapshot_at_claim`（有认领时快照，见[认领时的任务输入快照](agent-runner.md)）/ `verbatim_issue_body`（`--with-gh` 事后取到原文）/ `title_only`（仅 `run_records.issue_title`）/ `missing`。**拿不到原文不会伪装成原文**；事后取到的原文只是"导出时刻"的样子，不一定是 Agent 当初看到的。 |
+| `input.title` / `body` / `url` | 最早快照，其次 `gh`，其次 `run_records` | 有快照时取**最早一条**（Agent 认领时读到的）；没有快照的旧 Issue 行为不变。 |
+| `input.edited_since_claim` | 快照与 GitHub 现状比对 | 认领后正文是否被改过：`true` / `false`；没有快照无从判断时为 `null`。最新已知正文优先取 GitHub 现状（`--with-gh`），否则取最后一条快照。 |
+| `code` | PR（`--with-gh`）或本地 `issue-N` 分支 | `source` 为 `pull_request` 时以 PR 的提交链为准（`final_sha` 是 PR head；`base_sha` 默认是第一个 PR 提交的父提交，**有认领时快照则改用快照里记录的分叉点**，并在 `base_sha_source` 标明 `snapshot` / `inferred`）；否则退回本地分支（与默认分支的 merge-base 到分支末端）。本地分支可能落后于 PR 后续推送，所以有 gh 时不用它。两者都没有时为 `null`。 |
 | `pull_requests` | `gh pr list --head issue-N` | 原始 PR 列表（编号、状态、head、改动规模、提交）；未传 `--with-gh` 时为 `null`。 |
 | `size` | PR 或 `git diff --numstat` | `files` / `additions` / `deletions`。 |
 | `runs` / `attempts` / `invocations` | `console.db` | 运行结局、每次 attempt 的失败类型/preset/model、各阶段调用的 agent 与请求模型。 |
@@ -46,6 +47,10 @@ uv run python -m scripts.dataset_export --repo keda --with-gh --output samples.j
 ## 去重
 
 同一仓库可能以多个 `repo_id` 注册（如 `keda` 与 `keda-main` 指向同一路径）。同一仓库路径下相同的 Issue 编号只导出一份：保留运行记录最多的 `repo_id` 作为样本主键，其余记在 `alias_repo_ids`，运行与 attempt 记录会合并。
+
+## 提示，非结论
+
+导出器里的 `eval_ready`、`size_band`、`task_kind` 等是**启发式提示**，用来做廉价的初筛，不是对样本好坏的结论。KedaCode 只负责如实记录事实；样本是否可用、验证命令是否正确、描述是否清楚，应由后续的人工与更强的 Agent 在整理层判断，并能随时基于原始记录重做。
 
 ## 已知限制
 
