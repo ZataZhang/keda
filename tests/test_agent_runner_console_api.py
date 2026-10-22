@@ -34,6 +34,7 @@ from backend.engines.agent_runner.factory import (
 )
 from backend.infrastructure.persistence.console_store import SqliteConsoleStore
 from tests.support.issue_run_control import ScriptedTakeoverCasStore
+from tests.support.relative_time import utc_days_ago, utc_now
 
 client = TestClient(app)
 
@@ -538,12 +539,13 @@ def test_stats_history_empty(console_environment) -> None:
 def test_agent_performance_stats_reads_fresh_sqlite_rows_through_api(console_environment) -> None:
     """真实路由按仓库和时间窗口汇总持久化 attempt 与 run。"""
     import sqlite3
-    from datetime import datetime, timedelta, timezone
+    from datetime import timedelta
 
     database_path = console_environment["tmp_path"] / "console.db"
-    current_time = datetime.now(timezone.utc).replace(microsecond=0)
-    recent_timestamp = (current_time - timedelta(days=2)).isoformat()
-    older_timestamp = (current_time - timedelta(days=40)).isoformat()
+    # 窗口由服务端真实时钟决定，种子数据取相对时刻，避免用例随日期过期。
+    current_time = utc_now()
+    recent_timestamp = utc_days_ago(2).isoformat()
+    older_timestamp = utc_days_ago(40).isoformat()
     run_samples = (
         ("keda-main", "completed", 40, recent_timestamp),
         ("keda-main", "completed", 60, recent_timestamp),
