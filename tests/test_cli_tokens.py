@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -21,6 +22,7 @@ from backend.core.use_cases.agent_runner_lifecycle import (
     record_lifecycle_event,
 )
 from backend.infrastructure.persistence.console_store import SqliteConsoleStore
+from tests.support.relative_time import utc_days_ago
 
 runner = CliRunner()
 
@@ -59,14 +61,16 @@ def _seed_attempt(
     """经真实写入路径落一条带 usage 的 attempt 事件（rv 链路的账本侧）。"""
     from backend.core.shared.models.agent_runner import AttemptResult, FailureType, TokenUsage
 
+    # 命令按真实时钟换算 --days 窗口，种子必须跟着真实时钟走，否则用例会过期。
+    started_at_moment = utc_days_ago(2)
     result = AttemptResult(
         attempt_number=1,
         failure_type=FailureType.SUCCESS,
         recovered=False,
         detail="seed",
         agent=agent,
-        started_at="2026-10-04T10:00:00+00:00",
-        finished_at="2026-10-04T10:01:00+00:00",
+        started_at=started_at_moment.isoformat(),
+        finished_at=(started_at_moment + timedelta(minutes=1)).isoformat(),
         duration_seconds=60.0,
         token_usage=TokenUsage(**(usage_tokens or _FIXED_USAGE)),
     )
