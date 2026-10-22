@@ -1013,6 +1013,65 @@ def test_subprocess_runner_kills_silent_process_on_inactivity_timeout(
         )
 
 
+def test_captured_output_includes_stdout_written_when_process_exits(tmp_path: Path) -> None:
+    """活动输出持续超过旧读取等待窗口时,仍须收齐退出前最后写入的 stdout。"""
+    runner = SubprocessRunner()
+    script = (
+        "import sys, time\n"
+        "for progress_index in range(110):\n"
+        "    print(f'progress {progress_index}', file=sys.stderr, flush=True)\n"
+        "    time.sleep(0.1)\n"
+        "print('FINAL VERDICT', flush=True)\n"
+    )
+
+    completed_process = runner.run(
+        [sys.executable, "-c", script],
+        cwd=tmp_path,
+        capture_output=True,
+        timeout=20,
+        inactivity_timeout=3,
+    )
+
+    assert completed_process.stdout == "FINAL VERDICT\n"
+    assert "progress 109" in completed_process.stderr
+
+
+def test_captured_output_returns_when_descendant_keeps_pipes_open(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """直接子进程退出后,孙进程持有输出管道也不能让调用无限等待。"""
+    monkeypatch.setattr(process_runner_module, "_PROCESS_OUTPUT_JOIN_TIMEOUT_SECONDS", 0.1)
+    grandchild_pid_path = tmp_path / "grandchild.pid"
+    script = (
+        "from pathlib import Path\n"
+        "import subprocess, sys\n"
+        "grandchild = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])\n"
+        "Path(sys.argv[1]).write_text(str(grandchild.pid), encoding='utf-8')\n"
+    )
+    started_at = time.monotonic()
+
+    try:
+        completed_process = SubprocessRunner().run(
+            [sys.executable, "-c", script, str(grandchild_pid_path)],
+            cwd=tmp_path,
+            capture_output=True,
+            timeout=10,
+            inactivity_timeout=5,
+        )
+
+        assert time.monotonic() - started_at < 1
+        assert completed_process.stdout == ""
+        assert completed_process.stderr == ""
+    finally:
+        if grandchild_pid_path.exists():
+            grandchild_pid = int(grandchild_pid_path.read_text(encoding="utf-8"))
+            try:
+                os.kill(grandchild_pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+
+
 def test_captured_timeout_exception_carries_partial_output(tmp_path: Path) -> None:
     """墙钟超时被杀时,已收到的输出必须挂在异常上。
 
