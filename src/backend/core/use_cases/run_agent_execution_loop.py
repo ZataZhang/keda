@@ -161,6 +161,34 @@ def _attempt_resume_session_id(
     )
 
 
+def execute_agent_request(request: AgentExecutionRequest) -> AgentCommitResult:
+    """补齐首轮会话续传信息并执行 Agent recovery 状态机。
+
+    Args:
+        request: Agent 执行请求；若未指定首轮会话 id，则从 worktree 记录中解析。
+
+    Returns:
+        AgentCommitResult: 最终验证结果、attempt 历史及 verifier 结论。
+
+    Raises:
+        RuntimeError: 执行或 recovery 遇到无法继续的错误。
+    """
+    request_with_resume_session = (
+        request
+        if request.resume_session_id is not None
+        else replace(
+            request,
+            resume_session_id=resolve_resumable_session_id(
+                request.worktree_path,
+                config=request.config,
+                agent_name=request.selected_agent,
+                scope=AgentSessionScope(issue_number=request.issue.number),
+            ),
+        )
+    )
+    return run_agent_until_committed(request_with_resume_session)
+
+
 def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResult:
     """Run the agent, recover failed verification, and return final checks.
 

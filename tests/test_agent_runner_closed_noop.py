@@ -72,7 +72,6 @@ def test_ready_issue_skips_publication_for_closed_no_change_result(
 ) -> None:
     """执行循环确认无改动完成后，ready Issue 处理器不得继续发布 PR。"""
     from backend.core.use_cases import agent_runner_issue_handlers as handlers
-    from backend.core.use_cases import run_agent_once
 
     github_client = FakeGitHubClient()
     issue = make_ready_issue()
@@ -106,7 +105,7 @@ def test_ready_issue_skips_publication_for_closed_no_change_result(
         captured.update(kwargs)
         return AgentCommitResult([], [], issue_closed_without_changes=True)
 
-    monkeypatch.setattr(run_agent_once, "run_agent_until_committed", _closed_no_change_result)
+    monkeypatch.setattr(execution_loop, "execute_agent_request", _closed_no_change_result)
     monkeypatch.setattr(
         handlers,
         "_finish_implementation_publication",
@@ -122,4 +121,6 @@ def test_ready_issue_skips_publication_for_closed_no_change_result(
         process_runner=FakeProcessRunner(),
     )
 
-    assert captured["github_client"] is github_client
+    request = captured["request"]
+    assert isinstance(request, execution_loop.AgentExecutionRequest)
+    assert request.github_client is github_client

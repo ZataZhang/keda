@@ -21,7 +21,7 @@ from backend.core.shared.models.agent_runner import (
 )
 from backend.core.shared.models.publish_stage import PublishStage
 from backend.core.use_cases import agent_runner_issue_handlers as handlers
-from backend.core.use_cases import run_agent_once
+from backend.core.use_cases import run_agent_execution_loop
 from backend.core.use_cases.agent_runner_direct_pr_label import resolve_publish_stage
 from backend.core.use_cases.agent_runner_direct_pr_round import (
     DirectPrPublicationCandidate,
@@ -354,7 +354,7 @@ def _forbid_builder(monkeypatch: pytest.MonkeyPatch) -> None:
     def reject_builder(**kwargs):
         pytest.fail("Published Direct PR recovery invoked the builder")
 
-    monkeypatch.setattr(run_agent_once, "run_agent_until_committed", reject_builder)
+    monkeypatch.setattr(run_agent_execution_loop, "execute_agent_request", reject_builder)
     monkeypatch.setattr(
         handlers, "arbitrate_first_claim", lambda **kwargs: SimpleNamespace(comment_id=999)
     )

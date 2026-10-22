@@ -136,7 +136,6 @@ from backend.core.use_cases.agent_runner_session_store import (
     AgentSessionScope,
     consume_agent_timeout_resume_attempt as consume_agent_timeout_resume_attempt,
     load_agent_session_record,
-    resolve_resumable_session_id,
     save_agent_session_record,
 )
 from backend.core.use_cases.agent_runner_stall_supervision import (
@@ -793,17 +792,39 @@ def run_agent_until_committed(
     model_selection: ModelSelection | None = None,
     publish_stage: PublishStage = PublishStage.NORMAL,
     repo_id: str | None = None,
-    github_client: IGitHubClient | None = None,
 ) -> AgentCommitResult:
-    """运行 Agent recovery 状态机并返回最终提交结果；可在 verifier 前回调发布 Draft PR。"""
+    """运行 Agent recovery 状态机并返回最终提交结果。
+
+    可在 verifier 前回调发布 Draft PR。
+
+    Args:
+        selected_agent: 执行实现阶段的 Agent 名称。
+        issue: 当前处理的 Issue。
+        worktree_path: Agent 执行所在的 Git worktree 路径。
+        config: Agent Runner 配置。
+        process_runner: 外部命令执行器。
+        before_sha: 执行前的 HEAD SHA。
+        expected_branch: 预期的 Issue 分支名。
+        prompt_override: 可选的首轮执行提示词覆盖内容。
+        on_attempt_recorded: 每次 attempt 记录完成后的回调。
+        on_agent_usage: 非 attempt 主体 Agent 调用用量的观测回调。
+        before_verifier_callback: 独立 verifier 启动前调用的回调。
+        model_selection: 实现阶段使用的模型选择；缺省时使用 Agent 配置。
+        publish_stage: 发布档位，用于决定执行期间适用的验证门禁。
+        repo_id: 稳定的仓库 registry id；缺省时从 worktree 推导。
+
+    Returns:
+        AgentCommitResult: 最终验证结果、attempt 历史及 verifier 结论。
+
+    Raises:
+        AgentRunnerAttemptError: Agent 执行遇到不可恢复错误或耗尽 recovery 次数。
+    """
     from backend.core.use_cases.run_agent_execution_loop import (
         AgentExecutionRequest,
-    )
-    from backend.core.use_cases.run_agent_execution_loop import (
-        run_agent_until_committed as run_execution_loop,
+        execute_agent_request,
     )
 
-    return run_execution_loop(
+    return execute_agent_request(
         AgentExecutionRequest(
             selected_agent=selected_agent,
             issue=issue,
@@ -818,15 +839,6 @@ def run_agent_until_committed(
             before_verifier_callback=before_verifier_callback,
             model_selection=model_selection,
             repo_id=repo_id,
-            github_client=github_client,
-            # 首轮续传：worktree 里留有本 Issue 上一轮的会话记录就说明这是"接着跑"
-            # （崩溃对账重新入队 / 部分进度续作），而不是新任务被历史会话污染。
-            resume_session_id=resolve_resumable_session_id(
-                worktree_path,
-                config=config,
-                agent_name=selected_agent,
-                scope=AgentSessionScope(issue_number=issue.number),
-            ),
             publish_stage=publish_stage,
         )
     )

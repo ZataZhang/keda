@@ -701,7 +701,8 @@ def _prepare_exhaustion_handler(
 ) -> dict[str, object]:
     """把 ``_process_ready_issue`` 打到"agent 耗尽 → checkpoint → 交接"这一步。
 
-    沿用仓库既有的补丁中枢：延迟导入的名字打在 ``run_agent_once`` 上,模块级名字打在
+    沿用仓库既有的补丁中枢：执行请求打在 ``run_agent_execution_loop`` 上，
+    checkpoint 延迟导入名打在 ``run_agent_once`` 上，模块级名字打在
     ``agent_runner_issue_handlers`` 上。``publish_changes`` 与
     ``format_failure_context_comment`` 打在交接模块
     ``agent_runner_failure_handoff`` 上（交接链路从 handlers 拆出后,函数在这
@@ -709,7 +710,7 @@ def _prepare_exhaustion_handler(
     ``require_prd_archived`` 取值。
     """
     from backend.core.use_cases import agent_runner_issue_handlers as handlers
-    from backend.core.use_cases import run_agent_once
+    from backend.core.use_cases import run_agent_execution_loop, run_agent_once
 
     monkeypatch.setattr(handlers, "_reuse_existing_local_commit", lambda *a, **k: None)
     monkeypatch.setattr(handlers, "create_or_reuse_worktree", lambda *a, **k: worktree_path)
@@ -719,7 +720,7 @@ def _prepare_exhaustion_handler(
     def _raise_exhausted(**_kwargs: object) -> None:
         raise failure_exc
 
-    monkeypatch.setattr(run_agent_once, "run_agent_until_committed", _raise_exhausted)
+    monkeypatch.setattr(run_agent_execution_loop, "execute_agent_request", _raise_exhausted)
 
     def _fake_checkpoint(*_args: object, **_kwargs: object) -> str | None:
         return checkpoint_sha
@@ -1169,7 +1170,7 @@ def test_exhaustion_with_only_forbidden_changes_publishes_nothing(
     才能抓到"禁改内容被误当安全快照推出去"这类缺陷。
     """
     from backend.core.use_cases import agent_runner_issue_handlers as handlers
-    from backend.core.use_cases import run_agent_once
+    from backend.core.use_cases import run_agent_execution_loop
     from backend.core.use_cases.run_agent_once import MaxRetriesExceededError
     from backend.infrastructure.process_runner import SubprocessRunner
     from tests.support.agent_runner import init_git_repo, run_git
@@ -1188,7 +1189,7 @@ def test_exhaustion_with_only_forbidden_changes_publishes_nothing(
     def _raise_exhausted(**_kwargs: object) -> None:
         raise MaxRetriesExceededError(_handoff_attempt_results(_VERIFIER_RED_DETAIL))
 
-    monkeypatch.setattr(run_agent_once, "run_agent_until_committed", _raise_exhausted)
+    monkeypatch.setattr(run_agent_execution_loop, "execute_agent_request", _raise_exhausted)
 
     publish_calls: list[dict[str, object]] = []
 

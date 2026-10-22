@@ -140,7 +140,7 @@ def test_started_checkpoint_trust_controls_actual_builder_stage(monkeypatch, tmp
     builder_stages = []
 
     def capture_builder(**arguments):
-        builder_stages.append(arguments["publish_stage"])
+        builder_stages.append(arguments["request"].publish_stage)
         raise RuntimeError("builder boundary captured")
 
     _patch_ready_handler(monkeypatch, run_agent=capture_builder)
