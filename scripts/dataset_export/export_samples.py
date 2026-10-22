@@ -41,7 +41,22 @@ PR_JSON_FIELDS = (
     "number,state,mergeCommit,headRefName,headRefOid,additions,deletions,changedFiles,commits"
 )
 # 自动巡检生成的 Issue 不是真实开发任务，不适合作为评测题。
+# 非 keda 来源：除了判定"已合并"的字段外，还要 PR 描述、关联 Issue、作者与合并时间。
+PR_DISCOVERY_FIELDS = (
+    f"{PR_JSON_FIELDS},title,body,baseRefName,mergedAt,closingIssuesReferences,author"
+)
+# 一次列出很多 PR 时带 commits/author 会超过 GitHub GraphQL 的节点上限，所以先列轻量字段筛选，
+# 再逐个取详情。
+PR_LIST_FIELDS = "number,headRefName,author"
+DEFAULT_PR_LIMIT = 100
+ORIGIN_KEDA_RUN = "keda_run"
+ORIGIN_GITHUB_PR = "github_pr"
+# 输入来源太弱、不能当评测题的来源：缺失，或只有 PR 描述（它描述的是"改了什么"，等于泄露答案）。
+WEAK_INPUT_PROVENANCES = frozenset({"missing", "pr_description"})
+ISSUE_BRANCH_PATTERN = re.compile(r"^issue-(\d+)$")
 PATROL_TITLE_PATTERN = re.compile("巡检|巡查")
+# Conventional Commits 的 docs / chore 类型：归档 PRD、同步模板这类维护动作，不是开发任务。
+MAINTENANCE_TITLE_PATTERN = re.compile(r"^(docs|chore)(\([^)]*\))?!?:")
 # (档位, 文件数上限, 增删行数上限)；超出最后一档记为 large。
 SIZE_BANDS = (("small", 5, 300), ("medium", 30, 3000))
 LARGE_SIZE_BAND = "large"
@@ -59,6 +74,8 @@ class ExportOptions:
     exclude_repo_patterns: tuple[str, ...] = DEFAULT_EXCLUDE_REPO_PATTERNS
     use_gh: bool = False
     home_path: Path | None = None
+    github_pr_repo_paths: tuple[Path, ...] = ()
+    pr_limit: int = DEFAULT_PR_LIMIT
 
 
 @dataclass
@@ -263,8 +280,12 @@ def classify_size_band(size: dict[str, int] | None) -> str | None:
 
 
 def classify_task_kind(title: str | None) -> str:
-    """巡检类 Issue 标为 ``patrol``，其余视为 ``development``。"""
-    return "patrol" if title and PATROL_TITLE_PATTERN.search(title) else "development"
+    """巡检类标为 ``patrol``，docs/chore 类提交标题标为 ``maintenance``，其余为 ``development``。"""
+    if title and PATROL_TITLE_PATTERN.search(title):
+        return "patrol"
+    if title and MAINTENANCE_TITLE_PATTERN.match(title):
+        return "maintenance"
+    return "development"
 
 
 def fetch_gh_json(*, repo_path: Path, args: list[str]) -> Any | None:
@@ -356,7 +377,7 @@ def classify_input(
 
 
 def is_eval_ready(*, labels: dict[str, Any], input_provenance: str) -> bool:
-    """能否作为评测题：PR 已合并、有提交、有输入、真实开发任务、规模适中，且已核实无 merge commit。
+    """能否作为评测题：PR 已合并、有提交、输入可信（非缺失、非仅 PR 描述）、真实开发任务、规模适中，且已核实无 merge commit。
 
     ``merge_commit_count`` 为 ``None``（提交对象不在本地）表示未核实，不算通过。
     """
@@ -364,7 +385,7 @@ def is_eval_ready(*, labels: dict[str, Any], input_provenance: str) -> bool:
         labels["resolved"]
         and labels["resolved_basis"] == RESOLVED_BASIS_PR_MERGED
         and labels["has_commits"]
-        and input_provenance != "missing"
+        and input_provenance not in WEAK_INPUT_PROVENANCES
         and labels["task_kind"] == "development"
         and labels["size_band"] in {name for name, _, _ in SIZE_BANDS}
         and labels["merge_commit_count"] == 0
@@ -459,6 +480,7 @@ def build_sample(
     return {
         "schema_version": SCHEMA_VERSION,
         "sample_id": f"{group.repo_id}#issue-{group.issue_number}",
+        "origin": ORIGIN_KEDA_RUN,
         "repo_id": group.repo_id,
         "alias_repo_ids": group.alias_repo_ids,
         "issue_number": group.issue_number,
@@ -535,7 +557,10 @@ def summarize_samples(samples: list[dict[str, Any]]) -> dict[str, int]:
         counts["resolved_by_merged_pr"] += (
             labels["resolved"] and labels["resolved_basis"] == RESOLVED_BASIS_PR_MERGED
         )
+        counts["origin_github_pr"] += sample["origin"] == ORIGIN_GITHUB_PR
+        counts["input_pr_description"] += sample["input"]["provenance"] == "pr_description"
         counts["patrol_issue"] += labels["task_kind"] == "patrol"
+        counts["maintenance_task"] += labels["task_kind"] == "maintenance"
         counts["unverified_history"] += labels["merge_commit_count"] is None
         counts["eval_ready"] += labels["eval_ready"]
     return dict(counts)
@@ -571,16 +596,155 @@ def merge_groups_by_repo_path(groups: list[IssueGroup]) -> list[IssueGroup]:
     return sorted(result, key=lambda group: (group.repo_id, group.issue_number))
 
 
+def discover_merged_pull_requests(*, repo_path: Path, limit: int) -> list[dict[str, Any]] | None:
+    """列出仓库最近已合并的 PR（只含筛选用的轻量字段）；``gh`` 不可用时返回 ``None``。"""
+    pull_requests = fetch_gh_json(
+        repo_path=repo_path,
+        args=[
+            "pr", "list", "--state", "merged", "--limit", str(limit),
+            "--json", PR_LIST_FIELDS,
+        ],
+    )  # fmt: skip
+    return pull_requests if isinstance(pull_requests, list) else None
+
+
+def fetch_pull_request_detail(*, repo_path: Path, number: int) -> dict[str, Any] | None:
+    """取单个 PR 的完整字段（提交链、规模、关联 Issue 等）；失败返回 ``None``。"""
+    detail = fetch_gh_json(
+        repo_path=repo_path,
+        args=["pr", "view", str(number), "--json", PR_DISCOVERY_FIELDS],
+    )
+    return detail if isinstance(detail, dict) else None
+
+
+def is_covered_by_keda(pull_request: dict[str, Any], *, covered_issue_numbers: set[int]) -> bool:
+    """PR 是否已作为 keda 运行样本导出（head 分支为 ``issue-N`` 且该 Issue 已有 keda 样本）。"""
+    matched = ISSUE_BRANCH_PATTERN.match(pull_request["headRefName"])
+    return bool(matched and int(matched.group(1)) in covered_issue_numbers)
+
+
+def resolve_pr_input(
+    pull_request: dict[str, Any], *, repo_path: Path
+) -> tuple[str, dict[str, Any], int | None]:
+    """取非 keda 样本的任务输入，返回 ``(provenance, 输入来源, 关联 Issue 编号)``。
+
+    有关联 Issue 且有正文时用 Issue 正文（事后抓取的现状，与 keda 路径的
+    ``verbatim_issue_body`` 同义）；否则退到 PR 标题与描述并标 ``pr_description``——
+    那是对"改了什么"的描述，不是任务本身，也不能当评测题。
+    """
+    for reference in pull_request.get("closingIssuesReferences") or []:
+        issue = fetch_gh_json(
+            repo_path=repo_path,
+            args=["issue", "view", str(reference["number"]), "--json", "title,body,url"],
+        )
+        if issue and issue.get("body"):
+            return "verbatim_issue_body", issue, int(reference["number"])
+    return "pr_description", pull_request, None
+
+
+def build_pull_request_sample(
+    pull_request: dict[str, Any], *, repo_path: Path, repo_slug: str
+) -> dict[str, Any]:
+    """把一个与 keda 无关的已合并 PR 还原成样本；没有尝试与轨迹，只有可核实的事实。"""
+    provenance, input_source, issue_number = resolve_pr_input(pull_request, repo_path=repo_path)
+    code = collect_pull_request_commits(repo_path=repo_path, pull_request=pull_request)
+    size = {
+        "files": pull_request["changedFiles"],
+        "additions": pull_request["additions"],
+        "deletions": pull_request["deletions"],
+    }
+    labels = {
+        "resolved": True,
+        "resolved_basis": RESOLVED_BASIS_PR_MERGED,
+        "task_kind": classify_task_kind(input_source.get("title")),
+        "size_band": classify_size_band(size),
+        "merge_commit_count": count_merge_commits(repo_path=repo_path, code=code),
+        "has_commits": bool(code["commits"]),
+        "has_evidence": False,
+        "has_preference_pair": False,
+    }
+    labels["eval_ready"] = is_eval_ready(labels=labels, input_provenance=provenance)
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "sample_id": f"{repo_slug}#pr-{pull_request['number']}",
+        "origin": ORIGIN_GITHUB_PR,
+        "repo_id": repo_slug,
+        "alias_repo_ids": [],
+        "issue_number": issue_number,
+        "input": {
+            "provenance": provenance,
+            "title": input_source.get("title"),
+            "body": input_source.get("body"),
+            "url": input_source.get("url"),
+            "edited_since_claim": None,
+        },
+        "code": {**code, "base_sha_source": "inferred"},
+        "pull_requests": [
+            {key: pull_request.get(key) for key in ("number", "state", "mergeCommit", "mergedAt")}
+        ],
+        "runs": [],
+        "attempts": [],
+        "invocations": [],
+        "evidence": {"present": False, "item_count": 0, "items_with_negative_control": 0},
+        "size": size,
+        "labels": labels,
+    }
+
+
+def export_github_pr_samples(
+    options: ExportOptions, *, covered_issues_by_path: dict[Path, set[int]]
+) -> list[dict[str, Any]]:
+    """为 ``--github-pr-repo`` 指定的本地仓库导出非 keda 的已合并 PR 样本。
+
+    已作为 keda 样本导出的 PR、机器人账号的 PR 都会跳过；``gh`` 不可用时该仓库整体跳过。
+    """
+    samples: list[dict[str, Any]] = []
+    for repo_path in options.github_pr_repo_paths:
+        repo_info = fetch_gh_json(
+            repo_path=repo_path, args=["repo", "view", "--json", "nameWithOwner"]
+        )
+        pull_requests = discover_merged_pull_requests(repo_path=repo_path, limit=options.pr_limit)
+        if not repo_info or pull_requests is None:
+            print(f"跳过 {repo_path}: gh 不可用或无法识别 GitHub 仓库", file=sys.stderr)
+            continue
+        covered_issue_numbers = covered_issues_by_path.get(repo_path.resolve(), set())
+        for pull_request in pull_requests:
+            if (pull_request.get("author") or {}).get("is_bot"):
+                continue
+            if is_covered_by_keda(pull_request, covered_issue_numbers=covered_issue_numbers):
+                continue
+            detail = fetch_pull_request_detail(repo_path=repo_path, number=pull_request["number"])
+            if detail is None:
+                print(f"跳过 PR #{pull_request['number']}: 取不到详情", file=sys.stderr)
+                continue
+            samples.append(
+                build_pull_request_sample(
+                    detail, repo_path=repo_path, repo_slug=repo_info["nameWithOwner"]
+                )
+            )
+    return samples
+
+
 def export_samples(options: ExportOptions) -> list[dict[str, Any]]:
     """执行一次完整导出并返回样本列表。"""
-    connection = open_readonly(options.db_path)
-    try:
-        groups = merge_groups_by_repo_path(load_issue_groups(connection, options=options))
-    finally:
-        connection.close()
-    return [
+    groups: list[IssueGroup] = []
+    if options.db_path.is_file():
+        connection = open_readonly(options.db_path)
+        try:
+            groups = merge_groups_by_repo_path(load_issue_groups(connection, options=options))
+        finally:
+            connection.close()
+    samples = [
         build_sample(group, repo_path=latest_repo_path(group), options=options) for group in groups
     ]
+    covered_issues_by_path: dict[Path, set[int]] = defaultdict(set)
+    for group in groups:
+        group_repo_path = latest_repo_path(group)
+        if group_repo_path is not None:
+            covered_issues_by_path[group_repo_path.resolve()].add(group.issue_number)
+    return samples + export_github_pr_samples(
+        options, covered_issues_by_path=covered_issues_by_path
+    )
 
 
 def parse_args(argv: list[str] | None) -> ExportOptions:
@@ -596,6 +760,16 @@ def parse_args(argv: list[str] | None) -> ExportOptions:
         help="排除的 repo_id 通配符，可重复；缺省排除测试/演示仓库",
     )
     parser.add_argument("--with-gh", action="store_true", help="调用 gh 补 Issue 原文与 PR")
+    parser.add_argument(
+        "--github-pr-repo",
+        action="append",
+        type=Path,
+        default=[],
+        help="额外导出该本地仓库中与 keda 无关的已合并 PR（需要 gh），可重复",
+    )
+    parser.add_argument(
+        "--pr-limit", type=int, default=DEFAULT_PR_LIMIT, help="每个仓库最多取多少个已合并 PR"
+    )
     namespace = parser.parse_args(argv)
     return ExportOptions(
         db_path=namespace.db,
@@ -603,13 +777,15 @@ def parse_args(argv: list[str] | None) -> ExportOptions:
         repo_ids=tuple(namespace.repo),
         exclude_repo_patterns=tuple(namespace.exclude_repo or DEFAULT_EXCLUDE_REPO_PATTERNS),
         use_gh=namespace.with_gh,
+        github_pr_repo_paths=tuple(namespace.github_pr_repo),
+        pr_limit=namespace.pr_limit,
     )
 
 
 def main(argv: list[str] | None = None) -> int:
     """命令行入口：写出 JSONL，并把统计摘要打印到 stderr。"""
     options = parse_args(argv)
-    if not options.db_path.is_file():
+    if not options.db_path.is_file() and not options.github_pr_repo_paths:
         print(f"数据库不存在: {options.db_path}", file=sys.stderr)
         return 2
     samples = export_samples(options)

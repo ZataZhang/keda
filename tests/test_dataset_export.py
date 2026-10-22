@@ -403,3 +403,155 @@ def test_issue_without_snapshot_exports_exactly_as_before(console_db: Path, tmp_
     assert sample["input"]["provenance"] == "title_only"
     assert sample["input"]["edited_since_claim"] is None
     assert sample["input"]["body"] is None
+
+
+def _fake_gh(
+    monkeypatch: pytest.MonkeyPatch, *, listed: list[dict], details: dict, issues: dict
+) -> None:
+    """按 gh 子命令路由的假 ``fetch_gh_json``：只回放给定数据，未预期的调用直接失败。"""
+
+    def fake_fetch_gh_json(*, repo_path: Path, args: list[str]):
+        if args[:2] == ["repo", "view"]:
+            return {"nameWithOwner": "owner/repo"}
+        if args[:2] == ["pr", "list"]:
+            return listed
+        if args[:2] == ["pr", "view"]:
+            return details.get(int(args[2]))
+        if args[:2] == ["issue", "view"]:
+            return issues.get(int(args[2]))
+        pytest.fail(f"unexpected gh call: {args}")
+
+    monkeypatch.setattr(export_module, "fetch_gh_json", fake_fetch_gh_json)
+
+
+def _github_pr(
+    sample_repo: Path, *, number: int, head: str, title: str, closing: list[int]
+) -> dict:
+    """基于 ``sample_repo`` 的真实提交构造一个已合并 PR 的详情。"""
+    detail = _pull_request_fixture(sample_repo, state="MERGED")
+    detail.update(
+        number=number,
+        headRefName=head,
+        title=title,
+        body="PR 描述：做了什么",
+        mergedAt="2026-10-01T00:00:00Z",
+        closingIssuesReferences=[{"number": n} for n in closing],
+        author={"login": "someone", "is_bot": False},
+        url=f"https://github.com/owner/repo/pull/{number}",
+    )
+    return detail
+
+
+def _pr_only_options(tmp_path: Path, repo_path: Path) -> ExportOptions:
+    return ExportOptions(
+        db_path=tmp_path / "missing.db",
+        output_path=None,
+        github_pr_repo_paths=(repo_path,),
+        home_path=tmp_path / "home",
+    )
+
+
+def test_pr_without_linked_issue_is_reconstructed_and_never_eval_ready(
+    sample_repo: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    detail = _github_pr(sample_repo, number=9, head="feat/x", title="feat: add x", closing=[])
+    _fake_gh(
+        monkeypatch,
+        listed=[{"number": 9, "headRefName": "feat/x", "author": {}}],
+        details={9: detail},
+        issues={},
+    )
+
+    samples = export_samples(_pr_only_options(tmp_path, sample_repo))
+
+    sample = samples[0]
+    assert sample["origin"] == "github_pr"
+    assert sample["sample_id"] == "owner/repo#pr-9"
+    assert sample["input"]["provenance"] == "pr_description"
+    assert sample["input"]["title"] == "feat: add x"
+    assert sample["code"]["source"] == "pull_request"
+    assert sample["runs"] == sample["attempts"] == []
+    assert sample["labels"]["has_preference_pair"] is False
+    assert sample["labels"]["eval_ready"] is False
+    assert summarize_samples(samples)["input_pr_description"] == 1
+
+
+def test_pr_with_linked_issue_uses_issue_body_and_can_be_eval_ready(
+    sample_repo: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    detail = _github_pr(sample_repo, number=9, head="feat/x", title="feat: add x", closing=[5])
+    issue = {
+        "title": "需求标题",
+        "body": "需求原文",
+        "url": "https://github.com/owner/repo/issues/5",
+    }
+    _fake_gh(
+        monkeypatch,
+        listed=[{"number": 9, "headRefName": "feat/x", "author": {}}],
+        details={9: detail},
+        issues={5: issue},
+    )
+
+    sample = export_samples(_pr_only_options(tmp_path, sample_repo))[0]
+
+    assert sample["input"]["provenance"] == "verbatim_issue_body"
+    assert sample["input"]["body"] == "需求原文"
+    assert sample["issue_number"] == 5
+    assert sample["labels"]["merge_commit_count"] == 0
+    assert sample["labels"]["eval_ready"] is True
+
+
+def test_bot_prs_and_prs_already_exported_from_keda_runs_are_skipped(
+    console_db: Path, sample_repo: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    keda_pr = _github_pr(sample_repo, number=9, head="issue-7", title="[Agent] fix", closing=[7])
+    listed = [
+        {"number": 9, "headRefName": "issue-7", "author": {"is_bot": False}},
+        {"number": 10, "headRefName": "dependabot/x", "author": {"is_bot": True}},
+        {"number": 11, "headRefName": "feat/y", "author": {"is_bot": False}},
+    ]
+    human_pr = {**keda_pr, "number": 11, "headRefName": "feat/y", "closingIssuesReferences": []}
+    _fake_gh(monkeypatch, listed=listed, details={9: keda_pr, 11: human_pr}, issues={})
+
+    samples = export_samples(
+        ExportOptions(
+            db_path=console_db,
+            output_path=None,
+            github_pr_repo_paths=(sample_repo,),
+            home_path=tmp_path / "home",
+        )
+    )
+
+    assert [s["sample_id"] for s in samples] == ["keda#issue-7", "owner/repo#pr-11"]
+    assert [s["origin"] for s in samples] == ["keda_run", "github_pr"]
+
+
+def test_pr_source_is_skipped_quietly_when_gh_is_unavailable(
+    sample_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    monkeypatch.setattr(export_module, "fetch_gh_json", lambda **_: None)
+
+    samples = export_samples(_pr_only_options(tmp_path, sample_repo))
+
+    assert samples == []
+    assert "gh 不可用" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("title", "expected"),
+    [
+        ("docs(prd): archive issue-209 PRD", "maintenance"),
+        ("chore(template): sync prd skill", "maintenance"),
+        ("chore: bump", "maintenance"),
+        ("feat(cli): add tokens command", "development"),
+        ("fix(agent-runner): stop preemption", "development"),
+        ("Stats 页 Token 用量补按 PRD 维度汇总", "development"),
+    ],
+)
+def test_conventional_commit_docs_and_chore_titles_are_maintenance(
+    title: str, expected: str
+) -> None:
+    assert classify_task_kind(title) == expected

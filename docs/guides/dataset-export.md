@@ -12,11 +12,32 @@ uv run python -m scripts.dataset_export --repo keda --with-gh --output samples.j
 
 默认排除 `rv*`、`process-runner-test`、`harness` 三类测试或演示仓库，可用 `--exclude-repo` 覆盖。
 
+## 来源：不只是 keda 跑过的任务
+
+样本带 `origin` 字段，说明它是怎么被发现的。数据集不应该只覆盖 keda 创建或执行的任务，所以支持多种来源，每种能还原的信息不同：
+
+| `origin` | 怎么发现 | 任务输入 | 有尝试与失败记录 |
+|---|---|---|---|
+| `keda_run` | `console.db` 里的运行记录 | 认领时快照 > 事后抓取的 Issue 原文 > 仅标题 | 有（可构成偏好对） |
+| `github_pr` | `--github-pr-repo <本地仓库>`：该仓库已合并、且不是 keda 导出过的 PR | 关联 Issue 的正文（`verbatim_issue_body`）；没有关联 Issue 时只有 PR 描述（`pr_description`） | 无 |
+
+```bash
+# 额外导出一个仓库里与 keda 无关的已合并 PR（需要 gh 已登录；可重复；不依赖 console.db）
+uv run python -m scripts.dataset_export --github-pr-repo ~/code/some-project --pr-limit 100 --output samples.jsonl
+```
+
+- 跳过机器人账号（如 Dependabot）的 PR，以及 head 分支为 `issue-N` 且该 Issue 已作为 `keda_run` 样本导出的 PR，避免重复。
+- **`pr_description` 不能当评测题**：PR 描述写的是"改了什么"，不是任务本身，等于泄露答案；这类样本只作重建记录保留，永远不计入 `eval_ready`。要让非 keda 的任务成为合格评测题，需要它有关联的 Issue（PR 描述里写 `Closes #N`）。
+- 非 keda 来源没有 attempt，所以 `has_preference_pair` 恒为 `false`，不能产出偏好对。
+- 为避开 GitHub GraphQL 的节点上限，先列出轻量信息筛选，再逐个取剩下 PR 的详情；每个 PR 至少一次网络调用（有关联 Issue 再加一次），80 个 PR 大约一分多钟。
+- 尚未支持：没有 PR 的普通提交，以及 Agent 交互会话记录（Claude Code、codex 的会话，里面有当时逐字的原始输入和完整轨迹，需要先做好脱敏）。
+
 ## 样本字段
 
 | 字段 | 来源 | 说明 |
 |---|---|---|
-| `input.provenance` | 推断 | `snapshot_at_claim`（有认领时快照，见[认领时的任务输入快照](agent-runner.md)）/ `verbatim_issue_body`（`--with-gh` 事后取到原文）/ `title_only`（仅 `run_records.issue_title`）/ `missing`。**拿不到原文不会伪装成原文**；事后取到的原文只是"导出时刻"的样子，不一定是 Agent 当初看到的。 |
+| `origin` | 来源 | `keda_run` / `github_pr`，见上一节。 |
+| `input.provenance` | 推断 | `snapshot_at_claim`（有认领时快照，见[认领时的任务输入快照](agent-runner.md)）/ `pr_description`（仅 `github_pr`，只有 PR 描述，输入偏弱）/ `verbatim_issue_body`（`--with-gh` 事后取到原文）/ `title_only`（仅 `run_records.issue_title`）/ `missing`。**拿不到原文不会伪装成原文**；事后取到的原文只是"导出时刻"的样子，不一定是 Agent 当初看到的。 |
 | `input.title` / `body` / `url` | 最早快照，其次 `gh`，其次 `run_records` | 有快照时取**最早一条**（Agent 认领时读到的）；没有快照的旧 Issue 行为不变。 |
 | `input.edited_since_claim` | 快照与 GitHub 现状比对 | 认领后正文是否被改过：`true` / `false`；没有快照无从判断时为 `null`。最新已知正文优先取 GitHub 现状（`--with-gh`），否则取最后一条快照。 |
 | `code` | PR（`--with-gh`）或本地 `issue-N` 分支 | `source` 为 `pull_request` 时以 PR 的提交链为准（`final_sha` 是 PR head；`base_sha` 默认是第一个 PR 提交的父提交，**有认领时快照则改用快照里记录的分叉点**，并在 `base_sha_source` 标明 `snapshot` / `inferred`）；否则退回本地分支（与默认分支的 merge-base 到分支末端）。本地分支可能落后于 PR 后续推送，所以有 gh 时不用它。两者都没有时为 `null`。 |
@@ -33,7 +54,7 @@ uv run python -m scripts.dataset_export --repo keda --with-gh --output samples.j
 | 标签 | 含义 |
 |---|---|
 | `resolved` / `resolved_basis` | `resolved_basis=pr_merged` 时表示关联 PR 已合并（可信）；`run_completed` 只表示 runner 跑完，**不代表已合并**，仅在拿不到 PR 时作兜底。 |
-| `task_kind` | 标题含"巡检/巡查"的自动巡检 Issue 为 `patrol`，其余为 `development`。 |
+| `task_kind` | 标题含"巡检/巡查"的自动巡检为 `patrol`；Conventional Commits 的 `docs` / `chore` 类标题（归档 PRD、同步模板等）为 `maintenance`；其余为 `development`。只有 `development` 才可能 `eval_ready`。 |
 | `size_band` | `small`（≤5 文件且 ≤300 行）/ `medium`（≤30 文件且 ≤3000 行）/ `large`；规模未知为 `null`。 |
 | `merge_commit_count` | base..final 间的 merge commit 数；非 0 说明混入了别的分支的改动；提交对象不在本地时为 `null`（未核实）。 |
 | `has_commits` / `has_evidence` | 有提交链 / 有 `evidence.json`。 |
@@ -42,7 +63,7 @@ uv run python -m scripts.dataset_export --repo keda --with-gh --output samples.j
 
 ## 摘要中的 `eval_ready`
 
-同时满足以下条件的样本：PR 已合并（`resolved_basis=pr_merged`）、有提交、输入不是 `missing`、`task_kind=development`、`size_band` 不是 `large`、`merge_commit_count` 为 0（`null` 即未核实，不算通过，会计入摘要里的 `unverified_history`）。巡检类样本仍会出现在输出里（便于统计），只是不计入 `eval_ready`。**不加 `--with-gh` 时 `eval_ready` 恒为 0**，因为没有 PR 合并状态就无法确认任务真的解决了。评测集还需要每个样本有 `check_recipe`，这一步目前仍需人工补。
+同时满足以下条件的样本：PR 已合并（`resolved_basis=pr_merged`）、有提交、输入不是 `missing` 也不是仅 `pr_description`、`task_kind=development`、`size_band` 不是 `large`、`merge_commit_count` 为 0（`null` 即未核实，不算通过，会计入摘要里的 `unverified_history`）。巡检类样本仍会出现在输出里（便于统计），只是不计入 `eval_ready`。**不加 `--with-gh` 时 `eval_ready` 恒为 0**，因为没有 PR 合并状态就无法确认任务真的解决了。评测集还需要每个样本有 `check_recipe`，这一步目前仍需人工补。
 
 ## 去重
 
