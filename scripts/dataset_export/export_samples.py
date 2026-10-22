@@ -932,7 +932,7 @@ def export_agent_session_samples(options: ExportOptions) -> list[dict[str, Any]]
     return samples
 
 
-def _sample_repo_slug(sample: dict[str, Any]) -> str | None:
+def sample_repo_slug(sample: dict[str, Any]) -> str | None:
     """样本所属 GitHub 仓库的 ``owner/repo``；keda 运行样本从 Issue 链接里取，取不到为 ``None``。"""
     if sample["origin"] != ORIGIN_KEDA_RUN:
         return sample["repo_id"]
@@ -948,7 +948,7 @@ def link_sessions_to_pull_requests(samples: list[dict[str, Any]]) -> None:
     """
     targets: dict[tuple[str, int], dict[str, Any]] = {}
     for sample in samples:
-        slug = _sample_repo_slug(sample)
+        slug = sample_repo_slug(sample)
         if sample["origin"] == ORIGIN_AGENT_SESSION or slug is None:
             continue
         for pull_request in sample["pull_requests"] or []:

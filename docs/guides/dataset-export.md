@@ -104,6 +104,20 @@ uv run python -m scripts.dataset_export --commits-repo ~/code/proj --curation-di
 
 **待补全清单**（`--curation-worklist`）：每行是一个输入偏弱、开发类、有提交、没被排除的样本，带上已脱敏的当前输入、提交主题、起点与终点、规模和链接，足够让人或 Agent 写出不泄露实现方式的任务描述。清单里没有代码本身。
 
+给出本地仓库参数（`--commits-repo` / `--github-pr-repo` / `--agent-sessions-repo` / `--codex-sessions-repo` 任一）后，对应仓库的条目还会带上这些**提示**（不是结论，由补全员或人最终判断）：
+
+| 字段 | 内容 | 用来判断什么 |
+|---|---|---|
+| `change_context.changed_files` / `changed_file_count` | 改动的文件（最多 60 个）与总数 | 题目范围有多大 |
+| `change_context.files_by_area` | 按"前两级目录"分组的文件数 | 是否夹带了与主题无关的改动（区域五花八门往往就是夹带） |
+| `change_context.test_files` / `new_files` | 改动的测试文件；新增的非测试文件 | 有没有测试、加了哪些新模块 |
+| `change_context.new_symbols_referenced_by_tests` | 这次改动**新增**的函数、类、常量、模块名中，被测试新增行引用到的 | 测试是否依赖实现细节 |
+| `change_context.check_recipe_hint` | `tests_use_existing_entry_points`（测试只走已有入口，可考虑用测试判分）/ `tests_use_new_symbols`（测试直接引用新增符号，任务描述又不能写出这些名字，用测试判分对做题的人不公平，通常不要填 `check_recipe`）/ `no_tests` / `only_test_changes`（只改了测试，通常不构成一道题） | 能不能填 `check_recipe` |
+| `closing_issue_numbers` | 从提交主题、提交正文或 PR 描述里解析出的 `Closes/Fixes/Resolves #N` | 原始需求可能写在哪个 Issue |
+| `closing_issues` | 仅在同时带 `--with-gh` 时：这些 Issue 的标题与正文（正文截断到 4000 字符） | 大改动的原始需求 |
+
+符号依赖靠对 diff 的文本匹配：会漏（比如通过反射间接引用）也会误报（同名的已有符号），所以只当提示。在 keda 自己的 10 个试跑样本上，提示与补全员人工判断的"能否用测试判分"完全一致（8 个非排除样本：2 个能、6 个依赖新增符号）。
+
 **补全记录**是 `--curation-dir` 目录下的 `*.jsonl`，每行一条，只追加：
 
 ```json

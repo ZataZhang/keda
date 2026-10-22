@@ -25,12 +25,22 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from scripts.dataset_export.export_samples import WEAK_INPUT_PROVENANCES, is_eval_ready
+from scripts.dataset_export.export_samples import (
+    WEAK_INPUT_PROVENANCES,
+    is_eval_ready,
+    sample_repo_slug,
+)
 from scripts.dataset_export.redaction import redact_text
+from scripts.dataset_export.worklist_context import (
+    collect_change_context,
+    fetch_closing_issues,
+    parse_closing_issue_numbers,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -210,35 +220,55 @@ def needs_curation(sample: dict[str, Any]) -> bool:
     )
 
 
-def build_curation_worklist(samples: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def build_curation_worklist(
+    samples: list[dict[str, Any]],
+    *,
+    repo_paths: Mapping[str, Path] | None = None,
+    use_gh: bool = False,
+) -> list[dict[str, Any]]:
     """生成待补全清单：每条带足够的上下文，交给人或更强的 Agent 写出任务描述。
 
-    清单里是已脱敏的输入与提交主题，不含代码本身；补全记录写回 ``--curation-dir`` 即可。
+    基本信息是已脱敏的输入与提交主题。给出 ``repo_paths``（``owner/repo`` 到本地路径）后，
+    每条再带上"改动上下文"（改了哪些文件、按区域分组、测试是否依赖新增符号、``check_recipe``
+    提示），以及提交里 ``Closes #N`` 引用的 Issue 编号；``use_gh`` 时再取这些 Issue 的正文。
+    清单里没有代码本身；补全记录写回 ``--curation-dir`` 即可。
     """
     worklist: list[dict[str, Any]] = []
     for sample in samples:
         if not needs_curation(sample):
             continue
         code = sample.get("code") or {}
-        worklist.append(
-            {
-                "sample_id": sample["sample_id"],
-                "origin": sample["origin"],
-                "repo_id": sample["repo_id"],
-                "current_input": {
-                    "provenance": sample["input"]["provenance"],
-                    "title": sample["input"].get("title"),
-                    "body": sample["input"].get("body"),
-                },
-                "commit_subjects": [
-                    commit["subject"]
-                    for commit in code.get("commits", [])[:WORKLIST_MAX_COMMIT_SUBJECTS]
-                ],
-                "base_sha": code.get("base_sha"),
-                "final_sha": code.get("final_sha"),
-                "size": sample.get("size"),
-                "linked_sample_ids": (sample.get("session") or {}).get("linked_sample_ids", []),
-                "linked_session_ids": sample.get("linked_session_ids", []),
-            }
+        commit_subjects = [
+            commit["subject"] for commit in code.get("commits", [])[:WORKLIST_MAX_COMMIT_SUBJECTS]
+        ]
+        item: dict[str, Any] = {
+            "sample_id": sample["sample_id"],
+            "origin": sample["origin"],
+            "repo_id": sample["repo_id"],
+            "current_input": {
+                "provenance": sample["input"]["provenance"],
+                "title": sample["input"].get("title"),
+                "body": sample["input"].get("body"),
+            },
+            "commit_subjects": commit_subjects,
+            "base_sha": code.get("base_sha"),
+            "final_sha": code.get("final_sha"),
+            "size": sample.get("size"),
+            "linked_sample_ids": (sample.get("session") or {}).get("linked_sample_ids", []),
+            "linked_session_ids": sample.get("linked_session_ids", []),
+        }
+        repo_path = (repo_paths or {}).get(sample_repo_slug(sample) or "")
+        closing_numbers = parse_closing_issue_numbers(
+            [*commit_subjects, sample["input"].get("body")]
         )
+        item["closing_issue_numbers"] = closing_numbers
+        if repo_path is not None and code.get("base_sha") and code.get("final_sha"):
+            item["change_context"] = collect_change_context(
+                repo_path=repo_path, base_sha=code["base_sha"], final_sha=code["final_sha"]
+            )
+            if use_gh and closing_numbers:
+                item["closing_issues"] = fetch_closing_issues(
+                    repo_path=repo_path, numbers=closing_numbers
+                )
+        worklist.append(item)
     return worklist

@@ -16,6 +16,7 @@ from scripts.dataset_export.export_samples import (
     DEFAULT_PR_LIMIT,
     ExportOptions,
     export_samples,
+    resolve_repo_slug,
     summarize_samples,
 )
 
@@ -125,7 +126,16 @@ def main(argv: list[str] | None = None) -> int:
     else:
         sys.stdout.write(lines)
     if options.worklist_path:
-        worklist = build_curation_worklist(samples)
+        repo_paths = {
+            resolve_repo_slug(path): path
+            for path in (
+                *options.commit_repo_paths,
+                *options.github_pr_repo_paths,
+                *options.agent_session_repo_paths,
+                *options.codex_session_repo_paths,
+            )
+        }
+        worklist = build_curation_worklist(samples, repo_paths=repo_paths, use_gh=options.use_gh)
         options.worklist_path.write_text(
             "".join(json.dumps(item, ensure_ascii=False) + "\n" for item in worklist),
             encoding="utf-8",
