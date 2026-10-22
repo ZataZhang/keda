@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from backend.core.use_cases import agent_runner_issue_snapshot as issue_snapshot
+from scripts.dataset_export import agent_sessions
 
 SCHEMA_VERSION = 1
 DEFAULT_DB_PATH = Path.home() / ".kedacode" / "console.db"
@@ -51,8 +52,12 @@ PR_LIST_FIELDS = "number,headRefName,author"
 DEFAULT_PR_LIMIT = 100
 ORIGIN_KEDA_RUN = "keda_run"
 ORIGIN_GITHUB_PR = "github_pr"
+ORIGIN_AGENT_SESSION = "agent_session"
+GITHUB_REMOTE_PATTERN = re.compile(r"github\.com(?::\d+)?[:/]([^/\s]+/[^/\s]+?)(?:\.git)?$")
+GITHUB_URL_REPO_PATTERN = re.compile(r"github\.com/([^/\s]+/[^/\s]+)/(?:issues|pull)/\d+")
 # 输入来源太弱、不能当评测题的来源：缺失，或只有 PR 描述（它描述的是"改了什么"，等于泄露答案）。
-WEAK_INPUT_PROVENANCES = frozenset({"missing", "pr_description"})
+# 会话首句是对话式的（"你看一下这个"），不是任务规格，同样只能留给后续整理。
+WEAK_INPUT_PROVENANCES = frozenset({"missing", "pr_description", "session_first_prompt"})
 ISSUE_BRANCH_PATTERN = re.compile(r"^issue-(\d+)$")
 PATROL_TITLE_PATTERN = re.compile("巡检|巡查")
 # Conventional Commits 的 docs / chore 类型：归档 PRD、同步模板这类维护动作，不是开发任务。
@@ -76,6 +81,8 @@ class ExportOptions:
     home_path: Path | None = None
     github_pr_repo_paths: tuple[Path, ...] = ()
     pr_limit: int = DEFAULT_PR_LIMIT
+    agent_session_repo_paths: tuple[Path, ...] = ()
+    sessions_root: Path | None = None
 
 
 @dataclass
@@ -558,6 +565,7 @@ def summarize_samples(samples: list[dict[str, Any]]) -> dict[str, int]:
             labels["resolved"] and labels["resolved_basis"] == RESOLVED_BASIS_PR_MERGED
         )
         counts["origin_github_pr"] += sample["origin"] == ORIGIN_GITHUB_PR
+        counts["origin_agent_session"] += sample["origin"] == ORIGIN_AGENT_SESSION
         counts["input_pr_description"] += sample["input"]["provenance"] == "pr_description"
         counts["patrol_issue"] += labels["task_kind"] == "patrol"
         counts["maintenance_task"] += labels["task_kind"] == "maintenance"
@@ -725,6 +733,179 @@ def export_github_pr_samples(
     return samples
 
 
+def resolve_repo_slug(repo_path: Path) -> str:
+    """从 git 远程地址解析 ``owner/repo``（不联网）；解析不出时退回 ``local:<目录名>``。"""
+    remote_name = (run_git(repo_path=repo_path, args=["remote"]) or "").splitlines()
+    remote_url = (
+        run_git(repo_path=repo_path, args=["remote", "get-url", remote_name[0]])
+        if remote_name
+        else None
+    )
+    matched = GITHUB_REMOTE_PATTERN.search(remote_url or "")
+    return matched.group(1) if matched else f"local:{repo_path.name}"
+
+
+def resolve_session_commits(
+    parsed: agent_sessions.ParsedSession, *, repo_path: Path
+) -> dict[str, Any] | None:
+    """把会话里记录的提交哈希对照本地 git：能解析的按会话内顺序组成提交链，全都解析不出返回 ``None``。
+
+    重写历史（rebase、amend）后的旧哈希会解析失败，这类提交直接丢弃而不是猜。
+    """
+    resolved_shas = [
+        resolved
+        for sha in parsed.commit_shas
+        if (
+            resolved := run_git(
+                repo_path=repo_path, args=["rev-parse", "--verify", "--quiet", f"{sha}^{{commit}}"]
+            )
+        )
+    ]
+    if not resolved_shas:
+        return None
+    return {
+        "source": "session_transcript",
+        "branch": parsed.git_branch,
+        "base_sha": run_git(
+            repo_path=repo_path, args=["rev-parse", "--verify", "--quiet", f"{resolved_shas[0]}^"]
+        ),
+        "final_sha": resolved_shas[-1],
+        "commits": [
+            {
+                "sha": sha,
+                "subject": run_git(repo_path=repo_path, args=["log", "-1", "--format=%s", sha])
+                or "",
+            }
+            for sha in resolved_shas
+        ],
+        "base_sha_source": "inferred",
+    }
+
+
+def build_session_sample(
+    parsed: agent_sessions.ParsedSession, *, repo_path: Path, repo_slug: str
+) -> dict[str, Any] | None:
+    """把一个真人会话还原成样本；会话没有可对照的提交时不构成样本，返回 ``None``。"""
+    code = resolve_session_commits(parsed, repo_path=repo_path)
+    if code is None:
+        return None
+    size = measure_local_diff(repo_path=repo_path, code=code)
+    default_branch = find_base_branch(repo_path=repo_path)
+    on_default_branch = bool(
+        default_branch
+        and run_git(
+            repo_path=repo_path,
+            args=["merge-base", "--is-ancestor", code["final_sha"], default_branch],
+        )
+        is not None
+    )
+    labels = {
+        "resolved": on_default_branch,
+        "resolved_basis": "on_default_branch",
+        "task_kind": classify_task_kind(None),
+        "size_band": classify_size_band(size),
+        "merge_commit_count": count_merge_commits(repo_path=repo_path, code=code),
+        "has_commits": True,
+        "has_evidence": False,
+        "has_preference_pair": False,
+    }
+    labels["eval_ready"] = is_eval_ready(labels=labels, input_provenance="session_first_prompt")
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "sample_id": f"{repo_slug}#session-{parsed.session_id[:8]}",
+        "origin": ORIGIN_AGENT_SESSION,
+        "repo_id": repo_slug,
+        "alias_repo_ids": [],
+        "issue_number": None,
+        "input": {
+            "provenance": "session_first_prompt",
+            "title": None,
+            "url": None,
+            "edited_since_claim": None,
+            **agent_sessions.redact_first_prompt(parsed.first_prompt),
+        },
+        "code": code,
+        "pull_requests": [],
+        "runs": [],
+        "attempts": [],
+        "invocations": [],
+        "evidence": {"present": False, "item_count": 0, "items_with_negative_control": 0},
+        "size": size,
+        "session": {
+            "id": parsed.session_id,
+            "entrypoint": parsed.entrypoint,
+            "started_at": parsed.started_at,
+            "ended_at": parsed.ended_at,
+            "human_turns": parsed.human_turns,
+            "models": parsed.models,
+            "git_branch": parsed.git_branch,
+            "linked_prs": parsed.pr_links,
+        },
+        "labels": labels,
+    }
+
+
+def export_agent_session_samples(options: ExportOptions) -> list[dict[str, Any]]:
+    """为 ``--agent-sessions-repo`` 指定的仓库导出真人 Claude Code 会话样本。"""
+    samples: list[dict[str, Any]] = []
+    for repo_path in options.agent_session_repo_paths:
+        project_dir = agent_sessions.claude_project_dir(
+            repo_path=repo_path, projects_root=options.sessions_root
+        )
+        repo_slug = resolve_repo_slug(repo_path)
+        session_files = sorted(project_dir.glob("*.jsonl"))
+        human_sessions = [
+            parse_result
+            for path in session_files
+            if (parse_result := agent_sessions.parse_session_file(path))
+        ]
+        built = [
+            sample
+            for parsed in human_sessions
+            if (sample := build_session_sample(parsed, repo_path=repo_path, repo_slug=repo_slug))
+        ]
+        print(
+            f"{repo_path}: 会话文件 {len(session_files)}，真人会话 {len(human_sessions)}，"
+            f"有可对照提交 {len(built)}",
+            file=sys.stderr,
+        )
+        samples.extend(built)
+    return samples
+
+
+def _sample_repo_slug(sample: dict[str, Any]) -> str | None:
+    """样本所属 GitHub 仓库的 ``owner/repo``；keda 运行样本从 Issue 链接里取，取不到为 ``None``。"""
+    if sample["origin"] != ORIGIN_KEDA_RUN:
+        return sample["repo_id"]
+    matched = GITHUB_URL_REPO_PATTERN.search(sample["input"].get("url") or "")
+    return matched.group(1) if matched else None
+
+
+def link_sessions_to_pull_requests(samples: list[dict[str, Any]]) -> None:
+    """用会话里的 ``pr-link`` 把同一份工作的不同视角互相链接。
+
+    会话是原始首句，PR 样本和 keda 运行样本是可核实的事实；链上之后可以把"当时说了什么"和
+    "最后做成了什么"放在一起看。keda 运行样本只有带 ``--with-gh`` 时才有 PR 列表可供匹配。
+    """
+    targets: dict[tuple[str, int], dict[str, Any]] = {}
+    for sample in samples:
+        slug = _sample_repo_slug(sample)
+        if sample["origin"] == ORIGIN_AGENT_SESSION or slug is None:
+            continue
+        for pull_request in sample["pull_requests"] or []:
+            targets[(slug, pull_request["number"])] = sample
+    for sample in samples:
+        if sample["origin"] != ORIGIN_AGENT_SESSION:
+            continue
+        linked_sample_ids: list[str] = []
+        for link in sample["session"]["linked_prs"]:
+            target = targets.get((sample["repo_id"], link["number"]))
+            if target is not None and target["sample_id"] not in linked_sample_ids:
+                target.setdefault("linked_session_ids", []).append(sample["session"]["id"])
+                linked_sample_ids.append(target["sample_id"])
+        sample["session"]["linked_sample_ids"] = linked_sample_ids
+
+
 def export_samples(options: ExportOptions) -> list[dict[str, Any]]:
     """执行一次完整导出并返回样本列表。"""
     groups: list[IssueGroup] = []
@@ -742,9 +923,10 @@ def export_samples(options: ExportOptions) -> list[dict[str, Any]]:
         group_repo_path = latest_repo_path(group)
         if group_repo_path is not None:
             covered_issues_by_path[group_repo_path.resolve()].add(group.issue_number)
-    return samples + export_github_pr_samples(
-        options, covered_issues_by_path=covered_issues_by_path
-    )
+    samples += export_github_pr_samples(options, covered_issues_by_path=covered_issues_by_path)
+    samples += export_agent_session_samples(options)
+    link_sessions_to_pull_requests(samples)
+    return samples
 
 
 def parse_args(argv: list[str] | None) -> ExportOptions:
@@ -770,6 +952,16 @@ def parse_args(argv: list[str] | None) -> ExportOptions:
     parser.add_argument(
         "--pr-limit", type=int, default=DEFAULT_PR_LIMIT, help="每个仓库最多取多少个已合并 PR"
     )
+    parser.add_argument(
+        "--agent-sessions-repo",
+        action="append",
+        type=Path,
+        default=[],
+        help="额外导出该本地仓库的真人 Claude Code 会话（首句会脱敏；需显式开启），可重复",
+    )
+    parser.add_argument(
+        "--sessions-root", type=Path, help="Claude Code 会话根目录，缺省 ~/.claude/projects"
+    )
     namespace = parser.parse_args(argv)
     return ExportOptions(
         db_path=namespace.db,
@@ -779,13 +971,16 @@ def parse_args(argv: list[str] | None) -> ExportOptions:
         use_gh=namespace.with_gh,
         github_pr_repo_paths=tuple(namespace.github_pr_repo),
         pr_limit=namespace.pr_limit,
+        agent_session_repo_paths=tuple(namespace.agent_sessions_repo),
+        sessions_root=namespace.sessions_root,
     )
 
 
 def main(argv: list[str] | None = None) -> int:
     """命令行入口：写出 JSONL，并把统计摘要打印到 stderr。"""
     options = parse_args(argv)
-    if not options.db_path.is_file() and not options.github_pr_repo_paths:
+    has_extra_sources = options.github_pr_repo_paths or options.agent_session_repo_paths
+    if not options.db_path.is_file() and not has_extra_sources:
         print(f"数据库不存在: {options.db_path}", file=sys.stderr)
         return 2
     samples = export_samples(options)

@@ -20,6 +20,7 @@ uv run python -m scripts.dataset_export --repo keda --with-gh --output samples.j
 |---|---|---|---|
 | `keda_run` | `console.db` 里的运行记录 | 认领时快照 > 事后抓取的 Issue 原文 > 仅标题 | 有（可构成偏好对） |
 | `github_pr` | `--github-pr-repo <本地仓库>`：该仓库已合并、且不是 keda 导出过的 PR | 关联 Issue 的正文（`verbatim_issue_body`）；没有关联 Issue 时只有 PR 描述（`pr_description`） | 无 |
+| `agent_session` | `--agent-sessions-repo <本地仓库>`：该仓库的真人 Claude Code 会话 | 会话里用户**逐字**的首句，脱敏后导出（`session_first_prompt`） | 无（不导出完整轨迹） |
 
 ```bash
 # 额外导出一个仓库里与 keda 无关的已合并 PR（需要 gh 已登录；可重复；不依赖 console.db）
@@ -30,14 +31,36 @@ uv run python -m scripts.dataset_export --github-pr-repo ~/code/some-project --p
 - **`pr_description` 不能当评测题**：PR 描述写的是"改了什么"，不是任务本身，等于泄露答案；这类样本只作重建记录保留，永远不计入 `eval_ready`。要让非 keda 的任务成为合格评测题，需要它有关联的 Issue（PR 描述里写 `Closes #N`）。
 - 非 keda 来源没有 attempt，所以 `has_preference_pair` 恒为 `false`，不能产出偏好对。
 - 为避开 GitHub GraphQL 的节点上限，先列出轻量信息筛选，再逐个取剩下 PR 的详情；每个 PR 至少一次网络调用（有关联 Issue 再加一次），80 个 PR 大约一分多钟。
-- 尚未支持：没有 PR 的普通提交，以及 Agent 交互会话记录（Claude Code、codex 的会话，里面有当时逐字的原始输入和完整轨迹，需要先做好脱敏）。
+- 尚未支持：没有 PR 也没有会话记录的普通提交；codex 的会话记录。
+
+### 会话记录（`agent_session`）
+
+交互式会话的 jsonl 里有当时逐字的用户首句、会话期间做过的提交，以及会话与 PR 的链接（`pr-link`）。这是 keda 之外最接近"原始输入"的数据，也最敏感，所以**必须显式开启**：
+
+```bash
+uv run python -m scripts.dataset_export --agent-sessions-repo ~/code/some-project --output samples.jsonl
+```
+
+- 只读该仓库对应的会话目录（`~/.claude/projects/<仓库绝对路径，非字母数字换成 ->`，可用 `--sessions-root` 改根目录）。
+- **只取真人会话**：`entrypoint=sdk-cli` 的程序化会话（keda runner、verifier、探针）一律排除——它们已经是 `keda_run` 样本。斜杠命令注入、子代理、元消息也不算用户首句。
+- **只有能对上本地 git 的会话才构成样本**：从 `git commit` 的工具输出里取提交哈希，再对照本地仓库；改写历史（rebase、amend）后哈希对不上的提交直接丢弃，不猜。没有任何可对照提交的会话（纯讨论、纯排查）不导出。
+- `code.base_sha` 是第一个提交的父提交，`final_sha` 是最后一个提交；`resolved` 表示 `final_sha` 已在默认分支上（`resolved_basis=on_default_branch`）。
+- **输入永远偏弱，永远不计入 `eval_ready`**：首句往往是对话式的（"你看一下这个"），不是任务规格。样本只是原始输入的事实记录，是否能当题由后续人工与更强的 Agent 判断。
+- **不导出完整轨迹，也不带本机路径**；`session` 里只有会话 id、入口、起止时间、真人发言轮数、使用的模型、分支和 `linked_prs`。首句超过 2 万字符会截断并标 `truncated`。
+- 与其他来源互相链接：会话里的 `pr-link` 若能对上 `github_pr` 样本或带 `--with-gh` 的 `keda_run` 样本，会话样本的 `session.linked_sample_ids` 列出对应样本，对方样本的 `linked_session_ids` 列出会话 id。这样可以把"当时说了什么"和"最后做成了什么"放在一起看。
+
+#### 脱敏的边界
+
+首句经基于模式的脱敏：私钥块、`sk-`/`ghp_`/`AKIA`/`xox` 等常见令牌、`Bearer`、JWT、`api_key=…`/`password: …` 这类赋值、邮箱，以及 `/Users/<name>`、`/home/<name>` 家目录路径（替换成 `~`）。`input.redaction_count` 记录命中次数，`input.redaction_reviewed` 恒为 `false`。
+
+**这只是模式匹配，不保证抓全**（比如自然语言里说出的口令、内部系统名、客户名都抓不到）。发布或分享数据集之前必须人工抽查 `input.body`。
 
 ## 样本字段
 
 | 字段 | 来源 | 说明 |
 |---|---|---|
-| `origin` | 来源 | `keda_run` / `github_pr`，见上一节。 |
-| `input.provenance` | 推断 | `snapshot_at_claim`（有认领时快照，见[认领时的任务输入快照](agent-runner.md)）/ `pr_description`（仅 `github_pr`，只有 PR 描述，输入偏弱）/ `verbatim_issue_body`（`--with-gh` 事后取到原文）/ `title_only`（仅 `run_records.issue_title`）/ `missing`。**拿不到原文不会伪装成原文**；事后取到的原文只是"导出时刻"的样子，不一定是 Agent 当初看到的。 |
+| `origin` | 来源 | `keda_run` / `github_pr` / `agent_session`，见上一节。 |
+| `input.provenance` | 推断 | `snapshot_at_claim`（有认领时快照，见[认领时的任务输入快照](agent-runner.md)）/ `pr_description`（仅 `github_pr`，只有 PR 描述，输入偏弱）/ `session_first_prompt`（仅 `agent_session`，真人会话首句，输入偏弱）/ `verbatim_issue_body`（`--with-gh` 事后取到原文）/ `title_only`（仅 `run_records.issue_title`）/ `missing`。**拿不到原文不会伪装成原文**；事后取到的原文只是"导出时刻"的样子，不一定是 Agent 当初看到的。 |
 | `input.title` / `body` / `url` | 最早快照，其次 `gh`，其次 `run_records` | 有快照时取**最早一条**（Agent 认领时读到的）；没有快照的旧 Issue 行为不变。 |
 | `input.edited_since_claim` | 快照与 GitHub 现状比对 | 认领后正文是否被改过：`true` / `false`；没有快照无从判断时为 `null`。最新已知正文优先取 GitHub 现状（`--with-gh`），否则取最后一条快照。 |
 | `code` | PR（`--with-gh`）或本地 `issue-N` 分支 | `source` 为 `pull_request` 时以 PR 的提交链为准（`final_sha` 是 PR head；`base_sha` 默认是第一个 PR 提交的父提交，**有认领时快照则改用快照里记录的分叉点**，并在 `base_sha_source` 标明 `snapshot` / `inferred`）；否则退回本地分支（与默认分支的 merge-base 到分支末端）。本地分支可能落后于 PR 后续推送，所以有 gh 时不用它。两者都没有时为 `null`。 |
@@ -63,7 +86,7 @@ uv run python -m scripts.dataset_export --github-pr-repo ~/code/some-project --p
 
 ## 摘要中的 `eval_ready`
 
-同时满足以下条件的样本：PR 已合并（`resolved_basis=pr_merged`）、有提交、输入不是 `missing` 也不是仅 `pr_description`、`task_kind=development`、`size_band` 不是 `large`、`merge_commit_count` 为 0（`null` 即未核实，不算通过，会计入摘要里的 `unverified_history`）。巡检类样本仍会出现在输出里（便于统计），只是不计入 `eval_ready`。**不加 `--with-gh` 时 `eval_ready` 恒为 0**，因为没有 PR 合并状态就无法确认任务真的解决了。评测集还需要每个样本有 `check_recipe`，这一步目前仍需人工补。
+同时满足以下条件的样本：PR 已合并（`resolved_basis=pr_merged`）、有提交、输入不是 `missing`，也不是仅 `pr_description` / `session_first_prompt`、`task_kind=development`、`size_band` 不是 `large`、`merge_commit_count` 为 0（`null` 即未核实，不算通过，会计入摘要里的 `unverified_history`）。巡检类样本仍会出现在输出里（便于统计），只是不计入 `eval_ready`。**不加 `--with-gh` 时 `eval_ready` 恒为 0**，因为没有 PR 合并状态就无法确认任务真的解决了。评测集还需要每个样本有 `check_recipe`，这一步目前仍需人工补。
 
 ## 去重
 
