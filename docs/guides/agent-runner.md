@@ -3597,6 +3597,8 @@ verifier 拿到的任务是"自己复跑真实入口 + 逐个跑 negative contro
 - `verifier_timeout_seconds`：墙钟上限，按最慢的真实工作量给足。
 - `verifier_inactivity_timeout_seconds`：连续无输出多久判卡死，语义与 builder 侧 `runner.inactivity_timeout_seconds` 相同。两条线并存后墙钟可以放宽，真卡死仍在静默期结束时被杀。
 
+带静默超时的捕获型调用会在等待直接子进程退出期间持续读取 stdout/stderr，进程退出后再有界等待读线程收尾。因此，verifier 即使只在退出前写入一次最终 verdict，也会被完整捕获；若退出后的孙进程仍持有输出管道，runner 最多等待 5 秒并返回已读内容，不会无限卡住。
+
 超时按**运行事故**处理，不伪造 verdict：
 
 - 被杀前收到的部分输出写进 `verifier-response.txt`，文件头标 `TIMED OUT — no verdict`。否则"跑了半小时被杀"在磁盘上什么都不留。

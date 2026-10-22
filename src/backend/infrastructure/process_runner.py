@@ -108,6 +108,7 @@ _PTY_AVAILABLE = pty is not None and hasattr(pty, "openpty")
 _MAX_BUFFER_SIZE = 4096
 _MAX_ERROR_DETAIL_LEN = 4096
 _COMMAND_HEARTBEAT_SECONDS = 60
+_PROCESS_OUTPUT_JOIN_TIMEOUT_SECONDS = 5.0
 
 # 带超时的子进程都放进**自己的进程组**，超时时才能整组回收（见
 # :func:`_terminate_process_tree`）。用 ``process_group=0``（setpgid）而不是
@@ -664,7 +665,6 @@ def _run_captured_process(
             stdout, stderr = process.communicate(input=input_text)
         else:
             stdout, stderr = _communicate_with_activity_tracking(process, watchdog)
-            process.wait()
         if usage_collector is not None:
             usage_collector.observe_text(stdout)
             usage_collector.observe_text(stderr)
@@ -693,7 +693,7 @@ def _communicate_with_activity_tracking(
     process: subprocess.Popen[str],
     watchdog: _ProcessWatchdog,
 ) -> tuple[str, str]:
-    """Read stdout/stderr while resetting the inactivity timeout on each chunk."""
+    """并行排空输出并跟踪活动,在子进程退出后有界等待读线程收尾。"""
     stdout_lines: list[str] = []
     stderr_lines: list[str] = []
 
@@ -715,8 +715,16 @@ def _communicate_with_activity_tracking(
     stderr_thread = threading.Thread(target=_pump_stderr, daemon=True)
     stdout_thread.start()
     stderr_thread.start()
-    stdout_thread.join(timeout=5)
-    stderr_thread.join(timeout=5)
+
+    # 等待期间读线程持续排空管道,避免进程因 pipe 写满而停住。子进程退出后再
+    # 用一个共享时间上限收尾:孙进程若仍持有写端,此处返回目前已读到的内容。
+    process.wait()
+    join_deadline = time.monotonic() + _PROCESS_OUTPUT_JOIN_TIMEOUT_SECONDS
+    for reader_thread in (stdout_thread, stderr_thread):
+        remaining_join_seconds = join_deadline - time.monotonic()
+        if remaining_join_seconds <= 0:
+            break
+        reader_thread.join(timeout=remaining_join_seconds)
     return "".join(stdout_lines), "".join(stderr_lines)
 
 
