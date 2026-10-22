@@ -15,6 +15,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from rich.console import Console
+from rich.text import Text
 from typer.testing import CliRunner
 
 import backend.api.app as api_app
@@ -555,16 +556,18 @@ def test_api_only_console_starts_when_static_assets_are_missing(
 def test_api_only_help_explains_that_the_panel_is_unavailable() -> None:
     """--api-only 的帮助明确说明只提供 API 的代价。"""
     result = CliRunner().invoke(console_app, ["--help"])
+    # Rich 会在旗标字符间插入 ANSI 转义，先还原纯文本再检查。
+    output = Text.from_ansi(result.output).plain
 
     assert result.exit_code == 0
     # 帮助文本按终端宽度折行，只断言不会跨行的短片段。
-    assert "--api-only" in result.output
-    assert "Start even when" in result.output
-    assert "dashboard assets are" in result.output
-    assert "missing or incomplete" in result.output
-    assert "/ then returns" in result.output
-    assert "Complete assets keep" in result.output
-    assert "enabled." in result.output
+    assert "--api-only" in output
+    assert "Start even when" in output
+    assert "dashboard assets are" in output
+    assert "missing or incomplete" in output
+    assert "/ then returns" in output
+    assert "Complete assets keep" in output
+    assert "enabled." in output
 
 
 class FakeTimer:
