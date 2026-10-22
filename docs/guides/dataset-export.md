@@ -20,6 +20,7 @@ uv run python -m scripts.dataset_export --repo keda --with-gh --output samples.j
 |---|---|---|---|
 | `keda_run` | `console.db` 里的运行记录 | 认领时快照 > 事后抓取的 Issue 原文 > 仅标题 | 有（可构成偏好对） |
 | `github_pr` | `--github-pr-repo <本地仓库>`：该仓库已合并、且不是 keda 导出过的 PR | 关联 Issue 的正文（`verbatim_issue_body`）；没有关联 Issue 时只有 PR 描述（`pr_description`） | 无 |
+| `git_commit` | `--commits-repo <本地仓库>`：默认分支上没有 PR、也没被其他来源覆盖的普通提交 | 只有提交信息（`commit_message`，重建的） | 无 |
 | `agent_session` | `--agent-sessions-repo <本地仓库>`（Claude Code）或 `--codex-sessions-repo <本地仓库>`（codex）：该仓库的真人会话 | 会话里用户**逐字**的首句，脱敏后导出（`session_first_prompt`） | 无（不导出完整轨迹） |
 
 ```bash
@@ -31,7 +32,19 @@ uv run python -m scripts.dataset_export --github-pr-repo ~/code/some-project --p
 - **`pr_description` 不能当评测题**：PR 描述写的是"改了什么"，不是任务本身，等于泄露答案；这类样本只作重建记录保留，永远不计入 `eval_ready`。要让非 keda 的任务成为合格评测题，需要它有关联的 Issue（PR 描述里写 `Closes #N`）。
 - 非 keda 来源没有 attempt，所以 `has_preference_pair` 恒为 `false`，不能产出偏好对。
 - 为避开 GitHub GraphQL 的节点上限，先列出轻量信息筛选，再逐个取剩下 PR 的详情；每个 PR 至少一次网络调用（有关联 Issue 再加一次），80 个 PR 大约一分多钟。
-- 尚未支持：没有 PR 也没有会话记录的普通提交。
+
+### 普通提交（`git_commit`）
+
+默认分支上既没有 PR、也没有会话记录的提交，例如直接推到默认分支的改动：
+
+```bash
+uv run python -m scripts.dataset_export --commits-repo ~/code/some-project --commit-limit 100 --output samples.jsonl
+```
+
+- **默认分支**优先读远程声明（`refs/remotes/<远程>/HEAD`），取不到再试 `origin/main`、`main`、`origin/master`、`master`——很多项目的默认分支不叫 main（例如博客仓库是 `hugo`）。
+- 沿默认分支的**第一父链**取最近的提交，排除：合并提交、标题带 `(#N)` 的 squash-merge PR 提交、机器人账号（`[bot]`、dependabot、github-actions）的提交，以及已经被 keda 运行、PR、会话样本覆盖的提交（按提交哈希判断），避免同一件事导出两次。
+- 一个样本就是一个提交：`code.base_sha` 是它的父提交，`final_sha` 是它自己。
+- **质量最低，永远不计入 `eval_ready`**：任务输入只能从提交信息重建，既不是任务本身，也没有尝试与轨迹。作者姓名与邮箱不导出；提交正文经过同样的脱敏。它的价值在于保留事实，并通过下面的"后期补全"变成真正的题。
 
 ### 会话记录（`agent_session`）
 
@@ -77,11 +90,43 @@ uv run python -m scripts.dataset_export \
 
 样本不包含 `repo_path` 等本机绝对路径。轨迹原文（agent 日志）尚未导出，样本通过 `invocations` 只保留调用元数据。
 
+## 后期补全（curation）
+
+数据集会不断优化。输入偏弱的样本（`pr_description`、`session_first_prompt`、`commit_message`、`title_only` 等）靠后期的人或更强的 Agent 补成真正的任务描述。补全是**叠加在原始记录之上的补丁，永远不改原始记录**：
+
+```bash
+# 1. 导出，同时生成待补全清单
+uv run python -m scripts.dataset_export --commits-repo ~/code/proj --curation-worklist worklist.jsonl --output samples.jsonl
+# 2. 人或 Agent 根据清单写补全记录，放进一个目录（以后可以是数据集仓库）
+# 3. 带上补全目录再导出，补全被叠加上去
+uv run python -m scripts.dataset_export --commits-repo ~/code/proj --curation-dir ~/datasets/curation --output samples.jsonl
+```
+
+**待补全清单**（`--curation-worklist`）：每行是一个输入偏弱、开发类、有提交、没被排除的样本，带上已脱敏的当前输入、提交主题、起点与终点、规模和链接，足够让人或 Agent 写出不泄露实现方式的任务描述。清单里没有代码本身。
+
+**补全记录**是 `--curation-dir` 目录下的 `*.jsonl`，每行一条，只追加：
+
+```json
+{"schema_version": 1, "sample_id": "owner/repo#commit-1a2b3c4d5e",
+ "at": "2026-10-22T08:00:00Z",
+ "by": {"kind": "agent", "name": "curator", "model": "<模型名>"},
+ "reviewed_by_human": false,
+ "input": {"title": "…", "body": "…"},
+ "exclude": false, "check_recipe": "pytest", "notes": "…"}
+```
+
+- `by.kind` 是 `human` 或 `agent`；`input` 只能含 `title`、`body`；`exclude: true` 把题排除；`check_recipe` 记录这道题怎么判分。同一样本可以有多条，**同一字段以 `at` 最晚的为准**。
+- 补全过输入的样本：`input.provenance` 变成 `curated_human`（人补的）、`curated_agent_reviewed`（Agent 补且人复核过）或 `curated_agent`（Agent 补、未复核）；**原来的输入保留在 `input.original`**；样本多出 `curation`（条数、最后一次是谁、`check_recipe`、备注、是否排除）。
+- **Agent 补的在人复核之前仍算输入偏弱，不计入 `eval_ready`**；补全后会重新计算 `eval_ready`，被排除的永远不计入。
+- 补全文本同样经过脱敏，`input.redaction_count` 会累加。
+- 无效行（格式不对、版本未知、字段不认识）跳过并告警；找不到对应样本的补全记数打印到 stderr，不会报错。
+- **样本 id 要稳定，补全才能一直对得上**：PR 样本用 `owner/repo#pr-N`，提交样本用提交哈希前 10 位，会话样本用会话 id 后 8 位；只有改写历史（rebase、amend）才会让提交样本的 id 变化。
+
 ## 标签
 
 | 标签 | 含义 |
 |---|---|
-| `resolved` / `resolved_basis` | `resolved_basis=pr_merged` 时表示关联 PR 已合并（可信）；`run_completed` 只表示 runner 跑完，**不代表已合并**，仅在拿不到 PR 时作兜底。 |
+| `resolved` / `resolved_basis` | 可信的依据有两种：`pr_merged`（关联 PR 已合并）与 `on_default_branch`（提交已在默认分支上，用于会话与普通提交样本）；`run_completed` 只表示 runner 跑完，**不代表已合并**，仅在拿不到 PR 时作兜底，不算可信。 |
 | `task_kind` | 标题含"巡检/巡查"的自动巡检为 `patrol`；Conventional Commits 的 `docs` / `chore` 类标题（归档 PRD、同步模板等）为 `maintenance`；其余为 `development`。只有 `development` 才可能 `eval_ready`。 |
 | `size_band` | `small`（≤5 文件且 ≤300 行）/ `medium`（≤30 文件且 ≤3000 行）/ `large`；规模未知为 `null`。 |
 | `merge_commit_count` | base..final 间的 merge commit 数；非 0 说明混入了别的分支的改动；提交对象不在本地时为 `null`（未核实）。 |
@@ -91,7 +136,7 @@ uv run python -m scripts.dataset_export \
 
 ## 摘要中的 `eval_ready`
 
-同时满足以下条件的样本：PR 已合并（`resolved_basis=pr_merged`）、有提交、输入不是 `missing`，也不是仅 `pr_description` / `session_first_prompt`、`task_kind=development`、`size_band` 不是 `large`、`merge_commit_count` 为 0（`null` 即未核实，不算通过，会计入摘要里的 `unverified_history`）。巡检类样本仍会出现在输出里（便于统计），只是不计入 `eval_ready`。**不加 `--with-gh` 时 `eval_ready` 恒为 0**，因为没有 PR 合并状态就无法确认任务真的解决了。评测集还需要每个样本有 `check_recipe`，这一步目前仍需人工补。
+同时满足以下条件的样本：已解决（`resolved_basis` 为 `pr_merged` 或 `on_default_branch`）、有提交、输入可信（不是 `missing`、`pr_description`、`session_first_prompt`、`commit_message`，也不是未复核的 `curated_agent`）、`task_kind=development`、`size_band` 不是 `large`、`merge_commit_count` 为 0（`null` 即未核实，不算通过，会计入摘要里的 `unverified_history`）。巡检类样本仍会出现在输出里（便于统计），只是不计入 `eval_ready`。**不加 `--with-gh` 时 keda 运行样本的 `eval_ready` 恒为 0**，因为没有 PR 合并状态就无法确认任务真的解决了；会话、普通提交样本在补全前也恒为 0。评测集还需要每个样本有 `check_recipe`，这一步目前仍需人工补。
 
 ## 去重
 

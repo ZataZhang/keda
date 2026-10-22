@@ -10,7 +10,6 @@
 
 from __future__ import annotations
 
-import argparse
 import fnmatch
 import hashlib
 import json
@@ -21,7 +20,6 @@ import sys
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +36,9 @@ SUCCESS_FAILURE_TYPE = "success"
 MERGED_PR_STATE = "MERGED"
 RESOLVED_BASIS_PR_MERGED = "pr_merged"
 RESOLVED_BASIS_RUN_COMPLETED = "run_completed"
+RESOLVED_BASIS_ON_DEFAULT_BRANCH = "on_default_branch"
+# 可信的"已解决"依据：PR 已合并，或提交已在默认分支上。``run_completed`` 只表示 runner 跑完，不算。
+TRUSTED_RESOLVED_BASES = frozenset({RESOLVED_BASIS_PR_MERGED, RESOLVED_BASIS_ON_DEFAULT_BRANCH})
 PR_JSON_FIELDS = (
     "number,state,mergeCommit,headRefName,headRefOid,additions,deletions,changedFiles,commits"
 )
@@ -50,6 +51,7 @@ PR_DISCOVERY_FIELDS = (
 # 再逐个取详情。
 PR_LIST_FIELDS = "number,headRefName,author"
 DEFAULT_PR_LIMIT = 100
+DEFAULT_COMMIT_LIMIT = 100
 ORIGIN_KEDA_RUN = "keda_run"
 ORIGIN_GITHUB_PR = "github_pr"
 ORIGIN_AGENT_SESSION = "agent_session"
@@ -57,7 +59,10 @@ GITHUB_REMOTE_PATTERN = re.compile(r"github\.com(?::\d+)?[:/]([^/\s]+/[^/\s]+?)(
 GITHUB_URL_REPO_PATTERN = re.compile(r"github\.com/([^/\s]+/[^/\s]+)/(?:issues|pull)/\d+")
 # 输入来源太弱、不能当评测题的来源：缺失，或只有 PR 描述（它描述的是"改了什么"，等于泄露答案）。
 # 会话首句是对话式的（"你看一下这个"），不是任务规格，同样只能留给后续整理。
-WEAK_INPUT_PROVENANCES = frozenset({"missing", "pr_description", "session_first_prompt"})
+# 只有提交信息（重建的）、以及 Agent 补全但尚无人复核的输入，同样不够格。
+WEAK_INPUT_PROVENANCES = frozenset(
+    {"missing", "pr_description", "session_first_prompt", "commit_message", "curated_agent"}
+)
 ISSUE_BRANCH_PATTERN = re.compile(r"^issue-(\d+)$")
 PATROL_TITLE_PATTERN = re.compile("巡检|巡查")
 # Conventional Commits 的 docs / chore 类型：归档 PRD、同步模板这类维护动作，不是开发任务。
@@ -85,6 +90,10 @@ class ExportOptions:
     sessions_root: Path | None = None
     codex_session_repo_paths: tuple[Path, ...] = ()
     codex_sessions_root: Path | None = None
+    commit_repo_paths: tuple[Path, ...] = ()
+    commit_limit: int = DEFAULT_COMMIT_LIMIT
+    curation_dir: Path | None = None
+    worklist_path: Path | None = None
 
 
 @dataclass
@@ -184,7 +193,19 @@ def find_issue_branch(*, repo_path: Path, issue_number: int) -> str | None:
 
 
 def find_base_branch(*, repo_path: Path) -> str | None:
-    """返回第一个存在的默认分支引用。"""
+    """返回仓库的默认分支引用：优先用远程声明的（``refs/remotes/<远程>/HEAD``），再退到常见名字。
+
+    很多项目的默认分支不叫 main/master（例如博客仓库是 ``hugo``），只有读远程声明才不会漏掉。
+    """
+    for remote_name in (run_git(repo_path=repo_path, args=["remote"]) or "").split():
+        remote_head = run_git(
+            repo_path=repo_path,
+            args=["symbolic-ref", "--quiet", "--short", f"refs/remotes/{remote_name}/HEAD"],
+        )
+        if remote_head and run_git(
+            repo_path=repo_path, args=["rev-parse", "--verify", "--quiet", remote_head]
+        ):
+            return remote_head
     for candidate in DEFAULT_BASE_BRANCHES:
         if run_git(repo_path=repo_path, args=["rev-parse", "--verify", "--quiet", candidate]):
             return candidate
@@ -386,13 +407,14 @@ def classify_input(
 
 
 def is_eval_ready(*, labels: dict[str, Any], input_provenance: str) -> bool:
-    """能否作为评测题：PR 已合并、有提交、输入可信（非缺失、非仅 PR 描述）、真实开发任务、规模适中，且已核实无 merge commit。
+    """能否作为评测题：已解决（PR 已合并或提交已在默认分支）、有提交、输入可信（非缺失、非偏弱来源）、
+    真实开发任务、规模适中，且已核实无 merge commit。
 
     ``merge_commit_count`` 为 ``None``（提交对象不在本地）表示未核实，不算通过。
     """
     return bool(
         labels["resolved"]
-        and labels["resolved_basis"] == RESOLVED_BASIS_PR_MERGED
+        and labels["resolved_basis"] in TRUSTED_RESOLVED_BASES
         and labels["has_commits"]
         and input_provenance not in WEAK_INPUT_PROVENANCES
         and labels["task_kind"] == "development"
@@ -568,6 +590,9 @@ def summarize_samples(samples: list[dict[str, Any]]) -> dict[str, int]:
         )
         counts["origin_github_pr"] += sample["origin"] == ORIGIN_GITHUB_PR
         counts["origin_agent_session"] += sample["origin"] == ORIGIN_AGENT_SESSION
+        counts["origin_git_commit"] += sample["origin"] == "git_commit"
+        counts["curated"] += "curation" in sample
+        counts["excluded"] += bool(labels.get("excluded"))
         counts["input_pr_description"] += sample["input"]["provenance"] == "pr_description"
         counts["patrol_issue"] += labels["task_kind"] == "patrol"
         counts["maintenance_task"] += labels["task_kind"] == "maintenance"
@@ -803,7 +828,7 @@ def build_session_sample(
     )
     labels = {
         "resolved": on_default_branch,
-        "resolved_basis": "on_default_branch",
+        "resolved_basis": RESOLVED_BASIS_ON_DEFAULT_BRANCH,
         "task_kind": classify_task_kind(None),
         "size_band": classify_size_band(size),
         "merge_commit_count": count_merge_commits(repo_path=repo_path, code=code),
@@ -956,87 +981,22 @@ def export_samples(options: ExportOptions) -> list[dict[str, Any]]:
             covered_issues_by_path[group_repo_path.resolve()].add(group.issue_number)
     samples += export_github_pr_samples(options, covered_issues_by_path=covered_issues_by_path)
     samples += export_agent_session_samples(options)
+    # 延迟导入：这两个模块反过来依赖本模块里的辅助函数，顶部导入会循环。
+    from scripts.dataset_export import commits as commit_source
+    from scripts.dataset_export import curation
+
+    # 提交来源排在最后，把前面各来源已经覆盖的提交排除掉，避免同一件事被导出两次。
+    covered_shas = {
+        commit["sha"] for sample in samples for commit in (sample["code"] or {}).get("commits", [])
+    }
+    samples += commit_source.export_commit_samples(options, excluded_shas=covered_shas)
     link_sessions_to_pull_requests(samples)
+    if options.curation_dir is not None:
+        load = curation.load_curation_entries(options.curation_dir)
+        report = curation.apply_curation(samples, load)
+        print(
+            f"补全: 叠加 {report.applied_samples} 个样本，无效行 {load.skipped_lines}，"
+            f"找不到样本的补全 {len(report.unknown_sample_ids)}",
+            file=sys.stderr,
+        )
     return samples
-
-
-def parse_args(argv: list[str] | None) -> ExportOptions:
-    """解析命令行为 :class:`ExportOptions`。"""
-    parser = argparse.ArgumentParser(description="导出 KedaCode 数据集样本（只读）")
-    parser.add_argument("--db", type=Path, default=DEFAULT_DB_PATH, help="console.db 路径")
-    parser.add_argument("--output", type=Path, help="JSONL 输出路径，缺省写 stdout")
-    parser.add_argument("--repo", action="append", default=[], help="只导出该 repo_id，可重复")
-    parser.add_argument(
-        "--exclude-repo",
-        action="append",
-        default=None,
-        help="排除的 repo_id 通配符，可重复；缺省排除测试/演示仓库",
-    )
-    parser.add_argument("--with-gh", action="store_true", help="调用 gh 补 Issue 原文与 PR")
-    parser.add_argument(
-        "--github-pr-repo",
-        action="append",
-        type=Path,
-        default=[],
-        help="额外导出该本地仓库中与 keda 无关的已合并 PR（需要 gh），可重复",
-    )
-    parser.add_argument(
-        "--pr-limit", type=int, default=DEFAULT_PR_LIMIT, help="每个仓库最多取多少个已合并 PR"
-    )
-    parser.add_argument(
-        "--agent-sessions-repo",
-        action="append",
-        type=Path,
-        default=[],
-        help="额外导出该本地仓库的真人 Claude Code 会话（首句会脱敏；需显式开启），可重复",
-    )
-    parser.add_argument(
-        "--sessions-root", type=Path, help="Claude Code 会话根目录，缺省 ~/.claude/projects"
-    )
-    parser.add_argument(
-        "--codex-sessions-repo",
-        action="append",
-        type=Path,
-        default=[],
-        help="额外导出该本地仓库的真人 codex 会话（按会话 cwd 归属；首句会脱敏；需显式开启），可重复",
-    )
-    parser.add_argument(
-        "--codex-sessions-root", type=Path, help="codex 会话根目录，缺省 ~/.codex/sessions"
-    )
-    namespace = parser.parse_args(argv)
-    return ExportOptions(
-        db_path=namespace.db,
-        output_path=namespace.output,
-        repo_ids=tuple(namespace.repo),
-        exclude_repo_patterns=tuple(namespace.exclude_repo or DEFAULT_EXCLUDE_REPO_PATTERNS),
-        use_gh=namespace.with_gh,
-        github_pr_repo_paths=tuple(namespace.github_pr_repo),
-        pr_limit=namespace.pr_limit,
-        agent_session_repo_paths=tuple(namespace.agent_sessions_repo),
-        sessions_root=namespace.sessions_root,
-        codex_session_repo_paths=tuple(namespace.codex_sessions_repo),
-        codex_sessions_root=namespace.codex_sessions_root,
-    )
-
-
-def main(argv: list[str] | None = None) -> int:
-    """命令行入口：写出 JSONL，并把统计摘要打印到 stderr。"""
-    options = parse_args(argv)
-    has_extra_sources = (
-        options.github_pr_repo_paths
-        or options.agent_session_repo_paths
-        or options.codex_session_repo_paths
-    )
-    if not options.db_path.is_file() and not has_extra_sources:
-        print(f"数据库不存在: {options.db_path}", file=sys.stderr)
-        return 2
-    samples = export_samples(options)
-    lines = "".join(json.dumps(s, ensure_ascii=False) + "\n" for s in samples)
-    if options.output_path:
-        options.output_path.write_text(lines, encoding="utf-8")
-    else:
-        sys.stdout.write(lines)
-    summary = summarize_samples(samples)
-    stamp = datetime.now(UTC).isoformat(timespec="seconds")
-    print(f"[{stamp}] 导出摘要: {json.dumps(summary, ensure_ascii=False)}", file=sys.stderr)
-    return 0
