@@ -3,7 +3,7 @@
 覆盖三层：
 
 - 跳过矩阵：机器模式 / 补全协议 / ``--help`` / 非 TTY / ``NO_UPDATE_CHECK`` /
-  专用 ``NO_SKILL_SYNC`` 关闭时，同步整段不发生（不调用安装、不写缓存）。
+  专用 ``NO_SKILL_SYNC`` / ``--dry-run`` 关闭时，同步整段不发生（不调用安装、不写缓存）。
 - 版本门控：无缓存时同步并记录当前包版本；缓存版本与当前一致时跳过；版本变化后
   再次同步。
 - 呈现与容错：仅当有 ``install`` / ``refresh`` / ``overwrite`` 动作时提示；全
@@ -22,6 +22,7 @@ from backend.api import cli_skill
 from backend.api import cli_startup_skill_sync
 from backend.api.cli_startup_skill_sync import startup_skill_sync
 from backend.api.version_info import _UNKNOWN_VERSION
+from backend.core.shared.models.agent_spec import AgentSpec
 from backend.core.use_cases.agent_runner_init_assets import PackagedSkillInstallResult
 
 
@@ -55,13 +56,19 @@ def _gate_open(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture()
 def _spy_sync(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     """把 sync_packaged_operator_skills 打桩，记录调用次数并允许编排下次返回结果。"""
-    state = SimpleNamespace(calls=0, next_results=[_result("refresh")])
+    state = SimpleNamespace(calls=0, last_kwargs={}, next_results=[_result("refresh")])
 
-    def _fake_sync(**_kwargs: object) -> list[PackagedSkillInstallResult]:
+    def _fake_sync(**sync_arguments: object) -> list[PackagedSkillInstallResult]:
         state.calls += 1
+        state.last_kwargs = sync_arguments
         return state.next_results
 
     monkeypatch.setattr(cli_startup_skill_sync, "sync_packaged_operator_skills", _fake_sync)
+    monkeypatch.setattr(
+        cli_startup_skill_sync,
+        "build_app_config",
+        lambda: SimpleNamespace(agents={}),
+    )
     return state
 
 
@@ -73,6 +80,13 @@ def test_machine_and_disabled_paths_skip_sync(
         cli_startup_skill_sync, "_should_skip_startup_update_check", lambda *a, **k: True
     )
     startup_skill_sync(["run"])
+    assert _spy_sync.calls == 0
+    assert not cli_startup_skill_sync._cache_path().exists()
+
+
+def test_dry_run_skips_sync(_spy_sync: SimpleNamespace, _gate_open: None) -> None:
+    """``--dry-run`` 预览不得先由启动钩子真实写入 Skill。"""
+    startup_skill_sync(["skill", "install", "--dry-run"])
     assert _spy_sync.calls == 0
     assert not cli_startup_skill_sync._cache_path().exists()
 
@@ -158,3 +172,28 @@ def test_packaged_sync_targets_env_skills_root(
     results = cli_skill.sync_packaged_operator_skills()
     assert [result.action for result in results] == ["install"]
     assert (skills_root / "kedacode-operator" / "SKILL.md").is_file()
+
+
+def test_startup_sync_includes_configured_custom_agent_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _gate_open: None
+) -> None:
+    """启动同步使用全局 agent 注册表，把 operator Skill 刷新到自定义 agent 目录。"""
+    custom_agent_home = tmp_path / ".custom-agent"
+    custom_agent_home.mkdir()
+    custom_agent = AgentSpec(
+        bin="custom-agent",
+        label="agent/custom",
+        label_color="445566",
+        label_description="测试用自定义 agent",
+        auth_home="~/.custom-agent",
+    )
+    configured_agent_registry = {"custom": custom_agent}
+    monkeypatch.setattr(
+        cli_startup_skill_sync,
+        "build_app_config",
+        lambda: SimpleNamespace(agents=configured_agent_registry),
+    )
+
+    startup_skill_sync(["logs"])
+
+    assert (custom_agent_home / "skills" / "kedacode-operator" / "SKILL.md").is_file()

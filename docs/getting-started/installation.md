@@ -147,6 +147,7 @@ kc container down
 - **缓存**：同步到的版本记录在 `~/.kedacode/skill-sync.json`，与更新检查缓存相互独立；包版本变化会让记录自动失效并重新同步。
 - **不联网**：该钩子只读本地 wheel 与用户目录，离线照常工作。
 - **机器路径零打扰**：复用更新检查同一套跳过判定——`--json` / `--output json`、shell 补全协议、`--help` / `-h`、`--version`、无参数、非交互终端（管道 / CI / agent 子进程）下整段不发生。
+- **预览无写入**：带 `--dry-run` 的命令会跳过自动同步，避免在预览前改动 Skill 文件。
 - **显式关闭**：设置 `KEDACODE_NO_SKILL_SYNC=1` 停用自动同步（`KEDACODE_NO_UPDATE_CHECK=1` 同样会一并跳过），需要时手动 `kc skill install` 即可。
 
 ## 排错

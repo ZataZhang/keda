@@ -12,6 +12,7 @@ wheel 里，用户级安装根（``~/.claude`` 等）中的副本仍是旧版，
   （``--json``）、shell 补全协议、``--help`` / ``--version``、无参数、非交互终端、
   以及 ``KEDACODE_NO_UPDATE_CHECK=1`` 全部原样不发生；另支持专用关闭开关
   ``KEDACODE_NO_SKILL_SYNC=1``。
+- ``--dry-run`` 预览命令额外跳过，避免在预览前修改任何 Skill 文件。
 - 只刷新**随包 operator Skill**，绝不下载或覆盖 ``prd`` / ``code-reviewer`` 等远程模板，
   用户改过的 operator 副本按 ``force=False`` 保留（``preserve-conflict``），不会被破坏。
 - 结果记录到 ``<状态目录>/skill-sync.json``，仅缓存「上次已同步的包版本」；离线无关，
@@ -26,10 +27,12 @@ from pathlib import Path
 from typing import Mapping, Sequence
 
 from backend.api.cli_console import error_console
+from backend.api.cli_output import json_literal
 from backend.api.cli_skill import sync_packaged_operator_skills
 from backend.api.cli_update_check import _should_skip_startup_update_check
 from backend.api.version_info import _UNKNOWN_VERSION, resolve_keda_version
 from backend.core.shared.models import product_identity
+from backend.core.use_cases.agent_runner_factory import build_app_config
 
 __all__ = ["startup_skill_sync"]
 
@@ -66,7 +69,7 @@ def _write_cached_synced_version(*, synced_version: str) -> None:
     try:
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         cache_path.write_text(
-            json.dumps({"synced_version": synced_version}),
+            json_literal({"synced_version": synced_version}),
             encoding="utf-8",
         )
     except OSError:
@@ -90,10 +93,13 @@ def _needs_sync(
         environ: 环境变量映射；省略时取 :data:`os.environ`。
 
     Returns:
-        真值表示需要同步（机器/帮助/非交互路径、显式关闭、版本未变化均为 ``False``）。
+        真值表示需要同步（机器/帮助/非交互路径、``--dry-run``、显式关闭、版本未变化
+        均为 ``False``）。
     """
     source_environ = os.environ if environ is None else environ
     if _should_skip_startup_update_check(list(argv), environ=source_environ):
+        return False
+    if "--dry-run" in argv:
         return False
     if _truthy_disable_flag(source_environ):
         return False
@@ -125,7 +131,8 @@ def startup_skill_sync(argv: Sequence[str]) -> None:
         current_version = resolve_keda_version()
         if not _needs_sync(argv=argv, current_version=current_version, environ=None):
             return
-        results = sync_packaged_operator_skills()
+        configured_agent_registry = build_app_config().agents
+        results = sync_packaged_operator_skills(agents=configured_agent_registry)
         _write_cached_synced_version(synced_version=current_version)
         updated_count = sum(1 for result in results if result.action in _MUTATING_ACTIONS)
         if updated_count:

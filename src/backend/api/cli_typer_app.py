@@ -522,8 +522,8 @@ def main(argv: list[str] | None = None) -> int:
     # 启动更新检查（Issue #264）：内部自带全部跳过判定——机器模式、补全协议、
     # --help、非 TTY、显式关闭都在这条路径上原样不发生。
     startup_update_check(args)
-    # 随包 operator Skill 启动自动同步：仅当已安装包版本变化时刷新，复用与更新检查
-    # 相同的跳过判定，永不阻断命令；升级 pip/uv/pipx 后无需再手动 `kc skill install`。
+    # 随包 operator Skill 启动自动同步：仅当已安装包版本变化时刷新，复用更新检查跳过
+    # 矩阵并额外尊重 --dry-run，使用全局 agent 注册表，永不阻断命令。
     startup_skill_sync(args)
     try:
         result = app(
