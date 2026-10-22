@@ -27,6 +27,7 @@ from backend.core.shared.interfaces.agent_runner import (
     IProcessRunner,
 )
 from backend.core.shared.models.agent_runner import (
+    AgentCommitResult,
     AppConfig,
     AttemptResult,
     CommandResult,
@@ -109,6 +110,21 @@ from backend.core.use_cases.run_agent_once import (
 )
 
 _logger = logging.getLogger(__name__)
+
+
+def _skip_publication_for_closed_no_change(
+    issue: IssueSummary,
+    commit_result: AgentCommitResult,
+) -> bool:
+    """当执行循环确认 Issue 无变更收敛时跳过 PR 发布。"""
+    if not commit_result.issue_closed_without_changes:
+        return False
+    _logger.info(
+        "Issue #%d was closed during execution without changes; skipping publication.",
+        issue.number,
+    )
+    return True
+
 
 __all__ = [
     "_guard_blocked_issue_has_resolution",
@@ -301,6 +317,7 @@ def _process_blocked_resolution(
                 model_selection=implementation_model_selection,
                 publish_stage=publish_stage,
                 repo_id=repo_id,
+                github_client=github_client,
             )
         except VerifierCancelledByHumanError:
             # 人工接管（Issue #278）：解阻续作路径与首跑同样交班——verifier
@@ -316,6 +333,9 @@ def _process_blocked_resolution(
                 "Issue #%d: verifier during blocked resolution taken over by a human.",
                 issue.number,
             )
+            return
+
+        if _skip_publication_for_closed_no_change(issue, commit_result):
             return
 
         # 完成发布流程
@@ -544,6 +564,7 @@ def _process_ready_issue(
             model_selection=implementation_model_selection,
             publish_stage=publish_stage,
             repo_id=repo_id,
+            github_client=github_client,
         )
     except VerifierCancelledByHumanError:
         # 人工接管（Issue #278）：verifier 进程树已回收、控制行已落闸，交班
@@ -614,6 +635,9 @@ def _process_ready_issue(
                 content_generator=content_generator,
             )
         raise
+
+    if _skip_publication_for_closed_no_change(issue, new_commit_result):
+        return
 
     # 步骤 5: 完成发布流程
     _finish_implementation_publication(

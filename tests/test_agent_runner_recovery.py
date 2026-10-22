@@ -30,8 +30,16 @@ from tests.support.agent_runner import (
 )
 
 
-def test_recovery_loop_success_on_second_attempt(tmp_path: Path) -> None:
-    """Runner should succeed when recovery agent fixes the issue on attempt 2."""
+@pytest.mark.parametrize(
+    "close_without_changes",
+    [False, True],
+    ids=["recovered-commit", "closed-noop"],
+)
+def test_run_once_completes_recovery_or_closed_noop(
+    tmp_path: Path,
+    close_without_changes: bool,
+) -> None:
+    """Runner 应恢复无提交尝试，或接受执行期间明确关闭的无改动 Issue。"""
     fake_client = FakeGitHubClient()
     issue = make_ready_issue()
     fake_client.list_ready_issues = lambda ready_label, limit: [issue]
@@ -67,6 +75,8 @@ def test_recovery_loop_success_on_second_attempt(tmp_path: Path) -> None:
             if command_tuple[:1] == ("codex",):
                 self._agent_calls += 1
                 if self._agent_calls == 1:
+                    if close_without_changes:
+                        fake_client._issue_states[issue.number] = "CLOSED"
                     # First attempt: produce no commits
                     return CommandResult(command_tuple, 0, "", "")
                 if self._agent_calls == 2:
@@ -75,12 +85,12 @@ def test_recovery_loop_success_on_second_attempt(tmp_path: Path) -> None:
                     return CommandResult(command_tuple, 0, "", "")
             if command_tuple == ("git", "rev-parse", "HEAD"):
                 self._sha_calls += 1
-                sha = "after-sha" if self._sha_calls > 1 else "before-sha"
+                sha = "before-sha" if close_without_changes or self._sha_calls == 1 else "after-sha"
                 return CommandResult(command_tuple, 0, f"{sha}\n", "")
             if command_tuple == ("git", "branch", "--show-current"):
                 return CommandResult(command_tuple, 0, "issue-123\n", "")
             if command_tuple == ("git", "status", "--porcelain"):
-                stdout = "" if self._committed else " M file.txt\n"
+                stdout = "" if close_without_changes or self._committed else " M file.txt\n"
                 return CommandResult(command_tuple, 0, stdout, "")
             if command_tuple == ("git", "commit", "-m", "agent: recovered"):
                 self._committed = True
@@ -110,7 +120,16 @@ def test_recovery_loop_success_on_second_attempt(tmp_path: Path) -> None:
     assert exit_code == 0
     commands = [tuple(command) for command in fake_runner.calls]
     agent_commands = [command for command in commands if command[:1] == ("codex",)]
-    assert len(agent_commands) == 2
+    assert len(agent_commands) == (1 if close_without_changes else 2)
+    if close_without_changes:
+        assert any(call["method"] == "get_issue" for call in fake_client.calls)
+        assert not any(call["method"] == "create_draft_pr" for call in fake_client.calls)
+        assert not any(
+            call["method"] == "edit_issue_labels" and config.labels.failed in call.get("add", [])
+            for call in fake_client.calls
+        )
+        return
+
     comment_calls = [c for c in fake_client.calls if c["method"] == "comment_issue"]
     implementation_comment = [
         c for c in comment_calls if "Implementation Complete" in c.get("body", "")

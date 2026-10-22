@@ -7,7 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from backend.core.shared.interfaces.agent_runner import IProcessRunner
+from backend.core.shared.interfaces.agent_runner import IGitHubClient, IProcessRunner
 from backend.core.shared.models.agent_runner import (
     AgentCommitResult,
     AppConfig,
@@ -105,6 +105,8 @@ class AgentExecutionRequest:
     process_runner: IProcessRunner
     before_sha: str
     expected_branch: str
+    #: 用于确认「执行期间关闭且无变更」的 Issue 最新状态；缺失时保持原 no-commit recovery 行为。
+    github_client: IGitHubClient | None = None
     prompt_override: str | None = None
     on_attempt_recorded: Callable[[AttemptResult, list[AttemptResult]], None] | None = None
     #: 旁路观测回调：本 Issue 处理期间每次非 attempt 主体的 agent 调用
@@ -383,6 +385,51 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                 agent_command_result.token_usage if agent_command_result is not None else None
             ),
         )
+
+        # 无 PRD 的 Issue 可以在确认无剩余工作后被明确关闭。此时没有可验证或发布的
+        # 代码树；重新读取到 CLOSED 才把本轮当作正常收敛，读取失败仍走原 recovery。
+        if (
+            request.github_client is not None
+            and prd_relative_path is None
+            and get_head_sha(worktree_path, process_runner) == before_sha
+            and not has_changes(worktree_path, process_runner)
+        ):
+            try:
+                latest_issue = request.github_client.get_issue(issue.number)
+            except Exception as exc:  # noqa: BLE001 - 读取失败时必须 fail-closed
+                _logger.warning(
+                    "Could not confirm Issue #%d closure after a no-change run; "
+                    "continuing normal recovery: %s",
+                    issue.number,
+                    exc,
+                )
+            else:
+                if latest_issue.state.upper() == "CLOSED":
+                    _record_attempt(
+                        attempt_record_context,
+                        failure_type=FailureType.SUCCESS,
+                        detail="Issue closed during execution with no changes to publish.",
+                        recovered=attempt_index > 0,
+                    )
+                    mark_agent_session_complete(
+                        worktree_path,
+                        agent_name=selected_agent,
+                        scope=AgentSessionScope(
+                            issue_number=issue.number,
+                            phase=PHASE_IMPLEMENTATION,
+                        ),
+                    )
+                    _logger.info(
+                        "Issue #%d closed during execution with no changes; skipping validation "
+                        "and publication.",
+                        issue.number,
+                    )
+                    return AgentCommitResult(
+                        verification_results=[],
+                        attempt_results=attempt_results,
+                        verifier_verdict=None,
+                        issue_closed_without_changes=True,
+                    )
 
         # Phase 2: 验证 agent 产出的代码（staging 之前）
         # 直发档（--direct-pr）连 runner 自己的验证命令也不跑：结果恒为空，下面的

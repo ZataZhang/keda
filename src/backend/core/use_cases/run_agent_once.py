@@ -793,6 +793,7 @@ def run_agent_until_committed(
     model_selection: ModelSelection | None = None,
     publish_stage: PublishStage = PublishStage.NORMAL,
     repo_id: str | None = None,
+    github_client: IGitHubClient | None = None,
 ) -> AgentCommitResult:
     """运行 Agent recovery 状态机并返回最终提交结果；可在 verifier 前回调发布 Draft PR。"""
     from backend.core.use_cases.run_agent_execution_loop import (
@@ -817,6 +818,7 @@ def run_agent_until_committed(
             before_verifier_callback=before_verifier_callback,
             model_selection=model_selection,
             repo_id=repo_id,
+            github_client=github_client,
             # 首轮续传：worktree 里留有本 Issue 上一轮的会话记录就说明这是"接着跑"
             # （崩溃对账重新入队 / 部分进度续作），而不是新任务被历史会话污染。
             resume_session_id=resolve_resumable_session_id(
