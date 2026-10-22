@@ -91,17 +91,18 @@ registry 用的 `config.toml` 是**全局共享**的一份，解析顺序为：`
 每个仓库可独立覆盖 `labels`、`git`、`worktree`、`runner`、`safety` 子配置：
 
 ```toml
-[agent_runner.repositories.keda]
-path = "/Users/zata/code/keda"
+[agent_runner.repositories.example_service]
+path = "/path/to/your/repo"
 enabled = true
-display_name = "Keda"
+display_name = "Example Service"
+github_repo = "owner/repo"
 
-[agent_runner.repositories.keda.git]
+[agent_runner.repositories.example_service.git]
 remote = "origin"
 base_branch = "main"
 
 [agent_runner.repositories.backend_service]
-path = "/Users/zata/code/backend-service"
+path = "/path/to/your/backend-service"
 enabled = true
 
 [agent_runner.repositories.backend_service.runner]

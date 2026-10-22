@@ -78,7 +78,7 @@ def console_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     # resolve_console_spawn_cwd 不再打桩：contexts 里已带 repo_path，
     # 真实实现应把托管进程 cwd 解析到目标仓库自身路径。
 
-    # 设置源会读取机器级 config.toml，可能覆盖构造参数；此 API 测试必须固定使用替身命令。
+    # 绕过 BaseSettings 设置源，避免宿主或仓库 config.toml 覆盖测试用 runner 命令。
     fake_settings = AgentRunnerSettings.model_construct(
         console=AgentRunnerConsoleSettings(
             runner_command=fake_runner_command,

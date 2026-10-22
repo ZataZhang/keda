@@ -679,7 +679,7 @@
           if (pageParams.get('focus') === 'fallback') document.body.classList.add('capture-fallback-focus');
           if (pageParams.get('focus') === 'overview') document.body.classList.add('capture-lifecycle-overview');
         }
-        // ── 真实数据（取自 config.toml、内置默认与真实 registry） ──
+        // ── 配置与默认值取自实现；仓库名用中性示例展示 ──
         const REGISTERED_AGENTS = ['codex', 'claude', 'kimi', 'pi', 'codebuddy', 'qoder', 'opencode'];
         const UNREGISTERED_AGENT = 'no-such-agent';
         // 本机已安装可用的 agent（用于执行器回退时跳过未安装项）；'pi' 本机存在，这里按真实情况全部视为可用
@@ -695,18 +695,18 @@
           { agent: 'qoder', label: 'agent/qoder', color: 'FF8C42', description: 'Use Qoder for local runner execution.' },
           { agent: 'opencode', label: 'agent/opencode', color: '0EA5E9', description: 'Use OpenCode for local runner execution.' },
         ];
-        // 受管理仓库列表：repo_id / display_name 与真实 registry 一致，rowTop 是实测行位
+        // 仓库展示数据为中性示例，实际项目列表来自用户机器上的 registry
         const REPOS = [
           { id: 'keda-main', label: 'Keda Main', rowTop: 72 },
-          { id: 'zata-zhangtao-freshai', label: 'freshai', rowTop: 106 },
-          { id: 'freshai', label: 'freshai', rowTop: 140 },
+          { id: 'example-repo-a', label: 'Project A', rowTop: 106 },
+          { id: 'example-repo-b', label: 'Project B', rowTop: 140 },
           { id: 'kimi-ppt', label: 'kimi-ppt', rowTop: 174 },
           { id: 'dw-sale-agent', label: 'dw-sale-agent', rowTop: 208 },
           { id: 'zata-docs', label: 'zata-docs', rowTop: 242 },
-          { id: 'transmaster', label: 'TransMaster', rowTop: 276 },
+          { id: 'example-repo-c', label: 'Project C', rowTop: 276 },
           { id: 'zata-codes-template', label: 'zata_code_template', rowTop: 310 },
-          { id: 'keda', label: 'keda', rowTop: 344 },
-          { id: 'zata-zhangtao-fsense', label: 'fsense', rowTop: 378 },
+          { id: 'example-repo-d', label: 'Project D', rowTop: 344 },
+          { id: 'example-repo-e', label: 'Project E', rowTop: 378 },
         ];
         // legacy* = 既有散落配置键与内置默认（矩阵未声明时的回退层）
         // autoLabel = 该阶段 auto 的真实语义（各阶段不同，见 PRD §1 表）；只有实现了 auto 的阶段才提供该选项
