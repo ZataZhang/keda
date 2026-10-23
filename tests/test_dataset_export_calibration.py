@@ -325,3 +325,72 @@ def test_cli_main_calibrates_the_candidates_end_to_end(
     assert exit_code == 0
     assert '"calibrated": 1' in capsys.readouterr().out
     assert calibrate.calibration_path(tmp_path / "calibration", {"sample_id": "o/r#fix"}).is_file()
+
+
+def test_a_conftest_that_cannot_load_before_the_change_makes_the_task_coupled_not_an_error(
+    repo_path: Path,
+) -> None:
+    """改动带来的 conftest 依赖这次新增的名字：改动前 pytest 在加载阶段就退出、不出报告。这是最彻底的耦合，不是环境错误。"""
+    base, final = _commit(
+        repo_path,
+        {
+            "helper.py": "def brand_new_helper():\n    return 7\n",
+            "tests/conftest.py": "from helper import brand_new_helper  # noqa: F401\n",
+            "tests/test_uses_infra.py": "def test_infra():\n    assert True\n",
+        },
+        "feat: tests infrastructure depends on a new helper",
+    )
+
+    record = _calibrate(repo_path, base, final)
+
+    assert record["status"] == STATUS_COUPLED
+    assert record["black_box_fail_to_pass"] == []
+    assert record["fail_to_pass"] == ["tests.test_uses_infra::test_infra"]
+    assert any("conftest" in reason for reason in record["reasons"])
+
+
+def test_the_record_keeps_the_reason_each_test_failed_before_the_change(repo_path: Path) -> None:
+    base, final = _commit(
+        repo_path,
+        {
+            "app.py": APP_FIXED,
+            "helper.py": "def brand_new_helper():\n    return 7\n",
+            "tests/test_add.py": "from app import add\n\n\ndef test_add():\n    assert add(1, 2) == 3\n",
+            "tests/test_helper.py": "from helper import brand_new_helper\n\n\ndef test_helper():\n    assert brand_new_helper() == 7\n",
+        },
+        "fix and feat together",
+    )
+
+    detail = _calibrate(repo_path, base, final)["fail_to_pass_detail"]
+
+    assert detail["tests.test_add::test_add"]["kind"] == "behavioral"
+    assert "assert" in detail["tests.test_add::test_add"]["noop_message"].lower()
+    assert detail["tests.test_helper::test_helper"]["kind"] == "missing_symbol"
+    assert "No module named" in detail["tests.test_helper::test_helper"]["noop_message"]
+
+
+@pytest.mark.parametrize(
+    ("message", "expected_kind"),
+    [
+        ("fixture 'brand_new_fixture' not found", "missing_symbol"),
+        ("ImportError: cannot import name 'x' from 'y'", "missing_symbol"),
+        ("AttributeError: module 'm' has no attribute 'new_name'", "missing_symbol"),
+        ("TypeError: f() got an unexpected keyword argument 'new_option'", "missing_symbol"),
+        ("AssertionError: assert 1 == 2", "behavioral"),
+        ("assert 'FINAL' in ''", "behavioral"),
+    ],
+)
+def test_failure_messages_are_classified_by_whether_a_new_name_is_missing(
+    tmp_path: Path, message: str, expected_kind: str
+) -> None:
+    xml_path = tmp_path / "junit.xml"
+    xml_path.write_text(
+        '<testsuites><testsuite><testcase classname="tests.t" name="test_a">'
+        f'<failure message="{message}">{message}</failure></testcase></testsuite></testsuites>',
+        encoding="utf-8",
+    )
+
+    outcome = calibrate.parse_junit(xml_path)["tests.t::test_a"]
+
+    assert outcome.failure_kind == expected_kind
+    assert outcome.message == message

@@ -34,6 +34,8 @@ from scripts.dataset_export.archive import safe_name
 CALIBRATION_SCHEMA_VERSION = 1
 DEFAULT_TEST_COMMAND = ("uv", "run", "python", "-m", "pytest")
 DEFAULT_TIMEOUT_SECONDS = 900
+MAX_MESSAGE_CHARS = 200
+MAX_DETAIL_ENTRIES = 40
 STATUS_CALIBRATED = "calibrated"
 STATUS_NO_TESTS = "no_tests"
 STATUS_GOLD_FAILED = "gold_failed"
@@ -49,7 +51,8 @@ OUTCOME_SKIPPED = "skipped"
 # noop 下因为找不到这次新增的内部名字而失败的典型信息。
 _MISSING_SYMBOL_PATTERN = re.compile(
     r"ImportError|ModuleNotFoundError|cannot import name|has no attribute|NameError|"
-    r"unexpected keyword argument|got an unexpected|takes \d+ positional argument"
+    r"unexpected keyword argument|got an unexpected|takes \d+ positional argument|"
+    r"fixture '[^']+' not found"
 )
 TEST_FILE_PATTERN = re.compile(r"(^|/)test_[^/]*\.py$")
 TESTS_DIR_PATTERN = re.compile(r"(^|/)tests?/")
@@ -64,6 +67,12 @@ class TestOutcome:
 
     outcome: str
     failure_kind: str | None = None
+    # 失败信息的第一行（截断），给人复核"为什么说它是行为失败 / 找不到名字"用。
+    message: str | None = None
+
+
+class UnrunnableBeforeChangeError(Exception):
+    """改动前的代码上，连测试都加载不起来（例如 conftest 要导入这次新增的名字）。"""
 
 
 @dataclass
@@ -126,6 +135,18 @@ def overlay_tests(
         target.write_bytes(_git(repo_path, "show", f"{final_sha}:{path}"))
 
 
+def _headline(text: str) -> str:
+    """从失败信息里挑最有信息量的一行：优先 pytest 用 ``E `` 标出的错误行，否则取第一个非空行。
+
+    收集阶段的失败，junit 的 ``message`` 只是 ``collection failure``，真正的原因（``ImportError: …``）在正文里。
+    """
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    for line in lines:
+        if line.startswith("E "):
+            return line[1:].strip()
+    return lines[0] if lines else ""
+
+
 def parse_junit(xml_path: Path) -> dict[str, TestOutcome]:
     """解析 pytest 的 junit xml：测试标识 -> 结果；收集阶段的错误以文件为键记录。"""
     outcomes: dict[str, TestOutcome] = {}
@@ -140,13 +161,16 @@ def parse_junit(xml_path: Path) -> dict[str, TestOutcome]:
             kind_tag = "error"
         if problem is not None:
             text = f"{problem.get('message') or ''}\n{problem.text or ''}"
+            first_line = _headline(text)
             kind = (
                 FAILURE_MISSING_SYMBOL
                 if _MISSING_SYMBOL_PATTERN.search(text)
                 else FAILURE_BEHAVIORAL
             )
             outcomes[identifier] = TestOutcome(
-                OUTCOME_FAILED if kind_tag == "failed" else OUTCOME_ERROR, kind
+                OUTCOME_FAILED if kind_tag == "failed" else OUTCOME_ERROR,
+                kind,
+                first_line[:MAX_MESSAGE_CHARS],
             )
         elif case.find("skipped") is not None:
             outcomes[identifier] = TestOutcome(OUTCOME_SKIPPED)
@@ -179,7 +203,7 @@ def run_pytest(
         ),
         "PYTHONDONTWRITEBYTECODE": "1",
     }
-    subprocess.run(
+    completed = subprocess.run(
         [
             *command,
             *test_files,
@@ -200,6 +224,14 @@ def run_pytest(
         check=False,
     )
     if not xml_path.is_file():
+        output = (completed.stdout or b"").decode("utf-8", "replace") + (
+            completed.stderr or b""
+        ).decode("utf-8", "replace")
+        if _MISSING_SYMBOL_PATTERN.search(output) and "conftest" in output:
+            # conftest 在加载阶段就导入失败：pytest 没有跑任何用例，也就不会出报告。
+            raise UnrunnableBeforeChangeError(
+                "tests/conftest.py 在改动前的代码上就无法加载（它依赖这次改动新增的名字）"
+            )
         raise RuntimeError(
             "pytest produced no junit report (crashed or timed out before reporting)"
         )
@@ -254,7 +286,16 @@ def compare_runs(
                 black_box.append(identifier)
         elif before.outcome == OUTCOME_PASSED:
             pass_to_pass.append(identifier)
+    detail = {
+        identifier: {
+            "kind": before.failure_kind if before is not None else FAILURE_MISSING_SYMBOL,
+            "noop_message": before.message if before is not None else "测试在改动前没有被收集到",
+        }
+        for identifier in fail_to_pass[:MAX_DETAIL_ENTRIES]
+        for before in [_noop_outcome(identifier, noop, test_files)]
+    }
     return {
+        "fail_to_pass_detail": detail,
         "fail_to_pass": fail_to_pass,
         "black_box_fail_to_pass": black_box,
         "pass_to_pass": pass_to_pass,
@@ -323,13 +364,27 @@ def calibrate_sample(
                 timeout_seconds=timeout_seconds,
                 home_dir=home_dir,
             )
-            noop = run_pytest(
-                tree=noop_tree,
-                test_files=plan.test_files,
-                command=command,
-                timeout_seconds=timeout_seconds,
-                home_dir=home_dir,
-            )
+            try:
+                noop = run_pytest(
+                    tree=noop_tree,
+                    test_files=plan.test_files,
+                    command=command,
+                    timeout_seconds=timeout_seconds,
+                    home_dir=home_dir,
+                )
+            except UnrunnableBeforeChangeError as unrunnable:
+                # 改动前连测试都加载不起来：gold 下通过的测试在 noop 下都"不存在"，且完全与新增名字耦合。
+                passed = sorted(i for i, o in gold.items() if o.outcome == OUTCOME_PASSED)
+                record.update(
+                    status=STATUS_COUPLED,
+                    fail_to_pass=passed,
+                    black_box_fail_to_pass=[],
+                    pass_to_pass=[],
+                    gold_failures=sorted(i for i, o in gold.items() if o.outcome != OUTCOME_PASSED),
+                    counts={"gold": _count_outcomes(gold), "noop": {}},
+                )
+                record["reasons"].append(str(unrunnable))
+                return record
         comparison = compare_runs(gold, noop, plan.test_files)
         record.update(comparison)
         record["status"] = classify(plan, comparison, gold)
