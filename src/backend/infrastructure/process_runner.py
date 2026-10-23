@@ -11,7 +11,6 @@ import sys
 import threading
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -27,8 +26,9 @@ from backend.core.shared.interfaces.output_timestamps import (
     format_timestamped_line,
 )
 from backend.core.shared.models import product_identity
-from backend.core.shared.models.agent_runner import TokenUsage
 from backend.core.shared.models.agent_stall import AttemptOwnership, StallCancelOutcome
+from backend.core.shared.models.agent_runner_execution import CommandResult as CommandResult
+from backend.infrastructure.agent_model_config_snapshot import observe_process_model_config
 from backend.infrastructure.agent_stream_usage import (
     StreamUsageCollector,
     _attach_stream_observations,
@@ -213,26 +213,6 @@ def _process_termination_identity(
     return process_group, process_started_at
 
 
-@dataclass(frozen=True)
-class CommandResult:
-    """Captured subprocess result.
-
-    ``duration_seconds`` 让调用方能把"这一步花了多久"记进 attempt 历史 /
-    日志——没有它，卡住的到底是哪条命令只能靠翻日志时间戳倒推。字段与
-    ``backend.core.shared.models.agent_runner.CommandResult`` 保持一致。
-    """
-
-    command: tuple[str, ...]
-    return_code: int
-    stdout: str
-    stderr: str
-    duration_seconds: float = 0.0
-    output_protocol: str = PLAIN_PROTOCOL_ID
-    token_usage: TokenUsage | None = None
-    session_id: str | None = None
-    reported_model: str | None = None
-
-
 class CommandFailedError(subprocess.CalledProcessError):
     """CalledProcessError with captured stderr/stdout included in the message."""
 
@@ -298,6 +278,7 @@ class SubprocessRunner:
     ``backend.core.shared.interfaces.agent_runner`` via duck typing.
     """
 
+    @observe_process_model_config
     def run(
         self,
         command: Sequence[str],

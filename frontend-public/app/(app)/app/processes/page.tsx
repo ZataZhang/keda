@@ -57,7 +57,15 @@ export default function ProcessesPage() {
   } = useRepositorySelection();
   const [selectedKind, setSelectedKind] = useState<RunnerProcessKind>("daemon");
   const [starting, setStarting] = useState(false);
+  const [startingAll, setStartingAll] = useState(false);
   const [logProcess, setLogProcess] = useState<RunnerProcessRecord | null>(null);
+
+  // 已有在跑 daemon 的仓库：全局启动要跳过它们，否则后端会按同类常驻进程去重报错。
+  const daemonRepoIds = new Set(
+    processes
+      .filter((record) => record.kind === "daemon" && record.status === "running")
+      .map((record) => record.repo_id),
+  );
 
   const refreshProcesses = useCallback(async () => {
     try {
@@ -98,6 +106,55 @@ export default function ProcessesPage() {
       toast.error(error instanceof Error ? error.message : "启动进程失败。");
     } finally {
       setStarting(false);
+    }
+  }
+
+  /** 为所有启用仓库各启动一个 daemon，已在运行的仓库跳过。 */
+  async function handleStartAll() {
+    if (repositories.length === 0) {
+      toast.warning("没有可用的启用仓库。");
+      return;
+    }
+    const targets = repositories.filter(
+      (entry) => !daemonRepoIds.has(entry.repo_id),
+    );
+    if (targets.length === 0) {
+      toast.info("所有启用仓库都已有运行中的 daemon。");
+      return;
+    }
+    const confirmed = window.confirm(
+      `确认给 ${targets.length} 个仓库启动 daemon？已在运行的 ${daemonRepoIds.size} 个仓库会跳过。`,
+    );
+    if (!confirmed) {
+      return;
+    }
+    setStartingAll(true);
+    const started: string[] = [];
+    const failures: string[] = [];
+    // 串行启动：当前仓库数量是个位数，串行能给出稳定的顺序与逐条错误归属。
+    for (const entry of targets) {
+      try {
+        const record = await startProcess({
+          repo_id: entry.repo_id,
+          kind: "daemon",
+        });
+        started.push(`${entry.repo_id}（pid ${record.pid}）`);
+      } catch (error) {
+        failures.push(
+          `${entry.repo_id}：${error instanceof Error ? error.message : "启动失败。"}`,
+        );
+      }
+    }
+    try {
+      if (started.length > 0) {
+        toast.success(`已启动 ${started.length} 个 daemon：${started.join("、")}`);
+      }
+      if (failures.length > 0) {
+        toast.error(`${failures.length} 个仓库启动失败：${failures.join("；")}`);
+      }
+    } finally {
+      setStartingAll(false);
+      await refreshProcesses();
     }
   }
 
@@ -165,6 +222,15 @@ export default function ProcessesPage() {
           </select>
           <Button size="sm" onClick={() => void handleStart()} disabled={starting}>
             {starting ? "启动中…" : "启动"}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => void handleStartAll()}
+            disabled={startingAll || repositories.length === 0}
+            title="为所有启用仓库各启动一个 daemon；已在运行的仓库自动跳过"
+          >
+            {startingAll ? "批量启动中…" : "全部仓库启动 daemon"}
           </Button>
         </CardContent>
       </Card>

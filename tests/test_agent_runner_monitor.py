@@ -493,6 +493,32 @@ def test_build_repository_overview_aggregates_anomaly_counts(
     assert flagged == {30, 31, 32}
 
 
+def test_build_repository_overview_tracks_closed_issue_state(tmp_path: Path) -> None:
+    """运行账本里的已关闭 Issue 进入 tracked_issues，且不污染队列与异常统计。"""
+    config = AppConfig()
+    client = FakeGitHubClient()
+    client._issue_states[42] = "CLOSED"
+    client.set_issue_labels(42, ("agent/failed",))
+
+    overview = build_repository_overview(
+        repo_id="zata/keda-test",
+        display_name="Keda Test",
+        enabled=True,
+        config=config,
+        github_client=client,
+        process_runner=FakeProcessRunner(),
+        repo_path=tmp_path,
+        tracked_issue_numbers=[42],
+    )
+
+    assert overview.issues == ()
+    assert [snapshot.number for snapshot in overview.tracked_issues] == [42]
+    tracked = overview.tracked_issues[0]
+    assert tracked.state == "CLOSED"
+    assert tracked.anomaly_types == ()
+    assert overview.anomaly_count == 0
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Scenario: build_overview iterates over configured repositories
 # ─────────────────────────────────────────────────────────────────────────────

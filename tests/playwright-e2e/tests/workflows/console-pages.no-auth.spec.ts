@@ -396,6 +396,62 @@ test.describe('console pages smoke (mocked API)', () => {
     await expect(page.getByRole('button', { name: '停止' })).toBeVisible()
   })
 
+  test('processes page starts daemons for every repo that lacks one', async ({
+    page,
+  }) => {
+    await mockConsoleApi(page)
+    const startedBodies: unknown[] = []
+    // 在共用的 registry / processes mock 之上再注册一次：后注册的路由优先命中。
+    await page.route('**/api/v1/agent-runner/repositories', (route) =>
+      route.fulfill({
+        json: {
+          repositories: [
+            ...REGISTRY.repositories,
+            {
+              repo_id: 'ai-assistant',
+              path: '/Users/me/code/ai-assistant',
+              enabled: true,
+              display_name: 'ai-assistant',
+              path_exists: true,
+            },
+            {
+              repo_id: 'disabled-repo',
+              path: '/Users/me/code/disabled-repo',
+              enabled: false,
+              display_name: 'disabled-repo',
+              path_exists: true,
+            },
+          ],
+        },
+      }),
+    )
+    await page.route('**/api/v1/agent-runner/console/processes', (route) => {
+      const request = route.request()
+      if (request.method() !== 'POST') {
+        return route.fulfill({ json: PROCESSES })
+      }
+      const body = request.postDataJSON() as { repo_id: string; kind: string }
+      startedBodies.push(body)
+      return route.fulfill({
+        json: {
+          ...PROCESSES.processes[0],
+          process_id: 'new-process',
+          repo_id: body.repo_id,
+          pid: 5151,
+        },
+      })
+    })
+
+    page.once('dialog', (dialog) => void dialog.accept())
+    await page.goto('/app/processes')
+    await page.getByRole('button', { name: '全部仓库启动 daemon' }).click()
+
+    // keda-main 已有在跑 daemon、disabled-repo 未启用，都该被跳过。
+    await expect.poll(() => startedBodies, { timeout: 5_000 }).toEqual([
+      { repo_id: 'ai-assistant', kind: 'daemon' },
+    ])
+  })
+
   test('stats page shows completion table', async ({ page }) => {
     await mockConsoleApi(page)
     await page.goto('/app/stats')

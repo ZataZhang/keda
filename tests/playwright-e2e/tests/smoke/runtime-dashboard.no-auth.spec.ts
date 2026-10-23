@@ -23,6 +23,8 @@ const RUNNING_TASK = {
   repo_display_name: 'Keda Main',
   issue_title: 'Running Issue',
   issue_url: 'https://example.test/21',
+  pr_url: 'https://example.test/pr/21',
+  pr_number: 21,
   status: 'running',
   status_reason: '当前监控标签：agent/running',
   anomaly_types: [],
@@ -178,6 +180,13 @@ test.describe('runtime board (mocked API)', () => {
     await expect(
       page.getByTestId('runtime-task-row-keda-main-19'),
     ).toContainText('失败')
+    // 行内直接给出 Issue / PR 入口：有 PR 时两个都在，无 PR 时只有 Issue。
+    await expect(page.getByTestId('runtime-task-issue-link')).toHaveCount(2)
+    await expect(page.getByTestId('runtime-task-pr-link')).toHaveCount(1)
+    await expect(page.getByTestId('runtime-task-pr-link')).toHaveAttribute(
+      'href',
+      'https://example.test/pr/21',
+    )
     // 默认视图不再铺仓库卡片：仓库级动作收在「仓库监控」一侧。
     await expect(page.getByTestId('dashboard-repo-header')).toHaveCount(0)
   })
@@ -321,6 +330,7 @@ test.describe('desktop companion page (mocked API)', () => {
       await expect(row.getByTestId('runtime-task-status-reason')).toContainText('agent/blocked')
     }
     await expect(page.getByTestId('desktop-companion-list')).toBeVisible()
+    await expect(page.getByTestId('desktop-companion-count-blocked')).toHaveText('阻塞 5')
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy()
     await page.screenshot({ path: '/tmp/keda-runtime-phase-narrow.png', fullPage: true })
   })
@@ -349,6 +359,9 @@ test.describe('desktop companion page (mocked API)', () => {
     await page.goto('/app/companion')
 
     await expect(page.getByTestId('desktop-companion')).toBeVisible()
+    // 计数条把溢出任务的数量提前给出，不必滚到底数行。
+    await expect(page.getByTestId('desktop-companion-count-running')).toHaveText('运行中 5')
+    await expect(page.getByTestId('desktop-companion-count-blocked')).toHaveCount(0)
     // 超出紧凑高度的任务不丢弃：仍在同一列表里，靠滚动看到。
     await expect(page.getByTestId(/desktop-companion-row-/)).toHaveCount(5)
     await expect(page.getByTestId('desktop-companion-list')).toHaveCSS('overflow-y', 'auto')

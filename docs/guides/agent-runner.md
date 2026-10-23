@@ -4055,8 +4055,9 @@ per-repo overview JSON 与 `scanned_at`），因此即使 `gh` 慢或断网也�
 - 同步或写库失败时保留该仓库的旧快照、其余仓库照常更新，失败进入 job/批次状态并记日志，不伪装成刷新成功。
 - 已从 registry 删除或禁用的仓库即使仍有历史快照行，也不会重新出现在页面上。
 
-页面上可以看到"上次同步"时间（取各仓库快照 `scanned_at` 的最大值），点击"同步设置"
-可内联展开设置面板：开关自动同步、在 1/5/15/30/60 分钟之间调整间隔。设置保存在同一个
+页面上可以看到"上次同步"时间（取各仓库快照 `scanned_at` 的最大值）与当前生效的
+"每 N 分钟"间隔，点击"同步设置"可内联展开设置面板：开关自动同步、在 5/15/30/60
+分钟之间调整间隔。设置保存在同一个
 本地库的 `monitor_settings` 表里（运行时覆盖值），改完立即生效并在进程重启后保持；
 没有保存过时回落到配置项 `[agent_runner.console].monitor_sync_interval_seconds`。
 对应 API：
@@ -4066,7 +4067,9 @@ GET    /api/v1/agent-runner/console/monitor/settings
 PATCH  /api/v1/agent-runner/console/monitor/settings   {sync_enabled, sync_interval_seconds}
 ```
 
-`sync_interval_seconds` 合法区间为 60–3600 秒，两个字段都必填。保存成功后后端立即唤醒
+`sync_interval_seconds` 合法区间为 300–3600 秒（5 分钟下限），两个字段都必填。下限不是
+随手取的：每轮同步要对每个仓库逐个 PRD 查 3~5 次 GitHub REST，而认证配额是 5000 次/小时、
+并与 daemon 和 kc 共用，间隔再短就会把额度吃光（面板内有同样的说明）。保存成功后后端立即唤醒
 调度循环，按新间隔重算下一次运行时间；关闭自动同步后不再有任何后台扫描，手动刷新仍可用。
 这份设置是全局的：它同时约束 Dashboard 概览与 Backlog 列表两条后台同步循环
 （见「Backlog（待办队列）→ 本地快照与后台刷新」），两条循环共享设置但各自独立调度。
@@ -4075,7 +4078,7 @@ PATCH  /api/v1/agent-runner/console/monitor/settings   {sync_enabled, sync_inter
 
 `/app/dashboard/` 的**默认视图**是任务值守看板（「仓库监控」仍保留原有的仓库卡片视图，
 仓库级「跑一轮 / 复核一轮」和同步设置都在那一侧）。看板以 Issue 运行为单位列出
-生命周期分桶（运行中 / 等待值守 / 阻塞 / 失败 / 已完成 / 已关闭 / 状态未知）、仓库与 Issue 身份、
+生命周期分桶（运行中 / 等待处理 / 阻塞 / 失败 / 已完成 / 已关闭 / 状态未知）、仓库与 Issue 身份、
 阶段及其简明说明、执行者与耗时，可按状态筛选、按仓库 / 编号 / 标题搜索，选中项复用既有的 Issue 增量日志与
 调用账本端点（结构化调用默认折叠，折叠只是展示层，原文不做截断）。
 
@@ -4474,7 +4477,10 @@ Issue 的 `attempt_records` 读取，按尝试编号及生命周期事件的精�
 `invocation_finished` 调用账本。结构化输出中，完整 `assistant.message.usage` 按单次
 模型请求累加；没有可用 assistant 用量时回退到最后一条 `result.usage`。两类字段都需
 符合 input / output / cache_read / cache_creation 的语义；不会把 assistant 请求用量与
-result 汇总重复相加。plain 输出不做渲染，若包含同形 assistant 或 result 事件也按此规则采集：
+result 汇总重复相加。Codex 的 `turn.completed.usage` 按轮次累加；其中
+`cached_input_tokens` 已包含在 `input_tokens` 中，转为缓存读后从普通输入扣除，
+防止重复计费；`reasoning_output_tokens` 不额外相加。plain 输出不做渲染，
+若包含同形 assistant、result 或 Codex 事件也按此规则采集：
 
 - **统一口径**：流程、Agent、PRD 与模型统计都从每次实际调用的结束事件汇总，
   所以模型用量总数与流程/PRD 总数对齐。调用账本完全没有可用 usage 的旧 run
@@ -4512,6 +4518,31 @@ Settings →「成本估算」从下拉列表选择近一年实际调用过的�
   配置时显示已计价金额并标注「部分」。旧记录没有调用模型事实时不推测费用。修改价格后，
   当前统计窗口会按新价格重新估算，历史价格不做版本化快照。每个 Issue 最多读取最近
   500 条调用事件；达到上限时页面披露费用可能少计。
+- **采集完整性**：`token_usage_by_model.missing_usage_by_agent` 披露窗口内已结束但
+  无有效 usage 的调用数；这些调用不估算 Token 或费用，旧账本可能另有回退用量。
+  `zero_usage_by_model` 披露调用账本明确上报全零的调用数；全零模型显示「用量上报为 0」，
+  不能当作免费。缺失模型归属显示「模型未识别」，缺少单价才显示「待配置」。
+  已计价金额只覆盖已有用量与价格的部分；价格覆盖率不等于调用采集完整率。
+  历史渲染日志若未保留原始 usage，修复采集器不会自动恢复旧用量。
+- **默认模型快照**：内置输出协议与普通 Agent 进程路径会在启动前只读采集工具配置，
+  结束时通过 `model_config_snapshot` 保存模型标识、非敏感来源和别名标志；异常结束也
+  保留快照，不把配置值写进 `reported_model`，也不改变 `model_source` 的自报语义。
+  归属优先级为执行器报告 → KC 明确下发 → 具体版本模型的配置快照。Stats 对第三类
+  单独显示「含配置估价」及调用数。`sonnet`、`qmodel_latest`、`qfmodel` 等动态或
+  无版本名称只作线索，仍归入未识别模型，不按别名计费。
+  当前支持 Claude / CodeBuddy 的用户及当前目录 settings 文件、Qoder 两种目录
+  （`qodercli` 对应 `.qoder`、`qodercn` 对应 `.qoder-cn`）、Codex 的 `CODEX_HOME`
+  用户配置，以及 Kimi 的默认模型到 models 表映射。Kimi 新旧目录同时存在、Codex
+  使用 profile / 项目配置、存在续传或自定义配置覆盖参数、配置损坏或无法确认优先级时，
+  不猜测有效配置。Claude 的模型环境变量也会作为单独来源记录；认证字段不会落库。
+  读取失败不影响任务执行。快照只适用于该次调用，不用于回填历史记录，也不保证代理
+  服务端最终选择的模型。需要固定模型时，为各阶段绑定包含具体 `model` 的命名预设；
+  本功能不会替操作者修改工具默认值或选择新的模型。
+- **官方价格参考（2026-10-23）**：`claude-sonnet-5-5` 按
+  [Anthropic 公开价格](https://platform.claude.com/docs/en/about-claude/pricing)
+  可设置输入 2、输出 10、缓存读 0.10、5 分钟缓存写 2.50 USD / 百万 token。
+  1 小时缓存写为 4，当前统一缓存写单价无法区分 TTL；转售渠道、订阅额度和历史价格
+  应按实际计费条件另行设置，公开价估算不等同账单。
 - **模型计价接口**：`GET /api/v1/agent-runner/console/model-pricing` 读取价格清单；
   `PUT` 整体替换清单，字段为 `model_id`、`input_usd_per_million`、
   `output_usd_per_million`、`cache_read_usd_per_million` 与
@@ -4647,7 +4678,7 @@ process_registry_path = "~/.kedacode/processes.json"  # 托管进程 pidfile
 process_log_dir = "logs/agent-runner/processes"  # 进程日志目录（相对 keda 根）
 runner_command = ["uv", "run", "kc"]            # 托管进程启动命令前缀（缺省运行时解析，见上文）
 stop_timeout_seconds = 30                        # SIGTERM → SIGKILL 等待秒数
-monitor_sync_interval_seconds = 300              # dashboard 后台自动同步的静态默认间隔（秒，60–3600）
+monitor_sync_interval_seconds = 300              # dashboard 后台自动同步的静态默认间隔（秒，300–3600）
 host = "127.0.0.1"                               # 监听地址（固定本机，不开放配置其它网卡）
 port = 8600                                      # kc console 缺省端口（已有实例在跑则复用，否则被占用时自动顺延）
 ```
@@ -4996,10 +5027,13 @@ uv run kc ask "运行一次 dry-run 看看 ready 队列" --execute --yes
 
 - 快照存放在 `~/.kedacode/console.db` 的 `backlog_prd_snapshots` 表，按
   `(repo_id, include_archived)` 各存一行完整列表响应与 `scanned_at`，进程重启后仍然有效。
-- 读路径只做单行 SELECT：快照缺失、损坏或构建时间超过 30 秒时响应携带 `stale=true`，
+- 读路径只做单行 SELECT：快照缺失、损坏或构建时间超过 5 分钟（300 秒，与后台同步间隔
+  默认值对齐——避免页面停留时 30 秒一轮的全量 GitHub 查询耗尽 API 额度）时响应携带 `stale=true`，
   同时向协调器申请一次**非阻塞**的后台重扫（同一仓库同一视图在途只跑一次）；
   请求线程绝不等待扫描结果。「损坏」按列表响应的完整结构判定（含每条 PRD 与其依赖、
   `next_action` 的字段），结构不符即视同没有快照，坏数据绝不下发。
+- `?force_refresh=true` 是页面刷新按钮的入口：不等到快照超过 TTL，直接排一次后台重扫；
+  本次响应仍返回上一份快照并置 `stale=true`，前端据此保持 3 秒短轮询，直到新结果落库。
 - 后台重扫复用 dashboard 已验证的同步循环模式（独立一条 `MonitorSyncScheduler` 循环 +
   按任务键去重的协调器），开关与间隔复用上面的**全局同步设置**；console 启动首圈为所有
   启用仓库补建默认视图快照（启动预取），「显示已归档」变体首次访问时按需构建。
@@ -5008,8 +5042,11 @@ uv run kc ask "运行一次 dry-run 看看 ready 队列" --execute --yes
   查询失败会**中止本次重建**，不会把「查不到」降级成「未开始 / 被阻塞」写进快照——
   宁可让用户继续看上一份好数据，也不落一份网络抖动造成的假状态。已禁用/已删除仓库
   返回 400，其历史快照不会回流到页面。
-- 页面展示「数据截至 HH:MM:SS」；`stale=true` 时追加「后台更新中…」并把轮询间隔临时
-  缩短到 3 秒，拿到新鲜数据后恢复 30 秒。没有快照时显示「正在同步…」空态；列表请求
+- 页面展示「数据截至 HH:MM:SS」，旁边是刷新按钮：平时显示到下一次自动刷新的倒计时
+  （节奏取自列表响应里的 `refresh_interval_seconds`，即全局同步间隔，默认 5 分钟），点击
+  即可提前刷新；`stale=true` 时按钮显示「更新中…」并把轮询间隔临时缩短到 3 秒，拿到新鲜
+  数据后恢复配置的间隔并重置倒计时。时间戳与按钮都是固定宽度、不换行，文案切换不会让
+  表头换行把右侧按钮顶下去。没有快照时显示「正在同步…」空态；列表请求
   本身失败（后端不可达、仓库已移除等）时如实显示「加载失败」而不是伪装成正在同步。
 - 旧的 30 秒内存缓存已整体删除，快照是列表读路径的唯一缓存机制；PRD 详情、验收证据、
   CI/CD、Autopilot 等点击时加载的接口保持每次实时读取不变。
@@ -5665,3 +5702,12 @@ pi · run
 ### 未声明用途的行为
 
 一个 agent 不必声明全部四种用途。请求它未声明的用途时 `build_agent_invocation` 会抛 `UnknownProfileError` 并列出该 agent 已声明的用途名，**不会**回落到别的用途或别的 agent。`kc agent doctor <name> <profile>` 同样会以非零退出码指名报错。
+
+### 看板等待状态与 PR 值守
+
+等待处理按当前标签与最近监督动作细分为「待执行」「待人工评审」「待再次检查」。
+`wait_for_checks` 表示上次检查正在等待 CI，不代表 CI 现在仍未完成；需再次监督确认。
+旧版 `agent/review` 单独存在不能证明人工评审已就绪，保守显示待再次检查。
+PR 值守状态独立探测本机托管及手动启动的监督进程，失败时显示未知。
+值守运行中不代表当前正在执行任务，也不授予自动合并权限。
+已结束运行的 Agent 与耗时标注为上次运行；阶段表示最近记录的环节。

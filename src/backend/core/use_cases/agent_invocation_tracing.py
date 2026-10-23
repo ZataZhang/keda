@@ -31,7 +31,7 @@ import uuid
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, cast
@@ -42,6 +42,10 @@ from backend.core.shared.interfaces.runner_console import (
     InvocationEventRecord,
 )
 from backend.core.shared.models.agent_runner import CommandResult
+from backend.core.shared.models.agent_model_observation import (
+    AGENT_MODEL_CONFIG_SNAPSHOT_ATTR,
+    AgentModelConfigSnapshot,
+)
 from backend.core.use_cases.agent_runner_failure import AgentUnavailableError
 from backend.core.use_cases.agent_runner_output_routing import active_issue_log_binding
 
@@ -713,6 +717,11 @@ def finish_invocation(
         MODEL_SOURCE_EXECUTOR_REPORT if reported_model is not None else MODEL_SOURCE_UNKNOWN
     )
     token_usage = result.token_usage if result is not None else None
+    model_config_snapshot = (
+        getattr(result, "model_config_snapshot", None)
+        if result is not None
+        else getattr(exc, AGENT_MODEL_CONFIG_SNAPSHOT_ATTR, None)
+    )
     detail: dict[str, Any] = {
         **_identity_fields(context, observation.invocation_id, request),
         "parent_invocation_id": None,
@@ -724,6 +733,11 @@ def finish_invocation(
         )
         or None,
         "reported_model": reported_model,
+        "model_config_snapshot": (
+            asdict(model_config_snapshot)
+            if isinstance(model_config_snapshot, AgentModelConfigSnapshot)
+            else None
+        ),
         "model_source": model_source,
         "resumed_session_id": sanitize_identifier(request.resumed_session_id, fallback="") or None,
         "started_at": observation.started_at,

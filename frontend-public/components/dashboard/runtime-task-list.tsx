@@ -8,20 +8,22 @@
 // 单独呈现，避免「列表为空」被读成「一切正常」。
 
 import { useMemo, useState } from "react";
+import { Check, Copy } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import type { BadgeVariant } from "@/components/ui/badge";
 import { formatLifecycleDuration } from "@/components/backlog/prd-lifecycle-format";
 import { prettyLabel } from "@/components/agent-runner/label-variant";
 import type { RuntimeTaskEntry, RuntimeTaskStatus } from "@/lib/api/types";
-import { formatLocalDateTime } from "@/lib/utils";
+import { openExternalUrl } from "@/lib/open-external";
+import { cn, formatLocalDateTime } from "@/lib/utils";
 
 import { runtimePhaseDescription, RuntimeTaskPhase } from "./runtime-task-phase";
 
 /** 状态分桶的人读文案与配色（唯一事实源，列表/详情/小窗共用）。 */
 const STATUS_PRESENTATION: Record<RuntimeTaskStatus, { label: string; variant: BadgeVariant }> = {
   running: { label: "运行中", variant: "running" },
-  waiting: { label: "等待值守", variant: "review" },
+  waiting: { label: "等待处理", variant: "review" },
   blocked: { label: "阻塞", variant: "error" },
   failed: { label: "失败", variant: "error" },
   completed: { label: "已完成", variant: "ready" },
@@ -46,10 +48,22 @@ const STATUS_FILTERS: RuntimeTaskStatus[] = [
  * @param status - 后端分桶值；未知取值回落到「状态未知」。
  * @returns 徽章文案与配色。
  */
-export function runtimeStatusPresentation(status: string): {
+export function runtimeStatusPresentation(
+  status: string,
+  waitingReason?: RuntimeTaskEntry["waiting_reason"]
+): {
   label: string;
   variant: BadgeVariant;
 } {
+  if (status === "waiting") {
+    const label =
+      waitingReason === "queued"
+        ? "待执行"
+        : waitingReason === "human_review"
+          ? "待人工评审"
+          : "待再次检查";
+    return { ...STATUS_PRESENTATION.waiting, label };
+  }
   return STATUS_PRESENTATION[status as RuntimeTaskStatus] ?? STATUS_PRESENTATION.unknown;
 }
 
@@ -269,26 +283,34 @@ function RuntimeTaskRow({
   selected: boolean;
   onSelect: (task: RuntimeTaskEntry) => void;
 }) {
-  const presentation = runtimeStatusPresentation(task.status);
+  const presentation = runtimeStatusPresentation(task.status, task.waiting_reason);
   const identity = `${task.repo_display_name ?? task.repo_id}#${task.issue_number}`;
+  const issueUrl = task.issue_url;
+  const prUrl = task.pr_url;
   return (
-    <li>
-      <button
-        type="button"
-        onClick={() => onSelect(task)}
-        aria-current={selected ? "true" : undefined}
-        className={`w-full rounded-md border px-3 py-2 text-left text-sm transition-colors ${
-          selected
-            ? "border-slate-900 bg-slate-50 dark:border-slate-200 dark:bg-slate-900"
-            : "border-slate-200 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-900"
-        }`}
-        data-testid={`runtime-task-row-${task.repo_id}-${task.issue_number}`}
-      >
+    <li
+      className={`rounded-md border text-sm transition-colors ${
+        selected
+          ? "border-slate-900 bg-slate-50 dark:border-slate-200 dark:bg-slate-900"
+          : "border-slate-200 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-900"
+      }`}
+    >
+      {/* 行按钮与 Issue / PR 链接必须是兄弟节点：把 <a> 嵌进 button 或
+          role=button 会被 WebKit 的 AX 压成整行一个按钮，链接既不可读也不可点。 */}
+      <div className="flex items-start gap-2">
+        <button
+          type="button"
+          onClick={() => onSelect(task)}
+          aria-current={selected ? "true" : undefined}
+          className="min-w-0 flex-1 px-3 py-2 text-left"
+          data-testid={`runtime-task-row-${task.repo_id}-${task.issue_number}`}
+        >
         <span className="flex flex-wrap items-center gap-2">
           <Badge variant={presentation.variant}>{presentation.label}</Badge>
           <RuntimeTaskPhase phase={task.phase} />
+          <RuntimeTaskWatch task={task} />
           <span className="font-medium text-slate-900 dark:text-slate-100">{identity}</span>
-          <span className="truncate text-slate-600 dark:text-slate-300">
+          <span className="min-w-0 flex-1 truncate text-slate-600 dark:text-slate-300">
             {task.issue_title ?? "（账本未记录标题）"}
           </span>
         </span>
@@ -301,17 +323,152 @@ function RuntimeTaskRow({
         <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
           {task.agent ? (
             <span>
-              执行：{task.agent}
+              {task.finished_at ? "上次执行" : "执行"}：{task.agent}
               {task.preset ? ` · ${task.preset}` : ""}
             </span>
           ) : null}
-          <span>耗时：{formatLifecycleDuration(task.duration_seconds)}</span>
+          <RuntimeTaskDuration task={task} />
           {task.started_at ? <span>开始：{formatLocalDateTime(task.started_at)}</span> : null}
           {task.labels.length > 0 ? (
             <span className="truncate">标签：{task.labels.map(prettyLabel).join(" ")}</span>
           ) : null}
         </span>
-      </button>
+        </button>
+        <div className="flex shrink-0 flex-col items-end gap-1 px-3 py-2 text-[11px]">
+          {issueUrl ? (
+            <ExternalLinkPill
+              href={issueUrl}
+              label={`Issue #${task.issue_number}`}
+              tone="issue"
+              linkTestId="runtime-task-issue-link"
+              copyTestId="runtime-task-issue-copy"
+              description={`Issue #${task.issue_number}`}
+            />
+          ) : null}
+          {prUrl ? (
+            <ExternalLinkPill
+              href={prUrl}
+              label={task.pr_number ? `PR #${task.pr_number}` : "PR 链接"}
+              tone="pr"
+              linkTestId="runtime-task-pr-link"
+              copyTestId="runtime-task-pr-copy"
+              description={task.pr_number ? `PR #${task.pr_number}` : "PR"}
+            />
+          ) : null}
+        </div>
+      </div>
     </li>
   );
+}
+
+/** Issue / PR 胶囊的配色（左半是跳转链接，右半是复制按钮，共用同一个外壳）。 */
+const LINK_PILL_TONES = {
+  issue: {
+    shell:
+      "border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-900 dark:bg-sky-950/50 dark:text-sky-300",
+    segment: "hover:bg-sky-100 dark:hover:bg-sky-900/60",
+    divider: "border-sky-200 dark:border-sky-900",
+  },
+  pr: {
+    shell:
+      "border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-900 dark:bg-violet-950/50 dark:text-violet-300",
+    segment: "hover:bg-violet-100 dark:hover:bg-violet-900/60",
+    divider: "border-violet-200 dark:border-violet-900",
+  },
+} as const;
+
+/**
+ * 一分为二的外链胶囊：左半跳转，右半只复制 URL（复制不触发跳转）。
+ *
+ * @param props - 目标地址、左半文案、配色语义、两段各自的 testid 与读屏用描述。
+ * @returns 可跳转 + 可复制的外链胶囊。
+ */
+function ExternalLinkPill({
+  href,
+  label,
+  tone,
+  linkTestId,
+  copyTestId,
+  description,
+}: {
+  href: string;
+  label: string;
+  tone: keyof typeof LINK_PILL_TONES;
+  linkTestId: string;
+  copyTestId: string;
+  description: string;
+}) {
+  const [copied, setCopied] = useState(false);
+  const toneClass = LINK_PILL_TONES[tone];
+
+  /** 复制 URL；失败时保持图标不变，用户仍可选中链接文本手动复制。 */
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(href);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // 复制失败是环境限制（非安全上下文/无权限），不该弹窗打断看板浏览。
+    }
+  }
+
+  return (
+    <span
+      className={cn(
+        "inline-flex items-stretch overflow-hidden rounded-md border leading-4",
+        toneClass.shell,
+      )}
+    >
+      <a
+        href={href}
+        target="_blank"
+        rel="noreferrer"
+        onClick={(event) => {
+          if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+            return;
+          }
+          event.preventDefault();
+          void openExternalUrl(href);
+        }}
+        className={cn("inline-flex items-center px-2 py-0.5", toneClass.segment)}
+        data-testid={linkTestId}
+      >
+        {label}
+      </a>
+      <button
+        type="button"
+        onClick={() => void handleCopy()}
+        className={cn("flex items-center border-l px-1.5", toneClass.divider, toneClass.segment)}
+        aria-label={copied ? "已复制链接" : `复制 ${description} 链接`}
+        title={copied ? "已复制" : `复制 ${description} 链接`}
+        data-testid={copyTestId}
+      >
+        {copied ? <Check size={11} aria-hidden /> : <Copy size={11} aria-hidden />}
+      </button>
+    </span>
+  );
+}
+
+/** 展示本机 PR 值守探活；未知不能当作未启动。 */
+export function RuntimeTaskWatch({ task }: { task: RuntimeTaskEntry }) {
+  if (task.status !== "waiting" || task.waiting_reason === "queued") return null;
+  const label =
+    task.review_daemon_running === true
+      ? "PR 值守运行中"
+      : task.review_daemon_running === false
+        ? "PR 值守未启动"
+        : "PR 值守状态未知";
+  return (
+    <span
+      className="text-xs text-slate-500"
+      title="仅观测本机 PR 值守进程；不代表当前正在执行或已获自动合并授权。"
+    >
+      {label}
+    </span>
+  );
+}
+
+/** 共享运行耗时口径，区分历史运行和当前轮次。 */
+export function RuntimeTaskDuration({ task }: { task: RuntimeTaskEntry }) {
+  return <span>{task.finished_at ? "上次运行耗时" : "本轮耗时"}：{formatLifecycleDuration(task.duration_seconds)}</span>;
 }

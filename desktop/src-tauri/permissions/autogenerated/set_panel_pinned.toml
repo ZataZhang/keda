@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-panel-pinned"
+description = "Enables the set_panel_pinned command without any pre-configured scope."
+commands.allow = ["set_panel_pinned"]
+
+[[permission]]
+identifier = "deny-set-panel-pinned"
+description = "Denies the set_panel_pinned command without any pre-configured scope."
+commands.deny = ["set_panel_pinned"]

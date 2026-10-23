@@ -19,8 +19,13 @@ import {
 } from "@/lib/api/console";
 import type { MonitorSettings } from "@/lib/api/types";
 
-/** Selectable sync intervals, in minutes (backend accepts 60–3600 seconds). */
-export const SYNC_INTERVAL_OPTIONS_MINUTES = [1, 5, 15, 30, 60] as const;
+/**
+ * Selectable sync intervals, in minutes.
+ *
+ * 5 分钟是下限（后端同样按 300–3600 秒校验）：每轮同步要逐个 PRD 查 GitHub，
+ * 再密就会挤占 daemon 与 kc 共用的每小时配额。
+ */
+export const SYNC_INTERVAL_OPTIONS_MINUTES = [5, 15, 30, 60] as const;
 
 const DEFAULT_INTERVAL_MINUTES = 5;
 
@@ -36,9 +41,17 @@ function secondsToMinutesOption(seconds: number): number {
 /**
  * Inline sync settings panel.
  *
- * @param onClose - Callback invoked when the user collapses the panel.
+ * @param props - 面板回调。
+ * @param props.onClose - 用户收起面板时调用。
+ * @param props.onSaved - 保存成功后回传新设置，供外层表头显示当前间隔。
  */
-export function MonitorSettingsPanel({ onClose }: { onClose: () => void }) {
+export function MonitorSettingsPanel({
+  onClose,
+  onSaved,
+}: {
+  onClose: () => void;
+  onSaved?: (settings: MonitorSettings) => void;
+}) {
   const [settings, setSettings] = useState<MonitorSettings | null>(null);
   const [intervalMinutes, setIntervalMinutes] = useState<number>(
     DEFAULT_INTERVAL_MINUTES,
@@ -83,6 +96,7 @@ export function MonitorSettingsPanel({ onClose }: { onClose: () => void }) {
       setSettings(saved);
       setSavedAt(saved.updated_at);
       setLoadError(null);
+      onSaved?.(saved);
       toast.success("同步设置已保存");
     } catch (error: unknown) {
       const message =
@@ -106,6 +120,11 @@ export function MonitorSettingsPanel({ onClose }: { onClose: () => void }) {
         <p className="text-xs text-slate-500">
           这里的开关与间隔同时约束 Dashboard 概览和 Backlog
           列表的后台刷新节奏；关闭后两处都停止周期扫描，页面读取仍按需触发单次重扫。
+        </p>
+        <p className="text-xs text-slate-500">
+          最小 5 分钟：每轮同步要对每个仓库逐个 PRD 查询 GitHub（每个已开工 PRD 约
+          3~5 次 REST 调用），而认证配额是 5000 次/小时，且与 daemon、kc
+          共用；间隔更短会把额度吃光，连带让后台值守和命令行操作一起被限流。
         </p>
         <div className="flex items-center gap-2">
           <span className="text-xs text-slate-500">自动同步</span>

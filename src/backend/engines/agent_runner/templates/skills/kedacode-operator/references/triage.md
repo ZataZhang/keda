@@ -36,6 +36,8 @@ What the markers do **not** tell you, so do not over-read them:
 - **Log activity is not delivery.** Calls can start, end `ok`, and still never reach a PR — that is exactly the failure mode this tracing was added for. Confirm delivery against the PR / label state, not against how busy the log looks.
 - **A start with no end is a gap, not a verdict.** Read it as *unclosed* by default; call it *interrupted* only after separately confirming the process exited (the `pid=` in the claim comment is gone). Never invent a terminal state for it.
 - **`model_source=unknown` is honest, not broken.** It means the executor did not self-report a model, a binding was dropped on fallback, or the record predates this feature. It is never back-filled from the current config.
+- `model_config_snapshot` 是独立的调用时配置线索，不会把 `model_source=unknown` 改成自报。
+  配置含具体版本时可作标明来源的估价回退；`sonnet`、`qfmodel` 等别名仍待确认。
 - **Coverage is one process layer on one machine.** Sub-Agents spawned inside an Agent are `unobserved`, and the ledger is the local `~/.kedacode/console.db` — no cross-machine aggregation.
 - **`[iar-invocation-coverage-incomplete]` means the list may be incomplete**, not that the run failed. Business results are unaffected by observation faults.
 

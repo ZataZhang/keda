@@ -24,16 +24,17 @@ import {
 import { explainImpactStatus } from "@/components/backlog/prd-progress-strip";
 import { fetchRunExecutionDetails } from "@/lib/api/console";
 import { fetchPrdProgress } from "@/lib/api/backlog";
+import { openExternalUrl } from "@/lib/open-external";
 import type {
   BacklogPrdProgress,
   AnomalyType,
   RuntimeTaskEntry,
   RunInvocationDetailEntry,
 } from "@/lib/api/types";
-import { formatLocalDateTime } from "@/lib/utils";
+import { cn, formatLocalDateTime } from "@/lib/utils";
 
 import { runtimePhaseDescription, RuntimeTaskPhase } from "./runtime-task-phase";
-import { runtimeStatusPresentation } from "./runtime-task-list";
+import { RuntimeTaskDuration, RuntimeTaskWatch, runtimeStatusPresentation } from "./runtime-task-list";
 
 /** `worktree_status` 独有原因：`impact_status` 里没有对应取值，只能在这里补。 */
 const WORKTREE_REASON: Record<string, string> = {
@@ -72,10 +73,7 @@ interface RuntimeTaskAnomaliesProps {
  * @param props - 监控快照提供的异常类型与展示密度。
  * @returns 有异常时返回告警说明，否则返回 ``null``。
  */
-export function RuntimeTaskAnomalies({
-  anomalyTypes,
-  compact = false,
-}: RuntimeTaskAnomaliesProps) {
+export function RuntimeTaskAnomalies({ anomalyTypes, compact = false }: RuntimeTaskAnomaliesProps) {
   if (anomalyTypes.length === 0) {
     return null;
   }
@@ -83,7 +81,7 @@ export function RuntimeTaskAnomalies({
     <p
       className={
         compact
-          ? "break-words text-[11px] text-amber-700 dark:text-amber-300"
+          ? "text-[11px] break-words text-amber-700 dark:text-amber-300"
           : "text-amber-700 dark:text-amber-300"
       }
       data-testid="runtime-task-anomalies"
@@ -264,6 +262,8 @@ const IMPACT_WEAK_SIGNAL_HINT =
 interface RuntimeTaskDetailProps {
   /** 当前选中任务。 */
   task: RuntimeTaskEntry;
+  /** 追加到根容器的布局类；抽屉等受高度约束的宿主用它撑满可用空间。 */
+  className?: string;
 }
 
 /**
@@ -272,8 +272,8 @@ interface RuntimeTaskDetailProps {
  * @param props - 选中任务。
  * @returns 详情面板（观测摘要、触达弱信号、实时输出、折叠的结构化调用）。
  */
-export function RuntimeTaskDetail({ task }: RuntimeTaskDetailProps) {
-  const presentation = runtimeStatusPresentation(task.status);
+export function RuntimeTaskDetail({ task, className }: RuntimeTaskDetailProps) {
+  const presentation = runtimeStatusPresentation(task.status, task.waiting_reason);
   const [invocationsOpen, setInvocationsOpen] = useState(false);
   const [invocations, setInvocations] = useState<RunInvocationDetailEntry[] | null>(null);
   const [invocationError, setInvocationError] = useState<string | null>(null);
@@ -324,23 +324,46 @@ export function RuntimeTaskDetail({ task }: RuntimeTaskDetailProps) {
   ]);
 
   const identity = `${task.repo_display_name ?? task.repo_id}#${task.issue_number}`;
+  const issueUrl = task.issue_url;
+  const prUrl = task.pr_url;
 
   return (
-    <div className="flex min-h-0 flex-col gap-3" data-testid="runtime-task-detail">
+    <div className={cn("flex min-h-0 flex-col gap-3", className)} data-testid="runtime-task-detail">
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="flex flex-wrap items-center gap-2 text-sm">
             <Badge variant={presentation.variant}>{presentation.label}</Badge>
             <RuntimeTaskPhase phase={task.phase} />
+            <RuntimeTaskWatch task={task} />
             <span>{identity}</span>
-            {task.issue_url ? (
+            {issueUrl ? (
               <a
-                href={task.issue_url}
+                href={issueUrl}
                 target="_blank"
                 rel="noreferrer"
+                onClick={(event) => {
+                  event.preventDefault();
+                  void openExternalUrl(issueUrl);
+                }}
                 className="text-xs font-normal text-sky-700 underline dark:text-sky-300"
+                data-testid="runtime-detail-issue-link"
               >
                 Issue 原文
+              </a>
+            ) : null}
+            {prUrl ? (
+              <a
+                href={prUrl}
+                target="_blank"
+                rel="noreferrer"
+                onClick={(event) => {
+                  event.preventDefault();
+                  void openExternalUrl(prUrl);
+                }}
+                className="text-xs font-normal text-sky-700 underline dark:text-sky-300"
+                data-testid="runtime-detail-pr-link"
+              >
+                PR {task.pr_number ? `#${task.pr_number}` : "原文"}
               </a>
             ) : null}
           </CardTitle>
@@ -356,7 +379,7 @@ export function RuntimeTaskDetail({ task }: RuntimeTaskDetailProps) {
           <RuntimeTaskAnomalies anomalyTypes={task.anomaly_types ?? []} />
           <div className="flex flex-wrap gap-x-4 gap-y-1">
             <span>
-              执行：{task.agent ?? "未知"}
+              {task.finished_at ? "上次执行" : "执行"}：{task.agent ?? "未知"}
               {task.preset ? ` · preset ${task.preset}` : ""}
               {task.model ? ` · 模型 ${task.model}` : ""}
             </span>
@@ -369,7 +392,7 @@ export function RuntimeTaskDetail({ task }: RuntimeTaskDetailProps) {
               结束：
               {task.finished_at ? formatLocalDateTime(task.finished_at) : "尚未结束"}
             </span>
-            <span>耗时：{formatLifecycleDuration(task.duration_seconds)}</span>
+            <RuntimeTaskDuration task={task} />
             <span>终态：{task.last_outcome ?? "未收口"}</span>
           </div>
           {task.prd_path ? (

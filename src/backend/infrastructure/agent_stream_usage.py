@@ -1,7 +1,7 @@
 """agent 输出流中的旁路观测：token 用量与会话 id。
 
-从 agent CLI 的原始输出流解析官方自报的 usage 统计。支持 ``result.usage`` 与
-``assistant.message.usage`` 两种事件形态，字段均须与 input / output / cache_read /
+从 agent CLI 的原始输出流解析官方自报的 usage 统计。支持 ``result.usage``、
+``assistant.message.usage`` 与 Codex ``turn.completed.usage``，字段均须与 input / output / cache_read /
 cache_creation 的语义一致；完整 assistant 消息按单次模型请求累计，最终结果用量作为
 兼容回退。形状不同或拿不到时宽容降级为"无数据"（``None``），绝不估算、绝不抛异常
 影响主流程。
@@ -87,9 +87,9 @@ def build_token_usage(usage_payload: object) -> TokenUsage | None:
 
 
 def _extract_stream_usage_event(line: str) -> tuple[str, TokenUsage] | None:
-    """提取完整 assistant 消息或最终 result 事件中的 usage。"""
+    """提取完整 assistant 消息、result 或 Codex 轮次结束事件中的 usage。"""
     if '"usage"' not in line or not any(
-        event_name in line for event_name in ('"assistant"', '"result"')
+        event_name in line for event_name in ('"assistant"', '"result"', '"turn.completed"')
     ):
         return None
     try:
@@ -106,6 +106,26 @@ def _extract_stream_usage_event(line: str) -> tuple[str, TokenUsage] | None:
         usage_payload = message_payload.get("usage")
     elif event_type == "result":
         usage_payload = event_payload.get("usage")
+    elif event_type == "turn.completed":
+        # Codex 的 input_tokens 已包含缓存命中，转换为互斥的四类用量，避免重复计费。
+        codex_usage = event_payload.get("usage")
+        if not isinstance(codex_usage, dict):
+            return None
+        input_tokens = codex_usage.get("input_tokens")
+        cached_tokens = codex_usage.get("cached_input_tokens", 0)
+        if (
+            any(
+                isinstance(token_count, bool) or not isinstance(token_count, int) or token_count < 0
+                for token_count in (input_tokens, cached_tokens)
+            )
+            or cached_tokens > input_tokens
+        ):
+            return None
+        usage_payload = {
+            "input_tokens": input_tokens - cached_tokens,
+            "cache_read_input_tokens": cached_tokens,
+            "output_tokens": codex_usage.get("output_tokens"),
+        }
     else:
         return None
     parsed_usage = build_token_usage(usage_payload)
@@ -183,7 +203,7 @@ def extract_reported_model_event(line: str) -> str | None:
 class StreamUsageCollector:
     """流式采集器：逐行观察原始 stdout，收集用量、会话 id 与模型名。
 
-    完整 assistant 消息里的 usage 是单次请求用量，按调用累计；若流里没有可用的
+    完整 assistant 消息及 Codex 轮次结束里的 usage 按调用累计；若流里没有可用的
     assistant 用量，则回退到最后一条 result usage。两种来源不相加，避免重复统计。
     所有方法都不抛异常——用量采集是旁路，任何解析问题都静默降级为"无数据"。
     """
@@ -203,7 +223,7 @@ class StreamUsageCollector:
             parsed_usage_event = None
         if parsed_usage_event is not None:
             event_type, parsed_usage = parsed_usage_event
-            if event_type == "assistant":
+            if event_type in ("assistant", "turn.completed"):
                 previous_usage = self._assistant_usage or TokenUsage()
                 self._assistant_usage = TokenUsage(
                     input_tokens=previous_usage.input_tokens + parsed_usage.input_tokens,
@@ -239,7 +259,7 @@ class StreamUsageCollector:
 
     @property
     def usage(self) -> TokenUsage | None:
-        """返回 assistant 请求用量累计值，或缺少时回退到最终 result usage。"""
+        """返回 assistant / Codex 用量累计值，或缺少时回退到最终 result usage。"""
         if self._assistant_usage is not None and self._assistant_usage.total_tokens > 0:
             return self._assistant_usage
         if self._usage is not None:

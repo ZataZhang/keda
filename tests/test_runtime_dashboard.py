@@ -62,7 +62,13 @@ def _issue(
     }
 
 
-def _seed_snapshot(store: SqliteConsoleStore, repo_id: str, issues: list[dict]) -> None:
+def _seed_snapshot(
+    store: SqliteConsoleStore,
+    repo_id: str,
+    issues: list[dict],
+    *,
+    tracked_issues: list[dict] | None = None,
+) -> None:
     """把一份 per-repo overview 写入真实快照表。"""
     payload = {
         "repo_id": repo_id,
@@ -70,6 +76,8 @@ def _seed_snapshot(store: SqliteConsoleStore, repo_id: str, issues: list[dict]) 
         "issues": issues,
         "anomaly_count": 0,
     }
+    if tracked_issues is not None:
+        payload["tracked_issues"] = tracked_issues
     store.upsert_monitor_snapshot(
         MonitorSnapshotEntry(
             repo_id=repo_id,
@@ -192,6 +200,55 @@ def test_run_ledger_fills_issues_the_snapshot_no_longer_lists(tmp_path) -> None:
     assert completed.repo_display_name == "KEDA"
     assert completed.issue_title == "历史任务"
     assert completed.last_outcome == "completed"
+
+
+def test_snapshot_pr_identity_is_exposed_for_row_links(tmp_path) -> None:
+    """有 PR 的任务带上 PR 链接与编号；无 PR 的保持 None，供前端决定按钮组合。"""
+    store = _store(tmp_path)
+    with_pr = {
+        **_issue(9, labels=["agent/review"]),
+        "pr": {"url": "https://github.com/example/repo/pull/42", "number": 42},
+    }
+    _seed_snapshot(store, "keda", [with_pr, _issue(10, labels=["agent/running"])])
+
+    summary = _summary(store, ["keda"])
+    tasks = {task.issue_number: task for task in summary.tasks}
+    assert tasks[9].pr_url == "https://github.com/example/repo/pull/42"
+    assert tasks[9].pr_number == 42
+    assert tasks[10].pr_url is None
+    assert tasks[10].pr_number is None
+
+
+def test_tracked_issue_state_marks_closed_task(tmp_path) -> None:
+    """快照入账本外的 Issue 后，已关闭任务不再显示为「状态未知」。"""
+    store = _store(tmp_path)
+    _seed_snapshot(
+        store,
+        "keda",
+        [],
+        tracked_issues=[_issue(3, labels=["agent/failed"], state="closed")],
+    )
+    store.append_run(
+        RunRecord(
+            repo_id="keda",
+            repo_path="/tmp/keda",
+            issue_number=3,
+            trigger="console_run",
+            agent="qoder",
+            outcome="failed",
+            error_summary="历史错误",
+            started_at=_iso(-120),
+            finished_at=_iso(-100),
+            duration_seconds=1200.0,
+        )
+    )
+
+    summary = _summary(store, ["keda"])
+    task = next(task for task in summary.tasks if task.issue_number == 3)
+    assert task.status is RuntimeTaskStatus.CLOSED
+    assert task.status_reason == "GitHub Issue 已关闭"
+    assert summary.status_counts["closed"] == 1
+    assert summary.status_counts["unknown"] == 0
 
 
 @pytest.mark.parametrize("outcome", ["failed", "blocked"])

@@ -492,6 +492,8 @@ export type BacklogPrdsResponse = {
   scanned_at: string | null;
   /** 快照缺失、损坏或已超过后端 TTL：后台正在重扫，前端应短间隔继续轮询。 */
   stale: boolean;
+  /** 全局后台同步间隔（秒）：前端自动刷新与倒计时跟着它走，避免各处各写一套。 */
+  refresh_interval_seconds?: number;
 };
 
 /** 生效并发上限的来源：继承 runner 容量 / Backlog 设置 / 被 runner 容量压低。 */
@@ -686,12 +688,7 @@ export type BacklogPrdProgress = {
   /** 事实来源：``worktree`` / ``main`` / null（来源不可用）。 */
   prd_source: string | null;
   /** 归档终态用 ``not_applicable``；其余见后端 WorktreeMatchStatus。 */
-  worktree_status:
-    | "matched"
-    | "none"
-    | "unavailable"
-    | "ambiguous"
-    | "not_applicable";
+  worktree_status: "matched" | "none" | "unavailable" | "ambiguous" | "not_applicable";
   worktree: PrdProgressWorktree | null;
   checklist: PrdProgressChecklist;
   evidence: PrdProgressEvidence;
@@ -765,6 +762,7 @@ export type PrdInvocationRow = {
   retry_reason: string | null;
   exit_code: number | null;
   log_locator: string | null;
+  model_config_snapshot?: AgentModelConfigSnapshot | null;
 };
 
 /**
@@ -908,6 +906,21 @@ export type ModelTokenUsageStats = {
   by_agent: Record<string, Record<string, TokenUsageTotals>>;
   by_prd: PrdModelTokenUsageEntry[];
   truncated: boolean;
+  /** 已结束但没有可用用量的调用，按 Agent 计数。 */
+  missing_usage_by_agent?: Record<string, number>;
+  /** 执行器明确上报全零用量的调用，不能视为免费。 */
+  zero_usage_by_model?: Record<string, number>;
+  /** 按启动时默认配置回退归属的调用数，费用仍为估算。 */
+  configuration_fallback_counts?: Record<string, number>;
+  /** 默认配置仅提供别名的调用数，仍归为 unknown。 */
+  unresolved_model_alias_counts?: Record<string, number>;
+};
+
+/** 启动时读取的默认模型配置，不能冒充执行器报告。 */
+export type AgentModelConfigSnapshot = {
+  model_id: string;
+  source: string;
+  is_alias: boolean;
 };
 
 /** 单个 PRD 在单个模型上的累计用量。 */
@@ -1557,12 +1570,20 @@ export type RuntimeTaskStatus =
  * 走现有 progress 契约取数，避免出现第二份检测实现。
  */
 export type RuntimeTaskEntry = {
+  /** 等待原因来自最近监督动作与当前标签；缺失时保守显示待再次检查。 */
+  waiting_reason?: "queued" | "human_review" | "recheck" | null;
+  /** 仅表示本机 PR 值守进程存活，不保证任务会自动合并。 */
+  review_daemon_running?: boolean | null;
   repo_id: string;
   issue_number: number;
   task_key: string;
   repo_display_name: string | null;
   issue_title: string | null;
   issue_url: string | null;
+  /** 已开 PR 的网页链接；尚未开 PR 或旧响应缺少该字段时为 null。 */
+  pr_url?: string | null;
+  /** PR 编号；链接无法解析编号时为 null。 */
+  pr_number?: number | null;
   status: RuntimeTaskStatus;
   /** 当前状态的直接来源，例如监控标签或 Issue 关闭状态。 */
   status_reason: string | null;

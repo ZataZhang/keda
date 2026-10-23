@@ -17,7 +17,11 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import PlainTextResponse, Response
 from pydantic import BaseModel, Field
 
-from backend.api.backlog_sync import ensure_fresh_backlog_snapshot, request_backlog_resync
+from backend.api.backlog_sync import (
+    ensure_fresh_backlog_snapshot,
+    read_backlog_refresh_interval_seconds,
+    request_backlog_resync,
+)
 from backend.core.shared.interfaces.runner_console import AuditEntry, IBacklogStore
 from backend.core.shared.models.backlog import (
     BacklogDependency,
@@ -239,19 +243,29 @@ def _build_backlog_response(
 
 
 @router.get("/agent-runner/backlog/prds")
-def list_backlog_prds(repo_id: str, include_archived: bool = False) -> dict:
+def list_backlog_prds(
+    repo_id: str,
+    include_archived: bool = False,
+    force_refresh: bool = False,
+) -> dict:
     """列出 PRD 待办队列：立即返回本地快照，缺失/过期时在后台重扫。
 
     请求线程不做任何 GitHub 调用，也不等待重建结果——列表秒开的代价就是响应
     可能短暂陈旧，因此响应里用 ``stale`` 与 ``scanned_at`` 把新鲜度如实交代给
-    前端。仓库不存在或已禁用仍返回 400，其历史快照不会回流到任何页面。
+    前端。``force_refresh`` 供页面上的手动刷新使用：不等到快照超过 TTL，直接排一次
+    后台重扫，并在本次响应里置 ``stale=True``，让前端保持短轮询直到新结果落库。
+    仓库不存在或已禁用仍返回 400，其历史快照不会回流到任何页面。
     """
     _resolve_context(repo_id)
+    if force_refresh:
+        request_backlog_resync(repo_id, include_archived=include_archived)
     snapshot_view = ensure_fresh_backlog_snapshot(repo_id, include_archived=include_archived)
     return {
         **snapshot_view.payload,
         "scanned_at": snapshot_view.scanned_at,
-        "stale": snapshot_view.stale,
+        "stale": snapshot_view.stale or force_refresh,
+        # 前端自动刷新节奏与倒计时跟着这个值走，避免两处各写一套 5 分钟。
+        "refresh_interval_seconds": read_backlog_refresh_interval_seconds(),
     }
 
 

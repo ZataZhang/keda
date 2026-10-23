@@ -93,7 +93,7 @@ class IssueRunControlMixin:
         ``autopilot_hold`` 保留旧行的值：闸门只允许由同 head 的全新 verifier
         GREEN 清除，新一轮登记不得顺手洗掉。
         """
-        with self._connect() as connection:
+        with self._connection() as connection:
             connection.execute(
                 "INSERT INTO issue_run_control "
                 "(repo_id, issue_number, pr_number, run_id, head_sha, phase, state, "
@@ -121,7 +121,7 @@ class IssueRunControlMixin:
 
     def get_issue_run(self, *, repo_id: str, issue_number: int) -> IssueRunControlEntry | None:
         """读取该 Issue 的控制行；从未登记时返回 ``None``。"""
-        with self._connect() as connection:
+        with self._connection() as connection:
             control_row = connection.execute(
                 _SELECT_ISSUE_RUN_CONTROL,
                 (repo_id, issue_number),
@@ -148,7 +148,7 @@ class IssueRunControlMixin:
         与 ``autopilot_hold`` 已经持久，否则返回 ``state_change_conflict``（409），绝不把
         一个没落盘的请求报成受理。
         """
-        with self._connect() as connection:
+        with self._connection() as connection:
             for _ in range(_TAKEOVER_CAS_ATTEMPTS):
                 outcome = _takeover_cas_once(
                     connection,
@@ -191,7 +191,7 @@ class IssueRunControlMixin:
         state_placeholders = ", ".join("?" for _ in from_states)
         params.extend([repo_id, issue_number, run_id])
         params.extend(from_states)
-        with self._connect() as connection:
+        with self._connection() as connection:
             cursor = connection.execute(
                 f"UPDATE issue_run_control SET {', '.join(set_clauses)} "
                 f"WHERE repo_id = ? AND issue_number = ? AND run_id = ? "
@@ -203,7 +203,7 @@ class IssueRunControlMixin:
 
     def has_autopilot_hold(self, *, repo_id: str, issue_number: int) -> bool:
         """该 Issue 是否落着自动驾驶闸门。"""
-        with self._connect() as connection:
+        with self._connection() as connection:
             hold_row = connection.execute(
                 "SELECT 1 FROM issue_run_control "
                 "WHERE repo_id = ? AND issue_number = ? AND autopilot_hold = 1",
@@ -217,7 +217,7 @@ class IssueRunControlMixin:
         只服务 fail-closed 判定：控制行按注册表 repo_id 登记，按错的 key 查会查不到
         行、把被人工接管的 Issue 放回自动流程。跨仓库同号最多让自动处理多等一轮。
         """
-        with self._connect() as connection:
+        with self._connection() as connection:
             hold_row = connection.execute(
                 "SELECT 1 FROM issue_run_control "
                 "WHERE issue_number = ? AND autopilot_hold = 1 LIMIT 1",
@@ -233,7 +233,7 @@ class IssueRunControlMixin:
         ``state`` 条件防止半路清闸：闸门只允许被**这一轮**在同一 head 上跑完并
         取得 GREEN 的 verifier 打开；正在 running 或已 stale/接管完成的行都不算。
         """
-        with self._connect() as connection:
+        with self._connection() as connection:
             cursor = connection.execute(
                 "UPDATE issue_run_control SET autopilot_hold = 0 "
                 "WHERE repo_id = ? AND issue_number = ? AND autopilot_hold = 1 "
@@ -251,7 +251,7 @@ class IssueRunControlMixin:
         仅按 ``run_id`` 绑定改写：新一轮已重新登记该 Issue 时 rowcount 为 0，
         过期交班不会把别的运行的行盖上编号。
         """
-        with self._connect() as connection:
+        with self._connection() as connection:
             cursor = connection.execute(
                 "UPDATE issue_run_control SET pr_number = ? "
                 "WHERE repo_id = ? AND issue_number = ? AND run_id = ?",

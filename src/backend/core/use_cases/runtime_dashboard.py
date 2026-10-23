@@ -119,11 +119,28 @@ def status_for_labels(labels: Sequence[str]) -> RuntimeTaskStatus | None:
 
 
 def _overview_issues(overview_payload: Mapping[str, Any]) -> list[dict[str, Any]]:
-    """从 per-repo overview payload 里取出可渲染的 Issue 条目列表。"""
-    raw_issues = overview_payload.get("issues")
-    if not isinstance(raw_issues, list):
-        return []
-    return [entry for entry in raw_issues if isinstance(entry, dict)]
+    """从 per-repo overview payload 里取出可渲染的 Issue 条目列表。
+
+    除队列标签扫到的 Issue 外，还把近期运行账本出现、但已关闭或移出队列的
+    Issue（``tracked_issues``）一并纳入：它们的当前状态只能由监控快照补，
+    否则运行看板只能显示「状态未知」。同号条目以队列结果为准。
+    """
+    entries: list[dict[str, Any]] = []
+    seen_numbers: set[int] = set()
+    for key in ("issues", "tracked_issues"):
+        raw_entries = overview_payload.get(key)
+        if not isinstance(raw_entries, list):
+            continue
+        for entry in raw_entries:
+            if not isinstance(entry, dict):
+                continue
+            number = entry.get("number")
+            if isinstance(number, int):
+                if number in seen_numbers:
+                    continue
+                seen_numbers.add(number)
+            entries.append(entry)
+    return entries
 
 
 def _latest_run_by_issue(runs: Sequence[RunRecord]) -> dict[tuple[str, int], RunRecord]:
@@ -180,6 +197,18 @@ def _timeline_phase(issue_entry: Mapping[str, Any]) -> str | None:
     return None
 
 
+def _pr_identity(issue_entry: Mapping[str, Any]) -> tuple[str | None, int | None]:
+    """从监控快照条目里取 PR 链接与编号；没有 PR 时返回两个 ``None``。"""
+    raw_pr = issue_entry.get("pr")
+    if not isinstance(raw_pr, Mapping):
+        return None, None
+    raw_url = raw_pr.get("url")
+    raw_number = raw_pr.get("number")
+    pr_url = raw_url if isinstance(raw_url, str) and raw_url else None
+    pr_number = raw_number if isinstance(raw_number, int) else None
+    return pr_url, pr_number
+
+
 def _snapshot_task(
     *,
     repo_id: str,
@@ -219,16 +248,40 @@ def _snapshot_task(
                 status = RuntimeTaskStatus.UNKNOWN
                 status_reason = "监控快照没有可判定的生命周期标签"
 
+    waiting_reason = None
+    if status is RuntimeTaskStatus.WAITING:
+        timeline = issue_entry.get("timeline") or []
+        latest_action = next(
+            (
+                entry.get("action")
+                for entry in reversed(timeline)
+                if isinstance(entry, dict) and entry.get("action")
+            ),
+            None,
+        )
+        if "agent/ready" in labels:
+            waiting_reason = "queued"
+        elif latest_action == "wait_for_checks":
+            waiting_reason = "recheck"
+        elif "human/awaiting-review" in labels or latest_action == "approve_for_human_review":
+            waiting_reason = "human_review"
+        else:
+            waiting_reason = "recheck"
+
     title = issue_entry.get("title")
     url = issue_entry.get("url")
+    pr_url, pr_number = _pr_identity(issue_entry)
     return RuntimeTask(
         repo_id=repo_id,
         issue_number=issue_number,
         repo_display_name=repo_display_name,
         issue_title=title if isinstance(title, str) and title else None,
         issue_url=url if isinstance(url, str) and url else None,
+        pr_url=pr_url,
+        pr_number=pr_number,
         status=status,
         status_reason=status_reason,
+        waiting_reason=waiting_reason,
         phase=_timeline_phase(issue_entry),
         agent=run_record.agent if run_record else None,
         started_at=run_record.started_at if run_record else None,
@@ -329,6 +382,8 @@ def _enrich_from_attempt(
         repo_display_name=task.repo_display_name,
         issue_title=task.issue_title,
         issue_url=task.issue_url,
+        pr_url=task.pr_url,
+        pr_number=task.pr_number,
         status=task.status,
         status_reason=task.status_reason,
         phase=latest_attempt.failure_phase or task.phase,

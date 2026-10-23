@@ -44,6 +44,10 @@ class _TakeoverCasConnection:
     def __exit__(self, *exc_info: object) -> object:
         return self._connection.__exit__(*exc_info)  # type: ignore[arg-type]
 
+    def close(self) -> None:
+        """转发关闭：调用方（``_connection``）负责在事务收尾后释放 fd。"""
+        self._connection.close()
+
 
 class ScriptedTakeoverCasStore(SqliteConsoleStore):
     """让接管 CAS 的前 ``missed_cas_attempts`` 次 UPDATE 空手的 SQLite 存储。

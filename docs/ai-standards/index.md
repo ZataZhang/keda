@@ -43,6 +43,7 @@
 - [Naming](naming.md)
 - [Comments And Docstrings](comments-docstrings.md)
 - [Documentation](documentation.md)
+- [Frontend Design](frontend-design.md)
 - [Testing](testing.md)
 - [Tooling](tooling.md)
 - [时间显示与时区](time-display.md)

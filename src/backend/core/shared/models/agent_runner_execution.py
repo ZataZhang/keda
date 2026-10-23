@@ -7,6 +7,7 @@ from enum import Enum
 from typing import TYPE_CHECKING
 
 from backend.core.shared.interfaces.agent_output_protocol import PLAIN_PROTOCOL_ID
+from backend.core.shared.models.agent_model_observation import AgentModelConfigSnapshot
 
 if TYPE_CHECKING:
     # `ValidationVerdict` lives in the use-cases layer; import it only for
@@ -109,6 +110,7 @@ class CommandResult:
             ``system/init`` 事件里的 ``model``）。只表示"执行器报告了什么"，
             不声称已独立验证服务端内部运行的模型；协议未报告时为 ``None``
             （≠ 配置里的默认模型，展示为"未提供"）。
+        model_config_snapshot: 启动前读取的默认模型配置，仅作单独标注来源的估价回退。
     """
 
     command: tuple[str, ...]
@@ -120,6 +122,7 @@ class CommandResult:
     token_usage: TokenUsage | None = None
     session_id: str | None = None
     reported_model: str | None = None
+    model_config_snapshot: AgentModelConfigSnapshot | None = None
 
 
 @dataclass(frozen=True)

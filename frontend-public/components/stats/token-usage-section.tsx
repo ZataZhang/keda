@@ -67,19 +67,32 @@ export function TokenUsageSection({
     modelUsageStats.by_model,
     pricingModels
   )
+  const missingUsageEntries = Object.entries(
+    modelUsageStats.missing_usage_by_agent ?? {}
+  )
+  const missingUsageCount = missingUsageEntries.reduce(
+    (total, [, count]) => total + count,
+    0
+  )
+  const zeroUsageCount = Object.values(
+    modelUsageStats.zero_usage_by_model ?? {}
+  ).reduce((total, count) => total + count, 0)
   const overallCostValue =
     overallCost.usageCount === 0
       ? "—"
-      : overallCost.unpricedModelIds.length > 0 &&
-          overallCost.pricedTokenCount === 0
-        ? "待配置"
-        : `${formatUsdCost(overallCost.costUsd)}${overallCost.unpricedModelIds.length > 0 ? " + 未计价" : ""}`
+      : overallCost.tokenCount === 0
+        ? "用量上报为 0"
+        : overallCost.unpricedModelIds.length > 0 &&
+            overallCost.pricedTokenCount === 0
+          ? "待配置"
+          : `${formatUsdCost(overallCost.costUsd)}${overallCost.unpricedModelIds.length > 0 ? " + 未计价" : ""}`
   const costsByPrd = buildCostsByPrd(modelUsageStats.by_prd, pricingModels)
   const hasData =
     byFlow.length > 0 ||
     byAgent.length > 0 ||
     byPrd.length > 0 ||
-    modelRows.length > 0
+    modelRows.length > 0 ||
+    missingUsageCount > 0
 
   return (
     <Card
@@ -90,9 +103,11 @@ export function TokenUsageSection({
         <div className="space-y-1.5">
           <CardTitle className="text-base">Token 用量与费用</CardTitle>
           <CardDescription>
-            按实际调用记录中的模型和四类 token
-            用量估算；缓存命中率按输入侧 token 加权，不含输出。不同模型的缓存实现可能不同。
+            按实际调用记录中的模型和四类 token 用量估算；缓存命中率按输入侧
+            token 加权，不含输出。不同模型的缓存实现可能不同。
             价格按本机设置，缺少价格的模型会单独标出。
+            缺少用量或上报为零的调用无法确认实际费用，已计价金额不代表完整成本。
+            执行器未报告且未指定模型时，可按启动时的具体模型配置估价，并标明来源。
           </CardDescription>
         </div>
         <Button asChild size="sm" variant="outline" className="shrink-0">
@@ -100,6 +115,52 @@ export function TokenUsageSection({
         </Button>
       </CardHeader>
       <CardContent className="space-y-6">
+        {Object.keys(modelUsageStats.configuration_fallback_counts ?? {})
+          .length > 0 ? (
+          <p
+            className="rounded-lg border px-3 py-2 text-sm text-muted-foreground"
+            data-testid="stats-model-config-fallback"
+          >
+            以下调用按工具启动时的配置模型估价，执行器未报告实际模型：
+            {Object.entries(modelUsageStats.configuration_fallback_counts ?? {})
+              .map(([model, count]) => `${model} ${count} 次`)
+              .join("、")}
+            。
+          </p>
+        ) : null}
+        {Object.keys(modelUsageStats.unresolved_model_alias_counts ?? {})
+          .length > 0 ? (
+          <p
+            className="rounded-lg border border-amber-200 px-3 py-2 text-sm text-amber-800"
+            data-testid="stats-model-config-aliases"
+          >
+            工具默认配置仅提供别名，具体模型仍待确认：
+            {Object.entries(modelUsageStats.unresolved_model_alias_counts ?? {})
+              .map(([model, count]) => `${model} ${count} 次`)
+              .join("、")}
+            。这些用量保留在未识别模型中，不按别名计价。
+          </p>
+        ) : null}
+        {missingUsageCount > 0 || zeroUsageCount > 0 ? (
+          <div
+            className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300"
+            role="status"
+            data-testid="stats-token-usage-gaps"
+          >
+            {missingUsageCount > 0 ? (
+              <p>
+                {missingUsageCount} 次调用未上报用量（
+                {missingUsageEntries
+                  .map(([agent, count]) => `${agent} ${count} 次`)
+                  .join("、")}
+                ），未计入 Token 与费用；旧账本可能另有无法归属模型的用量。
+              </p>
+            ) : null}
+            {zeroUsageCount > 0 ? (
+              <p>{zeroUsageCount} 次调用上报用量为 0，无法据此确认免费。</p>
+            ) : null}
+          </div>
+        ) : null}
         {pricingError ? (
           <p
             className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300"
@@ -208,6 +269,13 @@ export function TokenUsageSection({
                               ) : (
                                 modelId
                               )}
+                              {(modelUsageStats.configuration_fallback_counts?.[
+                                modelId
+                              ] ?? 0) > 0 ? (
+                                <span className="ml-2 text-xs font-normal text-muted-foreground">
+                                  含配置估价
+                                </span>
+                              ) : null}
                             </td>
                             <td className="px-4 py-3 text-right tabular-nums">
                               {formatTokenCount(totals.total_tokens)}
@@ -216,7 +284,17 @@ export function TokenUsageSection({
                               {totals.usage_count}
                             </td>
                             <td className="px-4 py-3 text-right font-semibold tabular-nums">
-                              <CostValue estimate={modelCost} />
+                              {totals.total_tokens === 0 ? (
+                                <span className="text-amber-700 dark:text-amber-400">
+                                  用量上报为 0
+                                </span>
+                              ) : modelId === "unknown" ? (
+                                <span className="text-amber-700 dark:text-amber-400">
+                                  模型未识别
+                                </span>
+                              ) : (
+                                <CostValue estimate={modelCost} />
+                              )}
                             </td>
                           </tr>
                         )
@@ -293,6 +371,11 @@ function CostValue({
   }
   if (estimate.usageCount === 0) {
     return <span className="text-muted-foreground">—</span>
+  }
+  if (estimate.tokenCount === 0) {
+    return (
+      <span className="text-amber-700 dark:text-amber-400">用量上报为 0</span>
+    )
   }
   if (estimate.unpricedModelIds.length > 0 && estimate.pricedTokenCount === 0) {
     return (

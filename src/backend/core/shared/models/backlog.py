@@ -242,6 +242,7 @@ class PrdInvocationRow:
         requested_model: 本次实际下发的模型 id；未下发为 ``None``。
         reported_model: 执行器自报的模型 id；未上报为 ``None``。
         model_source: 实际模型信息来源；无自报时为 ``unknown``。
+        model_config_snapshot: 启动前读取的默认模型配置，仅作来源明确的估价线索。
         token_usage: 执行器自报用量；无数据时为 ``None``（≠ 0）。
         retry_of: 本次调用替代的上一次 invocation id；非重试为 ``None``。
         retry_reason: 与 :attr:`retry_of` 配套的闭集重试原因。
@@ -268,6 +269,7 @@ class PrdInvocationRow:
     retry_reason: str | None
     exit_code: int | None
     log_locator: str | None
+    model_config_snapshot: dict[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -365,12 +367,20 @@ class ModelTokenUsageStats:
         by_agent: Agent 名称到模型用量的嵌套映射。
         by_prd: PRD（Issue）与模型维度的用量条目。
         truncated: 是否有 Issue 的调用读取触达历史条数上限。
+        missing_usage_by_agent: 各 Agent 已结束但没有可用 usage 的调用数，不估算 token。
+        zero_usage_by_model: 各模型明确上报全零 usage 的调用数，不代表免费。
+        configuration_fallback_counts: 各模型按调用时默认配置归属的用量条数。
+        unresolved_model_alias_counts: 默认配置只提供别名的用量条数，仍归为 unknown。
     """
 
     by_model: dict[str, TokenUsageTotals] = field(default_factory=dict)
     by_agent: dict[str, dict[str, TokenUsageTotals]] = field(default_factory=dict)
     by_prd: tuple[PrdModelTokenUsageEntry, ...] = ()
     truncated: bool = False
+    missing_usage_by_agent: dict[str, int] = field(default_factory=dict)
+    zero_usage_by_model: dict[str, int] = field(default_factory=dict)
+    configuration_fallback_counts: dict[str, int] = field(default_factory=dict)
+    unresolved_model_alias_counts: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

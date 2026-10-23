@@ -21,12 +21,17 @@ const BASE_PATH = "/v1/agent-runner/backlog";
 export async function fetchBacklogPrds(params: {
   repoId: string;
   includeArchived?: boolean;
+  forceRefresh?: boolean;
   signal?: AbortSignal;
 }): Promise<BacklogPrdsResponse> {
   const searchParams = new URLSearchParams();
   searchParams.set("repo_id", params.repoId);
   if (params.includeArchived) {
     searchParams.set("include_archived", "true");
+  }
+  // 手动刷新：让后端立即排一次后台重扫，而不是等快照超过 TTL。
+  if (params.forceRefresh) {
+    searchParams.set("force_refresh", "true");
   }
   return get(`${BASE_PATH}/prds?${searchParams.toString()}`, { signal: params.signal });
 }

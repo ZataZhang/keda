@@ -117,7 +117,7 @@ class RunHistoryReadMixin:
             query_params.append(repo_id)
         query += " ORDER BY id DESC LIMIT ?"
         query_params.append(limit)
-        with self._connect() as connection:
+        with self._connection() as connection:
             record_rows = connection.execute(query, query_params).fetchall()
         return [
             RunRecord(
@@ -142,7 +142,7 @@ class RunHistoryReadMixin:
     ) -> list[AttemptRecord]:
         """按时间正序列出某个 Issue 的 attempt 记录；失败时降级为空列表。"""
         try:
-            with self._connect() as connection:
+            with self._connection() as connection:
                 attempt_rows = connection.execute(
                     "SELECT repo_id, issue_number, agent, attempt_number, failure_type, "
                     "recovered, detail, started_at, finished_at, duration_seconds, "
@@ -195,7 +195,7 @@ class RunHistoryReadMixin:
 
     def list_recent_audits(self, *, limit: int = 100) -> list[AuditEntry]:
         """倒序列出最近的审计条目。"""
-        with self._connect() as connection:
+        with self._connection() as connection:
             audit_rows = connection.execute(
                 "SELECT occurred_at, actor, action, repo_id, issue_number, "
                 "params_json, result, detail "
@@ -236,7 +236,7 @@ class RunHistoryReadMixin:
             query += " AND repo_id = ?"
             query_params.append(repo_id)
         query += " GROUP BY day ORDER BY day ASC"
-        with self._connect() as connection:
+        with self._connection() as connection:
             trend_rows = connection.execute(query, query_params).fetchall()
         return [
             DailyRunTrendEntry(
@@ -261,7 +261,7 @@ class RunHistoryReadMixin:
         query_params: list[object] = [since_date]
         if repo_id is not None:
             query_params.append(repo_id)
-        with self._connect() as connection:
+        with self._connection() as connection:
             attempt_rows = connection.execute(
                 "SELECT repo_id, agent, failure_type, duration_seconds, preset, model "
                 "FROM attempt_records WHERE date(started_at) >= date(?)" + repo_clause,

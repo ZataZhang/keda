@@ -5,7 +5,7 @@ description: Use KedaCode (kc) when the user asks to operate the KedaCode CLI or
 
 # KedaCode Operator
 
-Use this skill when the user asks to operate the KedaCode CLI or its managed runner. Match the request to one route in the table below, read that route's reference file (an absolute path once the skill is installed), then act. If the wording is a CLI direct translation rather than a phrase below, route by the command name.
+Use this skill when the user asks to operate the KedaCode CLI or its managed runner. Match the request to one route in the table below, read that route's reference file (an absolute path once the skill is installed), then act. If the wording is a CLI direct translation rather than a phrase below, route by the command name. Default-model configuration snapshots (`model_config_snapshot`) are separate from executor reports; read the watch route for source and estimation semantics.
 
 ## Routes
 

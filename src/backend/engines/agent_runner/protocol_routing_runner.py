@@ -32,6 +32,7 @@ from backend.core.shared.models.agent_spec import (
 from backend.core.shared.models.agent_stall import AttemptOwnership, StallCancelOutcome
 from backend.infrastructure.agent_stream_usage import attach_agent_observations
 from backend.infrastructure.process_runner import CommandFailedError
+from backend.core.shared.models.agent_model_observation import AGENT_MODEL_CONFIG_SNAPSHOT_ATTR
 
 
 class ProtocolRoutingProcessRunner(IProcessRunner):
@@ -135,6 +136,8 @@ class ProtocolRoutingProcessRunner(IProcessRunner):
                 session_id=result.session_id,
                 reported_model=result.reported_model,
             )
+            if result.model_config_snapshot is not None:
+                setattr(failure, AGENT_MODEL_CONFIG_SNAPSHOT_ATTR, result.model_config_snapshot)
             raise failure
         return result
 

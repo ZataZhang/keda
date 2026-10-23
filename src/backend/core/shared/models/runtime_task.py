@@ -72,9 +72,13 @@ class RuntimeTask:
         issue_number: Issue 编号。
         issue_title: Issue 标题；来源缺失时为 ``None``。
         issue_url: Issue 网页链接；来源缺失时为 ``None``。
+        pr_url: 该 Issue 关联 PR 的网页链接；尚无 PR 时为 ``None``。
+        pr_number: PR 编号；链接无法解析编号时为 ``None``。
         status: 生命周期分桶。
         status_reason: 当前分桶的直接来源，例如监控标签或 Issue 关闭状态。
         anomaly_types: 监控快照发现的异常类型；异常与任务状态分开记录。
+        waiting_reason: 等待原因：queued、human_review 或 recheck；非等待时为空。
+        review_daemon_running: 本机 PR 值守进程是否存活；未探测或读取失败时为空。
         phase: 最近一次观测到的生命周期阶段名。
         agent: 最近一次运行选择的 Agent 名称。
         preset: 最近一次 attempt 使用的模型 preset；旧记录为 ``None``。
@@ -93,6 +97,8 @@ class RuntimeTask:
     repo_display_name: str | None = None
     issue_title: str | None = None
     issue_url: str | None = None
+    pr_url: str | None = None
+    pr_number: int | None = None
     status: RuntimeTaskStatus = RuntimeTaskStatus.UNKNOWN
     status_reason: str | None = None
     phase: str | None = None
@@ -107,6 +113,8 @@ class RuntimeTask:
     last_outcome: str | None = None
     labels: tuple[str, ...] = ()
     anomaly_types: tuple[str, ...] = ()
+    waiting_reason: str | None = None
+    review_daemon_running: bool | None = None
 
     @property
     def task_key(self) -> str:

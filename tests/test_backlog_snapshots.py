@@ -651,7 +651,7 @@ def test_disabled_sync_never_scans_backlog(backlog_harness: _BacklogHarness) -> 
     """关闭全局自动同步后，Backlog 循环既不做首扫也不做周期扫描。"""
     disabled_settings = MonitorSettingsEntry(
         sync_enabled=False,
-        sync_interval_seconds=60,
+        sync_interval_seconds=300,
         updated_at="2026-10-08T01:00:00+00:00",
     )
     scheduler = MonitorSyncScheduler(

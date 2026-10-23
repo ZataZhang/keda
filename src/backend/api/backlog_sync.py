@@ -120,6 +120,15 @@ def ensure_fresh_backlog_snapshot(
     return snapshot_view
 
 
+def read_backlog_refresh_interval_seconds() -> int:
+    """返回全局后台同步间隔（秒），供前端对齐自动刷新节奏与倒计时。
+
+    Returns:
+        int: 当前生效的同步间隔（``[300, 3600]``）；无持久化记录时取配置默认值。
+    """
+    return _read_monitor_settings().sync_interval_seconds
+
+
 def request_backlog_resync(repo_id: str, *, include_archived: bool = False) -> None:
     """写操作（开始 / 全局开始）成功后立即为对应仓库申请一次后台重扫。
 
@@ -192,6 +201,7 @@ def wake_backlog_scheduler() -> None:
 
 __all__ = [
     "ensure_fresh_backlog_snapshot",
+    "read_backlog_refresh_interval_seconds",
     "get_backlog_scheduler",
     "get_backlog_snapshot_store",
     "get_backlog_sync_coordinator",

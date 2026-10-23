@@ -10,7 +10,12 @@ import type {
   PointerEvent as ReactPointerEvent,
 } from "react";
 import { useRouter } from "next/navigation";
-import { PanelLeftClose, PanelLeftOpen, Settings } from "lucide-react";
+import {
+  PanelLeftClose,
+  PanelLeftOpen,
+  RefreshCw,
+  Settings,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -59,9 +64,13 @@ import type {
   StartPrdLaunchOptions,
 } from "@/lib/api/types";
 
-const POLL_INTERVAL_MS = 30000;
-// 快照过期（后端 stale=true）时的追平节奏：后台重扫通常几秒内落库，30 秒要等太久。
+// 自动刷新间隔的回退值：正常节奏取自后端返回的全局同步间隔（当前 5 分钟起）。
+// 每轮刷新都会触发一次全量 GitHub 扫描（每个已开工 PRD 3~5 次 REST）。
+const DEFAULT_POLL_INTERVAL_MS = 300000;
+// 快照过期（后端 stale=true）时的追平节奏：后台重扫通常几秒内落库，5 分钟要等太久。
 const STALE_POLL_INTERVAL_MS = 3000;
+// Autopilot / CI/CD 开关是纯本地读（不碰 GitHub），保持 30 秒即可及时发现别处改动。
+const LOCAL_POLL_INTERVAL_MS = 30000;
 const DEFAULT_BACKLOG_LIST_WIDTH_PERCENT = 45;
 const MIN_BACKLOG_LIST_WIDTH_PERCENT = 25;
 const MAX_BACKLOG_LIST_WIDTH_PERCENT = 70;
@@ -98,31 +107,94 @@ function repoStatusDotClass(repo: RegistryRepositoryEntry): string {
 }
 
 /**
- * 快照新鲜度提示：数据截至时间，过期时追加「后台更新中」。
+ * 把剩余秒数格式化成刷新按钮上的 m:ss 倒计时。
  *
- * @param props - 快照时间与新鲜度标记。
- * @param props.scannedAt - 快照构建时间；null 表示还没有快照。
- * @param props.stale - 快照是否已超过后端 TTL 并正在后台重扫。
- * @param props.loadFailed - 最近一次列表读取是否失败。
- * @returns 表头右侧的新鲜度文案。
+ * @param totalSeconds - 剩余秒数（非负）。
+ * @returns 形如 `4:59` 的倒计时文案。
  */
-function SnapshotFreshnessLabel(props: {
+function formatRefreshCountdown(totalSeconds: number): string {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+/**
+ * 快照新鲜度与手动刷新控件。
+ *
+ * 时间戳与按钮都是固定宽度、且不换行：文案在「倒计时 / 更新中…」之间切换时行宽
+ * 不变，表头不会因为多出一段提示而换行，把右侧按钮顶下去。点击按钮立即刷新。
+ *
+ * @param props - 快照时间、新鲜度、下一次刷新时间与手动刷新回调。
+ * @param props.scannedAt - 快照构建时间；null 表示还没有快照。
+ * @param props.stale - 快照已超过后端 TTL，后台正在重扫。
+ * @param props.loadFailed - 最近一次列表读取是否失败。
+ * @param props.refreshing - 当前是否有刷新请求在途。
+ * @param props.nextRefreshAt - 下一次自动刷新的毫秒时间戳；0 表示尚未排期。
+ * @param props.onRefresh - 点击按钮立即刷新。
+ * @returns 表头的快照新鲜度与刷新控件。
+ */
+function SnapshotRefreshControl(props: {
   scannedAt: string | null;
   stale: boolean;
   loadFailed: boolean;
+  refreshing: boolean;
+  nextRefreshAt: number;
+  onRefresh: () => void;
 }) {
-  const { scannedAt, stale, loadFailed } = props;
-  if (loadFailed) {
-    return <span className="text-xs text-rose-500">加载失败</span>;
-  }
-  if (!scannedAt) {
-    return <span className="text-xs text-slate-400 dark:text-slate-500">正在同步…</span>;
-  }
+  const { scannedAt, stale, loadFailed, refreshing, nextRefreshAt, onRefresh } =
+    props;
+  const [nowMillis, setNowMillis] = useState(() => Date.now());
+
+  // 倒计时只在本组件内每秒重绘，避免整页（含依赖图）跟着每秒重渲染。
+  useEffect(() => {
+    setNowMillis(Date.now());
+    const timer = setInterval(() => setNowMillis(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [nextRefreshAt]);
+
+  const remainingSeconds =
+    nextRefreshAt > 0
+      ? Math.max(0, Math.ceil((nextRefreshAt - nowMillis) / 1000))
+      : 0;
+  const refreshPending = refreshing || stale;
+  const refreshLabel = loadFailed
+    ? "重试"
+    : !scannedAt
+      ? "同步中…"
+      : refreshPending
+        ? "更新中…"
+        : `刷新 ${formatRefreshCountdown(remainingSeconds)}`;
+
   return (
-    <span className="text-xs text-slate-400 dark:text-slate-500">
-      {`数据截至 ${formatLocalClockTime(scannedAt)}`}
-      {stale ? " · 后台更新中…" : ""}
-    </span>
+    <div className="flex shrink-0 items-center gap-2">
+      <span className="w-[7.5rem] whitespace-nowrap text-xs tabular-nums text-slate-400 dark:text-slate-500">
+        {loadFailed
+          ? "加载失败"
+          : scannedAt
+            ? `数据截至 ${formatLocalClockTime(scannedAt)}`
+            : "尚无快照"}
+      </span>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="w-[7.5rem] justify-center gap-1.5 whitespace-nowrap tabular-nums"
+        onClick={onRefresh}
+        disabled={refreshing}
+        title={
+          scannedAt
+            ? `数据截至 ${formatLocalClockTime(scannedAt)}，点击立即刷新`
+            : "点击立即刷新"
+        }
+        aria-label="立即刷新 Backlog 快照"
+        data-testid="backlog-snapshot-refresh"
+      >
+        <RefreshCw
+          className={cn("size-3.5", refreshPending && "animate-spin")}
+        />
+        {refreshLabel}
+      </Button>
+    </div>
   );
 }
 
@@ -137,6 +209,13 @@ export default function BacklogPage() {
   // 轮询节奏用 ref 传递：把 stale 放进 effect 依赖会让每次新鲜度翻转都重建整个
   // 加载流程，表现为列表反复闪骨架屏。
   const snapshotStaleRef = useRef(false);
+  // 自动刷新节奏取自后端下发的全局同步间隔（秒），轮询里读 ref 避免重建加载流程。
+  const refreshIntervalMsRef = useRef(DEFAULT_POLL_INTERVAL_MS);
+  // 刷新按钮的倒计时锚点（毫秒时间戳）与在途标记：只驱动按钮文案，不进轮询依赖。
+  const [nextRefreshAt, setNextRefreshAt] = useState(0);
+  const [snapshotRefreshing, setSnapshotRefreshing] = useState(false);
+  // 手动刷新入口由轮询 effect 注入，点击按钮可提前触发一次加载并重置倒计时。
+  const triggerRefreshRef = useRef<() => void>(() => {});
   // 入队成功后，快照重扫完成前保留动作接口确认的状态，避免旧快照把 UI 改回未开始。
   const optimisticEnqueueUpdatesRef = useRef(
     new Map<
@@ -188,7 +267,10 @@ export default function BacklogPage() {
   const [createIssueOpen, setCreateIssueOpen] = useState(false);
 
   const loadData = useCallback(
-    async (signal?: AbortSignal): Promise<BacklogPrd[]> => {
+    async (
+      signal?: AbortSignal,
+      forceRefresh = false,
+    ): Promise<BacklogPrd[]> => {
       if (!selectedRepoId) {
         return [];
       }
@@ -196,6 +278,7 @@ export default function BacklogPage() {
         const response = await fetchBacklogPrds({
           repoId: selectedRepoId,
           includeArchived,
+          forceRefresh,
           signal,
         });
         // 仓库级扫描要逐个 PRD 查 GitHub，慢响应可能在新仓库的响应之后才落地；
@@ -235,6 +318,9 @@ export default function BacklogPage() {
         setPrds(refreshedPrds);
         setSnapshotScannedAt(response.scanned_at);
         setSnapshotStale(response.stale);
+        if (response.refresh_interval_seconds) {
+          refreshIntervalMsRef.current = response.refresh_interval_seconds * 1000;
+        }
         setSnapshotLoadFailed(false);
         snapshotStaleRef.current = response.stale;
         return refreshedPrds;
@@ -265,23 +351,38 @@ export default function BacklogPage() {
     setLoading(true);
     setSnapshotLoadFailed(false);
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let inFlight = false;
     // 用自排的 setTimeout 而不是固定 setInterval：节奏跟着最近一次响应的 stale
-    // 走（3 秒追平 / 30 秒保活），而依赖数组保持不变，避免每次翻转都重建加载。
-    const poll = async () => {
-      await loadData(controller.signal);
+    // 走（3 秒追平 / 5 分钟保活），而依赖数组保持不变，避免每次翻转都重建加载。
+    const poll = async (forceRefresh = false) => {
+      if (inFlight || controller.signal.aborted) {
+        return;
+      }
+      inFlight = true;
+      if (timer) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+      setSnapshotRefreshing(true);
+      await loadData(controller.signal, forceRefresh);
+      inFlight = false;
       if (controller.signal.aborted) {
         return;
       }
+      setSnapshotRefreshing(false);
       setLoading(false);
-      timer = setTimeout(
-        () => void poll(),
-        snapshotStaleRef.current ? STALE_POLL_INTERVAL_MS : POLL_INTERVAL_MS,
-      );
+      const intervalMs = snapshotStaleRef.current
+        ? STALE_POLL_INTERVAL_MS
+        : refreshIntervalMsRef.current;
+      setNextRefreshAt(Date.now() + intervalMs);
+      timer = setTimeout(() => void poll(), intervalMs);
     };
+    triggerRefreshRef.current = () => void poll(true);
     void poll();
     return () => {
       // 切换仓库或卸载时中止在途请求，旧仓库的慢响应不能再写回 prds。
       controller.abort();
+      triggerRefreshRef.current = () => {};
       if (timer) {
         clearTimeout(timer);
       }
@@ -320,9 +421,9 @@ export default function BacklogPage() {
     }
     setCiRepairLoading(true);
     void loadCiRepair().finally(() => setCiRepairLoading(false));
-    // 与 PRD 列表共用 30 秒轮询节奏：配置在别处（CLI / 其他会话）被改动后，
-    // 页面必须在下一轮刷新里真实出现新值。
-    const timer = setInterval(() => void loadCiRepair(), POLL_INTERVAL_MS);
+    // 纯本地读，不跟 PRD 列表的 GitHub 刷新节奏走：配置在别处（CLI / 其他会话）
+    // 被改动后，页面必须在下一轮刷新里真实出现新值。
+    const timer = setInterval(() => void loadCiRepair(), LOCAL_POLL_INTERVAL_MS);
     return () => clearInterval(timer);
   }, [loadCiRepair, selectedRepoId]);
 
@@ -345,9 +446,9 @@ export default function BacklogPage() {
     }
     setAutopilotLoading(true);
     void loadAutopilot().finally(() => setAutopilotLoading(false));
-    // Autopilot 状态与 PRD 列表共用 30 秒轮询节奏；daemon / 生效配置的变化
-    // 必须在下一轮刷新里真实出现，而不是读前端缓存。
-    const timer = setInterval(() => void loadAutopilot(), POLL_INTERVAL_MS);
+    // Autopilot 状态同样是本地读，保持 30 秒；daemon / 生效配置的变化必须
+    // 在下一轮刷新里真实出现，而不是读前端缓存。
+    const timer = setInterval(() => void loadAutopilot(), LOCAL_POLL_INTERVAL_MS);
     return () => clearInterval(timer);
   }, [loadAutopilot, selectedRepoId]);
 
@@ -749,10 +850,13 @@ export default function BacklogPage() {
               {globalControlsExpanded ? "收起全局设置" : "显示全局设置"}
             </Button>
           ) : null}
-          <SnapshotFreshnessLabel
+          <SnapshotRefreshControl
             scannedAt={snapshotScannedAt}
             stale={snapshotStale}
             loadFailed={snapshotLoadFailed}
+            refreshing={snapshotRefreshing}
+            nextRefreshAt={nextRefreshAt}
+            onRefresh={() => triggerRefreshRef.current()}
           />
           <div className="flex-1" />
           <Button

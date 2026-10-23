@@ -38,6 +38,11 @@ Start and end share one identity prefix, so attribution in concurrent runs comes
 
 Fields worth knowing:
 
+调用详情中的 `model_config_snapshot` 单独保存启动前默认配置的 `model_id`、`source`
+和 `is_alias`；`reported_model` / `model_source` 仍只表达执行器自报事实。没有自报或
+明确下发模型时，Stats 可按具体配置模型估价并披露来源；动态别名只提示待确认，仍归为
+未识别模型。快照不改变实际模型选择，不用于反推历史。配置源或覆盖参数不确定时会缺省。
+
 - `invocation=` — unique per real subprocess call; pair start/end on it.
 - `run=` — `<repo_id>#issue-<N>#<UTC timestamp>-<random 12 hex>`. **Does not depend on a PRD**, so PRD-less Issues are covered too.
 - `phase=` / `role=` — closed set (`implementation`, `fix`, `review`, `review_repair`, `verification`, `verification_recovery`, `rebase_recovery`, `closeout`, `supervisor`, `supervisor_repair`, `content_generation`, `unspecified`).

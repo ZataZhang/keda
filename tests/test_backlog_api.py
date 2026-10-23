@@ -210,6 +210,43 @@ def test_list_backlog_prds_serves_snapshot_without_rescanning(
     assert snapshot_wiring.coordinator.in_flight_repo_ids() == ()
 
 
+def test_force_refresh_requests_rescan_and_reports_stale(
+    backlog_environment,
+    snapshot_wiring: _SnapshotWiring,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`?force_refresh=true` 立即排一次后台重扫，并如实回报 stale，供手动刷新按钮使用。"""
+    client.get("/api/v1/agent-runner/backlog/prds?repo_id=keda-main&include_archived=false")
+    assert snapshot_wiring.coordinator.wait_until_idle(timeout_seconds=5)
+
+    build_calls: list[tuple[str, bool]] = []
+
+    def counting_build(repo_id: str, include_archived: bool) -> dict:
+        build_calls.append((repo_id, include_archived))
+        return {
+            "prds": [],
+            "skipped": [],
+            "repo_id": repo_id,
+            "include_archived": include_archived,
+        }
+
+    monkeypatch.setattr(backlog_routes, "_build_backlog_response", counting_build)
+    snapshot_wiring.resync_requests.clear()
+
+    response = client.get(
+        "/api/v1/agent-runner/backlog/prds"
+        "?repo_id=keda-main&include_archived=false&force_refresh=true"
+    )
+    assert response.status_code == 200
+    # 快照本身还新，但已经排了一次重扫：必须回报 stale，前端才会按短节奏追平。
+    assert response.json()["stale"] is True
+    assert snapshot_wiring.resync_requests == [
+        build_backlog_task_key("keda-main", include_archived=False)
+    ]
+    assert snapshot_wiring.coordinator.wait_until_idle(timeout_seconds=5)
+    assert build_calls == [("keda-main", False)]
+
+
 def test_github_failure_keeps_previous_backlog_snapshot(
     backlog_environment,
     snapshot_wiring: _SnapshotWiring,

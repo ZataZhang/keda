@@ -49,6 +49,7 @@ create_foreground_session_launcher = _engines_factory_module.create_foreground_s
 create_preview_process_manager = _engines_factory_module.create_preview_process_manager
 prepare_native_session_plan = _engines_factory_module.prepare_native_session_plan
 daily_log_path = _engines_factory_module.daily_log_path
+ensure_standard_executable_path = _engines_factory_module.ensure_standard_executable_path
 find_repository_match_for_path = _engines_factory_module.find_repository_match_for_path
 get_agent_runner_settings = _engines_factory_module.get_agent_runner_settings
 get_agent_runner_status_data = _engines_factory_module.get_agent_runner_status_data
@@ -87,6 +88,7 @@ __all__ = [
     "create_backlog_store",
     "create_transcript_runner",
     "daily_log_path",
+    "ensure_standard_executable_path",
     "find_repository_match_for_path",
     "get_agent_runner_settings",
     "get_agent_runner_status_data",

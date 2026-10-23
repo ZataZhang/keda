@@ -33,9 +33,10 @@ from backend.core.shared.models.backlog import BacklogDependencyKind, BacklogPrd
 
 _logger = logging.getLogger(__name__)
 
-#: 快照视为"过期"的阈值（秒）。沿用被删除的内存缓存 TTL 语义，是前端把轮询
-#: 缩短到 3 秒的唯一触发条件，因此不能比它更宽松。
-BACKLOG_SNAPSHOT_STALE_TTL_SECONDS = 30
+#: 快照视为"过期"的阈值（秒）。与全局后台同步间隔（默认 300 秒）对齐：页面停留时
+#: 只有超过该阈值才触发一次读路径重扫，避免停留即"30 秒一轮"的全量 GitHub 查询把
+#: API 额度打满。它是前端把轮询缩短到 3 秒的唯一触发条件。
+BACKLOG_SNAPSHOT_STALE_TTL_SECONDS = 300
 
 #: 协调器任务键里标记"显示已归档"变体的后缀；默认视图直接用 ``repo_id``。
 BACKLOG_ARCHIVED_TASK_KEY_SUFFIX = "::archived"

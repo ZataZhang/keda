@@ -26,6 +26,8 @@ from backend.api.response_cache import TTLResponseCache
 from backend.api.routes.agent_runner_console_takeover import build_issue_action_response
 from backend.api.version_info import resolve_keda_version
 from backend.core.shared.interfaces.runner_console import (
+    MONITOR_SYNC_INTERVAL_MAX_SECONDS,
+    MONITOR_SYNC_INTERVAL_MIN_SECONDS,
     IMonitorSnapshotStore,
     RunnerProcessKind,
 )
@@ -726,7 +728,12 @@ class UpdateMonitorSettingsRequest(BaseModel):
     """
 
     sync_enabled: bool
-    sync_interval_seconds: int = Field(ge=60, le=3600)
+    # 下限 5 分钟是配额约束：每轮同步会逐个 PRD 查 3~5 次 GitHub REST，再密就会
+    # 挤占 daemon 与 kc 共用的 5000 次/小时额度。
+    sync_interval_seconds: int = Field(
+        ge=MONITOR_SYNC_INTERVAL_MIN_SECONDS,
+        le=MONITOR_SYNC_INTERVAL_MAX_SECONDS,
+    )
 
 
 @router.get("/agent-runner/console/monitor/settings")

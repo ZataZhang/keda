@@ -50,7 +50,7 @@ class PrdLifecycleStoreMixin:
 
     def upsert_lifecycle_run(self, run_record: PrdLifecycleRunRecord) -> None:
         """创建或刷新一个 lifecycle run；失败时抛出异常。"""
-        with self._connect() as connection:
+        with self._connection() as connection:
             connection.execute(
                 "INSERT INTO prd_lifecycle_runs "
                 "(run_id, repo_id, prd_path, issue_number, trigger, started_at, "
@@ -81,7 +81,7 @@ class PrdLifecycleStoreMixin:
 
     def append_lifecycle_event(self, event_record: PrdLifecycleEventRecord) -> bool:
         """追加一条生命周期事件，按 ``(run_id, event_key)`` 幂等；失败时抛出异常。"""
-        with self._connect() as connection:
+        with self._connection() as connection:
             cursor = connection.execute(
                 "INSERT OR IGNORE INTO prd_lifecycle_events "
                 "(run_id, event_key, event_type, phase, actor, occurred_at, detail_json, status) "
@@ -102,7 +102,7 @@ class PrdLifecycleStoreMixin:
 
     def mark_lifecycle_run_incomplete(self, run_id: str) -> None:
         """把某个 run 标记为观测历史不完整；失败时抛出异常。"""
-        with self._connect() as connection:
+        with self._connection() as connection:
             connection.execute(
                 "UPDATE prd_lifecycle_runs SET history_complete = 0 WHERE run_id = ?",
                 (run_id,),
@@ -111,7 +111,7 @@ class PrdLifecycleStoreMixin:
 
     def finish_lifecycle_run(self, *, run_id: str, outcome: str, finished_at: str) -> None:
         """写入 run 终态；失败时抛出异常。"""
-        with self._connect() as connection:
+        with self._connection() as connection:
             connection.execute(
                 "UPDATE prd_lifecycle_runs SET finished_at = ?, outcome = ? WHERE run_id = ?",
                 (finished_at, outcome, run_id),
@@ -124,7 +124,7 @@ class PrdLifecycleStoreMixin:
         重试或解除阻塞后同一 run 继续累积事件，必须清掉 ``finished_at``，否则
         它早于后续事件时间，会让端到端与执行 / 等待 / 阻塞拆分互相矛盾。
         """
-        with self._connect() as connection:
+        with self._connection() as connection:
             connection.execute(
                 "UPDATE prd_lifecycle_runs SET finished_at = NULL, outcome = NULL "
                 "WHERE run_id = ? AND finished_at IS NOT NULL",
@@ -134,7 +134,7 @@ class PrdLifecycleStoreMixin:
 
     def get_lifecycle_run(self, run_id: str) -> PrdLifecycleRunRecord | None:
         """按 run id 读取单个 run；不存在时返回 ``None``。"""
-        with self._connect() as connection:
+        with self._connection() as connection:
             run_row = connection.execute(
                 "SELECT run_id, repo_id, prd_path, issue_number, trigger, started_at, "
                 "finished_at, outcome, history_complete "
@@ -149,7 +149,7 @@ class PrdLifecycleStoreMixin:
         self, *, repo_id: str, prd_path: str
     ) -> PrdLifecycleRunRecord | None:
         """按 ``repo_id + prd_path`` 读取最近一次 run；不存在时返回 ``None``。"""
-        with self._connect() as connection:
+        with self._connection() as connection:
             run_row = connection.execute(
                 "SELECT run_id, repo_id, prd_path, issue_number, trigger, started_at, "
                 "finished_at, outcome, history_complete "
@@ -163,7 +163,7 @@ class PrdLifecycleStoreMixin:
 
     def list_lifecycle_events(self, *, run_id: str) -> list[PrdLifecycleEventRecord]:
         """按发生顺序列出某个 run 的全部事件。"""
-        with self._connect() as connection:
+        with self._connection() as connection:
             event_rows = connection.execute(
                 "SELECT run_id, event_key, event_type, phase, actor, occurred_at, "
                 "detail_json, status "
@@ -204,7 +204,7 @@ class PrdLifecycleStoreMixin:
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
         query += " ORDER BY started_at ASC, rowid ASC"
-        with self._connect() as connection:
+        with self._connection() as connection:
             run_rows = connection.execute(query, params).fetchall()
         return [_row_to_lifecycle_run(run_row) for run_row in run_rows]
 
@@ -226,7 +226,7 @@ class PrdLifecycleStoreMixin:
         if since is not None:
             query += " AND rr.started_at >= ?"
             params.append(since)
-        with self._connect() as connection:
+        with self._connection() as connection:
             legacy_row = connection.execute(query, params).fetchone()
         return int(legacy_row["legacy_count"] or 0)
 

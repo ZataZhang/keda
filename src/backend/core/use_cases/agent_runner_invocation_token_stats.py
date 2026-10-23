@@ -6,6 +6,8 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+from backend.core.shared.models.agent_model_observation import is_concrete_configured_model
+
 from backend.core.shared.models.backlog import (
     ModelTokenUsageStats,
     PrdModelTokenUsageEntry,
@@ -94,6 +96,8 @@ class _InvocationUsageRecord:
     flow_name: str
     model_id: str
     totals: TokenUsageTotals
+    configuration_fallback: bool = False
+    unresolved_model_alias: str | None = None
 
 
 @dataclass
@@ -194,12 +198,13 @@ def _read_invocation_usage_records(
     *,
     store: object,
     run_windows_by_issue: dict[tuple[str, int], list[tuple[object, datetime, datetime | None]]],
-) -> tuple[list[_InvocationUsageRecord], bool]:
+) -> tuple[list[_InvocationUsageRecord], bool, dict[str, int]]:
     """读取调用结束事件并通过时间窗关联到 lifecycle run。"""
     issue_event_reader = getattr(store, "list_issue_invocation_events", None)
     if not callable(issue_event_reader):
-        return [], False
+        return [], False, {}
     usage_records: list[_InvocationUsageRecord] = []
+    missing_usage_by_agent: dict[str, int] = {}
     history_truncated = False
     for (repo_id, issue_number), issue_run_windows in run_windows_by_issue.items():
         try:
@@ -236,6 +241,8 @@ def _read_invocation_usage_records(
             detail = _parse_detail_json(detail_json)
             usage_totals = _totals_from_payload(detail.get("token_usage"))
             if usage_totals is None:
+                agent_name = str(getattr(invocation_event, "agent", "") or "unknown")
+                missing_usage_by_agent[agent_name] = missing_usage_by_agent.get(agent_name, 0) + 1
                 continue
             model_id = next(
                 (
@@ -249,6 +256,25 @@ def _read_invocation_usage_records(
                 "unknown",
             )
             phase_name = str(getattr(invocation_event, "phase", "") or detail.get("phase") or "")
+            config_snapshot = detail.get("model_config_snapshot")
+            configured_model = (
+                config_snapshot.get("model_id") if isinstance(config_snapshot, dict) else None
+            )
+            configuration_fallback = False
+            unresolved_model_alias = None
+            if (
+                model_id == "unknown"
+                and isinstance(configured_model, str)
+                and configured_model.strip()
+            ):
+                configured_model = configured_model.strip()
+                if config_snapshot.get("is_alias") is False and is_concrete_configured_model(
+                    configured_model
+                ):
+                    model_id = configured_model
+                    configuration_fallback = True
+                else:
+                    unresolved_model_alias = configured_model
             usage_records.append(
                 _InvocationUsageRecord(
                     run_record=run_record,
@@ -258,9 +284,11 @@ def _read_invocation_usage_records(
                     flow_name=_INVOCATION_PHASE_TO_FLOW.get(phase_name, "unknown"),
                     model_id=model_id,
                     totals=usage_totals,
+                    configuration_fallback=configuration_fallback,
+                    unresolved_model_alias=unresolved_model_alias,
                 )
             )
-    return usage_records, history_truncated
+    return usage_records, history_truncated, missing_usage_by_agent
 
 
 def _build_prd_usage_entries(
@@ -355,13 +383,31 @@ def build_invocation_token_usage_summary(
         ``token_usage_by_model.truncated`` 为 ``True``。
     """
     run_windows_by_issue, run_records_by_id = _build_run_window_index(run_records)
-    invocation_usage_records, history_truncated = _read_invocation_usage_records(
-        store=store,
-        run_windows_by_issue=run_windows_by_issue,
+    invocation_usage_records, history_truncated, missing_usage_by_agent = (
+        _read_invocation_usage_records(
+            store=store,
+            run_windows_by_issue=run_windows_by_issue,
+        )
     )
     usage_buckets = _TokenUsageBuckets.empty()
+    zero_usage_by_model: dict[str, int] = {}
+    configuration_fallback_counts: dict[str, int] = {}
+    unresolved_model_alias_counts: dict[str, int] = {}
     for usage_record in invocation_usage_records:
         usage_buckets.add_invocation(usage_record)
+        if usage_record.configuration_fallback:
+            configuration_fallback_counts[usage_record.model_id] = (
+                configuration_fallback_counts.get(usage_record.model_id, 0) + 1
+            )
+        if usage_record.unresolved_model_alias:
+            alias_name = usage_record.unresolved_model_alias
+            unresolved_model_alias_counts[alias_name] = (
+                unresolved_model_alias_counts.get(alias_name, 0) + 1
+            )
+        if usage_record.totals.total_tokens == 0:
+            zero_usage_by_model[usage_record.model_id] = (
+                zero_usage_by_model.get(usage_record.model_id, 0) + 1
+            )
 
     for run_id, run_record in run_records_by_id.items():
         if run_id in usage_buckets.by_run:
@@ -396,6 +442,10 @@ def build_invocation_token_usage_summary(
             by_agent=usage_buckets.by_agent_model,
             by_prd=_build_prd_model_usage_entries(usage_buckets.by_prd_model),
             truncated=history_truncated,
+            missing_usage_by_agent=missing_usage_by_agent,
+            zero_usage_by_model=zero_usage_by_model,
+            configuration_fallback_counts=configuration_fallback_counts,
+            unresolved_model_alias_counts=unresolved_model_alias_counts,
         ),
     )
 

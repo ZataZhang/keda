@@ -320,7 +320,7 @@ def update_monitor_settings(
     Args:
         store: 快照存储端口实现。
         sync_enabled: 是否开启后台自动同步。
-        sync_interval_seconds: 同步间隔（秒），合法区间 ``[60, 3600]``。
+        sync_interval_seconds: 同步间隔（秒），合法区间 ``[300, 3600]``。
 
     Returns:
         MonitorSettingsEntry: 写入后的设置（含新的 ``updated_at``）。

@@ -30,6 +30,8 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -261,15 +263,44 @@ class SqliteConsoleStore(
         """
         self._db_path = Path(db_path).expanduser()
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        with self._connect() as connection:
+        with self._connection() as connection:
             self._migrate(connection)
 
     def _connect(self) -> sqlite3.Connection:
+        """新建一条连接，关闭责任在调用方。
+
+        存储层的读写一律走 :meth:`_connection`；只有需要包一层事务替身的
+        测试子类才直接覆写本方法。
+
+        Returns:
+            开启 WAL 与 busy_timeout 的连接。
+        """
         connection = sqlite3.connect(str(self._db_path), timeout=10)
         connection.execute("PRAGMA journal_mode=WAL")
         connection.execute("PRAGMA busy_timeout=5000")
         connection.row_factory = sqlite3.Row
         return connection
+
+    @contextmanager
+    def _connection(self) -> Iterator[sqlite3.Connection]:
+        """借出一条用完即关闭的连接。
+
+        stdlib 的 `with sqlite3.connect(...) as connection` 只在退出时提交或
+        回滚事务，**不关闭连接**：每查询一次就漏掉数据库文件与 `-wal` 两个
+        fd。常驻 console 每秒轮询若干次，累积几小时即撞上进程 fd 上限
+        （`OSError: [Errno 24] Too many open files`），此后 `accept()` 全部
+        失败，前端只能看到 Network Error。因此调用点统一走本方法，由
+        `finally` 保证关闭。
+
+        Yields:
+            与 ``_connect()`` 同源的连接，退出时先提交/回滚再关闭。
+        """
+        connection = self._connect()
+        try:
+            with connection:
+                yield connection
+        finally:
+            connection.close()
 
     def _migrate(self, connection: sqlite3.Connection) -> None:
         # 两张表都带 IF NOT EXISTS，**无条件**幂等建表后再看版本号：机器级共享库
@@ -383,7 +414,7 @@ class SqliteConsoleStore(
     def append_run(self, run_record: RunRecord) -> None:
         """追加运行记录；失败时降级为日志警告，不阻断 runner。"""
         try:
-            with self._connect() as connection:
+            with self._connection() as connection:
                 connection.execute(
                     "INSERT INTO run_records "
                     "(repo_id, repo_path, issue_number, trigger, agent, outcome, "
@@ -412,7 +443,7 @@ class SqliteConsoleStore(
     def append_attempt(self, attempt_record: AttemptRecord) -> None:
         """追加 attempt 记录；失败时降级为日志警告，不阻断 runner。"""
         try:
-            with self._connect() as connection:
+            with self._connection() as connection:
                 connection.execute(
                     "INSERT INTO attempt_records "
                     "(repo_id, issue_number, agent, attempt_number, failure_type, "
@@ -449,7 +480,7 @@ class SqliteConsoleStore(
     def append_audit(self, audit_entry: AuditEntry) -> None:
         """追加审计条目；失败时降级为日志警告。"""
         try:
-            with self._connect() as connection:
+            with self._connection() as connection:
                 connection.execute(
                     "INSERT INTO audit_logs "
                     "(occurred_at, actor, action, repo_id, issue_number, "
@@ -476,7 +507,7 @@ class SqliteConsoleStore(
 
     def get_backlog_settings(self, repo_id: str) -> BacklogSettingsEntry | None:
         """读取指定仓库的 backlog 设置。"""
-        with self._connect() as connection:
+        with self._connection() as connection:
             row = connection.execute(
                 "SELECT repo_id, max_parallel, default_view, updated_at "
                 "FROM backlog_settings WHERE repo_id = ?",
@@ -493,7 +524,7 @@ class SqliteConsoleStore(
 
     def save_backlog_settings(self, settings: BacklogSettingsEntry) -> None:
         """保存或更新 backlog 设置；失败时抛出异常。"""
-        with self._connect() as connection:
+        with self._connection() as connection:
             connection.execute(
                 "INSERT INTO backlog_settings (repo_id, max_parallel, default_view, updated_at) "
                 "VALUES (?, ?, ?, ?) "
@@ -510,13 +541,13 @@ class SqliteConsoleStore(
 
     def delete_backlog_settings(self, repo_id: str) -> None:
         """删除指定仓库的 backlog 设置行（恢复继承＝删行，幂等）。"""
-        with self._connect() as connection:
+        with self._connection() as connection:
             connection.execute("DELETE FROM backlog_settings WHERE repo_id = ?", (repo_id,))
             connection.commit()
 
     def enqueue_backlog(self, entry: BacklogQueueEntry) -> int:
         """将 PRD 加入 backlog 队列，返回自增 ID；失败时抛出异常。"""
-        with self._connect() as connection:
+        with self._connection() as connection:
             cursor = connection.execute(
                 "INSERT INTO backlog_queue (repo_id, prd_path, status, trigger, started_at, finished_at, error_detail) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -552,7 +583,7 @@ class SqliteConsoleStore(
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
         query += " ORDER BY id ASC"
-        with self._connect() as connection:
+        with self._connection() as connection:
             rows = connection.execute(query, params).fetchall()
         return [
             BacklogQueueEntry(
@@ -578,7 +609,7 @@ class SqliteConsoleStore(
         error_detail: str | None = None,
     ) -> None:
         """更新队列条目的状态；失败时抛出异常。"""
-        with self._connect() as connection:
+        with self._connection() as connection:
             connection.execute(
                 "UPDATE backlog_queue SET status = ?, started_at = ?, finished_at = ?, error_detail = ? "
                 "WHERE id = ?",
@@ -588,7 +619,7 @@ class SqliteConsoleStore(
 
     def clear_backlog_queue(self, *, repo_id: str | None = None) -> None:
         """清空 backlog 队列；失败时抛出异常。"""
-        with self._connect() as connection:
+        with self._connection() as connection:
             if repo_id is None:
                 connection.execute("DELETE FROM backlog_queue")
             else:
@@ -601,7 +632,7 @@ class SqliteConsoleStore(
 
     def upsert_monitor_snapshot(self, entry: MonitorSnapshotEntry) -> None:
         """写入或覆盖一个仓库的监控快照；失败时抛出异常。"""
-        with self._connect() as connection:
+        with self._connection() as connection:
             connection.execute(
                 "INSERT INTO monitoring_snapshots (repo_id, payload_json, scanned_at) "
                 "VALUES (?, ?, ?) "
@@ -613,7 +644,7 @@ class SqliteConsoleStore(
 
     def list_monitor_snapshots(self) -> list[MonitorSnapshotEntry]:
         """列出全部仓库的监控快照；失败时抛出异常。"""
-        with self._connect() as connection:
+        with self._connection() as connection:
             snapshot_rows = connection.execute(
                 "SELECT repo_id, payload_json, scanned_at FROM monitoring_snapshots"
             ).fetchall()
@@ -628,7 +659,7 @@ class SqliteConsoleStore(
 
     def get_monitor_settings(self) -> MonitorSettingsEntry | None:
         """读取全局监控同步设置；无记录时返回 ``None``（默认值由 core 注入）。"""
-        with self._connect() as connection:
+        with self._connection() as connection:
             settings_row = connection.execute(
                 "SELECT sync_enabled, sync_interval_seconds, updated_at "
                 "FROM monitor_settings WHERE id = 1"
@@ -643,7 +674,7 @@ class SqliteConsoleStore(
 
     def save_monitor_settings(self, settings: MonitorSettingsEntry) -> None:
         """保存或更新全局监控同步设置；失败时抛出异常。"""
-        with self._connect() as connection:
+        with self._connection() as connection:
             connection.execute(
                 "INSERT INTO monitor_settings (id, sync_enabled, sync_interval_seconds, updated_at) "
                 "VALUES (1, ?, ?, ?) "
@@ -661,7 +692,7 @@ class SqliteConsoleStore(
 
     def get_model_pricing_payload(self) -> tuple[list[dict[str, object]], str] | None:
         """读取本机模型价格设置；尚无记录时返回 ``None``。"""
-        with self._connect() as connection:
+        with self._connection() as connection:
             pricing_row = connection.execute(
                 "SELECT pricing_json, updated_at FROM model_pricing_settings WHERE id = 1"
             ).fetchone()
@@ -684,7 +715,7 @@ class SqliteConsoleStore(
         updated_at: str,
     ) -> None:
         """保存整份本机模型价格设置；失败时向调用方抛出。"""
-        with self._connect() as connection:
+        with self._connection() as connection:
             connection.execute(
                 "INSERT INTO model_pricing_settings (id, pricing_json, updated_at) "
                 "VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET "
@@ -699,7 +730,7 @@ class SqliteConsoleStore(
 
     def upsert_backlog_snapshot(self, entry: BacklogSnapshotEntry) -> None:
         """写入或覆盖一个视图变体的 Backlog 快照；失败时抛出异常。"""
-        with self._connect() as connection:
+        with self._connection() as connection:
             connection.execute(
                 "INSERT INTO backlog_prd_snapshots "
                 "(repo_id, include_archived, payload_json, scanned_at) "
@@ -719,7 +750,7 @@ class SqliteConsoleStore(
         self, *, repo_id: str, include_archived: bool
     ) -> BacklogSnapshotEntry | None:
         """读取指定视图变体的快照；不存在时返回 ``None``。"""
-        with self._connect() as connection:
+        with self._connection() as connection:
             snapshot_row = connection.execute(
                 "SELECT repo_id, include_archived, payload_json, scanned_at "
                 "FROM backlog_prd_snapshots WHERE repo_id = ? AND include_archived = ?",
@@ -731,7 +762,7 @@ class SqliteConsoleStore(
 
     def list_backlog_snapshots(self) -> list[BacklogSnapshotEntry]:
         """列出全部 Backlog 快照行；失败时抛出异常。"""
-        with self._connect() as connection:
+        with self._connection() as connection:
             snapshot_rows = connection.execute(
                 "SELECT repo_id, include_archived, payload_json, scanned_at "
                 "FROM backlog_prd_snapshots"

@@ -189,12 +189,12 @@ def test_monitor_settings_patch_persists_and_reads_back(
     assert row == (0, 900)
 
 
-@pytest.mark.parametrize("interval_seconds", [59, 3601, 0])
+@pytest.mark.parametrize("interval_seconds", [299, 3601, 0])
 def test_monitor_settings_patch_rejects_out_of_range_interval(
     monitor_environment: SimpleNamespace,
     interval_seconds: int,
 ) -> None:
-    """合法区间 [60, 3600] 之外的值被拒绝且不写库。"""
+    """合法区间 [300, 3600] 之外的值被拒绝且不写库。"""
     response = client.patch(
         SETTINGS_URL,
         json={"sync_enabled": True, "sync_interval_seconds": interval_seconds},
@@ -289,7 +289,7 @@ def test_overview_job_persists_snapshot_without_rescanning(
     """手动刷新复用扫描产物写回快照：每个仓库只扫描一次，不为写库再扫。"""
     scan_calls: list[list[str] | None] = []
 
-    def fake_build_overview(repo_ids: list[str] | None = None) -> dict:
+    def fake_build_overview(repo_ids: list[str] | None = None, **_kwargs) -> dict:
         scan_calls.append(repo_ids)
         return {
             "repositories": [
@@ -328,7 +328,7 @@ def test_overview_job_fails_when_snapshot_write_fails(
     monkeypatch.setattr(
         agent_runner_routes,
         "_build_overview_response",
-        lambda repo_ids=None: {
+        lambda repo_ids=None, **_kwargs: {
             "repositories": [{**_REPO_A_SNAPSHOT, "scanned_at": "2026-09-16T03:00:00+00:00"}],
             "scanned_at": "2026-09-16T03:00:00+00:00",
             "unreachable_repositories": [],

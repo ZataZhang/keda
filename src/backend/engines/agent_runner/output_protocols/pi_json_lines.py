@@ -24,6 +24,7 @@ from backend.engines.agent_runner.output_protocols.structured_json_lines import 
     relay_structured_json_lines,
 )
 from backend.infrastructure.agent_stream_usage import StreamUsageCollector
+from backend.infrastructure.agent_model_config_snapshot import observe_relay_model_config
 from backend.infrastructure.logging.logger import logger
 
 
@@ -36,6 +37,7 @@ class PiJsonLinesOutputProtocol:
     不能精确取消——监督器读到"归属不可证实"后原样继续，绝不猜测性击杀。
     """
 
+    @observe_relay_model_config
     def relay(self, request: OutputRelayRequest) -> CommandResult:
         """启动 pi 子进程并把 JSON Lines 事件渲染成可读文本。"""
         return relay_structured_json_lines(

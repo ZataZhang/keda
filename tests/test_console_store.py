@@ -7,7 +7,9 @@
 
 from __future__ import annotations
 
+import gc
 import json
+import os
 import sqlite3
 from dataclasses import replace
 from pathlib import Path
@@ -208,6 +210,40 @@ def test_append_and_list_runs(tmp_path: Path) -> None:
     assert recent_runs[1].outcome == "completed"
     assert recent_runs[1].issue_title == "Show task names in recent run history"
     assert recent_runs[1].issue_url == "https://github.com/example/keda/issues/1"
+
+
+def _open_fd_count() -> int:
+    """统计当前进程打开的 fd 数量（macOS 与 Linux 都通过 ``/dev/fd`` 暴露）。"""
+    return len(os.listdir("/dev/fd"))
+
+
+def test_repeated_reads_do_not_leak_file_descriptors(tmp_path: Path) -> None:
+    """每次读写都必须归还连接。
+
+    连接不关闭时每次查询漏两个 fd（库文件与 ``-wal``），常驻 console 每秒轮询
+    若干次，几小时后就撞上进程 fd 上限（``OSError: [Errno 24]``）：此后
+    ``accept()`` 全部失败，前端只剩 Network Error。
+    """
+    if not Path("/dev/fd").exists():
+        pytest.skip("当前平台不暴露 /dev/fd，无法统计 fd 数量")
+
+    store = SqliteConsoleStore(tmp_path / "console.db")
+    store.append_run(_make_run_record(issue_number=1))
+    gc.collect()
+
+    # 关掉循环 GC：预修复实现也能被 gc 兜底回收，只有禁掉回收才能看见"每次查询
+    # 都漏 fd"这一事实，否则用例会在旧实现上假绿。
+    baseline = _open_fd_count()
+    gc.disable()
+    try:
+        for _ in range(20):
+            assert store.list_recent_runs(limit=5)
+            assert store.get_monitor_settings() is None
+        leaked = _open_fd_count() - baseline
+    finally:
+        gc.enable()
+
+    assert leaked <= 2
 
 
 def test_v12_run_records_migrate_with_empty_issue_metadata(tmp_path: Path) -> None:
@@ -599,11 +635,11 @@ def test_monitor_settings_round_trip(tmp_path: Path) -> None:
     assert loaded.sync_interval_seconds == 900
     assert loaded.updated_at == "2026-09-16T03:00:00+00:00"
 
-    store.save_monitor_settings(replace(loaded, sync_enabled=True, sync_interval_seconds=60))
+    store.save_monitor_settings(replace(loaded, sync_enabled=True, sync_interval_seconds=300))
     reloaded = store.get_monitor_settings()
     assert reloaded is not None
     assert reloaded.sync_enabled is True
-    assert reloaded.sync_interval_seconds == 60
+    assert reloaded.sync_interval_seconds == 300
 
 
 def test_monitor_snapshot_write_failure_propagates(tmp_path: Path) -> None:

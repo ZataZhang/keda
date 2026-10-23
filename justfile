@@ -32,6 +32,14 @@ default: _check-completion
 reinstall-kc:
     uv tool install --force --reinstall --editable .
 
+# 前端构建 + CLI 重装：改过 frontend-public 后想一步到位时用它
+# （console-sync 要跑完整 Next.js 构建，所以没有塞进 reinstall-kc）
+# Usage:
+#   just refresh-kc
+refresh-kc: console-sync
+    uv tool install --force --reinstall --editable .
+    @echo "✅ 静态产物已同步、CLI 已重装。若改了后端，记得重启 kc console。"
+
 # 旧名 recipe：`iar` 作为弃用别名长期保留，用法与上面完全一致。  # legacy-alias
 alias reinstall-iar := reinstall-kc
 

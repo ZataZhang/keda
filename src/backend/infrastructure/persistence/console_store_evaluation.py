@@ -192,7 +192,7 @@ class EvaluationStoreMixin:
 
     def save_evaluation_run(self, run: Any) -> None:
         """插入或整体覆盖一个 run 快照行（入参为 core 或镜像记录均可）。"""
-        with self._connect() as connection:
+        with self._connection() as connection:
             connection.execute(
                 "INSERT OR REPLACE INTO evaluation_run ("
                 " run_id, suite_id, suite_version, suite_hash, rubric_version,"
@@ -227,7 +227,7 @@ class EvaluationStoreMixin:
 
     def get_evaluation_run(self, run_id: str) -> EvaluationRunRow | None:
         """按 id 读取 run；不存在返回 ``None``。"""
-        with self._connect() as connection:
+        with self._connection() as connection:
             row = connection.execute(
                 "SELECT * FROM evaluation_run WHERE run_id = ?", (run_id,)
             ).fetchone()
@@ -235,7 +235,7 @@ class EvaluationStoreMixin:
 
     def list_evaluation_runs(self) -> list[EvaluationRunRow]:
         """按创建时间倒序列出全部 run。"""
-        with self._connect() as connection:
+        with self._connection() as connection:
             rows = connection.execute(
                 "SELECT * FROM evaluation_run ORDER BY created_at DESC, run_id DESC"
             ).fetchall()
@@ -276,7 +276,7 @@ class EvaluationStoreMixin:
             f"UPDATE evaluation_run SET {', '.join(assignments)} "
             f"WHERE run_id = ? AND status IN ({placeholders})"
         )
-        with self._connect() as connection:
+        with self._connection() as connection:
             cursor = connection.execute(statement, params)
             if cursor.rowcount != 1:
                 current = connection.execute(
@@ -298,7 +298,7 @@ class EvaluationStoreMixin:
         后台执行线程可能持有已被「强制删除」的 run 的内存记录，写入用
         ``WHERE EXISTS`` 与 run 存在性原子绑定，避免删除后残留孤儿行。
         """
-        with self._connect() as connection:
+        with self._connection() as connection:
             connection.execute(
                 "INSERT OR REPLACE INTO evaluation_result ("
                 " result_id, run_id, case_id, execution_preset_id,"
@@ -338,7 +338,7 @@ class EvaluationStoreMixin:
 
     def get_evaluation_result(self, result_id: str) -> EvaluationResultRow | None:
         """按 id 读取候选结果；不存在返回 ``None``。"""
-        with self._connect() as connection:
+        with self._connection() as connection:
             row = connection.execute(
                 "SELECT * FROM evaluation_result WHERE result_id = ?", (result_id,)
             ).fetchone()
@@ -346,7 +346,7 @@ class EvaluationStoreMixin:
 
     def list_evaluation_results(self, run_id: str) -> list[EvaluationResultRow]:
         """列出某个 run 的全部候选结果（按 case/preset 稳定排序）。"""
-        with self._connect() as connection:
+        with self._connection() as connection:
             rows = connection.execute(
                 "SELECT * FROM evaluation_result WHERE run_id = ? "
                 "ORDER BY case_id, execution_preset_id",
@@ -360,7 +360,7 @@ class EvaluationStoreMixin:
         与候选结果同理：所属 run 已被删除（含 judging 期间的强制删除）时，
         在飞的评审线程回写被静默丢弃，不留孤儿行。
         """
-        with self._connect() as connection:
+        with self._connection() as connection:
             connection.execute(
                 "INSERT OR REPLACE INTO evaluation_score ("
                 " score_id, run_id, result_id, case_id, execution_preset_id,"
@@ -394,7 +394,7 @@ class EvaluationStoreMixin:
 
     def list_evaluation_scores(self, run_id: str) -> list[EvaluationScoreRow]:
         """列出某个 run 的全部评分行（含全部非 valid 状态）。"""
-        with self._connect() as connection:
+        with self._connection() as connection:
             rows = connection.execute(
                 "SELECT * FROM evaluation_score WHERE run_id = ? "
                 "ORDER BY result_id, judge_preset_id",
@@ -404,7 +404,7 @@ class EvaluationStoreMixin:
 
     def delete_evaluation_run(self, run_id: str) -> EvaluationRunRow | None:
         """级联删除 run 的评分、候选结果与 run 行本身；返回被删除的 run。"""
-        with self._connect() as connection:
+        with self._connection() as connection:
             row = connection.execute(
                 "SELECT * FROM evaluation_run WHERE run_id = ?", (run_id,)
             ).fetchone()
@@ -422,7 +422,7 @@ class EvaluationStoreMixin:
             "UPDATE evaluation_run SET status = ?, updated_at = ?, error = ? "
             f"WHERE status IN ({placeholders})"
         )
-        with self._connect() as connection:
+        with self._connection() as connection:
             cursor = connection.execute(
                 statement,
                 [
