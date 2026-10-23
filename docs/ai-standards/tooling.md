@@ -223,7 +223,7 @@ uv run pre-commit run --show-diff-on-failure
 
 完整模式：
 
-- `just lint --full`：运行 `uv run pre-commit run --all-files --show-diff-on-failure`，通过后写入 `.last_linted_commit`；manual 重复检测 hooks 不属于该模式。
+- `just lint --full`：先把未跟踪且未被 `.gitignore` 排除的文件传给 `uv run pre-commit run --files`，再运行 `uv run pre-commit run --all-files --show-diff-on-failure`，通过后写入 `.last_linted_commit`；manual 重复检测 hooks 不属于该模式。`--all-files` 只覆盖 Git 已知文件，不能替代前一趟；若 autofix 改写新文件，检查改动后重跑。
 - `just lint --reuse`：显式运行 manual 重复检测 hooks：`jscpd`、`pylint-duplicate-code`，并补跑 `check-architecture`、`check-guidelines-consistency`、`check-max-file-lines`。
 - `just lint --repo`：本地交付前总入口，串行执行 `just lint --full`、`just lint --reuse`、`just test`、`uv run mkdocs build --strict`，并在最后重新确认 full lint/test 标记。
 
@@ -235,7 +235,7 @@ uv run pre-commit run --show-diff-on-failure
 
 ## AI Adapter Sync
 
-`just sync-template` 默认模式只同步上游维护的基础设施（`justfile.shared`、`scripts/shared/*`、`scripts/build/*`、工具配置、`hooks/shared/*`、E2E 基础设施等），**不同步 AI 适配层文件**：
+`just sync-template` 默认模式只同步上游维护的基础设施（`justfile.shared`、`scripts/shared/*`、`scripts/build/*`、`.pre-commit-config.yaml`、`hooks/shared/*`、E2E 基础设施等）。`pytest.ini` 与 `ruff.toml` 需要保留项目自己的 markers、addopts 和 lint 例外，因此归项目所有，默认不同步。默认模式也**不同步 AI 适配层文件**：
 
 - AI 规范源：`docs/ai-standards/*`
 - Copilot 入口：`.github/copilot-instructions.md`、`.github/instructions/*.md`
@@ -244,14 +244,18 @@ uv run pre-commit run --show-diff-on-failure
 
 这些文件派生项目常会自定义（改入口指向、调整规范），默认覆盖会破坏项目定制，因此只在 `just sync-template --all` 模式才作为同步候选出现。实现见 `scripts/shared/template/sync_template.sh` 的 `_is_ai_adapter_file`。
 
+当同步候选包含当前正在运行的 `sync_template.sh` 时，脚本会先在同目录临时目录准备新文件，再原子替换路径，避免 Bash 执行期间读到被原地截断的脚本。
+
 模板包含 Skill 更新时，`just sync-template` 与 `just sync-local-skills` 遵守以下稳定契约：
 
 - 显式配置的目标与当前检测到的工具适配器可以同时生效；同一批选中的 Skill 会同步到全部目标。
-- `AI_SKILLS_DIRS` 接受以冒号分隔的任意 skills 目录，供新增、临时或未内置适配的 Agent 使用；`CC_SWITCH_SKILLS_DIR` 继续作为兼容入口。
+- 默认探测只认工具自己读取的 skills 目录（如 `~/.claude/skills`、`~/.codex/skills`），不写入需要二次转发的中间层目录：转发一旦停下，Skill 就只更新在中间层里、工具实际看不到。
+- `AI_SKILLS_DIRS` 接受以冒号分隔的任意 skills 目录，供新增、临时或未内置适配的 Agent 使用。
+- Skill 更新候选会忽略 `__pycache__/` 与 `*.pyc`；本地 Python 字节码缓存不会单独触发 `UPDATE`。
 - 非交互的 `scripts/sync_template.sh --skill <name>` 只更新目标中**已存在**的同名 Skill，不会创建首次安装目录；没有可更新安装时明确失败。
 - 首次安装仍走交互式 `just sync-local-skills`；未检测到目标时才展示当前内置适配器供选择。
 
-内置适配器是随工具生命周期增删的便利清单，目前包含 Codex、Claude、Pi、Qoder、Kimi Code、CodeBuddy 与 OpenCode；它们不是永久支持承诺。交互安装与非交互更新必须共用 `scripts/shared/template/sync_template.sh` 中的同一份适配器注册表，守卫测试保护上述工具无关契约，不为单个适配器建立永久性断言。
+内置适配器是随工具生命周期增删的便利清单，目前包含 Codex、Claude、Pi、Qoder、Kimi Code、CodeBuddy 与 KedaCode；它们不是永久支持承诺。交互安装与非交互更新必须共用 `scripts/shared/template/sync_template.sh` 中的同一份适配器注册表，守卫测试保护上述工具无关契约，不为单个适配器建立永久性断言。
 
 ## Pre-commit Configuration Sync
 
@@ -297,6 +301,37 @@ uv run pre-commit run --all-files
 - 对于刚 `git init`、尚无首个 commit 的仓库，flag 会绑定当前分支、`no-commit` 和对应有效 tree，因此模板仓库复制后可在首次提交前正常运行 `just test` / `just lint --full` / `git commit` 流程。
 
 `just test` 在入口处先读 `.last_tested_commit`：若分支、HEAD 和 test 有效 tree 均未变化，则直接打印提示并退出，避免重复 pytest。如果 test 标记不命中，则进一步读 `.last_linted_commit`：命中时跳过 lint 前置直接进入 pytest，未命中时才执行 `SKIP=check-test-flag just lint --full`。这种"两级快路径"是 warm tree 上 `just test` 能稳定低于 30s 的关键。CI 环境（`CI` 非空）下会禁用这两条快路径，强制走完整 lint + pytest，避免跨 job/host 的 flag 文件泄漏掩盖回归。测试成功后会同时刷新 test 标记和 full lint 标记，避免刚跑完 `just test` 后再次执行完整 full lint。本地 pytest 默认使用 `-q`，CI 下回退到 `-v`。
+
+### `just test` 的超时兜底
+
+`just test` 里的两个重活——`just lint --full` 前置和 `uv run pytest`——都经 `scripts/shared/just/with_timeout.py` 执行。它与 `timeout(1)` 的区别是**按进程组收尸**：无论超时还是正常退出，都会确认被包装命令的整个进程组已清空，有残留就 SIGTERM → 宽限 → SIGKILL。之所以自带一个而不直接用 `timeout`，是因为 macOS 既没有 `timeout` 也没有 `gtimeout`，写进共享 recipe 会出现"CI 正常、本地全挂"。
+
+这么做是因为 `just test` 的真实死法不是跑得慢，而是**顶层进程退出后 lint / pytest 子树还活着**——曾出现手敲的三次 `just test` 在 14 小时后仍常驻内存，只杀顶层进程对这种情况完全无效。
+
+| 环境变量 | 默认值 | 作用域 |
+|---|---|---|
+| `JUST_LINT_TIMEOUT_SECONDS` | `1800` | `just test` 内的 `just lint --full` 前置 |
+| `JUST_TEST_TIMEOUT_SECONDS` | `3600` | `just test` 内的 `uv run pytest` |
+| `WITH_TIMEOUT_GRACE` | `10` | SIGTERM 到 SIGKILL 的宽限秒数 |
+
+默认值只用来把"挂死"和"跑得慢"区分开，取值刻意宽松，健康的运行不可能碰到；测试套件特别慢的项目在自己的 `.env` 或 shell 里调高即可。**超时触发时 `just test` 以退出码 124 结束**（沿用 GNU `timeout` 约定），这表示被回收而非测试失败，排查时应先看是什么卡住了。
+
+`killpg` 前必须排除 0 号组（语义是"调用者自身所在的组"）和 1 号组（init）——两者都不可能是子进程独立建出来的组（那个组 id 恒等于子进程 pid），而误伤它们会直接打死 runner 自己。这条不变量由 `tests/guards/shared/test_with_timeout.py` 守卫。
+
+### `just test` 的 pytest 参数
+
+共享 recipe 通过环境变量适配项目测试策略；当前 Keda 的配置如下：
+
+| 环境变量 | 共享默认值 | Keda 配置与作用 |
+|---|---|---|
+| `JUST_FULL_TEST_FLAGS` | `-n auto` | 根 `justfile` 设为 `--no-testmon`，用于 `just test all` / `just test real`，强制绕过增量缓存且避免 testmon 与 xdist 冲突 |
+| `JUST_LOCAL_TEST_FLAGS` | `--no-header -p no:cacheprovider` | 根 `justfile` 设为 `--no-header`，保留 testmon 依赖的 cacheprovider |
+| `JUST_LOCAL_TEST_TARGET` | `tests/` | 未覆盖；决定本地档测试目标 |
+
+两个 `*_FLAGS` 都可设为空串表示不附加参数。本地档默认 `-q`，CI 下使用 `-v`。
+这些变量通过环境变量配置，因为被 import 的 just 变量不能由导入方重复定义；项目定制放在
+根 `justfile`，不修改 `justfile.shared`。本地与 CI 的验证分工仍以 [测试规范](testing.md#python-test-workflow)
+为准，本节不增加本地全量测试门槛。
 
 `just lint --full` 的快速路径仍会执行轻量的 `check-test-flag`，除非调用方显式设置 `SKIP=check-test-flag`。如果 `SKIP` 跳过了除 `check-test-flag` 以外的 hook，本次 full lint 不会写入 `.last_linted_commit`。
 
