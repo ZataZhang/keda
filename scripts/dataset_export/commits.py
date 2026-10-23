@@ -137,6 +137,7 @@ def export_commit_samples(
         default_ref = find_base_branch(repo_path=repo_path)
         if default_ref is None:
             print(f"跳过 {repo_path}: 找不到默认分支", file=sys.stderr)
+            options.skipped_sources.append(f"git_commit:{repo_path}")
             continue
         repo_slug = resolve_repo_slug(repo_path)
         commits = list_plain_commits(

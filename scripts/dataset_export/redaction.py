@@ -69,3 +69,22 @@ def redact_text(text: str) -> RedactionResult:
     redacted, count = _HOME_PATH_PATTERN.subn("~", redacted)
     redaction_count += count
     return RedactionResult(text=redacted, redaction_count=redaction_count)
+
+
+def detect_sensitive_kinds(text: str) -> set[str]:
+    """检测文本里还剩哪些**强特征**的敏感信息（邮箱、本机家目录路径、常见令牌、私钥）。
+
+    只看强特征，不看 ``password = …`` 这类赋值：代码和文档里这种写法太常见，用作硬性拦截会误伤。
+    返回的是种类名，不含具体值。
+    """
+    kinds: set[str] = set()
+    if _PRIVATE_KEY_PATTERN.search(text):
+        kinds.add("private_key")
+    if _EMAIL_PATTERN.search(text):
+        kinds.add("email")
+    if _HOME_PATH_PATTERN.search(text):
+        kinds.add("home_path")
+    for pattern, replacement in _TOKEN_PATTERNS:
+        if pattern.search(text):
+            kinds.add(replacement.strip("<>").replace("redacted-", "").split(" ")[-1])
+    return kinds

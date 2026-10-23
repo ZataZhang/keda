@@ -67,15 +67,16 @@ main() {
     for id in $run_repo_ids; do args+=(--repo "$id"); done
     for repo in $commit_repos; do args+=(--commits-repo "$repo"); done
     for repo in $pr_repos; do args+=(--github-pr-repo "$repo"); done
-    local err_file
+    # 退出码：0 成功；3 部分来源被跳过（样本与归档已写好、数据有效）；4 隐私拦截（什么都没写）；其余是失败。
+    local err_file export_rc=0
     err_file="$(mktemp)"
-    (cd "$runner_dir" && uv run python -m scripts.dataset_export "${args[@]}") 2>"$err_file" || {
-        cat "$err_file"
-        rm -f "$err_file"
-        echo "export failed; nothing committed"
-        return 1
-    }
+    (cd "$runner_dir" && uv run python -m scripts.dataset_export "${args[@]}") 2>"$err_file" || export_rc=$?
     cat "$err_file"
+    if [ "$export_rc" -ne 0 ] && [ "$export_rc" -ne 3 ]; then
+        rm -f "$err_file"
+        echo "export failed (exit $export_rc); nothing committed"
+        return 1
+    fi
 
     # 4. 有变化才提交并推送（只提交 raw/）
     cd "$dataset_dir"
@@ -83,6 +84,7 @@ main() {
     if git diff --cached --quiet; then
         echo "no changes in the archive; nothing to commit"
         rm -f "$err_file"
+        [ "$export_rc" -eq 3 ] && { echo "PARTIAL: some requested sources were skipped (see above)"; return 3; }
         return 0
     fi
     local summary
@@ -94,6 +96,9 @@ main() {
     }
     rm -f "$err_file"
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] dataset archive done: ${summary:-ok}"
+    # 数据有效、已提交，但有来源缺失：不能让定时任务看起来成功。
+    [ "$export_rc" -eq 3 ] && { echo "PARTIAL: some requested sources were skipped (see above)"; return 3; }
+    return 0
 }
 
 main "$@"

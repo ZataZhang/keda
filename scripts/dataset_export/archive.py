@@ -20,6 +20,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from scripts.dataset_export.sanitize import find_sensitive_kinds
+
 RAW_DIRNAME = "raw"
 MANIFEST_FILENAME = "MANIFEST.json"
 MANIFEST_SCHEMA_VERSION = 1
@@ -27,6 +29,10 @@ _UNSAFE_NAME_CHARS = re.compile(r"[^A-Za-z0-9._-]")
 STATUS_ADDED = "added"
 STATUS_UPDATED = "updated"
 STATUS_UNCHANGED = "unchanged"
+
+
+class ArchivePrivacyError(Exception):
+    """归档前的兜底检查发现样本里还有个人信息；此时不写任何文件。"""
 
 
 @dataclass
@@ -85,7 +91,23 @@ def _count_archived_by_origin(archive_dir: Path) -> dict[str, int]:
 
 
 def archive_samples(samples: list[dict[str, Any]], archive_dir: Path) -> ArchiveReport:
-    """把样本逐个写进归档目录，并刷新 ``MANIFEST.json``（只含数量，不含时间，避免每天的无意义改动）。"""
+    """把样本逐个写进归档目录，并刷新 ``MANIFEST.json``（只含数量，不含时间，避免每天的无意义改动）。
+
+    写入之前先对**全部**样本做兜底检查：只要有一个样本还带着邮箱、本机路径、令牌或私钥，
+    就抛 :class:`ArchivePrivacyError` 且一个文件都不写，宁可让定时任务失败，也不把个人信息写进长期保存的仓库。
+    """
+    findings = {
+        sample["sample_id"]: sorted(kinds)
+        for sample in samples
+        if (kinds := find_sensitive_kinds(sample))
+    }
+    if findings:
+        shown = "; ".join(
+            f"{sample_id}: {', '.join(kinds)}" for sample_id, kinds in list(findings.items())[:5]
+        )
+        raise ArchivePrivacyError(
+            f"{len(findings)} 个样本含敏感信息，已拒绝归档（只列种类，不列值）：{shown}"
+        )
     report = ArchiveReport()
     for sample in samples:
         status = write_sample_if_changed(sample_file_path(archive_dir, sample), sample)

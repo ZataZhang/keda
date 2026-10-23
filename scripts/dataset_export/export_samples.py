@@ -16,6 +16,7 @@ import re
 import sqlite3
 import subprocess
 import sys
+import time
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -24,6 +25,7 @@ from typing import Any
 
 from backend.core.use_cases import agent_runner_issue_snapshot as issue_snapshot
 from scripts.dataset_export import agent_sessions
+from scripts.dataset_export.sanitize import sanitize_sample_text, summarize_pull_request
 
 SCHEMA_VERSION = 1
 DEFAULT_DB_PATH = Path.home() / ".kedacode" / "console.db"
@@ -71,6 +73,8 @@ SIZE_BANDS = (("small", 5, 300), ("medium", 30, 3000))
 LARGE_SIZE_BAND = "large"
 GIT_TIMEOUT_SECONDS = 30
 GH_TIMEOUT_SECONDS = 60
+# gh 调用失败后的重试间隔（秒）：GitHub 的 GraphQL 接口会偶发 499/5xx，一次失败不等于数据不存在。
+GH_RETRY_DELAYS_SECONDS = (1.0, 3.0)
 
 
 @dataclass(frozen=True)
@@ -94,6 +98,8 @@ class ExportOptions:
     curation_dir: Path | None = None
     worklist_path: Path | None = None
     archive_dir: Path | None = None
+    # 被要求的来源里有哪些被跳过了（gh 不可用、找不到默认分支等）；命令行据此以非零退出码报告。
+    skipped_sources: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -319,14 +325,18 @@ def classify_task_kind(title: str | None) -> str:
 
 
 def fetch_gh_json(*, repo_path: Path, args: list[str]) -> Any | None:
-    """调用 ``gh`` 并解析 JSON，失败返回 ``None``。"""
-    stdout = run_command(args=["gh", *args], cwd=repo_path, timeout=GH_TIMEOUT_SECONDS)
-    if not stdout:
-        return None
-    try:
-        return json.loads(stdout)
-    except json.JSONDecodeError:
-        return None
+    """调用 ``gh`` 并解析 JSON；失败（含 GitHub 接口偶发的 5xx/499）重试几次，仍失败返回 ``None``。"""
+    for attempt_index, delay_seconds in enumerate((*GH_RETRY_DELAYS_SECONDS, None)):
+        stdout = run_command(args=["gh", *args], cwd=repo_path, timeout=GH_TIMEOUT_SECONDS)
+        if stdout:
+            try:
+                return json.loads(stdout)
+            except json.JSONDecodeError:
+                pass
+        if delay_seconds is None:
+            return None
+        time.sleep(delay_seconds)
+    return None
 
 
 def collect_gh_facts(*, repo_path: Path, issue_number: int) -> dict[str, Any]:
@@ -528,7 +538,11 @@ def build_sample(
             "edited_since_claim": is_edited_since_claim(snapshots, gh_issue=gh_issue),
         },
         "code": git_facts,
-        "pull_requests": gh_facts["pull_requests"],
+        "pull_requests": (
+            None
+            if gh_facts["pull_requests"] is None
+            else [summarize_pull_request(item) for item in gh_facts["pull_requests"]]
+        ),
         "runs": [
             {
                 key: run[key]
@@ -745,6 +759,7 @@ def export_github_pr_samples(
         pull_requests = discover_merged_pull_requests(repo_path=repo_path, limit=options.pr_limit)
         if not repo_info or pull_requests is None:
             print(f"跳过 {repo_path}: gh 不可用或无法识别 GitHub 仓库", file=sys.stderr)
+            options.skipped_sources.append(f"github_pr:{repo_path}")
             continue
         covered_issue_numbers = covered_issues_by_path.get(repo_path.resolve(), set())
         for pull_request in pull_requests:
@@ -755,6 +770,7 @@ def export_github_pr_samples(
             detail = fetch_pull_request_detail(repo_path=repo_path, number=pull_request["number"])
             if detail is None:
                 print(f"跳过 PR #{pull_request['number']}: 取不到详情", file=sys.stderr)
+                options.skipped_sources.append(f"github_pr:{repo_path}#{pull_request['number']}")
                 continue
             samples.append(
                 build_pull_request_sample(
@@ -1003,4 +1019,6 @@ def export_samples(options: ExportOptions) -> list[dict[str, Any]]:
             f"找不到样本的补全 {len(report.unknown_sample_ids)}",
             file=sys.stderr,
         )
+    for sample in samples:
+        sanitize_sample_text(sample)
     return samples

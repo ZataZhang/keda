@@ -8,7 +8,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-from scripts.dataset_export.archive import archive_samples
+from scripts.dataset_export.archive import ArchivePrivacyError, archive_samples
 from scripts.dataset_export.curation import build_curation_worklist
 from scripts.dataset_export.export_samples import (
     DEFAULT_COMMIT_LIMIT,
@@ -20,6 +20,9 @@ from scripts.dataset_export.export_samples import (
     resolve_repo_slug,
     summarize_samples,
 )
+
+EXIT_PARTIAL = 3
+EXIT_PRIVACY = 4
 
 
 def parse_args(argv: list[str] | None) -> ExportOptions:
@@ -134,7 +137,11 @@ def main(argv: list[str] | None = None) -> int:
     elif options.archive_dir is None:
         sys.stdout.write(lines)
     if options.archive_dir is not None:
-        report = archive_samples(samples, options.archive_dir)
+        try:
+            report = archive_samples(samples, options.archive_dir)
+        except ArchivePrivacyError as error:
+            print(f"归档失败: {error}", file=sys.stderr)
+            return EXIT_PRIVACY
         print(
             f"归档: 新增 {report.added}，更新 {report.updated}，未变 {report.unchanged}；"
             f"归档目录共 {sum(report.total_by_origin.values())} 个（{report.total_by_origin}）",
@@ -159,4 +166,8 @@ def main(argv: list[str] | None = None) -> int:
     summary = summarize_samples(samples)
     stamp = datetime.now(UTC).isoformat(timespec="seconds")
     print(f"[{stamp}] 导出摘要: {json.dumps(summary, ensure_ascii=False)}", file=sys.stderr)
+    if options.skipped_sources:
+        # 样本和归档已经写好（数据本身有效），但有被要求的来源缺失，不能报成功。
+        print(f"部分来源被跳过: {', '.join(options.skipped_sources)}", file=sys.stderr)
+        return EXIT_PARTIAL
     return 0
