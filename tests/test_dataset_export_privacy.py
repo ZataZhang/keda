@@ -19,7 +19,11 @@ from scripts.dataset_export.archive import ArchivePrivacyError, archive_samples
 from scripts.dataset_export.cli import EXIT_PARTIAL, EXIT_PRIVACY, main
 from scripts.dataset_export.export_samples import ExportOptions, export_samples
 from scripts.dataset_export.redaction import detect_sensitive_kinds
-from scripts.dataset_export.sanitize import sanitize_sample_text, summarize_pull_request
+from scripts.dataset_export.sanitize import (
+    find_sensitive_kinds,
+    sanitize_sample_text,
+    summarize_pull_request,
+)
 from tests.test_dataset_export import _pull_request_fixture, console_db, sample_repo  # noqa: F401
 
 RAW_PULL_REQUEST: dict[str, Any] = {
@@ -137,6 +141,27 @@ def _clean(sample_id: str, **extra: Any) -> dict[str, Any]:
         "input": {"title": "t"},
         **extra,
     }
+
+
+def test_guard_does_not_flag_a_bare_users_path_inside_quoted_text(tmp_path: Path) -> None:
+    """验收标准里写的 ``grep -n "/Users/" config.toml`` 不带用户名，不是个人信息；序列化的引号转义不能让它被误判。"""
+    sample = _clean(
+        "o/r#grep",
+        input={"title": "t", "body": 'run `grep -n "/Users/" config.toml` and expect no output'},
+    )
+
+    assert find_sensitive_kinds(sample) == set()
+    assert archive_samples([sample], tmp_path).added == 1
+
+
+def test_guard_still_finds_real_leaks_in_nested_fields() -> None:
+    sample = _clean(
+        "o/r#nested",
+        runs=[{"error_summary": "boom in /Users/zata/code/x"}],
+        pull_requests=[{"commits": [{"note": "mail a@b.com"}]}],
+    )
+
+    assert find_sensitive_kinds(sample) == {"home_path", "email"}
 
 
 def test_archive_refuses_to_write_anything_when_one_sample_still_has_personal_data(

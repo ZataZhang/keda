@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-import json
+from collections.abc import Iterator
 from typing import Any
 
 from scripts.dataset_export.redaction import detect_sensitive_kinds, redact_text
@@ -68,6 +68,26 @@ def sanitize_sample_text(sample: dict[str, Any]) -> None:
     sample_input.setdefault("redaction_reviewed", False)
 
 
+def _iter_strings(value: Any) -> Iterator[str]:
+    """递归取出样本里所有真实的字符串值。"""
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from _iter_strings(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _iter_strings(item)
+
+
 def find_sensitive_kinds(sample: dict[str, Any]) -> set[str]:
-    """兜底检查：返回样本里还能找到的敏感信息种类（不返回具体值，免得又把它写进日志）。"""
-    return detect_sensitive_kinds(json.dumps(sample, ensure_ascii=False))
+    """兜底检查：返回样本里还能找到的敏感信息种类（不返回具体值，免得又把它写进日志）。
+
+    **逐个检查真实的字符串值，而不是检查序列化后的 JSON 文本**：JSON 会把引号转义成 ``\\"``，
+    让 ``grep -n "/Users/" config.toml`` 这种不带用户名的裸路径被误判成"路径后面跟着用户名"，
+    与脱敏时的口径不一致。
+    """
+    kinds: set[str] = set()
+    for text in _iter_strings(sample):
+        kinds |= detect_sensitive_kinds(text)
+    return kinds
