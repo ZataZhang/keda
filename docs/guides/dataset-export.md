@@ -194,6 +194,39 @@ tail -f ~/.kedacode/logs/dataset-archive.log                                    
 
 电脑在 03:30 休眠时，launchd 会在唤醒后补跑；关机则错过当天。归档是增量的，错过一天不影响下一次把变化补齐。
 
+## 校准判分器（`calibrate`）
+
+一道评测题能成立，要求**判分器本身可靠**。`python -m scripts.dataset_export.calibrate` 对候选题做"失败转通过"检验，**不调用任何模型**：
+
+| 运行 | 代码 | 测试 | 期望 |
+|---|---|---|---|
+| gold（应用了原始修复） | 改动后 | 改动后 | 通过 |
+| noop（什么都不改） | 改动前 | 改动后（含 `tests/` 下新增的辅助文件，已删除的也删掉） | 有测试失败 |
+
+noop 下失败、gold 下通过的测试是 `fail_to_pass`（做对了才会变绿）；两边都通过的是 `pass_to_pass`（不能被改坏）。**黑盒的 `fail_to_pass`** 还要求 noop 下失败的**原因**是断言（行为不对），而不是 `ImportError`、`AttributeError` 这类"找不到这次新增的内部名字"——后者说明测试与实现细节耦合，任务描述又不能写出那些名字，用它判分对做题的人不公平。
+
+| `status` | 含义 |
+|---|---|
+| `calibrated` | 至少有一个黑盒 `fail_to_pass`：判分器可用 |
+| `coupled_to_new_symbols` | 有 `fail_to_pass`，但全部只因找不到新增的名字而失败 |
+| `no_fail_to_pass` | 改动前的代码也能通过这些测试，区分不出做没做对 |
+| `gold_failed` | 应用了原始修复后测试也没通过，判分器本身不可用 |
+| `no_tests` | 这次改动没有新增或修改任何 Python 测试文件 |
+| `error` | 环境问题（提交不在本地、pytest 崩溃或超时）；下次会重跑 |
+
+```bash
+uv run python -m scripts.dataset_export.calibrate \
+  --raw-dir ~/code/keda-datasets/raw --out-dir ~/code/keda-datasets/calibration \
+  --repo keda=~/code/keda --repo keda-main=~/code/keda --repo ZataZhang/keda=~/code/keda --jobs 2
+```
+
+- 默认只校准机器判定的候选题（`eval_ready`）；`--all` 校准全部，`--sample-id` 指定样本，`--force` 重跑已有记录。同一对提交已有非 `error` 的记录时自动跳过。
+- 每个样本写一个 `calibration/<样本 id>.json`：`status`、`fail_to_pass`、`black_box_fail_to_pass`、`pass_to_pass`、`gold_failures`、两次运行的结果计数、被校准的两个提交。这是**运行事实**，不是人的判断，所以单独存放，不混进补全层。
+- **不碰源仓库**：用 `git archive` 把两个提交导出到临时目录，不建 worktree、不改任何引用；测试子进程的 `HOME` 指向临时目录，早期提交里会写 `~/.kedacode` 之类的测试也弄脏不了真实的本机状态。
+- 运行测试用 `uv run python -m pytest`（`--command` 可改），`-o addopts=` 清掉 `--testmon`，并加 `--continue-on-collection-errors`：改动前有的测试文件会因为找不到新增的名字而无法导入，不能让它中止整次运行，否则同一次改动里其他文件的行为测试也跑不出来。
+
+**它证明什么、不证明什么**：`calibrated` 只说明"用这些测试判分，改动前红、改动后绿，且红是因为行为不对"。它**不**证明任务描述足够清楚、不证明题目不泄露答案、不证明测试没有偶发失败（gold 只跑一次）；`pass_to_pass` 也只覆盖这次改动涉及的测试文件，不是整套测试。所以 `calibrated` 离"合格评测题"还差**人工复核**，并且只支持 Python 测试。
+
 ## 样本里有什么个人信息，没有什么
 
 导出器**不**把这些放进样本：提交作者的姓名、登录名、邮箱（PR 对象只保留判定"已合并"与还原提交链所需的白名单字段）；本机绝对路径（`/Users/<名>`、`/home/<名>` 一律替换为 `~`）；常见令牌、私钥与"键=值"形式的密钥；文本里的邮箱。所有样本的自由文本（任务标题与正文、错误摘要、提交主题）在导出最后统一再过一遍脱敏，这一步幂等；`input.redaction_count` 记录累计命中数，`input.redaction_reviewed` 恒为 `false`。

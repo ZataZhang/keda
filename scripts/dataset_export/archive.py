@@ -45,7 +45,7 @@ class ArchiveReport:
     total_by_origin: dict[str, int] = field(default_factory=dict)
 
 
-def _safe_name(text: str) -> str:
+def safe_name(text: str) -> str:
     """把任意文本变成安全的目录名或文件名（路径分隔符、``#`` 等都换成下划线）。"""
     safe = _UNSAFE_NAME_CHARS.sub("_", text).strip(".")
     return safe or "_"
@@ -56,9 +56,9 @@ def sample_file_path(archive_dir: Path, sample: dict[str, Any]) -> Path:
     return (
         archive_dir
         / RAW_DIRNAME
-        / _safe_name(sample["origin"])
-        / _safe_name(sample["repo_id"])
-        / f"{_safe_name(sample['sample_id'])}.json"
+        / safe_name(sample["origin"])
+        / safe_name(sample["repo_id"])
+        / f"{safe_name(sample['sample_id'])}.json"
     )
 
 
