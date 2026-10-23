@@ -8,6 +8,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
+from scripts.dataset_export.archive import archive_samples
 from scripts.dataset_export.curation import build_curation_worklist
 from scripts.dataset_export.export_samples import (
     DEFAULT_COMMIT_LIMIT,
@@ -83,6 +84,12 @@ def parse_args(argv: list[str] | None) -> ExportOptions:
         help="后期补全目录：叠加其中 *.jsonl 的补全记录（任务输入、排除、评测方式），不改原始记录",
     )
     parser.add_argument(
+        "--archive-dir",
+        type=Path,
+        help="把样本归档到该目录（每个样本一个文件、原地更新、只增不删，供提交进数据集仓库）；"
+        "给了它又没给 --output 时，不再把样本打到 stdout",
+    )
+    parser.add_argument(
         "--curation-worklist",
         type=Path,
         help="另写一份待补全清单（输入偏弱的开发类样本），交给人或更强的 Agent 补全",
@@ -104,6 +111,7 @@ def parse_args(argv: list[str] | None) -> ExportOptions:
         commit_limit=namespace.commit_limit,
         curation_dir=namespace.curation_dir,
         worklist_path=namespace.curation_worklist,
+        archive_dir=namespace.archive_dir,
     )
 
 
@@ -123,8 +131,15 @@ def main(argv: list[str] | None = None) -> int:
     lines = "".join(json.dumps(s, ensure_ascii=False) + "\n" for s in samples)
     if options.output_path:
         options.output_path.write_text(lines, encoding="utf-8")
-    else:
+    elif options.archive_dir is None:
         sys.stdout.write(lines)
+    if options.archive_dir is not None:
+        report = archive_samples(samples, options.archive_dir)
+        print(
+            f"归档: 新增 {report.added}，更新 {report.updated}，未变 {report.unchanged}；"
+            f"归档目录共 {sum(report.total_by_origin.values())} 个（{report.total_by_origin}）",
+            file=sys.stderr,
+        )
     if options.worklist_path:
         repo_paths = {
             resolve_repo_slug(path): path

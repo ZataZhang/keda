@@ -93,6 +93,7 @@ class ExportOptions:
     commit_limit: int = DEFAULT_COMMIT_LIMIT
     curation_dir: Path | None = None
     worklist_path: Path | None = None
+    archive_dir: Path | None = None
 
 
 @dataclass
