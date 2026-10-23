@@ -11,7 +11,7 @@ timezone: Asia/Shanghai
 priority: P1
 slug: keda-blocker-monitor
 skip_when: needs_attention=0
-pre_command: 'blocked="$(gh issue list --repo ZataZhang/keda --state open --label agent/blocked --json number --jq length 2>/dev/null)" || blocked=unknown; failed="$(gh issue list --repo ZataZhang/keda --state open --label agent/failed --json number --jq length 2>/dev/null)" || failed=unknown; case "$blocked:$failed" in *[!0-9:]*|:*|*:) printf "blocked_count=unknown\nfailed_count=unknown\nneeds_attention=unknown\n";; *) total=$((blocked + failed)); printf "blocked_count=%s\nfailed_count=%s\nneeds_attention=%s\n" "$blocked" "$failed" "$total";; esac'
+pre_command: 'blocked="$(gh issue list --repo ZataZhang/keda --state open --label agent/blocked --limit 1000 --json number --jq length 2>/dev/null)" || blocked=unknown; failed="$(gh issue list --repo ZataZhang/keda --state open --label agent/failed --limit 1000 --json number --jq length 2>/dev/null)" || failed=unknown; case "$blocked:$failed" in *[!0-9:]*|:*|*:) printf "blocked_count=unknown\nfailed_count=unknown\nneeds_attention=unknown\n";; *) total=$((blocked + failed)); printf "blocked_count=%s\nfailed_count=%s\nneeds_attention=%s\n" "$blocked" "$failed" "$total";; esac'
 ---
 
 # Keda 阻塞与失败巡查 — {{date}}
@@ -26,7 +26,7 @@ pre_command: 'blocked="$(gh issue list --repo ZataZhang/keda --state open --labe
 
 ## 处理步骤
 
-1. 重新读取当前仓库所有 open 的 `agent/blocked` 和 `agent/failed` Issues，避免按过期计数操作。逐条读取 Issue 正文、最近的 Attempt History、相关 PR 状态，并用 `kc logs --repo-id keda --issue <N>` 查看本次执行日志。
+1. 重新读取当前仓库所有 open 的 `agent/blocked` 和 `agent/failed` Issues，避免按过期计数操作。`gh issue list` 查询必须显式传 `--limit 1000`（默认只返回 30 条）。逐条读取 Issue 正文、最近的 Attempt History、相关 PR 状态，并用 `kc logs --repo-id keda --issue <N>` 查看本次执行日志。
 2. 对 `agent/failed`，先分类根因。发布或状态收尾失败使用 `kc recover --issue <N>`；执行失败先修复已确认的代码、配置或本机环境原因，再按恢复流程重新排队。不要在根因未知时盲目重试。
 3. 对 `agent/blocked`，仓库维护者已授权自动处理范围明确、可验证的技术阻塞。修好根因后才运行 `kc blocked-continue --issue <N>`，并确认该 Issue 已恢复到正确状态。
 4. 不得猜测产品取舍、访问权限、密钥、受保护路径或外部审批。遇到这类需要人决策的阻塞时，保留原 Issue 的 blocked 状态，在 Issue 评论中写明证据、缺少的决定和最小可选项，然后让本巡查 Issue 进入 blocked，等待维护者处理。
