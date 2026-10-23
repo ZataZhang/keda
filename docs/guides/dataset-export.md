@@ -154,6 +154,43 @@ uv run python -m scripts.dataset_export --with-gh --repo keda --commits-repo ~/c
 
 **哪些内容该进归档，要在调用时用参数控制**：归档里是任务原文与提交信息，会话首句还是用户的原话（脱敏只是模式匹配）。没有明确同意之前，不要把公司仓库、会话记录归档进个人账号下的仓库。
 
+### 定时归档（`archive_daily.sh`）
+
+`scripts/dataset_export/archive_daily.sh` 把"导出 → 归档 → 有变化就提交并推送"串成一次可定时执行的任务。**它是确定性脚本，不要用 `kc loop` 来跑**：`kc loop` 是"定时开 Issue、交给 Agent 走 PR 流程"，每天为一次归档启动一个 Agent 既浪费又不可靠。
+
+- 用一个**专用的只读工作树**（默认 `~/.kedacode/dataset-runner/keda`，固定在 `zata/main`）跑导出，不用你正在改的检出：你改到一半的代码不会让定时任务失败，它也不会碰你的工作区。这个工作树会出现在你仓库的 `git worktree list` 里。
+- 导出失败就不提交，不会把残缺数据写进归档；只提交 `raw/` 与 `MANIFEST.json`，`curation/` 是人工补全，由人手工提交。
+- 运行锁防止重叠；锁里存 PID，进程已不在就当陈旧锁清掉。
+- **默认只归档本人名下的仓库，不含公司仓库，也不含会话记录**。要加入需要先单独确认；用环境变量 `COMMIT_REPOS`、`PR_REPOS`、`KEDA_RUN_REPO_IDS` 覆盖仓库列表，路径用 `KEDA_DIR`、`DATASET_DIR`、`RUNNER_DIR` 覆盖。
+
+macOS 上用 launchd 每天定时运行（路径按你的机器改；`PATH` 要写全，launchd 的环境很干净）：
+
+```xml
+<!-- ~/Library/LaunchAgents/com.kedacode.dataset-archive.plist -->
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.kedacode.dataset-archive</string>
+  <key>ProgramArguments</key><array>
+    <string>/bin/bash</string>
+    <string>/Users/<你>/.kedacode/dataset-runner/keda/scripts/dataset_export/archive_daily.sh</string>
+  </array>
+  <key>StartCalendarInterval</key><dict><key>Hour</key><integer>3</integer><key>Minute</key><integer>30</integer></dict>
+  <key>StandardOutPath</key><string>/Users/<你>/.kedacode/logs/dataset-archive.log</string>
+  <key>StandardErrorPath</key><string>/Users/<你>/.kedacode/logs/dataset-archive.log</string>
+  <key>EnvironmentVariables</key><dict>
+    <key>PATH</key><string>/opt/homebrew/bin:/Users/<你>/.local/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+</dict></plist>
+```
+
+```bash
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.kedacode.dataset-archive.plist   # 启用
+launchctl kickstart gui/$(id -u)/com.kedacode.dataset-archive                                # 立刻跑一次
+launchctl bootout gui/$(id -u)/com.kedacode.dataset-archive                                  # 停用
+tail -f ~/.kedacode/logs/dataset-archive.log                                                 # 看日志
+```
+
+电脑在 03:30 休眠时，launchd 会在唤醒后补跑；关机则错过当天。归档是增量的，错过一天不影响下一次把变化补齐。
+
 ## 标签
 
 | 标签 | 含义 |
