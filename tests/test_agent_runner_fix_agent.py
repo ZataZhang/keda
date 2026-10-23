@@ -19,11 +19,12 @@ from backend.core.shared.models.agent_runner import (
     RunnerConfig,
     StallSupervisorConfig,
 )
-from backend.core.use_cases.run_agent_once import (
-    MaxRetriesExceededError,
-    run_agent_until_committed,
+from backend.core.use_cases.run_agent_execution_loop import (
+    AgentExecutionRequest,
+    execute_agent_request,
 )
-from tests.conftest import FakeProcessRunner
+from backend.core.use_cases.run_agent_once import MaxRetriesExceededError
+from tests.conftest import FakeGitHubClient, FakeProcessRunner
 from tests.support.agent_runner import (
     is_bash_wrapped_verification_call,
     write_commit_request,
@@ -78,14 +79,17 @@ def test_run_agent_until_committed_enters_recovery_after_timeout(
     )
 
     with pytest.raises(MaxRetriesExceededError):
-        run_agent_until_committed(
-            selected_agent="claude",
-            issue=issue,
-            worktree_path=tmp_path,
-            config=config,
-            process_runner=fake_runner,
-            before_sha="abc123",
-            expected_branch="issue-1",
+        execute_agent_request(
+            AgentExecutionRequest(
+                selected_agent="claude",
+                issue=issue,
+                worktree_path=tmp_path,
+                config=config,
+                process_runner=fake_runner,
+                before_sha="abc123",
+                expected_branch="issue-1",
+                github_client=FakeGitHubClient(),
+            )
         )
 
     assert fake_runner.attempts == 2
@@ -250,14 +254,17 @@ def test_run_agent_until_committed_calls_fix_agent_before_recovery(
     )
 
     with caplog.at_level(logging.INFO, logger="backend.core.use_cases.run_agent_once"):
-        result = run_agent_until_committed(
-            selected_agent="claude",
-            issue=issue,
-            worktree_path=worktree_path,
-            config=config,
-            process_runner=fake_runner,
-            before_sha="before-sha",
-            expected_branch="issue-1",
+        result = execute_agent_request(
+            AgentExecutionRequest(
+                selected_agent="claude",
+                issue=issue,
+                worktree_path=worktree_path,
+                config=config,
+                process_runner=fake_runner,
+                before_sha="before-sha",
+                expected_branch="issue-1",
+                github_client=FakeGitHubClient(),
+            )
         )
 
     assert result.attempt_results[-1].failure_type == FailureType.SUCCESS
@@ -338,14 +345,17 @@ def test_run_agent_until_committed_skips_fix_agent_when_disabled(
 
     with caplog.at_level(logging.INFO, logger="backend.core.use_cases.run_agent_once"):
         with pytest.raises(MaxRetriesExceededError):
-            run_agent_until_committed(
-                selected_agent="claude",
-                issue=issue,
-                worktree_path=worktree_path,
-                config=config,
-                process_runner=fake_runner,
-                before_sha="before-sha",
-                expected_branch="issue-1",
+            execute_agent_request(
+                AgentExecutionRequest(
+                    selected_agent="claude",
+                    issue=issue,
+                    worktree_path=worktree_path,
+                    config=config,
+                    process_runner=fake_runner,
+                    before_sha="before-sha",
+                    expected_branch="issue-1",
+                    github_client=FakeGitHubClient(),
+                )
             )
 
     agent_commands = [c for c in fake_runner.calls if tuple(c)[:1] == ("claude",)]
@@ -423,14 +433,17 @@ def test_run_agent_until_committed_recovery_uses_recovery_timeout_seconds(
     )
 
     with pytest.raises(MaxRetriesExceededError):
-        run_agent_until_committed(
-            selected_agent="claude",
-            issue=issue,
-            worktree_path=worktree_path,
-            config=config,
-            process_runner=fake_runner,
-            before_sha="same-sha",
-            expected_branch="issue-1",
+        execute_agent_request(
+            AgentExecutionRequest(
+                selected_agent="claude",
+                issue=issue,
+                worktree_path=worktree_path,
+                config=config,
+                process_runner=fake_runner,
+                before_sha="same-sha",
+                expected_branch="issue-1",
+                github_client=FakeGitHubClient(),
+            )
         )
 
     claude_indices = [

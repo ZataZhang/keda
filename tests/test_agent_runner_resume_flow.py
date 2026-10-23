@@ -2,7 +2,7 @@
 
 被测边界（真实）：假 agent 子进程按 claude stream-json 信封自报 ``session_id`` →
 ``SubprocessRunner`` 观测 → ``CommandResult.session_id`` → worktree 局部会话记录 →
-领取侧 :func:`backend.core.use_cases.run_agent_once.run_agent_until_committed` 解析
+领取侧 :func:`backend.core.use_cases.run_agent_execution_loop.execute_agent_request` 解析
 首轮续传 → :func:`build_agent_invocation` 展开 ``resume_args`` → 第二次真实子进程
 argv。被替代的只有 agent CLI 本身；执行循环的门禁按
 ``test_agent_token_usage_flow.py`` 的既有模式替身为 no-op。
@@ -36,6 +36,7 @@ from backend.core.use_cases.agent_runner_session_store import (
     save_agent_session_record,
 )
 from backend.infrastructure.process_runner import SubprocessRunner
+from tests.conftest import FakeGitHubClient
 
 _ISSUE = IssueSummary(
     number=7,
@@ -160,14 +161,17 @@ def _run_claims(
 
     for _ in range(2):
         try:
-            run_agent_once_module.run_agent_until_committed(
-                selected_agent="claude",
-                issue=_ISSUE,
-                worktree_path=worktree,
-                config=config,
-                process_runner=SubprocessRunner(),
-                before_sha=before_sha,
-                expected_branch="issue-7",
+            execution_loop_module.execute_agent_request(
+                execution_loop_module.AgentExecutionRequest(
+                    selected_agent="claude",
+                    issue=_ISSUE,
+                    worktree_path=worktree,
+                    config=config,
+                    process_runner=SubprocessRunner(),
+                    before_sha=before_sha,
+                    expected_branch="issue-7",
+                    github_client=FakeGitHubClient(),
+                )
             )
         except run_agent_once_module.MaxRetriesExceededError:
             if not previous_attempt_failed:
@@ -240,6 +244,7 @@ class TestAttemptResumeSelection:
             process_runner=SubprocessRunner(),
             before_sha="0" * 40,
             expected_branch="issue-7",
+            github_client=FakeGitHubClient(),
             resume_session_id=resume_session_id,
         )
 

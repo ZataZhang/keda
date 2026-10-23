@@ -35,7 +35,7 @@ from backend.core.use_cases.run_agent_once import (
     resolve_supervisor_agent,
 )
 from backend.core.use_cases.run_verifier_agent import _choose_verifier_agent
-from tests.conftest import FakeProcessRunner
+from tests.conftest import FakeGitHubClient, FakeProcessRunner
 
 _ISSUE = IssueSummary(
     number=7,
@@ -209,6 +209,7 @@ def _run_loop_with_fix_failure(
                 process_runner=FakeProcessRunner(),
                 before_sha="0" * 40,
                 expected_branch="issue-7",
+                github_client=FakeGitHubClient(),
             )
         )
 
@@ -412,6 +413,7 @@ def test_closeout_agent_uses_matrix_value(tmp_path: Path, monkeypatch: pytest.Mo
                 process_runner=FakeProcessRunner(),
                 before_sha="0" * 40,
                 expected_branch="issue-7",
+                github_client=FakeGitHubClient(),
             )
         )
     assert capture.captured_agent == "pi"

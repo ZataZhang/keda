@@ -122,6 +122,7 @@ def _execution_request(
         process_runner=FakeProcessRunner(),
         before_sha="old",
         expected_branch="issue-7",
+        github_client=FakeGitHubClient(),
         fast_merge=fast_merge,
     )
 

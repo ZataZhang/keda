@@ -411,6 +411,13 @@ class FakeGitHubClient(IGitHubClient):
             state=self._issue_states.get(issue_number, "OPEN"),
         )
 
+    def close_issue(self, issue_number: int) -> None:
+        """把 Issue 置为 ``CLOSED``，用于布置「执行期间被关闭」这一 GitHub 事实。
+
+        测试只表达「Issue 关了」这个意图，不直接写假对象的内部字段名。
+        """
+        self._issue_states[issue_number] = "CLOSED"
+
     def set_issue_labels(self, issue_number: int, labels: Sequence[str]) -> None:
         """注入 Issue 当前标签，不记成 ``edit_issue_labels`` 调用（用于布置初始状态）。"""
         self._issue_labels[issue_number] = tuple(labels)

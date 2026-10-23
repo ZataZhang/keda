@@ -75,6 +75,7 @@ def test_agent_request_fast_merge_boolean_is_a_derived_view() -> None:
             process_runner=FakeProcessRunner(),
             before_sha="old",
             expected_branch="issue-7",
+            github_client=FakeGitHubClient(),
             **kwargs,
         )
 
@@ -178,6 +179,7 @@ def _execution_request(
         process_runner=FakeProcessRunner(),
         before_sha="old",
         expected_branch="issue-7",
+        github_client=FakeGitHubClient(),
         publish_stage=publish_stage,
     )
 

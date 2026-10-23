@@ -30,11 +30,12 @@ from backend.core.use_cases.agent_runner_closeout import (
     format_closeout_attempt_detail,
     summarize_closeout_changes,
 )
-from backend.core.use_cases.run_agent_once import (
-    MaxRetriesExceededError,
-    run_agent_until_committed,
+from backend.core.use_cases.run_agent_execution_loop import (
+    AgentExecutionRequest,
+    execute_agent_request,
 )
-from tests.conftest import FakeProcessRunner
+from backend.core.use_cases.run_agent_once import MaxRetriesExceededError
+from tests.conftest import FakeGitHubClient, FakeProcessRunner
 from tests.support.agent_runner import (
     ACCEPTED_BANNER,
     AWAITING_HUMAN_BANNER,
@@ -218,15 +219,18 @@ def _tick_checklist_and_touch_source(worktree_path: Path) -> None:
 
 
 def _run_loop(worktree_path: Path, config: AppConfig, fake_runner: FakeProcessRunner):
-    """Drive ``run_agent_until_committed`` against the closeout fixture."""
-    return run_agent_until_committed(
-        selected_agent="claude",
-        issue=_make_issue(),
-        worktree_path=worktree_path,
-        config=config,
-        process_runner=fake_runner,
-        before_sha="before-sha",
-        expected_branch="issue-7",
+    """Drive ``execute_agent_request`` against the closeout fixture."""
+    return execute_agent_request(
+        AgentExecutionRequest(
+            selected_agent="claude",
+            issue=_make_issue(),
+            worktree_path=worktree_path,
+            config=config,
+            process_runner=fake_runner,
+            before_sha="before-sha",
+            expected_branch="issue-7",
+            github_client=FakeGitHubClient(),
+        )
     )
 
 
@@ -438,14 +442,17 @@ def test_substantive_gate_failures_never_reach_the_closeout_layer(tmp_path: Path
     fake_runner = _CloseoutScenarioRunner(worktree_path, _tick_checklist_with_change_log)
 
     with pytest.raises(MaxRetriesExceededError) as error_info:
-        run_agent_until_committed(
-            selected_agent="claude",
-            issue=issue,
-            worktree_path=worktree_path,
-            config=_closeout_config(max_recovery_attempts=0),
-            process_runner=fake_runner,
-            before_sha="before-sha",
-            expected_branch="issue-7",
+        execute_agent_request(
+            AgentExecutionRequest(
+                selected_agent="claude",
+                issue=issue,
+                worktree_path=worktree_path,
+                config=_closeout_config(max_recovery_attempts=0),
+                process_runner=fake_runner,
+                before_sha="before-sha",
+                expected_branch="issue-7",
+                github_client=FakeGitHubClient(),
+            )
         )
 
     assert len(fake_runner.agent_prompts) == 1

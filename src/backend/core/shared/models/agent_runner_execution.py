@@ -35,11 +35,19 @@ def evidence_dir_uses_task_subdirs(evidence_dir: str) -> bool:
 
 @dataclass(frozen=True)
 class AgentCommitResult:
-    """Result of a successful agent execution with attempt history."""
+    """Agent 执行收敛结果。
+
+    Attributes:
+        verification_results: 执行过的仓库验证结果。
+        attempt_results: 本轮各次执行尝试的结果。
+        verifier_verdict: 独立 verifier 的结论；未运行时为 ``None``。
+        issue_closed_without_changes: Issue 在本轮执行期间关闭且没有变更需要发布时为 ``True``。
+    """
 
     verification_results: list[CommandResult]
     attempt_results: list[AttemptResult]
     verifier_verdict: "ValidationVerdict | None" = None
+    issue_closed_without_changes: bool = False
 
 
 @dataclass(frozen=True)

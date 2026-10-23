@@ -30,8 +30,16 @@ from tests.support.agent_runner import (
 )
 
 
-def test_recovery_loop_success_on_second_attempt(tmp_path: Path) -> None:
-    """Runner should succeed when recovery agent fixes the issue on attempt 2."""
+@pytest.mark.parametrize(
+    "close_without_changes",
+    [False, True],
+    ids=["recovered-commit", "closed-noop"],
+)
+def test_run_once_completes_recovery_or_closed_noop(
+    tmp_path: Path,
+    close_without_changes: bool,
+) -> None:
+    """Runner 应恢复无提交尝试，或接受执行期间明确关闭的无改动 Issue。"""
     fake_client = FakeGitHubClient()
     issue = make_ready_issue()
     fake_client.list_ready_issues = lambda ready_label, limit: [issue]
@@ -67,6 +75,8 @@ def test_recovery_loop_success_on_second_attempt(tmp_path: Path) -> None:
             if command_tuple[:1] == ("codex",):
                 self._agent_calls += 1
                 if self._agent_calls == 1:
+                    if close_without_changes:
+                        fake_client.close_issue(issue.number)
                     # First attempt: produce no commits
                     return CommandResult(command_tuple, 0, "", "")
                 if self._agent_calls == 2:
@@ -75,12 +85,12 @@ def test_recovery_loop_success_on_second_attempt(tmp_path: Path) -> None:
                     return CommandResult(command_tuple, 0, "", "")
             if command_tuple == ("git", "rev-parse", "HEAD"):
                 self._sha_calls += 1
-                sha = "after-sha" if self._sha_calls > 1 else "before-sha"
+                sha = "before-sha" if close_without_changes or self._sha_calls == 1 else "after-sha"
                 return CommandResult(command_tuple, 0, f"{sha}\n", "")
             if command_tuple == ("git", "branch", "--show-current"):
                 return CommandResult(command_tuple, 0, "issue-123\n", "")
             if command_tuple == ("git", "status", "--porcelain"):
-                stdout = "" if self._committed else " M file.txt\n"
+                stdout = "" if close_without_changes or self._committed else " M file.txt\n"
                 return CommandResult(command_tuple, 0, stdout, "")
             if command_tuple == ("git", "commit", "-m", "agent: recovered"):
                 self._committed = True
@@ -110,7 +120,16 @@ def test_recovery_loop_success_on_second_attempt(tmp_path: Path) -> None:
     assert exit_code == 0
     commands = [tuple(command) for command in fake_runner.calls]
     agent_commands = [command for command in commands if command[:1] == ("codex",)]
-    assert len(agent_commands) == 2
+    assert len(agent_commands) == (1 if close_without_changes else 2)
+    if close_without_changes:
+        assert any(call["method"] == "get_issue" for call in fake_client.calls)
+        assert not any(call["method"] == "create_draft_pr" for call in fake_client.calls)
+        assert not any(
+            call["method"] == "edit_issue_labels" and config.labels.failed in call.get("add", [])
+            for call in fake_client.calls
+        )
+        return
+
     comment_calls = [c for c in fake_client.calls if c["method"] == "comment_issue"]
     implementation_comment = [
         c for c in comment_calls if "Implementation Complete" in c.get("body", "")
@@ -181,6 +200,9 @@ def test_recovery_loop_exhausted_raises_max_retries(tmp_path: Path) -> None:
     )
 
     assert exit_code == 1
+    # 干净树 + HEAD 未前进会触发 fresh read，但 GitHub 上仍是 OPEN：
+    # 无改动闭合门禁必须被问过、并且没有放行，Issue 照旧落到 agent/failed。
+    assert any(call["method"] == "get_issue" for call in fake_client.calls)
     failed_calls = [
         c
         for c in fake_client.calls
@@ -682,7 +704,8 @@ def _prepare_exhaustion_handler(
 ) -> dict[str, object]:
     """把 ``_process_ready_issue`` 打到"agent 耗尽 → checkpoint → 交接"这一步。
 
-    沿用仓库既有的补丁中枢：延迟导入的名字打在 ``run_agent_once`` 上,模块级名字打在
+    沿用仓库既有的补丁中枢：执行请求打在 ``run_agent_execution_loop`` 上，
+    checkpoint 延迟导入名打在 ``run_agent_once`` 上，模块级名字打在
     ``agent_runner_issue_handlers`` 上。``publish_changes`` 与
     ``format_failure_context_comment`` 打在交接模块
     ``agent_runner_failure_handoff`` 上（交接链路从 handlers 拆出后,函数在这
@@ -690,7 +713,7 @@ def _prepare_exhaustion_handler(
     ``require_prd_archived`` 取值。
     """
     from backend.core.use_cases import agent_runner_issue_handlers as handlers
-    from backend.core.use_cases import run_agent_once
+    from backend.core.use_cases import run_agent_execution_loop, run_agent_once
 
     monkeypatch.setattr(handlers, "_reuse_existing_local_commit", lambda *a, **k: None)
     monkeypatch.setattr(handlers, "create_or_reuse_worktree", lambda *a, **k: worktree_path)
@@ -700,7 +723,7 @@ def _prepare_exhaustion_handler(
     def _raise_exhausted(**_kwargs: object) -> None:
         raise failure_exc
 
-    monkeypatch.setattr(run_agent_once, "run_agent_until_committed", _raise_exhausted)
+    monkeypatch.setattr(run_agent_execution_loop, "execute_agent_request", _raise_exhausted)
 
     def _fake_checkpoint(*_args: object, **_kwargs: object) -> str | None:
         return checkpoint_sha
@@ -1150,7 +1173,7 @@ def test_exhaustion_with_only_forbidden_changes_publishes_nothing(
     才能抓到"禁改内容被误当安全快照推出去"这类缺陷。
     """
     from backend.core.use_cases import agent_runner_issue_handlers as handlers
-    from backend.core.use_cases import run_agent_once
+    from backend.core.use_cases import run_agent_execution_loop
     from backend.core.use_cases.run_agent_once import MaxRetriesExceededError
     from backend.infrastructure.process_runner import SubprocessRunner
     from tests.support.agent_runner import init_git_repo, run_git
@@ -1169,7 +1192,7 @@ def test_exhaustion_with_only_forbidden_changes_publishes_nothing(
     def _raise_exhausted(**_kwargs: object) -> None:
         raise MaxRetriesExceededError(_handoff_attempt_results(_VERIFIER_RED_DETAIL))
 
-    monkeypatch.setattr(run_agent_once, "run_agent_until_committed", _raise_exhausted)
+    monkeypatch.setattr(run_agent_execution_loop, "execute_agent_request", _raise_exhausted)
 
     publish_calls: list[dict[str, object]] = []
 

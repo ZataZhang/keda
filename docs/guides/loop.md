@@ -227,8 +227,28 @@ flowchart TD
   一个 daemon 负责（由 `managed_by` 决定）。
 - **时区**：cron 默认 UTC 兼容行为；需要固定墙钟时应填写 IANA `timezone`，例如
   `Asia/Shanghai`。状态账本仍保存 UTC。
-- **pre_command 失败**：失败时 loop 标记 `last_error` 但不中断 daemon。
+- **pre_command 失败**：`_run_pre_command()` 只在命令**退出码非 0** 时打一条 warning，异常本身
+  也被吞掉换成空变量集返回，daemon 不中断。它**不会**把原因写进 loop-state.json：模型里的
+  `last_error` 字段目前没有任何写入方，只有序列化代码在读它。
 - **同一天去重**：通过 `loop/<id>` 标签 + Issue 标题日期判断；手动改 Issue 标题可能绕过去重。
+
+### 巡查计数显示 `unknown` 时先查什么
+
+`tasks/loops/keda-blocker-monitor-30m.md` 用 pre_command 里的两次 `gh issue list` 统计
+`agent/blocked` / `agent/failed`，失败时把值替换成字面量 `unknown`。这条路径有两个后果：
+
+- 哨兵分支仍然 `printf` 三行 `KEY=unknown` 并**以 0 退出**，所以既不会触发上面那条 warning，
+  也不会写 `last_error`；而 `skip_when: needs_attention=0` 按字面比较，`unknown ≠ 0`，于是照常
+  建巡查 Issue，把 `unknown` 写进正文。这正是 Issue #310 顶部三个计数都是 `unknown` 的来源。
+- `gh` 的报错在 shell 侧被 `2>/dev/null` 丢弃，循环侧又没有失败记录，因此事后无法从 Issue 正文、
+  loop-state.json 或 daemon 日志复原那一次到底是认证失败、PATH 里找不到 `gh`、还是限流。
+  同一次运行的 fresh read（runner 自己的 GitHub 读取）成功并读到 blocked 0 / failed 0，
+  说明故障属于触发前那次 `gh` 调用的局部/瞬时问题，不是 GitHub 整体不可读。
+
+排查顺序：先在触发所在的机器上手跑 recipe 里的同一条 pre_command（把 `2>/dev/null` 去掉），
+再看 `gh auth status` 与 daemon 进程的 PATH。要让下一轮自动带上原因，需要改 recipe 保留
+stderr 并新增一个 `state_read_error` 变量（模板占位符必须与 pre_command 输出一一对应），
+已按想法收件箱记录，未在本轮改动在跑的巡查配方。
 
 ## 后续规划
 
@@ -353,8 +373,8 @@ block scalar，pre_command 必须写成单行 shell（用 `;` / `&&` 链接多�
 
 ### 失败兜底
 
-- `pre_command` 失败 → `fire_loop` 把 `last_error` 写入 loop-state.json，
-  跳过本次 fire，daemon 不退出。下次 cron 到来再试。
+- `pre_command` 失败 → 记一条 warning、按「没有 pre_command 变量」继续：`skip_when` 不命中就
+  照常建 Issue，只有模板引用了未提供的 `{{var}}` 才在渲染时报错，daemon 不退出，下次 cron 再试。
 - 当晚 4 类 scope 都无事可做 → agent 在 worktree 内执行
   `gh issue close <N> --comment "no actionable cleanup tonight"`，**不**出 PR。
 - `scope/<x>` label 不存在 → `gh issue edit --add-label` 报错，agent 应

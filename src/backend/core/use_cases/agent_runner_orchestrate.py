@@ -366,8 +366,10 @@ def _persist_attempt_result(
     """Persist one attempt to SQLite and update the GitHub running comment.
 
     This is the incremental persistence callback wired into
-    :func:`run_agent_until_committed`. Failures are logged and swallowed so the
-    runner state machine is never blocked by the side-channel storage.
+    :attr:`AgentExecutionRequest.on_attempt_recorded` and driven by
+    :func:`run_agent_execution_loop.run_agent_until_committed`. Failures are
+    logged and swallowed so the runner state machine is never blocked by the
+    side-channel storage.
 
     The comment is rendered from the stored trail rather than from
     ``attempt_results``, because the in-memory list restarts at attempt 1 on

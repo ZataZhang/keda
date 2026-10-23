@@ -28,7 +28,7 @@ from backend.core.shared.models.agent_runner import (
 from backend.core.shared.models.publish_stage import PublishStage
 from backend.core.use_cases import agent_runner_issue_handlers as handlers
 from backend.core.use_cases import agent_runner_publication as publication
-from backend.core.use_cases import run_agent_once
+from backend.core.use_cases import run_agent_execution_loop
 from backend.core.use_cases.agent_runner_claim_arbitration import ClaimArbitrationLost
 from backend.core.use_cases.agent_runner_dependencies import format_direct_pr_marker
 from backend.core.use_cases.agent_runner_direct_pr_label import (
@@ -919,4 +919,9 @@ def _patch_ready_handler(
     monkeypatch.setattr(handlers, "get_head_sha", lambda *a, **k: _HEAD)
     monkeypatch.setattr(handlers, "get_current_branch", lambda *a, **k: _BRANCH)
     monkeypatch.setattr(handlers, "_reuse_existing_local_commit", lambda *a, **k: None)
-    monkeypatch.setattr(run_agent_once, "run_agent_until_committed", run_agent)
+    monkeypatch.setattr(run_agent_execution_loop, "execute_agent_request", run_agent)
+    monkeypatch.setattr(
+        handlers,
+        "arbitrate_first_claim",
+        lambda **_kwargs: SimpleNamespace(comment_id=91),
+    )

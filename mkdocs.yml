@@ -66,7 +66,7 @@ nav:
       - 部署指南: guides/deployment.md
       - 发布流程: guides/release-process.md
       - Agent Runner:
-          - 完整指南、值守看板、模块职责、并发调度、统计、成本与会话续接: guides/agent-runner.md
+          - 完整指南、值守看板、模块职责、并发调度、无改动闭合、统计、成本与会话续接: guides/agent-runner.md
       - 目标仓库 Issue 与 PR 模板: guides/repository-templates.md
       - 生命周期 Agent 矩阵: guides/lifecycle-agent-matrix.md
       - Agent 模型预设: guides/model-presets.md
