@@ -61,12 +61,12 @@ def _print_migration_report(migration_result: ConfigMigrationResult, *, dry_run:
     removed_verb = "Would remove" if dry_run else "Removed"
     if migration_result.removed_pins:
         console.print(
-            f"{removed_verb} {len(migration_result.removed_pins)} value(s) pinned by an older "
-            f"`kc init` in {migration_result.config_path}:",
+            f"{removed_verb} {len(migration_result.removed_pins)} value(s) written by an older "
+            f"`kc init` or retired in {migration_result.config_path}:",
             markup=False,
             soft_wrap=True,
         )
-        for pin_line in _format_pin_lines(migration_result.removed_pins, with_reason=False):
+        for pin_line in _format_pin_lines(migration_result.removed_pins, with_reason=True):
             console.print(pin_line, markup=False, soft_wrap=True)
     if migration_result.kept_pins:
         console.print(

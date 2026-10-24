@@ -156,11 +156,11 @@ def test_load_autopilot_state_reports_real_conditions(tmp_path: Path) -> None:
     assert state.persisted_enabled is False
     assert state.auto_merge_enabled is False
     assert state.daemon_running is True
-    # AppConfig() 默认容量为 1：策略 3 高于容量时生效值被容量压低，来源如实标注。
+    # AppConfig() 默认配置文件值为 1：页面设置 3 覆盖它（不再被压低），来源如实标注。
     assert state.policy_max_parallel == 3
     assert state.runner_capacity == 1
-    assert state.effective_max_parallel == 1
-    assert state.ceiling_source == "capped_by_capacity"
+    assert state.effective_max_parallel == 3
+    assert state.ceiling_source == "policy"
     assert state.config_source == ".kedacode.toml"
 
 
@@ -374,11 +374,11 @@ def test_get_autopilot_endpoint(autopilot_environment) -> None:
     assert data["enabled"] is False
     assert data["auto_merge_enabled"] is False
     assert data["daemon_running"] is False
-    # 无设置行 = 未设置：策略为 null，生效值继承 runner 容量（AppConfig 默认 1）。
+    # 无设置行 = 页面未保存：页面设置为 null，生效值取配置文件值（AppConfig 默认 1）。
     assert data["max_parallel"] is None
     assert data["effective_max_parallel"] == 1
     assert data["runner_capacity"] == 1
-    assert data["ceiling_source"] == "inherited"
+    assert data["ceiling_source"] == "config"
     assert data["config_source"] == ".kedacode.toml"
 
 

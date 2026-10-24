@@ -66,7 +66,7 @@
 {
   "daemon_mode": false,
   "config": {
-    "max_issues": 1,
+    "max_concurrent_issues": 1,
     "default_agent": "auto",
     "max_recovery_attempts": 5,
     "recovery_retry_delay_seconds": 30,
@@ -192,7 +192,7 @@ curl -sS \
   "max_parallel": null,
   "effective_max_parallel": 2,
   "runner_capacity": 2,
-  "ceiling_source": "inherited",
+  "ceiling_source": "config",
   "config_source": ".kedacode.toml",
   "persisted_enabled": true
 }
@@ -201,10 +201,10 @@ curl -sS \
 - `enabled`：生效配置中的 `agent_runner.autopilot.enabled`；
 - `auto_merge_enabled`：`safety.auto_merge`，即第二道危险动作门禁（只读展示）；
 - `daemon_running`：该仓库是否存在 `kind=daemon` 且存活的进程（来自既有 process supervisor 记录）；
-- `max_parallel`：Backlog「并发」**策略值**；`null` = 从未设置（存储层没有设置行），此时生效值继承 runner 容量；
-- `effective_max_parallel`：控制台按 `min(策略, runner_capacity)` 解析出的并发上限，用于控制条与「全局开始」；
-- `runner_capacity`：仓库配置 `[agent_runner.runner].max_concurrent_issues`（下限 1）。daemon 若显式传 `--concurrency`，本轮容量改用旗标值，其 daemon ceiling 可能低于此 API 快照；该端点不读取 daemon 进程旗标，实时值以 daemon 的 `Concurrency ceiling` 日志为准；
-- `ceiling_source`：`inherited` / `policy` / `capped_by_capacity` 三态来源，UI 据此标注生效值出处；
+- `max_parallel`：Backlog 页面保存的**并行上限**；`null` = 从未保存（存储层没有设置行），此时生效值取配置文件值；
+- `effective_max_parallel`：控制台解析出的生效并行上限（页面设置存在时取页面设置，否则取 `runner_capacity`），用于控制条与「全局开始」；
+- `runner_capacity`：仓库配置 `[agent_runner.runner].max_concurrent_issues`（下限 1）。daemon 若显式传 `--concurrency`，该 daemon 进程改用旗标值；该端点不读取 daemon 进程旗标，实时值以 daemon 的 `Parallel limit` 日志为准；
+- `ceiling_source`：`policy`（页面设置）/ `config`（配置文件）两态来源，UI 据此标注生效值出处；
 - `persisted_enabled`：目标仓库 `.kedacode.toml` 中的持久值；文件缺失或键未设置时为 `null`。
 
 ### `PATCH /api/v1/agent-runner/backlog/autopilot`

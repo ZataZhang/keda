@@ -32,7 +32,6 @@ class _AgentDaemonLoopRequest:
     contexts: list[RepositoryRunContext]
     interval: int
     agent: str
-    max_issues: int
     process_runner: IProcessRunner
     github_client_factory: Callable[[Path], IGitHubClient]
     content_generator_factory: Callable[[Path], IContentGenerator] | None

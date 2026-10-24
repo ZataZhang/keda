@@ -123,10 +123,9 @@ class BacklogAdvanceReport:
     Attributes:
         repo_id: Target repository ID.
         dry_run: ``True`` when the pass only computed the plan without writing.
-        ceiling: The single resolved concurrency ceiling used by this pass
-            (``min(policy, runner capacity)``, policy ``None`` inherits capacity).
-        ceiling_source: Where the ceiling came from: ``"inherited"`` /
-            ``"policy"`` / ``"capped_by_capacity"``.
+        ceiling: The single resolved parallel limit used by this pass (the
+            Backlog page setting when saved, otherwise the config value).
+        ceiling_source: Where the ceiling came from: ``"policy"`` or ``"config"``.
         free_slots: Slots available for promotion in this pass.
         running_count: Live repository-wide ``agent/running`` count, or ``None``
             if the count query failed and promotions were skipped.

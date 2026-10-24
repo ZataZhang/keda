@@ -17,7 +17,7 @@
 - **页面设置直接生效**（FR-3）：Backlog 页面保存的并行上限就是生效值，不再和配置文件取较小值；没保存时用配置文件里的值。
 - **执行期间也会补位**（FR-4、FR-5）：daemon 不再等一轮里的 Issue 全部跑完才看队列，而是每个轮询间隔都检查一次，运行中的 Issue 少于上限就补领新的。
 - **不会重复执行本机正在跑的 Issue**（FR-6）：补位、返工恢复和崩溃对账都会跳过本机正在执行的 Issue。
-- **界面显示真实数字**（FR-7）：状态栏显示"并行上限 N · 运行中 M"，看板同步间隔写明是"看板同步"，不再和 daemon 轮询混淆。
+- **界面显示真实数字**（FR-7）：Backlog 控件显示本仓库的"并行上限 N（来源）"；跨仓库的状态栏改显示"默认并行上限"，不再显示误导人的"队列上限"；看板同步间隔写明是"看板同步"，不再和 daemon 轮询混淆。
 - **命令行与文档同步**（FR-8、FR-9）：`kc daemon` 只保留 `--concurrency`；`kc run --all-ready --max-issues N` 保持"这次最多跑 N 个"的含义；文档与随包 operator skill 同步新模型。
 
 # Part A · 人审层 (Review Layer)
@@ -46,9 +46,9 @@
 
 | 验证方式 | 输入 / 操作 | 期望观察到的结果 |
 |---|---|---|
-| 👀 人审 + 自动验证 | 仓库并行上限为 2，daemon 正在执行一个要跑很久的 Issue A；此时把 Issue B、C 加入就绪队列 | 下一个轮询间隔内 B 被领取并开始执行，A 仍在跑；C 保持就绪，直到 A 或 B 结束后的下一次轮询才被领取。管理终端状态栏显示"并行上限 2 · 运行中 2"。 |
+| 👀 人审 + 自动验证 | 仓库并行上限为 2，daemon 正在执行一个要跑很久的 Issue A；此时把 Issue B、C 加入就绪队列 | 下一个轮询间隔内 B 被领取并开始执行，A 仍在跑；C 保持就绪，直到 A 或 B 结束后的下一次轮询才被领取。daemon 日志每次轮询都打印 `Parallel limit ... in_flight=N`。 |
 | 🤖 自动验证 | 配置文件写着 `max_issues = 5`、`max_concurrent_issues = 1`，启动 daemon | 日志出现一条 `max_issues` 已弃用的提示；同时运行的 Issue 始终不超过 1 个（与今天的实际行为一致）。 |
-| 👀 人审 + 自动验证 | 配置文件 `max_concurrent_issues = 2`，在 Backlog 页面把并行上限保存为 4，再点"恢复为配置文件值" | 保存后页面与状态栏显示"并行上限 4（页面设置）"，daemon 下一次轮询按 4 补位；恢复后显示"并行上限 2（配置文件）"。 |
+| 👀 人审 + 自动验证 | 配置文件 `max_concurrent_issues = 2`，在 Backlog 页面把并行上限保存为 4，再点"恢复为配置文件值" | 保存后 Backlog 控件显示"并行上限 4（页面设置）"，daemon 下一次轮询按 4 补位；恢复后显示"并行上限 2（配置文件）"。 |
 | 🤖 自动验证 | 用 `kc daemon run --concurrency 3` 启动，页面设置为 4、配置文件为 2 | daemon 按 3 执行，日志写明来源是命令行参数。 |
 | 🤖 自动验证 | daemon 正在本机执行 Issue A 时，A 的线程里出现返工标记，或对账扫描到 A 处于 `agent/running` | 补位与返工通道不会再次领取 A，对账不会把 A 当成僵尸处理；A 只由正在执行它的那个线程推进。 |
 | 🤖 自动验证 | 统计正在运行的 Issue 数时 GitHub 查询失败 | 本次轮询不领取新 Issue（宁可少跑也不超发），已在执行的 Issue 不受影响。 |
@@ -77,7 +77,7 @@
 
 ### What The User Gets
 
-- **想知道最多能同时跑几个的人**：在管理终端状态栏或 `kc daemon status` 里直接看到一个数字和它的来源。
+- **想知道最多能同时跑几个的人**：在 Backlog 页面看到本仓库的一个数字和它的来源；daemon 日志每次轮询都打印同一个数字。
 - **daemon 的使用者**：长任务执行期间新加入的、互不相关的 Issue 会在下一个轮询间隔内开工，不用等长任务结束。
 - **调整并行数的人**：在 Backlog 页面改一个数，下一次轮询就生效；配置文件里的数字作为默认值。
 
@@ -86,7 +86,7 @@
 - 并行上限为 2、有 1 个长任务在跑时，新进入就绪队列的 Issue 从就绪到被认领的耗时不超过"轮询间隔 + 一次轮询耗时"。
 - 任意时刻，daemon 让本仓库同时处于本机执行中的 Issue 数不超过生效并行上限。
 - 带 `max_issues` 的旧配置升级后，同时运行的 Issue 数与升级前相同，并输出 1 条弃用提示。
-- 管理终端状态栏的数字等于 daemon 日志里打印的生效上限。
+- Backlog 控件显示的并行上限等于 daemon 日志里打印的生效上限（daemon 未用 `--concurrency` 启动时）。
 - 本机正在执行的 Issue 被其他通道再次领取的次数为 0。
 
 ## 2. Human Review Map (介入与风险地图)
@@ -123,10 +123,10 @@
 照常运行 `kc daemon run`。并行上限默认取配置文件的 `max_concurrent_issues`；需要临时指定时用 `--concurrency N`。长任务执行期间，日志每个轮询间隔会打印一行 `Parallel limit: limit=N (source) running=M claimable=K`，新 Issue 会在空位出现后的下一次轮询被领取。`kc daemon run --max-issues` 不再接受，命令会报用法错误，并提示改用 `--concurrency`。
 
 **管理终端使用者**
-状态栏显示"并行上限 N（来源）· 运行中 M"，不再显示"队列上限"。Backlog 页面的并行上限输入框保存后立即成为生效值，"恢复为配置文件值"清除页面设置。顶部的同步间隔写作"看板同步：每 30 分钟"。
+跨仓库的状态栏显示"默认并行上限 N"（全局配置值），不再显示"队列上限"；各仓库的生效值看 Backlog 页面。Backlog 页面的并行上限输入框保存后立即成为生效值，"恢复为配置文件值"清除页面设置。顶部的同步间隔写作"看板同步：每 30 分钟"。
 
 **一次性运行者**
-`kc run --issue N` 不变。`kc run --all-ready --max-issues N` 表示这次最多领 N 个就绪 Issue，按 N 并行执行，跑完退出；不受并行上限约束（与今天一致）。
+`kc run --issue N` 不变。`kc run --all-ready --max-issues N` 仍表示这次最多领 N 个就绪 Issue、逐个串行执行、跑完退出，不受并行上限约束（与今天一致）。未传时默认 1（不再读配置文件）；`kc supervise` / `kc supervise-daemon` 的 `--max-issues` 默认值同样固定为 1。
 
 **配置维护者**
 配置文件里的 `max_issues` 会触发一条弃用提示，不影响行为；运行 `kc config migrate` 可以预览并删除它。`kc init` 生成的新配置不再包含 `max_issues`。
@@ -142,7 +142,7 @@ skill 里关于并发的说明改为"一个并行上限、三个入口、按优�
 ## 4. Requirement Shape
 
 - **Actor**：daemon 使用者、管理终端使用者、一次性运行者、配置维护者、通过 operator skill 调用 kc 的 Agent。
-- **Trigger**：daemon 每个轮询间隔；管理终端保存或清除并行上限；读取配置；运行 `kc config migrate`；查看状态栏与 `kc daemon status`。
+- **Trigger**：daemon 每个轮询间隔；管理终端保存或清除并行上限；读取配置；运行 `kc config migrate`；查看 Backlog 控件、状态栏与 daemon 日志。
 - **Expected behavior**：每个仓库只有一个生效并行上限，来源按优先级确定并对外可见；daemon 在执行期间持续补位且不重复执行本机在跑的 Issue；旧参数给出弃用提示而不改变实际同时运行数。
 - **Scope boundary**：不改显式运行、依赖门禁、认领仲裁、看板同步间隔的取值，不新增数据库结构，不做跨仓库全局上限。
 
@@ -174,7 +174,7 @@ skill 里关于并发的说明改为"一个并行上限、三个入口、按优�
 
 - 机器可读输出中的时间保持 UTC 带偏移；本 PRD 不新增时间展示。
 - 改 `kc` CLI 表面（删除 daemon 的 `--max-issues`）必须同步 operator skill 与 `docs/`。
-- 管理终端前端改动后需要 `just console-sync` 更新打包产物。
+- 管理终端前端改动后用 `just console-sync` 生成本地静态产物验证；该目录不进 git，发布打包时重新构建。
 
 **相关 PRD**
 
@@ -187,7 +187,7 @@ skill 里关于并发的说明改为"一个并行上限、三个入口、按优�
 
 ### Recommended Approach
 
-1. **上限解析**：`resolve_execution_ceiling` 改为按优先级取值并返回来源：`cli_override` > `policy` > `config` > `default`，删除 `min`。
+1. **上限解析**：`resolve_execution_ceiling` 改为"页面设置存在取页面设置，否则取配置文件值"，删除 `min`；`describe_ceiling_source` 返回 `policy` / `config`。命令行覆盖由 daemon 自己处理，日志来源记为 `cli_override`。
 2. **配置收敛**：`max_issues` 从 domain 与 settings 中移除；读取到时输出弃用警告。`kc config migrate` 删除该键。
 3. **daemon 补位调度**：daemon 为每个仓库维护一个常驻的执行池和"本机正在执行"名单。每次轮询计算 `可领取数 = 生效上限 − max(本机在执行数, GitHub 上运行中数)`，只提交新任务、不等待完成；然后照常休眠。任务完成后从名单移除，下一次轮询即可补位。
 4. **跳过本机在执行的 Issue**：`run_once` 的返工、发布恢复、blocked 恢复通道，以及崩溃对账，都接收"本机正在执行"名单并跳过其中的 Issue。
@@ -215,7 +215,7 @@ This section is a living implementation guide based on current repository analys
 ### 7.1 Core Logic
 
 **生效上限**
-`resolve_parallel_limit(cli_override, policy, config_value) -> ParallelLimit(value, source)`：第一个非空值胜出，`config_value` 缺省为 1。保留 `resolve_execution_ceiling` 名称作为薄包装或直接改名，所有调用方（`rg -n "resolve_execution_ceiling|describe_ceiling_source"`）同步。管理终端拿不到 daemon 进程的 `--concurrency`，因此它显示的是"页面设置 / 配置文件"层面的值；daemon 日志打印包含命令行覆盖的最终值（与现状一致，文档写明）。
+`resolve_execution_ceiling(policy, config_value)`：页面设置存在取页面设置，否则取配置文件值（下限 1）；`describe_ceiling_source(policy)` 返回 `policy` / `config`。命令行 `--concurrency` 由 daemon 自己判定，日志来源记为 `cli_override`。管理终端拿不到 daemon 进程的 `--concurrency`，因此它显示的是"页面设置 / 配置文件"层面的值；daemon 日志打印包含命令行覆盖的最终值（与现状一致，文档写明）。
 
 **daemon 补位**
 - 新增 `DaemonExecutionSlots`（每仓库一个）：持有执行池（`max_workers` = 当前生效上限，上限变化时按新值重建或用信号量控制）、`in_flight: dict[int, Future]`、锁。
@@ -231,11 +231,11 @@ This section is a living implementation guide based on current repository analys
 从 `AgentRunnerRunnerSettings`、domain dataclass、factory 映射、`settings.py` 中移除 `max_issues`；settings 层用 `model_validator(mode="before")` 识别旧键，弹出并记录一条 WARNING（每个配置文件只提示一次）。`kc init` 的配置模板与键说明（`repository_local.py`）去掉 `max_issues`，并把 `max_concurrent_issues` 的说明改为"同时运行的 Issue 上限"。`kc config migrate` 增加"删除 `[agent_runner.runner] max_issues`"步骤，复用 `toml_section_editor` 的写锁与预演。
 
 **CLI**
-`kc daemon` 与 `kc daemon run` 删除 `--max-issues`（传入时返回用法错误并提示 `--concurrency`）。`kc run --all-ready --max-issues N` 保留：本次最多领 N 个，按 N 并行执行；未传时取生效上限。`kc daemon status` 增加生效上限、来源与本机运行数。
+`kc daemon` 与 `kc daemon run` 删除 `--max-issues`（传入时返回用法错误并提示 `--concurrency`）。`kc run --all-ready --max-issues N` 保留原语义：本次最多领 N 个、串行执行；未传时默认 1。
 
 **管理终端**
-状态接口新增 `parallel_limit`、`parallel_limit_source`、`running_count`，移除 `max_issues`；Backlog 设置接口的 `ceiling_source` 取值改为 `policy` / `config` / `default`（去掉 `capped_by_capacity`），`effective_max_parallel` 按新规则计算。前端：
-- `runner-status-bar.tsx`：`并行上限 {parallel_limit}（{来源}）· 运行中 {running_count}`。
+状态接口的 `config.max_issues` 换成 `config.max_concurrent_issues`（全局默认并行上限；状态栏跨仓库，不显示单仓库生效值）；Backlog 设置与 Autopilot 接口的 `ceiling_source` 取值改为 `policy` / `config`（去掉 `inherited` 与 `capped_by_capacity`），`effective_max_parallel` 按新规则计算，字段名保持不变。前端：
+- `runner-status-bar.tsx`：`默认并行上限 {max_concurrent_issues}`。
 - `backlog-autopilot-control.tsx`：来源文案更新；清除按钮文案"恢复为配置文件值"。
 - `dashboard/page.tsx`：`看板同步：每 {N} 分钟`。
 
@@ -288,7 +288,7 @@ This section is a living implementation guide based on current repository analys
 │   │   【总结】settings → domain 映射去掉 max_issues。
 │   ├── src/backend/engines/agent_runner/factories/__init__.py
 │   │   [修改]
-│   │   【总结】同上。
+│   │   【总结】状态接口的 config.max_issues 换成 config.max_concurrent_issues。
 │   └── src/backend/engines/agent_runner/repository_local.py
 │       [修改]
 │       【总结】kc init 配置模板与键说明去掉 max_issues，更新 max_concurrent_issues 说明。
@@ -296,36 +296,30 @@ This section is a living implementation guide based on current repository analys
 ├── API / CLI
 │   ├── src/backend/api/cli_typer_runner.py
 │   │   [修改]
-│   │   【总结】daemon 删除 --max-issues；kc run --all-ready 的 --max-issues 帮助文本更新；daemon status 输出生效上限。
+│   │   【总结】daemon 的 --max-issues 改为隐藏的退役选项（传入即用法错误）。
 │   ├── src/backend/api/cli_typer_app.py
 │   │   [修改]
 │   │   【总结】MaxIssuesOption 帮助文本改为"本次一次性运行最多领取几个"。
 │   ├── src/backend/api/cli_parsed_commands/runner.py
 │   │   [修改]
-│   │   【总结】参数传递去掉 daemon 的 max_issues。
-│   ├── src/backend/api/routes/agent_runner_backlog.py
-│   │   [修改]
-│   │   【总结】Backlog 设置响应按新规则计算生效值与来源。
-│   └── src/backend/api/routes/agent_runner_console.py
+│   │   【总结】daemon 拒绝 --max-issues；run / supervise 的默认值改为固定的 DEFAULT_BATCH_MAX_ISSUES = 1。
+│   └── src/backend/api/routes/agent_runner_backlog.py
 │       [修改]
-│       【总结】状态接口返回 parallel_limit、parallel_limit_source、running_count，移除 max_issues。
+│       【总结】Backlog 设置响应按新规则计算生效值与来源。
 │
 ├── Frontend (frontend-public)
 │   ├── frontend-public/components/agent-runner/runner-status-bar.tsx
 │   │   [修改]
-│   │   【总结】"队列上限"改为"并行上限 N（来源）· 运行中 M"。
+│   │   【总结】"队列上限"改为"默认并行上限 N"。
 │   ├── frontend-public/components/backlog/backlog-autopilot-control.tsx
 │   │   [修改]
-│   │   【总结】来源文案按 policy/config/default 显示，清除按钮改为"恢复为配置文件值"。
+│   │   【总结】来源文案按 policy/config 显示，清除按钮改为"恢复为配置文件值：N"。
 │   ├── frontend-public/app/(app)/app/dashboard/page.tsx
 │   │   [修改]
 │   │   【总结】同步间隔文案改为"看板同步：每 N 分钟"。
 │   ├── frontend-public/lib/api/types.ts
 │   │   [修改]
 │   │   【总结】状态与 Backlog 类型同步新字段与来源取值。
-│   └── src/backend/api/static/console
-│       [修改]
-│       【总结】just console-sync 重新生成的静态产物。
 │
 ├── Tests
 │   ├── tests/test_backlog_concurrency.py [修改]
@@ -529,7 +523,7 @@ No external validation required; repository evidence was sufficient.
 
 - [ ] `rg -n "队列上限" frontend-public` 无结果；`rg -n "并行上限" frontend-public/components/agent-runner/runner-status-bar.tsx` 有命中
 - [ ] `rg -n "capped_by_capacity" frontend-public src/backend` 无结果
-- [ ] `just console-sync` 后的静态产物已随改动提交
+- [ ] `just console-sync` 构建通过（静态产物不进 git，只用于本地验证与发布打包）
 
 ### Validation Acceptance
 
@@ -556,8 +550,8 @@ No external validation required; repository evidence was sufficient.
 - **FR-4**：daemon 每个轮询间隔清理已完成任务、计算空位并提交新领取的 Issue，不等待正在执行的 Issue 完成；有任务在执行时不进入空闲退避。
 - **FR-5**：空位 = 生效上限 − max(本机在执行数, GitHub 上 `agent/running` 数)；统计失败时本次不领新 Issue。
 - **FR-6**：本机正在执行的 Issue 被就绪、返工、发布恢复、blocked 恢复、`direct_pr_cleanup` 通道与崩溃对账全部跳过。
-- **FR-7**：管理终端状态接口返回 `parallel_limit`、`parallel_limit_source`、`running_count`；状态栏显示"并行上限 N（来源）· 运行中 M"；Backlog 控件按新来源文案显示；顶部同步间隔写作"看板同步：每 N 分钟"。
-- **FR-8**：`kc daemon` 与 `kc daemon run` 删除 `--max-issues`（传入时返回用法错误并提示 `--concurrency`）；`kc run --all-ready --max-issues N` 表示本次最多领 N 个并并行执行；`kc run` 仍等待本次任务全部完成后退出；`kc daemon status` 显示生效上限与来源。
+- **FR-7**：Backlog 设置与 Autopilot 接口的来源取值为 `policy` / `config`；Backlog 控件显示"并行上限 N（页面设置 / 配置文件）"，清除按钮为"恢复为配置文件值：N"；跨仓库状态栏显示"默认并行上限 N"（状态接口 `config.max_concurrent_issues`）；顶部同步间隔写作"看板同步：每 N 分钟"。
+- **FR-8**：`kc daemon` 与 `kc daemon run` 删除 `--max-issues`（传入时返回用法错误并提示 `--concurrency`）；`kc run` / `kc supervise` / `kc supervise-daemon` 的 `--max-issues` 保持"本次最多处理几个"的原语义，未传时默认 1；`kc run` 仍等待本次任务全部完成后退出。
 - **FR-9**：`docs/guides/agent-runner.md` 与随包 operator skill 同步新模型。
 
 ## 11. Non-Goals
@@ -585,3 +579,29 @@ No external validation required; repository evidence was sufficient.
 | D-04 | daemon 如何用满上限 | 常驻执行池 + 每个轮询间隔补位 | 保持单轮阻塞、只改文案 | 单轮阻塞时长任务会挡住所有新 Issue，上限再大也用不满。 |
 | D-05 | 一次性 `kc run` 是否改为不等待 | 不改，继续等待全部完成 | 统一成后台执行 | 一次性命令的使用者需要它跑完再退出并拿到退出码。 |
 | D-06 | 防重复执行 | 本机在执行名单 + 各通道与对账跳过 | 只依赖 GitHub 标签判断 | 标签变化有延迟，返工标记与对账都可能命中本机正在跑的 Issue，本机名单是最直接的事实。 |
+
+## Change Log
+
+### 状态栏改显示全局默认并行上限
+- Type: scope
+- Before: FR-7 要求状态栏显示"并行上限 N（来源）· 运行中 M"，状态接口新增 parallel_limit / parallel_limit_source / running_count。
+- After: 状态栏显示"默认并行上限 N"（状态接口 config.max_concurrent_issues）；单仓库的生效值与来源只在 Backlog 控件显示；运行中数量沿用看板已有的"运行中"筛选计数。
+- Reason: 实现时发现状态栏是跨仓库的（"仓库 5"），没有单一仓库可言，硬塞一个仓库的生效值会再次误导。
+- Impact: FR-7、§3、rv-3 预期与 9.1 自检同步改写；不新增状态接口字段。
+- Review: 待用户确认（交付消息中说明）。
+
+### kc run 的 --max-issues 保持串行语义，kc daemon status 不显示并行上限
+- Type: scope
+- Before: FR-8 要求 `kc run --all-ready --max-issues N` 改为并行执行，且 `kc daemon status` 显示生效上限与来源。
+- After: `kc run` / `kc supervise` / `kc supervise-daemon` 的 `--max-issues` 保持"本次最多处理几个、串行"的原语义，未传时默认 1；`kc daemon status` 不改。
+- Reason: 一次性命令改并行会改变夜间批量与 `--aggregate-pr` 的既有行为，超出本 PRD 的目标；`kc daemon status` 列的是进程记录，加上限需要读管理终端数据库并改 JSON 输出，而 daemon 日志与 Backlog 页面已显示同一个值。
+- Impact: FR-8、§3、§7.1 同步改写；operator skill 不涉及 daemon status 变化。
+- Review: 待用户确认（交付消息中说明）。
+
+### 来源取值为两态，静态产物不进 git
+- Type: doc
+- Before: 来源设计为 policy / config / default 三态；验收项要求 `just console-sync` 产物随改动提交。
+- After: 来源为 policy / config 两态（默认值 1 归入 config），daemon 日志另有 cli_override；`src/backend/api/static/console` 不在 git 中，验收项改为构建通过。
+- Reason: 配置合并后无法区分"显式写了 1"与"默认 1"；静态目录本来就由发布打包生成。
+- Impact: §6、§7.1、§9 Frontend Acceptance 同步改写。
+- Review: 执行侧更正，无行为影响。

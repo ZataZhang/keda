@@ -384,12 +384,13 @@ _ALLOWED_FLAGS: dict[tuple[str, ...], set[str]] = {
         "--no-autopilot",
         "--interval",
         "--agent",
-        "--max-issues",
         "--concurrency",
         "--repo",
         "--repo-id",
         "--all",
     },
+    # 并行上限统一后 ``max_issues`` 退役，``kc config migrate`` 删除该旧键（skill 有示例）。
+    ("config", "migrate"): {"--repo", "--repo-id", "--dry-run"},
     # ``kc daemon --all`` 走的是 daemon 组自己的回调（不写 ``run`` 也能起守护），
     # ``build_command_schema`` 只导出叶子命令，所以这条路径由
     # ``_group_callback_flags_by_path()`` 从真实命令树补出来；旗标照抄派生结果，
@@ -403,7 +404,6 @@ _ALLOWED_FLAGS: dict[tuple[str, ...], set[str]] = {
         "--no-autopilot",
         "--interval",
         "--agent",
-        "--max-issues",
         "--concurrency",
         "--repo",
         "--repo-id",

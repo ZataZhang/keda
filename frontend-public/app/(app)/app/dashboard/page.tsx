@@ -717,7 +717,7 @@ export default function DashboardPage() {
               : "尚未同步"}
             {syncIntervalMinutes === null
               ? ""
-              : ` · 每 ${syncIntervalMinutes} 分钟`}
+              : ` · 看板同步：每 ${syncIntervalMinutes} 分钟`}
           </span>
           <DashboardSyncControl
             nextRefreshAt={nextAutoSyncAt}

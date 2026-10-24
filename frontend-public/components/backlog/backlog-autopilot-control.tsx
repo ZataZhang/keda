@@ -25,11 +25,10 @@ interface BacklogAutopilotControlProps {
   onUpdatePolicy: (maxParallel: number | null) => Promise<boolean>;
 }
 
-/** 生效并发上限来源对应的说明文案。 */
+/** 生效并行上限来源对应的说明文案。 */
 const CEILING_SOURCE_LABELS: Record<BacklogCeilingSource, string> = {
-  inherited: "继承 runner 配置",
-  policy: "Backlog 设置",
-  capped_by_capacity: "受 runner 容量限制",
+  policy: "页面设置",
+  config: "配置文件",
 };
 
 /**
@@ -107,8 +106,7 @@ export function BacklogAutopilotControl({
 
       <span className="flex items-center gap-2" data-testid="backlog-concurrency">
         <span className="text-slate-500">
-          并发 {state.effective_max_parallel}（{CEILING_SOURCE_LABELS[state.ceiling_source]}）
-          {state.ceiling_source === "capped_by_capacity" ? `，容量 ${state.runner_capacity}` : ""}
+          并行上限 {state.effective_max_parallel}（{CEILING_SOURCE_LABELS[state.ceiling_source]}）
         </span>
         <Input
           type="number"
@@ -119,7 +117,7 @@ export function BacklogAutopilotControl({
           placeholder={state.max_parallel === null ? "未设置" : String(state.max_parallel)}
           onChange={(event) => setDraft(event.target.value)}
           className="h-7 w-20 text-xs"
-          aria-label="设置并发上限（1-10）"
+          aria-label="设置并行上限（1-10）"
           data-testid="backlog-concurrency-input"
         />
         <Button
@@ -149,17 +147,17 @@ export function BacklogAutopilotControl({
             className="h-7 px-2 text-xs"
             disabled={policySaving}
             onClick={() => {
-              // 恢复继承＝删除设置行；成功后才丢弃未保存的输入草稿。
+              // 恢复为配置文件值＝删除设置行；成功后才丢弃未保存的输入草稿。
               void onUpdatePolicy(null).then((saved) => {
                 if (saved) {
                   setDraft("");
                 }
               });
             }}
-            title="恢复继承会删除本仓库的 Backlog 设置，默认视图偏好将回落到列表"
+            title={`恢复为配置文件值（${state.runner_capacity}）会删除本仓库的 Backlog 设置，默认视图偏好将回落到列表`}
             data-testid="backlog-concurrency-restore"
           >
-            恢复继承
+            恢复为配置文件值：{state.runner_capacity}
           </Button>
         ) : null}
       </span>

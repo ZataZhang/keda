@@ -471,7 +471,7 @@ export default function BacklogPage() {
     }
   }
 
-  /** 保存 Backlog「并发」策略（1–10），或以 ``null`` 恢复继承（清除设置行）。 */
+  /** 保存并行上限页面设置（1–10），或以 ``null`` 恢复为配置文件值（清除设置行）。 */
   async function handleUpdatePolicy(maxParallel: number | null): Promise<boolean> {
     setPolicySaving(true);
     try {
@@ -482,12 +482,12 @@ export default function BacklogPage() {
       await loadAutopilot();
       toast.success(
         maxParallel === null
-          ? "已恢复继承：并发上限跟随 runner 配置。"
-          : `已保存：生效并发上限 ${updated.effective_max_parallel}。`,
+          ? `已恢复为配置文件值：并行上限 ${updated.effective_max_parallel}。`
+          : `已保存：并行上限 ${updated.effective_max_parallel}。`,
       );
       return true;
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "保存并发设置失败。");
+      toast.error(error instanceof Error ? error.message : "保存并行上限失败。");
       await loadAutopilot();
       return false;
     } finally {

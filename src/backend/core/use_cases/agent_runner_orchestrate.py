@@ -43,6 +43,7 @@ from backend.core.shared.models.agent_runner import (
     TokenUsage,
 )
 from backend.core.shared.models.pass_activity import PassActivity
+from backend.core.use_cases.daemon_execution_slots import DaemonExecutionSlots
 from backend.core.shared.models.publish_stage import (
     PublishStage,
 )
@@ -603,8 +604,9 @@ def run_once(
     aggregate_pr: bool = False,
     execution_ceiling: int | None = None,
     pass_activity: PassActivity | None = None,
+    execution_slots: DaemonExecutionSlots | None = None,
 ) -> int:
-    """执行一次 Agent Runner 轮询。"""
+    """执行一次 Agent Runner 轮询（``execution_slots`` 见 :class:`RunOnceRequest`）。"""
     module = _orchestration_runtime_module()
     return module.run_once(
         module.RunOnceRequest(
@@ -626,5 +628,6 @@ def run_once(
             aggregate_pr=aggregate_pr,
             execution_ceiling=execution_ceiling,
             pass_activity=pass_activity,
+            execution_slots=execution_slots,
         )
     )

@@ -322,7 +322,15 @@ def _typer_preset_options(
 
 MaxIssuesOption = Annotated[
     int | None,
-    typer.Option("--max-issues", help="Maximum number of issues to process."),
+    typer.Option(
+        "--max-issues",
+        help="Maximum number of Issues this one-shot command processes (default: 1).",
+    ),
+]
+#: daemon 已不接受 --max-issues：保留隐藏选项只为给出改用 --concurrency 的明确报错。
+RetiredDaemonMaxIssuesOption = Annotated[
+    int | None,
+    typer.Option("--max-issues", hidden=True, help="Retired; use --concurrency."),
 ]
 DaemonIntervalOption = Annotated[
     int | None,
@@ -333,9 +341,9 @@ ConcurrencyOption = Annotated[
     typer.Option(
         "--concurrency",
         help=(
-            "Issues to process in parallel per pass (default: each target "
-            "repository's merged [agent_runner.runner].max_concurrent_issues; "
-            "1 = sequential)."
+            "Parallel limit: at most N Issues run at once per repository, backfilled "
+            "every polling interval (default: the Backlog page setting, else "
+            "[agent_runner.runner].max_concurrent_issues; 1 = sequential)."
         ),
     ),
 ]

@@ -574,8 +574,8 @@ def test_update_settings(backlog_environment) -> None:
     assert response.json()["max_parallel"] == 3
 
 
-def test_clear_settings_restores_inheritance(backlog_environment) -> None:
-    """PATCH max_parallel=null 应删除设置行（恢复继承），fresh 读回策略为空。"""
+def test_clear_settings_restores_config_value(backlog_environment) -> None:
+    """PATCH max_parallel=null 应删除设置行（恢复为配置文件值），fresh 读回页面设置为空。"""
     store: SqliteConsoleStore = backlog_environment["store"]
     response = client.patch(
         "/api/v1/agent-runner/backlog/settings?repo_id=keda-main",
@@ -591,7 +591,7 @@ def test_clear_settings_restores_inheritance(backlog_environment) -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["max_parallel"] is None
-    assert payload["ceiling_source"] == "inherited"
+    assert payload["ceiling_source"] == "config"
     assert store.get_backlog_settings("keda-main") is None
 
     # 恢复继承是删行语义，重复清除保持幂等成功。

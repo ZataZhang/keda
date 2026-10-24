@@ -496,15 +496,16 @@ export type BacklogPrdsResponse = {
   refresh_interval_seconds?: number;
 };
 
-/** 生效并发上限的来源：继承 runner 容量 / Backlog 设置 / 被 runner 容量压低。 */
-export type BacklogCeilingSource = "inherited" | "policy" | "capped_by_capacity";
+/** 生效并行上限的来源：Backlog 页面设置 / 配置文件 max_concurrent_issues。 */
+export type BacklogCeilingSource = "policy" | "config";
 
 export type BacklogSettings = {
   repo_id: string;
-  /** Backlog「并发」策略值；从未保存过时为 null（继承 runner 容量）。 */
+  /** Backlog 页面保存的并行上限；从未保存过时为 null（使用配置文件值）。 */
   max_parallel: number | null;
-  /** 解析后的单一生效并发上限，与 daemon 认领、补位、全局开始同值。 */
+  /** 解析后的单一生效并行上限，与 daemon 认领、补位、全局开始同值。 */
   effective_max_parallel: number;
+  /** 配置文件的并行上限（max_concurrent_issues），页面未保存时生效。 */
   runner_capacity: number;
   ceiling_source: BacklogCeilingSource;
   default_view: "timeline" | "list";
@@ -531,8 +532,8 @@ export type BacklogGlobalStartResult = {
  * `persisted_enabled` 是仓库 `.kedacode.toml` 里的值（缺失时为 null）。
  * `auto_merge_enabled` 表示自动合并的两道配置门都已开启，`daemon_running`
  * 表示后台进程正在运行。三者互相独立。
- * `max_parallel` 是可空的并发策略值（null = 从未保存），`effective_max_parallel`
- * 是与 daemon / 补位 / 全局开始共用同一解析函数的生效上限。
+ * `max_parallel` 是可空的页面设置（null = 从未保存，使用配置文件值），
+ * `effective_max_parallel` 是与 daemon / 补位 / 全局开始共用同一解析函数的生效上限。
  */
 export type BacklogAutopilotState = {
   repo_id: string;
@@ -1302,7 +1303,8 @@ export type StartPrdLaunchOptions = {
 export type RunnerStatusSummary = {
   daemon_mode: boolean;
   config: {
-    max_issues: number;
+    /** 全局配置的默认并行上限（各仓库的生效值见 Backlog 页面）。 */
+    max_concurrent_issues: number;
     default_agent: string;
     max_recovery_attempts: number;
     recovery_retry_delay_seconds: number;

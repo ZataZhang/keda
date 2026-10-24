@@ -270,7 +270,7 @@ def list_backlog_prds(
 
 
 def _settings_payload(store: IBacklogStore, repo_id: str, runner_capacity: int) -> dict:
-    """构造「可空策略 + 生效值 + 容量 + 来源」的设置快照（GET/PATCH 共用）。"""
+    """构造「可空页面设置 + 生效值 + 配置文件值 + 来源」的设置快照（GET/PATCH 共用）。"""
     row = store.get_backlog_settings(repo_id)
     policy_max_parallel = read_policy_max_parallel(store, repo_id)
     effective_max_parallel = resolve_execution_ceiling(policy_max_parallel, runner_capacity)
@@ -279,7 +279,7 @@ def _settings_payload(store: IBacklogStore, repo_id: str, runner_capacity: int) 
         "max_parallel": policy_max_parallel,
         "effective_max_parallel": effective_max_parallel,
         "runner_capacity": runner_capacity,
-        "ceiling_source": describe_ceiling_source(policy_max_parallel, effective_max_parallel),
+        "ceiling_source": describe_ceiling_source(policy_max_parallel),
         "default_view": row.default_view if row is not None else "list",
         "updated_at": row.updated_at if row is not None else "",
     }
