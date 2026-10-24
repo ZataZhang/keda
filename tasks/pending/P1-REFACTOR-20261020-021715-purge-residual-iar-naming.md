@@ -1,5 +1,7 @@
 # PRD: 清除残留 IAR 命名 —— 协议标记、工作树目录与代码标识符统一到 kc
 
+- GitHub Issue: https://github.com/ZataZhang/keda/issues/313
+
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
@@ -335,7 +337,7 @@ flowchart LR
   final_tree_evidence: 证据记录 commit sha，并在该 tree 上重跑一次读取
   negative_control: 用改名前 commit 复现同一命令，正文出现旧前缀
 - id: rv-2
-  behavior: 迁移把在途 Issue 的 iar:claim 改写为 kc:claim 后仍被判为已占用；预演不写、重跑无改动、runner 运行时拒绝；未迁移的 iar: 标记不再被识别
+  behavior: "迁移把在途 Issue 的 iar:claim 改写为 kc:claim 后仍被判为已占用；预演不写、重跑无改动、runner 运行时拒绝；未迁移的 iar: 标记不再被识别"
   reviewer: human
   real_entry: "uv run kc config migrate → uv run kc config migrate --apply → uv run kc run --dry-run → 再次 uv run kc config migrate（对一个预置了 open Issue、其认领评论含 <!-- iar:claim ... --> 且标签为 agent/running 的测试仓库；opt-in GH_TOKEN + KC_RV_SANDBOX_REPO，无凭据时用 PATH 上的文件型假 gh）"
   expected: "预演输出列出该 Issue 的评论 ID 与 1 处 claim 标记，GitHub 评论未变；--apply 后评论中标记变为 <!-- kc:claim ... -->，其余文字逐字节不变；kc run --dry-run 不把该 Issue 列为候选；第二次预演报告 0 处；本机启动 daemon 后执行 --apply 返回拒绝且评论未变；另一条未迁移的 iar:claim Issue 被 dry-run 当作无认领"
