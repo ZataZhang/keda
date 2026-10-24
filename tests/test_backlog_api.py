@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 from dataclasses import dataclass, replace
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -228,6 +229,8 @@ def test_force_refresh_requests_rescan_and_reports_stale(
             "skipped": [],
             "repo_id": repo_id,
             "include_archived": include_archived,
+            # 快照必须满足真实 builder 的契约，避免后台扫描完成时被误判为损坏。
+            "scanned_at": datetime.now(timezone.utc).isoformat(),
         }
 
     monkeypatch.setattr(backlog_routes, "_build_backlog_response", counting_build)

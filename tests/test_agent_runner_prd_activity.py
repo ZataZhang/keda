@@ -124,7 +124,7 @@ def test_iar_claim_reclaims_stale_prd_lock(tmp_path: Path) -> None:
                 "worktree": "deleted-old-worktree",
                 "started_at": stale_heartbeat,
                 "heartbeat_at": stale_heartbeat,
-            "ai_tool": "iar/qoder",
+                "ai_tool": "iar/qoder",
                 "branch": "issue-39",
             }
         ),

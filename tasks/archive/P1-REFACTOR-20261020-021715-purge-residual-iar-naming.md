@@ -5,7 +5,7 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> ⬜ **验收状态**：未开工。
+> 🧍 **验收状态**：待人工验收；3 项 Human-Confirmed 仍未勾选。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 > 本 PRD 分两个 altitude，自上而下阅读：
@@ -425,27 +425,30 @@ delivery_dependencies:
 
 ### 9.1 人读呈递区（Human Review Surface）
 
-- 决策一：标记只用 `kc:`、旧名不再识别、停机迁移；呈递 rv-1 的正文片段与 rv-2 的迁移清单、迁移前后评论 diff 与判定日志。
-- 决策二：目录换默认名、已有目录只认不搬；呈递 rv-3 的 `ls -la`、`git worktree list` 与 rv-4 的复用结果。
+| 人审决定 | 证据路径与打开命令 | 预期值 |
+|---|---|---|
+| 决策一：标记只用 `kc:`、旧名不再识别、升级时停机迁移 | `tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/rv-1-github-post-merge.txt` — `open "tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/rv-1-github-post-merge.txt"`；`tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/rv-2-marker-migration.txt` — `open "tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/rv-2-marker-migration.txt"` | 新 Issue 正文应含 `<!-- kc:depends-on #292 -->`。迁移评论只改变 `iar:` → `kc:`，其余字节不变；迁移后仍是活跃认领，复跑 0 处。RV-1 等 GitHub 凭据，RV-2 等可枚举本机进程的验证环境；两项目前未报告为通过。 |
+| 决策二：目录换默认名、已有目录只认不搬 | `tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/rv-3-clean-repository.txt` — `open "tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/rv-3-clean-repository.txt"`；`tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/rv-4-legacy-directory.txt` — `open "tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/rv-4-legacy-directory.txt"` | 干净仓库中工作树在 `.kc-worktrees/<branch>`，`git worktree list` 可见且 `git status --short` 为空；旧目录场景继续使用 `.iar-worktrees/<branch>`，根目录不出现平行 `.kc-worktrees`。 |
 
 ### 9.2 Acceptance Evidence Package
 
 **Machine-Confirmed**
 
-- [ ] 新创建的 Issue 正文只含新前缀标记（rv-1）
-- [ ] 迁移预演不写、`--apply` 只替换前缀、迁移后仍判为已占用、重跑 0 处、runner 运行时拒绝（rv-2）
-- [ ] 生产代码中 `iar:` 字面量只出现在迁移命令的"旧前缀"定义里：`rg -n "iar:" src/backend` 的命中全部位于迁移模块
-- [ ] 干净仓库创建工作树后使用新名目录（rv-3）
-- [ ] 已有旧目录的仓库复用旧目录（rv-4）
-- [ ] 双签名头都通过、缺头被拒（rv-5）
-- [ ] 守卫测试在白名单外命中旧名时失败（rv-6）
-- [ ] `just test`、`just lint`、文档构建通过
-- [ ] `docs/` 与 `ROADMAP.md` 中已失效的旧命令示例清零
+- [~] 新创建的 Issue 正文只含新前缀标记（rv-1） — runner-owned gate: post-merge opt-in GitHub create/readback and pre-refactor negative control; requires `GH_TOKEN` and `KC_RV_SANDBOX_REPO`.
+- [~] 迁移预演不写、`--apply` 只替换前缀、迁移后仍判为已占用、重跑 0 处、runner 运行时拒绝（rv-2） — runner-owned gate: rerun the isolated fake-gh CLI scenario where `psutil.process_iter()` can enumerate processes; do not bypass the fail-closed check.
+- [x] 生产代码中 `iar:` 字面量只出现在迁移命令的"旧前缀"定义里：`rg -n "iar:" src/backend` 的命中全部位于迁移模块
+- [x] 干净仓库创建工作树后使用新名目录（rv-3）
+- [x] 已有旧目录的仓库复用旧目录（rv-4）
+- [x] 双签名头都通过、缺头被拒（rv-5）
+- [x] 守卫测试在白名单外命中旧名时失败（rv-6）
+- [~] `just test`、`just lint`、文档构建通过 — runner-owned gate: 本轮 `just test all`（包含完整 lint）已通过；证据报告与 manifest staged 后，仍由 runner 在最终 staged tree 重跑 `just test`、`just lint` 与 MkDocs build。此前 standalone lint 被 `check-test-flag` 拒绝，因为 pre-commit 暂存期间会隐藏未跟踪的 evidence 文件。
+- [x] `docs/` 与 `ROADMAP.md` 中已失效的旧命令示例清零
 
 **Human-Confirmed**
 
 - [ ] 🧍 决策一已确认：接受只认 `kc:`、停机迁移 open Issue / PR、closed 默认不迁移
 - [ ] 🧍 决策二已确认：接受目录只认不搬与显式迁移
+- [ ] 🧍 9.1 人审导航已核对：已查看决策一的标记迁移证据及决策二的 Git 工作树目录证据
 
 ## 10. Functional Requirements
 
@@ -493,7 +496,9 @@ delivery_dependencies:
 
 ### Final Reconciliation
 
-未开始执行，待交付前填写。
+执行侧已按当前实现回核 FR-1 至 FR-10：协作标记与 Agent 执行标记只读写 `kc:` / `KC_EXEC`；旧 GitHub 标记仅由显式迁移器改写；新工作树目录使用 `.kc-worktrees` 并复用已有 `.iar-worktrees`；Webhook 接受新旧签名头；历史 PRD 与证据不参与扫描。`rg -n "iar:" src/backend` 仅命中 `github_marker_migration.py`；文档命令扫描未发现 `iar init`、`iar run`、`iar issue`、`<<IAR_EXEC>>` 或 `<!-- iar:` 示例。
+
+验证结果：RV-3 至 RV-6 的负控先于绿测重跑并保留逐项原始输出；最终代码修复后的定向后端套件以 `--no-testmon` 运行并通过（153 passed）。本轮完整 `UV_CACHE_DIR=.uv-cache just test all` 先通过完整 lint，再运行全量 pytest，最终为 4963 passed、1 skipped（454.72s）；同时更新本地 test 与 full-lint 标记。前一次完整运行曾在 `tests/test_backlog_api.py::test_force_refresh_requests_rescan_and_reports_stale` 偶发失败：测试的 mock builder 缺少生产快照契约要求的 `scanned_at`，后台扫描若先于请求读回完成，会落下无效快照并触发第二次扫描。相关 backlog 实现和该测试在基线 `f3bc2da3` 未变化；基线单次重跑通过。修复是让 mock 返回带时区的 `scanned_at`，目标用例连续 6 次通过，且不改变生产行为。`just lint --reuse` 与 MkDocs build 的既有验证通过。单独运行 `just lint` 曾被 `check-test-flag` 拒绝：pre-commit 暂存未跟踪文件时会暂时隐藏 untracked `evidence.json`，使计算的测试树与工作区标记不一致；没有跳过检查，runner 仍须在最终 staged tree 重跑相关门禁。RV-1 因缺少 `GH_TOKEN` / `KC_RV_SANDBOX_REPO` 留作 PRD 明确的 post-merge gate。RV-2 预演已列出待迁移评论且未写入；`--apply` 因当前 sandbox 拒绝 `psutil.process_iter()` 的 sysctl 进程枚举而 fail-closed，未伪称迁移成功。独立 verifier 与提交后 Git tree 仍由 runner 最终复核；Human-Confirmed 决策与 9.1 导航审阅保持未勾选。本执行器不归档 PRD。
 
 ## Change Log
 
@@ -504,3 +509,43 @@ delivery_dependencies:
 - Reason: 用户 2026-10-24 明确要求"iar 就改成不认了"，并要求补上新前缀的具体名字；永久双读会让旧前缀代码永远留在仓库里。
 - Impact: 决策一、FR-1、FR-2 改写，新增 FR-10；rv-2 改为迁移场景并升为 R3；新增 `github_marker_migration.py`；未迁移的在途 Issue 会被当作无认领，风险写入 §12。
 - Review: 待用户确认决策一（新版文本）。
+
+### 收集执行证据并标识 runner-owned 验证门
+- Type: evidence
+- Before: 验收清单全部未勾选，9.1 只有待呈递事项，且最终对账未填写。
+- After: rv-3 至 rv-6 已收集负控与绿测证据；rv-1 因真实 GitHub 凭据缺失、rv-2 因沙箱拒绝进程枚举被标记为 runner-owned gate；新增 9.1 可执行呈递路径及独立人审项，Human-Confirmed 项仍未勾选。
+- Reason: 延续已提交实现并完成当前环境可执行的真实入口验证，同时如实保留外部凭据与进程安全边界造成的未完成验证。
+- Impact: 不改变功能范围或验收 oracle；增加证据 manifest 与三份报告，明确 RV-1/RV-2 未获绿测且需由 runner 在最终 tree 复验。
+- Review: 待独立 verifier 复核 runner-owned gates；决策一、决策二与 9.1 呈递仍待人工确认。
+
+### 将未完成的最终 tree 检查留给 runner 并修正状态横幅
+- Type: evidence
+- Before: rv-1 在 checklist 中重复出现一条未勾选项；最终 `just test` / `just lint` / 文档构建仍标为 executor 未完成项；验收状态横幅显示待人工验收，尽管独立 verifier 与真实入口门禁尚未完成。
+- After: 合并重复的 rv-1 checklist 行并保留其 runner-owned gate；将最终 staged-tree 检查明确标为 runner-owned gate；横幅恢复为 `⬜ 未开工`，表示执行与验证尚在进行。RV-1/RV-2 的实际状态及所有 Human-Confirmed 项不变。
+- Reason: 使清单、横幅和原始证据一致，并避免执行器将未运行的最终 tree 验证声明为通过。
+- Impact: 未改变范围、行为或现实验证 oracle；runner 仍须运行最终验证并取得独立 verifier verdict，之后才能归档 PRD。
+- Review: 待 runner 最终 tree 验证及独立 verifier；人工决策与 9.1 导航审阅保持待确认。
+
+### 重跑定向验证并固定 worktree oracle 的负控顺序
+- Type: evidence
+- Before: RV-3 / RV-4 的 manifest 命令只指向绿测，未在单个可复现命令中显式表达负控先于绿测；Final Reconciliation 没有记录最后一次 `just test`、lint gate 和最终 no-testmon 套件的精确结果。
+- After: RV-3 / RV-4 命令先运行负控再运行真实 CLI 绿测；最终定向套件记录为 153 passed；`just test` 记录完整 lint 通过、testmon 无新增测试；standalone `just lint` 的 unstaged-evidence 标记冲突仍由 runner 在 staged tree 复验。
+- Reason: 让红绿证据的顺序可由 manifest 复现，并准确区分实际通过的 checks 与仍需最终 staged-tree 验证的 gate。
+- Impact: 不改变验收行为、范围或验证边界；RV-1/RV-2 和最终 staged-tree check 仍未被宣称通过，所有 Human-Confirmed 项保持未勾选。
+- Review: 待 runner 的 staged-tree 验证和独立 verifier；决策一、决策二与 9.1 导航仍待人工确认。
+
+### 修复 backlog 快照测试替身并重跑完整验证
+- Type: test
+- Before: `just test all` 的一次完整运行在 `test_force_refresh_requests_rescan_and_reports_stale` 失败；该测试的 mock builder 缺少快照必需的 `scanned_at` 字段，异步扫描时序可能导致无效快照被再次排队。
+- After: mock builder 返回与生产 builder 契约一致、带 UTC 时区的 `scanned_at`；目标用例连续 6 次通过，完整 `just test all` lint 阶段通过且全量 pytest 为 4963 passed、1 skipped。
+- Reason: 让测试替身满足被测快照接口的既有结构，消除调度时序造成的重复扫描误报。
+- Impact: 仅修改测试夹具，无生产行为、验收范围或 realistic validation oracle 变化；最终 staged-tree gate、RV-1/RV-2、独立 verifier 与 Human-Confirmed 项仍保持开放。
+- Review: 当前工作树中已执行定向重复测试与完整 `just test all`；最终 staged-tree 验证和独立 verifier 待 runner 完成。
+
+### 将验收状态横幅与人工确认清单对齐
+- Type: evidence
+- Before: 验收状态横幅为 `⬜ 未开工`，但 3 个 Human-Confirmed 项仍未勾选。
+- After: 横幅改为 `🧍 待人工验收`，并注明 3 个 Human-Confirmed 项仍未勾选；验收清单保持原样。
+- Reason: 让横幅准确投影 §9 中仍待人工确认的状态。
+- Impact: 仅更新验收状态横幅并记录本次变更；未改动任何验收清单项。
+- Review: 已核对 §9 中 3 个 Human-Confirmed 项仍为未勾选；其他清单项未触碰。

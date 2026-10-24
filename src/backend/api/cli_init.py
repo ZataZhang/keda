@@ -234,7 +234,7 @@ def _print_info_exclude_hint_if_needed(result: GitignoreSyncResult) -> None:
     if not result.info_exclude_hint:
         return
     error_console.print(
-        "[yellow]Hint:[/] .git/info/exclude contains legacy iar entries "  # legacy-alias
+        "[yellow]Hint:[/] .git/info/exclude contains legacy .iar entries "  # legacy-alias
         "(e.g. /.iar/evidence/, /.iar-worktrees/) that are now covered by "
         "the managed .gitignore block. You may delete them manually.",
         markup=False,
