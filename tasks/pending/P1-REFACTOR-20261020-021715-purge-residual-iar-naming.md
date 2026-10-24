@@ -14,7 +14,8 @@
 
 > 本节是 §10 Functional Requirements 的**平实语言投影**，不是第二事实源；行为验收以 §1 的行为样例表为准。
 
-- **写入的协作标记换成新前缀**（FR-1、FR-2）：新写出的 Issue / PR 标记与 Agent 执行标记不再带 `iar`，但历史标记继续被正确识别。
+- **协作标记统一换成 `kc:`，旧 `iar:` 不再识别**（FR-1、FR-2）：新写出的 Issue / PR 标记一律用 `kc:` 前缀，Agent 执行标记换成 `KC_EXEC`；读取端只认新名。
+- **升级时一次性迁移在途标记**（FR-10）：`kc config migrate` 把 open Issue / PR 正文与评论里的 `iar:` 标记改写成 `kc:`，先预演再执行，之后仓库里不再需要识别旧名。
 - **外部签名头新名生效、旧名继续可收**（FR-3）：GitHub Webhook 发送方可以在自己方便的时候切换。
 - **工作树与仓库内状态目录改用新名**（FR-4、FR-5）：新仓库看到的是新目录名，已有目录原样继续用、不搬家。
 - **代码里的旧名标识符清零**（FR-6）：异常类、解析函数、常量名与模块导出不再让人误以为存在另一套运行时。
@@ -40,19 +41,24 @@
 
 | 验证方式 | 输入 / 操作 | 期望观察到的结果 |
 |---|---|---|
-| 🤖 自动验证 | 用 `kc issue create` 创建一个带依赖的 Issue，然后读取正文 | 正文里出现新前缀的依赖标记，不出现新写入的 `iar:` 标记 |
-| 🤖 自动验证 | 打开一个历史 Issue（例如正文含 `<!-- iar:claim -->` 的旧 Issue），让 runner 判定认领状态 | 仍被识别为"已被占用"，不重复认领 |
+| 🤖 自动验证 | 用 `kc issue create` 创建一个带依赖的 Issue，然后读取正文 | 正文里出现 `<!-- kc:depends-on #292 -->`，不出现任何 `iar:` 标记 |
+| 👀 人审 + 自动验证 | 仓库里有一条正在执行的 Issue，其认领评论含 `<!-- iar:claim ... -->`；所有 runner 停止后运行 `kc config migrate`（先预演、再 `--apply`） | 预演列出将被改写的 Issue / 评论及条数且不写 GitHub；执行后该评论里的标记变成 `<!-- kc:claim ... -->`，其余文字不变；升级后的 runner 把这条 Issue 判为"已被占用"，不重复认领；再次执行迁移改写 0 处 |
+| 🤖 自动验证 | 没有迁移，直接让升级后的 runner 读取一条只含 `iar:claim` 的 Issue | `iar:` 标记不再被识别（等同于没有标记）；这是预期行为，升级说明要求先迁移 |
+| 🤖 自动验证 | 一台 runner 仍在运行时执行 `kc config migrate --apply` | 拒绝执行并说明需要先停掉 runner，不改写任何评论 |
 | 🤖 自动验证 | 在一个已有 `.iar-worktrees/` 目录的仓库执行工作树创建 | 复用旧目录，不新建平行目录、不搬动已有工作树 |
 | 👀 人审 + 自动验证 | 在一个干净仓库执行工作树创建并查看仓库根目录 | 出现新名工作树目录，目录里是该 Issue 的工作树，git 状态正常 |
 | 🤖 自动验证 | 向 Idea Inbox 接口发送请求，分别只带旧签名头、只带新签名头 | 两种都能通过签名校验；两者都缺时仍然拒绝 |
 | 🤖 自动验证 | 对代码与文档执行机械检查 | 白名单之外没有遗留旧名；白名单项逐条存在 |
-| 🤖 自动验证 | 触发一次 Agent 会话，其中包含一条可执行命令 | 命令被识别并执行，结果回填；使用旧写法标记的历史会话仍可解析 |
+| 🤖 自动验证 | 触发一次 Agent 会话，其中包含一条可执行命令 | 命令以 `<<KC_EXEC>>` 标记被识别并执行，结果回填；旧写法 `<<IAR_EXEC>>` 不再被解析 |
 
 表中仍成立的行为行即 §7.6 的验收 oracle；修正任一行即修正对应验收标准。
 
 **我默默定了这些**
 
-- 旧前缀的**读取**永久保留：历史 Issue / PR 里已有大量标记，删掉读取等于让老 Issue 全部变成"未被认领"，这是数据损坏级别的行为，不做取舍。
+- 新前缀定为 `kc:`（与命令名一致）：`iar:claim` → `kc:claim`、`iar:depends-on` → `kc:depends-on`，其余标记同理，只换前缀、不改标记名和属性；执行标记 `<<IAR_EXEC>>` → `<<KC_EXEC>>`，结果标签同理。
+- 协作标记与执行标记的旧名**不再识别**（用户 2026-10-24 决定）：读取端只认 `kc:`。为了不让在途 Issue 变成"没人认领"，升级时用一次性迁移命令把 open Issue / PR 里的旧标记改写成新标记。
+- 迁移默认只覆盖 **open** 的 Issue 与 PR（正文和全部评论）；closed 的需要显式加 `--include-closed`。迁移只做前缀替换，不碰标记以外的文字。
+- 工作树目录与签名头不在"不再识别"范围内：已有 `.iar-worktrees/` 目录、`X-IAR-Signature` 头继续按决策二与 FR-3 兼容（它们是磁盘布局和外部发送方，不能靠改写 GitHub 评论迁移）。
 - 白名单按"文件 + 行内容特征"判定，而不是按目录整体豁免；避免整个目录变成回潮避风港。
 - 历史 PRD、`tasks/archive/`、`tasks/evidence/` 与已归档原型不改写：它们是历史记录，改写反而破坏证据链。
 - `site/` 等构建产物不纳入检查：它们由文档源重新生成。
@@ -61,30 +67,36 @@
 
 **我理解为不做**
 
-- 不重写历史 Issue / PR 正文里的 `iar:` 标记，也不批量刷历史评论。
+- 不在升级时自动改写 GitHub 上的标记：改写只在用户显式执行 `kc config migrate --apply` 时发生；closed Issue / PR 默认不改写。
 - 不把用户磁盘上已有的 `.iar-worktrees/`、`.iar/` 自动改名；迁移只在显式命令下发生。
 - 不重新引入与旧版本 runner 混跑的能力（不双写旧标记）。
 
 ### 读作"旧名退场"，不是"字符串全局替换"
 
-目标是：**新产生的东西一律用新名；已经存在的东西继续被正确理解；两者之间只有读取方向的兼容，没有写入方向的兼容。**
+目标是：**新产生的东西一律用新名；GitHub 上的旧标记通过一次显式迁移变成新名，此后代码不再识别 `iar:`；磁盘目录和外部签名头保留读取方向的兼容。**
 
 边界条件——漏掉任何一条都会让实现走偏：
 
-- 兼容只发生在**读**：解析旧标记、识别旧目录、接受旧签名头。任何**写**路径都必须只产出新名，否则"清除"没有终点。
+- 协作标记和执行标记**不留任何读取兼容**：解析只认 `kc:` 与 `KC_EXEC`。在途数据靠迁移命令转换，不靠双读。
+- 读取兼容只保留给识别旧目录、接受旧签名头。任何**写**路径都必须只产出新名，否则"清除"没有终点。
+- 迁移命令是唯一会改写 GitHub 评论的入口：必须先预演，有 runner 在跑时拒绝执行，可以重复执行而不产生额外改动，并且只替换标记前缀。
 - 新旧混跑不是目标：如果为了同时讨好旧版本而双写标记，本 PRD 的核心收益（新 Issue 里看不到 `iar`）立刻归零。
 - 目录迁移不能有副作用：改名一个正在被 git 使用的工作树目录会破坏 worktree 元数据，因此已有目录"只认不搬"，只有在显式迁移命令且没有活动工作树时才允许改名。
 - 回潮必须机械可判：新增一个 `iar:` 标记常量而没有人发现，是本 PRD 最可能失败的方式，因此要有守卫测试。
 
 ## 2. Human Review Map (介入与风险地图)
 
-### 决策一：协作标记只写新名，放弃与旧版本混跑
+### 决策一：标记只用 `kc:`，旧 `iar:` 不再识别，升级时一次性迁移
 
-建议新写入的 Issue / PR 标记统一换成新前缀，读取端同时识别新旧两种；不双写旧标记。理由是兼容层已经在最近一次改动里拆掉了——`iar` 命令不再存在、`IAR_*` 环境变量不再被读，因此"新旧版本 runner 并存"这个前提本身已经不成立。继续双写只会让每个新 Issue 都带着旧名，与本 PRD 的目的直接冲突。真正的风险不在双写，而在读取遗漏：只要有一处解析只认新名，历史 Issue 就会被当成"没人认领"，runner 会重复开工。所以读取端的覆盖面必须由真实历史数据验证，而不是只跑单元测试。
+新写入的 Issue / PR 标记统一用 `kc:` 前缀，执行标记用 `KC_EXEC`；读取端只认新名，不双写，也不双读（用户 2026-10-24 已决定"iar 改成不认"）。
 
-**请确认：** 接受"只写新名 + 永久双读旧名"，并接受当前版本不再保证与旧版本 runner 混跑，可以吗？
+不再识别旧名之后，GitHub 上已有的 `iar:` 标记对升级后的 runner 来说等于不存在。对 closed 的历史 Issue 影响不大，但对在途 Issue 是数据损坏级别的后果：一条正在执行的 Issue 会被当成"没人认领"而被重复执行，一条声明了前置依赖的 Issue 会不等前置完成就开跑，恢复次数等计数会归零。所以升级必须按固定顺序：**所有电脑先停掉 runner → 升级 kc → 在任一台电脑运行一次 `kc config migrate` 迁移 open Issue / PR 的标记 → 再启动 runner**。迁移命令只能检查本机有没有 runner 在跑，看不到别的电脑，因此"所有电脑先停"要写进升级说明，由人来保证。
 
-**验收：** 新建 Issue 的正文只含新标记；拿一条带旧标记的真实历史 Issue 判定认领，结论仍是"已被占用"。
+与旧版本混跑同样不再支持：旧版读不到 `kc:` 标记，新版读不到 `iar:` 标记，两边会互相看不见对方的认领。
+
+**请确认：** 接受"只认 `kc:` + 升级时停机迁移 open Issue / PR"，以及"closed 的历史 Issue 默认不迁移，其中的旧标记从此不再被识别"，可以吗？
+
+**验收：** 新建 Issue 的正文只含 `kc:` 标记；一条认领评论含 `iar:claim` 的在途 Issue，迁移预演只列出、不改写；执行迁移后它变成 `kc:claim` 并被 runner 判为已占用；第二次迁移改写 0 处；runner 运行时执行迁移会被拒绝。
 
 ### 决策二：目录换默认名、已有目录只认不搬
 
@@ -107,7 +119,16 @@
 
 ### 用 `kc` 建 Issue 的人
 
-新建 Issue 的正文里不会再出现 `iar`，依赖声明、认领标记、证据格式标记都以新前缀书写。命令与参数完全不变。
+新建 Issue 的正文里不会再出现 `iar`，依赖声明、认领标记、证据格式标记都以 `kc:` 前缀书写。命令与参数完全不变。
+
+### 升级这一版的人（每个仓库做一次）
+
+1. 在**所有**跑 kc 的电脑上停掉 daemon 和正在执行的 `kc run`。
+2. 升级 kc。
+3. 在任意一台电脑的仓库目录运行 `kc config migrate` 查看预演结果（会列出哪些 Issue / PR、多少处标记要改），确认后运行 `kc config migrate --apply`。
+4. 重新启动 runner。
+
+跳过第 3 步的后果是：在途 Issue 会被当成没人认领、依赖声明失效。closed 的历史 Issue 不迁移也不影响后续运行；需要的话可以加 `--include-closed` 一起迁移。
 
 ### 已有仓库与已有工作树的人
 
@@ -115,7 +136,7 @@
 
 ### 旧版本留下的历史数据
 
-历史 Issue / PR 正文里的旧标记继续被识别；已经推送的 `iar-evidence/*` 远程分支继续可读；旧路径下的状态目录继续被使用。用户不需要做任何操作。
+已迁移的 open Issue / PR 照常工作；未迁移的 closed Issue 里的旧标记不再被识别（只影响回看历史，不影响运行）。已经推送的 `iar-evidence/*` 远程分支继续可读；旧路径下的状态目录继续被使用。
 
 ### 接收 Idea Inbox Webhook 的集成方
 
@@ -123,7 +144,7 @@
 
 ### Keda Agent（随包 skill 与执行标记）
 
-Agent 侧看到与写出的执行标记改为新名；旧写法仍能被解析，历史会话回放不受影响。随包 `kedacode-operator` skill 里的示例同步更新。
+Agent 侧看到与写出的执行标记改为 `<<KC_EXEC>>`；旧写法 `<<IAR_EXEC>>` 不再被解析，用旧写法的历史会话回放时其中的命令不会被执行。随包 `kedacode-operator` skill 里的示例同步更新。
 
 ### 维护者
 
@@ -137,8 +158,8 @@ Agent 侧看到与写出的执行标记改为新名；旧写法仍能被解析�
 
 - **actor**：使用 `kc` 建 Issue / 跑 Issue 的开发者；消费执行标记的 Agent；接收 Idea Inbox Webhook 的集成方；维护本仓库的人。
 - **trigger**：创建 Issue（标记写入）、runner 判定认领与依赖（标记读取）、创建工作树、Agent 会话中的可执行命令、Idea Inbox 收到签名请求。
-- **expected behavior**：写入路径只产出新名；读取路径新旧都认；文件系统默认值改为新名且旧目录继续可用；文档与路线图不再出现失效旧名；机械检查能挡住回潮。
-- **explicit scope boundary**：不重写历史数据、不双写旧标记、不自动搬迁已有目录、不改包名/仓库名。
+- **expected behavior**：写入路径只产出新名；协作标记与执行标记的读取只认新名；显式迁移命令把 open Issue / PR 的旧标记改写为新标记；文件系统默认值改为新名且旧目录继续可用；文档与路线图不再出现失效旧名；机械检查能挡住回潮。
+- **explicit scope boundary**：只在显式迁移命令下改写 GitHub 标记，closed 默认不改；不双写也不双读旧标记；不自动搬迁已有目录；不改包名/仓库名。
 
 # Part B · 执行器层 (Build Layer)
 
@@ -156,12 +177,14 @@ Agent 侧看到与写出的执行标记改为新名；旧写法仍能被解析�
 ### Reuse Candidates
 
 - 迁移能力复用 `src/backend/engines/agent_runner/repository_local_migration.py` 与 `src/backend/api/cli_parsed_commands/config_migrate.py`：目录改名应并入既有 `kc config migrate`，不新增命令。
-- 标记解析已有集中入口（各 use case 模块自身的解析函数），改为"新旧双读"时优先在这些函数内部兼容，不需要新的抽象层。
+- 标记解析已有集中入口（各 use case 模块自身的解析函数），只需把前缀换成 `kc:`，不需要新的抽象层。
+- GitHub 读写复用 `IGitHubClient` 现有的 `list_issues_by_label` / `list_issue_comment_entries` / `edit_issue_body` / `edit_issue_comment`；列出 open Issue 与 PR 如缺少接口，在 `IGitHubClient` 上补最小方法，不在迁移代码里直接拼 `gh` 命令。
 - 守卫测试复用 `tests/guards/` 的既有约定（`tests/guards/README.md` 描述了写法），不新建测试框架。
 
 ### 架构约束
 
-- 标记属于**跨进程契约**：写入方（runner）与读取方（同一 runner 的不同次运行、以及用户脚本）不在同一进程内，因此"改写入、留读取"必须在同一版本内一起发布。
+- 标记属于**跨进程契约**：写入方（runner）与读取方（同一 runner 的不同次运行、其他电脑上的 runner、以及用户脚本）不在同一进程内。读取端去掉 `iar:` 后，升级版与未升级版、迁移前与迁移后的数据都互不兼容，因此升级说明必须要求"全部停机 → 升级 → 迁移 → 启动"，迁移命令随同一版本发布。
+- 迁移命令会改写 GitHub 上别人可见的评论：只替换 `<!-- iar:` 这类标记前缀，评论里的其他文字逐字节不变；编辑评论不发通知。
 - 工作树目录属于**git 拥有**的状态：目录名被记录在 `.git/worktrees/*/gitdir` 里，任何改名都必须先确认无活动工作树。
 - 迁移命令属于**破坏性操作**：必须保留既有约定（有 runner 在跑就拒绝、预演不写盘、重复执行无副作用）。
 
@@ -183,11 +206,11 @@ No frontend impact。前端只渲染 Issue / PR 正文与运行记录，标记�
 
 ### Recommended Approach
 
-三件事一次做完：(1) 把所有**写入**路径的标记常量与拼接改为新前缀，把**读取**路径改为新旧双读；(2) 把目录默认值改为新名，并把旧目录识别并入现有解析入口，迁移并入 `kc config migrate`；(3) 重命名遗留的 Python 标识符与模块导出，并用守卫测试锁住白名单。
+四件事一次做完：(0) 在 `kc config migrate` 里加入"GitHub 标记迁移"步骤，把 open Issue / PR 的 `iar:` 标记改写成 `kc:`；(1) 把所有**写入**和**读取**路径的标记常量与解析统一改为 `kc:`，不保留旧前缀；(2) 把目录默认值改为新名，并把旧目录识别并入现有解析入口，迁移并入 `kc config migrate`；(3) 重命名遗留的 Python 标识符与模块导出，并用守卫测试锁住白名单。
 
 ### Proposed Solution Summary (实现机制)
 
-- **核心机制**：在现有标记常量处引入"新前缀常量 + 旧前缀兼容识别"两层——常量本身改名并改值，解析函数接受一个新旧前缀的匹配集合。写入一侧没有任何分支，只产出新值。
+- **核心机制**：标记常量直接改名改值为 `kc:`，解析函数只匹配新前缀，读写两侧都没有兼容分支。旧数据由迁移命令一次性转换：预演时列出 open Issue / PR 正文与评论中所有 `<!-- iar:<name>` 与 `<<IAR_EXEC` 类标记的位置和数量；`--apply` 时逐条把前缀替换为 `kc:` / `KC_EXEC` 后写回。迁移前检查本机是否有 runner 在运行（复用 `kc config migrate` 已有的检查），有则拒绝。
 - **谁提供声明**：新前缀由代码内常量决定，不引入配置项；不做"可配置标记前缀"，因为不存在真实的多样化需求。
 - **接入点**：Issue / PR 标记在 `core/use_cases` 现有拼接点；执行标记在 `repl_session.py` 的解析函数；签名头在 `agent_runner_idea_inbox.py` 的路由参数；工作树目录在 `worktree_cleanup.py` 等四处字面量收拢为一个常量；状态目录默认值在两处 dataclass 默认值。
 - **主要状态/输出变化**：新写入的 Issue / PR 正文、新建工作树目录名、新产生的证据分支名、Webhook 接受的头名称集合。
@@ -197,14 +220,16 @@ No frontend impact。前端只渲染 Issue / PR 正文与运行记录，标记�
 
 - **保留旧前缀不动（现状）**：成本是持续的解释负担与错误的"未完成"信号；且兼容层已拆，保留已无收益。否决。
 - **双写新旧标记**：可以让旧版本"看见"新 Issue，但前提是旧版本还能运行——`iar` 命令与 `IAR_*` 已移除，前提不成立。且双写会让本 PRD 目标归零。否决。
+- **只写新名、永久双读旧名**（本 PRD 初稿方案）：不需要停机迁移，但旧前缀的解析代码要永远留在仓库里，"清除 iar"永远做不完。用户 2026-10-24 选择不再识别旧名，改为一次性迁移。否决。
 - **升级即自动改名目录**：会破坏正在运行的工作树与 daemon 的文件句柄。否决，改为显式迁移。
 
 ## 7. Implementation Guide
 
 ### Core Logic
 
-1. **标记常量换值**：把 `iar:` 前缀的常量值改成新前缀，同时保留一个"兼容前缀集合"常量供解析使用。解析函数统一改成"匹配集合"形式，避免每处各写一遍正则。
-2. **执行标记**：`repl_session.py` 的三个标记常量改名换值，解析函数同时识别旧标记（历史会话回放）；提示文本同步。
+1. **标记常量换值**：把 `iar:` 前缀的常量值改成 `kc:`，解析正则同步只匹配 `kc:`；不保留任何旧前缀常量或兼容集合。前缀本身定义为一个常量（如 `MARKER_PREFIX = "kc:"`），各标记由它拼出，避免再散落字面量。
+2. **执行标记**：`repl_session.py` 的三个标记常量改名换值为 `KC_EXEC` 系列，解析函数只识别新标记；提示文本同步。
+2a. **GitHub 标记迁移**：在 `kc config migrate` 中新增一步。预演（默认）时，枚举 open Issue 与 open PR（`--include-closed` 时包括 closed），读取正文与全部评论，统计含旧标记的位置，输出"Issue/PR 编号 · 正文或评论 ID · 标记名 · 次数"清单，不写 GitHub。`--apply` 时，对每处用正则只替换标记前缀（`<!--\s*iar:` → `<!-- kc:`，`<<IAR_EXEC` → `<<KC_EXEC`，`<</IAR_EXEC` 等同理），经 `edit_issue_body` / `edit_issue_comment` 写回，逐条打印结果。任一条失败继续处理其余条目，最后以非零退出码汇总失败项；重跑只处理剩余的旧标记。本机有 runner 在运行时拒绝 `--apply`。迁移对 API 用量的估算（条目数 × 1 次编辑）在预演中一并给出。
 3. **签名头**：路由同时接受新头与旧头（两个 `Header` 参数，前者优先，后者兜底），校验逻辑不变。
 4. **工作树目录**：把散落的 `.iar-worktrees` 字面量收拢为一个常量（新名），并提供一个"检测旧目录存在则用旧目录"的解析函数；`.gitignore` 托管块同时包含新旧两行，避免老仓库忽略失效。
 5. **状态目录默认值**：`findings_artifact_dir` 等默认值改为新名；读取时若旧目录存在则沿用，逻辑与工作树一致。
@@ -228,12 +253,16 @@ src/backend/
 ├── core/shared/models/
 │   ├── agent_runner.py                    [改] findings_artifact_dir 默认值
 │   └── product_identity.py                [不改] 已是新名
+├── core/use_cases/
+│   └── github_marker_migration.py         [新增] open Issue / PR 旧标记扫描、预演清单与前缀替换（唯一允许出现 iar: 字面量的生产模块）
+├── core/shared/interfaces/
+│   └── agent_runner.py                    [改] 如缺少，补列出 open Issue / PR 的最小方法
 ├── engines/agent_runner/
 │   ├── repository_gitignore.py            [改] 托管块加入新目录名
 │   └── repository_local_migration.py      [改] 目录改名步骤
 ├── api/
 │   ├── routes/agent_runner_idea_inbox.py  [改] 双签名头
-│   ├── cli_parsed_commands/config_migrate.py [改] 目录改名接入
+│   ├── cli_parsed_commands/config_migrate.py [改] 目录改名与 GitHub 标记迁移接入（预演 / --apply / --include-closed）
 │   └── cli_typer_config.py                [改] 帮助文本
 └── infrastructure/config/
     └── agent_runner_settings_models.py    [改] 默认值
@@ -251,7 +280,7 @@ tasks/archive/**, tasks/evidence/**           [不改] 历史记录
 | change point | tier | decisive dimension/override | intervention | oracle/gate |
 |---|---|---|---|---|
 | 标记写入改新前缀 | R2 | 跨组件契约；写错会让新 Issue 失去依赖门禁 | human（决策一） | rv-1 |
-| 标记读取双读 | R2 | 兼容性；漏读会导致重复认领 | executor + 强 oracle | rv-1、rv-2 |
+| 标记读取只认 `kc:` + GitHub 标记迁移 | R3 | 正确性：未迁移或迁移错误会让在途 Issue 被重复执行；改写他人可见评论 | human（决策一） | rv-2 |
 | 工作树目录默认值与迁移 | R2 | 持久状态；改名破坏 git worktree 元数据 | human（决策二） | rv-3、rv-4 |
 | 状态目录默认值 | R1 | 单组件、可回滚 | executor | rv-4 |
 | 签名头双接受 | R1 | 单适配器、失败可观测 | executor | rv-5 |
@@ -262,7 +291,8 @@ tasks/archive/**, tasks/evidence/**           [不改] 历史记录
 
 - 起点文件清单不是全集：以 `grep -rn "iar:" src/backend`、`grep -rn "IAR_" src/backend`、`grep -rn "\.iar" src/backend` 三组搜索结果为准。
 - 不要按行号定位，按符号名与常量名定位。
-- 任何**写**路径都不允许保留旧前缀分支；发现需要"为了兼容而写旧值"的地方，先停下来核对决策一。
+- 任何**写**和**读**路径都不允许保留 `iar:` 分支；发现需要"为了兼容而读旧值"的地方，先停下来核对决策一。唯一允许出现 `iar:` 字面量的生产代码是迁移命令里的"被替换的旧前缀"。
+- 动手前列出所有"会读取 closed Issue / PR 标记"的消费者（数据集导出、统计、证据回看等）：`rg -n "closed|CLOSED" src/backend/core/use_cases | rg -i "marker|comment"`。如有消费者依赖 closed Issue 的旧标记，把清单写进本 PRD §12，并在 Human-Confirmed 中说明影响，而不是悄悄加回双读。
 - 迁移相关改动必须保持既有四规则（有 runner 运行则拒绝、预演不写盘、幂等、失败不留半迁移状态）。
 
 ### Flow / Architecture Diagram
@@ -270,9 +300,10 @@ tasks/archive/**, tasks/evidence/**           [不改] 历史记录
 ```mermaid
 flowchart LR
   A[创建 Issue] -->|写| B[新前缀标记]
+  M["kc config migrate --apply (停机后一次)"] -->|"iar: → kc:"| N[open Issue / PR 标记]
   C[runner 判定认领/依赖] -->|读| D{标记前缀}
-  D -->|新前缀| E[正常判定]
-  D -->|历史 iar: 前缀| E
+  D -->|"kc:"| E[正常判定]
+  D -->|"iar: (未迁移)"| X[视为无标记]
   F[创建工作树] --> G{旧目录存在?}
   G -->|是| H[复用旧目录]
   G -->|否| I[新目录]
@@ -304,20 +335,22 @@ flowchart LR
   final_tree_evidence: 证据记录 commit sha，并在该 tree 上重跑一次读取
   negative_control: 用改名前 commit 复现同一命令，正文出现旧前缀
 - id: rv-2
-  behavior: 历史旧前缀标记仍被判定为已占用，不会重复认领
-  reviewer: verifier
-  real_entry: uv run kc run --dry-run（对一条正文含旧前缀认领标记的真实历史 Issue）
-  expected: 该 Issue 被判为已占用，不进入候选执行队列
-  mock_boundary: 默认使用仓库内历史正文样本；提供 GH_TOKEN 时切换为真实 Issue
-  tier: R2
-  test_layer: cli-real
+  behavior: 迁移把在途 Issue 的 iar:claim 改写为 kc:claim 后仍被判为已占用；预演不写、重跑无改动、runner 运行时拒绝；未迁移的 iar: 标记不再被识别
+  reviewer: human
+  real_entry: "uv run kc config migrate → uv run kc config migrate --apply → uv run kc run --dry-run → 再次 uv run kc config migrate（对一个预置了 open Issue、其认领评论含 <!-- iar:claim ... --> 且标签为 agent/running 的测试仓库；opt-in GH_TOKEN + KC_RV_SANDBOX_REPO，无凭据时用 PATH 上的文件型假 gh）"
+  expected: "预演输出列出该 Issue 的评论 ID 与 1 处 claim 标记，GitHub 评论未变；--apply 后评论中标记变为 <!-- kc:claim ... -->，其余文字逐字节不变；kc run --dry-run 不把该 Issue 列为候选；第二次预演报告 0 处；本机启动 daemon 后执行 --apply 返回拒绝且评论未变；另一条未迁移的 iar:claim Issue 被 dry-run 当作无认领"
+  presentation: "tasks/evidence/<prd-stem>/rv-2-marker-migration.txt（预演清单、apply 结果、迁移前后评论正文 diff、dry-run 判定）；自检：diff 中只有 iar: → kc: 一处变化"
+  mock_boundary: "只在无凭据时替换 gh；kc CLI、迁移步骤、认领判定全部真实"
+  tier: R3
+  test_layer: e2e
   required_for_acceptance: true
-  critical_value_source: 历史正文取自 tests/support/marker_compat_baseline.json 或真实 GitHub 评论
-  must_cross: 读取正文 → 前缀匹配 → 认领判定
-  forbidden_bypasses: 不允许只测新前缀解析路径而跳过旧前缀分支
-  fresh_state_probe: 每次运行前确认样本 Issue 未被本进程写过标记
-  final_tree_evidence: 判定日志与 commit sha 一并记录
-  negative_control: 移除双读分支后同一输入被判为空闲
+  critical_value_source: "GitHub（或假 gh 存储）中该评论迁移前后的原始正文"
+  must_cross: "kc config migrate → IGitHubClient(list + edit_issue_comment) → GitHub → kc run --dry-run 认领判定"
+  forbidden_bypasses: "直接调用替换函数代替 CLI；在测试里手写迁移后的正文；保留任何 iar: 双读分支让判定通过"
+  fresh_state_probe: "--apply 结束后用新进程重新读取评论正文与 dry-run 判定"
+  final_tree_evidence: "证据记录 git rev-parse HEAD^{tree}；迁移或标记解析代码改动后重跑"
+  negative_control: "跳过 --apply 直接执行 kc run --dry-run：该 Issue 被当作无认领进入候选"
+  expected_fail: "断言'不把该 Issue 列为候选'失败"
 - id: rv-3
   behavior: 干净仓库创建工作树后仓库根出现新名目录，工作树可用
   reviewer: human
@@ -390,7 +423,7 @@ delivery_dependencies:
 
 ### 9.1 人读呈递区（Human Review Surface）
 
-- 决策一：标记只写新名 + 永久双读；呈递 rv-1 的正文片段与 rv-2 的判定日志。
+- 决策一：标记只用 `kc:`、旧名不再识别、停机迁移；呈递 rv-1 的正文片段与 rv-2 的迁移清单、迁移前后评论 diff 与判定日志。
 - 决策二：目录换默认名、已有目录只认不搬；呈递 rv-3 的 `ls -la`、`git worktree list` 与 rv-4 的复用结果。
 
 ### 9.2 Acceptance Evidence Package
@@ -398,7 +431,8 @@ delivery_dependencies:
 **Machine-Confirmed**
 
 - [ ] 新创建的 Issue 正文只含新前缀标记（rv-1）
-- [ ] 历史 `iar:` 标记仍被识别为已占用（rv-2）
+- [ ] 迁移预演不写、`--apply` 只替换前缀、迁移后仍判为已占用、重跑 0 处、runner 运行时拒绝（rv-2）
+- [ ] 生产代码中 `iar:` 字面量只出现在迁移命令的"旧前缀"定义里：`rg -n "iar:" src/backend` 的命中全部位于迁移模块
 - [ ] 干净仓库创建工作树后使用新名目录（rv-3）
 - [ ] 已有旧目录的仓库复用旧目录（rv-4）
 - [ ] 双签名头都通过、缺头被拒（rv-5）
@@ -408,13 +442,13 @@ delivery_dependencies:
 
 **Human-Confirmed**
 
-- [ ] 🧍 决策一已确认：接受只写新名与放弃新旧混跑
+- [ ] 🧍 决策一已确认：接受只认 `kc:`、停机迁移 open Issue / PR、closed 默认不迁移
 - [ ] 🧍 决策二已确认：接受目录只认不搬与显式迁移
 
 ## 10. Functional Requirements
 
-- **FR-1**：写入 Issue / PR 的协作标记使用新前缀；读取同时识别旧前缀与新前缀，旧前缀永久可读。
-- **FR-2**：Agent 执行标记改用新名，解析兼容旧标记与历史会话。
+- **FR-1**：写入 Issue / PR 的协作标记使用 `kc:` 前缀（只换前缀，标记名与属性不变）；读取只识别 `kc:`，不再识别 `iar:`。
+- **FR-2**：Agent 执行标记改用 `KC_EXEC` 系列，解析只识别新标记。
 - **FR-3**：Idea Inbox 签名头接受新名，同时继续接受 `X-IAR-Signature`。
 - **FR-4**：工作树目录默认使用新名；存在旧目录时复用旧目录，不新建平行目录。
 - **FR-5**：仓库内状态目录（findings / evidence 等）默认使用新名；旧目录继续可用。
@@ -422,10 +456,12 @@ delivery_dependencies:
 - **FR-7**：新建证据分支使用新前缀；已推送的旧前缀分支不改名、继续可读。
 - **FR-8**：文档、路线图、随包 skill 文本中已失效的旧命令示例清零，历史 PRD 与 evidence 不改。
 - **FR-9**：新增守卫测试锁定白名单，白名单外出现旧名即失败。
+- **FR-10**：`kc config migrate` 新增 GitHub 标记迁移步骤：默认预演，列出 open Issue / PR 正文与评论中的旧标记位置、数量和预计 API 调用数；`--apply` 只把标记前缀替换为新名并写回，逐条报告结果，部分失败以非零退出码汇总；重复执行只处理剩余旧标记；`--include-closed` 时包括 closed；本机有 runner 运行时拒绝 `--apply`。升级说明写明"所有电脑停机 → 升级 → 迁移 → 启动"。
 
 ## 11. Non-Goals
 
-- 不重写历史 Issue / PR 正文与历史评论。
+- 不在升级时自动改写 GitHub 上的标记；closed Issue / PR 默认不迁移。
+- 不检测别的电脑上是否还有 runner 在跑（只能检查本机，由升级说明约束）。
 - 不重命名已推送的 `iar-evidence/*` 分支。
 - 不自动搬迁已有工作树目录或状态目录。
 - 不恢复与旧版本 runner 的混跑能力，不双写旧标记。
@@ -435,7 +471,9 @@ delivery_dependencies:
 ## 12. Risks And Follow-Ups
 
 - **用户脚本依赖旧标记字符串**：新写入的正文不再匹配，属预期变化；在 release notes 中说明。
-- **读取端遗漏**：某处解析只认新前缀会让历史 Issue 变空闲，进而重复认领；由 rv-2 与全量测试兜住，并建议在 code review 时逐处确认"读"与"写"分界。
+- **没迁移就启动**：升级后不跑迁移、或别的电脑还没停就启动，在途 Issue 会被当成没人认领而被重复执行，依赖声明失效。由升级说明、`kc config migrate` 的预演输出与 release notes 显著提示兜住；系统无法检测其他电脑。
+- **closed Issue 的旧标记失效**：默认不迁移的 closed Issue 中，旧标记不再被识别；如有回看历史的功能依赖它们，见 Executor Drift Guard 的清单要求，必要时用 `--include-closed` 迁移。
+- **迁移的 API 用量**：每处旧标记一次编辑调用，评论多的仓库可能达到数百上千次；预演给出估算，迁移遇到限流时中止并可重跑续做。
 - **迁移破坏工作树**：由"无活动工作树才改名"的既有规则兜住；若迁移中途失败，保持旧目录不变（不做半迁移）。
 - **白名单过宽**：守卫测试可能因白名单过宽而失去意义；白名单需逐条带注释说明原因。
 
@@ -443,7 +481,9 @@ delivery_dependencies:
 
 | 决策 | 结论 | 依据 |
 |---|---|---|
-| 旧前缀是否永久可读 | 是 | 历史数据不可回收；删读取等于数据损坏 |
+| 新前缀是什么 | `kc:`；执行标记 `KC_EXEC` | 与命令名一致，也与跨机器租约 PRD 的 `kc:lease` / `kc:presence` 一致 |
+| 旧前缀是否继续可读 | 否，改为停机后一次性迁移 open Issue / PR | 用户 2026-10-24 决定"iar 改成不认"；双读会让旧前缀代码永远留在仓库里，迁移把在途数据转换后即可彻底删除 |
+| 迁移是否覆盖 closed | 默认否，`--include-closed` 可选 | closed Issue 不参与运行判定，全量迁移的 API 用量与改写面过大 |
 | 是否双写 | 否 | 兼容层已拆，混跑前提不存在 |
 | 目录是否自动改名 | 否 | 破坏 git worktree 元数据 |
 | 是否新增标记注册表 | 否 | 无真实多样化需求，避免过度抽象 |
@@ -452,3 +492,13 @@ delivery_dependencies:
 ### Final Reconciliation
 
 未开始执行，待交付前填写。
+
+## Change Log
+
+### 标记前缀定为 kc:，旧 iar: 改为不再识别并新增一次性迁移
+- Type: scope
+- Before: 协作标记"只写新名 + 永久双读旧名"，新前缀未具体命名；执行标记解析兼容旧写法；不改写任何历史 Issue / PR。
+- After: 新前缀定为 `kc:`（执行标记 `KC_EXEC`）；读取端只认新名；`kc config migrate` 新增 GitHub 标记迁移（默认预演、`--apply` 只替换前缀、默认只迁移 open Issue / PR、`--include-closed` 可选、runner 运行时拒绝）；升级说明要求所有电脑停机 → 升级 → 迁移 → 启动。工作树目录与签名头的读取兼容不变。
+- Reason: 用户 2026-10-24 明确要求"iar 就改成不认了"，并要求补上新前缀的具体名字；永久双读会让旧前缀代码永远留在仓库里。
+- Impact: 决策一、FR-1、FR-2 改写，新增 FR-10；rv-2 改为迁移场景并升为 R3；新增 `github_marker_migration.py`；未迁移的在途 Issue 会被当作无认领，风险写入 §12。
+- Review: 待用户确认决策一（新版文本）。
