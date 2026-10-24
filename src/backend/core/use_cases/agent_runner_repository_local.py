@@ -16,38 +16,36 @@ _engines_repository_local_module = importlib.import_module(
 
 GITIGNORE_BLOCK_FOOTER = _engines_repository_local_module.GITIGNORE_BLOCK_FOOTER
 GITIGNORE_BLOCK_HEADER = _engines_repository_local_module.GITIGNORE_BLOCK_HEADER
-IAR_GITIGNORE_SECTIONS = _engines_repository_local_module.IAR_GITIGNORE_SECTIONS
+GITIGNORE_SECTIONS = _engines_repository_local_module.GITIGNORE_SECTIONS
 GitignoreSyncOptions = _engines_repository_local_module.GitignoreSyncOptions
 GitignoreSyncResult = _engines_repository_local_module.GitignoreSyncResult
-IARRepositoryNotInitializedError = _engines_repository_local_module.IARRepositoryNotInitializedError
+RepositoryNotInitializedError = _engines_repository_local_module.RepositoryNotInitializedError
 RepositoryInitOptions = _engines_repository_local_module.RepositoryInitOptions
 RepositoryLocalConfigExistsError = _engines_repository_local_module.RepositoryLocalConfigExistsError
 RepositoryInitResult = _engines_repository_local_module.RepositoryInitResult
 detect_git_repository_root = _engines_repository_local_module.detect_git_repository_root
-discover_iar_repositories = _engines_repository_local_module.discover_iar_repositories
+discover_repositories = _engines_repository_local_module.discover_repositories
 ensure_gitignore_entries = _engines_repository_local_module.ensure_gitignore_entries
 initialize_repository_local_config = (
     _engines_repository_local_module.initialize_repository_local_config
 )
 normalize_repository_id = _engines_repository_local_module.normalize_repository_id
-require_iar_repository_initialized = (
-    _engines_repository_local_module.require_iar_repository_initialized
-)
+require_repository_initialized = _engines_repository_local_module.require_repository_initialized
 
 __all__ = [
     "GITIGNORE_BLOCK_FOOTER",
     "GITIGNORE_BLOCK_HEADER",
-    "IAR_GITIGNORE_SECTIONS",
+    "GITIGNORE_SECTIONS",
     "GitignoreSyncOptions",
     "GitignoreSyncResult",
-    "IARRepositoryNotInitializedError",
+    "RepositoryNotInitializedError",
     "RepositoryInitOptions",
     "RepositoryLocalConfigExistsError",
     "RepositoryInitResult",
     "detect_git_repository_root",
-    "discover_iar_repositories",
+    "discover_repositories",
     "ensure_gitignore_entries",
     "initialize_repository_local_config",
     "normalize_repository_id",
-    "require_iar_repository_initialized",
+    "require_repository_initialized",
 ]

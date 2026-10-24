@@ -846,10 +846,12 @@ def test_ensure_gitignore_inserts_block_when_missing(tmp_path: Path) -> None:
         ".kedacode/",
         ".agent-runner/",
         ".iar/",
+        ".kc-worktrees/",
         ".iar-worktrees/",
         "tasks/evidence/**",
         "!tasks/evidence/**/",
         "!tasks/evidence/**/*.md",
+        "!tasks/evidence/**/evidence.json",
     )
     assert result.entries_skipped_external == ()
     assert GITIGNORE_BLOCK_HEADER in text
@@ -857,11 +859,13 @@ def test_ensure_gitignore_inserts_block_when_missing(tmp_path: Path) -> None:
     assert ".kedacode/" in text
     assert ".iar/" in text
     assert ".agent-runner/" in text
+    assert ".kc-worktrees/" in text
     assert ".iar-worktrees/" in text
-    # tasks/evidence 白名单段：整目录排除、放行子目录、只提交 .md 文本报告。
+    # tasks/evidence 白名单段：整目录排除，允许 Markdown 报告与本地 manifest。
     assert "tasks/evidence/**" in text
     assert "!tasks/evidence/**/" in text
     assert "!tasks/evidence/**/*.md" in text
+    assert "!tasks/evidence/**/evidence.json" in text
 
 
 def test_ensure_gitignore_skips_patterns_already_outside_block(
@@ -883,10 +887,12 @@ def test_ensure_gitignore_skips_patterns_already_outside_block(
     assert result.entries_added == (
         ".kedacode/",
         ".iar/",
+        ".kc-worktrees/",
         ".iar-worktrees/",
         "tasks/evidence/**",
         "!tasks/evidence/**/",
         "!tasks/evidence/**/*.md",
+        "!tasks/evidence/**/evidence.json",
     )
     assert ".agent-runner/" in result.entries_skipped_external
     # Project rules must be preserved verbatim above the block.
@@ -934,12 +940,40 @@ def test_ensure_gitignore_updates_block_when_patterns_missing(
     assert result.block_updated is True
     assert ".kedacode/" in result.entries_added
     assert ".agent-runner/" in result.entries_added
+    assert ".kc-worktrees/" in result.entries_added
     assert ".iar-worktrees/" in result.entries_added
     assert ".kedacode/" in text
     assert ".agent-runner/" in text
+    assert ".kc-worktrees/" in text
     assert ".iar-worktrees/" in text
     # Header / footer order must be preserved.
     assert text.index(GITIGNORE_BLOCK_HEADER) < text.index(GITIGNORE_BLOCK_FOOTER)
+
+
+def test_ensure_gitignore_rewrites_the_legacy_managed_block(tmp_path: Path) -> None:
+    """新版 init 把旧 managed block 原位换成 kc block 并保留旧目录忽略规则。"""
+    repo_path = tmp_path / "target"
+    repo_path.mkdir()
+    gitignore_path = repo_path / ".gitignore"
+    gitignore_path.write_text(
+        "# project rule\ncustom/\n\n"
+        "# >>> iar (managed by `iar init`) >>>\n"
+        "# IAR-managed git worktrees (host-local)\n"
+        ".iar-worktrees/\n"
+        "# <<< iar <<<\n",
+        encoding="utf-8",
+    )
+
+    sync_result = ensure_gitignore_entries(GitignoreSyncOptions(repo_root_path=repo_path))
+
+    migrated_text = gitignore_path.read_text(encoding="utf-8")
+    assert sync_result.block_updated
+    assert "# >>> iar (managed by `iar init`) >>>" not in migrated_text
+    assert GITIGNORE_BLOCK_HEADER in migrated_text
+    assert GITIGNORE_BLOCK_FOOTER in migrated_text
+    assert ".kc-worktrees/" in migrated_text
+    assert ".iar-worktrees/" in migrated_text
+    assert migrated_text.startswith("# project rule\ncustom/\n")
 
 
 def test_ensure_gitignore_does_not_insert_empty_block_when_all_external(
@@ -950,8 +984,9 @@ def test_ensure_gitignore_does_not_insert_empty_block_when_all_external(
     repo_path.mkdir()
     gitignore = repo_path / ".gitignore"
     gitignore.write_text(
-        ".kedacode/\n.iar/\n.agent-runner/\n.iar-worktrees/\n"
-        "tasks/evidence/**\n!tasks/evidence/**/\n!tasks/evidence/**/*.md\n",
+        ".kedacode/\n.iar/\n.agent-runner/\n.kc-worktrees/\n.iar-worktrees/\n"
+        "tasks/evidence/**\n!tasks/evidence/**/\n!tasks/evidence/**/*.md\n"
+        "!tasks/evidence/**/evidence.json\n",
         encoding="utf-8",
     )
 
@@ -965,10 +1000,12 @@ def test_ensure_gitignore_does_not_insert_empty_block_when_all_external(
         ".kedacode/",
         ".iar/",
         ".agent-runner/",
+        ".kc-worktrees/",
         ".iar-worktrees/",
         "tasks/evidence/**",
         "!tasks/evidence/**/",
         "!tasks/evidence/**/*.md",
+        "!tasks/evidence/**/evidence.json",
     }
     assert GITIGNORE_BLOCK_HEADER not in text
 
@@ -1063,6 +1100,7 @@ def test_iar_init_writes_gitignore_block(tmp_path: Path, monkeypatch: pytest.Mon
     assert ".kedacode/" in gitignore_text
     assert ".iar/" in gitignore_text
     assert ".agent-runner/" in gitignore_text
+    assert ".kc-worktrees/" in gitignore_text
     assert ".iar-worktrees/" in gitignore_text
 
 
@@ -1109,6 +1147,7 @@ def test_iar_init_dry_run_emits_gitignore_block_lines(
     assert ".kedacode/" in out
     assert ".iar/" in out
     assert ".agent-runner/" in out
+    assert ".kc-worktrees/" in out
     assert ".iar-worktrees/" in out
     assert GITIGNORE_BLOCK_FOOTER in out
 

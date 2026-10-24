@@ -36,8 +36,8 @@ def add_setup_commands(subparsers: argparse._SubParsersAction) -> None:
         "--no-update-gitignore",
         action="store_true",
         help=(
-            "Do not add KedaCode runtime patterns (.iar/, .agent-runner/, "
-            ".iar-worktrees/) to .gitignore. Default: managed by kc init."
+            "Do not add KedaCode runtime patterns (.kedacode/, .agent-runner/, "
+            ".kc-worktrees/) to .gitignore. Default: managed by kc init."
         ),
     )
 

@@ -17,6 +17,9 @@ _engines_repository_local_migration_module = importlib.import_module(
 _engines_state_home_migration_module = importlib.import_module(
     "backend.engines.agent_runner.state_home_migration"
 )
+_engines_worktree_directory_migration_module = importlib.import_module(
+    "backend.engines.agent_runner.worktree_directory_migration"
+)
 
 ConfigMigrationError = _engines_repository_local_migration_module.ConfigMigrationError
 ConfigMigrationResult = _engines_repository_local_migration_module.ConfigMigrationResult
@@ -31,6 +34,10 @@ rename_repository_local_config_file = (
 
 StateHomeMigrationResult = _engines_state_home_migration_module.StateHomeMigrationResult
 migrate_state_home = _engines_state_home_migration_module.migrate_state_home
+WorktreeDirectoryMigrationResult = (
+    _engines_worktree_directory_migration_module.WorktreeDirectoryMigrationResult
+)
+migrate_worktree_directory = _engines_worktree_directory_migration_module.migrate_worktree_directory
 #: 结论分类以函数透出：常量身份在 importlib 解析下会被复制，按值比较才是稳定的用法。
 STATE_HOME_CONFLICT_OUTCOMES = _engines_state_home_migration_module.conflict_outcomes()
 STATE_HOME_FAILURE_OUTCOMES = _engines_state_home_migration_module.failure_outcomes()
@@ -43,7 +50,9 @@ __all__ = [
     "STATE_HOME_CONFLICT_OUTCOMES",
     "STATE_HOME_FAILURE_OUTCOMES",
     "StateHomeMigrationResult",
+    "WorktreeDirectoryMigrationResult",
     "migrate_repository_local_config",
     "migrate_state_home",
+    "migrate_worktree_directory",
     "rename_repository_local_config_file",
 ]

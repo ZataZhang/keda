@@ -273,7 +273,7 @@ def test_build_issue_validation_section_with_items_and_waiver() -> None:
     assert "- [ ] item" in checklist_section
 
     waiver_section = build_issue_validation_section(checklist_items=[], waiver_reason="docs only")
-    assert "iar:validation-waived" in waiver_section
+    assert "kc:validation-waived" in waiver_section
     assert "- [ ]" not in waiver_section
 
 
@@ -460,7 +460,7 @@ def test_format_check_disabled_by_config_keeps_non_empty_gate(
 
 
 def test_format_check_disabled_by_issue_marker(tmp_path: Path) -> None:
-    """An iar:evidence-format-waived marker skips per-item matching."""
+    """An kc:evidence-format-waived marker skips per-item matching."""
     config = _legacy_config()
     evidence_dir = tmp_path / ".iar" / "evidence"
     evidence_dir.mkdir(parents=True)
@@ -497,7 +497,7 @@ def test_build_issue_validation_section_with_format_waiver() -> None:
         waiver_reason=None,
         format_waiver_reason="格式不固定",
     )
-    assert "iar:evidence-format-waived" in section
+    assert "kc:evidence-format-waived" in section
     assert "- [ ] item" in section
     config = AppConfig()
     assert validation_required(section, config)
@@ -526,9 +526,9 @@ def test_collect_evidence_coverage_problems_matches_items() -> None:
 def test_extract_evidence_format_markers() -> None:
     """Markers are parsed into a {item_number: kind} mapping."""
     body = (
-        "<!-- iar:evidence-format item=1 kind=screenshot -->\n"
-        "<!-- iar:evidence-format item=2 kind=txt -->\n"
-        "<!-- iar:evidence-format item=3 kind=none -->"
+        "<!-- kc:evidence-format item=1 kind=screenshot -->\n"
+        "<!-- kc:evidence-format item=2 kind=txt -->\n"
+        "<!-- kc:evidence-format item=3 kind=none -->"
     )
     markers = extract_evidence_format_markers(body)
     assert markers == {1: "screenshot", 2: "txt"}
@@ -537,8 +537,8 @@ def test_extract_evidence_format_markers() -> None:
 def test_extract_evidence_format_markers_ignores_unknown_kinds() -> None:
     """Unknown or 'none' kinds are skipped so future extensions are safe."""
     body = (
-        "<!-- iar:evidence-format item=1 kind=screenshot -->\n"
-        "<!-- iar:evidence-format item=2 kind=unknown -->"
+        "<!-- kc:evidence-format item=1 kind=screenshot -->\n"
+        "<!-- kc:evidence-format item=2 kind=unknown -->"
     )
     markers = extract_evidence_format_markers(body)
     assert markers == {1: "screenshot"}
@@ -547,7 +547,7 @@ def test_extract_evidence_format_markers_ignores_unknown_kinds() -> None:
 def test_demanded_evidence_kinds_prefers_marker() -> None:
     """When a marker exists for the item, it overrides regex matching."""
     item_text = "浏览器操作登录页（截图留证）。"
-    body = "<!-- iar:evidence-format item=1 kind=txt -->"
+    body = "<!-- kc:evidence-format item=1 kind=txt -->"
     kinds = demanded_evidence_kinds(item_text, issue_body=body, item_number=1)
     assert len(kinds) == 1
     assert kinds[0].label == "plain-text capture (.txt/.log)"
@@ -567,7 +567,7 @@ def test_collect_evidence_coverage_problems_with_markers() -> None:
         "- [ ] item 1",
         "- [ ] item 2",
     ]
-    body = "<!-- iar:evidence-format item=1 kind=screenshot -->"
+    body = "<!-- kc:evidence-format item=1 kind=screenshot -->"
     problems = collect_evidence_coverage_problems(
         checklist_items, [Path("rv-1-run.txt")], issue_body=body
     )
@@ -1039,7 +1039,7 @@ def test_upload_evidence_branch_uses_orphan_plumbing(tmp_path: Path) -> None:
     )
 
     assert upload is not None
-    assert upload.branch == "iar-evidence/issue-42"
+    assert upload.branch == "kc-evidence/issue-42"
     assert upload.commit_sha == "commit1"
     assert upload.file_names == ("rv-1-shot.png", "rv-2-cli.txt")
     # mktree 输入两行 blob 条目
@@ -1056,7 +1056,7 @@ def test_upload_evidence_branch_uses_orphan_plumbing(tmp_path: Path) -> None:
         "push",
         "--force",
         config.git.remote,
-        "commit1:refs/heads/iar-evidence/issue-42",
+        "commit1:refs/heads/kc-evidence/issue-42",
     ] in fake_runner.calls
 
 
@@ -1178,7 +1178,7 @@ def test_publish_validation_evidence_posts_pr_comment(tmp_path: Path) -> None:
     pr_comment_calls = [call for call in fake_client.calls if call["method"] == "comment_pr"]
     assert len(pr_comment_calls) == 1
     assert pr_comment_calls[0]["pr_number"] == 7
-    assert "iar:validation-evidence" in pr_comment_calls[0]["body"]
+    assert "kc:validation-evidence" in pr_comment_calls[0]["body"]
 
 
 def test_publish_validation_evidence_binds_stable_pr_identity(tmp_path: Path) -> None:
@@ -1352,8 +1352,8 @@ def test_publish_changes_appends_checklist_block(tmp_path: Path) -> None:
     )
 
     draft_pr_call = next(call for call in fake_client.calls if call["method"] == "create_draft_pr")
-    assert "iar:realistic-validation version=1 total=2" in draft_pr_call["body"]
-    assert "iar:realistic-validation-end" in draft_pr_call["body"]
+    assert "kc:realistic-validation version=1 total=2" in draft_pr_call["body"]
+    assert "kc:realistic-validation-end" in draft_pr_call["body"]
 
 
 def test_publish_changes_skips_checklist_for_waived_issue(tmp_path: Path) -> None:
@@ -1376,7 +1376,7 @@ def test_publish_changes_skips_checklist_for_waived_issue(tmp_path: Path) -> Non
     )
 
     draft_pr_call = next(call for call in fake_client.calls if call["method"] == "create_draft_pr")
-    assert "iar:realistic-validation" not in draft_pr_call["body"]
+    assert "kc:realistic-validation" not in draft_pr_call["body"]
 
 
 # ---------------------------------------------------------------------------
@@ -1437,13 +1437,13 @@ def _gate_setup(
     if evidence_head is not None:
         if evidence_patch_id is not None:
             gate_client._pr_comments[7] = [
-                f"<!-- iar:validation-evidence version=2 head={evidence_head} "
+                f"<!-- kc:validation-evidence version=2 head={evidence_head} "
                 f"base={evidence_base or 'b' * 40} patch={evidence_patch_id} "
                 "branch=iar-evidence/issue-42 count=2 -->"
             ]
         else:
             gate_client._pr_comments[7] = [
-                f"<!-- iar:validation-evidence version=1 head={evidence_head} "
+                f"<!-- kc:validation-evidence version=1 head={evidence_head} "
                 "branch=iar-evidence/issue-42 count=2 -->"
             ]
     return gate_client, review_issue
@@ -1766,14 +1766,14 @@ def test_cleanup_deletes_branches_for_closed_issues(tmp_path: Path) -> None:
         "ls-remote",
         "--heads",
         config.git.remote,
-        "refs/heads/iar-evidence/*",
+        "refs/heads/kc-evidence/*",
     )
     fake_runner = FakeProcessRunner(
         responses={
             ls_remote_command: CommandResult(
                 ls_remote_command,
                 0,
-                "sha1\trefs/heads/iar-evidence/issue-41\nsha2\trefs/heads/iar-evidence/issue-42\n",
+                "sha1\trefs/heads/kc-evidence/issue-41\nsha2\trefs/heads/kc-evidence/issue-42\n",
                 "",
             )
         }
@@ -1791,14 +1791,14 @@ def test_cleanup_deletes_branches_for_closed_issues(tmp_path: Path) -> None:
         "push",
         config.git.remote,
         "--delete",
-        "iar-evidence/issue-41",
+        "kc-evidence/issue-41",
     ] in fake_runner.calls
     assert [
         "git",
         "push",
         config.git.remote,
         "--delete",
-        "iar-evidence/issue-42",
+        "kc-evidence/issue-42",
     ] not in fake_runner.calls
 
 
@@ -1876,7 +1876,7 @@ def test_create_issue_materializes_validation_checklist(tmp_path: Path) -> None:
     assert "## Realistic Validation" in create_call["body"]
     assert "The executing agent MUST run each item" in create_call["body"]
     assert create_call["body"].count("- [ ] **行为") >= 2
-    assert "iar:validation-waived" not in create_call["body"]
+    assert "kc:validation-waived" not in create_call["body"]
 
 
 def test_create_issue_materializes_waiver_marker(tmp_path: Path) -> None:
@@ -1896,7 +1896,7 @@ def test_create_issue_materializes_waiver_marker(tmp_path: Path) -> None:
     )
 
     create_call = next(call for call in fake_client.calls if call["method"] == "create_issue")
-    assert "iar:validation-waived" in create_call["body"]
+    assert "kc:validation-waived" in create_call["body"]
     assert "## Realistic Validation" in create_call["body"]
     body_validation_state = parse_validation_checklist_state(create_call["body"])
     assert body_validation_state is None
@@ -1911,7 +1911,7 @@ _STRUCTURED_ISSUE_BODY = """## Summary
 
 Tracked task.
 
-<!-- iar:structured-evidence version=1 language="zh-CN" -->
+<!-- kc:structured-evidence version=1 language="zh-CN" -->
 
 ## Realistic Validation
 
@@ -1982,7 +1982,7 @@ def test_format_structured_evidence_marker() -> None:
     """The marker formatter uses the configured language."""
     assert (
         format_structured_evidence_marker("en-US")
-        == '<!-- iar:structured-evidence version=1 language="en-US" -->'
+        == '<!-- kc:structured-evidence version=1 language="en-US" -->'
     )
 
 
@@ -1994,7 +1994,7 @@ def test_build_issue_validation_section_adds_structured_marker() -> None:
         language="zh-CN",
         structured_evidence=True,
     )
-    assert 'iar:structured-evidence version=1 language="zh-CN"' in section
+    assert 'kc:structured-evidence version=1 language="zh-CN"' in section
 
 
 def test_build_issue_validation_section_skips_marker_when_disabled() -> None:
@@ -2005,7 +2005,7 @@ def test_build_issue_validation_section_skips_marker_when_disabled() -> None:
         language="zh-CN",
         structured_evidence=False,
     )
-    assert "iar:structured-evidence" not in section
+    assert "kc:structured-evidence" not in section
 
 
 def test_ensure_validation_evidence_ready_passes_with_complete_manifest(
@@ -2292,7 +2292,7 @@ def test_ensure_validation_commands_pass_caches_pass_on_clean_tree(
         _issue(body=_STRUCTURED_ISSUE_BODY), tmp_path, _legacy_config(), first
     )
     assert ["bash", "-lc", "demo run"] in first.raw_calls
-    assert (tmp_path / ".iar" / "rv_reexec_cache.json").exists()
+    assert (tmp_path / ".kedacode" / "rv_reexec_cache.json").exists()
 
     second = FakeProcessRunner(responses=responses)
     ensure_validation_commands_pass(
@@ -2337,7 +2337,7 @@ def test_ensure_validation_commands_pass_does_not_cache_dirty_tree(
         _issue(body=_STRUCTURED_ISSUE_BODY), tmp_path, _legacy_config(), runner
     )
     assert ["bash", "-lc", "demo run"] in runner.raw_calls
-    assert not (tmp_path / ".iar" / "rv_reexec_cache.json").exists()
+    assert not (tmp_path / ".kedacode" / "rv_reexec_cache.json").exists()
 
 
 def test_ensure_validation_commands_pass_cache_disabled_always_reruns(
@@ -2351,7 +2351,7 @@ def test_ensure_validation_commands_pass_cache_disabled_always_reruns(
     first = FakeProcessRunner(responses=responses)
     ensure_validation_commands_pass(_issue(body=_STRUCTURED_ISSUE_BODY), tmp_path, config, first)
     assert ["bash", "-lc", "demo run"] in first.raw_calls
-    assert not (tmp_path / ".iar" / "rv_reexec_cache.json").exists()
+    assert not (tmp_path / ".kedacode" / "rv_reexec_cache.json").exists()
 
     second = FakeProcessRunner(responses=responses)
     ensure_validation_commands_pass(_issue(body=_STRUCTURED_ISSUE_BODY), tmp_path, config, second)
@@ -2500,7 +2500,7 @@ def test_create_issue_materializes_structured_evidence_marker(
     )
 
     create_call = next(call for call in fake_client.calls if call["method"] == "create_issue")
-    assert 'iar:structured-evidence version=1 language="zh-CN"' in create_call["body"]
+    assert 'kc:structured-evidence version=1 language="zh-CN"' in create_call["body"]
 
 
 def test_create_issue_omits_structured_marker_when_disabled(
@@ -2523,7 +2523,7 @@ def test_create_issue_omits_structured_marker_when_disabled(
     )
 
     create_call = next(call for call in fake_client.calls if call["method"] == "create_issue")
-    assert "iar:structured-evidence" not in create_call["body"]
+    assert "kc:structured-evidence" not in create_call["body"]
 
 
 # ---------------------------------------------------------------------------
@@ -2758,7 +2758,7 @@ def test_ensure_validation_commands_pass_enforces_stdout_substring(
     assert "REAL_OUTPUT" in failure_text
     assert "stdout" in failure_text
     # 假绿灯不得被写进复跑缓存，否则下一轮会被缓存固化
-    assert not (tmp_path / ".iar" / "rv_reexec_cache.json").exists()
+    assert not (tmp_path / ".kedacode" / "rv_reexec_cache.json").exists()
 
 
 def test_ensure_validation_commands_pass_allows_matching_stdout(tmp_path: Path) -> None:

@@ -72,7 +72,7 @@ class IssueFromPromptRequest:
         generated_content_config: AI 内容生成配置；``None`` 或未启用时直接用
             确定性回退正文。
         validation_language: Realistic Validation 固定标签语言。
-        structured_evidence: 是否物化 ``iar:structured-evidence`` marker。
+        structured_evidence: 是否物化 ``kc:structured-evidence`` marker。
         evidence_dir: 证据目录配置根（仓库相对）。
         model_selection: ``content_generation`` 阶段绑定的模型选择。
         extra_labels: 创建时就一并带上的额外标签（如 loop 的 ``loop/<id>``）。放在创建
@@ -228,7 +228,7 @@ def create_issue_from_prompt(
     2. 确定性回退标题 / 正文。
     3. 可选的 AI 内容生成（``agent → template → fallback``）。
     4. 按旗标物化或剥离 ``Realistic Validation`` 小节。
-    5. 追加 ``iar:depends-on`` marker（``--depends-on`` 是本路径唯一的依赖来源）。
+    5. 追加 ``kc:depends-on`` marker（``--depends-on`` 是本路径唯一的依赖来源）。
     6. 调用 ``github_client.create_issue()``。
 
     Args:

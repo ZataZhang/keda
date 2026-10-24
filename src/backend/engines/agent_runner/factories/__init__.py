@@ -277,7 +277,7 @@ def resolve_console_spawn_cwd(
 ) -> Path:
     """托管进程的工作目录：目标仓库自身的路径。
 
-    面板托管的 runner 必须在目标仓库内运行——读取该仓库的 ``.iar`` 状态
+    面板托管的 runner 必须在目标仓库内运行——读取该仓库的 ``.kedacode``（或现存 ``.iar``）状态
     与 git 上下文。全局安装场景下 keda 项目根与目标仓库无关，继续把
     cwd 指向它会让 daemon 在错误目录用一个不存在的 uv 项目启动。
     （``kc registry start`` / ``kc takeover`` 仍以 registry config.toml

@@ -174,7 +174,7 @@ def test_run_once_dry_run_skips_blocked_ready_issue() -> None:
         _make_ready_issue(
             2,
             "Issue #2",
-            "<!-- iar:depends-on #1 -->",
+            "<!-- kc:depends-on #1 -->",
             ("agent/ready",),
         )
     ]
@@ -209,7 +209,7 @@ def test_run_once_dry_run_continues_after_dependency_blocked_ready_issue(
             _make_ready_issue(
                 5,
                 "Issue #5",
-                "<!-- iar:depends-on #3 -->",
+                "<!-- kc:depends-on #3 -->",
                 ("agent/ready", "priority/P0"),
             ),
             _make_ready_issue(
@@ -254,7 +254,7 @@ def test_run_once_dry_run_stack_waiting_does_not_consume_quota(
         _make_ready_issue(
             5,
             "Issue #5",
-            '<!-- iar:depends-on #3 mode="stack" -->',
+            '<!-- kc:depends-on #3 mode="stack" -->',
             ("agent/ready", "priority/P0"),
         ),
         _make_ready_issue(
@@ -392,7 +392,7 @@ def test_run_once_dry_run_processes_unblocked_ready_issue() -> None:
         _make_ready_issue(
             2,
             "Issue #2",
-            "<!-- iar:depends-on #1 -->",
+            "<!-- kc:depends-on #1 -->",
             ("agent/ready", "agent/waiting"),
         )
     ]
@@ -1319,7 +1319,7 @@ def test_persist_attempt_result_writes_to_sqlite_and_github(tmp_path: Path) -> N
     # GitHub: first attempt creates a new comment
     comment_calls = [c for c in fake_client.calls if c["method"] == "comment_issue"]
     assert len(comment_calls) == 1
-    assert "<!-- iar-attempt-history -->" in comment_calls[0]["body"]
+    assert "<!-- kc:attempt-history -->" in comment_calls[0]["body"]
     assert "claude" in comment_calls[0]["body"]
     assert "5.0s" in comment_calls[0]["body"]
 
@@ -1328,7 +1328,7 @@ def test_persist_attempt_result_updates_existing_github_comment() -> None:
     """Subsequent attempts update the existing attempt-history comment."""
     fake_client = FakeGitHubClient()
     # Seed an existing attempt-history comment
-    fake_client.comment_issue(42, "<!-- iar-attempt-history -->\nold body")
+    fake_client.comment_issue(42, "<!-- kc:attempt-history -->\nold body")
     fake_client.calls.clear()
 
     result = AttemptResult(
@@ -1355,7 +1355,7 @@ def test_persist_attempt_result_updates_existing_github_comment() -> None:
 
     edit_calls = [c for c in fake_client.calls if c["method"] == "edit_issue_comment"]
     assert len(edit_calls) == 1
-    assert "<!-- iar-attempt-history -->" in edit_calls[0]["body"]
+    assert "<!-- kc:attempt-history -->" in edit_calls[0]["body"]
     assert "Done." in edit_calls[0]["body"]
     comment_calls = [c for c in fake_client.calls if c["method"] == "comment_issue"]
     assert len(comment_calls) == 0
@@ -1381,7 +1381,7 @@ def _latest_history_body(fake_client: FakeGitHubClient) -> str:
         call
         for call in fake_client.calls
         if call["method"] in {"comment_issue", "edit_issue_comment"}
-        and "<!-- iar-attempt-history -->" in call.get("body", "")
+        and "<!-- kc:attempt-history -->" in call.get("body", "")
     ]
     return history_writes[-1]["body"]
 
@@ -1937,7 +1937,7 @@ def test_run_once_direct_pr_cleanup_bypasses_ready_claim_budget(
     cleanup_issue = _make_ready_issue(
         8,
         "Published Direct PR handoff",
-        "<!-- iar:depends-on #1 -->",
+        "<!-- kc:depends-on #1 -->",
         ("agent/ready",),
     )
     regular_ready_issue = _make_ready_issue(9, "New work", "", ("agent/ready",))

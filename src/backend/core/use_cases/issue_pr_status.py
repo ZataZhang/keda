@@ -91,7 +91,7 @@ class IssueListResult:
     errors: tuple[tuple[str, str], ...] = ()
 
 
-def _has_local_iar_repo(cwd: Path) -> bool:
+def _has_local_kc_repo(cwd: Path) -> bool:
     """Return True when ``cwd`` holds a repository-local KedaCode config.
 
     只识别当前名称 ``.kedacode.toml``。
@@ -122,7 +122,7 @@ def _resolve_targets_with_cwd_autodetect(
     request: IssueListRequest,
     *,
     cwd: Path,
-    has_local_iar_repo: Callable[[Path], bool],
+    has_local_kc_repo: Callable[[Path], bool],
     resolve_targets: _RepoTargetResolver,
 ) -> list:
     """Apply cwd auto-detection on top of an injected target resolver.
@@ -136,7 +136,7 @@ def _resolve_targets_with_cwd_autodetect(
     Args:
         request: Validated caller request.
         cwd: Current working directory used for auto-detection.
-        has_local_iar_repo: Predicate that returns ``True`` when ``cwd``
+        has_local_kc_repo: Predicate that returns ``True`` when ``cwd``
             looks like a KedaCode project repo (i.e. its repository-local
             config file exists in ``cwd``).
         resolve_targets: Injected target resolver.
@@ -155,7 +155,7 @@ def _resolve_targets_with_cwd_autodetect(
             repo_path_override=request.repo_path_override,
             all_repositories=request.all_repositories,
         )
-    if has_local_iar_repo(cwd):
+    if has_local_kc_repo(cwd):
         return resolve_targets(
             repo_id=None,
             repo_path_override=str(cwd),
@@ -329,7 +329,7 @@ def list_issues_with_prs(
     cwd: Path,
     github_client_factory: Callable[[Path], IGitHubClient],
     resolve_targets: _RepoTargetResolver,
-    has_local_iar_repo: Callable[[Path], bool] = _has_local_iar_repo,
+    has_local_kc_repo: Callable[[Path], bool] = _has_local_kc_repo,
 ) -> IssueListResult:
     """Resolve, fetch, and assemble the issue + PR view-model rows.
 
@@ -341,7 +341,7 @@ def list_issues_with_prs(
         resolve_targets: Injected helper bound to the engine's
             ``resolve_repository_targets`` factory; injected here so the
             use case stays in ``core/``.
-        has_local_iar_repo: Predicate used by the cwd auto-detect
+        has_local_kc_repo: Predicate used by the cwd auto-detect
             wrapper; injected so tests can avoid touching disk.
 
     Returns:
@@ -353,7 +353,7 @@ def list_issues_with_prs(
     contexts = _resolve_targets_with_cwd_autodetect(
         request,
         cwd=cwd,
-        has_local_iar_repo=has_local_iar_repo,
+        has_local_kc_repo=has_local_kc_repo,
         resolve_targets=resolve_targets,
     )
 

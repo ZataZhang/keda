@@ -52,7 +52,7 @@ class PrdActivityLease:
             else self._repo_path
         )
         claim_result = self._run_lock_command(
-            "claim", "--tool", f"iar/{self._agent}", "--branch", f"issue-{self._issue_number}"
+            "claim", "--tool", f"kc/{self._agent}", "--branch", f"issue-{self._issue_number}"
         )
         if claim_result.returncode != 0:
             detail = (claim_result.stderr or claim_result.stdout).strip()
@@ -92,7 +92,7 @@ class PrdActivityLease:
                 self._run_lock_command(
                     "claim",
                     "--tool",
-                    f"iar/{self._agent}",
+                    f"kc/{self._agent}",
                     "--branch",
                     f"issue-{self._issue_number}",
                 )

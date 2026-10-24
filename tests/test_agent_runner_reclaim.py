@@ -12,6 +12,7 @@ from backend.core.use_cases.agent_runner_reclaim import (
     is_pid_alive,
     parse_claim_marker,
     parse_claim_marker_body,
+    parse_claim_marker_detail,
     reclaim_stale_running_issues,
 )
 from tests.conftest import FakeGitHubClient
@@ -45,6 +46,11 @@ def test_parse_claim_marker_picks_last() -> None:
 
 def test_parse_claim_marker_absent_returns_none() -> None:
     assert parse_claim_marker("no marker here") is None
+
+
+def test_parse_claim_marker_ignores_the_retired_marker_name() -> None:
+    """升级后旧认领标记等同于不存在，迁移前不做双读。"""
+    assert parse_claim_marker_detail('<!-- iar:claim host="host-a" pid="4242" -->') is None
 
 
 def test_is_pid_alive_distinguishes_live_and_dead() -> None:
@@ -301,5 +307,5 @@ def test_reclaim_ttl_still_reclaims_dead_pid() -> None:
 
 def test_parse_claim_marker_body_invalid_iso_falls_back_to_none() -> None:
     """started_at 解析失败时不影响 host/pid 解析,started_at 返回 None。"""
-    bad = '<!-- iar:claim host="host-a" pid="4242" started_at="not-iso" -->'
+    bad = '<!-- kc:claim host="host-a" pid="4242" started_at="not-iso" -->'
     assert parse_claim_marker_body(f"## x\n{bad}") == ("host-a", 4242, None)

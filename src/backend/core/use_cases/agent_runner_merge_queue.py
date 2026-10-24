@@ -12,7 +12,7 @@ PRD 文件本身不会在合并后被回写。
 崩溃重入幂等性：
 - 自动签核前先解析 :class:`ValidationChecklistState`，已全勾则不再改 body
   也不发评论。
-- 发评论前先扫描当前 Issue 评论找 ``iar:auto-sign-off`` marker，已存在则
+- 发评论前先扫描当前 Issue 评论找 ``kc:auto-sign-off`` marker，已存在则
   不重复发。
 - 合并成功后 ``gh pr merge --squash`` 对已合并 PR 视为幂等成功（由
   :class:`backend.infrastructure.github_client.GitHubCliClient` 把
@@ -72,7 +72,7 @@ from backend.core.use_cases.run_agent_once import create_or_reuse_worktree
 _logger = logging.getLogger(__name__)
 
 # Auto-sign-off marker prefix used to dedupe comments on daemon crash re-entry.
-_AUTO_SIGN_OFF_MARKER = "<!-- iar:auto-sign-off"
+_AUTO_SIGN_OFF_MARKER = "<!-- kc:auto-sign-off"
 # Event phase used by the merge-queue success audit comment.
 _MERGED_EVENT_PHASE = "auto_merged"
 
@@ -93,7 +93,7 @@ def _tick_sign_off_checklist(pr_body: str) -> str | None:
     # The block is delimited by two markers; ``re.DOTALL`` lets ``.*?`` span
     # lines. The captured middle group is what we tick in place.
     block_pattern = re.compile(
-        r"(<!--\s*iar:realistic-validation\s+version=\d+\s+total=\d+\s*-->)(.*?)(<!--\s*iar:realistic-validation-end\s*-->)",
+        r"(<!--\s*kc:realistic-validation\s+version=\d+\s+total=\d+\s*-->)(.*?)(<!--\s*kc:realistic-validation-end\s*-->)",
         re.DOTALL,
     )
     match = block_pattern.search(pr_body)
@@ -118,7 +118,7 @@ def _tick_sign_off_checklist(pr_body: str) -> str | None:
 
 
 def _has_auto_sign_off_marker(comments: list[str]) -> bool:
-    """Return True when an existing ``iar:auto-sign-off`` marker is present.
+    """Return True when an existing ``kc:auto-sign-off`` marker is present.
 
     Used by the merge queue to dedupe its own audit comments on daemon crash
     re-entry so the same Issue doesn't accumulate duplicate "I ticked the
@@ -460,7 +460,7 @@ def _process_one(
             return MergeQueueOutcome(issue_number=issue.number, action="skipped_verifier_missing")
 
     # Step 1.5: prd skill 发布契约硬门。发布端软门已在 PR body 里写入
-    # ``iar:pr-contract`` 标注（缺失锚点清单），runner 自己声明过不合规的 PR
+    # ``kc:pr-contract`` 标注（缺失锚点清单），runner 自己声明过不合规的 PR
     # 不自动合并。与 verifier 门同样走静默 skip：不合规状态本身已在 PR body
     # 标注块中对人可见，逐轮评论只会刷屏。存量 PR（机制上线前发布）无标注，
     # 不受影响。
@@ -698,7 +698,7 @@ def _process_one(
     auto_sign_off_marker = ""
     if any(_AUTO_SIGN_OFF_MARKER in comment for comment in new_comments):
         auto_sign_off_marker = (
-            "\n\n<!-- iar:auto-sign-off version=1 stage=merged verifier_gate="
+            "\n\n<!-- kc:auto-sign-off version=1 stage=merged verifier_gate="
             f"{'skipped' if scoped_prd_auto_merge else 'passed'} -->"
         )
     merge_summary = (

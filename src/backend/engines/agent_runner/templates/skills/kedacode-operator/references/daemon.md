@@ -23,7 +23,7 @@ The user says 「挂后台」「让它自己跑」「有个 daemon 在跑吗」�
 
 - A daemon that should stop: `kc registry stop --repo-id <id>`.
 - Work must be taken over from a live daemon immediately: run `kc run --all-ready --takeover` (add `--yes` in scripts) — destructive: it interrupts **all** of the daemon's in-flight Issues, so require the user's explicit consent first.
-- A labelled Issue keeps its `direct-pr` label after a failed execution or a failed PR creation — that is intentional: the unfinished round retains its DIRECT choice for retry. If the log says the PR was published but the label cleanup is pending, do **not** rerun the work: the next recovery confirms the unfinished publication-round association plus the same repository, Issue, branch, head and `iar:direct-pr` marker, then only completes label/workflow handoff—even after a crash where the label was already removed. An old same-head PR alone cannot consume a new choice. Wait for consumption and handoff before re-adding the label; a concurrent re-add in that window is unsupported.
+- A labelled Issue keeps its `direct-pr` label after a failed execution or a failed PR creation — that is intentional: the unfinished round retains its DIRECT choice for retry. If the log says the PR was published but the label cleanup is pending, do **not** rerun the work: the next recovery confirms the unfinished publication-round association plus the same repository, Issue, branch, head and `kc:direct-pr` marker, then only completes label/workflow handoff—even after a crash where the label was already removed. An old same-head PR alone cannot consume a new choice. Wait for consumption and handoff before re-adding the label; a concurrent re-add in that window is unsupported.
 
 ## Related
 

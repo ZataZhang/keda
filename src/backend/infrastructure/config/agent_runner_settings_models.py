@@ -505,11 +505,13 @@ class AgentRunnerBacklogSettings(BaseModel):
 class AgentRunnerValidationSettings(BaseModel):
     """Realistic Validation evidence gate configuration."""
 
+    # jscpd:ignore-start
+    # 与 core 的 ValidationConfig 镜像字段；基础设施层不能反向导入 core 默认值。
     enabled: bool = True
     # 与 core.shared.models.agent_runner.DEFAULT_VALIDATION_EVIDENCE_DIR 保持一致；
     # infrastructure 处于四层最底，不能反向 import core 的常量。
     evidence_dir: str = "tasks/evidence"
-    branch_prefix: str = "iar-evidence/"
+    branch_prefix: str = "kc-evidence/"
     evidence_format_check: bool = True
     parse_evidence_format_with_agent: bool = True
     language: str = "zh-CN"
@@ -525,6 +527,7 @@ class AgentRunnerValidationSettings(BaseModel):
     artifact_health_enabled: bool = True
     frontend_visual_evidence_required: bool = True
     frontend_paths: list[str] = Field(default_factory=lambda: ["frontend-admin", "frontend-public"])
+    # jscpd:ignore-end
 
 
 #: ``kc console`` 的默认端口；被占用时 CLI 会自动顺延，显式 ``--port`` 不顺延。
@@ -703,7 +706,7 @@ class AgentRunnerPostPrSupervisorSettings(BaseModel):
     max_diff_chars: int = 6000
     # 补丁 4：跨 cycle finding 注入开关与 artifact 目录（worktree 相对路径）
     previous_findings_injection_enabled: bool = True
-    findings_artifact_dir: str = ".iar/state"
+    findings_artifact_dir: str = ".kedacode/state"
 
 
 class AgentRunnerDeliberationProfileSettings(BaseModel):
@@ -730,7 +733,7 @@ class AgentRunnerReplSettings(BaseModel):
 
     The REPL entrypoint lets the user chat with a configured agent and
     grants the agent the ability to request execution of whitelisted KedaCode
-    subcommands via ``<<IAR_EXEC>> ... <<END_IAR_EXEC>>`` markers. This
+    subcommands via ``<<KC_EXEC>> ... <<END_KC_EXEC>>`` markers. This
     settings block isolates the REPL's risk surface (default agent,
     command allow/confirm lists, audit directory) from the ``kc ask``
     decision planner.

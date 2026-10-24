@@ -63,9 +63,9 @@ def test_format_event_marker_with_optional_fields() -> None:
 def test_parse_latest_event_marker_finds_latest() -> None:
     """Parser should return the most recent marker."""
     comments = [
-        "<!-- iar:event version=1 phase=old cycle=1 head=aaa -->",
+        "<!-- kc:event version=1 phase=old cycle=1 head=aaa -->",
         "some text",
-        "<!-- iar:event version=1 phase=new cycle=2 head=bbb action=rebase_pr_branch -->",
+        "<!-- kc:event version=1 phase=new cycle=2 head=bbb action=rebase_pr_branch -->",
     ]
     marker = parse_latest_event_marker(comments)
     assert marker is not None
@@ -138,7 +138,7 @@ def test_parse_pending_rework_marker_stops_after_completion() -> None:
 def test_parse_event_marker_with_new_fields() -> None:
     """Parser should extract new optional fields from marker."""
     comment = (
-        "<!-- iar:event version=1 phase=post_pr_supervisor cycle=3 "
+        "<!-- kc:event version=1 phase=post_pr_supervisor cycle=3 "
         "head=abc123 base=def456 checks_state=FAILURE mergeable=true "
         "issue_comments_count=5 pr_comments_count=2 -->"
     )
@@ -155,7 +155,7 @@ def test_parse_event_marker_with_new_fields() -> None:
 
 def test_parse_event_marker_backward_compatible() -> None:
     """Old markers without new fields should parse without error."""
-    comment = "<!-- iar:event version=1 phase=post_pr_supervisor cycle=1 head=abc123 -->"
+    comment = "<!-- kc:event version=1 phase=post_pr_supervisor cycle=1 head=abc123 -->"
     from backend.core.shared.models.agent_runner import ReviewEventMarker
 
     marker = parse_latest_event_marker([comment])
@@ -410,7 +410,7 @@ def test_build_pre_pr_review_result_comment_structure() -> None:
         cycle=1,
         findings_critical=0,
     )
-    assert "<!-- iar:event" in body
+    assert "<!-- kc:event" in body
     assert "phase=pre_pr_review" in body
     assert "Verdict: approved" in body
     assert "Reviewer: codex" in body

@@ -16,8 +16,8 @@
    ``validation/pending`` / ``validation/passed`` label，PR 改动身份变化时重置勾选，
    Issue 关闭后清理证据分支。
 
-所有 hidden marker 与 ``agent_runner_events.py`` 的 ``iar:event`` 同型
-（``<!-- iar:... -->`` + 命名捕获组正则）。GitHub Issue / PR 仍是唯一状态源。
+所有 hidden marker 与 ``agent_runner_events.py`` 的 ``kc:event`` 同型
+（``<!-- kc:... -->`` + 命名捕获组正则）。GitHub Issue / PR 仍是唯一状态源。
 """
 
 from __future__ import annotations
@@ -40,6 +40,10 @@ from backend.core.shared.models.agent_runner import (
     DeliveryGateFailureKind,
     IssueSummary,
     evidence_dir_uses_task_subdirs,
+)
+from backend.core.shared.models.repository_paths import (
+    LEGACY_REPOSITORY_STATE_DIR_NAME,
+    resolve_repository_state_path,
 )
 from backend.core.use_cases.agent_runner_evidence_format import (
     VISUAL_EVIDENCE_SUFFIXES,
@@ -472,6 +476,7 @@ def ensure_evidence_dir_excluded(
         # legacy/自定义目录：整目录排除，行为与历史版本一致。
         desired_lines.append(f"/{config.validation.evidence_dir.strip('/')}/")
     desired_lines.append(f"/{_RV_REEXEC_CACHE_RELPATH}")
+    desired_lines.append(f"/{_LEGACY_RV_REEXEC_CACHE_RELPATH}")
     existing_text = ""
     if exclude_path.exists():
         existing_text = exclude_path.read_text(encoding="utf-8")
@@ -579,10 +584,10 @@ def ensure_validation_evidence_ready(
     除了证据目录非空，还逐项核对清单：每个条目都要有 ``rv-<n>-*`` 文件，
     条目点名的格式（截图、pdf、txt、word……）必须有对应后缀的证据。
     逐项对账可全局关（``validation.evidence_format_check = false``）或
-    按任务关（Issue body 带 ``iar:evidence-format-waived`` marker），
+    按任务关（Issue body 带 ``kc:evidence-format-waived`` marker），
     关闭后退化为仅要求证据目录非空。
 
-    对于带 ``iar:structured-evidence`` marker 的 Issue，额外校验
+    对于带 ``kc:structured-evidence`` marker 的 Issue，额外校验
     ``evidence.json`` manifest：字段完整性、item 覆盖、证据文件存在性与
     编号一致性、语言一致性。
 
@@ -663,18 +668,25 @@ def ensure_validation_evidence_ready(
         )
 
 
-_RV_REEXEC_CACHE_RELPATH = ".iar/rv_reexec_cache.json"
+_RV_REEXEC_CACHE_RELPATH = ".kedacode/rv_reexec_cache.json"
+_LEGACY_RV_REEXEC_CACHE_RELPATH = (
+    Path(LEGACY_REPOSITORY_STATE_DIR_NAME) / "rv_reexec_cache.json"
+).as_posix()
 """RV 复跑缓存的 worktree 相对路径（runner 私有状态）。
 
-固定留在 ``.iar/``，与证据目录父目录解耦：RV 脚本每轮会清空自己产生的
-``rv-*`` 证据，缓存放进证据目录会被一并抹掉；``.iar/`` 由 init 的
-``.gitignore`` 托管块与 :func:`ensure_evidence_dir_excluded` 双重排除。
+默认留在 ``.kedacode/``，与证据目录父目录解耦：RV 脚本每轮会清空自己产生的
+``rv-*`` 证据，缓存放进证据目录会被一并抹掉；旧 ``.iar/`` 缓存存在时继续沿用。
+两种状态目录均由 init 的 ``.gitignore`` 托管块与 :func:`ensure_evidence_dir_excluded` 排除。
 """
 
 
 def _rv_reexec_cache_path(worktree_path: Path) -> Path:
     """Absolute path of the RV re-execution cache inside ``worktree_path``."""
-    return worktree_path / _RV_REEXEC_CACHE_RELPATH
+    return resolve_repository_state_path(
+        worktree_path,
+        Path(_RV_REEXEC_CACHE_RELPATH),
+        Path(_LEGACY_RV_REEXEC_CACHE_RELPATH),
+    )
 
 
 def _clean_tree_fingerprint(worktree_path: Path, process_runner: IProcessRunner) -> str | None:
@@ -794,7 +806,7 @@ def ensure_validation_commands_pass(
 
     keda 以自己复跑的退出码为准,而不是只信 agent 写的证据文件——这样
     "测试通过但功能其实坏了 / agent 没真跑" 无法蒙混过关。仅对带
-    ``iar:structured-evidence`` marker、要求验证、且开启 ``reexecute_commands``
+    ``kc:structured-evidence`` marker、要求验证、且开启 ``reexecute_commands``
     的 Issue 生效。命令经 ``bash -lc`` 在 worktree 内执行并带超时;非零退出
     或超时即判失败,抛 ``ValidationEvidenceError`` 进入既有 recovery 循环。
 

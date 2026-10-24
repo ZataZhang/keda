@@ -20,7 +20,7 @@ from backend.api.cli_registry import (
     _run_registry_stop_command,
 )
 from backend.core.use_cases.agent_runner_factory import create_registry_editor, logger
-from backend.core.use_cases.agent_runner_repository_local import discover_iar_repositories
+from backend.core.use_cases.agent_runner_repository_local import discover_repositories
 
 
 def _scan_root_error(command: str, exc: ValueError) -> CliError:
@@ -35,7 +35,7 @@ def _scan_root_error(command: str, exc: ValueError) -> CliError:
 def run_registry_scan_command(ctx: ParsedCommandContext) -> int:
     """``kc registry scan``: discover KedaCode-initialized repos under a path."""
     try:
-        entries = discover_iar_repositories(
+        entries = discover_repositories(
             scan_root=Path(ctx.parsed.scan_root),
             editor=create_registry_editor(),
         )
@@ -53,7 +53,7 @@ def run_registry_scan_command(ctx: ParsedCommandContext) -> int:
 def run_registry_sync_command(ctx: ParsedCommandContext) -> int:
     """``kc registry sync``: discover and register all KedaCode repositories."""
     try:
-        entries = discover_iar_repositories(
+        entries = discover_repositories(
             scan_root=Path(ctx.parsed.scan_root),
             editor=create_registry_editor(),
         )

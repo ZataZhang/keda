@@ -83,6 +83,20 @@ def test_worktree_create_creates_directory(tmp_path: Path) -> None:
     assert rev_parse.stdout.strip() == head_in_worktree.stdout.strip()
 
 
+def test_worktree_create_reuses_existing_legacy_directory(tmp_path: Path) -> None:
+    """已有旧容器目录时，新工作树仍建在该目录中。"""
+    repo_path = _init_git_repository(tmp_path, "target")
+    legacy_worktree_root_path = repo_path / ".iar-worktrees"
+    legacy_worktree_root_path.mkdir()
+    manager = WorktreeManager(repo_path, SubprocessRunner())
+
+    created_worktree_path = manager.create(branch="issue-legacy", base_branch="main")
+
+    assert created_worktree_path == legacy_worktree_root_path / "issue-legacy"
+    assert created_worktree_path.is_dir()
+    assert not (repo_path / ".kc-worktrees").exists()
+
+
 def test_worktree_create_excludes_worktree_dir_from_index(tmp_path: Path) -> None:
     """``create`` writes info/exclude so ``git add -A`` cannot stage worktrees.
 
@@ -132,6 +146,23 @@ def test_iar_worktree_create_cli_real_entry(
     assert worktree_path.exists()
     list_result = _run_git(repo_path, "worktree", "list")
     assert str(worktree_path) in list_result.stdout
+
+
+def test_worktree_create_cli_reuses_existing_legacy_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """真实 CLI 在旧目录存在时不创建新的平行容器目录。"""
+    repo_path = _init_git_repository(tmp_path, "legacy-target")
+    legacy_worktree_root_path = repo_path / ".iar-worktrees"
+    legacy_worktree_root_path.mkdir()
+    monkeypatch.chdir(repo_path)
+
+    assert main(["worktree", "create", "--branch", "cli-legacy", "--base-branch", "main"]) == 0
+
+    expected_worktree_path = legacy_worktree_root_path / "cli-legacy"
+    assert expected_worktree_path.is_dir()
+    assert not (repo_path / ".kc-worktrees").exists()
+    assert str(expected_worktree_path) in _run_git(repo_path, "worktree", "list").stdout
 
 
 def test_iar_worktree_path_cli_real_entry(

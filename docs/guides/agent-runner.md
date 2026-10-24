@@ -244,7 +244,7 @@ kc labels sync --repo-id keda
 依赖门禁采用 **PRD 结构化依赖声明 + KedaCode materialized marker/label** 的无状态方案：
 
 - PRD 中包含工具无关的 `Delivery Dependencies` 小节
-- `kc issue create` 将 `Gate type: hard` 的依赖物化为 Issue body 中的 `<!-- iar:depends-on ... -->` marker
+- `kc issue create` 将 `Gate type: hard` 的依赖物化为 Issue body 中的 `<!-- kc:depends-on ... -->` marker
 - runner 每次轮询时实时查询 GitHub 状态：依赖未满足时跳过领取、叠加 `agent/waiting` label 并写等待 comment
 - 依赖未满足的 ready Issue 不消耗 `max_issues` 的处理额度；runner 会继续扫描后续 ready Issue，直到找到可领取任务或扫描窗口耗尽
 - 上游 Issue 全部 closed 后，下一轮轮询自动移除 `agent/waiting` 并正常领取
@@ -282,7 +282,7 @@ kc labels sync --repo-id keda
   - **前置条件**：`stack` 只在 `Gate type: hard` 时物化 marker（`Gate type: none`/`soft` 会被静默忽略，等同 via-main）；且只支持**单个**上游，声明多个上游时 `kc issue create` fail fast（DAG 不在范围内）。
   - **收敛的已知代价**：keda 以 squash 合并上游，收敛时下游 `git rebase` 到 main 需要处理"上游提交已被 squash 进 main"的情况（多数被识别为空提交丢弃，但 base 同一区域被改动时仍可能冲突，冲突走既有 agent 解决路径）。这是被接受的复杂度，不是无代价的平移。
 
-> 依赖 marker 里以 `mode="stack"` 承载该策略（如 `<!-- iar:depends-on #42 mode="stack" -->`）；未声明时默认 `via-main`。
+> 依赖 marker 里以 `mode="stack"` 承载该策略（如 `<!-- kc:depends-on #42 mode="stack" -->`）；未声明时默认 `via-main`。
 
 PRD 引用只在 `kc issue create` 发布时解析，不会原样写入 Issue body。解析规则：
 
@@ -305,7 +305,7 @@ CLI 参数与 PRD 声明会**合并去重**，CLI 参数优先级最高。
 
 ### runner 行为
 
-- 无 `iar:depends-on` marker 的 Issue：行为与改动前完全一致（零破坏）
+- 无 `kc:depends-on` marker 的 Issue：行为与改动前完全一致（零破坏）
 - 依赖未满足：`agent/ready` 保持，叠加 `agent/waiting`，写 comment 说明阻塞原因
 - 依赖满足：自动移除 `agent/waiting`（若有），正常进入领取流程
 - 上游出现 `agent/failed` 或 `agent/blocked`：等待 comment 中会点名该上游 Issue，提示 operator 干预
@@ -352,7 +352,7 @@ rebase 到最新 base 时进程退出），会把 Issue 的 worktree 留在 **de
 
 | 证据源 | 取法 |
 |---|---|
-| 本机活跃 attempt 状态 | Issue 上最近一条 claim 标记（`<!-- iar:claim host= pid= started_at= agent= -->`）与该 PID 是否存活 |
+| 本机活跃 attempt 状态 | Issue 上最近一条 claim 标记（`<!-- kc:claim host= pid= started_at= agent= -->`）与该 PID 是否存活 |
 | Issue label | 是否仍是 `agent/running`（已关闭、已改别的状态一律不碰） |
 | Issue comments | attempt history 用于恢复预算；生命周期 marker 用于识别尚未完成的 post-PR 返工 |
 | worktree 现场文件状态 | `kc worktree path` 可得、目录存在且 `.git` 指针仍在 |
@@ -372,7 +372,7 @@ rebase 到最新 base 时进程退出），会把 Issue 的 worktree 留在 **de
 `skip` 不是出口而是"不触碰"：claim 来自别的机器、或进程仍存活且 claim 未过 `reclaim_ttl_seconds`，
 一律原样保留——宁可漏对账，也不把健康任务重新入队造成双跑。
 
-对账动作幂等：comment 末尾带隐藏标记 `<!-- iar:reconcile hash="<16hex>" seq="<n>" -->`，hash 覆盖
+对账动作幂等：comment 末尾带隐藏标记 `<!-- kc:reconcile hash="<16hex>" seq="<n>" -->`，hash 覆盖
 Issue / 主机 / PID / 中断时间 / agent / 处置结论 / 是否仍有返工（不含 seq）。同一判定重放时零新增 comment；若上次
 是在"comment 已写、label 未改回"之间被打断（写序固定为**先 comment 后 label**），重放会补齐那次缺失
 的 label 写回而不再评论一次，因此不存在永久半完成态，也不会并发领取同一 worktree。
@@ -380,7 +380,7 @@ Issue / 主机 / PID / 中断时间 / agent / 处置结论 / 是否仍有返工�
 会话续传的实现分工：session id 由各 agent 的输出形态解析（Claude、CodeBuddy、Qoder 复用
 `claude-stream-json`；Codex、OpenCode、pi 使用各自的 JSONL 协议；Kimi 解析 CLI 退出时打印的 resume hint），
 core 侧 `agent_runner_session_store.py` 以 tmp + `os.replace` 原子写入 worktree 局部记录
-`.iar/agent-runner/sessions/<agent>.json`（implementation；为兼容旧记录保留），其他阶段使用
+`.kedacode/agent-runner/sessions/<agent>.json`（implementation；已有 `.iar/` 记录会继续读取），其他阶段使用
 `<agent>.<phase>.json`，例如 pre-PR review 的 `<agent>.review.json`，避免 review 覆盖实现
 recovery 上下文；缺少阶段记录时会回退读取旧版未分阶段记录。记录包含续传资格和该 session
 已消耗的超时续跑轮数：失败/中断后的未完成执行链可以续传，implementation 或 review 完整成功后
@@ -420,7 +420,7 @@ reclaim_ttl_seconds = 18000       # claim 含 started_at 且超过该时长，�
 1. 创建 Issue 时打上 **`agent/deliberate`** 标签。系统不自动分诊，由人显式声明"这是需要讨论的复杂需求"。
 2. `kc run --once` / `kc daemon` 在 Phase 0 发现带 `agent/deliberate` 的开放 Issue，会复用 `run_agent_deliberation` 引擎（后台 NoOp 视图，不弹 TTY）跑多角色内部互辩，并把 synthesizer 的输出贴成一条结构化"澄清问题清单"评论，类别固定为 5 个：
    `## 范围边界` / `## 约束` / `## 验收标准` / `## 技术选型` / `## 风险`。
-3. 每条 AI 评论尾部追加一个隐藏的 `<!-- iar:event version=1 phase=deliberation_question_posted cycle=N issue_comments_count=K -->` marker；后续轮询靠它判断"轮到谁"。
+3. 每条 AI 评论尾部追加一个隐藏的 `<!-- kc:event version=1 phase=deliberation_question_posted cycle=N issue_comments_count=K -->` marker；后续轮询靠它判断"轮到谁"。
 4. 人直接在 GitHub 上回复评论补充信息。下一次轮询发现 `当前评论数 > marker.issue_comments_count`，轮到 AI 续问，`cycle` 递增。
 5. 连续 `stale_rounds_before_hint`（默认 3）轮 AI 提问但用户回复信息量很少时，问题清单评论末尾会自动追加"讨论接近完成，可将标签改为 `agent/rework-prd` 落地"的软提示。
 6. 讨论清楚后，**人手动**把 `agent/deliberate` 换成 `agent/rework-prd`。Phase 1 接管，把 Issue 体 + 完整讨论评论生成为 PRD 并 push draft PR。
@@ -452,7 +452,7 @@ PRD 交付；无 PRD 的轻量 Issue 不新增要求。实现分四层，全部�
 1. **prompt 教学**：draft PR 正文以 agent 模式生成时，`create_draft_pr` 会把 skill
    的发布契约参考文本注入生成 prompt（调用侧包装 config，`generated_content`
    与 skill 解耦）。教学要求 agent 在正文里写 `- PRD: <relative prd path>` 行和
-   `<!-- iar:merge-acceptance version=1 -->`（"合并即接受"声明）hidden marker。
+   `<!-- kc:merge-acceptance version=1 -->`（"合并即接受"声明）hidden marker。
    PRD 由 runner 在本 PR 里归档，所以 PRD 行指向 `tasks/archive/` 下的位置（文件名取自
    Issue 的 `PRD path:` 锚点）；声明句说的是"合并即接受所列人审决策与可见结果，并授权
    合并后在该 PRD 上补记验收记录"（authorizes post-merge acceptance recording），
@@ -469,20 +469,20 @@ PRD 交付；无 PRD 的轻量 Issue 不新增要求。实现分四层，全部�
    标题与 marker 被合并队列与测试钉住，沿用旧名不改。只补缺失的锚点，重复执行不变。
 3. **发布端软门**：正文（补锚点之后）做可 grep 锚点校验（`prd-link` 认 PRD 的归档
    路径，也认 Issue 记录的 pending 路径，存量 PR 与人手写的正文不会因此被标注）；缺失时**不阻断发布**，
-   而是在正文末尾追加 `<!-- iar:pr-contract version=1 missing=... -->` 标注块，列出
+   而是在正文末尾追加 `<!-- kc:pr-contract version=1 missing=... -->` 标注块，列出
    缺失锚点并说明合并队列将拒绝自动合并。经第 2 层之后仍缺锚点的只剩
    **agent 撰写的正文无视了教学**——标注正好暴露这个信号，agent 正文不会被静默
    补齐，"缺什么"对人可见，而不是像历史 PR 那样静默缺件。
 4. **合并端硬门**：autopilot 合并队列在 verifier 门禁之后消费发布端写下的
-   `iar:pr-contract` 标注——带标注的 PR 走 `skipped_pr_contract_missing` 静默
+   `kc:pr-contract` 标注——带标注的 PR 走 `skipped_pr_contract_missing` 静默
    跳过（不合规状态已在 PR body 标注块对人可见，逐轮评论只会刷屏）。机制
    上线前发布的存量 PR 无标注，不受影响。
 
 设计原则是**发布端软、合并端硬**：正文格式问题永远不应阻止代码被推送和审阅
 （那会触发恢复循环烧预算），只应阻止"看起来合格"地被自动合并。
 
-> **聚合总 PR 的 v2 契约不在这道硬门里**：`iar:aggregate-contract` 标注没有任何合并
-> 队列消费方（队列只认单 PRD 的 `iar:pr-contract`）。`kc pr aggregate` 在创建总 PR
+> **聚合总 PR 的 v2 契约不在这道硬门里**：`kc:aggregate-contract` 标注没有任何合并
+> 队列消费方（队列只认单 PRD 的 `kc:pr-contract`）。`kc pr aggregate` 在创建总 PR
 > **之前**重算 v2 违规并直接以 `verification` 失败拒绝发布，因此带标注的正文只会出现在
 > 本地 / dry-run 产出里，它是本地门的信号，不是给自动化读的机器门；总 PR 本就保持 Draft
 > 交人工合并。
@@ -517,15 +517,16 @@ uv run --project /path/to/keda kc init
 
 ### `.gitignore` 托管块与 prd skill 契约
 
-`kc init` 会在目标仓库 `.gitignore` 写入一个 `# >>> iar (managed by iar init) >>>` 托管块（幂等、可重跑；`--no-update-gitignore` 跳过），其中除 `.iar/`、`.agent-runner/`、`.iar-worktrees/` 外还包含 `tasks/evidence` 白名单段：<!-- legacy-alias -->
+`kc init` 会在目标仓库 `.gitignore` 写入一个 `# >>> kc (managed by kc init) >>>` 托管块（幂等、可重跑；`--no-update-gitignore` 跳过），其中包含 `.kedacode/`、`.agent-runner/`、`.kc-worktrees/`，并保留旧 `.iar/` 与 `.iar-worktrees/` 忽略规则以兼容现有仓库；还包含 `tasks/evidence` 白名单段：
 
 ```gitignore
 tasks/evidence/**
 !tasks/evidence/**/
 !tasks/evidence/**/*.md
+!tasks/evidence/**/evidence.json
 ```
 
-这段白名单是 daemon 流证据目录约定的 git 语义基础：执行 agent 把证据写进 `tasks/evidence/<prd-stem>/`（无 PRD 的 Issue 兜底 `tasks/evidence/issue-<N>/`），`git add -A` 天然只把 `.md` 文本报告（verification-plan / evidence-report / verifier-report）带进 commit，截图、录屏、oracle 脚本等原始产物不进 git 历史；发布前拦截（`ensure_no_evidence_paths_in_changes`）再兜底拒绝被 `git add -f` 强制加入的非 `.md` 证据产物。显式配置 `validation.evidence_dir = ".iar/evidence"` 的仓库不受此影响，保持整目录排除的旧行为。手工配置 `evidence_dir = "tasks/evidence"` 而绕过 init 的仓库必须自行保证上述白名单规则在场。
+这段白名单是 daemon 流证据目录约定的 git 语义基础：执行 agent 把证据写进 `tasks/evidence/<prd-stem>/`（无 PRD 的 Issue 兜底 `tasks/evidence/issue-<N>/`），gitignore 让 Markdown 报告与 `evidence.json` manifest 可被本地证据流程发现；代码发布前拦截（`ensure_no_evidence_paths_in_changes`）只允许 Markdown 报告进入代码 diff，manifest、截图、录屏、oracle 脚本等证据由独立证据分支交付。显式配置 `validation.evidence_dir = ".iar/evidence"` 的仓库不受此影响，保持整目录排除的旧行为。手工配置 `evidence_dir = "tasks/evidence"` 而绕过 init 的仓库必须自行保证上述白名单规则在场。
 
 同时 `kc init` 会从远程模板仓库安装 prd / code-reviewer skill（`--force` 会传递给 skill 安装，允许覆盖本地改过的同名 skill）。PRD 格式约定（Change Log 条目结构、验收复选框语法、分组标题、rv-id 证据命名、证据目录布局）的唯一出处是 prd skill 的 `## Machine Contract (vN)` 章节，而且**解析实现也只有一份**——skill 自带的 `scripts/prd_contract.py`：kc 各 prompt 只注入一行指向该契约的指针、不复述教学，验收清单与 Change Log 也不再由 kc 自己解析，而是把 PRD 文本交给该脚本、取回 JSON 结构。**daemon 在每轮执行循环前预检**三件事：prd skill 可解析、契约主版本落在受支持集合内（当前 v3/v4/v5；集合语义让"skill 先 bump、keda 后跟进"的发版错峰不会卡住）、以及兄弟 `scripts/prd_contract.py` 与 `SKILL.md` 成套存在（只装半套会在启动时就点名缺哪个文件，而不是拖到交付门禁）。错误给出安全修复方式（重装 skill 用 `kc skill install`、重建仓库配置才用 `kc init --force`，或设置 `KEDACODE_PRD_SKILL_PATH` 指向完整 skill），不建议盲目运行可能覆盖用户级 Skill 的 `--force` 形式。**安装目标首位是 keda 自有目录 `~/.kedacode/skills`**：解析时优先取这份，因此用户删掉 agent 目录里的 prd 副本不影响 `kc` 的正常解析；其后才是各 agent 用户级目录。CI / 测试可用 `KEDACODE_SKILLS_DIR` 把安装根覆盖到临时目录。
 
@@ -810,8 +811,8 @@ recovery 预算耗尽不是终点，而是**交班点**。此前只有同一个 
 
 现在耗尽路径补上三步（触发点在 `agent_runner_issue_handlers._process_ready_issue` 的耗尽 `except` 分支，实际写入步骤因单文件 1000 行上限拆到了 `agent_runner_failure_handoff.py`，但**这些行仍记在 logger `backend.core.use_cases.agent_runner_issue_handlers` 名下**——模块文件变了名字没变，按 `grep agent_runner_issue_handlers` 依旧能一次看到整条交接链路的告警）：
 
-1. **写交接记录**：一条带 `<!-- iar:failure-context checkpoint=… attempts=… verifier=… evidence=… -->` marker 的 Issue 评论，正文由 `format_failure_context_comment` 渲染，复用既有的 `format_attempt_history`，verifier 结论取自 `MaxRetriesExceededError.attempt_results[*].detail`。
-2. **发布同源的人读表面**：`checkpoint_sha` 非空时调用既有的 `publish_changes(..., require_prd_archived=False)`，发布或按分支复用同一个 Draft PR，并在 PR 正文尾部固定附一段指向该交接评论的回链（`<!-- iar:failure-context-ref -->`，重复耗尽时替换而非叠加）。
+1. **写交接记录**：一条带 `<!-- kc:failure-context checkpoint=… attempts=… verifier=… evidence=… -->` marker 的 Issue 评论，正文由 `format_failure_context_comment` 渲染，复用既有的 `format_attempt_history`，verifier 结论取自 `MaxRetriesExceededError.attempt_results[*].detail`。
+2. **发布同源的人读表面**：`checkpoint_sha` 非空时调用既有的 `publish_changes(..., require_prd_archived=False)`，发布或按分支复用同一个 Draft PR，并在 PR 正文尾部固定附一段指向该交接评论的回链（`<!-- kc:failure-context-ref -->`，重复耗尽时替换而非叠加）。
 3. **回灌下一轮**：新 claim 构造 continuation prompt 时按 latest-wins 读回**最近一条**交接记录（`find_latest_failure_context_comment`），经 `truncate_failure_context_for_prompt` 限量截断后注入。
 
 必须知道的边界：
@@ -826,7 +827,7 @@ recovery 预算耗尽不是终点，而是**交班点**。此前只有同一个 
 - **快照是 WIP 中途进度**，可能连编译都不过，不是"实现做完了但没过验收"。交接记录与 PR 正文都显式写明这一点。
 - agent fallback 阶梯会为每个候选 agent 各耗尽一次，因此一次 claim 可能留下多条记录；每条对应一次真实快照，下一轮按 latest-wins 只读最近一条，PR 仍按分支复用同一个。
 
-人工验证方式（runner 不产出这类证据，需人实际执行）：把一个 PRD 打到 recovery 耗尽，然后在 Issue 上找 `iar:failure-context` 评论、在 PR 列表找该分支的 Draft PR，确认 `gh pr view <N> --json labels,mergeable` 里没有 `validation/verifier-passed` 且签核/合并被拒、PRD 仍在 `tasks/pending/`；再重新 claim 同一个 Issue，确认续作 prompt 里出现了上一轮的结论。
+人工验证方式（runner 不产出这类证据，需人实际执行）：把一个 PRD 打到 recovery 耗尽，然后在 Issue 上找 `kc:failure-context` 评论、在 PR 列表找该分支的 Draft PR，确认 `gh pr view <N> --json labels,mergeable` 里没有 `validation/verifier-passed` 且签核/合并被拒、PRD 仍在 `tasks/pending/`；再重新 claim 同一个 Issue，确认续作 prompt 里出现了上一轮的结论。
 
 ### 非 claude agent 的实时输出（PTY）
 
@@ -899,7 +900,7 @@ enabled = true
 # 显式配置为其它值（如 legacy 的 .iar/evidence）则保持整目录排除的旧行为。
 evidence_dir = "tasks/evidence"
 # orphan 证据分支前缀
-branch_prefix = "iar-evidence/"
+branch_prefix = "kc-evidence/"
 # 是否逐项检查证据文件格式
 evidence_format_check = true
 # 是否用 agent 解析 PRD 中的格式要求
@@ -959,8 +960,8 @@ key_paths = []
 max_diff_chars = 6000
 # 是否把历轮未解决 findings 注入下个 cycle 的 supervisor prompt
 previous_findings_injection_enabled = true
-# 跨 cycle finding artifact 落盘目录（worktree 相对路径，已被 .iar/ gitignore 排除）
-findings_artifact_dir = ".iar/state"
+# 跨 cycle finding artifact 落盘目录（worktree 相对路径，已被 .kedacode/ gitignore 排除）
+findings_artifact_dir = ".kedacode/state"
 
 # 交互式决策（kc ask）配置
 [agent_runner.interactive_decision]
@@ -1121,7 +1122,7 @@ uv run kc workflow install preview --force
 
 ## 子进程环境净化（child env sanitize）
 
-凡经 runner **执行层**派发的子进程都不再原样继承父环境：`SubprocessRunner.run()` 的默认档（agent 内容生成的 plain 路径、git/gh/pytest 等工具命令、验证命令）与 agent 流式派发点（结构化 JSONL 协议、PTY 路径、plain 输出协议）统一使用 `backend.infrastructure.child_env.build_sanitized_child_env()` 组装子进程环境，按固定名单 `AGENT_CHILD_ENV_DENYLIST` 剔除会话私有变量，其余变量（PATH、HOME、代理、API key 等）原样透传；`env=None` 不再等于「全量继承 `os.environ`」。console 托管 runner 子进程（`process_supervisor.spawn`）与 `iar container up` 传给 docker compose 的环境（`container_ops._build_compose_env`）同样以净化档为基底，会话私有变量不会沿进程谱系下传。
+凡经 runner **执行层**派发的子进程都不再原样继承父环境：`SubprocessRunner.run()` 的默认档（agent 内容生成的 plain 路径、git/gh/pytest 等工具命令、验证命令）与 agent 流式派发点（结构化 JSONL 协议、PTY 路径、plain 输出协议）统一使用 `backend.infrastructure.child_env.build_sanitized_child_env()` 组装子进程环境，按固定名单 `AGENT_CHILD_ENV_DENYLIST` 剔除会话私有变量，其余变量（PATH、HOME、代理、API key 等）原样透传；`env=None` 不再等于「全量继承 `os.environ`」。console 托管 runner 子进程（`process_supervisor.spawn`）与 `kc container up` 传给 docker compose 的环境（`container_ops._build_compose_env`）同样以净化档为基底，会话私有变量不会沿进程谱系下传。
 
 - 名单（8 个，硬编码于 `src/backend/infrastructure/child_env.py`）：`SERVER__PORT` 与 `CODEBUDDY_SERVICE_PROXY_URL`、`CODEBUDDY_SESSION_ID`、`CODEBUDDY_CONVERSATION_REQUEST_ID`、`CODEBUDDY_ROOT_REQUEST_ID`、`CODEBUDDY_CONVERSATION_MESSAGE_ID`、`CODEBUDDY_PROJECT_DIR`、`CODEBUDDY_CURRENT_MODEL_ID`
 - 为什么剔除：交互式 CodeBuddy 会话会向 shell 注入 `SERVER__PORT`（会话 daemon 的监听端口）。headless 子进程继承后尝试绑定同一端口，触发 `EADDRINUSE` 并在首个模型请求前永久卡死（stdout 零输出，最终被 inactivity/timeout watchdog 杀掉，见 2026-09-28 Issue #156 事故）
@@ -1188,7 +1189,7 @@ CI 容器镜像预装浏览器运行时是后续工作；首版只保证本地 r
 - `kc worktree create` 和 `kc run` 的 create/reuse 流程都会把主仓库目录下的 `.env*` 文件按相对路径复制到 worktree（含子目录，如 `tests/playwright-e2e/.env`）
 - 只复制 worktree 中**缺失**的文件：被跟踪的 `.env*.example` 与 worktree 内已修改的 `.env` 永远不会被覆盖
 - 复用已有 worktree 时同样补齐（旧 worktree 缺 `.env` 的，下一次 `kc run` 会自动治愈）
-- 扫描会跳过 `.git`、`.iar-worktrees`、`.venv`、`node_modules` 等目录，避免把其他 worktree 的 env 文件复制串
+- 扫描会跳过 `.git`、`.kc-worktrees`、`.venv`、`node_modules` 等目录，避免把其他 worktree 的 env 文件复制串
 - **不会**复制 `.env.run-state`：它记录主仓库 `just run` 分配的端口，拷进 worktree 会让 worktree 指向主仓库端口——目标仓的共享库守卫据此认为有 dev server 在写本库而拒绝跑测试（假阳性），worktree 内 `just run` 也会与主仓库 dev server 抢端口；worktree 会自行生成自己的 run-state（`just worktree` 路径走随机端口）
 - 与旧的 `just worktree` 脚本不同，这里**不会**用 `.env.example` 兜底生成 `.env`：用示例值静默跑测试比明确的缺配置失败更危险
 - 复制是 best effort：单个文件失败（如悬空 symlink）只记日志，不会中断 agent run
@@ -1233,7 +1234,7 @@ CI 容器镜像预装浏览器运行时是后续工作；首版只保证本地 r
 
 ## 清理 stale issue worktree
 
-当 Issue 对应的 PR 合并并删除远端分支后，本地可能仍保留 `issue-<number>` 分支和 `.iar-worktrees/issue-<number>`。可以用 `kc worktree cleanup` 做一次安全清理：
+当 Issue 对应的 PR 合并并删除远端分支后，本地可能仍保留 `issue-<number>` 分支和 `.kc-worktrees/issue-<number>`。可以用 `kc worktree cleanup` 做一次安全清理：
 
 ```bash
 # 只预览，不删除
@@ -1251,7 +1252,7 @@ kc worktree cleanup --yes --force
 - 本地分支名匹配默认 KedaCode 模式 `issue-<number>`
 - GitHub Issue 状态为 `CLOSED`
 - `refs/remotes/<remote>/issue-<number>` 已不存在
-- worktree 位于当前仓库的 `.iar-worktrees/` 下
+- worktree 位于当前仓库的 `.kc-worktrees/` 下
 - 默认模式下 worktree 没有未提交或未跟踪文件
 - 默认模式下分支已经合入 `<remote>/<base_branch>`，或者 GitHub 上存在以该分支 head 的已合并 PR（覆盖 squash / rebase merge 场景）
 
@@ -1312,7 +1313,7 @@ kc pr aggregate --issue 101 --issue 102
 |---|---|---|
 | Issue 状态 | 仍为 open，且带 `agent/automated-review-passed` 标签 | NORMAL 档位发布后 Issue 先进 `agent/supervising`；PR 后监督返回 `wait_for_checks` 时就停在那里，本轮不会拿到 `agent/automated-review-passed` |
 | 来源 PR checks | 必需 checks 汇总为 `SUCCESS` | 新建 Draft PR 的 checks 通常是 `PENDING` |
-| 来源 PR 集合 | 每个 Issue 恰好一个未合并来源 PR，且未绕过 review/verification（正文不含 `iar:direct-pr` / `iar:fast-merge`） | 直发档、快速合并档的 Issue 会被拒 |
+| 来源 PR 集合 | 每个 Issue 恰好一个未合并来源 PR，且未绕过 review/verification（正文不含 `kc:direct-pr` / `kc:fast-merge`） | 直发档、快速合并档的 Issue 会被拒 |
 
 **后果**：单次夜间 `kc run --all-ready --aggregate-pr` 处理的通常正是"刚跑完"的 Issue，几乎必然卡在前两行，于是整批在 eligibility 阶段被拒绝——不创建总 PR、不关闭来源 PR，日志与错误里给出同一批成员的重试命令。要拿到总 PR，等 checks 跑绿、监督把 Issue 推进到 `agent/automated-review-passed` 之后，再显式补一次：
 
@@ -1366,10 +1367,10 @@ kc run --issue 42 --takeover --yes
 
 GitHub 的标签写入没有 compare-and-swap，所以"谁先领走这条 Issue"不能靠先到先得的标签写。首次领取改为**认领 marker 选举**：
 
-1. 每个候选进程先在自己的认领评论里投标（`iar:claim` marker 带 `started_at`、host、PID、agent）；
+1. 每个候选进程先在自己的认领评论里投标（`kc:claim` marker 带 `started_at`、host、PID、agent）；
 2. 等一个短暂 grace 窗口后**回读评论线程**，筛出同一轮的投标（有 `started_at`、落在并发窗口内、本机已死 PID 的投标剔除；远端投标按存活处理）；
 3. 按 `(started_at, host, PID)` 的全序取最小者。**只有赢家**把 Issue 切到 `agent/running`；
-4. 落败方把自己那条评论改写成 `iar:claim-withdrawn`（解析器认不出它，因此不会被后续轮询误读成认领），并**跳过该 Issue 而不写任何标签**——输掉竞争不是执行失败，不该把赢家的 running 覆盖成 failed。
+4. 落败方把自己那条评论改写成 `kc:claim-withdrawn`（解析器认不出它，因此不会被后续轮询误读成认领），并**跳过该 Issue 而不写任何标签**——输掉竞争不是执行失败，不该把赢家的 running 覆盖成 failed。
 
 历史 marker（没有 `started_at` 的旧格式）与并发窗口外的投标都不算投标，所以 rework / 重新认领不会被自己过去的评论永久锁死。同一进程在 agent fallback 换 agent 时会再走一遍领取：读到的是**自己更早的那次投标**，按重入处理并继续执行。
 
@@ -1399,10 +1400,10 @@ GitHub 的标签写入没有 compare-and-swap，所以"谁先领走这条 Issue"
 kc run --issue 42 --fast-merge
 ```
 
-- **PR 正文自我声明**：机器可读 marker `<!-- iar:fast-merge issued=<N> -->` + 人读说明"本 PR 经快速通道发布，未经过自动化验证门禁，合并前请人工验证"。marker 只声明旁路事实；无 marker 也不能代替最终代码树和实际验证结果的核对。
+- **PR 正文自我声明**：机器可读 marker `<!-- kc:fast-merge issued=<N> -->` + 人读说明"本 PR 经快速通道发布，未经过自动化验证门禁，合并前请人工验证"。marker 只声明旁路事实；无 marker 也不能代替最终代码树和实际验证结果的核对。
 - **只覆盖验证门禁本身**：发布路径（分支命名、push、PR 正文契约、pre-PR review）与"已提交干净工作树"的发布前提**照常执行**；builder 失败/恢复循环也不受影响——快速通道不会把失败掩盖成成功。
 - **单一目标限定**：与 `--all-ready` 组合是用法错误（退出码 2）——快速通道绝不能开启"整队未验证爆发"。
-- **stack 依赖拒绝（fail-closed）**：目标 Issue 若声明 `iar:depends-on ... mode="stack"` 顺序依赖，在启动任何 agent、乃至 `--takeover` 停 daemon 之前就报用法错误——未验证的上游会顺着 fork 基污染整条下游链；Issue 读不到时同样拒绝（无法证明不是 stack 就不走旁路）。
+- **stack 依赖拒绝（fail-closed）**：目标 Issue 若声明 `kc:depends-on ... mode="stack"` 顺序依赖，在启动任何 agent、乃至 `--takeover` 停 daemon 之前就报用法错误——未验证的上游会顺着 fork 基污染整条下游链；Issue 读不到时同样拒绝（无法证明不是 stack 就不走旁路）。
 - **与 `direct-pr` 标签冲突时拒绝**：目标 Issue 带着 `direct-pr` 标签却请求 `--fast-merge`，是用法错误而非"取更强者"——两个旁路跳过的门禁不同，静默升级会掩盖调用者的真实意图。撤掉旗标或摘掉标签，二选一。
 - **不加旗标时零变化**：默认 run 与今天完全一致（门禁照常）。daemon 没有 `--fast-merge`，也没有对应配置项——旁路只作用于这一次显式调用，且不触碰自动合并。
 
@@ -1416,7 +1417,7 @@ kc run --issue 42 --direct-pr
 ```
 
 - **适用边界（fail-closed）**：目标必须**没有 `- PRD path:` 锚点**。传 PRD 路径作为目标本身就是 PRD-backed，直接用法错误；`--issue <N>` 目标会读 Issue 正文证明无锚点，**读不到同样拒绝**——旁路不能留下一份未归档、未校验的 PRD。
-- **PR 正文自我声明**：marker `<!-- iar:direct-pr issued=<N> -->` + 人读说明"runner 侧未运行审核 Agent 与仓库验证命令，合并前请确认 CI 变绿并人工验证"。
+- **PR 正文自我声明**：marker `<!-- kc:direct-pr issued=<N> -->` + 人读说明"runner 侧未运行审核 Agent 与仓库验证命令，合并前请确认 CI 变绿并人工验证"。
 - **两个旁路旗标互斥**：`--fast-merge` 与 `--direct-pr` 同时给出是用法错误（退出码 2）。两者存在感不同（一个跳独立验证，一个连审核与仓库验证一起跳），所以刻意不"取更强者"，避免静默升级掩盖调用者的真实意图。
 - **单一目标限定**：与 `--all-ready` 组合是用法错误——直发档绝不能开启"整队未审核爆发"。旗标只改写敲下它的那台机器；daemon 没有 `--direct-pr` 旗标，也没有对应的全局配置项。要让 daemon 或另一台机器直发某个 Issue，用下面的 Issue 标签，而不是给 daemon 开总闸。不触碰自动合并。
 
@@ -1529,7 +1530,7 @@ kc run --issue 43
 ```
 
 - 前台 `run` **不获取 repo 级 daemon 锁**：`--all-ready` 只做"是否有 daemon 存活"的只读检查（互斥语义见上文），显式单目标连这个检查都不做。所以 run 与 run 之间、定向 run 与 daemon 之间都不互斥。
-- 每个 Issue 自带隔离资源：worktree 在 `.iar-worktrees/issue-<N>`，claim / blocked-claim 锁也按 worktree 独立；状态库走 WAL 容忍并发写。两条命令撞向**同一条 Issue** 时，由首次领取选举裁决归属（见上节），落败方安静跳过。
+- 每个 Issue 自带隔离资源：worktree 在 `.kc-worktrees/issue-<N>`，claim / blocked-claim 锁也按 worktree 独立；状态库走 WAL 容忍并发写。两条命令撞向**同一条 Issue** 时，由首次领取选举裁决归属（见上节），落败方安静跳过。
 - **例外**：`--all-ready` 领的是同一份 ready 队列，两条 `--all-ready` 并发会双 claim，不要这么用。要并发多个 Issue，就给每个 Issue 各发一条 `--issue`。
 - **统一并发上限不挡这里**：Backlog「并发」策略只闸门**自动执行**（daemon 补位/认领、Console「全局开始」）；显式 `kc run` 走的是 `execution_ceiling=None` 的全量语义，人在命令行人工点名的运行不因页面数字被压低。
 - 停止常驻进程没有 `kc daemon stop`：`kc daemon` 只暴露 `run` / `status`，托管进程用 `kc registry stop --repo-id <id>`（对未托管的手动 `kc daemon` 无效，需自行结束进程）。
@@ -1760,8 +1761,8 @@ kc logs --repo-id keda-main --issue 42 --follow
 - 默认跟随该 Issue 的**最新尝试**；重试产生新文件时 CLI 会提示并切换。
 - Issue 尚未开始、日志已清理或仓库未注册时，显示明确的空态 / 不可用提示，不会回退到别的 Issue 或进程日志。
 - 单次 `kc run`（串行）与并行 daemon 使用同一归属规则；串行时启动终端收到的就是这条 per-Issue 流的镜像，因此**同样带行首时间戳**——与未经路由时终端实时视图的显示一致（TTY 与重定向都一样），不是「无前缀的原始输出」。
-- Agent 流式输出的每个物理行在写入 per-Issue 日志、实时看板与前台镜像时带 `[HH:MM:SS]` 行首时间戳，可与心跳行的完整日期时间前缀对照时间线。时间戳由**输出路由 sink** 统一添加（`core/use_cases/agent_runner_output_routing.py`）：agent 生产者交给 sink 的始终是可读原文，所以合议的 `workspaces/**/*.md` 等原文产物不会被塞进时间线。文本增量只在行首加一次时间戳，不会切断同一行；`[iar-attempt-end]` 终态标记不经 sink，保持裸行，`--follow` 仍能精确匹配它。该前缀是**runner 机器本地时钟**盖的墙钟时间，不含日期与时区，无法被可靠换算：Web 日志视图（Issue 实时输出、进程日志抽屉）原样展示并自带说明，不会把 runner 本地时间当成浏览器时区转换；需要跨机器对时的真实瞬间请读事件账本的 ISO `occurred_at`（见 `docs/ai-standards/time-display.md`）。
-- 这条流里还带 `[iar-invocation-start]` / `[iar-invocation-end]` / `[iar-invocation-coverage-incomplete]` 三种结构化标记，用来核对"这段时间到底起了几次进程、每次谁在跑、跑成什么样"。字段读法、模型三态、`retry_of` 链与缺口解读见「Agent 调用记录与停滞诊断（Invocation Tracing）」。`grep '\[iar-invocation-' <日志文件>` 可以直接抽出调用清单。
+- Agent 流式输出的每个物理行在写入 per-Issue 日志、实时看板与前台镜像时带 `[HH:MM:SS]` 行首时间戳，可与心跳行的完整日期时间前缀对照时间线。时间戳由**输出路由 sink** 统一添加（`core/use_cases/agent_runner_output_routing.py`）：agent 生产者交给 sink 的始终是可读原文，所以合议的 `workspaces/**/*.md` 等原文产物不会被塞进时间线。文本增量只在行首加一次时间戳，不会切断同一行；`[kc-attempt-end]` 终态标记不经 sink，保持裸行，`--follow` 仍能精确匹配它。该前缀是**runner 机器本地时钟**盖的墙钟时间，不含日期与时区，无法被可靠换算：Web 日志视图（Issue 实时输出、进程日志抽屉）原样展示并自带说明，不会把 runner 本地时间当成浏览器时区转换；需要跨机器对时的真实瞬间请读事件账本的 ISO `occurred_at`（见 `docs/ai-standards/time-display.md`）。
+- 这条流里还带 `[kc-invocation-start]` / `[kc-invocation-end]` / `[kc-invocation-coverage-incomplete]` 三种结构化标记，用来核对"这段时间到底起了几次进程、每次谁在跑、跑成什么样"。字段读法、模型三态、`retry_of` 链与缺口解读见「Agent 调用记录与停滞诊断（Invocation Tracing）」。`grep '\[kc-invocation-' <日志文件>` 可以直接抽出调用清单。
 
 `kc daemon` 本身继续作为启动 daemon 的快捷命令，等效于 `kc daemon run`。例如：
 
@@ -1991,7 +1992,7 @@ max_diff_chars = 6000
 
 prompt 结构变为：`Changed files (N)` 清单 → `--- Key files (full diff) ---` → `--- Other files (truncated to N chars) ---`。`key_paths` 为空时退化为原来的整体截断。若配置的路径前缀一个文件都没命中，日志会打 WARNING 提示前缀写错。
 
-Supervisor 还能跨 cycle 记住未解决的 findings：LLM 可以在 JSON 决策里附带 `findings[]`（每项含 `title`，以及可选的 `severity` / `file` / `line` / `description` / `status`）。kc 把它们合并进 `<worktree>/.iar/state/issue-<N>/findings.json`（已被 `.iar/` gitignore 排除），下一个 cycle 的 prompt 会带上 `Previous unresolved findings from cycles X..Y:` 段。已在后续 cycle 修好的 finding 用 `status: "resolved"` 上报即可出列。用 `previous_findings_injection_enabled = false` 关闭注入。
+Supervisor 还能跨 cycle 记住未解决的 findings：LLM 可以在 JSON 决策里附带 `findings[]`（每项含 `title`，以及可选的 `severity` / `file` / `line` / `description` / `status`）。kc 把它们合并进 `<worktree>/.kedacode/state/issue-<N>/findings.json`（已被 `.kedacode/` gitignore 排除），下一个 cycle 的 prompt 会带上 `Previous unresolved findings from cycles X..Y:` 段。已在后续 cycle 修好的 finding 用 `status: "resolved"` 上报即可出列。用 `previous_findings_injection_enabled = false` 关闭注入。
 
 #### PR 后修复的审-修分工（`post_pr_supervisor.repair_agent`）
 
@@ -2001,7 +2002,7 @@ supervisor 本身始终是只读审阅；`[agent_runner.post_pr_supervisor].repa
 - `executor`：使用本次实现者作为 repair agent。发布路径显式把本次实现者传下去；拿不到本次实现者的入口（独立跑 `kc supervise`、rework 路径等）按 Issue 标签回落，并在日志里写明用的是哪一种来源。无论选哪个 repair agent，Supervisor 触发的修复都在 `agent/supervising` 生命周期内执行。
 - `<agent 名>`：指定 agent；未注册时该阶段开始前 fail-fast。
 
-两个修复调用点（supervisor 修复循环、rework 路径）共用解析器 `resolve_repair_agent`，避免两条路径语义分叉。修复提示词由 `build_repair_prompt` 生成，带 Issue 上下文与本轮 findings 清单（rework 路径取 `.iar/state/issue-<N>/findings.json` 里未解决的累积 findings），修复者不必自己重新推断要改什么。
+两个修复调用点（supervisor 修复循环、rework 路径）共用解析器 `resolve_repair_agent`，避免两条路径语义分叉。修复提示词由 `build_repair_prompt` 生成，带 Issue 上下文与本轮 findings 清单（rework 路径取 `.kedacode/state/issue-<N>/findings.json` 里未解决的累积 findings），修复者不必自己重新推断要改什么。
 
 #### Rebase Conflict Recovery Branch Guard
 
@@ -2025,7 +2026,7 @@ uv run kc supervise-daemon
 
 `kc supervise` / `kc supervise-daemon` 会：
 - 扫描 `agent/supervising` 和 `agent/automated-review-passed` 的 open Issues
-- 加载 linked PR context、Issue comments、PR comments 和最新 `iar:event` marker
+- 加载 linked PR context、Issue comments、PR comments 和最新 `kc:event` marker
 - 检测以下维度变化：
   - `head_sha` 或 `base_sha` 变化
   - `checks_state` 变化（如 CI 从 `PENDING` 变为 `FAILURE`）
@@ -2259,7 +2260,7 @@ kc run --all --all-ready
 kc daemon
 
 # 手动驱动一次 backlog 调度（一次 continuous-scheduling pass：reconcile + promote + discover，不用等 daemon 轮询）
-iar backlog advance
+kc backlog advance
 
 # 单次 review 检查
 kc supervise
@@ -2284,7 +2285,7 @@ agent，把仓库上下文与自然语言指令直接转成 KedaCode 子命令�
 
 | 触发方式 | 行为 |
 |---|---|
-| `kc`（TTY） | 启动 REPL，循环读取用户输入，调用 agent，把 agent 标注的 `<<IAR_EXEC>>` 命令翻译成 `kc <subcommand>` 并执行 |
+| `kc`（TTY） | 启动 REPL，循环读取用户输入，调用 agent，把 agent 标注的 `<<KC_EXEC>>` 命令翻译成 `kc <subcommand>` 并执行 |
 | `kc`（非 TTY） | 打印 Typer 帮助文本并以非零退出码失败，避免 CI / pipe 脚本 hang 住 |
 | `kc --help` / `kc -h` | 仍然打印帮助（不进入 REPL） |
 | `kc repl` | 显式启动 REPL 的子命令形式 |
@@ -2300,7 +2301,7 @@ agent，把仓库上下文与自然语言指令直接转成 KedaCode 子命令�
 - agent 的回复里通过标记协议请求执行 KedaCode 子命令：
 
   ```
-  <<IAR_EXEC>> kc labels sync --dry-run <<END_IAR_EXEC>>
+  <<KC_EXEC>> kc labels sync --dry-run <<END_KC_EXEC>>
   ```
 
   REPL 把标记里的命令交给命令执行器，执行器按白名单与确认策略运行：
@@ -2316,7 +2317,7 @@ agent，把仓库上下文与自然语言指令直接转成 KedaCode 子命令�
   - 不在白名单内的命令、含 shell 元字符的请求、`git push` / `git merge`
     / `git reset` 等直接 git 写操作都会被拒绝并反馈给 agent。
 
-每次执行的结果以 `[IAR_EXEC_RESULT]` 块回写到对话历史；agent 在下一轮
+每次执行的结果以 `[KC_EXEC_RESULT]` 块回写到对话历史；agent 在下一轮
 回复里就能看到 stdout / stderr / exit_code。
 
 ### 退出与审计
@@ -2345,12 +2346,12 @@ $ cd /path/to/repo
 $ kc
 kc> sync the labels for me, then start the daemon.
 I'll sync the labels.
-<<IAR_EXEC>> kc labels sync <<END_IAR_EXEC>>
+<<KC_EXEC>> kc labels sync <<END_KC_EXEC>>
 [Executed] kc labels sync
 stdout: ✅ labels synced
 
 Now I'll start the daemon.
-<<IAR_EXEC>> kc daemon <<END_IAR_EXEC>>
+<<KC_EXEC>> kc daemon <<END_KC_EXEC>>
 This command starts a long-running daemon. Execute? [y/N] y
 [Executed] kc daemon
 stdout: Daemon started with PID 12345
@@ -2419,10 +2420,10 @@ A failure comment is posted with the error and instructions to re-add `agent/rew
 
 By default, generation does **not** stop at the PRD. Step 8 adds `agent/ready`, and within the **same** `kc run` / daemon pass the PRD-rework phase (`process_prd_rework_issues`) runs *before* the ready-issue phase (`run_once`). So the freshly generated Issue can be claimed and implemented in that same pass; the implementation commits land on the same `issue-<N>` branch and accumulate in the same draft PR as the PRD.
 
-If you want the runner to generate the PRD but **hold before implementing** (e.g. to review the PRD on its own first), use the dependency gate. Add an `iar:depends-on` marker to the **Issue body**, pointing at a sentinel Issue you keep open until you are ready:
+If you want the runner to generate the PRD but **hold before implementing** (e.g. to review the PRD on its own first), use the dependency gate. Add an `kc:depends-on` marker to the **Issue body**, pointing at a sentinel Issue you keep open until you are ready:
 
 ```text
-<!-- iar:depends-on #<sentinel-issue> -->
+<!-- kc:depends-on #<sentinel-issue> -->
 ```
 
 How it behaves:
@@ -2479,11 +2480,11 @@ Issue 执行失败后会被标记为 `agent/failed`，runner 不会再自动处�
 4. **跨 agent fallback（Level 2）**：当某 agent **耗尽 recovery 预算仍失败**，或命中**供应商容量限制**（429 usage limit、529 overloaded、`daily count exceeded` 这类每日额度——同一供应商重试也只会继续失败，所以**不做原地重试**，直接换人），runner 会切换到 `agent_fallback_order` 里的下一个 agent，在已落盘的进度上接力。判定读的是失败异常里的 stdout/stderr 文本，因此流式 agent（`stream-json` 协议，如 qoder）的失败原因必须能进到异常里：整条 assistant 文本消息之后只跟一个不带文本的 `error` result 时（qoder 额度耗尽就是这种形态），runner 会把最近一条 assistant 文本作为 `[agent error]` 行带出；同时流式调用的 stderr 始终被收集（只保留最后 200 行），随失败异常一起进入 Issue 失败评论，不再只剩 `The command streamed its details to the terminal.`。有 `display_sink` 时 stderr 仍只交给回调，没有时照旧回显到终端。切换次数受 `max_agent_switches` 封顶。配置中列出但本机未安装的 agent（命令不存在）会被自动跳过。
 5. **不切换的情况**：安全违规（禁改路径、分支异常）等不可恢复错误换谁都失败，runner 直接停止、不浪费配额。依赖环境阻塞同理：失败能归因到 worktree 依赖准备记录里的缺失可执行文件（或验证命令以 127 / `command not found` 结束）时，缺的是**主机工具链**而不是某个 agent 的能力，runner 不换人，直接落 `agent/blocked`。
 
-`agent_fallback_order` 默认包含 `["claude", "kimi", "codex"]`，主 agent 失败后会依次尝试链中的下一个可用 agent。未安装的 agent（命令不存在）会被自动跳过。将 `agent_fallback_order` 设为空列表即可关闭跨 agent fallback，回退到单 agent 行为。所有尝试（含跨 agent）都会汇总进失败评论的 **Attempt History** 表，表格包含 **Started (UTC)**（本轮开始时间）、**Agent**（执行 agent）、**Duration**（耗时）和 **Detail**（失败摘要）列；同时每轮 attempt 会实时写入本地 SQLite 运行历史库的 `attempt_records` 表，并更新 GitHub Issue 上一条带 `<!-- iar-attempt-history -->` marker 的增量评论。该实时评论按 `(repo_id, issue_number)` 从 SQLite 轨迹整表重渲染，因此跨 agent fallback 和重新 claim 都会**追加**到同一张表，不会把上一个 agent 的历史行覆盖掉；轨迹超过 50 行时只保留最近 50 行，并在表格上方注明 `Older attempts omitted`。
+`agent_fallback_order` 默认包含 `["claude", "kimi", "codex"]`，主 agent 失败后会依次尝试链中的下一个可用 agent。未安装的 agent（命令不存在）会被自动跳过。将 `agent_fallback_order` 设为空列表即可关闭跨 agent fallback，回退到单 agent 行为。所有尝试（含跨 agent）都会汇总进失败评论的 **Attempt History** 表，表格包含 **Started (UTC)**（本轮开始时间）、**Agent**（执行 agent）、**Duration**（耗时）和 **Detail**（失败摘要）列；同时每轮 attempt 会实时写入本地 SQLite 运行历史库的 `attempt_records` 表，并更新 GitHub Issue 上一条带 `<!-- kc:attempt-history -->` marker 的增量评论。该实时评论按 `(repo_id, issue_number)` 从 SQLite 轨迹整表重渲染，因此跨 agent fallback 和重新 claim 都会**追加**到同一张表，不会把上一个 agent 的历史行覆盖掉；轨迹超过 50 行时只保留最近 50 行，并在表格上方注明 `Older attempts omitted`。
 
 配置示例见上文 `[agent_runner.runner]`：`agent_fallback_order` / `max_agent_switches` / `transient_retry_attempts` / `transient_retry_delay_seconds` / `timeout_resume_attempts`。
 
-阶梯的每一级都是**一次新的真实进程调用**，因此在 per-Issue 日志里各自留下一对 `[iar-invocation-start]` / `[iar-invocation-end]` 标记，并用 `retry_of=` + `retry_reason=`（`transient_failure` / `timeout_resume` / `executor_fallback` / `resume_not_started`）串成链；`executor=` 记的是**实际执行**的那个 agent，所以"到底回退到谁了"不必再从 Attempt History 表反推。字段读法见「Agent 调用记录与停滞诊断（Invocation Tracing）」。
+阶梯的每一级都是**一次新的真实进程调用**，因此在 per-Issue 日志里各自留下一对 `[kc-invocation-start]` / `[kc-invocation-end]` 标记，并用 `retry_of=` + `retry_reason=`（`transient_failure` / `timeout_resume` / `executor_fallback` / `resume_not_started`）串成链；`executor=` 记的是**实际执行**的那个 agent，所以"到底回退到谁了"不必再从 Attempt History 表反推。字段读法见「Agent 调用记录与停滞诊断（Invocation Tracing）」。
 
 ### 并行处理 Issue（`kc daemon --concurrency`）
 
@@ -2510,7 +2511,7 @@ kc daemon --concurrency 3
 - **每 Issue 日志文件**（始终写）：`logs/agent-runner/issues/<repo_id>/issue-<N>-<时间戳>.log`，含该 Issue 的 agent 流式输出与处理日志，可在 detached / 托管模式下 `tail -f` 回看，互不交错。agent 流式输出的每行行首带 `[HH:MM:SS]` 时间戳，与心跳行的时间前缀对得上。
 - **实时看板**（前台 TTY）：在交互终端直接 `kc daemon --concurrency 3` 时，会显示一个仿 `kc deliberate` 的多列实时面板，每个运行中的 Issue 一列；非 TTY（重定向、`kc registry start` 托管、CI）自动退化为按行加 `[issue #N ...]` 前缀的纯文本 + 上述日志文件。看板与纯文本视图收到的都是路由 sink 那份文本，因此每行顺序是 `[issue #N status=...] [HH:MM:SS] 原文`。
 - **按 Issue 从第二终端 / Console 查看**：`kc logs --repo-id <repo> --issue <N> [--follow]` 或 Console 的 PRD 详情「实时输出」标签，都读取同一份 per-Issue 日志文件；单次 `kc run`（串行）也走同一路径，只是不显示多列看板。
-- **归属靠字段而不是靠相邻文本**：每个 worker 线程各自绑定一份观测上下文（`contextvars`），因此并行时每条 `[iar-invocation-start]` / `[iar-invocation-end]` 都自带 `invocation=` / `run=` / `issue=`，即使日志被交错写入也能准确归属到具体 Issue 与具体那次调用。
+- **归属靠字段而不是靠相邻文本**：每个 worker 线程各自绑定一份观测上下文（`contextvars`），因此并行时每条 `[kc-invocation-start]` / `[kc-invocation-end]` 都自带 `invocation=` / `run=` / `issue=`，即使日志被交错写入也能准确归属到具体 Issue 与具体那次调用。
 
 ### 进度落盘与跨 claim 续作（checkpoint）
 
@@ -3378,10 +3379,10 @@ prompt = [
 
 ## Issue Comment Event Markers
 
-每个关键状态变化都会向 Issue 写入结构化 Markdown comment，并带隐藏 `iar:event` marker：
+每个关键状态变化都会向 Issue 写入结构化 Markdown comment，并带隐藏 `kc:event` marker：
 
 ```markdown
-<!-- iar:event version=1 phase=pre_pr_review cycle=1 head=abc123 -->
+<!-- kc:event version=1 phase=pre_pr_review cycle=1 head=abc123 -->
 
 ## Agent Runner Pre-PR Review
 
@@ -3412,12 +3413,12 @@ PRD 的 Realistic Validation 默认**必须由执行 agent 实跑**，并由人�
 
 ```text
 kc issue create        PRD 含 Realistic Validation 清单
-                        → 物化为 <!-- iar:structured-evidence version=1 language="zh-CN" --> marker
+                        → 物化为 <!-- kc:structured-evidence version=1 language="zh-CN" --> marker
                         → agent 解析每个 item 的格式要求（截图/pdf/txt等）
-                        → 物化为 <!-- iar:evidence-format item=N kind=xxx --> marker
+                        → 物化为 <!-- kc:evidence-format item=N kind=xxx --> marker
                         → Issue body 追加 "## Realistic Validation" 未勾清单
                         （PRD 显式声明 "Validation Waiver: <理由>" 时改为物化
-                          <!-- iar:validation-waived --> marker，跳过证据要求；
+                          <!-- kc:validation-waived --> marker，跳过证据要求；
                           配置 structured_evidence = false 时省略 structured marker）
 
 agent 执行              prompt 强制要求实跑验证计划，证据写入 worktree 的
@@ -3442,7 +3443,7 @@ agent 执行              prompt 强制要求实跑验证计划，证据写入 w
                         进入代码 diff。门禁按"目录前缀 + rv-<n>- 命名"两条规则
                         识别错放并打回 recovery；已提交在树里的历史违规只记
                         WARNING 日志，不阻塞交付。
-                        带 iar:structured-evidence marker 的 Issue 还必须写
+                        带 kc:structured-evidence marker 的 Issue 还必须写
                         <证据目录>/evidence.json manifest，按 checklist item
                         分组描述命令、关键输出摘要、解释、风险及关联证据文件。
 
@@ -3473,7 +3474,7 @@ RV 命令非零退出或 stdout 断言失败时，尝试详情会保留失败命
 commit 前门禁           要求验证但证据与清单不匹配 → 进入 recovery，
                         重试耗尽后 agent/failed。
 
-                        带 iar:structured-evidence marker 的 Issue 额外校验：
+                        带 kc:structured-evidence marker 的 Issue 额外校验：
                         - evidence.json 存在且 version = 1
                         - language 与 marker 一致
                         - 每个 checklist item 有且仅有一个 evidence block
@@ -3486,7 +3487,7 @@ commit 前门禁           要求验证但证据与清单不匹配 → 进入 re
                         未带 marker 的 Issue 保持原有行为：
                         - 证据目录（默认 tasks/evidence/<prd-stem>/）非空
                         - 第 n 个清单条目必须有 rv-<n>-* 证据文件
-                        - Issue body 含 iar:evidence-format marker 时，
+                        - Issue body 含 kc:evidence-format marker 时，
                           按 marker 的 kind 检查后缀（优先于正则匹配）
                         - 无 marker 时回退到正则关键词匹配：
                           截图/screenshot → 图片、pdf → .pdf、txt → .txt/.log、
@@ -3496,13 +3497,13 @@ commit 前门禁           要求验证但证据与清单不匹配 → 进入 re
                         - 全局：validation.evidence_format_check = false
                         - 按任务：PRD 在 Realistic Validation 小节写
                           "Evidence Format Waiver: <理由>"，物化为
-                          iar:evidence-format-waived marker
+                          kc:evidence-format-waived marker
 
 publish                 - diff 混入证据产物（.md 报告以外的证据路径）→ 拒绝
                           push（gitignore 白名单之外的强制加入在此兜底）
                         - PR body 末尾追加 marker 包裹的人工签收清单
                         - 证据经 git plumbing 推送到 orphan 分支
-                          iar-evidence/issue-<N>（无父提交、永不合并）
+                          kc-evidence/issue-<N>（无父提交、永不合并）
                         - PR 上发证据评论：
                           - 带 structured marker：按 RV-1 / RV-2 分组展示
                             命令、证据文件、SHA-256、关键输出摘要、解释、风险
@@ -3515,7 +3516,7 @@ publish                 - diff 混入证据产物（.md 报告以外的证据路
                         风险说明充分、SHA-256 与本地复现结果一致。
 
 当前 Realistic Validation 签收兼容路径使用 PR 改动身份，不把当前 main/base 的提交号当成证据身份；这不是其他验证 provider 必须遵循的通用规则。M12 将把门禁身份与有效性策略迁移到仓库用户定义的验证契约。新发布的
-`iar:validation-evidence version=2` marker 同时记录捕获时的 head/base 与 PR contribution
+`kc:validation-evidence version=2` marker 同时记录捕获时的 head/base 与 PR contribution
 patch-id。门禁先取 PR head 与当前 base 的共同祖先，再对 PR 改动计算 `git patch-id --stable`，
 并排除 `tasks/evidence/` 发布产物目录。PRD 本身仍包含在指纹中，因此验收范围变化会使旧签收
 失效。main 单独前进、PR 随后 rebase，或只更新 evidence 发布产物，都不会要求重新跑真实验证；
@@ -3523,19 +3524,19 @@ PR 的功能改动或 PRD 验收范围变化时才会清空签收并要求重新
 从 remote 取回，门禁保持验证待处理，不会把“身份无法计算”伪报成“证据已过期”。旧 `version=1`
 marker 继续按精确 head SHA 检查。
 
-相关 marker 一览（均为 `<!-- iar:... -->` 隐藏注释）：
+相关 marker 一览（均为 `<!-- kc:... -->` 隐藏注释）：
 
 | Marker | 位置 | 含义 |
 |---|---|---|
-| `iar:structured-evidence version=1 language="..."` | Issue body | 要求该 Issue 提供结构化 evidence.json manifest |
-| `iar:validation-waived reason="..."` | Issue body | operator 显式豁免，跳过证据要求 |
-| `iar:evidence-format-waived reason="..."` | Issue body | 按任务关闭逐项格式对账（证据仍必须存在） |
-| `iar:evidence-format item=N kind=xxx` | Issue body | agent 解析的格式要求标记（优先于正则） |
-| `iar:realistic-validation version=1 total=N` … `iar:realistic-validation-end` | PR body | 人工签收清单区块边界 |
-| `iar:validation-evidence version=1 head=<sha> branch=<branch> count=N` | PR comment | 旧版证据评论锚点（按精确 head 检测漂移） |
-| `iar:validation-evidence version=2 head=<sha> base=<sha> patch=<sha> branch=<branch> count=N` | PR comment | 证据锚点（按 PR 改动 patch-id 检测漂移；base/head 仅供审计） |
-| `iar:event phase=validation_passed` | Issue comment | 人工签收完成审计（按 head 去重） |
-| `iar:event phase=validation_reset` | PR comment | 签收因新 push 失效被重置 |
+| `kc:structured-evidence version=1 language="..."` | Issue body | 要求该 Issue 提供结构化 evidence.json manifest |
+| `kc:validation-waived reason="..."` | Issue body | operator 显式豁免，跳过证据要求 |
+| `kc:evidence-format-waived reason="..."` | Issue body | 按任务关闭逐项格式对账（证据仍必须存在） |
+| `kc:evidence-format item=N kind=xxx` | Issue body | agent 解析的格式要求标记（优先于正则） |
+| `kc:realistic-validation version=1 total=N` … `kc:realistic-validation-end` | PR body | 人工签收清单区块边界 |
+| `kc:validation-evidence version=1 head=<sha> branch=<branch> count=N` | PR comment | 旧版证据评论锚点（按精确 head 检测漂移） |
+| `kc:validation-evidence version=2 head=<sha> base=<sha> patch=<sha> branch=<branch> count=N` | PR comment | 证据锚点（按 PR 改动 patch-id 检测漂移；base/head 仅供审计） |
+| `kc:event phase=validation_passed` | Issue comment | 人工签收完成审计（按 head 去重） |
+| `kc:event phase=validation_reset` | PR comment | 签收因新 push 失效被重置 |
 
 配置（`config.toml` 或 `.kedacode.toml`）：
 
@@ -3545,7 +3546,7 @@ enabled = true                    # 关闭后整套门禁退化为不启用
 evidence_dir = "tasks/evidence"   # 证据目录根；默认按任务分子目录（<prd-stem>/ 或 issue-<N>/），
                                   # .md 报告经 gitignore 白名单入版本库；显式改为 ".iar/evidence"
                                   # 则回到整目录 info/exclude 排除的 legacy 行为
-branch_prefix = "iar-evidence/"   # orphan 证据分支前缀
+branch_prefix = "kc-evidence/"   # orphan 证据分支前缀
 evidence_format_check = true      # 逐项格式对账；false 退化为仅要求证据非空
 parse_evidence_format_with_agent = true  # 用 agent 解析格式要求；false 只用正则
 language = "zh-CN"                # 证据 prompt / PR 评论固定标签语言
@@ -3554,7 +3555,7 @@ require_negative_control = true    # 要求每项证据带 negative_control（�
 reexecute_commands = true          # keda 复跑每个证据项 command 确认真的通过；false 只信证据文件
 reexecute_timeout_seconds = 300    # 复跑单条命令的超时秒数（命令须为自终止的检查）
 reexecute_cache_enabled = true     # 工作区干净时按 HEAD^{tree} 缓存"已通过"，跳过重复复跑；脏则不缓存
-verifier_enabled = true            # 开 PR 前换一个 ≠builder 的 agent 对抗复验;red 自动打回 builder,yellow 贴警告评论,green 打 validation/verifier-passed label。仅对带 iar:structured-evidence marker 且要求验证的 issue 生效
+verifier_enabled = true            # 开 PR 前换一个 ≠builder 的 agent 对抗复验;red 自动打回 builder,yellow 贴警告评论,green 打 validation/verifier-passed label。仅对带 kc:structured-evidence marker 且要求验证的 issue 生效
 verifier_agent = "auto"            # verifier 用哪个 agent（auto=自动挑一个≠builder 的；显式指定的那个跑不起来时按 agent_fallback_order 顺延，封顶 max_agent_switches）
 verifier_timeout_seconds = 1800    # verifier 运行墙钟上限；多条 RV + negative control 的 PRD 需要更大值
 verifier_inactivity_timeout_seconds = 1200  # 连续多少秒没有任何输出才判卡死；与墙钟并存，让墙钟能放宽而真卡死仍被及时杀掉
@@ -3566,7 +3567,7 @@ validation_pending = "validation/pending"
 validation_passed = "validation/passed"
 ```
 
-语言配置只使用现有 TOML 配置体系（`config.toml` / `.kedacode.toml` 的 `[agent_runner.validation]`），不引入新的 `.iar/config` 文件，避免配置漂移。项目级默认语言写在 `config.toml`，单个仓库可通过 `.kedacode.toml` 覆盖。
+语言配置只使用现有 TOML 配置体系（`config.toml` / `.kedacode.toml` 的 `[agent_runner.validation]`），不引入新的 `.kedacode/config` 文件，避免配置漂移。项目级默认语言写在 `config.toml`，单个仓库可通过 `.kedacode.toml` 覆盖。
 
 ### verifier 判定的可诊断性：`red` 与"没吐 verdict"是两件事
 
@@ -3646,7 +3647,7 @@ verifier 能跑的就是 builder 写进 manifest 的那些 capture 脚本，而�
 
 ### Structured evidence manifest 格式
 
-带 `iar:structured-evidence` marker 的 Issue 必须在 `<证据目录>/evidence.json`（默认 `tasks/evidence/<prd-stem>/evidence.json`）提供如下 manifest：
+带 `kc:structured-evidence` marker 的 Issue 必须在 `<证据目录>/evidence.json`（默认 `tasks/evidence/<prd-stem>/evidence.json`）提供如下 manifest：
 
 ```json
 {
@@ -3692,9 +3693,9 @@ verifier 能跑的就是 builder 写进 manifest 的那些 capture 脚本，而�
 注意事项：
 
 - 私有仓库中证据评论的内联图片可能不渲染，点击评论中的 `Open image` / `Open file` 链接进入 blob 页查看。
-- 证据分支与代码历史零共同祖先（`git log iar-evidence/issue-<N>` 只有一个无父提交），永不合并；Issue 关闭后由 daemon 轮询清理。
+- 证据分支与代码历史零共同祖先（`git log kc-evidence/issue-<N>` 只有一个无父提交），永不合并；Issue 关闭后由 daemon 轮询清理。
 - 其他目标仓库使用该能力时，需要把 `validation-gate.yml` 复制到该仓库的 `.github/workflows/` 并配置 required check。
-- PRD 侧规范：Realistic Validation 默认必做；只有 operator 确认的 PRD 才允许在 `### Realistic Validation` 小节写 `Validation Waiver: <理由>` 行，`kc issue create` 会将其物化为豁免 marker。同一小节写 `Evidence Format Waiver: <理由>` 行则只关闭该任务的逐项格式对账（证据仍必须存在），物化为 `iar:evidence-format-waived` marker。
+- PRD 侧规范：Realistic Validation 默认必做；只有 operator 确认的 PRD 才允许在 `### Realistic Validation` 小节写 `Validation Waiver: <理由>` 行，`kc issue create` 会将其物化为豁免 marker。同一小节写 `Evidence Format Waiver: <理由>` 行则只关闭该任务的逐项格式对账（证据仍必须存在），物化为 `kc:evidence-format-waived` marker。
 
 ## 安全边界
 
@@ -3709,7 +3710,7 @@ verifier 能跑的就是 builder 写进 manifest 的那些 capture 脚本，而�
 - 如果验证过程结束后工作区还剩下任何 `git add -A` 仍会 stage 的内容，runner 会在安全路径校验后补一次 `git add -A`，避免 `.last_tested_commit` 指向 working tree 而 commit hook 检查到过期 staged tree。探测口径（`_verification_left_unstaged_worktree_changes`）覆盖两类残留：formatter / lint 自动修复的**已跟踪**文件（`git diff --quiet`），以及门禁自己生成、**未跟踪且未被 gitignore** 的新文件（`git ls-files --others --exclude-standard`，如新增快照或 golden 文件）。第二类曾是 `check-test-flag` 硬失败的盲区：`just test` 写标记用的路径集包含未跟踪未 ignore 的文件，而 commit 钩子比对 staged 树，只补 `git add -u` 时这些新文件永远进不了索引，钩子会给出「请运行 `git add -A` 归一」——恰好是 runner 漏做的那一步。判定与首次入索引的 `git add -A` 同口径，被 gitignore 的构建产物两边都看不见，因此不会被卷进提交
 - Agent CLI 非零退出或任一验证失败时，runner 最多按 `max_recovery_attempts` 重新调用同一个 Agent；每次 recovery 前会等待 `recovery_retry_delay_seconds` 秒，并把失败摘要以及失败命令的 exit code、stdout、stderr 放入 Fix Agent / Recovery Agent prompt；首次实现 prompt 也会预先列出完整的 `verification_commands` 并提醒检查项目规范，让 Agent 在写代码阶段就了解交付门禁。Agent 修复后仍只能写 commit request，不能直接提交
 - Runner 通过 `classify_failure` 对每次尝试进行分层失败识别，覆盖 `UNCOMMITTED_CHANGES`、`NO_COMMITS`、`VERIFICATION_FAILED`、`AGENT_ERROR`、`UNRECOVERABLE` 等类型；不可恢复错误（如安全路径拦截）会立即终止 retry loop
-- 每轮尝试的结果都会记录在 `AttemptResult` 中，包含执行 agent、起止时间、耗时与失败生命周期阶段；runner 会实时把结果写入本地 SQLite `attempt_records` 表，再用 `IRunHistoryStore.list_issue_attempts` 读回该 Issue 的完整轨迹（跨 agent、跨 claim）渲染 GitHub Issue 上带 `<!-- iar-attempt-history -->` marker 的增量评论。内存中的 attempt 列表每次换 agent 或重新 claim 都会从 1 重新计数，只能代表本轮，因此不作为渲染源（仅在没有配置 SQLite 存储时兜底）。最终失败评论中的「Attempt History」表格展示 attempt_number、started_at、agent、failure_type、recovered、duration、detail，便于人工 review 时追踪 Agent 的修复轨迹；由于 attempt_number 只在本轮内递增，整表会混排多轮（例如 `claude 1..6` 后紧跟 `kimi 1..2`），因此表格用 **Started (UTC)** 列给出时间锚点（`YYYY-MM-DD HH:MMZ`；缺失渲染为 `-`，无法解析则原样回显），并在表格下方固定附一行说明"编号在每次换 agent 与每次重新 claim 时从 1 重新开始"，避免被误读成编号错乱；Detail 列取每次失败输出的最后一行有效内容（实际报错几乎总在末尾），而不是从头截断的样板文字
+- 每轮尝试的结果都会记录在 `AttemptResult` 中，包含执行 agent、起止时间、耗时与失败生命周期阶段；runner 会实时把结果写入本地 SQLite `attempt_records` 表，再用 `IRunHistoryStore.list_issue_attempts` 读回该 Issue 的完整轨迹（跨 agent、跨 claim）渲染 GitHub Issue 上带 `<!-- kc:attempt-history -->` marker 的增量评论。内存中的 attempt 列表每次换 agent 或重新 claim 都会从 1 重新计数，只能代表本轮，因此不作为渲染源（仅在没有配置 SQLite 存储时兜底）。最终失败评论中的「Attempt History」表格展示 attempt_number、started_at、agent、failure_type、recovered、duration、detail，便于人工 review 时追踪 Agent 的修复轨迹；由于 attempt_number 只在本轮内递增，整表会混排多轮（例如 `claude 1..6` 后紧跟 `kimi 1..2`），因此表格用 **Started (UTC)** 列给出时间锚点（`YYYY-MM-DD HH:MMZ`；缺失渲染为 `-`，无法解析则原样回显），并在表格下方固定附一行说明"编号在每次换 agent 与每次重新 claim 时从 1 重新开始"，避免被误读成编号错乱；Detail 列取每次失败输出的最后一行有效内容（实际报错几乎总在末尾），而不是从头截断的样板文字
 - 失败评论会识别已知错误签名：命中 Claude API 用量限额（429 / usage limit）时，在评论顶部输出加粗的 Root cause 摘要并带上限额重置时间；`CalledProcessError` 的命令回显只保留命令名（如 `claude`），不会把完整 agent prompt 打进评论
 - 如果 Agent 没有产生任何新 commit 且工作区也没有未提交变更，runner 通常会将 Issue 标记为 `agent/failed`。无 PRD 的 Issue 若 fresh read 确认已关闭且 worktree 没有变更，则按「无改动完成」正常结束并跳过验证、PR 发布与失败重试；GitHub 读取失败、Issue 仍 open、存在代码变更或带 PRD 的任务都不走这条路径。四条负例在 `tests/test_agent_runner_closed_noop.py` 逐个断言失败分类；`kc run` 真实入口侧由 `tests/test_agent_runner_recovery.py` 覆盖两种收尾——`test_run_once_completes_recovery_or_closed_noop[closed-noop]` 确认闭合收敛不建 PR，`test_recovery_loop_exhausted_raises_max_retries` 确认干净树但状态仍 open 时 fresh read 被问过、门禁不放行，Issue 照旧 `no_commits` + `agent/failed`。两点容易读错的口径：
     - 「worktree 没有变更」按 `git status --porcelain` 判定，**含未跟踪文件**（只被 `.gitignore` 排除的 runner 产物如 `.agent-runner/` 不计入）。巡查 Agent 若在关闭 Issue 后留下了任何未跟踪产物，本轮仍按 `uncommitted_changes` / `no_commits` 失败，不会冒充「无改动完成」。
@@ -3777,7 +3778,7 @@ Claude stream (Issue #23: https://github.com/owner/example-repo/issues/23) still
 
 **入口没有变化**：仍然是 `kc logs --repo <path> --issue <N> [--follow]`，没有新命令、新旗标、新 JSON 汇总。变的只是这条流里多了三种结构化标记行。
 
-同一批调用事件另外还喂给 Backlog PRD 详情的「执行过程」标签页（只读消费，见下文「PRD 生命周期账本与执行分析」的 `invocations` 区）：`grep '\[iar-invocation-'` 仍是逐条核对的第一入口，页面只是把同一事实按会话/尝试分组呈现，不改口径、不补数据。
+同一批调用事件另外还喂给 Backlog PRD 详情的「执行过程」标签页（只读消费，见下文「PRD 生命周期账本与执行分析」的 `invocations` 区）：`grep '\[kc-invocation-'` 仍是逐条核对的第一入口，页面只是把同一事实按会话/尝试分组呈现，不改口径、不补数据。
 
 ### 为什么需要它
 
@@ -3792,15 +3793,15 @@ Claude stream (Issue #23: https://github.com/owner/example-repo/issues/23) still
 
 | 标记 | 出现时机 | 读法 |
 |---|---|---|
-| `[iar-invocation-start]` | 一次真实子进程调用**即将启动**（argv 已组装完成） | 这次调用存在了；后面必然有一条同 `invocation=` 的结束标记，或一个可解释的缺口 |
-| `[iar-invocation-end]` | 同一次调用返回、抛异常或超时被杀之后 | 这次调用的结局、耗时与模型事实 |
-| `[iar-invocation-coverage-incomplete]` | 观测事件写库失败、账本不可用或日志定位越界时（每个 run 最多一条） | **本次 run 的调用清单可能不完整**；业务结果不受影响，但不要拿这份清单当完整证据 |
+| `[kc-invocation-start]` | 一次真实子进程调用**即将启动**（argv 已组装完成） | 这次调用存在了；后面必然有一条同 `invocation=` 的结束标记，或一个可解释的缺口 |
+| `[kc-invocation-end]` | 同一次调用返回、抛异常或超时被杀之后 | 这次调用的结局、耗时与模型事实 |
+| `[kc-invocation-coverage-incomplete]` | 观测事件写库失败、账本不可用或日志定位越界时（每个 run 最多一条） | **本次 run 的调用清单可能不完整**；业务结果不受影响，但不要拿这份清单当完整证据 |
 
 起止标记共用同一段身份前缀，因此并发场景下靠 `invocation=` 归属，不靠"上下相邻"推断：
 
 ```text
-[iar-invocation-start] invocation=inv-3f9a1c7b2d40 run=keda-main#issue-242#20261008T015223Z-a91f4c0b7e33 issue=242 attempt=1 phase=implementation role=implementer executor=claude model_requested=claude-sonnet-4-5 retry_of=- retry_reason=- log=agent-runner/issues/keda-main/issue-242-20261008-015223.log
-[iar-invocation-end] invocation=inv-3f9a1c7b2d40 run=keda-main#issue-242#20261008T015223Z-a91f4c0b7e33 issue=242 attempt=1 phase=implementation role=implementer executor=claude outcome=ok exit_code=0 duration_s=1843.207 model_requested=claude-sonnet-4-5 model_reported=claude-sonnet-4-5-20250929 model_source=executor_report retry_of=- failure_category=-
+[kc-invocation-start] invocation=inv-3f9a1c7b2d40 run=keda-main#issue-242#20261008T015223Z-a91f4c0b7e33 issue=242 attempt=1 phase=implementation role=implementer executor=claude model_requested=claude-sonnet-4-5 retry_of=- retry_reason=- log=agent-runner/issues/keda-main/issue-242-20261008-015223.log
+[kc-invocation-end] invocation=inv-3f9a1c7b2d40 run=keda-main#issue-242#20261008T015223Z-a91f4c0b7e33 issue=242 attempt=1 phase=implementation role=implementer executor=claude outcome=ok exit_code=0 duration_s=1843.207 model_requested=claude-sonnet-4-5 model_reported=claude-sonnet-4-5-20250929 model_source=executor_report retry_of=- failure_category=-
 ```
 
 身份字段：
@@ -3994,13 +3995,13 @@ daemon 里一个 writer 卡住时，现状是"没人知道"：日志还在，进
 ### 一次停滞的完整链路
 
 1. 观察线程（daemon）按 `check_interval_seconds` 采样；签名一变就重置锚点。
-2. 冻结超过 `stalled_after_seconds` → 起一次只读诊断（`generate` profile，提示词里给了现场指纹与判定口径），审计行落 `[iar-stall-diagnosis]`。同一个停滞窗口至多问一次；**诊断调用本身失败**（网络 / CLI 抖动）不算结论，窗口保留、下个周期再问。
-3. 解析结论。只有 `stalled` 可触发处置，且必须同时给出摘要与支撑证据；`blocked` / `uncertain` 只交班（`[iar-stall-handoff]`），不写入也不终止。
+2. 冻结超过 `stalled_after_seconds` → 起一次只读诊断（`generate` profile，提示词里给了现场指纹与判定口径），审计行落 `[kc-stall-diagnosis]`。同一个停滞窗口至多问一次；**诊断调用本身失败**（网络 / CLI 抖动）不算结论，窗口保留、下个周期再问。
+3. 解析结论。只有 `stalled` 可触发处置，且必须同时给出摘要与支撑证据；`blocked` / `uncertain` 只交班（`[kc-stall-handoff]`），不写入也不终止。
 4. 处置前复核三件事：被监督调用仍活着、现场签名与诊断时一致、`probe_live_attempt` 确认这个 attempt  owns 那批 PID。任一项不成立 → 只交班。
-5. 全部成立 → `cancel_live_attempt` 终止该进程组，`[iar-stall-cancel]` 记账，抛 `AgentStallCancelledError`。
+5. 全部成立 → `cancel_live_attempt` 终止该进程组，`[kc-stall-cancel]` 记账，抛 `AgentStallCancelledError`。
 6. 该异常流进**既有**的 `classify_failure` → 恢复阶梯 → 既有门禁。监督器不新增恢复路径，也不改写标签。
 
-排查时直接 `grep '\[iar-stall-' <per-Issue 日志>`；审计行在调用线程里补写一遍，因此按 Issue 过滤就能看到监督器的每一步判断（含"为什么没动手"）。
+排查时直接 `grep '\[kc-stall-' <per-Issue 日志>`；审计行在调用线程里补写一遍，因此按 Issue 过滤就能看到监督器的每一步判断（含"为什么没动手"）。
 
 ### 结论协议：三个字段，形态容错，闭集不变
 
@@ -4109,13 +4110,13 @@ macOS 菜单栏版需要从 `~/Applications/KedaCode.app` 启动，点击顶部�
 | `label_pr_mismatch` | PR 已创建但 Issue label 不在 `agent/supervising` / `agent/automated-review-passed` / `agent/blocked` / `agent/failed` 中 | warning | `kc labels sync`、`kc supervise --dry-run` |
 | `pr_dirty_in_review` | PR `mergeable_state` 为 dirty/conflicted 且 label 是 `agent/automated-review-passed` | error | `kc supervise`、`kc run --max-issues 1` |
 | `dirty_worktree_mismatch` | worktree 有未提交变更但 label 不是 `agent/running` | warning | `kc run --dry-run`、`git status` |
-| `event_label_mismatch` | 最新 `iar:event` phase 隐含的状态与当前 label 不一致 | warning | `kc labels sync` |
+| `event_label_mismatch` | 最新 `kc:event` phase 隐含的状态与当前 label 不一致 | warning | `kc labels sync` |
 
 Overview 还会按 severity 汇总 `anomaly_count` 和 `anomaly_summary`（`warning` / `error`），并把 `has_anomaly` 标在对应 Issue 行上。
 
 ### 事件时间线
 
-`GET /api/v1/agent-runner/issues/{issue_number}` 返回 `timeline`，按时间顺序列出所有 `<!-- iar:event ... -->` 标记，附带 phase、cycle、head SHA、PR branch、checks_state、mergeable、action 等字段。解析复用 `backend.core.use_cases.agent_runner_events`，不会复制 marker parser。
+`GET /api/v1/agent-runner/issues/{issue_number}` 返回 `timeline`，按时间顺序列出所有 `<!-- kc:event ... -->` 标记，附带 phase、cycle、head SHA、PR branch、checks_state、mergeable、action 等字段。解析复用 `backend.core.use_cases.agent_runner_events`，不会复制 marker parser。
 
 ### 建议 CLI 文本
 
@@ -4318,7 +4319,7 @@ daemon 进程**即获得多项目并发——不同仓库的 Issue 同时执行�
   的 runner；重启后从 pidfile registry（`~/.kedacode/processes.json`）复活
   记录并重新探活。
 - 子进程以 `<kc> <command> --repo-id <id>` 启动，cwd 为**目标仓库自身
-  路径**：托管的 daemon 必须在目标仓库内读取该仓的 `.iar` 状态与 git
+  路径**：托管的 daemon 必须在目标仓库内读取该仓的 `.kedacode` 状态与 git
   上下文；全局安装场景下 keda 项目根与目标仓库无关。
 - 默认启动命令运行时解析：`kc console` 入口直接取 `sys.argv[0]`（与
   当前安装态完全同源），否则从 PATH 解析 `kc`，兜底 `uv run kc`（源码
@@ -4581,7 +4582,7 @@ GET /api/v1/agent-runner/console/stats/prd-lifecycle?repo_id=&days=
 
 `invocations` 把同一 Issue 的调用账本（`agent_invocation_events`，跨执行会话）按发生顺序解释成展示行，
 供 Backlog「执行过程」的「执行会话 → Agent 尝试 → 调用」三层视图消费。它就是
-`grep '\[iar-invocation-'` 的页面读法：同源同口径，页面不改写事件、不新增采集、不补数据。
+`grep '\[kc-invocation-'` 的页面读法：同源同口径，页面不改写事件、不新增采集、不补数据。
 
 - `rows[]` 每行含 `invocation_id / run_id（所属执行会话）/ attempt_number / phase / role / executor /
   outcome / failure_category / started_at / finished_at / duration_seconds / requested_model /
@@ -4897,7 +4898,7 @@ enabled = true               # 新键：仓库级显式打开
 5. **禁改路径终扫**：取 PR diff 文件清单，用 `safety.forbidden_path_patterns` 与 `safety.forbidden_path_exceptions` 做最终匹配（复用 `agent_runner_publish.is_forbidden_path(...)`）；命中且未命中例外→打 `agent/blocked` + 评论，永不自动合并。
 6. **PR 就绪与 checks**：本地验证及禁改路径终扫通过后，重新读取 Issue 的自动合并授权；只有 `prd-auto-merge` 路径还要求 PRD 锚点与开始时一致。再检查 `autopilot_hold`；任一未通过都保持 Draft。门禁仍通过时，若 PR 为 Draft，调用 `IGitHubClient.mark_pull_request_ready(pr_number)` 转为 Ready；重新读取 PR 状态，未确认 Ready 就保留 `agent/automated-review-passed` 并留待下一轮重试。Ready 转换后才轮询 checks，避免使用 Draft 时的旧状态快照；超时上限 `autopilot.merge_check_timeout_seconds`。GitHub branch protection 始终保留。
 7. **合并前复核**：checks 等待期间再次读取 Issue 的自动合并授权；只有 `prd-auto-merge` 路径还复核 PRD 锚点。授权撤销、适用的锚点变化或人工接管均停止本轮，不回退 Issue 生命周期。
-8. **合并**：调用 `IGitHubClient.merge_pull_request(pr_number, method="squash")`（gh 实现 `gh pr merge <n> --squash`）；对"already merged"响应归一为幂等成功。成功后发 `iar:event (auto-merged)` 评论、摘除 `agent/automated-review-passed` 标签。
+8. **合并**：调用 `IGitHubClient.merge_pull_request(pr_number, method="squash")`（gh 实现 `gh pr merge <n> --squash`）；对"already merged"响应归一为幂等成功。成功后发 `kc:event (auto-merged)` 评论、摘除 `agent/automated-review-passed` 标签。
 
 **PRD hold（自动签核之后、rebase 之前）**：PRD-backed Issue 在 rebase 前先读该 Issue worktree 里的 PRD——按实际位置定位（先 `tasks/pending/`，再 `tasks/archive/`）。只有 `prd-auto-merge` 这项 PRD 专用授权可以越过 Human-Confirmed hold；通用 `auto-merge` 仍等待人工验收。获准越过 hold 时不修改 PRD 的清单或验收横幅，也不记录人工验收；PRD 仍必须归档：
 
@@ -4910,7 +4911,7 @@ enabled = true               # 新键：仓库级显式打开
 ### 崩溃重入幂等
 
 - **勾选幂等**：解析 `ValidationChecklistState`，已全勾则不改 body、不发评论。
-- **评论幂等**：发评论前查 `iar:auto-sign-off` marker，避免重复评论。
+- **评论幂等**：发评论前查 `kc:auto-sign-off` marker，避免重复评论。
 - **合并幂等**：`gh pr merge --squash` 对已合并 PR 视为 no-op（基础设施层归一化）。
 - **跨 pass**：已合并的 Issue 失去 open PR，下一轮 `find_open_pr_by_head` 返回空，自动跳过收尾。
 
@@ -5175,7 +5176,7 @@ uv run kc backlog advance --repo <repo-id>
 #### 策略模型：全局默认 + 单 PRD 三态覆盖
 
 - **全局默认**：仓库级 `post_pr_supervisor.auto_repair_ci`（`.kedacode.toml`，默认 `false`），由 Backlog 顶部「全局自动修复 CI/CD」开关或 `kc backlog ci policy --global on|off` 控制；只改这一个布尔键，与 Autopilot、`safety.auto_merge`、提交前 Fix Agent 互不联动（Autopilot 的合并队列等 checks 全绿是合并门禁，不会因失败而触发自动修复）。
-- **单 PRD 覆盖**：`inherit`（跟随全局，默认）/ `on`（强制开启）/ `off`（强制关闭），事实源是对应 GitHub Issue 最新一条 `<!-- iar:ci-auto-repair-policy value=... -->` marker；无 Issue 的 PRD 只能跟随全局。
+- **单 PRD 覆盖**：`inherit`（跟随全局，默认）/ `on`（强制开启）/ `off`（强制关闭），事实源是对应 GitHub Issue 最新一条 `<!-- kc:ci-auto-repair-policy value=... -->` marker；无 Issue 的 PRD 只能跟随全局。
 - **最终生效值**由服务端按 `显式 on/off ?? fresh 全局值` 计算（`on → true`、`off → false`、`inherit → 全局值`），API/CLI 只回显，前端不得自行推断。
 
 Supervisor 的 `repair_pr_branch` JSON 决策包含 `repair_scope`：纯代码审查问题使用 `code_review`，CI 失败修复或混合问题使用 `ci`。缺失或无效值保守按 `ci` 处理。`auto_repair_ci` 与单 PRD 覆盖只限制 `ci`；`code_review` 不受 CI 自动修复开关影响。获准的修复都由 Supervisor 生命周期内的配置 repair agent 执行，Issue 保持 `agent/supervising`，不会重新认领 builder。两类修复共享 `max_repair_attempts` 上限及同一 head 的幂等请求，不扩大总重试预算。Supervisor 评论回显范围，便于核对实际政策。
@@ -5254,7 +5255,7 @@ PRD 的 `Delivery Dependencies` 小节会解析为两类依赖边（Issue 与 PR
 
 安全要求：
 
-1. 请求必须携带 `X-IAR-Signature` header，值为 `sha256=<HMAC_SHA256(secret, raw_body)>`。secret 来自环境变量 `KEDACODE_IDEA_INBOX_INBOUND_SECRET`，**不写入** `config.toml` / `.kedacode.toml`。
+1. 请求必须携带 `X-KC-Signature` header，值为 `sha256=<HMAC_SHA256(secret, raw_body)>`。secret 来自环境变量 `KEDACODE_IDEA_INBOX_INBOUND_SECRET`，**不写入** `config.toml` / `.kedacode.toml`。
 2. `repo_id` 必须显式给出并能在 registry 中解析；缺少或被禁用则返回 `400`。
 3. Feishu 等 provider adapter 只做 payload 转换：消息永远先写入 `ideas.md`（不会被猜项目路由到默认仓库，也不会直接创建 pending PRD）。如果消息只携带 `@项目名` 而没有 `repo_id`，adapter 应当返回明确错误或把消息放进 `unassigned` 队列；当前实现要求 `repo_id` 显式。
 
@@ -5332,7 +5333,7 @@ kc 默认跑在本机，需要本机预先安装你打算使用的 agent CLI（�
 
 - 容器内预装全套工具链（claude / codex / kimi / gh / Node / uv / just / git + kc 自身）。
 - 认证通过 `kc container auth import` 一次性快照到 `~/.kedacode/container-auth/`，与本机 cc-switch 当前 profile 隔离；本机 cc-switch 后续切换不影响容器。
-- 目标仓库挂载进容器，agent 在挂载目录的 `.iar-worktrees/` 建 worktree，宿主机可直接 `kc worktree open` 接管。
+- 目标仓库挂载进容器，agent 在挂载目录的 `.kc-worktrees/` 建 worktree，宿主机可直接 `kc worktree open` 接管。
 - 单仓库先跑通（一个容器跑一个仓库的 daemon）。
 
 ### 一次性导入认证
@@ -5378,11 +5379,11 @@ kc container up --repo /absolute/path/to/your-repo --repo-id keda
 
 ### 本机可见 Worktree
 
-agent 在容器内建的 worktree 落在挂载目录的 `<repo>/.iar-worktrees/issue-<N>/`，宿主 IDE 可直接打开：
+agent 在容器内建的 worktree 落在挂载目录的 `<repo>/.kc-worktrees/issue-<N>/`，宿主 IDE 可直接打开：
 
 ```bash
 kc worktree open
-ls /path/to/your-repo/.iar-worktrees/
+ls /path/to/your-repo/.kc-worktrees/
 ```
 
 容器以宿主机 `os.getuid()`/`os.getgid()` 运行，worktree 文件属主 = 宿主当前用户，非 root。
@@ -5414,11 +5415,11 @@ uv run python -c "from importlib.resources import files; print(files('backend.en
 | 症状 | 可能原因 | 排查 |
 |---|---|---|
 | `docker: command not found` | Docker 未装 | `brew install --cask docker` 或装 Docker Desktop |
-| 容器内 `claude --version` 失败 | kimi 安装脚本不可达 / npm 包镜像问题 | `docker compose -f <compose> run --rm iar-runner sh -c 'which claude; echo $PATH'` |
+| 容器内 `claude --version` 失败 | kimi 安装脚本不可达 / npm 包镜像问题 | `docker compose -f <compose> run --rm kc-runner sh -c 'which claude; echo $PATH'` |
 | 容器内 `gh auth status` 401 | `GH_TOKEN` 未传或过期 | `.env.local` 里确认 `GH_TOKEN=<有效 token>` |
 | worktree 属主变 root | `RUNNER_UID`/`RUNNER_GID` 未对齐宿主 | `id -u` / `id -g` 与 `.env.local` 校对 |
 | `kc container up` 拒绝启动 | 同 repo_id 的本机 daemon 已活 | `kc daemon stop --repo-id <id>` 后重试 |
-| `kc run --dry-run` 在容器内失败 | 挂载仓库未 `kc init` | 进容器：`docker compose exec iar-runner kc init` |
+| `kc run --dry-run` 在容器内失败 | 挂载仓库未 `kc init` | 进容器：`docker compose exec kc-runner kc init` |
 | 目标仓库缺失 `agent/*` 标签：`kc` 无法识别可执行 Issue、贴不上目标状态标签，典型表现是 `gh issue edit` 报 label 不存在、Issue 卡在无法流转的状态 | 该仓库从未运行过 `kc labels sync`，或仓库初始化时间早于某些后加的标签（例如 `agent/rework-prd`） | 在目标仓库运行 `kc labels sync` 补齐缺失的 `agent/*` 标签（幂等，可重复执行；仓库根需已有有效 `.kedacode.toml`，否则先 `kc init`） |
 
 ### 架构边界

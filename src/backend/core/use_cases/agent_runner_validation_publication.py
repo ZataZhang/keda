@@ -32,7 +32,7 @@ _PR_URL_PATTERN = re.compile(
     r"https?://[^/]+/(?P<owner>[^/]+)/(?P<repo>[^/]+)/pull/(?P<number>\d+)"
 )
 _EVIDENCE_MARKER_PATTERN = re.compile(
-    r"<!--\s*iar:validation-evidence\s+"
+    r"<!--\s*kc:validation-evidence\s+"
     r"version=(?P<version>\d+)\s+"
     r"head=(?P<head>[a-f0-9]+)\s+"
     r"(?:base=(?P<base>[a-f0-9]+)\s+patch=(?P<patch>[a-f0-9]+)\s+)?"
@@ -207,7 +207,7 @@ def build_evidence_comment(
 ) -> str:
     """Build the PR evidence comment with embedded images and quoted text.
 
-    当 ``issue_body`` 带 ``iar:structured-evidence`` marker 时，按 checklist item
+    当 ``issue_body`` 带 ``kc:structured-evidence`` marker 时，按 checklist item
     分组渲染结构化证据块（命令、摘要、解释、风险、SHA-256）；否则按文件名平铺，
     保持与旧 Issue 的兼容。
 
@@ -329,7 +329,7 @@ def _render_video_evidence_summary(
 def parse_latest_evidence_marker(
     pr_comments: list[str],
 ) -> EvidenceMarker | EvidenceMarkerV2 | None:
-    """Parse the latest iar:validation-evidence marker from PR comments."""
+    """Parse the latest kc:validation-evidence marker from PR comments."""
     for comment_body in reversed(pr_comments):
         marker_match = _EVIDENCE_MARKER_PATTERN.search(comment_body)
         if marker_match:

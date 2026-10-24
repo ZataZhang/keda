@@ -1237,6 +1237,69 @@ def test_list_issues_by_label_omits_label_flag_when_none(tmp_path: Path) -> None
     ]
 
 
+def test_list_repository_items_reads_all_pages_and_includes_pull_requests(
+    tmp_path: Path,
+) -> None:
+    """显式迁移使用完整 REST 分页，并保留 Issue 和 PR 正文。"""
+    repository_items_command = (
+        "gh",
+        "api",
+        "-X",
+        "GET",
+        "--paginate",
+        "--slurp",
+        "repos/owner/repo/issues",
+        "-f",
+        "state=all",
+        "-F",
+        "per_page=100",
+    )
+    fake_runner = FakeProcessRunner(
+        responses={
+            repository_items_command: CommandResult(
+                command=repository_items_command,
+                return_code=0,
+                stdout=json.dumps(
+                    [
+                        [
+                            {
+                                "number": 12,
+                                "title": "issue",
+                                "html_url": "https://github.com/owner/repo/issues/12",
+                                "labels": [],
+                                "body": "issue body",
+                                "state": "open",
+                            }
+                        ],
+                        [
+                            {
+                                "number": 13,
+                                "title": "pull request",
+                                "html_url": "https://github.com/owner/repo/pull/13",
+                                "labels": [],
+                                "body": "pull request body",
+                                "state": "closed",
+                                "pull_request": {"url": "https://api.github.com/pulls/13"},
+                            }
+                        ],
+                    ]
+                ),
+                stderr="",
+            )
+        }
+    )
+    github_client = GitHubCliClient(tmp_path, fake_runner)
+
+    repository_items = github_client.list_repository_items(state="all")
+
+    assert [repository_item.number for repository_item in repository_items] == [12, 13]
+    assert [repository_item.body for repository_item in repository_items] == [
+        "issue body",
+        "pull request body",
+    ]
+    assert fake_runner.calls == [list(repository_items_command)]
+
+
 def test_sync_labels_creates_verifier_passed_label(tmp_path: Path) -> None:
     """sync_labels must register validation/verifier-passed so post-PR verdicts can tag.
 

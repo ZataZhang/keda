@@ -11,7 +11,7 @@ from backend.core.shared.models import product_identity
 from backend.core.shared.models.agent_runner import AppConfig, GeneratedContentConfig
 from backend.engines.agent_runner import repository_local_migration as migration_module
 from backend.engines.agent_runner.factory import merge_repository_config
-from backend.engines.agent_runner.repository_local import IARRepositoryNotInitializedError
+from backend.engines.agent_runner.repository_local import RepositoryNotInitializedError
 from backend.engines.agent_runner.repository_local_migration import (
     ConfigMigrationError,
     ConfigMigrationResult,
@@ -586,7 +586,7 @@ def test_migration_rejects_invalid_toml_and_leaves_it_alone(tmp_path: Path) -> N
 
 def test_migration_requires_an_initialized_repository(tmp_path: Path) -> None:
     """没有 ``.kedacode.toml`` 时抛统一的“未初始化”错误，由 CLI 统一提示 ``kc init``。"""
-    with pytest.raises(IARRepositoryNotInitializedError) as exc_info:
+    with pytest.raises(RepositoryNotInitializedError) as exc_info:
         migrate_repository_local_config(tmp_path)
 
     # 两份名字都不存在时，报错指向新名（用户接下来该看到的是一份 .kedacode.toml）。

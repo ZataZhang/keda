@@ -2,7 +2,8 @@
 
 Agent Runner 的会话续传不把 session id 存进任何"第二状态源"（库表 / 租约）——
 持有方是 agent CLI 自己，runner 只做**记录与回传**：把 agent 输出流里自报的
-session id 落在该 Issue 的 worktree 局部（``.iar/``，仓库级 gitignore 内），
+session id 落在该 Issue 的 worktree 局部（``.kedacode/``，仓库级 gitignore 内；旧 ``.iar/``
+目录存在时继续使用），
 恢复轮次构建命令时读回来注入 resume 模板。记录还标记执行链是否已经完整成功，以及
 同一 session 已消耗的超时续跑预算，避免仅因历史 id 存在就自动续传。
 
@@ -23,11 +24,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from backend.core.shared.models.agent_runner import AppConfig
+from backend.core.shared.models.repository_paths import (
+    LEGACY_REPOSITORY_STATE_DIR_NAME,
+    resolve_repository_state_path,
+)
 
 _logger = logging.getLogger(__name__)
 
-#: 会话记录相对 worktree 根的目录（与 ``.iar`` 一起被仓库级 gitignore 覆盖）。
-_AGENT_SESSION_DIR_RELPATH = Path(".iar") / "agent-runner" / "sessions"
+#: 新会话目录；已有旧目录由路径解析器继续复用。
+_AGENT_SESSION_DIR_RELPATH = Path(".kedacode") / "agent-runner" / "sessions"
+_LEGACY_AGENT_SESSION_DIR_RELPATH = (
+    Path(LEGACY_REPOSITORY_STATE_DIR_NAME) / "agent-runner" / "sessions"
+)
 _SESSION_PHASE_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 
 
@@ -82,7 +90,12 @@ def agent_session_record_path(
         if not _SESSION_PHASE_RE.fullmatch(phase):
             raise ValueError(f"Invalid agent session phase: {phase!r}")
         record_name = f"{agent_name}.{phase}.json"
-    return worktree_path / _AGENT_SESSION_DIR_RELPATH / record_name
+    session_dir_path = resolve_repository_state_path(
+        worktree_path,
+        _AGENT_SESSION_DIR_RELPATH,
+        _LEGACY_AGENT_SESSION_DIR_RELPATH,
+    )
+    return session_dir_path / record_name
 
 
 def _atomic_write_text(target_path: Path, content: str) -> None:

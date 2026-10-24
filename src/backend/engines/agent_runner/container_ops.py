@@ -45,7 +45,7 @@ from backend.infrastructure.child_env import build_sanitized_child_env
 TEMPLATE_PACKAGE_NAME = "backend.engines.agent_runner.templates"
 RUNNER_CONTAINER_TEMPLATE_NAME = "runner_container"
 
-# compose 文件内 service 名；与 docker-compose.runner.yml 中的 service 保持一致。
+# compose 文件内的持久化 service 名保持兼容，避免新版本无法停止已有容器。
 RUNNER_SERVICE_NAME = "iar-runner"
 
 # compose 文件名 + 示例 env 文件名。

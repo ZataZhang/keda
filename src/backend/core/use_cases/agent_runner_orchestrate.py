@@ -323,7 +323,7 @@ def _stamp_attempts_with_agent(
     return [attempt if attempt.agent else replace(attempt, agent=agent) for attempt in attempts]
 
 
-_ATTEMPT_HISTORY_MARKER = "<!-- iar-attempt-history -->"
+_ATTEMPT_HISTORY_MARKER = "<!-- kc:attempt-history -->"
 _ATTEMPT_HISTORY_TITLE = "### Attempt History"
 
 

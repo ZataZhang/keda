@@ -254,12 +254,12 @@ def test_root_config_toml_declares_closeout_settings() -> None:
 
 def test_iar_toml_key_table_documents_closeout_settings() -> None:
     """逐仓库 .kedacode.toml 的键说明表必须登记三项新键，否则生成的文件里没有注释。"""
-    from backend.engines.agent_runner.repository_local import _IAR_FIELD_COMMENTS
+    from backend.engines.agent_runner.repository_local import _CONFIG_FIELD_COMMENTS
 
-    assert "runner.closeout_agent_enabled" in _IAR_FIELD_COMMENTS
-    assert "runner.closeout_timeout_seconds" in _IAR_FIELD_COMMENTS
-    assert "runner.closeout_visual_timeout_seconds" in _IAR_FIELD_COMMENTS
-    assert "runner.timeout_resume_attempts" in _IAR_FIELD_COMMENTS
+    assert "runner.closeout_agent_enabled" in _CONFIG_FIELD_COMMENTS
+    assert "runner.closeout_timeout_seconds" in _CONFIG_FIELD_COMMENTS
+    assert "runner.closeout_visual_timeout_seconds" in _CONFIG_FIELD_COMMENTS
+    assert "runner.timeout_resume_attempts" in _CONFIG_FIELD_COMMENTS
 
 
 def test_generated_content_settings_defaults_match_core_defaults() -> None:
@@ -723,10 +723,10 @@ def test_root_config_toml_declares_repair_agent() -> None:
 
 def test_iar_toml_key_table_documents_repair_agent() -> None:
     """逐仓库 .kedacode.toml 的键说明表必须登记两个新键，否则生成的文件里没有注释。"""
-    from backend.engines.agent_runner.repository_local import _IAR_FIELD_COMMENTS
+    from backend.engines.agent_runner.repository_local import _CONFIG_FIELD_COMMENTS
 
-    assert "pre_pr_review.repair_agent" in _IAR_FIELD_COMMENTS
-    assert "post_pr_supervisor.repair_agent" in _IAR_FIELD_COMMENTS
+    assert "pre_pr_review.repair_agent" in _CONFIG_FIELD_COMMENTS
+    assert "post_pr_supervisor.repair_agent" in _CONFIG_FIELD_COMMENTS
 
 
 def test_every_agent_invocation_call_site_passes_config() -> None:

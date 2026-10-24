@@ -32,7 +32,7 @@ def run_labels_command(ctx: ParsedCommandContext) -> int:
         repo_override=ctx.repo_override,
     )
     for context in contexts:
-        _cli.require_iar_repository_initialized(context.repo_path, ctx.process_runner)
+        _cli.require_repository_initialized(context.repo_path, ctx.process_runner)
     if contexts:
         _cli._ensure_gh_auth_or_prompt(contexts[0].repo_path, ctx.process_runner)
     for context in contexts:
@@ -141,7 +141,7 @@ def _run_issue_create_from_prompt(
 
     本路径不读工作区文件、不写回链、不发布任何内容，因此工作区必须零 diff。
     """
-    _cli.require_iar_repository_initialized(context.repo_path, ctx.process_runner)
+    _cli.require_repository_initialized(context.repo_path, ctx.process_runner)
     _cli._ensure_gh_auth_or_prompt(context.repo_path, ctx.process_runner)
     github_client = _cli.create_github_client(context.repo_path, ctx.process_runner)
     selection, content_generator = _resolve_content_generation_setup(
@@ -262,7 +262,7 @@ def run_issue_create_command(ctx: ParsedCommandContext) -> int:
             suggestion="kc issue create <prd-path> --title <title>",
         )
 
-    _cli.require_iar_repository_initialized(context.repo_path, ctx.process_runner)
+    _cli.require_repository_initialized(context.repo_path, ctx.process_runner)
     _cli._ensure_gh_auth_or_prompt(context.repo_path, ctx.process_runner)
     github_client = _cli.create_github_client(context.repo_path, ctx.process_runner)
     # content_generation 阶段：CLI --preset 一次性锚定 + 配置绑定解析。

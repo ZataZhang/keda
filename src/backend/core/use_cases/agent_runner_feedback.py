@@ -71,7 +71,7 @@ def truncate_failure_context_for_prompt(failure_context: str) -> str:
             failure_context[:_MAX_FAILURE_CONTEXT_INLINE_CHARS].rstrip(),
             "",
             "[handoff record truncated; the full text is the "
-            "`iar:failure-context` Issue comment]",
+            "`kc:failure-context` Issue comment]",
         ]
     )
 
@@ -1013,7 +1013,7 @@ def build_progress_continuation_prompt(
     上下文，让续作 agent 直接针对未通过的检查继续修复。
 
     ``previous_failure_context`` 是上一轮 recovery 耗尽时写到 Issue 上的交接记录
-    （``iar:failure-context`` 评论）正文，由调用方按 latest-wins 只取最近一条传入。
+    （``kc:failure-context`` 评论）正文，由调用方按 latest-wins 只取最近一条传入。
     它是"上一轮的陈述"而非事实裁定，因此措辞要求接手方自行对照 PRD 复核；无记录时
     不注入本段，prompt 与不带本功能时逐字一致。
     """

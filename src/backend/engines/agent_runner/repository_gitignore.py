@@ -1,9 +1,8 @@
 """``.gitignore`` sync for ``kc init``.
 
 ``kc init`` 在写完 ``.kedacode.toml`` 之后,会确保 KedaCode 运行时的中间产物
-(``.kedacode/``、``.agent-runner/``、``.iar-worktrees/``) 出现在
-``.gitignore`` 中。新增的条目用 ``# >>> iar (managed by `iar init`) >>>``
-/ ``# <<< iar <<<`` 块标记包裹,保证:
+(``.kedacode/``、``.agent-runner/``、``.kc-worktrees/``) 出现在
+``.gitignore`` 中。新增条目使用 ``kc`` 管理块；已有旧管理块会被原位更新。
 
 1. 幂等 — 重跑 ``kc init`` 不会产生重复条目或与已有配置冲突。
 2. 局部 — 块外的现有 ``.gitignore`` 内容(项目自定义规则)不会被修改。
@@ -19,26 +18,30 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-GITIGNORE_BLOCK_HEADER = "# >>> iar (managed by `iar init`) >>>"
+GITIGNORE_BLOCK_HEADER = "# >>> kc (managed by `kc init`) >>>"
 """``kc init`` 管理的 ``.gitignore`` 块的起始标记。"""
 
-GITIGNORE_BLOCK_FOOTER = "# <<< iar <<<"
+GITIGNORE_BLOCK_FOOTER = "# <<< kc <<<"
 """``kc init`` 管理的 ``.gitignore`` 块的结束标记。"""
+
+_LEGACY_GITIGNORE_BLOCK_HEADER = "# >>> iar (managed by `iar init`) >>>"
+_LEGACY_GITIGNORE_BLOCK_FOOTER = "# <<< iar <<<"
 
 # 段注释 -> 该段包含的 ignore 模式。结构化便于幂等地构建块,
 # 也让用户能一眼看出每条规则的作用域。
-IAR_GITIGNORE_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
+GITIGNORE_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("# KedaCode runner state (worktree-local)", (".kedacode/",)),
     ("# Agent runner state (worktree-local)", (".agent-runner/",)),
     ("# Legacy IAR state (for existing repositories)", (".iar/",)),
-    ("# IAR-managed git worktrees (host-local)", (".iar-worktrees/",)),
+    ("# KedaCode-managed git worktrees (host-local)", (".kc-worktrees/", ".iar-worktrees/")),
     (
-        "# PRD task evidence (commit only the *.md text reports; "
-        "raw artifacts stay out of git history)",
+        "# PRD task evidence (commit only *.md reports; evidence manifest stays "
+        "available to local packaging)",
         (
             "tasks/evidence/**",
             "!tasks/evidence/**/",
             "!tasks/evidence/**/*.md",
+            "!tasks/evidence/**/evidence.json",
         ),
     ),
 )
@@ -79,7 +82,7 @@ class GitignoreSyncResult:
         block_updated: 托管块已存在但内容需要更新(例如部分条目已
             在块外声明,块需要同步收缩)。
         entries_added: 实际写入块的模式列表(顺序与
-            :data:`IAR_GITIGNORE_SECTIONS` 一致)。
+            :data:`GITIGNORE_SECTIONS` 一致)。
         entries_skipped_external: 因已在托管块外的 ``.gitignore`` 中
             声明而被跳过的模式列表。
         info_exclude_hint: 检测到 ``.git/info/exclude`` 含历史遗留条目,
@@ -116,14 +119,20 @@ def _parse_gitignore_blocks(text: str) -> tuple[str, str | None, str]:
     lines = text.splitlines(keepends=True)
     header_idx: int | None = None
     for idx, line in enumerate(lines):
-        if line.rstrip("\r\n") == GITIGNORE_BLOCK_HEADER:
+        if line.rstrip("\r\n") in {GITIGNORE_BLOCK_HEADER, _LEGACY_GITIGNORE_BLOCK_HEADER}:
             header_idx = idx
             break
     if header_idx is None:
         return text, None, ""
     footer_idx: int | None = None
+    header_text = lines[header_idx].rstrip("\r\n")
+    footer_text = (
+        _LEGACY_GITIGNORE_BLOCK_FOOTER
+        if header_text == _LEGACY_GITIGNORE_BLOCK_HEADER
+        else GITIGNORE_BLOCK_FOOTER
+    )
     for idx in range(header_idx + 1, len(lines)):
-        if lines[idx].rstrip("\r\n") == GITIGNORE_BLOCK_FOOTER:
+        if lines[idx].rstrip("\r\n") == footer_text:
             footer_idx = idx
             break
     if footer_idx is None:
@@ -186,7 +195,7 @@ def _build_block_text(
     added: list[str] = []
     skipped: list[str] = []
     body_lines: list[str] = []
-    for comment, patterns in IAR_GITIGNORE_SECTIONS:
+    for comment, patterns in GITIGNORE_SECTIONS:
         kept: list[str] = []
         for pattern in patterns:
             if pattern in external_patterns:
@@ -206,7 +215,7 @@ def _build_block_text(
     return block_text, tuple(added), tuple(skipped)
 
 
-def _info_exclude_has_iar_entries(repo_root_path: Path) -> bool:
+def _info_exclude_has_legacy_entries(repo_root_path: Path) -> bool:
     """检测 ``.git/info/exclude`` 是否含历史遗留条目。"""
     info_exclude = repo_root_path / ".git" / "info" / "exclude"
     if not info_exclude.is_file():
@@ -222,13 +231,13 @@ def _info_exclude_has_iar_entries(repo_root_path: Path) -> bool:
         if stripped in _LEGACY_INFO_EXCLUDE_PATTERNS:
             return True
         # 块外 .gitignore 已声明的模式(用户搬过来的副本)也算漂移。
-        for _, patterns in IAR_GITIGNORE_SECTIONS:
+        for _, patterns in GITIGNORE_SECTIONS:
             if stripped in patterns:
                 return True
     return False
 
 
-def _replace_iar_block(existing_text: str, new_block_text: str) -> str:
+def _replace_managed_block(existing_text: str, new_block_text: str) -> str:
     """用 ``new_block_text`` 替换 ``existing_text`` 中的托管块。
 
     块外(prelude / postlude)逐字符保留,包括空行与缩进。
@@ -260,7 +269,7 @@ def ensure_gitignore_entries(
         副作用,以及 ``.git/info/exclude`` 的检测结果。
     """
     gitignore_path = options.repo_root_path / ".gitignore"
-    info_hint = _info_exclude_has_iar_entries(options.repo_root_path)
+    info_hint = _info_exclude_has_legacy_entries(options.repo_root_path)
 
     if options.skip:
         return GitignoreSyncResult(
@@ -280,7 +289,13 @@ def ensure_gitignore_entries(
         existing_text
         and existing_block is None
         and (
-            GITIGNORE_BLOCK_HEADER in existing_text and GITIGNORE_BLOCK_FOOTER not in existing_text
+            any(
+                header in existing_text and footer not in existing_text
+                for header, footer in (
+                    (GITIGNORE_BLOCK_HEADER, GITIGNORE_BLOCK_FOOTER),
+                    (_LEGACY_GITIGNORE_BLOCK_HEADER, _LEGACY_GITIGNORE_BLOCK_FOOTER),
+                )
+            )
         )
     ):
         # 块被破坏,不动文件,让用户自己处理。
@@ -335,7 +350,7 @@ def ensure_gitignore_entries(
                 dry_run=options.dry_run,
                 skipped=False,
             )
-        new_text = _replace_iar_block(existing_text, new_block_text)
+        new_text = _replace_managed_block(existing_text, new_block_text)
         block_updated = True
 
     if not options.dry_run:
@@ -358,6 +373,6 @@ __all__ = [
     "GITIGNORE_BLOCK_HEADER",
     "GitignoreSyncOptions",
     "GitignoreSyncResult",
-    "IAR_GITIGNORE_SECTIONS",
+    "GITIGNORE_SECTIONS",
     "ensure_gitignore_entries",
 ]

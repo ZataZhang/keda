@@ -20,7 +20,7 @@ from backend.core.use_cases.agent_runner_init_assets import RemoteTemplateSkillI
 from backend.core.use_cases.agent_runner_repository_local import (
     GITIGNORE_BLOCK_FOOTER,
     GITIGNORE_BLOCK_HEADER,
-    IAR_GITIGNORE_SECTIONS,
+    GITIGNORE_SECTIONS,
     GitignoreSyncOptions,
     GitignoreSyncResult,
     RepositoryInitOptions,
@@ -248,7 +248,7 @@ def _format_block_preview() -> list[str]:
     """
     lines = [GITIGNORE_BLOCK_HEADER]
     first = True
-    for comment, patterns in IAR_GITIGNORE_SECTIONS:
+    for comment, patterns in GITIGNORE_SECTIONS:
         if not first:
             lines.append("")
         first = False

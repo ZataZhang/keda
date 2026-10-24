@@ -137,7 +137,7 @@
       "name": "foo",
       "path": "/Users/me/code/foo",
       "is_git_repo": true,
-      "has_iar_config": true,
+      "has_repository_config": true,
       "already_registered": false,
       "suggested_repo_id": "foo"
     }
@@ -149,7 +149,7 @@
 
 - `path` / `parent` / `home`：当前目录、上级目录（已是文件系统根时为 `null`）与用户主目录。
 - `suggested_repo_id` / `suggested_display_name`：用于回填「添加仓库」表单的建议值，`suggested_repo_id` 由后端按 `normalize_repository_id` 规则从目录名生成，与 `kc registry` 扫描保持一致。
-- `directories[].is_git_repo` / `has_iar_config` / `already_registered`：该子目录是否为 git 仓库、是否已 `kc init`、是否已在 registry 中注册。
+- `directories[].is_git_repo` / `has_repository_config` / `already_registered`：该子目录是否为 git 仓库、是否已 `kc init`、是否已在 registry 中注册。
 
 ### `GET /api/v1/agent-runner/backlog/prds/{encoded_path}/content`
 
@@ -245,7 +245,7 @@ curl -sS \
 
 ### `PATCH /api/v1/agent-runner/backlog/prds/{encoded_path}/ci-policy`
 
-设置单个 PRD 的策略覆盖，请求体 `{"repo_id": "...", "value": "inherit|on|off"}`。写入对应 GitHub Issue 的 latest-wins `iar:ci-auto-repair-policy` marker（`inherit` 表示清除显式覆盖），成功响应是**写后 fresh 回读评论流**得到的 `ci_delivery`。无关联 Issue 的 PRD 返回 `400`。
+设置单个 PRD 的策略覆盖，请求体 `{"repo_id": "...", "value": "inherit|on|off"}`。写入对应 GitHub Issue 的 latest-wins `kc:ci-auto-repair-policy` marker（`inherit` 表示清除显式覆盖），成功响应是**写后 fresh 回读评论流**得到的 `ci_delivery`。无关联 Issue 的 PRD 返回 `400`。
 
 ### `POST /api/v1/agent-runner/backlog/prds/{encoded_path}/ci-repair`
 
@@ -532,14 +532,14 @@ run 详情：`run`、`results`（逐候选执行）、`scores`（逐评审评分
 
 `kc schema --json` 从已注册的 Typer/click 命令树派生，不维护第二份命令清单：顶层为 `name` / `help` / `exit_codes` / `command_count` / `commands`；每条命令含 `path`、`help`、`arguments`、`options`；每个参数含名称、类型、是否必填、枚举取值、默认值与示例。`kc ask` 与 `kc deliberate` 的 `--output` 是输出目录（文本型），不在机器格式之列。`kc run --fast-merge` 作为 `run` 的一次性旗标由该自动派生暴露，不另立清单。
 
-### PR 正文快速通道 marker `iar:fast-merge`
+### PR 正文快速通道 marker `kc:fast-merge`
 
-`kc run --fast-merge` 开出的 Draft PR 正文末尾带一条机器可读 marker（同族于 `iar:ci-auto-repair-policy` / `post_pr_rework_requested` 等 latest-wins marker）：
+`kc run --fast-merge` 开出的 Draft PR 正文末尾带一条机器可读 marker（同族于 `kc:ci-auto-repair-policy` / `post_pr_rework_requested` 等 latest-wins marker）：
 
 ```html
-<!-- iar:fast-merge issued=<Issue 编号> -->
+<!-- kc:fast-merge issued=<Issue 编号> -->
 ```
 
 - 语义：该 PR 经快速通道发布，builder 提交后**跳过了 Phase 4.5 的 rv re-exec 与独立 verifier 两道验证门禁**，未经自动化验证；正文同时附人读「合并前请人工验证」说明。
 - 判别：**无此 marker 的 PR 才代表走了完整验证**。下游工具（merge queue / CI）可据此拦截或降级处理未验证 PR。
-- 拒绝面：`--fast-merge` 与 `--all-ready` 组合、或目标 Issue 声明 `stack` 顺序依赖（`iar:depends-on ... mode="stack"`）时，以 `USAGE`（退出码 `2`）拒绝，不启动 agent、不产生 PR。该旗标不进入 daemon、无配置项，仅作用于当次显式调用。
+- 拒绝面：`--fast-merge` 与 `--all-ready` 组合、或目标 Issue 声明 `stack` 顺序依赖（`kc:depends-on ... mode="stack"`）时，以 `USAGE`（退出码 `2`）拒绝，不启动 agent、不产生 PR。该旗标不进入 daemon、无配置项，仅作用于当次显式调用。

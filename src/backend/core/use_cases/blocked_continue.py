@@ -142,7 +142,7 @@ def _extract_blocked_paths_from_comments(
 ) -> tuple[str, ...]:
     """Extract blocked paths from the latest blocked failure comment.
 
-    优先从 ``iar:event`` marker 的 ``blocked_paths`` 字段提取结构化数据；
+    优先从 ``kc:event`` marker 的 ``blocked_paths`` 字段提取结构化数据；
     若 marker 不存在，则降级为从 Markdown 正文中解析 ``Blocked paths:``
     列表。
     """

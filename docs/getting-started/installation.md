@@ -102,7 +102,7 @@ Skill，再安装到用户级目录；不会写入项目内 `.claude/skills`、`
 
 - 容器内预装 claude / codex / kimi 三个 agent CLI + gh + Node + uv + just + git，避免污染本机工具链。内置注册表里另有 `codebuddy` / `qoder` / `opencode`，但**容器镜像尚未预装它们**——容器里选中这些 agent 会在认领 Issue 之前被启动前门禁拦下（未找到 3，点名阶段与可执行文件），不做静默换人；需要时请在本机跑，或自行在镜像里补装。
 - 认证通过 `kc container auth import` 一次性快照到 `~/.kedacode/container-auth/`，与本机 cc-switch 当前 profile 隔离——本机切账号不影响容器内 agent 认证。
-- 目标仓库挂载进容器，agent 在挂载目录的 `.iar-worktrees/` 建 worktree，宿主机可直接 `kc worktree open` 接管。
+- 目标仓库挂载进容器，agent 在挂载目录的 `.kc-worktrees/` 建 worktree，宿主机可直接 `kc worktree open` 接管。
 - runner 容器资产（Dockerfile / compose / .env.example）随 `kc` 包发布，无需克隆 keda 源码，全局安装后即可使用。
 
 最小启动流程：

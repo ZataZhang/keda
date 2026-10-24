@@ -4,7 +4,7 @@ For Issues labelled ``agent/deliberate`` the daemon / ``kc run --once`` polls
 run a third party (``kc deliberate``'s multi-agent engine, reused with no
 live output view) and post a structured clarifying-question list as an Issue
 comment, then wait for the human to reply. Turn state is carried entirely by
-an ``iar:event`` marker written into the trailing HTML comment of the AI's
+an ``kc:event`` marker written into the trailing HTML comment of the AI's
 comment, matching the ``issue_comments_count`` and ``cycle`` pattern used by
 the rework / blocked gates elsewhere in the runner — no new persistence.
 

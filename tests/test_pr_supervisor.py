@@ -481,13 +481,13 @@ def test_supervisor_action_gate_keeps_approval_when_checks_success() -> None:
 
 
 def test_build_rework_intent_comment_has_marker() -> None:
-    """Rework intent comment should include an iar:event marker."""
+    """Rework intent comment should include an kc:event marker."""
     body = build_rework_intent_comment(
         action="repair_pr_branch",
         pr_branch="issue-42",
         head_sha="abc123",
     )
-    assert "<!-- iar:event" in body
+    assert "<!-- kc:event" in body
     assert "phase=post_pr_rework_requested" in body
     assert "pr_branch=issue-42" in body
     assert "head=abc123" in body
@@ -943,7 +943,7 @@ def test_run_post_pr_supervisor_cycle_writes_comment() -> None:
 
     comment_calls = [c for c in fake_client.calls if c["method"] == "comment_issue"]
     assert len(comment_calls) == 1
-    assert "<!-- iar:event" in comment_calls[0]["body"]
+    assert "<!-- kc:event" in comment_calls[0]["body"]
     assert "phase=post_pr_supervisor" in comment_calls[0]["body"]
     marker = parse_latest_event_marker([comment_calls[0]["body"]])
     assert marker is not None
@@ -2936,7 +2936,7 @@ def test_supervisor_finding_tracker_persists_and_loads_findings(tmp_path: Path) 
     )
     _persist_findings(tmp_path, config, 42, 1, (open_finding,))
 
-    artifact_path = tmp_path / ".iar" / "state" / "issue-42" / "findings.json"
+    artifact_path = tmp_path / ".kedacode" / "state" / "issue-42" / "findings.json"
     assert artifact_path.is_file()
     loaded_findings = _load_previous_findings(tmp_path, config, 42)
     assert len(loaded_findings) == 1

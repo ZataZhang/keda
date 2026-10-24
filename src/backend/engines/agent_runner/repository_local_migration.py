@@ -31,7 +31,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
 
-from backend.engines.agent_runner.repository_local import IARRepositoryNotInitializedError
+from backend.engines.agent_runner.repository_local import RepositoryNotInitializedError
 from backend.infrastructure.config.agent_runner_settings import (
     GENERATED_CONTENT_TARGET_NAMES,
     AgentRunnerGeneratedContentSettings,
@@ -158,14 +158,14 @@ def migrate_repository_local_config(
         迁移结果；``wrote_file`` 表示是否真的写了文件。
 
     Raises:
-        IARRepositoryNotInitializedError: 仓库根目录没有仓库本地配置。
+        RepositoryNotInitializedError: 仓库根目录没有仓库本地配置。
         ConfigMigrationError: 仓库本地配置不是合法 TOML，或迁移结果未通过写回前校验。
     """
     config_path = source_config_path or product_identity.effective_repository_config_path(
         repo_root_path
     )
     if not config_path.is_file():
-        raise IARRepositoryNotInitializedError(repo_root_path, config_path)
+        raise RepositoryNotInitializedError(repo_root_path, config_path)
 
     original_text = config_path.read_bytes().decode("utf-8")
     original_config = _parse_toml(original_text, source_label=str(config_path))

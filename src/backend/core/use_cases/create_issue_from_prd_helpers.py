@@ -53,7 +53,7 @@ class IssueFromPrdRequest:
         depends_on: 显式指定的上游 Issue 编号列表（与 PRD 声明合并去重）。
         parse_evidence_format_with_agent: 是否用 agent 解析 PRD 中的格式要求。
         validation_language: Realistic Validation 固定标签语言，如 ``zh-CN``。
-        structured_evidence: 是否为该 Issue 物化 ``iar:structured-evidence`` marker。
+        structured_evidence: 是否为该 Issue 物化 ``kc:structured-evidence`` marker。
         evidence_dir: 证据目录配置根（仓库相对）。默认 ``tasks/evidence`` 时
             Issue body 指向按 PRD stem 解析的子目录；显式配置的 legacy 目录
             原样展示。
@@ -193,14 +193,14 @@ def build_issue_body(
     3. 机器可读的 ``- PRD path: ...`` 锚点，runner 依赖它定位规范 PRD。
     4. 从 PRD 复制的验收清单。
     5. 交付说明（分支命名、worktree 命令、PR 规范）。
-    6. 可选的 ``iar:depends-on`` hidden marker（当依赖门禁启用时）。
+    6. 可选的 ``kc:depends-on`` hidden marker（当依赖门禁启用时）。
 
     Args:
         relative_prd_path: 相对于仓库根目录的 PRD 路径。
         title: Issue 标题（用于摘要行）。
         acceptance_items: 从 PRD 提取的清单条目。
         prd_text: 完整 PRD 文本，用于提取引言章节。
-        dependency_marker: 物化的 ``iar:depends-on`` marker 字符串，为空时不写入。
+        dependency_marker: 物化的 ``kc:depends-on`` marker 字符串，为空时不写入。
 
     Returns:
         完整的 Issue 正文 Markdown 字符串。

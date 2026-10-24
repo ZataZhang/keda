@@ -29,7 +29,7 @@ from backend.infrastructure.process_runner import SubprocessRunner
 
 from .repository_local import (
     detect_git_repository_root,
-    require_iar_repository_initialized,
+    require_repository_initialized,
 )
 
 logger = Logger()
@@ -132,11 +132,11 @@ def install_workflow(
         UnknownWorkflowError: When no bundled template matches ``options.name``.
         ExistingFileRefusedError: When existing files would be overwritten
             and ``options.force`` is ``False``.
-        IARRepositoryNotInitializedError: When ``.kedacode.toml`` is missing.
+        RepositoryNotInitializedError: When ``.kedacode.toml`` is missing.
         ValueError: When the cwd is not inside a Git repository.
     """
     repo_root_path = detect_git_repository_root(options.cwd, process_runner)
-    require_iar_repository_initialized(repo_root_path, process_runner)
+    require_repository_initialized(repo_root_path, process_runner)
 
     template_root = _resolve_template_root(options.name)
     template_file_plans = _plan_template_writes(template_root, repo_root_path)

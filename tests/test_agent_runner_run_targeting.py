@@ -153,7 +153,7 @@ def _run_patches():
     with (
         patch("backend.api.cli_helpers.create_github_client"),
         patch("backend.api.cli.create_github_client"),
-        patch("backend.api.cli.require_iar_repository_initialized"),
+        patch("backend.api.cli.require_repository_initialized"),
     ):
         yield
 

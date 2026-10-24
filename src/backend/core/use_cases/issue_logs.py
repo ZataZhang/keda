@@ -32,7 +32,7 @@ DEFAULT_TAIL_BYTES = 64 * 1024
 #: ``kc logs --issue --follow`` 以此为「运行结束」的唯一依据——裸 EOF 只表示
 #: 这一刻没有新字节（Agent 两次写入之间、重试间隔里都会出现），把 EOF 当成结束
 #: 会提前退出并丢掉后续输出。
-ATTEMPT_END_MARKER = "[iar-attempt-end]"
+ATTEMPT_END_MARKER = "[kc-attempt-end]"
 
 
 @dataclass(frozen=True)

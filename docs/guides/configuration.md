@@ -275,7 +275,7 @@ confirm_commands = [
 - `max_context_chars`：首条 system prompt 的最大字符数（超出部分被
   截断并保留头尾）。
 - `agent_timeout_seconds`：每轮调用 agent 子进程的超时；超时或非零
-  退出码会作为 `[IAR_EXEC_RESULT] exit_code=...` 块追加到对话历史。
+  退出码会作为 `[KC_EXEC_RESULT] exit_code=...` 块追加到对话历史。
 - `auto_confirm_commands`：前缀匹配列表，匹配的命令直接执行。
 - `confirm_commands`：前缀匹配列表，匹配的命令执行前先询问用户
   `Execute? [y/N]`。

@@ -834,7 +834,7 @@ def test_run_command_wires_the_fast_merge_label_conflict_gate(
         runner_module, "_resolve_cli_repository_targets", lambda **kwargs: [repo_context]
     )
     monkeypatch.setattr(
-        "backend.api.cli_parsed_commands.runner._cli.require_iar_repository_initialized",
+        "backend.api.cli_parsed_commands.runner._cli.require_repository_initialized",
         lambda *args, **kwargs: None,
     )
     monkeypatch.setattr(runner_module, "_ensure_gh_auth_or_prompt", lambda *args, **kwargs: None)

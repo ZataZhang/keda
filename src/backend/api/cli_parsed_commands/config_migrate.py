@@ -1,14 +1,14 @@
 """``kc config migrate`` handler.
 
-两步迁移，共用一套预检（预演与正式执行结论一致，预演永不写盘）：
+迁移共用一套预检（预演永不写盘）：
 
 1. **本机步骤**：把旧状态目录 ``~/.iar`` 搬到 ``~/.kedacode``，不保留旧路径链接，并把新状态目录里
    ``config.toml`` 写着旧路径的取值改写过来。
-2. **仓库步骤**：把当前仓库的 ``.iar.toml`` 改名为 ``.kedacode.toml``（只改名，不
-   碰 git，由用户自己决定何时提交），再清掉旧 ``kc init`` 钉进配置的默认值。
+2. **仓库步骤**：把当前仓库的 ``.iar.toml`` 改名为 ``.kedacode.toml``，清掉旧 ``kc init``
+   钉进配置的默认值；将无活动工作树的旧工作树容器目录改为新名；迁移 GitHub Issue / PR 标记。
 
 占用中（任何以 ``kc`` / ``kedacode`` / 旧版 ``iar`` 启动的进程、受管登记或锁文件里存活
-的 PID）时拒绝动手并列出进程号。范围规则：仓库内或带 ``--repo`` 时两步都做；不在
+的 PID）时拒绝动手并列出进程号。范围规则：仓库内或带 ``--repo`` 时执行仓库步骤；不在
 仓库里隐式执行只做本机步骤；``--repo`` 指向非仓库给「找不到目标」；``--repo-id`` 不
 支持。
 """
@@ -27,8 +27,10 @@ from backend.core.use_cases.agent_runner_config_migration import (
     ConfigRenameResult,
     PinDecision,
     StateHomeMigrationResult,
+    WorktreeDirectoryMigrationResult,
     migrate_repository_local_config,
     migrate_state_home,
+    migrate_worktree_directory,
     rename_repository_local_config_file,
 )
 from backend.core.use_cases.agent_runner_config_migration import (
@@ -38,6 +40,10 @@ from backend.core.use_cases.agent_runner_config_migration import (
     STATE_HOME_FAILURE_OUTCOMES as FAILURE_OUTCOMES,
 )
 from backend.core.use_cases.agent_runner_repository_local import detect_git_repository_root
+from backend.core.use_cases.github_marker_migration import (
+    GitHubMarkerMigrationResult,
+    migrate_github_markers,
+)
 
 
 def _format_pin_lines(pin_decisions: tuple[PinDecision, ...], *, with_reason: bool) -> list[str]:
@@ -132,6 +138,46 @@ def _print_rename_report(rename_result: ConfigRenameResult) -> None:
     console.print(rename_result.message, markup=False, soft_wrap=True)
 
 
+def _print_worktree_directory_report(
+    result: WorktreeDirectoryMigrationResult, *, dry_run: bool
+) -> None:
+    """打印工作树目录迁移结果。"""
+    console.print(result.message, markup=False, soft_wrap=True)
+    if result.outcome == "would_rename" and dry_run:
+        console.print("  Existing worktrees are not moved automatically.", markup=False)
+
+
+def _print_github_marker_report(result: GitHubMarkerMigrationResult) -> None:
+    """打印 GitHub 标记迁移计划或逐条执行结果。"""
+    state_text = "open and closed" if result.include_closed else "open"
+    console.print(
+        f"GitHub marker migration ({state_text} Issues/PRs): scanned "
+        f"{result.scanned_item_count} item(s); {len(result.entries)} location(s), "
+        f"{result.occurrence_count} marker(s); estimated edits: {len(result.entries)}.",
+        markup=False,
+        soft_wrap=True,
+    )
+    if not result.entries:
+        console.print("  No legacy GitHub markers found.", markup=False)
+    for entry in result.entries:
+        marker_summary = ", ".join(
+            f"{marker_name} × {count}" for marker_name, count in entry.marker_counts
+        )
+        location_was_updated = (entry.issue_number, entry.field_name) in result.updated_locations
+        if result.applied:
+            action = "updated" if location_was_updated else "failed"
+        else:
+            action = "would update"
+        console.print(
+            f"  Issue/PR #{entry.issue_number} · {entry.field_name} · {marker_summary} · "
+            f"{action}",
+            markup=False,
+            soft_wrap=True,
+        )
+    for failure_text in result.failures:
+        console.print(f"  Failed: {failure_text}", markup=False, soft_wrap=True)
+
+
 def _resolve_target_repository(
     ctx: ParsedCommandContext, *, dry_run: bool
 ) -> tuple[Path | None, bool]:
@@ -164,7 +210,7 @@ def _state_home_exit_code(state_result: StateHomeMigrationResult) -> int | None:
 
 
 def run_config_migrate_command(ctx: ParsedCommandContext) -> int:
-    """``kc config migrate``：迁移本机状态目录，并整理当前仓库的本地配置。"""
+    """``kc config migrate``：预演或执行本机、仓库与 GitHub 标记迁移。"""
     if ctx.repo_id is not None:
         raise CliError(
             "kc config migrate edits one repository's .kedacode.toml plus your local state "
@@ -174,7 +220,14 @@ def run_config_migrate_command(ctx: ParsedCommandContext) -> int:
             suggestion="kc config migrate --repo .",
         )
 
-    dry_run = bool(getattr(ctx.parsed, "dry_run", False))
+    apply_requested = bool(getattr(ctx.parsed, "apply", False))
+    if apply_requested and bool(getattr(ctx.parsed, "dry_run", False)):
+        raise CliError(
+            "Choose either --dry-run or --apply.",
+            code=ExitCode.USAGE,
+        )
+    dry_run = not apply_requested
+    include_closed = bool(getattr(ctx.parsed, "include_closed", False))
     repo_root_path, _ = _resolve_target_repository(ctx, dry_run=dry_run)
 
     # ── 预检：两步共用，全部通过才动手 ─────────────────────────────────────────
@@ -188,59 +241,161 @@ def run_config_migrate_command(ctx: ParsedCommandContext) -> int:
         _print_rename_report(rename_plan)
         return int(ExitCode.CONFLICT)
 
-    state_result = migrate_state_home(dry_run=dry_run)
+    config_migration_plan: ConfigMigrationResult | None = None
+    if (
+        repo_root_path is not None
+        and rename_plan is not None
+        and rename_plan.outcome in {"renamed", "already_named"}
+    ):
+        config_source_path = rename_plan.source_path or rename_plan.target_path
+        try:
+            config_migration_plan = migrate_repository_local_config(
+                repo_root_path,
+                dry_run=True,
+                source_config_path=config_source_path,
+            )
+        except ValueError as exc:
+            error_console.print("[red]kc config migrate failed:[/]")
+            error_console.print(str(exc), markup=False)
+            return int(ExitCode.GENERAL)
+
+    worktree_directory_plan = (
+        migrate_worktree_directory(
+            repo_root_path,
+            process_runner=ctx.process_runner,
+            dry_run=True,
+        )
+        if repo_root_path is not None
+        else None
+    )
+    if (
+        not dry_run
+        and worktree_directory_plan is not None
+        and worktree_directory_plan.outcome
+        in {
+            "conflict",
+            "failed",
+        }
+    ):
+        console.print("[red]Refusing to migrate the worktree directory:[/]")
+        _print_worktree_directory_report(worktree_directory_plan, dry_run=True)
+        return int(ExitCode.CONFLICT)
+
+    state_plan = migrate_state_home(dry_run=True)
+    exit_code = _state_home_exit_code(state_plan)
+    if exit_code != 0 and not dry_run:
+        console.print("[red]Refusing to migrate the local state directory:[/]")
+        _print_state_home_report(state_plan, dry_run=True)
+        return exit_code
+    _print_state_home_report(state_plan, dry_run=True)
+
+    github_marker_plan: GitHubMarkerMigrationResult | None = None
+    if repo_root_path is not None:
+        github_client = ctx.github_client_factory(repo_root_path)
+        try:
+            github_marker_plan = migrate_github_markers(
+                github_client,
+                include_closed=include_closed,
+                apply=False,
+            )
+        except Exception as exc:  # noqa: BLE001 - incomplete remote reads must stop migration.
+            error_console.print("[red]Cannot preview GitHub marker migration:[/]")
+            error_console.print(str(exc), markup=False)
+            return int(ExitCode.GENERAL)
+        _print_github_marker_report(github_marker_plan)
+
+    if dry_run:
+        if repo_root_path is None:
+            console.print(
+                "[dim]Not inside a repository: only the local state directory was previewed. "
+                "Run this command inside a repository, or pass --repo <path>.[/]",
+                soft_wrap=True,
+            )
+        elif worktree_directory_plan is not None:
+            _print_worktree_directory_report(worktree_directory_plan, dry_run=True)
+        if rename_plan is not None:
+            _print_rename_report(rename_plan)
+            if rename_plan.outcome == "absent":
+                console.print(
+                    "[dim]Skipping repository cleanup: no repository-local config. "
+                    "Run `kc init` first if this repository is not managed yet.[/]",
+                    soft_wrap=True,
+                )
+        if config_migration_plan is not None:
+            _print_migration_report(config_migration_plan, dry_run=True)
+        console.print("[cyan]Dry run: nothing was written.[/]")
+        return exit_code
+
+    state_result = migrate_state_home(dry_run=False)
     exit_code = _state_home_exit_code(state_result)
     if exit_code != 0:
         console.print("[red]Refusing to migrate the local state directory:[/]")
-        _print_state_home_report(state_result, dry_run=dry_run)
+        _print_state_home_report(state_result, dry_run=False)
         return exit_code
-    _print_state_home_report(state_result, dry_run=dry_run)
+    _print_state_home_report(state_result, dry_run=False)
 
-    if repo_root_path is None or rename_plan is None:
+    if repo_root_path is not None and github_marker_plan is not None:
+        try:
+            github_migration_result = migrate_github_markers(
+                ctx.github_client_factory(repo_root_path),
+                include_closed=include_closed,
+                apply=True,
+            )
+        except Exception as exc:  # noqa: BLE001 - the prior preview succeeded, but writes can fail.
+            error_console.print("[red]GitHub marker migration failed before completion:[/]")
+            error_console.print(str(exc), markup=False)
+            return int(ExitCode.GENERAL)
+        _print_github_marker_report(github_migration_result)
+        if github_migration_result.failures:
+            return int(ExitCode.GENERAL)
+
+    if repo_root_path is None:
         # 不在仓库里隐式执行：本机步骤做完即可，仓库步骤留给 --repo 或仓库内执行。
         console.print(
             "[dim]Not inside a repository: only the local state directory was handled. "
             "Run this command inside a repository, or pass --repo <path>[/]",
             soft_wrap=True,
         )
-        if dry_run:
-            console.print("[cyan]Dry run: nothing was written.[/]")
         return exit_code
 
     target_repository_path = repo_root_path
-    # 预演沿用预检得到的计划，正式执行才真的改名；两步都已通过预检才会走到这里。
-    rename_result = (
-        rename_plan if dry_run else rename_repository_local_config_file(target_repository_path)
-    )
-    _print_rename_report(rename_result)
-    if rename_result.outcome == "move_failed":
-        return int(ExitCode.GENERAL)
-    if rename_result.outcome == "absent":
-        console.print("[dim]Skipping repository cleanup: no repository-local config.[/]")
-        if dry_run:
-            console.print("[cyan]Dry run: nothing was written.[/]")
-        return exit_code
+    if rename_plan is not None and rename_plan.outcome == "renamed":
+        rename_result = rename_repository_local_config_file(target_repository_path)
+        _print_rename_report(rename_result)
+        if rename_result.outcome == "move_failed":
+            return int(ExitCode.GENERAL)
+    elif rename_plan is not None and rename_plan.outcome == "already_named":
+        _print_rename_report(rename_plan)
+    elif rename_plan is None or rename_plan.outcome == "absent":
+        console.print(
+            "[dim]Skipping repository cleanup: no repository-local config. "
+            "Run `kc init` first if this repository is not managed yet.[/]",
+            soft_wrap=True,
+        )
 
-    try:
-        # 预演不会真的改名；只有计划改名时才从旧名路径读取清理计划。
-        pending_rename_source = (
-            rename_result.source_path if dry_run and rename_result.outcome == "renamed" else None
-        )
-        migration_result = migrate_repository_local_config(
-            target_repository_path,
-            dry_run=dry_run,
-            source_config_path=pending_rename_source,
-        )
-    except ValueError as exc:
-        # 迁移校验失败（ConfigMigrationError）是未分类失败；未初始化
-        # （IARRepositoryNotInitializedError）不是 ValueError，交给统一入口给
-        # `kc init` 提示与退出码 3。错误正文可能含方括号，关闭 markup 单独打印。
-        error_console.print("[red]kc config migrate failed:[/]")
-        error_console.print(str(exc), markup=False)
-        return 1
-    _print_migration_report(migration_result, dry_run=dry_run)
-    if dry_run:
-        console.print("[cyan]Dry run: nothing was written.[/]")
+    if config_migration_plan is not None and rename_plan is not None:
+        try:
+            migration_result = migrate_repository_local_config(
+                target_repository_path,
+                source_config_path=rename_plan.target_path,
+            )
+        except ValueError as exc:
+            # 迁移校验失败（ConfigMigrationError）是未分类失败；未初始化
+            # （RepositoryNotInitializedError）不是 ValueError，交给统一入口给
+            # `kc init` 提示与退出码 3。错误正文可能含方括号，关闭 markup 单独打印。
+            error_console.print("[red]kc config migrate failed:[/]")
+            error_console.print(str(exc), markup=False)
+            return 1
+        _print_migration_report(migration_result, dry_run=False)
+
+    worktree_directory_result = migrate_worktree_directory(
+        target_repository_path,
+        process_runner=ctx.process_runner,
+        dry_run=False,
+    )
+    _print_worktree_directory_report(worktree_directory_result, dry_run=False)
+    if worktree_directory_result.outcome in {"conflict", "failed"}:
+        return int(ExitCode.CONFLICT)
     return exit_code
 
 

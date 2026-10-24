@@ -53,10 +53,20 @@ def test_unspecified_phase_keeps_legacy_record_path(tmp_path: Path) -> None:
     )
 
 
-def test_record_lives_under_gitignored_iar_dir(tmp_path: Path) -> None:
-    """记录落在 ``.iar/`` 里：worktree 局部、不会污染代码 diff。"""
+def test_record_lives_under_gitignored_kc_dir(tmp_path: Path) -> None:
+    """新会话记录默认落在 ``.kedacode/``，保持 worktree 局部。"""
     record_path = save_agent_session_record(tmp_path, agent_name="claude", session_id="sess-abc")
-    assert ".iar" in record_path.relative_to(tmp_path).parts
+    assert record_path.relative_to(tmp_path).parts[:2] == (".kedacode", "agent-runner")
+
+
+def test_existing_legacy_session_directory_remains_active(tmp_path: Path) -> None:
+    """已有 ``.iar/`` 会话目录时继续沿用，避免丢失续传状态。"""
+    legacy_sessions_path = tmp_path / ".iar" / "agent-runner" / "sessions"
+    legacy_sessions_path.mkdir(parents=True)
+
+    record_path = save_agent_session_record(tmp_path, agent_name="claude", session_id="sess-abc")
+
+    assert record_path.parent == legacy_sessions_path
 
 
 def test_save_leaves_no_temporary_file(tmp_path: Path) -> None:

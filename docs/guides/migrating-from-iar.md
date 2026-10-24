@@ -1,10 +1,8 @@
 # 从 IAR 升级到 KedaCode（`kc`）
 
-当前 CLI 只提供 `kc` 与 `kedacode` 两个入口。旧 `iar` 命令、`IAR_*` 环境变量、`~/.iar` 状态目录、
-`.iar.toml` 仓库配置、旧 shell 补全变量和旧插件入口点不再由运行时自动识别。升级时请完成下面的
-迁移；迁移后如果仍保留旧脚本或环境变量，它们不会继续生效。
-
-PyPI 包名 `kedacode` 和 GitHub 仓库名 `keda` 不变，也不新增 `keda` 命令。
+当前命令入口是 `kc`（也可使用 `kedacode`）。旧 `iar` 命令、`IAR_*` 环境变量、`~/.iar` 状态目录、
+`.iar.toml` 仓库配置、旧 shell 补全变量和旧插件入口点不再由运行时自动识别。PyPI 包名
+`kedacode` 与 GitHub 仓库名 `keda` 保持不变。
 
 ## 更新命令、变量和插件
 
@@ -16,46 +14,49 @@ PyPI 包名 `kedacode` 和 GitHub 仓库名 `keda` 不变，也不新增 `keda` 
 | `iar.agent_output_protocols` | `kedacode.agent_output_protocols` |
 | `_IAR_COMPLETE` | `_KC_COMPLETE`（重新安装 shell 补全） |
 
-把 shell 配置、CI、脚本和容器配置中的环境变量改为 `KEDACODE_*`。由 KedaCode 启动的子进程也只会
-收到 `KEDACODE_*` 名称。第三方输出协议插件需要改用新入口点分组并重新安装。
-
-重新安装补全脚本：
+把 shell 配置、CI、脚本和容器配置中的环境变量改为 `KEDACODE_*`，并重新安装补全：
 
 ```bash
 kc completion install
 ```
 
-## 迁移本机状态与仓库配置
+## 协作标记升级顺序
 
-升级前先停止旧版启动的 daemon、console 和其他 runner。安装新版后先预演：
+新版 runner 只识别 `kc:` 协作标记和 `<<KC_EXEC>>` 会话命令块，不识别旧 `iar:` / `IAR_EXEC` 写法。
+未迁移的在途 Issue 会被当成没有旧认领或依赖标记。新旧 runner 不能混跑，因此每个仓库都按下面顺序
+升级：
+
+1. 在**所有**运行 KedaCode 的电脑上停止 daemon、container 和正在执行的 `kc run`。
+2. 安装新版 KedaCode。
+3. 在仓库目录预演迁移；确认 Issue / PR 清单和预计编辑次数。
+4. 预演无误后显式执行 `--apply`。
+5. 重新启动 runner。
 
 ```bash
-kc config migrate --dry-run --repo /path/to/repository
+kc config migrate
+kc config migrate --apply
 ```
 
-确认计划后执行：
+默认只扫描 open Issue 与 PR 的正文和全部评论。迁移只替换标记前缀，其他文字保持不变；可以重复运行，
+第二次不会再次改写已迁移的标记。closed Issue / PR 默认跳过，需要时加 `--include-closed`。`--apply`
+会在本机检测到 runner 正在运行时拒绝执行；它无法检测其他电脑上的进程，必须先完成所有机器停机。
 
-```bash
-kc config migrate --repo /path/to/repository
-```
+如果跳过迁移，在途 Issue 的旧认领会被忽略，可能被重复执行；旧依赖标记也不再阻止任务启动。
+已关闭 Issue 中未迁移的旧标记不再被新版 runner 识别。
 
-命令会把 `~/.iar` 移到 `~/.kedacode`，把仓库里的 `.iar.toml` 改名为 `.kedacode.toml`，并清理旧版
-`kc init` 写入的部分固定默认值。它不会创建旧路径符号链接，也不会运行 `git add` 或提交文件。若只迁移
-本机状态，可在仓库外运行 `kc config migrate`；要迁移某个仓库配置，请使用 `--repo` 指定仓库。
+## 本机状态、仓库配置与工作树目录
 
-如果本机同时存在两个独立状态目录，或仓库中同时存在 `.iar.toml` 和 `.kedacode.toml`，命令会拒绝
-自动选择或合并。先手动备份并整理两份数据，再重新运行迁移。命令也会拒绝在检测到 KedaCode 或旧版
-IAR runner 进程仍运行时搬迁状态目录。
+`kc config migrate --apply` 还会迁移本机 `~/.iar` 状态、将 `.iar.toml` 改名为 `.kedacode.toml`，并清理
+旧版 `kc init` 写入的部分固定默认值。若仓库存在旧 `.iar-worktrees/` 且没有活动的 linked worktree，
+同一命令会将其改名为 `.kc-worktrees/`；若有活动 worktree 则拒绝改名。运行 `kc worktree create` 时，
+如果旧 `.iar-worktrees/` 仍存在，会继续在该目录创建工作树，不会另建平行目录。
 
-状态迁移会改写全局 `config.toml` 中指向旧状态目录的配置值；其他文件里残留的旧路径只会列出，不会
-自动改写。检查报告并按需手动更新这些路径。
+仓库状态与工作树的默认目录现在分别是 `.kedacode/` 和 `.kc-worktrees/`。发现旧 `.iar/` 状态文件时，
+相关读取路径会继续沿用它；明确配置为旧路径的仓库也不自动改写。若本机同时存在新旧状态目录，或仓库
+同时存在 `.iar.toml` 和 `.kedacode.toml`，迁移命令会拒绝自动合并。请先备份并整理，再重试。
 
-## 仍需保留的持久化协议
+## 仍接受的旧名称
 
-迁移运行时入口不会重命名已经写入 GitHub Issue、PR 或 agent 会话的数据格式。以下协议仍使用原名称，
-无需手工改写历史记录：`iar:*` Issue/PR marker、`iar-attempt-history` / `iar-attempt-end`、
-`IAR_EXEC` 会话命令块，以及 `X-IAR-Signature` Webhook 请求头。
-
-旧版 `.iar` 或 `.iar-worktrees` 仓库内目录可能仍出现在忽略规则和历史配置中；当前运行时目录布局不因
-本次命令别名移除而自动迁移。若仓库显式将证据目录配置为 `.iar/evidence`，迁移该配置前先确认已有
-证据的位置和保留要求。
+Idea Inbox Webhook 新签名头是 `X-KC-Signature`，同时继续接受 `X-IAR-Signature`，便于发送方分批升级。
+已推送的 `iar-evidence/*` 分支保持原样；之后创建的证据分支使用 `kc-evidence/*`。历史文档、归档 PRD
+和已保存的证据记录保留原文。

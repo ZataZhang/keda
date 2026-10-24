@@ -6,7 +6,7 @@
 把不合条件的 Issue 静默跳过（守护进程的空队列仍返回 0，那是正常状态）。
 
 判定与守护进程侧共用同一批既有事实源：workflow 标签来自 ``config.labels``，
-认领归属来自认领评论里的 ``iar:claim`` marker（:mod:`agent_runner_reclaim`
+认领归属来自认领评论里的 ``kc:claim`` marker（:mod:`agent_runner_reclaim`
 的解析器，本模块只读不改），阻塞解除请求沿用同一套 event marker 判据。
 """
 
@@ -63,7 +63,7 @@ def latest_claim(
     issue_number: int,
     github_client: IGitHubClient,
 ) -> ClaimMarkerDetail | None:
-    """取该 Issue 评论线程里最后一条可解析的 ``iar:claim`` marker。
+    """取该 Issue 评论线程里最后一条可解析的 ``kc:claim`` marker。
 
     Args:
         issue_number: Issue 编号。

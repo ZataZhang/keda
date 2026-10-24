@@ -145,8 +145,8 @@ def test_append_missing_contract_anchors_makes_fallback_body_compliant() -> None
     assert f"- PRD: {_ARCHIVED_PRD_PATH}" in completed_body
     assert _PENDING_PRD_PATH not in completed_body
     assert "## Human Acceptance And PRD Archive" in completed_body
-    assert "<!-- iar:merge-acceptance version=1 -->" in completed_body
-    assert MERGE_ACCEPTANCE_MARKER_TEXT == "<!-- iar:merge-acceptance version=1 -->"
+    assert "<!-- kc:merge-acceptance version=1 -->" in completed_body
+    assert MERGE_ACCEPTANCE_MARKER_TEXT == "<!-- kc:merge-acceptance version=1 -->"
     assert "authorizes post-merge acceptance recording" in completed_body
     assert "post-merge archival" not in completed_body
     assert find_pr_body_contract_violations(completed_body, _ISSUE_BODY_WITH_PRD) == []
@@ -195,12 +195,12 @@ def test_annotation_block_lists_human_readable_descriptions() -> None:
 @pytest.mark.parametrize(
     ("marker_line", "expected"),
     [
-        ("<!-- iar:pr-contract version=1 missing=prd-link -->", ["prd-link"]),
+        ("<!-- kc:pr-contract version=1 missing=prd-link -->", ["prd-link"]),
         (
-            "<!--iar:pr-contract version=1 missing=prd-link,merge-acceptance-->",
+            "<!--kc:pr-contract version=1 missing=prd-link,merge-acceptance-->",
             ["prd-link", "merge-acceptance"],
         ),
-        ("<!-- iar:pr-contract version=1 missing= -->", []),
+        ("<!-- kc:pr-contract version=1 missing= -->", []),
     ],
 )
 def test_parse_contract_annotation_marker_variants(marker_line: str, expected: list[str]) -> None:
@@ -442,7 +442,7 @@ def test_create_draft_pr_injects_contract_teaching_into_agent_prompt(
 
 
 def test_merge_queue_skips_prs_with_contract_annotation(tmp_path) -> None:
-    """发布端标注过 ``iar:pr-contract`` 的 PR 必须被合并队列拒绝。"""
+    """发布端标注过 ``kc:pr-contract`` 的 PR 必须被合并队列拒绝。"""
     from backend.core.shared.models.agent_runner import PullRequestContext
     from backend.core.use_cases.agent_runner_merge_queue import _process_one
     from tests.conftest import FakeGitHubClient, FakeProcessRunner
@@ -718,7 +718,7 @@ def test_aggregate_source_marker_roundtrip() -> None:
 def test_aggregate_source_marker_ignores_wrong_version() -> None:
     """未知 version 的来源 marker 视为无法识别，解析返回 None（fail closed）。"""
     assert (
-        parse_aggregate_source_marker("<!-- iar:aggregate-pr version=2 issues=1 source_prs=2 -->")
+        parse_aggregate_source_marker("<!-- kc:aggregate-pr version=2 issues=1 source_prs=2 -->")
         is None
     )
 
@@ -726,9 +726,9 @@ def test_aggregate_source_marker_ignores_wrong_version() -> None:
 @pytest.mark.parametrize(
     "marker",
     [
-        "<!-- iar:aggregate-pr version=1 issues=101,garbage source_prs=201,202 -->",
-        "<!-- iar:aggregate-pr version=1 issues=101,101 source_prs=201,202 -->",
-        "<!-- iar:aggregate-pr version=1 issues=0,102 source_prs=201,202 -->",
+        "<!-- kc:aggregate-pr version=1 issues=101,garbage source_prs=201,202 -->",
+        "<!-- kc:aggregate-pr version=1 issues=101,101 source_prs=201,202 -->",
+        "<!-- kc:aggregate-pr version=1 issues=0,102 source_prs=201,202 -->",
     ],
 )
 def test_aggregate_source_marker_rejects_malformed_number_sets(marker: str) -> None:
@@ -770,7 +770,7 @@ def test_aggregate_contract_annotation_block_marks_missing_anchors() -> None:
     """不合规标注块写入 aggregate-contract marker 并逐项说明缺失锚点。"""
     annotation = build_aggregate_contract_annotation_block(["merge-acceptance-v2", "prd-link"])
     assert (
-        "<!-- iar:aggregate-contract version=1 missing=merge-acceptance-v2,prd-link -->"
+        "<!-- kc:aggregate-contract version=1 missing=merge-acceptance-v2,prd-link -->"
         in annotation
     )
     assert "merge-acceptance-v2" in annotation
@@ -778,7 +778,7 @@ def test_aggregate_contract_annotation_block_marks_missing_anchors() -> None:
 
 
 def test_aggregate_contract_annotation_block_does_not_claim_merge_queue_gate() -> None:
-    """标注块只声明本地聚合门：没有任何合并队列路径消费 ``iar:aggregate-contract``。"""
+    """标注块只声明本地聚合门：没有任何合并队列路径消费 ``kc:aggregate-contract``。"""
     annotation = build_aggregate_contract_annotation_block(["prd-link"])
     assert "merge queue will refuse to auto-merge" not in annotation
     assert "refuses to publish" in annotation

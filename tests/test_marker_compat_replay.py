@@ -1,19 +1,11 @@
-"""GitHub 隐藏标记的逐字节兼容与认领语义回放测试。
+"""GitHub 隐藏标记的逐字节生成与认领语义回放测试。
 
-事实源是 ``tests/support/marker_compat_baseline.json``：里面的每段标记文本都由**改名前
-那棵树**（merge-base commit，见 fixture 的 ``generated_from_ref``）的真实写入函数产出，
-解析结果同样来自那棵树的真实解析函数，生成脚本是
-``.iar/evidence/scripts/rv-3-marker-snapshot.py``（证据脚本，不进改动集）。
+事实源是 ``tests/support/marker_compat_baseline.json``：每段文本和解析结果由当前树的
+真实写入、解析函数生成。跨进程标记格式发生有意变化时必须连同基线一起重生成；基线
+用于发现之后的意外漂移，不再声称旧拼写是永久协议。
 
-本测试在当前树上做三件事：
-
-1. 用当前树的真实写入函数按同样的入参重跑一遍，逐字节比对文本——写入侧不许因产品改名漂移。
-2. 把记录在案的文本送进当前树的真实解析函数，比对解析结果——解析侧语义不许漂移，
-   而不是只比字符串。
-3. 按基线记下的入参复核认领判定：未过期的旧认领仍判「已占用」（不回收），过期认领
-   按原规则可回收，且更晚的投标在仲裁里落败、不会二次认领同一个 Issue。
-
-修改标记格式属于跨进程契约变更，必须连同基线一起重生成，不要手改 fixture 里的文本。
+本测试逐字节比较写入文本、回放解析结果，并复核未过期认领仍占用、过期或进程死亡认领
+可回收，以及更晚的投标不会二次认领同一个 Issue。
 """
 
 from __future__ import annotations
@@ -44,35 +36,35 @@ BASELINE_PATH = pathlib.Path(__file__).parent / "support" / "marker_compat_basel
 
 EXPECTED_MARKER_KINDS: frozenset[str] = frozenset(
     {
-        "iar:auto-sign-off",
-        "iar:ci-auto-repair-policy",
-        "iar:claim",
-        "iar:claim-withdrawn",
-        "iar:dependency-wait",
-        "iar:depends-on",
-        "iar:direct-pr",
-        "iar:event",
-        "iar:evidence-format",
-        "iar:evidence-format-waived",
-        "iar:failure-context",
-        "iar:failure-context-ref",
-        "iar:fast-merge",
-        "iar:merge-acceptance",
-        "iar:pr-contract",
-        "iar:pr-contract-end",
-        "iar:realistic-validation",
-        "iar:realistic-validation-end",
-        "iar:reconcile",
-        "iar:structured-evidence",
-        "iar:validation-evidence",
-        "iar:validation-waived",
-        "iar:verifier-verdict",
-        "iar:verifier-warning",
-        "iar-attempt-history",
-        "iar-attempt-end",
+        "kc:auto-sign-off",
+        "kc:ci-auto-repair-policy",
+        "kc:claim",
+        "kc:claim-withdrawn",
+        "kc:dependency-wait",
+        "kc:depends-on",
+        "kc:direct-pr",
+        "kc:event",
+        "kc:evidence-format",
+        "kc:evidence-format-waived",
+        "kc:failure-context",
+        "kc:failure-context-ref",
+        "kc:fast-merge",
+        "kc:merge-acceptance",
+        "kc:pr-contract",
+        "kc:pr-contract-end",
+        "kc:realistic-validation",
+        "kc:realistic-validation-end",
+        "kc:reconcile",
+        "kc:structured-evidence",
+        "kc:validation-evidence",
+        "kc:validation-waived",
+        "kc:verifier-verdict",
+        "kc:verifier-warning",
+        "kc:attempt-history",
+        "kc-attempt-end",
     }
 )
-"""基线覆盖的标记种类（跨进程契约，永久保留旧拼写）。"""
+"""基线覆盖的当前标记种类。"""
 
 
 def load_baseline() -> dict[str, Any]:
@@ -224,7 +216,7 @@ def test_each_entry_text_carries_its_own_kind_token(entry: dict[str, Any]) -> No
 
 def test_claim_judgement_keeps_baseline_occupancy_semantics() -> None:
     """未过期的旧认领仍判已占用（不回收）；过期或进程死亡的按原规则可回收。"""
-    claim_entry = next(entry for entry in ENTRIES if entry["kind"] == "iar:claim")
+    claim_entry = next(entry for entry in ENTRIES if entry["kind"] == "kc:claim")
     judgement = claim_entry["claim_judgement"]
     comment_text = claim_entry["outputs"][judgement["input"]]
     detail = parse_claim_marker_detail(comment_text)
@@ -253,7 +245,7 @@ def test_claim_judgement_keeps_baseline_occupancy_semantics() -> None:
 
 def test_late_bidder_still_loses_arbitration_against_baseline_claim() -> None:
     """基线认领评论仍是「更早的投标」：更晚的进程落败、不切 running、不改别人的评论。"""
-    claim_entry = next(entry for entry in ENTRIES if entry["kind"] == "iar:claim")
+    claim_entry = next(entry for entry in ENTRIES if entry["kind"] == "kc:claim")
     baseline_comment = claim_entry["outputs"]["comment"]
     claim_detail = claim_entry["claim_judgement"]["cases"][0]["claim_detail"]
     # 并发窗口只有 120 秒，历史认领要落在窗口内才参与仲裁，因此这里的 now 取认领后
@@ -295,10 +287,10 @@ def test_late_bidder_still_loses_arbitration_against_baseline_claim() -> None:
 
 def test_withdrawn_claim_is_never_read_as_a_live_claim() -> None:
     """撤销 marker 不被认领解析器命中，线程里最近的认领仍是赢家的。"""
-    withdrawn = next(entry for entry in ENTRIES if entry["kind"] == "iar:claim-withdrawn")
+    withdrawn = next(entry for entry in ENTRIES if entry["kind"] == "kc:claim-withdrawn")
     comment_text = withdrawn["outputs"]["comment"]
     assert parse_claim_marker_detail(comment_text) is None
-    claim_entry = next(entry for entry in ENTRIES if entry["kind"] == "iar:claim")
+    claim_entry = next(entry for entry in ENTRIES if entry["kind"] == "kc:claim")
     thread = [claim_entry["outputs"]["comment"], comment_text]
     latest = next(
         (body for body in reversed(thread) if parse_claim_marker_detail(body) is not None),
