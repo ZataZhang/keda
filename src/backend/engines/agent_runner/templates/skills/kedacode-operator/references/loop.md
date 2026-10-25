@@ -16,6 +16,8 @@ The user says 「每天凌晨一点检查…」「定时跑一个任务」「周
 
 Required: `id`, `schedule` (5-field cron, or `10m` / `1h` / `1d`), `repo_id`. Optional: `issue_type` (`feature` / `refactor` / `bug`), `agent`, `labels` (a list; `loop/<id>` is always added), `queue_ready` (default true: label `agent/ready`), `timezone`, `priority`, `slug`, `managed_by`, `output`, and two scheduling helpers: `pre_command` (a shell command whose `KEY=value` stdout lines become `{{KEY}}` template variables; `{{date}}` and `{{loop_id}}` are built in) and `skip_when: KEY=v1,v2` (skip the fire, with no Issue and no agent cost, when that variable matches — e.g. skip a CI check when the last run is green). A missing variable never skips.
 
+Writing `pre_command`: keep it on one line (the frontmatter parser has no `|` blocks). In a double-quoted value write an inner `"` as `\"` (the YAML escapes `\\`, `\n`, `\t` are honored too); in a single-quoted value write `'` as `''`. `kc loop run <id> --dry-run` runs the `pre_command` and renders the template, so a broken command shows up there before registration: the error reads `undefined variable '<name>' ... The pre_command failed first: pre_command exited with N; stderr: …` — fix the command, not the frontmatter.
+
 ## Execute and never do
 
 - Preview with no side effects: `kc loop run <id> --dry-run` — renders the title and labels and reports what would happen; it does not call GitHub, write a file or touch the schedule.

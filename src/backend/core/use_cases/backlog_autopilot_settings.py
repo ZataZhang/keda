@@ -91,7 +91,9 @@ def daemon_is_running(repo_id: str, records: Sequence[RunnerProcessRecord]) -> b
     for record in records:
         if record.repo_id != repo_id:
             continue
-        if record.kind is not RunnerProcessKind.DAEMON:
+        # 按值比较：从注册表 JSON 读回的记录里 ``kind`` 是普通字符串，身份比较
+        # （``is``）对它永远不成立，曾让控件对正在运行的 daemon 显示「未运行」。
+        if record.kind != RunnerProcessKind.DAEMON:
             continue
         if _RUNNING_STATUS in str(record.status):
             return True
