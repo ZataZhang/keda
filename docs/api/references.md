@@ -205,6 +205,7 @@ curl -sS \
 - `effective_max_parallel`：控制台解析出的生效并行上限（页面设置存在时取页面设置，否则取 `runner_capacity`），用于控制条与「全局开始」；
 - `runner_capacity`：仓库配置 `[agent_runner.runner].max_concurrent_issues`（下限 1）。daemon 若显式传 `--concurrency`，该 daemon 进程改用旗标值；该端点不读取 daemon 进程旗标，实时值以 daemon 的 `Parallel limit` 日志为准；
 - `ceiling_source`：`policy`（页面设置）/ `config`（配置文件）两态来源，UI 据此标注生效值出处；
+- `daemon_parallel_limit` / `daemon_parallel_limit_source`：本机存活 daemon 最近一次轮询实际使用的并行上限与来源（`cli_override` / `policy` / `config`），包含 daemon 进程的 `--concurrency`；本机没有存活 daemon 时为 `null`，此时以 `effective_max_parallel` 为准；
 - `persisted_enabled`：目标仓库 `.kedacode.toml` 中的持久值；文件缺失或键未设置时为 `null`。
 
 ### `PATCH /api/v1/agent-runner/backlog/autopilot`

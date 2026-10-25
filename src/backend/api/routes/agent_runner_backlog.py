@@ -58,6 +58,10 @@ from backend.core.use_cases.backlog_concurrency import (
     read_policy_max_parallel,
     resolve_execution_ceiling,
 )
+from backend.core.use_cases.daemon_parallel_limit_status import (
+    read_daemon_parallel_limit_status,
+)
+from backend.core.use_cases.daemon_single_instance import daemon_lock_dir
 from backend.core.use_cases.backlog_autopilot_settings import (
     BacklogAutopilotError,
     BacklogAutopilotState,
@@ -330,13 +334,20 @@ def _resolve_policy_max_parallel(repo_id: str) -> int | None:
 
 
 def _autopilot_payload(state: BacklogAutopilotState) -> dict:
-    """序列化 Autopilot 快照并把策略字段映射回对外契约名 ``max_parallel``。
+    """序列化 Autopilot 快照并附上本机 daemon 实际生效的并行上限。
 
     core 快照用 ``policy_max_parallel`` 表达「可空策略值」，对外契约保持
-    ``max_parallel``（语义为策略、可为 null）不变，避免前端类型改名扩散。
+    ``max_parallel``（语义为页面设置、可为 null）不变，避免前端类型改名扩散。
+    ``daemon_parallel_limit`` / ``daemon_parallel_limit_source`` 来自本机存活 daemon
+    最近一次轮询写出的状态，包含只有 daemon 进程知道的 ``--concurrency``；本机没有
+    存活 daemon 时为 null，页面此时以 ``effective_max_parallel`` 为准。
     """
     payload: dict = _serialize(state)
     payload["max_parallel"] = payload.pop("policy_max_parallel")
+    lock_dir = daemon_lock_dir(load_fresh_agent_runner_settings().console.process_registry_path)
+    daemon_status = read_daemon_parallel_limit_status(lock_dir, state.repo_id)
+    payload["daemon_parallel_limit"] = daemon_status.parallel_limit if daemon_status else None
+    payload["daemon_parallel_limit_source"] = daemon_status.source if daemon_status else None
     return payload
 
 

@@ -380,6 +380,37 @@ def test_get_autopilot_endpoint(autopilot_environment) -> None:
     assert data["runner_capacity"] == 1
     assert data["ceiling_source"] == "config"
     assert data["config_source"] == ".kedacode.toml"
+    # 本机没有存活 daemon：实际生效值未知，页面以 effective_max_parallel 为准。
+    assert data["daemon_parallel_limit"] is None
+    assert data["daemon_parallel_limit_source"] is None
+
+
+def test_get_autopilot_reports_live_daemon_cli_override(
+    autopilot_environment, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """daemon 用 --concurrency 5 启动时，接口带出它实际在用的 5，而不只是页面值。"""
+    import backend.api.routes.agent_runner_backlog as backlog_routes
+    from backend.core.use_cases.daemon_parallel_limit_status import DaemonParallelLimitStatus
+
+    live_status = DaemonParallelLimitStatus(
+        repo_id=REPO_ID,
+        pid=4242,
+        parallel_limit=5,
+        source="cli_override",
+        in_flight=1,
+        updated_at="2026-10-25T00:00:00+00:00",
+    )
+    monkeypatch.setattr(
+        backlog_routes,
+        "read_daemon_parallel_limit_status",
+        lambda lock_dir, repo_id: live_status if repo_id == REPO_ID else None,
+    )
+
+    data = client.get(f"/api/v1/agent-runner/backlog/autopilot?repo_id={REPO_ID}").json()
+
+    assert data["effective_max_parallel"] == 1
+    assert data["daemon_parallel_limit"] == 5
+    assert data["daemon_parallel_limit_source"] == "cli_override"
 
 
 def test_get_autopilot_rejects_non_bool_enabled(autopilot_environment) -> None:

@@ -450,7 +450,8 @@ _ALLOWED_FLAGS: dict[tuple[str, ...], set[str]] = {
     ("registry", "stop"): {"--repo-id", "--all"},
     ("backlog", "advance"): {"--dry-run", "--repo", "--repo-id", "--config"},
     ("registry", "list"): set(),
-    ("daemon", "status"): set(),
+    # skill 用 ``kc daemon status --repo-id <id> --json`` 读 daemon 实际生效的并行上限。
+    ("daemon", "status"): {"--repo", "--repo-id", "--json", "--all"},
     ("recover",): {"--issue", "--branch", "--repo", "--repo-id"},
     ("blocked-continue",): {"--issue", "--agent", "--repo", "--repo-id"},
     ("worktree", "path"): {"--branch"},

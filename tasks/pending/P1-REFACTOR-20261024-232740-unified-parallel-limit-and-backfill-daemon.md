@@ -550,8 +550,8 @@ No external validation required; repository evidence was sufficient.
 - **FR-4**：daemon 每个轮询间隔清理已完成任务、计算空位并提交新领取的 Issue，不等待正在执行的 Issue 完成；有任务在执行时不进入空闲退避。
 - **FR-5**：空位 = 生效上限 − max(本机在执行数, GitHub 上 `agent/running` 数)；统计失败时本次不领新 Issue。
 - **FR-6**：本机正在执行的 Issue 被就绪、返工、发布恢复、blocked 恢复、`direct_pr_cleanup` 通道与崩溃对账全部跳过。
-- **FR-7**：Backlog 设置与 Autopilot 接口的来源取值为 `policy` / `config`；Backlog 控件显示"并行上限 N（页面设置 / 配置文件）"，清除按钮为"恢复为配置文件值：N"；跨仓库状态栏显示"默认并行上限 N"（状态接口 `config.max_concurrent_issues`）；顶部同步间隔写作"看板同步：每 N 分钟"。
-- **FR-8**：`kc daemon` 与 `kc daemon run` 删除 `--max-issues`（传入时返回用法错误并提示 `--concurrency`）；`kc run` / `kc supervise` / `kc supervise-daemon` 的 `--max-issues` 保持"本次最多处理几个"的原语义，未传时默认 1；`kc run` 仍等待本次任务全部完成后退出。
+- **FR-7**：Backlog 设置与 Autopilot 接口的来源取值为 `policy` / `config`；daemon 每次轮询把实际生效的并行上限、来源（含 `cli_override`）与本机在执行数写到单实例锁旁的状态文件，退出时删除；Autopilot 接口据此返回 `daemon_parallel_limit` / `daemon_parallel_limit_source`（无存活 daemon 时为 null）；Backlog 控件在 daemon 运行时显示它实际在用的值，例如"并行上限 5（daemon 命令行 --concurrency；页面设置 4 未生效）"，否则显示"并行上限 N（页面设置 / 配置文件）"，并注明"页面设置仅本机生效，不改 .kedacode.toml"；清除按钮为"恢复为配置文件值：N"；跨仓库状态栏显示"默认并行上限 N"（状态接口 `config.max_concurrent_issues`）；顶部同步间隔写作"看板同步：每 N 分钟"。
+- **FR-8**：`kc daemon` 与 `kc daemon run` 删除 `--max-issues`（传入时返回用法错误并提示 `--concurrency`）；`kc run` / `kc supervise` / `kc supervise-daemon` 的 `--max-issues` 保持"本次最多处理几个"的原语义，未传时默认 1；`kc run` 仍等待本次任务全部完成后退出；`kc daemon status` 增加 `parallel_limit` 列，`--json` 每个 daemon 行带 `parallel_limit` / `parallel_limit_source` / `in_flight`（读不到时为 null）。
 - **FR-9**：`docs/guides/agent-runner.md` 与随包 operator skill 同步新模型。
 
 ## 11. Non-Goals
@@ -605,3 +605,11 @@ No external validation required; repository evidence was sufficient.
 - Reason: 配置合并后无法区分"显式写了 1"与"默认 1"；静态目录本来就由发布打包生成。
 - Impact: §6、§7.1、§9 Frontend Acceptance 同步改写。
 - Review: 执行侧更正，无行为影响。
+
+### daemon 上报实际生效的并行上限，页面注明仅本机生效
+- Type: scope
+- Before: 命令行 `--concurrency` 只存在于 daemon 进程，管理终端显示页面设置 / 配置文件的值，可能与 daemon 实际值不一致；`kc daemon status` 不显示并行上限（见上一条变更）；页面设置只存本机这一点只写在文档里。
+- After: daemon 每次轮询把实际值写到 `~/.kedacode/daemon-locks/<repo_id>.parallel-limit.json`（只采信单实例锁存活持有者写的文件，退出时删除）；Autopilot 接口、Backlog 控件与 `kc daemon status`（表格列与 JSON 字段）都显示这个值；控件旁可见地注明"页面设置仅本机生效，不改 .kedacode.toml"；随包 skill 写明读取入口与三层各自的修改方式。
+- Reason: 用户 2026-10-25 指出 `--concurrency 5` 与页面设置 4 并存时无处看到真实值，并要求页面设置是否改配置文件说清楚、skill 描述准确便于 agent 使用。
+- Impact: FR-7、FR-8 更新；新增 `daemon_parallel_limit_status.py`、rv-4 证据；上一条变更中"kc daemon status 不显示并行上限"被本条取代。
+- Review: 用户 2026-10-25 已同意按推荐方案实施。

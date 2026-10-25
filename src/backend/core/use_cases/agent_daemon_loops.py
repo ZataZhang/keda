@@ -50,6 +50,7 @@ class _AgentDaemonLoopRequest:
     loop_clock: ILoopClock | None
     api_budget: IGitHubApiBudget | None
     idle_backoff_max_factor: int
+    parallel_limit_status_dir: Path | None = None
 
 
 @dataclass(frozen=True)

@@ -766,6 +766,9 @@ def run_daemon_command(ctx: ParsedCommandContext) -> int:
             loop_clock=_cli.create_loop_clock(),
             # 与 Monitor、CLI 共用同一份额度账本：撞限流或额度见底时全员暂停到重置。
             api_budget=_cli.create_github_api_budget(),
+            # 实际生效的并行上限写到单实例锁旁，管理终端与 kc daemon status 据此显示
+            # 包含 --concurrency 在内的真实值。
+            parallel_limit_status_dir=daemon_locks_dir,
         )
     finally:
         _cli.release_daemon_locks(acquired_daemon_locks)

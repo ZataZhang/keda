@@ -499,6 +499,9 @@ export type BacklogPrdsResponse = {
 /** 生效并行上限的来源：Backlog 页面设置 / 配置文件 max_concurrent_issues。 */
 export type BacklogCeilingSource = "policy" | "config";
 
+/** 本机 daemon 实际生效值的来源：多一个 `kc daemon run --concurrency` 命令行覆盖。 */
+export type DaemonParallelLimitSource = BacklogCeilingSource | "cli_override";
+
 export type BacklogSettings = {
   repo_id: string;
   /** Backlog 页面保存的并行上限；从未保存过时为 null（使用配置文件值）。 */
@@ -546,6 +549,9 @@ export type BacklogAutopilotState = {
   ceiling_source: BacklogCeilingSource;
   config_source: string;
   persisted_enabled: boolean | null;
+  /** 本机存活 daemon 最近一次轮询实际使用的并行上限；没有存活 daemon 时为 null。 */
+  daemon_parallel_limit: number | null;
+  daemon_parallel_limit_source: DaemonParallelLimitSource | null;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

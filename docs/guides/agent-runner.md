@@ -2494,6 +2494,10 @@ kc daemon --concurrency 3
 - **空位怎么算**：本轮可新领取数 = `max(0, 上限 − max(本机在执行数, 仓库内 open agent/running 标签数))`，取两者较大值是因为本机刚提交的 Issue 可能还没带上 running 标签。计数查询最多取到上限 + 1，超出时日志标为「至少 上限 + 1」；计数失败按 fail-closed 处理，本次不领新 Issue，已在执行的不受影响。running / blocked 恢复及 `direct_pr_cleanup` 收尾不受这个上限压低，但同样占用本机执行名额。
 - **不重复执行**：daemon 维护一份"本机正在执行"的名单，就绪、返工、发布恢复、blocked 恢复、`direct_pr_cleanup` 各通道与崩溃对账都会跳过名单里的 Issue；同一个 Issue 只由一个线程推进。
 - **日志**：每次轮询打印 `Parallel limit for '<repo>': limit=N source=<cli_override|policy|config> in_flight=M`，Issue 结束时打印 `Issue #N finished ... slot released`。
+- **在哪里看实际生效的值**：daemon 每次轮询把它对每个仓库实际使用的上限、来源和本机在执行数写到单实例锁旁边（`~/.kedacode/daemon-locks/<repo_id>.parallel-limit.json`），退出时删除。以下入口都读它，因此包含只有 daemon 进程知道的 `--concurrency`：
+  - `kc daemon status`：`parallel_limit` 列；`--json` 每行带 `parallel_limit`、`parallel_limit_source`（`cli_override` / `policy` / `config`）、`in_flight`。值为 `null` 表示本机没有存活的 daemon（或 daemon 还是升级前启动的旧进程）。
+  - 管理终端 Backlog 控件：daemon 在跑时显示它实际在用的值，例如 `--concurrency 5` 启动、页面设置 4 时显示「并行上限 5（daemon 命令行 --concurrency；页面设置 4 未生效）」；daemon 没在跑时显示页面设置 / 配置文件解析出的值。
+- **页面设置只对本机生效**：Backlog 页面保存的并行上限存在本机管理终端数据库（`~/.kedacode/console.db`），**不修改 `.kedacode.toml`**，其他电脑上的 daemon 读不到。要让所有电脑一致，改仓库的 `[agent_runner.runner].max_concurrent_issues` 并提交；但任一电脑上的页面设置仍会在那台电脑上覆盖它。
 - **隔离**：每个 Issue 仍各自 worktree / 分支；共享仓库的 worktree 创建被串行化以避开 `.git` 竞争，真正耗时的 agent 执行阶段全程并行。
 - **作用范围**：仅 `kc daemon`（含 `kc daemon run`）。多仓库（`--all`）时每个仓库各有自己的执行名单和并行上限，显式 `--concurrency` 统一覆盖各仓库。一次性 `kc run` 仍然等本次领到的 Issue 全部跑完才退出；`kc run` / `kc supervise` / `kc supervise-daemon` 的 `--max-issues` 表示本次最多处理几个，默认 `1`。
 - **成本提醒**：`--concurrency N` 即 N 路 agent 同时烧 token，请按额度与机器资源设定。

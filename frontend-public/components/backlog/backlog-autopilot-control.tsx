@@ -1,11 +1,12 @@
 "use client";
 
-// Backlog 仓库级自动推进控制条：调度开关键 + 真实运行状态 + 生效并发上限。
+// Backlog 仓库级自动推进控制条：调度开关键 + 真实运行状态 + 并行上限。
 //
 // 页面分别显示 Backlog 自动推进、daemon 运行状态和全局自动合并双开关。
-// 「并发」显示的是后端解析出的生效值与来源（继承 / 设置 / 受容量限制），
-// 并提供最小设置入口（1–10 与恢复继承）；数字与 daemon 认领、补位闸门同源。
-// 「恢复继承」= 删除设置行，已知副作用是默认视图偏好回落到列表（PRD §12），
+// 「并行上限」优先显示本机 daemon 实际在用的值与来源（含只有 daemon 知道的
+// --concurrency）；daemon 没在跑时显示页面设置 / 配置文件解析出的值。页面设置只存
+// 本机管理终端数据库，不修改 .kedacode.toml，也不影响其他电脑。
+// 「恢复为配置文件值」= 删除设置行，已知副作用是默认视图偏好回落到列表（PRD §12），
 // 按钮 title 上如实披露。
 // 单 PRD 自动合并授权位于 PRD 启动选项，不会改动全局合并配置。
 
@@ -14,7 +15,11 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { BacklogAutopilotState, BacklogCeilingSource } from "@/lib/api/types";
+import type {
+  BacklogAutopilotState,
+  BacklogCeilingSource,
+  DaemonParallelLimitSource,
+} from "@/lib/api/types";
 
 interface BacklogAutopilotControlProps {
   state: BacklogAutopilotState | null;
@@ -30,6 +35,31 @@ const CEILING_SOURCE_LABELS: Record<BacklogCeilingSource, string> = {
   policy: "页面设置",
   config: "配置文件",
 };
+
+/** daemon 实际生效值的来源文案（多一个只有 daemon 进程知道的命令行覆盖）。 */
+const DAEMON_LIMIT_SOURCE_LABELS: Record<DaemonParallelLimitSource, string> = {
+  ...CEILING_SOURCE_LABELS,
+  cli_override: "daemon 命令行 --concurrency",
+};
+
+/**
+ * 生成并行上限的展示文案：daemon 在跑时以它实际在用的值为准。
+ *
+ * @param state - 后端返回的 Autopilot 快照。
+ * @returns 例如「并行上限 5（daemon 命令行 --concurrency；页面设置 4 未生效）」。
+ */
+function describeParallelLimit(state: BacklogAutopilotState): string {
+  const daemonLimit = state.daemon_parallel_limit;
+  const daemonSource = state.daemon_parallel_limit_source;
+  if (daemonLimit === null || daemonSource === null) {
+    return `并行上限 ${state.effective_max_parallel}（${CEILING_SOURCE_LABELS[state.ceiling_source]}）`;
+  }
+  const overridden =
+    daemonLimit !== state.effective_max_parallel
+      ? `；${CEILING_SOURCE_LABELS[state.ceiling_source]} ${state.effective_max_parallel} 未生效`
+      : "";
+  return `并行上限 ${daemonLimit}（${DAEMON_LIMIT_SOURCE_LABELS[daemonSource]}${overridden}）`;
+}
 
 /**
  * 把草稿字符串解析为合法策略值。
@@ -105,8 +135,12 @@ export function BacklogAutopilotControl({
       <span className="text-slate-400">·</span>
 
       <span className="flex items-center gap-2" data-testid="backlog-concurrency">
-        <span className="text-slate-500">
-          并行上限 {state.effective_max_parallel}（{CEILING_SOURCE_LABELS[state.ceiling_source]}）
+        <span
+          className="text-slate-500"
+          title="页面设置只保存在这台电脑的管理终端里，不修改 .kedacode.toml，其他电脑不受影响"
+          data-testid="backlog-concurrency-label"
+        >
+          {describeParallelLimit(state)}
         </span>
         <Input
           type="number"
@@ -160,6 +194,9 @@ export function BacklogAutopilotControl({
             恢复为配置文件值：{state.runner_capacity}
           </Button>
         ) : null}
+        <span className="text-xs text-slate-400" data-testid="backlog-concurrency-scope">
+          页面设置仅本机生效，不改 .kedacode.toml
+        </span>
       </span>
 
       <span

@@ -7,6 +7,7 @@ import os
 import signal
 import time
 from collections.abc import Callable
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -47,6 +48,11 @@ from backend.core.use_cases.backlog_concurrency import (
     resolve_execution_ceiling,
 )
 from backend.core.use_cases.daemon_execution_slots import DaemonExecutionSlots
+from backend.core.use_cases.daemon_parallel_limit_status import (
+    DaemonParallelLimitStatus,
+    clear_daemon_parallel_limit_status,
+    write_daemon_parallel_limit_status,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -149,6 +155,7 @@ def run_agent_daemon(
     loop_clock: ILoopClock | None = None,
     api_budget: IGitHubApiBudget | None = None,
     idle_backoff_max_factor: int = IDLE_BACKOFF_MAX_FACTOR,
+    parallel_limit_status_dir: Path | None = None,
 ) -> None:
     """Run the queue poller forever across all target repositories.
 
@@ -199,6 +206,9 @@ def run_agent_daemon(
             避免发出注定失败的请求。省略时不做额度闸门。
         idle_backoff_max_factor: 连续空闲时轮询间隔最多拉长到基础间隔的几倍；
             ``1`` 关闭退避。
+        parallel_limit_status_dir: daemon 单实例锁目录。传入时每次轮询把每个仓库实际
+            生效的并行上限写到锁旁边的状态文件，供管理终端与 ``kc daemon status``
+            读取（命令行 ``--concurrency`` 只有 daemon 自己知道）；退出时删除。
     """
     previous_sigterm_handler: Any = signal.getsignal(signal.SIGTERM)
 
@@ -237,9 +247,14 @@ def run_agent_daemon(
                 loop_clock=loop_clock,
                 api_budget=api_budget,
                 idle_backoff_max_factor=idle_backoff_max_factor,
+                parallel_limit_status_dir=parallel_limit_status_dir,
             )
         )
     finally:
+        if parallel_limit_status_dir is not None:
+            clear_daemon_parallel_limit_status(
+                parallel_limit_status_dir, [context.repo_id for context in contexts]
+            )
         try:
             signal.signal(signal.SIGTERM, previous_sigterm_handler)
         except (ValueError, OSError):
@@ -469,13 +484,26 @@ def _run_daemon_loop(request: _AgentDaemonLoopRequest) -> None:
                     policy_max_parallel, max(1, context.config.runner.max_concurrent_issues)
                 )
                 ceiling_source = describe_ceiling_source(policy_max_parallel)
+            in_flight_count = len(execution_slots.in_flight_issue_numbers())
             _logger.info(
                 "Parallel limit for '%s': limit=%d source=%s in_flight=%d",
                 context.repo_id,
                 execution_ceiling,
                 ceiling_source,
-                len(execution_slots.in_flight_issue_numbers()),
+                in_flight_count,
             )
+            if request.parallel_limit_status_dir is not None:
+                write_daemon_parallel_limit_status(
+                    request.parallel_limit_status_dir,
+                    DaemonParallelLimitStatus(
+                        repo_id=context.repo_id,
+                        pid=os.getpid(),
+                        parallel_limit=execution_ceiling,
+                        source=ceiling_source,
+                        in_flight=in_flight_count,
+                        updated_at=datetime.now(timezone.utc).isoformat(),
+                    ),
+                )
 
             # 调度阶段：仅在 ``backlog.auto_advance`` 开启时持续推进 Backlog，先处理
             # 已完成/失败的 PRD，再将队列补到生效上限并标记 agent/ready。

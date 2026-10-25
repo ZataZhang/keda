@@ -8,6 +8,7 @@
 | keda 仓库 Backlog 控件：未保存页面设置（rv-3） | `rv-3-backlog-config-source.png` | "并行上限 10（配置文件）" |
 | 保存页面设置 4 之后（rv-3） | `rv-3-backlog-policy-source.png` | "并行上限 4（页面设置）"，旁边出现"恢复为配置文件值：10" |
 | 恢复为配置文件值之后（rv-3） | `rv-3-backlog-restored.png` | 回到"并行上限 10（配置文件）" |
+| daemon 以 `--concurrency 5` 运行时的 Backlog 控件（rv-4） | `rv-4-backlog-daemon-cli-override.png` | "并行上限 5（daemon 命令行 --concurrency；配置文件 10 未生效）"，旁边写"页面设置仅本机生效，不改 .kedacode.toml" |
 
 ![rv-3 看板顶部与状态栏](rv-3-dashboard-status-bar.png)
 
@@ -17,9 +18,13 @@
 
 ![rv-3 恢复为配置文件值](rv-3-backlog-restored.png)
 
+![rv-4 daemon 命令行覆盖](rv-4-backlog-daemon-cli-override.png)
+
 截图只保存在本地（证据目录的图片不进 git）。打开方式：`open tasks/evidence/P1-REFACTOR-20261024-232740-unified-parallel-limit-and-backfill-daemon/rv-3-backlog-policy-source.png`。
 
 截图来自用本次代码在 18765 端口启动的真实管理终端（`just console-sync` 后 `kc console --port 18765`），操作对象是本机真实的 keda 仓库；保存前 keda 没有页面设置行，恢复后再次确认设置行已删除，本机状态与操作前一致（见 `rv-3-console.txt`）。
+
+rv-4 的做法：本机常驻的 keda daemon（PID 78808）是旧代码，不会写状态文件；以它的 PID（正是 keda 单实例锁的存活持有者）临时写入一份 `--concurrency 5` 的状态文件，验证 `kc daemon status --json`、Autopilot 接口与页面三处都读到 5 / `cli_override`，截图后立即删除该文件（见 `rv-4-daemon-live-limit.txt`）。状态文件由真实 daemon 写出、退出时删除，由 `tests/test_daemon_parallel_limit_status.py` 覆盖。
 
 ## rv-1 执行期间补位
 
