@@ -31,6 +31,7 @@ from backend.core.use_cases.run_agent_once import (
     has_changes,
     run_agent_with_prompt,
     run_verification,
+    unstage_changes,
 )
 
 _logger = logging.getLogger(__name__)
@@ -130,11 +131,7 @@ def execute_repair(
         if failed_verification_results(verification_results):
             if attempt >= max_attempts:
                 ensure_verification_passed(verification_results)
-            process_runner.run(
-                ["git", "reset", "--mixed"],
-                cwd=worktree_path,
-                check=False,
-            )
+            unstage_changes(worktree_path, process_runner, check=False)
             repair_prompt = build_recovery_prompt(
                 issue,
                 worktree_path,
