@@ -5,9 +5,9 @@
     {
       "item_number": 1,
       "item_name": "新建 Issue 正文只写 kc 前缀依赖标记",
-      "command": "uv run kc issue create --from-prompt \"RV #313: dependency marker probe <unique-run-id>\" --depends-on 292（在 opt-in 测试仓库运行；创建后用 kc issue show 读取新 Issue 正文）",
+      "command": "UV_CACHE_DIR=.uv-cache uv run --offline python tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/scripts/rv-1-create-readback.py",
       "evidence_files": ["rv-1-github-post-merge.txt"],
-      "output_summary": "未执行真实 GitHub 创建：当前环境没有配置 GH_TOKEN 与 KC_RV_SANDBOX_REPO。PRD 明确要求将此 oracle 留为 post-merge，不以单元测试替代。",
+      "output_summary": "RV-1 create/readback 脚本已通过语法检查；执行时因 GH_TOKEN 与 KC_RV_SANDBOX_REPO 未配置而在任何 CLI 或网络写入前返回 2。没有创建 GitHub Issue，真实正文读回与旧版本负控仍留作 post-merge。",
       "explanation": "该行为必须跨过真实 kc CLI、GitHub API，并在新进程读回刚创建的 Issue 正文；本地代码断言无法证明 GitHub 上的最终正文。",
       "risks": "此项保持 runner-owned post-merge gate；必须在专用测试仓库创建全新 Issue，并记录最终 tree 与正文。未获得授权前不创建远端 Issue。",
       "negative_control": "在同一 opt-in 仓库和凭据下，用改名前版本运行相同的 kc issue create 命令，再读取新 Issue 正文。",
