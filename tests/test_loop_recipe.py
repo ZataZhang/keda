@@ -359,3 +359,64 @@ def test_recipe_examples_in_the_loop_guide_all_parse(tmp_path: Path) -> None:
         # 文档里的 <占位符> 换成可解析的实值。
         concrete_text = re.sub(r"<[^>\n]+>", "x", recipe_block)
         parse_loop_recipe_text(concrete_text, source_path=tmp_path / "example.md")
+
+
+@pytest.mark.parametrize(
+    ("scalar_text", "expected_value"),
+    [
+        (r'"print \"x=\" $0"', 'print "x=" $0'),
+        (r'"a\\b"', r"a\b"),
+        (r'"keep \q as-is"', r"keep \q as-is"),
+        ("'it''s'", "it's"),
+        (r"'no \" escape'", r"no \" escape"),
+    ],
+)
+def test_quoted_scalars_follow_yaml_escape_rules(scalar_text: str, expected_value: str) -> None:
+    """双引号按 YAML 还原转义（未知序列原样保留），单引号只把 ``''`` 还原成 ``'``。"""
+    from backend.core.use_cases.loop_recipe import _coerce_yaml_value
+
+    assert _coerce_yaml_value(scalar_text) == expected_value
+
+
+def test_pre_command_escaped_quotes_reach_the_shell_unescaped(tmp_path: Path) -> None:
+    """``pre_command`` 里的 ``\\"`` 交给 shell 前必须还原成 ``"``（nightly-cleanup 回归）。"""
+    recipe_path = tmp_path / "nightly.md"
+    recipe_path.write_text(
+        """---
+id: nightly
+schedule: "0 2 * * *"
+repo_id: demo
+pre_command: "printf ok | awk '{ print \\"status=\\" $0 }'"
+---
+
+Body {{status}}
+""",
+        encoding="utf-8",
+    )
+
+    recipe = parse_loop_recipe(recipe_path)
+
+    assert recipe.pre_command == "printf ok | awk '{ print \"status=\" $0 }'"
+
+
+def test_repository_loop_recipes_parse_without_leftover_escapes() -> None:
+    """仓库内每个 loop 文件解析后，字符串字段里不得残留 ``\\"``。
+
+    nightly-cleanup 的 ``pre_command`` 曾因解析器不处理转义，把 ``\\"`` 原样交给
+    shell，自 2026-10-21 起每次触发都失败；新增或修改 loop 文件时由本测试兜住。
+    """
+    recipes_dir = Path(__file__).resolve().parents[1] / "tasks" / "loops"
+    recipe_paths = sorted(recipes_dir.glob("*.md"))
+    assert {"nightly-cleanup-keda.md", "nightly-cleanup-product.md"} <= {
+        recipe_path.name for recipe_path in recipe_paths
+    }
+
+    for recipe_path in recipe_paths:
+        recipe = parse_loop_recipe(recipe_path)
+        string_fields = {
+            field_name: field_value
+            for field_name, field_value in vars(recipe).items()
+            if isinstance(field_value, str) and field_name != "body_template"
+        }
+        leftover_fields = [name for name, value in string_fields.items() if '\\"' in value]
+        assert leftover_fields == [], f"{recipe_path.name}: {leftover_fields}"

@@ -382,6 +382,59 @@ Trending repo: {{trending_repo}} (count={{count}})
     assert "Trending repo: demo/x (count=7)" in prd_text
 
 
+def test_fire_loop_reports_pre_command_failure_behind_undefined_variable(
+    tmp_path: Path, repo_path: Path
+) -> None:
+    """pre_command 失败导致变量缺失时，报错附上它的退出码与 stderr，而不只说"请添加变量"。"""
+    recipe_path = tmp_path / "nightly.md"
+    recipe_path.write_text(
+        """---
+id: nightly
+schedule: "0 2 * * *"
+repo_id: fire-demo
+---
+
+CI: {{last_ci_status}}
+""",
+        encoding="utf-8",
+    )
+    task = LoopTask(
+        id="nightly",
+        recipe_path=recipe_path,
+        repo_id="fire-demo",
+        schedule=LoopSchedule(kind=LoopScheduleKind.CRON, expression="0 2 * * *"),
+        pre_command="broken-pre-command",
+        publish_prd=False,
+    )
+    fake_github = FakeGitHubClient()
+    fake_github.set_list_issues_by_label_result([])
+    process_runner = FakeProcessRunner(
+        responses={
+            ("/bin/sh", "-c", task.pre_command): CommandResult(
+                command=("/bin/sh", "-c"),
+                return_code=2,
+                stdout="",
+                stderr="awk: illegal statement at source line 1",
+            )
+        }
+    )
+
+    with pytest.raises(ValueError) as raised:
+        fire_loop(
+            task,
+            repo_path=repo_path,
+            github_client=fake_github,
+            process_runner=process_runner,
+            state_store=JsonLoopStateStore(tmp_path / "loop-state.json"),
+            clock=FixedClock(datetime(2026, 10, 21, 18, 0, tzinfo=timezone.utc)),
+        )
+
+    message = str(raised.value)
+    assert "undefined variable 'last_ci_status'" in message
+    assert "pre_command exited with 2" in message
+    assert "awk: illegal statement" in message
+
+
 def _skip_when_scene(
     task: LoopTask, tmp_path: Path, ci_status: str
 ) -> tuple[LoopTask, FakeProcessRunner, JsonLoopStateStore]:

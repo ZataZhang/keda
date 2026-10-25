@@ -234,12 +234,16 @@ def _persist_skip_reason(
 # ---------------------------------------------------------------------------
 
 
+#: 写进"未定义变量"报错的 pre_command 错误输出最多保留多少字符。
+_PRE_COMMAND_DIAGNOSTIC_MAX_CHARS = 500
+
+
 def _run_pre_command(
     command: str,
     *,
     cwd: Path,
     process_runner: IProcessRunner,
-) -> dict[str, str]:
+) -> tuple[dict[str, str], str | None]:
     """Execute the pre_command and parse its ``KEY=value`` stdout.
 
     Args:
@@ -250,8 +254,9 @@ def _run_pre_command(
         process_runner: Process runner abstraction.
 
     Returns:
-        Mapping of variable name to value. Returns an empty dict when the
-        command produces no parseable output.
+        ``(变量, 诊断)``。变量在命令没有可解析输出时为空 dict；诊断在命令抛错、
+        退出码非零或写了 stderr 时给出（管道中间环节失败时退出码可能仍为 0，
+        stderr 是唯一线索），供模板缺变量时说明真正原因，否则为 ``None``。
     """
     try:
         result = process_runner.run(
@@ -262,14 +267,16 @@ def _run_pre_command(
         )
     except Exception as exc:  # noqa: BLE001 - keep loop running.
         _logger.warning("pre_command failed: %s", exc)
-        return {}
-    if result.return_code != 0:
-        _logger.warning(
-            "pre_command exited with %d; stderr=%s",
-            result.return_code,
-            result.stderr.strip(),
+        return {}, f"pre_command could not run: {exc}"
+    stderr_text = result.stderr.strip()
+    diagnostic: str | None = None
+    if result.return_code != 0 or stderr_text:
+        diagnostic = (
+            f"pre_command exited with {result.return_code}; "
+            f"stderr: {stderr_text[:_PRE_COMMAND_DIAGNOSTIC_MAX_CHARS] or '(empty)'}"
         )
-    return parse_pre_command_output(result.stdout)
+        _logger.warning("%s", diagnostic)
+    return parse_pre_command_output(result.stdout), diagnostic
 
 
 # ---------------------------------------------------------------------------
@@ -348,8 +355,9 @@ def fire_loop(
             )
 
     extra_variables: dict[str, str] = {}
+    pre_command_diagnostic: str | None = None
     if task.pre_command:
-        extra_variables = _run_pre_command(
+        extra_variables, pre_command_diagnostic = _run_pre_command(
             task.pre_command,
             cwd=task.recipe_path.parent,
             process_runner=process_runner,
@@ -376,16 +384,23 @@ def fire_loop(
             next_fire_at=next_skip_dt.isoformat(),
         )
 
-    rendered_body = render_loop_recipe(
-        recipe,
-        fire_at=fire_at,
-        extra_variables=extra_variables,
-    )
-    rendered_title = render_loop_recipe_title(
-        recipe,
-        fire_at=fire_at,
-        extra_variables=extra_variables,
-    )
+    try:
+        rendered_body = render_loop_recipe(
+            recipe,
+            fire_at=fire_at,
+            extra_variables=extra_variables,
+        )
+        rendered_title = render_loop_recipe_title(
+            recipe,
+            fire_at=fire_at,
+            extra_variables=extra_variables,
+        )
+    except ValueError as exc:
+        # 变量缺失多半是 pre_command 自己失败了；只报"请添加变量"会把人引去
+        # 改 frontmatter，所以把它的真实错误附上。
+        if pre_command_diagnostic is None:
+            raise
+        raise ValueError(f"{exc} The pre_command failed first: {pre_command_diagnostic}") from exc
     issue_title = rendered_title or recipe.id
     if dry_run:
         next_fire_dt = compute_next_fire(

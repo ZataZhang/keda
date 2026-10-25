@@ -139,6 +139,15 @@ def test_daemon_is_running_detects_repo_daemon() -> None:
     assert daemon_is_running(REPO_ID, records + [_daemon_record(REPO_ID)]) is True
 
 
+def test_daemon_is_running_accepts_kind_read_back_as_plain_string() -> None:
+    """注册表 JSON 读回的记录 ``kind`` 是字符串 ``"daemon"``，也必须判为在跑。"""
+    from dataclasses import replace
+
+    registry_record = replace(_daemon_record(REPO_ID), kind="daemon")
+
+    assert daemon_is_running(REPO_ID, [registry_record]) is True
+
+
 def test_load_autopilot_state_reports_real_conditions(tmp_path: Path) -> None:
     """状态快照必须分别给出 Autopilot / 自动合并 / daemon 三件事。"""
     repo_root = tmp_path / "repo"

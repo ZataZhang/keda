@@ -51,7 +51,7 @@ Loop 配方是仓库内的 Markdown 文件，建议存放在 `tasks/loops/<id>.m
 | `output` |  | enum | `issue` | 每次触发的产出：`issue`（默认）**不生成任何 PRD**，配方正文原文直接作为普通 Issue 的正文（`publish_prd` 在此模式下无意义）；`prd` 渲染一份带时间戳的 PRD 并与 Issue 一一绑定（走完整 PRD 生命周期，`publish_prd: true` 时还会提交并推送到 base 分支）。已经登记过、状态文件里没有该字段的旧 loop 仍按 `prd` 运行，不受默认值变化影响；重新登记旧配方时才会换成新默认值，需要旧行为请显式写 `output: prd`。 |
 | `queue_ready` |  | bool | `true` | 是否贴 `agent/ready` 标签让 runner 认领。 |
 | `run_now` |  | bool | `false` | 造票后是否立即调用 `run_agent_repositories_once`。 |
-| `pre_command` |  | string | `null` | 触发前执行的 shell 命令，stdout 中 `KEY=value` 行会被注入模板变量。 |
+| `pre_command` |  | string | `null` | 触发前执行的 shell 命令，stdout 中 `KEY=value` 行会被注入模板变量。只能写在一行里（不支持 `\|` 块）；写成双引号字符串时内部的 `"` 写作 `\"`，按 YAML 规则还原（同样支持 `\\`、`\n`、`\t`），单引号字符串里的 `'` 写作 `''`。 |
 | `timezone` |  | string | UTC | IANA 时区名（如 `Asia/Shanghai`），用于 cron 调度。 |
 | `managed_by` |  | enum | `loop-daemon` | `loop-daemon` 由独立 loop daemon 推进；`agent-daemon` 由普通 `kc daemon` 在每轮前置阶段推进。 |
 | `priority` |  | string | `P2` | 生成 PRD 文件名前缀（`P0`–`P3`）。 |
@@ -227,9 +227,11 @@ flowchart TD
   一个 daemon 负责（由 `managed_by` 决定）。
 - **时区**：cron 默认 UTC 兼容行为；需要固定墙钟时应填写 IANA `timezone`，例如
   `Asia/Shanghai`。状态账本仍保存 UTC。
-- **pre_command 失败**：`_run_pre_command()` 只在命令**退出码非 0** 时打一条 warning，异常本身
-  也被吞掉换成空变量集返回，daemon 不中断。它**不会**把原因写进 loop-state.json：模型里的
-  `last_error` 字段目前没有任何写入方，只有序列化代码在读它。
+- **pre_command 失败**：命令抛错、退出码非 0 或写了 stderr 时，`_run_pre_command()` 打一条
+  warning 并照常返回已解析到的变量，daemon 不中断。如果因此缺了模板变量，触发报错会在
+  「undefined variable」之后附上 `The pre_command failed first: pre_command exited with N; stderr: …`，
+  先看这段而不是去改 frontmatter。管道中间环节失败时退出码可能仍是 0，stderr 是唯一线索。
+  原因**不会**写进 loop-state.json：模型里的 `last_error` 字段目前没有任何写入方。
 - **同一天去重**：通过 `loop/<id>` 标签 + Issue 标题日期判断；手动改 Issue 标题可能绕过去重。
 
 ### 巡查计数显示 `unknown` 时先查什么
