@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from backend.core.shared.interfaces.agent_runner import IProcessRunner
@@ -24,12 +25,15 @@ from backend.core.use_cases.agent_runner_validation import (
 from backend.core.shared.models.agent_model_preset import ModelSelection
 from backend.core.use_cases.agent_invocation_tracing import PHASE_SUPERVISOR_REPAIR
 from backend.core.use_cases.run_agent_once import (
+    EmptyCommitRequestError,
     commit_requested_changes,
     ensure_verification_passed,
     has_changes,
     run_agent_with_prompt,
     run_verification,
 )
+
+_logger = logging.getLogger(__name__)
 
 
 def execute_repair(
@@ -61,7 +65,7 @@ def execute_repair(
         findings: 本轮要修复的具体问题清单。
 
     Returns:
-        修复提交后的验证结果。
+        修复提交后的验证结果；无实际改动时返回当前工作树的验证结果。
     """
     from backend.core.use_cases.agent_runner_git import get_current_branch, get_head_sha
 
@@ -106,47 +110,43 @@ def execute_repair(
                     process_runner,
                     expected_branch=pr_branch,
                 )
+            except EmptyCommitRequestError:
+                # 元数据修复可能只改 GitHub 上的 PR 标题或正文，不产生本地提交。
+                # 验证当前 tree 后交回监督循环重新读取 PR，不能据此直接批准。
+                _logger.info(
+                    "Post-PR repair agent produced no file changes for Issue #%d; "
+                    "verifying the current worktree before supervisor recheck.",
+                    issue.number,
+                )
+                verification_results = run_verification(worktree_path, config, process_runner)
             except VerificationFailedError as exc:
-                if attempt >= max_attempts:
-                    raise
-                process_runner.run(
-                    ["git", "reset", "--mixed"],
-                    cwd=worktree_path,
-                    check=False,
-                )
-                repair_prompt = build_recovery_prompt(
-                    issue,
-                    worktree_path,
-                    recovery_attempt=attempt,
-                    max_recovery_attempts=max_attempts,
-                    evidence_dir=resolve_issue_evidence_relpath(config, issue),
-                    failure_summary=format_recovery_failure_summary(
-                        "Verification failed before repair commit.",
-                        exc.verification_results,
-                    ),
-                )
-                continue
+                verification_results = exc.verification_results
         else:
             if has_changes(worktree_path, process_runner):
                 raise RuntimeError(
                     "Repair agent changed files without writing .agent-runner/commit-request.json."
                 )
             verification_results = run_verification(worktree_path, config, process_runner)
-            if failed_verification_results(verification_results):
-                if attempt >= max_attempts:
-                    ensure_verification_passed(verification_results)
-                repair_prompt = build_recovery_prompt(
-                    issue,
-                    worktree_path,
-                    recovery_attempt=attempt,
-                    max_recovery_attempts=max_attempts,
-                    evidence_dir=resolve_issue_evidence_relpath(config, issue),
-                    failure_summary=format_recovery_failure_summary(
-                        "Verification failed before repair commit.",
-                        verification_results,
-                    ),
-                )
-                continue
+        if failed_verification_results(verification_results):
+            if attempt >= max_attempts:
+                ensure_verification_passed(verification_results)
+            process_runner.run(
+                ["git", "reset", "--mixed"],
+                cwd=worktree_path,
+                check=False,
+            )
+            repair_prompt = build_recovery_prompt(
+                issue,
+                worktree_path,
+                recovery_attempt=attempt,
+                max_recovery_attempts=max_attempts,
+                evidence_dir=resolve_issue_evidence_relpath(config, issue),
+                failure_summary=format_recovery_failure_summary(
+                    "Verification failed before repair commit.",
+                    verification_results,
+                ),
+            )
+            continue
         break
     else:
         ensure_verification_passed(verification_results)
