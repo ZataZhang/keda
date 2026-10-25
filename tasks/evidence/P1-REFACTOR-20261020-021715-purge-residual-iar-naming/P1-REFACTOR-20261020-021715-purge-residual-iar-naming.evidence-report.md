@@ -4,7 +4,7 @@ GitHub Issue：[Issue #313](https://github.com/ZataZhang/keda/issues/313)。本�
 
 | 人审决定 | 证据与打开方式 | 逐项预期值 | 执行侧交叉核对 |
 |---|---|---|---|
-| 决策一：只认 `kc:`，升级时迁移在途标记 | RV-1：`/Users/zata/code/keda/.iar-worktrees/issue-313/tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/rv-1-github-post-merge.txt`；打开：`open "/Users/zata/code/keda/.iar-worktrees/issue-313/tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/rv-1-github-post-merge.txt"`。RV-2：同目录 `rv-2-marker-migration.txt`；打开：`open "/Users/zata/code/keda/.iar-worktrees/issue-313/tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/rv-2-marker-migration.txt"` | RV-1 应看到新 Issue 正文中的 `<!-- kc:depends-on #292 -->` 且没有新写出的旧前缀。RV-2 预期只有前缀发生变化，runner 不会重复认领，重跑为 0，runner 运行时拒绝写入。当前 RV-1 未获得 GitHub 凭据；RV-2 apply 被进程枚举权限阻断，未声称迁移成功。 | 执行侧读回代码、测试和 CLI 输出；rv-1 与 rv-2 的未完成部分已明确留作 runner gate。 |
+| 决策一：只认 `kc:`，升级时迁移在途标记 | RV-1：`/Users/zata/code/keda/.iar-worktrees/issue-313/tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/rv-1-github-post-merge.txt`；打开：`open "/Users/zata/code/keda/.iar-worktrees/issue-313/tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/rv-1-github-post-merge.txt"`。RV-2：同目录 `rv-2-marker-migration.txt`；打开：`open "/Users/zata/code/keda/.iar-worktrees/issue-313/tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/rv-2-marker-migration.txt"` | RV-1 应看到新 Issue 正文中的 `<!-- kc:depends-on #292 -->` 且没有新写出的旧前缀。RV-2 预期只有前缀发生变化，runner 不会重复认领，重跑为 0，runner 运行时拒绝写入。当前 RV-1 缺少显式 `GH_TOKEN` 与沙箱仓库 opt-in；本机存在 gh keyring 登录态，但本次未向任何仓库写入。RV-2 apply 被进程枚举权限阻断，未声称迁移成功。 | 执行侧读回代码、测试和 CLI 输出；rv-1 与 rv-2 的未完成部分已明确留作 runner gate。 |
 | 决策二：新目录默认名、老目录继续复用 | RV-3：`/Users/zata/code/keda/.iar-worktrees/issue-313/tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/rv-3-clean-repository.txt`；打开：`open "/Users/zata/code/keda/.iar-worktrees/issue-313/tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/rv-3-clean-repository.txt"`。RV-4：同目录 `rv-4-legacy-directory.txt`；打开：`open "/Users/zata/code/keda/.iar-worktrees/issue-313/tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/rv-4-legacy-directory.txt"` | 干净仓库创建前 `.kc-worktrees` 不存在，创建后新工作树位于 `.kc-worktrees/<branch>` 且 `git worktree list` 可见。旧目录场景中工作树位于 `.iar-worktrees/<branch>` 且仓库根没有 `.kc-worktrees`。 | 两项均由真实 CLI 写入独立 Git 仓库，再用 Git porcelain 与目录清单读回。 |
 
 没有前端或视觉界面变更，因此本次没有截图；以上证据是 CLI / filesystem 真实入口输出，不用 UI 图代替。
@@ -13,7 +13,7 @@ GitHub Issue：[Issue #313](https://github.com/ZataZhang/keda/issues/313)。本�
 
 | 项目 | 状态 | 证据 |
 |---|---|---|
-| rv-1 新建 GitHub Issue | 🟡 runner post-merge | `rv-1-github-post-merge.txt` 记录凭据缺失；未用单元测试冒充真实 GitHub 验证。 |
+| rv-1 新建 GitHub Issue | 🟡 runner post-merge | `rv-1-github-post-merge.txt` 与 `rv-1-review-preflight.txt` 记录缺少显式 opt-in；未用单元测试冒充真实 GitHub 验证。 |
 | rv-2 在途标记迁移 | 🟡 runner-owned gate | `rv-2-marker-migration.txt` 记录未迁移旧标记负控、预演无写及 apply 的 fail-closed 阻断；`rv-2-process-scanner.txt` 记录宿主权限错误。 |
 | rv-3/rv-4 工作树目录 | ✅ 通过 | 各有负控和真实 CLI 绿测文件。 |
 | rv-5 签名头 | ✅ 通过 | 新旧 HMAC 头成功，缺头 401；alias 故障注入使新头测试失败。 |
@@ -25,3 +25,10 @@ GitHub Issue：[Issue #313](https://github.com/ZataZhang/keda/issues/313)。本�
 standalone `just lint` 之前被 `check-test-flag` 拒绝：pre-commit 暂存未跟踪文件期间，untracked `evidence.json` 从工作视图隐藏，因而计算的 test tree 与工作区标记不一致。没有跳过该检查；runner 将 evidence reports / manifest stage 后需在最终 staged tree 重跑 `just test`、`just lint` 与 MkDocs build。独立 verifier 仍为 PENDING，且 `git rev-parse HEAD^{tree}` 的最终交付 tree 需由提交后的 runner 记录。
 
 证据 JSON manifest 位于同目录 `evidence.json`，含六个 Realistic Validation 项的复现命令、负控预期、输出文件及风险说明。原始 `.txt` 与 scripts 为本地证据，不应进入源码 diff。
+
+## Pre-PR Review Recheck (2026-10-25)
+
+- RV-1：重新执行 manifest 中的 create/readback harness，因未设置 `GH_TOKEN` 与 `KC_RV_SANDBOX_REPO` 在 CLI 或网络写入前以 exit 2 停止。虽然本机 `gh auth status` 显示有 keyring 登录态，但没有显式指定测试仓库，因此没有使用该登录态创建远端 Issue。输出见 `rv-1-review-preflight.txt`。
+- RV-2：重新执行 blocker harness；`psutil.process_iter()` 仍因 macOS sandbox 的 `sysctl` 权限返回 `PermissionError`，系统 `ps` 也被 sandbox 拒绝。迁移仍 fail-closed；真实 `--apply`、迁移后占用判定、幂等重跑与活动 runner 拒绝尚未验证。输出见 `rv-2-process-scanner.txt` 与 `rv-2-harness-exit.txt`。
+- 全量测试：未设置状态目录覆盖时，`UV_CACHE_DIR=.uv-cache just test all` 因沙箱不能写用户目录 `~/.kedacode/console.db` 而有 64 个依赖该状态库的测试失败；失败日志保存在本机 `logs/test-failures/`。没有改动生产代码或该门禁。将既有 `AGENT_RUNNER_CONSOLE` 状态路径覆盖到工作树内的临时目录后，重跑相同的全量测试集通过：`AGENT_RUNNER_CONSOLE='{"history_db_path":".tmp-review-state/console.db","process_registry_path":".tmp-review-state/process-registry.json"}' UV_CACHE_DIR=.uv-cache just test all`，结果 `4963 passed, 1 skipped in 515.26s`，包含 `just lint --full`。
+- 此段是执行侧复核记录，不代表独立 verifier verdict。独立 verifier 仍须在上述 gate 完成后，对最终 tree 执行并签发结果。
