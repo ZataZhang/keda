@@ -317,6 +317,20 @@ class TestReconcileEngine:
         assert [outcome.disposition for outcome in outcomes] == [StaleAttemptDisposition.REENQUEUE]
         assert "ttl_expired" in outcomes[0].reason
 
+    def test_in_flight_issue_past_ttl_is_skipped(self, tmp_path: Path) -> None:
+        """本机 daemon 正在执行的 Issue 即使超过 TTL 也不对账（执行期间补位后对账与执行并存）。"""
+        config = AppConfig()
+        github = FakeGitHubClient()
+        _seed_running_claim(github, config, pid=os.getpid(), started_at=OLD_CLAIM_START)
+
+        outcomes = _run_reconcile(
+            tmp_path, github, config, ttl_seconds=3600, exclude_issue_numbers=frozenset({7})
+        )
+
+        assert outcomes == []
+        assert _reconcile_comments(github) == []
+        assert config.labels.running in github.get_issue(7).labels
+
     def test_unresolvable_worktree_marks_failed(self, tmp_path: Path) -> None:
         """现场不可解析（path_command 空 stdout）→ 判失败并转 agent/failed。"""
         config = AppConfig()

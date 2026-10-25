@@ -157,7 +157,7 @@ def get_agent_runner_status_data() -> dict:
     return {
         "daemon_mode": False,
         "config": {
-            "max_issues": app_config.runner.max_issues,
+            "max_concurrent_issues": app_config.runner.max_concurrent_issues,
             "default_agent": app_config.runner.default_agent,
             "max_recovery_attempts": app_config.runner.max_recovery_attempts,
             "recovery_retry_delay_seconds": (app_config.runner.recovery_retry_delay_seconds),

@@ -89,7 +89,6 @@ def _run_one_daemon_pass(
             contexts=[_build_context("reconcile-test", tmp_path, config=config)],
             interval=1,
             agent="claude",
-            max_issues=1,
             # worktree 现场探测用假执行器：默认 path_command 必须解析到一个存在的
             # 目录，否则对账会判成「现场不可解析」→ 判失败，而不是重新入队。
             process_runner=FakeProcessRunner(worktree_site_response(tmp_path, 7)),

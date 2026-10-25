@@ -246,7 +246,7 @@ kc labels sync --repo-id keda
 - PRD 中包含工具无关的 `Delivery Dependencies` 小节
 - `kc issue create` 将 `Gate type: hard` 的依赖物化为 Issue body 中的 `<!-- iar:depends-on ... -->` marker
 - runner 每次轮询时实时查询 GitHub 状态：依赖未满足时跳过领取、叠加 `agent/waiting` label 并写等待 comment
-- 依赖未满足的 ready Issue 不消耗 `max_issues` 的处理额度；runner 会继续扫描后续 ready Issue，直到找到可领取任务或扫描窗口耗尽
+- 依赖未满足的 ready Issue 不消耗本轮的领取额度；runner 会继续扫描后续 ready Issue，直到找到可领取任务或扫描窗口耗尽
 - 上游 Issue 全部 closed 后，下一轮轮询自动移除 `agent/waiting` 并正常领取
 
 ### PRD 中的 Delivery Dependencies 语法
@@ -626,12 +626,10 @@ path_command = "kc worktree path --branch issue-{issue_number}"
 # 需要 worktree 的 .env.local 包含 DATABASE_URL。
 provision_database = true
 
-# Runner 行为配置：每轮处理 Issue 数量、默认 agent、提交前验证命令
+# Runner 行为配置：并行上限、默认 agent、提交前验证命令
 [agent_runner.runner]
-# 每次轮询每个仓库最多处理多少个 Issue
-max_issues = 1
-# 单轮内并行处理的 Issue 数量（自动执行的 runner 容量）：1 为串行（默认）；>1 时同一轮并行跑多个 Issue。
-# daemon 未指定 `--concurrency` 时，各仓库按各自合并配置取值；自动调度的生效并发上限 = min(Backlog「并发」策略, 本值)。
+# 并行上限：该仓库最多同时运行几个自动领取的 Issue（默认 1 = 串行）。
+# 优先级：kc daemon run --concurrency > Backlog 页面设置 > 本值。daemon 执行期间按轮询间隔补位。
 max_concurrent_issues = 1
 # 默认使用的 AI agent：auto / claude / codex / kimi
 default_agent = "auto"
@@ -1552,9 +1550,6 @@ kc daemon --no-autopilot
 `config.toml` 中的 `[agent_runner.repositories.*]` 现在作为显式 registry 兼容路径使用，适合 `--repo-id` 或 `--all`：
 
 ```toml
-[agent_runner]
-max_issues = 1
-
 [agent_runner.repositories.example_service]
 path = "/path/to/your/repo"
 enabled = true
@@ -2487,18 +2482,24 @@ Issue 执行失败后会被标记为 `agent/failed`，runner 不会再自动处�
 
 ### 并行处理 Issue（`kc daemon --concurrency`）
 
-默认 `kc daemon` **逐个串行**处理 Issue。机器空闲、队列较多时，可以让同一轮并行跑多个 Issue：
+默认 `kc daemon` 同一时刻只跑一个 Issue。机器空闲、队列较多时，可以提高**并行上限**，让同一仓库同时跑多个 Issue：
 
 ```bash
-# 本轮最多并行处理 3 个 Issue（自动领取至多 3 个）
+# 本次 daemon 每个仓库最多同时运行 3 个 Issue
 kc daemon --concurrency 3
 ```
 
-- **取值来源**：显式 `--concurrency` 覆盖本次 daemon 的所有目标仓库；未传时，每个目标仓库分别读取其合并配置 `[agent_runner.runner].max_concurrent_issues`（默认 `1` = 串行）。`kc daemon --all` 因此按各仓库自己的容量运行。
-- **统一并发上限**：daemon 每轮（无论 Backlog 自动推进开关是否开启）先把 Backlog「并发」策略与该轮容量解析成单一生效值 `ceiling = min(策略, 容量)`（策略从未设置 = 继承容量）。这个 ceiling 同时喂给补位闸门（`kc backlog advance` 同一口径；补位动作仅在 Backlog 自动推进开启时执行）与认领闸门：ready 通道本轮新认领数 = ``max(0, ceiling − 仓库内 open agent/running 标签数)``，占满即本轮零认领；计数查询最多取到 ceiling + 1，超出时日志标为「至少 ceiling + 1」。计数失败按 fail-closed 处理（宁可不领）。如果后续带标签的 running 恢复候选查询也失败，daemon 会用有界的 open Issue 列表重试筛选，以便继续处理既有恢复项；备用扫描也失败时记录原因并跳过该恢复扫描。running / blocked 恢复及 `direct_pr_cleanup` 收尾不新增并发，保持原配额，不受 ceiling 压低。
-- **领取上限**：并行时单轮领取上限抬到 `max(max_issues, concurrency)`，所以单独一个 `--concurrency N` 即可领到并跑 N 个，无需再调 `--max-issues`。
+- **只有一个数字**：每个仓库只有一个生效并行上限，按优先级取第一个给出的值：`kc daemon run --concurrency` > Backlog 页面保存的并行上限 > 配置文件 `[agent_runner.runner].max_concurrent_issues` > `1`。页面设置覆盖配置文件，不再与之取较小值。旧配置项 `max_issues` 已退役：读到时只告警，不参与任何计算，`kc config migrate` 会删除它；daemon 也不再接受 `--max-issues`（传入即报用法错误并提示改用 `--concurrency`）。
+- **执行期间持续补位**：daemon 不再等一轮里的 Issue 全部跑完才看队列。领到的 Issue 在后台线程里执行，主循环照常按轮询间隔运行：每次先清理已结束的任务，再按空位补领新的就绪 Issue。所以长任务执行期间新进入就绪队列的 Issue，会在出现空位后的下一次轮询被领取。对账、审议、PRD 返工、Backlog 推进等阶段在执行期间也照常运行；有 Issue 在执行时 daemon 不进入空闲退避，始终按基础间隔轮询。
+- **空位怎么算**：本轮可新领取数 = `max(0, 上限 − max(本机在执行数, 仓库内 open agent/running 标签数))`，取两者较大值是因为本机刚提交的 Issue 可能还没带上 running 标签。计数查询最多取到上限 + 1，超出时日志标为「至少 上限 + 1」；计数失败按 fail-closed 处理，本次不领新 Issue，已在执行的不受影响。running / blocked 恢复及 `direct_pr_cleanup` 收尾不受这个上限压低，但同样占用本机执行名额。
+- **不重复执行**：daemon 维护一份"本机正在执行"的名单，就绪、返工、发布恢复、blocked 恢复、`direct_pr_cleanup` 各通道与崩溃对账都会跳过名单里的 Issue；同一个 Issue 只由一个线程推进。
+- **日志**：每次轮询打印 `Parallel limit for '<repo>': limit=N source=<cli_override|policy|config> in_flight=M`，Issue 结束时打印 `Issue #N finished ... slot released`。
+- **在哪里看实际生效的值**：daemon 每次轮询把它对每个仓库实际使用的上限、来源和本机在执行数写到单实例锁旁边（`~/.kedacode/daemon-locks/<repo_id>.parallel-limit.json`），退出时删除。以下入口都读它，因此包含只有 daemon 进程知道的 `--concurrency`：
+  - `kc daemon status`：`parallel_limit` 列；`--json` 每行带 `parallel_limit`、`parallel_limit_source`（`cli_override` / `policy` / `config`）、`in_flight`。值为 `null` 表示本机没有存活的 daemon（或 daemon 还是升级前启动的旧进程）。
+  - 管理终端 Backlog 控件：daemon 在跑时显示它实际在用的值，例如 `--concurrency 5` 启动、页面设置 4 时显示「并行上限 5（daemon 命令行 --concurrency；页面设置 4 未生效）」；daemon 没在跑时显示页面设置 / 配置文件解析出的值。
+- **页面设置只对本机生效**：Backlog 页面保存的并行上限存在本机管理终端数据库（`~/.kedacode/console.db`），**不修改 `.kedacode.toml`**，其他电脑上的 daemon 读不到。要让所有电脑一致，改仓库的 `[agent_runner.runner].max_concurrent_issues` 并提交；但任一电脑上的页面设置仍会在那台电脑上覆盖它。
 - **隔离**：每个 Issue 仍各自 worktree / 分支；共享仓库的 worktree 创建被串行化以避开 `.git` 竞争，真正耗时的 agent 执行阶段全程并行。
-- **作用范围**：仅 `kc daemon`（含 `kc daemon run`）。多仓库（`--all`）仍逐仓库串行；每个仓库按自己的容量并行处理 Issue，显式 `--concurrency` 则统一覆盖各仓库。
+- **作用范围**：仅 `kc daemon`（含 `kc daemon run`）。多仓库（`--all`）时每个仓库各有自己的执行名单和并行上限，显式 `--concurrency` 统一覆盖各仓库。一次性 `kc run` 仍然等本次领到的 Issue 全部跑完才退出；`kc run` / `kc supervise` / `kc supervise-daemon` 的 `--max-issues` 表示本次最多处理几个，默认 `1`。
 - **成本提醒**：`--concurrency N` 即 N 路 agent 同时烧 token，请按额度与机器资源设定。
 
 > “本次优先某个 agent”无需新参数：`kc daemon --agent claude` 已把该 agent 放到 fallback 链首位（见上文 escalation ladder）。
@@ -3027,9 +3028,6 @@ uv run --project /path/to/keda kc daemon
 Agent Runner 的默认配置来自 keda 的 `config.toml`，目标仓库细节优先来自目标仓库 `.kedacode.toml`。两者使用相同的 `[agent_runner.*]` section shape；通常把通用默认值放在 `config.toml`，把仓库特定的 `git`、`runner`、`labels` 等覆盖项放在 `.kedacode.toml`。
 
 ```toml
-[agent_runner]
-max_issues = 1
-
 [agent_runner.labels]
 ready = "agent/ready"
 running = "agent/running"
@@ -4068,11 +4066,52 @@ PATCH  /api/v1/agent-runner/console/monitor/settings   {sync_enabled, sync_inter
 ```
 
 `sync_interval_seconds` 合法区间为 300–3600 秒（5 分钟下限），两个字段都必填。下限不是
-随手取的：每轮同步要对每个仓库逐个 PRD 查 3~5 次 GitHub REST，而认证配额是 5000 次/小时、
-并与 daemon 和 kc 共用，间隔再短就会把额度吃光（面板内有同样的说明）。保存成功后后端立即唤醒
+随手取的：每轮同步包含队列、评论、关联 PR 与检查状态等多次 GitHub REST 查询，实际调用量随
+Issue 数量、关联 PR、分页和重试变化，并与 daemon 和其他 kc 操作共享 API 配额。保存成功后后端立即唤醒
 调度循环，按新间隔重算下一次运行时间；关闭自动同步后不再有任何后台扫描，手动刷新仍可用。
 这份设置是全局的：它同时约束 Dashboard 概览与 Backlog 列表两条后台同步循环
 （见「Backlog（待办队列）→ 本地快照与后台刷新」），两条循环共享设置但各自独立调度。
+
+### 「刷新全部」的请求链与数据范围
+
+值守看板与仓库监控共用同一个「刷新全部」入口；当前显示哪种视图不改变扫描范围。
+点击后，前端请求 `GET /api/v1/agent-runner/overview/per-repo`，后端重新读取仓库配置，
+为当前启用且路径可访问的各仓库创建后台 job。同仓库已有扫描时复用正在执行的扫描。
+
+每个仓库的扫描包含以下读取：
+
+| 来源 | 读取范围 | 用途 |
+| --- | --- | --- |
+| GitHub 队列 Issue | 按配置的 ready、running、supervising、review、failed、blocked 六类标签分别查询开放 Issue，每类最多 30 条，再按编号去重；包含编号、标题、链接、正文、标签和状态 | 队列统计与 Issue 监控 |
+| GitHub Issue 评论 | 对每个队列 Issue 读取评论正文 | 解析事件时间线、最新事件与关联 PR 分支 |
+| GitHub 开放 PR | 评论能解析出 PR 分支时，按该分支查询开放 PR；完整上下文未取得时还有开放 PR 查找回退 | PR 链接、分支、head/base SHA、草稿状态与可合并性等 |
+| GitHub CI 检查 | 找到 PR 且取得 head SHA 时，查询该提交的 check-runs 和 commit status | 汇总检查状态 |
+| 本地运行账本与 GitHub 历史 Issue | 读取各仓库最近最多 20 条运行记录，筛选近 7 天的有效 Issue 编号并去重；对不在当前队列中的编号逐个查询当前 Issue | 补齐已关闭或已移出队列的任务状态；这些 Issue 只取基本状态，不再查评论、PR 或工作树 |
+| 本地工作树 | 对每个队列 Issue 执行配置的工作树路径命令；工作树存在时读取分支、HEAD 与 `git status --porcelain`，失败或分支不符时可能提前结束 | 工作树存在性、分支及未提交修改状态 |
+| 本地仓库健康 | `gh --version`、仓库目录存在性、`git remote get-url <remote>` | CLI 可用性与仓库配置健康 |
+
+后端由这些数据计算异常和队列计数，将同一份构建结果写入本地快照，不为保存快照再次扫描。
+一个仓库内最多并行构建 5 个队列 Issue 的完整监控快照。
+
+前端通过 `GET /api/v1/agent-runner/overview/jobs/{job_id}` 轮询任务状态，每个被轮询的
+job 约每 5 秒查一次，同时最多轮询 3 个 job；这个限制只约束前端轮询，不是后端扫描仓库数的上限。
+刷新期间保留旧数据，所有 job 结束后重新读取 `GET /api/v1/agent-runner/overview/snapshots`，
+立即展示已写入的快照。页面原有的每 15 秒本地快照与运行摘要轮询也继续执行。
+
+扫描结束后，前端还会请求 `GET /api/v1/agent-runner/console/stats/overview` 更新完成度统计。
+该接口有独立的 30 秒缓存；缓存失效时按工作流标签重新查询开放及已关闭的 Issue，计算总数、
+完成数、失败数、阻塞数和完成率，**并不直接复用刚生成的监控快照**，因此可能产生额外 GitHub 查询。
+
+一次刷新不是一次 GitHub 请求：主扫描包含每仓库六类标签查询、每个队列 Issue 的评论、
+按条件查询的 PR 与 CI、队列外近期 Issue 状态补查，以及缓存失效时的完成度统计。
+分页、重试和客户端辅助请求也可能增加实际调用量。刷新只观测数据并保存本地快照，不启动 Agent，
+不修改 GitHub 标签、评论、PR 或工作树。按钮倒计时表示下一次后台同步；手动刷新可提前触发扫描。
+
+源码定位：`frontend-public/app/(app)/app/dashboard/page.tsx` 的 `handleRefreshAll`；
+`src/backend/api/routes/agent_runner.py` 的 `_run_overview_job`、`_scan_repository_and_persist`
+与 `_recent_tracked_issue_numbers`；`src/backend/core/use_cases/agent_runner_monitor.py` 的
+`build_repository_overview`、`build_issue_snapshot`；`src/backend/core/use_cases/console_stats.py`
+的 `build_completion_stats`。
 
 ### 值守看板与桌面小窗
 
@@ -5111,20 +5150,23 @@ Backlog 顶部为当前选中仓库提供「Backlog 自动推进」开关，写�
   - **Backlog 自动推进是否开启**（自动发现、依赖解锁、队列补位）；
   - **daemon 是否运行中**（状态来自既有 process supervisor 记录；daemon 没跑时显示「自动推进暂不执行」，开关值仍可保存，可用 Processes 页面启动 daemon）；
   - **全局自动合并是否启用**（`autopilot.enabled` 与 `safety.auto_merge` 是否同时为真）；单 PRD 可在启动时单独授权。
-- 同排显示按仓库 `.kedacode.toml` 的 runner 容量解析出的并发上限及来源：「并发 N（继承 runner 配置 / Backlog 设置 / 受 runner 容量限制）」；策略未设置时输入框占位「未设置」，已设置时可点「恢复继承」删除设置行回到跟随容量。daemon 若启动时显式传入 `--concurrency`，该旗标会覆盖本轮容量并可能把 daemon 的实际 ceiling 压得更低；控制条不读取该进程旗标，核对 daemon 当前值应看其 `Concurrency ceiling` 日志。
+- 同排显示该仓库的生效并行上限及来源：「并行上限 N（页面设置 / 配置文件）」；页面未保存时输入框占位「未设置」，已保存时可点「恢复为配置文件值」删除设置行。daemon 若启动时显式传入 `--concurrency`，该旗标对这个 daemon 进程优先于页面设置；控制条不读取进程旗标，核对 daemon 当前值应看其 `Parallel limit` 日志。
 - 开启 Backlog 自动推进不会联动开启全局合并配置；全仓自动合并仍要求 `autopilot.enabled` 与 `safety.auto_merge` 同时为真。Backlog 的单 PRD 选项只授权目标 Issue，不改动全局配置。
 - 目标仓没有 `.kedacode.toml`、配置非法或不可写时返回 409，原文件保持不变。
 
 ### 全局调度
 
-Backlog 顶部的「并发」是仓库级**策略**（1–10，可以从未设置），生效并发上限全仓只有一个口径：
+Backlog 顶部的「并行上限」是仓库级页面设置（1–10，可以从未保存），生效并行上限全仓只有一个口径：
 
 ```text
-ceiling = min(Backlog「并发」策略, runner 容量 max_concurrent_issues)
+并行上限 = kc daemon run --concurrency（仅该 daemon 进程）
+        > Backlog 页面设置
+        > 配置文件 max_concurrent_issues
+        > 1
 ```
 
-- 策略从未设置 = **继承容量**（存储层就是「没有设置行」，不再落一行伪造默认值）；策略高于容量时页面同时显示两个数并标明「受 runner 容量限制」；「恢复继承」= 删除该仓设置行（副作用：默认视图一并回到「列表」，且在该行重新建立之前视图偏好无法再持久，见上文「视图说明」）。
-- 点击「全局开始」：按**控制台解析出的生效上限减去仓库内 open `agent/running` Issue 数**一次性批量启动——扫描所有无依赖且可安全进入 ready 的 pending PRD，按优先级排序，同时启动最多 `max(0, ceiling − running)` 个；超出槽位的进入 `backlog_queue` 等待队列。running 数覆盖没有 Backlog PRD 锚点的任务；查询失败时本次全局开始报错且不启动任务。请求体只带 `repo_id`，这次点击**不写设置**；改并发只能通过「并发」输入框落库。若 daemon 使用了显式 `--concurrency`，全局开始仍按仓库配置容量计算；控制台动作与 daemon 运行日志的 ceiling 可能不同，daemon 旗标覆盖的口径见上文。
+- 页面从未保存 = 使用配置文件值（存储层就是「没有设置行」，不落一行伪造默认值）；页面设置高于或低于配置文件都直接生效；「恢复为配置文件值」= 删除该仓设置行（副作用：默认视图一并回到「列表」，且在该行重新建立之前视图偏好无法再持久，见上文「视图说明」）。
+- 点击「全局开始」：按**控制台解析出的生效上限减去仓库内 open `agent/running` Issue 数**一次性批量启动——扫描所有无依赖且可安全进入 ready 的 pending PRD，按优先级排序，同时启动最多 `max(0, ceiling − running)` 个；超出槽位的进入 `backlog_queue` 等待队列。running 数覆盖没有 Backlog PRD 锚点的任务；查询失败时本次全局开始报错且不启动任务。请求体只带 `repo_id`，这次点击**不写设置**；改并发只能通过「并发」输入框落库。若 daemon 使用了显式 `--concurrency`，全局开始仍按页面设置与配置文件解析的值计算；控制台动作与 daemon 运行日志的 ceiling 可能不同，daemon 旗标覆盖的口径见上文。
 - 系统扫描、槽位与等待队列语义不变；「停止全局调度」仍只清空等待队列，已运行的进程不受影响。
 
 ### 持续调度（Continuous Scheduling）

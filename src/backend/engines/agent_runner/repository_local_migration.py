@@ -15,6 +15,9 @@
 - ``enabled = false`` 只报告不清：最早的脚手架写的就是它，但从值上分不清是遗留还是
   有意关闭；清掉会让仓库开始调用 AI 生成，这个决定留给仓库自己。
 
+另外清掉已退役的配置键（:data:`_RETIRED_KEYS`）：它们不再参与任何计算，不论值是多少都
+直接删除。
+
 实现是逐行编辑而不是重新序列化，这样注释和排版都保留：只删钉子本身、紧贴在它上面的
 注释行，以及因此变空的表头。写回前用 ``tomllib`` 重新解析，结果必须恰好等于“原配置
 去掉被清的键”，否则拒绝写入。
@@ -67,7 +70,16 @@ _LEGACY_TARGET_PIN_VALUES: dict[str, tuple[object, ...]] = {
     "include_diff_stat": (True,),
 }
 
+#: 已退役、不再参与任何计算的键：不论值是多少都删除。``max_issues`` 曾是"每轮最多处理
+#: 几个 Issue"，并行上限现在只看 ``max_concurrent_issues``（及 Backlog 页面设置）。
+_RETIRED_KEYS: dict[str, tuple[str, ...]] = {
+    "agent_runner.runner": ("max_issues",),
+}
+
 _REMOVED_REASON = "written by an older release"
+_RETIRED_REASON = (
+    "retired: the parallel limit is max_concurrent_issues; one-shot batches use --max-issues"
+)
 _UNLOCATED_REASON = (
     "written as dotted keys or an inline table, which this command does not edit; "
     "remove it by hand"
@@ -146,7 +158,7 @@ def migrate_repository_local_config(
     dry_run: bool = False,
     source_config_path: Path | None = None,
 ) -> ConfigMigrationResult:
-    """清掉旧脚手架在仓库本地配置里钉死的 generated_content 默认值。
+    """清掉旧脚手架钉死的 generated_content 默认值与已退役的配置键。
 
     Args:
         repo_root_path: 目标 Git 仓库根目录。
@@ -296,6 +308,15 @@ def _plan_pins(original_config: dict[str, object]) -> tuple[list[PinDecision], l
                 intentionally_kept_pins.append(
                     PinDecision(table_name, key_name, pinned_value, keep_reason)
                 )
+    for table_name, retired_key_names in _RETIRED_KEYS.items():
+        table_values = _nested_table(original_config, table_name)
+        if table_values is None:
+            continue
+        removable_pins.extend(
+            PinDecision(table_name, key_name, table_values[key_name], _RETIRED_REASON)
+            for key_name in retired_key_names
+            if key_name in table_values
+        )
     return removable_pins, intentionally_kept_pins
 
 

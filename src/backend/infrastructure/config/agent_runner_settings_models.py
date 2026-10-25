@@ -370,9 +370,8 @@ class AgentRunnerE2eVerificationCommandSettings(BaseModel):
 class AgentRunnerRunnerSettings(BaseModel):
     """Local runner behavior."""
 
-    max_issues: int = 1
-    # Maximum Issues processed in parallel within one daemon pass. 1 keeps the
-    # sequential path (zero regression); >1 enables thread-pool parallelism.
+    # 该仓库最多同时运行几个自动领取的 Issue（并行上限的配置文件来源）；
+    # Backlog 页面设置与 kc daemon run --concurrency 优先于它。
     max_concurrent_issues: int = 1
     default_agent: str = "auto"
     max_recovery_attempts: int = 5

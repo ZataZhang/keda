@@ -16,7 +16,7 @@ def test_status_returns_config() -> None:
     """Status endpoint should return global config summary."""
     result = get_agent_runner_status()
     assert "config" in result
-    assert "max_issues" in result["config"]
+    assert "max_concurrent_issues" in result["config"]
     assert "base_branch" in result["config"]
 
 

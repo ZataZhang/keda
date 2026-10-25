@@ -206,9 +206,9 @@ class RunnerConfig:
         transient_retry_delay_seconds: Backoff between transient retries.
         timeout_resume_attempts: Additional same-session runs allowed after a
             process timeout; the budget is persisted per session.
-        max_concurrent_issues: Maximum Issues processed in parallel within a
-            single daemon pass. ``1`` keeps the sequential path (zero
-            regression); ``> 1`` enables the thread-pool parallel path.
+        max_concurrent_issues: 并行上限的配置文件来源：该仓库最多同时运行几个
+            自动领取的 Issue。Backlog 页面设置与 ``kc daemon run --concurrency``
+            优先于它（见 ``backlog_concurrency.resolve_execution_ceiling``）。
         timeout_seconds: Wall-clock timeout for a single agent execution.
         inactivity_timeout_seconds: Kill the agent if it produces no stdout or
             stderr for this many seconds.
@@ -229,7 +229,6 @@ class RunnerConfig:
             ``None`` 时的回退链同上。
     """
 
-    max_issues: int = 1
     max_concurrent_issues: int = 1
     default_agent: str = "auto"
     max_recovery_attempts: int = 5

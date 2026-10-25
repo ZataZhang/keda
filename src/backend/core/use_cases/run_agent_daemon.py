@@ -7,6 +7,7 @@ import os
 import signal
 import time
 from collections.abc import Callable
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -41,8 +42,16 @@ from backend.core.use_cases.agent_runner_orchestrate import (
 )
 from backend.core.use_cases.backlog_actions import advance_backlog_queue
 from backend.core.use_cases.backlog_concurrency import (
+    CEILING_SOURCE_CLI_OVERRIDE,
+    describe_ceiling_source,
     read_policy_max_parallel,
     resolve_execution_ceiling,
+)
+from backend.core.use_cases.daemon_execution_slots import DaemonExecutionSlots
+from backend.core.use_cases.daemon_parallel_limit_status import (
+    DaemonParallelLimitStatus,
+    clear_daemon_parallel_limit_status,
+    write_daemon_parallel_limit_status,
 )
 
 _logger = logging.getLogger(__name__)
@@ -128,7 +137,6 @@ def run_agent_daemon(
     contexts: list[RepositoryRunContext],
     interval: int,
     agent: str,
-    max_issues: int,
     process_runner: IProcessRunner,
     github_client_factory: Callable[[Path], IGitHubClient],
     content_generator_factory: Callable[[Path], IContentGenerator] | None = None,
@@ -147,6 +155,7 @@ def run_agent_daemon(
     loop_clock: ILoopClock | None = None,
     api_budget: IGitHubApiBudget | None = None,
     idle_backoff_max_factor: int = IDLE_BACKOFF_MAX_FACTOR,
+    parallel_limit_status_dir: Path | None = None,
 ) -> None:
     """Run the queue poller forever across all target repositories.
 
@@ -154,7 +163,6 @@ def run_agent_daemon(
         contexts: Resolved repository targets with merged configurations.
         interval: Seconds between polling passes.
         agent: Agent override (auto, codex, claude).
-        max_issues: Maximum issues to process per pass per repository.
         process_runner: Runner for executing subprocess commands.
         github_client_factory: Factory that creates an IGitHubClient for a repo path.
         content_generator_factory: Optional factory that creates an IContentGenerator
@@ -168,9 +176,9 @@ def run_agent_daemon(
             callers that do not assemble a runner).
         max_deliberation_issues: Maximum ``agent/deliberate`` Issues to process
             per Phase 0 pass. Defaults to 1 to bound multi-agent cost.
-        concurrency: Optional process-wide override for Issues processed in
-            parallel. When omitted, each repository uses its merged runner
-            configuration; ``1`` keeps that repository's sequential path.
+        concurrency: ``kc daemon run --concurrency`` 的进程级覆盖：每个目标仓库最多
+            同时运行几个 Issue。省略时每个仓库按 Backlog 页面设置 > 配置文件
+            ``max_concurrent_issues`` 解析；执行期间每个轮询间隔都会补位。
         output_view: Optional live view for parallel runs; each Issue's agent
             output goes to its own panel. ``None`` shows no dashboard (per-Issue
             log files are still written).
@@ -198,6 +206,9 @@ def run_agent_daemon(
             避免发出注定失败的请求。省略时不做额度闸门。
         idle_backoff_max_factor: 连续空闲时轮询间隔最多拉长到基础间隔的几倍；
             ``1`` 关闭退避。
+        parallel_limit_status_dir: daemon 单实例锁目录。传入时每次轮询把每个仓库实际
+            生效的并行上限写到锁旁边的状态文件，供管理终端与 ``kc daemon status``
+            读取（命令行 ``--concurrency`` 只有 daemon 自己知道）；退出时删除。
     """
     previous_sigterm_handler: Any = signal.getsignal(signal.SIGTERM)
 
@@ -218,7 +229,6 @@ def run_agent_daemon(
                 contexts=contexts,
                 interval=interval,
                 agent=agent,
-                max_issues=max_issues,
                 process_runner=process_runner,
                 github_client_factory=github_client_factory,
                 content_generator_factory=content_generator_factory,
@@ -237,9 +247,14 @@ def run_agent_daemon(
                 loop_clock=loop_clock,
                 api_budget=api_budget,
                 idle_backoff_max_factor=idle_backoff_max_factor,
+                parallel_limit_status_dir=parallel_limit_status_dir,
             )
         )
     finally:
+        if parallel_limit_status_dir is not None:
+            clear_daemon_parallel_limit_status(
+                parallel_limit_status_dir, [context.repo_id for context in contexts]
+            )
         try:
             signal.signal(signal.SIGTERM, previous_sigterm_handler)
         except (ValueError, OSError):
@@ -284,7 +299,6 @@ def _run_daemon_loop(request: _AgentDaemonLoopRequest) -> None:
     contexts = request.contexts
     interval = request.interval
     agent = request.agent
-    max_issues = request.max_issues
     process_runner = request.process_runner
     github_client_factory = request.github_client_factory
     content_generator_factory = request.content_generator_factory
@@ -304,6 +318,8 @@ def _run_daemon_loop(request: _AgentDaemonLoopRequest) -> None:
     api_budget = request.api_budget
     idle_streak = 0
     last_usage_log_monotonic = time.monotonic()
+    # 每个仓库一份常驻执行名单：领到的 Issue 在后台线程里跑，主循环不等它们结束。
+    execution_slots_by_repo: dict[str, DaemonExecutionSlots] = {}
     loop_state_store = (
         loop_state_store_factory()
         if loop_state_store_factory is not None and loop_clock is not None
@@ -329,6 +345,10 @@ def _run_daemon_loop(request: _AgentDaemonLoopRequest) -> None:
                 context.display_name,
             )
             github_client = github_client_factory(context.repo_path)
+            execution_slots = execution_slots_by_repo.setdefault(
+                context.repo_id, DaemonExecutionSlots(context.repo_id)
+            )
+            execution_slots.reap()
             content_generator = (
                 content_generator_factory(context.repo_path)
                 if content_generator_factory is not None
@@ -385,6 +405,9 @@ def _run_daemon_loop(request: _AgentDaemonLoopRequest) -> None:
                         github_client=github_client,
                         process_runner=process_runner,
                         ttl_seconds=reconcile_ttl_seconds,
+                        # 本机正在执行的 Issue 由它自己的线程推进；长任务的认领
+                        # 可能超过 TTL，绝不能被对账当成僵尸回收后再领一次。
+                        exclude_issue_numbers=execution_slots.in_flight_issue_numbers(),
                     )
                     applied_numbers = [
                         outcome.issue_number for outcome in reconcile_outcomes if outcome.applied
@@ -437,31 +460,50 @@ def _run_daemon_loop(request: _AgentDaemonLoopRequest) -> None:
             except Exception as exc:  # noqa: BLE001 - daemon should survive unexpected errors.
                 _logger.error("PRD rework phase failed: %s", exc)
 
-            # 未传旗标时使用当前仓库的合并配置；显式旗标覆盖所有目标仓库。
-            repository_concurrency = max(
-                1,
-                context.config.runner.max_concurrent_issues if concurrency is None else concurrency,
+            # 并行上限：--concurrency > Backlog 页面设置 > 配置文件 max_concurrent_issues。
+            # 补位闸门与认领闸门共用该值，页面数字因此与调度行为一致；页面设置读取
+            # 失败时按未保存处理，回落到配置文件。
+            if concurrency is not None:
+                execution_ceiling = max(1, concurrency)
+                ceiling_source = CEILING_SOURCE_CLI_OVERRIDE
+            else:
+                policy_max_parallel: int | None = None
+                if backlog_store_factory is not None:
+                    try:
+                        policy_max_parallel = read_policy_max_parallel(
+                            backlog_store_factory(), context.repo_id
+                        )
+                    except Exception as exc:  # noqa: BLE001 - 读页面设置失败按未保存回退。
+                        _logger.warning(
+                            "Could not read the Backlog parallel limit for repository '%s' "
+                            "(%s); this pass uses the config value.",
+                            context.repo_id,
+                            exc,
+                        )
+                execution_ceiling = resolve_execution_ceiling(
+                    policy_max_parallel, max(1, context.config.runner.max_concurrent_issues)
+                )
+                ceiling_source = describe_ceiling_source(policy_max_parallel)
+            in_flight_count = len(execution_slots.in_flight_issue_numbers())
+            _logger.info(
+                "Parallel limit for '%s': limit=%d source=%s in_flight=%d",
+                context.repo_id,
+                execution_ceiling,
+                ceiling_source,
+                in_flight_count,
             )
-
-            # 统一并发上限：每轮先读 Backlog「并发」策略（没有设置行 = 未设置，
-            # 继承容量），与本仓 runner 容量取小，得到生效值。补位闸门与认领闸门共用该 ceiling，
-            # 页面数字因此与两处调度行为一致。策略读取失败时按未设置回退。
-            policy_max_parallel: int | None = None
-            if backlog_store_factory is not None:
-                try:
-                    policy_max_parallel = read_policy_max_parallel(
-                        backlog_store_factory(), context.repo_id
-                    )
-                except Exception as exc:  # noqa: BLE001 - 读策略失败按未设置回退。
-                    _logger.warning(
-                        "Could not read backlog policy for repository '%s' (%s); "
-                        "this pass inherits runner capacity.",
-                        context.repo_id,
-                        exc,
-                    )
-            execution_ceiling = resolve_execution_ceiling(
-                policy_max_parallel, repository_concurrency
-            )
+            if request.parallel_limit_status_dir is not None:
+                write_daemon_parallel_limit_status(
+                    request.parallel_limit_status_dir,
+                    DaemonParallelLimitStatus(
+                        repo_id=context.repo_id,
+                        pid=os.getpid(),
+                        parallel_limit=execution_ceiling,
+                        source=ceiling_source,
+                        in_flight=in_flight_count,
+                        updated_at=datetime.now(timezone.utc).isoformat(),
+                    ),
+                )
 
             # 调度阶段：仅在 ``backlog.auto_advance`` 开启时持续推进 Backlog，先处理
             # 已完成/失败的 PRD，再将队列补到生效上限并标记 agent/ready。
@@ -512,17 +554,18 @@ def _run_daemon_loop(request: _AgentDaemonLoopRequest) -> None:
                     config=context.config,
                     dry_run=False,
                     agent=agent,
-                    max_issues=max_issues,
+                    max_issues=execution_ceiling,
                     github_client=github_client,
                     process_runner=process_runner,
                     content_generator=content_generator,
                     run_history_store=run_history_store,
                     run_trigger=run_trigger,
                     repo_id=context.repo_id,
-                    concurrency=repository_concurrency,
+                    concurrency=execution_ceiling,
                     output_view=output_view,
                     execution_ceiling=execution_ceiling,
                     pass_activity=pass_activity,
+                    execution_slots=execution_slots,
                 )
                 round_ready_found += pass_activity.ready_found
             except Exception as exc:  # noqa: BLE001 - daemon should survive unexpected errors.
@@ -538,8 +581,13 @@ def _run_daemon_loop(request: _AgentDaemonLoopRequest) -> None:
         ):
             last_usage_log_monotonic = time.monotonic()
             _logger.info("GitHub API usage this hour: %s", format_usage_summary(api_budget))
-        # 有活或出错都算“不空闲”：出错时状态未知，不应该借机拉长间隔。
-        idle_streak = 0 if (round_failed or round_ready_found > 0) else idle_streak + 1
+        # 有活、出错或还有 Issue 在本机执行都算“不空闲”：出错时状态未知，执行中
+        # 要按基础间隔及时补位，都不应该借机拉长间隔。
+        has_in_flight_issues = any(
+            slots.in_flight_issue_numbers() for slots in execution_slots_by_repo.values()
+        )
+        is_busy = round_failed or round_ready_found > 0 or has_in_flight_issues
+        idle_streak = 0 if is_busy else idle_streak + 1
         sleep_seconds = next_poll_interval(interval, idle_streak, request.idle_backoff_max_factor)
         _logger.info(
             "Sleeping for %d seconds before next poll (idle rounds: %d).",
