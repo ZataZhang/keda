@@ -32,3 +32,9 @@ standalone `just lint` 之前被 `check-test-flag` 拒绝：pre-commit 暂存未
 - RV-2：重新执行 blocker harness；`psutil.process_iter()` 仍因 macOS sandbox 的 `sysctl` 权限返回 `PermissionError`，系统 `ps` 也被 sandbox 拒绝。迁移仍 fail-closed；真实 `--apply`、迁移后占用判定、幂等重跑与活动 runner 拒绝尚未验证。输出见 `rv-2-process-scanner.txt` 与 `rv-2-harness-exit.txt`。
 - 全量测试：未设置状态目录覆盖时，`UV_CACHE_DIR=.uv-cache just test all` 因沙箱不能写用户目录 `~/.kedacode/console.db` 而有 64 个依赖该状态库的测试失败；失败日志保存在本机 `logs/test-failures/`。没有改动生产代码或该门禁。将既有 `AGENT_RUNNER_CONSOLE` 状态路径覆盖到工作树内的临时目录后，重跑相同的全量测试集通过：`AGENT_RUNNER_CONSOLE='{"history_db_path":".tmp-review-state/console.db","process_registry_path":".tmp-review-state/process-registry.json"}' UV_CACHE_DIR=.uv-cache just test all`，结果 `4963 passed, 1 skipped in 515.26s`，包含 `just lint --full`。
 - 此段是执行侧复核记录，不代表独立 verifier verdict。独立 verifier 仍须在上述 gate 完成后，对最终 tree 执行并签发结果。
+
+## Pre-PR Review Recheck (2026-10-25, after evidence refresh)
+
+- 本轮再次确认 `GH_TOKEN` 与 `KC_RV_SANDBOX_REPO` 均未配置；RV-1 仍在远端操作前退出，没有创建 Issue 或使用未指定的仓库。
+- 本轮再次运行进程枚举探针，`psutil.process_iter()` 返回 `PermissionError: Operation not permitted`；RV-2 继续 fail-closed，未绕过活动 runner 检查。
+- 仓库没有独立的 `just ai verify` 入口；独立 verifier 是 `just implement` 流程中的 runner 阶段。因此本 review 不代写 verifier verdict，报告继续保持 PENDING，待 runner 在满足环境条件后验证最终 tree。
