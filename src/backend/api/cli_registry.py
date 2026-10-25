@@ -61,6 +61,8 @@ from backend.core.use_cases.issue_logs import (
 )
 from backend.core.use_cases.daemon_parallel_limit_status import (
     DaemonParallelLimitStatus,
+    describe_parallel_limit_status,
+    parallel_limit_status_fields,
     read_daemon_parallel_limit_status,
 )
 from backend.core.use_cases.daemon_single_instance import daemon_lock_dir
@@ -563,13 +565,9 @@ def _run_daemon_status_command(
         if record.kind == _DAEMON_KIND
     }
 
-    def _parallel_limit_text(record: RunnerProcessRecord) -> str:
-        limit_status = parallel_limit_by_repo_id.get(record.repo_id)
-        if record.kind != _DAEMON_KIND or limit_status is None:
-            return "-"
+    def _limit_status_of(record: RunnerProcessRecord) -> DaemonParallelLimitStatus | None:
         return (
-            f"{limit_status.parallel_limit} ({limit_status.source}), "
-            f"in flight {limit_status.in_flight}"
+            parallel_limit_by_repo_id.get(record.repo_id) if record.kind == _DAEMON_KIND else None
         )
 
     def _render_table() -> None:
@@ -594,7 +592,7 @@ def _run_daemon_status_command(
                 _display_process_kind(record.kind),
                 status_text,
                 str(record.pid),
-                _parallel_limit_text(record),
+                describe_parallel_limit_status(_limit_status_of(record)),
                 record.process_id,
                 format_local_display_time(record.started_at),
                 record.log_path or "-",
@@ -617,11 +615,7 @@ def _run_daemon_status_command(
                 "log_path": record.log_path,
                 "executable": _resolve_executable_from_command(record.command),
                 "command": list(record.command),
-                **_parallel_limit_fields(
-                    parallel_limit_by_repo_id.get(record.repo_id)
-                    if record.kind == _DAEMON_KIND
-                    else None
-                ),
+                **parallel_limit_status_fields(_limit_status_of(record)),
             }
             for record, is_managed in running_records
         ]
@@ -631,15 +625,6 @@ def _run_daemon_status_command(
         human_renderer=_render_table,
     )
     return 0
-
-
-def _parallel_limit_fields(limit_status: DaemonParallelLimitStatus | None) -> dict[str, object]:
-    """``kc daemon status --json`` 每行附带的并行上限字段；读不到时全部为 null。"""
-    return {
-        "parallel_limit": limit_status.parallel_limit if limit_status else None,
-        "parallel_limit_source": limit_status.source if limit_status else None,
-        "in_flight": limit_status.in_flight if limit_status else None,
-    }
 
 
 _LOGS_DEFAULT_LINES = 200

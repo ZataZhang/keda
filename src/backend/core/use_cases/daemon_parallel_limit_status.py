@@ -90,6 +90,27 @@ def read_daemon_parallel_limit_status(
     return status
 
 
+def parallel_limit_status_fields(
+    limit_status: DaemonParallelLimitStatus | None,
+) -> dict[str, object]:
+    """机器可读输出（如 ``kc daemon status --json``）的并行上限字段；读不到时全部为 null。"""
+    return {
+        "parallel_limit": limit_status.parallel_limit if limit_status else None,
+        "parallel_limit_source": limit_status.source if limit_status else None,
+        "in_flight": limit_status.in_flight if limit_status else None,
+    }
+
+
+def describe_parallel_limit_status(limit_status: DaemonParallelLimitStatus | None) -> str:
+    """人读表格里的一格，例如 ``5 (cli_override), in flight 1``；读不到时为 ``-``。"""
+    if limit_status is None:
+        return "-"
+    return (
+        f"{limit_status.parallel_limit} ({limit_status.source}), "
+        f"in flight {limit_status.in_flight}"
+    )
+
+
 def clear_daemon_parallel_limit_status(lock_dir: Path, repo_ids: list[str]) -> None:
     """daemon 退出时删除自己写出的状态文件（只删 PID 是本进程的那些）。"""
     current_pid = os.getpid()
@@ -107,6 +128,8 @@ __all__ = [
     "DaemonParallelLimitStatus",
     "clear_daemon_parallel_limit_status",
     "daemon_parallel_limit_status_path",
+    "describe_parallel_limit_status",
+    "parallel_limit_status_fields",
     "read_daemon_parallel_limit_status",
     "write_daemon_parallel_limit_status",
 ]
