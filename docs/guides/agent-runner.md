@@ -2006,6 +2006,8 @@ supervisor 本身始终是只读审阅；`[agent_runner.post_pr_supervisor].repa
 
 如果 rebase metadata 缺失、目标 branch 未知，或者解析出的目标与预期 PR branch 不匹配，runner 会拒绝继续并抛出带有诊断信息的错误，且**不会自动 abort rebase**。这样可以把工作区保留在冲突状态，供运维人员手动排查。该检查独立于普通的 commit proxy branch validation，专门用于保护 rebase 中间态。
 
+冲突修复 Agent 写了 `commit-request.json`、但没有产生文件变更时，runner 会清理请求并尝试 `git rebase --continue`。只有 Git 确认 rebase 继续成功后才运行验证并推送；若冲突仍未解决，则继续现有重试流程，不会仅因空提交请求就把 Issue 判为失败。Agent 未写提交请求却留下文件变更时仍拒绝继续。
+
 - 正常 branch：直接校验 branch 名称与预期 PR branch 是否一致。
 - Detached HEAD rebase：读取 `.git/rebase-merge/head-name` 或 `.git/rebase-apply/head-name` 解析目标 branch。
 - 目标未知或不匹配：拒绝继续，保留 rebase 状态，输出诊断错误。
