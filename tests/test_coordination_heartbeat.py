@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from backend.core.shared.models.agent_runner import (
     AppConfig,
     DaemonConfig,
@@ -23,10 +25,47 @@ from backend.core.use_cases.coordination_heartbeat import (
 from tests.conftest import FakeGitHubClient
 
 
+def test_lease_github_client_factory_sets_a_bounded_request_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """续租客户端把挂起的 gh 命令限制在五秒内。"""
+    captured_arguments: dict[str, object] = {}
+    expected_client = object()
+
+    def fake_create_github_client(
+        _repo_path: Path,
+        _process_runner: object,
+        **options: object,
+    ) -> object:
+        captured_arguments.update(options)
+        return expected_client
+
+    monkeypatch.setattr(
+        "backend.api.cli_coordination.create_github_client",
+        fake_create_github_client,
+    )
+
+    from backend.api.cli_coordination import _create_lease_client
+
+    actual_client = _create_lease_client(tmp_path, process_runner=object())  # type: ignore[arg-type]
+
+    assert actual_client is expected_client
+    assert captured_arguments == {
+        "bypass_budget_pause": True,
+        "request_timeout_seconds": 5,
+    }
+
+
 class FailingRenewalClient(FakeGitHubClient):
     """通过认领评论编辑故障模拟无法向 GitHub 续租。"""
 
+    def __init__(self) -> None:
+        super().__init__()
+        self.renewal_attempts = 0
+
     def edit_issue_comment(self, comment_id: int, body: str) -> None:
+        self.renewal_attempts += 1
         raise RuntimeError("simulated GitHub outage")
 
 
@@ -84,8 +123,8 @@ def test_concurrent_entry_points_retain_one_process_heartbeat(tmp_path: Path) ->
     assert active_coordination_heartbeat() is None
 
 
-def test_failed_renewal_at_half_ttl_terminates_the_registered_attempt(tmp_path: Path) -> None:
-    """距续期成功半个 TTL 后，线程先标记失租并终止核验通过的进程。"""
+def test_half_ttl_self_fence_does_not_start_another_renewal(tmp_path: Path) -> None:
+    """连续半个 TTL 没有续期成功后，先自停而不再发送一次租约请求。"""
     repo_path = tmp_path.resolve()
     config = AppConfig(daemon=DaemonConfig(presence_enabled=False, lease_ttl_seconds=120))
     repository_context = RepositoryRunContext("repo", "Repository", repo_path, config)
@@ -135,6 +174,7 @@ def test_failed_renewal_at_half_ttl_terminates_the_registered_attempt(tmp_path: 
 
         assert heartbeat.claim_was_lost(issue_number=42, worktree_path=repo_path)
         assert runner.cancelled == ["attempt-42"]
+        assert client.renewal_attempts == 0
     finally:
         heartbeat.stop()
 

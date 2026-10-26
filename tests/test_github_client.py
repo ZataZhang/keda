@@ -152,6 +152,38 @@ def test_edit_issue_comment_passes_body_as_gh_api_file_field(tmp_path: Path) -> 
     assert field_value.startswith("body=@"), field_value
 
 
+def test_default_request_timeout_applies_to_gh_calls_and_call_timeout_overrides_it(
+    tmp_path: Path,
+) -> None:
+    """租约客户端可为所有 gh 命令设置上限，单次显式超时仍优先。"""
+
+    class TimeoutCapturingRunner:
+        def __init__(self) -> None:
+            self.timeouts: list[int | None] = []
+
+        def run(self, command, *, cwd, check=True, timeout=None, **kwargs):  # type: ignore[no-untyped-def]
+            self.timeouts.append(timeout)
+            return CommandResult(
+                command=tuple(command),
+                return_code=0,
+                stdout="",
+                stderr="",
+            )
+
+    runner = TimeoutCapturingRunner()
+    github_client = GitHubCliClient(
+        tmp_path,
+        runner,  # type: ignore[arg-type]
+        request_timeout_seconds=5,
+    )
+    command = ["gh", "api", "-X", "PATCH", "repos/owner/repo/issues/comments/1"]
+
+    github_client._run_with_retry(command, cwd=tmp_path)
+    github_client._run_with_retry(command, cwd=tmp_path, timeout=2)
+
+    assert runner.timeouts == [5, 2]
+
+
 def test_delete_issue_comment_uses_comment_rest_endpoint(tmp_path: Path) -> None:
     """删除评论时只调用指定 comment 的 GitHub REST endpoint。"""
     fake_runner = FakeProcessRunner()

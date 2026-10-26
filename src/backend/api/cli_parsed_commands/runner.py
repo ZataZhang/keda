@@ -469,6 +469,13 @@ def _require_explicit_target_claimable(
             machine_id = create_machine_identity_store().load_or_create().machine_id
             from backend.core.use_cases.agent_runner_reconcile import reconcile_stale_attempts
 
+            require_explicit_target_claimable(
+                issue_number=target_issue,
+                github_client=github_client,
+                config=context.config,
+                machine_id=machine_id,
+                ignore_active_local_claim=ignore_active_local_claim,
+            )
             reconcile_stale_attempts(
                 repo_path=context.repo_path,
                 config=context.config,

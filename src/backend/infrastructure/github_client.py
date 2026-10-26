@@ -215,6 +215,7 @@ class GitHubCliClient:
         api_budget: IGitHubApiBudget | None = None,
         *,
         bypass_budget_pause: bool = False,
+        request_timeout_seconds: int | None = None,
     ) -> None:
         """Create the client.
 
@@ -223,11 +224,13 @@ class GitHubCliClient:
             process_runner: Optional process runner to use for gh commands.
             api_budget: 跨进程共享的额度预算；省略时不记账也不受暂停闸门约束。
             bypass_budget_pause: 心跳续期等安全收尾请求继续计费，但忽略共享暂停闸门。
+            request_timeout_seconds: 未单独指定超时的 gh 命令默认时限。
         """
         self.repo_path = repo_path
         self._runner = process_runner or SubprocessRunner()
         self._api_budget = api_budget
         self._bypass_budget_pause = bypass_budget_pause
+        self._request_timeout_seconds = request_timeout_seconds
         self._github_api_rate_limited: set[str] = set()
         self._owner_repo_cache: str | None = None
 
@@ -348,6 +351,7 @@ class GitHubCliClient:
             self._api_budget.ensure_available(api_kind)
 
         last_exc: subprocess.CalledProcessError | None = None
+        effective_timeout = timeout if timeout is not None else self._request_timeout_seconds
         for attempt in range(1, _MAX_GH_RETRIES + 1):
             if self._api_budget is not None and api_kind is not None:
                 self._api_budget.record_call(api_kind, _gh_operation_label(command))
@@ -356,7 +360,7 @@ class GitHubCliClient:
                     command,
                     cwd=cwd,
                     check=check,
-                    timeout=timeout,
+                    timeout=effective_timeout,
                     capture_output=capture_output,
                     input_text=input_text,
                 )

@@ -410,13 +410,25 @@ def create_github_client(
     process_runner: SubprocessRunner | None = None,
     *,
     bypass_budget_pause: bool = False,
+    request_timeout_seconds: int | None = None,
 ) -> GitHubCliClient:
-    """Create a client wired to the shared budget, optionally bypassing only its pause gate."""
+    """创建使用共享 API 预算的 GitHub 客户端。
+
+    Args:
+        repo_path: GitHub CLI 操作所在的仓库目录。
+        process_runner: 可选的子进程执行器。
+        bypass_budget_pause: 是否只绕过预算暂停闸门，API 调用仍会记账。
+        request_timeout_seconds: 未单独指定超时的 gh 命令默认时限。
+
+    Returns:
+        连接到共享 API 用量账本的 GitHub CLI 客户端。
+    """
     return GitHubCliClient(
         repo_path,
         process_runner,
         api_budget=create_github_api_budget(),
         bypass_budget_pause=bypass_budget_pause,
+        request_timeout_seconds=request_timeout_seconds,
     )
 
 

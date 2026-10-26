@@ -365,10 +365,7 @@ class CoordinationHeartbeat:
         if claim.lost:
             self._terminate_attempts(claim)
             return
-        if (
-            elapsed_since_success >= claim.ttl_seconds / 2
-            and elapsed_since_attempt < renewal_interval
-        ):
+        if elapsed_since_success >= claim.ttl_seconds / 2:
             with self._lock:
                 claim.lost = True
             _logger.warning(

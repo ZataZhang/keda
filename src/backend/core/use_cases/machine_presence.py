@@ -205,20 +205,23 @@ def render_presence_comment(
     serialized_payload = json.dumps(payload, ensure_ascii=False, sort_keys=True)
     task_rows = issues or ({"number": None, "stage": "idle", "agent": None},)
     table_rows = [
-        "| 主机名 | kc 版本 | 进程角色 | 状态 | 最后上报 | 正在处理 |",
+        "| 主机名 | kc 版本 | 进程角色 | 状态 | 最后上报 (UTC) | 正在处理 |",
         "|---|---|---|---|---|---|",
     ]
-    local_report = report_utc.astimezone().isoformat(timespec="seconds")
+    report_text = report_utc.isoformat(timespec="seconds")
     for task in task_rows:
         issue_number = task.get("number")
         issue_text = f"#{issue_number}" if issue_number is not None else "—"
         agent_name = str(task.get("agent") or "—")
         started_at = str(task.get("started_at") or "")
         if started_at:
-            issue_text = f"{issue_text} · {agent_name} · {_format_local_display_time(started_at)}"
+            issue_text = (
+                f"{issue_text} · {agent_name} · started (UTC): "
+                f"{_format_utc_display_time(started_at)}"
+            )
         table_rows.append(
             f"| {hostname} (`{machine_id[:8]}`) | {version} | {role} | "
-            f"{process_state} | {local_report} | {issue_text} |"
+            f"{process_state} | {report_text} | {issue_text} |"
         )
     return "\n".join(
         (
@@ -265,7 +268,8 @@ def list_presence_machines(
     github_client: IGitHubClient,
     now: datetime | None = None,
 ) -> tuple[IssueSummary | None, list[PresenceEntry]]:
-    """读取状态板并按 machine_id 保留服务端更新时间最新的评论。"""
+    """读取状态板，按 machine_id 合并进程状态与任务。"""
+    effective_now = _as_aware_utc(now or datetime.now(timezone.utc))
     presence_issues = _open_presence_issues(github_client)
     if not presence_issues:
         return None, []
@@ -276,16 +280,54 @@ def list_presence_machines(
         body_contains="<!-- kc:presence ",
         require_success=True,
     )
-    latest_by_machine: dict[str, PresenceEntry] = {}
+    entries_by_machine: dict[str, list[PresenceEntry]] = {}
     for comment_record in comment_records:
         entry = parse_presence_comment(comment_record)
         if entry is None:
             continue
-        current_entry = latest_by_machine.get(entry.machine_id)
-        if current_entry is None or entry.updated_at > current_entry.updated_at:
-            latest_by_machine[entry.machine_id] = entry
+        entries_by_machine.setdefault(entry.machine_id, []).append(entry)
+    machine_entries: list[PresenceEntry] = []
+    for process_entries in entries_by_machine.values():
+        online_entries = [
+            entry for entry in process_entries if presence_entry_is_online(entry, now=effective_now)
+        ]
+        representative = max(
+            online_entries or process_entries,
+            key=lambda presence_entry: presence_entry.updated_at,
+        )
+        issue_rows_by_number: dict[int, dict[str, object]] = {}
+        issue_rows_without_number: list[dict[str, object]] = []
+        for process_entry in sorted(
+            process_entries, key=lambda presence_entry: presence_entry.updated_at
+        ):
+            for issue_row in process_entry.issues:
+                issue_number = issue_row.get("number")
+                if isinstance(issue_number, int):
+                    issue_rows_by_number[issue_number] = issue_row
+                else:
+                    issue_rows_without_number.append(issue_row)
+        machine_entries.append(
+            PresenceEntry(
+                machine_id=representative.machine_id,
+                slot=representative.slot,
+                hostname=representative.hostname,
+                version=representative.version,
+                role=representative.role,
+                process_state="online" if online_entries else representative.process_state,
+                reported_at=representative.reported_at,
+                updated_at=representative.updated_at,
+                issues=tuple(
+                    [issue_rows_by_number[number] for number in sorted(issue_rows_by_number)]
+                    + issue_rows_without_number
+                ),
+            )
+        )
     return canonical_issue, sorted(
-        latest_by_machine.values(), key=lambda presence_entry: presence_entry.hostname.lower()
+        machine_entries,
+        key=lambda presence_entry: (
+            presence_entry.hostname.lower(),
+            presence_entry.machine_id,
+        ),
     )
 
 
@@ -370,15 +412,15 @@ def _as_aware_utc(value: datetime) -> datetime:
     return value.astimezone(timezone.utc)
 
 
-def _format_local_display_time(timestamp: str) -> str:
-    """把带偏移的机器时间换成本机时区，墙钟文本与非法值原样保留。"""
+def _format_utc_display_time(timestamp: str) -> str:
+    """把带偏移的时间换成 UTC，墙钟文本与非法值原样保留。"""
     try:
         parsed_timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
     except ValueError:
         return timestamp
     if parsed_timestamp.tzinfo is None:
         return timestamp
-    return parsed_timestamp.astimezone().isoformat(timespec="seconds")
+    return parsed_timestamp.astimezone(timezone.utc).isoformat(timespec="seconds")
 
 
 __all__ = [

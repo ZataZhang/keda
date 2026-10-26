@@ -14,7 +14,7 @@ _LEASE_MARKER_PATTERN = re.compile(r"<!--\s*kc:lease\s+(?P<attributes>.*?)\s*-->
 _ATTRIBUTE_PATTERN = re.compile(r'([a-z_]+)="([^"]*)"')
 _LEASE_HUMAN_BLOCK_PATTERN = re.compile(
     r"(?m)^- Lease: renews every \d+s, expires \d+s after the last renewal\n"
-    r"- Last renewed: `[^`]*`$"
+    r"- Last renewed(?: \(UTC\))?: `[^`]*`$"
 )
 
 
@@ -79,7 +79,7 @@ def with_claim_lease(
     human_line = (
         f"- Lease: renews every {max(1, ttl_seconds // 10)}s, expires "
         f"{ttl_seconds}s after the last renewal\n"
-        f"- Last renewed: `{_as_aware_utc(renewed_at).isoformat()}`"
+        f"- Last renewed (UTC): `{_as_aware_utc(renewed_at).isoformat()}`"
     )
     updated_comment = _LEASE_HUMAN_BLOCK_PATTERN.sub("", claim_comment).rstrip()
     previous_marker = _LEASE_MARKER_PATTERN.search(updated_comment)

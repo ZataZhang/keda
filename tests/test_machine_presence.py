@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timedelta, timezone
 
 from backend.core.shared.models.agent_runner import AppConfig, IssueSummary
 from backend.core.use_cases.machine_presence import (
     ensure_presence_issue,
+    list_presence_machines,
     parse_presence_comment,
     presence_entry_is_online,
     update_presence_comment,
@@ -202,13 +204,50 @@ def test_presence_comment_updates_in_place_and_expires_after_five_minutes() -> N
     assert parsed_entry.machine_id == "machine-a"
     assert parsed_entry.issues[0]["number"] == 42
     assert parsed_entry.issues[0]["started_at"] == "2026-10-26T07:30:00+00:00"
-    assert (
-        datetime(2026, 10, 26, 7, 30, tzinfo=timezone.utc)
-        .astimezone()
-        .isoformat(timespec="seconds")
-        in presence_records[0].body
-    )
+    assert "最后上报 (UTC)" in presence_records[0].body
+    assert "2026-10-26T08:00:00+00:00" in presence_records[0].body
+    assert "started (UTC): 2026-10-26T07:30:00+00:00" in presence_records[0].body
     assert presence_entry_is_online(parsed_entry, now=presence_records[0].updated_at)
     assert not presence_entry_is_online(
         parsed_entry, now=presence_records[0].updated_at + timedelta(minutes=6)
     )
+
+
+def test_peers_merge_tasks_from_multiple_process_slots_on_one_machine() -> None:
+    """同一机器的 peers 汇总保留多个 kc 进程各自持有的任务。"""
+    client = FakeGitHubClient()
+    client.set_list_issues_by_label_result(
+        [IssueSummary(12, "status", "url/12", "", ("kedacode/presence",))]
+    )
+    now = datetime.now(timezone.utc)
+    shared_args = {
+        "github_client": client,
+        "config": AppConfig(),
+        "machine_id": "machine-a",
+        "hostname": "macbook",
+        "version": "1.2.3",
+        "process_state": "online",
+        "now": now,
+    }
+    stale_comment_id = update_presence_comment(
+        **shared_args,
+        slot=f"{os.getpid()}@slot-one",
+        role="run",
+        issues=({"number": 41, "stage": "agent/running", "agent": "claude"},),
+    )
+    update_presence_comment(
+        **shared_args,
+        slot=f"{os.getpid()}@slot-two",
+        role="daemon",
+        issues=({"number": 42, "stage": "agent/running", "agent": "codex"},),
+    )
+    assert stale_comment_id is not None
+    client._issue_comment_updated_at[stale_comment_id] = now - timedelta(minutes=6)
+
+    presence_issue, machines = list_presence_machines(github_client=client, now=now)
+
+    assert presence_issue is not None and presence_issue.number == 12
+    assert len(machines) == 1
+    assert machines[0].machine_id == "machine-a"
+    assert presence_entry_is_online(machines[0], now=now)
+    assert [issue_row["number"] for issue_row in machines[0].issues] == [41, 42]

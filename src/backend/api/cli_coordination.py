@@ -17,6 +17,8 @@ from backend.core.use_cases.coordination_heartbeat import (
     acquire_coordination_heartbeat,
 )
 
+_LEASE_GITHUB_REQUEST_TIMEOUT_SECONDS = 5
+
 
 def start_coordination_heartbeat(
     *,
@@ -52,6 +54,7 @@ def _create_lease_client(
         repo_path,
         process_runner,
         bypass_budget_pause=True,
+        request_timeout_seconds=_LEASE_GITHUB_REQUEST_TIMEOUT_SECONDS,
     )
 
 

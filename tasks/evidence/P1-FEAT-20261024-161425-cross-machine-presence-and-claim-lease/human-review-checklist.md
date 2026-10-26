@@ -12,7 +12,7 @@ PRD §9.2 Human-Confirmed item 1；对应 §2 决策一。
 
 > “是否接受"远端认领租约过期（默认 10 分钟）即可由其他机器放回队列重跑，持有者 5 分钟续不上期就自停"这一规则，以及默认时长？”
 
-证据摘录（rv-2）：expired: server_updated_at_age=630s; issue_42_labels=agent/ready；无租约 #43 在模拟 24 小时后仍为 agent/running。证据摘录（rv-3）：agent_pid=15417 alive_after_exit=false；remote_issue_42_ref=absent gh_pr_create_calls=0；失租后标签写入为 0（初始认领的两次除外）。
+证据摘录（rv-2）：expired: server_updated_at_age=630s; issue_42_labels=agent/ready；无租约 #43 在模拟 24 小时后仍为 agent/running。证据摘录（rv-3）：agent_pid=96457 alive_after_exit=false；remote_issue_42_ref=absent gh_pr_create_calls=0；失租后标签写入为 0（初始认领的两次除外）。
 
 负控摘录：rv-2 新鲜服务器时间使过期认领保持运行且无过期评论；rv-3 关闭竞争认领保护后实际推送并尝试创建 PR。
 

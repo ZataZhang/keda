@@ -58,6 +58,17 @@ def test_lease_is_independent_and_legacy_claim_parser_still_reads_it() -> None:
     assert parsed_lease is not None
     assert parsed_lease.machine_id == "machine-b"
     assert parsed_lease.ttl_seconds == 600
+    assert "- Last renewed (UTC): `2026-10-26T08:00:00+00:00`" in leased_comment
+
+    legacy_human_block = leased_comment.replace("Last renewed (UTC):", "Last renewed:")
+    renewed_comment = with_claim_lease(
+        legacy_human_block,
+        machine_id="machine-b",
+        ttl_seconds=600,
+        renewed_at=NOW + timedelta(minutes=1),
+    )
+    assert renewed_comment.count("- Last renewed") == 1
+    assert "- Last renewed (UTC): `2026-10-26T08:01:00+00:00`" in renewed_comment
 
 
 def test_remote_lease_classification_and_machine_identity() -> None:

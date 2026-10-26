@@ -362,6 +362,20 @@ def test_cli_run_on_closed_issue_exits_not_found(
     assert runs == []
 
 
+def test_cli_run_on_unreadable_issue_exits_not_found(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """对账前目标读取失败仍经准入层映射为 NOT_FOUND(3)。"""
+    client = _client()
+    client._get_issue_error = RuntimeError("gh: Issue Not Found")
+
+    with _cli_patches(client, live_daemon_pid=None) as runs:
+        exit_code = _main(["run", "--issue", "7"], monkeypatch)
+
+    assert exit_code == int(ExitCode.NOT_FOUND)
+    assert runs == []
+
+
 def test_cli_run_on_blocked_issue_suggests_blocked_continue(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
