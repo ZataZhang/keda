@@ -8,8 +8,8 @@
 
 ## 验证身份
 
-- Candidate implementation tree：`6658504731e5dbc2cfc5b751d470123789c3464c`
-- Base HEAD tree：`d03d049a1a95efc7f5b19e2d1a3247884a936ed3`
+- Current executor candidate implementation tree：`552d0b85faf6748fa773d3d7e4f8f7454089db77`
+- Base HEAD tree：`388b18d786736448372b7fb0e2ba6c754e6eb660`
 - 四项 RV 各自在最终实现树上重跑；证据命令、输出摘要、expected fail、解释和风险见同目录 `evidence.json`。
 - 原始终端文件按 RV item 分开保存；RV harness、假 GitHub/agent 与 tree helper 都位于 `scripts/`，不进入代码 diff，脚本和输出不含凭据。
 
@@ -17,7 +17,7 @@
 
 ### 决策一 · rv-2（R3）
 
-负控令假 GitHub 对已过期认领返回新鲜更新时间，真实 daemon 因而不接手；green 场景分别观察到 TTL 前 30 秒仍运行和 TTL 后 30 秒回到队列。旧版无租约认领在模拟 24 小时后仍保持 running，基线 `kc:claim` 解析器读到 host、pid、started_at 与 agent。
+负控令假 GitHub 对已过期认领返回新鲜更新时间，真实 daemon 因而不接手；默认 1200 秒租约的 green 场景分别观察到 TTL 前 30 秒（1170s）仍运行和 TTL 后 30 秒（1230s）回到队列。旧版无租约认领在模拟 24 小时后仍保持 running，基线 `kc:claim` 解析器读到 host、pid、started_at 与 agent。
 
 - 原始证据：`rv-2-remote-lease.txt`
 - Green 要点：`remote_lease_expired_comments=1`；`issue_42_labels=agent/ready`；`lease_marker=absent`（#43）
@@ -47,7 +47,7 @@
 - Green 要点：表格有 #42/codex；JSON 的 `machines` 长度为 2；`status_issue=#100 presence_comments=2`
 - Negative control：隐藏 B 后 `machines=1`，oracle 按预期失败。
 
-## 其他交付验证
+## 先前复核树的其他交付验证（tree 6658504731e5dbc2cfc5b751d470123789c3464c）
 
 - 相关测试：`uv run pytest -o addopts="" tests/test_agent_runner_claim_lease.py tests/test_coordination_heartbeat.py tests/test_machine_presence.py tests/test_agent_runner_reconcile.py tests/test_run_target_admission.py tests/test_agent_runner_claim_arbitration.py tests/test_agent_runner_reclaim.py tests/test_github_client.py tests/test_kc_peers.py` — **149 passed**。
 - 配置映射回归：设置 TTL 为 900 秒的认领评论包含 `ttl="900"`。
@@ -62,8 +62,17 @@
 实际浏览器检查未完成：CUA browser inventory 为空；Edge 和 Chrome-for-Testing 的 app 访问均返回 `Computer Use was not approved`。官方 warning checker 另报 Markdown 3 项、HTML 2 项；这是 checker 对模板注释中 `<h2>` 示例的误读，它从注释开启的伪标题一直匹配到第一张真实卡的闭合标题。执行者没有把静态解析当成 pageerror 或交互验证的替代品。CUA inventory 无浏览器，已安装 Chrome 的 headless/dump-dom 启动均以 134 退出。此项记录为 `REVIEW_INCIDENT / INCONCLUSIVE`，等待 runner 在可用浏览器环境中验证首卡显示、翻页和末页 Markdown 生成。
 
 
-## 最终树跟进
+## 先前复核轮次（默认租约 600 秒）
 
-代码审查修复后的四项 RV 已在同一最终候选树 `6658504731e5dbc2cfc5b751d470123789c3464c` 上重跑通过（每项先观察负控变红，再确认同一真实入口转绿）；base HEAD tree 为 `d03d049a1a95efc7f5b19e2d1a3247884a936ed3`。最终相关 pytest 覆盖九个模块、149 passed；最终树的 lint、reuse、MkDocs strict 与 diff check 均通过。RV-4 会断言并发首启后重复 Issue 只留一条指针评论。
+代码审查修复后的四项 RV 曾在 candidate tree `6658504731e5dbc2cfc5b751d470123789c3464c` 上重跑通过；九模块 pytest 为 149 passed，整套测试为 5043 passed、1 skipped。该轮验证使用 600 秒默认租约，结果不代表随后改成 1200 秒后的当前树。
 
-独立 verifier 已在 commit `0a8d9cf0`（candidate tree `8b8c0d22461ab066fef954d7b88b376a3f3884af`）上亲自重跑 rv-1 至 rv-4，结论 **GREEN** 并留下 `iar:verifier-verdict risk=green` 标记，原始记录见 `verifier-response.txt`。本轮审查修复（仲裁的本机判定、发布前归属栅栏、机器编号来源、presence 转义与渲染、CLI 退出码映射、对账重复留痕收敛）改变了实现树，因此该 GREEN 不等于对本最终树的判定；runner 仍需在 `6658504…` 上重跑独立 verifier 门禁。真实浏览器 smoke 仍是 `REVIEW_INCIDENT / INCONCLUSIVE`。
+独立 verifier 已在 commit `0a8d9cf0`（candidate tree `8b8c0d22461ab066fef954d7b88b376a3f3884af`）上亲自重跑 rv-1 至 rv-4，结论 **GREEN** 并留下 `iar:verifier-verdict risk=green` 标记，原始记录见 `verifier-response.txt`。后续审查修复与默认值调整改变了实现树，因此该 GREEN 不等于对当前树的判定；runner 仍需在 `552d0b8…` 上重跑独立 verifier 门禁。真实浏览器 smoke 仍是 `REVIEW_INCIDENT / INCONCLUSIVE`。
+
+## 默认租约 1200 秒后的当前验证
+
+四项 RV 在 candidate tree `552d0b85faf6748fa773d3d7e4f8f7454089db77` 上重新运行，负控与绿色路径均符合预期；rv-2 直接验证默认 TTL 为 1200 秒，1170 秒不接手，1230 秒后回收。
+
+- 九个相关模块无 testmon 过滤：**149 passed**。
+- `just test`：lint 与本地增量测试通过（409 tests）。
+- `uv run mkdocs build --strict`：passed。
+- 独立 verifier、浏览器交互检查和 `kc peers` 人读呈递检查仍待完成。

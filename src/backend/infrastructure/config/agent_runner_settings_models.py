@@ -625,7 +625,7 @@ class AgentRunnerDaemonSettings(BaseModel):
     # 的 attempt 会被误判 ttl_expired。仅在 ``reconcile_stale_attempts=True`` 时生效。
     reclaim_ttl_seconds: int = 18000
     presence_enabled: bool = True
-    lease_ttl_seconds: int = 600
+    lease_ttl_seconds: int = 1200
 
 
 class AgentRunnerPromptSettings(BaseModel):

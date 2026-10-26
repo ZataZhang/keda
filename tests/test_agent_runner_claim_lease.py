@@ -139,6 +139,11 @@ def test_publish_ownership_fails_closed_after_a_newer_claim() -> None:
 
 def test_daemon_settings_map_through_to_domain_config() -> None:
     """Pydantic 配置和领域配置保持一致，不让默认值掩盖映射漏项。"""
+    default_settings = AgentRunnerSettings()
+    default_domain_config = build_app_config_from_settings(default_settings)
+    assert default_settings.daemon.lease_ttl_seconds == 1200
+    assert default_domain_config.daemon.lease_ttl_seconds == 1200
+
     settings = AgentRunnerSettings()
     settings.daemon = AgentRunnerDaemonSettings(presence_enabled=False, lease_ttl_seconds=900)
 

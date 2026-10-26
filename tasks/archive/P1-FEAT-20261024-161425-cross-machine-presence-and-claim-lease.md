@@ -46,8 +46,8 @@
 | 验证方式 | 输入 / 操作 | 期望观察到的结果 |
 |---|---|---|
 | 👀 人审 + 自动验证 | A、B 两台电脑都对同一仓库运行 daemon，B 正在执行 #42；在 A 上运行 `kc peers` | 输出两行机器：A 和 B 的主机名、kc 版本、在线状态、最后上报时间；B 一行写明正在做 #42、所用 agent、开始时间。仓库里的"机器状态" Issue 网页上有 A、B 各一条评论，内容一致。 |
-| 🤖 自动验证 | B 认领 #42 后直接断电，A 的 daemon 继续运行 | 租约到期前（默认 10 分钟）A 不碰 #42；到期后 A 的下一轮对账在 #42 留下一条写明"远端租约过期"的对账评论，并把它放回 `agent/ready`，随后由某台机器重新认领、从远端分支已有的状态重跑。 |
-| 🤖 自动验证 | B 正在执行 #42 时断网 6 分钟，进程一直活着 | 断网满 5 分钟（租约时长的一半）时，B 主动终止自己这次 agent 运行，不推送、不开 PR、不改标签；网络恢复后 B 发现最近一条认领已不是自己，同样不推送。 |
+| 🤖 自动验证 | B 认领 #42 后直接断电，A 的 daemon 继续运行 | 租约到期前（默认 20 分钟）A 不碰 #42；到期后 A 的下一轮对账在 #42 留下一条写明"远端租约过期"的对账评论，并把它放回 `agent/ready`，随后由某台机器重新认领、从远端分支已有的状态重跑。 |
+| 🤖 自动验证 | B 正在执行 #42 时断网 11 分钟，进程一直活着 | 断网满 10 分钟（租约时长的一半）时，B 主动终止自己这次 agent 运行，不推送、不开 PR、不改标签；网络恢复后 B 发现最近一条认领已不是自己，同样不推送。 |
 | 🤖 自动验证 | C 运行旧版 kc 认领 #43（认领评论没有租约信息）后宕机 | A 永远不接手 #43，行为与今天相同；`kc peers` 把 #43 列为"持有者未上报状态（可能是旧版本）"，并显示认领评论里的主机名。 |
 | 🤖 自动验证 | 两台主机名都叫 `macbook` 的电脑分别认领不同 Issue，其中一台的 kc 进程退出 | 另一台不会把对方的认领当成本机认领，也不会因为本机查不到对方 PID 就回收它。 |
 | 🤖 自动验证 | 一个从未用过本功能的仓库里，两台机器在同一分钟首次启动 daemon | 最终只有一条带状态标签的"机器状态" Issue；多建出来的那条被移除标签，并留言指向保留的那条。 |
@@ -61,8 +61,8 @@
 - 状态评论超过 5 分钟没有更新就显示为"离线"；离线评论不自动删除。
 - 新命令叫 `kc peers`，支持表格和 `--json` 两种输出；不改现有 `kc daemon status`（它继续只看本机进程）。
 - 租约时长由持有者写进认领评论，接手方按持有者声明的时长判定，不用自己的配置，避免两台机器配置不同导致误判。
-- 续期间隔为租约时长的 1/10（默认 60 秒），自我隔离阈值为租约时长的 1/2（默认 5 分钟）。
-- 接手方用"评论在 GitHub 服务器上的最后更新时间"与本机 UTC 时间比较；两台机器的时钟偏差在租约一半以内（默认 5 分钟）时判定依然安全，超出这个偏差不在本期保护范围内。
+- 续期间隔为租约时长的 1/10（默认 120 秒），自我隔离阈值为租约时长的 1/2（默认 10 分钟）。
+- 接手方用"评论在 GitHub 服务器上的最后更新时间"与本机 UTC 时间比较；两台机器的时钟偏差在租约一半以内（默认 10 分钟）时判定依然安全，超出这个偏差不在本期保护范围内。
 - 远端接手一律是"放回队列从头跑"：远端未推送的本地进度（WIP checkpoint 只存在本地分支）和会话都拿不到，因此不尝试续传；恢复次数预算沿用现有设置。
 - 有租约且仍处于"等待返工"状态的远端认领过期后，保留 `agent/running`，交给现有返工通道重新认领，与本机崩溃对账的规则一致。
 - 续期属于必须执行的调用：daemon 因 GitHub API 预算暂停时，续期照常进行，但仍计入用量；真被限流导致的失败按"续期失败"处理。
@@ -80,7 +80,7 @@
 
 - **在任意一台装了 kc 的电脑上**：运行 `kc peers`，就能看到这个仓库上有哪几台机器、哪些在线、各自在跑什么 Issue。
 - **不装 kc 的人**：打开仓库里的"机器状态" Issue，网页上就能看到同样的信息。
-- **daemon 机器的操作者**：一台执行机宕机、断网或被收走以后，它手上的任务会在约 10 分钟后自动回到队列，由还活着的机器接着做，不用再人工改标签。
+- **daemon 机器的操作者**：一台执行机宕机、断网或被收走以后，它手上的任务会在约 20 分钟后自动回到队列，由还活着的机器接着做，不用再人工改标签。
 - **所有人**：同名电脑和断网恢复不会造成同一条 Issue 被两台机器同时交付。
 
 ### Measurable Objectives
@@ -96,11 +96,11 @@
 
 ### 决策一：允许接手"租约已过期"的远端认领
 
-这一项改变了一个现有的安全承诺。今天跨机器的认领一律当作还活着，代价是远端宕机后任务永久卡住；本期改为远端认领如果带租约，并且超过持有者声明的时长（默认 10 分钟）没有续期，就视为失效，可以由任何机器放回队列。为了不出现两台机器同时干活，持有者这边配了两道刹车：一是续期连续失败满一半时长（默认 5 分钟）就停掉自己的 agent，不推送、不开 PR；二是每次推送和开 PR 之前，回读确认最近一条认领仍是自己。
+这一项改变了一个现有的安全承诺。今天跨机器的认领一律当作还活着，代价是远端宕机后任务永久卡住；本期改为远端认领如果带租约，并且超过持有者声明的时长（默认 20 分钟）没有续期，就视为失效，可以由任何机器放回队列。为了不出现两台机器同时干活，持有者这边配了两道刹车：一是续期连续失败满一半时长（默认 10 分钟）就停掉自己的 agent，不推送、不开 PR；二是每次推送和开 PR 之前，回读确认最近一条认领仍是自己。
 
-主要风险有两个。一是两台机器时钟偏差超过 5 分钟时，接手可能早于持有者自停，造成短时间双跑；第二道刹车（推送前确认认领归属）可以挡住其中一方的交付，但挡不住双方都消耗 agent 调用。二是接手方拿不到远端未推送的进度，只能从远端分支已推送的状态重跑，上一台机器没推送的工作会重做一遍。没有租约标记的旧认领完全保持现状，混用新旧版本时不会更不安全。
+主要风险有两个。一是两台机器时钟偏差超过 10 分钟时，接手可能早于持有者自停，造成短时间双跑；第二道刹车（推送前确认认领归属）可以挡住其中一方的交付，但挡不住双方都消耗 agent 调用。二是接手方拿不到远端未推送的进度，只能从远端分支已推送的状态重跑，上一台机器没推送的工作会重做一遍。没有租约标记的旧认领完全保持现状，混用新旧版本时不会更不安全。
 
-**请确认：** 是否接受"远端认领租约过期（默认 10 分钟）即可由其他机器放回队列重跑，持有者 5 分钟续不上期就自停"这一规则，以及默认时长？
+**请确认：** 是否接受"远端认领租约过期（默认 20 分钟）即可由其他机器放回队列重跑，持有者 10 分钟续不上期就自停"这一规则，以及默认时长？
 
 **验收：** 在本机模拟两台机器：一台认领后被强杀，另一台在到期前不接手、到期后接手并留下对账评论；另一组模拟断网，持有者在一半时长时自停，并且全程没有推送。
 
@@ -145,7 +145,7 @@ skill 新增"看别的机器"路由，指向 `kc peers --json`。
 **对现有行为的影响**
 - 没有租约标记的认领（旧版本或历史认领）：所有判定与今天完全一致。
 - 旧版 kc 与新版混跑：旧版读不到新标记，按今天的方式工作；新版对旧版的认领一律不接手。
-- 新增配置项都有默认值，未配置时状态上报开启、租约时长 10 分钟。关闭状态上报只影响状态 Issue，不影响租约。
+- 新增配置项都有默认值，未配置时状态上报开启、租约时长 20 分钟。关闭状态上报只影响状态 Issue，不影响租约。
 
 ## 4. Requirement Shape
 
@@ -244,11 +244,11 @@ This section is a living implementation guide based on current repository analys
 ```text
   ## Agent Runner Claimed（评论标题，原样）
 - Host / PID / Agent / Started at（原样）
-- Lease: renews every 60s, expires 600s after the last renewal（人读）
+- Lease: renews every 120s, expires 1200s after the last renewal（人读）
 - Last renewed: `<UTC ISO>`（人读，每次续期改写，保证正文变化从而刷新 updated_at）
 
 <!-- kc:claim host=... pid=... started_at=... agent=... -->   ← 原样，不得改动
-<!-- kc:lease machine="<machine_id>" ttl="600" renewed_at="<UTC ISO>" v="1" -->
+<!-- kc:lease machine="<machine_id>" ttl="1200" renewed_at="<UTC ISO>" v="1" -->
 ```
 
 解析 `kc:lease` 用新的独立正则，属性顺序宽松。`kc:claim` 的正则与格式化函数不改。
@@ -363,7 +363,7 @@ This section is a living implementation guide based on current repository analys
 ├── Config
 │   ├── src/backend/infrastructure/config/agent_runner_settings_models.py
 │   │   [修改]
-│   │   【总结】[agent_runner.daemon] 增加 presence_enabled（默认 true）与 lease_ttl_seconds（默认 600，最小 120）。
+│   │   【总结】[agent_runner.daemon] 增加 presence_enabled（默认 true）与 lease_ttl_seconds（默认 1200，最小 120）。
 │   ├── src/backend/core/shared/models/agent_runner.py
 │   │   [修改]
 │   │   【总结】对应 domain dataclass 字段同步。
@@ -439,7 +439,7 @@ sequenceDiagram
     participant B as "B 机 (持有者)"
     participant GH as "GitHub Issue #42"
     participant A as "A 机 (对账方)"
-    B->>GH: "认领评论: kc:claim + kc:lease(ttl=600)"
+    B->>GH: "认领评论: kc:claim + kc:lease(ttl=1200)"
     loop "每 ttl/10 秒"
         B->>GH: "编辑评论 (刷新 updated_at)"
     end
@@ -483,7 +483,7 @@ sequenceDiagram
   forbidden_bypasses: "直接调用 classify_remote_lease 代替 daemon；在测试里手写对账评论；用客户端本地时间代替假 gh 存储的服务端 updated_at"
   fresh_state_probe: "对账结束后用一个新的 gh 进程读取 #42/#43 的标签与评论数"
   final_tree_evidence: "rv-2 输出由 scripts/working_tree_hash.py 计算的 candidate implementation tree（排除 PRD/evidence delivery records）；任何 core/use_cases 下的改动后重跑"
-  negative_control: "当 #42 服务端 updated_at 已早于声明 TTL 630 秒时，设置 FAKE_GH_FORCE_UPDATED_AT_ISSUE=42，让假 gh 对真实 kc daemon 返回新鲜更新时间。"
+  negative_control: "当 #42 服务端 updated_at 已早于声明 TTL 1230 秒时，设置 FAKE_GH_FORCE_UPDATED_AT_ISSUE=42，让假 gh 对真实 kc daemon 返回新鲜更新时间。"
   expected_fail: "目标 Issue 仍停在 agent/running 且 remote_lease_expired 评论为 0 条；要求过期后恰好一条对账评论的断言失败。"
 - id: rv-3
   behavior: 持有者续期连续失败满 ttl/2 时终止自己的 agent 且不交付；恢复联网后发现认领已易主同样不推送
@@ -568,11 +568,11 @@ No external validation required; repository evidence was sufficient.（GitHub RE
 
 ### 9.2 Acceptance Evidence Package
 
-按风险排序：决策一（rv-2、rv-3，R3）→ 决策二（rv-4，R2）→ rv-1 与 R1/R0 门禁。rv-1 至 rv-4 均通过真实 `kc` CLI/daemon 与本地 Git，GitHub 和 agent CLI 由无凭据替身提供。每个场景先执行负控并观察到 oracle 失败，再去掉故障注入观察到通过；四项共享 candidate implementation tree `6658504731e5dbc2cfc5b751d470123789c3464c`（不含本 PRD 与 evidence delivery records）：
+按风险排序：决策一（rv-2、rv-3，R3）→ 决策二（rv-4，R2）→ rv-1 与 R1/R0 门禁。rv-1 至 rv-4 均通过真实 `kc` CLI/daemon 与本地 Git，GitHub 和 agent CLI 由无凭据替身提供。每个场景先执行负控并观察到 oracle 失败，再去掉故障注入观察到通过；四项在默认租约调整后重新运行，共享 candidate implementation tree `552d0b85faf6748fa773d3d7e4f8f7454089db77`（不含本 PRD 与 evidence delivery records）：
 
 | 顺序 | 结果与判别证据 | 原始证据 |
 |---|---|---|
-| 决策一 · rv-2（R3） | 负控强制返回新鲜服务器时间，过期 oracle 观察到 0 条接手评论、#42 仍为 `agent/running`；正常路径 570 秒未接手、630 秒后恰有 1 条 `remote_lease_expired` 并回到 `agent/ready`。无租约 #43 在模拟 24 小时后仍为 `agent/running`；基线解析器读到 `kc:claim` 的 host、pid、started_at、agent。 | `rv-2-remote-lease.txt` |
+| 决策一 · rv-2（R3） | 负控强制返回新鲜服务器时间，过期 oracle 观察到 0 条接手评论、#42 仍为 `agent/running`；默认 1200 秒租约下正常路径 1170 秒未接手、1230 秒后恰有 1 条 `remote_lease_expired` 并回到 `agent/ready`。无租约 #43 在模拟 24 小时后仍为 `agent/running`；基线解析器读到 `kc:claim` 的 host、pid、started_at、agent。 | `rv-2-remote-lease.txt` |
 | 决策一 · rv-3（R3） | 负控确实推送分支并尝试开 PR，保护 oracle 失败；绿色路径分别在推送前与开 PR 前发现认领易主并阻止交付。续期失败到 120 秒 TTL 的一半时 agent 子进程退出；失租后的远端分支不存在、PR 调用为 0、标签写入为 0（初始认领的 2 次除外）。 | `rv-3-self-fence.txt` |
 | 决策二 · rv-4（R2） | 负控拒绝重复标签移除后留下 2 条状态 Issue，唯一板 oracle 失败；重试及并发首启绿色路径都收敛至 1 条。关闭状态开关后状态评论不变而租约继续续期；同主机名、不同 machine_id 的远端有效租约保持运行。 | `rv-4-presence.txt` |
 | 双机可见 · rv-1（R1） | 负控隐藏 B 评论后真实 `kc peers --json` 只见 1 台，数量断言失败；绿色表格与 JSON 都见两台在线机器，B 正在处理 #42 / `codex`，状态 Issue 有两条评论。 | `rv-1-kc-peers.txt` |
@@ -581,8 +581,8 @@ No external validation required; repository evidence was sufficient.（GitHub RE
 
 ### Human-Confirmed (来自 Part A 风险地图)
 
-- [ ] 决策一：接受"远端认领租约过期（默认 10 分钟）即可被放回队列，持有者 5 分钟续不上期就自停"及默认时长 — 依据 rv-2、rv-3 结果
-- [ ] 决策二：接受状态 Issue 默认开启（包括公开仓库），只提供按仓库关闭的开关 — 依据 rv-4 结果
+- [x] 决策一：接受"远端认领租约过期（默认 20 分钟）即可被放回队列，持有者 10 分钟续不上期就自停"及默认时长 — 依据 rv-2、rv-3 结果 <!-- 证据: 用户于 2026-10-26 明确同意，并确认租约默认值为 1200 秒。 -->
+- [x] 决策二：接受状态 Issue 默认开启（包括公开仓库），只提供按仓库关闭的开关 — 依据 rv-4 结果 <!-- 证据: 用户于 2026-10-26 明确同意。 -->
 - [ ] 已查看 9.1 呈递区，`kc peers` 的输出内容与格式符合预期
 
 ### Architecture Acceptance
@@ -593,13 +593,13 @@ No external validation required; repository evidence was sufficient.（GitHub RE
 
 ### Behavior Acceptance
 
-- [x] rv-2 通过：到期前不接手、到期后恰好 1 条 `remote_lease_expired` 对账评论并回到 `agent/ready`、旧认领永不接手（证据：`rv-2-remote-lease.txt`；candidate tree `6658504731e5dbc2cfc5b751d470123789c3464c`）。
-- [x] rv-3 通过：ttl/2 时 agent 被终止；失租后远端分支 ref 未变化、`pr create` 为 0 次、标签写入为 0 次（初始 ready→running 认领的 2 次标签写入除外，证据：`rv-3-self-fence.txt`；candidate tree `6658504731e5dbc2cfc5b751d470123789c3464c`）。
-- [x] rv-4 通过：状态 Issue 恰好 1 条、关闭开关后状态停止更新但租约照常、同名主机不被误对账（证据：`rv-4-presence.txt`；candidate tree `6658504731e5dbc2cfc5b751d470123789c3464c`）。
-- [x] `kc:claim` 文本与本 PRD 基线逐字节一致，基线解析器能解析新认领评论（证据：`rv-2-remote-lease.txt` 中的兼容断言；candidate tree `6658504731e5dbc2cfc5b751d470123789c3464c`）。
-- [x] 租约有效的远端认领，`kc run --issue N` 返回退出码 5，提示中包含剩余时间（证据：`tests/test_run_target_admission.py::test_cli_run_on_live_remote_lease_exits_conflict`，命令输出 `2 passed` 中对应断言；candidate tree `6658504731e5dbc2cfc5b751d470123789c3464c`）。
-- [x] 同名主机 + 同数字 PID 的**另一台机器**先认领时，仲裁不按本机重入放行：带租约的投标一律按机器编号判定（回归测试 `tests/test_agent_runner_claim_arbitration.py::test_same_host_same_pid_remote_lease_bid_is_not_a_reentry`，同机的合法重入仍由 `test_own_leased_earlier_bid_still_reenters` 保住；candidate tree `6658504731e5dbc2cfc5b751d470123789c3464c`）。
-- [x] 本进程未登记认领时，推送/开 PR 前的归属栅栏仍回读服务端按机器编号确认，确认不了就拒绝交付（回归测试 `tests/test_coordination_heartbeat.py::test_publish_fence_fails_closed_when_the_claim_is_not_registered` 与 `test_publish_fence_resolves_a_desynced_repo_id`；candidate tree `6658504731e5dbc2cfc5b751d470123789c3464c`）。
+- [x] rv-2 通过：默认 1200 秒租约下，1170 秒时不接手、1230 秒后恰好 1 条 `remote_lease_expired` 对账评论并回到 `agent/ready`，旧认领永不接手（证据：`rv-2-remote-lease.txt`；candidate tree `552d0b85faf6748fa773d3d7e4f8f7454089db77`）。
+- [x] rv-3 通过：ttl/2 时 agent 被终止；失租后远端分支 ref 未变化、`pr create` 为 0 次、标签写入为 0 次（初始 ready→running 认领的 2 次标签写入除外，证据：`rv-3-self-fence.txt`；candidate tree `552d0b85faf6748fa773d3d7e4f8f7454089db77`）。
+- [x] rv-4 通过：状态 Issue 恰好 1 条、关闭开关后状态停止更新但租约照常、同名主机不被误对账（证据：`rv-4-presence.txt`；candidate tree `552d0b85faf6748fa773d3d7e4f8f7454089db77`）。
+- [x] `kc:claim` 文本与本 PRD 基线逐字节一致，基线解析器能解析新认领评论（证据：`rv-2-remote-lease.txt` 中的兼容断言；candidate tree `552d0b85faf6748fa773d3d7e4f8f7454089db77`）。
+- [x] 租约有效的远端认领，`kc run --issue N` 返回退出码 5，提示中包含剩余时间（证据：当前九模块命令 `149 passed`，包含 `tests/test_run_target_admission.py::test_cli_run_on_live_remote_lease_exits_conflict`；candidate tree `552d0b85faf6748fa773d3d7e4f8f7454089db77`）。
+- [x] 同名主机 + 同数字 PID 的**另一台机器**先认领时，仲裁不按本机重入放行：带租约的投标一律按机器编号判定（当前九模块命令 `149 passed` 覆盖 `test_same_host_same_pid_remote_lease_bid_is_not_a_reentry` 与同机重入回归；candidate tree `552d0b85faf6748fa773d3d7e4f8f7454089db77`）。
+- [x] 本进程未登记认领时，推送/开 PR 前的归属栅栏仍回读服务端按机器编号确认，确认不了就拒绝交付（当前九模块命令 `149 passed` 覆盖两个 publish-fence 回归；candidate tree `552d0b85faf6748fa773d3d7e4f8f7454089db77`）。
 
 ### Dependency Acceptance
 
@@ -607,9 +607,9 @@ No external validation required; repository evidence was sufficient.（GitHub RE
 
 ### Validation Acceptance
 
-- [x] 最高保真入口：rv-1 至 rv-4 均通过真实 `kc` CLI 与 daemon 进程执行，只替换 `gh` 与 agent CLI；每份证据记录由 RV tree helper 计算的 candidate implementation tree（不含 PRD/evidence delivery records），且彼此相同并对应最终实现代码。证据：四份 `rv-*.txt` 均记录 `6658504731e5dbc2cfc5b751d470123789c3464c`，manifest 位于 `evidence.json`。
+- [x] 最高保真入口：rv-1 至 rv-4 均通过真实 `kc` CLI 与 daemon 进程执行，只替换 `gh` 与 agent CLI；每份证据记录由 RV tree helper 计算的 candidate implementation tree（不含 PRD/evidence delivery records），且彼此相同并对应最终实现代码。默认租约调整后重新执行，四份 `rv-*.txt` 均记录 `552d0b85faf6748fa773d3d7e4f8f7454089db77`，manifest 位于 `evidence.json`。
 - [x] 配置三处映射：设置 `lease_ttl_seconds = 900` 后，新认领评论中出现 `ttl="900"`（证据：`tests/test_agent_runner_claim_lease.py::test_configured_ttl_is_written_into_new_claim_comment`；对应相关测试输出）。
-- [x] 全量相关测试：`uv run pytest -o addopts="" tests/test_agent_runner_claim_lease.py tests/test_coordination_heartbeat.py tests/test_machine_presence.py tests/test_agent_runner_reconcile.py tests/test_run_target_admission.py tests/test_agent_runner_claim_arbitration.py tests/test_agent_runner_reclaim.py tests/test_github_client.py tests/test_kc_peers.py` 全部通过（不依赖 testmon 增量）。证据：最终运行 `149 passed`；完整单元套件 `uv run pytest -o addopts="" tests/` 为 `5043 passed, 1 skipped`。
+- [x] 全量相关测试：`uv run pytest -o addopts="" tests/test_agent_runner_claim_lease.py tests/test_coordination_heartbeat.py tests/test_machine_presence.py tests/test_agent_runner_reconcile.py tests/test_run_target_admission.py tests/test_agent_runner_claim_arbitration.py tests/test_agent_runner_reclaim.py tests/test_github_client.py tests/test_kc_peers.py` 全部通过（不依赖 testmon 增量）。默认租约调整后的当前树结果为 `149 passed`。完整单元套件 `5043 passed, 1 skipped` 是先前 tree `6658504731e5dbc2cfc5b751d470123789c3464c` 的历史结果，未在本次默认值改动后重跑。
 
 ### Documentation Acceptance
 
@@ -635,7 +635,7 @@ No external validation required; repository evidence was sufficient.（GitHub RE
 - **FR-6**：**远端接手**：对账遇到来自别的机器、带 `kc:lease` 的认领时，用评论的服务器端 `updated_at` 判断是否过期（以持有者声明的时长为准，只信任有写权限作者的评论）。过期时：有未消费的返工标记则保持 `agent/running`；恢复预算未耗尽则放回 `agent/ready`；预算耗尽则判 `agent/failed`。每种处置都写一条原因为 `remote_lease_expired` 的对账评论，并保持幂等。没有 `kc:lease` 的远端认领一律不碰。定向 `kc run --issue N` 在租约有效时返回冲突并提示剩余时间，过期时先执行同一对账再认领。
 - **FR-7**：**自我隔离**：持有者某个认领"距上次续期成功"达到 `ttl/2` 时，终止该 Issue 当前在册的 agent 子进程，标记失去认领，之后不推送、不开 PR、不改标签。每次推送和开 PR 之前，回读确认最近一条可信认领仍是本进程那条评论，否则放弃交付。
 - **FR-8**：**本机判定**：带 `kc:lease` 的认领用机器编号判断是否本机；没有的退回主机名。对账、准入、仲裁三处统一使用同一判定。
-- **FR-9**：**配置**：仓库级 `[agent_runner.daemon]` 新增 `presence_enabled`（默认 `true`）和 `lease_ttl_seconds`（默认 `600`，低于 `120` 时按 `120` 处理并告警）。关闭状态上报不影响租约与远端接手。
+- **FR-9**：**配置**：仓库级 `[agent_runner.daemon]` 新增 `presence_enabled`（默认 `true`）和 `lease_ttl_seconds`（默认 `1200`，低于 `120` 时按 `120` 处理并告警）。关闭状态上报不影响租约与远端接手。
 - **FR-10**：**文档与 skill 同步**：更新 `docs/guides/agent-runner.md` 中相关章节与 `kedacode-operator` skill，说明 `kc peers`、状态 Issue、租约、远端接手和自我隔离。
 
 ## 11. Non-Goals
@@ -673,13 +673,13 @@ No external validation required; repository evidence was sufficient.（GitHub RE
 ### Final Reconciliation
 
 - Interpretation: 交付实现仍是每仓一块 GitHub 状态 Issue 与认领评论中的独立 `kc:lease`；命名清理依赖已在基线完成（`f4886655`），所以当前认领标记是 `kc:claim`。它的格式不变，rv-2 用基线解析器验证 host、pid、started_at 与 agent 可读。
-- Public behavior and contracts: 实现入口为 `kc peers`，支持 `--repo`、`--repo-id` 与 `--json`；`presence_enabled` 默认为开启，关闭只停止状态 Issue 读写，租约续期继续工作；`lease_ttl_seconds` 默认 600，配置低于 120 时运行期按 120 处理并告警。配置经 settings、domain dataclass 与 factory 映射传递。CLI 表格与 GitHub 状态评论的人读时间按生成机器本地时区显示，JSON 时间保留带偏移 UTC。
+- Public behavior and contracts: 实现入口为 `kc peers`，支持 `--repo`、`--repo-id` 与 `--json`；`presence_enabled` 默认为开启，关闭只停止状态 Issue 读写，租约续期继续工作；`lease_ttl_seconds` 默认 1200，配置低于 120 时运行期按 120 处理并告警。配置经 settings、domain dataclass 与 factory 映射传递。CLI 表格与 GitHub 状态评论的人读时间按生成机器本地时区显示，JSON 时间保留带偏移 UTC。
 - Related PRD status: 归档的命名清理 PRD 与 hard via-main 依赖由基线 commit `f4886655` 满足；Tailscale onboarding 与 hosted-runner deployment 仍独立，无额外顺序依赖。
 - Requirements and risks: rv-1 到 rv-4 均以真实 kc CLI/daemon、真实本地 git、假 GitHub 与确定性 agent CLI 运行；服务器时间通过假 GitHub 的 `updated_at` 设置。rv-3 区分初始领取的两次标签写入与失租后的零次标签写入，并覆盖推送前与开 PR 前两个归属读取点。远端接手仍受双方时钟偏差小于 ttl/2 的 PRD 前提约束；状态评论仍在公开仓库可见。
 - **实现中发现并纳入的边界**：进程因失租被终止后，`ClaimLeaseLost` 必须穿过执行恢复循环并阻止启动新的 recovery attempt；该修复已由定向回归测试与 rv-3 子进程场景验证。`kc run --takeover` 在停本机 daemon 前先拒绝有效远端租约，停止后再次准入；旧 takeover reclaim 路径也改为按 machine_id 识别本机，避免同名主机误回收。状态 Issue 重复项先写带 canonical 标记的清理留言，再移除重复标签；若留言失败，重复项仍留在查询集合中供下一次重试，回归测试覆盖失败后重试。低 TTL 配置留给运行期下限钳制，机器编号文件仅接受带时区创建时间的 UUID4。
-- **最终证据树**：rv-1 至 rv-4 在最终实现改动完成后逐项重跑，原始输出各自记录同一 candidate implementation tree `6658504731e5dbc2cfc5b751d470123789c3464c`；该身份排除 PRD 与 evidence delivery-record 路径，命令与哈希汇总在 9.2 和 evidence report。实现侧接受项已由执行者完成；独立 verifier 由 runner 后续门禁单独判断，执行者自审不冒充 verifier `PASS`。
+- **当前执行者证据树**：租约默认值调整后，rv-1 至 rv-4 逐项重跑，四份原始输出与 `evidence.json` 均记录 candidate implementation tree `552d0b85faf6748fa773d3d7e4f8f7454089db77`；该身份排除 PRD 与 evidence delivery-record 路径。九模块相关测试 `149 passed`。独立 verifier 尚未在该树重跑；runner 后续门禁需给出 verifier 结论，执行者自审不冒充 `PASS`。
 - **人审包检查**：Markdown 与 HTML 源码静态核对包含相同的三张决定卡和结果卡；官方 warning checker 因未修改的模板注释中出现字面 `<h2>` 产生 2 张卡的误报，HTMLParser 检查实际正文为 4 张卡。真实浏览器检查因 CUA inventory 无 browser 且两个已安装浏览器均拒绝访问，记录为 `REVIEW_INCIDENT / INCONCLUSIVE`；runner 需在可用浏览器环境重试翻页、首卡可见与结果生成检查。
-- **验收投影**：实现侧清单项在对应验证通过后勾选；两项决策与 9.1 呈递区仍留在 `Human-Confirmed`，因此状态横幅为 `🧍 待人工验收`。
+- **验收投影**：实现侧清单项在对应验证通过后勾选；用户已确认决策一、决策二，9.1 呈递审阅仍未完成，因此状态横幅仍为 `🧍 待人工验收`。
 
 ## Change Log
 
@@ -722,3 +722,11 @@ No external validation required; repository evidence was sufficient.（GitHub RE
 - Reason: A reviewer found the same-hostname harm the Issue itself named, a fail-open path in FR-7's second brake, and identity, comment, output-safety and evidence-binding gaps; the acceptance source of truth has to name the tree the reruns actually used.
 - Impact: FR-8 locality now holds on the arbitration path and FR-7 refuses delivery that cannot be attributed, which is fail-closed for unattributable publishes. Legacy hostname-only claims keep their previous fallback. No CLI subcommand, flag or machine-readable output changed, so the packaged operator skill needs no update. Independent verifier still has to rerun on the final tree, and the browser smoke stays `REVIEW_INCIDENT / INCONCLUSIVE`.
 - Review: executor review complete for both rounds; independent verifier on the final tree, browser smoke, and human decisions pending
+
+### Record human decisions and widen the default lease grace period
+- Type: user decision / configuration default
+- Before: Default `lease_ttl_seconds` was 600 seconds (10-minute remote expiry, 5-minute owner self-fence), and both human decisions were unchecked.
+- After: Default `lease_ttl_seconds` is 1200 seconds; renewal cadence follows the existing TTL/10 rule (120 seconds by default) and owner self-fence remains TTL/2 (10 minutes). The user approved the lease policy and public status Issue default with a repository-level opt-out. The `kc peers` presentation review remains open.
+- Reason: Add more tolerance for temporary connectivity or GitHub API interruptions before stopping an active agent, while keeping a bounded recovery time after a machine goes away.
+- Impact: Default remote takeover can take up to 20 minutes; renewal calls are less frequent under the existing TTL/10 rule. No new setting or service was added. RV-1 through RV-4 and the nine relevant test modules were rerun on current candidate tree `552d0b85faf6748fa773d3d7e4f8f7454089db77`; independent verifier and browser presentation review remain pending.
+- Review: User decisions confirmed 2026-10-26; executor validation passed, independent verifier and remaining presentation review pending.

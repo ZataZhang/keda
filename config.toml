@@ -1153,7 +1153,7 @@ reclaim_ttl_seconds = 18000
 # 每仓库状态 Issue 默认开启；设为 false 仅关闭可见性，不影响认领租约。
 presence_enabled = true
 # 新认领声明的租约时长（秒），最小 120。
-lease_ttl_seconds = 600
+lease_ttl_seconds = 1200
 
 [agent_runner.lifecycle_agents]
 implementation = "codebuddy"

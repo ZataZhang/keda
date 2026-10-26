@@ -744,7 +744,7 @@ class DaemonConfig:
     reconcile_stale_attempts: bool | None = None
     reclaim_ttl_seconds: int | None = None
     presence_enabled: bool = True
-    lease_ttl_seconds: int = 600
+    lease_ttl_seconds: int = 1200
 
 
 @dataclass(frozen=True)
