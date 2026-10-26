@@ -16,6 +16,7 @@ from backend.core.shared.interfaces.agent_runner import IGitHubClient, IProcessR
 from backend.core.shared.models.agent_runner import AppConfig, RepositoryRunContext
 from backend.core.shared.models.machine_identity import MachineIdentity
 from backend.core.use_cases.agent_runner_claim_lease import (
+    assert_claim_owned_by_machine,
     assert_claim_still_owned,
     with_claim_lease,
 )
@@ -329,11 +330,28 @@ class CoordinationHeartbeat:
         return matching_claims[0].repo_id if len(matching_claims) == 1 else None
 
     def assert_claim_owned(self, *, github_client: IGitHubClient, issue_number: int) -> None:
-        """在推送或开 PR 前重新确认认领仍归当前 attempt 所有。"""
+        """在推送或开 PR 前重新确认认领仍归当前 attempt 所有。
+
+        本进程登记过这条认领时按评论 ID 精确确认；没登记时（仓库标识与登记时不一致、
+        或短时发布恢复从未仲裁过）先按配置/worktree 解析回认领，再回读服务端确认
+        最近一条可信认领归属本机——确认不了就拒绝交付，不能静默放行。
+        """
         repo_context = self._context_for_client(github_client)
         with self._lock:
             claim = self._claims.get((repo_context.repo_id, issue_number))
+            if claim is None:
+                resolved_repo_id = self._resolve_claim_repo_id(
+                    repo_context.config, issue_number, repo_context.repo_path
+                )
+                if resolved_repo_id is not None:
+                    claim = self._claims.get((resolved_repo_id, issue_number))
         if claim is None:
+            assert_claim_owned_by_machine(
+                github_client=self._lease_client_factory(repo_context.repo_path),
+                issue_number=issue_number,
+                machine_id=self.machine_id,
+                host=self._host,
+            )
             return
         assert_claim_still_owned(
             github_client=claim.github_client,
@@ -487,6 +505,36 @@ def active_coordination_heartbeat() -> CoordinationHeartbeat | None:
         return _ACTIVE_HEARTBEAT
 
 
+_PERSISTED_MACHINE_ID: str | None = None
+
+
+def _persisted_machine_id() -> str | None:
+    """读取状态目录里的机器编号；进程内缓存，读不到时返回 ``None``。"""
+    global _PERSISTED_MACHINE_ID
+    if _PERSISTED_MACHINE_ID is not None:
+        return _PERSISTED_MACHINE_ID
+    from backend.core.use_cases.agent_runner_factory import create_machine_identity_store
+
+    try:
+        _PERSISTED_MACHINE_ID = create_machine_identity_store().load_or_create().machine_id
+    except Exception as exc:  # noqa: BLE001 - 身份不可得时退回无机器编号的旧判定。
+        _logger.warning("Could not resolve the persisted machine id: %s", exc)
+        return None
+    return _PERSISTED_MACHINE_ID
+
+
+def current_machine_id() -> str | None:
+    """本机稳定机器编号：优先用心跳携带的身份，没有心跳时读持久身份。
+
+    仲裁与对账都必须按机器编号判断「是不是本机」（PRD FR-8）。只从心跳取身份时，
+    未启动心跳的入口会把自己那批带租约的认领判成远端，进而给自己写接手评论。
+    """
+    heartbeat = active_coordination_heartbeat()
+    if heartbeat is not None:
+        return heartbeat.machine_id
+    return _persisted_machine_id()
+
+
 def acquire_coordination_heartbeat(heartbeat: CoordinationHeartbeat) -> CoordinationHeartbeat:
     """启动或复用当前进程 heartbeat，并把新入口的仓库并入其上下文。"""
     with _ACTIVE_HEARTBEAT_LOCK:
@@ -508,4 +556,5 @@ __all__ = [
     "CoordinationHeartbeat",
     "acquire_coordination_heartbeat",
     "active_coordination_heartbeat",
+    "current_machine_id",
 ]

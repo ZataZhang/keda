@@ -130,17 +130,11 @@ def latest_claim_record(
     return None
 
 
-def assert_claim_still_owned(
-    *,
+def _latest_trusted_claim(
     github_client: IGitHubClient,
     issue_number: int,
-    own_comment_id: int,
-    machine_id: str,
-    was_lost: bool = False,
-) -> None:
-    """回读可信认领评论，失去认领或读取不确定时拒绝发布。"""
-    if was_lost:
-        raise ClaimLeaseLost(f"Issue #{issue_number} claim lease was lost; refusing delivery.")
+) -> tuple[IssueCommentRecord, ClaimMarkerDetail, ClaimLease | None]:
+    """回读最近一条可信认领；读不到或已无认领时按失去认领拒绝交付。"""
     try:
         comment_records = github_client.list_issue_comment_records(
             issue_number,
@@ -153,13 +147,57 @@ def assert_claim_still_owned(
             f"Could not verify the claim for Issue #{issue_number}; refusing delivery: {exc}"
         ) from exc
     latest_record = latest_claim_record(comment_records)
+    if latest_record is None:
+        raise ClaimLeaseLost(
+            f"Issue #{issue_number} has no readable claim comment to verify; refusing delivery."
+        )
+    return latest_record
+
+
+def assert_claim_still_owned(
+    *,
+    github_client: IGitHubClient,
+    issue_number: int,
+    own_comment_id: int,
+    machine_id: str,
+    was_lost: bool = False,
+) -> None:
+    """回读可信认领评论，失去认领或读取不确定时拒绝发布。"""
+    if was_lost:
+        raise ClaimLeaseLost(f"Issue #{issue_number} claim lease was lost; refusing delivery.")
+    latest_record = _latest_trusted_claim(github_client, issue_number)
     if (
-        latest_record is None
-        or latest_record[0].comment_id != own_comment_id
+        latest_record[0].comment_id != own_comment_id
         or latest_record[2] is None
         or latest_record[2].machine_id != machine_id
     ):
         raise ClaimLeaseLost(f"Issue #{issue_number} claim is no longer owned by this process.")
+
+
+def assert_claim_owned_by_machine(
+    *,
+    github_client: IGitHubClient,
+    issue_number: int,
+    machine_id: str,
+    host: str,
+) -> None:
+    """本进程未登记认领时，按机器编号确认最近一条可信认领仍归属本机。
+
+    发布恢复这类入口不经过仲裁，拿不到自己的评论 ID，因此只能退到机器级归属判定：
+    带租约的认领按机器编号、旧认领按主机名（与 :func:`is_local_claim` 同一口径）。
+    判不出来就拒绝交付，不能让「没登记」变成「不用检查」。
+    """
+    _claim_record, claim_detail, lease = _latest_trusted_claim(github_client, issue_number)
+    if not is_local_claim(
+        claim_host=claim_detail.host,
+        lease=lease,
+        machine_id=machine_id,
+        host=host,
+    ):
+        raise ClaimLeaseLost(
+            f"Issue #{issue_number} claim belongs to {claim_detail.host}, not this machine; "
+            "refusing delivery."
+        )
 
 
 def _as_aware_utc(value: datetime) -> datetime:
@@ -173,6 +211,7 @@ __all__ = [
     "ClaimLease",
     "ClaimLeaseLost",
     "RemoteLeaseStatus",
+    "assert_claim_owned_by_machine",
     "assert_claim_still_owned",
     "classify_remote_lease",
     "format_claim_lease_marker",

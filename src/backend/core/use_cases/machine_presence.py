@@ -202,7 +202,9 @@ def render_presence_comment(
         "reported_at": report_utc.isoformat(),
         "issues": list(issues),
     }
-    serialized_payload = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    serialized_payload = _escape_marker_breaks(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    )
     task_rows = issues or ({"number": None, "stage": "idle", "agent": None},)
     table_rows = [
         "| 主机名 | kc 版本 | 进程角色 | 状态 | 最后上报 (UTC) | 正在处理 |",
@@ -403,6 +405,16 @@ def is_process_alive(process_id: int) -> bool:
     except OSError:
         return True
     return True
+
+
+def _escape_marker_breaks(serialized_payload: str) -> str:
+    """转义尖括号，防止正文里的 ``-->`` 提前闭合 ``kc:presence-json`` 注释块。
+
+    JSON 字符串里的 ``\\u003c`` / ``\\u003e`` 在解析时原样还原，因此只影响注释块边界，
+    不影响读回的主机名等字段；不做这层转义时，带 ``-->`` 的主机名会让这台机器从
+    ``kc peers`` 里静默消失。
+    """
+    return serialized_payload.replace("<", "\\u003c").replace(">", "\\u003e")
 
 
 def _as_aware_utc(value: datetime) -> datetime:

@@ -16,6 +16,10 @@ label、Issue comment 的 attempt 历史、worktree 文件状态。**不引入�
 评论；label 变更走"读-检查-写"CAS，Issue 已被别的通路推进时本轮空转。跨机认领、
 无 claim marker、进程仍存活且未过 TTL 的 Issue 一律保守不触碰（与既有 reclaim
 同源同规则）。
+
+残余窗口：评论写入没有 CAS，去重本身是"读-检查-写"。写前再读一次线程把窗口压到
+"这一读与那一写"之间；两台机器的 Phase -1 恰好在此重叠时仍可能各留一条同 hash 的
+对账评论——标签侧由 CAS 保证只有一边推进，多出的评论只是审计噪声。
 """
 
 from __future__ import annotations
@@ -503,6 +507,18 @@ def _apply_disposition(
             applied=False,
             reason=f"{stale_reason}: {decision.reason} (no longer agent/running)",
         )
+
+    if not skip_comment:
+        # 取证用的评论快照可能已经过时：GitHub 评论没有 CAS，两台 daemon 的 Phase -1
+        # 轮询重叠时都会判成同一条结论。写之前再读一次，别人已经留痕就只补 label。
+        if _marker_hash_present(list(github_client.list_issue_comments(issue.number)), dedupe_hash):
+            _logger.info(
+                "Issue #%d reconcile comment landed during this pass (hash=%s); "
+                "applying the label transition only.",
+                issue.number,
+                dedupe_hash,
+            )
+            skip_comment = True
 
     if not skip_comment:
         comment_body = format_stale_attempt_comment(

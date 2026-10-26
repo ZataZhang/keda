@@ -31,8 +31,15 @@ from backend.core.use_cases.agent_runner_reclaim import (
     is_pid_alive,
     parse_claim_marker_detail,
 )
-from backend.core.use_cases.agent_runner_claim_lease import is_local_claim, parse_claim_lease
-from backend.core.use_cases.coordination_heartbeat import active_coordination_heartbeat
+from backend.core.use_cases.agent_runner_claim_lease import (
+    ClaimLease,
+    is_local_claim,
+    parse_claim_lease,
+)
+from backend.core.use_cases.coordination_heartbeat import (
+    active_coordination_heartbeat,
+    current_machine_id,
+)
 from backend.core.use_cases.agent_runner_workflow import transition_issue_workflow_state
 
 #: 投递投标后、回读前的宽限秒数：给并发领取者的评论留出可见时间。仲裁的一致性
@@ -70,6 +77,8 @@ class ClaimBid:
         pid: 投标进程 PID。
         started_at: 投标时间（UTC，带时区）。
         agent: 投标时选定的 agent 注册名。
+        lease: 该投标声明的租约；旧版本认领没有租约时为 ``None``。判断「是不是本机」
+            要靠它携带的机器编号，主机名在两台同名电脑上会撞车。
     """
 
     comment_id: int
@@ -77,6 +86,7 @@ class ClaimBid:
     pid: int
     started_at: datetime
     agent: str | None
+    lease: ClaimLease | None = None
 
 
 def _as_aware_utc(value: datetime) -> datetime:
@@ -139,14 +149,16 @@ def format_withdrawn_claim_comment(loser: ClaimBid, winner: ClaimBid) -> str:
 def _bid_from_comment(
     comment_id: int,
     detail: ClaimMarkerDetail,
+    lease: ClaimLease | None,
 ) -> ClaimBid:
-    """把解析出的 marker 明细组装成 :class:`ClaimBid`。"""
+    """把解析出的 marker 明细与租约组装成 :class:`ClaimBid`。"""
     return ClaimBid(
         comment_id=comment_id,
         host=detail.host,
         pid=detail.pid,
         started_at=_as_aware_utc(detail.started_at),
         agent=detail.agent,
+        lease=lease,
     )
 
 
@@ -184,20 +196,42 @@ def concurrent_bids(
         detail = parse_claim_marker_detail(comment_body)
         if detail is None or detail.started_at is None:
             continue
-        bid = _bid_from_comment(comment_id, detail)
+        bid = _bid_from_comment(comment_id, detail, parse_claim_lease(comment_body))
         age_seconds = (effective_now - bid.started_at).total_seconds()
         if age_seconds > window_seconds:
             continue
-        lease = parse_claim_lease(comment_body)
         if is_local_claim(
             claim_host=bid.host,
-            lease=lease,
+            lease=bid.lease,
             machine_id=machine_id,
             host=this_host,
         ) and not pid_alive(bid.pid):
             continue
         bids.append(bid)
     return bids
+
+
+def _winner_is_own_replay(
+    winner: ClaimBid,
+    *,
+    this_host: str,
+    this_pid: int,
+    machine_id: str | None,
+) -> bool:
+    """赢家是否**可证明**属于本进程，而不是同名同 PID 的另一台机器。
+
+    agent fallback 换 agent 会对同一 Issue 再走一遍领取，此时更早的投标确实属于
+    本进程；但主机名 + PID 在两台同名电脑上会撞车，所以带租约的投标必须按机器编号
+    确认（PRD FR-8），只有没有租约的旧投标才回退到主机名判定。
+    """
+    if (winner.host, winner.pid) != (this_host, this_pid):
+        return False
+    return is_local_claim(
+        claim_host=winner.host,
+        lease=winner.lease,
+        machine_id=machine_id,
+        host=this_host,
+    )
 
 
 def arbitrate_first_claim(
@@ -245,6 +279,7 @@ def arbitrate_first_claim(
     """
     this_host = host if host is not None else socket.gethostname()
     this_pid = pid if pid is not None else os.getpid()
+    own_machine_id = current_machine_id()
     effective_now = _as_aware_utc(now if now is not None else datetime.now(timezone.utc))
     bid = ClaimBid(
         comment_id=0,
@@ -297,7 +332,7 @@ def arbitrate_first_claim(
             this_host=this_host,
             now=effective_now,
             pid_alive=pid_alive,
-            machine_id=heartbeat.machine_id if heartbeat is not None else None,
+            machine_id=own_machine_id,
         )
         own_bid = next(
             (
@@ -319,7 +354,12 @@ def arbitrate_first_claim(
         )
 
     winner = min(bids, key=_bid_sort_key)
-    if (winner.host, winner.pid) == (this_host, this_pid):
+    if _winner_is_own_replay(
+        winner,
+        this_host=this_host,
+        this_pid=this_pid,
+        machine_id=own_machine_id,
+    ):
         # 赢家就是本进程更早的那次投标：这是**同一次领取的重入**（agent fallback
         # 换 agent 会再走一遍领取），不是竞争。继续执行，不撤销自己的认领。
         if on_won is not None:

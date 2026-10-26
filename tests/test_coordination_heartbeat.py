@@ -16,7 +16,11 @@ from backend.core.shared.models.agent_runner import (
 )
 from backend.core.shared.models.machine_identity import MachineIdentity
 from backend.core.use_cases.agent_runner_claim_arbitration import ClaimBid, format_claim_comment
-from backend.core.use_cases.agent_runner_claim_lease import parse_claim_lease, with_claim_lease
+from backend.core.use_cases.agent_runner_claim_lease import (
+    ClaimLeaseLost,
+    parse_claim_lease,
+    with_claim_lease,
+)
 from backend.core.use_cases.coordination_heartbeat import (
     CoordinationHeartbeat,
     acquire_coordination_heartbeat,
@@ -29,7 +33,7 @@ def test_lease_github_client_factory_sets_a_bounded_request_timeout(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """续租客户端把挂起的 gh 命令限制在五秒内。"""
+    """续租客户端把单次挂起的 gh 命令限制在五秒内（重试另有上限）。"""
     captured_arguments: dict[str, object] = {}
     expected_client = object()
 
@@ -177,6 +181,118 @@ def test_half_ttl_self_fence_does_not_start_another_renewal(tmp_path: Path) -> N
         assert client.renewal_attempts == 0
     finally:
         heartbeat.stop()
+
+
+def test_publish_fence_fails_closed_when_the_claim_is_not_registered(tmp_path: Path) -> None:
+    """本进程没登记认领时，推送前仍要回读确认归属，且远端认领必须拒绝交付。"""
+    repo_path = tmp_path.resolve()
+    config = AppConfig(daemon=DaemonConfig(presence_enabled=False))
+    repository_context = RepositoryRunContext("repo", "Repository", repo_path, config)
+    client = FakeGitHubClient()
+    client.repo_path = repo_path
+    heartbeat = CoordinationHeartbeat(
+        contexts=[repository_context],
+        machine_identity=MachineIdentity("machine-a", datetime.now(timezone.utc)),
+        version="1.2.3",
+        role="recover",
+        github_client_factory=lambda _repo_path: client,
+        lease_client_factory=lambda _repo_path: client,
+    )
+    client.comment_issue(
+        42,
+        with_claim_lease(
+            format_claim_comment(ClaimBid(1, "host-b", 321, datetime.now(timezone.utc), "claude")),
+            machine_id="machine-b",
+            ttl_seconds=120,
+            renewed_at=datetime.now(timezone.utc),
+        ),
+    )
+    client.comment_issue(
+        43,
+        with_claim_lease(
+            format_claim_comment(ClaimBid(2, "host-a", 321, datetime.now(timezone.utc), "claude")),
+            machine_id="machine-a",
+            ttl_seconds=120,
+            renewed_at=datetime.now(timezone.utc),
+        ),
+    )
+
+    with pytest.raises(ClaimLeaseLost):
+        heartbeat.assert_claim_owned(github_client=client, issue_number=42)
+    heartbeat.assert_claim_owned(github_client=client, issue_number=43)
+
+
+def test_publish_fence_resolves_a_desynced_repo_id(tmp_path: Path) -> None:
+    """认领登记在另一个仓库标识下时，发布栅栏仍按评论 ID 精确确认。"""
+    repo_path = tmp_path.resolve()
+    config = AppConfig(daemon=DaemonConfig(presence_enabled=False))
+    repository_context = RepositoryRunContext("repo", "Repository", repo_path, config)
+    client = FakeGitHubClient()
+    client.repo_path = repo_path
+    heartbeat = CoordinationHeartbeat(
+        contexts=[repository_context],
+        machine_identity=MachineIdentity("machine-a", datetime.now(timezone.utc)),
+        version="1.2.3",
+        role="run",
+        github_client_factory=lambda _repo_path: client,
+        lease_client_factory=lambda _repo_path: client,
+    )
+    bid = ClaimBid(1, "host-a", 321, datetime.now(timezone.utc), "claude")
+    claim_body = with_claim_lease(
+        format_claim_comment(bid),
+        machine_id="machine-a",
+        ttl_seconds=120,
+        renewed_at=datetime.now(timezone.utc),
+    )
+    client.comment_issue(42, claim_body)
+    heartbeat.start()
+    try:
+        heartbeat.register_claim(
+            github_client=client,
+            issue_number=42,
+            bid=bid,
+            body=claim_body,
+            ttl_seconds=120,
+            config=config,
+        )
+        # 模拟 repo_id 漂移：登记键与发布时解析出的仓库标识不一致。
+        relocated_claim = heartbeat._claims.pop(("repo", 42))
+        heartbeat._claims[("other-repo", 42)] = relocated_claim
+        heartbeat.assert_claim_owned(github_client=client, issue_number=42)
+
+        client.comment_issue(
+            42,
+            with_claim_lease(
+                format_claim_comment(
+                    ClaimBid(2, "host-b", 555, datetime.now(timezone.utc), "claude")
+                ),
+                machine_id="machine-b",
+                ttl_seconds=120,
+                renewed_at=datetime.now(timezone.utc),
+            ),
+        )
+        with pytest.raises(ClaimLeaseLost):
+            heartbeat.assert_claim_owned(github_client=client, issue_number=42)
+    finally:
+        heartbeat.stop()
+
+
+def test_current_machine_id_falls_back_to_the_persisted_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """没有心跳时按持久身份取机器编号，本机带租约的认领不会被判成远端。"""
+    from backend.core.use_cases import coordination_heartbeat as heartbeat_module
+
+    monkeypatch.setattr(heartbeat_module, "_PERSISTED_MACHINE_ID", None)
+    monkeypatch.setattr(
+        "backend.core.use_cases.agent_runner_factory.create_machine_identity_store",
+        lambda: SimpleNamespace(
+            load_or_create=lambda: SimpleNamespace(machine_id="machine-persisted")
+        ),
+    )
+
+    assert active_coordination_heartbeat() is None
+    assert heartbeat_module.current_machine_id() == "machine-persisted"
 
 
 def test_claim_ttl_below_minimum_is_clamped_with_a_warning(

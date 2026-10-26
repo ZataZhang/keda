@@ -869,6 +869,27 @@ def _isolate_issue_snapshot_dir(tmp_path_factory: pytest.TempPathFactory) -> Ite
         session_monkeypatch.undo()
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _isolate_machine_identity(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    """把机器身份文件指到临时状态目录，测试不会写进真实的 ``~/.kedacode``。
+
+    没有心跳的入口（直接驱动 core use case 的用例）会经持久身份解析机器编号；不隔离
+    的话，这些用例会在开发机上创建真实的 ``machine.json`` 与槽位锁。显式传入
+    ``machine_file`` 的用例不受影响。
+    """
+    from backend.infrastructure import machine_identity_store as identity_module
+
+    isolated_state_dir = tmp_path_factory.mktemp("machine-identity")
+    session_monkeypatch = pytest.MonkeyPatch()
+    session_monkeypatch.setattr(
+        identity_module, "state_home", lambda home_path=None: isolated_state_dir
+    )
+    try:
+        yield
+    finally:
+        session_monkeypatch.undo()
+
+
 # ---------------------------------------------------------------------------
 # 失败现场落盘：偶发失败（testmon 子集、机器负载、常驻 daemon 并发写状态目录）事后
 # 无法复现，终端输出又常被 tail 截掉。只要有用例失败，就把完整报错与运行环境写到

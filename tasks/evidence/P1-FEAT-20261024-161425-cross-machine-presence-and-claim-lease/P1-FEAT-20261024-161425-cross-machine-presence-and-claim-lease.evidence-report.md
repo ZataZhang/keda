@@ -8,8 +8,8 @@
 
 ## 验证身份
 
-- Candidate implementation tree：`8b8c0d22461ab066fef954d7b88b376a3f3884af`
-- Base HEAD tree：`901998256c8daaca6f2fa4ef627150ff76f666ac`
+- Candidate implementation tree：`6658504731e5dbc2cfc5b751d470123789c3464c`
+- Base HEAD tree：`d03d049a1a95efc7f5b19e2d1a3247884a936ed3`
 - 四项 RV 各自在最终实现树上重跑；证据命令、输出摘要、expected fail、解释和风险见同目录 `evidence.json`。
 - 原始终端文件按 RV item 分开保存；RV harness、假 GitHub/agent 与 tree helper 都位于 `scripts/`，不进入代码 diff，脚本和输出不含凭据。
 
@@ -49,11 +49,11 @@
 
 ## 其他交付验证
 
-- 相关测试：`uv run pytest -o addopts="" tests/test_agent_runner_claim_lease.py tests/test_coordination_heartbeat.py tests/test_machine_presence.py tests/test_agent_runner_reconcile.py tests/test_run_target_admission.py tests/test_agent_runner_claim_arbitration.py tests/test_agent_runner_reclaim.py tests/test_github_client.py` — **138 passed**。
+- 相关测试：`uv run pytest -o addopts="" tests/test_agent_runner_claim_lease.py tests/test_coordination_heartbeat.py tests/test_machine_presence.py tests/test_agent_runner_reconcile.py tests/test_run_target_admission.py tests/test_agent_runner_claim_arbitration.py tests/test_agent_runner_reclaim.py tests/test_github_client.py tests/test_kc_peers.py` — **149 passed**。
 - 配置映射回归：设置 TTL 为 900 秒的认领评论包含 `ttl="900"`。
 - `SKIP=check-test-flag just lint --full` — **passed**；`just lint --reuse` — **passed**；`uv run mkdocs build --strict` — **passed**。
-- `just test` 根据 testmon 增量结果未选择任何用例；相关八模块已用上方不带 testmon 过滤的命令全部执行。
-- PRD acceptance archive-readiness checker — **PASS**。此前 runner-owned verifier 对更早候选树给出 Yellow，其中报告的并发指针评论缺陷已由当前提交修复；最终树仍需独立 verifier 重跑并给出 PASS。PRD 已由 runner 归档；归档记录执行侧交付完成，不代表人工验收。
+- `just test`（testmon 增量档）通过；完整单元套件 `uv run pytest -o addopts="" tests/` 在最终候选树上为 **5043 passed, 1 skipped**，相关九模块另用不带 testmon 过滤的命令单独确认 `149 passed`。
+- PRD acceptance archive-readiness checker — **passed**。独立 verifier 已在 commit `0a8d9cf0` 上重跑四项 RV 并给出 **GREEN**（`iar:verifier-verdict risk=green`，见 `verifier-response.txt`）；本轮代码审查修复后的最终候选树仍需 runner 重跑独立 verifier 门禁。PRD 已由 runner 归档；归档记录执行侧交付完成，不代表人工验收。
 
 ## 人审清单浏览器检查
 
@@ -64,6 +64,6 @@
 
 ## 最终树跟进
 
-代码审查修复后的四项 RV 已在同一最终候选树 `8b8c0d22461ab066fef954d7b88b376a3f3884af` 上重跑通过；base HEAD tree 为 `901998256c8daaca6f2fa4ef627150ff76f666ac`。最终相关 pytest 覆盖八个模块、138 passed；最终树的 lint、reuse、MkDocs strict 与 diff check 均通过。RV-4 会断言并发首启后重复 Issue 只留一条指针评论。
+代码审查修复后的四项 RV 已在同一最终候选树 `6658504731e5dbc2cfc5b751d470123789c3464c` 上重跑通过（每项先观察负控变红，再确认同一真实入口转绿）；base HEAD tree 为 `d03d049a1a95efc7f5b19e2d1a3247884a936ed3`。最终相关 pytest 覆盖九个模块、149 passed；最终树的 lint、reuse、MkDocs strict 与 diff check 均通过。RV-4 会断言并发首启后重复 Issue 只留一条指针评论。
 
-此前的 runner-owned verifier 原始报告针对更早的候选树，不能作为本最终树的独立 `PASS`；runner 仍需在最终树上重跑独立 verifier。真实浏览器 smoke 仍是 `REVIEW_INCIDENT / INCONCLUSIVE`。
+独立 verifier 已在 commit `0a8d9cf0`（candidate tree `8b8c0d22461ab066fef954d7b88b376a3f3884af`）上亲自重跑 rv-1 至 rv-4，结论 **GREEN** 并留下 `iar:verifier-verdict risk=green` 标记，原始记录见 `verifier-response.txt`。本轮审查修复（仲裁的本机判定、发布前归属栅栏、机器编号来源、presence 转义与渲染、CLI 退出码映射、对账重复留痕收敛）改变了实现树，因此该 GREEN 不等于对本最终树的判定；runner 仍需在 `6658504…` 上重跑独立 verifier 门禁。真实浏览器 smoke 仍是 `REVIEW_INCIDENT / INCONCLUSIVE`。

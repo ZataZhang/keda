@@ -2,18 +2,55 @@
 
 from __future__ import annotations
 
+import json
 import os
 from datetime import datetime, timedelta, timezone
 
-from backend.core.shared.models.agent_runner import AppConfig, IssueSummary
+from backend.core.shared.models.agent_runner import (
+    AppConfig,
+    IssueCommentRecord,
+    IssueSummary,
+)
 from backend.core.use_cases.machine_presence import (
     ensure_presence_issue,
     list_presence_machines,
     parse_presence_comment,
     presence_entry_is_online,
+    render_presence_comment,
     update_presence_comment,
 )
 from tests.conftest import FakeGitHubClient
+
+
+def test_presence_marker_payload_survives_angle_bracket_hostname() -> None:
+    """主机名里的 ``-->`` 不会提前闭合 JSON 区块，这台机器仍出现在 peers 里。"""
+    hostile_hostname = 'macbook-->\n<!-- kc:presence-json {"broken": true'
+
+    comment_body = render_presence_comment(
+        machine_id="machine-a",
+        slot="111@1730000000.000000",
+        hostname=hostile_hostname,
+        version="1.2.3",
+        role="daemon",
+        process_state="online",
+        issues=({"number": 42, "stage": "agent/running", "agent": "codex"},),
+        reported_at=datetime.now(timezone.utc),
+    )
+    record = IssueCommentRecord(
+        comment_id=1,
+        body=comment_body,
+        updated_at=datetime.now(timezone.utc),
+        author="fake-user",
+    )
+
+    entry = parse_presence_comment(record)
+    payload_text = comment_body.split("kc:presence-json", maxsplit=1)[1].partition("-->")[0].strip()
+
+    # JSON 区块只被它自己的闭合符结束：主机名带来的 `-->` 已转义，读回仍是原值。
+    assert json.loads(payload_text)["hostname"] == hostile_hostname
+    assert entry is not None
+    assert entry.hostname == hostile_hostname
+    assert entry.machine_id == "machine-a"
 
 
 def test_duplicate_presence_issues_converge_to_lowest_number() -> None:

@@ -351,6 +351,24 @@ def test_cli_run_on_live_remote_lease_exits_conflict(
     assert runs == []
 
 
+def test_cli_run_on_unreadable_claim_records_exits_conflict(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """认领评论无法确认归属时，真实 CLI 分发按 CONFLICT(5) 退出而非抛 traceback。"""
+    client = _client(labels=(CONFIG.labels.running,))
+
+    def _unreadable_records(_issue_number: int, **_options: object) -> list:
+        raise RuntimeError("Issue #7 comment has invalid timestamp or author metadata.")
+
+    client.list_issue_comment_records = _unreadable_records  # type: ignore[method-assign]
+
+    with _cli_patches(client, live_daemon_pid=None) as runs:
+        exit_code = _main(["run", "--issue", "7"], monkeypatch)
+
+    assert exit_code == int(ExitCode.CONFLICT)
+    assert runs == []
+
+
 def test_cli_run_on_closed_issue_exits_not_found(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

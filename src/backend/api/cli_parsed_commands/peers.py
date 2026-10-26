@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 
+from rich.markup import escape
 from rich.table import Table
 
 from backend.api.cli_console import console
@@ -16,6 +18,25 @@ from backend.core.use_cases.machine_presence import (
     list_presence_machines,
     presence_entry_is_online,
 )
+
+#: 状态评论里的自由文本字段在终端表格里最多展示这么多字符。
+_DISPLAY_FIELD_MAX_CHARS = 64
+#: C0/C1 控制字符：单元格必须是单行纯文本，制表与换行也一并剥掉。
+_TERMINAL_CONTROL_PATTERN = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
+
+def _display_field(value: object) -> str:
+    """把评论带来的自由文本压成安全的终端单元格内容。
+
+    状态评论由具备仓库写权限的作者提交，主机名 / kc 版本 / agent 名都可能带 Rich
+    markup 或终端控制序列；先剥控制字符并限长，再转义方括号，避免 ``kc peers`` 被
+    人造序列操纵终端或刷爆表格。机器可读的 ``--json`` 仍输出原值，不做这层处理。
+    """
+    display_text = "" if value is None else str(value)
+    display_text = _TERMINAL_CONTROL_PATTERN.sub("", display_text)
+    if len(display_text) > _DISPLAY_FIELD_MAX_CHARS:
+        display_text = display_text[: _DISPLAY_FIELD_MAX_CHARS - 1] + "…"
+    return escape(display_text)
 
 
 def run_peers_command(ctx: ParsedCommandContext) -> int:
@@ -132,17 +153,19 @@ def _render_peers_table(
             number = issue_row.get("number")
             if number is None:
                 continue
-            activity = f"#{number} · {issue_row.get('agent') or '—'}"
+            activity = (
+                f"#{_display_field(number)} · {_display_field(issue_row.get('agent') or '—')}"
+            )
             stage = issue_row.get("stage")
             if stage:
-                activity += f" · {stage}"
+                activity += f" · {_display_field(stage)}"
             started_at = issue_row.get("started_at")
             if started_at:
-                activity += f" · {format_local_display_time(str(started_at))}"
+                activity += f" · {_display_field(format_local_display_time(str(started_at)))}"
             activities.append(activity)
         table.add_row(
-            entry.hostname,
-            entry.version,
+            _display_field(entry.hostname),
+            _display_field(entry.version),
             "online" if presence_entry_is_online(entry, now=now) else "offline",
             entry.updated_at.astimezone().isoformat(timespec="seconds"),
             ", ".join(activities) or "idle",
@@ -157,8 +180,8 @@ def _render_unreported_claims(unreported_claims: list[dict[str, object]]) -> Non
         console.print("\nClaim holders without presence status:")
         for claim_row in unreported_claims:
             console.print(
-                f"- Issue #{claim_row['issue_number']}: {claim_row['hostname']} "
-                f"({claim_row['status']})"
+                f"- Issue #{claim_row['issue_number']}: {_display_field(claim_row['hostname'])} "
+                f"({_display_field(claim_row['status'])})"
             )
 
 

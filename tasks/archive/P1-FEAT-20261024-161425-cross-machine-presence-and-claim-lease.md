@@ -568,7 +568,7 @@ No external validation required; repository evidence was sufficient.（GitHub RE
 
 ### 9.2 Acceptance Evidence Package
 
-按风险排序：决策一（rv-2、rv-3，R3）→ 决策二（rv-4，R2）→ rv-1 与 R1/R0 门禁。rv-1 至 rv-4 均通过真实 `kc` CLI/daemon 与本地 Git，GitHub 和 agent CLI 由无凭据替身提供。每个场景先执行负控并观察到 oracle 失败，再去掉故障注入观察到通过；四项共享 candidate implementation tree `1915539127430f1cb15f1dadd8c9bc955457d801`（不含本 PRD 与 evidence delivery records）：
+按风险排序：决策一（rv-2、rv-3，R3）→ 决策二（rv-4，R2）→ rv-1 与 R1/R0 门禁。rv-1 至 rv-4 均通过真实 `kc` CLI/daemon 与本地 Git，GitHub 和 agent CLI 由无凭据替身提供。每个场景先执行负控并观察到 oracle 失败，再去掉故障注入观察到通过；四项共享 candidate implementation tree `6658504731e5dbc2cfc5b751d470123789c3464c`（不含本 PRD 与 evidence delivery records）：
 
 | 顺序 | 结果与判别证据 | 原始证据 |
 |---|---|---|
@@ -593,11 +593,13 @@ No external validation required; repository evidence was sufficient.（GitHub RE
 
 ### Behavior Acceptance
 
-- [x] rv-2 通过：到期前不接手、到期后恰好 1 条 `remote_lease_expired` 对账评论并回到 `agent/ready`、旧认领永不接手（证据：`rv-2-remote-lease.txt`；candidate tree `1915539127430f1cb15f1dadd8c9bc955457d801`）。
-- [x] rv-3 通过：ttl/2 时 agent 被终止；失租后远端分支 ref 未变化、`pr create` 为 0 次、标签写入为 0 次（初始 ready→running 认领的 2 次标签写入除外，证据：`rv-3-self-fence.txt`；candidate tree `1915539127430f1cb15f1dadd8c9bc955457d801`）。
-- [x] rv-4 通过：状态 Issue 恰好 1 条、关闭开关后状态停止更新但租约照常、同名主机不被误对账（证据：`rv-4-presence.txt`；candidate tree `1915539127430f1cb15f1dadd8c9bc955457d801`）。
-- [x] `kc:claim` 文本与本 PRD 基线逐字节一致，基线解析器能解析新认领评论（证据：`rv-2-remote-lease.txt` 中的兼容断言；candidate tree `1915539127430f1cb15f1dadd8c9bc955457d801`）。
-- [x] 租约有效的远端认领，`kc run --issue N` 返回退出码 5，提示中包含剩余时间（证据：`tests/test_run_target_admission.py::test_cli_run_on_live_remote_lease_exits_conflict`，命令输出 `2 passed` 中对应断言；candidate tree `1915539127430f1cb15f1dadd8c9bc955457d801`）。
+- [x] rv-2 通过：到期前不接手、到期后恰好 1 条 `remote_lease_expired` 对账评论并回到 `agent/ready`、旧认领永不接手（证据：`rv-2-remote-lease.txt`；candidate tree `6658504731e5dbc2cfc5b751d470123789c3464c`）。
+- [x] rv-3 通过：ttl/2 时 agent 被终止；失租后远端分支 ref 未变化、`pr create` 为 0 次、标签写入为 0 次（初始 ready→running 认领的 2 次标签写入除外，证据：`rv-3-self-fence.txt`；candidate tree `6658504731e5dbc2cfc5b751d470123789c3464c`）。
+- [x] rv-4 通过：状态 Issue 恰好 1 条、关闭开关后状态停止更新但租约照常、同名主机不被误对账（证据：`rv-4-presence.txt`；candidate tree `6658504731e5dbc2cfc5b751d470123789c3464c`）。
+- [x] `kc:claim` 文本与本 PRD 基线逐字节一致，基线解析器能解析新认领评论（证据：`rv-2-remote-lease.txt` 中的兼容断言；candidate tree `6658504731e5dbc2cfc5b751d470123789c3464c`）。
+- [x] 租约有效的远端认领，`kc run --issue N` 返回退出码 5，提示中包含剩余时间（证据：`tests/test_run_target_admission.py::test_cli_run_on_live_remote_lease_exits_conflict`，命令输出 `2 passed` 中对应断言；candidate tree `6658504731e5dbc2cfc5b751d470123789c3464c`）。
+- [x] 同名主机 + 同数字 PID 的**另一台机器**先认领时，仲裁不按本机重入放行：带租约的投标一律按机器编号判定（回归测试 `tests/test_agent_runner_claim_arbitration.py::test_same_host_same_pid_remote_lease_bid_is_not_a_reentry`，同机的合法重入仍由 `test_own_leased_earlier_bid_still_reenters` 保住；candidate tree `6658504731e5dbc2cfc5b751d470123789c3464c`）。
+- [x] 本进程未登记认领时，推送/开 PR 前的归属栅栏仍回读服务端按机器编号确认，确认不了就拒绝交付（回归测试 `tests/test_coordination_heartbeat.py::test_publish_fence_fails_closed_when_the_claim_is_not_registered` 与 `test_publish_fence_resolves_a_desynced_repo_id`；candidate tree `6658504731e5dbc2cfc5b751d470123789c3464c`）。
 
 ### Dependency Acceptance
 
@@ -605,9 +607,9 @@ No external validation required; repository evidence was sufficient.（GitHub RE
 
 ### Validation Acceptance
 
-- [x] 最高保真入口：rv-1 至 rv-4 均通过真实 `kc` CLI 与 daemon 进程执行，只替换 `gh` 与 agent CLI；每份证据记录由 RV tree helper 计算的 candidate implementation tree（不含 PRD/evidence delivery records），且彼此相同并对应最终实现代码。证据：四份 `rv-*.txt` 均记录 `1915539127430f1cb15f1dadd8c9bc955457d801`，manifest 位于 `evidence.json`。
+- [x] 最高保真入口：rv-1 至 rv-4 均通过真实 `kc` CLI 与 daemon 进程执行，只替换 `gh` 与 agent CLI；每份证据记录由 RV tree helper 计算的 candidate implementation tree（不含 PRD/evidence delivery records），且彼此相同并对应最终实现代码。证据：四份 `rv-*.txt` 均记录 `6658504731e5dbc2cfc5b751d470123789c3464c`，manifest 位于 `evidence.json`。
 - [x] 配置三处映射：设置 `lease_ttl_seconds = 900` 后，新认领评论中出现 `ttl="900"`（证据：`tests/test_agent_runner_claim_lease.py::test_configured_ttl_is_written_into_new_claim_comment`；对应相关测试输出）。
-- [x] 全量相关测试：`uv run pytest -o addopts="" tests/test_agent_runner_claim_lease.py tests/test_coordination_heartbeat.py tests/test_machine_presence.py tests/test_agent_runner_reconcile.py tests/test_run_target_admission.py tests/test_agent_runner_claim_arbitration.py tests/test_agent_runner_reclaim.py` 全部通过（不依赖 testmon 增量）。证据：最终运行 `96 passed`。
+- [x] 全量相关测试：`uv run pytest -o addopts="" tests/test_agent_runner_claim_lease.py tests/test_coordination_heartbeat.py tests/test_machine_presence.py tests/test_agent_runner_reconcile.py tests/test_run_target_admission.py tests/test_agent_runner_claim_arbitration.py tests/test_agent_runner_reclaim.py tests/test_github_client.py tests/test_kc_peers.py` 全部通过（不依赖 testmon 增量）。证据：最终运行 `149 passed`；完整单元套件 `uv run pytest -o addopts="" tests/` 为 `5043 passed, 1 skipped`。
 
 ### Documentation Acceptance
 
@@ -619,7 +621,7 @@ No external validation required; repository evidence was sufficient.（GitHub RE
 
 - [x] 推荐方案已完整实现，没有遗留的 Phase 2 或临时兼容层。证据：最终代码审查、四项 RV 与相关回归测试；没有新增运行时依赖或临时旁路。
 - [x] 如果交付走 PR，PR 证据评论包含 9.1 呈递区的内容；否则完成消息原样附上 9.1 内容。证据：本次不创建 PR，完成消息将逐字附上 9.1 行。
-- [x] `just lint --full` 与上述 pytest 通过，单文件非空行均少于 1000 行。证据：最终 `just lint --full`、相关测试 `96 passed` 与 `just lint --reuse` 通过；全文件行数检查无超限。`just test` 按仓库 testmon 增量策略报告本轮无待运行用例，针对性全量命令不依赖 testmon 已全通过。
+- [x] `just lint --full` 与上述 pytest 通过，单文件非空行均少于 1000 行。证据：最终 `just lint --full`、相关测试 `149 passed` 与 `just lint --reuse` 通过；全文件行数检查无超限。`just test`（testmon 增量档）通过，完整单元套件 `uv run pytest -o addopts="" tests/` 在最终候选树上为 `5043 passed, 1 skipped`，针对性全量命令不依赖 testmon 亦 `149 passed`。
 - [~] 独立 verifier 的最终判定 — runner-owned gate: runner 在所有 executor-owned 清单项完成后执行独立审查并记录有效 verdict；执行者不得把自身代码审查记为 verifier `PASS`。
 - [~] 人审 HTML 的真实浏览器渲染与翻页 smoke — runner-owned gate: 在可用浏览器中确认零 `pageerror`、首卡可见、能到末页生成 Markdown。执行者的 CUA 环境没有可用 browser tab 且拒绝访问已安装浏览器；未把静态结构检查冒充浏览器通过。
 
@@ -675,7 +677,7 @@ No external validation required; repository evidence was sufficient.（GitHub RE
 - Related PRD status: 归档的命名清理 PRD 与 hard via-main 依赖由基线 commit `f4886655` 满足；Tailscale onboarding 与 hosted-runner deployment 仍独立，无额外顺序依赖。
 - Requirements and risks: rv-1 到 rv-4 均以真实 kc CLI/daemon、真实本地 git、假 GitHub 与确定性 agent CLI 运行；服务器时间通过假 GitHub 的 `updated_at` 设置。rv-3 区分初始领取的两次标签写入与失租后的零次标签写入，并覆盖推送前与开 PR 前两个归属读取点。远端接手仍受双方时钟偏差小于 ttl/2 的 PRD 前提约束；状态评论仍在公开仓库可见。
 - **实现中发现并纳入的边界**：进程因失租被终止后，`ClaimLeaseLost` 必须穿过执行恢复循环并阻止启动新的 recovery attempt；该修复已由定向回归测试与 rv-3 子进程场景验证。`kc run --takeover` 在停本机 daemon 前先拒绝有效远端租约，停止后再次准入；旧 takeover reclaim 路径也改为按 machine_id 识别本机，避免同名主机误回收。状态 Issue 重复项先写带 canonical 标记的清理留言，再移除重复标签；若留言失败，重复项仍留在查询集合中供下一次重试，回归测试覆盖失败后重试。低 TTL 配置留给运行期下限钳制，机器编号文件仅接受带时区创建时间的 UUID4。
-- **最终证据树**：rv-1 至 rv-4 在最终实现改动完成后逐项重跑，原始输出各自记录同一 candidate implementation tree `1915539127430f1cb15f1dadd8c9bc955457d801`；该身份排除 PRD 与 evidence delivery-record 路径，命令与哈希汇总在 9.2 和 evidence report。实现侧接受项已由执行者完成；独立 verifier 由 runner 后续门禁单独判断，执行者自审不冒充 verifier `PASS`。
+- **最终证据树**：rv-1 至 rv-4 在最终实现改动完成后逐项重跑，原始输出各自记录同一 candidate implementation tree `6658504731e5dbc2cfc5b751d470123789c3464c`；该身份排除 PRD 与 evidence delivery-record 路径，命令与哈希汇总在 9.2 和 evidence report。实现侧接受项已由执行者完成；独立 verifier 由 runner 后续门禁单独判断，执行者自审不冒充 verifier `PASS`。
 - **人审包检查**：Markdown 与 HTML 源码静态核对包含相同的三张决定卡和结果卡；官方 warning checker 因未修改的模板注释中出现字面 `<h2>` 产生 2 张卡的误报，HTMLParser 检查实际正文为 4 张卡。真实浏览器检查因 CUA inventory 无 browser 且两个已安装浏览器均拒绝访问，记录为 `REVIEW_INCIDENT / INCONCLUSIVE`；runner 需在可用浏览器环境重试翻页、首卡可见与结果生成检查。
 - **验收投影**：实现侧清单项在对应验证通过后勾选；两项决策与 9.1 呈递区仍留在 `Human-Confirmed`，因此状态横幅为 `🧍 待人工验收`。
 
@@ -692,7 +694,7 @@ No external validation required; repository evidence was sufficient.（GitHub RE
 ### Make duplicate-board cleanup retryable and refresh final evidence
 - Type: implementation / evidence
 - Before: Duplicate status Issues lost the `kedacode/presence` label before the pointer comment was written; a transient comment failure could make the duplicate undiscoverable for retry. The four RV records referenced an earlier candidate tree.
-- After: The canonical pointer comment is ensured before label removal. A regression test injects the comment failure, proves the duplicate remains discoverable, then verifies a retry writes the pointer and removes the label. rv-1 through rv-4 were rerun and all record candidate tree `1915539127430f1cb15f1dadd8c9bc955457d801`.
+- After: The canonical pointer comment is ensured before label removal. A regression test injects the comment failure, proves the duplicate remains discoverable, then verifies a retry writes the pointer and removes the label. rv-1 through rv-4 were rerun and all record candidate tree `6658504731e5dbc2cfc5b751d470123789c3464c`.
 - Reason: Preserve the PRD's promised duplicate-issue convergence and pointer comment under a transient GitHub write failure, and bind every realistic validation result to the final source tree.
 - Impact: No scope or user-visible behavior changed; convergence now retries safely. The 4 realistic oracles passed with their negative controls, and focused tests cover the retry path.
 - Review: executor code review complete; independent verifier and human decisions pending
@@ -712,3 +714,11 @@ No external validation required; repository evidence was sufficient.（GitHub RE
 - Reason: Preserve the distinction between static artifact inspection and actual browser rendering.
 - Impact: No product behavior or scope changed. Independent verifier/archive remains pending until the runner completes its verdict and real-browser checklist smoke.
 - Review: executor review complete; independent verifier, browser smoke, and human decisions pending
+
+### Close second-round review findings and rebind final evidence
+- Type: implementation / evidence
+- Before: Arbitration treated a winning bid as a same-process re-entry on hostname + PID alone, so two machines sharing a hostname and a numeric PID inside the concurrent-claim window both flipped the Issue to `agent/running`. The pre-push/pre-PR ownership fence returned silently whenever the claim was not registered under the publish-time repository id. Machine identity came only from the heartbeat, so a heartbeat-less entry judged its own leased claims remote. Duplicate `remote_lease_expired` reconcile comments depended on a stale comment snapshot, `kc peers` rendered comment-authored hostname/version/agent straight into Rich cells, `json.dumps(ensure_ascii=False)` left `>` unescaped so a `-->` hostname truncated its own presence block, the guide described the lease request bound as one 5-second limit, and an unreadable claim comment surfaced as a bare traceback instead of exit 5. §9 and the verifier report still cited the pre-review candidate tree and `96 passed`.
+- After: `ClaimBid` carries the lease it declared and the re-entry test goes through `is_local_claim`, so a leased bid counts as ours only when the machine id matches (legacy unleased bids keep the hostname fallback). The fence reuses `_resolve_claim_repo_id` for repo_id/config drift and otherwise re-reads the server to confirm the latest trusted claim belongs to this machine, raising `ClaimLeaseLost` when it cannot. `current_machine_id()` sources identity from the heartbeat first and the persisted `machine.json` second, with `tests/conftest.py` isolating the state directory. Reconcile re-checks the dedupe hash immediately before writing and documents the residual multi-writer window. Presence payloads escape `<`/`>`, and `kc peers` strips control characters, escapes markup and bounds length before table rendering. The guide states the per-attempt limit with the 3-attempt/17-second worst case, serial renewal head-of-line effect, and monotonic self-fence clock, and the CLI maps claim-record read failures to `ExitCode.CONFLICT`. rv-1 through rv-4 were rerun and all record candidate tree `6658504731e5dbc2cfc5b751d470123789c3464c`; the focused suite is `149 passed` across nine modules and the full unit suite `5043 passed, 1 skipped`.
+- Reason: A reviewer found the same-hostname harm the Issue itself named, a fail-open path in FR-7's second brake, and identity, comment, output-safety and evidence-binding gaps; the acceptance source of truth has to name the tree the reruns actually used.
+- Impact: FR-8 locality now holds on the arbitration path and FR-7 refuses delivery that cannot be attributed, which is fail-closed for unattributable publishes. Legacy hostname-only claims keep their previous fallback. No CLI subcommand, flag or machine-readable output changed, so the packaged operator skill needs no update. Independent verifier still has to rerun on the final tree, and the browser smoke stays `REVIEW_INCIDENT / INCONCLUSIVE`.
+- Review: executor review complete for both rounds; independent verifier on the final tree, browser smoke, and human decisions pending

@@ -124,6 +124,23 @@ def _seed_remote_leased_claim(
     github.set_list_issues_by_label_result([github.get_issue(7)])
 
 
+class _PeerReconcileClient(FakeGitHubClient):
+    """把对端 daemon 的对账评论延迟到本轮取证之后才露出来。"""
+
+    def __init__(self, peer_comment: str) -> None:
+        super().__init__()
+        self._peer_comment = peer_comment
+        self._evidence_reads = 0
+
+    def list_issue_comments(self, issue_number: int, *, require_success: bool = False) -> list[str]:
+        """首次读取（取证快照）干净，之后的读取已含对端那条评论。"""
+        comments = super().list_issue_comments(issue_number)
+        if self._evidence_reads:
+            return [*comments, self._peer_comment]
+        self._evidence_reads += 1
+        return comments
+
+
 class TestDecideStaleAttemptDisposition:
     """三出口判定阶梯（纯函数，无 I/O）。"""
 
@@ -297,6 +314,29 @@ class TestReconcileEngine:
         assert github.get_issue(7).labels == labels_after_first
         assert second_round[0].applied is True
         assert "comment already recorded" in second_round[0].reason
+
+    def test_peer_comment_landing_mid_pass_is_not_duplicated(self, tmp_path: Path) -> None:
+        """对端 daemon 在本轮取证之后才落评论：写前重读，不再写第二条同结论留痕。"""
+        config = AppConfig()
+        peer_github = FakeGitHubClient()
+        _seed_running_claim(peer_github, config)
+        peer_round = _run_reconcile(tmp_path, peer_github, config)
+        assert peer_round[0].applied is True
+        peer_comment = _reconcile_comments(peer_github)[0]
+
+        github = _PeerReconcileClient(peer_comment)
+        _seed_running_claim(github, config)
+
+        outcomes = _run_reconcile(tmp_path, github, config)
+
+        assert outcomes[0].applied is True
+        assert "comment already recorded" in outcomes[0].reason
+        assert not [
+            call
+            for call in github.calls
+            if call["method"] == "comment_issue" and "## Stale Attempt Reconciled" in call["body"]
+        ]
+        assert config.labels.ready in github.get_issue(7).labels
 
     def test_cross_host_claim_untouched(self, tmp_path: Path) -> None:
         """别的机器认领的僵尸不在本机回收范围内（保守护栏）。"""

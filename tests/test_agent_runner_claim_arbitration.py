@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
-from backend.core.shared.models.agent_runner import AppConfig
+from backend.core.shared.models.agent_runner import AppConfig, DaemonConfig, RepositoryRunContext
+from backend.core.shared.models.machine_identity import MachineIdentity
 from backend.core.use_cases.agent_runner_claim_arbitration import (
     CONCURRENT_CLAIM_WINDOW_SECONDS,
     ClaimArbitrationLost,
@@ -21,6 +23,7 @@ from backend.core.use_cases.agent_runner_reclaim import (
     format_claim_marker,
     parse_claim_marker_detail,
 )
+from backend.core.use_cases.coordination_heartbeat import CoordinationHeartbeat
 from tests.conftest import FakeGitHubClient
 
 HOST = "runner-a"
@@ -234,6 +237,68 @@ def test_same_process_reentry_wins_over_its_own_earlier_bid() -> None:
     again = _arbitrate(client, started_at=NOW + timedelta(seconds=3))
 
     assert again.pid == 111
+    assert not [call for call in client.calls if call["method"] == "edit_issue_comment"]
+
+
+def _leased_machine_heartbeat(
+    machine_id: str, repo_path: Path, client: FakeGitHubClient
+) -> CoordinationHeartbeat:
+    """起一个带机器编号的心跳，让新认领自动写上自己的租约。"""
+    config = AppConfig(daemon=DaemonConfig(presence_enabled=False))
+    client.repo_path = repo_path
+    return CoordinationHeartbeat(
+        contexts=[RepositoryRunContext("repo", "Repository", repo_path, config)],
+        machine_identity=MachineIdentity(machine_id, NOW),
+        version="1.2.3",
+        role="run",
+        github_client_factory=lambda _repo_path: client,
+        lease_client_factory=lambda _repo_path: client,
+    )
+
+
+def test_same_host_same_pid_remote_lease_bid_is_not_a_reentry(tmp_path: Path) -> None:
+    """同名同 PID 的**另一台机器**先认领时，不能按本机重入放行（FR-8）。
+
+    两台电脑主机名相同、kc 进程恰好又是同一个数字 PID 时，主机名 + PID 判不出归属：
+    只有按租约里的机器编号判断，才不会两边都以为是自己重入而双跑同一个 Issue。
+    """
+    client = FakeGitHubClient()
+    rival_started_at = NOW - timedelta(seconds=10)
+    client.comment_issue(
+        42,
+        with_claim_lease(
+            format_claim_comment(ClaimBid(0, HOST, 111, rival_started_at, "codex")),
+            machine_id="machine-b",
+            ttl_seconds=600,
+            renewed_at=rival_started_at,
+        ),
+    )
+    heartbeat = _leased_machine_heartbeat("machine-a", tmp_path.resolve(), client)
+    heartbeat.start()
+    try:
+        with pytest.raises(ClaimArbitrationLost) as exc_info:
+            _arbitrate(client, host=HOST, pid=111, started_at=NOW)
+    finally:
+        heartbeat.stop()
+
+    assert exc_info.value.winner is not None
+    assert not [call for call in client.calls if call["method"] == "edit_issue_labels"]
+    withdrawn = next(call for call in client.calls if call["method"] == "edit_issue_comment")
+    assert "kc:claim-withdrawn" in withdrawn["body"]
+
+
+def test_own_leased_earlier_bid_still_reenters(tmp_path: Path) -> None:
+    """自己的更早投标带着同一机器编号时，重入路径照常放行。"""
+    client = FakeGitHubClient()
+    heartbeat = _leased_machine_heartbeat("machine-a", tmp_path.resolve(), client)
+    heartbeat.start()
+    try:
+        first = _arbitrate(client, host=HOST, pid=111, started_at=NOW)
+        again = _arbitrate(client, host=HOST, pid=111, started_at=NOW + timedelta(seconds=3))
+    finally:
+        heartbeat.stop()
+
+    assert (first.pid, again.pid) == (111, 111)
     assert not [call for call in client.calls if call["method"] == "edit_issue_comment"]
 
 

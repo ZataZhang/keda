@@ -452,10 +452,12 @@ def _require_explicit_target_claimable(
 
     错误原因由 core 层给出（core 不引用 ``ExitCode``），这里映射成退出码：
     读不到 / 非 open → ``NOT_FOUND (3)``，被他人活跃认领或 blocked 未解除 →
-    ``CONFLICT (5)``。
+    ``CONFLICT (5)``。确认认领归属时 GitHub 评论结构不完整（缺更新时间或作者）会
+    直接报错，同样按 ``CONFLICT (5)`` 回报「现在领不动」，而不是把 traceback
+    抛给操作者。
 
     Raises:
-        CliError: 目标 Issue 当前不可被本进程领取。
+        CliError: 目标 Issue 当前不可被本进程领取，或无法确认其认领归属。
     """
     from backend.core.use_cases.run_target_admission import (
         TARGET_UNCLAIMABLE_NOT_FOUND,
@@ -500,6 +502,14 @@ def _require_explicit_target_claimable(
                     else ExitCode.CONFLICT
                 ),
                 suggestion=exc.suggestion,
+            ) from exc
+        except RuntimeError as exc:
+            raise CliError(
+                f"Cannot confirm the claim on Issue #{target_issue}: {exc}",
+                code=ExitCode.CONFLICT,
+                suggestion=(
+                    f"kc peers --repo-id {context.repo_id}  " "# 确认机器状态与在途认领后重试"
+                ),
             ) from exc
 
 
