@@ -42,7 +42,9 @@ kc config migrate --apply
 ```
 
 默认只扫描 open Issue 与 PR 的正文和全部评论。迁移只替换标记前缀，其他文字保持不变；可以重复运行，
-第二次不会再次改写已迁移的标记。closed Issue / PR 默认跳过，需要时加 `--include-closed`。`--apply`
+第二次不会再次改写已迁移的标记。PR 正文经 pulls 端口写回：GitHub 把 PR 也算进 issues 集合，所以
+读取可以共用，但 `PATCH /issues/{n}` 不会改动 PR 正文，用它写回会报成功而远端原样不动。closed
+Issue / PR 默认跳过，需要时加 `--include-closed`。`--apply`
 会在本机检测到 runner 正在运行时拒绝执行；它无法检测其他电脑上的进程，必须先完成所有机器停机。
 占用检查同时覆盖新旧状态目录中的受管进程登记与锁；旧目录已移除时，新目录中的活动记录仍会阻止执行。
 
