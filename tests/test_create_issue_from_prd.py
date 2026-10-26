@@ -320,6 +320,45 @@ def test_create_issue_from_prd_rejects_unparsed_non_none_dependency(
     assert [call for call in fake_client.calls if call["method"] == "create_issue"] == []
 
 
+@pytest.mark.parametrize(
+    "dependency_heading",
+    [
+        "## 8. Delivery Dependancies\n",
+        "# 8. Delivery Dependencies\n",
+        "",
+    ],
+    ids=["misspelled-heading", "unsupported-heading-level", "missing-heading"],
+)
+def test_create_issue_from_prd_rejects_dependencies_without_recognized_heading(
+    tmp_path: Path,
+    dependency_heading: str,
+) -> None:
+    """依赖字段位于未识别标题下时，应指出 PRD 并在创建 Issue 前失败。"""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo)
+    fake_client = FakeGitHubClient()
+    prd = repo / "tasks" / "pending" / "downstream.md"
+    prd.parent.mkdir(parents=True)
+    prd.write_text(
+        "# PRD: Downstream\n\n" + dependency_heading + "- Depends on tasks/issues: #42\n"
+        "- Gate type: hard\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        create_issue_from_prd(
+            request=_request(repo, Path("tasks/pending/downstream.md")),
+            github_client=fake_client,
+        )
+
+    message = str(exc_info.value)
+    assert "tasks/pending/downstream.md" in message
+    assert "non-none 'Depends on tasks/issues'" in message
+    assert "no dependency references were parsed" in message
+    assert [call for call in fake_client.calls if call["method"] == "create_issue"] == []
+
+
 def test_create_issue_from_prd_rejects_dependencies_in_later_section(
     tmp_path: Path,
 ) -> None:

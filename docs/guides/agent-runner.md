@@ -266,6 +266,7 @@ kc labels sync --repo-id keda
 `## 8. Delivery Dependencies` 外层标题加 `### Delivery Dependencies` 子标题。
 解析器按匹配标题的级别确定边界：更低级标题仍属于该小节，遇到同级或更高级标题才结束。
 每份 PRD 应只声明一个依赖小节；重复小节若包含额外依赖，`kc issue create` 会报错并停止，避免遗漏后续依赖。
+`Depends on tasks/issues` 声明非 `none` 内容却没有解析到依赖引用时（例如依赖标题拼写错误），`kc issue create` 会报告 PRD 路径并在创建 Issue 前失败。
 
 字段说明：
 

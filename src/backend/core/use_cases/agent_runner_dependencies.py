@@ -161,52 +161,63 @@ def validate_delivery_dependencies_not_dropped(
         prd_path: 用于报错的 PRD 仓库相对路径。
 
     Raises:
-        ValueError: PRD 在依赖小节中写了非 ``none`` 内容，但解析结果没有依赖引用。
+        ValueError: PRD 声明了非 ``none`` 依赖但解析结果无引用，或后续依赖小节会被丢弃。
     """
     declaration_has_dependencies = bool(
         declaration.depends_on_issues or declaration.depends_on_prds
     )
-    for section_index, section_text in enumerate(_delivery_dependencies_section_texts(prd_text)):
-        dependency_values: list[str] = []
-        current_field_is_dependency = False
-
-        for line in section_text.splitlines():
-            stripped_line = line.strip()
-            if not stripped_line or stripped_line.startswith("#"):
-                continue
-
-            field_match = _DELIVERY_FIELD_RE.match(stripped_line)
-            if field_match:
-                normalized_field_key = field_match.group("key").strip().lower().replace(" ", "_")
-                current_field_is_dependency = (
-                    _DELIVERY_FIELD_ALIASES.get(normalized_field_key) == "depends_on_issues"
-                )
-                if current_field_is_dependency:
-                    dependency_values.append(field_match.group("value").strip())
-                continue
-
-            list_item_match = _DELIVERY_LIST_ITEM_RE.match(line)
-            if list_item_match and current_field_is_dependency:
-                dependency_values.append(list_item_match.group("value").strip())
-
-        declares_non_none_dependency = any(
+    if not declaration_has_dependencies:
+        declares_unparsed_dependency = any(
             dependency_value.strip().lower() not in _NONE_DEPENDENCY_VALUES
-            for dependency_value in dependency_values
+            for dependency_value in _delivery_dependency_field_values(prd_text)
         )
-        if not declares_non_none_dependency:
-            continue
-        if declaration_has_dependencies and section_index > 0:
-            raise ValueError(
-                f"PRD '{prd_path}' declares dependencies in multiple 'Delivery Dependencies' "
-                "sections, but dependencies after the first section were not parsed. "
-                "Consolidate dependency references into one section."
-            )
-        if not declaration_has_dependencies:
+        if declares_unparsed_dependency:
             raise ValueError(
                 f"PRD '{prd_path}' declares a non-none 'Depends on tasks/issues' value, "
                 "but no dependency references were parsed. Check the Delivery Dependencies "
                 "section heading and dependency field."
             )
+
+    for section_index, section_text in enumerate(_delivery_dependencies_section_texts(prd_text)):
+        if section_index == 0:
+            continue
+        section_has_unparsed_dependency = any(
+            dependency_value.strip().lower() not in _NONE_DEPENDENCY_VALUES
+            for dependency_value in _delivery_dependency_field_values(section_text)
+        )
+        if section_has_unparsed_dependency:
+            raise ValueError(
+                f"PRD '{prd_path}' declares dependencies in multiple 'Delivery Dependencies' "
+                "sections, but dependencies after the first section were not parsed. "
+                "Consolidate dependency references into one section."
+            )
+
+
+def _delivery_dependency_field_values(markdown_text: str) -> list[str]:
+    """提取 Markdown 文本中的依赖字段值及其列表续行。"""
+    dependency_values: list[str] = []
+    current_field_is_dependency = False
+
+    for line in markdown_text.splitlines():
+        stripped_line = line.strip()
+        if not stripped_line or stripped_line.startswith("#"):
+            continue
+
+        field_match = _DELIVERY_FIELD_RE.match(stripped_line)
+        if field_match:
+            normalized_field_key = field_match.group("key").strip().lower().replace(" ", "_")
+            current_field_is_dependency = (
+                _DELIVERY_FIELD_ALIASES.get(normalized_field_key) == "depends_on_issues"
+            )
+            if current_field_is_dependency:
+                dependency_values.append(field_match.group("value").strip())
+            continue
+
+        list_item_match = _DELIVERY_LIST_ITEM_RE.match(line)
+        if list_item_match and current_field_is_dependency:
+            dependency_values.append(list_item_match.group("value").strip())
+
+    return dependency_values
 
 
 def _delivery_dependencies_section_texts(prd_text: str) -> list[str]:
