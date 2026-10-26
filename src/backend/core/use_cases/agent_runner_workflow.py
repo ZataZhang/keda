@@ -229,7 +229,10 @@ def claim_blocked_issue(
         config: 应用配置
 
     Returns:
-        成功认领后的 Issue 快照；状态竞争失败时返回 ``None``。
+        成功认领后的 Issue 快照；状态竞争失败时返回 ``None``。快照只含 GitHub 侧
+        字段，不含编排入口从 PRD 头部回填的 ``lifecycle_overrides`` /
+        ``lifecycle_preset_overrides``，已回填过覆盖的调用方接管快照时必须把这两个
+        字段带过去。
     """
     issue_before = github_client.get_issue(issue_number)
     if config.labels.blocked not in issue_before.labels:

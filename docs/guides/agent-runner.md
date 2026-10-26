@@ -2652,6 +2652,11 @@ agent/running ── forbidden path 拦截 ──→ agent/blocked ── blocke
 
 多个 runner 同时处理同一个 blocked Issue 时，只有第一个成功执行 label CAS 的 runner 会继续。其他 runner 会收到明确提示并跳过。即使 `kc blocked-continue` 只写了 marker 但 CAS 被其他进程抢占，后续 `kc run` 轮询时也会检测到该 marker 并完成认领。
 
+认领函数 `claim_blocked_issue(github_client, issue_number, config)` 的返回值就是这场竞争的裁决，签名是 `-> IssueSummary | None`（旧版返回 `bool`）：认领成功返回**认领之后的 Issue 新鲜快照**，认领前的标签不含 blocked、或二次确认发现标签没翻成 `agent/running` 时返回 `None`，调用方据此跳过而不是抛错。两条容易被读错的口径：
+
+- 新鲜快照是「无改动交接」的判定基线。巡查（patrol）类 Issue 本来就是带着 `agent/blocked` 进来的，若继续拿认领前的旧状态当基线，本轮重新被阻塞会被 `is_issue_newly_blocked` 判成「执行前就 blocked」而漏判，Issue 照旧落进 no-commit 失败流程。daemon 的 `blocked_resolution` 分支因此把认领后的快照交给后续执行（`kc blocked-continue` 入口拿的是同一个返回值）。
+- 快照来自 `get_issue`，只带 GitHub 侧字段，**不含**编排入口从 PRD 头部回填的 `lifecycle_overrides` / `lifecycle_preset_overrides`。daemon 在分派前已经调过 `attach_prd_lifecycle_overrides`，接管快照时必须把这两个字段带过去：实现（`_process_blocked_resolution` 会用交接的 Issue 重跑 `choose_agent`）、review（`resolve_reviewer_agent(issue, ...)`）与监督（`resolve_lifecycle_agent("supervisor", ..., issue=issue)`）都只读 Issue 上的回填字段、没有显式 PRD 入参，丢了就静默回落到仓库 / 全局矩阵而不是报错。覆盖见 `tests/test_lifecycle_agent_routing.py::test_blocked_resolution_claim_keeps_prd_overrides`。`kc blocked-continue` 这条 CLI 入口不经过 daemon 编排，Issue 从未被回填 PRD 覆盖，因此接管快照没有信息损失，其阶段绑定沿用仓库 / 全局矩阵。
+
 ### 与 run 兜底路径的关系
 
 `kc run` 在消耗完 `agent/ready` 和 `agent/running` 配额后，也会扫描 `agent/blocked` Issue。对带有 `blocked_resolution_requested` marker 的 Issue，它会执行同样的 CAS 竞争认领。这意味着：
@@ -3713,9 +3718,10 @@ verifier 能跑的就是 builder 写进 manifest 的那些 capture 脚本，而�
 - 每轮尝试的结果都会记录在 `AttemptResult` 中，包含执行 agent、起止时间、耗时与失败生命周期阶段；runner 会实时把结果写入本地 SQLite `attempt_records` 表，再用 `IRunHistoryStore.list_issue_attempts` 读回该 Issue 的完整轨迹（跨 agent、跨 claim）渲染 GitHub Issue 上带 `<!-- kc:attempt-history -->` marker 的增量评论。内存中的 attempt 列表每次换 agent 或重新 claim 都会从 1 重新计数，只能代表本轮，因此不作为渲染源（仅在没有配置 SQLite 存储时兜底）。最终失败评论中的「Attempt History」表格展示 attempt_number、started_at、agent、failure_type、recovered、duration、detail，便于人工 review 时追踪 Agent 的修复轨迹；由于 attempt_number 只在本轮内递增，整表会混排多轮（例如 `claude 1..6` 后紧跟 `kimi 1..2`），因此表格用 **Started (UTC)** 列给出时间锚点（`YYYY-MM-DD HH:MMZ`；缺失渲染为 `-`，无法解析则原样回显），并在表格下方固定附一行说明"编号在每次换 agent 与每次重新 claim 时从 1 重新开始"，避免被误读成编号错乱；Detail 列取每次失败输出的最后一行有效内容（实际报错几乎总在末尾），而不是从头截断的样板文字
 - 失败评论会识别已知错误签名：命中 Claude API 用量限额（429 / usage limit）时，在评论顶部输出加粗的 Root cause 摘要并带上限额重置时间；`CalledProcessError` 的命令回显只保留命令名（如 `claude`），不会把完整 agent prompt 打进评论
 - 如果 Agent 没有产生任何新 commit 且工作区也没有未提交变更，runner 会 fresh read Issue 状态。无 PRD 的 Issue 确认已关闭时按「无改动完成」结束；若 Issue 在本次执行开始后转为 open / `agent/blocked`，则按人工交接结束，跳过 no-commit recovery、验证和 PR 发布，并保留 `agent/blocked`。普通 open/no-change 仍走原 `no_commits` 失败流程；状态读取失败、执行前已经 blocked、存在 commit 或工作区不干净时都不能借此提前结束。该状态判定由 `tests/test_agent_runner_closed_noop.py` 与 `tests/test_agent_runner_workflow.py` 覆盖。
-  无 PRD 闭合和新 blocked 路径的 `kc run` 集成验证由 `tests/test_agent_runner_recovery.py` 覆盖：`test_run_once_completes_recovery_or_hands_off_no_change_issue[closed-noop]` 确认闭合收敛不建 PR，`[blocked-noop]` 确认 blocked 状态保留且不重试、不发 PR；`test_recovery_loop_exhausted_raises_max_retries` 确认干净树但状态仍 open 时 fresh read 被问过、门禁不放行，Issue 照旧 `no_commits` + `agent/failed`。两点容易读错的口径：
+  无 PRD 闭合和新 blocked 路径的 `kc run` 集成验证由 `tests/test_agent_runner_recovery.py` 覆盖：`test_run_once_completes_recovery_or_hands_off_no_change_issue[closed-noop]` 确认闭合收敛不建 PR，`[blocked-noop]` 确认 blocked 状态保留且不重试、不发 PR；`test_recovery_loop_exhausted_raises_max_retries` 确认干净树但状态仍 open 时 fresh read 被问过、门禁不放行，Issue 照旧 `no_commits` + `agent/failed`。三点容易读错的口径：
     - 「worktree 没有变更」按 `git status --porcelain` 判定，**含未跟踪文件**（只被 `.gitignore` 排除的 runner 产物如 `.agent-runner/` 不计入）。巡查 Agent 若在关闭 Issue 后留下了任何未跟踪产物，本轮仍按 `uncommitted_changes` / `no_commits` 失败，不会冒充「无改动完成」。
     - fresh read 依赖执行请求上的 `github_client`，该字段是**必填**：漏传的调用面在构造 `AgentExecutionRequest` 时直接抛 `TypeError`，而不是静默退回旧的 no-commit 失败行为（仓库不跑静态类型检查，所以兜底的是构造期报错与测试）。
+    - blocked 续作（解阻后重跑的巡查 Issue）的比较基线是**认领后**的新鲜快照，不是认领前那条 `agent/blocked`：接管快照时只认它的新标签与状态，同时把编排入口回填的 PRD 级 `lifecycle_*` 覆盖带过去（口径见「竞争安全」小节）。拿认领前的状态当基线会把本轮新发生的 blocked 误判成「执行前已经 blocked」，人工交接漏判。
   无改动闭合只跳过发布环节，不做事后清理：本轮 claim 建的 worktree 与分支仍留在原地（没有任何可合并的提交），由 `kc worktree cleanup`（不带 `--yes` 时只做 dry run）这条 post-merge 回收扫描按「Issue 已关闭 + `git fetch --prune` 后远端分支不存在 + 工作区干净 + 分支已在 base 之上」删掉；runner、daemon 与 merge queue 都不会自动回收工作区，因此这条路径不占并发槽位（`count_live_running_issues` 只数 open），只留一个待回收的目录。
 - Pre-PR reviewer 的修改同样必须通过 `verification_commands` 才能发布
 - Post-PR supervisor 的 rebase 操作使用 `--force-with-lease` 且仅作用于 PR branch，不会推送 base branch
