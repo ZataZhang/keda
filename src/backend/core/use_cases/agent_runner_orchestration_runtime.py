@@ -354,14 +354,15 @@ def _process_single_issue(
             if marker is None:
                 output_view.update_status(issue.number, "skipped")
                 return 0
-            claimed = claim_blocked_issue(github_client, issue.number, config)
-            if not claimed:
+            claimed_issue_snapshot = claim_blocked_issue(github_client, issue.number, config)
+            if claimed_issue_snapshot is None:
                 _logger.info(
                     "Issue #%d already claimed by another runner, skipping.",
                     issue.number,
                 )
                 output_view.update_status(issue.number, "skipped")
                 return 0
+            issue = claimed_issue_snapshot
             # 生命周期观测：阻塞 Issue 被重新领取，说明阻塞已解除并进入新一轮执行。
             record_lifecycle_event(
                 store=run_history_store,

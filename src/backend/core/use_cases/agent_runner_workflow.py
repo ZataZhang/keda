@@ -209,12 +209,13 @@ def claim_blocked_issue(
     github_client: IGitHubClient,
     issue_number: int,
     config: AppConfig,
-) -> bool:
+) -> IssueSummary | None:
     """尝试竞争认领一个 blocked Issue，将其切换到 running。
 
     采用读-检查-写模式（best-effort CAS）：先读取当前 labels，确认仍是
     blocked；然后执行 transition；最后重新读取 labels，确认已成功切换为
-    running 且不再包含 blocked。二次确认失败时返回 False。
+    running 且不再包含 blocked。二次确认失败时返回 ``None``，成功时返回认领后的
+    Issue 快照，供后续执行状态判定使用。
 
     .. note::
         这不是真正的 compare-and-swap。在极高并发下存在 TOCTOU 窗口：
@@ -228,16 +229,18 @@ def claim_blocked_issue(
         config: 应用配置
 
     Returns:
-        是否成功认领
+        成功认领后的 Issue 快照；状态竞争失败时返回 ``None``。
     """
     issue_before = github_client.get_issue(issue_number)
     if config.labels.blocked not in issue_before.labels:
-        return False
+        return None
 
     transition_issue_workflow_state(github_client, issue_number, config, config.labels.running)
 
     issue_after = github_client.get_issue(issue_number)
-    return (
+    if (
         config.labels.running in issue_after.labels
         and config.labels.blocked not in issue_after.labels
-    )
+    ):
+        return issue_after
+    return None
