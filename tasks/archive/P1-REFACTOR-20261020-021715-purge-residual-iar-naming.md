@@ -5,7 +5,7 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> 🧍 **验收状态**：待人工验收；3 项 Human-Confirmed 仍未勾选。
+> ✅ **验收状态**：已验收；用户授权验证通过后 squash 合并 #318，最终 Git tree 已核对。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 > 本 PRD 分两个 altitude，自上而下阅读：
@@ -446,9 +446,9 @@ delivery_dependencies:
 
 **Human-Confirmed**
 
-- [ ] 🧍 决策一已确认：接受只认 `kc:`、停机迁移 open Issue / PR、closed 默认不迁移
-- [ ] 🧍 决策二已确认：接受目录只认不搬与显式迁移
-- [ ] 🧍 9.1 人审导航已核对：已查看决策一的标记迁移证据及决策二的 Git 工作树目录证据
+- [x] 🧍 决策一已确认：接受只认 `kc:`、停机迁移 open Issue / PR、closed 默认不迁移
+- [x] 🧍 决策二已确认：接受目录只认不搬与显式迁移
+- [x] 🧍 9.1 人审导航已核对：已查看决策一的标记迁移证据及决策二的 Git 工作树目录证据
 
 ## 10. Functional Requirements
 
@@ -502,7 +502,7 @@ delivery_dependencies:
 
 RV-1 在用户授权创建的私有 GitHub 沙箱完成真实写入与 fresh 读回，含旧版本负控及依赖状态验证；RV-2 在真实进程枚举可用的本机完成迁移、幂等、占用拒绝，只有 gh 传输采用文件型替身；RV-3 至 RV-6 正负控均通过。原始输出、脚本和 manifest 只保留本地及独立 evidence 分支，源码只提交 Markdown 报告。验证层级为 CLI real entry、Git/filesystem、API route、GitHub live integration，无前端交付。
 
-源指纹（排除关联 PRD 与 tasks/evidence）为 `d3ee685533be8bc01f881e79fa0850e8895158670e07c1e523ce2d6fffb72976`；此后的修改只记录验收，不变更实现或 oracle。最终 PR head 的完整 CI 仍由合并流程单独确认。Machine-Confirmed 已按证据勾选；三个 Human-Confirmed 空框随交付归档，合并即验收契约生效后仅回填验收记录。
+源指纹（排除关联 PRD 与 tasks/evidence）为 `d3ee685533be8bc01f881e79fa0850e8895158670e07c1e523ce2d6fffb72976`；此后的修改只记录验收，不变更实现或 oracle。最终 PR head 的完整 CI 已通过（5005 passed，1 skipped）。Machine-Confirmed 已按证据勾选；用户明确授权通过验证后合并，PR #318 的唯一关联 PRD 合并即验收契约已生效，三个 Human-Confirmed 项现仅回填验收记录。
 
 ## Change Log
 
@@ -560,3 +560,11 @@ RV-1 在用户授权创建的私有 GitHub 沙箱完成真实写入与 fresh 读
 - After: 用户授权创建私有验证仓库；六项 RV 正负控通过，迁移安全与随包说明的独立 findings 全部修复，干净实现提交独立 PASS，machine 清单和 Final Reconciliation 已对齐。
 - Evidence: 本 PRD 同名证据目录的三份 Markdown 报告、rv-0 身份记录与逐项 RV 原始输出。
 - Human acceptance: 仍待合并即验收契约按最终 tree 生效后回填。
+
+### 2026-10-26 合并即验收记录
+- Type: acceptance
+- Authorization: 用户明确要求继续 #318、解决冲突、检查可合并性，并在可合并时合并；PR #318 正文包含唯一关联本 PRD 的 `kc:merge-acceptance version=1` 声明。
+- Gates: 六项 RV 通过，独立 verifier 复审及最终记录提交复核均 PASS；最终提交 `9b16d1829c5bc507633fd85ee03d15e99320379f` 的 CI 为 5005 passed、1 skipped，安装检查与签核门禁通过。
+- Merge: https://github.com/ZataZhang/keda/pull/318 以 squash 提交 `f488665551f250a3107126a97504d5258112a80e` 合并。
+- Tree reconciliation: 合并 tree `f19f320b784c3b1053c8e9bbd73142c349ffdd61` 与最终已验证 PR head 的完整 tree 相同，且相对实现复审提交仅有本 PRD 与证据报告记录变化。
+- Recorded result: 勾选 Human-Confirmed 三项、横幅更新为已验收；本次仅回填验收记录，不修改实现、需求范围或 oracle。
