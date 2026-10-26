@@ -391,6 +391,9 @@ class FakeGitHubClient(IGitHubClient):
             {
                 "method": "list_issue_comment_entries",
                 "issue_number": issue_number,
+                "trusted_only": trusted_only,
+                "body_contains": body_contains,
+                "require_success": require_success,
             }
         )
         return [
@@ -407,6 +410,19 @@ class FakeGitHubClient(IGitHubClient):
                     entries[index] = (comment_id, body)
                     self._issue_comment_updated_at[comment_id] = datetime.now(timezone.utc)
                     return
+
+    def delete_issue_comment(self, comment_id: int) -> None:
+        self.calls.append({"method": "delete_issue_comment", "comment_id": comment_id})
+        for issue_number, entries in self._issue_comment_entries.items():
+            for index, (existing_id, body) in enumerate(entries):
+                if existing_id != comment_id:
+                    continue
+                entries.pop(index)
+                self._issue_comment_updated_at.pop(comment_id, None)
+                issue_comments = self._issue_comments.get(issue_number, [])
+                if index < len(issue_comments) and issue_comments[index] == body:
+                    issue_comments.pop(index)
+                return
 
     def list_issue_comment_records(
         self,

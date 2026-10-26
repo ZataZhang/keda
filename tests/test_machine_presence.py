@@ -95,6 +95,74 @@ def test_duplicate_presence_issue_retries_pointer_comment_before_unlabeling() ->
     assert client.calls.index(duplicate_comment) < label_removal_index
 
 
+def test_duplicate_presence_issue_consolidates_racing_pointer_comments() -> None:
+    """并发写入的可信指针评论会收敛为一条，清理失败时保留重复标签。"""
+
+    class RacingPointerClient(FakeGitHubClient):
+        def __init__(self) -> None:
+            super().__init__()
+            self.inject_racing_comment = True
+            self.fail_first_delete = True
+
+        def comment_issue(self, issue_number: int, body: str) -> None:
+            super().comment_issue(issue_number, body)
+            if self.inject_racing_comment and "kc:presence-duplicate" in body:
+                self.inject_racing_comment = False
+                super().comment_issue(issue_number, body)
+
+        def delete_issue_comment(self, comment_id: int) -> None:
+            if self.fail_first_delete:
+                self.fail_first_delete = False
+                raise RuntimeError("simulated duplicate-comment deletion failure")
+            super().delete_issue_comment(comment_id)
+
+    client = RacingPointerClient()
+    client.set_list_issues_by_label_result(
+        [
+            IssueSummary(33, "status", "url/33", "", ("kedacode/presence",)),
+            IssueSummary(12, "status", "url/12", "", ("kedacode/presence",)),
+        ]
+    )
+
+    try:
+        ensure_presence_issue(client, AppConfig())
+    except RuntimeError as error:
+        assert str(error) == "simulated duplicate-comment deletion failure"
+    else:
+        raise AssertionError("the injected duplicate-comment cleanup should fail")
+
+    assert not any(
+        call["method"] == "edit_issue_labels" and call["issue_number"] == 33
+        for call in client.calls
+    )
+
+    ensure_presence_issue(client, AppConfig())
+
+    pointer_entries = client.list_issue_comment_entries(
+        33,
+        trusted_only=True,
+        body_contains='<!-- kc:presence-duplicate canonical="12" -->',
+        require_success=True,
+    )
+    assert len(pointer_entries) == 1
+    delete_index = next(
+        index for index, call in enumerate(client.calls) if call["method"] == "delete_issue_comment"
+    )
+    label_removal_index = next(
+        index
+        for index, call in enumerate(client.calls)
+        if call["method"] == "edit_issue_labels" and call["issue_number"] == 33
+    )
+    assert delete_index < label_removal_index
+    assert any(
+        call["method"] == "list_issue_comment_entries"
+        and call["trusted_only"]
+        and call["require_success"]
+        and call["issue_number"] == 33
+        for call in client.calls
+    )
+
+
 def test_presence_comment_updates_in_place_and_expires_after_five_minutes() -> None:
     """同一进程复用一条评论，读取方按服务端更新时间计算离线。"""
     client = FakeGitHubClient()

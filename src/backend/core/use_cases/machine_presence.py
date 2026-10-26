@@ -68,19 +68,42 @@ def ensure_presence_issue(
         if duplicate_issue.number == canonical_issue.number:
             continue
         duplicate_marker = f'<!-- kc:presence-duplicate canonical="{canonical_issue.number}" -->'
-        existing_duplicate_comments = github_client.list_issue_comment_entries(
+        duplicate_comment_entries = github_client.list_issue_comment_entries(
             duplicate_issue.number,
+            trusted_only=True,
             body_contains="<!-- kc:presence-duplicate ",
             require_success=True,
         )
-        if not any(
-            duplicate_marker in comment_body for _, comment_body in existing_duplicate_comments
-        ):
+        matching_duplicate_entries = [
+            (comment_id, comment_body)
+            for comment_id, comment_body in duplicate_comment_entries
+            if duplicate_marker in comment_body
+        ]
+        if not matching_duplicate_entries:
             github_client.comment_issue(
                 duplicate_issue.number,
                 f"{duplicate_marker}\nDuplicate machine status Issue; "
                 f"the canonical board is #{canonical_issue.number}.",
             )
+            duplicate_comment_entries = github_client.list_issue_comment_entries(
+                duplicate_issue.number,
+                trusted_only=True,
+                body_contains="<!-- kc:presence-duplicate ",
+                require_success=True,
+            )
+            matching_duplicate_entries = [
+                (comment_id, comment_body)
+                for comment_id, comment_body in duplicate_comment_entries
+                if duplicate_marker in comment_body
+            ]
+            if not matching_duplicate_entries:
+                raise RuntimeError(
+                    "GitHub did not return the canonical presence pointer after creation."
+                )
+        retained_comment_id = min(comment_id for comment_id, _ in matching_duplicate_entries)
+        for comment_id, _ in duplicate_comment_entries:
+            if comment_id != retained_comment_id:
+                github_client.delete_issue_comment(comment_id)
         github_client.edit_issue_labels(
             duplicate_issue.number,
             remove=(KEDACODE_PRESENCE_LABEL,),

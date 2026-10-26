@@ -54,6 +54,7 @@ from backend.infrastructure.github_helpers import (
 from backend.infrastructure.github_issue_ops import (
     comment_issue,
     create_issue,
+    delete_issue_comment,
     edit_issue_body,
     edit_issue_comment,
     edit_issue_labels,
@@ -582,6 +583,9 @@ class GitHubCliClient:
 
     def edit_issue_comment(self, comment_id: int, body: str) -> None:
         edit_issue_comment(self, comment_id, body)
+
+    def delete_issue_comment(self, comment_id: int) -> None:
+        delete_issue_comment(self, comment_id)
 
     # --- PR delegations -------------------------------------------------
 

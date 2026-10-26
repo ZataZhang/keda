@@ -584,9 +584,25 @@ def edit_issue_comment(client: _ClientProtocol, comment_id: int, body: str) -> N
         )
 
 
+def delete_issue_comment(client: _ClientProtocol, comment_id: int) -> None:
+    """删除 GitHub Issue 评论。"""
+    owner_repo = client._get_owner_repo()
+    client._run_with_retry(
+        [
+            "gh",
+            "api",
+            "-X",
+            "DELETE",
+            f"repos/{owner_repo}/issues/comments/{comment_id}",
+        ],
+        cwd=client.repo_path,
+    )
+
+
 __all__ = [
     "comment_issue",
     "create_issue",
+    "delete_issue_comment",
     "edit_issue_body",
     "edit_issue_comment",
     "edit_issue_labels",

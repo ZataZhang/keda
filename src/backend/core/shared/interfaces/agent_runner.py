@@ -672,6 +672,15 @@ class IGitHubClient(ABC):
         ...
 
     @abstractmethod
+    def delete_issue_comment(self, comment_id: int) -> None:
+        """删除指定的 Issue 评论。
+
+        Args:
+            comment_id: 要删除的 numeric 评论 ID。
+        """
+        ...
+
+    @abstractmethod
     def comment_pr(self, pr_number: int, body: str) -> None:
         """向某个 Pull Request 发布一条 Markdown 评论。
 
