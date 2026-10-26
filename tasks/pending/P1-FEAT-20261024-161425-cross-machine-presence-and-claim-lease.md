@@ -1,6 +1,8 @@
 # PRD: 跨机器可见性与认领租约（只依赖 GitHub 的多机协作）
 
-> ⛔ **交付前置**：建议排在 `P1-REFACTOR-20261020-021715-purge-residual-iar-naming` 之后开工（soft，不阻塞构建）。两份 PRD 改的是同一批认领标记的格式化与解析代码；先完成命名清理，本 PRD 直接在新前缀的认领标记上加租约，避免两边反复改同一组函数、合并时冲突。
+- GitHub Issue: https://github.com/ZataZhang/keda/issues/314
+
+> ⛔ **交付前置**：排在 `P1-REFACTOR-20261020-021715-purge-residual-iar-naming` 合并进 main 之后开工（hard 门禁）。两份 PRD 改的是同一批认领标记的格式化与解析代码；本 PRD 单独先做也能构建，但会和命名清理反复改同一组函数并在合并时冲突，所以由 runner 的依赖门禁强制先后。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 > ⬜ **验收状态**：未开工。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
@@ -191,11 +193,11 @@ skill 新增"看别的机器"路由，指向 `kc peers --json`。
 
 **相关 PRD**
 
-- `tasks/pending/P1-REFACTOR-20261020-021715-purge-residual-iar-naming.md`：soft 顺序依赖。它把认领等协作标记的读写统一改成 `kc:` 前缀、不再识别 `iar:`，并提供一次性迁移和回潮守卫；两份 PRD 都改 `agent_runner_reclaim.py` 与 `agent_runner_claim_arbitration.py` 里的认领标记格式化和解析。建议它先合入，本 PRD 再基于新前缀实现；如果顺序反过来，命名清理只需替换认领标记的前缀，`kc:lease` 与 `kc:presence` 已经是新前缀，不受影响。
+- `tasks/pending/P1-REFACTOR-20261020-021715-purge-residual-iar-naming.md`：hard 顺序依赖（via-main）。它把认领等协作标记的读写统一改成 `kc:` 前缀、不再识别 `iar:`，并提供一次性迁移和回潮守卫；两份 PRD 都改 `agent_runner_reclaim.py` 与 `agent_runner_claim_arbitration.py` 里的认领标记格式化和解析。建议它先合入，本 PRD 再基于新前缀实现；如果顺序反过来，命名清理只需替换认领标记的前缀，`kc:lease` 与 `kc:presence` 已经是新前缀，不受影响。
 - `tasks/pending/P1-FEAT-20261018-034216-kc-tailscale-machine-onboarding.md`：独立。它规划经 Tailscale 与 SSH 管理机器，并新建 `kc machine` 命令组与 Console `/app/machines/` 页面。本 PRD 不占用 `kc machine` 命名；本 PRD 的机器编号文件今后可以被它复用，但两边互不依赖。
 - `tasks/pending/P1-FEAT-20261009-161453-kc-hosted-runner-deployment.md`：独立。托管 runner 运行在容器里，状态目录由 `KEDACODE_HOME` 指定，本 PRD 的机器编号随之落在容器的状态目录中。
 - `tasks/archive/P1-FEAT-20260930-225000-daemon-crash-reconciliation-session-resume.md`：前序工作，定义了"不引入心跳表或租约库"和三出口对账。本 PRD 在它之上新增"远端租约过期"这一证据来源，租约信息依然写在 Issue 评论里，没有引入第二个状态源。
-- 除上述与命名清理 PRD 的 soft 顺序关系外，没有重复或阻塞关系。
+- 除上述与命名清理 PRD 的 hard 顺序关系外，没有重复或阻塞关系。
 
 ## 6. Recommendation
 
@@ -546,9 +548,9 @@ No external validation required; repository evidence was sufficient.（GitHub RE
 
 - Depends on tasks/issues:
   - P1-REFACTOR-20261020-021715-purge-residual-iar-naming
-- Gate type: soft
+- Gate type: hard
 - Sequence: via-main
-- Notes: 建议顺序而非构建依赖：两份 PRD 改同一组认领标记的格式化与解析函数，先做命名清理可避免重复改动和合并冲突；本 PRD 单独先做也能构建和交付。与 `P1-FEAT-20261018-034216-kc-tailscale-machine-onboarding` 无顺序依赖；它今后可以复用本 PRD 的 `machine.json` 机器编号。与 `P1-FEAT-20261009-161453-kc-hosted-runner-deployment` 无依赖。
+- Notes: 交付顺序依赖而非构建依赖：两份 PRD 改同一组认领标记的格式化与解析函数，先做命名清理可避免重复改动和合并冲突；用户 2026-10-24 要求由 kc 自动保证顺序，因此设为 hard。与 `P1-FEAT-20261018-034216-kc-tailscale-machine-onboarding` 无顺序依赖；它今后可以复用本 PRD 的 `machine.json` 机器编号。与 `P1-FEAT-20261009-161453-kc-hosted-runner-deployment` 无依赖。
 
 ## 9. Acceptance Checklist
 
@@ -643,7 +645,7 @@ No external validation required; repository evidence was sufficient.（GitHub RE
 |---|---|---|---|---|
 | D-01 | 共享状态放哪 | 继续只用 GitHub Issue 与评论 | `kc hub` + Tailscale 中心服务 | 用户要求"只装 kc 和登录 GitHub"即可使用，中心服务需要额外部署和网络配置。 |
 | D-02 | 租约字段放哪 | 同一认领评论里的独立 `kc:lease` 标记 | 给认领标记加属性 | 现有解析器要求属性顺序固定且紧跟 `-->`，加属性会让未升级的 kc 认不出新认领并重复执行；独立标记还让本 PRD 与命名清理 PRD 的前缀迁移互不干扰。 |
-| D-09 | 与命名清理 PRD 的顺序 | soft 依赖，建议命名清理先合入 | 两份并行开发 | 两份都改同一组认领标记函数，并行开发必然冲突；本 PRD 的新标记已用 `kc:` 前缀，无论先后都不用返工命名。 |
+| D-09 | 与命名清理 PRD 的顺序 | hard 依赖（via-main），命名清理合并后才开工 | soft 依赖、两份并行开发 | 两份都改同一组认领标记函数，并行开发必然冲突；交给 runner 的依赖门禁执行顺序，不靠人盯。 |
 | D-03 | 过期判定用哪个时间 | 评论的服务器端 `updated_at` + 持有者声明的时长 | 评论正文里由持有者写入的时间戳 | 正文时间来自持有者的时钟，服务器时间戳只需要信任接手方一侧的时钟。 |
 | D-04 | 续期挂在哪 | 进程级后台线程 | daemon tick | `run_once` 执行 Issue 期间阻塞，tick 间隔还会随空闲退避拉长，无法保证续期频率。 |
 | D-05 | 远端接手方式 | 放回队列从已推送状态重跑 | 续传远端会话 | 远端的 worktree、会话和 WIP checkpoint 只存在于那台机器，接手方拿不到。 |

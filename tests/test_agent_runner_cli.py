@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 from pathlib import Path
@@ -4844,3 +4845,56 @@ def test_agent_fallback_candidate_add_reads_baseline_under_write_lock(
     capsys.readouterr()
 
     assert lock_held_at_baseline == [True]
+
+
+def test_main_daemon_status_json_reports_live_parallel_limit(capsys, monkeypatch) -> None:
+    """``kc daemon status --json`` 带出 daemon 实际在用的并行上限，供脚本与 agent 读取。"""
+    from backend.api.cli import main
+    from backend.core.use_cases.daemon_parallel_limit_status import DaemonParallelLimitStatus
+
+    monkeypatch.setenv("KEDACODE_SKIP_GH_AUTH_CHECK", "1")
+    mock_context = MagicMock()
+    mock_context.repo_path = Path("/tmp/repo")
+    mock_context.repo_id = "repo"
+    daemon_record = RunnerProcessRecord(
+        process_id="abc123",
+        repo_id="repo",
+        kind=RunnerProcessKind.DAEMON,
+        pid=1234,
+        status="running",
+        exit_code=None,
+        log_path="/tmp/log",
+        command=("kc", "daemon", "--repo-id", "repo", "--concurrency", "5"),
+        started_at="2026-06-23T10:00:00Z",
+        stopped_at=None,
+    )
+    mock_supervisor = MagicMock()
+    mock_supervisor.list_processes.return_value = [daemon_record]
+    mock_supervisor.list_unmanaged_processes.return_value = []
+    mock_editor = MagicMock()
+    mock_editor.list_repositories.return_value = []
+    live_status = DaemonParallelLimitStatus(
+        repo_id="repo",
+        pid=1234,
+        parallel_limit=5,
+        source="cli_override",
+        in_flight=2,
+        updated_at="2026-10-25T00:00:00+00:00",
+    )
+
+    with (
+        patch("backend.api.cli_registry.resolve_repository_targets", return_value=[mock_context]),
+        patch("backend.api.cli_registry.create_process_supervisor", return_value=mock_supervisor),
+        patch("backend.api.cli_registry.create_registry_editor", return_value=mock_editor),
+        patch(
+            "backend.api.cli_registry.read_daemon_parallel_limit_status",
+            return_value=live_status,
+        ),
+    ):
+        exit_code = main(["daemon", "status", "--repo-id", "repo", "--json"])
+
+    rows = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert rows[0]["parallel_limit"] == 5
+    assert rows[0]["parallel_limit_source"] == "cli_override"
+    assert rows[0]["in_flight"] == 2

@@ -768,3 +768,29 @@ def test_rename_failure_is_reported(tmp_path: Path, monkeypatch: pytest.MonkeyPa
 
     assert rename_result.outcome == "move_failed"
     assert (tmp_path / LEGACY_CONFIG_FILENAME).is_file()
+
+
+def test_migration_removes_retired_max_issues_with_its_comment(tmp_path: Path) -> None:
+    """已退役的 ``runner.max_issues`` 不论值是多少都删除，并行上限键原样保留。"""
+    runner_table = """\
+[agent_runner.runner]
+# 每次轮询每个仓库最多处理多少个 Issue
+max_issues = 5
+# 并行上限
+max_concurrent_issues = 3
+"""
+    config_path = _write_config(tmp_path, CONFIG_BEFORE_GENERATED_CONTENT, runner_table)
+
+    dry_run_result = migrate_repository_local_config(tmp_path, dry_run=True)
+    assert not dry_run_result.wrote_file
+    assert [
+        (pin.table_name, pin.key_name, pin.pinned_value) for pin in dry_run_result.removed_pins
+    ] == [("agent_runner.runner", "max_issues", 5)]
+
+    migration_result = migrate_repository_local_config(tmp_path)
+
+    assert migration_result.wrote_file
+    migrated_config = _parsed_config(config_path.read_text(encoding="utf-8"))
+    assert migrated_config["agent_runner"]["runner"] == {"max_concurrent_issues": 3}
+    assert "每次轮询每个仓库最多处理多少个 Issue" not in config_path.read_text(encoding="utf-8")
+    assert migrate_repository_local_config(tmp_path).removed_pins == ()

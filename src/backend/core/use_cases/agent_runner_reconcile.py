@@ -99,6 +99,7 @@ def reconcile_stale_attempts(
     pid_alive: Callable[[int], bool] = is_pid_alive,
     ttl_seconds: int | None = None,
     now: datetime | None = None,
+    exclude_issue_numbers: frozenset[int] = frozenset(),
 ) -> list[ReconcileOutcome]:
     """对账本仓库 ``agent/running`` 僵尸 attempt，逐个给出明确终态。
 
@@ -112,6 +113,8 @@ def reconcile_stale_attempts(
         pid_alive: 进程存活探针（测试注入）。
         ttl_seconds: claim 老化阈值；``None`` 表示只认"PID 已死"。
         now: 当前时间（测试可注入）；默认 UTC now。
+        exclude_issue_numbers: 本机 daemon 正在执行的 Issue。它们由执行线程推进，
+            长任务的认领可能超过 TTL，必须整体跳过，否则会被当成僵尸放回队列再领一次。
 
     Returns:
         本轮产生判定的 Issue 结果列表（含被去重跳过的空转轮次）。
@@ -128,7 +131,7 @@ def reconcile_stale_attempts(
     )
     outcomes: list[ReconcileOutcome] = []
     for issue in github_client.list_issues_by_label(config.labels.running, limit):
-        if issue.state.upper() != "OPEN":
+        if issue.state.upper() != "OPEN" or issue.number in exclude_issue_numbers:
             continue
         try:
             outcome = _reconcile_one_issue(pass_context, issue)

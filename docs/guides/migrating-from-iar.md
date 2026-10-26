@@ -30,7 +30,9 @@ kc completion install
 2. 安装新版 KedaCode。
 3. 在仓库目录预演迁移；确认 Issue / PR 清单和预计编辑次数。
 4. 预演无误后显式执行 `--apply`。
-5. 重新启动 runner。
+5. 将各目标仓库的 `.github/workflows/validation-gate.yml` 同步到当前版本，确认它解析
+   `kc:realistic-validation` 清单；旧工作流只识别 `iar:`，会把新清单当成不存在。
+6. 重新启动 runner。
 
 ```bash
 kc config migrate
@@ -40,6 +42,7 @@ kc config migrate --apply
 默认只扫描 open Issue 与 PR 的正文和全部评论。迁移只替换标记前缀，其他文字保持不变；可以重复运行，
 第二次不会再次改写已迁移的标记。closed Issue / PR 默认跳过，需要时加 `--include-closed`。`--apply`
 会在本机检测到 runner 正在运行时拒绝执行；它无法检测其他电脑上的进程，必须先完成所有机器停机。
+占用检查同时覆盖新旧状态目录中的受管进程登记与锁；旧目录已移除时，新目录中的活动记录仍会阻止执行。
 
 如果跳过迁移，在途 Issue 的旧认领会被忽略，可能被重复执行；旧依赖标记也不再阻止任务启动。
 已关闭 Issue 中未迁移的旧标记不再被新版 runner 识别。

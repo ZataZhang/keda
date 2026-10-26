@@ -1,16 +1,13 @@
-# Verification Plan
+# #318 最终验证计划
 
-PRD: `tasks/pending/P1-REFACTOR-20261020-021715-purge-residual-iar-naming.md`
+按风险顺序执行 RV-2、RV-1、RV-3/4、RV-5、RV-6，逐项保留反例与正例。原始文件只进入本地与孤立 evidence 分支；源码分支只保留 Markdown 报告。
 
-验证按风险从真实入口开始。所有 RV 原始输出分别保存在 `tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/rv-*.txt`；脚本只放在同目录的 `scripts/`，不进入代码 diff。
+- RV-1：`scripts/rv-1-live.py`。显式指定 `KC_RV_SANDBOX_REPO` 与 `KC_RV_BASELINE_SOURCE`，复用本机 gh 登录；生产 CLI 创建、GitHub 保存、fresh gh 读回与生产依赖门禁必须贯通。所有创建的 Issue 在 finally 中关闭，不运行 Agent。
+- RV-2：`scripts/rv-2-current.py`。复用 `rv_harness.py` 的持久化 gh 替身；真实 CLI、Git、进程扫描与消费者不替换。检查迁移前负控、只读预演、只替前缀、新进程认领、重跑零编辑、新状态目录活动登记拒绝及实际 kc daemon 拒绝。
+- RV-3/4：`rv_harness.py` 的真实 worktree 场景。`KC_CLI_PATH` 指向当前环境的 kc，`SCENE_ROOT` 放到独立临时目录；每项先负控再正例，用真实 Git 元数据与 status 读回。
+- RV-5：`scripts/rv-5-signature-control.py`，故障注入与生产路由正例顺序执行，finally 恢复源码；禁止与其他测试并发运行。
+- RV-6：`scripts/rv-6-guard-control.py`，临时插入白名单外旧名后 guard 失败，移除后通过；不得修改 guard 放行。
+- 补充：执行真实 Validation Gate 工作流脚本，生产 writer 生成的未完成 kc 清单须拒绝；执行新目录 PID/锁回归测试与最终受影响 CLI/API 测试。
+- 最终门禁：full lint、reuse、相关测试、strict MkDocs、最终 head 远端完整 CI、干净已提交树的独立 verifier。全部通过才签核机器项并 squash 合并。
 
-| Item | 入口与边界 | 负控 | 绿测 / 预期 |
-|---|---|---|---|
-| rv-1 | opt-in 测试 GitHub 仓库；`kc issue create --depends-on 292` 后用新进程读回新 Issue 正文 | 改名前版本执行同一入口，正文应出现旧依赖标记 | 新正文含 `<!-- kc:depends-on #292 -->`，不含新写入的旧前缀。当前缺少 `GH_TOKEN` 与 `KC_RV_SANDBOX_REPO`，留给 runner post-merge，禁止以单测替代。 |
-| rv-2 | 安装版 `kc config migrate` / `kc run --dry-run`，仅 GitHub API 边界由持久化文件型 `gh` shim 替代；先看未迁移行为，再预演、apply、二次预演与进程拒绝 | 跳过 apply，断言旧认领仍阻止重复执行；该断言应失败 | 预演不写，apply 只替换 marker 前缀，fresh process 判为 active claim，第二次迁移 0 处，active runner 时无写入。当前进程枚举受 sandbox 的 sysctl PermissionError 阻断，apply fail-closed；作为 runner-owned gate 保留。 |
-| rv-3 | 新建临时 Git 仓库，通过真实 `kc worktree create`、`ls -la`、`git worktree list` | 临时注入旧目录默认值 | 工作树只落在 `.kc-worktrees` 且 Git 元数据可见。 |
-| rv-4 | 临时 Git 仓库预置 `.iar-worktrees`，通过真实 CLI 创建工作树 | 临时跳过旧目录解析 | 新工作树继续写入旧目录，无平行新目录。 |
-| rv-5 | FastAPI `TestClient` 调用生产 Idea Inbox 路由，使用真实 HMAC 算法 | 改错新头 alias，参数化新头接受测试应失败 | 新旧头单独签名均返回 202；缺头返回 401。 |
-| rv-6 | 运行仓库 guard | 临时向 docs 注入一个白名单外旧标记 | guard 对探针失败；删除探针后通过。 |
-
-补充命令：`UV_CACHE_DIR=.uv-cache just test`、`PRE_COMMIT_HOME=.uv-cache/pre-commit UV_CACHE_DIR=.uv-cache just lint`、`UV_CACHE_DIR=.uv-cache just lint --reuse`、`UV_CACHE_DIR=.uv-cache uv run --offline mkdocs build`。测试标记必须在最终 evidence manifest 写完后重跑，以覆盖当前测试树。
+无前端交付；不使用组件预览或截图代替以上真实入口证据。最终源代码身份见 `rv-0-source-identity.txt`；报告与验收记录变更不得改变实现或 oracle 范围。

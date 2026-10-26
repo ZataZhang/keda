@@ -1,40 +1,42 @@
-## 人审导航 / Human Review Navigation
+# #318 最终复核证据（2026-10-26）
 
-GitHub Issue：[Issue #313](https://github.com/ZataZhang/keda/issues/313)。本工作没有创建 PR，因此目前没有 PR 或 CI 链接。
+对应 [PR #318](https://github.com/ZataZhang/keda/pull/318) 与 [Issue #313](https://github.com/ZataZhang/keda/issues/313)。本次没有前端改动；证据层级为 CLI real entry、真实 Git / filesystem、API route 和 GitHub live integration。
 
-| 人审决定 | 证据与打开方式 | 逐项预期值 | 执行侧交叉核对 |
-|---|---|---|---|
-| 决策一：只认 `kc:`，升级时迁移在途标记 | RV-1：`/Users/zata/code/keda/.iar-worktrees/issue-313/tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/rv-1-github-post-merge.txt`；打开：`open "/Users/zata/code/keda/.iar-worktrees/issue-313/tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/rv-1-github-post-merge.txt"`。RV-2：同目录 `rv-2-marker-migration.txt`；打开：`open "/Users/zata/code/keda/.iar-worktrees/issue-313/tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/rv-2-marker-migration.txt"` | RV-1 应看到新 Issue 正文中的 `<!-- kc:depends-on #292 -->` 且没有新写出的旧前缀。RV-2 预期只有前缀发生变化，runner 不会重复认领，重跑为 0，runner 运行时拒绝写入。当前 RV-1 缺少显式 `GH_TOKEN` 与沙箱仓库 opt-in；本机存在 gh keyring 登录态，但本次未向任何仓库写入。RV-2 apply 被进程枚举权限阻断，未声称迁移成功。 | 执行侧读回代码、测试和 CLI 输出；rv-1 与 rv-2 的未完成部分已明确留作 runner gate。 |
-| 决策二：新目录默认名、老目录继续复用 | RV-3：`/Users/zata/code/keda/.iar-worktrees/issue-313/tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/rv-3-clean-repository.txt`；打开：`open "/Users/zata/code/keda/.iar-worktrees/issue-313/tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/rv-3-clean-repository.txt"`。RV-4：同目录 `rv-4-legacy-directory.txt`；打开：`open "/Users/zata/code/keda/.iar-worktrees/issue-313/tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/rv-4-legacy-directory.txt"` | 干净仓库创建前 `.kc-worktrees` 不存在，创建后新工作树位于 `.kc-worktrees/<branch>` 且 `git worktree list` 可见。旧目录场景中工作树位于 `.iar-worktrees/<branch>` 且仓库根没有 `.kc-worktrees`。 | 两项均由真实 CLI 写入独立 Git 仓库，再用 Git porcelain 与目录清单读回。 |
+## 风险优先的人审导航
 
-没有前端或视觉界面变更，因此本次没有截图；以上证据是 CLI / filesystem 真实入口输出，不用 UI 图代替。
+1. 协作标记升级：查看 `rv-1-live-github-current.txt`、`rv-2-marker-migration-current.txt`、`rv-2-active-daemon-current.txt`。必须全部停机后迁移 open Issue / PR；旧标记不再读取。
+2. 目录策略：查看 `rv-3-clean-repository.txt` 与 `rv-4-legacy-directory.txt`，以及对应 negative-control 文件。新仓库使用新目录；旧目录继续复用，不自动搬动。
 
-## 验证结果
+真实 GitHub 沙箱为用户明确授权创建的私有仓库 [kedacode-validation-sandbox](https://github.com/ZataZhang/kedacode-validation-sandbox)。使用隔离配置、禁用 AI 内容生成；测试 Issue 完成后关闭。凭据从本机 gh 登录态读取，只放入子进程环境，未写进文件、Git 或证据日志。
 
-| 项目 | 状态 | 证据 |
+## 本轮修复
+
+- 合并最新 main，保留 daemon 参数限制、批量默认值、新初始化检查名和 #321 的真实 backlog builder 测试修复。
+- 修正 Validation Gate 工作流仍读旧前缀的遗漏。故障复现证明生产生成的未勾选 kc 清单曾被当成“不存在”而通过；现有工作流脚本与生产清单 writer 的四个组合测试现在验证未完成拒绝、全部完成允许、零项目允许。
+- 复验 RV-2 时发现旧状态目录已移除后，新目录的登记 PID / 锁未参与预检。现同时检查新旧目录；两项回归测试和真实 CLI 验证均证明活动登记会阻止远端改写。真实 kc daemon 也通过真实进程扫描阻止 apply。
+
+## Realistic Validation 结果
+
+| RV | 实际边界与判别力 | 结果 / 原始文件 |
 |---|---|---|
-| rv-1 新建 GitHub Issue | 🟡 runner post-merge | `rv-1-github-post-merge.txt` 与 `rv-1-review-preflight.txt` 记录缺少显式 opt-in；未用单元测试冒充真实 GitHub 验证。 |
-| rv-2 在途标记迁移 | 🟡 runner-owned gate | `rv-2-marker-migration.txt` 记录未迁移旧标记负控、预演无写及 apply 的 fail-closed 阻断；`rv-2-process-scanner.txt` 记录宿主权限错误。 |
-| rv-3/rv-4 工作树目录 | ✅ 通过 | 各有负控和真实 CLI 绿测文件。 |
-| rv-5 签名头 | ✅ 通过 | 新旧 HMAC 头成功，缺头 401；alias 故障注入使新头测试失败。 |
-| rv-6 命名守卫 | ✅ 通过 | 白名单外注入使 guard 失败，移除后通过。 |
-| 最终 `just test` / `just lint` gate | 🟡 runner-owned staged-tree gate | 本轮 `UV_CACHE_DIR=.uv-cache just test all` 的完整 lint 与全量 pytest 通过（4963 passed、1 skipped）；证据包 staged 后仍需 runner 在最终 staged tree 重跑 `just test`、`just lint` 与 MkDocs build。 |
+| RV-1 | 新版与改名前版各经生产 kc CLI 写真实 GitHub；fresh gh 读回；依赖 OPEN 时生产 dry-run 阻塞，关闭后新 GitHub client 判定满足 | PASS，`rv-1-live-github-current.txt` |
+| RV-2 | 仅替外部 gh 传输，CLI / 进程扫描 / GitHub client / 持久 JSON / fresh kc 消费都保真；有迁移前负控、预演、apply、重复 apply、登记 PID 和实际 daemon 拒绝 | PASS，`rv-2-marker-migration-current.txt`、`rv-2-active-daemon-current.txt` |
+| RV-3 | 全新 Git 仓库经生产 CLI 创建工作树；读取实际路径、Git 元数据、干净状态；旧常量负控失败 | PASS，`rv-3-clean-repository.txt`、`rv-3-negative-control.txt` |
+| RV-4 | 预置旧目录后真实 CLI 继续复用；禁用旧目录识别的负控出现平行目录并失败 | PASS，`rv-4-legacy-directory.txt`、`rv-4-negative-control.txt` |
+| RV-5 | FastAPI TestClient 穿过真实签名路由；新旧有效 HMAC 202、缺头 401；alias 故障注入使新头失败，结束后源码恢复 | PASS，`rv-5-signature-headers.txt`、`rv-5-negative-control.txt` |
+| RV-6 | 真实 guard 对临时白名单外旧名报错；移除探针后同一 guard 通过；未修改 guard 本身 | PASS，`rv-6-guard-green.txt`、`rv-6-negative-control.txt` |
 
-额外验证：最终代码修复后的定向后端套件通过（`153 passed in 7.16s`），命令带 `--no-testmon`；之前实际执行的本地核心档为 `19 passed, 199 deselected`。恢复门禁时，目标用例 `tests/test_backlog_api.py::test_force_refresh_requests_rescan_and_reports_stale` 连续 6 次通过。先前完整运行偶发失败的原因是该测试的 mock builder 没有返回必需的 `scanned_at`，异步重建先完成时会写出不可渲染的快照并诱发第二次重扫；修复只补齐 mock 契约，不改生产逻辑。随后 `UV_CACHE_DIR=.uv-cache just test all` 完整通过：lint passed，`4963 passed, 1 skipped in 454.72s`，并更新 test 与 full-lint 标记。相关测试与实现文件在基线 `f3bc2da3` 未变化，基线上的一次定向重跑通过。`just lint --reuse` 与 MkDocs 构建的既有验证通过，三处此前修改的 Python 文件由 Ruff format 检查通过，manifest schema 与其引用的证据文件完整性检查通过。RV-3 / RV-4 的 manifest 命令已改为先跑负控、再跑真实 CLI 绿测。
+原始文件和 oracle 脚本保留在同目录；manifest `evidence.json` 也仅作本地 / evidence 分支产物，源码分支只提交 Markdown 报告。独立 verifier 的结论单独记录，执行器不代写 PASS。
 
-standalone `just lint` 之前被 `check-test-flag` 拒绝：pre-commit 暂存未跟踪文件期间，untracked `evidence.json` 从工作视图隐藏，因而计算的 test tree 与工作区标记不一致。没有跳过该检查；runner 将 evidence reports / manifest stage 后需在最终 staged tree 重跑 `just test`、`just lint` 与 MkDocs build。独立 verifier 仍为 PENDING，且 `git rev-parse HEAD^{tree}` 的最终交付 tree 需由提交后的 runner 记录。
+## 仓库验证
 
-证据 JSON manifest 位于同目录 `evidence.json`，含六个 Realistic Validation 项的复现命令、负控预期、输出文件及风险说明。原始 `.txt` 与 scripts 为本地证据，不应进入源码 diff。
+- 初次合并 main 后的冷缓存 `just lint --repo` 执行 4995 passed、1 skipped（617.54s）。运行期间新增了后续两项修复，因此该数字不声称覆盖最后的新增测试。
+- 最终代码上显式禁用 testmon 执行受影响入口：`tests/test_validation_gate_workflow.py tests/test_state_home_migration.py tests/test_cli_config_migrate.py tests/test_agent_runner_cli.py tests/test_backlog_api.py`，223 passed（32.58s），包含新增六项用例。
+- 最终代码的 full lint、reuse、架构与规范一致性检查通过；`just lint --repo` 再运行时命中本地 test 标记，未把该次“跳过测试”算作执行证据；strict MkDocs 构建通过。
+- 远端最终 head 的完整 CI 仍须成功，合并前不沿用旧 head 的检查结果。
 
-## Pre-PR Review Recheck (2026-10-25)
+## 身份与限制
 
-- RV-1：重新执行 manifest 中的 create/readback harness，因未设置 `GH_TOKEN` 与 `KC_RV_SANDBOX_REPO` 在 CLI 或网络写入前以 exit 2 停止。虽然本机 `gh auth status` 显示有 keyring 登录态，但没有显式指定测试仓库，因此没有使用该登录态创建远端 Issue。输出见 `rv-1-review-preflight.txt`。
-- RV-2：重新执行 blocker harness；`psutil.process_iter()` 仍因 macOS sandbox 的 `sysctl` 权限返回 `PermissionError`，系统 `ps` 也被 sandbox 拒绝。迁移仍 fail-closed；真实 `--apply`、迁移后占用判定、幂等重跑与活动 runner 拒绝尚未验证。输出见 `rv-2-process-scanner.txt` 与 `rv-2-harness-exit.txt`。
-- 全量测试：未设置状态目录覆盖时，`UV_CACHE_DIR=.uv-cache just test all` 因沙箱不能写用户目录 `~/.kedacode/console.db` 而有 64 个依赖该状态库的测试失败；失败日志保存在本机 `logs/test-failures/`。没有改动生产代码或该门禁。将既有 `AGENT_RUNNER_CONSOLE` 状态路径覆盖到工作树内的临时目录后，重跑相同的全量测试集通过：`AGENT_RUNNER_CONSOLE='{"history_db_path":".tmp-review-state/console.db","process_registry_path":".tmp-review-state/process-registry.json"}' UV_CACHE_DIR=.uv-cache just test all`，结果 `4963 passed, 1 skipped in 515.26s`，包含 `just lint --full`。
-- 此段是执行侧复核记录，不代表独立 verifier verdict。独立 verifier 仍须在上述 gate 完成后，对最终 tree 执行并签发结果。
+候选提交与 Git tree 写入 `rv-0-source-identity.txt`，由独立 verifier 对照干净提交检查。此报告只总结执行证据，不替代独立 verdict。后续若改动迁移、标记构造、消费者或断言，必须重跑受影响 RV。
 
-## Pre-PR Review Recheck (2026-10-25, after evidence refresh)
-
-- 本轮再次确认 `GH_TOKEN` 与 `KC_RV_SANDBOX_REPO` 均未配置；RV-1 仍在远端操作前退出，没有创建 Issue 或使用未指定的仓库。
-- 本轮再次运行进程枚举探针，`psutil.process_iter()` 返回 `PermissionError: Operation not permitted`；RV-2 继续 fail-closed，未绕过活动 runner 检查。
-- 仓库没有独立的 `just ai verify` 入口；独立 verifier 是 `just implement` 流程中的 runner 阶段。因此本 review 不代写 verifier verdict，报告继续保持 PENDING，待 runner 在满足环境条件后验证最终 tree。
+证据覆盖本机与指定私有沙箱；无法判断其他电脑是否仍有旧 runner 运行，实际升级前仍需维护者按升级指南停止全部机器上的 runner。合并源代码不执行生产仓库标记迁移。

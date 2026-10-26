@@ -139,6 +139,15 @@ def test_daemon_is_running_detects_repo_daemon() -> None:
     assert daemon_is_running(REPO_ID, records + [_daemon_record(REPO_ID)]) is True
 
 
+def test_daemon_is_running_accepts_kind_read_back_as_plain_string() -> None:
+    """注册表 JSON 读回的记录 ``kind`` 是字符串 ``"daemon"``，也必须判为在跑。"""
+    from dataclasses import replace
+
+    registry_record = replace(_daemon_record(REPO_ID), kind="daemon")
+
+    assert daemon_is_running(REPO_ID, [registry_record]) is True
+
+
 def test_load_autopilot_state_reports_real_conditions(tmp_path: Path) -> None:
     """状态快照必须分别给出 Autopilot / 自动合并 / daemon 三件事。"""
     repo_root = tmp_path / "repo"
@@ -156,11 +165,11 @@ def test_load_autopilot_state_reports_real_conditions(tmp_path: Path) -> None:
     assert state.persisted_enabled is False
     assert state.auto_merge_enabled is False
     assert state.daemon_running is True
-    # AppConfig() 默认容量为 1：策略 3 高于容量时生效值被容量压低，来源如实标注。
+    # AppConfig() 默认配置文件值为 1：页面设置 3 覆盖它（不再被压低），来源如实标注。
     assert state.policy_max_parallel == 3
     assert state.runner_capacity == 1
-    assert state.effective_max_parallel == 1
-    assert state.ceiling_source == "capped_by_capacity"
+    assert state.effective_max_parallel == 3
+    assert state.ceiling_source == "policy"
     assert state.config_source == ".kedacode.toml"
 
 
@@ -374,12 +383,43 @@ def test_get_autopilot_endpoint(autopilot_environment) -> None:
     assert data["enabled"] is False
     assert data["auto_merge_enabled"] is False
     assert data["daemon_running"] is False
-    # 无设置行 = 未设置：策略为 null，生效值继承 runner 容量（AppConfig 默认 1）。
+    # 无设置行 = 页面未保存：页面设置为 null，生效值取配置文件值（AppConfig 默认 1）。
     assert data["max_parallel"] is None
     assert data["effective_max_parallel"] == 1
     assert data["runner_capacity"] == 1
-    assert data["ceiling_source"] == "inherited"
+    assert data["ceiling_source"] == "config"
     assert data["config_source"] == ".kedacode.toml"
+    # 本机没有存活 daemon：实际生效值未知，页面以 effective_max_parallel 为准。
+    assert data["daemon_parallel_limit"] is None
+    assert data["daemon_parallel_limit_source"] is None
+
+
+def test_get_autopilot_reports_live_daemon_cli_override(
+    autopilot_environment, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """daemon 用 --concurrency 5 启动时，接口带出它实际在用的 5，而不只是页面值。"""
+    import backend.api.routes.agent_runner_backlog as backlog_routes
+    from backend.core.use_cases.daemon_parallel_limit_status import DaemonParallelLimitStatus
+
+    live_status = DaemonParallelLimitStatus(
+        repo_id=REPO_ID,
+        pid=4242,
+        parallel_limit=5,
+        source="cli_override",
+        in_flight=1,
+        updated_at="2026-10-25T00:00:00+00:00",
+    )
+    monkeypatch.setattr(
+        backlog_routes,
+        "read_daemon_parallel_limit_status",
+        lambda lock_dir, repo_id: live_status if repo_id == REPO_ID else None,
+    )
+
+    data = client.get(f"/api/v1/agent-runner/backlog/autopilot?repo_id={REPO_ID}").json()
+
+    assert data["effective_max_parallel"] == 1
+    assert data["daemon_parallel_limit"] == 5
+    assert data["daemon_parallel_limit_source"] == "cli_override"
 
 
 def test_get_autopilot_rejects_non_bool_enabled(autopilot_environment) -> None:

@@ -9,6 +9,7 @@
 import logging
 import os
 from pathlib import Path
+from typing import Any
 from urllib.parse import quote_plus
 
 from pydantic import (
@@ -247,7 +248,6 @@ class AgentRunnerSettings(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="AGENT_RUNNER_")
 
-    max_issues: int = 1
     default_agent: str = "auto"
     labels: AgentRunnerLabelSettings = Field(default_factory=AgentRunnerLabelSettings)
     git: AgentRunnerGitSettings = Field(default_factory=AgentRunnerGitSettings)
@@ -304,6 +304,35 @@ class AgentRunnerSettings(BaseSettings):
     # 内置默认在 core.shared.models.agent_spec.BUILTIN_AGENT_SPECS；
     # 此处只存显式声明，逐字段覆盖内置值（见 factory_config_builder）。
     agents: dict[str, AgentRunnerAgentSettings] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_retired_max_issues(cls, raw_settings: Any) -> Any:
+        """读到已退役的 ``max_issues`` 时告警并丢弃，不让它参与任何计算。
+
+        并行上限只看 ``runner.max_concurrent_issues``（及 Backlog 页面设置与
+        ``kc daemon run --concurrency``）。旧值不并入：并行数为 1 时它只是"同一轮
+        串行跑几个"，并入会让升级后的仓库突然并行多跑。
+        """
+        if not isinstance(raw_settings, dict):
+            return raw_settings
+        runner_section = raw_settings.get("runner")
+        has_runner_key = isinstance(runner_section, dict) and "max_issues" in runner_section
+        if not has_runner_key and "max_issues" not in raw_settings:
+            return raw_settings
+        cleaned_settings = {
+            key: value for key, value in raw_settings.items() if key != "max_issues"
+        }
+        if has_runner_key:
+            cleaned_settings["runner"] = {
+                key: value for key, value in runner_section.items() if key != "max_issues"
+            }
+        _logger.warning(
+            "[agent_runner.runner] max_issues 已退役，不再参与任何计算：并行上限只看 "
+            "max_concurrent_issues；kc supervise / kc run 的批量请改用命令行 --max-issues。"
+            "运行 kc config migrate 可删除该行。"
+        )
+        return cleaned_settings
 
     @model_validator(mode="after")
     def _warn_reclaim_ttl_not_above_agent_timeout(self) -> "AgentRunnerSettings":

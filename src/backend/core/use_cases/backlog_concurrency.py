@@ -1,13 +1,14 @@
-"""自动执行并发上限（execution ceiling）的统一解析逻辑。
+"""并行上限（execution ceiling）的统一解析逻辑。
 
-Backlog 的「并发」设置是仓库级策略，runner 配置的 ``max_concurrent_issues``
-是引擎容量；两者过去各读各的，导致同一个 daemon 回合里补位闸门与认领闸门
-可以按不同的上限放行。本模块把两者收敛为一个生效值：
+每个仓库只有一个生效的并行上限：最多同时运行几个自动领取的 Issue。它有三个
+入口，按优先级取第一个给出的值：
 
-    ceiling = min(policy, capacity)，且 policy 未设置时继承 capacity。
+    kc daemon run --concurrency > Backlog 页面设置 > 配置文件 max_concurrent_issues
 
-所有消费方（daemon 认领闸门、Backlog 补位、控制台「全局开始」、Autopilot
-快照、设置读写）都必须调用这里的解析函数，不再各自读设置。
+页面设置覆盖配置文件，不再与之取较小值（取较小值要求使用者同时记两个数字，
+且页面调大不生效）。命令行覆盖只存在于 daemon 进程内，由 daemon 自己处理；
+本模块解析其余两层。所有消费方（daemon 认领闸门、Backlog 补位、控制台「全局
+开始」、Autopilot 快照、设置读写）都必须调用这里的解析函数，不再各自读设置。
 """
 
 from __future__ import annotations
@@ -15,57 +16,46 @@ from __future__ import annotations
 from backend.core.shared.interfaces.agent_runner import IGitHubClient
 from backend.core.shared.interfaces.runner_console import IBacklogStore
 
-CEILING_SOURCE_INHERITED = "inherited"
 CEILING_SOURCE_POLICY = "policy"
-CEILING_SOURCE_CAPPED_BY_CAPACITY = "capped_by_capacity"
-
-_CEILING_SOURCES = (
-    CEILING_SOURCE_INHERITED,
-    CEILING_SOURCE_POLICY,
-    CEILING_SOURCE_CAPPED_BY_CAPACITY,
-)
+CEILING_SOURCE_CONFIG = "config"
+#: 只出现在 daemon 日志里：``kc daemon run --concurrency`` 覆盖了本进程的上限。
+CEILING_SOURCE_CLI_OVERRIDE = "cli_override"
 
 
-def resolve_execution_ceiling(policy_max_parallel: int | None, runner_capacity: int) -> int:
-    """把策略值与容量解析为单一生效并发上限。
+def resolve_execution_ceiling(policy_max_parallel: int | None, config_max_parallel: int) -> int:
+    """把页面设置与配置文件解析为单一生效并行上限。
 
     Args:
-        policy_max_parallel: Backlog「并发」策略值；``None`` 表示从未设置
-            （继承容量）。必须为正整数或 ``None``。
-        runner_capacity: runner 侧容量（``max_concurrent_issues``），必须
-            ``>= 1``。
+        policy_max_parallel: Backlog 页面保存的并行上限；``None`` 表示从未保存。
+            必须为正整数或 ``None``。
+        config_max_parallel: 配置文件的 ``max_concurrent_issues``，必须 ``>= 1``。
 
     Returns:
-        生效上限：策略缺失或超出容量时取容量，否则取策略值。
+        页面设置存在时取页面设置，否则取配置文件值。
 
     Raises:
-        ValueError: ``runner_capacity`` 小于 1 或策略值小于 1。
+        ValueError: 配置文件值或页面设置小于 1。
     """
-    if runner_capacity < 1:
-        raise ValueError(f"runner_capacity must be >= 1, got {runner_capacity}")
+    if config_max_parallel < 1:
+        raise ValueError(f"config_max_parallel must be >= 1, got {config_max_parallel}")
     if policy_max_parallel is None:
-        return runner_capacity
+        return config_max_parallel
     if policy_max_parallel < 1:
         raise ValueError(f"policy_max_parallel must be >= 1, got {policy_max_parallel}")
-    return min(policy_max_parallel, runner_capacity)
+    return policy_max_parallel
 
 
-def describe_ceiling_source(policy_max_parallel: int | None, effective_ceiling: int) -> str:
-    """描述生效上限的来源，供 UI 与 API 展示。
+def describe_ceiling_source(policy_max_parallel: int | None) -> str:
+    """描述生效上限来自哪一层，供 UI、API 与日志展示。
 
     Args:
-        policy_max_parallel: Backlog「并发」策略值，``None`` 表示未设置。
-        effective_ceiling: 已解析的生效上限（来自
-            :func:`resolve_execution_ceiling`）。
+        policy_max_parallel: Backlog 页面保存的并行上限，``None`` 表示未保存。
 
     Returns:
-        ``"inherited"``（无策略）、``"policy"``（策略即生效值）或
-        ``"capped_by_capacity"``（策略高于生效值，被容量压低）。
+        ``"policy"``（页面设置）或 ``"config"``（配置文件，含默认值 1）。
     """
     if policy_max_parallel is None:
-        return CEILING_SOURCE_INHERITED
-    if policy_max_parallel > effective_ceiling:
-        return CEILING_SOURCE_CAPPED_BY_CAPACITY
+        return CEILING_SOURCE_CONFIG
     return CEILING_SOURCE_POLICY
 
 

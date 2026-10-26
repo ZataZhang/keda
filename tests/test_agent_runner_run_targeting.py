@@ -528,7 +528,6 @@ def _run_one_daemon_pass(
             contexts=[context],
             interval=0,
             agent="auto",
-            max_issues=1,
             process_runner=MagicMock(),
             github_client_factory=lambda repo_path: MagicMock(),
             backlog_store_factory=lambda: store,
@@ -577,7 +576,8 @@ def test_daemon_without_flag_follows_config_each_pass(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 统一并发上限：daemon 每轮解析并分发同一个 ceiling（PRD P1-FEAT-20261010-011714）
+# 并行上限：daemon 每轮按 --concurrency > 页面设置 > 配置文件解析同一个 ceiling
+# 并分发给补位与认领两道闸门（PRD P1-REFACTOR-20261024-232740）
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -586,7 +586,7 @@ def _run_one_daemon_pass_capturing(
     *,
     context: RepositoryRunContext,
     store: object,
-    concurrency: int,
+    concurrency: int | None,
 ) -> dict:
     """跑恰好一轮 daemon（全部执行阶段打桩），返回补位与认领调用的真实 kwargs。"""
     from types import SimpleNamespace
@@ -617,7 +617,6 @@ def _run_one_daemon_pass_capturing(
             contexts=[context],
             interval=0,
             agent="auto",
-            max_issues=1,
             concurrency=concurrency,
             process_runner=MagicMock(),
             github_client_factory=lambda repo_path: MagicMock(),
@@ -627,35 +626,71 @@ def _run_one_daemon_pass_capturing(
     return captured
 
 
-def _daemon_context(tmp_path: Path) -> RepositoryRunContext:
+def _daemon_context(tmp_path: Path, *, config_max_parallel: int = 1) -> RepositoryRunContext:
+    config = AppConfig()
+    config = replace(
+        config, runner=replace(config.runner, max_concurrent_issues=config_max_parallel)
+    )
     return RepositoryRunContext(
-        repo_id=REPO_ID, display_name="Keda Test", repo_path=tmp_path, config=AppConfig()
+        repo_id=REPO_ID, display_name="Keda Test", repo_path=tmp_path, config=config
     )
 
 
-def test_daemon_resolves_policy_ceiling_for_both_gates(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("policy_max_parallel", "config_max_parallel", "expected_ceiling"),
+    [(2, 4, 2), (6, 3, 6)],
+)
+def test_daemon_policy_overrides_config_for_both_gates(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    policy_max_parallel: int,
+    config_max_parallel: int,
+    expected_ceiling: int,
 ) -> None:
-    """策略=2、容量=4 → 同一轮补位闸门与认领闸门拿到同一个 ceiling=2。"""
+    """页面设置覆盖配置文件（高于或低于都生效），补位与认领拿到同一个 ceiling。"""
     from tests.conftest import FakeBacklogStore
 
-    store = FakeBacklogStore(repo_id=REPO_ID, max_parallel=2)
+    store = FakeBacklogStore(repo_id=REPO_ID, max_parallel=policy_max_parallel)
     captured = _run_one_daemon_pass_capturing(
-        monkeypatch, context=_daemon_context(tmp_path), store=store, concurrency=4
+        monkeypatch,
+        context=_daemon_context(tmp_path, config_max_parallel=config_max_parallel),
+        store=store,
+        concurrency=None,
     )
-    assert captured["advance"]["execution_ceiling"] == 2
-    assert captured["run_once"]["execution_ceiling"] == 2
+    assert captured["advance"]["execution_ceiling"] == expected_ceiling
+    assert captured["run_once"]["execution_ceiling"] == expected_ceiling
+    assert captured["run_once"]["concurrency"] == expected_ceiling
 
 
-def test_daemon_inherits_capacity_when_policy_unset(
+def test_daemon_cli_concurrency_overrides_policy(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """从未设置策略（没有设置行）→ 继承容量，且读取绝不物化默认行。"""
+    """``--concurrency`` 是最高优先级：页面设置 6、配置 2 时仍按 3 执行。"""
+    from tests.conftest import FakeBacklogStore
+
+    store = FakeBacklogStore(repo_id=REPO_ID, max_parallel=6)
+    captured = _run_one_daemon_pass_capturing(
+        monkeypatch,
+        context=_daemon_context(tmp_path, config_max_parallel=2),
+        store=store,
+        concurrency=3,
+    )
+    assert captured["advance"]["execution_ceiling"] == 3
+    assert captured["run_once"]["execution_ceiling"] == 3
+
+
+def test_daemon_uses_config_when_policy_unset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """页面从未保存（没有设置行）→ 使用配置文件值，且读取绝不物化默认行。"""
     from tests.conftest import FakeBacklogStore
 
     store = FakeBacklogStore(repo_id=REPO_ID, max_parallel=None)
     captured = _run_one_daemon_pass_capturing(
-        monkeypatch, context=_daemon_context(tmp_path), store=store, concurrency=4
+        monkeypatch,
+        context=_daemon_context(tmp_path, config_max_parallel=4),
+        store=store,
+        concurrency=None,
     )
     assert captured["advance"]["execution_ceiling"] == 4
     assert captured["run_once"]["execution_ceiling"] == 4
@@ -694,12 +729,12 @@ def test_run_once_targeted_mode_exempt_from_execution_ceiling(
     assert "would process Issue #7" in caplog.text
 
 
-def test_daemon_policy_read_failure_falls_back_to_capacity(
+def test_daemon_policy_read_failure_falls_back_to_config(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """策略读取异常不阻断本轮：按未设置回退（继承容量）并告警。"""
+    """页面设置读取异常不阻断本轮：按未保存回退到配置文件值并告警。"""
 
     class _ExplodingStore:
         def get_backlog_settings(self, repo_id: str):
@@ -708,13 +743,13 @@ def test_daemon_policy_read_failure_falls_back_to_capacity(
     with caplog.at_level(logging.WARNING):
         captured = _run_one_daemon_pass_capturing(
             monkeypatch,
-            context=_daemon_context(tmp_path),
+            context=_daemon_context(tmp_path, config_max_parallel=4),
             store=_ExplodingStore(),
-            concurrency=4,
+            concurrency=None,
         )
     assert captured["advance"]["execution_ceiling"] == 4
     assert captured["run_once"]["execution_ceiling"] == 4
-    assert "this pass inherits runner capacity" in caplog.text
+    assert "this pass uses the config value" in caplog.text
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -1,8 +1,8 @@
 name: Validation Gate
 
 # Realistic Validation 签收完整性门禁：
-# 解析 PR body 中由 KedaCode 注入的 <!-- iar:realistic-validation ... --> 区块，
-# 该标记是跨版本 wire 契约，名字永久不变。
+# 解析 PR body 中由 KedaCode 注入的 <!-- kc:realistic-validation ... --> 区块，
+# 与 runner 的当前标记格式同步；升级时须先迁移在途 Issue / PR 标记。
 # 存在未勾选项则 check 失败。配合 branch protection 将本 check 设为
 # required，即可阻止签收清单未完成的 PR 合并。人工审查或授权的自动签收
 # 路径都可更新清单；此 workflow 只检查完整性，不判断签收者身份或证据质量。
@@ -34,9 +34,9 @@ jobs:
 
           pr_body = os.environ.get("PR_BODY") or ""
           block_match = re.search(
-              r"<!--\s*iar:realistic-validation\s+version=\d+\s+total=(\d+)\s*-->"
+              r"<!--\s*kc:realistic-validation\s+version=\d+\s+total=(\d+)\s*-->"
               r"(.*?)"
-              r"(?:<!--\s*iar:realistic-validation-end\s*-->|\Z)",
+              r"(?:<!--\s*kc:realistic-validation-end\s*-->|\Z)",
               pr_body,
               re.S,
           )

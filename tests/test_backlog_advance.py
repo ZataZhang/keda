@@ -536,7 +536,6 @@ def _run_single_daemon_pass(
             contexts=[context],
             interval=0,
             agent="auto",
-            max_issues=1,
             process_runner=FakeProcessRunner(),
             github_client_factory=lambda repo_path: client,
             backlog_store_factory=lambda: store,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import subprocess
 from pathlib import Path
 
@@ -108,7 +109,8 @@ def test_build_app_config_from_settings_structure() -> None:
     assert isinstance(app_config, AppConfig)
     assert app_config.git.base_branch is not None
     assert app_config.git.remote is not None
-    assert app_config.runner.max_issues >= 1
+    assert app_config.runner.max_concurrent_issues >= 1
+    assert not hasattr(app_config.runner, "max_issues")
 
 
 def test_agent_runner_daemon_settings_defaults() -> None:
@@ -132,13 +134,13 @@ def test_merge_repository_config_overrides_git() -> None:
 
 def test_merge_repository_config_inherits_unset_fields() -> None:
     """Repository settings should inherit global values for unoverridden fields."""
-    global_config = AppConfig(runner=RunnerConfig(max_issues=5, default_agent="claude"))
+    global_config = AppConfig(runner=RunnerConfig(max_concurrent_issues=5, default_agent="claude"))
     repo_settings = AgentRunnerRepositorySettings(
         path="/tmp/repo",
-        runner=AgentRunnerRunnerSettings(max_issues=3),
+        runner=AgentRunnerRunnerSettings(max_concurrent_issues=3),
     )
     merged = merge_repository_config(global_config, repo_settings)
-    assert merged.runner.max_issues == 3
+    assert merged.runner.max_concurrent_issues == 3
     assert merged.runner.default_agent == "claude"
 
 
@@ -1059,3 +1061,15 @@ auto_advance = true
     assert contexts[0].config.autopilot.enabled is True
     assert contexts[0].config.autopilot.merge_check_timeout_seconds == 60
     assert contexts[0].config.backlog.auto_advance is True
+
+
+def test_retired_max_issues_is_ignored_with_a_warning(caplog: pytest.LogCaptureFixture) -> None:
+    """旧配置里的 ``max_issues`` 只告警、不参与计算；并行上限只看 max_concurrent_issues。"""
+    with caplog.at_level(logging.WARNING):
+        settings = AgentRunnerSettings.model_validate(
+            {"max_issues": 4, "runner": {"max_issues": 5, "max_concurrent_issues": 2}}
+        )
+
+    app_config = build_app_config_from_settings(settings)
+    assert app_config.runner.max_concurrent_issues == 2
+    assert "max_issues 已退役" in caplog.text

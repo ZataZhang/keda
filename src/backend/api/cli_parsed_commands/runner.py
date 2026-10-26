@@ -28,6 +28,12 @@ from backend.api import cli as _cli
 from backend.core.use_cases.agent_runner_factory import logger
 
 
+#: ``kc run`` / ``kc supervise`` / ``kc supervise-daemon`` 未传 ``--max-issues`` 时
+#: 本次最多处理几个 Issue。配置项 ``runner.max_issues`` 已退役：常驻 daemon 的
+#: 并发只看并行上限（``--concurrency`` > Backlog 页面设置 > ``max_concurrent_issues``）。
+DEFAULT_BATCH_MAX_ISSUES = 1
+
+
 def _resolve_initialized_repository_contexts(
     ctx: ParsedCommandContext, *, anchored_stage: str | None = None
 ) -> list[RepositoryRunContext]:
@@ -126,10 +132,7 @@ def run_run_command(ctx: ParsedCommandContext) -> int:
     publish_stage = _resolve_publish_stage(fast_merge=fast_merge, direct_pr=direct_pr)
 
     if aggregate_pr:
-        _validate_aggregate_run_options(
-            parsed,
-            ctx.runner_settings.runner.max_issues,
-        )
+        _validate_aggregate_run_options(parsed, DEFAULT_BATCH_MAX_ISSUES)
 
     if direct_pr and all_ready:
         raise CliError(
@@ -271,7 +274,7 @@ def run_run_command(ctx: ParsedCommandContext) -> int:
         contexts=contexts,
         dry_run=parsed.dry_run,
         agent=parsed.agent,
-        max_issues=parsed.max_issues or ctx.runner_settings.runner.max_issues,
+        max_issues=parsed.max_issues or DEFAULT_BATCH_MAX_ISSUES,
         process_runner=ctx.process_runner,
         github_client_factory=ctx.github_client_factory,
         content_generator=content_generator,
@@ -292,7 +295,7 @@ def run_run_command(ctx: ParsedCommandContext) -> int:
         _dry_run_preview(
             contexts,
             agent=parsed.agent,
-            max_issues=parsed.max_issues or ctx.runner_settings.runner.max_issues,
+            max_issues=parsed.max_issues or DEFAULT_BATCH_MAX_ISSUES,
             target_issue=target_issue,
             all_ready=all_ready,
             fast_merge=fast_merge,
@@ -676,6 +679,13 @@ def run_daemon_command(ctx: ParsedCommandContext) -> int:
             repo_id=ctx.repo_id,
             repo_override=ctx.repo_override,
         )
+    if getattr(ctx.parsed, "max_issues", None) is not None:
+        raise CliError(
+            "kc daemon no longer accepts --max-issues: the daemon keeps each repository "
+            "at its parallel limit and backfills every polling interval.",
+            code=ExitCode.USAGE,
+            suggestion="kc daemon run --concurrency <N>",
+        )
     contexts = _resolve_initialized_repository_contexts(ctx, anchored_stage="implementation")
     if contexts:
         _ensure_gh_auth_or_prompt(contexts[0].repo_path, ctx.process_runner)
@@ -740,7 +750,6 @@ def run_daemon_command(ctx: ParsedCommandContext) -> int:
             contexts=contexts,
             interval=interval,
             agent=ctx.parsed.agent,
-            max_issues=ctx.parsed.max_issues or ctx.runner_settings.runner.max_issues,
             process_runner=ctx.process_runner,
             github_client_factory=ctx.github_client_factory,
             content_generator_factory=content_generator_factory,
@@ -765,6 +774,9 @@ def run_daemon_command(ctx: ParsedCommandContext) -> int:
             loop_clock=_cli.create_loop_clock(),
             # 与 Monitor、CLI 共用同一份额度账本：撞限流或额度见底时全员暂停到重置。
             api_budget=_cli.create_github_api_budget(),
+            # 实际生效的并行上限写到单实例锁旁，管理终端与 kc daemon status 据此显示
+            # 包含 --concurrency 在内的真实值。
+            parallel_limit_status_dir=daemon_locks_dir,
         )
     finally:
         _cli.release_daemon_locks(acquired_daemon_locks)
@@ -796,7 +808,7 @@ def run_review_command(ctx: ParsedCommandContext) -> int:
                 config=context.config,
                 dry_run=ctx.parsed.dry_run,
                 agent=ctx.parsed.agent,
-                max_issues=ctx.parsed.max_issues or ctx.runner_settings.runner.max_issues,
+                max_issues=ctx.parsed.max_issues or DEFAULT_BATCH_MAX_ISSUES,
                 github_client=github_client,
                 process_runner=ctx.process_runner,
                 run_history_store=_create_run_history_store_or_none(),
@@ -828,7 +840,7 @@ def run_review_daemon_command(ctx: ParsedCommandContext) -> int:
         contexts=contexts,
         interval=interval,
         agent=ctx.parsed.agent,
-        max_issues=ctx.parsed.max_issues or ctx.runner_settings.runner.max_issues,
+        max_issues=ctx.parsed.max_issues or DEFAULT_BATCH_MAX_ISSUES,
         process_runner=ctx.process_runner,
         github_client_factory=ctx.github_client_factory,
         run_history_store=_create_run_history_store_or_none(),

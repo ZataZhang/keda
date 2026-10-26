@@ -5,7 +5,6 @@ from __future__ import annotations
 import base64
 import json
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -221,17 +220,11 @@ def test_force_refresh_requests_rescan_and_reports_stale(
     assert snapshot_wiring.coordinator.wait_until_idle(timeout_seconds=5)
 
     build_calls: list[tuple[str, bool]] = []
+    original_build_backlog_response = backlog_routes._build_backlog_response
 
     def counting_build(repo_id: str, include_archived: bool) -> dict:
         build_calls.append((repo_id, include_archived))
-        return {
-            "prds": [],
-            "skipped": [],
-            "repo_id": repo_id,
-            "include_archived": include_archived,
-            # 快照必须满足真实 builder 的契约，避免后台扫描完成时被误判为损坏。
-            "scanned_at": datetime.now(timezone.utc).isoformat(),
-        }
+        return original_build_backlog_response(repo_id, include_archived)
 
     monkeypatch.setattr(backlog_routes, "_build_backlog_response", counting_build)
     snapshot_wiring.resync_requests.clear()
@@ -577,8 +570,8 @@ def test_update_settings(backlog_environment) -> None:
     assert response.json()["max_parallel"] == 3
 
 
-def test_clear_settings_restores_inheritance(backlog_environment) -> None:
-    """PATCH max_parallel=null 应删除设置行（恢复继承），fresh 读回策略为空。"""
+def test_clear_settings_restores_config_value(backlog_environment) -> None:
+    """PATCH max_parallel=null 应删除设置行（恢复为配置文件值），fresh 读回页面设置为空。"""
     store: SqliteConsoleStore = backlog_environment["store"]
     response = client.patch(
         "/api/v1/agent-runner/backlog/settings?repo_id=keda-main",
@@ -594,7 +587,7 @@ def test_clear_settings_restores_inheritance(backlog_environment) -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["max_parallel"] is None
-    assert payload["ceiling_source"] == "inherited"
+    assert payload["ceiling_source"] == "config"
     assert store.get_backlog_settings("keda-main") is None
 
     # 恢复继承是删行语义，重复清除保持幂等成功。

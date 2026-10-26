@@ -85,7 +85,7 @@ export function RunnerStatusBar() {
       <span>仓库 {enabledRepos.length}</span>
       <span className="text-slate-400">|</span>
       <span>
-        队列上限 {status.config.max_issues} · 默认 agent{" "}
+        默认并行上限 {status.config.max_concurrent_issues} · 默认 agent{" "}
         <code className="font-mono">{status.config.default_agent}</code>
       </span>
       <span>

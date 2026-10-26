@@ -79,8 +79,8 @@ Thumbs.db
 
 # Realistic Validation evidence packages — local PRD flow (`just ai implement`).
 # Commit only the text reports (*.md: verification-plan / evidence-report /
-# verifier-report). Keep the manifest visible to local evidence tooling and
-# keep raw artifacts (screenshots, recordings, captured output, large logs) local-only.
+# verifier-report). Keep the manifest and raw artifacts (screenshots,
+# recordings, captured output, large logs) local-only.
 # Same principle as the KedaCode runner's
 # .iar/evidence/: legacy raw evidence never enters code history (binary bloat + secret
 # leakage in permanent git history). The verifier and check_prd_evidence.sh
@@ -88,7 +88,6 @@ Thumbs.db
 tasks/evidence/**
 !tasks/evidence/**/
 !tasks/evidence/**/*.md
-!tasks/evidence/**/evidence.json
 
 # pytest-testmon SQLite cache
 .testmondata*

@@ -36,6 +36,7 @@ from backend.api.cli_typer_app import (
     JsonOutputOption,
     LogsKindChoice,
     MaxIssuesOption,
+    RetiredDaemonMaxIssuesOption,
     ModelIdOption,
     ModelPresetOption,
     OutputFormat,
@@ -352,7 +353,7 @@ def daemon_run_command(
     ctx: typer.Context,
     interval: DaemonIntervalOption = None,
     agent: RunAgentOption = RunAgentChoice.auto,
-    max_issues: MaxIssuesOption = None,
+    max_issues: RetiredDaemonMaxIssuesOption = None,
     concurrency: ConcurrencyOption = None,
     autopilot: Annotated[
         bool | None,
