@@ -261,9 +261,11 @@ def list_backlog_prds(
     仓库不存在或已禁用仍返回 400，其历史快照不会回流到任何页面。
     """
     _resolve_context(repo_id)
-    if force_refresh:
-        request_backlog_resync(repo_id, include_archived=include_archived)
-    snapshot_view = ensure_fresh_backlog_snapshot(repo_id, include_archived=include_archived)
+    snapshot_view = ensure_fresh_backlog_snapshot(
+        repo_id,
+        include_archived=include_archived,
+        force_resync=force_refresh,
+    )
     return {
         **snapshot_view.payload,
         "scanned_at": snapshot_view.scanned_at,

@@ -152,6 +152,7 @@ def snapshot_wiring(
 
     monkeypatch.setattr(backlog_sync, "get_backlog_snapshot_store", lambda: store)
     monkeypatch.setattr(backlog_sync, "get_backlog_sync_coordinator", lambda: coordinator)
+    monkeypatch.setattr(backlog_sync, "request_backlog_resync", recording_resync)
     monkeypatch.setattr(backlog_routes, "request_backlog_resync", recording_resync)
     monkeypatch.setattr(backlog_sync, "_BACKLOG_COORDINATOR", None)
     monkeypatch.setattr(backlog_sync, "_BACKLOG_SCHEDULER", None)
@@ -218,6 +219,14 @@ def test_force_refresh_requests_rescan_and_reports_stale(
     """`?force_refresh=true` 立即排一次后台重扫，并如实回报 stale，供手动刷新按钮使用。"""
     client.get("/api/v1/agent-runner/backlog/prds?repo_id=keda-main&include_archived=false")
     assert snapshot_wiring.coordinator.wait_until_idle(timeout_seconds=5)
+    fresh_snapshot_entry = backlog_environment["store"].get_backlog_snapshot(
+        repo_id="keda-main",
+        include_archived=False,
+    )
+    assert fresh_snapshot_entry is not None
+    backlog_environment["store"].upsert_backlog_snapshot(
+        replace(fresh_snapshot_entry, scanned_at="2000-01-01T00:00:00+00:00")
+    )
 
     build_calls: list[tuple[str, bool]] = []
     original_build_backlog_response = backlog_routes._build_backlog_response
@@ -234,7 +243,7 @@ def test_force_refresh_requests_rescan_and_reports_stale(
         "?repo_id=keda-main&include_archived=false&force_refresh=true"
     )
     assert response.status_code == 200
-    # 快照本身还新，但已经排了一次重扫：必须回报 stale，前端才会按短节奏追平。
+    # 快照也已过期，强制刷新仍只排一次重扫并回报 stale，供前端按短节奏追平。
     assert response.json()["stale"] is True
     assert snapshot_wiring.resync_requests == [
         build_backlog_task_key("keda-main", include_archived=False)

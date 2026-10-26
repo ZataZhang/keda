@@ -94,13 +94,15 @@ def ensure_fresh_backlog_snapshot(
     *,
     include_archived: bool,
     now_reference: datetime | None = None,
+    force_resync: bool = False,
 ) -> BacklogSnapshotView:
-    """读本地快照并在缺失/过期时申请一次后台重扫，绝不等待扫描结果。
+    """读本地快照，按需申请一次后台重扫，绝不等待扫描结果。
 
     Args:
         repo_id: 目标仓库 ID。
         include_archived: 视图变体。
         now_reference: 注入的当前时间，用于 stale 判定。
+        force_resync: 是否无视快照新鲜度强制申请一次重扫。
 
     Returns:
         BacklogSnapshotView: 快照视图（无可用快照时为空态骨架），带如实的
@@ -112,11 +114,9 @@ def ensure_fresh_backlog_snapshot(
         include_archived=include_archived,
         now_reference=now_reference,
     )
-    if snapshot_view.stale:
+    if snapshot_view.stale or force_resync:
         # 协调器按任务键去重：同一变体在途扫描不会叠加，慢仓库也不会被轮询打爆。
-        get_backlog_sync_coordinator().request_sync(
-            build_backlog_task_key(repo_id, include_archived=include_archived)
-        )
+        request_backlog_resync(repo_id, include_archived=include_archived)
     return snapshot_view
 
 
