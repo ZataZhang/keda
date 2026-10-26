@@ -42,9 +42,10 @@ _DEPENDENCY_WAIT_MARKER_PATTERN = re.compile(
 # ---------------------------------------------------------------------------
 
 _DELIVERY_DEPENDENCIES_HEADER_RE = re.compile(
-    r"^#{2,4}\s+(?:\d+\.\s+)?Delivery Dependencies\s*$",
+    r"^(?P<heading>#{2,4})\s+(?:\d+\.\s+)?Delivery Dependencies\s*$",
     re.IGNORECASE | re.MULTILINE,
 )
+_MARKDOWN_HEADING_RE = re.compile(r"^(?P<heading>#{1,6})[ \t]+", re.MULTILINE)
 
 _DELIVERY_FIELD_RE = re.compile(r"^-\s+(?P<key>[A-Za-z/\s]+?)\s*:\s*(?P<value>.*?)\s*$")
 _DELIVERY_LIST_ITEM_RE = re.compile(r"^\s+-\s+(?P<value>.*?)\s*$")
@@ -56,12 +57,23 @@ _DELIVERY_PRD_PATH_RE = re.compile(
     r"(?P<path>(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\.md)" r"(?=$|[\s,;，；()（）])"
 )
 _NONE_DEPENDENCY_VALUES = {"", "none", "n/a", "na", "-"}
+_DELIVERY_FIELD_ALIASES = {
+    "depends_on_tasks/issues": "depends_on_issues",
+    "depends_on_tasks": "depends_on_issues",
+    "depends_on_issues": "depends_on_issues",
+    "gate_type": "gate_type",
+    "gate": "gate_type",
+    "sequence": "sequence",
+    "notes": "notes",
+    "note": "notes",
+}
 
 
 def parse_delivery_dependencies(prd_text: str) -> DeliveryDependencyDeclaration:
     """Parse the structured ``Delivery Dependencies`` section from a PRD.
 
     Only structured fields are accepted; free-form prose is ignored.
+    匹配到标题后会把更低级标题作为小节内容，仅在同级或更高级标题处结束。
 
     Args:
         prd_text: Full PRD Markdown text.
@@ -73,17 +85,8 @@ def parse_delivery_dependencies(prd_text: str) -> DeliveryDependencyDeclaration:
     if not match:
         return DeliveryDependencyDeclaration()
 
-    section_start = match.end()
-    # Section ends at the next header of same or higher level
-    next_header_match = re.search(
-        r"^#{1,4}\s+",
-        prd_text[section_start:],
-        re.MULTILINE,
-    )
-    if next_header_match:
-        section_text = prd_text[section_start : section_start + next_header_match.start()]
-    else:
-        section_text = prd_text[section_start:]
+    section_texts = _delivery_dependencies_section_texts(prd_text)
+    section_text = section_texts[0]
 
     field_values: dict[str, list[str]] = {
         "depends_on_issues": [],
@@ -144,6 +147,80 @@ def parse_delivery_dependencies(prd_text: str) -> DeliveryDependencyDeclaration:
     )
 
 
+def validate_delivery_dependencies_not_dropped(
+    prd_text: str,
+    declaration: DeliveryDependencyDeclaration,
+    *,
+    prd_path: str,
+) -> None:
+    """在 Issue 创建前拒绝非空依赖声明被解析成空结果。
+
+    Args:
+        prd_text: 完整 PRD Markdown 正文。
+        declaration: 已解析的依赖声明。
+        prd_path: 用于报错的 PRD 仓库相对路径。
+
+    Raises:
+        ValueError: PRD 在依赖小节中写了非 ``none`` 内容，但解析结果没有依赖引用。
+    """
+    if declaration.depends_on_issues or declaration.depends_on_prds:
+        return
+
+    for section_text in _delivery_dependencies_section_texts(prd_text):
+        dependency_values: list[str] = []
+        current_field_is_dependency = False
+
+        for line in section_text.splitlines():
+            stripped_line = line.strip()
+            if not stripped_line or stripped_line.startswith("#"):
+                continue
+
+            field_match = _DELIVERY_FIELD_RE.match(stripped_line)
+            if field_match:
+                normalized_field_key = field_match.group("key").strip().lower().replace(" ", "_")
+                current_field_is_dependency = (
+                    _DELIVERY_FIELD_ALIASES.get(normalized_field_key) == "depends_on_issues"
+                )
+                if current_field_is_dependency:
+                    dependency_values.append(field_match.group("value").strip())
+                continue
+
+            list_item_match = _DELIVERY_LIST_ITEM_RE.match(line)
+            if list_item_match and current_field_is_dependency:
+                dependency_values.append(list_item_match.group("value").strip())
+
+        declares_non_none_dependency = any(
+            dependency_value.strip().lower() not in _NONE_DEPENDENCY_VALUES
+            for dependency_value in dependency_values
+        )
+        if declares_non_none_dependency:
+            raise ValueError(
+                f"PRD '{prd_path}' declares a non-none 'Depends on tasks/issues' value, "
+                "but no dependency references were parsed. Check the Delivery Dependencies "
+                "section heading and dependency field."
+            )
+
+
+def _delivery_dependencies_section_texts(prd_text: str) -> list[str]:
+    """返回每个 Delivery Dependencies 标题覆盖的正文，按标题级别截断。"""
+    dependency_heading_matches = list(_DELIVERY_DEPENDENCIES_HEADER_RE.finditer(prd_text))
+    all_heading_matches = list(_MARKDOWN_HEADING_RE.finditer(prd_text))
+    section_texts: list[str] = []
+
+    for dependency_heading_match in dependency_heading_matches:
+        heading_level = len(dependency_heading_match.group("heading"))
+        section_end = len(prd_text)
+        for following_heading_match in all_heading_matches:
+            if following_heading_match.start() < dependency_heading_match.end():
+                continue
+            if len(following_heading_match.group("heading")) <= heading_level:
+                section_end = following_heading_match.start()
+                break
+        section_texts.append(prd_text[dependency_heading_match.end() : section_end])
+
+    return section_texts
+
+
 def _normalize_delivery_field_key(raw_key: str) -> str:
     """Normalize a structured Delivery Dependencies field name.
 
@@ -158,18 +235,8 @@ def _normalize_delivery_field_key(raw_key: str) -> str:
             "with GitHub Issue numbers under 'Depends on tasks/issues' "
             "(for example '#42')."
         )
-    if key in (
-        "depends_on_tasks/issues",
-        "depends_on_tasks",
-        "depends_on_issues",
-    ):
-        return "depends_on_issues"
-    if key in ("gate_type", "gate"):
-        return "gate_type"
-    if key in ("sequence",):
-        return "sequence"
-    if key in ("notes", "note"):
-        return "notes"
+    if key in _DELIVERY_FIELD_ALIASES:
+        return _DELIVERY_FIELD_ALIASES[key]
     raise ValueError(
         f"Unknown field in Delivery Dependencies: {raw_key!r}. "
         "Expected one of: Depends on tasks/issues, Gate type, Sequence, Notes."

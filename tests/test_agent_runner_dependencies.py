@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 from backend.core.shared.models.agent_runner import (
@@ -165,6 +168,162 @@ class TestParseDeliveryDependencies:
 """
         result = parse_delivery_dependencies(prd_text)
         assert result.notes == "first"
+
+    def test_parses_real_m13_two_level_delivery_dependencies(self) -> None:
+        """M13 PRD 的真实双层写法应保留 hard 依赖和排序声明。"""
+        fixture_path = (
+            Path(__file__).resolve().parents[1]
+            / "tasks/pending/P1-FEAT-20261019-180938-m13-keda-vs-claude-workflow-evaluation.md"
+        )
+        prd_text = fixture_path.read_text(encoding="utf-8")
+
+        result = parse_delivery_dependencies(prd_text)
+
+        assert result.depends_on_issues == ()
+        assert result.depends_on_prds == (
+            "tasks/pending/P1-FEAT-20261019-140531-m13-golden-eval-baseline.md",
+        )
+        assert result.gate_type == "hard"
+        assert result.sequence == "via-main"
+
+    @pytest.mark.parametrize(
+        ("prd_text", "expected"),
+        [
+            (
+                "## Delivery Dependencies\n"
+                "- Depends on tasks/issues: #42\n"
+                "- Gate type: hard\n"
+                "- Sequence: via-main\n",
+                DeliveryDependencyDeclaration(
+                    depends_on_issues=(42,), gate_type="hard", sequence="via-main"
+                ),
+            ),
+            (
+                "## 8. Delivery Dependencies\n"
+                "### Delivery Dependencies\n"
+                "- Depends on tasks/issues: #43\n"
+                "- Gate type: hard\n"
+                "- Sequence: stack\n",
+                DeliveryDependencyDeclaration(
+                    depends_on_issues=(43,), gate_type="hard", sequence="stack"
+                ),
+            ),
+            (
+                "## 8. Delivery Dependencies\n"
+                "### Delivery Dependencies\n"
+                "- Depends on tasks/issues: #44\n"
+                "- Gate type: soft\n",
+                DeliveryDependencyDeclaration(
+                    depends_on_issues=(44,), gate_type="soft", sequence="via-main"
+                ),
+            ),
+            (
+                "## 8. Delivery Dependencies\n"
+                "### Delivery Dependencies\n"
+                "- Depends on tasks/issues: none\n"
+                "- Gate type: none\n",
+                DeliveryDependencyDeclaration(),
+            ),
+        ],
+    )
+    def test_parses_delivery_dependency_heading_shapes(
+        self, prd_text: str, expected: DeliveryDependencyDeclaration
+    ) -> None:
+        """单层和双层标题下的门禁类型与 Sequence 均按声明解析。"""
+        assert parse_delivery_dependencies(prd_text) == expected
+
+    def test_matches_upstream_shared_delivery_dependency_samples_or_issue_fallback(
+        self,
+    ) -> None:
+        """逐例验证上游共享样例；样例同步前使用 Issue #315 的回归形状。"""
+        repository_root = Path(__file__).resolve().parents[1]
+        shared_samples_directory = repository_root / "tests/guards/shared"
+        shared_sample_paths = sorted(shared_samples_directory.glob("*delivery*dependenc*.json"))
+        if shared_sample_paths:
+            sample_cases: list[dict[str, object]] = []
+            for shared_sample_path in shared_sample_paths:
+                sample_payload = json.loads(shared_sample_path.read_text(encoding="utf-8"))
+                if isinstance(sample_payload, dict):
+                    sample_cases.extend(sample_payload["cases"])
+                else:
+                    sample_cases.extend(sample_payload)
+        else:
+            # TODO: 上游同步 Delivery Dependencies 共享样例后，删除本 Issue 的本地回退样例。
+            m13_fixture_path = (
+                repository_root
+                / "tasks/pending/P1-FEAT-20261019-180938-m13-keda-vs-claude-workflow-evaluation.md"
+            )
+            sample_cases = [
+                {
+                    "name": "m13-real-hard-via-main",
+                    "prd_fragment": m13_fixture_path.read_text(encoding="utf-8"),
+                    "expected": {
+                        "depends_on_issues": [],
+                        "depends_on_prds": [
+                            "tasks/pending/P1-FEAT-20261019-140531-m13-golden-eval-baseline.md"
+                        ],
+                        "gate_type": "hard",
+                        "sequence": "via-main",
+                        "notes": (
+                            "需要前置 PRD 已将 suite 校准、快照隔离、延后判分、重复结果账本及 "
+                            "v16 schema 落到主线；本 PRD 之后将账本推进到 v17。"
+                        ),
+                    },
+                },
+                {
+                    "name": "two-level-hard-stack",
+                    "prd_fragment": (
+                        "## 8. Delivery Dependencies\n### Delivery Dependencies\n"
+                        "- Depends on tasks/issues: #42\n- Gate type: hard\n"
+                        "- Sequence: stack\n"
+                    ),
+                    "expected": {
+                        "depends_on_issues": [42],
+                        "depends_on_prds": [],
+                        "gate_type": "hard",
+                        "sequence": "stack",
+                    },
+                },
+                {
+                    "name": "two-level-soft",
+                    "prd_fragment": (
+                        "## 8. Delivery Dependencies\n### Delivery Dependencies\n"
+                        "- Depends on tasks/issues: #43\n- Gate type: soft\n"
+                    ),
+                    "expected": {
+                        "depends_on_issues": [43],
+                        "depends_on_prds": [],
+                        "gate_type": "soft",
+                        "sequence": "via-main",
+                    },
+                },
+                {
+                    "name": "two-level-none",
+                    "prd_fragment": (
+                        "## 8. Delivery Dependencies\n### Delivery Dependencies\n"
+                        "- Depends on tasks/issues: none\n- Gate type: none\n"
+                    ),
+                    "expected": {
+                        "depends_on_issues": [],
+                        "depends_on_prds": [],
+                        "gate_type": "none",
+                        "sequence": "via-main",
+                    },
+                },
+            ]
+
+        for sample_case in sample_cases:
+            expected_declaration = sample_case["expected"]
+            assert isinstance(expected_declaration, dict), sample_case["name"]
+            assert parse_delivery_dependencies(sample_case["prd_fragment"]) == (
+                DeliveryDependencyDeclaration(
+                    depends_on_issues=tuple(expected_declaration["depends_on_issues"]),
+                    depends_on_prds=tuple(expected_declaration["depends_on_prds"]),
+                    gate_type=expected_declaration["gate_type"],
+                    sequence=expected_declaration["sequence"],
+                    notes=expected_declaration.get("notes", ""),
+                )
+            ), sample_case["name"]
 
 
 # ---------------------------------------------------------------------------

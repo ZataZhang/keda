@@ -286,6 +286,40 @@ def test_create_issue_from_prd_missing_issue_link_fails_fast(
     assert [c for c in fake_client.calls if c["method"] == "create_issue"] == []
 
 
+def test_create_issue_from_prd_rejects_unparsed_non_none_dependency(
+    tmp_path: Path,
+) -> None:
+    """依赖字段有非 none 内容但解析为空时，必须带 PRD 路径失败且不创建 Issue。"""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo)
+    fake_client = FakeGitHubClient()
+    prd = repo / "tasks" / "pending" / "downstream.md"
+    prd.parent.mkdir(parents=True)
+    prd.write_text(
+        "# PRD: Downstream\n\n"
+        "## Delivery Dependencies\n\n"
+        "- Depends on tasks/issues: none\n"
+        "- Gate type: none\n\n"
+        "## Delivery Dependencies\n\n"
+        "- Depends on tasks/issues: #42\n"
+        "- Gate type: hard\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        create_issue_from_prd(
+            request=_request(repo, Path("tasks/pending/downstream.md")),
+            github_client=fake_client,
+        )
+
+    message = str(exc_info.value)
+    assert "tasks/pending/downstream.md" in message
+    assert "non-none 'Depends on tasks/issues'" in message
+    assert "no dependency references were parsed" in message
+    assert [call for call in fake_client.calls if call["method"] == "create_issue"] == []
+
+
 def test_create_issue_from_prd_unresolved_prd_ref_is_actionable(
     tmp_path: Path,
 ) -> None:

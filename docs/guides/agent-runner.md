@@ -262,6 +262,10 @@ kc labels sync --repo-id keda
 - Notes: 等待上游 API 改造完成
 ```
 
+依赖小节支持 `## Delivery Dependencies` 单层标题，也支持 PRD 模板使用的
+`## 8. Delivery Dependencies` 外层标题加 `### Delivery Dependencies` 子标题。
+解析器按匹配标题的级别确定边界：更低级标题仍属于该小节，遇到同级或更高级标题才结束。
+
 字段说明：
 
 | 字段 | 说明 |

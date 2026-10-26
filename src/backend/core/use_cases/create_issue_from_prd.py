@@ -49,6 +49,7 @@ from backend.core.use_cases.agent_runner_dependencies import (
     format_dependency_marker,
     parse_dependency_marker,
     parse_delivery_dependencies,
+    validate_delivery_dependencies_not_dropped,
 )
 from backend.core.use_cases.agent_runner_validation import (
     assert_realistic_validation_oracle_valid,
@@ -118,6 +119,18 @@ def _resolve_dependencies(
         ``sequence`` is the PRD's ``Sequence`` field (``via-main`` if absent).
     """
     from_prd = parse_delivery_dependencies(prd_text)
+    if current_prd_path is not None:
+        display_prd_path = str(current_prd_path)
+        if repo_path is not None:
+            try:
+                display_prd_path = current_prd_path.relative_to(repo_path).as_posix()
+            except ValueError:
+                pass
+        validate_delivery_dependencies_not_dropped(
+            prd_text,
+            from_prd,
+            prd_path=display_prd_path,
+        )
 
     # Start with PRD section values
     gate_type = from_prd.gate_type
