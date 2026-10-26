@@ -3201,6 +3201,13 @@ PRD 写下的时刻和执行它的时刻之间仓库还在变，PRD 点名的路
 错配不会报错（例如给 `issue_from_prd` 配 `markdown`，JSON 原文会被当成标题和正文）；JSON 解析失败时
 日志里会有一条 `Agent output is not a JSON object` 警告。
 
+`draft_pr` 的 markdown 输出按 `Closes #N` 锚点定位正文。agent 经常在正文前写一整段散文开场白、一行
+`**Title:** ...` 标注，或把整份正文包进 ```markdown 围栏，而开场白白名单只认对话式引导语
+（`Here is ...`、以冒号结尾的短句），认不出用完整句子写的段落——PR #328 的标题就是漏进正文的第一段
+散文。现在提示词契约（"首个非空行 `Closes #N`"）是判定依据：锚点之前除了"单行且 ≤72 字符、可能是
+标题"这种既有约定外一律剥离；`**Title:**` 标注里 ≤72 字符的值被回收为 PR 标题，没有可用标题时落到
+`[Agent] {issue_title}` 回退标题。正文里的内层代码围栏保持不动，只剥掉与开场白那半配对的外层关闭行。
+
 agent 缺 `prompt`、超时、CLI 不可执行，或输出不合格（解析失败、缺下面的必需锚点），都**不会中断**
 Issue 创建或 PR 发布，而是按下面的顺序落到下一级，并各记一条警告日志：
 
@@ -3710,6 +3717,7 @@ verifier 能跑的就是 builder 写进 manifest 的那些 capture 脚本，而�
 - Agent 执行在隔离 worktree 中进行，不影响主工作区
 - Agent 不直接执行 `git add` 或 `git commit`；完成修改后写入 `.agent-runner/commit-request.json` 请求 runner 在 host 侧提交
 - `commit-request.json` 必须提供 `commit_message`；pre-PR reviewer 可额外提供 `verdict`、`summary` 和 `findings_*` 元数据作为空提交兜底。runner 会校验当前 branch 未变化、删除请求文件、检查 `forbidden_path_patterns`（例外覆盖也会生效），再执行 `git add -A` 和 `git commit`
+- `commit_message` 里的 subject 与 body 都会交给 Git（`sanitize_commit_message` 保留段落，最多 2000 字符并按整行收敛）；首行超过 72 字符时在**词边界**折进正文，不再像早期版本那样把整条信息压成一行、在词中间截断（Issue #326 巡查到的 200 字符标题）。提交规范见 `docs/ai-standards/tooling.md`：英文 Conventional Commits、标题 ≤72 字符、正文写 why，并带上目标 Issue 编号
 - 不同仓库应在 `verification_commands` 中配置自己的验证命令，例如 `just test`、`npm test`、`pnpm lint` 或 `make test`
 - runner 会在提交前先运行一次 `verification_commands`；发现未提交变更并执行 `git add -A` 后，会再次运行同一组验证命令，覆盖依赖 staged 状态的 commit hook 或测试标记
 - 如果验证过程结束后工作区还剩下任何 `git add -A` 仍会 stage 的内容，runner 会在安全路径校验后补一次 `git add -A`，避免 `.last_tested_commit` 指向 working tree 而 commit hook 检查到过期 staged tree。探测口径（`_verification_left_unstaged_worktree_changes`）覆盖两类残留：formatter / lint 自动修复的**已跟踪**文件（`git diff --quiet`），以及门禁自己生成、**未跟踪且未被 gitignore** 的新文件（`git ls-files --others --exclude-standard`，如新增快照或 golden 文件）。第二类曾是 `check-test-flag` 硬失败的盲区：`just test` 写标记用的路径集包含未跟踪未 ignore 的文件，而 commit 钩子比对 staged 树，只补 `git add -u` 时这些新文件永远进不了索引，钩子会给出「请运行 `git add -A` 归一」——恰好是 runner 漏做的那一步。判定与首次入索引的 `git add -A` 同口径，被 gitignore 的构建产物两边都看不见，因此不会被卷进提交
