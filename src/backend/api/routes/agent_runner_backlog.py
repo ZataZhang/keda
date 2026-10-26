@@ -257,7 +257,7 @@ def list_backlog_prds(
     请求线程不做任何 GitHub 调用，也不等待重建结果——列表秒开的代价就是响应
     可能短暂陈旧，因此响应里用 ``stale`` 与 ``scanned_at`` 把新鲜度如实交代给
     前端。``force_refresh`` 供页面上的手动刷新使用：不等到快照超过 TTL，直接排一次
-    后台重扫，并在本次响应里置 ``stale=True``，让前端保持短轮询直到新结果落库。
+    后台重扫，并在本次响应里置 ``stale=True``，让前端保持短轮询直到后续响应确认快照已新鲜。
     仓库不存在或已禁用仍返回 400，其历史快照不会回流到任何页面。
     """
     _resolve_context(repo_id)
@@ -654,7 +654,7 @@ class UpdateCiPolicyRequest(BaseModel):
 
 @router.patch("/agent-runner/backlog/prds/{encoded_path}/ci-policy")
 def update_backlog_prd_ci_policy(encoded_path: str, request: UpdateCiPolicyRequest) -> dict:
-    """写对应 Issue 的最新 ``iar:ci-auto-repair-policy`` marker 并 fresh 回读。"""
+    """写对应 Issue 的最新 ``kc:ci-auto-repair-policy`` marker 并 fresh 回读。"""
     prd_path = _decode_prd_path(encoded_path)
     _context, prd, github_client, issue_comments, pr_context = _resolve_prd_ci_context(
         request.repo_id, prd_path

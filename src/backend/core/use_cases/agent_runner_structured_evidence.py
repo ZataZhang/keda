@@ -2,7 +2,7 @@
 
 本模块负责 Realistic Validation 的**结构化证据**能力：
 
-- 解析并物化 ``iar:structured-evidence`` hidden marker。
+- 解析并物化 ``kc:structured-evidence`` hidden marker。
 - 读取证据目录下的 ``evidence.json`` manifest（默认约定为
   ``tasks/evidence/<prd-stem>/evidence.json``，目录由调用方按任务解析传入）。
 - 校验 manifest 字段完整性、item 覆盖、证据文件存在性与编号一致性。
@@ -33,7 +33,7 @@ from backend.core.use_cases.agent_runner_evidence_format import (
 )
 
 _STRUCTURED_EVIDENCE_MARKER_PATTERN = re.compile(
-    r"<!--\s*iar:structured-evidence\s+"
+    r"<!--\s*kc:structured-evidence\s+"
     r"version=(?P<version>\d+)\s+"
     r'language="(?P<language>[^"]+)"\s*-->'
 )
@@ -71,7 +71,7 @@ class EvidenceUpload:
 
 @dataclass(frozen=True)
 class StructuredEvidenceMarker:
-    """Parsed ``iar:structured-evidence`` hidden marker from an Issue body."""
+    """Parsed ``kc:structured-evidence`` hidden marker from an Issue body."""
 
     version: int
     language: str
@@ -234,13 +234,13 @@ def _label(language: str, key: str) -> str:
 
 def format_structured_evidence_marker(language: str) -> str:
     """Format the hidden structured evidence marker for an Issue body."""
-    return f'<!-- iar:structured-evidence version=1 language="{language}" -->'
+    return f'<!-- kc:structured-evidence version=1 language="{language}" -->'
 
 
 def parse_structured_evidence_marker(
     issue_body: str,
 ) -> StructuredEvidenceMarker | None:
-    """Parse the latest ``iar:structured-evidence`` marker from an Issue body."""
+    """Parse the latest ``kc:structured-evidence`` marker from an Issue body."""
     marker_match = None
     for marker_match in _STRUCTURED_EVIDENCE_MARKER_PATTERN.finditer(issue_body):
         pass
@@ -754,7 +754,7 @@ def validate_evidence_manifest(
     if marker is None:
         raise ValidationEvidenceError(
             "Internal error: validate_evidence_manifest called on an Issue without "
-            "an `iar:structured-evidence` marker."
+            "an `kc:structured-evidence` marker."
         )
 
     manifest = load_evidence_manifest(worktree_path, config, evidence_dir=evidence_dir)

@@ -51,7 +51,7 @@ def _marker(
     checks_state: str | None = None,
     mergeable: bool | None = None,
 ) -> str:
-    """Format an iar:event comment body matching the official schema."""
+    """Format an kc:event comment body matching the official schema."""
     parts = [
         "version=1",
         f"phase={phase}",
@@ -67,7 +67,7 @@ def _marker(
         parts.append(f"checks_state={checks_state}")
     if mergeable is not None:
         parts.append(f"mergeable={'true' if mergeable else 'false'}")
-    return f"<!-- iar:event {' '.join(parts)} -->"
+    return f"<!-- kc:event {' '.join(parts)} -->"
 
 
 def _make_issue(
@@ -442,7 +442,7 @@ def test_build_repository_overview_aggregates_anomaly_counts(
         ]
         # 31 / 32 carry a non-marker comment with the PR branch so the
         # snapshot resolution can locate the PR context without setting
-        # a latest iar:event marker (which would skew anomaly totals).
+        # a latest kc:event marker (which would skew anomaly totals).
         client._issue_comments[31] = ["PR Branch: `issue-31`"]
         client._issue_comments[32] = ["PR Branch: `issue-32`"]
 
@@ -563,7 +563,7 @@ def test_serialize_monitoring_converts_nested_dataclasses() -> None:
                 phase="claimed",
                 cycle=1,
                 comment_index=0,
-                raw_marker="<!-- iar:event ... -->",
+                raw_marker="<!-- kc:event ... -->",
             ),
         ),
         "anomaly": Anomaly(

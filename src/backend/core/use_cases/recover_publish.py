@@ -748,7 +748,7 @@ def build_recovery_success_comment(
 ) -> str:
     """构建发布恢复成功后写入 Issue 的评论正文。
 
-    评论包含 ``iar:event`` marker，``review_once`` 可通过该 marker 解析出
+    评论包含 ``kc:event`` marker，``review_once`` 可通过该 marker 解析出
     PR branch 上下文。
 
     Args:

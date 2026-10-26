@@ -574,7 +574,7 @@ def test_api_prd_policy_write_and_fresh_read(ci_environment) -> None:
     assert data["effective_enabled"] is True
     # marker 写进了 Issue 评论流（同一事实源，CLI/Console 双向可见）。
     assert any(
-        "iar:ci-auto-repair-policy value=on" in body
+        "kc:ci-auto-repair-policy value=on" in body
         for body in ci_environment["github"].list_issue_comments(42)
     )
     # 清除覆盖回到 inherit。

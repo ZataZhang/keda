@@ -131,7 +131,7 @@ def test_earlier_rival_claim_makes_this_side_lose_without_touching_labels() -> N
     assert exc_info.value.winner.host == "runner-b"
     assert not [call for call in client.calls if call["method"] == "edit_issue_labels"]
     withdrawn = next(call for call in client.calls if call["method"] == "edit_issue_comment")
-    assert "iar:claim-withdrawn" in withdrawn["body"]
+    assert "kc:claim-withdrawn" in withdrawn["body"]
 
 
 def test_same_timestamp_tie_break_is_the_same_for_both_processes() -> None:
@@ -252,7 +252,7 @@ def test_rival_bid_inserted_during_grace_wins_and_loser_withdraws() -> None:
     assert exc_info.value.winner.host == "runner-b"
     assert not [call for call in client.calls if call["method"] == "edit_issue_labels"]
     withdrawn = next(call for call in client.calls if call["method"] == "edit_issue_comment")
-    assert "iar:claim-withdrawn" in withdrawn["body"]
+    assert "kc:claim-withdrawn" in withdrawn["body"]
 
 
 def test_other_live_process_on_the_same_host_still_wins_the_earlier_bid() -> None:

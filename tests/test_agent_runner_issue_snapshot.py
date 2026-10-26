@@ -155,7 +155,7 @@ def test_stack_sequencing_uses_upstream_issue_branch_as_base(tmp_path: Path) -> 
     upstream_sha = create_commit(repo_path, "upstream work")
     _git(repo_path, "checkout", "-b", "issue-43")
     create_commit(repo_path, "downstream work")
-    stacked_issue = _issue(body='<!-- iar:depends-on #42 mode="stack" -->', number=43)
+    stacked_issue = _issue(body='<!-- kc:depends-on #42 mode="stack" -->', number=43)
 
     snapshot = build_issue_snapshot(_request(repo_path, stacked_issue))
 

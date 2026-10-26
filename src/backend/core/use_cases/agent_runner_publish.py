@@ -307,9 +307,9 @@ def create_draft_pr(
             PR. When set, the worktree's current branch must match.
         content_generator: Optional AI content generator for PR title/body.
         publish_stage: 发布档位。``FAST``（``kc run --fast-merge``）在正文末尾注入
-            ``iar:fast-merge`` 自我声明 marker 与人读未验证标注；``DIRECT``
+            ``kc:fast-merge`` 自我声明 marker 与人读未验证标注；``DIRECT``
             （``kc run --direct-pr`` 旗标，或认领后从 Issue ``direct-pr`` 标签解析出的
-            直发档）注入同族的 ``iar:direct-pr`` marker 与直发说明——marker 只声明档位，
+            直发档）注入同族的 ``kc:direct-pr`` marker 与直发说明——marker 只声明档位，
             不区分来源；``NORMAL`` 不注入任何档位标注。
 
     Returns:
@@ -424,7 +424,7 @@ def create_draft_pr(
         if gc_config.draft_pr.enabled and generated.source != "agent":
             pr_body = (
                 f"{pr_body}\n\n"
-                f"<!-- iar: draft-pr-source={generated.source};"
+                f"<!-- kc: draft-pr-source={generated.source};"
                 f" reason=agent-timeout-or-no-output -->"
             )
 

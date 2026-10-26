@@ -68,7 +68,7 @@ class IssueLogBinding:
 
 
 _ACTIVE_ISSUE_LOG_BINDING: ContextVar[IssueLogBinding | None] = ContextVar(
-    "iar_active_issue_log_binding", default=None
+    "kc_active_issue_log_binding", default=None
 )
 
 
@@ -230,7 +230,7 @@ def issue_output_routing(
 
     该 sink 是行首 ``[HH:MM:SS]`` 时间戳的唯一落点（Issue #223）：生产者传入
     的仍是可读原文，前缀在这里加上后再分发给日志文件、看板与前台镜像，三个
-    消费端因此逐行一致。日志末尾的 ``[iar-attempt-end]`` 终态标记由 writer
+    消费端因此逐行一致。日志末尾的 ``[kc-attempt-end]`` 终态标记由 writer
     直接写入，不经 sink，因此保持裸行、可被 ``--follow`` 精确匹配。
 
     Args:

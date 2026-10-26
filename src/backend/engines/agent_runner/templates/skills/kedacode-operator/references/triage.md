@@ -28,7 +28,7 @@ An Agent that prints nothing for the configured inactivity timeout is killed and
 
 1. Read the `Attempt History` comment: per-attempt Agent, failure type, and duration.
 2. Check the latest claim comment for the Agent actually in use; a different name means fallback already happened.
-3. Read the `[iar-invocation-start]` / `[iar-invocation-end]` markers in `kc logs --issue <N>`: how many real subprocess calls happened, which `executor=` ran each, what `outcome=` / `failure_category=` each ended with, and how they chain via `retry_of=`. Field-by-field reading is on the 看进度 route (`${CODEBUDDY_SKILL_DIR}/references/watch.md`).
+3. Read the `[kc-invocation-start]` / `[kc-invocation-end]` markers in `kc logs --issue <N>`: how many real subprocess calls happened, which `executor=` ran each, what `outcome=` / `failure_category=` each ended with, and how they chain via `retry_of=`. Field-by-field reading is on the 看进度 route (`${CODEBUDDY_SKILL_DIR}/references/watch.md`).
 4. Only after retries *and* fallback are exhausted does the Issue become `agent/failed`.
 
 What the markers do **not** tell you, so do not over-read them:
@@ -39,18 +39,18 @@ What the markers do **not** tell you, so do not over-read them:
 - `model_config_snapshot` 是独立的调用时配置线索，不会把 `model_source=unknown` 改成自报。
   配置含具体版本时可作标明来源的估价回退；`sonnet`、`qfmodel` 等别名仍待确认。
 - **Coverage is one process layer on one machine.** Sub-Agents spawned inside an Agent are `unobserved`, and the ledger is the local `~/.kedacode/console.db` — no cross-machine aggregation.
-- **`[iar-invocation-coverage-incomplete]` means the list may be incomplete**, not that the run failed. Business results are unaffected by observation faults.
+- **`[kc-invocation-coverage-incomplete]` means the list may be incomplete**, not that the run failed. Business results are unaffected by observation faults.
 
 These markers alone stay diagnosable: they carry no threshold and take no action. The stall supervisor is a separate component, **on by default for eligible Issue runs** and explicitly disableable — see the next subsection.
 
 ### When a stalled run *should* have been cancelled and was not
 
-`[agent_runner.stall_supervisor]` adds a per-attempt observer that asks one read-only Agent whether a frozen attempt is thinking or stuck, and cancels the process group only when the answer is actionable. It writes `[iar-stall-check]`, `[iar-stall-diagnosis]`, `[iar-stall-handoff]`, and `[iar-stall-cancel]` lines into the same per-Issue log, so `kc logs --issue <N>` shows why it acted — or why it did not:
+`[agent_runner.stall_supervisor]` adds a per-attempt observer that asks one read-only Agent whether a frozen attempt is thinking or stuck, and cancels the process group only when the answer is actionable. It writes `[kc-stall-check]`, `[kc-stall-diagnosis]`, `[kc-stall-handoff]`, and `[kc-stall-cancel]` lines into the same per-Issue log, so `kc logs --issue <N>` shows why it acted — or why it did not:
 
-- **Supervision is explicitly off** (`enabled = false`): no observer thread, no model call, behavior is byte-for-byte what it was before the feature. Absence of `[iar-stall-*]` lines can also mean there is no eligible active Issue run.
+- **Supervision is explicitly off** (`enabled = false`): no observer thread, no model call, behavior is byte-for-byte what it was before the feature. Absence of `[kc-stall-*]` lines can also mean there is no eligible active Issue run.
 - **The call was not supervisable**: only runs with an Issue identity and a run-phase profile get an observer. `kc ask`, deliberation, and read-only diagnosis calls never do.
 - **The supervisor has no read-only `generate` profile**: it self-disables and records one audit line rather than diagnosing with a write-capable Agent.
-- **The verdict was not `stalled`**: `blocked` and `uncertain` hand off (`[iar-stall-handoff]`) and touch nothing. A `stalled` answer missing its summary or evidence is downgraded to `uncertain` — a mis-spelled word does not earn the right to kill a process.
+- **The verdict was not `stalled`**: `blocked` and `uncertain` hand off (`[kc-stall-handoff]`) and touch nothing. A `stalled` answer missing its summary or evidence is downgraded to `uncertain` — a mis-spelled word does not earn the right to kill a process.
 - **The recheck before cancelling failed**: the attempt had already finished, the scene fingerprint changed while the model was thinking, or `probe_live_attempt` could not confirm that this attempt owns those PIDs. Any of these hands off instead.
 - **A frozen fingerprint is not a frozen stdout**: progress is HEAD, branch, status/diff fingerprints, finished-call count, and last event time — deliberately not log volume, because a loop that prints the same error looks busy and is not progressing.
 

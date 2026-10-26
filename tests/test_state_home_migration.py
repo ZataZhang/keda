@@ -223,6 +223,31 @@ def test_lock_file_and_registry_pids_are_detected(
     assert report.pid_set == frozenset({111, 333})
 
 
+@pytest.mark.parametrize("occupancy_source", ["registry", "lock"])
+def test_new_state_directory_blocks_migration_without_legacy_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, occupancy_source: str
+) -> None:
+    """旧目录已移除时，新目录中的活动登记或锁仍须阻止迁移。"""
+    new_state_path = tmp_path / product_identity.STATE_DIR_NAME
+    new_state_path.mkdir()
+    active_pid = os.getpid()
+    if occupancy_source == "registry":
+        (new_state_path / "processes.json").write_text(
+            json.dumps({"active-runner": {"pid": active_pid}}), encoding="utf-8"
+        )
+    else:
+        lock_directory = new_state_path / "daemon-locks"
+        lock_directory.mkdir()
+        (lock_directory / "active.lock").write_text(str(active_pid), encoding="utf-8")
+    monkeypatch.setattr(state_home_migration, "_pids_from_command_scan", lambda _home: frozenset())
+
+    result = migrate_state_home(home_path=tmp_path)
+
+    assert result.outcome == "occupied"
+    assert result.blocking_pid_set == (active_pid,)
+    assert not (tmp_path / _LEGACY_STATE_DIR_NAME).exists()
+
+
 # ---------------------------------------------------------------------------
 # 搬迁失败分支
 # ---------------------------------------------------------------------------

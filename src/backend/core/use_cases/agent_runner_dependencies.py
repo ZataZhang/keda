@@ -2,7 +2,7 @@
 
 本模块实现 Issue 依赖门禁的解析、判定与等待副作用：
 
-- ``parse_dependency_marker``：解析 Issue body 中的 ``iar:depends-on`` marker。
+- ``parse_dependency_marker``：解析 Issue body 中的 ``kc:depends-on`` marker。
 - ``parse_delivery_dependencies``：解析 PRD 中工具无关的 ``Delivery Dependencies`` 小节。
 - ``evaluate_dependencies``：查询 GitHub 实时状态，判定依赖是否满足。
 - ``mark_dependency_waiting``：为未满足依赖的 Issue 添加 ``agent/waiting`` label
@@ -31,10 +31,10 @@ _logger = logging.getLogger(__name__)
 # Marker regexes (same style as agent_runner_events.py)
 # ---------------------------------------------------------------------------
 
-_DEPENDS_ON_MARKER_PATTERN = re.compile(r"<!--\s*iar:depends-on\s+" r"(?P<body>[^>]+?)" r"\s*-->")
+_DEPENDS_ON_MARKER_PATTERN = re.compile(r"<!--\s*kc:depends-on\s+" r"(?P<body>[^>]+?)" r"\s*-->")
 
 _DEPENDENCY_WAIT_MARKER_PATTERN = re.compile(
-    r"<!--\s*iar:dependency-wait\s+" r"blockers=(?P<blockers>[^\s>]+)" r"\s*-->"
+    r"<!--\s*kc:dependency-wait\s+" r"blockers=(?P<blockers>[^\s>]+)" r"\s*-->"
 )
 
 # ---------------------------------------------------------------------------
@@ -269,7 +269,7 @@ def _looks_like_issue_or_prd_ref(candidate_ref: str) -> bool:
 
 
 def parse_dependency_marker(issue_body: str) -> DependencyDeclaration | None:
-    """Parse ``iar:depends-on`` hidden markers from an Issue body.
+    """Parse ``kc:depends-on`` hidden markers from an Issue body.
 
     只解析 ``#N`` Issue 引用与 ``mode="stack"`` 策略 token。
 
@@ -303,7 +303,7 @@ def format_dependency_marker(
     issue_numbers: tuple[int, ...] = (),
     sequence: str = "via-main",
 ) -> str:
-    """Format a materialised ``iar:depends-on`` hidden marker.
+    """Format a materialised ``kc:depends-on`` hidden marker.
 
     Args:
         issue_numbers: Upstream Issue numbers.
@@ -321,18 +321,18 @@ def format_dependency_marker(
     body = " ".join(parts)
     if sequence.strip().lower() == "stack":
         body += ' mode="stack"'
-    return f"<!-- iar:depends-on {body} -->"
+    return f"<!-- kc:depends-on {body} -->"
 
 
 # ---------------------------------------------------------------------------
-# fast-merge 自我声明 marker（PR 正文；与 iar:depends-on 同族）
+# fast-merge 自我声明 marker（PR 正文；与 kc:depends-on 同族）
 # ---------------------------------------------------------------------------
 
-_FAST_MERGE_MARKER_PATTERN = re.compile(r"<!--\s*iar:fast-merge\s+issued=(?P<issued>\d+)\s*-->")
+_FAST_MERGE_MARKER_PATTERN = re.compile(r"<!--\s*kc:fast-merge\s+issued=(?P<issued>\d+)\s*-->")
 
 
 def format_fast_merge_marker(issue_number: int) -> str:
-    """Format the ``iar:fast-merge`` hidden self-declaration marker.
+    """Format the ``kc:fast-merge`` hidden self-declaration marker.
 
     经快速通道（``kc run --fast-merge``）发布的 PR 用它机器可读地声明
     "本 PR 未过验证门禁"；``issued`` 记录目标 Issue 编号，便于审计与
@@ -344,11 +344,11 @@ def format_fast_merge_marker(issue_number: int) -> str:
     Returns:
         Hidden HTML comment marker string.
     """
-    return f"<!-- iar:fast-merge issued={issue_number} -->"
+    return f"<!-- kc:fast-merge issued={issue_number} -->"
 
 
 def parse_fast_merge_marker(text: str) -> int | None:
-    """Parse the ``iar:fast-merge`` marker from a PR body or other text.
+    """Parse the ``kc:fast-merge`` marker from a PR body or other text.
 
     Args:
         text: 待扫描的正文（通常为 PR body）。
@@ -362,17 +362,17 @@ def parse_fast_merge_marker(text: str) -> int | None:
 
 def format_prd_auto_merge_marker(issue_number: int) -> str:
     """Format the audit marker for an explicitly selected PRD auto-merge run."""
-    return f"<!-- iar:prd-auto-merge issued={issue_number} -->"
+    return f"<!-- kc:prd-auto-merge issued={issue_number} -->"
 
 
-_DIRECT_PR_MARKER_PATTERN = re.compile(r"<!--\s*iar:direct-pr\s+issued=(?P<issued>\d+)\s*-->")
+_DIRECT_PR_MARKER_PATTERN = re.compile(r"<!--\s*kc:direct-pr\s+issued=(?P<issued>\d+)\s*-->")
 
 
 def format_direct_pr_marker(issue_number: int) -> str:
-    """Format the ``iar:direct-pr`` hidden self-declaration marker.
+    """Format the ``kc:direct-pr`` hidden self-declaration marker.
 
     经直发档（``kc run --direct-pr``）发布的 PR 用它机器可读地声明「本 PR 未经
-    任何 runner 侧门禁」；与 ``iar:fast-merge`` 同族但**值不同**，两个档位因此可
+    任何 runner 侧门禁」；与 ``kc:fast-merge`` 同族但**值不同**，两个档位因此可
     被下游区分（fast 仍跑 reviewer 与仓库验证，direct 连它们一起跳过）。
 
     Args:
@@ -381,11 +381,11 @@ def format_direct_pr_marker(issue_number: int) -> str:
     Returns:
         Hidden HTML comment marker string.
     """
-    return f"<!-- iar:direct-pr issued={issue_number} -->"
+    return f"<!-- kc:direct-pr issued={issue_number} -->"
 
 
 def parse_direct_pr_marker(text: str) -> int | None:
-    """Parse the ``iar:direct-pr`` marker from a PR body or other text.
+    """Parse the ``kc:direct-pr`` marker from a PR body or other text.
 
     Args:
         text: 待扫描的正文（通常为 PR body）。
@@ -398,7 +398,7 @@ def parse_direct_pr_marker(text: str) -> int | None:
 
 
 def format_dependency_wait_marker(blockers: tuple[DependencyBlocker, ...]) -> str:
-    """Format a hidden ``iar:dependency-wait`` marker for comment deduplication.
+    """Format a hidden ``kc:dependency-wait`` marker for comment deduplication.
 
     Args:
         blockers: Current blocker list.
@@ -407,7 +407,7 @@ def format_dependency_wait_marker(blockers: tuple[DependencyBlocker, ...]) -> st
         Hidden HTML comment marker string.
     """
     canonical = _canonical_blockers_hash(blockers)
-    return f"<!-- iar:dependency-wait blockers={canonical} -->"
+    return f"<!-- kc:dependency-wait blockers={canonical} -->"
 
 
 def _canonical_blockers_hash(blockers: tuple[DependencyBlocker, ...]) -> str:
@@ -417,7 +417,7 @@ def _canonical_blockers_hash(blockers: tuple[DependencyBlocker, ...]) -> str:
 
 
 def parse_latest_dependency_wait_marker(comments: list[str]) -> str | None:
-    """Parse the latest ``iar:dependency-wait`` marker from Issue comments.
+    """Parse the latest ``kc:dependency-wait`` marker from Issue comments.
 
     Args:
         comments: Comment body texts, oldest first.
@@ -636,7 +636,7 @@ def _build_resolution_guidance(
     if has_open_blocker:
         guidance.append(
             "- **Open upstream**: wait for the listed Issues to close, or remove "
-            "them from the ``<!-- iar:depends-on ... -->`` marker if they are no longer "
+            "them from the ``<!-- kc:depends-on ... -->`` marker if they are no longer "
             "required."
         )
     if verdict.has_failed_or_blocked_upstream:

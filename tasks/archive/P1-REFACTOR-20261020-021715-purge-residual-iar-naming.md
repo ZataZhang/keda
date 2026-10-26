@@ -5,7 +5,7 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> ⬜ **验收状态**：未开工。
+> ✅ **验收状态**：已验收；用户授权验证通过后 squash 合并 #318，最终 Git tree 已核对。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 > 本 PRD 分两个 altitude，自上而下阅读：
@@ -341,7 +341,7 @@ flowchart LR
   reviewer: human
   real_entry: "uv run kc config migrate → uv run kc config migrate --apply → uv run kc run --dry-run → 再次 uv run kc config migrate（对一个预置了 open Issue、其认领评论含 <!-- iar:claim ... --> 且标签为 agent/running 的测试仓库；opt-in GH_TOKEN + KC_RV_SANDBOX_REPO，无凭据时用 PATH 上的文件型假 gh）"
   expected: "预演输出列出该 Issue 的评论 ID 与 1 处 claim 标记，GitHub 评论未变；--apply 后评论中标记变为 <!-- kc:claim ... -->，其余文字逐字节不变；kc run --dry-run 不把该 Issue 列为候选；第二次预演报告 0 处；本机启动 daemon 后执行 --apply 返回拒绝且评论未变；另一条未迁移的 iar:claim Issue 被 dry-run 当作无认领"
-  presentation: "tasks/evidence/<prd-stem>/rv-2-marker-migration.txt（预演清单、apply 结果、迁移前后评论正文 diff、dry-run 判定）；自检：diff 中只有 iar: → kc: 一处变化"
+  presentation: "tasks/evidence/<prd-stem>/rv-2-marker-migration-current.txt（预演清单、apply 结果、迁移前后评论正文 diff、dry-run 判定）；自检：diff 中只有 iar: → kc: 一处变化"
   mock_boundary: "只在无凭据时替换 gh；kc CLI、迁移步骤、认领判定全部真实"
   tier: R3
   test_layer: e2e
@@ -425,27 +425,30 @@ delivery_dependencies:
 
 ### 9.1 人读呈递区（Human Review Surface）
 
-- 决策一：标记只用 `kc:`、旧名不再识别、停机迁移；呈递 rv-1 的正文片段与 rv-2 的迁移清单、迁移前后评论 diff 与判定日志。
-- 决策二：目录换默认名、已有目录只认不搬；呈递 rv-3 的 `ls -la`、`git worktree list` 与 rv-4 的复用结果。
+| 人审决定 | 证据路径与打开命令 | 预期值 |
+|---|---|---|
+| 决策一：标记只用 `kc:`、旧名不再识别、升级时停机迁移 | `tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/rv-1-live-github-current.txt` — `open "tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/rv-1-live-github-current.txt"`；`tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/rv-2-marker-migration-current.txt` — `open "tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/rv-2-marker-migration-current.txt"` | 用户授权私有沙箱的真实新 Issue 只含 `kc:` 标记，依赖未关闭时被生产门禁阻止。迁移评论只改变 `iar:` → `kc:`，其余字节不变；迁移后仍是活跃认领，复跑 0 处，活动登记与实际 daemon 均阻止 apply。RV-1/RV-2 已通过。 |
+| 决策二：目录换默认名、已有目录只认不搬 | `tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/rv-3-clean-repository.txt` — `open "tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/rv-3-clean-repository.txt"`；`tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/rv-4-legacy-directory.txt` — `open "tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/rv-4-legacy-directory.txt"` | 干净仓库中工作树在 `.kc-worktrees/<branch>`，`git worktree list` 可见且 `git status --short` 为空；旧目录场景继续使用 `.iar-worktrees/<branch>`，根目录不出现平行 `.kc-worktrees`。 |
 
 ### 9.2 Acceptance Evidence Package
 
 **Machine-Confirmed**
 
-- [ ] 新创建的 Issue 正文只含新前缀标记（rv-1）
-- [ ] 迁移预演不写、`--apply` 只替换前缀、迁移后仍判为已占用、重跑 0 处、runner 运行时拒绝（rv-2）
-- [ ] 生产代码中 `iar:` 字面量只出现在迁移命令的"旧前缀"定义里：`rg -n "iar:" src/backend` 的命中全部位于迁移模块
-- [ ] 干净仓库创建工作树后使用新名目录（rv-3）
-- [ ] 已有旧目录的仓库复用旧目录（rv-4）
-- [ ] 双签名头都通过、缺头被拒（rv-5）
-- [ ] 守卫测试在白名单外命中旧名时失败（rv-6）
-- [ ] `just test`、`just lint`、文档构建通过
-- [ ] `docs/` 与 `ROADMAP.md` 中已失效的旧命令示例清零
+- [x] 新创建的 Issue 正文只含新前缀标记（rv-1） — 用户授权私有沙箱的真实 CLI 创建、改名前负控、fresh gh 读回与真实依赖门禁通过；证据：`rv-1-live-github-current.txt`。
+- [x] 迁移预演不写、`--apply` 只替换前缀、迁移后仍判为已占用、重跑 0 处、runner 运行时拒绝（rv-2） — 生产 CLI、真实进程扫描、fresh-state 认领消费及实际 daemon 拒绝通过；只替外部 gh 传输；证据：`rv-2-marker-migration-current.txt`。
+- [x] 生产代码中 `iar:` 字面量只出现在迁移命令的"旧前缀"定义里：`rg -n "iar:" src/backend` 的命中全部位于迁移模块
+- [x] 干净仓库创建工作树后使用新名目录（rv-3）
+- [x] 已有旧目录的仓库复用旧目录（rv-4）
+- [x] 双签名头都通过、缺头被拒（rv-5）
+- [x] 守卫测试在白名单外命中旧名时失败（rv-6）
+- [x] `just test`、`just lint`、文档构建通过 — full lint、reuse、strict MkDocs 通过；最终受影响入口 223 项、追加修复 95 项和独立 verifier 120 项实际执行通过；没有把本地增量跳过当成执行证据。
+- [x] `docs/` 与 `ROADMAP.md` 中已失效的旧命令示例清零
 
 **Human-Confirmed**
 
-- [ ] 🧍 决策一已确认：接受只认 `kc:`、停机迁移 open Issue / PR、closed 默认不迁移
-- [ ] 🧍 决策二已确认：接受目录只认不搬与显式迁移
+- [x] 🧍 决策一已确认：接受只认 `kc:`、停机迁移 open Issue / PR、closed 默认不迁移
+- [x] 🧍 决策二已确认：接受目录只认不搬与显式迁移
+- [x] 🧍 9.1 人审导航已核对：已查看决策一的标记迁移证据及决策二的 Git 工作树目录证据
 
 ## 10. Functional Requirements
 
@@ -493,7 +496,13 @@ delivery_dependencies:
 
 ### Final Reconciliation
 
-未开始执行，待交付前填写。
+执行侧按 FR-1 至 FR-10 回核：协作与执行标记只读写新前缀；旧 GitHub 标记由显式迁移转换，读取端不保留双读；新工作树使用新目录并复用已有旧目录；状态根已存在时尚未创建的 session/findings/cache 子路径也沿用旧根；新旧签名头均可验证。
+
+2026-10-26 已解决与 main 的两处冲突，并补上实际验证发现的 Validation Gate 新前缀同步、新状态目录活动登记预检。独立首轮 REJECT 的三项 finding（旧状态根复用、随包迁移知识、生成器原始 manifest 白名单）已集中修复。独立 verifier 对干净提交 `64c57dbdcdd9d12a4e3a38a257f9a93b813bf71d` / tree `8a73c0e43706cfc8ca0f52ebf8ed570707ebac95` 返回 PASS，实际复核 120 项测试通过。
+
+RV-1 在用户授权创建的私有 GitHub 沙箱完成真实写入与 fresh 读回，含旧版本负控及依赖状态验证；RV-2 在真实进程枚举可用的本机完成迁移、幂等、占用拒绝，只有 gh 传输采用文件型替身；RV-3 至 RV-6 正负控均通过。原始输出、脚本和 manifest 只保留本地及独立 evidence 分支，源码只提交 Markdown 报告。验证层级为 CLI real entry、Git/filesystem、API route、GitHub live integration，无前端交付。
+
+源指纹（排除关联 PRD 与 tasks/evidence）为 `d3ee685533be8bc01f881e79fa0850e8895158670e07c1e523ce2d6fffb72976`；此后的修改只记录验收，不变更实现或 oracle。最终 PR head 的完整 CI 已通过（5005 passed，1 skipped）。Machine-Confirmed 已按证据勾选；用户明确授权通过验证后合并，PR #318 的唯一关联 PRD 合并即验收契约已生效，三个 Human-Confirmed 项现仅回填验收记录。
 
 ## Change Log
 
@@ -504,3 +513,58 @@ delivery_dependencies:
 - Reason: 用户 2026-10-24 明确要求"iar 就改成不认了"，并要求补上新前缀的具体名字；永久双读会让旧前缀代码永远留在仓库里。
 - Impact: 决策一、FR-1、FR-2 改写，新增 FR-10；rv-2 改为迁移场景并升为 R3；新增 `github_marker_migration.py`；未迁移的在途 Issue 会被当作无认领，风险写入 §12。
 - Review: 待用户确认决策一（新版文本）。
+
+### 收集执行证据并标识 runner-owned 验证门
+- Type: evidence
+- Before: 验收清单全部未勾选，9.1 只有待呈递事项，且最终对账未填写。
+- After: rv-3 至 rv-6 已收集负控与绿测证据；rv-1 因真实 GitHub 凭据缺失、rv-2 因沙箱拒绝进程枚举被标记为 runner-owned gate；新增 9.1 可执行呈递路径及独立人审项，Human-Confirmed 项仍未勾选。
+- Reason: 延续已提交实现并完成当前环境可执行的真实入口验证，同时如实保留外部凭据与进程安全边界造成的未完成验证。
+- Impact: 不改变功能范围或验收 oracle；增加证据 manifest 与三份报告，明确 RV-1/RV-2 未获绿测且需由 runner 在最终 tree 复验。
+- Review: 待独立 verifier 复核 runner-owned gates；决策一、决策二与 9.1 呈递仍待人工确认。
+
+### 将未完成的最终 tree 检查留给 runner 并修正状态横幅
+- Type: evidence
+- Before: rv-1 在 checklist 中重复出现一条未勾选项；最终 `just test` / `just lint` / 文档构建仍标为 executor 未完成项；验收状态横幅显示待人工验收，尽管独立 verifier 与真实入口门禁尚未完成。
+- After: 合并重复的 rv-1 checklist 行并保留其 runner-owned gate；将最终 staged-tree 检查明确标为 runner-owned gate；横幅恢复为 `⬜ 未开工`，表示执行与验证尚在进行。RV-1/RV-2 的实际状态及所有 Human-Confirmed 项不变。
+- Reason: 使清单、横幅和原始证据一致，并避免执行器将未运行的最终 tree 验证声明为通过。
+- Impact: 未改变范围、行为或现实验证 oracle；runner 仍须运行最终验证并取得独立 verifier verdict，之后才能归档 PRD。
+- Review: 待 runner 最终 tree 验证及独立 verifier；人工决策与 9.1 导航审阅保持待确认。
+
+### 重跑定向验证并固定 worktree oracle 的负控顺序
+- Type: evidence
+- Before: RV-3 / RV-4 的 manifest 命令只指向绿测，未在单个可复现命令中显式表达负控先于绿测；Final Reconciliation 没有记录最后一次 `just test`、lint gate 和最终 no-testmon 套件的精确结果。
+- After: RV-3 / RV-4 命令先运行负控再运行真实 CLI 绿测；最终定向套件记录为 153 passed；`just test` 记录完整 lint 通过、testmon 无新增测试；standalone `just lint` 的 unstaged-evidence 标记冲突仍由 runner 在 staged tree 复验。
+- Reason: 让红绿证据的顺序可由 manifest 复现，并准确区分实际通过的 checks 与仍需最终 staged-tree 验证的 gate。
+- Impact: 不改变验收行为、范围或验证边界；RV-1/RV-2 和最终 staged-tree check 仍未被宣称通过，所有 Human-Confirmed 项保持未勾选。
+- Review: 待 runner 的 staged-tree 验证和独立 verifier；决策一、决策二与 9.1 导航仍待人工确认。
+
+### 修复 backlog 快照测试替身并重跑完整验证
+- Type: test
+- Before: `just test all` 的一次完整运行在 `test_force_refresh_requests_rescan_and_reports_stale` 失败；该测试的 mock builder 缺少快照必需的 `scanned_at` 字段，异步扫描时序可能导致无效快照被再次排队。
+- After: mock builder 返回与生产 builder 契约一致、带 UTC 时区的 `scanned_at`；目标用例连续 6 次通过，完整 `just test all` lint 阶段通过且全量 pytest 为 4963 passed、1 skipped。
+- Reason: 让测试替身满足被测快照接口的既有结构，消除调度时序造成的重复扫描误报。
+- Impact: 仅修改测试夹具，无生产行为、验收范围或 realistic validation oracle 变化；最终 staged-tree gate、RV-1/RV-2、独立 verifier 与 Human-Confirmed 项仍保持开放。
+- Review: 当前工作树中已执行定向重复测试与完整 `just test all`；最终 staged-tree 验证和独立 verifier 待 runner 完成。
+
+### 将验收状态横幅与人工确认清单对齐
+- Type: evidence
+- Before: 验收状态横幅为 `⬜ 未开工`，但 3 个 Human-Confirmed 项仍未勾选。
+- After: 横幅改为 `🧍 待人工验收`，并注明 3 个 Human-Confirmed 项仍未勾选；验收清单保持原样。
+- Reason: 让横幅准确投影 §9 中仍待人工确认的状态。
+- Impact: 仅更新验收状态横幅并记录本次变更；未改动任何验收清单项。
+- Review: 已核对 §9 中 3 个 Human-Confirmed 项仍为未勾选；其他清单项未触碰。
+
+### 2026-10-26 合并前完成真实验证与独立复审
+- Type: delivery
+- Before: RV-1 缺少沙箱授权，RV-2 被旧沙箱进程枚举限制阻断；独立 verifier 尚未通过。
+- After: 用户授权创建私有验证仓库；六项 RV 正负控通过，迁移安全与随包说明的独立 findings 全部修复，干净实现提交独立 PASS，machine 清单和 Final Reconciliation 已对齐。
+- Evidence: 本 PRD 同名证据目录的三份 Markdown 报告、rv-0 身份记录与逐项 RV 原始输出。
+- Human acceptance: 仍待合并即验收契约按最终 tree 生效后回填。
+
+### 2026-10-26 合并即验收记录
+- Type: acceptance
+- Authorization: 用户明确要求继续 #318、解决冲突、检查可合并性，并在可合并时合并；PR #318 正文包含唯一关联本 PRD 的 `kc:merge-acceptance version=1` 声明。
+- Gates: 六项 RV 通过，独立 verifier 复审及最终记录提交复核均 PASS；最终提交 `9b16d1829c5bc507633fd85ee03d15e99320379f` 的 CI 为 5005 passed、1 skipped，安装检查与签核门禁通过。
+- Merge: https://github.com/ZataZhang/keda/pull/318 以 squash 提交 `f488665551f250a3107126a97504d5258112a80e` 合并。
+- Tree reconciliation: 合并 tree `f19f320b784c3b1053c8e9bbd73142c349ffdd61` 与最终已验证 PR head 的完整 tree 相同，且相对实现复审提交仅有本 PRD 与证据报告记录变化。
+- Recorded result: 勾选 Human-Confirmed 三项、横幅更新为已验收；本次仅回填验收记录，不修改实现、需求范围或 oracle。

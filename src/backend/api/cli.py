@@ -43,7 +43,7 @@ from backend.core.use_cases.agent_runner_factory import (
     logger,
 )
 from backend.core.use_cases.agent_runner_repository_local import (
-    IARRepositoryNotInitializedError,
+    RepositoryNotInitializedError,
 )
 
 if TYPE_CHECKING:
@@ -250,7 +250,7 @@ def _run_parsed_command(parsed: argparse.Namespace) -> int:
         )
 
         exit_code = dispatch_parsed_command(parsed_ctx)
-    except IARRepositoryNotInitializedError as exc:
+    except RepositoryNotInitializedError as exc:
         return _handle_not_initialized_error(exc, fmt=output_format)
     except CliError as exc:
         return render_cli_error(exc, fmt=output_format)
@@ -324,7 +324,7 @@ from backend.api.cli_reexports import (  # noqa: E402,F401
     daemon_lock_dir,
     get_agent_runner_settings,
     release_daemon_locks,
-    require_iar_repository_initialized,
+    require_repository_initialized,
     resolve_issue_from_prd_target,
     resolve_prd_paths,
     resolve_repository_targets,

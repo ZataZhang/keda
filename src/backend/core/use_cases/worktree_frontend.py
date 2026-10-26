@@ -48,6 +48,11 @@ import os
 import shutil
 from pathlib import Path
 
+from backend.core.shared.models.repository_paths import (
+    DEFAULT_WORKTREE_DIR_NAME,
+    LEGACY_WORKTREE_DIR_NAME,
+)
+
 from backend.core.shared.interfaces.agent_runner import IProcessRunner
 from backend.core.use_cases.worktree_dependency_context import (
     OUTCOME_INSTALLED,
@@ -91,7 +96,8 @@ NODE_MODULES_DIR_NAME = "node_modules"
 FRONTEND_SCAN_PRUNED_DIR_NAMES = frozenset(
     {
         ".git",
-        ".iar-worktrees",
+        DEFAULT_WORKTREE_DIR_NAME,
+        LEGACY_WORKTREE_DIR_NAME,
         ".venv",
         "venv",
         ".uv-cache",

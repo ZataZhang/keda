@@ -21,14 +21,14 @@ from backend.api.cli_helpers import (
 from backend.api.cli_parsed_context import ParsedCommandContext
 from backend.api import cli as _cli
 from backend.core.use_cases.agent_runner_repository_local import (
-    IARRepositoryNotInitializedError,
+    RepositoryNotInitializedError,
     detect_git_repository_root,
-    require_iar_repository_initialized,
+    require_repository_initialized,
 )
 from backend.core.use_cases.agent_runner_worktree_cli import build_worktree_manager
 from backend.core.use_cases.worktree_cleanup import (
     WorktreeCleanupRequest,
-    cleanup_iar_worktrees,
+    cleanup_managed_worktrees,
 )
 from backend.core.use_cases.worktree_env import copy_missing_env_files
 
@@ -37,14 +37,14 @@ def run_worktree_command(ctx: ParsedCommandContext) -> int:
     """``kc worktree <create|path|remove|cleanup>``."""
     try:
         repo_root_path = detect_git_repository_root(Path.cwd(), ctx.process_runner)
-        require_iar_repository_initialized(repo_root_path, ctx.process_runner)
+        require_repository_initialized(repo_root_path, ctx.process_runner)
     except ValueError as exc:
         raise CliError(
             str(exc),
             code=ExitCode.NOT_FOUND,
             suggestion="kc registry list",
         ) from exc
-    except IARRepositoryNotInitializedError as exc:
+    except RepositoryNotInitializedError as exc:
         from backend.api.cli_helpers import _handle_not_initialized_error
 
         return _handle_not_initialized_error(exc, fmt=ctx.output_format)
@@ -96,7 +96,7 @@ def run_worktree_command(ctx: ParsedCommandContext) -> int:
             force=ctx.parsed.force,
             managed_worktree_root_path=manager.worktree_root,
         )
-        cleanup_result = cleanup_iar_worktrees(
+        cleanup_result = cleanup_managed_worktrees(
             cleanup_request,
             github_client=github_client,
             process_runner=ctx.process_runner,

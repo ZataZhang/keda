@@ -32,7 +32,7 @@ def worktree_create_command(
         str, typer.Option("--base-branch", help="Existing branch to fork from.")
     ],
 ) -> int:
-    """Create a worktree at .iar-worktrees/<branch>."""
+    """Create a worktree at .kc-worktrees/<branch>."""
     return _run_typer_command(
         "worktree",
         repo=None,

@@ -27,6 +27,7 @@ from backend.core.use_cases.agent_runner_failure import (
     AgentUnavailableError,
     DependencyEnvironmentBlockedError,
     ForbiddenBlockedError,
+    IssueBlockedDuringNoChangeError,
     MaxRetriesExceededError,
     ProviderCapacityError,
     UnrecoverableError,
@@ -174,7 +175,7 @@ def test_run_once_dry_run_skips_blocked_ready_issue() -> None:
         _make_ready_issue(
             2,
             "Issue #2",
-            "<!-- iar:depends-on #1 -->",
+            "<!-- kc:depends-on #1 -->",
             ("agent/ready",),
         )
     ]
@@ -209,7 +210,7 @@ def test_run_once_dry_run_continues_after_dependency_blocked_ready_issue(
             _make_ready_issue(
                 5,
                 "Issue #5",
-                "<!-- iar:depends-on #3 -->",
+                "<!-- kc:depends-on #3 -->",
                 ("agent/ready", "priority/P0"),
             ),
             _make_ready_issue(
@@ -254,7 +255,7 @@ def test_run_once_dry_run_stack_waiting_does_not_consume_quota(
         _make_ready_issue(
             5,
             "Issue #5",
-            '<!-- iar:depends-on #3 mode="stack" -->',
+            '<!-- kc:depends-on #3 mode="stack" -->',
             ("agent/ready", "priority/P0"),
         ),
         _make_ready_issue(
@@ -392,7 +393,7 @@ def test_run_once_dry_run_processes_unblocked_ready_issue() -> None:
         _make_ready_issue(
             2,
             "Issue #2",
-            "<!-- iar:depends-on #1 -->",
+            "<!-- kc:depends-on #1 -->",
             ("agent/ready", "agent/waiting"),
         )
     ]
@@ -519,6 +520,29 @@ def test_mark_issue_blocked_uses_prepared_dependency_comment() -> None:
     assert "blocked_dependency_environment" in body
     assert "Missing required executable(s): pnpm." in body
     assert "blocked_forbidden" not in body
+
+
+def test_mark_issue_blocked_uses_no_change_handoff_comment() -> None:
+    """干净 no-change 人工交接发布专用说明，不套用 forbidden-path 模板。"""
+    fake_client = FakeGitHubClient()
+    issue = _make_ready_issue(44, "Issue #44", "", ("agent/running",))
+
+    _mark_issue_blocked(
+        issue=issue,
+        config=AppConfig(),
+        github_client=fake_client,
+        exc=IssueBlockedDuringNoChangeError(44, []),
+    )
+
+    label_calls = [call for call in fake_client.calls if call["method"] == "edit_issue_labels"]
+    assert len(label_calls) == 1
+    assert "agent/blocked" in label_calls[0]["add"]
+    comment_calls = [call for call in fake_client.calls if call["method"] == "comment_issue"]
+    assert len(comment_calls) == 1
+    comment_body = comment_calls[0]["body"]
+    assert "blocked_no_change_handoff" in comment_body
+    assert "blocked-continue --issue 44" in comment_body
+    assert "blocked_forbidden" not in comment_body
 
 
 def test_guard_blocked_issue_has_resolution_finds_marker() -> None:
@@ -1129,6 +1153,27 @@ def test_fallback_does_not_switch_on_dependency_blocked() -> None:
     assert calls == ["claude"]
 
 
+def test_fallback_does_not_switch_on_no_change_blocked_handoff() -> None:
+    """已明确转为 blocked 的 Issue 不应换 agent 重跑相同的人工阻塞。"""
+    config = AppConfig(runner=RunnerConfig(agent_fallback_order=("claude", "codex")))
+    process_for_agent, calls = _agent_outcomes(
+        {
+            "claude": IssueBlockedDuringNoChangeError(42, []),
+            "codex": None,
+        }
+    )
+
+    with pytest.raises(IssueBlockedDuringNoChangeError):
+        run_issue_with_agent_fallback(
+            issue=_fallback_issue("agent/claude"),
+            config=config,
+            agent="auto",
+            process_for_agent=process_for_agent,
+        )
+
+    assert calls == ["claude"]
+
+
 def test_fallback_skips_unavailable_agent() -> None:
     """An unavailable agent CLI is skipped to the next candidate."""
     config = AppConfig(runner=RunnerConfig(agent_fallback_order=("claude", "codex")))
@@ -1319,7 +1364,7 @@ def test_persist_attempt_result_writes_to_sqlite_and_github(tmp_path: Path) -> N
     # GitHub: first attempt creates a new comment
     comment_calls = [c for c in fake_client.calls if c["method"] == "comment_issue"]
     assert len(comment_calls) == 1
-    assert "<!-- iar-attempt-history -->" in comment_calls[0]["body"]
+    assert "<!-- kc:attempt-history -->" in comment_calls[0]["body"]
     assert "claude" in comment_calls[0]["body"]
     assert "5.0s" in comment_calls[0]["body"]
 
@@ -1328,7 +1373,7 @@ def test_persist_attempt_result_updates_existing_github_comment() -> None:
     """Subsequent attempts update the existing attempt-history comment."""
     fake_client = FakeGitHubClient()
     # Seed an existing attempt-history comment
-    fake_client.comment_issue(42, "<!-- iar-attempt-history -->\nold body")
+    fake_client.comment_issue(42, "<!-- kc:attempt-history -->\nold body")
     fake_client.calls.clear()
 
     result = AttemptResult(
@@ -1355,7 +1400,7 @@ def test_persist_attempt_result_updates_existing_github_comment() -> None:
 
     edit_calls = [c for c in fake_client.calls if c["method"] == "edit_issue_comment"]
     assert len(edit_calls) == 1
-    assert "<!-- iar-attempt-history -->" in edit_calls[0]["body"]
+    assert "<!-- kc:attempt-history -->" in edit_calls[0]["body"]
     assert "Done." in edit_calls[0]["body"]
     comment_calls = [c for c in fake_client.calls if c["method"] == "comment_issue"]
     assert len(comment_calls) == 0
@@ -1381,7 +1426,7 @@ def _latest_history_body(fake_client: FakeGitHubClient) -> str:
         call
         for call in fake_client.calls
         if call["method"] in {"comment_issue", "edit_issue_comment"}
-        and "<!-- iar-attempt-history -->" in call.get("body", "")
+        and "<!-- kc:attempt-history -->" in call.get("body", "")
     ]
     return history_writes[-1]["body"]
 
@@ -1937,7 +1982,7 @@ def test_run_once_direct_pr_cleanup_bypasses_ready_claim_budget(
     cleanup_issue = _make_ready_issue(
         8,
         "Published Direct PR handoff",
-        "<!-- iar:depends-on #1 -->",
+        "<!-- kc:depends-on #1 -->",
         ("agent/ready",),
     )
     regular_ready_issue = _make_ready_issue(9, "New work", "", ("agent/ready",))

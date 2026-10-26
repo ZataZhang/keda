@@ -531,7 +531,7 @@ def test_next_claim_reflows_latest_handoff_record_into_continuation_prompt(
 
     latest_handoff = "\n".join(
         [
-            "<!-- iar:failure-context checkpoint=a1b2c3d4 attempts=3 verifier=red "
+            "<!-- kc:failure-context checkpoint=a1b2c3d4 attempts=3 verifier=red "
             "evidence=tasks/evidence/example -->",
             "## Agent Runner Handoff — Recovery Budget Exhausted",
             "- Checkpoint commit: `a1b2c3d4`",
@@ -539,7 +539,7 @@ def test_next_claim_reflows_latest_handoff_record_into_continuation_prompt(
         ]
     )
     stale_handoff = (
-        "<!-- iar:failure-context checkpoint=deadbee attempts=9 verifier=red -->\n"
+        "<!-- kc:failure-context checkpoint=deadbee attempts=9 verifier=red -->\n"
         "rv-1 not satisfied: the legacy export path was never wired."
     )
 

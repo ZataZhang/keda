@@ -93,7 +93,7 @@ def test_closed_issue_with_merged_pr_maps_to_merged() -> None:
     client = FakeGitHubClient()
     client._issue_states[3] = "CLOSED"
     client._issue_comments[3] = [
-        "<!-- iar:event version=1 phase=draft_pr_created cycle=1 pr_branch=issue-3 -->"
+        "<!-- kc:event version=1 phase=draft_pr_created cycle=1 pr_branch=issue-3 -->"
     ]
     client._merged_prs["issue-3"] = "https://github.com/org/repo/pull/9"
     resolved = resolve_backlog_states([prd], client, _resolution_context())

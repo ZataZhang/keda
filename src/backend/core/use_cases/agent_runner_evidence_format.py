@@ -13,7 +13,7 @@ VISUAL_EVIDENCE_SUFFIXES = IMAGE_EVIDENCE_SUFFIXES | frozenset({".mp4", ".mov", 
 _EVIDENCE_ITEM_FILE_PATTERN = re.compile(r"^rv-(?P<item>\d+)[-.]", re.IGNORECASE)
 _MAX_ITEM_SUMMARY_CHARS = 120
 _EVIDENCE_FORMAT_MARKER_PATTERN = re.compile(
-    r"<!--\s*iar:evidence-format\s+item=(?P<item>\d+)\s+kind=(?P<kind>[a-z]+)\s*-->",
+    r"<!--\s*kc:evidence-format\s+item=(?P<item>\d+)\s+kind=(?P<kind>[a-z]+)\s*-->",
     re.IGNORECASE,
 )
 _KNOWN_EVIDENCE_KINDS: frozenset[str] = frozenset(
@@ -74,7 +74,7 @@ _EVIDENCE_KIND_RULES: tuple[EvidenceKindRule, ...] = (
 
 
 def extract_evidence_format_markers(issue_body: str) -> dict[int, str]:
-    """Parse ``iar:evidence-format`` markers from an Issue body.
+    """Parse ``kc:evidence-format`` markers from an Issue body.
 
     Args:
         issue_body: Markdown body containing optional hidden markers.
@@ -114,7 +114,7 @@ def demanded_evidence_kinds(
 
     Args:
         item_text: Checklist item text.
-        issue_body: Optional Issue body with ``iar:evidence-format`` markers.
+        issue_body: Optional Issue body with ``kc:evidence-format`` markers.
         item_number: Optional checklist item number for marker lookup.
 
     Returns:

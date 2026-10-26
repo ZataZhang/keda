@@ -100,11 +100,11 @@ def test_agent_request_fast_merge_boolean_is_a_derived_view() -> None:
 def test_direct_pr_marker_round_trip() -> None:
     """直发档 marker 可被同族解析函数读回 Issue 编号，且不被快速通道解析器认出。"""
     marker = format_direct_pr_marker(12)
-    assert marker == "<!-- iar:direct-pr issued=12 -->"
+    assert marker == "<!-- kc:direct-pr issued=12 -->"
     assert parse_direct_pr_marker(f"body\n\n{marker}\n") == 12
     assert parse_direct_pr_marker(format_fast_merge_marker(12)) is None
     assert parse_fast_merge_marker(marker) is None
-    assert parse_direct_pr_marker("<!-- iar:direct-pr -->") is None
+    assert parse_direct_pr_marker("<!-- kc:direct-pr -->") is None
 
 
 # ---------------------------------------------------------------------------
@@ -450,8 +450,8 @@ def test_normal_pr_body_carries_no_stage_marker(
     pr_body, review_call_count = _publish_with_stage(monkeypatch, tmp_path, PublishStage.NORMAL)
 
     assert review_call_count == 1
-    assert "iar:fast-merge" not in pr_body
-    assert "iar:direct-pr" not in pr_body
+    assert "kc:fast-merge" not in pr_body
+    assert "kc:direct-pr" not in pr_body
 
 
 def test_direct_pr_annotation_carries_human_readable_note(
@@ -597,7 +597,7 @@ def _patched_run_command_dependencies(
         lambda **kwargs: [repo_context],
     )
     monkeypatch.setattr(
-        "backend.api.cli_parsed_commands.runner._cli.require_iar_repository_initialized",
+        "backend.api.cli_parsed_commands.runner._cli.require_repository_initialized",
         lambda *args, **kwargs: None,
     )
     monkeypatch.setattr(

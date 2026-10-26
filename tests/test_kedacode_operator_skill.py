@@ -390,7 +390,7 @@ _ALLOWED_FLAGS: dict[tuple[str, ...], set[str]] = {
         "--all",
     },
     # 并行上限统一后 ``max_issues`` 退役，``kc config migrate`` 删除该旧键（skill 有示例）。
-    ("config", "migrate"): {"--repo", "--repo-id", "--dry-run"},
+    ("config", "migrate"): {"--repo", "--repo-id", "--dry-run", "--apply", "--include-closed"},
     # ``kc daemon --all`` 走的是 daemon 组自己的回调（不写 ``run`` 也能起守护），
     # ``build_command_schema`` 只导出叶子命令，所以这条路径由
     # ``_group_callback_flags_by_path()`` 从真实命令树补出来；旗标照抄派生结果，
@@ -868,7 +868,7 @@ def test_packaged_skill_documents_direct_pr_and_from_prompt_entries() -> None:
     text = _all_skill_text()
     # 直发档：无 PRD 锚点才可用，且跳过审核 Agent 与仓库验证命令。
     assert "`kc run --issue <N> --direct-pr`" in text
-    assert "iar:direct-pr" in text
+    assert "kc:direct-pr" in text
     # 从一句话需求开 Issue：正文默认不带 PRD 锚点，验收小节是显式 opt-in。
     assert "`kc issue create --from-prompt" in text
     assert "--require-validation" in text
@@ -912,7 +912,7 @@ def test_packaged_skill_drops_retired_absolute_claims() -> None:
     # 替代表述②：显式定向不再要求就绪标签，但认领状态必须响亮回报。
     assert "An explicit target does not need `agent/ready`" in text
     # 替代表述③：首次领取由 marker 选举裁决，落败方不改标签。
-    assert "iar:claim-withdrawn" in text
+    assert "kc:claim-withdrawn" in text
 
 
 def test_packaged_skill_separates_read_only_from_execution() -> None:

@@ -31,20 +31,26 @@ from tests.support.agent_runner import (
 
 
 @pytest.mark.parametrize(
-    "close_without_changes",
-    [False, True],
-    ids=["recovered-commit", "closed-noop"],
+    ("scenario", "expected_exit_code"),
+    [
+        ("recovered-commit", 0),
+        ("closed-noop", 0),
+        ("blocked-noop", 1),
+    ],
+    ids=["recovered-commit", "closed-noop", "blocked-noop"],
 )
-def test_run_once_completes_recovery_or_closed_noop(
+def test_run_once_completes_recovery_or_hands_off_no_change_issue(
     tmp_path: Path,
-    close_without_changes: bool,
+    scenario: str,
+    expected_exit_code: int,
 ) -> None:
-    """Runner 应恢复无提交尝试，或接受执行期间明确关闭的无改动 Issue。"""
+    """run_once 应恢复提交、收敛 closed no-op，或保留执行期间新 blocked 状态。"""
     fake_client = FakeGitHubClient()
     issue = make_ready_issue()
     fake_client.list_ready_issues = lambda ready_label, limit: [issue]
     worktree_path = tmp_path / "issue-123"
     worktree_path.mkdir()
+    config = config_with_review_disabled(worktree_path)
 
     class _RecoverySuccessRunner(FakeProcessRunner):
         def __init__(self) -> None:
@@ -75,8 +81,10 @@ def test_run_once_completes_recovery_or_closed_noop(
             if command_tuple[:1] == ("codex",):
                 self._agent_calls += 1
                 if self._agent_calls == 1:
-                    if close_without_changes:
+                    if scenario == "closed-noop":
                         fake_client.close_issue(issue.number)
+                    elif scenario == "blocked-noop":
+                        fake_client.set_issue_labels(issue.number, (config.labels.blocked,))
                     # First attempt: produce no commits
                     return CommandResult(command_tuple, 0, "", "")
                 if self._agent_calls == 2:
@@ -85,12 +93,14 @@ def test_run_once_completes_recovery_or_closed_noop(
                     return CommandResult(command_tuple, 0, "", "")
             if command_tuple == ("git", "rev-parse", "HEAD"):
                 self._sha_calls += 1
-                sha = "before-sha" if close_without_changes or self._sha_calls == 1 else "after-sha"
+                no_change_scenario = scenario in ("closed-noop", "blocked-noop")
+                sha = "before-sha" if no_change_scenario or self._sha_calls == 1 else "after-sha"
                 return CommandResult(command_tuple, 0, f"{sha}\n", "")
             if command_tuple == ("git", "branch", "--show-current"):
                 return CommandResult(command_tuple, 0, "issue-123\n", "")
             if command_tuple == ("git", "status", "--porcelain"):
-                stdout = "" if close_without_changes or self._committed else " M file.txt\n"
+                no_change_scenario = scenario in ("closed-noop", "blocked-noop")
+                stdout = "" if no_change_scenario or self._committed else " M file.txt\n"
                 return CommandResult(command_tuple, 0, stdout, "")
             if command_tuple == ("git", "commit", "-m", "agent: recovered"):
                 self._committed = True
@@ -103,7 +113,6 @@ def test_run_once_completes_recovery_or_closed_noop(
         path_command: path_result,
         git_remote_command(): git_remote_result("origin"),
     }
-    config = config_with_review_disabled(worktree_path)
 
     from backend.core.use_cases.agent_runner_orchestrate import run_once
 
@@ -117,17 +126,27 @@ def test_run_once_completes_recovery_or_closed_noop(
         process_runner=fake_runner,
     )
 
-    assert exit_code == 0
+    assert exit_code == expected_exit_code
     commands = [tuple(command) for command in fake_runner.calls]
     agent_commands = [command for command in commands if command[:1] == ("codex",)]
-    assert len(agent_commands) == (1 if close_without_changes else 2)
-    if close_without_changes:
+    assert len(agent_commands) == (2 if scenario == "recovered-commit" else 1)
+    if scenario == "closed-noop":
         assert any(call["method"] == "get_issue" for call in fake_client.calls)
         assert not any(call["method"] == "create_draft_pr" for call in fake_client.calls)
         assert not any(
             call["method"] == "edit_issue_labels" and config.labels.failed in call.get("add", [])
             for call in fake_client.calls
         )
+        return
+    if scenario == "blocked-noop":
+        assert any(call["method"] == "get_issue" for call in fake_client.calls)
+        final_labels = set(fake_client._issue_labels[issue.number])
+        assert final_labels.intersection(
+            {config.labels.failed, config.labels.blocked, config.labels.running}
+        ) == {config.labels.blocked}
+        assert not any(call["method"] == "create_draft_pr" for call in fake_client.calls)
+        comment_calls = [c for c in fake_client.calls if c["method"] == "comment_issue"]
+        assert any("blocked_no_change_handoff" in call["body"] for call in comment_calls)
         return
 
     comment_calls = [c for c in fake_client.calls if c["method"] == "comment_issue"]
@@ -652,7 +671,7 @@ def test_keyboard_interrupt_checkpoints_in_flight_work_before_exit(
 # commit 时发布同源的 Draft PR、把回链固定附到 PR 正文尾部；以及另两类异常
 # （ProviderCapacityError / KeyboardInterrupt）必须零副作用。
 
-_VERDICT_MARKER_RED = "<!-- iar:verifier-verdict risk=red -->"
+_VERDICT_MARKER_RED = "<!-- kc:verifier-verdict risk=red -->"
 
 _VERIFIER_RED_DETAIL = "\n".join(
     [
@@ -751,13 +770,13 @@ def _prepare_exhaustion_handler(
 
 
 def _handoff_comments(fake_client: FakeGitHubClient) -> list[str]:
-    """取出 Issue 上带 ``iar:failure-context`` marker 的评论正文。"""
+    """取出 Issue 上带 ``kc:failure-context`` marker 的评论正文。"""
     return [
         call["body"]
         for call in fake_client.calls
         if call["method"] == "comment_issue"
         and isinstance(call.get("body"), str)
-        and "iar:failure-context" in call["body"]
+        and "kc:failure-context" in call["body"]
     ]
 
 
@@ -820,7 +839,7 @@ def test_exhaustion_writes_failure_context_handoff_and_draft_pr(
     handoff_body = handoff_bodies[0]
     # marker 可被下一轮确定性定位,且带 checkpoint SHA / attempt 数 / 证据目录。
     assert (
-        f"<!-- iar:failure-context checkpoint=a1b2c3d4 attempts=3 "
+        f"<!-- kc:failure-context checkpoint=a1b2c3d4 attempts=3 "
         f"verifier={expected_verifier_state}"
     ) in handoff_body
     assert "evidence=" in handoff_body

@@ -52,7 +52,7 @@ def _run_stalled_recovery(
         prompts.append(prompt)
         if len(prompts) == 1:
             raise AgentStallCancelledError(
-                "[iar-stall-cancel] verified child group exited; "
+                "[kc-stall-cancel] verified child group exited; "
                 "stalled diagnosis: writer has made no progress"
             )
         recoveries.append(True)

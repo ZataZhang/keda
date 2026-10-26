@@ -511,7 +511,7 @@ def add_session_commands(subparsers: argparse._SubParsersAction) -> None:
     )
     worktree_subparsers = worktree_parser.add_subparsers(dest="worktree_command", required=True)
     worktree_create_parser = worktree_subparsers.add_parser(
-        "create", help="Create a worktree at .iar-worktrees/<branch>."
+        "create", help="Create a worktree at .kc-worktrees/<branch>."
     )
     worktree_create_parser.add_argument("--branch", required=True, help="Branch name to create.")
     worktree_create_parser.add_argument(

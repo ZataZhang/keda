@@ -62,6 +62,7 @@ from backend.infrastructure.github_issue_ops import (
     list_issue_comments,
     list_issue_label_names,
     list_issues_by_label,
+    list_repository_items,
     list_ready_issues,
     list_review_candidate_issues,
     list_rework_prd_issues,
@@ -501,6 +502,9 @@ class GitHubCliClient:
     ) -> list[IssueSummary]:
         return list_issues_by_label(self, label, limit, state)
 
+    def list_repository_items(self, *, state: str = "open") -> list[IssueSummary]:
+        return list_repository_items(self, state=state)
+
     def get_issue(self, issue_number: int) -> IssueSummary:
         return get_issue(self, issue_number)
 
@@ -526,7 +530,12 @@ class GitHubCliClient:
         return list_issue_comments(self, issue_number, require_success=require_success)
 
     def list_issue_comment_entries(
-        self, issue_number: int, *, trusted_only: bool = False, body_contains: str | None = None
+        self,
+        issue_number: int,
+        *,
+        trusted_only: bool = False,
+        body_contains: str | None = None,
+        require_success: bool = False,
     ) -> list[tuple[int, str]]:
         """读取评论，可按正文过滤并只保留可管理 Issue 的作者。
 
@@ -542,7 +551,11 @@ class GitHubCliClient:
             RuntimeError: 可信模式无法确认读取结果或作者权限。
         """
         return list_issue_comment_entries(
-            self, issue_number, trusted_only=trusted_only, body_contains=body_contains
+            self,
+            issue_number,
+            trusted_only=trusted_only,
+            body_contains=body_contains,
+            require_success=require_success,
         )
 
     def edit_issue_comment(self, comment_id: int, body: str) -> None:

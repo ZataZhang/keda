@@ -372,7 +372,7 @@ def _write_iar_toml(repo_root: Path, repo_id: str, display_name: str) -> None:
     )
 
 
-def test_discover_iar_repositories_finds_local_repos(console_environment, tmp_path: Path) -> None:
+def test_discover_repositories_finds_local_repos(console_environment, tmp_path: Path) -> None:
     """Discover endpoint must find IAR-initialized git repositories."""
     scan_root = tmp_path / "code"
     scan_root.mkdir()
@@ -438,13 +438,13 @@ def test_browse_repositories_lists_subdirectories(console_environment, tmp_path:
 
     alpha_entry = body["directories"][0]
     assert alpha_entry["is_git_repo"] is True
-    assert alpha_entry["has_iar_config"] is True
+    assert alpha_entry["has_repository_config"] is True
     assert alpha_entry["already_registered"] is False
     assert alpha_entry["suggested_repo_id"] == "alpha"
 
     beta_entry = body["directories"][1]
     assert beta_entry["is_git_repo"] is False
-    assert beta_entry["has_iar_config"] is False
+    assert beta_entry["has_repository_config"] is False
 
 
 def test_browse_repositories_marks_registered_directory(

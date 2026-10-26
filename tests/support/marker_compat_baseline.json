@@ -58,10 +58,10 @@
         "input": "comment"
       },
       "id": "claim",
-      "kind": "iar:claim",
+      "kind": "kc:claim",
       "outputs": {
-        "comment": "## Agent Runner Claimed\n\n- Host: `runner-a`\n- PID: `4242`\n- Agent: `claude`\n- Started at: `2026-01-02T03:04:05+00:00`\n\n<!-- iar:claim host=\"runner-a\" pid=\"4242\" started_at=\"2026-01-02T03:04:05+00:00\" agent=\"claude\" -->",
-        "text": "<!-- iar:claim host=\"runner-a\" pid=\"4242\" started_at=\"2026-01-02T03:04:05+00:00\" agent=\"claude\" -->"
+        "text": "<!-- kc:claim host=\"runner-a\" pid=\"4242\" started_at=\"2026-01-02T03:04:05+00:00\" agent=\"claude\" -->",
+        "comment": "## Agent Runner Claimed\n\n- Host: `runner-a`\n- PID: `4242`\n- Agent: `claude`\n- Started at: `2026-01-02T03:04:05+00:00`\n\n<!-- kc:claim host=\"runner-a\" pid=\"4242\" started_at=\"2026-01-02T03:04:05+00:00\" agent=\"claude\" -->"
       },
       "parses": [
         {
@@ -96,10 +96,10 @@
           "method": null,
           "parser": "backend.core.use_cases.agent_runner_reclaim:parse_claim_marker_detail",
           "result": {
-            "agent": "claude",
             "host": "runner-a",
             "pid": 4242,
-            "started_at": "2026-01-02T03:04:05+00:00"
+            "started_at": "2026-01-02T03:04:05+00:00",
+            "agent": "claude"
           },
           "text_kwarg": null
         },
@@ -158,9 +158,9 @@
     {
       "claim_judgement": null,
       "id": "claim-withdrawn",
-      "kind": "iar:claim-withdrawn",
+      "kind": "kc:claim-withdrawn",
       "outputs": {
-        "comment": "## Agent Runner Claim Withdrawn\n\n- Host: `runner-b`\n- PID: `9292`\n- Agent: `codex`\n- Started at: `2026-01-02T03:04:35+00:00`\n\nLost first-claim arbitration to `runner-a` (PID 4242), which claimed this Issue earlier; this process did not run the Issue.\n\n<!-- iar:claim-withdrawn host=\"runner-b\" pid=\"9292\" started_at=\"2026-01-02T03:04:35+00:00\" -->"
+        "comment": "## Agent Runner Claim Withdrawn\n\n- Host: `runner-b`\n- PID: `9292`\n- Agent: `codex`\n- Started at: `2026-01-02T03:04:35+00:00`\n\nLost first-claim arbitration to `runner-a` (PID 4242), which claimed this Issue earlier; this process did not run the Issue.\n\n<!-- kc:claim-withdrawn host=\"runner-b\" pid=\"9292\" started_at=\"2026-01-02T03:04:35+00:00\" -->"
       },
       "parses": [
         {
@@ -230,9 +230,9 @@
     {
       "claim_judgement": null,
       "id": "depends-on",
-      "kind": "iar:depends-on",
+      "kind": "kc:depends-on",
       "outputs": {
-        "text": "<!-- iar:depends-on #7 #3 mode=\"stack\" -->"
+        "text": "<!-- kc:depends-on #7 #3 mode=\"stack\" -->"
       },
       "parses": [
         {
@@ -273,9 +273,9 @@
     {
       "claim_judgement": null,
       "id": "fast-merge",
-      "kind": "iar:fast-merge",
+      "kind": "kc:fast-merge",
       "outputs": {
-        "text": "<!-- iar:fast-merge issued=7 -->"
+        "text": "<!-- kc:fast-merge issued=7 -->"
       },
       "parses": [
         {
@@ -304,9 +304,9 @@
     {
       "claim_judgement": null,
       "id": "direct-pr",
-      "kind": "iar:direct-pr",
+      "kind": "kc:direct-pr",
       "outputs": {
-        "text": "<!-- iar:direct-pr issued=7 -->"
+        "text": "<!-- kc:direct-pr issued=7 -->"
       },
       "parses": [
         {
@@ -335,9 +335,9 @@
     {
       "claim_judgement": null,
       "id": "dependency-wait",
-      "kind": "iar:dependency-wait",
+      "kind": "kc:dependency-wait",
       "outputs": {
-        "text": "<!-- iar:dependency-wait blockers=9fa3295260ed4c2a -->"
+        "text": "<!-- kc:dependency-wait blockers=9fa3295260ed4c2a -->"
       },
       "parses": [
         {
@@ -385,9 +385,9 @@
     {
       "claim_judgement": null,
       "id": "event",
-      "kind": "iar:event",
+      "kind": "kc:event",
       "outputs": {
-        "text": "<!-- iar:event version=1 phase=implementation_complete cycle=2 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa base=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb pr_branch=issue-7 action=push checks_state=green mergeable=true issue_comments_count=11 pr_comments_count=3 blocked_paths=src/backend/core/a.py,docs/b.md -->"
+        "text": "<!-- kc:event version=1 phase=implementation_complete cycle=2 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa base=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb pr_branch=issue-7 action=push checks_state=green mergeable=true issue_comments_count=11 pr_comments_count=3 blocked_paths=src/backend/core/a.py,docs/b.md -->"
       },
       "parses": [
         {
@@ -397,21 +397,21 @@
           "method": null,
           "parser": "backend.core.use_cases.agent_runner_events:parse_latest_event_marker",
           "result": {
-            "action": "push",
+            "version": 1,
+            "phase": "implementation_complete",
+            "cycle": 2,
+            "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "base_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "pr_branch": "issue-7",
+            "action": "push",
+            "checks_state": "green",
+            "mergeable": true,
+            "issue_comments_count": 11,
+            "pr_comments_count": 3,
             "blocked_paths": [
               "src/backend/core/a.py",
               "docs/b.md"
-            ],
-            "checks_state": "green",
-            "cycle": 2,
-            "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            "issue_comments_count": 11,
-            "mergeable": true,
-            "phase": "implementation_complete",
-            "pr_branch": "issue-7",
-            "pr_comments_count": 3,
-            "version": 1
+            ]
           },
           "text_kwarg": null
         },
@@ -429,21 +429,21 @@
           "method": null,
           "parser": "backend.core.use_cases.agent_runner_events:parse_latest_event_marker_for_phases",
           "result": {
-            "action": "push",
+            "version": 1,
+            "phase": "implementation_complete",
+            "cycle": 2,
+            "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "base_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "pr_branch": "issue-7",
+            "action": "push",
+            "checks_state": "green",
+            "mergeable": true,
+            "issue_comments_count": 11,
+            "pr_comments_count": 3,
             "blocked_paths": [
               "src/backend/core/a.py",
               "docs/b.md"
-            ],
-            "checks_state": "green",
-            "cycle": 2,
-            "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            "issue_comments_count": 11,
-            "mergeable": true,
-            "phase": "implementation_complete",
-            "pr_branch": "issue-7",
-            "pr_comments_count": 3,
-            "version": 1
+            ]
           },
           "text_kwarg": null
         }
@@ -479,9 +479,9 @@
     {
       "claim_judgement": null,
       "id": "failure-context",
-      "kind": "iar:failure-context",
+      "kind": "kc:failure-context",
       "outputs": {
-        "text": "<!-- iar:failure-context checkpoint=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa attempts=3 verifier=red evidence=.iar/evidence -->"
+        "text": "<!-- kc:failure-context checkpoint=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa attempts=3 verifier=red evidence=.iar/evidence -->"
       },
       "parses": [
         {
@@ -499,7 +499,7 @@
           "kwargs": {},
           "method": null,
           "parser": "backend.core.use_cases.agent_runner_events:find_latest_failure_context_comment",
-          "result": "<!-- iar:failure-context checkpoint=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa attempts=3 verifier=red evidence=.iar/evidence -->",
+          "result": "<!-- kc:failure-context checkpoint=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa attempts=3 verifier=red evidence=.iar/evidence -->",
           "text_kwarg": null
         }
       ],
@@ -522,9 +522,9 @@
     {
       "claim_judgement": null,
       "id": "failure-context-ref",
-      "kind": "iar:failure-context-ref",
+      "kind": "kc:failure-context-ref",
       "outputs": {
-        "comment": "<!-- iar:failure-context-ref -->\n\n## Previous Round Handoff\n\nThis Draft PR was published from a **WIP checkpoint** after the runner exhausted its recovery budget (3 attempts). The commits here are mid-progress work, not a finished implementation, and the existence of this PR is not an acceptance result.\n\n- Authoritative handoff record (latest round): <https://github.com/example-org/example-repo/issues/7#issuecomment-999>\n- `validation/verifier-passed` is **absent**, so the existing sign-off, merge and archive gates keep refusing this PR by design. Nothing in this section changes that, and the gates are not modified by this feature.\n"
+        "comment": "<!-- kc:failure-context-ref -->\n\n## Previous Round Handoff\n\nThis Draft PR was published from a **WIP checkpoint** after the runner exhausted its recovery budget (3 attempts). The commits here are mid-progress work, not a finished implementation, and the existence of this PR is not an acceptance result.\n\n- Authoritative handoff record (latest round): <https://github.com/example-org/example-repo/issues/7#issuecomment-999>\n- `validation/verifier-passed` is **absent**, so the existing sign-off, merge and archive gates keep refusing this PR by design. Nothing in this section changes that, and the gates are not modified by this feature.\n"
       },
       "parses": [
         {
@@ -535,7 +535,7 @@
           },
           "method": null,
           "parser": "backend.core.use_cases.agent_runner_pr_handoff:_with_pr_handoff_ref",
-          "result": "## Draft PR\n\nbody\n\n<!-- iar:failure-context-ref -->\n\n## Previous Round Handoff\n\nThis Draft PR was published from a **WIP checkpoint** after the runner exhausted its recovery budget (3 attempts). The commits here are mid-progress work, not a finished implementation, and the existence of this PR is not an acceptance result.\n\n- Authoritative handoff record (latest round): <https://github.com/example-org/example-repo/issues/7#issuecomment-999>\n- `validation/verifier-passed` is **absent**, so the existing sign-off, merge and archive gates keep refusing this PR by design. Nothing in this section changes that, and the gates are not modified by this feature.\n",
+          "result": "## Draft PR\n\nbody\n\n<!-- kc:failure-context-ref -->\n\n## Previous Round Handoff\n\nThis Draft PR was published from a **WIP checkpoint** after the runner exhausted its recovery budget (3 attempts). The commits here are mid-progress work, not a finished implementation, and the existence of this PR is not an acceptance result.\n\n- Authoritative handoff record (latest round): <https://github.com/example-org/example-repo/issues/7#issuecomment-999>\n- `validation/verifier-passed` is **absent**, so the existing sign-off, merge and archive gates keep refusing this PR by design. Nothing in this section changes that, and the gates are not modified by this feature.\n",
           "text_kwarg": "handoff_ref_block"
         },
         {
@@ -548,7 +548,7 @@
           },
           "method": null,
           "parser": "backend.core.use_cases.agent_runner_pr_handoff:_build_pr_handoff_ref_block",
-          "result": "<!-- iar:failure-context-ref -->\n\n## Previous Round Handoff\n\nThis Draft PR was published from a **WIP checkpoint** after the runner exhausted its recovery budget (3 attempts). The commits here are mid-progress work, not a finished implementation, and the existence of this PR is not an acceptance result.\n\n- Handoff record could not be posted to this Issue; see the Issue comment list for whatever the runner managed to report: <https://github.com/example-org/example-repo/issues/7#issuecomment-999>\n- `validation/verifier-passed` is **absent**, so the existing sign-off, merge and archive gates keep refusing this PR by design. Nothing in this section changes that, and the gates are not modified by this feature.\n",
+          "result": "<!-- kc:failure-context-ref -->\n\n## Previous Round Handoff\n\nThis Draft PR was published from a **WIP checkpoint** after the runner exhausted its recovery budget (3 attempts). The commits here are mid-progress work, not a finished implementation, and the existence of this PR is not an acceptance result.\n\n- Handoff record could not be posted to this Issue; see the Issue comment list for whatever the runner managed to report: <https://github.com/example-org/example-repo/issues/7#issuecomment-999>\n- `validation/verifier-passed` is **absent**, so the existing sign-off, merge and archive gates keep refusing this PR by design. Nothing in this section changes that, and the gates are not modified by this feature.\n",
           "text_kwarg": null
         }
       ],
@@ -570,9 +570,9 @@
     {
       "claim_judgement": null,
       "id": "ci-auto-repair-policy",
-      "kind": "iar:ci-auto-repair-policy",
+      "kind": "kc:ci-auto-repair-policy",
       "outputs": {
-        "text": "<!-- iar:ci-auto-repair-policy value=off -->"
+        "text": "<!-- kc:ci-auto-repair-policy value=off -->"
       },
       "parses": [
         {
@@ -601,9 +601,9 @@
     {
       "claim_judgement": null,
       "id": "auto-sign-off",
-      "kind": "iar:auto-sign-off",
+      "kind": "kc:auto-sign-off",
       "outputs": {
-        "text": "<!-- iar:auto-sign-off"
+        "text": "<!-- kc:auto-sign-off"
       },
       "parses": [
         {
@@ -621,7 +621,7 @@
           "as": "text",
           "call": null,
           "const": null,
-          "contains": "iar:auto-sign-off",
+          "contains": "kc:auto-sign-off",
           "kwargs": {},
           "literal_in": "backend.core.use_cases.agent_runner_merge_queue"
         }
@@ -630,9 +630,9 @@
     {
       "claim_judgement": null,
       "id": "merge-acceptance",
-      "kind": "iar:merge-acceptance",
+      "kind": "kc:merge-acceptance",
       "outputs": {
-        "text": "<!-- iar:merge-acceptance version=1 -->"
+        "text": "<!-- kc:merge-acceptance version=1 -->"
       },
       "parses": [
         {
@@ -642,10 +642,10 @@
           "method": "search",
           "parser": "backend.core.use_cases.agent_runner_pr_body_contract:_MERGE_ACCEPTANCE_MARKER_PATTERN",
           "result": {
+            "match": "<!-- kc:merge-acceptance version=1 -->",
             "groups": {
               "version": "1"
-            },
-            "match": "<!-- iar:merge-acceptance version=1 -->"
+            }
           },
           "text_kwarg": null
         }
@@ -664,9 +664,9 @@
     {
       "claim_judgement": null,
       "id": "pr-contract",
-      "kind": "iar:pr-contract",
+      "kind": "kc:pr-contract",
       "outputs": {
-        "comment": "<!-- iar:pr-contract version=1 missing=missing acceptance heading,missing merge-acceptance marker -->\n## PR Body Contract Violation (auto-generated)\n\nThis PR body does not satisfy the prd skill PR-Native Acceptance contract, so the autopilot merge queue will refuse to auto-merge it. Missing anchors:\n\n- `missing acceptance heading`: unknown anchor\n- `missing merge-acceptance marker`: unknown anchor\n\n<!-- iar:pr-contract-end -->"
+        "comment": "<!-- kc:pr-contract version=1 missing=missing acceptance heading,missing merge-acceptance marker -->\n## PR Body Contract Violation (auto-generated)\n\nThis PR body does not satisfy the prd skill PR-Native Acceptance contract, so the autopilot merge queue will refuse to auto-merge it. Missing anchors:\n\n- `missing acceptance heading`: unknown anchor\n- `missing merge-acceptance marker`: unknown anchor\n\n<!-- kc:pr-contract-end -->"
       },
       "parses": [
         {
@@ -707,9 +707,9 @@
     {
       "claim_judgement": null,
       "id": "pr-contract-end",
-      "kind": "iar:pr-contract-end",
+      "kind": "kc:pr-contract-end",
       "outputs": {
-        "comment": "<!-- iar:pr-contract version=1 missing=missing acceptance heading,missing merge-acceptance marker -->\n## PR Body Contract Violation (auto-generated)\n\nThis PR body does not satisfy the prd skill PR-Native Acceptance contract, so the autopilot merge queue will refuse to auto-merge it. Missing anchors:\n\n- `missing acceptance heading`: unknown anchor\n- `missing merge-acceptance marker`: unknown anchor\n\n<!-- iar:pr-contract-end -->"
+        "comment": "<!-- kc:pr-contract version=1 missing=missing acceptance heading,missing merge-acceptance marker -->\n## PR Body Contract Violation (auto-generated)\n\nThis PR body does not satisfy the prd skill PR-Native Acceptance contract, so the autopilot merge queue will refuse to auto-merge it. Missing anchors:\n\n- `missing acceptance heading`: unknown anchor\n- `missing merge-acceptance marker`: unknown anchor\n\n<!-- kc:pr-contract-end -->"
       },
       "parses": [
         {
@@ -741,9 +741,9 @@
     {
       "claim_judgement": null,
       "id": "realistic-validation",
-      "kind": "iar:realistic-validation",
+      "kind": "kc:realistic-validation",
       "outputs": {
-        "comment": "<!-- iar:realistic-validation version=1 total=2 -->\n## Realistic Validation sign-off\n\nComplete each item only after its evidence has been verified. The configured review or authorized auto-sign-off path may complete this checklist:\n\nRun `kc run --issue 7` and capture rv-1 evidence\nTick the checklist after evidence is attached\n\n<!-- iar:realistic-validation-end -->"
+        "comment": "<!-- kc:realistic-validation version=1 total=2 -->\n## Realistic Validation sign-off\n\nComplete each item only after its evidence has been verified. The configured review or authorized auto-sign-off path may complete this checklist:\n\nRun `kc run --issue 7` and capture rv-1 evidence\nTick the checklist after evidence is attached\n\n<!-- kc:realistic-validation-end -->"
       },
       "parses": [
         {
@@ -753,8 +753,8 @@
           "method": null,
           "parser": "backend.core.use_cases.agent_runner_validation_checklist:parse_validation_checklist_state",
           "result": {
-            "checked_count": 0,
             "total": 2,
+            "checked_count": 0,
             "unchecked_count": 0
           },
           "text_kwarg": null
@@ -765,7 +765,7 @@
           "kwargs": {},
           "method": null,
           "parser": "backend.core.use_cases.agent_runner_validation_checklist:reset_validation_checklist",
-          "result": "<!-- iar:realistic-validation version=1 total=2 -->\n## Realistic Validation sign-off\n\nComplete each item only after its evidence has been verified. The configured review or authorized auto-sign-off path may complete this checklist:\n\nRun `kc run --issue 7` and capture rv-1 evidence\nTick the checklist after evidence is attached\n<!-- iar:realistic-validation-end -->",
+          "result": "<!-- kc:realistic-validation version=1 total=2 -->\n## Realistic Validation sign-off\n\nComplete each item only after its evidence has been verified. The configured review or authorized auto-sign-off path may complete this checklist:\n\nRun `kc run --issue 7` and capture rv-1 evidence\nTick the checklist after evidence is attached\n<!-- kc:realistic-validation-end -->",
           "text_kwarg": null
         }
       ],
@@ -788,9 +788,9 @@
     {
       "claim_judgement": null,
       "id": "realistic-validation-end",
-      "kind": "iar:realistic-validation-end",
+      "kind": "kc:realistic-validation-end",
       "outputs": {
-        "comment": "<!-- iar:realistic-validation version=1 total=2 -->\n## Realistic Validation sign-off\n\nComplete each item only after its evidence has been verified. The configured review or authorized auto-sign-off path may complete this checklist:\n\nRun `kc run --issue 7` and capture rv-1 evidence\nTick the checklist after evidence is attached\n\n<!-- iar:realistic-validation-end -->"
+        "comment": "<!-- kc:realistic-validation version=1 total=2 -->\n## Realistic Validation sign-off\n\nComplete each item only after its evidence has been verified. The configured review or authorized auto-sign-off path may complete this checklist:\n\nRun `kc run --issue 7` and capture rv-1 evidence\nTick the checklist after evidence is attached\n\n<!-- kc:realistic-validation-end -->"
       },
       "parses": [
         {
@@ -822,9 +822,9 @@
     {
       "claim_judgement": null,
       "id": "structured-evidence",
-      "kind": "iar:structured-evidence",
+      "kind": "kc:structured-evidence",
       "outputs": {
-        "text": "<!-- iar:structured-evidence version=1 language=\"zh-CN\" -->"
+        "text": "<!-- kc:structured-evidence version=1 language=\"zh-CN\" -->"
       },
       "parses": [
         {
@@ -834,8 +834,8 @@
           "method": null,
           "parser": "backend.core.use_cases.agent_runner_structured_evidence:parse_structured_evidence_marker",
           "result": {
-            "language": "zh-CN",
-            "version": 1
+            "version": 1,
+            "language": "zh-CN"
           },
           "text_kwarg": null
         },
@@ -865,9 +865,9 @@
     {
       "claim_judgement": null,
       "id": "evidence-format",
-      "kind": "iar:evidence-format",
+      "kind": "kc:evidence-format",
       "outputs": {
-        "text": "<!-- iar:evidence-format item=1 kind=screenshot -->\n<!-- iar:evidence-format item=2 kind=log -->"
+        "text": "<!-- kc:evidence-format item=1 kind=screenshot -->\n<!-- kc:evidence-format item=2 kind=log -->"
       },
       "parses": [
         {
@@ -909,9 +909,9 @@
     {
       "claim_judgement": null,
       "id": "evidence-format-waived",
-      "kind": "iar:evidence-format-waived",
+      "kind": "kc:evidence-format-waived",
       "outputs": {
-        "text": "<!-- iar:evidence-format-waived reason=\"纯文档改动，无可执行行为\" -->"
+        "text": "<!-- kc:evidence-format-waived reason=\"纯文档改动，无可执行行为\" -->"
       },
       "parses": [
         {
@@ -949,9 +949,9 @@
     {
       "claim_judgement": null,
       "id": "validation-waived",
-      "kind": "iar:validation-waived",
+      "kind": "kc:validation-waived",
       "outputs": {
-        "text": "<!-- iar:validation-waived reason=\"行为由守卫测试覆盖\" -->"
+        "text": "<!-- kc:validation-waived reason=\"行为由守卫测试覆盖\" -->"
       },
       "parses": [
         {
@@ -989,9 +989,9 @@
     {
       "claim_judgement": null,
       "id": "validation-evidence",
-      "kind": "iar:validation-evidence",
+      "kind": "kc:validation-evidence",
       "outputs": {
-        "comment": "<!-- iar:validation-evidence version=1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa branch=iar-evidence/7 count=1 -->\n\n## Realistic Validation Evidence\n\n- Evidence branch: `iar-evidence/7` (orphan; never merged; auto-deleted after the issue closes)\n- Code head at capture time: `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`\n\nReview the evidence below, then tick the Realistic Validation checklist in the PR description to sign off.\n\n### rv-1-demo.png\n![rv-1-demo.png](https://github.com/example-org/example-repo/blob/iar-evidence/7/rv-1-demo.png?raw=true)\n[Open image](https://github.com/example-org/example-repo/blob/iar-evidence/7/rv-1-demo.png)"
+        "comment": "<!-- kc:validation-evidence version=1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa branch=iar-evidence/7 count=1 -->\n\n## Realistic Validation Evidence\n\n- Evidence branch: `iar-evidence/7` (orphan; never merged; auto-deleted after the issue closes)\n- Code head at capture time: `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`\n\nReview the evidence below, then tick the Realistic Validation checklist in the PR description to sign off.\n\n### rv-1-demo.png\n![rv-1-demo.png](https://github.com/example-org/example-repo/blob/iar-evidence/7/rv-1-demo.png?raw=true)\n[Open image](https://github.com/example-org/example-repo/blob/iar-evidence/7/rv-1-demo.png)"
       },
       "parses": [
         {
@@ -1001,9 +1001,9 @@
           "method": null,
           "parser": "backend.core.use_cases.agent_runner_validation_publication:parse_latest_evidence_marker",
           "result": {
+            "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "branch": "iar-evidence/7",
-            "count": 1,
-            "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            "count": 1
           },
           "text_kwarg": null
         }
@@ -1046,9 +1046,9 @@
     {
       "claim_judgement": null,
       "id": "verifier-verdict",
-      "kind": "iar:verifier-verdict",
+      "kind": "kc:verifier-verdict",
       "outputs": {
-        "text": "<!-- iar:verifier-verdict risk=yellow -->"
+        "text": "<!-- kc:verifier-verdict risk=yellow -->"
       },
       "parses": [
         {
@@ -1058,10 +1058,10 @@
           "method": null,
           "parser": "backend.core.use_cases.run_verifier_agent:parse_verifier_verdict",
           "result": {
-            "agent": "",
+            "risk": "yellow",
             "findings": "",
             "marker_found": true,
-            "risk": "yellow",
+            "agent": "",
             "token_usage": null,
             "verifier_input_sha": null,
             "verifier_run_id": null
@@ -1077,10 +1077,10 @@
           "method": null,
           "parser": "backend.core.use_cases.run_verifier_agent:parse_verifier_verdict",
           "result": {
-            "agent": "",
+            "risk": "yellow",
             "findings": "manual findings",
             "marker_found": true,
-            "risk": "yellow",
+            "agent": "",
             "token_usage": null,
             "verifier_input_sha": null,
             "verifier_run_id": null
@@ -1104,9 +1104,9 @@
     {
       "claim_judgement": null,
       "id": "verifier-warning",
-      "kind": "iar:verifier-warning",
+      "kind": "kc:verifier-warning",
       "outputs": {
-        "comment": "<!-- iar:verifier-warning risk=yellow -->\n\n## ⚠️ Independent verifier returned YELLOW\n\nThe independent verifier ran for issue #7 and found a non-blocking risk. Review the findings below before merging:\n\n<details>\n<summary>Verifier findings</summary>\n\nevidence for rv-3 is thin\n\n</details>"
+        "comment": "<!-- kc:verifier-warning risk=yellow -->\n\n## ⚠️ Independent verifier returned YELLOW\n\nThe independent verifier ran for issue #7 and found a non-blocking risk. Review the findings below before merging:\n\n<details>\n<summary>Verifier findings</summary>\n\nevidence for rv-3 is thin\n\n</details>"
       },
       "parses": [
         {
@@ -1116,10 +1116,10 @@
           "method": null,
           "parser": "backend.core.use_cases.run_verifier_agent:parse_verifier_verdict",
           "result": {
-            "agent": "",
+            "risk": "red",
             "findings": "No parseable verifier verdict marker found; treating as blocked (red).",
             "marker_found": false,
-            "risk": "red",
+            "agent": "",
             "token_usage": null,
             "verifier_input_sha": null,
             "verifier_run_id": null
@@ -1155,10 +1155,10 @@
     {
       "claim_judgement": null,
       "id": "reconcile",
-      "kind": "iar:reconcile",
+      "kind": "kc:reconcile",
       "outputs": {
-        "comment": "## Stale Attempt Reconciled\n\n<!-- iar:reconcile hash=\"8bbac5de407ca274\" seq=\"1\" -->\n\n| Field | Value |\n|-------|-------|\n| Interrupted at (UTC) | 2026-01-02 03:04:05 |\n| Classification | stale_attempt |\n| Staleness detected by | dead_pid |\n| Disposition | re-enqueue |\n| Claim owner | `runner-a` / pid `4242` / agent `claude` |\n\n**Reason**: Re-enqueued for a fresh attempt after the crash.\n\n### Basis\n\n- claim pid is gone\n- no session record in the worktree\n\nThe Issue is back on `agent/ready` and will be picked up by the next poll.",
-        "text": "<!-- iar:reconcile hash=\"8bbac5de407ca274\" seq=\"1\" -->"
+        "text": "<!-- kc:reconcile hash=\"8bbac5de407ca274\" seq=\"1\" -->",
+        "comment": "## Stale Attempt Reconciled\n\n<!-- kc:reconcile hash=\"8bbac5de407ca274\" seq=\"1\" -->\n\n| Field | Value |\n|-------|-------|\n| Interrupted at (UTC) | 2026-01-02 03:04:05 |\n| Classification | stale_attempt |\n| Staleness detected by | dead_pid |\n| Disposition | re-enqueue |\n| Claim owner | `runner-a` / pid `4242` / agent `claude` |\n\n**Reason**: Re-enqueued for a fresh attempt after the crash.\n\n### Basis\n\n- claim pid is gone\n- no session record in the worktree\n\nThe Issue is back on `agent/ready` and will be picked up by the next poll."
       },
       "parses": [
         {
@@ -1248,9 +1248,9 @@
     {
       "claim_judgement": null,
       "id": "attempt-history",
-      "kind": "iar-attempt-history",
+      "kind": "kc:attempt-history",
       "outputs": {
-        "comment": "<!-- iar-attempt-history -->\n### Attempt History (live)\n\n_(Older attempts omitted; showing the latest 50.)_\n\n| Attempt | Started (UTC) | Agent | Failure Type | Recovered | Duration | Detail |\n|---------|---------------|-------|-------------|-----------|----------|--------|\n| 1 | 2026-01-02 03:04Z | claude | verification_failed | No | 600.0s (agent 420.5s · verification 179.0s) | verification failed: just test exited 2 |\n\n_`Attempt` counts within one agent run: it restarts at 1 on every agent switch and every re-claim, so use `Started` to tell consecutive runs apart. Rows are ordered oldest-first._",
+        "comment": "<!-- kc:attempt-history -->\n### Attempt History (live)\n\n_(Older attempts omitted; showing the latest 50.)_\n\n| Attempt | Started (UTC) | Agent | Failure Type | Recovered | Duration | Detail |\n|---------|---------------|-------|-------------|-----------|----------|--------|\n| 1 | 2026-01-02 03:04Z | claude | verification_failed | No | 600.0s (agent 420.5s · verification 179.0s) | verification failed: just test exited 2 |\n\n_`Attempt` counts within one agent run: it restarts at 1 on every agent switch and every re-claim, so use `Started` to tell consecutive runs apart. Rows are ordered oldest-first._",
         "text": "### Attempt History\n\n| Attempt | Started (UTC) | Agent | Failure Type | Recovered | Duration | Detail |\n|---------|---------------|-------|-------------|-----------|----------|--------|\n| 1 | 2026-01-02 03:04Z | claude | verification_failed | No | 600.0s (agent 420.5s · verification 179.0s) | verification failed: just test exited 2 |\n\n_`Attempt` counts within one agent run: it restarts at 1 on every agent switch and every re-claim, so use `Started` to tell consecutive runs apart. Rows are ordered oldest-first._"
       },
       "parses": [
@@ -1409,9 +1409,9 @@
     {
       "claim_judgement": null,
       "id": "attempt-end",
-      "kind": "iar-attempt-end",
+      "kind": "kc-attempt-end",
       "outputs": {
-        "text": "[iar-attempt-end]"
+        "text": "[kc-attempt-end]"
       },
       "parses": [
         {
@@ -1436,35 +1436,35 @@
       ]
     }
   ],
-  "generated_by": ".iar/evidence/scripts/rv-3-marker-snapshot.py",
-  "generated_from_ref": "a0a170f5f6e614c9f94bcb8292d59095eee5338d",
+  "generated_by": "current-tree production writers and parsers for Issue #313",
+  "generated_from_ref": "Issue #313 working tree",
   "kinds": [
-    "iar-attempt-end",
-    "iar-attempt-history",
-    "iar:auto-sign-off",
-    "iar:ci-auto-repair-policy",
-    "iar:claim",
-    "iar:claim-withdrawn",
-    "iar:dependency-wait",
-    "iar:depends-on",
-    "iar:direct-pr",
-    "iar:event",
-    "iar:evidence-format",
-    "iar:evidence-format-waived",
-    "iar:failure-context",
-    "iar:failure-context-ref",
-    "iar:fast-merge",
-    "iar:merge-acceptance",
-    "iar:pr-contract",
-    "iar:pr-contract-end",
-    "iar:realistic-validation",
-    "iar:realistic-validation-end",
-    "iar:reconcile",
-    "iar:structured-evidence",
-    "iar:validation-evidence",
-    "iar:validation-waived",
-    "iar:verifier-verdict",
-    "iar:verifier-warning"
+    "kc:attempt-history",
+    "kc-attempt-end",
+    "kc:auto-sign-off",
+    "kc:ci-auto-repair-policy",
+    "kc:claim",
+    "kc:claim-withdrawn",
+    "kc:dependency-wait",
+    "kc:depends-on",
+    "kc:direct-pr",
+    "kc:event",
+    "kc:evidence-format",
+    "kc:evidence-format-waived",
+    "kc:failure-context",
+    "kc:failure-context-ref",
+    "kc:fast-merge",
+    "kc:merge-acceptance",
+    "kc:pr-contract",
+    "kc:pr-contract-end",
+    "kc:realistic-validation",
+    "kc:realistic-validation-end",
+    "kc:reconcile",
+    "kc:structured-evidence",
+    "kc:validation-evidence",
+    "kc:validation-waived",
+    "kc:verifier-verdict",
+    "kc:verifier-warning"
   ],
   "python": "3.13.13",
   "version": 1

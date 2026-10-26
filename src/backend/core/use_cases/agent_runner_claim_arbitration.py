@@ -94,7 +94,7 @@ def _bid_sort_key(bid: ClaimBid) -> tuple[datetime, str, int]:
 
 
 def format_claim_comment(bid: ClaimBid) -> str:
-    """渲染投标即认领评论：人读归属信息 + 机器可读 ``iar:claim`` marker。
+    """渲染投标即认领评论：人读归属信息 + 机器可读 ``kc:claim`` marker。
 
     文本与历史上的领取评论保持一致（对账与 reclaim 侧按该 marker 解析归属）。
     """
@@ -117,7 +117,7 @@ def format_claim_comment(bid: ClaimBid) -> str:
 def format_withdrawn_claim_comment(loser: ClaimBid, winner: ClaimBid) -> str:
     """输家把自己的认领评论改写成撤销说明。
 
-    撤销 marker 故意使用 ``iar:claim-withdrawn``：它不被 ``iar:claim`` 的解析器
+    撤销 marker 故意使用 ``kc:claim-withdrawn``：它不被 ``kc:claim`` 的解析器
     匹配，因此线程里剩下的「最近一次认领」自动指向赢家，reclaim 与对账都不会把
     输家当成持有者。
     """
@@ -129,7 +129,7 @@ def format_withdrawn_claim_comment(loser: ClaimBid, winner: ClaimBid) -> str:
         f"- Started at: `{loser.started_at.isoformat()}`\n\n"
         f"Lost first-claim arbitration to `{winner.host}` (PID {winner.pid}), "
         "which claimed this Issue earlier; this process did not run the Issue.\n\n"
-        f'<!-- iar:claim-withdrawn host="{loser.host}" pid="{loser.pid}" '
+        f'<!-- kc:claim-withdrawn host="{loser.host}" pid="{loser.pid}" '
         f'started_at="{loser.started_at.isoformat()}" -->'
     )
 

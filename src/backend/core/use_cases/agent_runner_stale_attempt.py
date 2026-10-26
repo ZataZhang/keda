@@ -178,7 +178,7 @@ def decide_stale_attempt_disposition(evidence: StaleAttemptEvidence) -> StaleAtt
 
 
 _RECONCILE_MARKER_PATTERN = re.compile(
-    r'<!--\s*iar:reconcile\s+hash="(?P<hash>[0-9a-f]{8,64})"\s+seq="(?P<seq>\d+)"\s*-->'
+    r'<!--\s*kc:reconcile\s+hash="(?P<hash>[0-9a-f]{8,64})"\s+seq="(?P<seq>\d+)"\s*-->'
 )
 
 
@@ -188,7 +188,7 @@ def format_reconcile_marker(dedupe_hash: str, stale_attempt_seq: int) -> str:
     同一判定重放时 hash 不变：comment 已存在则不再追加，label 也已翻转，于是重放
     产生零新增评论与零重复状态变更（PRD FR-5）。
     """
-    return f'<!-- iar:reconcile hash="{dedupe_hash}" seq="{stale_attempt_seq}" -->'
+    return f'<!-- kc:reconcile hash="{dedupe_hash}" seq="{stale_attempt_seq}" -->'
 
 
 def parse_reconcile_marker(comment_body: str) -> tuple[str, int] | None:

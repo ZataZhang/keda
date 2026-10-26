@@ -27,7 +27,7 @@ from backend.core.use_cases.agent_runner_init_assets import (
     install_workflow,
 )
 from backend.core.use_cases.agent_runner_repository_local import (
-    IARRepositoryNotInitializedError,
+    RepositoryNotInitializedError,
 )
 
 
@@ -73,7 +73,7 @@ def run_workflow_install_command(ctx: ParsedCommandContext) -> int:
             code=ExitCode.CONFLICT,
             suggestion=f"kc workflow install {ctx.parsed.name} --force",
         ) from exc
-    except IARRepositoryNotInitializedError as exc:
+    except RepositoryNotInitializedError as exc:
         return _handle_not_initialized_error(exc, fmt=ctx.output_format)
     except ValueError as exc:
         logger.error("kc workflow install failed: %s", exc)

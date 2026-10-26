@@ -38,7 +38,7 @@ class PrChangeFingerprintRequest:
 
 @dataclass(frozen=True)
 class EvidenceMarker:
-    """PR 评论中解析出的 ``iar:validation-evidence`` 隐藏标记。
+    """PR 评论中解析出的 ``kc:validation-evidence`` 隐藏标记。
 
     Attributes:
         head_sha: 发布证据时的 PR head。
@@ -66,16 +66,16 @@ def format_validation_evidence_marker(marker: EvidenceMarker | EvidenceMarkerV2)
         marker: 需要编码到隐藏注释中的证据身份。
 
     Returns:
-        ``iar:validation-evidence`` 格式的单行 HTML 注释。
+        ``kc:validation-evidence`` 格式的单行 HTML 注释。
     """
     if isinstance(marker, EvidenceMarkerV2):
         return (
-            f"<!-- iar:validation-evidence version=2 head={marker.head_sha} "
+            f"<!-- kc:validation-evidence version=2 head={marker.head_sha} "
             f"base={marker.base_sha} patch={marker.patch_id} branch={marker.branch} "
             f"count={marker.count} -->"
         )
     return (
-        f"<!-- iar:validation-evidence version=1 head={marker.head_sha} "
+        f"<!-- kc:validation-evidence version=1 head={marker.head_sha} "
         f"branch={marker.branch} count={marker.count} -->"
     )
 

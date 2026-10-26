@@ -72,7 +72,7 @@ from backend.core.use_cases.agent_runner_factory import (
     resolve_console_spawn_cwd,
     resolve_repository_targets_with_diagnostics,
 )
-from backend.core.use_cases.agent_runner_repository_local import discover_iar_repositories
+from backend.core.use_cases.agent_runner_repository_local import discover_repositories
 from backend.core.use_cases.monitor_snapshots import (
     get_monitor_settings,
     update_monitor_settings,
@@ -590,7 +590,7 @@ def browse_console_directories(path: str | None = None) -> dict:
 def discover_console_repositories(scan_root: str) -> dict:
     """扫描本地目录，发现已初始化 KedaCode 的 git 仓库候选。"""
     try:
-        entries = discover_iar_repositories(
+        entries = discover_repositories(
             scan_root=Path(scan_root),
             editor=create_registry_editor(),
         )

@@ -135,7 +135,7 @@ def extract_unique_issue_number(prd_text: str) -> int | None:
 def list_worktrees(process_runner: IProcessRunner, repo_path: Path) -> WorktreeListResult:
     """用 ``git worktree list --porcelain`` 列出该仓库的所有工作区。
 
-    porcelain 布局同时覆盖 ``.iar-worktrees/<branch>``（issue 流程）与 ``just
+    porcelain 布局同时覆盖 ``.kc-worktrees/<branch>``（issue 流程）与 ``just
     worktree`` 的兄弟目录布局，因此不硬编码任何路径拼接。detached（无 ``branch``
     行）条目被跳过；命令非零退出或执行异常一律记为 ``unavailable``，不能据此
     断定「没有工作区」。

@@ -1274,7 +1274,7 @@ def test_logs_command_issue_surfaces_invocation_markers(tmp_path: Path, capsys) 
 def test_logs_command_issue_follow_still_exits_on_attempt_end_with_markers(
     tmp_path: Path, capsys
 ) -> None:
-    """调用标记不干扰 `--follow` 的终态判定：仍只认 `[iar-attempt-end]`。"""
+    """调用标记不干扰 `--follow` 的终态判定：仍只认 `[kc-attempt-end]`。"""
     repo_dir = tmp_path / "repo"
     _produce_invocation_attempt_log(repo_dir, 42)
 

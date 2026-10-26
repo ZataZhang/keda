@@ -147,7 +147,7 @@ def test_overview_http_reuses_pr_but_next_scan_reads_again(
         lambda label, limit: issues if label == config.labels.ready else []
     )
     github.list_issue_comments.return_value = [
-        "<!-- iar:event version=1 phase=implement cycle=1 pr_branch=shared -->"
+        "<!-- kc:event version=1 phase=implement cycle=1 pr_branch=shared -->"
     ]
     github.get_pull_request_context.return_value = PullRequestContext(
         pr_url="https://github.com/test/repo/pull/3",

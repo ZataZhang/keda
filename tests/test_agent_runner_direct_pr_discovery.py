@@ -26,7 +26,7 @@ def test_actual_dispatch_handoffs_published_round_despite_new_dependency(
     client.set_issue_labels(_NUMBER, (workflow, "test/preserve"))
     client.set_issue_body(
         _NUMBER,
-        "- PRD path: `tasks/pending/new-requirement.md`\n<!-- iar:depends-on #42 -->",
+        "- PRD path: `tasks/pending/new-requirement.md`\n<!-- kc:depends-on #42 -->",
     )
     client.set_issue_labels(42, ("agent/ready",))
     client.list_ready_issues = lambda *_args: (
@@ -72,7 +72,7 @@ def test_unassociated_issue_does_not_gain_cleanup_discovery(
     client = _published_storage(tmp_path / "github.json")
     client._issue_comment_entries.clear()
     client.set_issue_labels(_NUMBER, (workflow, "direct-pr"))
-    client.set_issue_body(_NUMBER, "<!-- iar:depends-on #42 -->")
+    client.set_issue_body(_NUMBER, "<!-- kc:depends-on #42 -->")
     client.set_issue_labels(42, ("agent/ready",))
     client.list_ready_issues = lambda *_args: (
         [client.get_issue(_NUMBER)] if workflow == "agent/ready" else []
@@ -105,7 +105,7 @@ def test_cleanup_discovery_cannot_turn_into_new_publication(tmp_path, monkeypatc
 
     client = _published_storage(tmp_path / "github.json", label_present=False)
     client.set_issue_labels(_NUMBER, ("agent/ready",))
-    client.set_issue_body(_NUMBER, "<!-- iar:depends-on #42 -->")
+    client.set_issue_body(_NUMBER, "<!-- kc:depends-on #42 -->")
     client.list_ready_issues = lambda *_args: [client.get_issue(_NUMBER)]
     client.list_review_candidate_issues = lambda *_args: []
     original = runtime._has_published_direct_pr_handoff

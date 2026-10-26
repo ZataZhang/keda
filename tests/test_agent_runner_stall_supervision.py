@@ -1075,7 +1075,7 @@ def test_audit_lines_are_replayed_in_the_calling_thread(
         supervision_logger.setLevel(previous_level)
 
     main_thread_lines = [text for name, text in seen if name == threading.main_thread().name]
-    observer_lines = [text for name, text in seen if name.startswith("iar-stall-")]
+    observer_lines = [text for name, text in seen if name.startswith("kc-stall-")]
     assert any(STALL_DIAGNOSIS_MARKER in text for text in observer_lines)
     assert any(STALL_HANDOFF_MARKER in text for text in main_thread_lines), main_thread_lines
 

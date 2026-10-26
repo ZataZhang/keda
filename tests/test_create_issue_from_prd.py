@@ -240,7 +240,7 @@ def test_create_issue_from_prd_materializes_prd_ref_issue_link(
     )
 
     create_calls = [c for c in fake_client.calls if c["method"] == "create_issue"]
-    assert "<!-- iar:depends-on #77 -->" in create_calls[0]["body"]
+    assert "<!-- kc:depends-on #77 -->" in create_calls[0]["body"]
 
 
 def test_create_issue_from_prd_missing_issue_link_fails_fast(
@@ -935,7 +935,7 @@ def test_create_issue_from_prd_materializes_structured_evidence_marker(
     )
 
     create_call = next(c for c in fake_client.calls if c["method"] == "create_issue")
-    assert '<!-- iar:structured-evidence version=1 language="zh-CN" -->' in create_call["body"]
+    assert '<!-- kc:structured-evidence version=1 language="zh-CN" -->' in create_call["body"]
 
 
 def test_create_issue_from_prd_honors_validation_language(
@@ -964,7 +964,7 @@ def test_create_issue_from_prd_honors_validation_language(
     )
 
     create_call = next(c for c in fake_client.calls if c["method"] == "create_issue")
-    assert '<!-- iar:structured-evidence version=1 language="en-US" -->' in create_call["body"]
+    assert '<!-- kc:structured-evidence version=1 language="en-US" -->' in create_call["body"]
 
 
 def test_create_issue_from_prd_skips_marker_when_structured_evidence_disabled(
@@ -993,7 +993,7 @@ def test_create_issue_from_prd_skips_marker_when_structured_evidence_disabled(
     )
 
     create_call = next(c for c in fake_client.calls if c["method"] == "create_issue")
-    assert "iar:structured-evidence" not in create_call["body"]
+    assert "kc:structured-evidence" not in create_call["body"]
 
 
 def test_extract_title_strips_prd_prefix() -> None:

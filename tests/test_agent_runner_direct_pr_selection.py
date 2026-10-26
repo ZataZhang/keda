@@ -100,7 +100,7 @@ def _forbidden_builder(**_kwargs):
 
 def test_fresh_dependency_stops_ready_handler_before_publication(monkeypatch) -> None:
     """队列无依赖但认领后正文新增未完成依赖，不得建立直发检查点或消费标签。"""
-    client = _client(body="<!-- iar:depends-on #42 -->")
+    client = _client(body="<!-- kc:depends-on #42 -->")
     client.set_issue_labels(42, ("agent/ready",))
     _patch_ready_handler(monkeypatch, run_agent=_forbidden_builder)
     monkeypatch.setattr(

@@ -3,7 +3,7 @@
 本模块是 Agent Runner 监控面板的核心业务逻辑：
 - `build_overview`：按仓库汇总队列状态、最新 event 和异常计数。
 - `build_issue_detail`：单个 Issue 的 label、PR 上下文、worktree 状态、event timeline、anomaly 和建议 CLI。
-- `parse_event_timeline`：从 Issue comments 解析所有 iar:event marker 作为事件时间线。
+- `parse_event_timeline`：从 Issue comments 解析所有 kc:event marker 作为事件时间线。
 - 异常检测规则：label_pr_mismatch、pr_dirty_in_review、dirty_worktree_mismatch、event_label_mismatch。
 
 按照四层依赖方向，本模块属于 core/use_cases/，只依赖
@@ -155,7 +155,7 @@ class AnomalyDetectionContext:
 # ─────────────────────────────────────────────────────────────────────────────
 
 _EVENT_MARKER_LINE_PATTERN = re.compile(
-    r"<!--\s*iar:event\s+([^>]+?)\s*-->",
+    r"<!--\s*kc:event\s+([^>]+?)\s*-->",
     re.DOTALL,
 )
 
@@ -193,11 +193,11 @@ def _parse_marker_attributes(
 
 
 def parse_event_timeline(comments: Iterable[str]) -> list[EventTimelineEntry]:
-    """Parse all iar:event markers from Issue comments, oldest first.
+    """Parse all kc:event markers from Issue comments, oldest first.
 
     Args:
         comments: Iterable of comment bodies in chronological order. Bodies
-            that do not contain an ``iar:event`` marker are skipped.
+            that do not contain an ``kc:event`` marker are skipped.
 
     Returns:
         A list of :class:`EventTimelineEntry` ordered from oldest to newest.
@@ -407,7 +407,7 @@ _POST_PR_LABELS: frozenset[str] = frozenset(
 
 
 def _phase_implies_label(phase: str) -> str | None:
-    """Map an iar:event phase to the label it implies.
+    """Map an kc:event phase to the label it implies.
 
     Returns ``None`` when the phase does not pin a label decision.
     """

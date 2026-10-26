@@ -1,9 +1,7 @@
 """Typer commands under ``kc config``.
 
-Currently a single command — ``kc config migrate`` — which moves the local state
-directory from ``~/.iar`` to ``~/.kedacode``, renames the repository's ``.iar.toml``
-to ``.kedacode.toml``, and removes
-the generated-content defaults an older ``kc init`` pinned into it.
+Currently a single command — ``kc config migrate`` — which previews or applies local
+state, repository configuration, worktree directory, and GitHub marker migrations.
 """
 
 from __future__ import annotations
@@ -18,11 +16,19 @@ from backend.api.cli_typer_app import _run_typer_repository_command, config_app
 @config_app.command("migrate")
 def config_migrate_command(
     ctx: typer.Context,
+    apply: Annotated[
+        bool,
+        typer.Option("--apply", help="Apply the migration after previewing it."),
+    ] = False,
+    include_closed: Annotated[
+        bool,
+        typer.Option("--include-closed", help="Also migrate closed Issues and PRs."),
+    ] = False,
     dry_run: Annotated[
         bool,
         typer.Option(
             "--dry-run",
-            help="Show the whole plan (state directory, rename, diff) without writing anything.",
+            help="Preview the migration without writing anything (default).",
         ),
     ] = False,
     repo: Annotated[
@@ -44,7 +50,7 @@ def config_migrate_command(
         ),
     ] = None,
 ) -> int:
-    """Move ~/.iar to ~/.kedacode, rename .iar.toml, and drop pinned values."""
+    """Preview or apply local configuration and GitHub marker migration."""
     return _run_typer_repository_command(
         ctx,
         "config migrate",
@@ -52,6 +58,8 @@ def config_migrate_command(
         repo_id=repo_id,
         config=config,
         dry_run=dry_run,
+        apply=apply,
+        include_closed=include_closed,
     )
 
 

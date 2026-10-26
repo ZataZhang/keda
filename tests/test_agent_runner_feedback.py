@@ -302,7 +302,7 @@ def test_prd_delivery_detail_stays_diagnostic_only() -> None:
 
 _HANDOFF_RECORD = "\n".join(
     [
-        "<!-- iar:failure-context checkpoint=a1b2c3d4 attempts=3 verifier=red "
+        "<!-- kc:failure-context checkpoint=a1b2c3d4 attempts=3 verifier=red "
         "evidence=tasks/evidence/example -->",
         "",
         "## Agent Runner Handoff — Recovery Budget Exhausted",
@@ -320,7 +320,7 @@ _HANDOFF_RECORD = "\n".join(
 )
 
 _STALE_HANDOFF_RECORD = (
-    "<!-- iar:failure-context checkpoint=deadbee attempts=9 verifier=red "
+    "<!-- kc:failure-context checkpoint=deadbee attempts=9 verifier=red "
     "evidence=tasks/evidence/old -->\n"
     "rv-1 not satisfied: the legacy export path was never wired."
 )
@@ -412,7 +412,7 @@ def test_continuation_prompt_truncates_overlong_handoff_record() -> None:
     """
     oversized_record = "\n".join(
         [
-            "<!-- iar:failure-context checkpoint=a1b2c3d4 attempts=3 verifier=red -->",
+            "<!-- kc:failure-context checkpoint=a1b2c3d4 attempts=3 verifier=red -->",
             "- Checkpoint commit: `a1b2c3d4`",
             "- Verifier: formed an explicit **red** verdict.",
             "x" * 20000,
@@ -472,16 +472,16 @@ def test_failure_context_marker_round_trips_without_a_shared_contract_object() -
     )
 
     assert marker_without_snapshot == (
-        "<!-- iar:failure-context checkpoint=none attempts=0 "
+        "<!-- kc:failure-context checkpoint=none attempts=0 "
         "verifier=no-verdict evidence=tasks/evidence/example -->"
     )
     assert has_failure_context_marker(marker_without_snapshot)
-    assert not has_failure_context_marker("<!-- iar:event version=1 phase=x cycle=0 -->")
-    # PR 正文尾部的回链段带 ``iar:failure-context-ref`` 前缀，不能被误认成交接记录。
-    assert not has_failure_context_marker("<!-- iar:failure-context-ref -->")
+    assert not has_failure_context_marker("<!-- kc:event version=1 phase=x cycle=0 -->")
+    # PR 正文尾部的回链段带 ``kc:failure-context-ref`` 前缀，不能被误认成交接记录。
+    assert not has_failure_context_marker("<!-- kc:failure-context-ref -->")
     # checkpoint 取值**不能**只认 16 进制：marker 解析失败时回灌按"没有上下文"处理，
     # 于是取值形状不符会静默退回到本功能要消除的"从零反推"。这条曾真实红过一次
-    # （正则照抄 iar:event 的 head= 写法时，非 hex 取值让 PR 回链退化成 Issue URL）。
+    # （正则照抄 kc:event 的 head= 写法时，非 hex 取值让 PR 回链退化成 Issue URL）。
     non_hex_marker = format_failure_context_marker(
         checkpoint_sha="refs-wip-001",
         attempt_count=1,
