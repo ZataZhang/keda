@@ -35,13 +35,11 @@ GITIGNORE_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("# Legacy IAR state (for existing repositories)", (".iar/",)),
     ("# KedaCode-managed git worktrees (host-local)", (".kc-worktrees/", ".iar-worktrees/")),
     (
-        "# PRD task evidence (commit only *.md reports; evidence manifest stays "
-        "available to local packaging)",
+        "# PRD task evidence (commit only *.md reports; manifest and raw artifacts stay local)",
         (
             "tasks/evidence/**",
             "!tasks/evidence/**/",
             "!tasks/evidence/**/*.md",
-            "!tasks/evidence/**/evidence.json",
         ),
     ),
 )

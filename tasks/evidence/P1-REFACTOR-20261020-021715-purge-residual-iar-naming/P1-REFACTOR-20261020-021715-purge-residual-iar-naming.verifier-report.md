@@ -1,10 +1,13 @@
-# Independent Verifier Report
+# 独立 Verifier 报告
 
-**Status: PENDING — no independent verifier run is available in this execution.**
+当前状态：PENDING，等待修复后三项 finding 的干净提交复审。
 
-This report does not claim `PASS`. The source-level review and executor validation found two realistic gates that cannot be completed in the current sandbox:
+首次独立审查对象：`e01731e163846406b88ef5217ee0ee0d98220274`，tree `1f1beb1d9e2b2c6d37253d7acb323510e4e8fec1`。
 
-1. RV-1 needs an authorized `GH_TOKEN` and `KC_RV_SANDBOX_REPO`; neither is configured. The PRD explicitly requires this to remain a post-merge real-GitHub check instead of replacing it with unit tests.
-2. RV-2 `kc config migrate --apply` fails closed because macOS `psutil.process_iter()` cannot enumerate PIDs (`PermissionError: Operation not permitted` from `sysctl`). The GitHub preview was read-only and left the fake comment unchanged. The process safety check was not bypassed, so successful apply, post-migration claim recognition, idempotent second run, and active-runner refusal remain unverified here.
+首轮 verdict：REJECT。独立 verifier 运行 129 项定向测试通过，并只读确认真实沙箱旧/新标记 Issue 均已关闭。RV-1 至 RV-6 的证据边界可接受，但有三项交付缺口：
 
-Completed executor checks: worktree directory RV-3/RV-4, Idea Inbox signature RV-5, residual-name guard RV-6, focused backend suites, reuse check, and MkDocs build. After the previous full-suite run exposed an intermittent fixture defect, the test double in `tests/test_backlog_api.py` was updated with the required timezone-aware `scanned_at`; the focused test passed six consecutive runs and `UV_CACHE_DIR=.uv-cache just test all` then passed full lint plus all tests (`4963 passed, 1 skipped`). The verifier should repeat the delivery gate on the final staged/committed tree, assess whether the RV-2 runner environment can safely enumerate processes, and record the final tree identity. Human-Confirmed decisions remain unanswered.
+1. FR-5：完整旧 artifact 路径不存在时，虽然旧状态根存在，session/findings 仍可能创建平行新根。
+2. 随包 operator Skill：缺少新增迁移语义、旗标、全部机器停机顺序及入口路由。
+3. Gitignore 生成器：会重新放行原始 evidence manifest，与根规则和 Markdown-only 策略不一致。
+
+执行器已集中修复以上问题并补回归；本文件不自行把修复等同于独立 PASS。待独立 verifier 对干净新提交返回结论后更新。

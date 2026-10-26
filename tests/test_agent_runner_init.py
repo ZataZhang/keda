@@ -851,7 +851,6 @@ def test_ensure_gitignore_inserts_block_when_missing(tmp_path: Path) -> None:
         "tasks/evidence/**",
         "!tasks/evidence/**/",
         "!tasks/evidence/**/*.md",
-        "!tasks/evidence/**/evidence.json",
     )
     assert result.entries_skipped_external == ()
     assert GITIGNORE_BLOCK_HEADER in text
@@ -861,11 +860,11 @@ def test_ensure_gitignore_inserts_block_when_missing(tmp_path: Path) -> None:
     assert ".agent-runner/" in text
     assert ".kc-worktrees/" in text
     assert ".iar-worktrees/" in text
-    # tasks/evidence 白名单段：整目录排除，允许 Markdown 报告与本地 manifest。
+    # tasks/evidence 白名单段：只允许 Markdown 报告，manifest 保留在本地。
     assert "tasks/evidence/**" in text
     assert "!tasks/evidence/**/" in text
     assert "!tasks/evidence/**/*.md" in text
-    assert "!tasks/evidence/**/evidence.json" in text
+    assert "!tasks/evidence/**/evidence.json" not in text
 
 
 def test_ensure_gitignore_skips_patterns_already_outside_block(
@@ -892,7 +891,6 @@ def test_ensure_gitignore_skips_patterns_already_outside_block(
         "tasks/evidence/**",
         "!tasks/evidence/**/",
         "!tasks/evidence/**/*.md",
-        "!tasks/evidence/**/evidence.json",
     )
     assert ".agent-runner/" in result.entries_skipped_external
     # Project rules must be preserved verbatim above the block.
@@ -985,8 +983,7 @@ def test_ensure_gitignore_does_not_insert_empty_block_when_all_external(
     gitignore = repo_path / ".gitignore"
     gitignore.write_text(
         ".kedacode/\n.iar/\n.agent-runner/\n.kc-worktrees/\n.iar-worktrees/\n"
-        "tasks/evidence/**\n!tasks/evidence/**/\n!tasks/evidence/**/*.md\n"
-        "!tasks/evidence/**/evidence.json\n",
+        "tasks/evidence/**\n!tasks/evidence/**/\n!tasks/evidence/**/*.md\n",
         encoding="utf-8",
     )
 
@@ -1005,7 +1002,6 @@ def test_ensure_gitignore_does_not_insert_empty_block_when_all_external(
         "tasks/evidence/**",
         "!tasks/evidence/**/",
         "!tasks/evidence/**/*.md",
-        "!tasks/evidence/**/evidence.json",
     }
     assert GITIGNORE_BLOCK_HEADER not in text
 

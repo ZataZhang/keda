@@ -59,14 +59,19 @@ def test_record_lives_under_gitignored_kc_dir(tmp_path: Path) -> None:
     assert record_path.relative_to(tmp_path).parts[:2] == (".kedacode", "agent-runner")
 
 
-def test_existing_legacy_session_directory_remains_active(tmp_path: Path) -> None:
+@pytest.mark.parametrize("legacy_directory", [".iar", ".iar/state", ".iar/agent-runner/sessions"])
+def test_existing_legacy_session_directory_remains_active(
+    tmp_path: Path, legacy_directory: str
+) -> None:
     """已有 ``.iar/`` 会话目录时继续沿用，避免丢失续传状态。"""
     legacy_sessions_path = tmp_path / ".iar" / "agent-runner" / "sessions"
-    legacy_sessions_path.mkdir(parents=True)
+    (tmp_path / legacy_directory).mkdir(parents=True)
 
     record_path = save_agent_session_record(tmp_path, agent_name="claude", session_id="sess-abc")
 
     assert record_path.parent == legacy_sessions_path
+    assert load_agent_session_record(tmp_path, "claude").session_id == "sess-abc"
+    assert not (tmp_path / ".kedacode").exists()
 
 
 def test_save_leaves_no_temporary_file(tmp_path: Path) -> None:

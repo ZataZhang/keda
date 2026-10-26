@@ -2292,7 +2292,7 @@ def test_ensure_validation_commands_pass_caches_pass_on_clean_tree(
         _issue(body=_STRUCTURED_ISSUE_BODY), tmp_path, _legacy_config(), first
     )
     assert ["bash", "-lc", "demo run"] in first.raw_calls
-    assert (tmp_path / ".kedacode" / "rv_reexec_cache.json").exists()
+    assert (tmp_path / ".iar" / "rv_reexec_cache.json").exists()
 
     second = FakeProcessRunner(responses=responses)
     ensure_validation_commands_pass(

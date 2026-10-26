@@ -31,7 +31,7 @@ def resolve_repository_state_path(
     current_relative_path: Path,
     legacy_relative_path: Path,
 ) -> Path:
-    """解析仓库状态文件路径，旧路径已存在时继续复用旧状态。
+    """解析仓库状态文件路径，旧状态根存在时继续复用其目录。
 
     Args:
         repository_root_path: 仓库或 worktree 根目录。
@@ -39,10 +39,11 @@ def resolve_repository_state_path(
         legacy_relative_path: 上一版使用的相对路径。
 
     Returns:
-        旧路径已存在时返回旧路径，否则返回新路径。
+        旧状态根或完整旧路径存在时返回旧路径，否则返回新路径。
     """
     legacy_state_path = repository_root_path / legacy_relative_path
-    if legacy_state_path.exists():
+    legacy_state_root_path = repository_root_path / LEGACY_REPOSITORY_STATE_DIR_NAME
+    if legacy_state_root_path.is_dir() or legacy_state_path.exists():
         return legacy_state_path
     return repository_root_path / current_relative_path
 

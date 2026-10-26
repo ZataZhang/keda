@@ -2925,9 +2925,14 @@ def test_build_supervisor_prompt_includes_previous_unresolved_findings() -> None
     assert "Previous unresolved" not in clean_prompt
 
 
-def test_supervisor_finding_tracker_persists_and_loads_findings(tmp_path: Path) -> None:
+@pytest.mark.parametrize("legacy_directory", [None, ".iar", ".iar/state"])
+def test_supervisor_finding_tracker_persists_and_loads_findings(
+    tmp_path: Path, legacy_directory: str | None
+) -> None:
     """finding artifact 写入后可读回；resolved 的 finding 从累积列表移除（FR-10）。"""
     config = AppConfig()
+    if legacy_directory is not None:
+        (tmp_path / legacy_directory).mkdir(parents=True)
     open_finding = FindingDetail(
         severity="high",
         title="Missing error handling",
@@ -2936,8 +2941,11 @@ def test_supervisor_finding_tracker_persists_and_loads_findings(tmp_path: Path) 
     )
     _persist_findings(tmp_path, config, 42, 1, (open_finding,))
 
-    artifact_path = tmp_path / ".kedacode" / "state" / "issue-42" / "findings.json"
+    state_directory = ".iar" if legacy_directory is not None else ".kedacode"
+    artifact_path = tmp_path / state_directory / "state" / "issue-42" / "findings.json"
     assert artifact_path.is_file()
+    if legacy_directory is not None:
+        assert not (tmp_path / ".kedacode").exists()
     loaded_findings = _load_previous_findings(tmp_path, config, 42)
     assert len(loaded_findings) == 1
     assert loaded_findings[0].title == "Missing error handling"

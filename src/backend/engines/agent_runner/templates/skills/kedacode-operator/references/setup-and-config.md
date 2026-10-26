@@ -78,6 +78,20 @@ executable. Availability has exactly one source of truth — the registered `bin
 
 ## Execute and never do
 
+### 协作标记升级与显式迁移
+
+新版只读写 `kc:` 协作标记和 `KC_EXEC` 执行标记，旧标记不会被识别。
+迁移在途任务前，必须在所有电脑上停止 daemon、container 和运行中的 runner；本机检查不能证明其他机器已停。
+升级后先运行 `kc config migrate --repo <path>` 预演，它只列出 open Issue / PR 正文与评论的旧标记位置和数量，不写入。
+已有授权且预演范围正确时，再运行 `kc config migrate --repo <path> --apply`；它只改标记前缀，其他文字不变，重复执行不会再次编辑已迁移标记。
+closed 的历史条目默认不改；仅在用户需要这些历史条目时使用 `kc config migrate --repo <path> --apply --include-closed`。
+同步各目标仓库的 `validation-gate.yml`，使其识别当前 `kc:realistic-validation` 清单，完成迁移后再恢复 runner。
+有本机活动进程、登记 PID 或锁时，`--apply` 会拒绝；无法枚举进程也拒绝，不得绕过此检查。
+新仓库使用新目录；已有旧目录继续复用，只有显式迁移且无活动 linked worktree 时才允许改名。
+迁移失败时保留停机状态，检查预演与错误后再重跑；不要让新旧 runner 同时运行。
+
+### 其他安装与配置操作
+
 - Initialize: `kc init --dry-run`, then `kc init`.
 - Refresh user-level Skills only (already-initialized repo, renamed packaged skill, or an explicit skill-refresh request): `kc skill install --dry-run`, then `kc skill install`. It never reads or writes `.kedacode.toml`, so it also works where `kc init` would stop at the existing config; it takes no repository (reject `--repo` / `--repo-id` / `--config` as a usage error).
 - Repair one `kedacode-operator` copy without touching any other Agent root or remote Skill: `kc skill repair-operator --skill-dir <absolute-path> --dry-run`; add `--force` only for an explicitly requested overwrite of that copy's managed files. The path must name the exact `kedacode-operator` directory.
