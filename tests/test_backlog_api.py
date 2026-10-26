@@ -220,15 +220,11 @@ def test_force_refresh_requests_rescan_and_reports_stale(
     assert snapshot_wiring.coordinator.wait_until_idle(timeout_seconds=5)
 
     build_calls: list[tuple[str, bool]] = []
+    original_build_backlog_response = backlog_routes._build_backlog_response
 
     def counting_build(repo_id: str, include_archived: bool) -> dict:
         build_calls.append((repo_id, include_archived))
-        return {
-            "prds": [],
-            "skipped": [],
-            "repo_id": repo_id,
-            "include_archived": include_archived,
-        }
+        return original_build_backlog_response(repo_id, include_archived)
 
     monkeypatch.setattr(backlog_routes, "_build_backlog_response", counting_build)
     snapshot_wiring.resync_requests.clear()
