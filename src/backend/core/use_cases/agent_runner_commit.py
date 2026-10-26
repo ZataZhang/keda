@@ -395,9 +395,21 @@ def commit_requested_changes(
     return verification_results
 
 
-def unstage_changes(worktree_path: Path, process_runner: IProcessRunner) -> None:
-    """Reset the Git index after a staged verification failure."""
-    process_runner.run(["git", "reset", "--mixed"], cwd=worktree_path)
+def unstage_changes(
+    worktree_path: Path,
+    process_runner: IProcessRunner,
+    *,
+    check: bool = True,
+) -> None:
+    """Reset the Git index after a staged verification failure.
+
+    Args:
+        worktree_path: 需要重置索引的 worktree 路径。
+        process_runner: 命令执行器。
+        check: 索引重置失败是否抛出。重试循环传 ``False``：清索引只是重试前的
+            best-effort 清理，不该让一次 git 抖动把剩余恢复轮次升级成硬失败。
+    """
+    process_runner.run(["git", "reset", "--mixed"], cwd=worktree_path, check=check)
 
 
 def checkpoint_uncommitted_progress(

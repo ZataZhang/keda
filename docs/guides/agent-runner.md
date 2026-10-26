@@ -1969,10 +1969,11 @@ Draft PR 创建后，Issue 先进入 `agent/supervising`，并立即运行至少
    - `wait_for_checks` → 保持 stash 与 `agent/supervising`，等待 PR checks 完成
    - `request_human_input` → 恢复 stash 后进入 `agent/blocked`，但必须带有可操作 summary
    - `mark_failed` → 恢复 stash 后进入 `agent/failed`
-
 5. 执行前先写 `post_pr_rework_requested` event marker，Issue 保持 `agent/supervising`；post-PR repair/rebase 不重新排进 builder 的 `agent/running` 队列
 6. 修复在当前 supervisor pass 内执行；若进程中断，后续 review pass 会核对 marker 对应的 PR head 后续跑。marker 已过期时记录 `post_pr_rework_superseded` 并针对当前 PR context 重新评审
 7. rework 成功后写 `rebase_repair_complete` marker，后续 review pass 根据 PR、checks 与评论变化继续监督
+
+修复 Agent 写出 `.agent-runner/commit-request.json`、但没有产生文件改动时，runner 将其视为良性空操作：对当前 worktree 运行配置验证，通过后返回监督循环重新读取 PR 上下文。空提交不会直接批准 PR；如果验证失败，失败摘要会进入下一轮修复提示词。
 
 #### Supervisor diff 分层注入与跨 cycle finding 累积
 
