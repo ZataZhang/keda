@@ -1,0 +1,91 @@
+{
+  "version": 1,
+  "language": "zh-CN",
+  "items": [
+    {
+      "item_number": 1,
+      "item_name": "新建 Issue 正文只写 kc 前缀依赖标记",
+      "command": "KC_RV_SANDBOX_REPO=/tmp/keda-pr-review-20261026/kedacode-validation-sandbox KC_RV_BASELINE_SOURCE=/tmp/keda-pr-review-20261026/wt323/src PYTHONPATH=src UV_PROJECT_ENVIRONMENT=/Users/zata/code/keda/.venv UV_NO_SYNC=1 uv run --offline python tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/scripts/rv-1-live.py",
+      "evidence_files": [
+        "rv-1-live-github-current.txt"
+      ],
+      "output_summary": "真实 CLI 在用户授权创建的私有 GitHub 沙箱建 Issue。旧版本负控写出旧前缀；当前版本只写 kc 前缀；全新 gh 进程读回正文；生产依赖门禁阻塞未关闭上游，关闭后允许。测试 Issue 均关闭。",
+      "explanation": "该行为必须跨过真实 kc CLI、GitHub API，并在新进程读回刚创建的 Issue 正文；本地代码断言无法证明 GitHub 上的最终正文。",
+      "risks": "会在显式指定的测试仓库创建并关闭非 ready Issue；凭据仅从本机 gh 登录态进入子进程环境，不记录值。",
+      "negative_control": "在同一 opt-in 仓库和凭据下，用改名前版本运行相同的 kc issue create 命令，再读取新 Issue 正文。",
+      "expected_fail": "同一沙箱中改名前代码创建的 Issue 仍含旧前缀，不满足当前标记断言。"
+    },
+    {
+      "item_number": 2,
+      "item_name": "在途认领标记迁移与升级后占用判定",
+      "command": "PYTHONPATH=src UV_PROJECT_ENVIRONMENT=/Users/zata/code/keda/.venv UV_NO_SYNC=1 uv run --offline python tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/scripts/rv-2-current.py",
+      "evidence_files": [
+        "rv-2-marker-migration-current.txt",
+        "rv-2-active-daemon-current.txt"
+      ],
+      "output_summary": "真实 CLI、GitHub client 与文件型 gh 边界验证预演不写、apply 仅替换前缀、新进程识别已占用、幂等重跑、真实 kc daemon 与新目录登记 PID 均阻止迁移。生产进程枚举没有注入或绕过。",
+      "explanation": "命令经过安装版 kc CLI、GitHub client 与文件型假 gh，真实评论状态保存于独立 JSON，并从新进程读取。证据准确暴露该主机安全边界阻断 apply；没有将单元测试或被注入的进程探针冒充完整 E2E。",
+      "risks": "仅 GitHub 传输由持久化文件型 gh 替代；进程枚举、CLI、Git、评论存储和 fresh-state 消费均真实。",
+      "negative_control": "在 `--apply` 之前运行 `kc run --issue 17 --dry-run --repo <fixture-repo> --output json`，并断言旧标记仍使该 Issue 被判为活跃占用。",
+      "expected_fail": "未迁移时 kc run --dry-run 返回 10 且未识别旧认领；迁移后同一入口返回 actively claimed。"
+    },
+    {
+      "item_number": 3,
+      "item_name": "干净仓库使用新工作树目录",
+      "command": "PYTHONPATH=src UV_PROJECT_ENVIRONMENT=/Users/zata/code/keda/.venv UV_NO_SYNC=1 uv run --offline python tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/scripts/rv-3-4-current.py 3",
+      "evidence_files": [
+        "rv-3-clean-repository.txt",
+        "rv-3-negative-control.txt"
+      ],
+      "output_summary": "真实 kc worktree create 在全新 Git 仓库中创建 `.kc-worktrees/rv-3-issue`；创建前新目录不存在，git worktree list 收录该路径，仓库根没有平行旧目录。注入旧默认值后相同断言失败，工作树落在 `.iar-worktrees`。",
+      "explanation": "通过已安装 CLI 写入真实临时 Git 仓库，并由 ls -la 与 git worktree list 读回磁盘布局和 Git 元数据；负控的 EXPECTED_FAIL 行展示旧默认值无法满足新目录断言。",
+      "risks": "验证使用本地临时仓库，不连接远程 GitHub；这与该项无 mock 的真实 Git / filesystem 边界一致。",
+      "negative_control": "UV_CACHE_DIR=.uv-cache uv run --offline python tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/scripts/rv_harness.py rv-3-negative",
+      "expected_fail": "断言新工作树位于 `.kc-worktrees` 失败；记录的实际 Git worktree 路径位于 `.iar-worktrees/rv-3-negative`。"
+    },
+    {
+      "item_number": 4,
+      "item_name": "已有旧目录继续被复用",
+      "command": "PYTHONPATH=src UV_PROJECT_ENVIRONMENT=/Users/zata/code/keda/.venv UV_NO_SYNC=1 uv run --offline python tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/scripts/rv-3-4-current.py 4",
+      "evidence_files": [
+        "rv-4-legacy-directory.txt",
+        "rv-4-negative-control.txt"
+      ],
+      "output_summary": "真实仓库预置 `.iar-worktrees` 后，kc worktree create 将分支创建在旧目录中；git worktree list 包含旧路径，根目录没有 `.kc-worktrees` 平行目录。负控跳过旧路径解析后创建了新目录，复用断言变红。",
+      "explanation": "用真实 Git 元数据与仓库根目录观察目录选择，预置目录在 CLI 执行前已经存在；负控显示解析路径改变时会误建新目录。",
+      "risks": "负控只在独立临时仓库中更改解析结果，不改生产源文件。",
+      "negative_control": "UV_CACHE_DIR=.uv-cache uv run --offline python tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/scripts/rv_harness.py rv-4-negative",
+      "expected_fail": "断言工作树仍位于 `.iar-worktrees` 失败；实际 Git worktree 路径位于 `.kc-worktrees/rv-4-negative`，并出现平行目录。"
+    },
+    {
+      "item_number": 5,
+      "item_name": "Idea Inbox 接受新旧签名头并拒绝缺失签名",
+      "command": "PYTHONPATH=src UV_PROJECT_ENVIRONMENT=/Users/zata/code/keda/.venv UV_NO_SYNC=1 uv run --offline python tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/scripts/rv-5-signature-control.py",
+      "evidence_files": [
+        "rv-5-negative-control.txt",
+        "rv-5-signature-headers.txt"
+      ],
+      "output_summary": "真实 FastAPI 路由：X-KC-Signature 与 X-IAR-Signature 的有效 HMAC 都返回 202；无签名返回 401，3 个定向测试通过。故障注入把新头 alias 改为错误名称后，新头参数化测试失败（401 != 202），旧头用例仍通过。",
+      "explanation": "TestClient 经过生产 FastAPI 路由和 HMAC 校验算法，只替换外部配置 secret 与既有路由依赖 fixture；故障注入在测试进程完成后恢复路由源文件。",
+      "risks": "密钥是测试用环境变量 `topsecret`，未写入证据输出；故障注入仅影响短暂本地测试，不改变最终源文件。",
+      "negative_control": "UV_CACHE_DIR=.uv-cache uv run --offline python tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/scripts/rv-5-signature-control.py（脚本先故障注入并运行参数化接受测试，再恢复源文件并运行绿测）",
+      "expected_fail": "新签名头用例返回 401 而预期 202；pytest 输出 `1 failed, 1 passed`。"
+    },
+    {
+      "item_number": 6,
+      "item_name": "白名单外旧名使守卫失败",
+      "command": "PYTHONPATH=src UV_PROJECT_ENVIRONMENT=/Users/zata/code/keda/.venv UV_NO_SYNC=1 uv run --offline python tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/scripts/rv-6-guard-control.py",
+      "evidence_files": [
+        "rv-6-negative-control.txt",
+        "rv-6-guard-green.txt",
+        "rv-6-source-prefix-scan.txt",
+        "rv-6-doc-command-scan.txt"
+      ],
+      "output_summary": "向 docs 临时注入 `iar:claim` 后 guard 报出未授权命中并失败（1 failed）；移除注入文件后相同 guard 通过（1 passed）。另有生产源码旧前缀扫描仅命中迁移模块；文档/路线图/随包 skill 失效旧命令扫描无命中。临时探针文件已删除。",
+      "explanation": "运行真实 guard 测试并扫描完整配置范围；负控命中的相对路径与文本出现在 pytest 失败详情中，之后不修改 guard 源码而恢复绿色。",
+      "risks": "探针是测试运行期间的临时 docs 文件，已在 finally 清理；代码中仅迁移模块保留 iar: 旧前缀。",
+      "negative_control": "UV_CACHE_DIR=.uv-cache uv run --offline python tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/scripts/rv-6-guard-control.py（先注入 docs/rv6-residual-name-probe.md 再运行 guard）",
+      "expected_fail": "pytest 返回非零并列出 `docs/rv6-residual-name-probe.md:1` 为白名单外残留。"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+trim trailing whitespace.................................................Passed
+fix end of files.........................................................Passed
+check yaml...............................................................Passed
+check toml...............................................................Passed
+check for added large files..............................................Passed
+debug statements (python)................................................Passed
+ruff.....................................................................Passed
+ruff-format..............................................................Passed
+Check PRD acceptance checklist...........................................Passed
+Check guidelines consistency.............................................Passed
+Archive task markdown files..............................................Passed
+Check architecture layer dependencies....................................Passed
+Check SQLAlchemy model comments......................(no files to check)Skipped
+Check database schema conventions....................(no files to check)Skipped
+Check max file lines (non-empty).........................................Passed
+Check PRD execution lock conflict (warn-only)............................Passed
+Check just test flag....................................................Skipped
+Check guard test modification............................................Passed
+✅ just lint --full flag updated: HEAD @ e01731e1

@@ -1,0 +1,125 @@
+$ ['/Users/zata/code/keda/.venv/bin/kc', 'labels', 'sync', '--repo', '/private/tmp/keda-pr-review-20261026/kedacode-validation-sandbox']
+exit_code=0
+stdout:
+2026-10-26 10:12:37 - backend.core.use_cases.sync_labels - INFO - sync_labels.py:32 - Labels synchronized.
+2026-10-26 10:12:37 - app - INFO - labels_issue.py:45 - Labels are ready.
+
+stderr:
+
+$ ['/Users/zata/code/keda/.venv/bin/kc', 'issue', 'create', '--from-prompt', 'RV-1 dependency fixture b54355a893', '--no-ready', '--repo', '/private/tmp/keda-pr-review-20261026/kedacode-validation-sandbox', '--output', 'json']
+exit_code=0
+stdout:
+{
+  "created": [
+    {
+      "prompt": "RV-1 dependency fixture b54355a893",
+      "issue_url": "https://github.com/ZataZhang/kedacode-validation-sandbox/issues/7",
+      "ready": false,
+      "require_validation": false
+    }
+  ],
+  "skipped": [],
+  "failed": [],
+  "note": null
+}
+
+stderr:
+2026-10-26 10:12:41 - backend.core.use_cases.create_issue_from_prompt - INFO - create_issue_from_prompt.py:316 - Created GitHub Issue from prompt: https://github.com/ZataZhang/kedacode-validation-sandbox/issues/7
+2026-10-26 10:12:41 - app - INFO - labels_issue.py:201 - Issue created without 'agent/ready' label. Use --ready if you want a runner to pick it up.
+2026-10-26 10:12:41 - app - INFO - labels_issue.py:205 - Created GitHub Issue: https://github.com/ZataZhang/kedacode-validation-sandbox/issues/7
+
+$ ['/Users/zata/code/keda/.venv/bin/kc', 'issue', 'create', '--from-prompt', 'RV-1 pre-refactor negative control b54355a893', '--no-ready', '--repo', '/private/tmp/keda-pr-review-20261026/kedacode-validation-sandbox', '--output', 'json', '--depends-on', '7']
+exit_code=0
+stdout:
+{
+  "created": [
+    {
+      "prompt": "RV-1 pre-refactor negative control b54355a893",
+      "issue_url": "https://github.com/ZataZhang/kedacode-validation-sandbox/issues/8",
+      "ready": false,
+      "require_validation": false
+    }
+  ],
+  "skipped": [],
+  "failed": [],
+  "note": null
+}
+
+stderr:
+2026-10-26 10:12:45 - backend.core.use_cases.create_issue_from_prompt - INFO - create_issue_from_prompt.py:316 - Created GitHub Issue from prompt: https://github.com/ZataZhang/kedacode-validation-sandbox/issues/8
+2026-10-26 10:12:45 - app - INFO - labels_issue.py:201 - Issue created without 'agent/ready' label. Use --ready if you want a runner to pick it up.
+2026-10-26 10:12:45 - app - INFO - labels_issue.py:205 - Created GitHub Issue: https://github.com/ZataZhang/kedacode-validation-sandbox/issues/8
+
+$ ['gh', 'issue', 'view', 'https://github.com/ZataZhang/kedacode-validation-sandbox/issues/8', '--json', 'body,labels,state']
+exit_code=0
+stdout:
+{"body":"## Requirement\n\nRV-1 pre-refactor negative control b54355a893\n\n## Delivery Notes\n\n- 本 Issue 由 ``kc issue create --from-prompt`` 创建：正文就是需求的\n  唯一来源，仓库里没有对应的 PRD 文件。\n- Recommended branch: `task/<issue-number>-<slug>`\n- Worktree command: `just worktree --issue <issue-number>`\n- PR should include: `Closes #<issue-number>`\n\n<!-- iar:depends-on #7 -->\n","labels":[{"id":"LA_kwDOVXYKCs8AAAAC_RHUmw","name":"type/feature","description":"User-facing feature or capability work.","color":"1D76DB"},{"id":"LA_kwDOVXYKCs8AAAAC_RHWCQ","name":"status/backlog","description":"Tracked work that is not in progress yet.","color":"BFDADC"}],"state":"OPEN"}
+
+stderr:
+
+$ ['/Users/zata/code/keda/.venv/bin/kc', 'issue', 'create', '--from-prompt', 'RV-1 kc marker acceptance b54355a893', '--no-ready', '--repo', '/private/tmp/keda-pr-review-20261026/kedacode-validation-sandbox', '--output', 'json', '--depends-on', '7']
+exit_code=0
+stdout:
+{
+  "created": [
+    {
+      "prompt": "RV-1 kc marker acceptance b54355a893",
+      "issue_url": "https://github.com/ZataZhang/kedacode-validation-sandbox/issues/9",
+      "ready": false,
+      "require_validation": false
+    }
+  ],
+  "skipped": [],
+  "failed": [],
+  "note": null
+}
+
+stderr:
+2026-10-26 10:12:51 - backend.core.use_cases.create_issue_from_prompt - INFO - create_issue_from_prompt.py:316 - Created GitHub Issue from prompt: https://github.com/ZataZhang/kedacode-validation-sandbox/issues/9
+2026-10-26 10:12:51 - app - INFO - labels_issue.py:201 - Issue created without 'agent/ready' label. Use --ready if you want a runner to pick it up.
+2026-10-26 10:12:51 - app - INFO - labels_issue.py:205 - Created GitHub Issue: https://github.com/ZataZhang/kedacode-validation-sandbox/issues/9
+
+$ ['gh', 'issue', 'view', 'https://github.com/ZataZhang/kedacode-validation-sandbox/issues/9', '--json', 'body,labels,state']
+exit_code=0
+stdout:
+{"body":"## Requirement\n\nRV-1 kc marker acceptance b54355a893\n\n## Delivery Notes\n\n- 本 Issue 由 ``kc issue create --from-prompt`` 创建：正文就是需求的\n  唯一来源，仓库里没有对应的 PRD 文件。\n- Recommended branch: `task/<issue-number>-<slug>`\n- Worktree command: `just worktree --issue <issue-number>`\n- PR should include: `Closes #<issue-number>`\n\n<!-- kc:depends-on #7 -->\n","labels":[{"id":"LA_kwDOVXYKCs8AAAAC_RHUmw","name":"type/feature","description":"User-facing feature or capability work.","color":"1D76DB"},{"id":"LA_kwDOVXYKCs8AAAAC_RHWCQ","name":"status/backlog","description":"Tracked work that is not in progress yet.","color":"BFDADC"}],"state":"OPEN"}
+
+stderr:
+
+$ ['/Users/zata/code/keda/.venv/bin/kc', 'run', '--issue', '9', '--dry-run', '--repo', '/private/tmp/keda-pr-review-20261026/kedacode-validation-sandbox', '--output', 'json']
+exit_code=10
+stdout:
+{
+  "dry_run": true,
+  "agent": "auto",
+  "max_issues": 1,
+  "target_issue": 9,
+  "all_ready": false,
+  "fast_merge": false,
+  "aggregate_pr": false,
+  "publish_stage": "normal",
+  "repositories": [
+    {
+      "repo_id": "validation-sandbox",
+      "repo_path": "/private/tmp/keda-pr-review-20261026/kedacode-validation-sandbox"
+    }
+  ]
+}
+
+stderr:
+2026-10-26 10:12:57 - backend.core.use_cases.run_agent_repositories_once - INFO - run_agent_repositories_once.py:101 - Running once for repository 'validation-sandbox' (ad-hoc).
+2026-10-26 10:13:00 - backend.core.use_cases.agent_runner_dependencies - INFO - agent_runner_dependencies.py:675 - DRY RUN: would mark Issue #9 as waiting (blockers: issue:7)
+2026-10-26 10:13:00 - backend.core.use_cases.agent_runner_orchestrate - INFO - agent_runner_orchestration_runtime.py:815 - DRY RUN: Issue #9 blocked by dependencies: issue:7(OPEN)
+2026-10-26 10:13:00 - backend.core.use_cases.agent_runner_orchestrate - INFO - agent_runner_orchestration_runtime.py:939 - No open Issues found with label agent/ready, eligible running rework, or blocked resolution.
+
+$ ['gh', 'issue', 'close', 'https://github.com/ZataZhang/kedacode-validation-sandbox/issues/7', '--reason', 'completed']
+exit_code=0
+stdout:
+
+stderr:
+✓ Closed issue ZataZhang/kedacode-validation-sandbox#7 ([Feature] RV-1 dependency fixture b54355a893)
+
+PASS: old-tree negative control emits old marker; current CLI writes <!-- kc:depends-on #7 -->.
+PASS: fresh gh readback retained new marker, no old marker, and no ready label.
+PASS: fresh production GitHub client blocks open dependency and accepts it after close.
+Created issue URLs: ['https://github.com/ZataZhang/kedacode-validation-sandbox/issues/7', 'https://github.com/ZataZhang/kedacode-validation-sandbox/issues/8', 'https://github.com/ZataZhang/kedacode-validation-sandbox/issues/9']

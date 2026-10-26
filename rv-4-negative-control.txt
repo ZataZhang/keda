@@ -1,0 +1,34 @@
+scene=negative control; repo=/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-worktree-rv-5k7idy6f/rv-4/repo
+$ /Users/zata/code/keda/.venv/bin/kc worktree create --branch rv-4-negative --base-branch main
+exit_code=0
+stdout:
+
+stderr:
+
+$ git worktree list
+exit_code=0
+stdout:
+/private/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-worktree-rv-5k7idy6f/rv-4/repo                             997e809 [main]
+/private/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-worktree-rv-5k7idy6f/rv-4/repo/.kc-worktrees/rv-4-negative 997e809 [rv-4-negative]
+stderr:
+
+$ ls -la /var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-worktree-rv-5k7idy6f/rv-4/repo
+exit_code=0
+stdout:
+total 16
+drwxr-xr-x@  7 zata  staff  224 Oct 26 10:29 .
+drwxr-xr-x@  5 zata  staff  160 Oct 26 10:29 ..
+drwxr-xr-x@ 13 zata  staff  416 Oct 26 10:29 .git
+drwxr-xr-x@  2 zata  staff   64 Oct 26 10:29 .iar-worktrees
+drwxr-xr-x@  3 zata  staff   96 Oct 26 10:29 .kc-worktrees
+-rw-r--r--@  1 zata  staff   38 Oct 26 10:29 .kedacode.toml
+-rw-r--r--@  1 zata  staff   11 Oct 26 10:29 README.md
+stderr:
+
+$ git status --short
+exit_code=0
+stdout:
+
+stderr:
+
+EXPECTED_FAIL: expected worktree under /var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-worktree-rv-5k7idy6f/rv-4/repo/.iar-worktrees; actual worktree is /var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-worktree-rv-5k7idy6f/rv-4/repo/.kc-worktrees/rv-4-negative

@@ -1,0 +1,37 @@
+scene=acceptance; repo=/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-worktree-rv-5k7idy6f/rv-4/repo
+precondition: .iar-worktrees exists before create = True
+$ /Users/zata/code/keda/.venv/bin/kc worktree create --branch rv-4-issue --base-branch main
+exit_code=0
+stdout:
+
+stderr:
+
+$ git worktree list
+exit_code=0
+stdout:
+/private/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-worktree-rv-5k7idy6f/rv-4/repo                           01c3b5d [main]
+/private/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-worktree-rv-5k7idy6f/rv-4/repo/.iar-worktrees/rv-4-issue 01c3b5d [rv-4-issue]
+stderr:
+
+$ ls -la /var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-worktree-rv-5k7idy6f/rv-4/repo
+exit_code=0
+stdout:
+total 16
+drwxr-xr-x@  6 zata  staff  192 Oct 26 10:29 .
+drwxr-xr-x@  5 zata  staff  160 Oct 26 10:29 ..
+drwxr-xr-x@ 13 zata  staff  416 Oct 26 10:29 .git
+drwxr-xr-x@  3 zata  staff   96 Oct 26 10:29 .iar-worktrees
+-rw-r--r--@  1 zata  staff   38 Oct 26 10:29 .kedacode.toml
+-rw-r--r--@  1 zata  staff   11 Oct 26 10:29 README.md
+stderr:
+
+$ git status --short
+exit_code=0
+stdout:
+
+stderr:
+
+PASS: worktree path=/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-worktree-rv-5k7idy6f/rv-4/repo/.iar-worktrees/rv-4-issue
+PASS: git worktree list contains the new worktree
+PASS: git status --short is clean in the new worktree
+PASS: no parallel directory was created

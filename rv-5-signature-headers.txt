@@ -1,0 +1,8 @@
+$ /Users/zata/code/keda/.venv/bin/python -m pytest tests/test_idea_inbox.py -k inbound and (accepts_valid_signature or rejects_missing_signature) -q --no-testmon
+exit_code=0
+stdout:
+...                                                                      [100%]
+3 passed, 21 deselected in 0.25s
+stderr:
+
+PASS: both signature aliases validate and a missing signature is rejected.

@@ -1,0 +1,8 @@
+$ /Users/zata/code/keda/.venv/bin/python -m pytest tests/guards/test_residual_iar_naming_guard.py -q --no-testmon
+exit_code=0
+stdout:
+.                                                                        [100%]
+1 passed in 0.29s
+stderr:
+
+PASS: the guard is green after the injected file was removed.

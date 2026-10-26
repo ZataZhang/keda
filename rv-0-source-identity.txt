@@ -1,0 +1,6 @@
+Final delivery HEAD=9b16d1829c5bc507633fd85ee03d15e99320379f
+Final Git tree=f19f320b784c3b1053c8e9bbd73142c349ffdd61
+Independent verified implementation HEAD=64c57dbdcdd9d12a4e3a38a257f9a93b813bf71d
+Verified implementation tree=8a73c0e43706cfc8ca0f52ebf8ed570707ebac95
+Source SHA256 (all tracked paths excluding tasks/evidence and linked PRD)=d3ee685533be8bc01f881e79fa0850e8895158670e07c1e523ce2d6fffb72976
+Only PRD and evidence Markdown records differ from the verified implementation.

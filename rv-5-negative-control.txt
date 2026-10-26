@@ -1,0 +1,53 @@
+$ /Users/zata/code/keda/.venv/bin/python -m pytest tests/test_idea_inbox.py::test_api_inbound_accepts_valid_signature -q --no-testmon
+exit_code=1
+stdout:
+F.                                                                       [100%]失败现场已保存: /private/tmp/keda-pr-review-20261026/wt318/logs/test-failures/failures-20261026-100726-89846.log
+
+=================================== FAILURES ===================================
+___________ test_api_inbound_accepts_valid_signature[X-KC-Signature] ___________
+
+api_environment = {'repo': PosixPath('/private/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/pytest-of-zata/pytest-2998/test_api_inbound_accepts_valid0/fake-repo')}
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10b2c9cd0>
+signature_header_name = 'X-KC-Signature'
+
+    @pytest.mark.parametrize("signature_header_name", ["X-KC-Signature", "X-IAR-Signature"])
+    def test_api_inbound_accepts_valid_signature(
+        api_environment: dict,
+        monkeypatch: pytest.MonkeyPatch,
+        signature_header_name: str,
+    ) -> None:
+        monkeypatch.setenv("KEDACODE_IDEA_INBOX_INBOUND_SECRET", "topsecret")
+        client = TestClient(app)
+        body = json.dumps(
+            {
+                "provider": "feishu",
+                "repo_id": "keda-main",
+                "sender": "user-1",
+                "text": "从飞书来的想法",
+            },
+            ensure_ascii=False,
+        )
+        sig = "sha256=" + hmac.new(b"topsecret", body.encode("utf-8"), hashlib.sha256).hexdigest()
+        response = client.post(
+            "/api/v1/agent-runner/idea-inbox/inbound",
+            content=body,
+            headers={
+                "Content-Type": "application/json",
+                signature_header_name: sig,
+            },
+        )
+>       assert response.status_code == 202
+E       assert 401 == 202
+E        +  where 401 = <Response [401 Unauthorized]>.status_code
+
+tests/test_idea_inbox.py:642: AssertionError
+----------------------------- Captured stdout call -----------------------------
+2026-10-26 10:07:26 - httpx - INFO - _client.py:1025 - HTTP Request: POST http://testserver/api/v1/agent-runner/idea-inbox/inbound "HTTP/1.1 401 Unauthorized"
+------------------------------ Captured log call -------------------------------
+INFO     httpx:_client.py:1025 HTTP Request: POST http://testserver/api/v1/agent-runner/idea-inbox/inbound "HTTP/1.1 401 Unauthorized"
+=========================== short test summary info ============================
+FAILED tests/test_idea_inbox.py::test_api_inbound_accepts_valid_signature[X-KC-Signature]
+1 failed, 1 passed in 0.36s
+stderr:
+
+EXPECTED_FAIL: X-KC-Signature acceptance fails after the route alias is fault-injected.

@@ -1,0 +1,78 @@
+warning: adding embedded git repository: tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/scripts/scenes/rv-2/repo
+hint: You've added another git repository inside your current repository.
+hint: Clones of the outer repository will not contain the contents of
+hint: the embedded repository and will not know how to obtain it.
+hint: If you meant to add a submodule, use:
+hint:
+hint: 	git submodule add <url> tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/scripts/scenes/rv-2/repo
+hint:
+hint: If you added this path by mistake, you can remove it from the
+hint: index with:
+hint:
+hint: 	git rm --cached tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/scripts/scenes/rv-2/repo
+hint:
+hint: See "git help submodule" for more information.
+hint: Disable this message with "git config set advice.addEmbeddedRepo false"
+🔍 Running pre-commit on untracked files (invisible to --all-files)...
+trim trailing whitespace.............................(no files to check)Skipped
+fix end of files.....................................(no files to check)Skipped
+check yaml...........................................(no files to check)Skipped
+check toml...........................................(no files to check)Skipped
+check for added large files..........................(no files to check)Skipped
+debug statements (python)............................(no files to check)Skipped
+ruff.................................................(no files to check)Skipped
+ruff-format..........................................(no files to check)Skipped
+Check PRD acceptance checklist.......................(no files to check)Skipped
+Check guidelines consistency.........................(no files to check)Skipped
+Archive task markdown files..............................................Passed
+Check architecture layer dependencies................(no files to check)Skipped
+Check SQLAlchemy model comments......................(no files to check)Skipped
+Check database schema conventions....................(no files to check)Skipped
+Check max file lines (non-empty).....................(no files to check)Skipped
+Check PRD execution lock conflict (warn-only)........(no files to check)Skipped
+Check just test flag....................................................Skipped
+Check guard test modification............................................Passed
+trim trailing whitespace.................................................Passed
+fix end of files.........................................................Passed
+check yaml...............................................................Passed
+check toml...............................................................Passed
+check for added large files..............................................Passed
+debug statements (python)................................................Passed
+ruff.....................................................................Passed
+ruff-format..............................................................Passed
+Check PRD acceptance checklist...........................................Passed
+Check guidelines consistency.............................................Passed
+Archive task markdown files..............................................Passed
+Check architecture layer dependencies....................................Passed
+Check SQLAlchemy model comments......................(no files to check)Skipped
+Check database schema conventions....................(no files to check)Skipped
+Check max file lines (non-empty).........................................Passed
+Check PRD execution lock conflict (warn-only)............................Passed
+Check just test flag....................................................Skipped
+Check guard test modification............................................Passed
+warning: adding embedded git repository: tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/scripts/scenes/rv-2/repo
+hint: You've added another git repository inside your current repository.
+hint: Clones of the outer repository will not contain the contents of
+hint: the embedded repository and will not know how to obtain it.
+hint: If you meant to add a submodule, use:
+hint:
+hint: 	git submodule add <url> tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/scripts/scenes/rv-2/repo
+hint:
+hint: If you added this path by mistake, you can remove it from the
+hint: index with:
+hint:
+hint: 	git rm --cached tasks/evidence/P1-REFACTOR-20261020-021715-purge-residual-iar-naming/scripts/scenes/rv-2/repo
+hint:
+hint: See "git help submodule" for more information.
+hint: Disable this message with "git config set advice.addEmbeddedRepo false"
+✅ just lint --full flag updated: HEAD @ 32c612de
+🔍 Running reuse hook: jscpd
+Check copy-paste duplication.............................................Passed
+🔍 Running reuse hook: pylint-duplicate-code
+Check Python duplicate code..............................................Passed
+🔍 Running reuse hook: check-architecture
+Check architecture layer dependencies....................................Passed
+🔍 Running reuse hook: check-guidelines-consistency
+Check guidelines consistency.............................................Passed
+🔍 Running reuse hook: check-max-file-lines
+Check max file lines (non-empty).........................................Passed

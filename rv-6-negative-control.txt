@@ -1,0 +1,55 @@
+$ /Users/zata/code/keda/.venv/bin/python -m pytest tests/guards/test_residual_iar_naming_guard.py -q --no-testmon
+exit_code=1
+stdout:
+F                                                                        [100%]失败现场已保存: /private/tmp/keda-pr-review-20261026/wt318/logs/test-failures/failures-20261026-100727-89855.log
+
+=================================== FAILURES ===================================
+_________ test_old_names_are_limited_to_documented_compatibility_lines _________
+
+    def test_old_names_are_limited_to_documented_compatibility_lines() -> None:
+        """源码与当前文档只在逐行声明的兼容场景中保留旧名。"""
+        allowances_by_path: dict[str, list[tuple[int, LegacyNameAllowance]]] = {}
+        for allowance_index, allowance in enumerate(LEGACY_NAME_ALLOWANCES):
+            allowances_by_path.setdefault(allowance.relative_path, []).append(
+                (allowance_index, allowance)
+            )
+    
+        matched_allowance_indexes: set[int] = set()
+        unexpected_lines: list[str] = []
+        for source_path in _scan_paths():
+            relative_path = source_path.relative_to(REPOSITORY_ROOT_PATH).as_posix()
+            for line_number, source_line in enumerate(
+                source_path.read_text(encoding="utf-8").splitlines(), start=1
+            ):
+                if LEGACY_NAME_PATTERN.search(source_line) is None:
+                    continue
+                matching_allowance = next(
+                    (
+                        (allowance_index, allowance)
+                        for allowance_index, allowance in allowances_by_path.get(relative_path, [])
+                        if allowance.line_pattern.search(source_line) is not None
+                    ),
+                    None,
+                )
+                if matching_allowance is None:
+                    unexpected_lines.append(f"{relative_path}:{line_number}: {source_line.strip()}")
+                    continue
+                matched_allowance_indexes.add(matching_allowance[0])
+    
+        stale_allowances = [
+            allowance.reason
+            for allowance_index, allowance in enumerate(LEGACY_NAME_ALLOWANCES)
+            if allowance_index not in matched_allowance_indexes
+        ]
+>       assert not unexpected_lines, "旧命名出现在白名单之外：\n" + "\n".join(unexpected_lines)
+E       AssertionError: 旧命名出现在白名单之外：
+E         docs/rv6-residual-name-probe.md:1: A new iar:claim constant must be rejected by the guard.
+E       assert not ['docs/rv6-residual-name-probe.md:1: A new iar:claim constant must be rejected by the guard.']
+
+tests/guards/test_residual_iar_naming_guard.py:249: AssertionError
+=========================== short test summary info ============================
+FAILED tests/guards/test_residual_iar_naming_guard.py::test_old_names_are_limited_to_documented_compatibility_lines
+1 failed in 0.39s
+stderr:
+
+EXPECTED_FAIL: the guard identifies the injected out-of-allowlist docs line.

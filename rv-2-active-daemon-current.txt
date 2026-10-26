@@ -1,0 +1,8 @@
+2026-10-26 10:29:46 - backend.core.use_cases.run_agent_daemon - INFO - run_agent_daemon.py:342 - Daemon pass for repository 'rv-2' (ad-hoc).
+2026-10-26 10:29:46 - backend.core.use_cases.run_agent_daemon - ERROR - run_agent_daemon.py:423 - Stale-attempt reconcile failed for repository 'rv-2': list indices must be integers or slices, not str
+2026-10-26 10:29:46 - backend.core.use_cases.run_agent_daemon - ERROR - run_agent_daemon.py:448 - Deliberation phase failed: list indices must be integers or slices, not str
+2026-10-26 10:29:46 - backend.core.use_cases.run_agent_daemon - ERROR - run_agent_daemon.py:461 - PRD rework phase failed: list indices must be integers or slices, not str
+2026-10-26 10:29:46 - backend.core.use_cases.run_agent_daemon - INFO - run_agent_daemon.py:488 - Parallel limit for 'rv-2': limit=1 source=config in_flight=0
+2026-10-26 10:29:46 - backend.core.use_cases.agent_runner_orchestrate - ERROR - agent_runner_orchestration_runtime.py:663 - Agent runner preflight failed: prd skill is not readable at /var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-rv2-scenes-tai40ioc/rv-2/home/.kedacode/skills/prd/SKILL.md. The agent runner delegates PRD format conventions to the prd skill's Machine Contract, so it cannot run without the skill installed. Run `kc init` to install the remote template skills, or point KEDACODE_PRD_SKILL_PATH at a prd SKILL.md.
+2026-10-26 10:29:46 - backend.core.use_cases.run_agent_daemon - INFO - run_agent_daemon.py:592 - Sleeping for 60 seconds before next poll (idle rounds: 1).
+2026-10-26 10:29:48 - backend.core.use_cases.run_agent_daemon - INFO - run_agent_daemon.py:217 - Daemon received SIGTERM; terminating in-flight agent trees before exit.

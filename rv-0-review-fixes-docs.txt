@@ -1,0 +1,37 @@
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /private/tmp/keda-pr-review-20261026/wt318/site
+INFO    -  The following pages exist in the docs directory, but are not included in the "nav" configuration:
+  - ai-standards/alembic.md
+  - prototypes/blocked-draft-pr-surface.md
+  - prototypes/kc-agent-terminal-preview.md
+  - prototypes/lifecycle-agent-matrix.md
+  - prototypes/roadmap-prd-cicd-auto-repair.md
+  - prototypes/roadmap-prd-controls-evidence-autopilot.md
+  - prototypes/verifier-human-takeover.md
+  - prototypes/assets/backlog-unified-concurrency-ceiling.prompt.md
+  - prototypes/assets/blocked-draft-pr-01-failure-context-comment.source.md
+  - prototypes/assets/blocked-draft-pr-02-draft-pr-body.source.md
+  - prototypes/assets/kc-terminal-agent-preview.prompt.md
+  - prototypes/assets/keda-vs-claude-paired-evaluation.source.md
+  - prototypes/assets/roadmap-prd-cicd-01-waiting.prompt.md
+  - prototypes/assets/roadmap-prd-cicd-02-repairing.prompt.md
+  - prototypes/assets/roadmap-prd-cicd-03-rechecking.prompt.md
+  - prototypes/assets/roadmap-prd-cicd-04-passed.prompt.md
+  - prototypes/assets/roadmap-prd-cicd-auto-repair.prompt.md
+  - prototypes/assets/roadmap-prd-controls-evidence-autopilot-progress-archived.prompt.md
+  - prototypes/assets/roadmap-prd-controls-evidence-autopilot-progress-degraded.prompt.md
+  - prototypes/assets/roadmap-prd-controls-evidence-autopilot-progress-running.prompt.md
+  - prototypes/assets/roadmap-prd-controls-evidence-autopilot.prompt.md
+  - prototypes/assets/runtime-board-preview.source.md
+  - prototypes/assets/runtime-consent-preview.source.md
+  - prototypes/assets/runtime-evaluation-preview.source.md
+  - prototypes/assets/runtime-widget-preview.source.md
+  - prototypes/assets/lifecycle-agent-matrix/prd-content-real.source.md
+  - prototypes/assets/lifecycle-agent-matrix/preview-fallback-settings.source.md
+  - prototypes/assets/lifecycle-agent-matrix/preview-lifecycle-settings.source.md
+  - prototypes/assets/lifecycle-agent-matrix/preview-settings.source.md
+  - prototypes/assets/lifecycle-agent-matrix/roadmap-real.source.md
+  - prototypes/assets/lifecycle-agent-matrix/settings-real.source.md
+  - prototypes/tailscale-machine-management/prototype.md
+INFO    -  mkdocstrings_handlers: Formatting signatures requires either Black or Ruff to be installed.
+INFO    -  Documentation built in 3.78 seconds

@@ -1,0 +1,116 @@
+$ /Users/zata/code/keda/.venv/bin/kc run --issue 17 --dry-run --output json --repo /var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-rv2-scenes-tai40ioc/rv-2/repo
+exit_code=10
+stdout:
+{
+  "dry_run": true,
+  "agent": "auto",
+  "max_issues": 1,
+  "target_issue": 17,
+  "all_ready": false,
+  "fast_merge": false,
+  "aggregate_pr": false,
+  "publish_stage": "normal",
+  "repositories": [
+    {
+      "repo_id": "rv-2",
+      "repo_path": "/private/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-rv2-scenes-tai40ioc/rv-2/repo"
+    }
+  ]
+}
+stderr:
+2026-10-26 10:29:42 - backend.core.use_cases.run_agent_repositories_once - INFO - run_agent_repositories_once.py:101 - Running once for repository 'rv-2' (ad-hoc).
+2026-10-26 10:29:43 - backend.core.use_cases.agent_runner_worktree_probe - INFO - agent_runner_worktree_probe.py:106 - Skipping existing local commit probe for Issue #17: worktree path does not exist (path_command output): /private/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-rv2-scenes-tai40ioc/rv-2/repo/.kc-worktrees/issue-17. path_command return_code=0, stdout='/private/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-rv2-scenes-tai40ioc/rv-2/repo/.kc-worktrees/issue-17\n'.
+2026-10-26 10:29:43 - backend.core.use_cases.agent_runner_worktree_probe - INFO - agent_runner_worktree_probe.py:143 - Skipping rebase-recovery probe for Issue #17: worktree path does not exist (path_command output): /private/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-rv2-scenes-tai40ioc/rv-2/repo/.kc-worktrees/issue-17. path_command return_code=0, stdout='/private/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-rv2-scenes-tai40ioc/rv-2/repo/.kc-worktrees/issue-17\n'.
+2026-10-26 10:29:43 - backend.core.use_cases.agent_runner_orchestrate - INFO - agent_runner_orchestration_runtime.py:897 - Skipping Issue #17 with label agent/running: no rework marker, no clean local commit ready to publish, and no recoverable rebase/detached worktree.
+2026-10-26 10:29:43 - backend.core.use_cases.agent_runner_orchestrate - INFO - agent_runner_orchestration_runtime.py:939 - No open Issues found with label agent/ready, eligible running rework, or blocked resolution.
+EXPECTED_FAIL: unmigrated legacy claim is not recognized as actively claimed.
+$ /Users/zata/code/keda/.venv/bin/kc config migrate --repo /var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-rv2-scenes-tai40ioc/rv-2/repo
+exit_code=0
+stdout:
+already migrated: state lives in /var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-rv2-scenes-tai40ioc/rv-2/home/.kedacode.
+GitHub marker migration (open Issues/PRs): scanned 1 item(s); 1 location(s), 1 marker(s); estimated edits: 1.
+  Issue/PR #17 · comment 17001 · iar:claim × 1 · would update
+No legacy worktree directory at /private/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-rv2-scenes-tai40ioc/rv-2/repo/.iar-worktrees.
+repository config is already named .kedacode.toml.
+Nothing to migrate: /private/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-rv2-scenes-tai40ioc/rv-2/repo/.kedacode.toml has no values pinned by an older `kc init`.
+Dry run: nothing was written.
+stderr:
+
+PASS: preview lists the old claim without changing its bytes.
+$ /Users/zata/code/keda/.venv/bin/kc config migrate --apply --repo /var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-rv2-scenes-tai40ioc/rv-2/repo
+exit_code=0
+stdout:
+already migrated: state lives in /var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-rv2-scenes-tai40ioc/rv-2/home/.kedacode.
+GitHub marker migration (open Issues/PRs): scanned 1 item(s); 1 location(s), 1 marker(s); estimated edits: 1.
+  Issue/PR #17 · comment 17001 · iar:claim × 1 · would update
+already migrated: state lives in /var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-rv2-scenes-tai40ioc/rv-2/home/.kedacode.
+GitHub marker migration (open Issues/PRs): scanned 1 item(s); 1 location(s), 1 marker(s); estimated edits: 1.
+  Issue/PR #17 · comment 17001 · iar:claim × 1 · updated
+repository config is already named .kedacode.toml.
+Nothing to migrate: /private/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-rv2-scenes-tai40ioc/rv-2/repo/.kedacode.toml has no values pinned by an older `kc init`.
+No legacy worktree directory at /private/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-rv2-scenes-tai40ioc/rv-2/repo/.iar-worktrees.
+stderr:
+
+$ gh api repos/rv-owner/rv-repo/issues/17/comments
+exit_code=0
+stdout:
+[[{"id": 17001, "body": "Claim owner text remains byte-identical.\n<!-- kc:claim host=\"ZataZhangdeMacBook-Air.local\" pid=\"25555\" started_at=\"2026-10-26T02:29:41+00:00\" -->"}]]
+stderr:
+
+PASS: fresh gh process reads the migrated claim; all other bytes are unchanged.
+$ /Users/zata/code/keda/.venv/bin/kc run --issue 17 --dry-run --output json --repo /var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-rv2-scenes-tai40ioc/rv-2/repo
+exit_code=5
+stdout:
+
+stderr:
+{
+  "error": "conflict",
+  "message": "Issue #17 is actively claimed by ZataZhangdeMacBook-Air.local (PID 25555); running it here would double-run the same Issue.",
+  "suggestion": "kc run --issue 17 --takeover  # 持有者在本机：停掉本机守护进程并回收其在途 Issue",
+  "retryable": false,
+  "exit_code": 5
+}
+PASS: fresh kc run process recognizes the migrated active claim.
+$ /Users/zata/code/keda/.venv/bin/kc config migrate --repo /var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-rv2-scenes-tai40ioc/rv-2/repo
+exit_code=0
+stdout:
+already migrated: state lives in /var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-rv2-scenes-tai40ioc/rv-2/home/.kedacode.
+GitHub marker migration (open Issues/PRs): scanned 1 item(s); 0 location(s), 0 marker(s); estimated edits: 0.
+  No legacy GitHub markers found.
+No legacy worktree directory at /private/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-rv2-scenes-tai40ioc/rv-2/repo/.iar-worktrees.
+repository config is already named .kedacode.toml.
+Nothing to migrate: /private/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-rv2-scenes-tai40ioc/rv-2/repo/.kedacode.toml has no values pinned by an older `kc init`.
+Dry run: nothing was written.
+stderr:
+
+$ /Users/zata/code/keda/.venv/bin/kc config migrate --apply --repo /var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-rv2-scenes-tai40ioc/rv-2/repo
+exit_code=0
+stdout:
+already migrated: state lives in /var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-rv2-scenes-tai40ioc/rv-2/home/.kedacode.
+GitHub marker migration (open Issues/PRs): scanned 1 item(s); 0 location(s), 0 marker(s); estimated edits: 0.
+  No legacy GitHub markers found.
+already migrated: state lives in /var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-rv2-scenes-tai40ioc/rv-2/home/.kedacode.
+GitHub marker migration (open Issues/PRs): scanned 1 item(s); 0 location(s), 0 marker(s); estimated edits: 0.
+  No legacy GitHub markers found.
+repository config is already named .kedacode.toml.
+Nothing to migrate: /private/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-rv2-scenes-tai40ioc/rv-2/repo/.kedacode.toml has no values pinned by an older `kc init`.
+No legacy worktree directory at /private/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-rv2-scenes-tai40ioc/rv-2/repo/.iar-worktrees.
+stderr:
+
+PASS: second preview and apply perform zero marker edits.
+$ /Users/zata/code/keda/.venv/bin/kc config migrate --apply --repo /var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-rv2-scenes-tai40ioc/rv-2/repo
+exit_code=5
+stdout:
+Refusing to migrate the local state directory:
+KedaCode process(es) still running (PID 25675); stop the daemon and close the console before migrating. Nothing was changed.
+stderr:
+
+PASS: registered live runner PID blocks apply without editing the pending old claim.
+$ /Users/zata/code/keda/.venv/bin/kc config migrate --apply --repo /var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/kc-rv2-scenes-tai40ioc/rv-2/repo
+exit_code=5
+stdout:
+Refusing to migrate the local state directory:
+KedaCode process(es) still running (PID 25681); stop the daemon and close the console before migrating. Nothing was changed.
+stderr:
+
+PASS: actual kc daemon process blocks apply through the real command scanner without changing the old claim.
