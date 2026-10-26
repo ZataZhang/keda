@@ -265,6 +265,7 @@ kc labels sync --repo-id keda
 依赖小节支持 `## Delivery Dependencies` 单层标题，也支持 PRD 模板使用的
 `## 8. Delivery Dependencies` 外层标题加 `### Delivery Dependencies` 子标题。
 解析器按匹配标题的级别确定边界：更低级标题仍属于该小节，遇到同级或更高级标题才结束。
+每份 PRD 应只声明一个依赖小节；重复小节若包含额外依赖，`kc issue create` 会报错并停止，避免遗漏后续依赖。
 
 字段说明：
 

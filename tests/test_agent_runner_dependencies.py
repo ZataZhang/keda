@@ -224,6 +224,15 @@ class TestParseDeliveryDependencies:
                 "- Gate type: none\n",
                 DeliveryDependencyDeclaration(),
             ),
+            (
+                "##### Delivery Dependencies\n"
+                "###### Nested fields\n"
+                "- Depends on tasks/issues: #45\n"
+                "- Gate type: hard\n"
+                "#### Next section\n"
+                "- Depends on tasks/issues: #99\n",
+                DeliveryDependencyDeclaration(depends_on_issues=(45,), gate_type="hard"),
+            ),
         ],
     )
     def test_parses_delivery_dependency_heading_shapes(

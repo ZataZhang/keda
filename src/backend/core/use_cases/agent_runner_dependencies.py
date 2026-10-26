@@ -42,7 +42,7 @@ _DEPENDENCY_WAIT_MARKER_PATTERN = re.compile(
 # ---------------------------------------------------------------------------
 
 _DELIVERY_DEPENDENCIES_HEADER_RE = re.compile(
-    r"^(?P<heading>#{2,4})\s+(?:\d+\.\s+)?Delivery Dependencies\s*$",
+    r"^(?P<heading>#{2,6})\s+(?:\d+\.\s+)?Delivery Dependencies\s*$",
     re.IGNORECASE | re.MULTILINE,
 )
 _MARKDOWN_HEADING_RE = re.compile(r"^(?P<heading>#{1,6})[ \t]+", re.MULTILINE)
@@ -163,10 +163,10 @@ def validate_delivery_dependencies_not_dropped(
     Raises:
         ValueError: PRD 在依赖小节中写了非 ``none`` 内容，但解析结果没有依赖引用。
     """
-    if declaration.depends_on_issues or declaration.depends_on_prds:
-        return
-
-    for section_text in _delivery_dependencies_section_texts(prd_text):
+    declaration_has_dependencies = bool(
+        declaration.depends_on_issues or declaration.depends_on_prds
+    )
+    for section_index, section_text in enumerate(_delivery_dependencies_section_texts(prd_text)):
         dependency_values: list[str] = []
         current_field_is_dependency = False
 
@@ -193,7 +193,15 @@ def validate_delivery_dependencies_not_dropped(
             dependency_value.strip().lower() not in _NONE_DEPENDENCY_VALUES
             for dependency_value in dependency_values
         )
-        if declares_non_none_dependency:
+        if not declares_non_none_dependency:
+            continue
+        if declaration_has_dependencies and section_index > 0:
+            raise ValueError(
+                f"PRD '{prd_path}' declares dependencies in multiple 'Delivery Dependencies' "
+                "sections, but dependencies after the first section were not parsed. "
+                "Consolidate dependency references into one section."
+            )
+        if not declaration_has_dependencies:
             raise ValueError(
                 f"PRD '{prd_path}' declares a non-none 'Depends on tasks/issues' value, "
                 "but no dependency references were parsed. Check the Delivery Dependencies "
@@ -202,13 +210,33 @@ def validate_delivery_dependencies_not_dropped(
 
 
 def _delivery_dependencies_section_texts(prd_text: str) -> list[str]:
-    """返回每个 Delivery Dependencies 标题覆盖的正文，按标题级别截断。"""
+    """返回独立 Delivery Dependencies 小节正文，保留嵌套同名子标题。"""
     dependency_heading_matches = list(_DELIVERY_DEPENDENCIES_HEADER_RE.finditer(prd_text))
     all_heading_matches = list(_MARKDOWN_HEADING_RE.finditer(prd_text))
     section_texts: list[str] = []
+    independent_dependency_headings: list[re.Match[str]] = []
 
     for dependency_heading_match in dependency_heading_matches:
         heading_level = len(dependency_heading_match.group("heading"))
+        nested_in_existing_section = False
+        for parent_dependency_heading in independent_dependency_headings:
+            parent_heading_level = len(parent_dependency_heading.group("heading"))
+            if heading_level <= parent_heading_level:
+                continue
+            parent_section_was_closed = any(
+                len(following_heading_match.group("heading")) <= parent_heading_level
+                for following_heading_match in all_heading_matches
+                if parent_dependency_heading.end()
+                <= following_heading_match.start()
+                < dependency_heading_match.start()
+            )
+            if not parent_section_was_closed:
+                nested_in_existing_section = True
+                break
+        if nested_in_existing_section:
+            continue
+
+        independent_dependency_headings.append(dependency_heading_match)
         section_end = len(prd_text)
         for following_heading_match in all_heading_matches:
             if following_heading_match.start() < dependency_heading_match.end():

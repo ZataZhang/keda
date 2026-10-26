@@ -320,6 +320,39 @@ def test_create_issue_from_prd_rejects_unparsed_non_none_dependency(
     assert [call for call in fake_client.calls if call["method"] == "create_issue"] == []
 
 
+def test_create_issue_from_prd_rejects_dependencies_in_later_section(
+    tmp_path: Path,
+) -> None:
+    """重复依赖小节里的后续引用不能在创建 Issue 时被静默丢弃。"""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo)
+    fake_client = FakeGitHubClient()
+    prd = repo / "tasks" / "pending" / "downstream.md"
+    prd.parent.mkdir(parents=True)
+    prd.write_text(
+        "# PRD: Downstream\n\n"
+        "## Delivery Dependencies\n\n"
+        "- Depends on tasks/issues: #41\n"
+        "- Gate type: hard\n\n"
+        "## Delivery Dependencies\n\n"
+        "- Depends on tasks/issues: #42\n"
+        "- Gate type: hard\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        create_issue_from_prd(
+            request=_request(repo, Path("tasks/pending/downstream.md")),
+            github_client=fake_client,
+        )
+
+    message = str(exc_info.value)
+    assert "tasks/pending/downstream.md" in message
+    assert "dependencies in multiple 'Delivery Dependencies' sections" in message
+    assert [call for call in fake_client.calls if call["method"] == "create_issue"] == []
+
+
 def test_create_issue_from_prd_unresolved_prd_ref_is_actionable(
     tmp_path: Path,
 ) -> None:
