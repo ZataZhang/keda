@@ -9,6 +9,7 @@ from __future__ import annotations
 import threading
 import time
 from collections.abc import Callable
+from concurrent.futures import Future
 from typing import Any
 
 
@@ -24,6 +25,7 @@ class TTLResponseCache:
         self._ttl_seconds = ttl_seconds
         self._lock = threading.Lock()
         self._entries: dict[str, dict[str, Any]] = {}
+        self._pending: dict[str, Future[Any]] = {}
 
     def get_or_build(self, cache_key: str, builder: Callable[[], Any]) -> Any:
         """返回缓存条目；未命中或已过期时调用 ``builder`` 重建。
@@ -36,18 +38,38 @@ class TTLResponseCache:
         Returns:
             缓存或新建的构建结果。
         """
-        now = time.time()
         with self._lock:
             entry = self._entries.get(cache_key)
-            if entry is not None and (now - entry["timestamp"]) < self._ttl_seconds:
+            if entry is not None and (time.monotonic() - entry["timestamp"]) < self._ttl_seconds:
                 return entry["payload"]
-        # 构建在锁外执行：构建可能耗时数十秒，不应阻塞其它键的读取。
-        payload = builder()
-        with self._lock:
-            self._entries[cache_key] = {"payload": payload, "timestamp": time.time()}
-        return payload
+            pending = self._pending.get(cache_key)
+            is_builder = pending is None
+            if pending is None:
+                pending = Future()
+                self._pending[cache_key] = pending
+        if not is_builder:
+            return pending.result()
+        try:
+            # 同键请求共享构建结果，不同键仍可并发；失败不写入缓存。
+            payload = builder()
+            with self._lock:
+                if self._pending.get(cache_key) is pending:
+                    self._entries[cache_key] = {
+                        "payload": payload,
+                        "timestamp": time.monotonic(),
+                    }
+            pending.set_result(payload)
+            return payload
+        except BaseException as exc:
+            pending.set_exception(exc)
+            raise
+        finally:
+            with self._lock:
+                if self._pending.get(cache_key) is pending:
+                    self._pending.pop(cache_key)
 
     def clear(self) -> None:
         """清空全部缓存条目（测试或手动失效用）。"""
         with self._lock:
             self._entries.clear()
+            self._pending.clear()

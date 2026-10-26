@@ -2,6 +2,8 @@
 
 // 统计页：实时完成度（GitHub 口径）+ 本地运行历史趋势（SQLite 口径）。
 
+import { ConsolePage, ConsolePageHeader, ConsoleToolbar } from "@/components/layout/console-page";
+import { NativeSelect } from "@/components/ui/native-select";
 import { useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 
@@ -207,25 +209,11 @@ export default function StatsPage() {
     "全部仓库"
 
   return (
-    <div className="mx-auto flex w-full max-w-7xl flex-col gap-5 p-4 sm:p-6 lg:p-8">
-      <section className="relative overflow-hidden rounded-2xl border bg-gradient-to-br from-white via-white to-sky-50/70 p-5 shadow-sm sm:p-7 dark:from-slate-950 dark:via-slate-950 dark:to-sky-950/30">
-        <div className="pointer-events-none absolute -top-16 -right-10 size-56 rounded-full bg-sky-200/25 blur-3xl dark:bg-sky-500/10" />
-        <div className="relative flex flex-col justify-between gap-5 xl:flex-row xl:items-end">
-          <div className="max-w-2xl">
-            <span className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[10px] font-semibold tracking-[0.16em] text-sky-800 dark:border-sky-900 dark:bg-sky-950/50 dark:text-sky-300">
-              RUN ANALYTICS
-            </span>
-            <h1 className="mt-3 text-2xl font-semibold tracking-tight text-slate-950 sm:text-3xl dark:text-slate-50">
-              统计与成本
-            </h1>
-            <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
-              一处查看 GitHub 处理进度、本地运行趋势、Agent
-              表现和按模型价格估算的 token 成本。
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2 rounded-xl border bg-background/85 p-2 shadow-sm backdrop-blur">
-            <select
-              className="h-9 min-w-36 rounded-lg border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-sky-500/40"
+    <ConsolePage>
+      <ConsolePageHeader title="统计与成本" description="一处查看 GitHub 处理进度、本地运行趋势、Agent 表现和按模型价格估算的 token 成本。" />
+      <ConsoleToolbar aria-label="统计筛选">
+            <NativeSelect
+              className="h-8 min-w-36"
               value={trendRepoId}
               onChange={(event) => setTrendRepoId(event.target.value)}
               aria-label="统计仓库筛选"
@@ -236,9 +224,9 @@ export default function StatsPage() {
                   {entry.display_name}
                 </option>
               ))}
-            </select>
-            <select
-              className="h-9 min-w-28 rounded-lg border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-sky-500/40"
+            </NativeSelect>
+            <NativeSelect
+              className="h-8 min-w-28"
               value={trendDays}
               onChange={(event) => setTrendDays(Number(event.target.value))}
               aria-label="统计时间范围"
@@ -246,10 +234,8 @@ export default function StatsPage() {
               <option value={7}>近 7 天</option>
               <option value={30}>近 30 天</option>
               <option value={90}>近 90 天</option>
-            </select>
-          </div>
-        </div>
-      </section>
+            </NativeSelect>
+      </ConsoleToolbar>
 
       <StatsSectionTabs />
 
@@ -285,9 +271,9 @@ export default function StatsPage() {
         />
       </section>
 
-      <Card className="gap-4 border-border/70 shadow-sm">
+      <Card className="gap-4">
         <CardHeader>
-          <CardTitle className="text-base">仓库完成度</CardTitle>
+          <CardTitle className="text-sm">仓库完成度</CardTitle>
           <CardDescription>
             GitHub 实时状态；closed Issue 带有 agent workflow label
             时计为已处理。
@@ -362,11 +348,11 @@ export default function StatsPage() {
         </CardContent>
       </Card>
 
-      <Card className="gap-4 border-border/70 shadow-sm">
+      <Card className="gap-4">
         <CardHeader>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <CardTitle className="text-base">运行趋势</CardTitle>
+              <CardTitle className="text-sm">运行趋势</CardTitle>
               <CardDescription className="mt-1">
                 {selectedRepositoryName} · 近 {trendDays} 天 · CLI
                 与面板运行记录
@@ -441,9 +427,9 @@ export default function StatsPage() {
         </CardContent>
       </Card>
 
-      <Card className="gap-4 border-border/70 shadow-sm">
+      <Card className="gap-4">
         <CardHeader>
-          <CardTitle className="text-base">最近运行记录</CardTitle>
+          <CardTitle className="text-sm">最近运行记录</CardTitle>
           <CardDescription>
             按仓库和 Issue 分组；展开后可查看每次运行的详情，包括成功、失败与
             Blocked。
@@ -480,7 +466,7 @@ export default function StatsPage() {
         {lifecycleStats === null ? (
           <Card className="border-border/70 shadow-sm">
             <CardHeader>
-              <CardTitle className="text-base">Token 用量与费用</CardTitle>
+              <CardTitle className="text-sm">Token 用量与费用</CardTitle>
               <CardDescription>正在读取调用明细与模型价格…</CardDescription>
             </CardHeader>
             <CardContent>
@@ -516,10 +502,10 @@ export default function StatsPage() {
       >
         <Card
           data-testid="stats-prd-lifecycle"
-          className="gap-4 border-border/70 shadow-sm"
+          className="gap-4"
         >
           <CardHeader>
-            <CardTitle className="text-base">PRD 执行分析</CardTitle>
+            <CardTitle className="text-sm">PRD 执行分析</CardTitle>
             <CardDescription>
               以完整 PRD 生命周期为口径（非单次 runner
               调用），共用上方的仓库与时间范围筛选； 进行中记录与无法关联 PRD
@@ -670,7 +656,7 @@ export default function StatsPage() {
           </CardContent>
         </Card>
       </div>
-    </div>
+    </ConsolePage>
   )
 }
 

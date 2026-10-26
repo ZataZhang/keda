@@ -101,7 +101,7 @@ export function TokenUsageSection({
     >
       <CardHeader className="gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-1.5">
-          <CardTitle className="text-base">Token 用量与费用</CardTitle>
+          <CardTitle className="text-sm">Token 用量与费用</CardTitle>
           <CardDescription>
             按实际调用记录中的模型和四类 token 用量估算；缓存命中率按输入侧
             token 加权，不含输出。不同模型的缓存实现可能不同。

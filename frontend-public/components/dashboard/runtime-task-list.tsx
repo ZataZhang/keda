@@ -10,6 +10,8 @@
 import { useMemo, useState } from "react";
 import { Check, Copy } from "lucide-react";
 
+import { ConsoleToolbar } from "@/components/layout/console-page";
+import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import type { BadgeVariant } from "@/components/ui/badge";
 import { formatLifecycleDuration } from "@/components/backlog/prd-lifecycle-format";
@@ -18,14 +20,14 @@ import type { RuntimeTaskEntry, RuntimeTaskStatus } from "@/lib/api/types";
 import { openExternalUrl } from "@/lib/open-external";
 import { cn, formatLocalDateTime } from "@/lib/utils";
 
-import { runtimePhaseDescription, RuntimeTaskPhase } from "./runtime-task-phase";
+import { RuntimeTaskPhaseDescription, RuntimeTaskPhase } from "./runtime-task-phase";
 
 /** 状态分桶的人读文案与配色（唯一事实源，列表/详情/小窗共用）。 */
 const STATUS_PRESENTATION: Record<RuntimeTaskStatus, { label: string; variant: BadgeVariant }> = {
   running: { label: "运行中", variant: "running" },
   waiting: { label: "等待处理", variant: "review" },
-  blocked: { label: "阻塞", variant: "error" },
-  failed: { label: "失败", variant: "error" },
+  blocked: { label: "阻塞", variant: "blocked" },
+  failed: { label: "失败", variant: "failed" },
   completed: { label: "已完成", variant: "ready" },
   closed: { label: "已关闭", variant: "default" },
   unknown: { label: "状态未知", variant: "default" },
@@ -104,7 +106,7 @@ export function RuntimeTaskList({
   missingRepoIds = [],
   truncated = false,
 }: RuntimeTaskListProps) {
-  const [statusFilter, setStatusFilter] = useState<RuntimeTaskStatus | "all">("all");
+  const [statusFilter, setStatusFilter] = useState<RuntimeTaskStatus | "all" | "active">("active");
   const [query, setQuery] = useState("");
 
   const counts = useMemo(() => {
@@ -118,7 +120,11 @@ export function RuntimeTaskList({
   const visibleTasks = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return tasks.filter((task) => {
-      if (statusFilter !== "all" && task.status !== statusFilter) {
+      if (
+        statusFilter === "active"
+          ? !isActiveRuntimeTask(task)
+          : statusFilter !== "all" && task.status !== statusFilter
+      ) {
         return false;
       }
       if (!needle) {
@@ -139,8 +145,15 @@ export function RuntimeTaskList({
 
   return (
     <div className="flex min-h-0 flex-col gap-3" data-testid="runtime-task-list">
-      <div className="flex flex-wrap items-center gap-2">
+      <ConsoleToolbar>
         <div className="flex flex-wrap items-center gap-1" role="group" aria-label="按状态筛选任务">
+          <FilterChip
+            active={statusFilter === "active"}
+            label="活动任务"
+            count={tasks.filter(isActiveRuntimeTask).length}
+            onClick={() => setStatusFilter("active")}
+            testId="runtime-filter-active"
+          />
           <FilterChip
             active={statusFilter === "all"}
             label="全部"
@@ -161,16 +174,16 @@ export function RuntimeTaskList({
         </div>
         <label className="ml-auto flex items-center gap-2 text-xs text-slate-500">
           <span className="sr-only">搜索仓库、Issue 号或标题</span>
-          <input
+          <Input
             type="search"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="搜索仓库 / Issue / 标题"
-            className="w-56 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-900 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100"
+            className="h-8 w-56"
             data-testid="runtime-task-search"
           />
         </label>
-      </div>
+      </ConsoleToolbar>
 
       {syncStatus === "pending_first_sync" ? (
         <p className="text-xs text-amber-700 dark:text-amber-300" data-testid="runtime-degraded">
@@ -201,7 +214,9 @@ export function RuntimeTaskList({
             ? syncStatus === "pending_first_sync"
               ? "等待首次同步后显示任务。"
               : "当前没有已注册仓库的运行任务。"
-            : "没有符合筛选条件的任务。"}
+            : statusFilter === "active" && !query.trim()
+              ? "当前没有活动任务；可切换「全部」「已完成」或「已关闭」查看历史。"
+              : "没有符合筛选条件的任务。"}
         </div>
       ) : (
         <ul className="flex min-h-0 flex-col gap-1 overflow-auto">
@@ -252,10 +267,10 @@ function FilterChip({
       type="button"
       onClick={onClick}
       aria-pressed={active}
-      className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
+      className={`inline-flex h-8 items-center gap-1 rounded-md border px-2.5 text-xs transition-colors ${
         active
-          ? "border-slate-900 bg-slate-900 text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-900"
-          : "border-slate-200 text-slate-600 hover:bg-slate-100 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-900"
+          ? "border-primary bg-primary text-primary-foreground"
+          : "border-border text-muted-foreground hover:bg-muted hover:text-foreground"
       }`}
       data-testid={testId}
     >
@@ -307,23 +322,19 @@ function RuntimeTaskRow({
         >
         <span className="flex flex-wrap items-center gap-2">
           <Badge variant={presentation.variant}>{presentation.label}</Badge>
-          <RuntimeTaskPhase phase={task.phase} />
+          <RuntimeTaskPhase task={task} />
           <RuntimeTaskWatch task={task} />
           <span className="font-medium text-slate-900 dark:text-slate-100">{identity}</span>
           <span className="min-w-0 flex-1 truncate text-slate-600 dark:text-slate-300">
             {task.issue_title ?? "（账本未记录标题）"}
           </span>
         </span>
-        <span
-          className="mt-1 block text-xs text-slate-500"
-          data-testid="runtime-task-phase-description"
-        >
-          阶段说明：{runtimePhaseDescription(task.phase)}
-        </span>
+        <RuntimeTaskPhaseDescription task={task} className="mt-1 block text-xs text-slate-500" />
+        <RuntimeTaskObservation task={task} />
         <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
           {task.agent ? (
             <span>
-              {task.finished_at ? "上次执行" : "执行"}：{task.agent}
+              最近执行：{task.agent}
               {task.preset ? ` · ${task.preset}` : ""}
             </span>
           ) : null}
@@ -470,5 +481,30 @@ export function RuntimeTaskWatch({ task }: { task: RuntimeTaskEntry }) {
 
 /** 共享运行耗时口径，区分历史运行和当前轮次。 */
 export function RuntimeTaskDuration({ task }: { task: RuntimeTaskEntry }) {
-  return <span>{task.finished_at ? "上次运行耗时" : "本轮耗时"}：{formatLifecycleDuration(task.duration_seconds)}</span>;
+  if (task.duration_seconds === null) return null;
+  const label = task.finished_at ? "上次运行耗时" : task.status === "running" ? "本轮耗时" : "记录耗时";
+  return <span>{label}：{formatLifecycleDuration(task.duration_seconds)}</span>;
+}
+
+/** 活动列表包含状态待核实的任务，避免未知状态被历史任务掩盖。 */
+export function isActiveRuntimeTask(task: RuntimeTaskEntry): boolean {
+  return task.status !== "completed" && task.status !== "closed";
+}
+
+/** 在列表、小窗和详情中直接披露运行依据及历史终态。 */
+export function RuntimeTaskObservation({ task }: { task: RuntimeTaskEntry }) {
+  const outcomeLabels: Record<string, string> = { completed: "成功", failed: "失败", blocked: "阻塞" };
+  const reason = task.status === "running"
+    ? `${task.status_reason ?? "监控标记运行"}；运行标记不代表执行进程已探活。`
+    : task.status === "unknown" || task.status === "closed"
+      ? task.status_reason
+      : null;
+  if (!reason && !task.last_outcome) return null;
+  return (
+    <span className="mt-1 block text-xs text-slate-500" data-testid="runtime-task-observation">
+      {reason}
+      {reason && task.last_outcome ? " · " : ""}
+      {task.last_outcome ? `上次运行结果：${outcomeLabels[task.last_outcome] ?? task.last_outcome}` : ""}
+    </span>
+  );
 }

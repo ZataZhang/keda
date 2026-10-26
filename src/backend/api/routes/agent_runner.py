@@ -14,6 +14,7 @@ from typing import Any, cast
 
 from fastapi import APIRouter, HTTPException, Query
 
+from backend.api.monitoring_reads import MonitoringGitHubReads, MonitoringProcessReads
 from backend.api.response_cache import TTLResponseCache
 from backend.core.shared.interfaces.agent_runner import (
     IGitHubClient,
@@ -95,7 +96,11 @@ def _serialize_monitoring(value: Any) -> Any:
 
 def _get_monitoring_dependencies() -> tuple[Callable[[Path], IGitHubClient], IProcessRunner]:
     """Resolve the GitHub client factory and shared process runner."""
-    return create_github_client, create_process_runner()
+
+    def monitoring_client(repo_path: Path) -> IGitHubClient:
+        return cast(IGitHubClient, MonitoringGitHubReads(create_github_client(repo_path)))
+
+    return monitoring_client, cast(IProcessRunner, MonitoringProcessReads(create_process_runner()))
 
 
 _OVERVIEW_CACHE_TTL_SECONDS = 30

@@ -17,7 +17,7 @@ Use this skill when the user asks to operate the KedaCode CLI or its managed run
 | 跑一次或聚合已完成批次 | 跑一下 / 跑一次 / 执行这个 Issue / run this / 快速通道发 PR / 直接发 PR / 夜间任务总 PR / 聚合来源 PR / 重试批次 PR | `${CODEBUDDY_SKILL_DIR}/references/run-once.md` |
 | 看进度 | 看看 197 现在什么情况 / 到哪了 / 实时输出 / logs / tail / `/ps` | `${CODEBUDDY_SKILL_DIR}/references/watch.md` |
 | 卡住了 | 怎么不动了 / 卡住了 / 失败了 / agent/blocked / 恢复 / 人工接管这个 Issue 的验证 | `${CODEBUDDY_SKILL_DIR}/references/triage.md` |
-| 定时任务 | 每天几点跑 / 定时检查 / 周期性任务 / 夜间巡检 / loop / kc loop | `${CODEBUDDY_SKILL_DIR}/references/loop.md` |
+| 定时任务 | 每天几点跑 / 定时检查 / 周期性任务 / 夜间巡检 / 内置 blocker-monitor 模板（显式启用） / loop / kc loop | `${CODEBUDDY_SKILL_DIR}/references/loop.md` |
 | 后台跑 | 挂后台 / 让它自己跑 / daemon / 起守护 / 停掉它 / 并行上限 / 最多同时跑几个 / 并发调成 N | `${CODEBUDDY_SKILL_DIR}/references/daemon.md` |
 | CI 交付 | CI 状态 / checks 怎么样 / 自动修复 / 修一下 CI / backlog ci | `${CODEBUDDY_SKILL_DIR}/references/ci.md` |
 | 装环境与查 Agent 配置 | 装环境 / 初始化仓库 / kc init / 重装 skill / 刷新 skill / kc skill install / 修复 operator skill / kc skill repair-operator / 安装菜单栏 App / kc desktop install / 有哪些模型预设 / agent doctor / 生命周期矩阵 / 九阶段生效模型 / kc agent lifecycle / kc agent preset / 回退候选 / kc agent fallback / 这台机器装了哪些 agent / kc agent list / 该用哪个 agent / kc agent setup / 注册一个自己的 agent / kc agent add / 这个命令收什么旗标 / 裸 kc 进哪个入口 / kc session 与 kc repl 的区别 / 起个预览 / 起 dev server | `${CODEBUDDY_SKILL_DIR}/references/setup-and-config.md` |

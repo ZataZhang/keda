@@ -15,7 +15,11 @@
 
 ## 颜色语义
 
-中性骨架统一用 `slate`（浅色 `white/slate-50`，深色 `slate-950/slate-900`）。语义色对照表：
+中性骨架优先使用 `globals.css` 的语义 token：`background` / `foreground`、
+`card` / `card-foreground`、`muted` / `muted-foreground`、`border` / `input`。
+主操作、选中项和焦点统一使用 `primary` / `ring`（当前为紫色），不要给各页单独指定蓝色、
+天空色或紫色主调。状态色与外链色保留独立语义，不跟随主色改色。
+现存 `slate` 中性类可渐进迁移，新共享控件使用 token。语义色对照表：
 
 | 语义          | Tailwind 家族            | 典型用途                            |
 | ----------- | ---------------------- | ------------------------------- |
@@ -57,14 +61,37 @@
 
 ## 间距节奏
 
-- 页面容器：`p-4 lg:p-6`，区块之间 `gap-4`。
+- 页面内边距由 `AppShell` 唯一提供：`p-4 lg:p-6`；页面不要再嵌套 `container`、最大宽度或额外四周内边距。区块之间 `gap-4`。
 - 卡片：`py-6` + 内容 `px-6`（来自 `Card` 组件，不要在外面重复内边距）。
 - 列表行：密集行 `px-3 py-2`；行内元素 `gap-2`；按钮组 `gap-1`。
 - 表格：单元格 `py-2 pr-3`，表头 `text-xs text-slate-500`。
 
+## 管理终端页面骨架
+
+`frontend-public` 的九个管理页面（含生命周期设置）使用
+`components/layout/console-page.tsx`：
+
+- `ConsolePage`：纵向 `gap-4`，保持内容可收缩；Backlog 的工作区高度由页面自身约束。
+- `ConsolePageHeader`：唯一 `h1`，20px / 600 / 28px 行高；说明 14px / 24px 行高。
+  不为单页添加渐变 Hero、装饰标签或独立的大标题字号。
+- `ConsoleToolbar`：筛选与操作 `gap-2`，窄屏允许换行。紧凑工具栏控件使用 32px（`Button size="sm"`、`Input` / `NativeSelect` 加 `h-8`），表单默认 36px。
+- `ConsoleSectionTabs` 与 `consoleTabClassName`：区块导航的吸顶、边框、选中态和键盘焦点统一维护。
+  Settings、生命周期设置与 Stats 复用；Stats 保留自己的锚点滚动与区块高亮逻辑。
+- 卡片使用 `Card`，标题默认 14px / 600；原生下拉使用 `NativeSelect`。
+  按钮、输入框、卡片、菜单和 Dialog / Sheet 的中性颜色从语义 token 获取。
+
+这套骨架适用于管理终端，公开首页、登录页与独立 `frontend-admin` 不强制套用终端布局。
+
+## 管理终端滚动布局
+
+`frontend-public` 的 AppShell 在 `md` 及以上宽度限制为视口高度：左侧导航保持可见，
+右侧主内容独立滚动；侧栏不被内容挤窄。窗口较矮时只滚动侧栏菜单，品牌、主题与收起按钮
+仍留在侧栏顶部。`md` 以下继续使用顶部导航与文档滚动，避免挤占窄屏内容区域。
+
 ## 深色模式
 
-每个浅色类都必须配一个 `dark:` 对偶，不允许只写一半：
+优先使用会自动切换浅深主题的语义 token，无需再叠加 `dark:`。手写色值或状态色类时，
+每个浅色类必须配一个 `dark:` 对偶，不允许只写一半：
 
 | 浅色                     | 深色                                  |
 | ---------------------- | ----------------------------------- |

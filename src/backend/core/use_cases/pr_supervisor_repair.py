@@ -24,6 +24,7 @@ from backend.core.use_cases.agent_runner_validation import (
 from backend.core.shared.models.agent_model_preset import ModelSelection
 from backend.core.use_cases.agent_invocation_tracing import PHASE_SUPERVISOR_REPAIR
 from backend.core.use_cases.run_agent_once import (
+    EmptyCommitRequestError,
     commit_requested_changes,
     ensure_verification_passed,
     has_changes,
@@ -106,6 +107,10 @@ def execute_repair(
                     process_runner,
                     expected_branch=pr_branch,
                 )
+            except EmptyCommitRequestError:
+                # 空提交请求表示没有仓库改动；验证通过后继续监督循环，
+                # 让 supervisor 重新确认远端修复是否已满足 finding。
+                verification_results = run_verification(worktree_path, config, process_runner)
             except VerificationFailedError as exc:
                 if attempt >= max_attempts:
                     raise
@@ -114,39 +119,28 @@ def execute_repair(
                     cwd=worktree_path,
                     check=False,
                 )
-                repair_prompt = build_recovery_prompt(
-                    issue,
-                    worktree_path,
-                    recovery_attempt=attempt,
-                    max_recovery_attempts=max_attempts,
-                    evidence_dir=resolve_issue_evidence_relpath(config, issue),
-                    failure_summary=format_recovery_failure_summary(
-                        "Verification failed before repair commit.",
-                        exc.verification_results,
-                    ),
-                )
-                continue
+                verification_results = exc.verification_results
         else:
             if has_changes(worktree_path, process_runner):
                 raise RuntimeError(
                     "Repair agent changed files without writing .agent-runner/commit-request.json."
                 )
             verification_results = run_verification(worktree_path, config, process_runner)
-            if failed_verification_results(verification_results):
-                if attempt >= max_attempts:
-                    ensure_verification_passed(verification_results)
-                repair_prompt = build_recovery_prompt(
-                    issue,
-                    worktree_path,
-                    recovery_attempt=attempt,
-                    max_recovery_attempts=max_attempts,
-                    evidence_dir=resolve_issue_evidence_relpath(config, issue),
-                    failure_summary=format_recovery_failure_summary(
-                        "Verification failed before repair commit.",
-                        verification_results,
-                    ),
-                )
-                continue
+        if failed_verification_results(verification_results):
+            if attempt >= max_attempts:
+                ensure_verification_passed(verification_results)
+            repair_prompt = build_recovery_prompt(
+                issue,
+                worktree_path,
+                recovery_attempt=attempt,
+                max_recovery_attempts=max_attempts,
+                evidence_dir=resolve_issue_evidence_relpath(config, issue),
+                failure_summary=format_recovery_failure_summary(
+                    "Verification failed before repair commit.",
+                    verification_results,
+                ),
+            )
+            continue
         break
     else:
         ensure_verification_passed(verification_results)

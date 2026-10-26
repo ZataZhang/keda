@@ -12,6 +12,7 @@
 // 写回保持保留式语义：矩阵只提交改动过的预设与绑定（一次 PATCH），回退候选按
 // 完整期望数组写回（PUT）。二者目标文件不同，互不牵连。
 
+import { ConsolePage, ConsolePageHeader, ConsoleToolbar, ConsoleSectionTabs, consoleTabClassName } from "@/components/layout/console-page";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -495,17 +496,19 @@ export function LifecycleSettingsPage({
   /** 渲染全局 / 仓库范围选择条（仓库范围附下拉选仓库）。 */
   function renderScopeBar() {
     return (
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="inline-flex rounded-lg border p-0.5">
+      <>
+        <ConsolePageHeader title="生命周期与模型设置" description="配置全局或仓库的阶段 Agent、模型预设与执行器回退。" />
+      <ConsoleToolbar>
+        <div className="inline-flex rounded-md border border-border p-0.5">
           <button
             type="button"
             onClick={() => switchScope("global")}
             data-testid="scope-global"
             className={cn(
-              "rounded-md px-3 py-1 text-sm transition-colors",
+              "h-8 rounded-md px-3 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               scope === "global"
-                ? "bg-slate-900 text-slate-50 dark:bg-slate-50 dark:text-slate-900"
-                : "text-slate-600 hover:text-slate-900 dark:text-slate-400",
+                ? "bg-primary text-primary-foreground"
+                : "text-muted-foreground hover:text-foreground",
             )}
           >
             全局
@@ -515,10 +518,10 @@ export function LifecycleSettingsPage({
             onClick={() => switchScope("repository")}
             data-testid="scope-repository"
             className={cn(
-              "rounded-md px-3 py-1 text-sm transition-colors",
+              "h-8 rounded-md px-3 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               scope === "repository"
-                ? "bg-slate-900 text-slate-50 dark:bg-slate-50 dark:text-slate-900"
-                : "text-slate-600 hover:text-slate-900 dark:text-slate-400",
+                ? "bg-primary text-primary-foreground"
+                : "text-muted-foreground hover:text-foreground",
             )}
           >
             仓库
@@ -551,7 +554,8 @@ export function LifecycleSettingsPage({
             </DropdownMenuContent>
           </DropdownMenu>
         ) : null}
-      </div>
+      </ConsoleToolbar>
+      </>
     );
   }
 
@@ -570,11 +574,10 @@ export function LifecycleSettingsPage({
   /** 吸顶 Tab 导航（矩阵 / 预设 / 回退）。 */
   function renderBlockNav() {
     return (
-      <nav
+      <ConsoleSectionTabs
         ref={settingsTablistRef}
         role="tablist"
         aria-label="生命周期设置区块"
-        className="sticky top-0 z-20 -mx-4 flex gap-1 overflow-x-auto whitespace-nowrap border-b border-slate-200 bg-white/95 px-4 pt-2 backdrop-blur dark:border-slate-800 dark:bg-slate-950/95 md:-mx-8 md:px-8"
         data-testid="block-nav"
       >
         {LIFECYCLE_SETTINGS_TABS.map((tab) => (
@@ -587,17 +590,12 @@ export function LifecycleSettingsPage({
             aria-controls={`lifecycle-settings-panel-${tab.id}`}
             data-testid={`settings-tab-${tab.id}`}
             onClick={() => switchSettingsTab(tab.id)}
-            className={cn(
-              "-mb-px shrink-0 border-b-2 px-3 py-2 text-sm transition-colors",
-              activeSettingsTab === tab.id
-                ? "border-slate-900 font-medium text-slate-900 dark:border-slate-100 dark:text-slate-50"
-                : "border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200",
-            )}
+            className={consoleTabClassName(activeSettingsTab === tab.id)}
           >
             {tab.label}
           </button>
         ))}
-      </nav>
+      </ConsoleSectionTabs>
     );
   }
 
@@ -1000,37 +998,37 @@ export function LifecycleSettingsPage({
 
   if (loadError) {
     return (
-      <div className="space-y-4">
+      <ConsolePage>
         {renderScopeBar()}
         <ResourceErrorAlert message={loadError} testId="lifecycle-settings-error" />
-      </div>
+      </ConsolePage>
     );
   }
 
   if (scope === "repository" && !repoId) {
     return (
-      <div className="space-y-4" data-testid="lifecycle-settings-page">
+      <ConsolePage data-testid="lifecycle-settings-page">
         {renderScopeBar()}
         <p className="text-sm text-slate-500" data-testid="lifecycle-settings-pick-repo">
           请选择一个仓库以编辑其生命周期设置。
         </p>
-      </div>
+      </ConsolePage>
     );
   }
 
   if (isLoading || !viewMatchesSelection) {
     return (
-      <div className="space-y-4" data-testid="lifecycle-settings-page">
+      <ConsolePage data-testid="lifecycle-settings-page">
         {renderScopeBar()}
         <p className="text-sm text-slate-500" data-testid="lifecycle-settings-loading">
           加载中…
         </p>
-      </div>
+      </ConsolePage>
     );
   }
 
   return (
-    <div className="space-y-4" data-testid="lifecycle-settings-page">
+    <ConsolePage data-testid="lifecycle-settings-page">
       {renderScopeBar()}
       <p className="text-xs text-slate-500 dark:text-slate-400">
         {view.scope === "global"
@@ -1075,6 +1073,6 @@ export function LifecycleSettingsPage({
       >
         {renderFallbackSection(view)}
       </div>
-    </div>
+    </ConsolePage>
   );
 }

@@ -217,10 +217,15 @@ def add_ops_commands(subparsers: argparse._SubParsersAction) -> None:
         "loop_id",
         help="Short kebab-case identifier for the loop.",
     )
-    loop_create_parser.add_argument(
+    loop_source_group = loop_create_parser.add_mutually_exclusive_group(required=True)
+    loop_source_group.add_argument(
         "--recipe",
-        required=True,
         help="Path to the loop recipe Markdown file (with YAML frontmatter).",
+    )
+    loop_source_group.add_argument(
+        "--template",
+        choices=["blocker-monitor"],
+        help="Generate and register a built-in recipe (requires --repo-id).",
     )
     loop_create_parser.add_argument(
         "--cron",

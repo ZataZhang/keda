@@ -3,6 +3,7 @@
 
 // Backlog 页面：左侧受管理仓库栏 + 右侧 PRD 画布（依赖图/时间轴/列表）。
 
+import { ConsolePage, ConsolePageHeader, ConsoleToolbar } from "@/components/layout/console-page";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   CSSProperties,
@@ -698,11 +699,13 @@ export default function BacklogPage() {
 
   return (
     <>
-    <div className="flex h-[calc(100svh-4rem)] gap-4">
+    <ConsolePage className="h-[calc(100svh-2rem)] lg:h-[calc(100svh-3rem)]">
+      <ConsolePageHeader title="Backlog" description="查看仓库 PRD、依赖关系与执行进度。" />
+    <div className="flex min-h-0 flex-1 flex-col gap-4 md:flex-row">
       <aside
         id="backlog-repository-panel"
         className={cn(
-          "flex w-60 shrink-0 flex-col overflow-hidden rounded-lg border border-slate-200 dark:border-slate-800",
+          "flex max-h-48 w-full shrink-0 flex-col overflow-hidden rounded-xl border border-border bg-card md:max-h-none md:w-60",
           !showRepositoryPanel && "hidden",
         )}
       >
@@ -776,8 +779,8 @@ export default function BacklogPage() {
         </div>
       </aside>
 
-      <section className="flex min-w-0 flex-1 flex-col gap-3">
-        <div className="flex flex-wrap items-center gap-3">
+      <section className="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
+        <ConsoleToolbar>
           {repoPanelCollapsed && (!selectedPrd || leftNavigationExpanded) ? (
             <Button
               type="button"
@@ -791,7 +794,6 @@ export default function BacklogPage() {
               <PanelLeftOpen className="size-4" />
             </Button>
           ) : null}
-          <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-50">Backlog</h2>
           {selectedPrd ? (
             <Button
               type="button"
@@ -882,7 +884,7 @@ export default function BacklogPage() {
           >
             停止全局调度
           </Button>
-        </div>
+        </ConsoleToolbar>
 
         <div
           id="backlog-global-controls"
@@ -921,7 +923,7 @@ export default function BacklogPage() {
           <div
             id="backlog-prd-list-panel"
             className={cn(
-              "min-h-0 flex-1 overflow-auto rounded-lg border border-slate-200 p-4 dark:border-slate-800",
+              "min-h-0 flex-1 overflow-auto rounded-xl border border-border bg-card p-4",
               !showPrdList && "hidden",
             )}
           >
@@ -1041,6 +1043,7 @@ export default function BacklogPage() {
         </div>
       </section>
     </div>
+    </ConsolePage>
 
       {startOptionsPrd ? (
         <PrdStartOptionsSheet

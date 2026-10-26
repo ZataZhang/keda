@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 
 const badgeVariantClasses: Record<string, string> = {
   default:
-    "border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-800 dark:bg-slate-800 dark:text-slate-200",
+    "border-border bg-muted text-foreground",
   ready:
     "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-200",
   running:

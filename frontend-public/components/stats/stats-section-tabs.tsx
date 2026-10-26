@@ -2,7 +2,10 @@
 
 import { useEffect, useRef, useState } from "react"
 
-import { cn } from "@/lib/utils"
+import {
+  ConsoleSectionTabs,
+  consoleTabClassName,
+} from "@/components/layout/console-page"
 
 /** 统计页各区块锚点的 DOM id，页面区块与顶部导航共用，避免两边键名漂移。 */
 export const STATS_SECTION_IDS = {
@@ -25,30 +28,23 @@ const STATS_SECTION_TABS: readonly StatsSectionTab[] = [
   { key: "prdExecution", label: "PRD 执行分析" },
 ]
 
-
 /**
  * 统计区块顶部导航：点击平滑滚动到对应区块，页面滚动时同步高亮，
  * 方向键切换，窄屏可横向浏览。
  *
- * 页面滚动实际发生在 window（AppShell 的 main 高度随内容增长），
- * 因此导航用 JS 吸顶（越过自然位置后 fixed）而非纯 CSS sticky；
- * 外层占位盒保持原高度，避免吸顶切换时内容跳动。
+ * 桌面监听主内容滚动，窄屏兼容文档滚动；导航沿用公共 CSS sticky，
+ * 保持在当前内容区域内，避免固定定位遮住全局侧栏。
  *
  * @returns 顶部 Tab 导航。
  */
 export function StatsSectionTabs() {
   const [activeKey, setActiveKey] = useState<StatsSectionTab["key"]>("overview")
-  const [isPinned, setIsPinned] = useState(false)
-  const [shellHeight, setShellHeight] = useState<number | null>(null)
-  const shellRef = useRef<HTMLDivElement | null>(null)
   const navRef = useRef<HTMLElement | null>(null)
-  const pinnedTopRef = useRef(0)
   const tabRefs = useRef(new Map<StatsSectionTab["key"], HTMLButtonElement>())
 
   useEffect(() => {
-    const shellNode = shellRef.current
     const navNode = navRef.current
-    if (shellNode === null || navNode === null) {
+    if (navNode === null) {
       return
     }
     const sections = STATS_SECTION_TABS.map((tab) => ({
@@ -62,27 +58,19 @@ export function StatsSectionTabs() {
       return
     }
 
-    const measureLayout = () => {
-      setShellHeight(navNode.offsetHeight)
-      // 占位 shell 始终处于文档流中（无论导航是否已 fixed 吸顶），
-      // 其文档坐标即吸顶阈值。
-      pinnedTopRef.current =
-        shellNode.getBoundingClientRect().top + window.scrollY
-    }
-
     let rafHandle = 0
 
     const update = () => {
-      const pinnedNow = window.scrollY >= pinnedTopRef.current
-      setIsPinned(pinnedNow)
-      // 吸顶生效的那一帧导航尚未按 fixed 重排，直接取吸顶后的高度，
-      // 避免用旧的 relative 位置算出错误的判定阈值。
-      const navBottom = pinnedNow
-        ? navNode.offsetHeight
-        : navNode.getBoundingClientRect().bottom
-      const documentElement = document.documentElement
+      const navBottom = navNode.getBoundingClientRect().bottom
+      const main = navNode.closest("main")
+      const scrollRoot =
+        main && main.scrollHeight > main.clientHeight
+          ? main
+          : document.documentElement
       const reachedBottom =
-        window.scrollY + window.innerHeight >= documentElement.scrollHeight - 2
+        scrollRoot.scrollTop > 0 &&
+        scrollRoot.scrollTop + scrollRoot.clientHeight >=
+          scrollRoot.scrollHeight - 2
       if (reachedBottom) {
         setActiveKey(sections[sections.length - 1].key)
         return
@@ -109,17 +97,18 @@ export function StatsSectionTabs() {
     }
 
     const handleResize = () => {
-      measureLayout()
       requestUpdate()
     }
 
-    measureLayout()
     update()
-    window.addEventListener("scroll", requestUpdate, { passive: true })
+    document.addEventListener("scroll", requestUpdate, {
+      passive: true,
+      capture: true,
+    })
     window.addEventListener("resize", handleResize)
     return () => {
       window.cancelAnimationFrame(rafHandle)
-      window.removeEventListener("scroll", requestUpdate)
+      document.removeEventListener("scroll", requestUpdate, true)
       window.removeEventListener("resize", handleResize)
     }
   }, [])
@@ -160,61 +149,46 @@ export function StatsSectionTabs() {
   }
 
   return (
-    <div
-      ref={shellRef}
-      data-testid="stats-section-tabs-shell"
-      style={shellHeight === null ? undefined : { height: shellHeight }}
+    <ConsoleSectionTabs
+      ref={navRef}
+      aria-label="统计区块导航"
+      data-testid="stats-section-tabs"
     >
-      <nav
-        ref={navRef}
+      <div
+        role="tablist"
         aria-label="统计区块导航"
-        data-testid="stats-section-tabs"
-        className={cn(
-          "border-y border-border/70 bg-background/95 py-2 shadow-sm backdrop-blur",
-          isPinned ? "fixed inset-x-0 top-0 z-20" : "relative"
-        )}
+        aria-orientation="horizontal"
+        data-testid="stats-section-tablist"
+        onKeyDown={(event) => handleKeyDown(event, activeKey)}
+        className="flex min-w-0 flex-1 flex-nowrap gap-1 overflow-x-auto overflow-y-hidden"
       >
-        <div
-          role="tablist"
-          aria-label="统计区块导航"
-          aria-orientation="horizontal"
-          data-testid="stats-section-tablist"
-          onKeyDown={(event) => handleKeyDown(event, activeKey)}
-          className="flex flex-nowrap gap-1 overflow-x-auto rounded-xl border border-border/70 bg-background p-1"
-        >
-          {STATS_SECTION_TABS.map((tab) => {
-            const isActive = activeKey === tab.key
-            return (
-              <button
-                key={tab.key}
-                ref={(buttonNode) => {
-                  if (buttonNode === null) {
-                    tabRefs.current.delete(tab.key)
-                    return
-                  }
-                  tabRefs.current.set(tab.key, buttonNode)
-                }}
-                type="button"
-                role="tab"
-                id={`stats-section-tab-${tab.key}`}
-                data-testid={`stats-section-tab-${tab.key}`}
-                aria-selected={isActive}
-                aria-controls={STATS_SECTION_IDS[tab.key]}
-                tabIndex={isActive ? 0 : -1}
-                onClick={() => scrollToSection(tab.key)}
-                className={cn(
-                  "shrink-0 cursor-pointer rounded-lg px-3 py-1.5 text-sm whitespace-nowrap transition-colors outline-none focus-visible:ring-2 focus-visible:ring-sky-500/40",
-                  isActive
-                    ? "bg-slate-900 font-medium text-slate-50 dark:bg-slate-100 dark:text-slate-900"
-                    : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
-                )}
-              >
-                {tab.label}
-              </button>
-            )
-          })}
-        </div>
-      </nav>
-    </div>
+        {STATS_SECTION_TABS.map((tab) => {
+          const isActive = activeKey === tab.key
+          return (
+            <button
+              key={tab.key}
+              ref={(buttonNode) => {
+                if (buttonNode === null) {
+                  tabRefs.current.delete(tab.key)
+                  return
+                }
+                tabRefs.current.set(tab.key, buttonNode)
+              }}
+              type="button"
+              role="tab"
+              id={`stats-section-tab-${tab.key}`}
+              data-testid={`stats-section-tab-${tab.key}`}
+              aria-selected={isActive}
+              aria-controls={STATS_SECTION_IDS[tab.key]}
+              tabIndex={isActive ? 0 : -1}
+              onClick={() => scrollToSection(tab.key)}
+              className={consoleTabClassName(isActive)}
+            >
+              {tab.label}
+            </button>
+          )
+        })}
+      </div>
+    </ConsoleSectionTabs>
   )
 }
