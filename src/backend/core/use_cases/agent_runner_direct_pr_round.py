@@ -11,7 +11,7 @@ from backend.core.shared.interfaces.agent_runner import IGitHubClient
 from backend.core.shared.models.agent_runner import IssueSummary
 from backend.core.use_cases.agent_runner_dependencies import parse_direct_pr_marker
 
-_ROUND_MARKER = re.compile(r"<!-- iar:direct-pr-round (\{[^\n]*\}) -->")
+_ROUND_MARKER = re.compile(r"<!-- kc:direct-pr-round (\{[^\n]*\}) -->")
 
 
 class DirectPrRoundError(RuntimeError):
@@ -76,7 +76,7 @@ def _round_body(record: DirectPrRound) -> str:
         f"- Round: `{record.round}`\n"
         f"- Publication: {record.pr_url or 'not confirmed'}\n"
         f"- Handoff complete: {record.handoff_complete}\n\n"
-        f"<!-- iar:direct-pr-round {json.dumps(payload, ensure_ascii=True, sort_keys=True)} -->"
+        f"<!-- kc:direct-pr-round {json.dumps(payload, ensure_ascii=True, sort_keys=True)} -->"
     )
 
 
@@ -95,7 +95,7 @@ def read_direct_pr_round(github_client: IGitHubClient, issue: IssueSummary) -> D
     """
     try:
         entries = github_client.list_issue_comment_entries(
-            issue.number, trusted_only=True, body_contains="<!-- iar:direct-pr-round "
+            issue.number, trusted_only=True, body_contains="<!-- kc:direct-pr-round "
         )
         for comment_id, comment_body in reversed(entries):
             matched = _ROUND_MARKER.search(comment_body)
@@ -187,7 +187,7 @@ def _save_round(github_client: IGitHubClient, record: DirectPrRound) -> DirectPr
         expected_body = _round_body(record)
         github_client.edit_issue_comment(record.comment_id, expected_body)
         entries = github_client.list_issue_comment_entries(
-            record.issue, trusted_only=True, body_contains="<!-- iar:direct-pr-round "
+            record.issue, trusted_only=True, body_contains="<!-- kc:direct-pr-round "
         )
         persisted_body = next(
             (body for comment_id, body in entries if comment_id == record.comment_id), None

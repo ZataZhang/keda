@@ -16,7 +16,7 @@ from backend.engines.agent_runner.repository_gitignore import (  # noqa: F401
     GITIGNORE_BLOCK_HEADER,
     GitignoreSyncOptions,
     GitignoreSyncResult,
-    IAR_GITIGNORE_SECTIONS,
+    GITIGNORE_SECTIONS,
     ensure_gitignore_entries,
 )
 from backend.infrastructure.config.settings import (
@@ -57,7 +57,7 @@ _logger = logging.getLogger(__name__)
 _MAX_SCAN_DEPTH = 4
 
 
-class IARRepositoryNotInitializedError(Exception):
+class RepositoryNotInitializedError(Exception):
     """Raised when a target repository has not run `kc init`."""
 
     def __init__(self, repo_root_path: Path, config_path: Path) -> None:
@@ -83,7 +83,7 @@ class RepositoryLocalConfigExistsError(ValueError):
         )
 
 
-def require_iar_repository_initialized(
+def require_repository_initialized(
     repo_root_path: Path,
     process_runner: SubprocessRunner | None = None,  # noqa: ARG001
 ) -> None:
@@ -101,16 +101,16 @@ def require_iar_repository_initialized(
             symmetry with other repository-local helpers).
 
     Raises:
-        IARRepositoryNotInitializedError: If the repository is not initialized.
+        RepositoryNotInitializedError: If the repository is not initialized.
     """
     config_path = product_identity.effective_repository_config_path(repo_root_path)
     try:
         local_settings = load_agent_runner_local_settings(repo_root_path)
     except ValueError as exc:
-        raise IARRepositoryNotInitializedError(repo_root_path, config_path) from exc
+        raise RepositoryNotInitializedError(repo_root_path, config_path) from exc
 
     if local_settings is None or not local_settings.id:
-        raise IARRepositoryNotInitializedError(repo_root_path, config_path)
+        raise RepositoryNotInitializedError(repo_root_path, config_path)
 
 
 @dataclass(frozen=True)
@@ -180,7 +180,7 @@ TOML_HEADER_COMMENT = """# KedaCode 本地仓库配置
 """
 
 # 生成文件中顶级 section 的展示顺序。
-_IAR_SECTION_ORDER = (
+_CONFIG_SECTION_ORDER = (
     "repository",
     "labels",
     "agents",
@@ -204,7 +204,7 @@ _IAR_SECTION_ORDER = (
 )
 
 # section -> 段前说明注释（中文为主，关键术语保留英文）。
-_IAR_SECTION_COMMENTS: dict[str, str] = {
+_CONFIG_SECTION_COMMENTS: dict[str, str] = {
     "repository": "仓库身份标识（用于多仓库管理时区分不同仓库）",
     "labels": "GitHub labels 状态流转配置",
     "agents": "agent 注册表：每个 agent 的调用形态（bin / 路由标签 / 容器认证 / 四种用途的 argv 与输出协议）",
@@ -233,14 +233,14 @@ _IAR_SECTION_COMMENTS: dict[str, str] = {
 }
 
 # 子表路径 -> 子表说明注释。
-_IAR_SUBTABLE_COMMENTS: dict[str, str] = {
+_CONFIG_SUBTABLE_COMMENTS: dict[str, str] = {
     "deliberation.profiles.architect": "审议角色：架构师，关注系统设计与可维护性",
     "deliberation.profiles.skeptic": "审议角色：质疑者，挑战假设与风险",
     "deliberation.profiles.implementer": "审议角色：实现者，关注可行性与落地步骤",
 }
 
 # 字段路径 -> 字段说明注释（中文为主，关键术语保留英文）。
-_IAR_FIELD_COMMENTS: dict[str, str] = {
+_CONFIG_FIELD_COMMENTS: dict[str, str] = {
     "repository.id": "仓库在 KedaCode 中的唯一标识，通常与远程仓库名一致",
     "repository.enabled": "是否允许 runner 处理该仓库的 Issue",
     "repository.display_name": "管理终端 / 日志中显示的友好名称",
@@ -307,7 +307,7 @@ _IAR_FIELD_COMMENTS: dict[str, str] = {
     "validation.evidence_format_check": "是否逐项检查证据文件格式",
     "validation.parse_evidence_format_with_agent": "是否用 agent 解析 PRD 中的格式要求",
     "validation.language": "证据 prompt 与 PR 评论的固定标签语言，如 zh-CN / en-US",
-    "validation.structured_evidence": "是否要求带 iar:structured-evidence marker 的 Issue 提供 evidence.json manifest",
+    "validation.structured_evidence": "是否要求带 kc:structured-evidence marker 的 Issue 提供 evidence.json manifest",
     "validation.require_negative_control": "是否要求每个结构化证据项提供 negative_control（红→绿判别力,默认开;关掉则回退旧行为）",
     "validation.reexecute_commands": "是否由 keda 复跑每个结构化证据项的 command 以确认其真的通过（默认开;关掉则只信 agent 证据文件）",
     "validation.reexecute_timeout_seconds": "keda 复跑单条命令的超时秒数（默认 300;超时判失败,命令须为自终止的检查）",
@@ -458,7 +458,7 @@ def settings_to_toml_string(settings: AgentRunnerLocalSettings) -> str:
     # Wrap in [agent_runner] to match the repository config structure
     wrapped = {"agent_runner": data}
     toml_body = tomli_w.dumps(wrapped)
-    annotated_body = _annotate_iar_toml(toml_body)
+    annotated_body = _annotate_repository_toml(toml_body)
     return (
         TOML_HEADER_COMMENT
         + "\n"
@@ -468,7 +468,7 @@ def settings_to_toml_string(settings: AgentRunnerLocalSettings) -> str:
     )
 
 
-def _annotate_iar_toml(toml_body: str) -> str:
+def _annotate_repository_toml(toml_body: str) -> str:
     """Inject Chinese comments and reorder sections for readability.
 
     tomli_w does not preserve comments, so we post-process the generated body.
@@ -476,11 +476,11 @@ def _annotate_iar_toml(toml_body: str) -> str:
     section_blocks = _split_top_level_sections(toml_body)
 
     ordered_blocks: list[tuple[str, list[str]]] = []
-    for section_name in _IAR_SECTION_ORDER:
+    for section_name in _CONFIG_SECTION_ORDER:
         if section_name in section_blocks:
             ordered_blocks.append((section_name, section_blocks[section_name]))
     for section_name, block in section_blocks.items():
-        if section_name not in _IAR_SECTION_ORDER:
+        if section_name not in _CONFIG_SECTION_ORDER:
             ordered_blocks.append((section_name, block))
 
     output_lines: list[str] = []
@@ -489,7 +489,7 @@ def _annotate_iar_toml(toml_body: str) -> str:
             block_lines.pop()
         if output_lines and output_lines[-1] != "":
             output_lines.append("")
-        section_comment = _IAR_SECTION_COMMENTS.get(section_name)
+        section_comment = _CONFIG_SECTION_COMMENTS.get(section_name)
         if section_comment:
             output_lines.append(f"# {section_comment}")
 
@@ -498,7 +498,7 @@ def _annotate_iar_toml(toml_body: str) -> str:
             subtable_match = re.match(r"^\[agent_runner\.(.+)\]\s*$", line)
             if subtable_match:
                 current_path = subtable_match.group(1)
-                sub_comment = _IAR_SUBTABLE_COMMENTS.get(current_path)
+                sub_comment = _CONFIG_SUBTABLE_COMMENTS.get(current_path)
                 if sub_comment:
                     output_lines.append(f"# {sub_comment}")
                 output_lines.append(line)
@@ -507,7 +507,7 @@ def _annotate_iar_toml(toml_body: str) -> str:
             key_match = re.match(r"^([A-Za-z0-9_]+)\s*=", line)
             if key_match:
                 dotted_key = f"{current_path}.{key_match.group(1)}"
-                field_comment = _IAR_FIELD_COMMENTS.get(dotted_key)
+                field_comment = _CONFIG_FIELD_COMMENTS.get(dotted_key)
                 if field_comment:
                     output_lines.append(f"# {field_comment}")
             output_lines.append(line)
@@ -1035,7 +1035,7 @@ def _remote_head_branch(
     return None
 
 
-def discover_iar_repositories(
+def discover_repositories(
     *,
     scan_root: Path,
     editor: IRepositoryRegistryEditor,
@@ -1066,7 +1066,7 @@ def discover_iar_repositories(
 
     discovered: dict[str, DiscoveredRepositoryEntry] = {}
     for directory in _walk_directories(resolved_root, _MAX_SCAN_DEPTH):
-        if not _is_iar_git_repository(directory):
+        if not _is_managed_git_repository(directory):
             continue
         local_settings = load_agent_runner_local_settings(directory)
         repo_id = (
@@ -1106,6 +1106,6 @@ def _walk_directories(root: Path, max_depth: int):
             queue.append((child, depth + 1))
 
 
-def _is_iar_git_repository(directory: Path) -> bool:
+def _is_managed_git_repository(directory: Path) -> bool:
     """判断目录是否为带 KedaCode 配置的 git 仓库。"""
     return (directory / ".git").exists() and product_identity.has_repository_config(directory)

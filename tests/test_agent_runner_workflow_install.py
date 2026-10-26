@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from backend.engines.agent_runner.repository_local import (
-    IARRepositoryNotInitializedError,
+    RepositoryNotInitializedError,
 )
 from backend.engines.agent_runner.workflow_install import (
     ExistingFileRefusedError,
@@ -237,9 +237,9 @@ def test_install_workflow_unknown_name_raises(tmp_path: Path) -> None:
 
 
 def test_install_workflow_requires_iar_init(tmp_path: Path) -> None:
-    """Missing ``.kedacode.toml`` must raise ``IARRepositoryNotInitializedError``."""
+    """Missing ``.kedacode.toml`` must raise ``RepositoryNotInitializedError``."""
     fake_runner = _make_fake_runner(tmp_path)
-    with pytest.raises(IARRepositoryNotInitializedError):
+    with pytest.raises(RepositoryNotInitializedError):
         install_workflow(
             WorkflowInstallOptions(cwd=tmp_path, name="preview"),
             process_runner=fake_runner,

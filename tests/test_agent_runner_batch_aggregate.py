@@ -193,7 +193,7 @@ def test_build_total_pr_body_annotates_when_source_pr_missing() -> None:
     )
     # 正文 PRD 集与来源解析结果不一致 → 本地聚合门标注块出现并点名 prd-link；
     # 发布路径会在 aggregate_batch 里先拒绝，这份正文不会带着标注到达 GitHub。
-    assert "iar:aggregate-contract" in body
+    assert "kc:aggregate-contract" in body
     assert "missing=prd-link" in body
     # 用错误的来源 Issue 集去校验同一正文 → 来源 marker 不匹配。
     assert find_aggregate_pr_body_contract_violations(
@@ -249,8 +249,8 @@ def test_same_aggregate_pr_body_text_ignores_markdown_whitespace_only() -> None:
 
 def test_same_aggregate_pr_body_text_keeps_content_difference() -> None:
     """正文内容差异（marker、清单项）仍判为不一致，收尾门不会因此放过漂移。"""
-    generated_body = "<!-- iar:aggregate-pr version=1 issues=101,102 source_prs=301,302 -->\n"
-    stale_body = "<!-- iar:aggregate-pr version=1 issues=101,103 source_prs=301,303 -->\n"
+    generated_body = "<!-- kc:aggregate-pr version=1 issues=101,102 source_prs=301,302 -->\n"
+    stale_body = "<!-- kc:aggregate-pr version=1 issues=101,103 source_prs=301,303 -->\n"
     assert _same_aggregate_pr_body_text(stale_body, generated_body) is False
 
 

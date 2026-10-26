@@ -176,22 +176,25 @@ class TestParseDependencyMarker:
     def test_no_marker_returns_none(self) -> None:
         assert parse_dependency_marker("No markers here") is None
 
+    def test_retired_marker_name_returns_none(self) -> None:
+        assert parse_dependency_marker("<!-- iar:depends-on #42 -->") is None
+
     def test_parses_issue_numbers(self) -> None:
-        body = "<!-- iar:depends-on #42 #99 -->"
+        body = "<!-- kc:depends-on #42 #99 -->"
         result = parse_dependency_marker(body)
         assert result == DependencyDeclaration(issue_numbers=(42, 99))
 
     def test_legacy_group_token_only_returns_none(self) -> None:
-        body = "<!-- iar:depends-on group:alpha group:beta -->"
+        body = "<!-- kc:depends-on group:alpha group:beta -->"
         assert parse_dependency_marker(body) is None
 
     def test_mixed_marker_ignores_group_tokens(self) -> None:
-        body = "<!-- iar:depends-on #7 group:gamma #12 -->"
+        body = "<!-- kc:depends-on #7 group:gamma #12 -->"
         result = parse_dependency_marker(body)
         assert result == DependencyDeclaration(issue_numbers=(7, 12))
 
     def test_multiple_markers(self) -> None:
-        body = "<!-- iar:depends-on #1 -->\n<!-- iar:depends-on #2 -->"
+        body = "<!-- kc:depends-on #1 -->\n<!-- kc:depends-on #2 -->"
         result = parse_dependency_marker(body)
         assert result == DependencyDeclaration(issue_numbers=(1, 2))
 
@@ -206,7 +209,7 @@ class TestFormatDependencyMarker:
         assert format_dependency_marker() == ""
 
     def test_issues_only(self) -> None:
-        assert format_dependency_marker(issue_numbers=(42,)) == "<!-- iar:depends-on #42 -->"
+        assert format_dependency_marker(issue_numbers=(42,)) == "<!-- kc:depends-on #42 -->"
 
 
 # ---------------------------------------------------------------------------
@@ -225,8 +228,8 @@ class TestCommentDeduplication:
 
     def test_parse_latest_dependency_wait_marker(self) -> None:
         comments = [
-            "old\n<!-- iar:dependency-wait blockers=abc123 -->",
-            "new\n<!-- iar:dependency-wait blockers=def456 -->",
+            "old\n<!-- kc:dependency-wait blockers=abc123 -->",
+            "new\n<!-- kc:dependency-wait blockers=def456 -->",
         ]
         assert parse_latest_dependency_wait_marker(comments) == "def456"
 
@@ -435,7 +438,7 @@ class TestWaitingSideEffects:
         from tests.conftest import FakeGitHubClient
 
         client = FakeGitHubClient()
-        client.comment_issue(1, "first\n<!-- iar:dependency-wait blockers=abc -->")
+        client.comment_issue(1, "first\n<!-- kc:dependency-wait blockers=abc -->")
         issue = IssueSummary(number=1, title="T", url="", body="", labels=())
         # Same blockers as stored in comment above
         verdict = DependencyVerdict(
@@ -507,7 +510,7 @@ class TestBuildWaitingComment:
         comment = build_waiting_comment(verdict, 1, LabelConfig())
         assert "Issue #42" in comment
         assert "Issue #43" in comment
-        assert "iar:dependency-wait" in comment
+        assert "kc:dependency-wait" in comment
 
     def test_upstream_failure_warning(self) -> None:
         verdict = DependencyVerdict(
@@ -597,7 +600,7 @@ class TestResolveDependencies:
         assert issues == (1, 2)
 
     def test_explicit_marker_compat_ignores_group_token(self) -> None:
-        prd = "<!-- iar:depends-on #5 group:g3 -->\n# PRD\n"
+        prd = "<!-- kc:depends-on #5 group:g3 -->\n# PRD\n"
         gate, issues, sequence = _resolve_dependencies(prd)
         assert issues == (5,)
 
@@ -649,7 +652,7 @@ class TestResolveDependencies:
         assert issues == (42,)
 
     def test_explicit_stack_marker_preserved_without_sequence_field(self) -> None:
-        prd = '<!-- iar:depends-on #5 mode="stack" -->\n# PRD\n'
+        prd = '<!-- kc:depends-on #5 mode="stack" -->\n# PRD\n'
         gate, issues, sequence = _resolve_dependencies(prd)
         assert issues == (5,)
         assert sequence == "stack"

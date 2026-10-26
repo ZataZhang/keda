@@ -465,7 +465,7 @@ class BacklogCiDelivery:
     """Backlog PRD 的 CI/CD 交付尾段投影（运行时派生，不持久化）。
 
     Console API 与 ``kc backlog ci status --json`` 共用同一份 DTO 结构；
-    轮次事实源是 GitHub PR head SHA 与既有 ``iar:event`` marker。
+    轮次事实源是 GitHub PR head SHA 与既有 ``kc:event`` marker。
     """
 
     prd_path: str
@@ -480,7 +480,7 @@ class BacklogCiDelivery:
     #: 修复轮数上限（复用 ``post_pr_supervisor.max_repair_attempts``）。
     max_rounds: int
     problems: tuple[CiCheckProblem, ...]
-    #: 对应 Issue 最新 ``iar:ci-auto-repair-policy`` marker；无 marker 即 inherit。
+    #: 对应 Issue 最新 ``kc:ci-auto-repair-policy`` marker；无 marker 即 inherit。
     stored_policy: CiRepairPolicy
     #: 仓库全局 ``post_pr_supervisor.auto_repair_ci``（fresh 配置值）。
     global_enabled: bool

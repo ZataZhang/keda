@@ -3,7 +3,7 @@
 浏览器拿不到真实绝对路径（``showDirectoryPicker`` 只给不透明 handle，
 ``webkitdirectory`` 只有相对路径），所以「选取仓库路径」必须由后端列举目录。
 本模块只读取目录名与路径，**不返回任何文件内容**，能力范围与既有的仓库扫描
-端点（``discover_iar_repositories``）同级。
+端点（``discover_repositories``）同级。
 """
 
 from __future__ import annotations
@@ -100,7 +100,7 @@ def _describe_directory(
         name=directory.name,
         path=str(directory),
         is_git_repo=(directory / ".git").exists(),
-        has_iar_config=product_identity.has_repository_config(directory),
+        has_repository_config=product_identity.has_repository_config(directory),
         already_registered=str(directory) in registered_paths,
         suggested_repo_id=normalize_repository_id(directory.name),
     )

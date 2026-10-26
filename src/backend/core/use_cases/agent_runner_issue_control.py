@@ -81,8 +81,8 @@ _logger = logging.getLogger(__name__)
 TAKEOVER_ORPHAN_GRACE_SECONDS = 120
 
 #: 交班评论的 hidden marker：语义是"人工接管、无 verdict"，与
-#: ``iar:verifier-verdict`` 互斥——解析器绝不从这条记录推断任何结论。
-VERIFIER_TAKEOVER_MARKER_PREFIX = "<!-- iar:verifier-takeover"
+#: ``kc:verifier-verdict`` 互斥——解析器绝不从这条记录推断任何结论。
+VERIFIER_TAKEOVER_MARKER_PREFIX = "<!-- kc:verifier-takeover"
 
 
 def _utc_now_iso() -> str:

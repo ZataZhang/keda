@@ -80,8 +80,8 @@ def test_missing_or_malformed_marker_fails_safe_to_red() -> None:
     for text in (
         "",
         "no marker here at all",
-        "<!-- iar:verifier-verdict risk=bogus -->",
-        "<!-- iar:verifier-verdict -->",
+        "<!-- kc:verifier-verdict risk=bogus -->",
+        "<!-- kc:verifier-verdict -->",
     ):
         verdict = parse_verifier_verdict(text)
         assert verdict.risk == "red"
@@ -119,7 +119,7 @@ def test_build_verifier_prompt_demands_independence_and_marker() -> None:
     assert "do not assume the builder tested the right thing" in prompt.lower()
     assert "negative control" in prompt.lower()
     assert "demo dedupe --check" in prompt  # real entry injected from the oracle
-    assert "iar:verifier-verdict" in prompt  # how to emit the verdict
+    assert "kc:verifier-verdict" in prompt  # how to emit the verdict
     assert "abc1234" in prompt  # builder commit
     assert _issue().title in prompt
 

@@ -652,7 +652,7 @@ def test_keyboard_interrupt_checkpoints_in_flight_work_before_exit(
 # commit 时发布同源的 Draft PR、把回链固定附到 PR 正文尾部；以及另两类异常
 # （ProviderCapacityError / KeyboardInterrupt）必须零副作用。
 
-_VERDICT_MARKER_RED = "<!-- iar:verifier-verdict risk=red -->"
+_VERDICT_MARKER_RED = "<!-- kc:verifier-verdict risk=red -->"
 
 _VERIFIER_RED_DETAIL = "\n".join(
     [
@@ -751,13 +751,13 @@ def _prepare_exhaustion_handler(
 
 
 def _handoff_comments(fake_client: FakeGitHubClient) -> list[str]:
-    """取出 Issue 上带 ``iar:failure-context`` marker 的评论正文。"""
+    """取出 Issue 上带 ``kc:failure-context`` marker 的评论正文。"""
     return [
         call["body"]
         for call in fake_client.calls
         if call["method"] == "comment_issue"
         and isinstance(call.get("body"), str)
-        and "iar:failure-context" in call["body"]
+        and "kc:failure-context" in call["body"]
     ]
 
 
@@ -820,7 +820,7 @@ def test_exhaustion_writes_failure_context_handoff_and_draft_pr(
     handoff_body = handoff_bodies[0]
     # marker 可被下一轮确定性定位,且带 checkpoint SHA / attempt 数 / 证据目录。
     assert (
-        f"<!-- iar:failure-context checkpoint=a1b2c3d4 attempts=3 "
+        f"<!-- kc:failure-context checkpoint=a1b2c3d4 attempts=3 "
         f"verifier={expected_verifier_state}"
     ) in handoff_body
     assert "evidence=" in handoff_body

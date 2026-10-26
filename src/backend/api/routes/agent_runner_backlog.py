@@ -654,7 +654,7 @@ class UpdateCiPolicyRequest(BaseModel):
 
 @router.patch("/agent-runner/backlog/prds/{encoded_path}/ci-policy")
 def update_backlog_prd_ci_policy(encoded_path: str, request: UpdateCiPolicyRequest) -> dict:
-    """写对应 Issue 的最新 ``iar:ci-auto-repair-policy`` marker 并 fresh 回读。"""
+    """写对应 Issue 的最新 ``kc:ci-auto-repair-policy`` marker 并 fresh 回读。"""
     prd_path = _decode_prd_path(encoded_path)
     _context, prd, github_client, issue_comments, pr_context = _resolve_prd_ci_context(
         request.repo_id, prd_path

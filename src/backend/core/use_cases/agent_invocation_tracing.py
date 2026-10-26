@@ -55,12 +55,12 @@ _logger = logging.getLogger(__name__)
 # 闭集常量（标记文本与结构化字段共用，改这里就是改协议）
 # ---------------------------------------------------------------------------
 
-#: 既有 Issue 日志里的调用开始标记（与 ``[iar-attempt-end]`` 同族，可精确 grep）。
-INVOCATION_START_MARKER = "[iar-invocation-start]"
+#: 既有 Issue 日志里的调用开始标记（与 ``[kc-attempt-end]`` 同族，可精确 grep）。
+INVOCATION_START_MARKER = "[kc-invocation-start]"
 #: 既有 Issue 日志里的调用结束标记。
-INVOCATION_END_MARKER = "[iar-invocation-end]"
+INVOCATION_END_MARKER = "[kc-invocation-end]"
 #: 观测自身降级时写入既有 Issue 日志的覆盖不完整标记。
-INVOCATION_COVERAGE_INCOMPLETE_MARKER = "[iar-invocation-coverage-incomplete]"
+INVOCATION_COVERAGE_INCOMPLETE_MARKER = "[kc-invocation-coverage-incomplete]"
 
 EVENT_INVOCATION_STARTED = "invocation_started"
 EVENT_INVOCATION_FINISHED = "invocation_finished"
@@ -356,7 +356,7 @@ class InvocationTraceContext:
 
 
 _ACTIVE_TRACE_CONTEXT: ContextVar[InvocationTraceContext | None] = ContextVar(
-    "iar_invocation_trace_context", default=None
+    "kc_invocation_trace_context", default=None
 )
 
 

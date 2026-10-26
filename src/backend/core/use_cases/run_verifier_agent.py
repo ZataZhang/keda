@@ -421,7 +421,7 @@ def run_verifier_gate(
     - **yellow** → 记警告并放行,返回 verdict 供调用方在开 PR 后贴警告评论。
     - **green** → 放行,返回 verdict 供调用方在开 PR 后置 ``validation/verifier-passed`` label。
 
-    默认开(``verifier_enabled``)。仅对带 ``iar:structured-evidence`` marker、且要求验证的 issue 生效。
+    默认开(``verifier_enabled``)。仅对带 ``kc:structured-evidence`` marker、且要求验证的 issue 生效。
 
     超时按运行事故处理而不是 verdict:墙钟(``verifier_timeout_seconds``)与静默期
     (``verifier_inactivity_timeout_seconds``)两条线并存,超时不伪造 verdict,而是

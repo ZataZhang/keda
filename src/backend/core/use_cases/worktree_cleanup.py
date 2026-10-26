@@ -8,10 +8,12 @@ from pathlib import Path
 import re
 
 from backend.core.shared.interfaces.agent_runner import IGitHubClient, IProcessRunner
+from backend.core.shared.models.repository_paths import (
+    resolve_managed_worktree_root,
+)
 
 
 DEFAULT_ISSUE_BRANCH_PREFIX = "issue-"
-DEFAULT_WORKTREE_DIR_NAME = ".iar-worktrees"
 
 
 class WorktreeCleanupStatus(str, Enum):
@@ -85,7 +87,7 @@ class WorktreeCleanupResult:
         return sum(1 for branch_result in self.branches if branch_result.status is status)
 
 
-def cleanup_iar_worktrees(
+def cleanup_managed_worktrees(
     request: WorktreeCleanupRequest,
     *,
     github_client: IGitHubClient,
@@ -104,7 +106,7 @@ def cleanup_iar_worktrees(
     managed_worktree_root_path = (
         request.managed_worktree_root_path
         if request.managed_worktree_root_path is not None
-        else repo_path / DEFAULT_WORKTREE_DIR_NAME
+        else resolve_managed_worktree_root(repo_path)
     ).resolve()
 
     _fetch_pruned_remote(repo_path, request.remote, process_runner)

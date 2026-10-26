@@ -416,7 +416,7 @@ def format_failure_context_comment(
         evidence_dir: 该 Issue 的证据目录相对路径，供人自行核对原始诊断。
 
     Returns:
-        以 ``iar:failure-context`` marker 开头的 Markdown 评论正文。
+        以 ``kc:failure-context`` marker 开头的 Markdown 评论正文。
     """
     # Local import: run_verifier_agent 依赖 run_agent_once，而后者又导入本模块，
     # 模块级导入会成环。verdict 的解析沿用既有确定性 parser，不另起一套判定。

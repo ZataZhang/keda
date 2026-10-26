@@ -366,7 +366,7 @@ def _compose_e2e_shell(e2e_command: BrowserE2EVerificationCommand) -> str:
             script_lines.append(f"mkdir -p {shlex.quote(artifact_parent)}")
 
     if e2e_command.app_start:
-        script_lines.append('e2e_app_log=$(mktemp "${TMPDIR:-/tmp}/iar-e2e-app.XXXXXX") || exit 3')
+        script_lines.append('e2e_app_log=$(mktemp "${TMPDIR:-/tmp}/kc-e2e-app.XXXXXX") || exit 3')
         script_lines.append(
             f"bash -lc {shlex.quote(e2e_command.app_start)} "
             '>"$e2e_app_log" 2>&1 < /dev/null & e2e_app_pid=$!'

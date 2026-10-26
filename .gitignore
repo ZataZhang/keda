@@ -69,7 +69,7 @@ Thumbs.db
 
 # Agent runner state (local only)
 .agent-runner/
-# kc runner 会话记录仅保存在本机；纳入版本控制会让 Agent 执行改动工作树，
+# KedaCode runner 会话记录仅保存在本机；纳入版本控制会让 Agent 执行改动工作树，
 # 并导致独立验证的 clean-tree 门禁失败。崩溃恢复与阶段续传需要它保留在本地。
 .iar/agent-runner/
 
@@ -78,25 +78,25 @@ Thumbs.db
 *.toml.tmp
 
 # Realistic Validation evidence packages — local PRD flow (`just ai implement`).
-# Commit the text reports (*.md: verification-plan / evidence-report /
-# verifier-report) and the machine-readable evidence manifest; keep raw
-# artifacts (screenshots, recordings, captured output, large logs) local-only.
-# Same principle as the kc runner's
-# .iar/evidence/: raw evidence never enters code history (binary bloat + secret
+# Commit only the text reports (*.md: verification-plan / evidence-report /
+# verifier-report). Keep the manifest and raw artifacts (screenshots,
+# recordings, captured output, large logs) local-only.
+# Same principle as the KedaCode runner's
+# .iar/evidence/: legacy raw evidence never enters code history (binary bloat + secret
 # leakage in permanent git history). The verifier and check_prd_evidence.sh
 # still run against the local files at implement time.
 tasks/evidence/**
 !tasks/evidence/**/
 !tasks/evidence/**/*.md
-!tasks/evidence/**/evidence.json
 
 # pytest-testmon SQLite cache
 .testmondata*
 
-# >>> iar (managed by `iar init`) >>>
-# IAR-managed git worktrees (host-local)
+# >>> kc (managed by `kc init`) >>>
+# KedaCode-managed git worktrees (host-local)
+.kc-worktrees/
 .iar-worktrees/
-# <<< iar <<<
+# <<< kc <<<
 
 # KedaCode runner local state (memory / skills / decisions / state)
 .kedacode/

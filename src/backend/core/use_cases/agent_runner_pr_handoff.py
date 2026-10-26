@@ -4,7 +4,7 @@ from __future__ import annotations
 
 # Draft PR 正文里指向交接评论的那一段的锚点。有了它，重复耗尽时改写的是同一段而
 # 不是越叠越长；也让"正文只是快照、评论才是事实源"这条边界在 PR 上写明。
-_PR_HANDOFF_REF_MARKER = "<!-- iar:failure-context-ref -->"
+_PR_HANDOFF_REF_MARKER = "<!-- kc:failure-context-ref -->"
 
 
 def _build_pr_handoff_ref_block(

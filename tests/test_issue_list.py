@@ -137,7 +137,7 @@ def test_resolve_targets_with_cwd_autodetect_single_repo() -> None:
     contexts = _resolve_targets_with_cwd_autodetect(
         request,
         cwd=cwd,
-        has_local_iar_repo=lambda c: c == cwd,
+        has_local_kc_repo=lambda c: c == cwd,
         resolve_targets=_fake_resolve,
     )
     assert len(contexts) == 1
@@ -167,7 +167,7 @@ def test_resolve_targets_with_cwd_autodetect_all_registered() -> None:
     _ = _resolve_targets_with_cwd_autodetect(
         request,
         cwd=Path("/tmp"),
-        has_local_iar_repo=lambda _: False,
+        has_local_kc_repo=lambda _: False,
         resolve_targets=_fake_resolve,
     )
     assert requests_seen[0]["all_repositories"] is True
@@ -196,7 +196,7 @@ def test_resolve_targets_with_cwd_autodetect_explicit_repo() -> None:
     _ = _resolve_targets_with_cwd_autodetect(
         request,
         cwd=Path("/work"),
-        has_local_iar_repo=lambda _: True,
+        has_local_kc_repo=lambda _: True,
         resolve_targets=_fake_resolve,
     )
     assert requests_seen[0]["repo_path_override"] == "/other"
@@ -233,7 +233,7 @@ def test_list_issues_with_prs_returns_rows(tmp_path: Path) -> None:
         resolve_targets=_fake_resolve_factory(
             [_make_context("test-repo", repo_path, github_repo="owner/repo")]
         ),
-        has_local_iar_repo=lambda _: True,
+        has_local_kc_repo=lambda _: True,
     )
 
     assert [row.number for row in result.rows] == [1, 2]
@@ -265,7 +265,7 @@ def test_list_issues_with_prs_with_pr_filter(tmp_path: Path) -> None:
         resolve_targets=_fake_resolve_factory(
             [_make_context("test-repo", repo_path, github_repo="owner/repo")]
         ),
-        has_local_iar_repo=lambda _: True,
+        has_local_kc_repo=lambda _: True,
     )
     assert {row.number for row in result.rows} == {1, 2}
 
@@ -290,7 +290,7 @@ def test_list_issues_with_prs_without_pr_filter(tmp_path: Path) -> None:
         resolve_targets=_fake_resolve_factory(
             [_make_context("test-repo", repo_path, github_repo="owner/repo")]
         ),
-        has_local_iar_repo=lambda _: True,
+        has_local_kc_repo=lambda _: True,
     )
     assert [row.number for row in result.rows] == [2]
 
@@ -305,7 +305,7 @@ def test_list_issues_with_prs_state_filter_is_validated(tmp_path: Path) -> None:
             cwd=tmp_path,
             github_client_factory=lambda _: github_client,
             resolve_targets=_fake_resolve_factory([_make_context("test-repo", tmp_path)]),
-            has_local_iar_repo=lambda _: True,
+            has_local_kc_repo=lambda _: True,
         )
 
 
@@ -333,7 +333,7 @@ def test_list_issues_with_prs_partial_failure_isolates_errors(tmp_path: Path) ->
                 _make_context("repo-b", repo_b, github_repo="owner-b/repo-b"),
             ]
         ),
-        has_local_iar_repo=lambda _: False,
+        has_local_kc_repo=lambda _: False,
     )
     assert [row.number for row in result.rows] == [1]
     assert len(result.errors) == 1
@@ -403,7 +403,7 @@ def test_list_issues_with_prs_emits_warn_when_github_repo_missing(
         resolve_targets=_fake_resolve_factory(
             [_make_context("unconfigured", repo_path, github_repo=None)]
         ),
-        has_local_iar_repo=lambda _: True,
+        has_local_kc_repo=lambda _: True,
     )
     assert [row.number for row in result.rows] == [1, 2]
     for row in result.rows:

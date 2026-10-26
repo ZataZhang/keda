@@ -277,7 +277,7 @@ def test_issue_output_routing_end_to_end_log_file_timestamps_agent_lines(
 
     其余路由用例直接喂 sink 裸 chunk，绕过了生产者；这条钉住运营者与 Console
     实际读到的那份产物：agent 流式输出的每个物理行在
-    ``issue-<N>-<ts>.log`` 里行首带 ``[HH:MM:SS]``，而 ``[iar-attempt-end]``
+    ``issue-<N>-<ts>.log`` 里行首带 ``[HH:MM:SS]``，而 ``[kc-attempt-end]``
     终态标记保持裸行——``iar logs --issue --follow`` 靠精确匹配它判断运行
     结束，被前缀污染就会一路跟到空闲兜底才退出。
     """

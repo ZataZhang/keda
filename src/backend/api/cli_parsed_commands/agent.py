@@ -201,7 +201,7 @@ def run_repl_command(ctx: ParsedCommandContext) -> int:
         repo_override=ctx.repo_override,
     )
     for context in contexts:
-        _cli.require_iar_repository_initialized(context.repo_path, ctx.process_runner)
+        _cli.require_repository_initialized(context.repo_path, ctx.process_runner)
     context = require_single_repository_target("repl", contexts)
     _cli._ensure_gh_auth_or_prompt(context.repo_path, ctx.process_runner)
     github_client = _cli.create_github_client(context.repo_path, ctx.process_runner)
@@ -242,7 +242,7 @@ def run_deliberate_command(ctx: ParsedCommandContext) -> int:
         repo_override=ctx.repo_override,
     )
     context = require_single_repository_target("deliberate", contexts)
-    _cli.require_iar_repository_initialized(context.repo_path, ctx.process_runner)
+    _cli.require_repository_initialized(context.repo_path, ctx.process_runner)
     deliberation_settings = context.config.deliberation
     output_dir = ctx.parsed.output or deliberation_settings.default_output_dir
     rounds = (

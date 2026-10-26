@@ -356,12 +356,23 @@ def add_ops_commands(subparsers: argparse._SubParsersAction) -> None:
 
     config_migrate_parser = config_subparsers.add_parser(
         "migrate",
-        help="Move ~/.iar to ~/.kedacode, rename .iar.toml, drop pinned values.",
+        help="Preview or migrate local configuration and GitHub markers.",
     )
     config_migrate_parser.set_defaults(command="config migrate")
-    config_migrate_parser.add_argument(
+    migrate_mode_group = config_migrate_parser.add_mutually_exclusive_group()
+    migrate_mode_group.add_argument(
         "--dry-run",
         action="store_true",
-        help="Show the whole plan (state directory, rename, diff) without writing anything.",
+        help="Preview the migration without writing anything (default).",
+    )
+    migrate_mode_group.add_argument(
+        "--apply",
+        action="store_true",
+        help="Apply the migration after previewing it.",
+    )
+    config_migrate_parser.add_argument(
+        "--include-closed",
+        action="store_true",
+        help="Include closed Issues and PRs in GitHub marker migration.",
     )
     add_common_options(config_migrate_parser)

@@ -157,6 +157,7 @@ class FakeGitHubClient(IGitHubClient):
         self._issue_states: dict[int, str] = {}
         self._issue_title: str | None = None
         self._issue_labels: dict[int, tuple[str, ...]] = {}
+        self._repository_items: list[IssueSummary] = []
         self._rework_prd_issues: list[IssueSummary] = []
         self._prs_by_repo_issue: dict[tuple[str, int], list[PullRequestSummary]] = {}
         self._list_issues_by_label_result: list[IssueSummary] = []
@@ -186,6 +187,28 @@ class FakeGitHubClient(IGitHubClient):
 
     def set_rework_prd_issues(self, issues: list[IssueSummary]) -> None:
         self._rework_prd_issues = issues
+
+    def set_repository_items(self, repository_items: list[IssueSummary]) -> None:
+        """设置显式仓库扫描返回值，用于迁移命令测试。"""
+        self._repository_items = list(repository_items)
+
+    def list_repository_items(self, *, state: str = "open") -> list[IssueSummary]:
+        self.calls.append({"method": "list_repository_items", "state": state})
+        if state == "all":
+            repository_items = list(self._repository_items)
+        else:
+            repository_items = [
+                repository_item
+                for repository_item in self._repository_items
+                if repository_item.state.lower() == state
+            ]
+        return [
+            replace(
+                repository_item,
+                body=self._issue_bodies.get(repository_item.number, repository_item.body),
+            )
+            for repository_item in repository_items
+        ]
 
     def edit_issue_labels(
         self, issue_number: int, *, add: Sequence[str] = (), remove: Sequence[str] = ()
@@ -343,7 +366,12 @@ class FakeGitHubClient(IGitHubClient):
         return list(self._issue_comments.get(issue_number, []))
 
     def list_issue_comment_entries(
-        self, issue_number: int, *, trusted_only: bool = False, body_contains: str | None = None
+        self,
+        issue_number: int,
+        *,
+        trusted_only: bool = False,
+        body_contains: str | None = None,
+        require_success: bool = False,
     ) -> list[tuple[int, str]]:
         """返回已授权测试 fixture 的评论，权限判定由真实 adapter 测试覆盖。
 

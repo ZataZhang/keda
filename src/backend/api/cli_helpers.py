@@ -31,9 +31,9 @@ from backend.core.use_cases.agent_runner_factory import (
     resolve_repository_targets,
 )
 from backend.core.use_cases.agent_runner_repository_local import (
-    IARRepositoryNotInitializedError,
+    RepositoryNotInitializedError,
     detect_git_repository_root,
-    require_iar_repository_initialized,
+    require_repository_initialized,
 )
 from backend.core.use_cases.worktree_cleanup import (
     WorktreeCleanupResult,
@@ -259,8 +259,8 @@ def _resolve_default_daemon_target() -> _DefaultDaemonTarget:
     if match.is_unique_enabled:
         assert match.matched_repo_id is not None  # noqa: S101
         try:
-            require_iar_repository_initialized(cwd_git_root)
-        except IARRepositoryNotInitializedError:
+            require_repository_initialized(cwd_git_root)
+        except RepositoryNotInitializedError:
             return _DefaultDaemonTarget(
                 repo_id=None,
                 error=(
@@ -320,7 +320,7 @@ def _create_run_history_store_or_none():
 
 
 def _handle_not_initialized_error(
-    exc: IARRepositoryNotInitializedError, *, fmt: str = OUTPUT_FORMAT_TABLE
+    exc: RepositoryNotInitializedError, *, fmt: str = OUTPUT_FORMAT_TABLE
 ) -> int:
     """Print a friendly error and suggest running `kc init`.
 

@@ -1,7 +1,7 @@
 # Roadmap
 
 > 本文件是项目的**战略路线图**（方向、里程碑、边界）。管理终端里的 **Backlog**
-> 页面（`/app/backlog`、`iar backlog`、`/api/v1/agent-runner/backlog/*`）是执行侧的
+> 页面（`/app/backlog`、`kc backlog`、`/api/v1/agent-runner/backlog/*`）是执行侧的
 > PRD 待办队列工作台，二者不是同一事物；下文里程碑名中的 "Roadmap" 均指该功能在
 > 正名为 Backlog 之前的历史名称。
 
@@ -31,14 +31,14 @@
 
 ### Completed
 
-- **CLI 基础能力已落地**：`iar init`、`iar labels sync`、`iar issue-from-prd`、`iar run-once`、`iar daemon`、`iar review-once`、`iar review-daemon`、`iar recover-publish`、`iar deliberate` 和 `iar worktree` 已接入项目脚本，并通过 `.iar.toml`、`config.toml` 与环境变量配置。
-- **仓库本地配置已落地**：`iar init` 能在目标仓库生成 `.iar.toml`，全局 `config.toml` 主要保留默认值、环境级设置和 legacy repository registry。
+- **CLI 基础能力已落地**：`kc init`、`kc labels sync`、`kc issue-from-prd`、`kc run-once`、`kc daemon`、`kc review-once`、`kc review-daemon`、`kc recover-publish`、`kc deliberate` 和 `kc worktree` 已接入项目脚本，并通过 `.kedacode.toml`、`config.toml` 与环境变量配置。
+- **仓库本地配置已落地**：`kc init` 能在目标仓库生成 `.kedacode.toml`，全局 `config.toml` 主要保留默认值、环境级设置和 legacy repository registry。
 - **人工准入队列已落地**：runner 只处理带有 `agent/ready` label 的代码任务，不会主动挑选未标记任务；支持 `agent/codex`、`agent/claude`、`agent/kimi` 等 agent 路由 label。
 - **标准 label 流转已落地**：支持同步和使用 `agent/ready`、`agent/running`、`agent/supervising`、`agent/automated-review-passed`、`agent/failed`、`agent/blocked` 等队列状态；`human/awaiting-review` 独立标记仍需人工审阅或验收的 Issue。
 - **PRD 到 Issue 的发布链路已落地**：`issue-from-prd` 能从 PRD 创建 GitHub Issue、回写 Issue URL，并支持 `--publish-prd` 在 ready 前提交和推送目标 PRD 文件；不带 `--publish-prd` 的 `--ready` 交互路径会延迟添加 ready label，避免 PRD 尚未发布时被 runner 领取。
 - **多仓库目标解析已落地**：当前目录、`--repo`、`--repo-id` 和 `--all` 均可解析目标仓库；多仓库 registry 继续兼容，但未指定目标时默认处理当前 Git 仓库，不再隐式轮询所有 enabled registry entries。
 - **隔离 worktree 执行链路已落地**：`run-once` 能领取 ready issue、创建或复用 worktree、选择 agent、运行 agent、执行验证、推送分支并创建 Draft PR。
-- **内置 worktree 管理已落地**：`iar worktree create/path/remove` 统一管理 `.iar-worktrees/<branch>`，新 `iar init` 默认使用内置命令，`create_or_reuse_worktree` 会在返回前校验路径存在并输出三段命令诊断。
+- **内置 worktree 管理已落地**：`kc worktree create/path/remove` 统一管理 `.kc-worktrees/<branch>`，新 `kc init` 默认使用内置命令，`create_or_reuse_worktree` 会在返回前校验路径存在并输出三段命令诊断。
 - **受限提交代理已落地**：agent 不直接 `git add` / `git commit`，而是写入 `.agent-runner/commit-request.json`，由 runner 在 host 侧完成受控提交。
 - **本地验证和失败恢复已部分落地**：runner 支持配置化验证命令、失败输出摘要、有限 recovery loop、Claude stream-json 前台过滤和 recovery retry delay；commit request、验证失败、agent CLI 异常和 pre-commit 失败等可恢复错误会进入修复循环。
 - **pre-commit 验证命令已落地**：runner 在 commit 阶段新增 `runner.pre_commit_verification_command`，与既有 `runner.verification_commands` 解耦；记忆/技能晋升与 verifier 阶段不经过该命令。
@@ -48,26 +48,26 @@
 - **review daemon 宽上下文检测已落地**：`review-once` / `review-daemon` 能扫描 `agent/supervising` 和 `agent/automated-review-passed` Issue，并基于 head/base、CI checks、mergeability、Issue comments 和 PR comments 变化重新运行 supervisor cycle；supervisor 自写评论不会触发无限自循环，中断的 supervising rework marker 可在后续 review pass 恢复。
 - **rebase 冲突 agent 解决基础能力已落地**：post-PR supervisor 的 rebase 路径遇到冲突时可调用 agent 处理冲突、运行验证并用 `--force-with-lease` 推送。
 - **AI 生成 Issue / PR 内容已落地**：`[agent_runner.generated_content]` 支持 template 和只读 agent 两种模式，并对 Issue 的 PRD anchor 与 PR 的 `Closes #...` anchor 做 fallback 校验。
-- **只读多 agent 合议基础能力已落地**：`iar deliberate` 能运行 architect / skeptic / implementer 等 profile，输出 event stream、transcript、result、session metadata 和隔离 workspace 原始输出。
-- **Issue 依赖门禁已落地**：PRD `Delivery Dependencies` 小节在 `iar issue create` 时被物化为 `iar:depends-on` marker；runner 领取 `agent/ready` Issue 前实时判定依赖满足状态，未满足时叠加 `agent/waiting` label 并写去重 comment；仅支持 Issue 编号依赖，上游 failed/blocked 点名提示。
+- **只读多 agent 合议基础能力已落地**：`kc deliberate` 能运行 architect / skeptic / implementer 等 profile，输出 event stream、transcript、result、session metadata 和隔离 workspace 原始输出。
+- **Issue 依赖门禁已落地**：PRD `Delivery Dependencies` 小节在 `kc issue create` 时被物化为 `kc:depends-on` marker；runner 领取 `agent/ready` Issue 前实时判定依赖满足状态，未满足时叠加 `agent/waiting` label 并写去重 comment；仅支持 Issue 编号依赖，上游 failed/blocked 点名提示。
 - **Agent Runner 记忆持久化已落地**：runner 启动时检索长期记忆 / 草稿 / 已晋升 skill，短期记忆写入 worktree 局部目录、问题关闭后清理；skill 草稿按 usage_count 自动晋升阈值（默认 3）。
 - **Agent Runner 记忆锚点稳定化已落地**：所有记忆目录在 `factory` 构建 `RepositoryRunContext` 时被一次性绝对化到目标仓库主检出根，跨 worktree / 跨 Issue 持久化真实生效；共享目录写入采用 tmp + `os.replace` 原子落盘，并发场景 last-write-wins 不产生半写文件；原 PRD 验收降级为"同目录内部函数调用"的失真场景已被纠正，证据脚本强制 `git worktree add` 创建两个真实副本。
 - **`api → engines` 直连已迁移回 `core` 编排层**：`src/backend/api/` 对 11 个 `engines/agent_runner/` 能力的直连 import 全部清零，业务类能力在 `core/use_cases/` 补薄 facade 用例或复用既有用例；`live_terminal` / `runner_live_view` 等呈现模块从 engines 迁入 `api/`；`hooks/shared/check_architecture.py` 的 `FORBIDDEN_IMPORTS["api"]` 恢复严格态 `["infrastructure", "engines"]` 并稳定通过 `just lint --full`；`CLAUDE.md` 与 `docs/ai-standards/architecture.md`、`docs/architecture/system-design.md` 关于 `api/` 依赖方向的表述三处一致。
 - **原生执行器入口与按需项目预览已落地**：TTY 下裸 `kc` 即 `kc session`——KC 只解析默认执行器、核对随包 operator skill、投递 bootstrap 后把终端交出去，并**原样转发 provider 退出码**（非 TTY 回落帮助且退出 1，管道/CI 不会把失败读成成功）；`kc preview start|status|stop` 承载按需预览，argv 必须是精确参数数组（不经 `sh -c`），ready 地址主机限定回环闭集且非回环是**加载期错误**，只终止 KC 自己登记的进程组。隧道、外部预览平台、以及"用模型猜用户是否想要预览"仍是明确非目标（PRD `P1-FEAT-20261009-123512`）。
 - **停滞监督已落地（默认开启）**：`[agent_runner.stall_supervisor]` 为活跃 attempt 起一个只读 observer，按现场指纹（HEAD/branch/status/diff/调用终态数/最近事件时间，**刻意不含 stdout**）判定疑似停滞，请模型在 `progress / blocked / stalled / uncertain` 闭集里下一次结论；只有 `stalled` 且摘要与证据齐全、且处置前现场与进程归属复核通过，才终止该进程组并把 `AgentStallCancelledError` 交回既有失败分类与恢复阶梯——不新增恢复路径、不改标签。结论解析容忍中英键名、markdown/表格/JSON/换行续写与 provider 追加字段（两个线上误报：追加字段解析失败、三字段齐全仍判 uncertain），容错只到"读法"为止，取值仍落闭集（PRD `P1-FEAT-20261009-123512`，含 P2 复盘）。
 - **文档与测试基础已落地**：已有 Agent Runner 使用指南、配置说明、架构规范、归档 PRD、pytest 覆盖和 `just test` 验证入口。
-- **包管理器分发链路已落地**：PyPI 分发包定名 `kedacode`（命令名仍是 `iar`，避免与 CNCF KEDA 撞名），发布走"tag 构建 draft release → 人工正式发布 → OIDC Trusted Publishing 上传 PyPI → 自动更新 Homebrew tap"两步走；用户侧三条等价入口 `brew install ZataZhang/tap/kedacode`、`uv tool install kedacode` / `pipx install kedacode`、`curl -fsSL .../install.sh | bash`（`--source auto|pypi|tarball`，pypi 来源失败不静默回退）。公开分发仍不提供原生安装包：未签名/公证的 `.app` 不适合公开分发；本机自用的菜单栏 App 已由 PRD `P1-FEAT-20260913-204531` 单独实现，不改变 PyPI 与 Homebrew tap 链路。
+- **包管理器分发链路已落地**：PyPI 分发包与 CLI 命令定名 `kedacode` / `kc`，发布走"tag 构建 draft release → 人工正式发布 → OIDC Trusted Publishing 上传 PyPI → 自动更新 Homebrew tap"两步走；用户侧三条等价入口 `brew install ZataZhang/tap/kedacode`、`uv tool install kedacode` / `pipx install kedacode`、`curl -fsSL .../install.sh | bash`（`--source auto|pypi|tarball`，pypi 来源失败不静默回退）。公开分发仍不提供原生安装包：未签名/公证的 `.app` 不适合公开分发；本机自用的菜单栏 App 已由 PRD `P1-FEAT-20260913-204531` 单独实现，不改变 PyPI 与 Homebrew tap 链路。
 
 ### Partially Completed
 
 - **交互终端能力**：裸 `kc` 原生执行器入口、`kc repl`、`kc preview` 与少量交互式提示已具备，前端仍是基础结构；但还没有完整的 issue 浏览、任务选择、状态追踪和人工介入终端体验。
 - **自动恢复能力**：执行、验证、提交请求、已有本地 commit 发布恢复、repair/rebase 已有基础闭环；supervisor-owned rework marker 可留在 supervising 并续跑；发布恢复后重新进入 supervisor 的安全闭环、旧 runner-owned CI rework 状态恢复、blocked/forbidden resolution、rebase detached HEAD guard 仍待补齐。
-- **可观测性**：终端前台输出、Issue comment、`iar:event` marker、合议日志、review-daemon cursor 和健康端点已具备；还缺少面向 operator 的统一监控面板、异常聚合和可审计时间线视图。
+- **可观测性**：终端前台输出、Issue comment、`kc:event` marker、合议日志、review-daemon cursor 和健康端点已具备；还缺少面向 operator 的统一监控面板、异常聚合和可审计时间线视图。
 - **review 能力**：pre-push review、post-PR supervisor、宽上下文 review-daemon、独立 verifier gate 已有闭环；高风险 finding 的稳定阻断规则、PR 正文 schema 校验和部分 supervisor 安全边界仍需补齐。
 - **PR 分支维护能力**：supervisor 可在 `agent/supervising` 内请求并执行现有 PR branch repair/rebase/resolve-conflict，review-daemon 可感知 base、checks、comment 和 mergeability 变化；detached HEAD rebase 中间态识别、发布恢复后的 supervisor 闭环和旧 runner-owned CI rework 状态恢复仍不完整。
 - **前端能力**：已有基础前端结构和页面骨架；面向 agent runner 的可用操作台尚未完成。
 - **Issue-first 能力**：PRD -> Issue 已完成；**任意 Issue（含无 PRD）可执行**的运行侧路径已具备，并已由 `P1-FEAT-20261006-122336` 完成首次真实端到端实证（Issue #216 → Draft PR #217，待人工验收）；Issue -> PRD / PRD rewrite / PRD review deliberation 作为**按需**能力仍在 pending PRD 中（不再是执行前置）。
-- **Autopilot fast-lane（产品仓"打开开关即无人值守"能力族）**：原三件中已交付两件——**合并队列快速档**（`P1-FEAT-20260703-105322`，已归档：`[autopilot]` + `safety.auto_merge` 双开关门控，verifier 绿灯 → 自动签核 → rebase 最新 base → 全量验证重跑 → 禁改路径终扫 → squash 合并，按 Issue 号 FIFO 串行）与 **roadmap 持续调度**（`P1-FEAT-20260703-105330`，已归档：daemon 内对账 + 补位 + 发现式入队，`iar roadmap advance [--dry-run]` 一次性入口）。第三件"执行前 re-grounding 与触碰面避让"已**取消独立阶段、取消 agent 侧触碰面预测、取消并行撞车避让**，收缩为默认 `execution` 提示模板内置的 `PRD map check` 核验指令并交付（`P1-FEAT-20260703-105340`；形态见 M2）。仍未完成的只剩 fast-lane 的发布说明（`auto_merge` 语义已从死开关激活，需显式提示升级影响）。
+- **Autopilot fast-lane（产品仓"打开开关即无人值守"能力族）**：原三件中已交付两件——**合并队列快速档**（`P1-FEAT-20260703-105322`，已归档：`[autopilot]` + `safety.auto_merge` 双开关门控，verifier 绿灯 → 自动签核 → rebase 最新 base → 全量验证重跑 → 禁改路径终扫 → squash 合并，按 Issue 号 FIFO 串行）与 **roadmap 持续调度**（`P1-FEAT-20260703-105330`，已归档：daemon 内对账 + 补位 + 发现式入队，`kc roadmap advance [--dry-run]` 一次性入口）。第三件"执行前 re-grounding 与触碰面避让"已**取消独立阶段、取消 agent 侧触碰面预测、取消并行撞车避让**，收缩为默认 `execution` 提示模板内置的 `PRD map check` 核验指令并交付（`P1-FEAT-20260703-105340`；形态见 M2）。仍未完成的只剩 fast-lane 的发布说明（`auto_merge` 语义已从死开关激活，需显式提示升级影响）。
 
 ### Not Completed
 
@@ -94,9 +94,9 @@
 - **事实依据**：代码中从未实现这条强制链——全仓检索 `intake` / `needs-prd` / `requires_prd` 零命中；所有 PRD 相关门禁（交付门、PR body 契约、证据门禁、最终复核）都是「有 PRD 锚点才生效，没有即提前返回」；独立 verifier 的意图来源本就是 Issue body。**撤销边界是让文档与实现对齐，不是放宽一个真实存在的门禁。** 撤销前的状态是「文档承诺了一个代码里不存在的保护」，比明确放开更危险。
 - **未验证项（已在 PRD 中登记）**：无 PRD 的 Issue 能跑，此前只有单元测试与代码阅读支撑，从未在真实生产 run 上验证过（账本中 29 条空 `prd_path` 记录全部来自测试夹具）。首次真实端到端验证是承接 PRD 的首要交付。
 - **新增 `--direct-pr` 档位（同一 PRD）**：实测确认 `--fast-merge` **不等于**「agent 干完就出 PR」——它之后仍挂着一个默认开启的 `pre_pr_review`（第二个 agent，最多 2 轮、单轮 1800s，且能改代码再 push）与两处会打回 agent 的验证命令。`--direct-pr` 让执行 agent 结束后**只剩机械步骤**（runner 受控提交 → push → 建 Draft PR），把门禁从 runner 侧转移到 PR 上的 CI。**代价已显式接受**：runner 侧不再有任何质量检查（可推出连测试都不过的 PR），唯一门禁是该仓库的 CI。该档位刻意限定为只对**无 PRD 锚点**的 Issue 有效，且与 `--fast-merge` 互斥；`--fast-merge` 的既有行为逐字不变。
-- **准入规则调整（同一 PRD）**：`agent/ready` 从「唯一准入」收窄为「**守护进程自主挑选的准入**」——人的显式定向（`iar run --issue N` / PRD 路径）不再要求该标记。这疏通了一条此前不存在的能力：「**我想让我这台机器跑，别被别的机器抢走**」——不打标记、直接显式执行，零竞争（此前只能「打标记 + 抢」，而守护进程默认 120 秒轮询，人抢不过）。**随之必须补一处并发正确性**：显式定向不再要求标记后，领取时的原子性成为唯一防双跑机制，而首次领取当前是裸的 read-modify-write（`agent_runner_workflow.py` 无回读校验），两个并发领取者可双跑同一 Issue —— 本次补真 CAS（`R3`，需可执行负控）。同时显式定向到不可领取状态（被他人持有 / blocked 无解除标记 / 不存在）改为报明确错误而非静默成功。
-- **daemon 互斥收窄（同一 PRD 同一条决策）**：`iar run` 与正在运行的本机守护进程**不再互斥**——现状是本机有守护进程在跑时任何 `iar run` 都被拒绝（CONFLICT，要求 `--takeover` 先停掉守护进程），这让上一条的「零竞争路径」实际被堵死。互斥收窄为**只挡队列轮询**（`--all-ready` / 无显式 target）：显式单目标与守护进程共存，各跑各的 Issue（工作树按 Issue 隔离；同仓多 Issue 并行本就是守护进程的既有能力，线程池）。**同目标的排他因此完全落在首次领取 CAS 上**，故该收窄必须与 CAS 同批或更晚落地。`--takeover` 语义不变（仍用于显式停守护进程）。
-- 承接 PRD：`P1-FEAT-20261006-122336`（任意 Issue 可执行；含首次真实验证、`iar issue create --from-prompt` 入口、`--direct-pr` 档位、以及 daemon 互斥收窄）。
+- **准入规则调整（同一 PRD）**：`agent/ready` 从「唯一准入」收窄为「**守护进程自主挑选的准入**」——人的显式定向（`kc run --issue N` / PRD 路径）不再要求该标记。这疏通了一条此前不存在的能力：「**我想让我这台机器跑，别被别的机器抢走**」——不打标记、直接显式执行，零竞争（此前只能「打标记 + 抢」，而守护进程默认 120 秒轮询，人抢不过）。**随之必须补一处并发正确性**：显式定向不再要求标记后，领取时的原子性成为唯一防双跑机制，而首次领取当前是裸的 read-modify-write（`agent_runner_workflow.py` 无回读校验），两个并发领取者可双跑同一 Issue —— 本次补真 CAS（`R3`，需可执行负控）。同时显式定向到不可领取状态（被他人持有 / blocked 无解除标记 / 不存在）改为报明确错误而非静默成功。
+- **daemon 互斥收窄（同一 PRD 同一条决策）**：`kc run` 与正在运行的本机守护进程**不再互斥**——现状是本机有守护进程在跑时任何 `kc run` 都被拒绝（CONFLICT，要求 `--takeover` 先停掉守护进程），这让上一条的「零竞争路径」实际被堵死。互斥收窄为**只挡队列轮询**（`--all-ready` / 无显式 target）：显式单目标与守护进程共存，各跑各的 Issue（工作树按 Issue 隔离；同仓多 Issue 并行本就是守护进程的既有能力，线程池）。**同目标的排他因此完全落在首次领取 CAS 上**，故该收窄必须与 CAS 同批或更晚落地。`--takeover` 语义不变（仍用于显式停守护进程）。
+- 承接 PRD：`P1-FEAT-20261006-122336`（任意 Issue 可执行；含首次真实验证、`kc issue create --from-prompt` 入口、`--direct-pr` 档位、以及 daemon 互斥收窄）。
 
 ### 2026-10-14 验证门禁归用户配置，KedaCode 提供生命周期
 
@@ -135,28 +135,28 @@
 
 ### 自 2026-09-17 快照以来已交付
 
-- **Roadmap 单 PRD 控制、归档证据与仓库级 Autopilot 开关**（#148，`P1-FEAT-20260916-122645` 已归档）：统一右侧详情容器（`prd-detail.tsx` 的 `additionalTabs`）与受限 `.iar.toml` writer 落地。
+- **Roadmap 单 PRD 控制、归档证据与仓库级 Autopilot 开关**（#148，`P1-FEAT-20260916-122645` 已归档）：统一右侧详情容器（`prd-detail.tsx` 的 `additionalTabs`）与受限 `.kedacode.toml` writer 落地。
 - **PRD 生命周期台账与可观测 UI**（#153）：console SQLite schema v5（`prd_lifecycle_runs` / `prd_lifecycle_events`）+ `frontend-public` 执行过程 tab 与 Stats 生命周期口径。
 - **Operator Skill 与可预期队列**（`P1-FEAT-20260924-020856` 已归档）。
 - **Post-PR CI 决策契约（Agent-led）**（`P1-BUG-20260924-100212` 已归档）：`checks_state`/`checks_summary` 作为 Agent 观察事实输入，不再按聚合状态强制改写 Supervisor 动作，仅保留 `mergeable=false` 等非 CI 确定性安全门。
 - **Roadmap CI/CD 监控与可选自动修复**（`P1-FEAT-20260916-134008` 已归档）：前置契约已满足后交付。
-- **`iar` 的 Agent 机读契约**（`P1-FEAT-20260930-141135` 已归档）：`--output json` / 语义退出码 / `iar schema` 运行时自省。
+- **KedaCode CLI 的 Agent 机读契约**（`P1-FEAT-20260930-141135` 已归档）：`--output json` / 语义退出码 / `kc schema` 运行时自省。
 - **浏览器 E2E 验证工具链**（`P1-FEAT-20260930-225500` 已归档）。
 - **Daemon 崩溃对账与 Agent 会话续传**（`P1-FEAT-20260930-225000`，PR #210 已合并 `c4792fba`）：Phase -1 对账 + 三出口处置 + 声明式会话续传。
-- **`iar run --fast-merge` 快速通道**（`P1-FEAT-20261005-215933`，PR #208 已合并 `2b7cae4c`）：per-run 旗标，builder 提交后旁路 Phase 4.5 的 rv_reexec 与独立 verifier。
+- **`kc run --fast-merge` 快速通道**（`P1-FEAT-20261005-215933`，PR #208 已合并 `2b7cae4c`）：per-run 旗标，builder 提交后旁路 Phase 4.5 的 rv_reexec 与独立 verifier。
 - **行数红线清零**（PR #212 已合并 `866ddabc`）：4 个超 1000 非空行的源文件拆分完毕，`main` 的 CI 恢复绿色。
 
 ### 当前 pending / hold
 
 **pending（待执行）**
 
-1. `P1-FEAT-20261006-122336`（**任意 Issue 可执行**）：执行侧已随本 PR 交付——首次真实端到端实证（Issue #216 → Draft PR #217）、文档边界撤销、`iar issue create --from-prompt` 与 `--direct-pr` 档位、daemon 互斥收窄与首次领取 CAS 全部落地；待人工验收与合并后从本清单移除。归入 M1 与 M8。
+1. `P1-FEAT-20261006-122336`（**任意 Issue 可执行**）：执行侧已随本 PR 交付——首次真实端到端实证（Issue #216 → Draft PR #217）、文档边界撤销、`kc issue create --from-prompt` 与 `--direct-pr` 档位、daemon 互斥收窄与首次领取 CAS 全部落地；待人工验收与合并后从本清单移除。归入 M1 与 M8。
 2. `P1-FEAT-20261006-013227`（Stats 页 Token 用量补按 PRD 维度汇总）：执行侧已交付为 Draft PR #211，待人工验收与合并后从本清单移除。
 3. `P1-FEAT-20260913-204531`（Tauri 菜单栏状态面板）：菜单栏 App 与固定悬浮窗已实现，待真实 UI 交互验收。
 
 **hold（已成形但暂缓，不参与排期）**
 
-- `P1-FEAT-20261006-024434`（`iar run --quick` 轻量档）：2026-10-06 移入。方向被「任意 Issue 可执行」取代——它优化「出了 PRD 之后跑得慢」，而后者消除「必须出 PRD」这个前提；其识别出的行数债已由 PR #212 承接。
+- `P1-FEAT-20261006-024434`（`kc run --quick` 轻量档）：2026-10-06 移入。方向被「任意 Issue 可执行」取代——它优化「出了 PRD 之后跑得慢」，而后者消除「必须出 PRD」这个前提；其识别出的行数债已由 PR #212 承接。
 
 ### 已知漂移（下次大更新时校准）
 
@@ -164,15 +164,15 @@
 
 ## Target Workflow
 
-1. 用户可以直接创建 GitHub Issue，也可以先写 PRD 后通过 `iar issue-from-prd` 发布 Issue；直接创建 Issue 时，用户应尽量写清需求、问题、复现路径、期望结果和约束，并可上传图片附件补充说明。
-2. `iar` 读取 Issue 正文、评论和图片附件等上下文，判断任务是否已有足够信息进入后续流程。
+1. 用户可以直接创建 GitHub Issue，也可以先写 PRD 后通过 `kc issue-from-prd` 发布 Issue；直接创建 Issue 时，用户应尽量写清需求、问题、复现路径、期望结果和约束，并可上传图片附件补充说明。
+2. `kc` 读取 Issue 正文、评论和图片附件等上下文，判断任务是否已有足够信息进入后续流程。
 3. 如果 Issue 描述不清楚，AI 可以在 Issue 中反问用户并等待补充。澄清是**可选增强**，不是执行前置——是否在信息不完整时开工，由打 `agent/ready` 的人决定，AI 不代劳。
 4. 如果 Issue 需求已足够明确（无论是否关联 PRD），管理员通过添加 `agent/ready` label（可结合 `agent/claude`、`agent/codex` 或 `agent/kimi` 指定终端）标记 AI 介入。
-5. 如果 Issue 没有关联 PRD，`iar` 可以（但不强制）把它视为待澄清候选：需求足够清楚时，人工直接打 `agent/ready` 即可进入执行；需求含糊或涉及多方决策时，才走需求澄清与合议流程。**没有 PRD 不构成执行障碍**。
-6. （按需）`iar` 调用多 agent 合议能力，对 Issue 背景、目标、风险、实现边界、验收标准和图片上下文进行讨论；公开 transcript、synthesis 和建议动作写回 Issue comment。
+5. 如果 Issue 没有关联 PRD，`kc` 可以（但不强制）把它视为待澄清候选：需求足够清楚时，人工直接打 `agent/ready` 即可进入执行；需求含糊或涉及多方决策时，才走需求澄清与合议流程。**没有 PRD 不构成执行障碍**。
+6. （按需）`kc` 调用多 agent 合议能力，对 Issue 背景、目标、风险、实现边界、验收标准和图片上下文进行讨论；公开 transcript、synthesis 和建议动作写回 Issue comment。
 7. 管理员在 Issue 中决定是否需要创建 PRD。**选择「不需要 PRD」是正常路径**（简单的需求直接打 `agent/ready` 即可执行），不是例外处理。
-8. 管理员决定创建 PRD 后，`iar` 根据 Issue 与合议结果生成 PRD 草稿，并把草稿内容或草稿链接写回 Issue，等待管理员确认。
-9. 若决定创建 PRD，管理员确认后 `iar` 把 PRD 真实写入仓库 `tasks/pending/`，并在 PRD 与 Issue 之间建立双向链接。若决定不创建，则直接进入下一步。
+8. 管理员决定创建 PRD 后，`kc` 根据 Issue 与合议结果生成 PRD 草稿，并把草稿内容或草稿链接写回 Issue，等待管理员确认。
+9. 若决定创建 PRD，管理员确认后 `kc` 把 PRD 真实写入仓库 `tasks/pending/`，并在 PRD 与 Issue 之间建立双向链接。若决定不创建，则直接进入下一步。
 10. runner 基于仓库现有架构与规范创建隔离 worktree，并把 issue、PRD 和执行规则传给 agent。
 11. 执行 agent 在动代码之前先做一次 PRD 引用核验（由默认 `execution` 提示模板内置的 `PRD map check` 规则提供；所有仓库通用，非快速档专属，**不是**独立流水线阶段）：核对 PRD 点名的文件路径 / 符号 / 配置键是否仍存在于当前 worktree；已变更则以当前代码为准调整路线、不重建已不存在的旧结构；PRD 计划新增的按计划实施；收尾总结固定带一行 `PRD map check:` 结论（无过期引用写 `none`）。该指令是**增益而非门禁**——agent 未执行或核不出结论时不阻塞交付。**不做** agent 侧触碰面预测、**不做**并行撞车避让（原设计的该半边整体取消，理由与决策记录见 `tasks/archive/P1-FEAT-20260703-105340-prd-regrounding-touch-map-avoidance.md`）。
 12. agent 修改代码、测试和必要文档；runner 通过受限 commit proxy 完成本地提交。
@@ -180,10 +180,10 @@
 14. runner 做发布前安全检查和 pre-push AI review；reviewer 如需修改，仍通过受限 commit proxy 和配置化验证命令完成。
 15. review 通过后，runner 推送任务分支、创建 Draft PR，并把 Issue 移入 `agent/supervising`。
 16. post-PR supervisor 检查 PR context、Issue/PR comments、diff、仓库配置的验证门禁结果、checks 与 mergeability；门禁通过后进入 `agent/automated-review-passed`。Supervisor 的对账、发布与 repair/rebase 全程留在 `agent/supervising`，需要代码修改时调用配置的 repair agent；按生命周期等待、请求人工决策或失败收敛。独立 verifier 是当前实现，按 M12 迁移。
-17. **快速档仓库**在 `agent/automated-review-passed` 阶段额外挂合并队列：只消费仓库声明为必需的验证门禁与分支保护结果，再按仓库策略推进签收、rebase/验证和 squash 合并并写 `iar:event`（auto-merged）评论；任一步失败走既有失败/修复路径，不阻塞其余 PR。当前固定 verifier、自动签收与验证重跑行为是待 M12 整理的实现，不能成为所有仓库必须采用的验证规则。严格档仓库保持原样停在人工 Review。
+17. **快速档仓库**在 `agent/automated-review-passed` 阶段额外挂合并队列：只消费仓库声明为必需的验证门禁与分支保护结果，再按仓库策略推进签收、rebase/验证和 squash 合并并写 `kc:event`（auto-merged）评论；任一步失败走既有失败/修复路径，不阻塞其余 PR。当前固定 verifier、自动签收与验证重跑行为是待 M12 整理的实现，不能成为所有仓库必须采用的验证规则。严格档仓库保持原样停在人工 Review。
 18. `review-once` / `review-daemon` 持续观察已进入 `agent/supervising` 或 `agent/automated-review-passed` 的 Issue；当 PR head/base、CI/check、Issue/PR comment 或 mergeability 变化时重新运行 supervisor cycle。
-19. **快速档仓库**的 `iar daemon run` 在每轮 pass 头部执行 roadmap 持续调度：对账 running 队列条目（merged/archived → completed、failed → failed 泊车不重试）、按 `max_parallel` 补位晋升 queued 与 `tasks/pending/` 中新发现的合格 PRD，幂等建 Issue / 打 ready 标签交 Phase 2 消费；`iar roadmap advance [--dry-run]` 作为一次性入口。
-20. 发布阶段失败但本地 commit 已存在时，operator 可用 `iar recover-publish` 完成发布收尾；目标状态应与普通 Draft PR 发布一致，进入 supervisor 闭环后再交给人工 review。
+19. **快速档仓库**的 `kc daemon run` 在每轮 pass 头部执行 roadmap 持续调度：对账 running 队列条目（merged/archived → completed、failed → failed 泊车不重试）、按 `max_parallel` 补位晋升 queued 与 `tasks/pending/` 中新发现的合格 PRD，幂等建 Issue / 打 ready 标签交 Phase 2 消费；`kc roadmap advance [--dry-run]` 作为一次性入口。
+20. 发布阶段失败但本地 commit 已存在时，operator 可用 `kc recover-publish` 完成发布收尾；目标状态应与普通 Draft PR 发布一致，进入 supervisor 闭环后再交给人工 review。
 21. 在需求不明确、rebase 冲突无法安全确认、发布失败、验证失败或高风险 review 发现时安全停止，并输出明确的人工处理建议。
 
 ## Milestones
@@ -192,11 +192,11 @@
 
 Status: Completed.
 
-- 注册 `iar` CLI。
-- 支持仓库本地 `.iar.toml` 初始化。
+- 注册 `kc` CLI。
+- 支持仓库本地 `.kedacode.toml` 初始化。
 - 支持标准 label 同步。
 - 使用 GitHub Issues / Labels 作为队列状态源。
-- 通过 `.iar.toml`、`config.toml`、环境变量管理 runner、labels、git、worktree、safety、prompts、review、supervisor 和 generated content 配置。
+- 通过 `.kedacode.toml`、`config.toml`、环境变量管理 runner、labels、git、worktree、safety、prompts、review、supervisor 和 generated content 配置。
 
 ### M1: Human-Gated Task Intake
 
@@ -205,9 +205,9 @@ Status: Partially completed.
 - 已完成：通过 `agent/ready` label 和 agent 路由 label 控制 issue 是否进入 runner。
 - 已完成：从 PRD 创建 Issue，并在 Issue body 中保留 canonical PRD 路径和验收摘要。
 - 已完成：`issue-from-prd --ready` 在 PRD 未发布前不会提前添加 ready label。
-- 未完成（本次登记）：**`iar run` 对任意 Issue 通用**——人手写的、无 PRD 锚点的、正文自由文本的 Issue 只要带 `agent/ready` 就能被领取并端到端执行。运行侧代码路径已具备（各门禁对无 PRD 条件生效），但**从未被真实验证**；由 `P1-FEAT-20261006-122336` 交付，含首次端到端实证与文档边界对齐。
-- 未完成（本次登记）：`iar issue create --from-prompt "<一句需求>"` —— 直接从自然语言建出不含 PRD 指针的 Issue，并可选择**立刻进队列**（`--ready`：打上就绪标记，任何为该仓库轮询的守护进程先到先得，**与哪台机器无关**）或**先不进队列**（默认：谁的守护进程都不领，由人显式 `iar run --issue N` 执行）。系统不提供「指派给某台机器」的机制。由 `P1-FEAT-20261006-122336` 交付。
-- 未完成（本次登记）：**显式定向不受就绪标记约束 + `iar run` 与守护进程共存** —— `agent/ready` 从「唯一准入」收窄为「**守护进程自主挑选的准入**」，人的显式 `iar run --issue N` / PRD 路径不再要求该标记；daemon mutex 收窄为只挡队列轮询，本机守护进程在跑时也能手动跑**另一个** Issue（对守护进程正持有的 Issue 仍拒绝，依据认领状态）。同目标的排他改由首次领取的真 CAS 承担，故两项须同批落地。由 `P1-FEAT-20261006-122336` 交付。
+- 未完成（本次登记）：**`kc run` 对任意 Issue 通用**——人手写的、无 PRD 锚点的、正文自由文本的 Issue 只要带 `agent/ready` 就能被领取并端到端执行。运行侧代码路径已具备（各门禁对无 PRD 条件生效），但**从未被真实验证**；由 `P1-FEAT-20261006-122336` 交付，含首次端到端实证与文档边界对齐。
+- 未完成（本次登记）：`kc issue create --from-prompt "<一句需求>"` —— 直接从自然语言建出不含 PRD 指针的 Issue，并可选择**立刻进队列**（`--ready`：打上就绪标记，任何为该仓库轮询的守护进程先到先得，**与哪台机器无关**）或**先不进队列**（默认：谁的守护进程都不领，由人显式 `kc run --issue N` 执行）。系统不提供「指派给某台机器」的机制。由 `P1-FEAT-20261006-122336` 交付。
+- 未完成（本次登记）：**显式定向不受就绪标记约束 + `kc run` 与守护进程共存** —— `agent/ready` 从「唯一准入」收窄为「**守护进程自主挑选的准入**」，人的显式 `kc run --issue N` / PRD 路径不再要求该标记；daemon mutex 收窄为只挡队列轮询，本机守护进程在跑时也能手动跑**另一个** Issue（对守护进程正持有的 Issue 仍拒绝，依据认领状态）。同目标的排他改由首次领取的真 CAS 承担，故两项须同批落地。由 `P1-FEAT-20261006-122336` 交付。
 - 未完成：完整交互终端中浏览 issue、选择任务、追问需求和展示状态。
 - 未完成（**按需能力，非执行前置**）：无 PRD 的 Issue 进入澄清候选池、经管理员决策转换为 PRD 草稿；以及 PRD 草稿在管理员确认前只写回 Issue、不落盘。这些能力对复杂需求仍有价值，但不再是执行前的强制链。
 - 未完成（**按需能力**）：在 Issue 描述不清楚时自动生成面向用户的澄清问题并等待补充。
@@ -218,7 +218,7 @@ Status: Partially completed.
 Status: Completed for the basic code-change path; 完整的结构化规划（任务前的形式化影响面识别与验收标准校验）仍是 future work。执行前的 PRD 引用核验已落地，但形态是"默认 `execution` 模板内置的 `PRD map check` 规则"，**不是**原设计的独立 re-grounding 阶段，也不含触碰面预测。
 
 - 已完成：runner 能创建或复用 issue worktree，并启动 Codex、Claude 或 Kimi。
-- 已完成：内置 `iar worktree` 管理 `.iar-worktrees/<branch>`，并在 worktree 路径漂移时 fail fast。
+- 已完成：内置 `kc worktree` 管理 `.kc-worktrees/<branch>`，并在 worktree 路径漂移时 fail fast。
 - 已完成：prompt 会要求 agent 读取 `AGENTS.md`、遵守仓库规范、修改代码、测试和必要文档。
 - 已完成：runner 通过 commit request 文件完成受限提交。
 - 已完成：prompt template / phase 配置化，避免每次调整 execution prompt 都改 Python 代码。
@@ -240,12 +240,12 @@ Status: Partially completed.
 - 已完成：review-daemon 能检测 head/base、checks、comments 和 mergeability 变化，并避免 supervisor 自写评论触发自循环。
 - 已完成：独立 verifier gate 落地——Realistic Validation sign-off 由独立 verifier agent 评估，verifier 默认换 agent/model、干净 worktree、对抗性验证，通过后打 `validation/verifier-passed` 标签，head 漂移自动清除。
 - 路线调整（M12）：上述 verifier 与 Realistic Validation 是当前实现，不定义平台必须采用的通用验证 oracle；后续迁移到仓库用户配置的检查门禁与平台生命周期契约。
-- 已完成：关键阶段写入 `iar:event` marker，形成基础审计 cursor。
+- 已完成：关键阶段写入 `kc:event` marker，形成基础审计 cursor。
 - 未完成：把高风险 finding count 转换为稳定阻断规则或转人工规则。
 - 未完成：PR 正文实现摘要、验证详情和残余风险仍缺少强 schema 化校验。
 - 未完成：更细粒度的失败分类、恢复策略和面向 operator 的审计时间线视图。跨进程崩溃分类（`stale_attempt`）与三出口恢复策略已随 `P1-FEAT-20260930-225000` 落地；时间线视图与 finding 计数规则化仍是缺口。
 - 未完成：UI 类 Issue 的浏览器 E2E 验证通道（真实启动应用 + 浏览器执行 + 产物证据）——由 `P1-FEAT-20260930-225500`（浏览器 E2E 验证工具链）承接，2026-10-05 登记本里程碑。
-- 已完成：跨进程边界的恢复——daemon / host 崩溃后的僵尸 attempt 对账与 agent 会话续传——随 `P1-FEAT-20260930-225000`（Daemon 崩溃对账与 Agent 会话续传）交付：daemon 每轮 tick 头部的 Phase -1 对账（证据源限定为 claim 存活 / label / comment 历史 / worktree 现场四件现成事实），三出口处置（`resume-session` / `re-enqueue` / `mark-failed`）均留四要素对账 comment，内容 hash 去重保证幂等；agent 侧按 `supports_resume` 声明式能力续传会话，无记录时降级为全新会话。`iar daemon` 侧新增 `[agent_runner.daemon] reconcile_stale_attempts`（默认开）与 `reclaim_ttl_seconds`。详见 `docs/guides/agent-runner.md` 的「崩溃对账与 Agent 会话续传」。
+- 已完成：跨进程边界的恢复——daemon / host 崩溃后的僵尸 attempt 对账与 agent 会话续传——随 `P1-FEAT-20260930-225000`（Daemon 崩溃对账与 Agent 会话续传）交付：daemon 每轮 tick 头部的 Phase -1 对账（证据源限定为 claim 存活 / label / comment 历史 / worktree 现场四件现成事实），三出口处置（`resume-session` / `re-enqueue` / `mark-failed`）均留四要素对账 comment，内容 hash 去重保证幂等；agent 侧按 `supports_resume` 声明式能力续传会话，无记录时降级为全新会话。`kc daemon` 侧新增 `[agent_runner.daemon] reconcile_stale_attempts`（默认开）与 `reclaim_ttl_seconds`。详见 `docs/guides/agent-runner.md` 的「崩溃对账与 Agent 会话续传」。
 
 ### M4: Pull Request Automation
 
@@ -257,7 +257,7 @@ Status: Partially completed.
 - 已完成：可通过 `[agent_runner.generated_content]` 生成更完整的 Issue / PR Markdown，并在锚点缺失时 fallback。
 - 已完成：PRD-backed Issue 发布前会强制检查 Acceptance Checklist，并在完成时归档 PRD。
 - 已完成：发布前会校验 remote、branch 和 forbidden paths，降低错误发布风险。
-- 已完成：`iar recover-publish` 支持发布阶段失败后的显式恢复命令，并可复用已有 open Draft PR。
+- 已完成：`kc recover-publish` 支持发布阶段失败后的显式恢复命令，并可复用已有 open Draft PR。
 - 已完成（新增）：快速档合并队列（verifier 绿灯 → 自动签核 → rebase → 全量验证 → 禁改终扫 → squash 合并）作为 `agent/automated-review-passed` 阶段的延伸，已随 `P1-FEAT-20260703-105322` 交付归档（实现：`src/backend/core/use_cases/agent_runner_merge_queue.py`；测试：`tests/test_agent_runner_merge_queue.py`；门控：`config.toml` 的 `[agent_runner.autopilot]` + `[agent_runner.safety].auto_merge`）。
 - 未完成（本次登记）：`--direct-pr` per-run 档位——执行 agent 结束后只保留机械步骤（runner 受控提交 → push → 建 Draft PR），跳过 pre-PR review 与 runner 验证命令，把门禁转移到 PR 上的 CI。仅限无 PRD 锚点的 Issue，与 `--fast-merge` 互斥。由 `P1-FEAT-20261006-122336` 交付。
 - 未完成：发布恢复成功后仍需与普通 Draft PR 发布保持同样的 post-PR supervisor 安全闭环。
@@ -288,7 +288,7 @@ Status: Partially completed.
 
 Status: Partially completed.
 
-- 已完成：支持 `iar deliberate` 多 agent 合议会话，用于需求澄清、方案争议和复杂设计评估。
+- 已完成：支持 `kc deliberate` 多 agent 合议会话，用于需求澄清、方案争议和复杂设计评估。
 - 已完成：支持只读 transcript、最终 synthesis、事件流、session metadata 和隔离 workspace 输出。
 - 已完成：合议能力与 issue runner 解耦，不修改代码、不创建 branch、不创建 PR。
 - 已完成：独立 verifier gate 把"对抗性只读 agent 评估"复用为 Realistic Validation sign-off 的唯一绿灯来源；与 deliberate 共享 `IAgentTranscriptRunner` 端口，不新建第二个评估抽象。
@@ -305,8 +305,8 @@ Status: Not completed. **本里程碑是「按需增强」而非「执行前置�
 - （按需）对无 PRD Issue 启动多 agent 合议，讨论需求清晰度、实现边界、验收标准、风险和是否需要 PRD。
 - （按需）将公开讨论 transcript、最终 synthesis、PRD 建议和待管理员决策项写入 Issue comment，形成可审计记录。
 - 管理员在 Issue 中决定是否创建 PRD。**选择不创建是正常路径**：简单需求直接打 `agent/ready` 执行，不必先补 PRD。
-- 管理员决定创建 PRD 后，`iar` 先生成 PRD 草稿并写回 Issue，等待管理员确认草稿内容。
-- 管理员确认后，`iar` 把 PRD 落盘到 `tasks/pending/`，在 PRD 中记录关联 Issue，在 Issue 中记录 PRD 路径。
+- 管理员决定创建 PRD 后，`kc` 先生成 PRD 草稿并写回 Issue，等待管理员确认草稿内容。
+- 管理员确认后，`kc` 把 PRD 落盘到 `tasks/pending/`，在 PRD 中记录关联 Issue，在 Issue 中记录 PRD 路径。
 - runner 在 Issue 进入 `agent/ready` 后开始执行代码任务，**不要求 PRD 已存在**。
 
 ### M9: Operations Console
@@ -314,31 +314,31 @@ Status: Not completed. **本里程碑是「按需增强」而非「执行前置�
 Status: Completed. 监控面板与时间线 API 已随 `#39` / `#81` / `#89` 落地，随后升级为统一管理终端（写操作白名单 + 审计），并在 `P1-FEAT-20260910-111901-iar-console-bundled-web-terminal` 中补齐分发能力。
 
 - 提供监控面板，展示队列统计、仓库健康、Issue 状态、PR context、worktree 状态和最新事件。
-- 提供 Issue 时间线 API，复用 `iar:event` marker、Issue comments、PR comments 和本地 worktree 状态。
+- 提供 Issue 时间线 API，复用 `kc:event` marker、Issue comments、PR comments 和本地 worktree 状态。
 - 检测 label 与 PR/worktree 状态不一致、failed/blocked、dirty worktree、stale PR、checks failed 和缺失 supervisor event 等异常。
 - 运维写操作收敛在管理终端 API（白名单动作 + 审计）：启停 daemon / runner 进程、重试 failed、roadmap 队列与 idea inbox 管理；直接写 GitHub label/comment/PR 仍走 CLI。
 - 统计接口线程池并发构建并带 TTL 缓存，多仓库下仪表盘首屏不串行等待。
-- 分发能力：`frontend-public` 静态导出产物随 wheel 打包，`iar console` 一条命令启动 API + 内置面板并自动打开浏览器；无需源码检出、Node / pnpm / just。
+- 分发能力：`frontend-public` 静态导出产物随 wheel 打包，`kc console` 一条命令启动 API + 内置面板并自动打开浏览器；无需源码检出、Node / pnpm / just。
 
 ### M10: Autopilot Fast-Lane (Product Repos)
 
 Status: Completed. 随 `P1-FEAT-20260703-105322` 交付归档；实现 `src/backend/core/use_cases/agent_runner_merge_queue.py`，测试 `tests/test_agent_runner_merge_queue.py`，门控 `config.toml` 的 `[agent_runner.autopilot]`（与 `[agent_runner.safety].auto_merge` 双开关同时为真才生效）。
 
-- 快速档开关：在 `.iar.toml` 写入 `[autopilot] enabled = true` 与 `[safety] auto_merge = true`，双开关同时为真才激活；默认全关，严格档仓库零行为变化。
+- 快速档开关：在 `.kedacode.toml` 写入 `[autopilot] enabled = true` 与 `[safety] auto_merge = true`，双开关同时为真才激活；默认全关，严格档仓库零行为变化。
 - 合并队列：review pass 末尾按 Issue 号 FIFO 串行处理 supervisor 已 approve 的 PR，链式门禁（verifier 绿灯 → 自动签核 → rebase 最新 base → worktree 全量验证重跑 → 禁改路径终扫 → checks 全绿 → squash 合并），任一步失败转既有修复路径、不阻塞队列中其余 PR。
-- 自动签核：合并前自动勾选 PR body 的 Realistic Validation sign-off 清单并发 `iar:auto-sign-off` marker 评论；勾选与评论均幂等，崩溃重入不重复动作。
-- 队列状态：复用 `agent/automated-review-passed` 标签与 PR 状态表达进度，无新存储；仍有 PRD 人工验收项时添加 `human/awaiting-review`，待办完成或合并成功后清理；合并成功后发 `iar:event`（auto-merged）评论并摘除自动审查通过标签。
+- 自动签核：合并前自动勾选 PR body 的 Realistic Validation sign-off 清单并发 `kc:auto-sign-off` marker 评论；勾选与评论均幂等，崩溃重入不重复动作。
+- 队列状态：复用 `agent/automated-review-passed` 标签与 PR 状态表达进度，无新存储；仍有 PRD 人工验收项时添加 `human/awaiting-review`，待办完成或合并成功后清理；合并成功后发 `kc:event`（auto-merged）评论并摘除自动审查通过标签。
 - 显式逃生：`safety.auto_merge` 维持为死开关等价物直到 `autopilot.enabled` 同时为真；`recover-publish` / 现有 review daemon 行为不被动；`auto_merge` 语义激活需要发布说明显式提示。
 - 跨仓库边界：每仓独立串行合并，不做跨仓库统一编排；merge 方式仅 squash。
 
 ### M11: Roadmap Continuous Scheduling (Fast-Lane)
 
-Status: Completed. 随 `P1-FEAT-20260703-105330` 交付归档；实现 `src/backend/core/use_cases/roadmap_actions.py` 的 `advance_roadmap_queue`（对账 / 槽位核算 / 发现式晋升），CLI `iar roadmap advance [--dry-run]`，daemon 在 `autopilot.enabled` 时于 Phase 2 之前插入该阶段。
+Status: Completed. 随 `P1-FEAT-20260703-105330` 交付归档；实现 `src/backend/core/use_cases/roadmap_actions.py` 的 `advance_roadmap_queue`（对账 / 槽位核算 / 发现式晋升），CLI `kc roadmap advance [--dry-run]`，daemon 在 `autopilot.enabled` 时于 Phase 2 之前插入该阶段。
 
 - daemon 内每仓 pass 头部新增持续调度阶段（`autopilot.enabled` 门控）：对账 running 队列条目（merged/archived → completed、failed → failed 泊车不重试）→ 重算依赖 → 按 `max_parallel` 补位晋升 queued 与 `tasks/pending/` 中新发现的合格 PRD。
 - 晋升动作 = 幂等建 Issue（复用既有"同名 Issue 已存在则复用"判定）+ 打 `agent/ready` + 队列条目置 running；**不** spawn 独立 runner 进程——Phase 2 既是 ready 标签的消费者也是执行入口，由 daemon `--concurrency` 统一约束并发。
 - 槽位口径：沿用 `start_global_roadmap` 的 RUNNING-only（supervising/review/blocked 不占槽、不晋升）；blocked 保留 running 记录但不计槽位。
-- 新 CLI：`iar roadmap advance [--dry-run]` 作为一次性入口；dry-run 零副作用，可用于观察下一轮调度计划与人工对账。
+- 新 CLI：`kc roadmap advance [--dry-run]` 作为一次性入口；dry-run 零副作用，可用于观察下一轮调度计划与人工对账。
 - 幂等与竞态：与 console 手动 `start_prd` 并发最坏结果是同 PRD 出现手动+自动两条队列记录，但 Issue / ready 标签唯一，不会双开执行。
 - 失败处理：失败 PRD 泊车（failed + error_detail），不自动重试、不阻塞其余 PRD；状态解析依赖 GitHub 可达性，gh 失败时保守返回，下一轮 pass 自愈。
 - M11 自身是 `M10` 之后的工作流闭环；非快速档仓库零变化，console 手动路径完全保留。
@@ -409,7 +409,7 @@ Status: Not started；记忆持久化与 skill 草稿晋升是已有的起点，
 8. **发布恢复后的 supervisor 安全闭环**：恢复成功后先进入 `agent/supervising`，supervisor approve 后再进入 `agent/automated-review-passed`，并修正分支 token 匹配与发布失败阶段分类。
 9. **rebase detached HEAD branch guard**：确保 active rebase target 可确认时允许继续，无法确认时安全停止并输出可诊断错误。
 10. **CI rework state recovery、blocked/forbidden resolution 与 process runner 错误可诊断性增强**：从 supervisor 修复回路单点补齐。
-11. **Agent Runner operator 监控面板、异常检测和 Issue 时间线 API**（M9）：已交付，并升级为统一管理终端 + `iar console` 随 wheel 分发一键启动。
+11. **Agent Runner operator 监控面板、异常检测和 Issue 时间线 API**（M9）：已交付，并升级为统一管理终端 + `kc console` 随 wheel 分发一键启动。
 12. **基于现有 generated content 和合议能力补齐 Issue -> PRD / PRD rewrite（按需）**：`agent/rework-prd`、管理员 PRD gate、确认后落盘 PRD；M8 全闭环。**注意本项已从「执行前置」改为「按需增强」**——无 PRD 的 Issue 可直接执行，本项不再阻塞任何交付。
 13. **把多 agent deliberation 接入 PRD review**：生成结构化 verdict、finding、risk 和后续动作 comment，与 M8 协同。
 14. **高风险 review finding 的稳定阻断规则**：定义哪些风险必须转人工，哪些可以自动重试或自动合并。
@@ -424,7 +424,7 @@ Status: Not started；记忆持久化与 skill 草稿晋升是已有的起点，
 - [x] 能够在 PRD 发布前延迟 ready label，避免 runner 读取过期 PRD。
 - [x] 能够从人工选定的 issue 中提取 PRD 路径和验收摘要。
 - [x] 能够在隔离 worktree 中启动指定 agent。
-- [x] 能够用内置 `iar worktree` 管理默认 worktree 路径，并在路径漂移时 fail fast。
+- [x] 能够用内置 `kc worktree` 管理默认 worktree 路径，并在路径漂移时 fail fast。
 - [x] 能够自动运行配置化验证命令（含 pre-commit 与 runner.verification_commands 两套）。
 - [x] 能够自动提交受控变更、推送任务分支并创建 Draft PR。
 - [x] 能够在验证失败、agent 执行失败、commit request 错误或 pre-commit 失败时做有限恢复。
@@ -439,7 +439,7 @@ Status: Not started；记忆持久化与 skill 草稿晋升是已有的起点，
 - [x] 能够在 PRD-backed Issue 完成时检查 Acceptance Checklist 并归档 PRD。
 - [x] 能够运行只读多 agent 合议并输出 transcript、synthesis 和事件记录。
 - [x] 能够生成包含 `Closes #<issue-number>` 锚点的 PR body，并支持 template / agent 生成模式。
-- [x] 能够在发布失败后通过显式 `iar recover-publish` 继续已有本地成果。
+- [x] 能够在发布失败后通过显式 `kc recover-publish` 继续已有本地成果。
 - [x] 能够在 rebase 冲突时调用 agent 尝试解决，失败或验证失败时安全停止并报告原因。
 - [x] Agent Runner 记忆（长期 / 短期 / skill 草稿 / 已晋升 skill）锚定在目标仓库主检出根，跨 worktree / 跨 Issue 真实持久化；共享目录写入原子化不产生半写。
 - [x] Realistic Validation sign-off 由独立 verifier agent 评估，verifier 绿灯以 `validation/verifier-passed` 标签物化。
@@ -457,14 +457,14 @@ Status: Not started；记忆持久化与 skill 草稿晋升是已有的起点，
 - [ ] 能够在管理员确认后把 PRD 写入 `tasks/pending/` 并双向链接 Issue（PRD 是可选产物；无 PRD 的 Issue 也能直接执行）。
 - [ ] 能够对任意 Issue（含人手写的、无 PRD 锚点的、正文自由文本的）在打上 `agent/ready` 后领取并端到端执行出 Draft PR，且已通过真实端到端验证（`P1-FEAT-20261006-122336`）。
 - [ ] 能够从一句自然语言创建不含 PRD 指针的 Issue，并可选择立刻进队列（任何守护进程先到先得）或先不进队列、留给人显式执行（`P1-FEAT-20261006-122336`）。
-- [ ] 能够显式定向执行任意可领取的 Issue 而不必先打就绪标记；`iar run` 与本机守护进程共存（互斥只挡队列轮询），同目标的排他由首次领取的真 CAS 承担（`P1-FEAT-20261006-122336`）。
+- [ ] 能够显式定向执行任意可领取的 Issue 而不必先打就绪标记；`kc run` 与本机守护进程共存（互斥只挡队列轮询），同目标的排他由首次领取的真 CAS 承担（`P1-FEAT-20261006-122336`）。
 - [ ] 能够对无 PRD 锚点的 Issue 用 `--direct-pr` 直接出 Draft PR：执行 agent 之后只剩机械步骤，runner 侧不再有第二个 agent 与验证命令，门禁转移到 PR 上的 CI（`P1-FEAT-20261006-122336`）。
 - [ ] 能够从 Issue 生成或重写 PRD，并在多 agent PRD review 后等待人类确认。
 - [ ] 能够用稳定规则阻止带有高风险问题的 PR 自动发布或自动转人工。
 - [ ] 能够强校验 PR 正文包含完整实现摘要、验证结果和残余风险。
 - [ ] 能够提供只读 operator 监控面板和 Issue 时间线 API。
 - [x] 能够在快速档仓库中按 Issue 号 FIFO 串行 squash 合并 supervisor 已 approve 的 PR，且自动签核、rebase、全量验证、禁改终扫四道门禁全部生效（`P1-FEAT-20260703-105322` 已交付归档；实现 `src/backend/core/use_cases/agent_runner_merge_queue.py`）。
-- [x] 能够在快速档 daemon 每轮 pass 自动对账 running 队列条目、按 `max_parallel` 补位晋升 queued 与 `tasks/pending/` 中新发现的合格 PRD，且 `iar roadmap advance [--dry-run]` 一次性入口可用（`P1-FEAT-20260703-105330` 已交付归档）。
+- [x] 能够在快速档 daemon 每轮 pass 自动对账 running 队列条目、按 `max_parallel` 补位晋升 queued 与 `tasks/pending/` 中新发现的合格 PRD，且 `kc roadmap advance [--dry-run]` 一次性入口可用（`P1-FEAT-20260703-105330` 已交付归档）。
 - [x] 能够在执行 agent 启动前核验 PRD 引用的路径 / 符号 / 配置是否仍有效，并在收尾总结给出 `PRD map check:` 声明行；核验不通过不阻塞交付（`P1-FEAT-20260703-105340` 已交付归档；形态为默认 `execution` 模板内置规则，非独立阶段）。
 - ~~能够在执行 agent 启动前注入 re-grounding 勘误附录并物化触碰面评论；触碰面相交时自动转 `agent/waiting` 让路、冲突消除后由调度循环自动 re-ready，且 defer 次数有上限防止活锁。~~ **已取消，不再作为验收项**：默认串行时"在途 running 集合"恒空永不触发，并发下触碰面发布竞态使其在最需要的场景失效；决策记录见 `tasks/archive/P1-FEAT-20260703-105340-prd-regrounding-touch-map-avoidance.md` §13 D-03。
 

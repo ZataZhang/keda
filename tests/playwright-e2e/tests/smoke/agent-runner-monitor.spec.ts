@@ -77,7 +77,7 @@ const KEDA_TEST_OVERVIEW: MonitoringRepositoryOverview = {
           pr_branch: 'issue-100',
           checks_state: null,
           mergeable: null,
-          raw_marker: '<!-- iar:event version=1 phase=claimed cycle=1 -->',
+          raw_marker: '<!-- kc:event version=1 phase=claimed cycle=1 -->',
         },
         {
           phase: 'draft_pr_created',
@@ -88,7 +88,7 @@ const KEDA_TEST_OVERVIEW: MonitoringRepositoryOverview = {
           pr_branch: 'issue-100',
           checks_state: null,
           mergeable: null,
-          raw_marker: '<!-- iar:event version=1 phase=draft_pr_created cycle=2 -->',
+          raw_marker: '<!-- kc:event version=1 phase=draft_pr_created cycle=2 -->',
         },
       ],
       latest_event: {

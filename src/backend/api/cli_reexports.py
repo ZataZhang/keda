@@ -4,7 +4,7 @@ After the line-split refactor :mod:`backend.api.cli` is a thin dispatcher
 that delegates each parsed command to a focused module under
 :mod:`backend.api.cli_parsed_commands`. The original ``_run_parsed_command``
 referenced dozens of use-case functions and infrastructure helpers as
-module-level names (e.g. ``run_agent_daemon``, ``require_iar_repository_initialized``,
+module-level names (e.g. ``run_agent_daemon``, ``require_repository_initialized``,
 ``create_github_client``); the test suite patches those names on
 ``backend.api.cli`` (e.g. ``patch("backend.api.cli.run_agent_daemon")``).
 
@@ -88,7 +88,7 @@ from backend.core.use_cases.agent_runner_factory import (
     write_deliberation_outputs,
 )
 from backend.core.use_cases.agent_runner_repository_local import (
-    require_iar_repository_initialized,
+    require_repository_initialized,
 )
 
 __all__ = [
@@ -122,7 +122,7 @@ __all__ = [
     "daemon_lock_dir",
     "get_agent_runner_settings",
     "release_daemon_locks",
-    "require_iar_repository_initialized",
+    "require_repository_initialized",
     "resolve_issue_from_prd_target",
     "resolve_prd_paths",
     "resolve_repository_targets",

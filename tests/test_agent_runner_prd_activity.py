@@ -73,7 +73,7 @@ def test_iar_activity_lock_visible_to_status(tmp_path: Path) -> None:
     lock_path = repo_path / "tasks/evidence/P1-FEAT-20260928-example/active.lock"
     try:
         lock_metadata = json.loads(lock_path.read_text(encoding="utf-8"))
-        assert lock_metadata["ai_tool"] == "iar/qoder"
+        assert lock_metadata["ai_tool"] == "kc/qoder"
         assert lock_metadata["branch"] == "issue-39"
         assert lock_metadata["heartbeat_at"]
     finally:
@@ -135,7 +135,7 @@ def test_iar_claim_reclaims_stale_prd_lock(tmp_path: Path) -> None:
     lease.start()
     try:
         claimed_metadata = json.loads(lock_path.read_text(encoding="utf-8"))
-        assert claimed_metadata["ai_tool"] == "iar/codebuddy"
+        assert claimed_metadata["ai_tool"] == "kc/codebuddy"
         assert claimed_metadata["branch"] == "issue-39"
         stale_archives = list(lock_path.parent.glob("active.lock.*.stale"))
         assert len(stale_archives) == 1
@@ -189,7 +189,7 @@ def test_status_reads_issue_worktree_prd_progress(tmp_path: Path) -> None:
             check=True,
         )
         assert "1/2" in status_result.stdout
-        assert "RUNNING iar/qoder" in status_result.stdout
+        assert "RUNNING kc/qoder" in status_result.stdout
         assert "@issue-39" in status_result.stdout
     finally:
         lease.close()

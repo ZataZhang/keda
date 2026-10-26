@@ -32,7 +32,7 @@ from backend.engines.agent_runner.container_ops import ContainerOpsController
 
 
 @pytest.fixture
-def fake_global_iar(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def fake_global_kc(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """把 ``Path.home()`` 指向临时目录，避免污染本机 ``~/.kedacode``。"""
     fake_home = tmp_path / "fake-home"
     fake_home.mkdir()
@@ -49,7 +49,7 @@ def test_container_ops_controller_resolves_assets() -> None:
 
 
 def test_container_auth_controller_imports_through_facade(
-    fake_global_iar: Path, monkeypatch: pytest.MonkeyPatch
+    fake_global_kc: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """``import_container_auth`` 经 facade 调用 engines 实现并返回结果。"""
     # 用临时 missing specs 让所有 agent 都 skipped
@@ -58,7 +58,7 @@ def test_container_auth_controller_imports_through_facade(
     missing_specs = tuple(
         AgentImportSpec(
             agent_name=spec.agent_name,
-            source_dir=fake_global_iar / "missing",
+            source_dir=fake_global_kc / "missing",
             target_subdir=spec.target_subdir,
             include_top_level=spec.include_top_level,
             exclude_subpaths=spec.exclude_subpaths,
@@ -70,7 +70,7 @@ def test_container_auth_controller_imports_through_facade(
     importer = ContainerAuthController()
     result = import_container_auth(importer)
     assert result.container_auth_dir == (
-        fake_global_iar / product_identity.STATE_DIR_NAME / "container-auth"
+        fake_global_kc / product_identity.STATE_DIR_NAME / "container-auth"
     )
     # 由于 SUPPORTED_AGENT_SPECS 被 monkeypatched 但 default 参数在函数定义时已绑定，
     # 这里直接用底层函数验证：
@@ -78,12 +78,12 @@ def test_container_auth_controller_imports_through_facade(
     assert all(r.skipped for r in direct_result.agent_results)
 
 
-def test_start_runner_container_missing_repo_path(tmp_path: Path, fake_global_iar: Path) -> None:
+def test_start_runner_container_missing_repo_path(tmp_path: Path, fake_global_kc: Path) -> None:
     """``start_runner_container`` 在目标仓库路径不存在时抛 ``FileNotFoundError``。"""
     options = StartRunnerContainerOptions(
         repo_path=tmp_path / "does-not-exist",
         repo_id="keda",
-        process_registry_path=str(fake_global_iar / ".iar" / "processes.json"),
+        process_registry_path=str(fake_global_kc / ".iar" / "processes.json"),
     )
     controller = ContainerOpsController()
     with pytest.raises(FileNotFoundError):
@@ -91,13 +91,13 @@ def test_start_runner_container_missing_repo_path(tmp_path: Path, fake_global_ia
 
 
 def test_start_runner_container_refuses_when_host_daemon_lock_live(
-    tmp_path: Path, fake_global_iar: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, fake_global_kc: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """当目标 repo_id 已有活 PID daemon lock 时拒绝启动，且不调 docker runner。"""
     repo_path = tmp_path / "repo"
     repo_path.mkdir()
 
-    lock_dir = fake_global_iar / ".iar" / "daemon-locks"
+    lock_dir = fake_global_kc / ".iar" / "daemon-locks"
     lock_dir.mkdir(parents=True)
     (lock_dir / "keda.lock").write_text("99999\n", encoding="utf-8")
 
@@ -108,7 +108,7 @@ def test_start_runner_container_refuses_when_host_daemon_lock_live(
     options = StartRunnerContainerOptions(
         repo_path=repo_path,
         repo_id="keda",
-        process_registry_path=str(fake_global_iar / ".iar" / "processes.json"),
+        process_registry_path=str(fake_global_kc / ".iar" / "processes.json"),
         dry_run=True,
     )
 
@@ -124,7 +124,7 @@ def test_start_runner_container_refuses_when_host_daemon_lock_live(
     assert called == []
 
 
-def test_start_runner_container_passes_env_to_runner(tmp_path: Path, fake_global_iar: Path) -> None:
+def test_start_runner_container_passes_env_to_runner(tmp_path: Path, fake_global_kc: Path) -> None:
     """``start_runner_container`` 把 env 传给注入的 docker runner。"""
     repo_path = tmp_path / "repo"
     repo_path.mkdir()
@@ -141,7 +141,7 @@ def test_start_runner_container_passes_env_to_runner(tmp_path: Path, fake_global
         gh_token="ghp_test",
         uid=501,
         gid=20,
-        process_registry_path=str(fake_global_iar / ".iar" / "processes.json"),
+        process_registry_path=str(fake_global_kc / ".iar" / "processes.json"),
     )
     controller = ContainerOpsController()
     result = start_runner_container(controller, options, runner=fake_runner)
@@ -159,7 +159,7 @@ def test_start_runner_container_passes_env_to_runner(tmp_path: Path, fake_global
     assert "up" in result.plan.argv
 
 
-def test_start_runner_container_dry_run_skips_runner(tmp_path: Path, fake_global_iar: Path) -> None:
+def test_start_runner_container_dry_run_skips_runner(tmp_path: Path, fake_global_kc: Path) -> None:
     """``dry_run=True`` 时不调 docker runner。"""
     repo_path = tmp_path / "repo"
     repo_path.mkdir()
@@ -173,7 +173,7 @@ def test_start_runner_container_dry_run_skips_runner(tmp_path: Path, fake_global
     options = StartRunnerContainerOptions(
         repo_path=repo_path,
         repo_id="",
-        process_registry_path=str(fake_global_iar / ".iar" / "processes.json"),
+        process_registry_path=str(fake_global_kc / ".iar" / "processes.json"),
         dry_run=True,
     )
     controller = ContainerOpsController()
@@ -185,7 +185,7 @@ def test_start_runner_container_dry_run_skips_runner(tmp_path: Path, fake_global
 
 
 def test_start_runner_container_no_repo_id_skips_lock_check(
-    tmp_path: Path, fake_global_iar: Path
+    tmp_path: Path, fake_global_kc: Path
 ) -> None:
     """未传 ``repo_id`` 时跳过 daemon lock 检查（标 ``daemon_lock_check_skipped=True``）。"""
     repo_path = tmp_path / "repo"
@@ -200,7 +200,7 @@ def test_start_runner_container_no_repo_id_skips_lock_check(
     options = StartRunnerContainerOptions(
         repo_path=repo_path,
         repo_id="",
-        process_registry_path=str(fake_global_iar / ".iar" / "processes.json"),
+        process_registry_path=str(fake_global_kc / ".iar" / "processes.json"),
     )
     controller = ContainerOpsController()
     result = start_runner_container(controller, options, runner=fake_runner)
@@ -210,14 +210,14 @@ def test_start_runner_container_no_repo_id_skips_lock_check(
 
 
 def test_start_runner_container_stale_daemon_lock_is_not_blocking(
-    tmp_path: Path, fake_global_iar: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, fake_global_kc: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """目标 repo_id 的 daemon lock 是 stale PID（已死）时不应阻止启动。"""
     repo_path = tmp_path / "repo"
     repo_path.mkdir()
 
     stale_pid = 2_147_483_647
-    lock_dir = fake_global_iar / ".iar" / "daemon-locks"
+    lock_dir = fake_global_kc / ".iar" / "daemon-locks"
     lock_dir.mkdir(parents=True)
     (lock_dir / "keda.lock").write_text(f"{stale_pid}\n", encoding="utf-8")
 
@@ -234,7 +234,7 @@ def test_start_runner_container_stale_daemon_lock_is_not_blocking(
     options = StartRunnerContainerOptions(
         repo_path=repo_path,
         repo_id="keda",
-        process_registry_path=str(fake_global_iar / ".iar" / "processes.json"),
+        process_registry_path=str(fake_global_kc / ".iar" / "processes.json"),
     )
     controller = ContainerOpsController()
     start_runner_container(controller, options, runner=fake_runner)
@@ -294,14 +294,14 @@ def test_stream_runner_container_logs_no_follow(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("operation", ["down", "logs"])
 def test_container_operations_inject_effective_state_home(
-    fake_global_iar: Path,
+    fake_global_kc: Path,
     monkeypatch: pytest.MonkeyPatch,
     operation: str,
 ) -> None:
     """停止与日志命令无需继承 up 的临时环境，也能解析生效状态挂载。"""
-    expected_state_home = fake_global_iar / ".kedacode"
+    expected_state_home = fake_global_kc / ".kedacode"
     expected_state_home.mkdir()
-    (fake_global_iar / ".iar").mkdir()
+    (fake_global_kc / ".iar").mkdir()
     monkeypatch.delenv("KEDACODE_HOST_STATE_HOME", raising=False)
     controller = ContainerOpsController()
     compose_file = controller.resolve_packaged_runner_assets().compose_file

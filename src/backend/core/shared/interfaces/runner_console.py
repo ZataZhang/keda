@@ -570,7 +570,7 @@ class BrowsableDirectoryEntry:
     name: str
     path: str
     is_git_repo: bool
-    has_iar_config: bool
+    has_repository_config: bool
     already_registered: bool
     suggested_repo_id: str
 

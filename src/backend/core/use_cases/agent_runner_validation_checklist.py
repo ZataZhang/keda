@@ -12,9 +12,9 @@ import re
 from dataclasses import dataclass
 
 _CHECKLIST_START_PATTERN = re.compile(
-    r"<!--\s*iar:realistic-validation\s+version=(?P<version>\d+)\s+total=(?P<total>\d+)\s*-->"
+    r"<!--\s*kc:realistic-validation\s+version=(?P<version>\d+)\s+total=(?P<total>\d+)\s*-->"
 )
-_CHECKLIST_END_MARKER = "<!-- iar:realistic-validation-end -->"
+_CHECKLIST_END_MARKER = "<!-- kc:realistic-validation-end -->"
 _CHECKED_ITEM_PATTERN = re.compile(r"^\s*[-*] \[[xX]\] ")
 _UNCHECKED_ITEM_PATTERN = re.compile(r"^\s*[-*] \[ \] ")
 
@@ -44,7 +44,7 @@ def build_validation_checklist_block(checklist_items: list[str]) -> str:
     """
     return "\n".join(
         [
-            f"<!-- iar:realistic-validation version=1 total={len(checklist_items)} -->",
+            f"<!-- kc:realistic-validation version=1 total={len(checklist_items)} -->",
             "## Realistic Validation sign-off",
             "",
             "Complete each item only after its evidence has been verified. "

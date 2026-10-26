@@ -24,8 +24,8 @@ from backend.engines.agent_runner.factory import (
     resolve_repository_targets,
 )
 from backend.engines.agent_runner.repository_local import (
-    IARRepositoryNotInitializedError,
-    require_iar_repository_initialized,
+    RepositoryNotInitializedError,
+    require_repository_initialized,
 )
 from backend.infrastructure.config import settings as settings_module
 from backend.infrastructure.config import settings_sources
@@ -181,7 +181,7 @@ def test_merge_repository_config_inherits_max_concurrent_issues() -> None:
 def test_iar_toml_renders_max_concurrent_issues_comment() -> None:
     """`iar init` output documents max_concurrent_issues above the field."""
     from backend.engines.agent_runner.repository_local import (
-        _IAR_FIELD_COMMENTS,
+        _CONFIG_FIELD_COMMENTS,
         settings_to_toml_string,
     )
     from backend.infrastructure.config.settings import AgentRunnerLocalSettings
@@ -189,9 +189,9 @@ def test_iar_toml_renders_max_concurrent_issues_comment() -> None:
     settings = AgentRunnerLocalSettings(runner=AgentRunnerRunnerSettings())
     rendered = settings_to_toml_string(settings)
 
-    assert "runner.max_concurrent_issues" in _IAR_FIELD_COMMENTS
+    assert "runner.max_concurrent_issues" in _CONFIG_FIELD_COMMENTS
     assert "max_concurrent_issues = 1" in rendered
-    comment = _IAR_FIELD_COMMENTS["runner.max_concurrent_issues"]
+    comment = _CONFIG_FIELD_COMMENTS["runner.max_concurrent_issues"]
     assert any(comment in line for line in rendered.splitlines())
 
 
@@ -605,7 +605,7 @@ def test_merge_repository_config_ignores_empty_template_overrides() -> None:
     assert merged.generated_content.draft_pr.prompt == "global prompt"
 
 
-def test_require_iar_repository_initialized_accepts_valid_config(
+def test_require_repository_initialized_accepts_valid_config(
     tmp_path: Path,
 ) -> None:
     """A valid .kedacode.toml with non-empty repository.id should pass."""
@@ -617,23 +617,23 @@ def test_require_iar_repository_initialized_accepts_valid_config(
 id = "initialized"
 """,
     )
-    require_iar_repository_initialized(repo_path)
+    require_repository_initialized(repo_path)
 
 
-def test_require_iar_repository_initialized_rejects_missing_config(
+def test_require_repository_initialized_rejects_missing_config(
     tmp_path: Path,
 ) -> None:
-    """仓库缺少 ``.kedacode.toml`` 时应抛 ``IARRepositoryNotInitializedError``。"""
+    """仓库缺少 ``.kedacode.toml`` 时应抛 ``RepositoryNotInitializedError``。"""
     repo_path = _init_git_repository(tmp_path, "missing")
-    with pytest.raises(IARRepositoryNotInitializedError) as exc_info:
-        require_iar_repository_initialized(repo_path)
+    with pytest.raises(RepositoryNotInitializedError) as exc_info:
+        require_repository_initialized(repo_path)
     assert str(repo_path / product_identity.REPOSITORY_CONFIG_FILENAME) in str(exc_info.value)
 
 
-def test_require_iar_repository_initialized_rejects_empty_repo_id(
+def test_require_repository_initialized_rejects_empty_repo_id(
     tmp_path: Path,
 ) -> None:
-    """An empty repository.id should raise IARRepositoryNotInitializedError."""
+    """An empty repository.id should raise RepositoryNotInitializedError."""
     repo_path = _init_git_repository(tmp_path, "empty-id")
     _write_local_iar_config(
         repo_path,
@@ -642,30 +642,30 @@ def test_require_iar_repository_initialized_rejects_empty_repo_id(
 id = ""
 """,
     )
-    with pytest.raises(IARRepositoryNotInitializedError) as exc_info:
-        require_iar_repository_initialized(repo_path)
+    with pytest.raises(RepositoryNotInitializedError) as exc_info:
+        require_repository_initialized(repo_path)
     assert str(repo_path / ".kedacode.toml") in str(exc_info.value)
 
 
-def test_require_iar_repository_initialized_rejects_invalid_toml(
+def test_require_repository_initialized_rejects_invalid_toml(
     tmp_path: Path,
 ) -> None:
-    """Invalid TOML should raise IARRepositoryNotInitializedError."""
+    """Invalid TOML should raise RepositoryNotInitializedError."""
     repo_path = _init_git_repository(tmp_path, "invalid")
     _write_local_iar_config(repo_path, "this is not valid toml")
-    with pytest.raises(IARRepositoryNotInitializedError) as exc_info:
-        require_iar_repository_initialized(repo_path)
+    with pytest.raises(RepositoryNotInitializedError) as exc_info:
+        require_repository_initialized(repo_path)
     assert str(repo_path / ".kedacode.toml") in str(exc_info.value)
 
 
-def test_require_iar_repository_initialized_rejects_missing_agent_runner_section(
+def test_require_repository_initialized_rejects_missing_agent_runner_section(
     tmp_path: Path,
 ) -> None:
-    """TOML without [agent_runner] should raise IARRepositoryNotInitializedError."""
+    """TOML without [agent_runner] should raise RepositoryNotInitializedError."""
     repo_path = _init_git_repository(tmp_path, "no-section")
     _write_local_iar_config(repo_path, '[other]\nkey = "value"\n')
-    with pytest.raises(IARRepositoryNotInitializedError) as exc_info:
-        require_iar_repository_initialized(repo_path)
+    with pytest.raises(RepositoryNotInitializedError) as exc_info:
+        require_repository_initialized(repo_path)
     assert str(repo_path / ".kedacode.toml") in str(exc_info.value)
 
 

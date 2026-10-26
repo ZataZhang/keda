@@ -145,7 +145,7 @@ def test_run_once_no_new_commits_fails() -> None:
     history_comment_calls = [
         c
         for c in fake_client.calls
-        if c["method"] == "comment_issue" and "<!-- iar-attempt-history -->" in c.get("body", "")
+        if c["method"] == "comment_issue" and "<!-- kc:attempt-history -->" in c.get("body", "")
     ]
     assert len(history_comment_calls) >= 1
     # 耗尽时 Issue 上有三类评论：实时的 attempt 历史、交接记录、以及既有的失败报告。
@@ -156,7 +156,7 @@ def test_run_once_no_new_commits_fails() -> None:
     handoff_comment_calls = [
         c
         for c in fake_client.calls
-        if c["method"] == "comment_issue" and "iar:failure-context" in c.get("body", "")
+        if c["method"] == "comment_issue" and "kc:failure-context" in c.get("body", "")
     ]
     assert len(handoff_comment_calls) >= 1
     failure_comment_calls = [
@@ -164,8 +164,8 @@ def test_run_once_no_new_commits_fails() -> None:
         for c in fake_client.calls
         if c["method"] == "comment_issue"
         and "no git commits" in c.get("body", "")
-        and "<!-- iar-attempt-history -->" not in c.get("body", "")
-        and "iar:failure-context" not in c.get("body", "")
+        and "<!-- kc:attempt-history -->" not in c.get("body", "")
+        and "kc:failure-context" not in c.get("body", "")
     ]
     assert len(failure_comment_calls) == 1
 

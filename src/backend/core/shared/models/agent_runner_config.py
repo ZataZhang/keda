@@ -437,7 +437,7 @@ class ValidationConfig:
 
     ``language`` controls the fixed labels in prompts and PR evidence comments.
     ``structured_evidence`` enables the ``evidence.json`` manifest requirement
-    for new Issues that carry the ``iar:structured-evidence`` marker.
+    for new Issues that carry the ``kc:structured-evidence`` marker.
     ``require_negative_control`` (default on) makes the gate reject any
     structured-evidence item lacking a ``negative_control`` (red→green proof);
     set it off to opt out per repository.
@@ -458,7 +458,7 @@ class ValidationConfig:
 
     enabled: bool = True
     evidence_dir: str = DEFAULT_VALIDATION_EVIDENCE_DIR
-    branch_prefix: str = "iar-evidence/"
+    branch_prefix: str = "kc-evidence/"
     evidence_format_check: bool = True
     parse_evidence_format_with_agent: bool = True
     language: str = "zh-CN"
@@ -568,7 +568,7 @@ class PostPrSupervisorConfig:
     max_diff_chars: int = 6000
     # 补丁 4：跨 cycle finding 注入开关（opt-out）与 artifact 落盘目录
     previous_findings_injection_enabled: bool = True
-    findings_artifact_dir: str = ".iar/state"
+    findings_artifact_dir: str = ".kedacode/state"
 
 
 @dataclass(frozen=True)
@@ -602,7 +602,7 @@ class PullRequestContext:
 
 @dataclass(frozen=True)
 class ReviewEventMarker:
-    """Parsed iar:event hidden marker from an Issue comment."""
+    """Parsed kc:event hidden marker from an Issue comment."""
 
     version: int
     phase: str
@@ -709,7 +709,7 @@ class RepositoryIdentity:
     without depending on ``infrastructure/`` Pydantic types.
 
     Attributes:
-        id: Optional iar-internal identifier (e.g. ``"keda-main"``). Falls
+        id: Optional KedaCode repository identifier (e.g. ``"keda-main"``). Falls
             back to ``path`` when the registry entry did not set one.
         path: Resolved absolute path to the repository working tree.
         display_name: Human-readable label used by status surfaces.

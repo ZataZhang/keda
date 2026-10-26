@@ -4,8 +4,8 @@
 （CI ``check_max_file_lines.py --max-lines 1000``），而 allowlist 明确禁止新增豁免，
 故按职责切成独立模块。这里只放 finding artifact 的读写与 prompt 段渲染。
 
-artifact 落在 worktree 内的 ``.iar/state/issue-<N>/findings.json``（已被 ``.iar/``
-gitignore 排除），不污染 GitHub PR 评论流。"""
+artifact 默认落在 worktree 内的 ``.kedacode/state/issue-<N>/findings.json``（已被仓库 gitignore
+排除）；若已有 ``.iar/state`` 则继续写入原路径，不污染 GitHub PR 评论流。"""
 
 from __future__ import annotations
 
@@ -16,6 +16,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from backend.core.shared.models.agent_runner import AppConfig, FindingDetail
+from backend.core.shared.models.repository_paths import (
+    LEGACY_REPOSITORY_STATE_DIR_NAME,
+    resolve_repository_state_path,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -24,6 +28,8 @@ _logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _FINDINGS_ARTIFACT_FILE_NAME = "findings.json"
+_DEFAULT_FINDINGS_ARTIFACT_DIR = Path(".kedacode/state")
+_LEGACY_FINDINGS_ARTIFACT_DIR = Path(LEGACY_REPOSITORY_STATE_DIR_NAME) / "state"
 _FINDINGS_ARTIFACT_VERSION = 1
 _OPEN_FINDING_STATUS = "open"
 _RESOLVED_FINDING_STATUS = "resolved"
@@ -31,9 +37,16 @@ _RESOLVED_FINDING_STATUS = "resolved"
 
 def _findings_artifact_path(worktree_path: Path, config: AppConfig, issue_number: int) -> Path:
     """finding artifact 路径：``<worktree>/<artifact_dir>/issue-<N>/findings.json``。"""
+    artifact_relative_path = Path(config.post_pr_supervisor.findings_artifact_dir)
+    if artifact_relative_path == _DEFAULT_FINDINGS_ARTIFACT_DIR:
+        artifact_relative_path = resolve_repository_state_path(
+            worktree_path,
+            artifact_relative_path,
+            _LEGACY_FINDINGS_ARTIFACT_DIR,
+        ).relative_to(worktree_path)
     return (
         worktree_path
-        / config.post_pr_supervisor.findings_artifact_dir
+        / artifact_relative_path
         / f"issue-{issue_number}"
         / _FINDINGS_ARTIFACT_FILE_NAME
     )

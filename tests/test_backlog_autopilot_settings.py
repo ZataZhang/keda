@@ -292,7 +292,7 @@ def test_upstream_merged_promotes_downstream_when_auto_advance_enabled(tmp_path:
     github_client = FakeGitHubClient()
     github_client._issue_states[1] = "CLOSED"
     github_client._issue_comments[1] = [
-        "<!-- iar:event version=1 phase=draft_pr_created cycle=1 pr_branch=issue-1 -->"
+        "<!-- kc:event version=1 phase=draft_pr_created cycle=1 pr_branch=issue-1 -->"
     ]
     github_client._merged_prs["issue-1"] = "https://github.com/example/repo/pull/1"
 

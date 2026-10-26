@@ -521,9 +521,7 @@ def migrate_state_home(
     """
     resolved_home_path = Path.home() if home_path is None else Path(home_path)
     shape, new_state_path, legacy_state_path = _state_dir_shape(resolved_home_path)
-    candidate_state_dir_tuple = (
-        (new_state_path, legacy_state_path) if shape == "separate" else (legacy_state_path,)
-    )
+    candidate_state_dir_tuple = (new_state_path, legacy_state_path)
     probe = _detect_occupancy if occupancy_probe is None else occupancy_probe
     occupancy_report = probe(candidate_state_dir_tuple, resolved_home_path)
     if not occupancy_report.scanner_available:

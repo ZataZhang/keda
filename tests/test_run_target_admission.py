@@ -216,7 +216,7 @@ def _cli_patches(client: FakeGitHubClient, *, live_daemon_pid: int | None):
         patch("backend.api.cli_helpers.resolve_repository_targets") as resolve_targets,
         patch("backend.api.cli.create_github_client", return_value=client),
         patch("backend.api.cli_helpers.create_github_client"),
-        patch("backend.api.cli.require_iar_repository_initialized"),
+        patch("backend.api.cli.require_repository_initialized"),
         patch(
             "backend.core.use_cases.daemon_single_instance.find_live_daemon_pid",
             return_value=live_daemon_pid,
@@ -306,7 +306,7 @@ def test_cli_prd_path_target_also_bypasses_the_mutex(
     with (
         patch("backend.api.cli_helpers.resolve_repository_targets") as resolve_targets,
         patch("backend.api.cli.create_github_client", return_value=client),
-        patch("backend.api.cli.require_iar_repository_initialized"),
+        patch("backend.api.cli.require_repository_initialized"),
         patch(
             "backend.core.use_cases.daemon_single_instance.find_live_daemon_pid",
             return_value=4242,

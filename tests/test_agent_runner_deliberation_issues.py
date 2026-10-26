@@ -170,7 +170,7 @@ def test_resolve_turn_skips_when_user_has_not_replied() -> None:
 
 
 def test_format_question_list_comment_appends_marker() -> None:
-    """The posted comment must end with the iar:event marker HTML comment."""
+    """The posted comment must end with the kc:event marker HTML comment."""
     labels = LabelConfig(deliberate="agent/deliberate", rework_prd="agent/rework-prd")
     body = _format_question_list_comment(
         synthesis_output="## 范围边界\n- Q",
@@ -180,7 +180,7 @@ def test_format_question_list_comment_appends_marker() -> None:
         label_config=labels,
     )
     assert "Q" in body
-    assert "<!-- iar:event" in body
+    assert "<!-- kc:event" in body
     assert f"phase={DELIBERATION_QUESTION_PHASE}" in body
     assert "cycle=4" in body
     assert "issue_comments_count=7" in body

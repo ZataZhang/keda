@@ -123,6 +123,36 @@ def list_issues_by_label(
     ]
 
 
+def list_repository_items(client: _ClientProtocol, *, state: str = "open") -> list[IssueSummary]:
+    """完整列出仓库 Issue 与 PR，保留每个条目的正文和状态。"""
+    if state not in {"open", "closed", "all"}:
+        raise ValueError("state must be 'open', 'closed', or 'all'.")
+    command = [
+        "gh",
+        "api",
+        "-X",
+        "GET",
+        "--paginate",
+        "--slurp",
+        f"repos/{client._get_owner_repo()}/issues",
+        "-f",
+        f"state={state}",
+        "-F",
+        "per_page=100",
+    ]
+    try:
+        result = client._run_with_retry(command, cwd=client.repo_path)
+        raw_pages = json.loads(result.stdout or "[]")
+    except Exception as exc:  # noqa: BLE001 - migration must fail closed on incomplete reads.
+        raise RuntimeError(f"Cannot list repository Issues and PRs: {exc}") from exc
+    if not isinstance(raw_pages, list) or any(not isinstance(page, list) for page in raw_pages):
+        raise RuntimeError("Repository Issue query returned an incomplete paginated response.")
+    raw_items = [raw_item for raw_page in raw_pages for raw_item in raw_page]
+    if any(not isinstance(raw_item, dict) or "number" not in raw_item for raw_item in raw_items):
+        raise RuntimeError("Repository Issue query returned malformed item metadata.")
+    return [_build_issue_summary(raw_item) for raw_item in raw_items]
+
+
 def get_issue(client: _ClientProtocol, issue_number: int) -> IssueSummary:
     """读取指定编号的 Issue 摘要。"""
     try:
@@ -434,7 +464,10 @@ def list_issue_comment_entries(
             if body_contains not in raw_comment["body"]:
                 continue
         if require_success and (
-            not isinstance(raw_comment, dict) or not isinstance(raw_comment.get("body"), str)
+            not isinstance(raw_comment, dict)
+            or not isinstance(raw_comment.get("body"), str)
+            or not isinstance(raw_comment.get("id"), int)
+            or raw_comment["id"] <= 0
         ):
             raise RuntimeError("Issue comment query has malformed body metadata.")
         if trusted_only:
@@ -451,6 +484,8 @@ def list_issue_comment_entries(
             comment_id = int(raw_comment.get("id", 0))
         except (TypeError, ValueError):
             comment_id = 0
+        if require_success and comment_id <= 0:
+            raise RuntimeError("Issue comment query has invalid comment identity.")
         if trusted_only and (comment_id <= 0 or not isinstance(raw_comment.get("body"), str)):
             raise RuntimeError("Trusted comment query has invalid comment identity or body.")
         body = str(raw_comment.get("body", "") or "")

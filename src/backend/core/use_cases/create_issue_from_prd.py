@@ -102,7 +102,7 @@ def _resolve_dependencies(
     Three sources are merged with CLI taking highest precedence:
 
     1. ``Delivery Dependencies`` section in the PRD.
-    2. Explicit ``iar:depends-on`` markers in the PRD body.
+    2. Explicit ``kc:depends-on`` markers in the PRD body.
     3. CLI ``--depends-on`` overrides.
 
     Args:
@@ -144,7 +144,7 @@ def _resolve_dependencies(
     deduped_issues = [n for n in resolved_issues if not (n in seen_issues or seen_issues.add(n))]
 
     # ``stack`` declared either in the Delivery Dependencies section or carried by
-    # an explicit ``iar:depends-on ... mode="stack"`` marker in the body. The
+    # an explicit ``kc:depends-on ... mode="stack"`` marker in the body. The
     # latter is the compat path; honour it instead of regenerating a via-main
     # marker that would silently drop the strategy.
     sequence = from_prd.sequence
@@ -492,11 +492,11 @@ def _parse_evidence_format_with_agent(
 
 
 def _build_evidence_format_markers(parsed_formats: dict[int, str]) -> str:
-    """Build hidden ``iar:evidence-format`` markers from parsed formats."""
+    """Build hidden ``kc:evidence-format`` markers from parsed formats."""
     if not parsed_formats:
         return ""
     lines = [
-        f"<!-- iar:evidence-format item={num} kind={kind} -->"
+        f"<!-- kc:evidence-format item={num} kind={kind} -->"
         for num, kind in sorted(parsed_formats.items())
     ]
     return "\n".join(lines)

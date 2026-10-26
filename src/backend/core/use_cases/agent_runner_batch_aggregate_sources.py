@@ -225,7 +225,7 @@ def _source_branch(issue_number: int) -> str:
 
 def build_superseded_marker(total_pr_number: int) -> str:
     """构造可供聚合重试验证的来源 PR 取代 marker。"""
-    return f"<!-- iar:aggregate-superseded version=1 total_pr={total_pr_number} -->"
+    return f"<!-- kc:aggregate-superseded version=1 total_pr={total_pr_number} -->"
 
 
 def _read_source_pr_context(
@@ -376,8 +376,8 @@ def resolve_batch_sources(request: BatchSourceResolutionRequest) -> tuple[BatchS
                     failure_category="eligibility",
                 )
             if (
-                "<!-- iar:direct-pr" in source_context.body
-                or "<!-- iar:fast-merge" in source_context.body
+                "<!-- kc:direct-pr" in source_context.body
+                or "<!-- kc:fast-merge" in source_context.body
             ):
                 raise BatchAggregateError(
                     f"source PR #{source_pr.number} bypassed required review or verification gates",

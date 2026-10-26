@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 from backend.core.shared.interfaces.agent_runner import (
-    IarExecRequest,
+    KCExecRequest,
     IProcessRunner,
     IReplCommandExecutor,
     ReplExecOutcome,
@@ -106,7 +106,7 @@ class ReplCommandExecutor(IReplCommandExecutor):
 
     def execute(
         self,
-        request: IarExecRequest,
+        request: KCExecRequest,
         *,
         repo_path: Path,
     ) -> ReplExecOutcome:
