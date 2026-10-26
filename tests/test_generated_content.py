@@ -62,6 +62,20 @@ def test_validate_pr_body_fails_empty() -> None:
     assert _validate_pr_body("", 42) is False
 
 
+def test_validate_pr_body_fails_when_only_fenced_reference_exists() -> None:
+    """Closes 锚点只出现在围栏代码块里时不算通过：GitHub 不会据此关联 Issue。"""
+    body = "## Summary\n\n```markdown\nCloses #42\n```\n"
+
+    assert _validate_pr_body(body, 42) is False
+
+
+def test_validate_pr_body_passes_with_real_anchor_beside_fenced_example() -> None:
+    """正文里有真实锚点时，块内的同名示例不影响判定。"""
+    body = "Closes #42\n\n## Template\n\n```markdown\nCloses #99\n```\n"
+
+    assert _validate_pr_body(body, 42) is True
+
+
 def test_parse_json_output_extracts_title_and_body() -> None:
     """JSON output with title and body keys should be parsed."""
     title, body = _parse_json_output('{"title": "T", "body": "B"}')
@@ -422,6 +436,48 @@ def test_generate_pr_content_agent_mode_markdown() -> None:
     assert result.title == "Fallback"
     assert "Closes #42" in result.body
     assert result.source == "agent"
+
+
+def test_generate_pr_content_agent_rejects_fenced_only_anchor() -> None:
+    """agent 正文里唯一的 Closes 锚点在围栏内时落到 fallback，避免发布无关联的 PR。"""
+    generator = FakeContentGenerator(
+        response=(
+            "[Agent] Repair dependencies\n\n## Summary\n\n"
+            "PR 正文模板：\n\n```markdown\nCloses #42\n\n## Summary\n```\n"
+        )
+    )
+    config = GeneratedContentConfig(
+        enabled=True,
+        draft_pr=GeneratedContentTargetConfig(
+            enabled=True,
+            mode="agent",
+            output="markdown",
+            prompt="Generate PR for #{issue_number}",
+        ),
+    )
+    context = PrContext(
+        issue_number=42,
+        issue_title="Title",
+        issue_body="Body",
+        branch="issue-42",
+        base_branch="main",
+        commit_log="",
+        commit_messages="",
+        diff_stat="",
+        git_diff_stat="",
+    )
+
+    result = generate_pr_content(
+        config=config,
+        context=context,
+        fallback_title="Fallback",
+        fallback_body="Fallback Body",
+        generator=generator,
+        cwd=Path("."),
+    )
+
+    assert result.source == "fallback"
+    assert result.body == "Fallback Body"
 
 
 def test_generate_pr_content_agent_fallback_to_template() -> None:

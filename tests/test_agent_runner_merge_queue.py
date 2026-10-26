@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 
 from backend.core.shared.models.agent_runner import (
@@ -1067,6 +1069,40 @@ def test_tick_sign_off_checklist_helper() -> None:
     assert _tick_sign_off_checklist(_TICKED_BODY) is None
     # No checklist → returns None.
     assert _tick_sign_off_checklist("") is None
+
+
+def test_auto_sign_off_warns_when_block_marker_is_unreadable(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """读不懂的签收区块不能被静默跳过：自动勾选必须留下可诊断的警告。"""
+    legacy_body = (
+        "<!-- iar:realistic-validation version=1 total=2 -->\n"
+        "- [ ] rv-1: first checklist behaviour\n"
+        "- [ ] rv-2: second checklist behaviour\n"
+        "<!-- iar:realistic-validation-end -->"
+    )
+    github = FakeGitHubClient()
+    request = merge_queue_module._AutoSignOffRequest(
+        issue=IssueSummary(
+            number=42,
+            title="Demo",
+            url="https://github.com/example/repo/issues/42",
+            body="",
+            labels=(),
+        ),
+        pr_number=7,
+        pr_branch="issue-42",
+        pr_body=legacy_body,
+        comments=[],
+        github_client=github,
+        scoped_prd_auto_merge=False,
+    )
+
+    with caplog.at_level(logging.WARNING):
+        assert merge_queue_module._apply_auto_sign_off(request) is False
+
+    assert [c for c in github.calls if c["method"] == "update_pull_request_body"] == []
+    assert "cannot read" in caplog.text
 
 
 def test_diff_unavailable_fails_closed(tmp_path, worktree_path, monkeypatch) -> None:

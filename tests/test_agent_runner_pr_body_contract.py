@@ -744,6 +744,51 @@ def test_unique_prd_paths_is_order_independent_and_deduped() -> None:
     assert unique_prd_paths(scrambled) == (_AGGREGATE_PRD_A, _AGGREGATE_PRD_B)
 
 
+def test_fenced_anchors_do_not_satisfy_pr_body_contract() -> None:
+    """围栏代码块里的 PRD 路径与 marker 示例不算声明，两个锚点仍判为缺失。"""
+    fenced_body = "\n".join(
+        [
+            "Closes #42",
+            "",
+            "## 正文模板",
+            "",
+            "```markdown",
+            f"- PRD: {_ARCHIVED_PRD_PATH}",
+            MERGE_ACCEPTANCE_MARKER_TEXT,
+            "```",
+            "",
+        ]
+    )
+
+    assert find_pr_body_contract_violations(fenced_body, _ISSUE_BODY_WITH_PRD) == [
+        "prd-link",
+        "merge-acceptance",
+    ]
+    # 同样的两行移出围栏后锚点即成立：判定只看书写位置，不看内容。
+    unfenced_body = fenced_body.replace("```markdown\n", "").replace("```\n", "")
+    assert find_pr_body_contract_violations(unfenced_body, _ISSUE_BODY_WITH_PRD) == []
+
+
+def test_aggregate_contract_ignores_prd_lines_inside_code_fence() -> None:
+    """总 PR 只在围栏里列 PRD 时判为漏列：示例不能充当合并即接受清单。"""
+    fenced_body = _build_aggregate_body(
+        prd_lines=[
+            "```markdown",
+            *_prd_lines(_AGGREGATE_PRD_A, _AGGREGATE_PRD_B),
+            "```",
+        ]
+    )
+
+    violations = find_aggregate_pr_body_contract_violations(
+        fenced_body,
+        expected_prd_paths=[_AGGREGATE_PRD_A, _AGGREGATE_PRD_B],
+        expected_issue_numbers=_AGGREGATE_ISSUES,
+        expected_source_pr_numbers=_AGGREGATE_SOURCE_PRS,
+    )
+
+    assert violations == ["prd-link"]
+
+
 def test_extract_prd_reference_paths_preserves_order_and_duplicates() -> None:
     """抽取正文 PRD 行保留文档顺序与重复项，供重复判定使用。"""
     pr_body = _build_aggregate_body(

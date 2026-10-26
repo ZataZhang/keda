@@ -298,10 +298,10 @@ def test_create_issue_from_prd_rejects_unparsed_non_none_dependency(
     prd.parent.mkdir(parents=True)
     prd.write_text(
         "# PRD: Downstream\n\n"
-        "## Delivery Dependencies\n\n"
+        "## 8. Delivery Dependencies\n\n"
         "- Depends on tasks/issues: none\n"
         "- Gate type: none\n\n"
-        "## Delivery Dependencies\n\n"
+        "## 9. Acceptance Checklist\n\n"
         "- Depends on tasks/issues: #42\n"
         "- Gate type: hard\n",
         encoding="utf-8",
@@ -316,8 +316,43 @@ def test_create_issue_from_prd_rejects_unparsed_non_none_dependency(
     message = str(exc_info.value)
     assert "tasks/pending/downstream.md" in message
     assert "non-none 'Depends on tasks/issues'" in message
+    assert "outside any parsed 'Delivery Dependencies' section" in message
     assert "no dependency references were parsed" in message
     assert [call for call in fake_client.calls if call["method"] == "create_issue"] == []
+
+
+def test_create_issue_from_prd_ignores_dependency_example_in_code_fence(
+    tmp_path: Path,
+) -> None:
+    """围栏代码块里的依赖示例不是声明，不能拦下 none 小节的 Issue 创建。"""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo)
+    fake_client = FakeGitHubClient()
+    prd = repo / "tasks" / "pending" / "downstream.md"
+    prd.parent.mkdir(parents=True)
+    prd.write_text(
+        "# PRD: Downstream\n\n"
+        "## 8. Delivery Dependencies\n\n"
+        "- Depends on tasks/issues: none\n"
+        "- Gate type: none\n\n"
+        "## 9. Realistic Validation\n\n"
+        "PRD 模板里的示例区块（不是本 PRD 的声明）：\n\n"
+        "```markdown\n"
+        "## Delivery Dependencies\n\n"
+        "- Depends on tasks/issues: #42\n"
+        "- Gate type: hard\n"
+        "```\n\n"
+        "## Acceptance Checklist\n\n- [x] One\n",
+        encoding="utf-8",
+    )
+
+    issue_url = create_issue_from_prd(
+        request=_request(repo, Path("tasks/pending/downstream.md")),
+        github_client=fake_client,
+    )
+
+    assert issue_url == "https://github.com/example/repo/issues/42"
 
 
 @pytest.mark.parametrize(

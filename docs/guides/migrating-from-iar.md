@@ -32,6 +32,8 @@ kc completion install
 4. 预演无误后显式执行 `--apply`。
 5. 将各目标仓库的 `.github/workflows/validation-gate.yml` 同步到当前版本，确认它解析
    `kc:realistic-validation` 清单；旧工作流只识别 `iar:`，会把新清单当成不存在。
+   反过来，新版工作流不再放过残留清单：正文里出现读不懂的签收区块（旧前缀或残缺
+   marker）时 check 直接失败，因此必须在本机停跑 runner 后执行第 4 步再合并。
 6. 重新启动 runner。
 
 ```bash
