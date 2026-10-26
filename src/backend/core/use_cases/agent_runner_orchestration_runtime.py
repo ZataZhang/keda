@@ -49,6 +49,7 @@ from backend.core.use_cases.agent_runner_orchestrate import (
     AttemptResult,
     DependencyEnvironmentBlockedError,
     ForbiddenBlockedError,
+    IssueBlockedDuringNoChangeError,
     IContentGenerator,
     IGitHubClient,
     IProcessRunner,
@@ -440,8 +441,12 @@ def _process_single_issue(
         output_view.update_status(issue.number, "skipped")
         raise
 
-    except (ForbiddenBlockedError, DependencyEnvironmentBlockedError) as exc:
-        # 两者都是「等人」而非「执行失败」：Issue 进入可恢复的 agent/blocked，
+    except (
+        ForbiddenBlockedError,
+        IssueBlockedDuringNoChangeError,
+        DependencyEnvironmentBlockedError,
+    ) as exc:
+        # 这些情况都是「等人」而非「执行失败」：Issue 进入可恢复的 agent/blocked，
         # 人给出决定后 `kc blocked-continue` 继续，不占用 agent/failed 语义。
         _mark_issue_blocked(
             issue=issue,

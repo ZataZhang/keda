@@ -31,6 +31,28 @@ def workflow_state_labels(config: AppConfig) -> list[str]:
     ]
 
 
+def is_issue_newly_blocked(
+    issue_snapshot: IssueSummary,
+    current_issue: IssueSummary,
+    config: AppConfig,
+) -> bool:
+    """判断 open Issue 是否在本次执行开始后进入 blocked 状态。
+
+    Args:
+        issue_snapshot: 本次执行开始时读取的 Issue。
+        current_issue: 刚从 GitHub 重新读取的 Issue。
+        config: 当前运行配置。
+
+    Returns:
+        Issue 仍 open、当前带 blocked 标签且执行前没有该标签时返回 True。
+    """
+    return (
+        current_issue.state.upper() == "OPEN"
+        and config.labels.blocked in current_issue.labels
+        and config.labels.blocked not in issue_snapshot.labels
+    )
+
+
 def issue_requires_human_review(issue: IssueSummary, config: AppConfig) -> bool:
     """判断自动审查通过后是否仍需要人工处理。
 

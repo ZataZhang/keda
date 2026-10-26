@@ -46,6 +46,7 @@ __all__ = [
     "AgentUnavailableError",
     "DependencyEnvironmentBlockedError",
     "ForbiddenBlockedError",
+    "IssueBlockedDuringNoChangeError",
     "MaxRetriesExceededError",
     "ProviderCapacityError",
     "PublishFailureError",
@@ -111,6 +112,31 @@ class ForbiddenBlockedError(AgentRunnerAttemptError):
         attempt_results: list[AttemptResult],
     ) -> None:
         super().__init__(message, attempt_results)
+
+
+class IssueBlockedDuringNoChangeError(AgentRunnerAttemptError):
+    """无代码变更的执行期间 Issue 转为 blocked 时发起人工交接。"""
+
+    def __init__(self, issue_number: int, attempt_results: list[AttemptResult]) -> None:
+        message = f"Issue #{issue_number} was moved to the blocked state during a no-change run."
+        super().__init__(message, attempt_results)
+        self.issue_comment_body = "\n".join(
+            [
+                "## Agent Runner Blocked",
+                "",
+                "- Block type: `blocked_no_change_handoff`",
+                "",
+                f"Issue #{issue_number} was re-read as open with the configured blocked label "
+                "after the agent produced no commits and left a clean worktree. The runner "
+                "stopped recovery and skipped validation and publication.",
+                "",
+                "Resolve the human decision recorded in the Issue comments, then continue with:",
+                "",
+                "```bash",
+                f"kc blocked-continue --issue {issue_number}",
+                "```",
+            ]
+        )
 
 
 class DependencyEnvironmentBlockedError(RuntimeError):

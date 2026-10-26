@@ -19,6 +19,7 @@ from backend.core.shared.models.agent_runner import (
 )
 from backend.core.shared.models.publish_stage import PublishStage
 from backend.core.use_cases import run_agent_execution_loop as execution_loop
+from backend.core.use_cases.agent_runner_failure import IssueBlockedDuringNoChangeError
 from backend.core.use_cases.run_agent_once import MaxRetriesExceededError
 from tests.conftest import FakeGitHubClient, FakeProcessRunner
 from tests.support.agent_runner import (
@@ -144,6 +145,56 @@ def test_issue_still_open_without_changes_still_fails(
     assert validation_calls == ["verification"]
 
 
+def test_newly_blocked_issue_without_changes_hands_off_before_validation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """执行中转为 blocked 的干净 Issue 应交给人，不进入 no-commit recovery。"""
+    github_client = FakeGitHubClient()
+    issue = make_ready_issue()
+    validation_calls: list[str] = []
+    _patch_clean_run(monkeypatch, validation_calls)
+
+    def _block_issue_after_agent(*_args: object, **_kwargs: object) -> CommandResult:
+        github_client.set_issue_labels(issue.number, ("agent/blocked",))
+        return CommandResult(("codex",), 0, "", "")
+
+    monkeypatch.setattr(execution_loop, "run_agent", _block_issue_after_agent)
+
+    with pytest.raises(
+        IssueBlockedDuringNoChangeError,
+        match="moved to the blocked state",
+    ) as error_info:
+        execution_loop.run_agent_until_committed(
+            _request(issue=issue, github_client=github_client, worktree_path=tmp_path)
+        )
+
+    assert error_info.value.attempt_results[-1].failure_type is FailureType.NO_COMMITS
+    assert validation_calls == []
+    assert any(call["method"] == "get_issue" for call in github_client.calls)
+
+
+def test_preexisting_blocked_label_does_not_suppress_no_commit_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """执行前已有 blocked 标签不能伪装成本轮新完成的人工交接。"""
+    github_client = FakeGitHubClient()
+    issue = replace(make_ready_issue(), labels=("agent/blocked",))
+    github_client.set_issue_labels(issue.number, ("agent/blocked",))
+    validation_calls: list[str] = []
+    _patch_clean_run(monkeypatch, validation_calls)
+    _patch_downstream_gates(monkeypatch)
+
+    with pytest.raises(MaxRetriesExceededError) as error_info:
+        execution_loop.run_agent_until_committed(
+            _request(issue=issue, github_client=github_client, worktree_path=tmp_path)
+        )
+
+    assert error_info.value.attempt_results[-1].failure_type is FailureType.NO_COMMITS
+    assert validation_calls == ["verification"]
+
+
 def test_issue_state_read_failure_keeps_failing_closed(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -193,7 +244,7 @@ def test_closed_issue_with_changes_does_not_take_the_noop_gate(
     assert not any(call["method"] == "get_issue" for call in github_client.calls)
 
 
-def test_prd_issue_does_not_take_the_noop_gate(
+def test_prd_issue_does_not_take_the_closed_noop_gate(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -212,7 +263,7 @@ def test_prd_issue_does_not_take_the_noop_gate(
 
     attempt = error_info.value.attempt_results[-1]
     assert attempt.failure_type is FailureType.NO_COMMITS
-    assert not any(call["method"] == "get_issue" for call in github_client.calls)
+    assert any(call["method"] == "get_issue" for call in github_client.calls)
     assert validation_calls == ["verification"]
 
 

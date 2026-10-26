@@ -27,6 +27,7 @@ from backend.core.use_cases.agent_runner_failure import (
     AgentUnavailableError,
     DependencyEnvironmentBlockedError,
     ForbiddenBlockedError,
+    IssueBlockedDuringNoChangeError,
     MaxRetriesExceededError,
     ProviderCapacityError,
     UnrecoverableError,
@@ -519,6 +520,29 @@ def test_mark_issue_blocked_uses_prepared_dependency_comment() -> None:
     assert "blocked_dependency_environment" in body
     assert "Missing required executable(s): pnpm." in body
     assert "blocked_forbidden" not in body
+
+
+def test_mark_issue_blocked_uses_no_change_handoff_comment() -> None:
+    """干净 no-change 人工交接发布专用说明，不套用 forbidden-path 模板。"""
+    fake_client = FakeGitHubClient()
+    issue = _make_ready_issue(44, "Issue #44", "", ("agent/running",))
+
+    _mark_issue_blocked(
+        issue=issue,
+        config=AppConfig(),
+        github_client=fake_client,
+        exc=IssueBlockedDuringNoChangeError(44, []),
+    )
+
+    label_calls = [call for call in fake_client.calls if call["method"] == "edit_issue_labels"]
+    assert len(label_calls) == 1
+    assert "agent/blocked" in label_calls[0]["add"]
+    comment_calls = [call for call in fake_client.calls if call["method"] == "comment_issue"]
+    assert len(comment_calls) == 1
+    comment_body = comment_calls[0]["body"]
+    assert "blocked_no_change_handoff" in comment_body
+    assert "blocked-continue --issue 44" in comment_body
+    assert "blocked_forbidden" not in comment_body
 
 
 def test_guard_blocked_issue_has_resolution_finds_marker() -> None:
@@ -1119,6 +1143,27 @@ def test_fallback_does_not_switch_on_dependency_blocked() -> None:
     process_for_agent, calls = _agent_outcomes({"claude": _dependency_block_error(), "codex": None})
 
     with pytest.raises(DependencyEnvironmentBlockedError):
+        run_issue_with_agent_fallback(
+            issue=_fallback_issue("agent/claude"),
+            config=config,
+            agent="auto",
+            process_for_agent=process_for_agent,
+        )
+
+    assert calls == ["claude"]
+
+
+def test_fallback_does_not_switch_on_no_change_blocked_handoff() -> None:
+    """已明确转为 blocked 的 Issue 不应换 agent 重跑相同的人工阻塞。"""
+    config = AppConfig(runner=RunnerConfig(agent_fallback_order=("claude", "codex")))
+    process_for_agent, calls = _agent_outcomes(
+        {
+            "claude": IssueBlockedDuringNoChangeError(42, []),
+            "codex": None,
+        }
+    )
+
+    with pytest.raises(IssueBlockedDuringNoChangeError):
         run_issue_with_agent_fallback(
             issue=_fallback_issue("agent/claude"),
             config=config,

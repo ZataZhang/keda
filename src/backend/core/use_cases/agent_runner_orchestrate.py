@@ -84,6 +84,7 @@ from backend.core.use_cases.agent_runner_failure import (
     AgentUnavailableError,
     DependencyEnvironmentBlockedError,
     ForbiddenBlockedError,
+    IssueBlockedDuringNoChangeError,
     MaxRetriesExceededError,
     ProviderCapacityError,
     UnrecoverableError,
@@ -483,6 +484,7 @@ def run_issue_with_agent_fallback(
     Raises:
         UnrecoverableError: A security/branch violation that no agent can fix.
         ForbiddenBlockedError: Forbidden paths require human intervention.
+        IssueBlockedDuringNoChangeError: An Issue was newly blocked during a clean no-change run.
         MaxRetriesExceededError: Every candidate agent failed.
         AgentUnavailableError: Every candidate agent's CLI was unavailable.
     """
@@ -514,6 +516,7 @@ def run_issue_with_agent_fallback(
         except (
             UnrecoverableError,
             ForbiddenBlockedError,
+            IssueBlockedDuringNoChangeError,
             DependencyEnvironmentBlockedError,
             ClaimArbitrationLost,
         ):
