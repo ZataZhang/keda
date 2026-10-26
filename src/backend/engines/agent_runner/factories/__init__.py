@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Callable, Sequence
 
 from backend.core.shared.interfaces.agent_output_view import IAgentOutputView
 from backend.core.shared.interfaces.agent_runner import IProcessRunner
+from backend.core.shared.interfaces.machine_identity import IMachineIdentityStore
 from backend.core.shared.interfaces.agent_session import (
     IForegroundSessionLauncher,
     IPreviewProcessManager,
@@ -405,10 +406,25 @@ def create_github_api_budget() -> JsonGitHubApiBudget:
 
 
 def create_github_client(
-    repo_path: Path, process_runner: SubprocessRunner | None = None
+    repo_path: Path,
+    process_runner: SubprocessRunner | None = None,
+    *,
+    bypass_budget_pause: bool = False,
 ) -> GitHubCliClient:
-    """Create a new GitHub CLI client instance wired to the shared API budget."""
-    return GitHubCliClient(repo_path, process_runner, api_budget=create_github_api_budget())
+    """Create a client wired to the shared budget, optionally bypassing only its pause gate."""
+    return GitHubCliClient(
+        repo_path,
+        process_runner,
+        api_budget=create_github_api_budget(),
+        bypass_budget_pause=bypass_budget_pause,
+    )
+
+
+def create_machine_identity_store() -> IMachineIdentityStore:
+    """Create the infrastructure adapter for the persistent machine identity."""
+    from backend.infrastructure.machine_identity_store import MachineIdentityStore
+
+    return MachineIdentityStore()
 
 
 def create_repl_command_executor(

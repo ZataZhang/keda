@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import socket
+from datetime import datetime, timezone
 from typing import Callable
 
 from backend.core.shared.interfaces.agent_runner import IGitHubClient
@@ -24,6 +25,11 @@ from backend.core.use_cases.agent_runner_reclaim import (
     ClaimMarkerDetail,
     is_pid_alive,
     parse_claim_marker_detail,
+)
+from backend.core.use_cases.agent_runner_claim_lease import (
+    classify_remote_lease,
+    is_local_claim,
+    latest_claim_record,
 )
 from backend.core.use_cases.agent_runner_workflow import workflow_state_labels
 
@@ -84,15 +90,34 @@ def _claim_is_active(
     *,
     this_host: str,
     pid_alive: Callable[[int], bool],
+    machine_id: str | None = None,
+    updated_at: datetime | None = None,
+    now: datetime | None = None,
+    lease=None,
 ) -> bool:
     """该认领是否仍由一个存活的持有者占有。
 
-    本机认领可以直接探 PID；**跨机器认领无法探测远端进程**，因此一律按有效处理
-    （fail-closed）：抢跑别人正在执行的 Issue 是双跑，而拒绝一次定向只是让人等一等。
+    本机认领可以直接探 PID；带租约的跨机器认领按 GitHub 评论更新时间判定，
+    没有租约或缺少服务器更新时间的旧跨机器认领继续按有效处理（fail-closed）。
     """
-    if claim.host != this_host:
+    is_local = is_local_claim(
+        claim_host=claim.host,
+        lease=lease,
+        machine_id=machine_id,
+        host=this_host,
+    )
+    if is_local:
+        return pid_alive(claim.pid)
+    if lease is None or updated_at is None:
         return True
-    return pid_alive(claim.pid)
+    return (
+        classify_remote_lease(
+            updated_at=updated_at,
+            lease=lease,
+            now=now or datetime.now(timezone.utc),
+        ).state
+        == "live"
+    )
 
 
 def _blocked_resolution_is_requested(
@@ -114,15 +139,18 @@ def require_explicit_target_claimable(
     config: AppConfig,
     host: str | None = None,
     pid_alive: Callable[[int], bool] = is_pid_alive,
+    machine_id: str | None = None,
+    now: datetime | None = None,
+    ignore_active_local_claim: bool = False,
 ) -> None:
     """确认显式定向的目标 Issue 可以被领取，否则抛出带原因的错误。
 
     判定顺序（先说最硬的）：
 
     1. 读不到、或不是 open 状态 → ``not_found``。
-    2. 带 ``agent/running`` 且最近一次认领的持有者仍存活 → ``live_claim``，
-       错误里点名持有者 ``host``/``PID``；持有者已死（本机 PID 不在）则放行，
-       交给 running 通道的恢复路径（rework / 发布恢复）。
+    2. 带 ``agent/running`` 且最近一次认领仍有效 → ``live_claim``，错误里点名
+       持有者 ``host``/``PID``；本机 PID 不在或远端租约已过期则放行，交给 running
+       通道的恢复路径（rework / 发布恢复）。没有租约的旧远端认领仍视为有效。
     3. 带 ``agent/blocked`` 且没有未消费的解除请求 marker → ``blocked``，
        提示先跑 ``kc blocked-continue``。
     4. 其余情况一律放行 —— 包括**没有任何 workflow 标签**的 Issue，这正是本次
@@ -134,6 +162,8 @@ def require_explicit_target_claimable(
         config: 该仓库运行配置（提供 workflow 标签名）。
         host: 覆盖本机主机名（测试用）；默认 ``socket.gethostname()``。
         pid_alive: PID 存活探针（测试可注入）。
+        ignore_active_local_claim: 停本机 daemon 前的预检可忽略其认领；停止后还要正常复查，
+            以免放过另一条仍运行的本机 ``kc run``。
 
     Raises:
         TargetNotClaimableError: 目标不存在 / 被他人活跃认领 / blocked 未解除。
@@ -160,18 +190,54 @@ def require_explicit_target_claimable(
 
     labels = set(issue.labels)
     if config.labels.running in labels:
-        claim = latest_claim(issue_number, github_client)
-        if claim is not None and _claim_is_active(claim, this_host=this_host, pid_alive=pid_alive):
+        comment_records = github_client.list_issue_comment_records(
+            issue_number,
+            trusted_only=True,
+            body_contains="<!-- kc:claim ",
+            require_success=True,
+        )
+        latest_record = latest_claim_record(comment_records)
+        claim = (
+            latest_record[1]
+            if latest_record is not None
+            else latest_claim(issue_number, github_client)
+        )
+        lease = latest_record[2] if latest_record is not None else None
+        active = claim is not None and _claim_is_active(
+            claim,
+            this_host=this_host,
+            pid_alive=pid_alive,
+            machine_id=machine_id,
+            updated_at=latest_record[0].updated_at if latest_record is not None else None,
+            now=now,
+            lease=lease,
+        )
+        local_claim = claim is not None and is_local_claim(
+            claim_host=claim.host,
+            lease=lease,
+            machine_id=machine_id,
+            host=this_host,
+        )
+        if claim is not None and active and not (ignore_active_local_claim and local_claim):
+            remaining_text = ""
+            if lease is not None and latest_record is not None:
+                lease_status = classify_remote_lease(
+                    updated_at=latest_record[0].updated_at,
+                    lease=lease,
+                    now=now or datetime.now(timezone.utc),
+                )
+                if lease_status.state == "live" and not local_claim:
+                    remaining_text = f"; lease expires in {int(lease_status.remaining_seconds)}s"
             raise TargetNotClaimableError(
                 f"Issue #{issue_number} is actively claimed by {claim.host} "
-                f"(PID {claim.pid}); running it here would double-run the same Issue.",
+                f"(PID {claim.pid}){remaining_text}; running it here would double-run the same Issue.",
                 reason=TARGET_UNCLAIMABLE_LIVE_CLAIM,
                 issue_number=issue_number,
                 holder=(claim.host, claim.pid),
                 suggestion=(
                     f"kc run --issue {issue_number} --takeover  # 持有者在本机："
                     "停掉本机守护进程并回收其在途 Issue"
-                    if claim.host == this_host
+                    if local_claim
                     else "kc issue list  # 持有者在另一台机器：等它结束，或换跑别的 Issue"
                     "（系统没有强制接管远端认领的入口）"
                 ),

@@ -140,6 +140,8 @@ from backend.core.use_cases.agent_runner_stall_supervision import (
     build_supervision_attempt_key,
     supervised_agent_invocation,
 )
+from backend.core.use_cases.coordination_heartbeat import active_coordination_heartbeat
+from backend.core.use_cases.agent_runner_claim_lease import ClaimLeaseLost
 from backend.core.use_cases.agent_runner_validation import (
     build_validation_prompt_line,
     resolve_issue_evidence_relpath,
@@ -668,6 +670,23 @@ def run_agent_with_prompt(
         stall_request = _build_stall_supervision_request()
         if stall_request is not None:
             run_kwargs["attempt_key"] = stall_request.attempt_key
+        heartbeat = active_coordination_heartbeat()
+        tracked_attempt_key = stall_request.attempt_key if stall_request is not None else None
+        if heartbeat is not None and issue is not None:
+            if tracked_attempt_key is None:
+                tracked_attempt_key = build_supervision_attempt_key(
+                    issue_number=issue.number,
+                    invocation_phase=invocation_phase,
+                    invocation_attempt=invocation_attempt,
+                )
+                run_kwargs["attempt_key"] = tracked_attempt_key
+            heartbeat.register_attempt(
+                config=effective_config,
+                issue_number=issue.number,
+                process_runner=process_runner,
+                attempt_key=tracked_attempt_key,
+                worktree_path=worktree_path,
+            )
 
         def _run_attempt() -> CommandResult:
             try:
@@ -692,13 +711,43 @@ def run_agent_with_prompt(
                 if stall_request is None
                 else supervised_agent_invocation(stall_request, _run_attempt)
             )
+            if (
+                heartbeat is not None
+                and issue is not None
+                and heartbeat.claim_was_lost(
+                    issue_number=issue.number,
+                    worktree_path=worktree_path,
+                )
+            ):
+                raise ClaimLeaseLost(
+                    f"Issue #{issue.number} claim lease was lost while its agent was running."
+                )
         except Exception as exc:
             finish_invocation(observation, exc=exc)
             _persist_session_id(
                 _session_id_from_exception(exc),
                 continuation_session_id=resume_id,
             )
+            if (
+                heartbeat is not None
+                and issue is not None
+                and heartbeat.claim_was_lost(
+                    issue_number=issue.number,
+                    worktree_path=worktree_path,
+                )
+            ):
+                raise ClaimLeaseLost(
+                    f"Issue #{issue.number} claim lease was lost while its agent was running."
+                ) from exc
             raise
+        finally:
+            if heartbeat is not None and issue is not None and tracked_attempt_key is not None:
+                heartbeat.unregister_attempt(
+                    config=effective_config,
+                    issue_number=issue.number,
+                    attempt_key=tracked_attempt_key,
+                    worktree_path=worktree_path,
+                )
         finish_invocation(observation, result=attempt_result)
         _persist_session_id(
             attempt_result.session_id,

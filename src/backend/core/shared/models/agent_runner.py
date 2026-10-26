@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
 
@@ -67,6 +68,7 @@ from backend.core.shared.models.agent_runner_config import (  # noqa: F401
     DaemonConfig,
     AppConfig,
 )
+from backend.core.shared.models.machine_identity import MachineIdentity  # noqa: F401
 
 
 @dataclass(frozen=True)
@@ -77,6 +79,16 @@ class RepositoryRunContext:
     display_name: str
     repo_path: Path
     config: AppConfig
+
+
+@dataclass(frozen=True)
+class IssueCommentRecord:
+    """GitHub Issue 评论的可信读取投影。"""
+
+    comment_id: int
+    body: str
+    updated_at: datetime
+    author: str
 
 
 class PublishFailureCategory(Enum):

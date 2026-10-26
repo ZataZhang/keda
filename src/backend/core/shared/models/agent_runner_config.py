@@ -737,10 +737,14 @@ class DaemonConfig:
             传入的全局默认。``False`` 时 Phase -1 整轮空转，僵尸保持 ``agent/running``
             不被触碰（即本特性落地前的现状）。
         reclaim_ttl_seconds: claim 老化阈值(秒)；``None`` 表示沿用调用方默认。
+        presence_enabled: 是否维护本仓库的机器状态 Issue。
+        lease_ttl_seconds: 新认领声明的租约时长；低于 120 秒时运行期按 120 秒处理。
     """
 
     reconcile_stale_attempts: bool | None = None
     reclaim_ttl_seconds: int | None = None
+    presence_enabled: bool = True
+    lease_ttl_seconds: int = 600
 
 
 @dataclass(frozen=True)

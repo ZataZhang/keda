@@ -9,7 +9,7 @@ CLI 入口基于 Typer/Rich：`kc --help` 会展示分组命令、参数和别�
 - **init**：在目标 Git 仓库创建仓库本地 `.kedacode.toml` 配置
 - **labels sync**：在目标仓库创建或更新标准 labels（`agent/ready`、`agent/running`、`agent/supervising` 等）
 - **issue create**：从一个或多个 PRD Markdown 文件创建 GitHub Issue，**默认带上 `agent/ready` 直接进队列**（`--no-ready` 可只建 Issue 不排队），并默认在 ready 前发布 PRD（可用 `--no-publish-prd` 关闭，兼容旧命令 `issue-from-prd`）；也可以用 `--from-prompt "<一句话需求>"` 直接开一条**没有 PRD** 的 Issue（与 PRD 路径参数互斥，生成的正文不含 PRD 锚点，验收小节靠 `--require-validation` 显式开启）
-- **run**：单次轮询执行，**目标必填**——`--issue <N>` 定向处理一个 Issue，或传 PRD 路径（解析其回链 Issue），或显式 `--all-ready` 按优先级处理整个 ready 队列（兼容旧命令 `run-once`；不传目标即用法错误）。daemon 的互斥**只挡队列轮询**：同仓 daemon 在跑时 `--all-ready` 拒绝（`--takeover` 显式接管），`kc run --issue <N>` 照常执行——定向不要求 `agent/ready`，只按认领状态把关（见「显式定向的领取准入」）
+- **run**：单次轮询执行，**目标必填**——`--issue <N>` 定向处理一个 Issue，或传 PRD 路径（解析其回链 Issue），或显式 `--all-ready` 按优先级处理整个 ready 队列（兼容旧命令 `run-once`；不传目标即用法错误）。daemon 的互斥**只挡队列轮询**：同仓 daemon 在跑时 `--all-ready` 拒绝（`--takeover` 显式接管），`kc run --issue <N>` 照常执行——定向不要求 `agent/ready`，只按认领状态把关；租约仍有效的远端认领即使带 `--takeover` 也不能强制接手（见「显式定向的领取准入」）
 - **batch aggregate**：`kc run --all-ready --aggregate-pr --max-issues <N>` 显式把本轮至少两个已选 Issue 收为一批；分别运行现有任务流程后，只在全部成功时组合、验证并发布唯一总 Draft PR。跨多次运行时可用 `kc pr aggregate --issue <N> --issue <N>` 显式指定成员或重试聚合阶段。普通 `run`、daemon 和 loop 不自动汇总。**同一条聚合资格门对两个入口都一样**：成员 Issue 必须是 open 且已带 `agent/automated-review-passed`，且每个来源 PR 的必需 checks 必须已是 `SUCCESS`；刚发布完的 Issue 通常还停在 `agent/supervising`、Draft PR 的 checks 还是 PENDING，所以单次夜间 `kc run --all-ready --aggregate-pr` 常会在资格阶段被拒，需要等 checks 与标签落定后再补一次 `kc pr aggregate --issue ...`（见「批次聚合的资格门与两次调用」）。
 - **supervise**：单次处理已有 PR 的 Issue，基于 PR 上下文变化运行 post-PR supervisor cycle（兼容旧命令 `review`；历史命令 `review-once` 已删除）
 - **supervise-daemon**：常驻进程，按指定间隔循环执行 post-PR supervisor 检查
@@ -403,14 +403,24 @@ recovery 轮次。
 
 ```toml
 [agent_runner.daemon]
-reconcile_stale_attempts = true   # 主开关；设为 false 即回到本特性落地前的现状
-reclaim_ttl_seconds = 18000       # claim 含 started_at 且超过该时长，即便 PID 仍活也判为 stale
+reconcile_stale_attempts = true   # 崩溃对账主开关
+reclaim_ttl_seconds = 18000       # 本机 claim 老化阈值
+presence_enabled = true           # 是否维护本仓库的机器状态 Issue
+lease_ttl_seconds = 600           # 新认领的租约时长，最小 120 秒
 ```
 
 `reclaim_ttl_seconds` 必须大于 `runner.timeout_seconds`（默认 14400 秒）：否则运行时间超过 TTL 的 attempt 即便仍在正常工作也会被按 `ttl_expired` 误回收。配置加载时若发现 TTL 不大于超时会打 WARNING（不拒绝加载）。
 
 `reconcile_stale_attempts = false` 时 Phase -1 整轮空转，僵尸 Issue 保持 `agent/running` 不被触碰、
 不留任何 comment（负控口径见 `.iar/evidence/`：rv-1 关掉开关后僵尸确实纹丝不动）。
+
+## 多机器可见性与认领租约
+
+在一个仓库上运行的 `kc daemon`、`kc run`、`kc supervise-daemon` 和短时发布恢复（`kc recover`、Console 的“恢复发布”动作）会共用一条带 `kedacode/presence` 标签的机器状态 Issue。每个进程在 Issue 中维护自己的状态评论；同一进程内并发的 kc 入口共用状态槽位和续期线程，避免重复启动后台协调器。评论显示主机名、kc 版本、进程角色、最后上报时间和执行中的 Issue。运行 `kc peers` 查看表格，或运行 `kc peers --json` 获取机器可读输出。超过五分钟没有更新的进程会显示为离线；没有对应状态评论的运行中认领（包括旧版本认领）会列在“持有者未上报状态”下。仓库尚无状态 Issue 时，`kc peers` 仍会显示未匹配的认领持有者，并以退出码 0 返回。
+
+状态上报默认开启，按仓库设置 `[agent_runner.daemon].presence_enabled = false` 可关闭状态 Issue 的创建与更新；认领租约仍会照常续期。`lease_ttl_seconds` 默认 600，最小 120；持有者约每 TTL 的十分之一编辑认领评论。带租约的远端认领超过持有者声明时长后，daemon 下一轮对账会写入 `remote_lease_expired` 并按恢复预算放回 `agent/ready` 或标记失败；待处理返工会继续保持 `agent/running`。没有 `kc:lease` 的旧远端认领永远不因本功能被接手。
+
+持有者连续半个 TTL 没有成功续期时会终止自己的 agent attempt，并在推送与开 PR 前再次检查认领归属。机器身份保存在状态目录的 `machine.json`；带租约的认领按机器编号判断本机，旧认领仍按主机名回退。机器可见性仅限当前仓库，不会汇总调用账本、运行历史或日志。
 
 ## 复杂需求：异步 Issue 评论讨论（`agent/deliberate`）
 
@@ -1342,7 +1352,7 @@ next: kc registry stop --repo-id <repo_id> ... or rerun with --takeover ...
 kc run --issue 42 --takeover --yes
 ```
 
-接管流程：优雅停 daemon（SIGTERM → 等待超时 → 兜底 SIGKILL；**不会**把 SIGKILL 当首手段）→ 终止 daemon 的在途 agent 子进程树（不留孤儿 agent）→ 把在途 Issue reclaim 回 `agent/ready` → 执行定向 run。**接管会中断 daemon 当前所有在途 Issue**（不只是你指定的那个），它们会被 reclaim 后重跑——这是有意为之的破坏性动作，所以默认不发生。`--takeover` 跳过下节的准入判定：显式接管本身就是"强制回收在途 Issue"的入口，能不能领由 reclaim 决定。
+接管流程：定向目标先检查认领；有效的远端租约会立即报冲突，不会停止本机 daemon。确认后优雅停 daemon（SIGTERM → 等待超时 → 兜底 SIGKILL；**不会**把 SIGKILL 当首手段）→ 终止 daemon 的在途 agent 子进程树（不留孤儿 agent）→ 仅按本机机器编号回收该机已停止进程的 Issue → 再次检查定向目标 → 执行定向 run。**接管会中断 daemon 当前所有在途 Issue**（不只是你指定的那个），但不会回收其他机器的同名主机认领或有效租约——这是有意为之的破坏性动作，所以默认不发生。
 
 ### 显式定向的领取准入
 
@@ -1351,13 +1361,13 @@ kc run --issue 42 --takeover --yes
 | 目标状态 | 定向 run 的结果 |
 |---|---|
 | open、无 workflow 标签，或只带 `agent/ready` | 放行，进入 ready 通道执行 |
-| `agent/running` 且最近一次认领的持有者仍存活 | 退出码 5 `conflict`，错误里点名持有者 `host` / `PID`；本机持有者提示 `kc run --issue <N> --takeover`，远端持有者只能等它结束（系统没有强制接管远端认领的入口） |
+| `agent/running` 且最近一次认领的持有者仍存活 | 退出码 5 `conflict`，错误里点名持有者 `host` / `PID`；带租约的远端认领会附剩余时间，租约过期时先执行远端对账；没有租约的旧远端认领仍按有效处理 |
 | `agent/running` 但本机持有者 PID 已不存在 | 放行，交给 running 通道的恢复路径（rework / 发布恢复） |
 | `agent/blocked` 且没有未消费的解除请求 marker | 退出码 5 `conflict`，提示先 `kc blocked-continue --issue <N>` |
 | 读不到、或不是 open | 退出码 3 `not_found` |
 | `agent/automated-review-passed` / `agent/supervising` 等其他状态 | 准入层放行，但 `kc run` 没有对应通道，本轮静默跳过（返回 0）——这些状态的通道是 `kc supervise` / supervise-daemon |
 
-**跨机器的认领无法探测远端进程，一律按有效处理（fail-closed）**：抢跑别人正在执行的 Issue 是双跑，而拒绝一次定向只是让人等一等。
+带租约的认领按 `machine_id` 区分本机与远端；旧认领没有机器编号时仍按主机名回退。带租约的远端认领在声明 TTL 内按有效处理，过期后先走与 daemon 相同的对账出口；没有租约的远端认领一直按有效处理，避免接手旧版本任务。
 
 守护进程侧不受本节影响：空队列仍是正常状态，`--all-ready` 与 `kc daemon` 挑不到合条件的 Issue 时依然静默返回 0。
 
@@ -1366,11 +1376,11 @@ kc run --issue 42 --takeover --yes
 GitHub 的标签写入没有 compare-and-swap，所以"谁先领走这条 Issue"不能靠先到先得的标签写。首次领取改为**认领 marker 选举**：
 
 1. 每个候选进程先在自己的认领评论里投标（`kc:claim` marker 带 `started_at`、host、PID、agent）；
-2. 等一个短暂 grace 窗口后**回读评论线程**，筛出同一轮的投标（有 `started_at`、落在并发窗口内、本机已死 PID 的投标剔除；远端投标按存活处理）；
+2. 等一个短暂 grace 窗口后**回读评论线程**，筛出同一轮的投标（有 `started_at`、落在并发窗口内；带租约时按机器编号识别本机并剔除本机已死 PID，旧 marker 回退到主机名；远端投标按有效处理）；
 3. 按 `(started_at, host, PID)` 的全序取最小者。**只有赢家**把 Issue 切到 `agent/running`；
 4. 落败方把自己那条评论改写成 `kc:claim-withdrawn`（解析器认不出它，因此不会被后续轮询误读成认领），并**跳过该 Issue 而不写任何标签**——输掉竞争不是执行失败，不该把赢家的 running 覆盖成 failed。
 
-历史 marker（没有 `started_at` 的旧格式）与并发窗口外的投标都不算投标，所以 rework / 重新认领不会被自己过去的评论永久锁死。同一进程在 agent fallback 换 agent 时会再走一遍领取：读到的是**自己更早的那次投标**，按重入处理并继续执行。
+历史 marker（没有 `started_at` 的旧格式）与并发窗口外的投标都不算投标，所以 rework / 重新认领不会被自己过去的评论永久锁死。同一进程在 agent fallback 换 agent 时会再走一遍领取：读到的是**自己更早的那次投标**，按重入处理并继续执行。新认领评论在不改变 `kc:claim` marker 的前提下追加独立的 `kc:lease` marker；持有进程按声明 TTL 的十分之一续期，远端对账按 GitHub 评论 `updated_at` 判断是否过期。
 
 
 ### 认领时的任务输入快照
@@ -3132,13 +3142,15 @@ crash_retry_max_backoff_seconds = 600
 review_interval_seconds = 120
 run_interval_seconds = 120
 # 每轮开头是否对账崩溃遗留的 agent/running 僵尸 attempt（续传 / 重新入队 / 判失败三出口留痕）。
-# 保守判定:仅当 claim 标记的 host 是本机、且记录的 PID 已死或 claim 已老化时才处置。默认开。
+# 保守判定:仅当 claim 属于本机、且记录的 PID 已死或 claim 已老化时才处置；旧 claim 按主机名识别。默认开。
 reconcile_stale_attempts = true
 # claim 老化阈值(秒):claim 含 started_at 且距 now 超过此值,即便 PID 仍活也视为 stale
 reclaim_ttl_seconds = 18000
+presence_enabled = true           # 关闭本仓库机器状态 Issue 的创建与更新
+lease_ttl_seconds = 600           # 新认领租约时长，最小 120 秒
 ```
 
-硬中断(SIGKILL / 崩溃 / 关机)不会把 Issue 从 `agent/running` 退回,而 daemon 只认领 `agent/ready`,任务会就此卡死。开启 `reconcile_stale_attempts` 后,daemon 每轮开头会对本机认领、进程已死的 running Issue 做对账:worktree 完好且可续传时回 `agent/ready` 并续上原会话,否则回 `agent/ready` 全新重跑,worktree 不可解析或恢复预算耗尽时判 `agent/failed`,三种出口都留一条对账 comment。关闭该开关即回到本特性落地前的现状。跨机器的孤儿需在同一台机器上重启 daemon 才会被回收。判定细节、幂等机制与配置优先级见前面「崩溃对账与 Agent 会话续传」一节。
+硬中断(SIGKILL / 崩溃 / 关机)不会把 Issue 从 `agent/running` 退回,而 daemon 只认领 `agent/ready`。开启 `reconcile_stale_attempts` 后,daemon 每轮开头对本机已死 attempt 沿用既有续传 / 重跑 / 判失败三出口；对带租约且已过期的远端认领则记录 `remote_lease_expired`，不读取另一台机器的 worktree 或 session，从远端分支已推送状态重新入队。没有租约的旧远端认领保持原状。关闭该开关会关闭整轮崩溃对账。判定细节、幂等机制与配置优先级见前面「崩溃对账与 Agent 会话续传」及「多机器可见性与认领租约」两节。
 
 配置优先级：目标仓库 `.kedacode.toml` 覆盖项 > 环境变量 > `config.toml` 全局默认值 > 代码默认值。目标仓库覆盖项只影响对应 repository context，不会改变 keda 全局设置。
 

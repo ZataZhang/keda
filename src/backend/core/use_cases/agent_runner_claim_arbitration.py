@@ -31,6 +31,8 @@ from backend.core.use_cases.agent_runner_reclaim import (
     is_pid_alive,
     parse_claim_marker_detail,
 )
+from backend.core.use_cases.agent_runner_claim_lease import is_local_claim, parse_claim_lease
+from backend.core.use_cases.coordination_heartbeat import active_coordination_heartbeat
 from backend.core.use_cases.agent_runner_workflow import transition_issue_workflow_state
 
 #: 投递投标后、回读前的宽限秒数：给并发领取者的评论留出可见时间。仲裁的一致性
@@ -155,13 +157,15 @@ def concurrent_bids(
     now: datetime,
     pid_alive: Callable[[int], bool] = is_pid_alive,
     window_seconds: float = CONCURRENT_CLAIM_WINDOW_SECONDS,
+    machine_id: str | None = None,
 ) -> list[ClaimBid]:
     """筛出同一轮的并发投标。
 
     排除条件（都必须在仲裁前排除，否则领取会被历史标记永久挡住）：没有
     ``started_at`` 的老 marker（无法排序）、超出时间窗的历史认领、以及本机已死
-    进程的投标（进程都不在了，不该继续占位）。跨机投标无法探活，按有效计入 ——
-    宁可拒绝一次定向，也不与别人双跑同一个 Issue。
+    进程的投标（进程都不在了，不该继续占位）。带租约的投标按机器编号识别本机；
+    旧投标没有机器编号时回退到主机名。远端投标按有效计入 —— 宁可拒绝一次定向，
+    也不与别人双跑同一个 Issue。
 
     Args:
         comment_entries: ``(comment_id, body)`` 序列，按线程顺序。
@@ -169,6 +173,7 @@ def concurrent_bids(
         now: 当前时间（UTC）。
         pid_alive: PID 存活探针（测试可注入）。
         window_seconds: 并发窗口的秒数。
+        machine_id: 当前稳定机器编号，用来识别带租约的本机投标。
 
     Returns:
         参与本轮仲裁的投标列表（保持线程顺序）。
@@ -183,7 +188,13 @@ def concurrent_bids(
         age_seconds = (effective_now - bid.started_at).total_seconds()
         if age_seconds > window_seconds:
             continue
-        if bid.host == this_host and not pid_alive(bid.pid):
+        lease = parse_claim_lease(comment_body)
+        if is_local_claim(
+            claim_host=bid.host,
+            lease=lease,
+            machine_id=machine_id,
+            host=this_host,
+        ) and not pid_alive(bid.pid):
             continue
         bids.append(bid)
     return bids
@@ -243,7 +254,31 @@ def arbitrate_first_claim(
         agent=selected_agent,
     )
 
-    github_client.comment_issue(issue_number, format_claim_comment(bid))
+    claim_comment_body = format_claim_comment(bid)
+    heartbeat = active_coordination_heartbeat()
+    lease_ttl_seconds: int | None = None
+    if heartbeat is not None:
+        prepared_comment = heartbeat.prepare_claim_comment(
+            base_comment=claim_comment_body,
+            config=config,
+        )
+        if prepared_comment is not None:
+            claim_comment_body, lease_ttl_seconds = prepared_comment
+
+    def register_winning_claim(own_bid: ClaimBid) -> None:
+        """仲裁胜出后登记租约续期。"""
+        if heartbeat is None or lease_ttl_seconds is None:
+            return
+        heartbeat.register_claim(
+            github_client=github_client,
+            issue_number=issue_number,
+            bid=own_bid,
+            body=claim_comment_body,
+            ttl_seconds=lease_ttl_seconds,
+            config=config,
+        )
+
+    github_client.comment_issue(issue_number, claim_comment_body)
     if grace_seconds > 0:
         sleeper(grace_seconds)
 
@@ -262,6 +297,7 @@ def arbitrate_first_claim(
             this_host=this_host,
             now=effective_now,
             pid_alive=pid_alive,
+            machine_id=heartbeat.machine_id if heartbeat is not None else None,
         )
         own_bid = next(
             (
@@ -294,6 +330,7 @@ def arbitrate_first_claim(
             config,
             target_label or config.labels.running,
         )
+        register_winning_claim(own_bid)
         return own_bid
     if _bid_sort_key(winner) != _bid_sort_key(own_bid):
         github_client.edit_issue_comment(
@@ -312,6 +349,7 @@ def arbitrate_first_claim(
         config,
         target_label or config.labels.running,
     )
+    register_winning_claim(own_bid)
     return own_bid
 
 

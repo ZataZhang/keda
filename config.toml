@@ -1150,6 +1150,10 @@ max_deliberation_issues = 1
 reconcile_stale_attempts = true
 # claim 老化阈值(秒)：claim 带 started_at 且超过该时长，即便 PID 仍活也判为 stale。
 reclaim_ttl_seconds = 18000
+# 每仓库状态 Issue 默认开启；设为 false 仅关闭可见性，不影响认领租约。
+presence_enabled = true
+# 新认领声明的租约时长（秒），最小 120。
+lease_ttl_seconds = 600
 
 [agent_runner.lifecycle_agents]
 implementation = "codebuddy"

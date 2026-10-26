@@ -9,6 +9,7 @@ import contextlib
 import logging
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -153,6 +154,12 @@ def _run_patches():
     with (
         patch("backend.api.cli_helpers.create_github_client"),
         patch("backend.api.cli.create_github_client"),
+        patch(
+            "backend.api.cli_parsed_commands.runner.create_machine_identity_store",
+            return_value=SimpleNamespace(
+                load_or_create=lambda: SimpleNamespace(machine_id="machine-local")
+            ),
+        ),
         patch("backend.api.cli.require_repository_initialized"),
     ):
         yield
@@ -208,6 +215,8 @@ def test_main_run_takeover_yes_stops_daemon_and_runs(
 
     monkeypatch.setenv("KEDACODE_SKIP_GH_AUTH_CHECK", "1")
     context = _mock_run_context(tmp_path)
+    github_client = FakeGitHubClient()
+    github_client._issue_labels[7] = (context.config.labels.ready,)
     captured: dict = {}
 
     def fake_take_over(**kwargs):
@@ -235,12 +244,15 @@ def test_main_run_takeover_yes_stops_daemon_and_runs(
         ),
         patch("backend.api.cli.run_agent_repositories_once", return_value=0) as mock_run,
         _run_patches(),
+        patch("backend.api.cli.create_github_client", return_value=github_client),
+        patch("backend.api.cli_helpers.create_github_client", return_value=github_client),
     ):
         exit_code = main(["run", "--issue", "7", "--takeover", "--yes"])
 
     assert exit_code == 0
     assert captured["daemon_pid"] == 4242
     assert captured["repo_id"] == REPO_ID
+    assert captured["machine_id"] == "machine-local"
     assert mock_run.call_args.kwargs["target_issue"] == 7
 
 
@@ -253,6 +265,8 @@ def test_main_run_takeover_declined_leaves_daemon_alone(
     monkeypatch.setenv("KEDACODE_SKIP_GH_AUTH_CHECK", "1")
     monkeypatch.setattr("sys.stdin", MagicMock(isatty=lambda: True))
     context = _mock_run_context(tmp_path)
+    github_client = FakeGitHubClient()
+    github_client._issue_labels[7] = (context.config.labels.ready,)
     with (
         patch(
             "backend.api.cli_helpers.resolve_repository_targets",
@@ -268,6 +282,8 @@ def test_main_run_takeover_declined_leaves_daemon_alone(
         ),
         patch("rich.prompt.Confirm.ask", return_value=False),
         _run_patches(),
+        patch("backend.api.cli.create_github_client", return_value=github_client),
+        patch("backend.api.cli_helpers.create_github_client", return_value=github_client),
     ):
         exit_code = main(["run", "--issue", "7", "--takeover"])
 

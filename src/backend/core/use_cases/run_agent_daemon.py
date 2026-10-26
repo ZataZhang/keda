@@ -399,6 +399,11 @@ def _run_daemon_loop(request: _AgentDaemonLoopRequest) -> None:
             )
             if reconcile_enabled:
                 try:
+                    from backend.core.use_cases.coordination_heartbeat import (
+                        active_coordination_heartbeat,
+                    )
+
+                    coordination = active_coordination_heartbeat()
                     reconcile_outcomes = agent_runner_reconcile.reconcile_stale_attempts(
                         repo_path=context.repo_path,
                         config=context.config,
@@ -408,6 +413,7 @@ def _run_daemon_loop(request: _AgentDaemonLoopRequest) -> None:
                         # 本机正在执行的 Issue 由它自己的线程推进；长任务的认领
                         # 可能超过 TTL，绝不能被对账当成僵尸回收后再领一次。
                         exclude_issue_numbers=execution_slots.in_flight_issue_numbers(),
+                        machine_id=(coordination.machine_id if coordination is not None else None),
                     )
                     applied_numbers = [
                         outcome.issue_number for outcome in reconcile_outcomes if outcome.applied

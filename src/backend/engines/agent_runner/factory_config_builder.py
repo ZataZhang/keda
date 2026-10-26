@@ -20,6 +20,7 @@ from backend.core.shared.models.agent_runner import (
     AutopilotConfig,
     BacklogConfig,
     BrowserE2EVerificationCommand,
+    DaemonConfig,
     E2EVerificationArtifact,
     GeneratedContentConfig,
     GeneratedContentTargetConfig,
@@ -825,6 +826,10 @@ def build_app_config_from_settings(
         repl=repl,
         agent_session=agent_session,
         stall_supervisor=stall_supervisor,
+        daemon=DaemonConfig(
+            presence_enabled=agent_runner_settings.daemon.presence_enabled,
+            lease_ttl_seconds=agent_runner_settings.daemon.lease_ttl_seconds,
+        ),
         deliberation=deliberation,
         lifecycle_agents=lifecycle_agents,
         agent_presets=build_agent_presets_from_settings(agent_runner_settings.presets),

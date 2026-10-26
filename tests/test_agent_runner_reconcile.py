@@ -30,6 +30,7 @@ from backend.core.use_cases.agent_runner_reclaim import (
     ClaimMarkerDetail,
     format_claim_marker,
 )
+from backend.core.use_cases.agent_runner_claim_lease import with_claim_lease
 from backend.core.use_cases.agent_runner_reconcile import reconcile_stale_attempts
 from backend.core.use_cases.agent_runner_session_store import (
     AgentSessionScope,
@@ -96,6 +97,31 @@ def _reconcile_comments(github: FakeGitHubClient) -> list[str]:
         for comment_body in github.list_issue_comments(7)
         if "## Stale Attempt Reconciled" in comment_body
     ]
+
+
+def _seed_remote_leased_claim(
+    github: FakeGitHubClient,
+    config: AppConfig,
+    *,
+    lease_updated_at: datetime,
+    ttl_seconds: int = 600,
+    machine_id: str = "remote-machine",
+    host: str = "shared-host",
+) -> None:
+    """在 Issue #7 写入远端认领，并注入 GitHub 服务端评论更新时间。"""
+    github.set_issue_labels(7, (config.labels.running,))
+    claim_body = "## Agent Runner Claimed\n" + format_claim_marker(
+        host, 987654, started_at=lease_updated_at, agent="claude"
+    )
+    leased_body = with_claim_lease(
+        claim_body,
+        machine_id=machine_id,
+        ttl_seconds=ttl_seconds,
+        renewed_at=lease_updated_at,
+    )
+    github.comment_issue(7, leased_body)
+    github._issue_comment_updated_at[1] = lease_updated_at
+    github.set_list_issues_by_label_result([github.get_issue(7)])
 
 
 class TestDecideStaleAttemptDisposition:
@@ -294,6 +320,120 @@ class TestReconcileEngine:
 
         assert _run_reconcile(tmp_path, github, config) == []
         assert config.labels.running in github.get_issue(7).labels
+
+
+def test_expired_remote_lease_reenqueues_and_records_remote_reason(tmp_path: Path) -> None:
+    """远端租约到期会留 remote_lease_expired 证据并回到 ready。"""
+    config = AppConfig()
+    github = FakeGitHubClient()
+    now = datetime(2026, 10, 26, 12, 0, tzinfo=timezone.utc)
+    _seed_remote_leased_claim(
+        github,
+        config,
+        lease_updated_at=now - timedelta(seconds=601),
+    )
+
+    outcomes = _run_reconcile(
+        tmp_path,
+        github,
+        config,
+        host="local-host",
+        machine_id="local-machine",
+        now=now,
+        process_runner=FakeProcessRunner(),
+    )
+
+    assert [outcome.disposition for outcome in outcomes] == [StaleAttemptDisposition.REENQUEUE]
+    assert config.labels.ready in github.get_issue(7).labels
+    assert config.labels.running not in github.get_issue(7).labels
+    reconcile_comments = _reconcile_comments(github)
+    assert len(reconcile_comments) == 1
+    assert "remote_lease_expired" in reconcile_comments[0]
+    assert "remote-machine" in reconcile_comments[0]
+
+
+def test_live_remote_lease_with_same_hostname_is_not_reconciled(tmp_path: Path) -> None:
+    """同主机名的远端机器按 machine_id 区分，不拿本机 PID 探测。"""
+    config = AppConfig()
+    github = FakeGitHubClient()
+    now = datetime(2026, 10, 26, 12, 0, tzinfo=timezone.utc)
+    _seed_remote_leased_claim(
+        github,
+        config,
+        lease_updated_at=now - timedelta(seconds=120),
+        host="macbook",
+    )
+
+    outcomes = _run_reconcile(
+        tmp_path,
+        github,
+        config,
+        host="macbook",
+        machine_id="another-machine",
+        now=now,
+        pid_alive=lambda _process_id: False,
+        process_runner=FakeProcessRunner(),
+    )
+
+    assert outcomes == []
+    assert config.labels.running in github.get_issue(7).labels
+    assert _reconcile_comments(github) == []
+
+
+def test_remote_claim_without_lease_is_never_reconciled(tmp_path: Path) -> None:
+    """旧版本远端认领没有租约，即使多年未更新也保持 running。"""
+    config = AppConfig()
+    github = FakeGitHubClient()
+    github.set_issue_labels(7, (config.labels.running,))
+    github.comment_issue(
+        7,
+        "## Agent Runner Claimed\n"
+        + format_claim_marker(
+            "remote-host",
+            DEAD_PID,
+            started_at=OLD_CLAIM_START,
+            agent="claude",
+        ),
+    )
+    github._issue_comment_updated_at[1] = OLD_CLAIM_START
+    github.set_list_issues_by_label_result([github.get_issue(7)])
+
+    outcomes = _run_reconcile(
+        tmp_path,
+        github,
+        config,
+        host="local-host",
+        machine_id="local-machine",
+        now=datetime.now(timezone.utc) + timedelta(days=365),
+        process_runner=FakeProcessRunner(),
+    )
+
+    assert outcomes == []
+    assert config.labels.running in github.get_issue(7).labels
+    assert _reconcile_comments(github) == []
+
+
+def test_remote_expiry_keeps_pending_rework_running_and_honors_budget() -> None:
+    """远端返工保持 running；没有返工且预算为零时走 failed 出口。"""
+    pending_rework = decide_stale_attempt_disposition(
+        StaleAttemptEvidence(
+            worktree_resolvable=True,
+            max_recovery_attempts=0,
+            pending_rework=True,
+            remote_lease_expired=True,
+        )
+    )
+    exhausted_budget = decide_stale_attempt_disposition(
+        StaleAttemptEvidence(
+            worktree_resolvable=True,
+            max_recovery_attempts=0,
+            remote_lease_expired=True,
+        )
+    )
+
+    assert pending_rework.disposition is StaleAttemptDisposition.REENQUEUE
+    assert pending_rework.pending_rework is True
+    assert exhausted_budget.disposition is StaleAttemptDisposition.FAIL
 
     def test_live_claim_within_ttl_untouched(self, tmp_path: Path) -> None:
         """PID 仍活且未过 TTL 的在途运行不得被对账打扰。"""

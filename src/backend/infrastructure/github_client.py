@@ -59,6 +59,7 @@ from backend.infrastructure.github_issue_ops import (
     edit_issue_labels,
     get_issue,
     list_issue_comment_entries,
+    list_issue_comment_records,
     list_issue_comments,
     list_issue_label_names,
     list_issues_by_label,
@@ -211,6 +212,8 @@ class GitHubCliClient:
         repo_path: Path,
         process_runner: SubprocessRunner | None = None,
         api_budget: IGitHubApiBudget | None = None,
+        *,
+        bypass_budget_pause: bool = False,
     ) -> None:
         """Create the client.
 
@@ -218,10 +221,12 @@ class GitHubCliClient:
             repo_path: Target repository path.
             process_runner: Optional process runner to use for gh commands.
             api_budget: 跨进程共享的额度预算；省略时不记账也不受暂停闸门约束。
+            bypass_budget_pause: 心跳续期等安全收尾请求继续计费，但忽略共享暂停闸门。
         """
         self.repo_path = repo_path
         self._runner = process_runner or SubprocessRunner()
         self._api_budget = api_budget
+        self._bypass_budget_pause = bypass_budget_pause
         self._github_api_rate_limited: set[str] = set()
         self._owner_repo_cache: str | None = None
 
@@ -330,13 +335,13 @@ class GitHubCliClient:
         """
 
         api_kind = self._github_api_kind(command)
-        if api_kind in self._github_api_rate_limited:
+        if api_kind in self._github_api_rate_limited and not self._bypass_budget_pause:
             raise GitHubApiRateLimitError(
                 "GitHub API rate limit was reached earlier in this pass; "
                 f"remaining {api_kind} operations were deferred."
             )
 
-        if self._api_budget is not None and api_kind is not None:
+        if self._api_budget is not None and api_kind is not None and not self._bypass_budget_pause:
             # 先探测再判断：探测免费，且能撤销已经过期的暂停标记。
             self._probe_budget_if_due()
             self._api_budget.ensure_available(api_kind)
@@ -551,6 +556,23 @@ class GitHubCliClient:
             RuntimeError: 可信模式无法确认读取结果或作者权限。
         """
         return list_issue_comment_entries(
+            self,
+            issue_number,
+            trusted_only=trusted_only,
+            body_contains=body_contains,
+            require_success=require_success,
+        )
+
+    def list_issue_comment_records(
+        self,
+        issue_number: int,
+        *,
+        trusted_only: bool = False,
+        body_contains: str | None = None,
+        require_success: bool = False,
+    ):
+        """读取评论及服务端更新时间和作者。"""
+        return list_issue_comment_records(
             self,
             issue_number,
             trusted_only=trusted_only,

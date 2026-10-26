@@ -26,6 +26,8 @@ from backend.core.use_cases.agent_runner_batch_aggregate_queue import (
 )
 from backend.core.use_cases.agent_runner_blocked_claim import BlockedWorktreeClaimedError
 from backend.core.use_cases.agent_runner_claim_arbitration import ClaimArbitrationLost
+from backend.core.use_cases.agent_runner_claim_lease import ClaimLeaseLost
+from backend.core.use_cases.coordination_heartbeat import active_coordination_heartbeat
 from backend.core.use_cases.agent_runner_dependencies import (
     clear_dependency_waiting,
     evaluate_dependencies,
@@ -489,6 +491,12 @@ def _process_single_issue(
         output_view.update_status(issue.number, "skipped")
         return 0
 
+    except ClaimLeaseLost as exc:
+        # 租约失效时标签归新持有者；只交班，不写失败评论或工作流标签。
+        _logger.warning("Issue #%d claim lease lost; abandoning delivery: %s", issue.number, exc)
+        output_view.update_status(issue.number, "skipped")
+        return 0
+
     except BlockedWorktreeClaimedError as exc:
         _logger.info(
             "Issue #%d worktree already claimed by another runner, skipping: %s",
@@ -532,6 +540,9 @@ def _process_single_issue(
 
     finally:
         prd_activity_lease.close()
+        heartbeat = active_coordination_heartbeat()
+        if heartbeat is not None:
+            heartbeat.release_claim(github_client=github_client, issue_number=issue.number)
 
 
 def _has_published_direct_pr_handoff(github_client: IGitHubClient, issue: IssueSummary) -> bool:

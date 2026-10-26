@@ -16,6 +16,7 @@ from backend.core.use_cases.agent_runner_claim_arbitration import (
     format_claim_comment,
     format_withdrawn_claim_comment,
 )
+from backend.core.use_cases.agent_runner_claim_lease import with_claim_lease
 from backend.core.use_cases.agent_runner_reclaim import (
     format_claim_marker,
     parse_claim_marker_detail,
@@ -175,6 +176,26 @@ def test_dead_local_bid_is_dropped_but_live_remote_bid_counts() -> None:
     bids = concurrent_bids(entries, this_host=HOST, now=NOW, pid_alive=lambda pid: pid == 777)
 
     assert [bid.host for bid in bids] == ["runner-b"]
+
+
+def test_same_hostname_with_different_machine_id_is_remote() -> None:
+    """同名主机上的另一台机器投标不使用本机 PID 探测。"""
+    bid_body = with_claim_lease(
+        _bid_comment(HOST, 999, NOW - timedelta(seconds=5)),
+        machine_id="machine-b",
+        ttl_seconds=600,
+        renewed_at=NOW,
+    )
+
+    bids = concurrent_bids(
+        [(1, bid_body)],
+        this_host=HOST,
+        machine_id="machine-a",
+        now=NOW,
+        pid_alive=lambda _pid: False,
+    )
+
+    assert [bid.pid for bid in bids] == [999]
 
 
 def test_read_back_failure_fails_closed_without_running_label() -> None:

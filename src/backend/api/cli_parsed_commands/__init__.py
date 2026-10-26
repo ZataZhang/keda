@@ -50,6 +50,7 @@ from backend.api.cli_parsed_commands.labels_issue import (
     run_labels_command,
 )
 from backend.api.cli_parsed_commands.logs import run_logs_command
+from backend.api.cli_parsed_commands.peers import run_peers_command
 from backend.api.cli_parsed_commands.loop import run_loop_command
 from backend.api.cli_parsed_commands.registry import (
     run_registry_list_command,
@@ -137,6 +138,7 @@ _DISPATCH_TABLE: dict[str, callable] = {
     "agent fallback candidate preset set": run_agent_fallback_candidate_preset_set_command,
     "agent fallback candidate preset unset": run_agent_fallback_candidate_preset_unset_command,
     "logs": run_logs_command,
+    "peers": run_peers_command,
     "loop create": run_loop_command,
     "loop list": run_loop_command,
     "loop cancel": run_loop_command,

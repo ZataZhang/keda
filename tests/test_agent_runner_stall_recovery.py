@@ -14,6 +14,7 @@ from backend.core.shared.models.agent_runner import (
 )
 from backend.core.shared.models.agent_stall import AgentStallCancelledError
 from backend.core.use_cases import run_agent_execution_loop as execution_loop
+from backend.core.use_cases.agent_runner_claim_lease import ClaimLeaseLost
 from backend.core.use_cases import run_verifier_agent as verifier_module
 from backend.core.use_cases.run_agent_once import MaxRetriesExceededError
 from backend.core.use_cases.run_verifier_agent import ValidationVerdict
@@ -25,6 +26,7 @@ def _run_stalled_recovery(
     monkeypatch: pytest.MonkeyPatch,
     *,
     verification_return_code: int,
+    lease_lost_on_first_attempt: bool = False,
 ) -> tuple[list[str], list[str], list[str], list[str], list[bool]]:
     """将真实执行循环接到一次监督取消与一次 recovery 调用。"""
     issue = IssueSummary(
@@ -51,6 +53,8 @@ def _run_stalled_recovery(
     def _agent_call(_agent: str, prompt: str, *_args: object, **_kwargs: object) -> CommandResult:
         prompts.append(prompt)
         if len(prompts) == 1:
+            if lease_lost_on_first_attempt:
+                raise ClaimLeaseLost("claim ownership changed while the agent was running")
             raise AgentStallCancelledError(
                 "[kc-stall-cancel] verified child group exited; "
                 "stalled diagnosis: writer has made no progress"
@@ -166,3 +170,16 @@ def test_failed_verification_after_stall_recovery_cannot_report_success(
 
     assert len(failure.value.attempt_results) == 2
     assert all(attempt.failure_type.value != "success" for attempt in failure.value.attempt_results)
+
+
+def test_claim_lease_loss_does_not_start_recovery_attempt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """租约失效是交班，不应消耗 recovery 预算再启动 Agent。"""
+    with pytest.raises(ClaimLeaseLost):
+        _run_stalled_recovery(
+            tmp_path,
+            monkeypatch,
+            verification_return_code=0,
+            lease_lost_on_first_attempt=True,
+        )

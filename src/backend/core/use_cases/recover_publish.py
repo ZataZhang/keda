@@ -17,6 +17,8 @@ from backend.core.shared.interfaces.agent_runner import (
     IProcessRunner,
 )
 from backend.core.shared.models.publish_stage import PublishStage
+from backend.core.use_cases.agent_runner_claim_lease import ClaimLeaseLost
+from backend.core.use_cases.coordination_heartbeat import active_coordination_heartbeat
 from backend.core.shared.models.agent_runner import (
     AppConfig,
     IssueSummary,
@@ -304,6 +306,8 @@ def _create_recovery_draft_pr(
             base_branch=config.git.base_branch,
             cwd=worktree_path,
         )
+    except ClaimLeaseLost:
+        raise
     except Exception as create_exc:  # noqa: BLE001
         exc = PublishRecoveryError(
             f"Failed to create draft PR for branch '{branch}': {create_exc}",
@@ -494,6 +498,9 @@ def _recover_publish_issue_owned(
         configured_remote,
         issue_number,
     )
+    heartbeat = active_coordination_heartbeat()
+    if heartbeat is not None:
+        heartbeat.assert_claim_owned(github_client=github_client, issue_number=issue_number)
     push_result = process_runner.run(
         ["git", "push", "-u", configured_remote, branch],
         cwd=worktree_path,

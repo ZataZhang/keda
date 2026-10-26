@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, Sequence
 if TYPE_CHECKING:
     # 仅注解使用：避免 interfaces -> models 的运行时反向依赖。
     from backend.core.shared.models.agent_model_preset import ModelSelection
+    from backend.core.shared.models.agent_runner import IssueCommentRecord
 
 from backend.core.shared.models.agent_deliberation import (
     DeliberationEvent,
@@ -644,6 +645,21 @@ class IGitHubClient(ABC):
             RuntimeError: 可信模式下查询或权限无法确认；不得把读取失败当作空列表。
         """
         ...
+
+    def list_issue_comment_records(
+        self,
+        issue_number: int,
+        *,
+        trusted_only: bool = False,
+        body_contains: str | None = None,
+        require_success: bool = False,
+    ) -> list[IssueCommentRecord]:
+        """返回包含 GitHub 服务端更新时间和作者的评论记录。
+
+        默认实现保留旧适配器兼容性。需要租约判断的调用必须使用支持
+        ``updated_at`` 的基础设施实现；不支持时会显式失败，不能猜测时间。
+        """
+        raise NotImplementedError("GitHub client does not expose comment timestamps.")
 
     @abstractmethod
     def edit_issue_comment(self, comment_id: int, body: str) -> None:

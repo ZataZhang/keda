@@ -6,8 +6,8 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
-from datetime import datetime, timezone
+from contextlib import contextmanager, nullcontext
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -18,6 +18,7 @@ import backend.api.cli  # noqa: F401  先导入调度器，避免解析命令模
 from backend.api.cli_exit_codes import ExitCode
 from backend.core.shared.models.agent_runner import AppConfig, IssueSummary
 from backend.core.use_cases.agent_runner_claim_arbitration import ClaimBid, format_claim_comment
+from backend.core.use_cases.agent_runner_claim_lease import with_claim_lease
 from backend.core.use_cases.agent_runner_events import format_event_marker
 from backend.core.use_cases.run_target_admission import (
     TARGET_UNCLAIMABLE_BLOCKED,
@@ -121,6 +122,33 @@ def test_live_foreign_claim_is_rejected_naming_the_holder() -> None:
     assert "takeover" not in error.suggestion
 
 
+def test_live_remote_lease_conflict_reports_remaining_seconds() -> None:
+    """有效租约仍拒绝定向运行，并给出声明 TTL 的剩余秒数。"""
+    client = _client(labels=(CONFIG.labels.running,))
+    leased_comment = with_claim_lease(
+        format_claim_comment(ClaimBid(0, "remote-host", 555, NOW, "claude")),
+        machine_id="machine-remote",
+        ttl_seconds=120,
+        renewed_at=NOW,
+    )
+    client.comment_issue(7, leased_comment)
+    client._issue_comment_updated_at[1] = NOW
+
+    with pytest.raises(TargetNotClaimableError) as exc_info:
+        require_explicit_target_claimable(
+            issue_number=7,
+            github_client=client,
+            config=CONFIG,
+            host="local-host",
+            machine_id="machine-local",
+            now=NOW + timedelta(seconds=30),
+            pid_alive=lambda _pid: False,
+        )
+
+    assert exc_info.value.reason == TARGET_UNCLAIMABLE_LIVE_CLAIM
+    assert "lease expires in 90s" in str(exc_info.value)
+
+
 def test_live_local_claim_suggests_takeover() -> None:
     """本机守护进程持有的目标，建议指向 --takeover。"""
     error = _error(
@@ -129,6 +157,52 @@ def test_live_local_claim_suggests_takeover() -> None:
     )
     assert error.reason == TARGET_UNCLAIMABLE_LIVE_CLAIM
     assert "--takeover" in error.suggestion
+
+
+def test_takeover_preflight_can_ignore_local_daemon_claim() -> None:
+    """停止本机 daemon 前可先检查目标，同时保留停止后的普通复查。"""
+    client = _client(labels=(CONFIG.labels.running,), claims=((HOST, 111, NOW),))
+
+    require_explicit_target_claimable(
+        issue_number=7,
+        github_client=client,
+        config=CONFIG,
+        host=HOST,
+        machine_id="machine-local",
+        now=NOW,
+        ignore_active_local_claim=True,
+        pid_alive=lambda _pid: True,
+    )
+
+
+def test_takeover_preflight_still_rejects_live_remote_lease_on_same_hostname() -> None:
+    """takeover 前置检查不能把同名主机上的远端有效租约当成本机。"""
+    client = _client(labels=(CONFIG.labels.running,))
+    client.comment_issue(
+        7,
+        with_claim_lease(
+            format_claim_comment(ClaimBid(0, HOST, 111, NOW, "claude")),
+            machine_id="machine-remote",
+            ttl_seconds=600,
+            renewed_at=NOW,
+        ),
+    )
+    client._issue_comment_updated_at[1] = NOW
+
+    with pytest.raises(TargetNotClaimableError) as exc_info:
+        require_explicit_target_claimable(
+            issue_number=7,
+            github_client=client,
+            config=CONFIG,
+            host=HOST,
+            machine_id="machine-local",
+            now=NOW + timedelta(seconds=30),
+            ignore_active_local_claim=True,
+            pid_alive=lambda _pid: False,
+        )
+
+    assert exc_info.value.reason == TARGET_UNCLAIMABLE_LIVE_CLAIM
+    assert "lease expires in 570s" in str(exc_info.value)
 
 
 def test_dead_local_claim_falls_through_to_the_recovery_channel() -> None:
@@ -215,6 +289,13 @@ def _cli_patches(client: FakeGitHubClient, *, live_daemon_pid: int | None):
     with (
         patch("backend.api.cli_helpers.resolve_repository_targets") as resolve_targets,
         patch("backend.api.cli.create_github_client", return_value=client),
+        patch(
+            "backend.api.cli_parsed_commands.runner.create_machine_identity_store",
+            return_value=SimpleNamespace(
+                load_or_create=lambda: SimpleNamespace(machine_id="machine-test"),
+                presence_slot_lock=nullcontext,
+            ),
+        ),
         patch("backend.api.cli_helpers.create_github_client"),
         patch("backend.api.cli.require_repository_initialized"),
         patch(
@@ -240,6 +321,29 @@ def test_cli_run_on_foreign_live_claim_exits_conflict(
 ) -> None:
     """定向到他人活跃认领的 Issue → CONFLICT(5)，且不进入执行。"""
     client = _client(labels=(CONFIG.labels.running,), claims=(("runner-remote", 555, NOW),))
+    with _cli_patches(client, live_daemon_pid=None) as runs:
+        exit_code = _main(["run", "--issue", "7"], monkeypatch)
+
+    assert exit_code == int(ExitCode.CONFLICT)
+    assert runs == []
+
+
+def test_cli_run_on_live_remote_lease_exits_conflict(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """真实 CLI 分发在远端租约仍有效时返回 CONFLICT(5)，不进入执行。"""
+    client = _client(labels=(CONFIG.labels.running,))
+    claim_started_at = datetime.now(timezone.utc)
+    client.comment_issue(
+        7,
+        with_claim_lease(
+            format_claim_comment(ClaimBid(0, "runner-remote", 555, claim_started_at, "claude")),
+            machine_id="machine-remote",
+            ttl_seconds=600,
+            renewed_at=claim_started_at,
+        ),
+    )
+    client._issue_comment_updated_at[1] = claim_started_at
     with _cli_patches(client, live_daemon_pid=None) as runs:
         exit_code = _main(["run", "--issue", "7"], monkeypatch)
 
@@ -306,6 +410,13 @@ def test_cli_prd_path_target_also_bypasses_the_mutex(
     with (
         patch("backend.api.cli_helpers.resolve_repository_targets") as resolve_targets,
         patch("backend.api.cli.create_github_client", return_value=client),
+        patch(
+            "backend.api.cli_parsed_commands.runner.create_machine_identity_store",
+            return_value=SimpleNamespace(
+                load_or_create=lambda: SimpleNamespace(machine_id="machine-test"),
+                presence_slot_lock=nullcontext,
+            ),
+        ),
         patch("backend.api.cli.require_repository_initialized"),
         patch(
             "backend.core.use_cases.daemon_single_instance.find_live_daemon_pid",
@@ -322,28 +433,30 @@ def test_cli_prd_path_target_also_bypasses_the_mutex(
     assert mock_run.call_args.kwargs["target_issue"] == 7
 
 
-def test_cli_takeover_skips_the_admission_check(
+def test_cli_takeover_cannot_override_a_live_remote_lease(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """--takeover 是强制回收入口：不被准入拦下（语义不变）。"""
-    from backend.api.cli_run_takeover import DaemonTakeoverResult
-
-    client = _client(labels=(CONFIG.labels.running,), claims=((HOST, 555, NOW),))
-    takeover_result = DaemonTakeoverResult(
-        repo_id="keda-test",
-        daemon_pid=4242,
-        managed=False,
-        final_signal="sigterm",
-        reclaimed_issues=(7,),
+    """同名主机上的远端有效租约会在停止本机 daemon 前拦下 takeover。"""
+    client = _client(labels=(CONFIG.labels.running,))
+    fresh_now = datetime.now(timezone.utc)
+    client.comment_issue(
+        7,
+        with_claim_lease(
+            format_claim_comment(ClaimBid(0, HOST, 555, fresh_now, "claude")),
+            machine_id="machine-remote",
+            ttl_seconds=600,
+            renewed_at=fresh_now,
+        ),
     )
+    client._issue_comment_updated_at[1] = fresh_now
     with (
         _cli_patches(client, live_daemon_pid=4242) as runs,
         patch(
             "backend.api.cli_run_takeover.take_over_daemon",
-            return_value=takeover_result,
+            side_effect=AssertionError("a live remote lease must not stop the local daemon"),
         ),
     ):
         exit_code = _main(["run", "--issue", "7", "--takeover", "--yes"], monkeypatch)
 
-    assert exit_code == 0
-    assert runs[0]["target_issue"] == 7
+    assert exit_code == int(ExitCode.CONFLICT)
+    assert runs == []

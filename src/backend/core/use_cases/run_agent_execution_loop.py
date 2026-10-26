@@ -45,6 +45,7 @@ from backend.core.use_cases.run_agent_once import (
     wait_before_recovery_attempt,
 )
 from backend.core.use_cases.agent_invocation_tracing import PHASE_IMPLEMENTATION
+from backend.core.use_cases.agent_runner_claim_lease import ClaimLeaseLost
 from backend.core.use_cases.agent_runner_attempt_recording import (
     _AttemptRecordContext,
     _classify_and_record_gate_failure,
@@ -355,6 +356,9 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                         invocation_phase=PHASE_IMPLEMENTATION,
                         invocation_attempt=attempt_index + 1,
                     )
+        except ClaimLeaseLost:
+            # 认领已丢失时不得启动 recovery attempt；执行权已经交给新持有者。
+            raise
         except AgentUnavailableError:
             # The agent CLI could not be launched; let the cross-agent fallback
             # skip to the next candidate instead of burning recovery attempts.

@@ -7,6 +7,7 @@ import shlex
 import sys
 from collections.abc import Iterator
 from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Sequence
 
@@ -25,6 +26,7 @@ from backend.core.shared.interfaces.runner_console import (
 )
 from backend.core.shared.models.agent_runner import (
     CommandResult,
+    IssueCommentRecord,
     IssueSummary,
     LabelConfig,
     PullRequestContext,
@@ -143,6 +145,7 @@ class FakeGitHubClient(IGitHubClient):
         self.calls: list[dict] = []
         self._issue_comments: dict[int, list[str]] = {}
         self._issue_comment_entries: dict[int, list[tuple[int, str]]] = {}
+        self._issue_comment_updated_at: dict[int, datetime] = {}
         self._next_comment_id = 1
         self._issue_bodies: dict[int, str] = {}
         self._issue_get_bodies: dict[int, str] = {}
@@ -232,6 +235,7 @@ class FakeGitHubClient(IGitHubClient):
         comment_id = self._next_comment_id
         self._next_comment_id += 1
         self._issue_comment_entries.setdefault(issue_number, []).append((comment_id, body))
+        self._issue_comment_updated_at[comment_id] = datetime.now(timezone.utc)
 
     def edit_issue_body(self, issue_number: int, body: str) -> None:
         self.calls.append({"method": "edit_issue_body", "issue_number": issue_number, "body": body})
@@ -401,7 +405,31 @@ class FakeGitHubClient(IGitHubClient):
             for index, (existing_id, _) in enumerate(entries):
                 if existing_id == comment_id:
                     entries[index] = (comment_id, body)
+                    self._issue_comment_updated_at[comment_id] = datetime.now(timezone.utc)
                     return
+
+    def list_issue_comment_records(
+        self,
+        issue_number: int,
+        *,
+        trusted_only: bool = False,
+        body_contains: str | None = None,
+        require_success: bool = False,
+    ) -> list[IssueCommentRecord]:
+        """为租约与状态用例返回带时间戳的假评论。"""
+        self.calls.append({"method": "list_issue_comment_records", "issue_number": issue_number})
+        return [
+            IssueCommentRecord(
+                comment_id=comment_id,
+                body=body,
+                updated_at=self._issue_comment_updated_at.get(
+                    comment_id, datetime.now(timezone.utc)
+                ),
+                author="fake-user",
+            )
+            for comment_id, body in self._issue_comment_entries.get(issue_number, [])
+            if body_contains is None or body_contains in body
+        ]
 
     def list_pr_comments(self, pr_number: int) -> list[str]:
         self.calls.append({"method": "list_pr_comments", "pr_number": pr_number})
