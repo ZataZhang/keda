@@ -4,12 +4,12 @@
 |---|---|---|
 | 在一台机器上看到两台机器及各自在做的 Issue（rv-1） | `tasks/evidence/P1-FEAT-20261024-161425-cross-machine-presence-and-claim-lease/rv-1-kc-peers.txt`；打开：`open "$(git rev-parse --show-toplevel)/tasks/evidence/P1-FEAT-20261024-161425-cross-machine-presence-and-claim-lease/rv-1-kc-peers.txt"`。这是终端原始输出；本项没有截图或其他静态图片。 | 表格里 B 那一行的"正在处理"列是 `#42`；JSON 中 `machines` 长度为 2 |
 
-执行者已用两个独立状态目录、两个真实 daemon 与真实 `kc peers` 交叉核对这份输出。对话中可打开工作树里的文本文件；也可运行 `just prd review tasks/archive/P1-FEAT-20261024-161425-cross-machine-presence-and-claim-lease.md` 定位交互清单。PR/CI：执行者未创建 PR 或触发 CI；这项交付由 runner 后续处理。
+执行者已用两个独立状态目录、两个真实 daemon 与真实 `kc peers` 交叉核对这份输出。对话中可打开工作树里的文本文件；也可运行 `just prd review tasks/archive/P1-FEAT-20261024-161425-cross-machine-presence-and-claim-lease.md` 定位交互清单。PR #330 已由执行者接管；本地验证通过，当前候选分支的 CI 与独立 verifier 仍待完成。
 
 ## 验证身份
 
-- Current executor candidate implementation tree：`552d0b85faf6748fa773d3d7e4f8f7454089db77`
-- Base HEAD tree：`388b18d786736448372b7fb0e2ba6c754e6eb660`
+- Current executor candidate implementation tree：`735690ebd1fccd8215261885511ae90f166752eb`
+- Base HEAD tree：`904f910b47c42d589ec4c32f15152bf7e072e249`
 - 四项 RV 各自在最终实现树上重跑；证据命令、输出摘要、expected fail、解释和风险见同目录 `evidence.json`。
 - 原始终端文件按 RV item 分开保存；RV harness、假 GitHub/agent 与 tree helper 都位于 `scripts/`，不进入代码 diff，脚本和输出不含凭据。
 
@@ -49,7 +49,7 @@
 
 ## 先前复核树的其他交付验证（tree 6658504731e5dbc2cfc5b751d470123789c3464c）
 
-- 相关测试：`uv run pytest -o addopts="" tests/test_agent_runner_claim_lease.py tests/test_coordination_heartbeat.py tests/test_machine_presence.py tests/test_agent_runner_reconcile.py tests/test_run_target_admission.py tests/test_agent_runner_claim_arbitration.py tests/test_agent_runner_reclaim.py tests/test_github_client.py tests/test_kc_peers.py` — **149 passed**。
+- 相关测试：`uv run pytest -o addopts="" tests/test_agent_runner_claim_lease.py tests/test_coordination_heartbeat.py tests/test_machine_presence.py tests/test_agent_runner_reconcile.py tests/test_run_target_admission.py tests/test_agent_runner_claim_arbitration.py tests/test_agent_runner_reclaim.py tests/test_github_client.py tests/test_kc_peers.py` — **149 passed**，合并前总入口另有 **5138 passed, 1 skipped**。
 - 配置映射回归：设置 TTL 为 900 秒的认领评论包含 `ttl="900"`。
 - `SKIP=check-test-flag just lint --full` — **passed**；`just lint --reuse` — **passed**；`uv run mkdocs build --strict` — **passed**。
 - `just test`（testmon 增量档）通过；完整单元套件 `uv run pytest -o addopts="" tests/` 在最终候选树上为 **5043 passed, 1 skipped**，相关九模块另用不带 testmon 过滤的命令单独确认 `149 passed`。
@@ -59,20 +59,22 @@
 
 清单文件：`tasks/evidence/P1-FEAT-20261024-161425-cross-machine-presence-and-claim-lease/human-review-checklist.md`；交互伴侣：`tasks/evidence/P1-FEAT-20261024-161425-cross-machine-presence-and-claim-lease/human-review-checklist.html`。Markdown 与 HTML 的三项标题和选择项已静态核对；模板固定脚本未改。静态 HTMLParser 检查得到 4 张卡、3 组单选、3 个文本框和结果卡。
 
-实际浏览器检查未完成：CUA browser inventory 为空；Edge 和 Chrome-for-Testing 的 app 访问均返回 `Computer Use was not approved`。官方 warning checker 另报 Markdown 3 项、HTML 2 项；这是 checker 对模板注释中 `<h2>` 示例的误读，它从注释开启的伪标题一直匹配到第一张真实卡的闭合标题。执行者没有把静态解析当成 pageerror 或交互验证的替代品。CUA inventory 无浏览器，已安装 Chrome 的 headless/dump-dom 启动均以 134 退出。此项记录为 `REVIEW_INCIDENT / INCONCLUSIVE`，等待 runner 在可用浏览器环境中验证首卡显示、翻页和末页 Markdown 生成。
+实际浏览器 smoke 已于 2026-10-27 在 Microsoft Edge 完成：首卡正常显示，三张卡均可翻页，结果页可生成 Markdown；DevTools 记录 0 个 page error。仍有 3 条可访问性警告，来自三个备注 textarea 缺少 id/name；这不影响当前交互路径，但后续可为输入框补充可访问名称。
 
 
 ## 先前复核轮次（默认租约 600 秒）
 
 代码审查修复后的四项 RV 曾在 candidate tree `6658504731e5dbc2cfc5b751d470123789c3464c` 上重跑通过；九模块 pytest 为 149 passed，整套测试为 5043 passed、1 skipped。该轮验证使用 600 秒默认租约，结果不代表随后改成 1200 秒后的当前树。
 
-独立 verifier 已在 commit `0a8d9cf0`（candidate tree `8b8c0d22461ab066fef954d7b88b376a3f3884af`）上亲自重跑 rv-1 至 rv-4，结论 **GREEN** 并留下 `iar:verifier-verdict risk=green` 标记，原始记录见 `verifier-response.txt`。后续审查修复与默认值调整改变了实现树，因此该 GREEN 不等于对当前树的判定；runner 仍需在 `552d0b8…` 上重跑独立 verifier 门禁。真实浏览器 smoke 仍是 `REVIEW_INCIDENT / INCONCLUSIVE`。
+独立 verifier 曾在更早的 commit `0a8d9cf0`（candidate tree `8b8c0d22461ab066fef954d7b88b376a3f3884af`）给出 **GREEN**；该结论不覆盖当前树。当前验证树为 `735690ebd1fccd8215261885511ae90f166752eb`，独立 verifier 将对最终提交重新运行。人审清单已在 Microsoft Edge 完成 smoke，结果与警告见上文。
 
 ## 默认租约 1200 秒后的当前验证
 
-四项 RV 在 candidate tree `552d0b85faf6748fa773d3d7e4f8f7454089db77` 上重新运行，负控与绿色路径均符合预期；rv-2 直接验证默认 TTL 为 1200 秒，1170 秒不接手，1230 秒后回收。
+四项 RV 在 candidate tree `735690ebd1fccd8215261885511ae90f166752eb` 上重新运行，负控与绿色路径均符合预期；rv-2 直接验证默认 TTL 为 1200 秒，1170 秒不接手，1230 秒后回收。四项输出和 manifest 已与该树哈希同步。
 
 - 九个相关模块无 testmon 过滤：**149 passed**。
-- `just test`：lint 与本地增量测试通过（409 tests）。
+- `just lint --reuse`：passed。`just lint --full`：命令退出码为 0；该次 lint hook 报告当前待检查变更均为非代码文件并跳过本地 test 检查。
 - `uv run mkdocs build --strict`：passed。
-- 独立 verifier、浏览器交互检查和 `kc peers` 人读呈递检查仍待完成。
+- Microsoft Edge 人审清单 smoke：首卡显示、三卡翻页、结果 Markdown 生成均通过；0 个 page error，3 条 textarea 可访问性警告。
+- `just lint --repo`：passed；其中 `just test` 为 **5138 passed, 1 skipped**，严格 MkDocs 构建通过。
+- `kc peers` 的人读输出已在 rv-1 表格与 JSON 中检查；独立 verifier 尚待对最终提交运行。
