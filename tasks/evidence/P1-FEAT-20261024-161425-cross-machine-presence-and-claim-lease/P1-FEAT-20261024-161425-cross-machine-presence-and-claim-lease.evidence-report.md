@@ -4,7 +4,7 @@
 |---|---|---|
 | 在一台机器上看到两台机器及各自在做的 Issue（rv-1） | `tasks/evidence/P1-FEAT-20261024-161425-cross-machine-presence-and-claim-lease/rv-1-kc-peers.txt`；打开：`open "$(git rev-parse --show-toplevel)/tasks/evidence/P1-FEAT-20261024-161425-cross-machine-presence-and-claim-lease/rv-1-kc-peers.txt"`。这是终端原始输出；本项没有截图或其他静态图片。 | 表格里 B 那一行的"正在处理"列是 `#42`；JSON 中 `machines` 长度为 2 |
 
-执行者已用两个独立状态目录、两个真实 daemon 与真实 `kc peers` 交叉核对这份输出。对话中可打开工作树里的文本文件；也可运行 `just prd review tasks/archive/P1-FEAT-20261024-161425-cross-machine-presence-and-claim-lease.md` 定位交互清单。PR #330 已由执行者接管；当前 candidate tree `bfaad53e278da7a66af2ffad1d0732654f569fc4` 的四项 RV 与九模块测试已通过（149 passed）；manifest 与报告刚完成哈希对齐，Qoder 最终独立复核待完成。GitHub CI 以最终 PR head 的结果为准。
+执行者已用两个独立状态目录、两个真实 daemon 与真实 `kc peers` 交叉核对这份输出。PRD 已归档到 `tasks/archive/P1-FEAT-20261024-161425-cross-machine-presence-and-claim-lease.md`；运行 `just prd review tasks/archive/P1-FEAT-20261024-161425-cross-machine-presence-and-claim-lease.md` 可定位交互清单。PR #330 已由执行者接管；candidate tree `bfaad53e278da7a66af2ffad1d0732654f569fc4` 的四项 RV 与九模块测试已通过（149 passed）。Qoder 在同一候选实现树上返回独立 verifier **PASS**；它提出的 HTML 缺失、rv-3 PID 过期和 Change Log 歧义三项呈递问题，已在当前 PR HEAD `deb4a48586f5dea9cbf057c395ebc86034283d5a` 和 evidence branch `12e09af2eb9ffa6dbfe12ce1540650dd91febcff` 修正。GitHub CI 以最终 PR head 的结果为准。
 
 ## 验证身份
 
@@ -77,4 +77,4 @@
 - `just lint --reuse`：passed；`uv run mkdocs build --strict`：passed。
 - 前一候选树 `735690ebd1fccd8215261885511ae90f166752eb` 的 `just lint --repo` 为 **5138 passed, 1 skipped**；这项历史结果不冒充当前树结果。
 - Microsoft Edge 人审清单 smoke：首卡显示、三卡翻页、结果 Markdown 生成均通过；0 个 page error，3 条 textarea 可访问性警告。
-- `kc peers` 的人读输出已在 rv-1 表格与 JSON 中检查；Qoder 对旧候选树的 GREEN 不覆盖本轮候选树，刷新后独立复核待完成。9.1 内容是否符合预期仍由显式 merge-acceptance 契约在 PR 合并时确认。
+- `kc peers` 的人读输出已在 rv-1 表格与 JSON 中检查；Qoder 对候选树 `bfaad53e278da7a66af2ffad1d0732654f569fc4` 的只读独立复核为 PASS。HTML 清单现已发布，rv-3 PID 与原始输出一致。9.1 内容是否符合预期仍由显式 merge-acceptance 契约在 PR 合并时确认。

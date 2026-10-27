@@ -577,7 +577,7 @@ No external validation required; repository evidence was sufficient.（GitHub RE
 | 决策二 · rv-4（R2） | 负控拒绝重复标签移除后留下 2 条状态 Issue，唯一板 oracle 失败；重试及并发首启绿色路径都收敛至 1 条。关闭状态开关后状态评论不变而租约继续续期；同主机名、不同 machine_id 的远端有效租约保持运行。 | `rv-4-presence.txt` |
 | 双机可见 · rv-1（R1） | 负控隐藏 B 评论后真实 `kc peers --json` 只见 1 台，数量断言失败；绿色表格与 JSON 都见两台在线机器，B 正在处理 #42 / `codex`，状态 Issue 有两条评论。 | `rv-1-kc-peers.txt` |
 
-每项的完整实际命令、负控、预期失败、输出摘要、解释与风险见 `evidence.json`；终端原始输出只含本项内容。上一轮 Qoder 曾在 builder HEAD `9119bc370bfde2b04be769621356aa2383a7a105`、candidate implementation tree `2bd42838188f29bc252a6216082a21f4bf187c9c` 返回 `risk=green`；该候选树早于行数门禁修复，不构成本轮独立验收。当前 candidate implementation tree 为 `bfaad53e278da7a66af2ffad1d0732654f569fc4`，最终独立 verdict 待复核，结果写入 `verifier-response.txt` 后再更新本节。上一轮 verifier 披露：真实 GitHub 写入尚未覆盖；预算耗尽与待返工两个 FR-6 分支只有单测覆盖；无心跳的内部直接调用可能留下无租约认领。
+每项的完整实际命令、负控、预期失败、输出摘要、解释与风险见 `evidence.json`；终端原始输出只含本项内容。上一轮 Qoder 曾在 builder HEAD `9119bc370bfde2b04be769621356aa2383a7a105`、candidate implementation tree `2bd42838188f29bc252a6216082a21f4bf187c9c` 返回 `risk=green`；该候选树早于行数门禁修复，不构成本轮独立验收。Qoder 后续在 builder HEAD `e58f70b3c4213d1598f0f667b08e0cce061d81be` 上对当前 candidate implementation tree `bfaad53e278da7a66af2ffad1d0732654f569fc4` 独立复核并返回 **PASS**。它发现的三项非阻塞呈递问题已在 docs-only PR head `deb4a48586f5dea9cbf057c395ebc86034283d5a` 修正；当前 PR head 过滤后的实现树仍为 `bfaad53e278da7a66af2ffad1d0732654f569fc4`。上一轮 verifier 披露：真实 GitHub 写入尚未覆盖；预算耗尽与待返工两个 FR-6 分支只有单测覆盖；无心跳的内部直接调用可能留下无租约认领。
 
 ### Human-Confirmed (来自 Part A 风险地图)
 
@@ -622,7 +622,7 @@ No external validation required; repository evidence was sufficient.（GitHub RE
 - [x] 推荐方案已完整实现，没有遗留的 Phase 2 或临时兼容层。证据：最终代码审查、四项 RV 与相关回归测试；没有新增运行时依赖或临时旁路。
 - [x] 如果交付走 PR，PR 描述包含 9.1 呈递区与证据链接；否则完成消息原样附上 9.1 内容。证据：PR #330 的 Human Visible Outcomes 列出 rv-1 表格/JSON 断言，并链接 `rv-1-kc-peers.txt` 与交互清单。
 - [x] `SKIP=check-test-flag just lint --full` 与上述 pytest 通过，单文件非空行均少于 1000 行。证据：本轮 `SKIP=check-test-flag just lint --full`、相关测试 `149 passed` 与 `just lint --reuse` 通过；全文件行数检查无超限。`just test` 受 testmon 增量标记影响，实际输出 `no tests ran`，不作为测试通过证据。完整单元套件 `uv run pytest -o addopts="" tests/` 在先前 tree `6658504731e5dbc2cfc5b751d470123789c3464c` 上为 `5043 passed, 1 skipped`；默认租约改为 1200 秒后的当前树未重跑全量套件。
-- [ ] 独立 verifier 的最终判定 — 旧 GREEN 绑定到前一候选树，当前候选树复核待重新完成；结果写入 `verifier-response.txt` 后再勾选。
+- [x] 独立 verifier 的最终判定 — Qoder 对 candidate implementation tree `bfaad53e278da7a66af2ffad1d0732654f569fc4` 返回 PASS，相关证据写入 `verifier-response.txt` 和 verifier report；三项非阻塞证据呈递问题已在当前 PR head 与发布包中修正。
 - [x] 人审 HTML 的真实浏览器渲染与翻页 smoke — 2026-10-27 Microsoft Edge 首卡显示、三卡翻页和 Markdown 结果生成通过；0 个 `pageerror`。另有 3 条 textarea 缺少 id/name 的可访问性警告，不影响已验证交互。
 
 ## 10. Functional Requirements
@@ -677,7 +677,7 @@ No external validation required; repository evidence was sufficient.（GitHub RE
 - Related PRD status: 归档的命名清理 PRD 与 hard via-main 依赖由基线 commit `f4886655` 满足；Tailscale onboarding 与 hosted-runner deployment 仍独立，无额外顺序依赖。
 - Requirements and risks: rv-1 到 rv-4 均以真实 kc CLI/daemon、真实本地 git、假 GitHub 与确定性 agent CLI 运行；服务器时间通过假 GitHub 的 `updated_at` 设置。rv-3 区分初始领取的两次标签写入与失租后的零次标签写入，并覆盖推送前与开 PR 前两个归属读取点。远端接手仍受双方时钟偏差小于 ttl/2 的 PRD 前提约束；状态评论仍在公开仓库可见。
 - **实现中发现并纳入的边界**：进程因失租被终止后，`ClaimLeaseLost` 必须穿过执行恢复循环并阻止启动新的 recovery attempt；该修复已由定向回归测试与 rv-3 子进程场景验证。`kc run --takeover` 在停本机 daemon 前先拒绝有效远端租约，停止后再次准入；旧 takeover reclaim 路径也改为按 machine_id 识别本机，避免同名主机误回收。状态 Issue 重复项先写带 canonical 标记的清理留言，再移除重复标签；若留言失败，重复项仍留在查询集合中供下一次重试，回归测试覆盖失败后重试。低 TTL 配置留给运行期下限钳制，机器编号文件仅接受带时区创建时间的 UUID4。
-- **当前执行者证据树**：默认租约调整后，rv-1 至 rv-4 逐项重跑，四份原始输出和 `evidence.json` 均记录 candidate implementation tree `bfaad53e278da7a66af2ffad1d0732654f569fc4`；该身份通过排除 PRD 与整个 evidence delivery-record 目录计算。当前九个相关测试模块 `149 passed`。生命周期/verifier 测试计数不再引用：此前记录的文件在当前分支不存在。`just test` 实际输出 `no tests ran`，不作为测试通过证据。当前树的独立 verifier 复核待完成。
+- **当前执行者证据树**：默认租约调整后，rv-1 至 rv-4 逐项重跑，四份原始输出和 `evidence.json` 均记录 candidate implementation tree `bfaad53e278da7a66af2ffad1d0732654f569fc4`；该身份通过排除 PRD 与整个 evidence delivery-record 目录计算。当前九个相关测试模块 `149 passed`。生命周期/verifier 测试计数不再引用：此前记录的文件在当前分支不存在。`just test` 实际输出 `no tests ran`，不作为测试通过证据。Qoder 独立 verifier 在同一候选实现树上返回 PASS；当前 PR HEAD 的过滤树仍相同。
 - **人审包检查**：Markdown 与 HTML 源码静态核对包含相同的三张决定卡和结果卡。2026-10-27 Microsoft Edge 实际浏览器 smoke 确认首卡可见、三卡可翻页并生成结果 Markdown；0 个 page error，3 条 textarea 缺少 id/name 的可访问性警告。
 - **验收投影**：实现与 runner-owned gate 项均有对应验证；用户已确认决策一、决策二。PR #330 显式声明 squash merge 即接受 9.1 人读呈递；在合并前状态仍为 `🧍 待人工验收`，只有满足门禁且 squash commit 的 record-excluded tree 与上述候选树相同后，才按契约回填 Human-Confirmed 并更新横幅。
 
@@ -689,7 +689,15 @@ No external validation required; repository evidence was sufficient.（GitHub RE
 - After: Qoder 曾在 builder HEAD `9119bc370bfde2b04be769621356aa2383a7a105`、candidate implementation tree `2bd42838188f29bc252a6216082a21f4bf187c9c` 返回 `risk=green`；该结果早于行数门禁修复，不再代表当前候选树。
 - Reason: 保留历史复核记录，同时明确它不满足当前树的独立 verifier 门禁，也不把执行者自审冒充独立结论。
 - Impact: 不改变运行行为；验证证据只覆盖 PRD 声明的替身 GitHub 边界，并披露真实写入、两个处置分支和无心跳内部调用窗口。
-- Review: 历史 Qoder GREEN 已被后续代码树取代；当前树的独立复核待完成。9.1 人读内容接受由 PR #330 的 merge-acceptance 契约在 squash merge 后记录。
+- Review: 本记录只保留当时对旧候选树的结果；旧 Qoder GREEN 不覆盖当前树。当时记录此 Change Log 时，当前树的独立复核仍待完成。9.1 人读内容接受由 PR #330 的 merge-acceptance 契约在 squash merge 后记录。
+
+### Complete independent verification and refresh published review artifacts
+- Type: validation evidence / delivery records
+- Before: 当前候选树的独立 verifier 结论仍待复核；发布包缺少 HTML 清单，rv-3 清单 PID 对应旧运行，历史 Change Log 的 Review 行容易被误读为当前 GREEN。
+- After: Qoder 对 builder HEAD `e58f70b3c4213d1598f0f667b08e0cce061d81be` 上的 candidate implementation tree `bfaad53e278da7a66af2ffad1d0732654f569fc4` 返回 PASS，独立重跑九模块得到 `149 passed` 并核对 25 条 manifest 断言。执行者随后将 HTML 清单与当前 rv-3 PID `35838` 发布到 evidence branch `12e09af2eb9ffa6dbfe12ce1540650dd91febcff`，并澄清历史 Change Log。PR HEAD `deb4a48586f5dea9cbf057c395ebc86034283d5a` 的过滤候选树仍为 `bfaad53e278da7a66af2ffad1d0732654f569fc4`。
+- Reason: 将独立 verdict、实际 RV 输出和审阅者可访问的清单绑定到同一交付身份，并关闭 verifier 指出的三项非阻塞呈递问题。
+- Impact: 运行时实现未改变；清单与 9.1 的人工接受仍按 PR 的 squash-merge 契约记录，合并前横幅保持待人工验收。
+- Review: Qoder independent verifier PASS on candidate tree `bfaad53e278da7a66af2ffad1d0732654f569fc4`; residual test and live-write limitations remain disclosed above.
 
 ### Align marker compatibility and realistic validation evidence
 - Type: evidence / scope clarification

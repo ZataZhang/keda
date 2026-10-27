@@ -6,7 +6,7 @@
 - 独立性 review 发现仓库的 verifier preset 可与 builder 同为 codex；`_choose_verifier_agent` 已改为跳过同一 agent、选回退链里的不同 agent，并在没有候选时 fail closed。回归测试覆盖两种情况。
 - 当前验证：相关九模块 **149 passed**；`just test` 实际输出 `no tests ran`，不作为测试通过证据；`SKIP=check-test-flag just lint --full`、reuse lint 与严格 MkDocs 构建通过。
 - Microsoft Edge smoke 已完成：首卡、三卡翻页和结果 Markdown 通过；0 个 page error，3 条 textarea 可访问性警告。
-- 旧 Qoder GREEN 绑定到此前候选树，不能覆盖本轮文件行数修复。Qoder 首次检查刷新后的候选树时发现 manifest 与报告仍指向旧哈希；这些记录现已统一绑定到当前树，最终独立复核待对提交后的文件重新运行。
+- 旧 Qoder GREEN 绑定到此前候选树，不能覆盖本轮文件行数修复。Qoder 首次检查刷新后的候选树时发现 manifest 与报告仍指向旧哈希；这些记录现已统一绑定到当前树。Qoder 对 builder HEAD `e58f70b3c4213d1598f0f667b08e0cce061d81be` 的只读独立复核返回 **PASS**，candidate implementation tree 为 `bfaad53e278da7a66af2ffad1d0732654f569fc4`。它提出的三个非阻塞证据呈递问题已在 `deb4a48586f5dea9cbf057c395ebc86034283d5a` 修复，且没有改变该候选实现树；最终 PR HEAD 上的过滤树仍为同一哈希。
 
 ## 评审基准
 
@@ -46,7 +46,7 @@
 
 **历史 verdict（不满足独立性）**：commit `0a8d9cf06c54f547c93cd2d40ed2b1260e4bd320`（tree `8b8c0d22461ab066fef954d7b88b376a3f3884af`）上的 GREEN 使用 codex verifier，而 builder 同为 codex；它也早于当前候选树。该结果不得作为本 PR 的独立 verifier PASS。
 
-**当前树门禁：待独立复核。** 本轮修复后，四项真实入口 RV 与九个相关测试模块（149 passed）均绑定 candidate implementation tree `bfaad53e278da7a66af2ffad1d0732654f569fc4`；base HEAD tree 为 `ab6d0208a74baf73ed0b11f8dc3edb1ad98ab376`。Qoder 上轮发现的 evidence identity 不一致已修正。最终 verifier 将审查提交 HEAD、实际 full tree 与上述排除交付记录后的候选树，结果写入 `verifier-response.txt` 后再更新此报告。
+**当前候选树门禁：PASS。** Qoder 以只读独立 verifier 身份审查 builder HEAD `e58f70b3c4213d1598f0f667b08e0cce061d81be`，重新计算 candidate implementation tree `bfaad53e278da7a66af2ffad1d0732654f569fc4`，并独立重跑九个相关测试模块（149 passed），返回 **PASS**。RV-1 至 RV-4、manifest 和此候选树一致，base HEAD tree 为 `ab6d0208a74baf73ed0b11f8dc3edb1ad98ab376`。Qoder 另指出的三个非阻塞记录问题已由执行者修复并核对：HTML 清单已发布到 evidence branch，rv-3 PID 与原始输出相同，历史 Change Log 用语不再暗示旧 verdict 覆盖当前树。修复仅变更交付记录；最终 PR HEAD `deb4a48586f5dea9cbf057c395ebc86034283d5a` 的过滤候选树仍可复算为 `bfaad53e278da7a66af2ffad1d0732654f569fc4`。完整单元测试与真实 GitHub 首次写入等披露边界见下文。
 
 **Verifier 披露的非阻塞覆盖边界**：
 
@@ -66,15 +66,15 @@
 
 需求状态: ✅ 与 PRD 范围一致
 代码审查: ✅ 两轮审查发现全部闭环（当前未解发现: 0）
-验证状态: ⏳ 当前树 RV 与 149 个相关测试通过；全量单测沿用旧默认值树结果，未在 1200 秒默认值后重跑。浏览器 smoke 已通过并披露 3 条可访问性警告；独立 verifier 待复核。
+验证状态: ✅ 当前候选树 RV 与 149 个相关测试通过；Qoder 独立 verifier 在同一 candidate implementation tree 上返回 PASS。全量单测沿用旧默认值树结果，未在 1200 秒默认值后重跑。浏览器 smoke 已通过并披露 3 条可访问性警告。
 文档状态: ✅ 通过
 
-结论: ⏳ 当前候选树已通过四项 RV 与 149 个相关测试；独立 verifier 待重新复核。真实 GitHub 写入、两项 FR-6 处置的 RV 覆盖和 9.1 人工接受边界如上披露；PRD 人工验收状态在授权 squash merge 前保持待验收。
+结论: ✅ candidate implementation tree `bfaad53e278da7a66af2ffad1d0732654f569fc4` 已通过四项 RV、149 个相关测试与 Qoder 独立 verifier。真实 GitHub 写入、两项 FR-6 处置的 RV 覆盖和 9.1 人工接受边界如上披露；PRD 人工验收状态在 squash merge 前保持待验收。
 
 ```json
 {
-  "verdict": "pending",
-  "summary": "The refreshed delivery records now identify candidate implementation tree bfaad53e278da7a66af2ffad1d0732654f569fc4 and base HEAD tree ab6d0208a74baf73ed0b11f8dc3edb1ad98ab376. RV-1 through RV-4 passed with negative controls; the nine relevant pytest modules passed (149 passed). The first review found stale evidence identities, which have been corrected. A final independent review of the committed HEAD and filtered candidate tree is pending.",
+  "verdict": "pass",
+  "summary": "Qoder independently reviewed builder HEAD e58f70b3c4213d1598f0f667b08e0cce061d81be and recomputed the candidate implementation tree bfaad53e278da7a66af2ffad1d0732654f569fc4. RV-1 through RV-4 passed with negative controls; the nine relevant pytest modules passed (149 passed); all 25 manifest stdout assertions matched their raw outputs. The current PR head deb4a48586f5dea9cbf057c395ebc86034283d5a keeps the same filtered implementation tree. Three non-blocking evidence presentation findings were corrected in that docs-only commit and the published evidence bundle.",
   "findings": []
 }
 ```
