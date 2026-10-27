@@ -137,6 +137,7 @@ def _gate_single_issue(
 ) -> None:
     """运行一个 ``agent/automated-review-passed`` Issue 的验证软门禁。"""
     from backend.core.use_cases.agent_runner_validation import (
+        find_unrecognized_validation_block_marker,
         parse_latest_evidence_marker,
         parse_validation_checklist_state,
         reset_validation_checklist,
@@ -150,10 +151,35 @@ def _gate_single_issue(
     pr_context: PullRequestContext | None = github_client.get_pull_request_context(pr_branch)
     if pr_context is None or pr_context.number is None:
         return
-    checklist_state = parse_validation_checklist_state(pr_context.body)
-    if checklist_state is None or checklist_state.total == 0:
-        return
     head_sha = pr_context.head_sha
+    checklist_state = parse_validation_checklist_state(pr_context.body)
+    if checklist_state is None:
+        # 正文里有当前契约读不懂的签收区块（旧前缀或残缺 marker）时不能按"没有清单"
+        # 放行：CI 门禁与自动勾选同样匹配不到它，三方都静默空转。此处 fail closed。
+        unreadable_marker = find_unrecognized_validation_block_marker(pr_context.body)
+        if unreadable_marker is None:
+            return
+        _logger.warning(
+            "Issue #%d PR body carries an unreadable sign-off block marker %r; "
+            "keeping validation pending.",
+            issue.number,
+            unreadable_marker,
+        )
+        _mark_validation_pending(issue=issue, config=config, github_client=github_client)
+        _emit_validation_event(
+            on_validation,
+            issue,
+            LifecycleEventType.VALIDATION_FAILED,
+            f"validation_failed:{head_sha}",
+            {
+                "head_sha": head_sha,
+                "reason": "unreadable_sign_off_block_marker",
+                "marker": unreadable_marker,
+            },
+        )
+        return
+    if checklist_state.total == 0:
+        return
     _emit_validation_event(
         on_validation,
         issue,

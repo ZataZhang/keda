@@ -40,11 +40,12 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
+from backend.core.shared.markdown_code_fence import strip_code_fences
+from backend.core.shared.prd_skill_location import resolve_prd_skill_path
 from backend.core.use_cases.agent_runner_feedback import (
     extract_prd_path,
     resolve_prd_archive_path,
 )
-from backend.core.shared.prd_skill_location import resolve_prd_skill_path
 
 # "合并即接受"声明必须携带的 hidden marker（prompt 教学与校验共用同一常量）。
 MERGE_ACCEPTANCE_MARKER_TEXT = "<!-- kc:merge-acceptance version=1 -->"
@@ -145,7 +146,8 @@ def find_pr_body_contract_violations(pr_body: str, issue_body: str) -> list[str]
     """返回 PR 正文缺失的契约锚点标识列表；完全合规时为空。
 
     仅当 Issue body 携带 ``PRD path:`` 锚点（即 PRD 交付）时才校验；无 PRD 的
-    Issue 返回空列表。当前锚点：
+    Issue 返回空列表。围栏代码块里的示例文字不算声明——它们既不会被 GitHub 解析，
+    也不构成人读正文里的引用，因此判定只读剥离围栏后的正文。当前锚点：
 
     - ``prd-link``：正文既未引用 PRD 的归档路径，也未引用 Issue 指向的 pending
       路径。PRD 在本 PR 里归档，归档路径是首选写法；pending 路径照样认，存量
@@ -155,14 +157,15 @@ def find_pr_body_contract_violations(pr_body: str, issue_body: str) -> list[str]
     prd_relative_path = extract_prd_path(issue_body)
     if prd_relative_path is None:
         return []
+    scannable_body = strip_code_fences(pr_body)
     violations: list[str] = []
     accepted_prd_paths = [prd_relative_path]
     archive_relative_path = resolve_prd_archive_path(prd_relative_path)
     if archive_relative_path is not None:
         accepted_prd_paths.append(archive_relative_path)
-    if not any(accepted_prd_path in pr_body for accepted_prd_path in accepted_prd_paths):
+    if not any(accepted_prd_path in scannable_body for accepted_prd_path in accepted_prd_paths):
         violations.append("prd-link")
-    if not _MERGE_ACCEPTANCE_MARKER_PATTERN.search(pr_body):
+    if not _MERGE_ACCEPTANCE_MARKER_PATTERN.search(scannable_body):
         violations.append("merge-acceptance")
     return violations
 
@@ -400,9 +403,13 @@ def extract_prd_reference_paths(pr_body: str) -> tuple[str, ...]:
     """按正文出现顺序抽取所有 ``- PRD: <path>`` 引用路径（不去重）。
 
     校验端据此同时判断"完整性"（集合相等）与"重复"（同一路径出现多次），因此保留
-    文档顺序与重复项，不在这里做 :func:`unique_prd_paths` 的收敛。
+    文档顺序与重复项，不在这里做 :func:`unique_prd_paths` 的收敛。围栏代码块里的
+    示例行不算声明，判定前先剥离。
     """
-    return tuple(match.group("path").strip() for match in _PRD_LIST_LINE_PATTERN.finditer(pr_body))
+    return tuple(
+        match.group("path").strip()
+        for match in _PRD_LIST_LINE_PATTERN.finditer(strip_code_fences(pr_body))
+    )
 
 
 def build_aggregate_merge_acceptance_block(prd_paths: Iterable[str]) -> str:
@@ -460,7 +467,8 @@ def find_aggregate_pr_body_contract_violations(
         缺失 / 不匹配的锚点标识列表（顺序稳定：marker 类 → PRD 集合类）。
     """
     violations: list[str] = []
-    declaration = parse_aggregate_source_marker(pr_body)
+    scannable_body = strip_code_fences(pr_body)
+    declaration = parse_aggregate_source_marker(scannable_body)
     expected_issues = tuple(sorted({int(number) for number in expected_issue_numbers}))
     expected_prs = tuple(sorted({int(number) for number in expected_source_pr_numbers}))
     if (
@@ -469,11 +477,11 @@ def find_aggregate_pr_body_contract_violations(
         or declaration.source_pr_numbers != expected_prs
     ):
         violations.append("aggregate-source-marker")
-    if not _has_merge_acceptance_version(pr_body, 2):
+    if not _has_merge_acceptance_version(scannable_body, 2):
         violations.append("merge-acceptance-v2")
-    if AGGREGATE_MERGE_ACCEPTANCE_STATEMENT_TEXT not in pr_body:
+    if AGGREGATE_MERGE_ACCEPTANCE_STATEMENT_TEXT not in scannable_body:
         violations.append("merge-acceptance-statement")
-    listed_paths = extract_prd_reference_paths(pr_body)
+    listed_paths = extract_prd_reference_paths(scannable_body)
     if any(count > 1 for count in Counter(listed_paths).values()):
         violations.append("prd-duplicate")
     expected_paths = unique_prd_paths(expected_prd_paths)
