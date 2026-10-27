@@ -577,7 +577,7 @@ No external validation required; repository evidence was sufficient.（GitHub RE
 | 决策二 · rv-4（R2） | 负控拒绝重复标签移除后留下 2 条状态 Issue，唯一板 oracle 失败；重试及并发首启绿色路径都收敛至 1 条。关闭状态开关后状态评论不变而租约继续续期；同主机名、不同 machine_id 的远端有效租约保持运行。 | `rv-4-presence.txt` |
 | 双机可见 · rv-1（R1） | 负控隐藏 B 评论后真实 `kc peers --json` 只见 1 台，数量断言失败；绿色表格与 JSON 都见两台在线机器，B 正在处理 #42 / `codex`，状态 Issue 有两条评论。 | `rv-1-kc-peers.txt` |
 
-每项的完整实际命令、负控、预期失败、输出摘要、解释与风险见 `evidence.json`；终端原始输出只含本项内容。Qoder 以独立 verifier 身份在 builder HEAD `9119bc370bfde2b04be769621356aa2383a7a105`、candidate implementation tree `bfaad53e278da7a66af2ffad1d0732654f569fc4` 上完成复验，返回 `risk=green`；完整原始回复见 `tasks/evidence/P1-FEAT-20261024-161425-cross-machine-presence-and-claim-lease/verifier-response.txt`。Verifier 披露：真实 GitHub 写入尚未覆盖；预算耗尽与待返工两个 FR-6 分支只有单测覆盖；无心跳的内部直接调用可能留下无租约认领。受支持的 CLI/daemon 入口会先启动心跳；该窄范围窗口被 verifier 判为非阻塞。
+每项的完整实际命令、负控、预期失败、输出摘要、解释与风险见 `evidence.json`；终端原始输出只含本项内容。上一轮 Qoder 曾在 builder HEAD `9119bc370bfde2b04be769621356aa2383a7a105`、candidate implementation tree `2bd42838188f29bc252a6216082a21f4bf187c9c` 返回 `risk=green`；该候选树早于行数门禁修复，不构成本轮独立验收。当前 candidate implementation tree 为 `bfaad53e278da7a66af2ffad1d0732654f569fc4`，最终独立 verdict 待复核，结果写入 `verifier-response.txt` 后再更新本节。上一轮 verifier 披露：真实 GitHub 写入尚未覆盖；预算耗尽与待返工两个 FR-6 分支只有单测覆盖；无心跳的内部直接调用可能留下无租约认领。
 
 ### Human-Confirmed (来自 Part A 风险地图)
 
