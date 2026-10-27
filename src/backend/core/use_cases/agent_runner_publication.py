@@ -804,7 +804,7 @@ def _finish_implementation_publication(
         return
 
     # 直发标签的消费点：Draft PR 已确认（同仓、同 Issue 分支、同 head、正文带指认本
-    # Issue 的 `iar:direct-pr` marker）才移除标签。放在 workflow 标签切换之前——删除
+    # Issue 的 `kc:direct-pr` marker）才移除标签。放在 workflow 标签切换之前——删除
     # 失败时 Issue 仍停在 running，下一轮认领会确认同一个 PR 并只补清理，而不是重复
     # 构建或重复建 PR。
     consume_label_after_publication(

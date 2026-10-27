@@ -370,9 +370,8 @@ class AgentRunnerE2eVerificationCommandSettings(BaseModel):
 class AgentRunnerRunnerSettings(BaseModel):
     """Local runner behavior."""
 
-    max_issues: int = 1
-    # Maximum Issues processed in parallel within one daemon pass. 1 keeps the
-    # sequential path (zero regression); >1 enables thread-pool parallelism.
+    # 该仓库最多同时运行几个自动领取的 Issue（并行上限的配置文件来源）；
+    # Backlog 页面设置与 kc daemon run --concurrency 优先于它。
     max_concurrent_issues: int = 1
     default_agent: str = "auto"
     max_recovery_attempts: int = 5
@@ -456,6 +455,7 @@ class AgentRunnerSafetySettings(BaseModel):
             "docker-compose.prod.yml",
         ]
     )
+    forbidden_path_exceptions: list[str] = Field(default_factory=list)
 
 
 class AgentRunnerAutopilotSettings(BaseModel):
@@ -504,11 +504,13 @@ class AgentRunnerBacklogSettings(BaseModel):
 class AgentRunnerValidationSettings(BaseModel):
     """Realistic Validation evidence gate configuration."""
 
+    # jscpd:ignore-start
+    # 与 core 的 ValidationConfig 镜像字段；基础设施层不能反向导入 core 默认值。
     enabled: bool = True
     # 与 core.shared.models.agent_runner.DEFAULT_VALIDATION_EVIDENCE_DIR 保持一致；
     # infrastructure 处于四层最底，不能反向 import core 的常量。
     evidence_dir: str = "tasks/evidence"
-    branch_prefix: str = "iar-evidence/"
+    branch_prefix: str = "kc-evidence/"
     evidence_format_check: bool = True
     parse_evidence_format_with_agent: bool = True
     language: str = "zh-CN"
@@ -524,6 +526,7 @@ class AgentRunnerValidationSettings(BaseModel):
     artifact_health_enabled: bool = True
     frontend_visual_evidence_required: bool = True
     frontend_paths: list[str] = Field(default_factory=lambda: ["frontend-admin", "frontend-public"])
+    # jscpd:ignore-end
 
 
 #: ``kc console`` 的默认端口；被占用时 CLI 会自动顺延，显式 ``--port`` 不顺延。
@@ -537,9 +540,8 @@ _CONSOLE_PROCESS_REGISTRY_NAME = "processes.json"
 def _default_runner_command() -> list[str]:
     """解析托管进程的默认启动命令（自有名字优先，见身份模块）。
 
-    解析顺序：① 当前进程就是以 ``kc`` / ``kedacode`` / ``iar`` 之一启动的 → 用它
-    （保证托管 daemon 与安装态同源）；② 按 ``kc`` → ``kedacode`` → ``iar`` 查
-    PATH；③ 都找不到时回落到 ``uv run kc``（keda 源码树场景）。
+    解析顺序：① 当前进程以 ``kc`` 或 ``kedacode`` 启动时沿用该命令；② 按
+    ``kc`` → ``kedacode`` 查 PATH；③ 都找不到时回落到 ``uv run kc``（keda 源码树场景）。
     ``config.toml`` 里显式配置的 ``runner_command`` 始终优先。
     """
     return product_identity.resolve_own_command_argv(sys.argv[0] if sys.argv else "")
@@ -553,9 +555,8 @@ class AgentRunnerConsoleSettings(BaseModel):
     （一行 ``host = "0.0.0.0"`` 就能把可写面板暴露给整个网段）。残留的
     ``host`` 键按 pydantic extra 忽略。远程访问走 SSH 端口转发。
 
-    落库与注册表默认值随**当前生效的状态目录**派生（新旧双读），配置里写死的
-    旧状态路径在加载时归一化到同一个目录，因此迁移前后、旧路径链接存在与否，
-    读到的都是同一份历史。
+    落库与注册表默认值随 ``~/.kedacode`` 派生。显式配置为当前状态目录下的
+    路径会归一化到本机状态目录；旧路径应通过 ``kc config migrate`` 迁移。
     """
 
     history_db_path: str = Field(
@@ -574,7 +575,7 @@ class AgentRunnerConsoleSettings(BaseModel):
 
     @model_validator(mode="after")
     def _normalize_state_home_paths(self) -> "AgentRunnerConsoleSettings":
-        """把写死旧/新状态目录的配置值归一化到当前生效状态目录。"""
+        """把写死当前状态目录的配置值归一化到本机状态目录。"""
         for path_field in ("history_db_path", "process_registry_path", "process_log_dir"):
             setattr(
                 self,
@@ -619,14 +620,20 @@ class AgentRunnerDaemonSettings(BaseModel):
     # 低水位暂停新任务；恢复水位采用滞回，避免容量在阈值附近时反复启停。
     disk_low_watermark_bytes: int = 10 * 1024**3
     disk_resume_watermark_bytes: int = 15 * 1024**3
+    # 托管资源与历史维护须显式开启；默认本地 daemon 不进入新清理路径。
+    hosted_maintenance_enabled: bool = False
+    # 低水位暂停新任务；恢复水位采用滞回，避免容量在阈值附近时反复启停。
+    disk_low_watermark_bytes: int = 10 * 1024**3
+    disk_resume_watermark_bytes: int = 15 * 1024**3
     # 崩溃对账主开关：daemon 每轮开头（Phase -1）扫描本机认领、但认领进程已死的
     # ``agent/running`` 僵尸 attempt，给出续传 / 重跑 / 判失败三出口留痕。关闭后
     # Phase -1 整轮空转（僵尸保持 agent/running 不被触碰），即回退到本特性前的现状。
     reconcile_stale_attempts: bool = True
     # claim 老化阈值(秒):claim marker 含 ``started_at`` 且距 now 超过此值时,
     # 即便 PID 仍存活也视为 stale（"daemon 自身持锁 claim 但已卡死"的死锁兜底）。
-    # 默认 3 小时。仅在 ``reconcile_stale_attempts=True`` 时生效。
-    reclaim_ttl_seconds: int = 10800
+    # 默认 5 小时：必须大于 ``runner.timeout_seconds``（默认 4 小时），否则仍在正常运行
+    # 的 attempt 会被误判 ttl_expired。仅在 ``reconcile_stale_attempts=True`` 时生效。
+    reclaim_ttl_seconds: int = 18000
 
     @model_validator(mode="after")
     def _validate_disk_watermarks(self) -> "AgentRunnerDaemonSettings":
@@ -720,7 +727,7 @@ class AgentRunnerPostPrSupervisorSettings(BaseModel):
     max_diff_chars: int = 6000
     # 补丁 4：跨 cycle finding 注入开关与 artifact 目录（worktree 相对路径）
     previous_findings_injection_enabled: bool = True
-    findings_artifact_dir: str = ".iar/state"
+    findings_artifact_dir: str = ".kedacode/state"
 
 
 class AgentRunnerDeliberationProfileSettings(BaseModel):
@@ -747,7 +754,7 @@ class AgentRunnerReplSettings(BaseModel):
 
     The REPL entrypoint lets the user chat with a configured agent and
     grants the agent the ability to request execution of whitelisted KedaCode
-    subcommands via ``<<IAR_EXEC>> ... <<END_IAR_EXEC>>`` markers. This
+    subcommands via ``<<KC_EXEC>> ... <<END_KC_EXEC>>`` markers. This
     settings block isolates the REPL's risk surface (default agent,
     command allow/confirm lists, audit directory) from the ``kc ask``
     decision planner.

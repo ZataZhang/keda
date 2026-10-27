@@ -12,7 +12,10 @@ from backend.core.shared.models.agent_runner import (
     IssueSummary,
     RunnerConfig,
 )
-from backend.core.use_cases.agent_runner_commit import commit_requested_changes
+from backend.core.use_cases.agent_runner_commit import (
+    commit_requested_changes,
+    sanitize_commit_message,
+)
 from backend.core.use_cases.agent_runner_feedback import VerificationFailedError
 from tests.conftest import FakeProcessRunner
 from tests.support.agent_runner import (
@@ -772,3 +775,56 @@ def test_commit_requested_changes_raises_on_persistent_precommit_failure(
             fake_runner,
             expected_branch="issue-123",
         )
+
+
+def test_sanitize_commit_message_keeps_subject_and_body() -> None:
+    """commit request 里的 subject + body 结构必须原样交给 Git，不再被压成一行。"""
+    raw_message = (
+        "fix(runner): preserve PRD agent pins across blocked re-claim\n\n"
+        "Why: the claim path dropped lifecycle overrides.\n\n"
+        "Refs #326\n"
+    )
+
+    assert (
+        sanitize_commit_message(raw_message, _make_issue())
+        == "fix(runner): preserve PRD agent pins across blocked re-claim\n\n"
+        "Why: the claim path dropped lifecycle overrides.\n\nRefs #326"
+    )
+
+
+def test_sanitize_commit_message_wraps_overlong_subject_into_body() -> None:
+    """超长标题在词边界折进正文：标题 ≤72 字符，一个字符都不丢（Issue #326 巡查项）。"""
+    flattened = (
+        "fix(runner): preserve fresh blocked claim state Use the post-claim Issue snapshot "
+        "for no-change handoff checks so a blocked-continue run can detect a new block "
+        "instead of trusting the pre-claim blocke"
+    )
+
+    message = sanitize_commit_message(flattened, _make_issue())
+    subject, _, body = message.partition("\n\n")
+
+    assert len(subject) <= 72
+    assert subject == "fix(runner): preserve fresh blocked claim state Use the post-claim"
+    assert body.startswith("Issue snapshot for no-change handoff checks")
+    assert message.replace("\n\n", " ").replace("\n", " ").split() == flattened.split()
+
+
+def test_sanitize_commit_message_caps_body_at_line_boundary() -> None:
+    """正文超出总长度上限时按整行丢弃，不在词中间切断。"""
+    body_lines = [f"line {index} of a very long commit body" for index in range(200)]
+    message = sanitize_commit_message(
+        f"fix(runner): bound the total length\n\n{chr(10).join(body_lines)}",
+        _make_issue(),
+    )
+    kept_body_lines = message.split("\n\n", 1)[1].splitlines()
+
+    assert message.splitlines()[0] == "fix(runner): bound the total length"
+    assert len(message) <= 2000
+    assert len(kept_body_lines) < len(body_lines)
+    assert all(line in body_lines for line in kept_body_lines)
+
+
+@pytest.mark.parametrize("raw_message", ["", "   \n\n  \n", None, 42])
+def test_sanitize_commit_message_falls_back_on_empty_request(raw_message: object) -> None:
+    """缺失或空白的提交请求回退到 Issue 缺省标题。"""
+    assert sanitize_commit_message(raw_message, _make_issue()) == "[Agent] Issue #123: Example"

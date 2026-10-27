@@ -818,7 +818,7 @@ class TestBuildRecoverySuccessComment:
         assert "reused" in comment
 
     def test_includes_event_marker(self) -> None:
-        """Should include iar:event marker for review_once parsing."""
+        """Should include kc:event marker for review_once parsing."""
         comment = build_recovery_success_comment(
             branch="issue-42",
             head_sha="abc123",
@@ -826,7 +826,7 @@ class TestBuildRecoverySuccessComment:
             pr_reused=False,
         )
 
-        assert "<!-- iar:event" in comment
+        assert "<!-- kc:event" in comment
         assert "phase=publish_recovered" in comment
         assert "pr_branch=issue-42" in comment
         assert "head=abc123" in comment

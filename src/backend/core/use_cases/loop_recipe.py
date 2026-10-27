@@ -13,12 +13,13 @@ cases compose with state-store and GitHub client ports.
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from backend.core.shared.models.agent_spec import BUILTIN_AGENT_SPECS
+from backend.core.shared.models.agent_spec import BUILTIN_AGENT_SPECS, AgentSpec
 from backend.core.shared.models.loop import (
     LoopManager,
     LoopOutput,
@@ -126,12 +127,29 @@ def _parse_simple_yaml(raw_yaml: str) -> dict[str, Any]:
     return result
 
 
+#: 双引号标量里支持的 YAML 转义；其他反斜杠序列原样保留（宽松，不报错）。
+_DOUBLE_QUOTED_ESCAPES: dict[str, str] = {'"': '"', "\\": "\\", "n": "\n", "t": "\t"}
+_DOUBLE_QUOTED_ESCAPE_RE = re.compile(r"\\(.)")
+
+
+def _unescape_double_quoted(inner_text: str) -> str:
+    """按 YAML 双引号标量语义还原 ``\\"`` / ``\\\\`` / ``\\n`` / ``\\t``。
+
+    不还原会把 ``\\"`` 原样交给 ``pre_command`` 的 shell，jq / awk 因此语法错误、
+    变量全部缺失（nightly-cleanup loop 自 2026-10-21 起每次触发都因此失败）。
+    """
+    return _DOUBLE_QUOTED_ESCAPE_RE.sub(
+        lambda match: _DOUBLE_QUOTED_ESCAPES.get(match.group(1), match.group(0)), inner_text
+    )
+
+
 def _coerce_yaml_value(text: str) -> Any:
     """Coerce a single YAML scalar to a Python value."""
-    if (text.startswith('"') and text.endswith('"')) or (
-        text.startswith("'") and text.endswith("'")
-    ):
-        return text[1:-1]
+    if len(text) >= 2 and text.startswith('"') and text.endswith('"'):
+        return _unescape_double_quoted(text[1:-1])
+    if len(text) >= 2 and text.startswith("'") and text.endswith("'"):
+        # YAML 单引号标量没有反斜杠转义，只有 ``''`` 表示一个单引号。
+        return text[1:-1].replace("''", "'")
     if text.startswith("[") and text.endswith("]"):
         inner = text[1:-1].strip()
         if not inner:
@@ -150,11 +168,23 @@ _VALID_ISSUE_TYPES: frozenset[str] = frozenset({"feature", "refactor", "bug"})
 _SKIP_WHEN_PATTERN = re.compile(r"^\w+=[^=,\s]+(,[^=,\s]+)*$")
 _VALID_LOOP_OUTPUTS: frozenset[str] = frozenset(output.value for output in LoopOutput)
 _VALID_LOOP_MANAGERS: frozenset[str] = frozenset(manager.value for manager in LoopManager)
-# 合法 agent 名由 agent 注册表派生；"auto" 是显式的路由别名。
+# 合法 agent 名由 agent 注册表派生；"auto" 是显式的路由别名。默认注册表只有
+# 内置条目，调用方传入生效注册表（含 ``[agent_runner.agents.*]``）后自定义名同样合法。
 _VALID_AGENTS: frozenset[str] = frozenset({"auto", *BUILTIN_AGENT_SPECS})
 
 
-def _validate_recipe_fields(data: dict[str, Any]) -> None:
+def _valid_agent_names(agents: Mapping[str, AgentSpec] | None) -> frozenset[str]:
+    """本次校验接受的 agent 名集合（路由别名 + 生效注册表键）。"""
+    if agents is None:
+        return _VALID_AGENTS
+    return frozenset({"auto", *agents})
+
+
+def _validate_recipe_fields(
+    data: dict[str, Any],
+    *,
+    agents: Mapping[str, AgentSpec] | None = None,
+) -> None:
     """Validate that the parsed frontmatter contains the required fields."""
     missing_fields = [
         field_name for field_name in _REQUIRED_RECIPE_FIELDS if not data.get(field_name)
@@ -170,9 +200,10 @@ def _validate_recipe_fields(data: dict[str, Any]) -> None:
             f"{sorted(_VALID_ISSUE_TYPES)}; got {issue_type!r}."
         )
     agent_name = data.get("agent", "auto")
-    if agent_name not in _VALID_AGENTS:
+    valid_agents = _valid_agent_names(agents)
+    if agent_name not in valid_agents:
         raise ValueError(
-            f"Loop recipe agent must be one of {sorted(_VALID_AGENTS)}; got {agent_name!r}."
+            f"Loop recipe agent must be one of {sorted(valid_agents)}; got {agent_name!r}."
         )
     managed_by = data.get("managed_by", LoopManager.LOOP_DAEMON.value)
     if managed_by not in _VALID_LOOP_MANAGERS:
@@ -198,11 +229,16 @@ def _validate_recipe_fields(data: dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def parse_loop_recipe(recipe_path: Path) -> LoopRecipe:
+def parse_loop_recipe(
+    recipe_path: Path,
+    *,
+    agents: Mapping[str, AgentSpec] | None = None,
+) -> LoopRecipe:
     """Read and parse a loop recipe from disk.
 
     Args:
         recipe_path: Absolute or relative path to the recipe file.
+        agents: 生效 agent 注册表；``None`` 时只认内置条目。
 
     Returns:
         A :class:`LoopRecipe` ready to be rendered or registered.
@@ -215,15 +251,21 @@ def parse_loop_recipe(recipe_path: Path) -> LoopRecipe:
     if not resolved.is_file():
         raise FileNotFoundError(f"Loop recipe not found: {resolved}")
     recipe_text = resolved.read_text(encoding="utf-8")
-    return parse_loop_recipe_text(recipe_text, source_path=resolved)
+    return parse_loop_recipe_text(recipe_text, source_path=resolved, agents=agents)
 
 
-def parse_loop_recipe_text(recipe_text: str, *, source_path: Path) -> LoopRecipe:
+def parse_loop_recipe_text(
+    recipe_text: str,
+    *,
+    source_path: Path,
+    agents: Mapping[str, AgentSpec] | None = None,
+) -> LoopRecipe:
     """Parse a loop recipe from raw text.
 
     Args:
         recipe_text: Full recipe contents.
         source_path: Path used to anchor the recipe when stored.
+        agents: 生效 agent 注册表；``None`` 时只认内置条目。
 
     Returns:
         A :class:`LoopRecipe` populated from the frontmatter / body.
@@ -233,7 +275,7 @@ def parse_loop_recipe_text(recipe_text: str, *, source_path: Path) -> LoopRecipe
             invalid value.
     """
     frontmatter, body = _split_frontmatter(recipe_text)
-    _validate_recipe_fields(frontmatter.data)
+    _validate_recipe_fields(frontmatter.data, agents=agents)
     recipe_id = str(frontmatter.data["id"]).strip()
     if not _SLUG_PATTERN.match(recipe_id):
         raise ValueError(

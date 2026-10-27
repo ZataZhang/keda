@@ -426,7 +426,7 @@ def test_api_evidence_rejects_malicious_token(evidence_api_environment) -> None:
 
     encoded_prd = base64.urlsafe_b64encode(ARCHIVED_PRD.encode("utf-8")).decode("ascii")
     bad_tokens = [
-        base64.urlsafe_b64encode(b"../.iar.toml").decode("ascii"),
+        base64.urlsafe_b64encode(b"../.kedacode.toml").decode("ascii"),
         base64.urlsafe_b64encode(b"../../../../etc/hosts").decode("ascii"),
         "!!!not-base64!!!",
     ]

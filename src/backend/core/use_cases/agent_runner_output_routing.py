@@ -40,6 +40,11 @@ from backend.core.shared.interfaces.output_timestamps import TimestampedStreamFo
 from backend.core.shared.interfaces.runner_live_view import IRunnerLiveView
 from backend.core.shared.models.agent_runner import CommandResult
 from backend.core.shared.models.agent_stall import AttemptOwnership, StallCancelOutcome
+from backend.core.use_cases.agent_daemon_shutdown import (
+    AgentDaemonShutdownInterrupt,
+    is_agent_daemon_stopping,
+    raise_if_agent_daemon_stopping,
+)
 from backend.core.use_cases.issue_logs import ATTEMPT_END_MARKER
 
 # Logger namespace the per-Issue handler attaches to. All backend modules log
@@ -68,7 +73,7 @@ class IssueLogBinding:
 
 
 _ACTIVE_ISSUE_LOG_BINDING: ContextVar[IssueLogBinding | None] = ContextVar(
-    "iar_active_issue_log_binding", default=None
+    "kc_active_issue_log_binding", default=None
 )
 
 
@@ -112,6 +117,7 @@ class _OutputRoutedProcessRunner:
         output_sink: Callable[[str], None] | None = None,
         output_protocol: str | None = None,
         attempt_key: str | None = None,
+        cancel_check: Callable[[], bool] | None = None,
     ) -> CommandResult:
         # jscpd:ignore-end
         """Delegate to the wrapped runner, defaulting ``output_sink`` per Issue.
@@ -131,12 +137,23 @@ class _OutputRoutedProcessRunner:
             "output_sink": output_sink if output_sink is not None else self._sink,
             "output_protocol": output_protocol,
             "attempt_key": attempt_key,
+            "cancel_check": cancel_check,
         }
         if self._accepted_params:
             run_kwargs = {
                 name: value for name, value in run_kwargs.items() if name in self._accepted_params
             }
-        return self._wrapped.run(command, **run_kwargs)
+        raise_if_agent_daemon_stopping()
+        try:
+            command_result = self._wrapped.run(command, **run_kwargs)
+        except BaseException as exc:
+            if is_agent_daemon_stopping():
+                raise AgentDaemonShutdownInterrupt(
+                    "Agent daemon stopped while an Issue subprocess was running."
+                ) from exc
+            raise
+        raise_if_agent_daemon_stopping()
+        return command_result
 
     def probe_live_attempt(self, attempt_key: str) -> AttemptOwnership:
         """把进程归属复核委托给被包装的执行器——登记册在它手里，包装器不持有进程。
@@ -228,7 +245,7 @@ def issue_output_routing(
 
     该 sink 是行首 ``[HH:MM:SS]`` 时间戳的唯一落点（Issue #223）：生产者传入
     的仍是可读原文，前缀在这里加上后再分发给日志文件、看板与前台镜像，三个
-    消费端因此逐行一致。日志末尾的 ``[iar-attempt-end]`` 终态标记由 writer
+    消费端因此逐行一致。日志末尾的 ``[kc-attempt-end]`` 终态标记由 writer
     直接写入，不经 sink，因此保持裸行、可被 ``--follow`` 精确匹配。
 
     Args:

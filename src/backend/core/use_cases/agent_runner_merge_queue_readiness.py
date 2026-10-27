@@ -14,7 +14,7 @@ from backend.core.use_cases.agent_runner_merge_authorization import (
 from backend.core.use_cases.agent_runner_feedback import extract_prd_path
 
 _logger = logging.getLogger(__name__)
-_DRAFT_READY_FAILURE_MARKER = "<!-- iar:merge-queue-draft-ready-failed"
+_DRAFT_READY_FAILURE_MARKER = "<!-- kc:merge-queue-draft-ready-failed"
 
 
 @dataclass(frozen=True)

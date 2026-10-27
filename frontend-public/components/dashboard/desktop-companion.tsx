@@ -13,13 +13,14 @@ import { useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { formatLifecycleDuration } from "@/components/backlog/prd-lifecycle-format";
+
 import { closeDesktopCompanionWindow, fetchRuntimeTasks } from "@/lib/api/console";
 import type { RuntimeTaskEntry, RuntimeTaskSummary } from "@/lib/api/types";
 import { formatLocalDateTime } from "@/lib/utils";
 
-import { RuntimeTaskImpact } from "./runtime-task-detail";
-import { runtimeStatusPresentation, runtimeTaskKey } from "./runtime-task-list";
+import { RuntimeTaskPhaseDescription, RuntimeTaskPhase } from "./runtime-task-phase";
+import { RuntimeTaskAnomalies, RuntimeTaskImpact } from "./runtime-task-detail";
+import { RuntimeTaskDuration, RuntimeTaskObservation, RuntimeTaskWatch, isActiveRuntimeTask, runtimeStatusPresentation, runtimeTaskKey } from "./runtime-task-list";
 
 /** 小窗轮询间隔：与网页看板同一节奏（PRD §7.1.5「沿用现有 Dashboard 监控刷新」）。 */
 const COMPANION_POLL_MS = 15_000;
@@ -30,12 +31,55 @@ const MAX_ACTIVE_TASKS = 4;
 /** 每轮读取触达读数的条数上限：滚动到的行不擅自增加取数量。 */
 const MAX_IMPACT_READS_PER_ROUND = 4;
 
-/** 活动分桶：值守者离开浏览器后仍需要盯的三类状态。 */
-const ACTIVE_STATUSES = new Set(["running", "blocked", "waiting"]);
-
 interface DesktopCompanionProps {
   /** 关闭按钮的目标动作；在原生窗口里由 helper 关窗，在浏览器里退化为隐藏。 */
   onClose?: () => void;
+  /** 菜单栏 App 中切换 popover 与悬浮窗模式的动作。 */
+  onTogglePinned?: () => void;
+  /** 当前是否已固定为悬浮窗。 */
+  isPinned?: boolean;
+  /** 关闭按钮文案；菜单栏 App 中使用「隐藏」。 */
+  closeLabel?: string;
+  /** 菜单栏 App 中打开完整控制台窗口的动作；缺省时不渲染该按钮。 */
+  onOpenConsole?: () => void;
+  /** 每轮成功读数后的回调：原生宿主据此判断任务状态跃迁并提示。 */
+  onSummary?: (summary: RuntimeTaskSummary) => void;
+}
+
+/** 顶部计数条的分桶顺序：与看板状态优先级一致，计数为 0 的桶不占位。 */
+const STATUS_COUNT_ORDER = ["running", "waiting", "blocked", "failed", "unknown"] as const;
+
+/**
+ * 渲染活动任务的分状态计数。
+ *
+ * 面板每轮只显示四条任务，溢出项要滚动才看得到；计数条把「还有几个在跑、几个
+ * 卡住」放在一屏之内，不需要滚到底部数行。
+ *
+ * @param props.counts - 摘要里的 `status_counts` 分桶计数。
+ * @returns 计数徽章行；所有桶都为 0 时不渲染。
+ */
+function StatusCountRow({ counts }: { counts: RuntimeTaskSummary["status_counts"] }) {
+  const buckets = STATUS_COUNT_ORDER.map((status) => ({
+    status,
+    presentation: runtimeStatusPresentation(status),
+    count: counts[status] ?? 0,
+  })).filter((bucket) => bucket.count > 0);
+
+  if (buckets.length === 0) {
+    return null;
+  }
+
+  return (
+    <ul className="flex flex-wrap items-center gap-1.5" data-testid="desktop-companion-counts">
+      {buckets.map((bucket) => (
+        <li key={bucket.status} data-testid={`desktop-companion-count-${bucket.status}`}>
+          <Badge variant={bucket.presentation.variant}>
+            {bucket.presentation.label} {bucket.count}
+          </Badge>
+        </li>
+      ))}
+    </ul>
+  );
 }
 
 /**
@@ -44,7 +88,14 @@ interface DesktopCompanionProps {
  * @param props.onClose - 关闭动作回调；缺省时不渲染关闭按钮。
  * @returns 紧凑任务面板，附带来源可用性与断连披露。
  */
-export function DesktopCompanion({ onClose }: DesktopCompanionProps) {
+export function DesktopCompanion({
+  onClose,
+  onTogglePinned,
+  isPinned = false,
+  closeLabel = "关闭",
+  onOpenConsole,
+  onSummary,
+}: DesktopCompanionProps) {
   const [summary, setSummary] = useState<RuntimeTaskSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [paused, setPaused] = useState(false);
@@ -61,6 +112,7 @@ export function DesktopCompanion({ onClose }: DesktopCompanionProps) {
         }
         setSummary(next);
         setError(null);
+        onSummary?.(next);
       } catch (caught: unknown) {
         if (!cancelled) {
           setError(caught instanceof Error ? caught.message : "无法读取本机 Console");
@@ -77,21 +129,50 @@ export function DesktopCompanion({ onClose }: DesktopCompanionProps) {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [paused]);
+  }, [paused, onSummary]);
 
-  const activeTasks = (summary?.tasks ?? []).filter((task) => ACTIVE_STATUSES.has(task.status));
+  const activeTasks = (summary?.tasks ?? []).filter(isActiveRuntimeTask);
   const overflowCount = Math.max(0, activeTasks.length - MAX_ACTIVE_TASKS);
 
   return (
-    <div
-      className="flex min-h-0 flex-1 flex-col gap-2 p-3"
-      data-testid="desktop-companion"
-    >
-      <div className="flex items-center justify-between gap-2 text-[11px] text-slate-500">
-        <span data-testid="desktop-companion-sync">
-          {summary && !error ? `更新于 ${formatLocalDateTime(summary.generated_at)}` : "等待读数…"}
+    <div className="flex min-h-0 flex-1 flex-col gap-2 p-3" data-testid="desktop-companion">
+      <div className="flex flex-col gap-1 text-[11px] text-slate-500">
+        <span className="min-w-0 flex-1 truncate">
+          {onTogglePinned ? (
+            <span className="mr-2 font-semibold text-slate-900 dark:text-slate-100">
+              KedaCode 运行时
+            </span>
+          ) : null}
+          <span data-testid="desktop-companion-sync">
+            {summary && !error
+              ? `更新于 ${formatLocalDateTime(summary.generated_at)}`
+              : "等待读数…"}
+          </span>
         </span>
-        <span className="flex items-center gap-1">
+        <span className="flex flex-wrap items-center gap-1 whitespace-nowrap">
+          {onOpenConsole ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-6 px-2 text-[11px]"
+              onClick={onOpenConsole}
+              data-testid="desktop-companion-open-console"
+            >
+              控制台
+            </Button>
+          ) : null}
+          {onTogglePinned ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-6 px-2 text-[11px]"
+              onClick={onTogglePinned}
+              data-testid="desktop-companion-pin"
+              aria-label={isPinned ? "取消固定悬浮窗" : "固定为悬浮窗"}
+            >
+              {isPinned ? "取消固定" : "固定悬浮"}
+            </Button>
+          ) : null}
           <Button
             size="sm"
             variant="ghost"
@@ -109,11 +190,13 @@ export function DesktopCompanion({ onClose }: DesktopCompanionProps) {
               onClick={onClose}
               data-testid="desktop-companion-close"
             >
-              关闭
+              {closeLabel}
             </Button>
           ) : null}
         </span>
       </div>
+
+      {summary && !error ? <StatusCountRow counts={summary.status_counts} /> : null}
 
       {error ? (
         <p
@@ -144,7 +227,7 @@ export function DesktopCompanion({ onClose }: DesktopCompanionProps) {
           className="rounded-md border border-dashed border-slate-200 p-4 text-center text-xs text-slate-500 dark:border-slate-800"
           data-testid="desktop-companion-empty"
         >
-          {summary ? "当前没有运行中、阻塞或等待值守的任务。" : "还没有读到任务。"}
+          {summary ? "当前没有运行中、阻塞、失败或等待处理的任务。" : "还没有读到任务。"}
         </p>
       ) : null}
 
@@ -158,7 +241,7 @@ export function DesktopCompanion({ onClose }: DesktopCompanionProps) {
       ) : null}
 
       <ul
-        className={`min-h-0 flex-1 flex flex-col gap-2 overflow-auto ${error ? "opacity-60" : ""}`}
+        className={`flex min-h-0 flex-1 flex-col gap-2 overflow-auto ${error ? "opacity-60" : ""}`}
         data-testid="desktop-companion-list"
         data-stale={error ? "true" : "false"}
       >
@@ -195,7 +278,7 @@ function CompanionTaskRow({
   task: RuntimeTaskEntry;
   impactRequested: boolean;
 }) {
-  const presentation = runtimeStatusPresentation(task.status);
+  const presentation = runtimeStatusPresentation(task.status, task.waiting_reason);
   return (
     <li
       className="flex flex-col gap-1 rounded-md border border-slate-200 p-2 dark:border-slate-800"
@@ -203,6 +286,8 @@ function CompanionTaskRow({
     >
       <span className="flex flex-wrap items-center gap-1.5 text-xs">
         <Badge variant={presentation.variant}>{presentation.label}</Badge>
+        <RuntimeTaskPhase task={task} />
+        <RuntimeTaskWatch task={task} />
         <span className="font-medium text-slate-900 dark:text-slate-100">
           {task.repo_display_name ?? task.repo_id}#{task.issue_number}
         </span>
@@ -210,16 +295,29 @@ function CompanionTaskRow({
       <span className="truncate text-[11px] text-slate-600 dark:text-slate-300">
         {task.issue_title ?? "（账本未记录标题）"}
       </span>
+      <RuntimeTaskPhaseDescription
+        task={task}
+        className="line-clamp-2 text-[11px] leading-snug text-slate-500 dark:text-slate-400"
+      />
+      <RuntimeTaskObservation task={task} />
       <span className="flex flex-wrap gap-x-2 text-[11px] text-slate-500">
-        {task.phase ? <span>{task.phase}</span> : null}
         {task.agent ? (
           <span>
-            {task.agent}
+            最近执行：{task.agent}
             {task.preset ? ` · ${task.preset}` : ""}
           </span>
         ) : null}
-        <span>{formatLifecycleDuration(task.duration_seconds)}</span>
+        <RuntimeTaskDuration task={task} />
       </span>
+      {["blocked", "failed"].includes(task.status) ? (
+        <p
+          className="text-[11px] break-words text-red-700 dark:text-red-300"
+          data-testid="runtime-task-status-reason"
+        >
+          状态来源：{task.status_reason ?? "未提供，请查看任务详情"}
+        </p>
+      ) : null}
+      <RuntimeTaskAnomalies anomalyTypes={task.anomaly_types ?? []} compact />
       <RuntimeTaskImpact
         repoId={task.repo_id}
         prdPath={task.prd_path}

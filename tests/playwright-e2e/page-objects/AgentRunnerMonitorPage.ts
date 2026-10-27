@@ -280,7 +280,7 @@ export class AgentRunnerMonitorPage {
       .poll(
         async () =>
           this.page.evaluate(() =>
-            [1, 5, 15, 30, 60].filter((option) => {
+            [5, 15, 30, 60].filter((option) => {
               const element = document.querySelector(
                 `[data-testid="monitor-sync-interval-${option}"]`,
               )

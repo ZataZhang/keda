@@ -143,7 +143,7 @@ def test_registry_start_uses_config_directory_as_spawn_cwd(tmp_path: Path) -> No
     settings.repositories = {
         "zata-zhangtao-keda": MagicMock(path=str(repo_path), enabled=True),
     }
-    settings.console.runner_command = ["iar"]
+    settings.console.runner_command = ["kc"]
 
     context = MagicMock()
     context.repo_id = "zata-zhangtao-keda"
@@ -193,7 +193,7 @@ def test_registry_start_rejects_missing_repo_path(tmp_path: Path) -> None:
     settings.repositories = {
         "ghost-repo": MagicMock(path=str(missing_path), enabled=True),
     }
-    settings.console.runner_command = ["iar"]
+    settings.console.runner_command = ["kc"]
 
     start_mock = MagicMock()
     parsed = _FakeArgs(
@@ -369,7 +369,7 @@ def test_takeover_start_daemons_uses_config_directory_as_spawn_cwd(
     repo_path.mkdir()
 
     settings = MagicMock()
-    settings.console.runner_command = ["iar"]
+    settings.console.runner_command = ["kc"]
 
     context = MagicMock()
     context.repo_id = "zata-zhangtao-keda"
@@ -1274,7 +1274,7 @@ def test_logs_command_issue_surfaces_invocation_markers(tmp_path: Path, capsys) 
 def test_logs_command_issue_follow_still_exits_on_attempt_end_with_markers(
     tmp_path: Path, capsys
 ) -> None:
-    """调用标记不干扰 `--follow` 的终态判定：仍只认 `[iar-attempt-end]`。"""
+    """调用标记不干扰 `--follow` 的终态判定：仍只认 `[kc-attempt-end]`。"""
     repo_dir = tmp_path / "repo"
     _produce_invocation_attempt_log(repo_dir, 42)
 

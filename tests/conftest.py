@@ -59,7 +59,7 @@ def _find_usable_prd_skill() -> Path | None:
     from backend.core.shared.prd_skill_location import resolve_prd_skill_path
 
     candidate_skill_paths: list[Path] = [resolve_prd_skill_path()]
-    ambient_skill_path = os.environ.get("IAR_PRD_SKILL_PATH")
+    ambient_skill_path = os.environ.get("KEDACODE_PRD_SKILL_PATH")
     if ambient_skill_path:
         candidate_skill_paths.append(Path(ambient_skill_path).expanduser())
     for candidate_skill_path in candidate_skill_paths:
@@ -70,13 +70,13 @@ def _find_usable_prd_skill() -> Path | None:
 
 @pytest.fixture(autouse=True, scope="session")
 def _prd_skill_contract_env() -> Iterator[Path | None]:
-    """把会话级 ``IAR_PRD_SKILL_PATH`` 指向真实安装的 prd skill。
+    """把会话级 ``KEDACODE_PRD_SKILL_PATH`` 指向真实安装的 prd skill。
 
     解析到真实 skill 时固定为会话级取值，让依赖 PRD 解析的用例确定性地走同一份
     契约实现；解析不到时不设置变量（保持环境原样），让运行时按用户级安装解析——
     缺失会由 ``prd_contract_client`` 报出可行动的错，而不是在这里静默跳过用例。
 
-    要触发预检失败路径的用例照旧用 ``monkeypatch.setenv("IAR_PRD_SKILL_PATH", ...)``
+    要触发预检失败路径的用例照旧用 ``monkeypatch.setenv("KEDACODE_PRD_SKILL_PATH", ...)``
     覆盖，用例结束后会还原到这里的会话级取值。宿主的新变量仅用于找到真实
     skill；进入测试会话后移除它，防止覆盖单测显式设置的旧变量。双名优先级
     由专门的解析测试显式设置两名验证，会话结束恢复两名宿主取值。
@@ -87,10 +87,10 @@ def _prd_skill_contract_env() -> Iterator[Path | None]:
         return
     previous_values = {
         env_name: os.environ.get(env_name)
-        for env_name in ("KEDACODE_PRD_SKILL_PATH", "IAR_PRD_SKILL_PATH")
+        for env_name in ("KEDACODE_PRD_SKILL_PATH", "KEDACODE_PRD_SKILL_PATH")
     }
     os.environ.pop("KEDACODE_PRD_SKILL_PATH", None)
-    os.environ["IAR_PRD_SKILL_PATH"] = str(usable_skill_path)
+    os.environ["KEDACODE_PRD_SKILL_PATH"] = str(usable_skill_path)
     try:
         yield usable_skill_path
     finally:
@@ -105,7 +105,7 @@ def _prd_skill_contract_env() -> Iterator[Path | None]:
 def _isolate_ambient_iar_config() -> Iterator[None]:
     """在 pytest 会话期间剥离宿主注入的新旧 CONFIG，保证默认配置解析可测。
 
-    托管 runner 向子进程注入 ``KEDACODE_CONFIG`` 与 ``IAR_CONFIG``，指向机器级
+    托管 runner 向子进程注入 ``KEDACODE_CONFIG`` 与 ``KEDACODE_CONFIG``，指向机器级
     配置。默认解析测试需要从 cwd 查找或临时 HOME 回落，不能被宿主配置覆盖。
     需要覆盖的用例仍用 ``monkeypatch.setenv`` 显式设置；结束恢复两名宿主取值。
 
@@ -121,7 +121,8 @@ def _isolate_ambient_iar_config() -> Iterator[None]:
     from backend.infrastructure.config.settings import AgentRunnerSettings
 
     previous_values = {
-        env_name: os.environ.pop(env_name, None) for env_name in ("KEDACODE_CONFIG", "IAR_CONFIG")
+        env_name: os.environ.pop(env_name, None)
+        for env_name in ("KEDACODE_CONFIG", "KEDACODE_CONFIG")
     }
     app_settings_module.config.agent_runner = AgentRunnerSettings()
     try:
@@ -156,6 +157,7 @@ class FakeGitHubClient(IGitHubClient):
         self._issue_states: dict[int, str] = {}
         self._issue_title: str | None = None
         self._issue_labels: dict[int, tuple[str, ...]] = {}
+        self._repository_items: list[IssueSummary] = []
         self._rework_prd_issues: list[IssueSummary] = []
         self._prs_by_repo_issue: dict[tuple[str, int], list[PullRequestSummary]] = {}
         self._list_issues_by_label_result: list[IssueSummary] = []
@@ -185,6 +187,28 @@ class FakeGitHubClient(IGitHubClient):
 
     def set_rework_prd_issues(self, issues: list[IssueSummary]) -> None:
         self._rework_prd_issues = issues
+
+    def set_repository_items(self, repository_items: list[IssueSummary]) -> None:
+        """设置显式仓库扫描返回值，用于迁移命令测试。"""
+        self._repository_items = list(repository_items)
+
+    def list_repository_items(self, *, state: str = "open") -> list[IssueSummary]:
+        self.calls.append({"method": "list_repository_items", "state": state})
+        if state == "all":
+            repository_items = list(self._repository_items)
+        else:
+            repository_items = [
+                repository_item
+                for repository_item in self._repository_items
+                if repository_item.state.lower() == state
+            ]
+        return [
+            replace(
+                repository_item,
+                body=self._issue_bodies.get(repository_item.number, repository_item.body),
+            )
+            for repository_item in repository_items
+        ]
 
     def edit_issue_labels(
         self, issue_number: int, *, add: Sequence[str] = (), remove: Sequence[str] = ()
@@ -342,7 +366,12 @@ class FakeGitHubClient(IGitHubClient):
         return list(self._issue_comments.get(issue_number, []))
 
     def list_issue_comment_entries(
-        self, issue_number: int, *, trusted_only: bool = False, body_contains: str | None = None
+        self,
+        issue_number: int,
+        *,
+        trusted_only: bool = False,
+        body_contains: str | None = None,
+        require_success: bool = False,
     ) -> list[tuple[int, str]]:
         """返回已授权测试 fixture 的评论，权限判定由真实 adapter 测试覆盖。
 
@@ -409,6 +438,13 @@ class FakeGitHubClient(IGitHubClient):
             labels=self._issue_labels.get(issue_number, ()),
             state=self._issue_states.get(issue_number, "OPEN"),
         )
+
+    def close_issue(self, issue_number: int) -> None:
+        """把 Issue 置为 ``CLOSED``，用于布置「执行期间被关闭」这一 GitHub 事实。
+
+        测试只表达「Issue 关了」这个意图，不直接写假对象的内部字段名。
+        """
+        self._issue_states[issue_number] = "CLOSED"
 
     def set_issue_labels(self, issue_number: int, labels: Sequence[str]) -> None:
         """注入 Issue 当前标签，不记成 ``edit_issue_labels`` 调用（用于布置初始状态）。"""
@@ -759,6 +795,34 @@ def _isolate_github_api_budget(tmp_path_factory: pytest.TempPathFactory) -> Iter
             os.environ.pop(BUDGET_PATH_ENV_VAR, None)
         else:
             os.environ[BUDGET_PATH_ENV_VAR] = previous_value
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _isolate_issue_snapshot_dir(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    """把认领快照指到临时家目录，测试不会写进真实的本机状态目录。
+
+    ``_process_ready_issue`` 在认领路径上会追加任务输入快照；不隔离的话，任何驱动该
+    处理器的测试都会在开发机真实的 ``~/.kedacode/dataset/`` 下留下假 Issue 的快照。
+    显式传入 ``home_path`` 的用例不受影响。
+    """
+    from backend.core.use_cases import agent_runner_issue_snapshot as snapshot_module
+
+    isolated_home_path = tmp_path_factory.mktemp("issue-snapshot-home")
+    original_snapshot_file_path = snapshot_module.snapshot_file_path
+
+    def _isolated_snapshot_file_path(
+        *, repo_id: str, issue_number: int, home_path: Path | None = None
+    ) -> Path:
+        return original_snapshot_file_path(
+            repo_id=repo_id, issue_number=issue_number, home_path=home_path or isolated_home_path
+        )
+
+    session_monkeypatch = pytest.MonkeyPatch()
+    session_monkeypatch.setattr(snapshot_module, "snapshot_file_path", _isolated_snapshot_file_path)
+    try:
+        yield
+    finally:
+        session_monkeypatch.undo()
 
 
 # ---------------------------------------------------------------------------

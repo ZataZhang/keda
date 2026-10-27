@@ -95,6 +95,7 @@ from backend.infrastructure.config.settings import (
     resolve_project_root_path,
     resolve_registry_config_toml_path,
 )
+from backend.infrastructure.executable_path import ensure_standard_executable_path
 from backend.infrastructure.logging.logger import daily_log_path
 
 __all__ = [
@@ -143,6 +144,7 @@ __all__ = [
     "create_repository_autopilot_settings_editor",
     "create_transcript_runner",
     "daily_log_path",
+    "ensure_standard_executable_path",
     "find_repository_match_for_path",
     "get_agent_runner_settings",
     "get_agent_runner_status_data",

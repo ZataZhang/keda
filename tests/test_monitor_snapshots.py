@@ -258,9 +258,9 @@ def test_settings_read_stored_override() -> None:
     assert settings.sync_interval_seconds == 900
 
 
-@pytest.mark.parametrize("interval_seconds", [59, 3601, 0, -1])
+@pytest.mark.parametrize("interval_seconds", [299, 3601, 0, -1])
 def test_settings_reject_out_of_range_interval(interval_seconds: int) -> None:
-    """合法区间外的间隔被拒绝，不写库。"""
+    """合法区间外的间隔被拒绝（下限 5 分钟 = 300 秒），不写库。"""
     store = _FakeMonitorStore()
 
     with pytest.raises(ValueError, match="sync_interval_seconds"):
@@ -268,9 +268,9 @@ def test_settings_reject_out_of_range_interval(interval_seconds: int) -> None:
     assert store.settings is None
 
 
-@pytest.mark.parametrize("interval_seconds", [60, 300, 3600])
+@pytest.mark.parametrize("interval_seconds", [300, 600, 3600])
 def test_settings_accept_boundary_intervals(interval_seconds: int) -> None:
-    """区间边界值 [60, 3600] 都合法并落库。"""
+    """区间边界值 [300, 3600] 都合法并落库。"""
     store = _FakeMonitorStore()
 
     saved = update_monitor_settings(

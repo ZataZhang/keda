@@ -18,6 +18,7 @@ from backend.core.shared.models.agent_runner import (
 from backend.core.use_cases.generated_content import (
     IssueContext,
     PrContext,
+    _extract_pr_title_annotation,
     _parse_json_output,
     _parse_markdown_output,
     _strip_markdown_preamble,
@@ -60,6 +61,20 @@ def test_validate_pr_body_fails_without_closes() -> None:
 def test_validate_pr_body_fails_empty() -> None:
     """Empty PR body should be invalid."""
     assert _validate_pr_body("", 42) is False
+
+
+def test_validate_pr_body_fails_when_only_fenced_reference_exists() -> None:
+    """Closes 锚点只出现在围栏代码块里时不算通过：GitHub 不会据此关联 Issue。"""
+    body = "## Summary\n\n```markdown\nCloses #42\n```\n"
+
+    assert _validate_pr_body(body, 42) is False
+
+
+def test_validate_pr_body_passes_with_real_anchor_beside_fenced_example() -> None:
+    """正文里有真实锚点时，块内的同名示例不影响判定。"""
+    body = "Closes #42\n\n## Template\n\n```markdown\nCloses #99\n```\n"
+
+    assert _validate_pr_body(body, 42) is True
 
 
 def test_parse_json_output_extracts_title_and_body() -> None:
@@ -424,6 +439,48 @@ def test_generate_pr_content_agent_mode_markdown() -> None:
     assert result.source == "agent"
 
 
+def test_generate_pr_content_agent_rejects_fenced_only_anchor() -> None:
+    """agent 正文里唯一的 Closes 锚点在围栏内时落到 fallback，避免发布无关联的 PR。"""
+    generator = FakeContentGenerator(
+        response=(
+            "[Agent] Repair dependencies\n\n## Summary\n\n"
+            "PR 正文模板：\n\n```markdown\nCloses #42\n\n## Summary\n```\n"
+        )
+    )
+    config = GeneratedContentConfig(
+        enabled=True,
+        draft_pr=GeneratedContentTargetConfig(
+            enabled=True,
+            mode="agent",
+            output="markdown",
+            prompt="Generate PR for #{issue_number}",
+        ),
+    )
+    context = PrContext(
+        issue_number=42,
+        issue_title="Title",
+        issue_body="Body",
+        branch="issue-42",
+        base_branch="main",
+        commit_log="",
+        commit_messages="",
+        diff_stat="",
+        git_diff_stat="",
+    )
+
+    result = generate_pr_content(
+        config=config,
+        context=context,
+        fallback_title="Fallback",
+        fallback_body="Fallback Body",
+        generator=generator,
+        cwd=Path("."),
+    )
+
+    assert result.source == "fallback"
+    assert result.body == "Fallback Body"
+
+
 def test_generate_pr_content_agent_fallback_to_template() -> None:
     """Agent failure with fallback=template should render PR templates before hard fallback."""
     generator = FakeContentGenerator(response="invalid markdown")
@@ -565,6 +622,100 @@ def test_strip_markdown_preamble_keeps_real_title() -> None:
     raw_output = "Add PR contract\n\nCloses #42\n\n## Summary\n\nDone."
 
     assert _strip_markdown_preamble(raw_output) == raw_output
+
+
+def test_strip_markdown_preamble_trims_prose_before_closing_anchor() -> None:
+    """完整句子写的开场白 + ``**Title:**`` 标注 + 外层围栏，正文只剩 ``Closes`` 起的契约体。
+
+    回放 PR #328 的真实输出：``_PREAMBLE_LEAD`` 一条都不命中，开场白因此既成了 PR 标题
+    又留在正文里。正文末尾的内层 ```` ```text ```` 围栏必须保住，只丢掉没配对的外层关闭行。
+    """
+    raw_output = "\n".join(
+        [
+            "I compared the branch against the upstream `zata/main`. Only two commits "
+            "are unique and they touch 11 files.",
+            "",
+            "The Issue body has no `PRD path:` anchor, because this is a patrol Issue.",
+            "",
+            "---",
+            "",
+            "**Title:** `fix(runner): preserve fresh blocked claim state`",
+            "",
+            "```markdown",
+            "Closes #42",
+            "",
+            "## Summary",
+            "",
+            "Done.",
+            "",
+            "```text",
+            "1 file changed",
+            "```",
+            "```",
+            "",
+        ]
+    )
+
+    assert _strip_markdown_preamble(raw_output) == "\n".join(
+        [
+            "Closes #42",
+            "",
+            "## Summary",
+            "",
+            "Done.",
+            "",
+            "```text",
+            "1 file changed",
+            "```",
+        ]
+    )
+
+
+def test_extract_pr_title_annotation_recovers_labelled_title() -> None:
+    """关闭锚点之前的 ``**Title:**`` 标注被回收成 PR 标题，反引号剥掉。"""
+    raw_output = (
+        "I compared the branch.\n\n**Title:** `fix(runner): keep fresh blocked state`\n\n"
+        "```markdown\nCloses #42\n\n## Summary\n\nDone.\n```"
+    )
+
+    assert _extract_pr_title_annotation(raw_output) == ("fix(runner): keep fresh blocked state")
+
+
+def test_extract_pr_title_annotation_ignores_prose_and_overlong_label() -> None:
+    """没有标题标注、或标注长到更像一段话时不产出标题，交给回退标题。"""
+    prose_output = "I compared the branch.\n\nCloses #42\n\n## Summary\n\nDone."
+    overlong_label = f"**Title:** {'word ' * 30}\nCloses #42\n\nDone."
+
+    assert _extract_pr_title_annotation(prose_output) == ""
+    assert _extract_pr_title_annotation(overlong_label) == ""
+
+
+def test_generate_pr_content_markdown_annotated_title_replaces_prose() -> None:
+    """agent 散文开场时，标题取标注值、正文从锚点开始，开场白不再泄漏进 PR 元数据。"""
+    generated_pr_content = _generate_agent_pr_content(
+        "I compared the branch against the upstream `zata/main`.\n\n"
+        "**Title:** `fix(runner): preserve fresh blocked claim state`\n\n"
+        "```markdown\nCloses #42\n\n## Summary\n\nDone.\n```",
+        output="markdown",
+    )
+
+    assert generated_pr_content.title == "fix(runner): preserve fresh blocked claim state"
+    assert generated_pr_content.body.startswith("Closes #42")
+    assert "I compared the branch" not in generated_pr_content.body
+    assert "```markdown" not in generated_pr_content.body
+    assert generated_pr_content.source == "agent"
+
+
+def test_generate_pr_content_markdown_prose_preamble_without_label_uses_fallback() -> None:
+    """散文开场且没有标题标注时回退到确定标题，正文仍从锚点开始。"""
+    generated_pr_content = _generate_agent_pr_content(
+        "I compared the branch against the upstream `zata/main`.\n\n"
+        "```markdown\nCloses #42\n\n## Summary\n\nDone.\n```",
+        output="markdown",
+    )
+
+    assert generated_pr_content.title == "Fallback"
+    assert generated_pr_content.body == "Closes #42\n\n## Summary\n\nDone."
 
 
 def test_generate_pr_content_markdown_preamble_uses_fallback_title() -> None:

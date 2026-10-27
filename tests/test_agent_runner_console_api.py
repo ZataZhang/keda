@@ -34,6 +34,7 @@ from backend.engines.agent_runner.factory import (
 )
 from backend.infrastructure.persistence.console_store import SqliteConsoleStore
 from tests.support.issue_run_control import ScriptedTakeoverCasStore
+from tests.support.relative_time import utc_days_ago, utc_now
 
 client = TestClient(app)
 
@@ -78,7 +79,9 @@ def console_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     # resolve_console_spawn_cwd 不再打桩：contexts 里已带 repo_path，
     # 真实实现应把托管进程 cwd 解析到目标仓库自身路径。
 
-    fake_settings = AgentRunnerSettings(
+    # 绕过 BaseSettings 设置源，避免宿主或仓库 config.toml 覆盖测试用 runner 命令。
+    # 此 API 测试必须固定使用替身命令。
+    fake_settings = AgentRunnerSettings.model_construct(
         console=AgentRunnerConsoleSettings(
             runner_command=fake_runner_command,
             stop_timeout_seconds=5,
@@ -358,8 +361,8 @@ def test_registry_add_rejects_duplicate_path(console_environment) -> None:
 
 
 def _write_iar_toml(repo_root: Path, repo_id: str, display_name: str) -> None:
-    """Helper to write a minimal .iar.toml for discovery tests."""
-    iar_toml = repo_root / ".iar.toml"
+    """Helper to write a minimal .kedacode.toml for discovery tests."""
+    iar_toml = repo_root / ".kedacode.toml"
     iar_toml.write_text(
         "[agent_runner]\n"
         "[agent_runner.repository]\n"
@@ -369,7 +372,7 @@ def _write_iar_toml(repo_root: Path, repo_id: str, display_name: str) -> None:
     )
 
 
-def test_discover_iar_repositories_finds_local_repos(console_environment, tmp_path: Path) -> None:
+def test_discover_repositories_finds_local_repos(console_environment, tmp_path: Path) -> None:
     """Discover endpoint must find IAR-initialized git repositories."""
     scan_root = tmp_path / "code"
     scan_root.mkdir()
@@ -435,13 +438,13 @@ def test_browse_repositories_lists_subdirectories(console_environment, tmp_path:
 
     alpha_entry = body["directories"][0]
     assert alpha_entry["is_git_repo"] is True
-    assert alpha_entry["has_iar_config"] is True
+    assert alpha_entry["has_repository_config"] is True
     assert alpha_entry["already_registered"] is False
     assert alpha_entry["suggested_repo_id"] == "alpha"
 
     beta_entry = body["directories"][1]
     assert beta_entry["is_git_repo"] is False
-    assert beta_entry["has_iar_config"] is False
+    assert beta_entry["has_repository_config"] is False
 
 
 def test_browse_repositories_marks_registered_directory(
@@ -536,12 +539,13 @@ def test_stats_history_empty(console_environment) -> None:
 def test_agent_performance_stats_reads_fresh_sqlite_rows_through_api(console_environment) -> None:
     """真实路由按仓库和时间窗口汇总持久化 attempt 与 run。"""
     import sqlite3
-    from datetime import datetime, timedelta, timezone
+    from datetime import timedelta
 
     database_path = console_environment["tmp_path"] / "console.db"
-    current_time = datetime.now(timezone.utc).replace(microsecond=0)
-    recent_timestamp = (current_time - timedelta(days=2)).isoformat()
-    older_timestamp = (current_time - timedelta(days=40)).isoformat()
+    # 窗口由服务端真实时钟决定，种子数据取相对时刻，避免用例随日期过期。
+    current_time = utc_now()
+    recent_timestamp = utc_days_ago(2).isoformat()
+    older_timestamp = utc_days_ago(40).isoformat()
     run_samples = (
         ("keda-main", "completed", 40, recent_timestamp),
         ("keda-main", "completed", 60, recent_timestamp),

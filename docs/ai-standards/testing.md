@@ -30,6 +30,24 @@
 - 需要凭据、沙箱账号或外部服务时，验证命令必须用环境变量显式开启，并记录无凭据时仍需通过的 fallback 验证。
 - PRD 或 planning 任务必须写明真实入口、mock 边界、数据/环境需求、命令或人工沙箱流程，以及该验证是否阻塞验收。
 
+## Test Double Boundaries
+
+替身（fake server、stub、注入的 completion callable）可以替掉慢、贵或不稳定的依赖，但**不得替一个不受我们控制的外部系统凭空断言它的输出形状**。
+
+区分两种替身：
+
+- **替传输**：替掉网络、时延、计费和不确定性，数据形状仍由我们这侧的契约决定。合法。
+- **发明契约**：替身手写出一份"外部系统应该长这样"的响应，而没有任何东西验证过生产代码真的能引出这个形状。这不是测试，是把假设固化成了绿灯。
+
+规则：
+
+1. 替身产出的数据若本应由外部系统（LLM、第三方 API、硬件）生成，则必须另有一道检查把**生产侧的指令或 schema**与**消费侧的解码器**绑在一起。这道检查的词汇表要从解码器常量派生，不要重抄一份——两份手写描述迟早漂移，那正是事故的形状。
+2. 替身不得是某段生产代码的唯一执行者。只有替身路径会绕开的代码（提示词构造、schema 生成、请求组装）必须有自己的用例。
+3. 缺凭据、缺配置或缺外部服务时，**停下来报告并交人补齐**，不得用替身顶上去再宣称完成了真实入口验证。此时正确的结论是"未验证 + 阻塞原因"，而不是"通过"。
+4. 依赖"环境恰好没有某项配置"的跳过守卫等同于没有守卫。守卫里的环境变量名必须与配置层真实读取的名字一致；更好的做法是在用例内用 `monkeypatch` 显式构造出该状态，让用例在任何机器上都真的运行。
+
+> 例如，fake server 返回了解码器需要的键名，但生产提示词从未声明这些键名；若所有用例又都注入 completion 替身，测试就可能长期全绿而真实 LLM 路径不可用。应覆盖生产请求构造与消费契约的衔接。
+
 ## Frontend Visual Validation Fidelity
 
 前端截图或录屏必须标注验证层级。不得把组件预览、临时路由或手工注入状态称为真实入口验证。
@@ -134,6 +152,18 @@ AI 代理默认不会设置该变量，因此会被 hook 拦下——这是"指�
 
 E2E 基础设施（runner、配置、共享 support/fixtures/page-objects/scripts、README）是上游模板维护的共享层，`just sync-template` 会自动提示同步。项目特定的测试用例放在 `tests/playwright-e2e/tests/`，默认被 `config.toml` 的 `project_skip_paths` 排除，不会被模板覆盖。运行时产物（`.auth/`、`node_modules/`、`playwright-report/`、`test-results/`、`.env.e2e.local`）永远不会出现在同步列表中。
 
+### E2E 数据清理
+
+E2E 可能复用开发服务及其数据库，`just e2e` 结束时只停服务、**不清数据**。用例自己创建的持久化数据（测试任务、用户、上传的文件、授权记录等）必须由用例自己清理，否则每跑一轮就在共享库里多一批测试数据，直接出现在公开列表和管理后台里。
+
+- 优先在 `afterEach` / fixture teardown 里清理，保证用例失败时也会执行；复用 `support/cleanup.ts` 的 `CleanupRegistry`，按创建的逆序执行。
+- 优先走产品自带的删除入口（如带同源头的认证写接口或管理端删除）。逻辑删除能让数据从用户可见的列表消失就够用；不要为了清理在 E2E 里直连数据库。
+- 一次性数据用带时间戳或随机后缀的标识命名，便于事后按前缀定位和手动清理。
+- 确实无法清理的数据（产品无删除入口、物理删除需要直连库等），在用例文件头注释写明会留下什么、以及如何手动清理。
+- 自己写流程、不走 `session.fixture.ts` 的用例同样适用：fixture 自带清理，手写流程要自己接。
+
+本节是规范，不是校验器：不新增检查前后行数的守卫。发现残留时，先判断是用例漏了清理，还是产品缺少删除入口，再决定补用例还是另开任务。
+
 ### AI Agent 常用命令
 
 `just e2e` 是单命令入口，会自动启停 `backend + admin 前端 + public 前端`。服务已在运行时直接复用，跑完自动 `just down` 清理。
@@ -214,7 +244,7 @@ HTML 报告仍固定在 `tests/playwright-e2e/playwright-report/`，可用 `just
 
 使用 `just ai implement` 实现 PRD 时，Agent 必须生成可审查的证据包，而不是直接勾选 Acceptance Checklist。
 
-> **证据留存策略**：`tasks/evidence/` 只提交文本报告（`*.verification-plan.md`、`*.evidence-report.md`、`*.verifier-report.md`）；原始证据产物（截图、录屏、命令输出、大日志）由 `.gitignore` 白名单（`tasks/evidence/**` + `!tasks/evidence/**/*.md`）排除，仅留在本地磁盘——原始证据不进代码历史（避免二进制膨胀、密钥泄漏永久化）。verifier 与 `check_prd_evidence.sh` 在实现期仍针对本地文件运行。**本地 `just ai implement` 流与 kc daemon 的 Issue→PR 流使用同一约定**：daemon 流同样写入 `tasks/evidence/<prd-stem>/`（无 PRD 的 Issue 兜底 `tasks/evidence/issue-<N>/`），三份 `.md` 报告随 PR 进版本库，原始产物额外发布到 PR 评论与 orphan 证据分支，见 `docs/guides/agent-runner.md`。显式配置 `validation.evidence_dir = ".iar/evidence"` 的 legacy 仓库保持整目录排除的旧行为。
+> **证据留存策略**：`tasks/evidence/` 的 Markdown 报告（`*.verification-plan.md`、`*.evidence-report.md`、`*.verifier-report.md`）可以进入代码变更；`evidence.json` manifest 保持本地可读，由证据发布流程单独上传；原始证据产物（截图、录屏、命令输出、大日志、脚本）不进代码 diff，避免二进制膨胀与密钥泄漏永久化。verifier 与 `check_prd_evidence.sh` 在实现期仍针对本地文件运行。**本地 `just ai implement` 流与 kc daemon 的 Issue→PR 流使用同一约定**：daemon 流同样写入 `tasks/evidence/<prd-stem>/`（无 PRD 的 Issue 兜底 `tasks/evidence/issue-<N>/`），三份 `.md` 报告随 PR 进版本库，其余证据文件额外发布到 PR 评论与 orphan 证据分支，见 `docs/guides/agent-runner.md`。显式配置 `validation.evidence_dir = ".iar/evidence"` 的 legacy 仓库保持整目录排除的旧行为。
 
 流程：
 

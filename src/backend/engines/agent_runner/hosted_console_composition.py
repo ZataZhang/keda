@@ -81,7 +81,7 @@ class ComposeRunnerControl:
                     "Hosted runner stop refused because its checkout is not configured."
                 )
                 return False
-            compose_environment = product_identity.build_child_env_aliases({"REPO_ID": repo_id})
+            compose_environment = product_identity.build_child_env({"REPO_ID": repo_id})
             compose_environment.update(
                 {
                     "REPO_PATH": str(repository_path),

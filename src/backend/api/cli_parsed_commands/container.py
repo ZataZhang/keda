@@ -190,7 +190,7 @@ def run_container_logs_command(ctx: ParsedCommandContext) -> int:
     # 若把提示放在调用之后，用户在 streaming 期间永远看不到它，且
     # Ctrl+C 会以 KeyboardInterrupt 形式抛出（见下方 except）。
     hint = " (--follow, Ctrl+C 停止)" if follow else ""
-    console.print(f"[green]Tailing iar-runner logs[/]{hint}")
+    console.print(f"[green]Tailing kc-runner logs[/]{hint}")
     try:
         stream_runner_container_logs(controller, assets.compose_file, follow=follow)
     except KeyboardInterrupt:

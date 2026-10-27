@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import sys
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
+from typing import Any, Callable
 
 from backend.core.shared.interfaces.agent_runner import GitHubApiRateLimitError
 from backend.core.shared.interfaces.runner_live_view import NoOpRunnerLiveView
@@ -21,6 +23,10 @@ from backend.core.use_cases.agent_runner_batch_aggregate_queue import (
     check_aggregate_candidate_shortfall,
     complete_aggregate_queue,
     log_aggregate_dry_run_preview,
+)
+from backend.core.use_cases.agent_daemon_shutdown import (
+    AgentDaemonShutdownInterrupt,
+    _skip_issue_on_daemon_shutdown,
 )
 from backend.core.use_cases.agent_runner_blocked_claim import BlockedWorktreeClaimedError
 from backend.core.use_cases.agent_runner_claim_arbitration import ClaimArbitrationLost
@@ -45,7 +51,9 @@ from backend.core.use_cases.agent_runner_orchestrate import (
     _READY_DISCOVERY_LIMIT,
     AppConfig,
     AttemptResult,
+    DependencyEnvironmentBlockedError,
     ForbiddenBlockedError,
+    IssueBlockedDuringNoChangeError,
     IContentGenerator,
     IGitHubClient,
     IProcessRunner,
@@ -53,6 +61,7 @@ from backend.core.use_cases.agent_runner_orchestrate import (
     IRunnerLiveView,
     IssueSummary,
     _append_run_record_locked,
+    _find_worktree_path_for_issue,
     _guard_blocked_issue_has_resolution,
     _guard_running_issue_is_rework,
     _logger,
@@ -85,6 +94,9 @@ from backend.core.use_cases.agent_runner_worktree_probe import (
 from backend.core.use_cases.backlog_concurrency import count_live_running_issues
 from backend.core.use_cases.lifecycle_agent_resolution import attach_prd_lifecycle_overrides
 from backend.core.use_cases.run_target_admission import has_non_ready_workflow_label
+from backend.core.use_cases.worktree_dependency_context import (
+    escalate_dependency_environment_failure,
+)
 
 RUNTIME_DEPENDENCY_NAMES = (
     "_process_ready_issue",
@@ -92,6 +104,7 @@ RUNTIME_DEPENDENCY_NAMES = (
     "_process_blocked_resolution",
     "_process_running_publish_recovery",
     "choose_agent",
+    "_find_worktree_path_for_issue",
     "_worktree_needs_rebase_recovery",
     "_has_existing_local_commit_ready_for_publish",
 )
@@ -263,26 +276,50 @@ def _process_single_issue(
         if issue_kind != "ready":
             prd_activity_lease.start()
         if issue_kind == "ready":
-            used_agent = run_issue_with_agent_fallback(
-                issue=issue,
-                config=config,
-                agent=agent,
-                process_for_agent=partial(
-                    _process_ready_issue,
+            try:
+                used_agent = run_issue_with_agent_fallback(
                     issue=issue,
-                    repo_path=repo_path,
                     config=config,
-                    github_client=github_client,
-                    process_runner=process_runner,
-                    content_generator=content_generator,
-                    publish_stage=publish_stage,
-                    stage_selection=stage_selection,
-                    repo_id=effective_repo_id,
-                    on_claimed=prd_activity_lease.start,
-                ),
-                on_attempt_recorded=_on_attempt_recorded,
-                on_agent_usage=_emit_agent_usage_event,
-            )
+                    agent=agent,
+                    process_for_agent=partial(
+                        _process_ready_issue,
+                        issue=issue,
+                        repo_path=repo_path,
+                        config=config,
+                        github_client=github_client,
+                        process_runner=process_runner,
+                        content_generator=content_generator,
+                        publish_stage=publish_stage,
+                        stage_selection=stage_selection,
+                        repo_id=effective_repo_id,
+                        on_claimed=prd_activity_lease.start,
+                    ),
+                    on_attempt_recorded=_on_attempt_recorded,
+                    on_agent_usage=_emit_agent_usage_event,
+                )
+            except Exception as execution_exc:  # noqa: BLE001 - 只做归属判断后原样抛出
+                # 依赖准备是「可恢复的准备 + 诊断」，绝不提前终止 Issue；因此当执行
+                # 确实失败且能归因到记录在案的环境缺口（缺可执行文件 / 验证命令 127）
+                # 时，改判为可恢复阻塞，而不是 agent/failed。
+                dependency_block_exc: BaseException = execution_exc
+                try:
+                    claimed_worktree_path = _find_worktree_path_for_issue(
+                        repo_path, issue, config, process_runner
+                    )
+                except Exception as locate_exc:  # noqa: BLE001 - 定位不到 worktree 就不做归属
+                    _logger.debug(
+                        "Issue #%d: worktree path not locatable, skipping dependency "
+                        "environment attribution: %s",
+                        issue.number,
+                        locate_exc,
+                    )
+                else:
+                    dependency_block_exc = escalate_dependency_environment_failure(
+                        execution_exc, claimed_worktree_path
+                    )
+                if dependency_block_exc is not execution_exc:
+                    raise dependency_block_exc from execution_exc
+                raise
         elif issue_kind == "running_rework":
             _, marker = _guard_running_issue_is_rework(issue, config, github_client)
             if marker is None:
@@ -321,14 +358,23 @@ def _process_single_issue(
             if marker is None:
                 output_view.update_status(issue.number, "skipped")
                 return 0
-            claimed = claim_blocked_issue(github_client, issue.number, config)
-            if not claimed:
+            claimed_issue_snapshot = claim_blocked_issue(github_client, issue.number, config)
+            if claimed_issue_snapshot is None:
                 _logger.info(
                     "Issue #%d already claimed by another runner, skipping.",
                     issue.number,
                 )
                 output_view.update_status(issue.number, "skipped")
                 return 0
+            # 认领后的新鲜快照是「无改动交接」判定的基线（标签已翻成 running），
+            # 但它来自 get_issue，不带入口处回填的 PRD 级 lifecycle 覆盖。直接整体
+            # 赋值会让 review / supervisor 这类只读 Issue 上覆盖字段的阶段静默丢绑定，
+            # 因此以新鲜快照为底、把两个 lifecycle 覆盖字段带过来。
+            issue = replace(
+                claimed_issue_snapshot,
+                lifecycle_overrides=issue.lifecycle_overrides,
+                lifecycle_preset_overrides=issue.lifecycle_preset_overrides,
+            )
             # 生命周期观测：阻塞 Issue 被重新领取，说明阻塞已解除并进入新一轮执行。
             record_lifecycle_event(
                 store=run_history_store,
@@ -404,11 +450,22 @@ def _process_single_issue(
             started_at=run_started_at,
         )
         return 0
+    except AgentDaemonShutdownInterrupt:
+        _skip_issue_on_daemon_shutdown(issue.number, output_view)
+        return 0
     except GitHubApiRateLimitError:
+        if _skip_issue_on_daemon_shutdown(issue.number, output_view):
+            return 0
         output_view.update_status(issue.number, "skipped")
         raise
 
-    except ForbiddenBlockedError as exc:
+    except (
+        ForbiddenBlockedError,
+        IssueBlockedDuringNoChangeError,
+        DependencyEnvironmentBlockedError,
+    ) as exc:
+        # 这些情况都是「等人」而非「执行失败」：Issue 进入可恢复的 agent/blocked，
+        # 人给出决定后 `kc blocked-continue` 继续，不占用 agent/failed 语义。
         _mark_issue_blocked(
             issue=issue,
             config=config,
@@ -464,6 +521,8 @@ def _process_single_issue(
         output_view.update_status(issue.number, "skipped")
         return 0
     except Exception as exc:  # noqa: BLE001 - report queue failures and continue.
+        if _skip_issue_on_daemon_shutdown(issue.number, output_view):
+            return 0
         _mark_issue_failed(
             issue=issue,
             config=config,
@@ -522,6 +581,62 @@ def _is_issue_admitted(request: RunOnceRequest, issue: IssueSummary) -> bool:
         issue.number,
     )
     return False
+
+
+@dataclass(frozen=True)
+class _IssueRoutingContext:
+    """单个 Issue 执行时的输出路由与观测上下文（同一轮内所有 Issue 共用）。"""
+
+    effective_repo_id: str
+    log_base: Path
+    output_view: IRunnerLiveView
+    console_sink: Callable[[str], None] | None
+    process_runner: IProcessRunner
+    run_history_store: IRunHistoryStore | None
+    process_kwargs: dict[str, Any]
+    run_request: RunOnceRequest
+
+
+def _mirror_to_console(chunk: str) -> None:
+    """把串行执行的 Issue 输出镜像到启动终端。"""
+    print(chunk, end="", flush=True, file=sys.stdout)
+
+
+def _process_routed_issue(
+    item: tuple[IssueSummary, str],
+    *,
+    routing: _IssueRoutingContext,
+) -> int:
+    """在输出路由与观测上下文里处理一个 Issue；路由自身的异常按失败返回。"""
+    issue, issue_kind = item
+    if not _is_issue_admitted(routing.run_request, issue):
+        return 0
+    try:
+        with issue_output_routing(
+            repo_id=routing.effective_repo_id,
+            issue_number=issue.number,
+            log_base=routing.log_base,
+            output_view=routing.output_view,
+            console_sink=routing.console_sink,
+        ) as sink:
+            scoped_runner = _OutputRoutedProcessRunner(routing.process_runner, sink)
+            with bound_invocation_trace_context(
+                build_invocation_trace_context(
+                    repo_id=routing.effective_repo_id,
+                    issue_number=issue.number,
+                    run_history_store=routing.run_history_store,
+                )
+            ):
+                return _process_single_issue(
+                    issue,
+                    issue_kind,
+                    process_runner=scoped_runner,
+                    output_view=routing.output_view,
+                    **routing.process_kwargs,
+                )
+    except Exception as exc:  # noqa: BLE001 - 单个 Issue 的 I/O 不应中断本轮。
+        _logger.error("Output routing failed for Issue #%d: %s", issue.number, exc)
+        return 1
 
 
 def run_once(request: RunOnceRequest) -> int:
@@ -627,6 +742,13 @@ def run_once(request: RunOnceRequest) -> int:
     # 状态，按标签决定它进入哪条候选通道；其余 ready/running/blocked Issue
     # 一律不动。
     effective_max_issues = max(max_issues, concurrency)
+    # daemon 补位模式：本轮能接的 Issue 数 = 并行上限 − 本机在执行数；本机在执行的
+    # Issue 在下面所有通道里都被跳过，保证同一个 Issue 只由一个线程推进。
+    execution_slots = request.execution_slots
+    in_flight_numbers: frozenset[int] = frozenset()
+    if execution_slots is not None:
+        in_flight_numbers = execution_slots.in_flight_issue_numbers()
+        effective_max_issues = max(0, concurrency - len(in_flight_numbers))
     ready_discovery_limit = max(effective_max_issues, _READY_DISCOVERY_LIMIT)
     target_issue_number = request.target_issue
     target_issue_summary: IssueSummary | None = None
@@ -648,7 +770,11 @@ def run_once(request: RunOnceRequest) -> int:
             else []
         )
     else:
-        ready_issues = github_client.list_ready_issues(config.labels.ready, ready_discovery_limit)
+        ready_issues = [
+            issue
+            for issue in github_client.list_ready_issues(config.labels.ready, ready_discovery_limit)
+            if issue.number not in in_flight_numbers
+        ]
         if request.pass_activity is not None:
             request.pass_activity.ready_found = len(ready_issues)
 
@@ -668,7 +794,8 @@ def run_once(request: RunOnceRequest) -> int:
                 config.labels.running,
                 ceiling,
             )
-            live_running_count_for_budget = live_running_count
+            # 标签更新有延迟：本机刚提交的 Issue 可能还没带上 running 标签。
+            live_running_count_for_budget = max(live_running_count, len(in_flight_numbers))
         except Exception as count_exc:  # noqa: BLE001 - 计数失败即不认领（fail-closed）。
             _logger.warning(
                 "Failed to count live '%s' Issues for the concurrency ceiling: %s; "
@@ -754,8 +881,9 @@ def run_once(request: RunOnceRequest) -> int:
             )
         else:
             try:
+                # 本机在执行的 Issue 也带 running 标签：多查这么多个，避免它们占满候选窗口。
                 running_candidates = github_client.list_review_candidate_issues(
-                    [config.labels.running], remaining
+                    [config.labels.running], remaining + len(in_flight_numbers)
                 )
             except Exception as discovery_exc:
                 if not running_count_failed:
@@ -782,6 +910,10 @@ def run_once(request: RunOnceRequest) -> int:
                     )
                     running_candidates = []
         for issue in running_candidates:
+            if issue.number in in_flight_numbers:
+                continue
+            if len(issues_to_process) >= effective_max_issues:
+                break
             if _has_published_direct_pr_handoff(github_client, issue):
                 issues_to_process.append((issue, "direct_pr_cleanup"))
                 continue
@@ -823,6 +955,8 @@ def run_once(request: RunOnceRequest) -> int:
                 [config.labels.blocked], remaining
             )
         for issue in blocked_candidates:
+            if issue.number in in_flight_numbers:
+                continue
             marker = _guard_blocked_issue_has_resolution(issue, github_client)
             if marker is not None:
                 issues_to_process.append((issue, "blocked_resolution"))
@@ -894,103 +1028,39 @@ def run_once(request: RunOnceRequest) -> int:
         "publish_stage": request.publish_stage,
     }
 
-    # 串行路径：concurrency<=1 时逐个处理。与历史行为的差异有二——每个
-    # Issue 的可见输出同时落到 ``logs/agent-runner/issues/<repo_id>/`` 下
-    # 的 per-Issue 文件（供第二终端 / Console 按 Issue 续读），且原启动终端
-    # 经 ``console_sink`` 收到的是路由 sink 的那一份文本，因此每行行首带
-    # ``[HH:MM:SS]``：与未经路由时的终端实时视图逐行一致（Issue #223），
-    # TTY 与重定向两种场景相同。
-    if concurrency <= 1:
-        noop_view = NoOpRunnerLiveView()
-        log_base = repo_path / "logs"
+    # 串行（并行上限 1）时只有一个 Issue 在跑，它的输出同时镜像到启动终端；每个
+    # Issue 的可见输出都落到 ``logs/agent-runner/issues/<repo_id>/`` 下的 per-Issue
+    # 文件，行首带 ``[HH:MM:SS]``（Issue #223）。并行时输出分流到实时看板的独立列，
+    # 互不交错。观测上下文绑在 contextvar 上，每个线程的调用身份天然隔离。
+    is_serial = concurrency <= 1
+    active_view = NoOpRunnerLiveView() if is_serial else (output_view or NoOpRunnerLiveView())
+    routing = _IssueRoutingContext(
+        effective_repo_id=effective_repo_id,
+        log_base=repo_path / "logs",
+        output_view=active_view,
+        console_sink=_mirror_to_console if is_serial else None,
+        process_runner=process_runner,
+        run_history_store=run_history_store,
+        process_kwargs=process_kwargs,
+        run_request=request,
+    )
+    process_routed = partial(_process_routed_issue, routing=routing)
 
-        def _console_mirror(chunk: str) -> None:
-            print(chunk, end="", flush=True, file=sys.stdout)
+    # daemon 补位模式：提交到常驻执行名单后立即返回，下一次轮询再清理与补位。
+    # 实时看板随 daemon 进程存活，不在这里关闭。
+    if execution_slots is not None:
+        for issue, issue_kind in issues_to_process:
+            execution_slots.submit(issue.number, partial(process_routed, (issue, issue_kind)))
+        return 0
 
-        def _process_serial(item: tuple[IssueSummary, str]) -> int:
-            issue, issue_kind = item
-            if not _is_issue_admitted(request, issue):
-                return 0
-            try:
-                with issue_output_routing(
-                    repo_id=effective_repo_id,
-                    issue_number=issue.number,
-                    log_base=log_base,
-                    output_view=noop_view,
-                    console_sink=_console_mirror,
-                ) as sink:
-                    scoped_runner = _OutputRoutedProcessRunner(process_runner, sink)
-                    with bound_invocation_trace_context(
-                        build_invocation_trace_context(
-                            repo_id=effective_repo_id,
-                            issue_number=issue.number,
-                            run_history_store=run_history_store,
-                        )
-                    ):
-                        return _process_single_issue(
-                            issue,
-                            issue_kind,
-                            process_runner=scoped_runner,
-                            output_view=noop_view,
-                            **process_kwargs,
-                        )
-            except Exception as exc:  # noqa: BLE001 - 单个 Issue 的 I/O 不应中断本轮。
-                _logger.error("Serial routing failed for Issue #%d: %s", issue.number, exc)
-                return 1
-
-        issue_results = [
-            _process_serial((issue, issue_kind)) for issue, issue_kind in issues_to_process
-        ]
-        return complete_aggregate_queue(
-            AggregateQueueCompletionRequest(
-                run_request=request,
-                issue_numbers=tuple(issue.number for issue, _ in issues_to_process),
-                exit_codes=tuple(issue_results),
-            )
-        )
-
-    # 并行路径：线程池同一轮并行处理多个 Issue。每个 Issue 的 agent 输出经
-    # output_sink 路由到独立日志文件与（可选）独立看板列，互不交错。
-    active_view = output_view or NoOpRunnerLiveView()
-    log_base = repo_path / "logs"
-
-    def _process_with_routing(item: tuple[IssueSummary, str]) -> int:
-        issue, issue_kind = item
-        if not _is_issue_admitted(request, issue):
-            return 0
+    if is_serial:
+        results = [process_routed(item) for item in issues_to_process]
+    else:
         try:
-            with issue_output_routing(
-                repo_id=effective_repo_id,
-                issue_number=issue.number,
-                log_base=log_base,
-                output_view=active_view,
-            ) as sink:
-                scoped_runner = _OutputRoutedProcessRunner(process_runner, sink)
-                # 观测上下文绑在 contextvar 上：线程池的每个 worker 有各自的上下文，
-                # 因此并行处理多个 Issue 时调用身份天然隔离，不靠相邻文本推断归属。
-                with bound_invocation_trace_context(
-                    build_invocation_trace_context(
-                        repo_id=effective_repo_id,
-                        issue_number=issue.number,
-                        run_history_store=run_history_store,
-                    )
-                ):
-                    return _process_single_issue(
-                        issue,
-                        issue_kind,
-                        process_runner=scoped_runner,
-                        output_view=active_view,
-                        **process_kwargs,
-                    )
-        except Exception as exc:  # noqa: BLE001 - one Issue's I/O must not kill the pass.
-            _logger.error("Parallel routing failed for Issue #%d: %s", issue.number, exc)
-            return 1
-
-    try:
-        with ThreadPoolExecutor(max_workers=concurrency) as pool:
-            results = list(pool.map(_process_with_routing, issues_to_process))
-    finally:
-        active_view.close()
+            with ThreadPoolExecutor(max_workers=concurrency) as pool:
+                results = list(pool.map(process_routed, issues_to_process))
+        finally:
+            active_view.close()
     return complete_aggregate_queue(
         AggregateQueueCompletionRequest(
             run_request=request,

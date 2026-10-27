@@ -17,7 +17,11 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import PlainTextResponse, Response
 from pydantic import BaseModel, Field
 
-from backend.api.backlog_sync import ensure_fresh_backlog_snapshot, request_backlog_resync
+from backend.api.backlog_sync import (
+    ensure_fresh_backlog_snapshot,
+    read_backlog_refresh_interval_seconds,
+    request_backlog_resync,
+)
 from backend.core.shared.interfaces.runner_console import AuditEntry, IBacklogStore
 from backend.core.shared.models.backlog import (
     BacklogDependency,
@@ -54,6 +58,10 @@ from backend.core.use_cases.backlog_concurrency import (
     read_policy_max_parallel,
     resolve_execution_ceiling,
 )
+from backend.core.use_cases.daemon_parallel_limit_status import (
+    read_daemon_parallel_limit_status,
+)
+from backend.core.use_cases.daemon_single_instance import daemon_lock_dir
 from backend.core.use_cases.backlog_autopilot_settings import (
     BacklogAutopilotError,
     BacklogAutopilotState,
@@ -239,24 +247,36 @@ def _build_backlog_response(
 
 
 @router.get("/agent-runner/backlog/prds")
-def list_backlog_prds(repo_id: str, include_archived: bool = False) -> dict:
+def list_backlog_prds(
+    repo_id: str,
+    include_archived: bool = False,
+    force_refresh: bool = False,
+) -> dict:
     """列出 PRD 待办队列：立即返回本地快照，缺失/过期时在后台重扫。
 
     请求线程不做任何 GitHub 调用，也不等待重建结果——列表秒开的代价就是响应
     可能短暂陈旧，因此响应里用 ``stale`` 与 ``scanned_at`` 把新鲜度如实交代给
-    前端。仓库不存在或已禁用仍返回 400，其历史快照不会回流到任何页面。
+    前端。``force_refresh`` 供页面上的手动刷新使用：不等到快照超过 TTL，直接排一次
+    后台重扫，并在本次响应里置 ``stale=True``，让前端保持短轮询直到后续响应确认快照已新鲜。
+    仓库不存在或已禁用仍返回 400，其历史快照不会回流到任何页面。
     """
     _resolve_context(repo_id)
-    snapshot_view = ensure_fresh_backlog_snapshot(repo_id, include_archived=include_archived)
+    snapshot_view = ensure_fresh_backlog_snapshot(
+        repo_id,
+        include_archived=include_archived,
+        force_resync=force_refresh,
+    )
     return {
         **snapshot_view.payload,
         "scanned_at": snapshot_view.scanned_at,
-        "stale": snapshot_view.stale,
+        "stale": snapshot_view.stale or force_refresh,
+        # 前端自动刷新节奏与倒计时跟着这个值走，避免两处各写一套 5 分钟。
+        "refresh_interval_seconds": read_backlog_refresh_interval_seconds(),
     }
 
 
 def _settings_payload(store: IBacklogStore, repo_id: str, runner_capacity: int) -> dict:
-    """构造「可空策略 + 生效值 + 容量 + 来源」的设置快照（GET/PATCH 共用）。"""
+    """构造「可空页面设置 + 生效值 + 配置文件值 + 来源」的设置快照（GET/PATCH 共用）。"""
     row = store.get_backlog_settings(repo_id)
     policy_max_parallel = read_policy_max_parallel(store, repo_id)
     effective_max_parallel = resolve_execution_ceiling(policy_max_parallel, runner_capacity)
@@ -265,7 +285,7 @@ def _settings_payload(store: IBacklogStore, repo_id: str, runner_capacity: int) 
         "max_parallel": policy_max_parallel,
         "effective_max_parallel": effective_max_parallel,
         "runner_capacity": runner_capacity,
-        "ceiling_source": describe_ceiling_source(policy_max_parallel, effective_max_parallel),
+        "ceiling_source": describe_ceiling_source(policy_max_parallel),
         "default_view": row.default_view if row is not None else "list",
         "updated_at": row.updated_at if row is not None else "",
     }
@@ -316,13 +336,20 @@ def _resolve_policy_max_parallel(repo_id: str) -> int | None:
 
 
 def _autopilot_payload(state: BacklogAutopilotState) -> dict:
-    """序列化 Autopilot 快照并把策略字段映射回对外契约名 ``max_parallel``。
+    """序列化 Autopilot 快照并附上本机 daemon 实际生效的并行上限。
 
     core 快照用 ``policy_max_parallel`` 表达「可空策略值」，对外契约保持
-    ``max_parallel``（语义为策略、可为 null）不变，避免前端类型改名扩散。
+    ``max_parallel``（语义为页面设置、可为 null）不变，避免前端类型改名扩散。
+    ``daemon_parallel_limit`` / ``daemon_parallel_limit_source`` 来自本机存活 daemon
+    最近一次轮询写出的状态，包含只有 daemon 进程知道的 ``--concurrency``；本机没有
+    存活 daemon 时为 null，页面此时以 ``effective_max_parallel`` 为准。
     """
     payload: dict = _serialize(state)
     payload["max_parallel"] = payload.pop("policy_max_parallel")
+    lock_dir = daemon_lock_dir(load_fresh_agent_runner_settings().console.process_registry_path)
+    daemon_status = read_daemon_parallel_limit_status(lock_dir, state.repo_id)
+    payload["daemon_parallel_limit"] = daemon_status.parallel_limit if daemon_status else None
+    payload["daemon_parallel_limit_source"] = daemon_status.source if daemon_status else None
     return payload
 
 
@@ -629,7 +656,7 @@ class UpdateCiPolicyRequest(BaseModel):
 
 @router.patch("/agent-runner/backlog/prds/{encoded_path}/ci-policy")
 def update_backlog_prd_ci_policy(encoded_path: str, request: UpdateCiPolicyRequest) -> dict:
-    """写对应 Issue 的最新 ``iar:ci-auto-repair-policy`` marker 并 fresh 回读。"""
+    """写对应 Issue 的最新 ``kc:ci-auto-repair-policy`` marker 并 fresh 回读。"""
     prd_path = _decode_prd_path(encoded_path)
     _context, prd, github_client, issue_comments, pr_context = _resolve_prd_ci_context(
         request.repo_id, prd_path

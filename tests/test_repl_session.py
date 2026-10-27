@@ -10,7 +10,7 @@ from typing import Iterator
 import pytest
 
 from backend.core.shared.interfaces.agent_runner import (
-    IarExecRequest,
+    KCExecRequest,
 )
 from backend.core.shared.models.agent_decision import ReplConfig
 from backend.core.shared.models import product_identity
@@ -25,11 +25,11 @@ from backend.core.shared.models.agent_runner import (
 from backend.core.use_cases.repl_session import (
     EXIT_COMMAND,
     HELP_COMMAND,
-    IAR_EXEC_CLOSE_MARKER,
-    IAR_EXEC_OPEN_MARKER,
+    KC_EXEC_CLOSE_MARKER,
+    KC_EXEC_OPEN_MARKER,
     ReplSessionDeps,
     ReplSessionInputs,
-    parse_iar_exec_markers,
+    parse_kc_exec_markers,
     run_repl_session,
 )
 from backend.engines.agent_runner.repl_command_executor import ReplCommandExecutor
@@ -70,27 +70,27 @@ def _make_config(
 
 
 # ---------------------------------------------------------------------------
-# parse_iar_exec_markers
+# parse_kc_exec_markers
 # ---------------------------------------------------------------------------
 
 
 def test_parse_markers_extracts_single_command() -> None:
     text = (
         "Sure, I'll do that.\n"
-        f"{IAR_EXEC_OPEN_MARKER} iar labels sync --dry-run {IAR_EXEC_CLOSE_MARKER}\n"
+        f"{KC_EXEC_OPEN_MARKER} kc labels sync --dry-run {KC_EXEC_CLOSE_MARKER}\n"
         "Done."
     )
-    requests = parse_iar_exec_markers(text)
+    requests = parse_kc_exec_markers(text)
     assert len(requests) == 1
     assert requests[0].argv == ("labels", "sync", "--dry-run")
 
 
 def test_parse_markers_extracts_multiple_commands() -> None:
     text = (
-        f"{IAR_EXEC_OPEN_MARKER} iar labels sync {IAR_EXEC_CLOSE_MARKER} and "
-        f"{IAR_EXEC_OPEN_MARKER} iar status {IAR_EXEC_CLOSE_MARKER}"
+        f"{KC_EXEC_OPEN_MARKER} kc labels sync {KC_EXEC_CLOSE_MARKER} and "
+        f"{KC_EXEC_OPEN_MARKER} kc status {KC_EXEC_CLOSE_MARKER}"
     )
-    requests = parse_iar_exec_markers(text)
+    requests = parse_kc_exec_markers(text)
     assert [r.argv for r in requests] == [
         ("labels", "sync"),
         ("status",),
@@ -98,10 +98,8 @@ def test_parse_markers_extracts_multiple_commands() -> None:
 
 
 def test_parse_markers_preserves_quoted_args() -> None:
-    text = (
-        f'{IAR_EXEC_OPEN_MARKER} iar issue create --title "Hello World" ' f"{IAR_EXEC_CLOSE_MARKER}"
-    )
-    requests = parse_iar_exec_markers(text)
+    text = f'{KC_EXEC_OPEN_MARKER} kc issue create --title "Hello World" ' f"{KC_EXEC_CLOSE_MARKER}"
+    requests = parse_kc_exec_markers(text)
     assert len(requests) == 1
     assert requests[0].argv == (
         "issue",
@@ -112,40 +110,44 @@ def test_parse_markers_preserves_quoted_args() -> None:
 
 
 def test_parse_markers_returns_empty_when_no_markers() -> None:
-    assert parse_iar_exec_markers("nothing here") == ()
+    assert parse_kc_exec_markers("nothing here") == ()
+
+
+def test_parse_markers_ignores_the_retired_marker_name() -> None:
+    """历史会话中的旧执行标记不会再生成可执行命令。"""
+    assert parse_kc_exec_markers("<<IAR_EXEC>>kc labels sync<<END_IAR_EXEC>>") == ()
 
 
 def test_parse_markers_skips_malformed_body() -> None:
-    text = f"{IAR_EXEC_OPEN_MARKER} not a valid shell line " f"{IAR_EXEC_CLOSE_MARKER}"
+    text = f"{KC_EXEC_OPEN_MARKER} not a valid shell line " f"{KC_EXEC_CLOSE_MARKER}"
     # shlex.split can split the body, but the first token "not" is fine.
     # Truly malformed bodies (unterminated quotes) should be skipped.
-    text2 = f'{IAR_EXEC_OPEN_MARKER} iar issue create --title "oops ' f"{IAR_EXEC_CLOSE_MARKER}"
-    requests = parse_iar_exec_markers(text)
+    text2 = f'{KC_EXEC_OPEN_MARKER} kc issue create --title "oops ' f"{KC_EXEC_CLOSE_MARKER}"
+    requests = parse_kc_exec_markers(text)
     # First one parses fine; the malformed second one should be skipped.
     assert all(not r.raw_text.endswith("oops ") for r in requests)
-    requests2 = parse_iar_exec_markers(text2)
+    requests2 = parse_kc_exec_markers(text2)
     assert requests2 == ()
 
 
 def test_parse_markers_strips_all_own_command_names_only() -> None:
-    """REPL 用 is_own_command_name 判定自有命令：kc / kedacode / 旧别名 iar 都识别并剥离，git 不识别。"""
+    """REPL 只剥离当前自有命令 kc / kedacode，git 不识别。"""
     for own_command_name in (
         product_identity.PRIMARY_COMMAND_NAME,
         product_identity.LONG_COMMAND_NAME,
-        product_identity.LEGACY_COMMAND_NAME,
     ):
         marker_text = (
-            f"{IAR_EXEC_OPEN_MARKER} {own_command_name} labels sync --dry-run "
-            f"{IAR_EXEC_CLOSE_MARKER}"
+            f"{KC_EXEC_OPEN_MARKER} {own_command_name} labels sync --dry-run "
+            f"{KC_EXEC_CLOSE_MARKER}"
         )
-        requests = parse_iar_exec_markers(marker_text)
+        requests = parse_kc_exec_markers(marker_text)
         assert len(requests) == 1
         # 首个自有名 token 被剥掉，执行器只拿到子命令，避免拼成 [kc, kc, ...]。
         assert requests[0].argv == ("labels", "sync", "--dry-run")
 
     # 非自有命令（git）不是 REPL 自有命令：不剥离首词，交给执行器时会被 allowlist 拒绝。
-    foreign_text = f"{IAR_EXEC_OPEN_MARKER} git status {IAR_EXEC_CLOSE_MARKER}"
-    foreign_requests = parse_iar_exec_markers(foreign_text)
+    foreign_text = f"{KC_EXEC_OPEN_MARKER} git status {KC_EXEC_CLOSE_MARKER}"
+    foreign_requests = parse_kc_exec_markers(foreign_text)
     assert len(foreign_requests) == 1
     assert foreign_requests[0].argv == ("git", "status")
 
@@ -168,7 +170,7 @@ def test_executor_rejects_shell_metachar() -> None:
     runner = _make_process_runner()
     executor = ReplCommandExecutor(runner, _make_config())
     outcome = executor.execute(
-        IarExecRequest(
+        KCExecRequest(
             argv=("labels", "sync", ";", "rm", "-rf", "/"),
             raw_text="labels sync ; rm -rf /",
         ),
@@ -183,7 +185,7 @@ def test_executor_rejects_unknown_command() -> None:
     runner = _make_process_runner()
     executor = ReplCommandExecutor(runner, _make_config())
     outcome = executor.execute(
-        IarExecRequest(argv=("evil", "command"), raw_text="evil command"),
+        KCExecRequest(argv=("evil", "command"), raw_text="evil command"),
         repo_path=Path("/tmp"),
     )
     assert outcome.rejected
@@ -195,7 +197,7 @@ def test_executor_rejects_git_push() -> None:
     runner = _make_process_runner()
     executor = ReplCommandExecutor(runner, _make_config())
     outcome = executor.execute(
-        IarExecRequest(
+        KCExecRequest(
             argv=("git", "push", "origin", "main"),
             raw_text="git push origin main",
         ),
@@ -218,7 +220,7 @@ def test_executor_runs_auto_confirm_command(monkeypatch: pytest.MonkeyPatch) -> 
     )
     executor = ReplCommandExecutor(runner, _make_config())
     outcome = executor.execute(
-        IarExecRequest(
+        KCExecRequest(
             argv=("labels", "sync", "--dry-run"),
             raw_text="labels sync --dry-run",
         ),
@@ -232,8 +234,8 @@ def test_executor_runs_auto_confirm_command(monkeypatch: pytest.MonkeyPatch) -> 
 
 def test_executor_prompts_for_confirm_command_and_user_says_yes() -> None:
     runner = _make_process_runner()
-    runner.responses[("iar", "run")] = CommandResult(
-        command=("iar", "run"), return_code=0, stdout="ok", stderr=""
+    runner.responses[("kc", "run")] = CommandResult(
+        command=("kc", "run"), return_code=0, stdout="ok", stderr=""
     )
     prompts: list[str] = []
     responses = iter(["y"])
@@ -244,7 +246,7 @@ def test_executor_prompts_for_confirm_command_and_user_says_yes() -> None:
         prompt_output_fn=prompts.append,
     )
     outcome = executor.execute(
-        IarExecRequest(argv=("run",), raw_text="run"),
+        KCExecRequest(argv=("run",), raw_text="run"),
         repo_path=Path("/tmp"),
     )
     assert outcome.confirmation_prompted
@@ -263,7 +265,7 @@ def test_executor_prompts_for_confirm_command_and_user_says_no() -> None:
         prompt_output_fn=prompts.append,
     )
     outcome = executor.execute(
-        IarExecRequest(argv=("daemon",), raw_text="daemon"),
+        KCExecRequest(argv=("daemon",), raw_text="daemon"),
         repo_path=Path("/tmp"),
     )
     assert outcome.confirmation_prompted
@@ -280,7 +282,7 @@ def test_executor_eoferror_during_confirm_is_rejected() -> None:
 
     executor = ReplCommandExecutor(runner, _make_config(), input_fn=_raise_eof)
     outcome = executor.execute(
-        IarExecRequest(argv=("run",), raw_text="run"),
+        KCExecRequest(argv=("run",), raw_text="run"),
         repo_path=Path("/tmp"),
     )
     assert outcome.rejected
@@ -293,7 +295,7 @@ def test_executor_eoferror_during_confirm_is_rejected() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_run_repl_executes_iar_command_from_agent_reply(
+def test_run_repl_executes_kc_command_from_agent_reply(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -310,8 +312,8 @@ def test_run_repl_executes_iar_command_from_agent_reply(
     content_generator = FakeContentGenerator(
         response=(
             "I'll sync the labels.\n"
-            f"{IAR_EXEC_OPEN_MARKER} iar labels sync --dry-run "
-            f"{IAR_EXEC_CLOSE_MARKER}"
+            f"{KC_EXEC_OPEN_MARKER} kc labels sync --dry-run "
+            f"{KC_EXEC_CLOSE_MARKER}"
         )
     )
     command_executor = ReplCommandExecutor(

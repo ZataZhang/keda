@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from backend.core.shared.models import product_identity
 from backend.core.shared.models.agent_runner import (
     GeneratedContentConfig,
     GeneratedContentTargetConfig,
@@ -277,24 +278,24 @@ def test_resolve_prd_skill_path_precedence(tmp_path: Path, monkeypatch: pytest.M
     monkeypatch.setattr(Path, "home", classmethod(lambda _cls: tmp_path))
     for env_name in (
         "KEDACODE_PRD_SKILL_PATH",
-        "IAR_PRD_SKILL_PATH",
+        "KEDACODE_PRD_SKILL_PATH",
         "KEDACODE_SKILLS_DIR",
-        "IAR_SKILLS_DIR",
+        "KEDACODE_SKILLS_DIR",
     ):
         monkeypatch.delenv(env_name, raising=False)
     explicit = tmp_path / "explicit.md"
     assert resolve_prd_skill_path(explicit) == explicit
-    monkeypatch.setenv("IAR_PRD_SKILL_PATH", str(tmp_path / "env.md"))
+    monkeypatch.setenv("KEDACODE_PRD_SKILL_PATH", str(tmp_path / "env.md"))
     assert resolve_prd_skill_path() == tmp_path / "env.md"
     monkeypatch.setenv("KEDACODE_PRD_SKILL_PATH", str(tmp_path / "new-env.md"))
     assert resolve_prd_skill_path() == tmp_path / "new-env.md"
     assert resolve_prd_skill_path(explicit) == explicit
     monkeypatch.delenv("KEDACODE_PRD_SKILL_PATH")
-    monkeypatch.delenv("IAR_PRD_SKILL_PATH", raising=False)
+    monkeypatch.delenv("KEDACODE_PRD_SKILL_PATH", raising=False)
     configured_skill_path = tmp_path / "configured-skills" / "prd" / "SKILL.md"
     configured_skill_path.parent.mkdir(parents=True)
     configured_skill_path.write_text("configured", encoding="utf-8")
-    monkeypatch.setenv("IAR_SKILLS_DIR", str(tmp_path / "configured-skills"))
+    monkeypatch.setenv("KEDACODE_SKILLS_DIR", str(tmp_path / "configured-skills"))
     assert resolve_prd_skill_path() == configured_skill_path
     new_skills_root = tmp_path / "new-configured-skills"
     new_configured_skill_path = new_skills_root / "prd" / "SKILL.md"
@@ -303,9 +304,11 @@ def test_resolve_prd_skill_path_precedence(tmp_path: Path, monkeypatch: pytest.M
     monkeypatch.setenv("KEDACODE_SKILLS_DIR", str(new_skills_root))
     assert resolve_prd_skill_path() == new_configured_skill_path
     monkeypatch.delenv("KEDACODE_SKILLS_DIR")
-    monkeypatch.delenv("IAR_SKILLS_DIR", raising=False)
+    monkeypatch.delenv("KEDACODE_SKILLS_DIR", raising=False)
 
-    keda_owned_skill_path = tmp_path / ".iar" / "skills" / "prd" / "SKILL.md"
+    keda_owned_skill_path = (
+        tmp_path / product_identity.STATE_DIR_NAME / "skills" / "prd" / "SKILL.md"
+    )
     codex_skill_path = tmp_path / ".codex" / "skills" / "prd" / "SKILL.md"
     claude_skill_path = tmp_path / ".claude" / "skills" / "prd" / "SKILL.md"
     kimi_code_skill_path = tmp_path / ".kimi-code" / "skills" / "prd" / "SKILL.md"

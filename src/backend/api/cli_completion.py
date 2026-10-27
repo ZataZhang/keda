@@ -13,20 +13,14 @@ from enum import Enum
 from importlib.metadata import entry_points
 from pathlib import Path
 
-import click
 import typer
-from rich.live import Live
-from rich.panel import Panel
-from rich.text import Text
 from typer.completion import get_completion_script
 
-from backend.api.cli_console import error_console
 from backend.api.cli_output import machine_output_requested
+from backend.api.cli_setup_prompt import choose_setup_option
 from backend.core.shared.models import product_identity
 
-# 补全协议环境变量名是已安装补全脚本写死的跨版本契约，永久保留旧拼写，因此这里
-# 不随 prog_name 推导（legacy-alias）。别名入口共享同一协议：协议解析会丢弃首词
-# 命令名，命令名不影响补全结果。
+# 补全协议环境变量名显式绑定当前 CLI 名称，避免随调用方的 prog_name 漂移。
 _PRIMARY_COMMAND_NAME = product_identity.PRIMARY_COMMAND_NAME
 _COMPLETION_ENV_VAR = product_identity.COMPLETION_ENV_VAR_NAME
 # bash 补全脚本的 XDG 配置目录名沿用长命令名（与 PyPI 发行名一致）。
@@ -45,18 +39,20 @@ class CompletionShellChoice(str, Enum):
 
 
 def alias_command_names() -> tuple[str, ...]:
-    """按安装元数据返回与主命令共享入口的别名命令名，按字母序去重。
+    """按安装元数据返回当前支持的非主命令入口，按字母序去重。
 
-    元数据缺失时返回空元组，此时只生成主命令补全；改名前的旧发行版会重复
-    声明同一入口，按命令名去重后不受影响。
+    元数据缺失时返回空元组，此时只生成主命令补全。未知或旧命令名不会生成补全。
 
     Returns:
-        tuple[str, ...]: 别名命令名，例如 ``("iar", "kedacode")``。
+        tuple[str, ...]: 当前支持的非主命令入口，例如 ``("kedacode",)``。
     """
+    supported_alias_names = set(product_identity.OWN_COMMAND_NAMES)
+    supported_alias_names.discard(_PRIMARY_COMMAND_NAME)
     alias_name_set = {
         entry_point.name
         for entry_point in entry_points(group="console_scripts")
         if entry_point.value == _CLI_ENTRY_POINT_TARGET
+        and entry_point.name in supported_alias_names
     }
     alias_name_set.discard(_PRIMARY_COMMAND_NAME)
     return tuple(sorted(alias_name_set))
@@ -142,63 +138,6 @@ def _completion_installation_exists(
     return _completion_source_line(completion_path) in profile_lines
 
 
-def _choose_completion_setup(shell: CompletionShellChoice) -> bool:
-    """用方向键选择是否启用补全，默认选择安装。"""
-    selected_index = 0
-    with Live(console=error_console, transient=True, auto_refresh=False) as live_menu:
-        while True:
-            menu_text = Text()
-            menu_text.append(f"Enable {shell.value} shell completion?\n\n", style="bold")
-            menu_choices = ("Install completion (default)", "Not now")
-            for choice_index, choice_text in enumerate(menu_choices):
-                is_selected = choice_index == selected_index
-                cursor = "❯ " if is_selected else "  "
-                menu_text.append(
-                    f"{cursor}{choice_text}\n",
-                    style="bold cyan" if is_selected else "dim",
-                )
-            menu_text.append("\n↑/↓ move · Enter select · q skip", style="dim")
-            live_menu.update(Panel(menu_text, border_style="cyan", expand=False), refresh=True)
-
-            key_buffer = click.getchar()
-            while key_buffer:
-                if key_buffer.startswith(("\x1b[", "\x1bO")):
-                    sequence_end = next(
-                        (
-                            index
-                            for index, sequence_character in enumerate(key_buffer[2:], start=2)
-                            if sequence_character.isalpha()
-                        ),
-                        None,
-                    )
-                    if sequence_end is None:
-                        key_buffer = ""
-                        continue
-                    pressed_key = {"A": "up", "B": "down"}.get(key_buffer[sequence_end], "ignore")
-                    key_buffer = key_buffer[sequence_end + 1 :]
-                elif key_buffer.startswith(("\x00", "\xe0")) and len(key_buffer) > 1:
-                    pressed_key = {"H": "up", "P": "down"}.get(key_buffer[1], "ignore")
-                    key_buffer = key_buffer[2:]
-                else:
-                    key_character = key_buffer[0]
-                    key_buffer = key_buffer[1:]
-                    if key_character in {"\r", "\n"}:
-                        pressed_key = "select"
-                    elif key_character.lower() == "q":
-                        pressed_key = "skip"
-                    else:
-                        pressed_key = "ignore"
-
-                if pressed_key == "up":
-                    selected_index = max(0, selected_index - 1)
-                elif pressed_key == "down":
-                    selected_index = min(1, selected_index + 1)
-                elif pressed_key == "select":
-                    return selected_index == 0
-                elif pressed_key == "skip":
-                    return False
-
-
 def _mark_completion_setup_prompt_shown(marker_path: Path) -> None:
     """持久化提示状态；写入失败不能阻断 CLI。"""
     try:
@@ -276,7 +215,11 @@ def maybe_prompt_for_completion_setup(raw_cli_arguments: Sequence[str]) -> bool:
         _mark_completion_setup_prompt_shown(marker_path)
         return False
 
-    if _choose_completion_setup(shell_choice):
+    if choose_setup_option(
+        question=f"Enable {shell_choice.value} shell completion?",
+        install_label="Install completion (default)",
+        skip_label="Not now",
+    ):
         try:
             _install_completion_and_report(shell_choice, to_stderr=True)
             typer.echo(

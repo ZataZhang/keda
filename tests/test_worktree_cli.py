@@ -9,6 +9,7 @@ absolute worktree location, so the historical
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -21,6 +22,7 @@ from backend.core.shared.models.agent_runner import (
     WorktreeConfig,
 )
 from backend.core.use_cases import agent_runner_worktree_create as worktree_create_module
+from backend.core.use_cases import worktree_frontend
 from backend.core.use_cases.run_agent_once import create_or_reuse_worktree
 from backend.infrastructure.git.worktree import WorktreeManager, WORKTREE_DIR_NAME
 from backend.infrastructure.process_runner import SubprocessRunner
@@ -47,11 +49,11 @@ def _init_git_repository(tmp_path: Path, name: str) -> Path:
     _run_git(repo_path, "config", "user.email", "test@example.com")
     _run_git(repo_path, "config", "user.name", "Test User")
     (repo_path / "README.md").write_text("placeholder", encoding="utf-8")
-    (repo_path / ".iar.toml").write_text(
+    (repo_path / ".kedacode.toml").write_text(
         '[agent_runner.repository]\nid = "test-repo"\n',
         encoding="utf-8",
     )
-    _run_git(repo_path, "add", "README.md", ".iar.toml")
+    _run_git(repo_path, "add", "README.md", ".kedacode.toml")
     _run_git(repo_path, "commit", "-m", "init")
     return repo_path
 
@@ -79,6 +81,20 @@ def test_worktree_create_creates_directory(tmp_path: Path) -> None:
     rev_parse = _run_git(repo_path, "rev-parse", "issue-9")
     head_in_worktree = _run_git(target, "rev-parse", "HEAD")
     assert rev_parse.stdout.strip() == head_in_worktree.stdout.strip()
+
+
+def test_worktree_create_reuses_existing_legacy_directory(tmp_path: Path) -> None:
+    """已有旧容器目录时，新工作树仍建在该目录中。"""
+    repo_path = _init_git_repository(tmp_path, "target")
+    legacy_worktree_root_path = repo_path / ".iar-worktrees"
+    legacy_worktree_root_path.mkdir()
+    manager = WorktreeManager(repo_path, SubprocessRunner())
+
+    created_worktree_path = manager.create(branch="issue-legacy", base_branch="main")
+
+    assert created_worktree_path == legacy_worktree_root_path / "issue-legacy"
+    assert created_worktree_path.is_dir()
+    assert not (repo_path / ".kc-worktrees").exists()
 
 
 def test_worktree_create_excludes_worktree_dir_from_index(tmp_path: Path) -> None:
@@ -130,6 +146,23 @@ def test_iar_worktree_create_cli_real_entry(
     assert worktree_path.exists()
     list_result = _run_git(repo_path, "worktree", "list")
     assert str(worktree_path) in list_result.stdout
+
+
+def test_worktree_create_cli_reuses_existing_legacy_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """真实 CLI 在旧目录存在时不创建新的平行容器目录。"""
+    repo_path = _init_git_repository(tmp_path, "legacy-target")
+    legacy_worktree_root_path = repo_path / ".iar-worktrees"
+    legacy_worktree_root_path.mkdir()
+    monkeypatch.chdir(repo_path)
+
+    assert main(["worktree", "create", "--branch", "cli-legacy", "--base-branch", "main"]) == 0
+
+    expected_worktree_path = legacy_worktree_root_path / "cli-legacy"
+    assert expected_worktree_path.is_dir()
+    assert not (repo_path / ".kc-worktrees").exists()
+    assert str(expected_worktree_path) in _run_git(repo_path, "worktree", "list").stdout
 
 
 def test_iar_worktree_path_cli_real_entry(
@@ -266,6 +299,7 @@ def test_create_or_reuse_worktree_provisions_database_when_enabled(
 
 def test_create_or_reuse_worktree_links_frontend_node_modules(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Reusing a worktree symlinks frontend ``node_modules`` from main.
 
@@ -274,11 +308,17 @@ def test_create_or_reuse_worktree_links_frontend_node_modules(
     found`` even though the main checkout has dependencies installed.
     """
     repo_path = _init_git_repository(tmp_path, "target")
-    (repo_path / ".gitignore").write_text("node_modules/\n", encoding="utf-8")
+    monkeypatch.setattr(worktree_frontend.shutil, "which", lambda _: None)
+    # .agent-runner/ 是 runner 的 worktree 状态目录（kc init 会把它写进 .gitignore）；
+    # 依赖准备诊断就落在这里，必须保持被忽略，否则 worktree 会被判为有未提交改动。
+    (repo_path / ".gitignore").write_text("node_modules/\n.agent-runner/\n", encoding="utf-8")
     (repo_path / "frontend").mkdir()
     (repo_path / "frontend" / "package.json").write_text("{}\n", encoding="utf-8")
-    _run_git(repo_path, "add", ".gitignore", "frontend/package.json")
+    (repo_path / "frontend" / "pnpm-lock.yaml").write_text("lockfile\n", encoding="utf-8")
+    _run_git(repo_path, "add", ".gitignore", "frontend/package.json", "frontend/pnpm-lock.yaml")
     _run_git(repo_path, "commit", "-m", "track frontend manifest")
+    # 固定走复用回退分支，避免测试调用主机 pnpm 执行安装。
+    monkeypatch.setattr(worktree_frontend.shutil, "which", lambda _executable: None)
     # Installed dependencies live only in the (gitignored) main checkout.
     main_vite_path = repo_path / "frontend" / "node_modules" / ".bin" / "vite"
     main_vite_path.parent.mkdir(parents=True)
@@ -314,6 +354,14 @@ def test_create_or_reuse_worktree_links_frontend_node_modules(
     # so `iar worktree cleanup` can still remove it later.
     status_result = _run_git(worktree_path, "status", "--porcelain")
     assert status_result.stdout.strip() == ""
+
+    # 依赖准备诊断随真实入口落进 worktree 状态目录，供 prompt 组装阶段读回交给 Agent。
+    report_path = worktree_path / ".agent-runner" / "dependency-preparation.json"
+    assert report_path.is_file()
+    report_payload = json.loads(report_path.read_text(encoding="utf-8"))
+    project_entries = report_payload["projects"]
+    assert [entry["project_path"] for entry in project_entries] == ["frontend"]
+    assert project_entries[0]["outcome"] == "reused"
 
 
 def test_create_or_reuse_worktree_anchors_relative_path_output_to_repo(

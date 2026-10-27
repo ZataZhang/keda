@@ -42,7 +42,7 @@ def _marker_comment(
 ) -> str:
     action_part = f"action={action} " if action else ""
     return (
-        "<!-- iar:event version=1 phase=post_pr_supervisor cycle=1 "
+        "<!-- kc:event version=1 phase=post_pr_supervisor cycle=1 "
         f"head={head_sha} base={base_sha} pr_branch=issue-1 "
         f"{action_part}"
         f"checks_state={checks_state} mergeable={'true' if mergeable else 'false'} "

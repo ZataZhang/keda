@@ -6,18 +6,21 @@ import logging
 import threading
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, is_dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from fastapi import APIRouter, HTTPException, Query
 
+from backend.api.monitoring_reads import MonitoringGitHubReads, MonitoringProcessReads
 from backend.api.response_cache import TTLResponseCache
 from backend.core.shared.interfaces.agent_runner import (
     IGitHubClient,
     IProcessRunner,
 )
+from backend.core.shared.interfaces.runner_console import IRunHistoryStore
 from backend.core.use_cases.agent_runner_factory import (
     create_console_store,
     create_github_client,
@@ -39,6 +42,10 @@ from backend.core.use_cases.monitor_snapshots import (
     get_snapshot_overview,
     persist_monitoring_result,
     snapshot_overview_to_payload,
+)
+from backend.core.use_cases.runtime_dashboard import (
+    RUNTIME_TASK_WINDOW_SECONDS,
+    parse_runtime_timestamp,
 )
 
 _logger = logging.getLogger(__name__)
@@ -89,7 +96,11 @@ def _serialize_monitoring(value: Any) -> Any:
 
 def _get_monitoring_dependencies() -> tuple[Callable[[Path], IGitHubClient], IProcessRunner]:
     """Resolve the GitHub client factory and shared process runner."""
-    return create_github_client, create_process_runner()
+
+    def monitoring_client(repo_path: Path) -> IGitHubClient:
+        return cast(IGitHubClient, MonitoringGitHubReads(create_github_client(repo_path)))
+
+    return monitoring_client, cast(IProcessRunner, MonitoringProcessReads(create_process_runner()))
 
 
 _OVERVIEW_CACHE_TTL_SECONDS = 30
@@ -141,7 +152,7 @@ def _scan_repository_and_persist(repo_id: str) -> None:
     once and hands the **same** payload to :func:`persist_monitoring_result`,
     never re-scanning GitHub just to write to the database.
     """
-    payload = _build_overview_response(repo_ids=[repo_id])
+    payload = _build_overview_response(repo_ids=[repo_id], include_tracked_issues=True)
     report = persist_monitoring_result(create_console_store(), payload)
     if not report.ok:
         failed_detail = "; ".join(
@@ -282,12 +293,53 @@ def _build_snapshot_payload(repo_ids: list[str]) -> dict:
     }
 
 
-def _build_overview_response(repo_ids: list[str] | None = None) -> dict:
+_TRACKED_ISSUE_SCAN_LIMIT = 20
+
+
+def _recent_tracked_issue_numbers(repositories: Sequence[Any]) -> dict[str, list[int]]:
+    """按仓库收集运行账本里近期出现的 Issue 编号。
+
+    监控快照原本只扫描队列标签下的开放 Issue；已关闭或已移出队列的 Issue
+    没有当前状态，运行看板只能把它们显示成「状态未知」。这里把近 7 天运行
+    账本里出现过的编号一并交给扫描器补状态，并限制每仓库最多 20 个，避免
+    为历史复盘付出无界 GitHub 调用。
+    """
+    store = cast(IRunHistoryStore, create_console_store())
+    cutoff = datetime.now(UTC) - timedelta(seconds=RUNTIME_TASK_WINDOW_SECONDS)
+    tracked: dict[str, list[int]] = {}
+    for repository in repositories:
+        try:
+            runs = store.list_recent_runs(
+                repo_id=repository.repo_id, limit=_TRACKED_ISSUE_SCAN_LIMIT
+            )
+        except Exception as exc:  # noqa: BLE001 - 账本读失败只放弃补状态，不阻断扫描。
+            _logger.info("Tracked issue lookup failed for %s: %s", repository.repo_id, exc)
+            continue
+        numbers: list[int] = []
+        for run in runs:
+            if run.issue_number <= 0 or run.issue_number in numbers:
+                continue
+            started_at = parse_runtime_timestamp(run.started_at)
+            if started_at is not None and started_at < cutoff:
+                continue
+            numbers.append(run.issue_number)
+        tracked[repository.repo_id] = numbers
+    return tracked
+
+
+def _build_overview_response(
+    repo_ids: list[str] | None = None,
+    *,
+    include_tracked_issues: bool = False,
+) -> dict:
     """Build the ``/overview`` monitoring response payload.
 
     Args:
         repo_ids: Optional whitelist of repository IDs to include. ``None``
             means all enabled repositories.
+        include_tracked_issues: 是否额外读取运行账本里的 Issue 当前状态。仅周期
+            快照写入路径开启；普通 ``/overview`` 请求保持只读队列口径，避免
+            每次页面刷新都为历史 Issue 产生额外 GitHub 调用。
     """
     settings = load_fresh_agent_runner_settings()
     repository_contexts, resolution_failures = resolve_repository_targets_with_diagnostics(settings)
@@ -303,6 +355,11 @@ def _build_overview_response(repo_ids: list[str] | None = None) -> dict:
             repositories=repository_contexts,
             github_client_factory=github_client_factory,
             process_runner=process_runner,
+            tracked_issue_numbers_by_repo=(
+                _recent_tracked_issue_numbers(repository_contexts)
+                if include_tracked_issues
+                else None
+            ),
         )
     except Exception as exc:  # noqa: BLE001
         _logger.exception("Failed to build monitoring overview: %s", exc)

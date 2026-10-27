@@ -1,7 +1,7 @@
 """本机状态目录迁移测试（``kc config migrate`` 的本机步骤）。
 
-覆盖 PRD FR-5 的判定表：占用拒绝、新旧两目录互斥、搬迁 + 相对链接、幂等重跑、
-跨文件系统与建链失败、只改写状态目录 ``config.toml`` 里的旧路径取值。
+覆盖状态目录迁移：占用拒绝、新旧两目录互斥、搬迁、不创建旧路径链接、幂等重跑、
+跨文件系统失败，以及改写状态目录 ``config.toml`` 里的旧路径取值。
 
 占用检测一律通过 ``occupancy_probe`` 注入，测试不去扫描真实机器上的进程；
 探测函数自身的行为单独用 ``_pids_from_*`` 直接验证。
@@ -25,6 +25,7 @@ from backend.engines.agent_runner.state_home_migration import (
 )
 
 _IDLE = OccupancyReport(scanner_available=True, pid_set=frozenset())
+_LEGACY_STATE_DIR_NAME = ".iar"
 
 
 def _idle_probe(_candidates: tuple[Path, ...], _home: Path) -> OccupancyReport:
@@ -38,7 +39,7 @@ def _occupied_probe(_candidates: tuple[Path, ...], _home: Path, pid: int) -> Occ
 
 def _make_legacy_state_dir(home_path: Path) -> Path:
     """在临时家目录下造一个有内容的旧状态目录。"""
-    legacy_path = home_path / product_identity.LEGACY_STATE_DIR_NAME
+    legacy_path = home_path / _LEGACY_STATE_DIR_NAME
     legacy_path.mkdir(parents=True)
     (legacy_path / "config.toml").write_text(
         '[agent_runner.console]\nhistory_db_path = "~/.iar/console.db"\n', encoding="utf-8"
@@ -52,8 +53,8 @@ def _make_legacy_state_dir(home_path: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 
-def test_only_legacy_dir_moves_and_links(tmp_path: Path) -> None:
-    """只有旧真实目录时搬到新位置，旧路径变成指向新目录的相对链接。"""
+def test_only_legacy_dir_moves_without_keeping_old_path(tmp_path: Path) -> None:
+    """只有旧真实目录时搬到新位置，不保留旧路径链接。"""
     legacy_path = _make_legacy_state_dir(tmp_path)
 
     result = migrate_state_home(home_path=tmp_path, occupancy_probe=_idle_probe)
@@ -62,8 +63,7 @@ def test_only_legacy_dir_moves_and_links(tmp_path: Path) -> None:
     new_state_path = tmp_path / product_identity.STATE_DIR_NAME
     assert new_state_path.is_dir()
     assert not new_state_path.is_symlink()
-    assert legacy_path.is_symlink()
-    assert os.readlink(legacy_path) == product_identity.STATE_DIR_NAME
+    assert not legacy_path.exists()
     assert (new_state_path / "config.toml").is_file()
     assert (new_state_path / "daemon-locks").is_dir()
 
@@ -93,13 +93,18 @@ def test_second_run_is_idempotent_and_changes_nothing(tmp_path: Path) -> None:
     assert new_state_path.is_dir()
 
 
-def test_only_new_dir_reports_already_migrated(tmp_path: Path) -> None:
-    """只有新目录时同样判为已迁移，不去动任何东西。"""
-    (tmp_path / product_identity.STATE_DIR_NAME).mkdir()
+def test_existing_compatibility_link_is_removed(tmp_path: Path) -> None:
+    """新版迁移器清理由旧版命令创建的兼容链接。"""
+    new_state_path = tmp_path / product_identity.STATE_DIR_NAME
+    new_state_path.mkdir()
+    legacy_state_path = tmp_path / _LEGACY_STATE_DIR_NAME
+    legacy_state_path.symlink_to(new_state_path.name)
 
     result = migrate_state_home(home_path=tmp_path, occupancy_probe=_idle_probe)
 
     assert result.outcome == "already_migrated"
+    assert not legacy_state_path.exists()
+    assert not legacy_state_path.is_symlink()
 
 
 def test_neither_dir_reports_nothing_to_do(tmp_path: Path) -> None:
@@ -121,22 +126,22 @@ def test_separate_directories_are_refused(tmp_path: Path) -> None:
 
     assert result.outcome == "separate_directories"
     assert result.outcome in state_home_migration.CONFLICT_OUTCOMES
-    assert (tmp_path / product_identity.LEGACY_STATE_DIR_NAME / "config.toml").is_file()
+    assert (tmp_path / _LEGACY_STATE_DIR_NAME / "config.toml").is_file()
     assert (new_state_path / "own.txt").read_text(encoding="utf-8") == "keep\n"
-    assert not (tmp_path / product_identity.LEGACY_STATE_DIR_NAME).is_symlink()
+    assert not (tmp_path / _LEGACY_STATE_DIR_NAME).is_symlink()
 
 
 def test_legacy_symlink_to_elsewhere_is_refused(tmp_path: Path) -> None:
     """旧位置是指向别处的链接时不搬，避免把用户的重定向踩掉。"""
     elsewhere = tmp_path / "somewhere-else"
     elsewhere.mkdir()
-    (tmp_path / product_identity.LEGACY_STATE_DIR_NAME).symlink_to(elsewhere)
+    (tmp_path / _LEGACY_STATE_DIR_NAME).symlink_to(elsewhere)
 
     result = migrate_state_home(home_path=tmp_path, occupancy_probe=_idle_probe)
 
     assert result.outcome == "legacy_link_in_way"
     assert result.outcome in state_home_migration.CONFLICT_OUTCOMES
-    assert (tmp_path / product_identity.LEGACY_STATE_DIR_NAME).is_symlink()
+    assert (tmp_path / _LEGACY_STATE_DIR_NAME).is_symlink()
     assert not (tmp_path / product_identity.STATE_DIR_NAME).exists()
 
 
@@ -197,7 +202,7 @@ def test_lock_file_and_registry_pids_are_detected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """锁文件与 ``processes.json`` 里存活的 PID 都算占用；已退出的记录不算。"""
-    state_dir_path = tmp_path / product_identity.LEGACY_STATE_DIR_NAME
+    state_dir_path = tmp_path / _LEGACY_STATE_DIR_NAME
     state_dir_path.mkdir(parents=True)
     lock_dir_path = state_dir_path / "daemon-locks"
     lock_dir_path.mkdir()
@@ -216,6 +221,31 @@ def test_lock_file_and_registry_pids_are_detected(
     report = state_home_migration._detect_occupancy((state_dir_path,))
     assert report.scanner_available is True
     assert report.pid_set == frozenset({111, 333})
+
+
+@pytest.mark.parametrize("occupancy_source", ["registry", "lock"])
+def test_new_state_directory_blocks_migration_without_legacy_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, occupancy_source: str
+) -> None:
+    """旧目录已移除时，新目录中的活动登记或锁仍须阻止迁移。"""
+    new_state_path = tmp_path / product_identity.STATE_DIR_NAME
+    new_state_path.mkdir()
+    active_pid = os.getpid()
+    if occupancy_source == "registry":
+        (new_state_path / "processes.json").write_text(
+            json.dumps({"active-runner": {"pid": active_pid}}), encoding="utf-8"
+        )
+    else:
+        lock_directory = new_state_path / "daemon-locks"
+        lock_directory.mkdir()
+        (lock_directory / "active.lock").write_text(str(active_pid), encoding="utf-8")
+    monkeypatch.setattr(state_home_migration, "_pids_from_command_scan", lambda _home: frozenset())
+
+    result = migrate_state_home(home_path=tmp_path)
+
+    assert result.outcome == "occupied"
+    assert result.blocking_pid_set == (active_pid,)
+    assert not (tmp_path / _LEGACY_STATE_DIR_NAME).exists()
 
 
 # ---------------------------------------------------------------------------
@@ -257,30 +287,6 @@ def test_move_failure_is_reported(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     assert result.outcome in state_home_migration.FAILURE_OUTCOMES
 
 
-def test_symlink_failure_keeps_the_move_and_gives_manual_command(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """搬迁成功但建链失败：不回滚，给出手工补建命令。"""
-    _make_legacy_state_dir(tmp_path)
-    real_rename = os.rename
-    monkeypatch.setattr(os, "rename", real_rename)
-
-    def _no_link(_src: str, _dst: str) -> None:
-        raise OSError(errno.EPERM, "symlinks are disabled")
-
-    monkeypatch.setattr(os, "symlink", _no_link)
-
-    result = migrate_state_home(home_path=tmp_path, occupancy_probe=_idle_probe)
-
-    new_state_path = tmp_path / product_identity.STATE_DIR_NAME
-    assert result.outcome == "symlink_failed"
-    assert new_state_path.is_dir()
-    assert not (tmp_path / product_identity.LEGACY_STATE_DIR_NAME).exists()
-    manual_command = result.manual_symlink_command or ""
-    assert manual_command.startswith("ln -s .kedacode ")
-    assert str(tmp_path / product_identity.LEGACY_STATE_DIR_NAME) in manual_command
-
-
 # ---------------------------------------------------------------------------
 # 旧路径改写
 # ---------------------------------------------------------------------------
@@ -311,7 +317,7 @@ def test_rewrite_hits_only_legacy_state_prefixes() -> None:
 
 def test_move_rewrites_config_toml_and_lists_other_files(tmp_path: Path) -> None:
     """搬迁后改写状态目录 ``config.toml`` 的旧路径取值，其他文件只统计不改动。"""
-    legacy_path = tmp_path / product_identity.LEGACY_STATE_DIR_NAME
+    legacy_path = tmp_path / _LEGACY_STATE_DIR_NAME
     legacy_path.mkdir()
     home_text = str(tmp_path)
     (legacy_path / "config.toml").write_text(
@@ -370,7 +376,7 @@ def test_dry_run_reports_plan_without_writing(tmp_path: Path) -> None:
 
 def test_unparsable_config_toml_does_not_block_move(tmp_path: Path) -> None:
     """状态目录里的 ``config.toml`` 损坏时照样搬迁，只是不改写取值。"""
-    legacy_path = tmp_path / product_identity.LEGACY_STATE_DIR_NAME
+    legacy_path = tmp_path / _LEGACY_STATE_DIR_NAME
     legacy_path.mkdir()
     (legacy_path / "config.toml").write_text("not = = toml\n", encoding="utf-8")
 

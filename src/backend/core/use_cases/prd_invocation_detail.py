@@ -181,6 +181,9 @@ def _build_invocation_rows(
                 requested_model=timeline_row.requested_model,
                 reported_model=timeline_row.reported_model,
                 model_source=timeline_row.model_source,
+                model_config_snapshot=_as_optional_mapping(
+                    _display_field(finish_detail, start_detail, "model_config_snapshot")
+                ),
                 token_usage=_as_optional_mapping(
                     _display_field(finish_detail, start_detail, "token_usage")
                 ),

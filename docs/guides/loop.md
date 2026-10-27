@@ -1,5 +1,8 @@
 # KedaCode Loop — 定时循环任务
 
+需要开箱可用的 blocked / failed 巡检时，可显式启用
+[内置任务恢复巡检模板](loop-blocker-monitor.md)；安装与初始化不会自动启用。
+
 > Issue #110 交付物。`kc loop` 子系统让运维者把 GitHub Issue 的“造票”变成
 > 定时任务，每天/每小时自动生成一份 PRD + Issue，交给现有 runner 流转到 PR。
 
@@ -51,7 +54,7 @@ Loop 配方是仓库内的 Markdown 文件，建议存放在 `tasks/loops/<id>.m
 | `output` |  | enum | `issue` | 每次触发的产出：`issue`（默认）**不生成任何 PRD**，配方正文原文直接作为普通 Issue 的正文（`publish_prd` 在此模式下无意义）；`prd` 渲染一份带时间戳的 PRD 并与 Issue 一一绑定（走完整 PRD 生命周期，`publish_prd: true` 时还会提交并推送到 base 分支）。已经登记过、状态文件里没有该字段的旧 loop 仍按 `prd` 运行，不受默认值变化影响；重新登记旧配方时才会换成新默认值，需要旧行为请显式写 `output: prd`。 |
 | `queue_ready` |  | bool | `true` | 是否贴 `agent/ready` 标签让 runner 认领。 |
 | `run_now` |  | bool | `false` | 造票后是否立即调用 `run_agent_repositories_once`。 |
-| `pre_command` |  | string | `null` | 触发前执行的 shell 命令，stdout 中 `KEY=value` 行会被注入模板变量。 |
+| `pre_command` |  | string | `null` | 触发前执行的 shell 命令，stdout 中 `KEY=value` 行会被注入模板变量。只能写在一行里（不支持 `\|` 块）；写成双引号字符串时内部的 `"` 写作 `\"`，按 YAML 规则还原（同样支持 `\\`、`\n`、`\t`），单引号字符串里的 `'` 写作 `''`。 |
 | `timezone` |  | string | UTC | IANA 时区名（如 `Asia/Shanghai`），用于 cron 调度。 |
 | `managed_by` |  | enum | `loop-daemon` | `loop-daemon` 由独立 loop daemon 推进；`agent-daemon` 由普通 `kc daemon` 在每轮前置阶段推进。 |
 | `priority` |  | string | `P2` | 生成 PRD 文件名前缀（`P0`–`P3`）。 |
@@ -227,8 +230,30 @@ flowchart TD
   一个 daemon 负责（由 `managed_by` 决定）。
 - **时区**：cron 默认 UTC 兼容行为；需要固定墙钟时应填写 IANA `timezone`，例如
   `Asia/Shanghai`。状态账本仍保存 UTC。
-- **pre_command 失败**：失败时 loop 标记 `last_error` 但不中断 daemon。
+- **pre_command 失败**：命令抛错、退出码非 0 或写了 stderr 时，`_run_pre_command()` 打一条
+  warning 并照常返回已解析到的变量，daemon 不中断。如果因此缺了模板变量，触发报错会在
+  「undefined variable」之后附上 `The pre_command failed first: pre_command exited with N; stderr: …`，
+  先看这段而不是去改 frontmatter。管道中间环节失败时退出码可能仍是 0，stderr 是唯一线索。
+  原因**不会**写进 loop-state.json：模型里的 `last_error` 字段目前没有任何写入方。
 - **同一天去重**：通过 `loop/<id>` 标签 + Issue 标题日期判断；手动改 Issue 标题可能绕过去重。
+
+### 巡查计数显示 `unknown` 时先查什么
+
+`tasks/loops/keda-blocker-monitor-30m.md` 用 pre_command 里的两次 `gh issue list` 统计
+`agent/blocked` / `agent/failed`，失败时把值替换成字面量 `unknown`。这条路径有两个后果：
+
+- 哨兵分支仍然 `printf` 三行 `KEY=unknown` 并**以 0 退出**，所以既不会触发上面那条 warning，
+  也不会写 `last_error`；而 `skip_when: needs_attention=0` 按字面比较，`unknown ≠ 0`，于是照常
+  建巡查 Issue，把 `unknown` 写进正文。这正是 Issue #310 顶部三个计数都是 `unknown` 的来源。
+- `gh` 的报错在 shell 侧被 `2>/dev/null` 丢弃，循环侧又没有失败记录，因此事后无法从 Issue 正文、
+  loop-state.json 或 daemon 日志复原那一次到底是认证失败、PATH 里找不到 `gh`、还是限流。
+  同一次运行的 fresh read（runner 自己的 GitHub 读取）成功并读到 blocked 0 / failed 0，
+  说明故障属于触发前那次 `gh` 调用的局部/瞬时问题，不是 GitHub 整体不可读。
+
+排查顺序：先在触发所在的机器上手跑 recipe 里的同一条 pre_command（把 `2>/dev/null` 去掉），
+再看 `gh auth status` 与 daemon 进程的 PATH。要让下一轮自动带上原因，需要改 recipe 保留
+stderr 并新增一个 `state_read_error` 变量（模板占位符必须与 pre_command 输出一一对应），
+已按想法收件箱记录，未在本轮改动在跑的巡查配方。
 
 ## 后续规划
 
@@ -243,6 +268,15 @@ flowchart TD
 > ROI 的 scope 即可。本节给出这种 **triage decision tree recipe** 的
 > 写作约定，示例见 `tasks/loops/nightly-cleanup-keda.md` 与
 > `tasks/loops/nightly-cleanup-product.md`。
+
+Keda 夜间清理配方的文档 scope 按近期 base 分支 diff 核对受影响文档的实际行为，
+不以 MkDocs 构建通过代替内容核对。每轮最多检查最早的 20 个待查提交，检查结果与
+`checked_through_sha` 记录在本轮 Issue 评论中；下轮从最近有效检查点继续。
+首次运行只覆盖最近 7 天并披露历史限制；检查不完整、记录读取失败或文档 scope 被
+更高优先级任务跳过时不推进检查点。发现的未解决项保留承接 Issue/PR 链接，避免漏修或重复修复。
+这些是 Agent 执行约定，不是 loop 调度器自动维护的状态字段；具体步骤以配方为准。
+调度器每次触发会重新读取登记的 recipe 路径，因此路径不变时正文修改在下一次触发生效，
+已经创建的 Issue 正文不会自动更新。
 
 ### 何时用 triage 决策树
 
@@ -353,8 +387,8 @@ block scalar，pre_command 必须写成单行 shell（用 `;` / `&&` 链接多�
 
 ### 失败兜底
 
-- `pre_command` 失败 → `fire_loop` 把 `last_error` 写入 loop-state.json，
-  跳过本次 fire，daemon 不退出。下次 cron 到来再试。
+- `pre_command` 失败 → 记一条 warning、按「没有 pre_command 变量」继续：`skip_when` 不命中就
+  照常建 Issue，只有模板引用了未提供的 `{{var}}` 才在渲染时报错，daemon 不退出，下次 cron 再试。
 - 当晚 4 类 scope 都无事可做 → agent 在 worktree 内执行
   `gh issue close <N> --comment "no actionable cleanup tonight"`，**不**出 PR。
 - `scope/<x>` label 不存在 → `gh issue edit --add-label` 报错，agent 应

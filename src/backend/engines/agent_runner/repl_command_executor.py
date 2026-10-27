@@ -1,9 +1,9 @@
 """REPL command executor.
 
-Implements :class:`IReplCommandExecutor` for the ``iar`` REPL entrypoint.
+Implements :class:`IReplCommandExecutor` for the ``kc`` REPL entrypoint.
 The executor owns the policy decisions that core use cases should not
 have to know about: which KedaCode subcommands are allowed, which need
-explicit confirmation, how to invoke the real ``iar`` CLI as a
+explicit confirmation, how to invoke the real ``kc`` CLI as a
 subprocess, and how to truncate captured output before returning it to
 the conversation history.
 
@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 from backend.core.shared.interfaces.agent_runner import (
-    IarExecRequest,
+    KCExecRequest,
     IProcessRunner,
     IReplCommandExecutor,
     ReplExecOutcome,
@@ -82,7 +82,7 @@ class ReplCommandExecutor(IReplCommandExecutor):
     """Validate and execute KedaCode subcommands requested by the REPL agent.
 
     Args:
-        process_runner: Subprocess runner used to invoke ``iar``.
+        process_runner: Subprocess runner used to invoke ``kc``.
         config: REPL configuration (allowlist / confirm / audit settings).
         input_fn: Replacement for ``builtins.input`` so unit tests can
             drive the confirmation prompts deterministically. Defaults to
@@ -106,7 +106,7 @@ class ReplCommandExecutor(IReplCommandExecutor):
 
     def execute(
         self,
-        request: IarExecRequest,
+        request: KCExecRequest,
         *,
         repo_path: Path,
     ) -> ReplExecOutcome:
@@ -172,7 +172,7 @@ class ReplCommandExecutor(IReplCommandExecutor):
         elif needs_confirmation:
             self._prompt_output_fn(
                 f"\nThe agent wants to run a write/risky command:\n"
-                f"  iar {prefix}\n"
+                f"  kc {prefix}\n"
                 f"This command is in the confirm list. Execute? [y/N]: "
             )
             try:

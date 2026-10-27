@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -21,6 +22,7 @@ from backend.core.shared.interfaces.agent_runner import (
     AGENT_REPORTED_MODEL_ATTR_NAME,
     AGENT_SESSION_ID_ATTR_NAME,
 )
+from backend.core.shared.interfaces.agent_output_protocol import OutputRelayRequest
 from backend.core.shared.models.agent_runner import TokenUsage
 from backend.engines.agent_runner.output_protocols import get_output_protocol_registry
 from backend.engines.agent_runner.protocol_routing_runner import ProtocolRoutingProcessRunner
@@ -114,6 +116,72 @@ class TestExtractUsageEvent:
 
 class TestStreamUsageCollector:
     """流式收集器：累计 assistant 请求用量，兼容最后一个 result usage。"""
+
+    def test_codex_turn_usage_excludes_cached_input_from_base_price(self) -> None:
+        collector = StreamUsageCollector()
+        for _ in range(2):
+            collector.observe_line(
+                json.dumps(
+                    {
+                        "type": "turn.completed",
+                        "usage": {
+                            "input_tokens": 1000,
+                            "cached_input_tokens": 800,
+                            "output_tokens": 20,
+                        },
+                    }
+                )
+            )
+        assert collector.usage == TokenUsage(
+            input_tokens=400,
+            cache_read_input_tokens=1600,
+            output_tokens=40,
+        )
+        assert collector.usage.total_tokens == 2040
+
+    @pytest.mark.parametrize("cached_tokens", [True, -1, "800", 1001])
+    def test_codex_invalid_cache_usage_is_not_counted(self, cached_tokens: object) -> None:
+        collector = StreamUsageCollector()
+        collector.observe_line(
+            json.dumps(
+                {
+                    "type": "turn.completed",
+                    "usage": {
+                        "input_tokens": 1000,
+                        "cached_input_tokens": cached_tokens,
+                        "output_tokens": 20,
+                    },
+                }
+            )
+        )
+        assert collector.usage is None
+
+    def test_codex_protocol_preserves_usage_before_rendering(self, tmp_path: Path) -> None:
+        """通过真实子进程与生产协议中继验证，避免渲染丢弃用量。"""
+        event_line = json.dumps(
+            {
+                "type": "turn.completed",
+                "usage": {
+                    "input_tokens": 1000,
+                    "cached_input_tokens": 800,
+                    "output_tokens": 20,
+                },
+            }
+        )
+        protocol = get_output_protocol_registry().resolve("codex-json-lines")
+        command_result = protocol.relay(
+            OutputRelayRequest(
+                argv=(sys.executable, "-c", f"print({event_line!r})"),
+                cwd=tmp_path,
+                collect_stdout=True,
+            )
+        )
+        assert command_result.token_usage == TokenUsage(
+            input_tokens=200,
+            cache_read_input_tokens=800,
+            output_tokens=20,
+        )
+        assert "turn.completed" not in command_result.stdout
 
     def test_collects_last_usage(self) -> None:
         collector = StreamUsageCollector()

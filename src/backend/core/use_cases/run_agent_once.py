@@ -26,12 +26,9 @@ from backend.core.shared.interfaces.agent_runner import (
 )
 from backend.core.shared.models.agent_model_preset import ModelSelection
 from backend.core.shared.models.agent_runner import (
-    AgentCommitResult,
     AppConfig,
-    AttemptResult,
     CommandResult,
     IssueSummary,
-    TokenUsage,
     describe_verification_command,
 )
 from backend.core.shared.models.agent_spec import (
@@ -40,7 +37,6 @@ from backend.core.shared.models.agent_spec import (
     AGENT_PROFILE_RUN,
     PROMPT_DELIVERY_STDIN,
 )
-from backend.core.shared.models.publish_stage import PublishStage
 from backend.core.use_cases.agent_invocation import (
     UnknownAgentError,
     build_agent_invocation,
@@ -136,7 +132,6 @@ from backend.core.use_cases.agent_runner_session_store import (
     AgentSessionScope,
     consume_agent_timeout_resume_attempt as consume_agent_timeout_resume_attempt,
     load_agent_session_record,
-    resolve_resumable_session_id,
     save_agent_session_record,
 )
 from backend.core.use_cases.agent_runner_stall_supervision import (
@@ -251,7 +246,6 @@ __all__ = [
     "consume_agent_timeout_resume_attempt",
     "is_transient_failure",
     "run_agent",
-    "run_agent_until_committed",
     "run_agent_with_prompt",
     "run_agent_with_prompt_resilient",
     "run_fix_agent",
@@ -676,7 +670,21 @@ def run_agent_with_prompt(
             run_kwargs["attempt_key"] = stall_request.attempt_key
 
         def _run_attempt() -> CommandResult:
-            return process_runner.run(**run_kwargs)
+            try:
+                return process_runner.run(**run_kwargs)
+            except FileNotFoundError as exc:
+                # 进程边界兜底：PATH 的判定权留给 claim 之前的门禁与用户可见的
+                # ``kc agent setup``，这里只在真实起跑失败时把阶段、用途与可执行文件名
+                # 补进异常，让日志与失败评论不再只剩一句 command not found。不在起跑前
+                # 主动查 PATH——注入的 runner 与本机 PATH 无关，提前查会让 CI（不安装任何
+                # agent CLI）里的真实流程测试全线变红。
+                raise AgentUnavailableError(
+                    agent_name,
+                    context=(
+                        f"launching bin '{attempt_invocation.argv[0]}' for phase "
+                        f"'{invocation_phase}' with profile '{profile}'"
+                    ),
+                ) from exc
 
         try:
             attempt_result = (
@@ -761,59 +769,6 @@ def _resumed_run_never_started(result: CommandResult) -> bool:
     上层恢复处理，不能改跑全新会话，否则会白扔掉已经取得的进度。
     """
     return result.return_code != 0 and result.session_id is None
-
-
-def run_agent_until_committed(
-    *,
-    selected_agent: str,
-    issue: IssueSummary,
-    worktree_path: Path,
-    config: AppConfig,
-    process_runner: IProcessRunner,
-    before_sha: str,
-    expected_branch: str,
-    prompt_override: str | None = None,
-    on_attempt_recorded: Callable[[AttemptResult, list[AttemptResult]], None] | None = None,
-    on_agent_usage: Callable[[str, str, TokenUsage], None] | None = None,
-    before_verifier_callback: Callable[[], None] | None = None,
-    model_selection: ModelSelection | None = None,
-    publish_stage: PublishStage = PublishStage.NORMAL,
-    repo_id: str | None = None,
-) -> AgentCommitResult:
-    """运行 Agent recovery 状态机并返回最终提交结果；可在 verifier 前回调发布 Draft PR。"""
-    from backend.core.use_cases.run_agent_execution_loop import (
-        AgentExecutionRequest,
-    )
-    from backend.core.use_cases.run_agent_execution_loop import (
-        run_agent_until_committed as run_execution_loop,
-    )
-
-    return run_execution_loop(
-        AgentExecutionRequest(
-            selected_agent=selected_agent,
-            issue=issue,
-            worktree_path=worktree_path,
-            config=config,
-            process_runner=process_runner,
-            before_sha=before_sha,
-            expected_branch=expected_branch,
-            prompt_override=prompt_override,
-            on_attempt_recorded=on_attempt_recorded,
-            on_agent_usage=on_agent_usage,
-            before_verifier_callback=before_verifier_callback,
-            model_selection=model_selection,
-            repo_id=repo_id,
-            # 首轮续传：worktree 里留有本 Issue 上一轮的会话记录就说明这是"接着跑"
-            # （崩溃对账重新入队 / 部分进度续作），而不是新任务被历史会话污染。
-            resume_session_id=resolve_resumable_session_id(
-                worktree_path,
-                config=config,
-                agent_name=selected_agent,
-                scope=AgentSessionScope(issue_number=issue.number),
-            ),
-            publish_stage=publish_stage,
-        )
-    )
 
 
 def run_once(

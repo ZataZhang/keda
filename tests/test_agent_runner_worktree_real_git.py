@@ -35,7 +35,7 @@ def _stack_issue(upstream_issue: int) -> IssueSummary:
         number=999,
         title="downstream",
         url="https://github.com/example/repo/issues/999",
-        body=f'<!-- iar:depends-on #{upstream_issue} mode="stack" -->',
+        body=f'<!-- kc:depends-on #{upstream_issue} mode="stack" -->',
         labels=(),
     )
 

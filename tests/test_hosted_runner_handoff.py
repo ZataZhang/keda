@@ -217,7 +217,6 @@ def test_hosted_runner_stop_passes_bound_repo_id_to_compose(tmp_path, monkeypatc
     assert compose_file == tmp_path / "compose.yml"
     assert env_overrides == {
         "KEDACODE_REPO_ID": "pilot",
-        "IAR_REPO_ID": "pilot",
         "REPO_PATH": str(tmp_path / "checkout"),
         "KEDACODE_RUNNER_AUTH_DIR": str(tmp_path / "auth" / "pilot"),
         "KEDACODE_DESKTOP_ENABLED": "false",

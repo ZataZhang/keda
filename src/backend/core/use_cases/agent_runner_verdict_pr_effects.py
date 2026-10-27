@@ -41,7 +41,7 @@ def build_verifier_yellow_comment(verdict: ValidationVerdict, issue_number: int)
     """
     return "\n".join(
         [
-            "<!-- iar:verifier-warning risk=yellow -->",
+            "<!-- kc:verifier-warning risk=yellow -->",
             "",
             "## ⚠️ Independent verifier returned YELLOW",
             "",

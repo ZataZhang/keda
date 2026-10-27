@@ -216,7 +216,7 @@ def _cli_patches(client: FakeGitHubClient, *, live_daemon_pid: int | None):
         patch("backend.api.cli_helpers.resolve_repository_targets") as resolve_targets,
         patch("backend.api.cli.create_github_client", return_value=client),
         patch("backend.api.cli_helpers.create_github_client"),
-        patch("backend.api.cli.require_iar_repository_initialized"),
+        patch("backend.api.cli.require_repository_initialized"),
         patch(
             "backend.core.use_cases.daemon_single_instance.find_live_daemon_pid",
             return_value=live_daemon_pid,
@@ -229,7 +229,7 @@ def _cli_patches(client: FakeGitHubClient, *, live_daemon_pid: int | None):
 
 def _main(argv: list[str], monkeypatch: pytest.MonkeyPatch) -> int:
     """跑一次真实 CLI 分发（不联网：仓库目标与 GitHub 客户端均已打桩）。"""
-    monkeypatch.setenv("IAR_SKIP_GH_AUTH_CHECK", "1")
+    monkeypatch.setenv("KEDACODE_SKIP_GH_AUTH_CHECK", "1")
     from backend.api.cli import main
 
     return main(argv)
@@ -306,7 +306,7 @@ def test_cli_prd_path_target_also_bypasses_the_mutex(
     with (
         patch("backend.api.cli_helpers.resolve_repository_targets") as resolve_targets,
         patch("backend.api.cli.create_github_client", return_value=client),
-        patch("backend.api.cli.require_iar_repository_initialized"),
+        patch("backend.api.cli.require_repository_initialized"),
         patch(
             "backend.core.use_cases.daemon_single_instance.find_live_daemon_pid",
             return_value=4242,

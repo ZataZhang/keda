@@ -146,7 +146,7 @@ class IContainerAuthImporter(ABC):
 
     @abstractmethod
     def import_container_auth(
-        self, *, global_iar_dir: Path | None = None
+        self, *, global_state_dir: Path | None = None
     ) -> ContainerAuthImportResult:
         """把本机当前 cc-switch profile 的认证 + skills 复制到 container-auth。"""
 

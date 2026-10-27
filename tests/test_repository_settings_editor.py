@@ -1,4 +1,4 @@
-"""针对仓库本地配置（``.iar.toml``）受限 Backlog 写回的保真测试。
+"""针对仓库本地配置（``.kedacode.toml``）受限 Backlog 写回的保真测试。
 
 关注点：``set_enabled`` 只能改动一个布尔键——注释、同级键、未知键/子表必须逐字
 保留；失败时原文件不变；原子替换为同目录临时文件 + ``os.replace``。
@@ -15,7 +15,7 @@ from backend.infrastructure.config.repository_settings_editor import (
     TomlRepositoryAutopilotSettingsEditor,
 )
 
-# 本仓真实 .iar.toml 的 backlog 键 + 注释 + 一个未知子表，
+# 本仓真实 .kedacode.toml 的 backlog 键 + 注释 + 一个未知子表，
 # 用于断言写回保真（PRD §7 Executor Drift Guard 要求的两类样本）。
 _FIDELITY_SAMPLE = """# 仓库本地配置
 [agent_runner]
@@ -43,7 +43,7 @@ def editor() -> TomlRepositoryAutopilotSettingsEditor:
 
 def _write_config(repo_root: Path, text: str) -> Path:
     repo_root.mkdir(parents=True, exist_ok=True)
-    config_path = repo_root / ".iar.toml"
+    config_path = repo_root / ".kedacode.toml"
     config_path.write_text(text, encoding="utf-8")
     return config_path
 
@@ -103,7 +103,7 @@ def test_set_enabled_toggles_back_without_drift(tmp_path: Path, editor) -> None:
 
 
 def test_set_enabled_rejects_missing_file(tmp_path: Path, editor) -> None:
-    """目标仓没有 .iar.toml 时必须报错，而不是凭空创建配置。"""
+    """目标仓没有 .kedacode.toml 时必须报错，而不是凭空创建配置。"""
     with pytest.raises(RepositorySettingsEditError):
         editor.set_enabled(tmp_path / "empty-repo", True)
 

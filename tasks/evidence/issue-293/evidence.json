@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "language": "zh-CN",
+  "subject": "Issue #293 kc console 缺少（或只同步了一半）静态面板产物时在监听前失败，并保留显式 API-only 逃生口",
+  "items": [
+    {
+      "item_number": 1,
+      "item_name": "缺少静态产物时默认非零退出且未开始监听（含残缺产物目录）",
+      "command": "bash tasks/evidence/issue-293/scripts/rv-1-default-failure.sh",
+      "evidence_files": ["rv-1-missing-assets-default-fails.txt"],
+      "output_summary": "残缺产物目录（只有 _next/、没有 index.html）配合注入的修复前门禁时，真实 kc console 照常监听且 / 返回 404（负控变红）。修复后的真实代码下两种缺产物形态都被拦下：GREEN CASE A（残缺目录）与 GREEN CASE B（目录整体缺失，Issue 的复现步骤）CLI 退出码均为 1，监听探测为 connection refused / HTTP 000，stderr 给出 just console-sync、发布 wheel 与 kc console --api-only 三条出路。同一残缺目录下显式 --api-only 仍起服务：/ 返回 404、版本端点返回 200，证明拦截来自门禁而不是环境损坏。",
+      "explanation": "脚本用真实 uv run kc console 进程 + curl 探测回环端口，逐项检查进程退出码、stderr 文本与是否真的在监听；负控阶段在脚本内把 src/backend/api/cli_typer_console.py 的门禁临时改回上一轮的 `not static_assets.console_static_dir().is_dir()`（只判目录存在），结束按 sha256 校验还原源文件并恢复产物目录，全程没有 mock、没有 TestClient、没有替服务。",
+      "risks": "端口由系统分配后立即释放再交给 CLI，极低概率被并发抢占；脚本对每个探测结果做硬断言，端口异常即失败。负控阶段会临时改写仓库源文件与产物目录，cleanup trap 负责还原并以 sha256 兜底校验；备份与状态目录都在被 gitignore 的证据目录内，运行结束即清理。",
+      "negative_control": "bash tasks/evidence/issue-293/scripts/rv-1-default-failure.sh 的 NEGATIVE CONTROL 阶段：把 CLI 门禁注入回修复前的 `not static_assets.console_static_dir().is_dir()`，同时把 src/backend/api/static/console 换成只含 _next/ 的残缺目录，再运行 uv run kc console --no-browser --port <空闲端口>。单元层面同一注入也让 tests/test_cli_console.py::test_console_incomplete_static_assets_fail_before_listening 与 ::test_static_mount_skips_panel_when_entry_file_missing 变红。",
+      "expected_fail": "注入后命令不再拒绝启动：进程继续监听，日志出现 Uvicorn running，GET / 返回 404（证据文件里 ROOT_HTTP_STATUS: 404、SERVER_STOP_STATUS: 143），item 1「非零退出且未监听」的 oracle 因此变红；这正是独立验收记录为 Yellow 时指出的残余缺口。",
+      "stdout_assertions": [
+        {"severity": "high", "pattern": "CLI_EXIT_CODE: 1", "must_match": true},
+        {"severity": "high", "pattern": "LISTENER_PROBE: connection refused (curl HTTP status 000)", "must_match": true},
+        {"severity": "high", "pattern": "just console-sync", "must_match": true},
+        {"severity": "high", "pattern": "kc console --api-only", "must_match": true},
+        {"severity": "high", "pattern": "EXPECTED_FAIL", "must_match": true},
+        {"severity": "medium", "pattern": "VERSION_ENDPOINT_HTTP_STATUS: 200", "must_match": true},
+        {"severity": "high", "pattern": "ASSERTION_FAILED", "must_match": false},
+        {"severity": "high", "pattern": "Traceback", "must_match": false}
+      ]
+    },
+    {
+      "item_number": 2,
+      "item_name": "缺少静态产物时显式 --api-only 正常启动并提供版本 JSON",
+      "command": "bash tasks/evidence/issue-293/scripts/rv-2-api-only.sh",
+      "evidence_files": ["rv-2-api-only-starts.txt"],
+      "output_summary": "负控（同一缺产物条件下刻意省略 --api-only）退出码为 1，版本端点 curl 失败、HTTP 状态 000，取不到任何 JSON。修复路径使用 kc console --api-only --no-browser 起真实服务，/api/v1/agent-runner/console/version 返回 HTTP 200 且响应体含 version 键，日志出现 Uvicorn running 且不含 ERROR，进程由脚本按 PID 停止。",
+      "explanation": "脚本先把真实产物目录整体移走制造缺产物条件，再分别通过真实 kc CLI 启动负控与显式 API-only 实例并用 curl 请求运行中的版本端点；判定的是真实 HTTP 响应与真实退出码，没有替换服务或以 TestClient 代替产品入口。",
+      "risks": "服务 lifespan 会启动 monitor scheduler，配置文件与 console 数据库限定在被 gitignore 的证据状态目录里，运行结束删除；证据只覆盖本地 API 路径，不覆盖远程仓库集成行为。端口为系统分配后释放，存在极低概率的并发抢占，脚本对结果做硬断言。",
+      "negative_control": "bash tasks/evidence/issue-293/scripts/rv-2-api-only.sh 的 NEGATIVE CONTROL 阶段：静态产物缺失时执行 uv run kc console --no-browser --port <空闲端口>，刻意省略 --api-only，并请求同一版本端点。",
+      "expected_fail": "负控命令退出码 1、版本端点 curl 退出码 7 且 HTTP 状态 000，拿不到含 version 的 JSON；若 --api-only 的放行逻辑失效或被误当作错误，本项的 200 + version JSON 断言立刻变红。",
+      "stdout_assertions": [
+        {"severity": "high", "pattern": "VERSION_HTTP_STATUS: 200", "must_match": true},
+        {"severity": "high", "pattern": "Uvicorn running", "must_match": true},
+        {"severity": "high", "pattern": "EXPECTED_FAIL", "must_match": true},
+        {"severity": "medium", "pattern": "version", "must_match": true},
+        {"severity": "high", "pattern": "API_ASSERTION_FAILED", "must_match": false},
+        {"severity": "high", "pattern": "Traceback", "must_match": false}
+      ]
+    },
+    {
+      "item_number": 3,
+      "item_name": "静态产物完整时默认启动并通过根路径返回面板 HTML",
+      "command": "bash tasks/evidence/issue-293/scripts/rv-3-static-panel.sh",
+      "evidence_files": ["rv-3-panel-served.txt"],
+      "output_summary": "just console-sync 构建成功并产出 src/backend/api/static/console/index.html。负控把已构建产物整体移走后用 --api-only 启动，/ 返回 404。恢复产物后默认 kc console 的 / 返回 HTTP 200、Content-Type 为 text/html 且响应体含 <html> 标记；uv build --wheel 产出的 wheel 内含 backend/api/static/console/index.html。",
+      "explanation": "脚本走仓库真实构建入口（just console-sync）生成面板，再用真实 CLI 起服务并用 curl 请求根路径断言状态码、Content-Type 与 HTML 标记；随后用 uv build 构建 wheel 并直接检查归档成员，证明发布产物同样满足新的入口文件判定。负控与通过结果都没有替换服务或伪造响应。",
+      "risks": "just console-sync 依赖本机 pnpm/Node 工具链，缺失时脚本在构建阶段即失败而不是静默跳过；wheel 成员检查只验证归档内容，不在隔离环境重装 wheel（该步骤由独立验收补做并记录在 verifier-response.txt）。产物目录先备份到被 gitignore 的证据目录，结束时还原。",
+      "negative_control": "bash tasks/evidence/issue-293/scripts/rv-3-static-panel.sh 中的真实变体：将已构建的 console 静态目录移走，再运行 uv run kc console --api-only --no-browser --port <空闲端口> 并请求 /。",
+      "expected_fail": "负控根路径返回 HTTP 404，不满足 item 3 要求的 200 + text/html 面板断言；若入口文件判定误伤完整产物（例如把已构建的目录判为不可用），默认启动会以退出码 1 拒绝监听，本项同样变红。",
+      "stdout_assertions": [
+        {"severity": "high", "pattern": "ROOT_HTTP_STATUS: 200", "must_match": true},
+        {"severity": "high", "pattern": "CONTENT_TYPE: text/html", "must_match": true},
+        {"severity": "high", "pattern": "WHEEL_ASSET: backend/api/static/console/index.html present", "must_match": true},
+        {"severity": "high", "pattern": "EXPECTED_FAIL", "must_match": true},
+        {"severity": "high", "pattern": "PANEL_ASSERTION_FAILED", "must_match": false},
+        {"severity": "high", "pattern": "Traceback", "must_match": false}
+      ]
+    },
+    {
+      "item_number": 4,
+      "item_name": "文档记录 api-only 语义并与实现一致，删除旧静默降级说明",
+      "command": "bash tasks/evidence/issue-293/scripts/rv-4-docs.sh",
+      "evidence_files": ["rv-4-api-only-docs.txt"],
+      "output_summary": "修复前基线（e6b60d94）文档 grep api-only 退出码为 1，且仍写着「源码开发模式（wheel 里没有静态产物）时，kc console 仍可启动并只提供 API」，也没有提到 index.html。当前文档 grep 返回退出码 0 并命中两处（启动命令示例与行为说明），旧静默降级说明已删除，并点名就绪信号是面板入口文件 index.html、覆盖「目录在但只同步了一半」的残缺产物；随包 kedacode-operator skill 的 references/setup-and-config.md 同样写明 index.html 就绪判定。",
+      "explanation": "脚本以 git show 读取修复前基线文档做同源对照，再对当前 docs/guides/agent-runner.md 与随包 operator skill 参考页执行清单里的 grep 与四条一致性断言：CLI 表面变化（--api-only）与就绪判定（入口文件）都必须在文档与随包 skill 中同步出现，否则文档与实现漂移。",
+      "risks": "断言基于文本命中，不解析 MkDocs 渲染后的页面；文档条目位置变化不会影响 grep 判定，但措辞改动需同步更新脚本里的期望片段。",
+      "negative_control": "bash tasks/evidence/issue-293/scripts/rv-4-docs.sh 的 NEGATIVE CONTROL 阶段：git show e6b60d94:docs/guides/agent-runner.md 后对其运行 grep -n 'api-only'，并对同一基线断言旧的静默降级说明存在、index.html 判定未记录。",
+      "expected_fail": "修复前基线 grep 退出码为 1、零命中，且旧静默降级文字仍在，文档项判红；当前文档若删掉 api-only 说明或补不上入口文件判定，CHECKLIST_GREP_EXIT_CODE 或后续四条断言即失败。",
+      "stdout_assertions": [
+        {"severity": "high", "pattern": "NEGATIVE_CONTROL_GREP_EXIT_CODE: 1", "must_match": true},
+        {"severity": "high", "pattern": "CHECKLIST_GREP_EXIT_CODE: 0", "must_match": true},
+        {"severity": "high", "pattern": "OBSOLETE_SILENT_FALLBACK_CLAIM=absent", "must_match": true},
+        {"severity": "medium", "pattern": "SKILL_REFERENCE_LINE:", "must_match": true},
+        {"severity": "high", "pattern": "DOC_ASSERTION_FAILED", "must_match": false},
+        {"severity": "high", "pattern": "Traceback", "must_match": false}
+      ]
+    }
+  ]
+}

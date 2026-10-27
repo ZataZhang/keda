@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 from backend.core.shared.models.agent_runner import (
@@ -14,6 +17,7 @@ from backend.core.shared.models.agent_runner import (
 )
 from backend.core.use_cases.agent_runner_dependencies import (
     _canonical_blockers_hash,
+    _delivery_dependencies_section_texts,
     build_waiting_comment,
     clear_dependency_waiting,
     evaluate_dependencies,
@@ -166,6 +170,240 @@ class TestParseDeliveryDependencies:
         result = parse_delivery_dependencies(prd_text)
         assert result.notes == "first"
 
+    def test_fenced_yaml_block_in_nested_section_is_not_parsed_as_fields(self) -> None:
+        """双层标题 + 围栏 YAML 示例的归档 PRD 形状必须回到 gate none，而不是硬失败。"""
+        prd_text = (
+            "## 8. Delivery Dependencies\n"
+            "### Delivery Dependencies\n"
+            "```yaml\n"
+            "delivery_dependencies:\n"
+            "  hard: []\n"
+            "  soft:\n"
+            "    - prd: P1-FEAT-20261020-011007-agent-availability-and-custom-registry\n"
+            "      reason: 可并行\n"
+            "  blocks: []\n"
+            "```\n"
+            "## 9. Acceptance Checklist\n"
+        )
+
+        assert parse_delivery_dependencies(prd_text) == DeliveryDependencyDeclaration()
+
+    def test_fenced_example_cannot_trigger_legacy_field(self) -> None:
+        """围栏里的旧格式示例不是声明，不能触发 task-group 报错。"""
+        prd_text = (
+            "## 8. Delivery Dependencies\n\n"
+            "```markdown\n"
+            "### Delivery Dependencies\n\n"
+            "- Group: nightly-cleanup-loop\n"
+            "- Depends on groups:\n"
+            "  - iar-loop-subystem\n"
+            "```\n\n"
+            "无硬依赖，可独立开工。\n"
+        )
+
+        assert parse_delivery_dependencies(prd_text) == DeliveryDependencyDeclaration()
+
+    def test_fenced_example_does_not_override_unfenced_declaration(self) -> None:
+        """小节里真实声明优先：围栏示例中的另一个值既不加依赖也不改 gate。"""
+        prd_text = (
+            "## 8. Delivery Dependencies\n"
+            "- Depends on tasks/issues: #41\n"
+            "- Gate type: hard\n"
+            "```markdown\n"
+            "- Depends on tasks/issues: #99\n"
+            "- Gate type: soft\n"
+            "- Notes: 示例说明\n"
+            "```\n"
+        )
+
+        result = parse_delivery_dependencies(prd_text)
+
+        assert result.depends_on_issues == (41,)
+        assert result.gate_type == "hard"
+        assert result.notes == ""
+
+    def test_fenced_heading_does_not_create_a_second_section(self) -> None:
+        """围栏里的假标题不是第二个小节，不能触发多小节丢弃判定。"""
+        prd_text = (
+            "## Delivery Dependencies\n"
+            "- Depends on tasks/issues: none\n"
+            "- Gate type: none\n\n"
+            "```markdown\n"
+            "## Delivery Dependencies\n\n"
+            "- Depends on tasks/issues: #42\n"
+            "- Gate type: hard\n"
+            "```\n"
+        )
+        declaration = parse_delivery_dependencies(prd_text)
+
+        assert declaration.depends_on_issues == ()
+        assert len(_delivery_dependencies_section_texts(prd_text)) == 1
+
+    def test_parses_real_m13_two_level_delivery_dependencies(self) -> None:
+        """M13 PRD 的真实双层写法应保留 hard 依赖和排序声明。"""
+        fixture_path = (
+            Path(__file__).resolve().parents[1]
+            / "tasks/pending/P1-FEAT-20261019-180938-m13-keda-vs-claude-workflow-evaluation.md"
+        )
+        prd_text = fixture_path.read_text(encoding="utf-8")
+
+        result = parse_delivery_dependencies(prd_text)
+
+        assert result.depends_on_issues == ()
+        assert result.depends_on_prds == (
+            "tasks/pending/P1-FEAT-20261019-140531-m13-golden-eval-baseline.md",
+        )
+        assert result.gate_type == "hard"
+        assert result.sequence == "via-main"
+
+    @pytest.mark.parametrize(
+        ("prd_text", "expected"),
+        [
+            (
+                "## Delivery Dependencies\n"
+                "- Depends on tasks/issues: #42\n"
+                "- Gate type: hard\n"
+                "- Sequence: via-main\n",
+                DeliveryDependencyDeclaration(
+                    depends_on_issues=(42,), gate_type="hard", sequence="via-main"
+                ),
+            ),
+            (
+                "## 8. Delivery Dependencies\n"
+                "### Delivery Dependencies\n"
+                "- Depends on tasks/issues: #43\n"
+                "- Gate type: hard\n"
+                "- Sequence: stack\n",
+                DeliveryDependencyDeclaration(
+                    depends_on_issues=(43,), gate_type="hard", sequence="stack"
+                ),
+            ),
+            (
+                "## 8. Delivery Dependencies\n"
+                "### Delivery Dependencies\n"
+                "- Depends on tasks/issues: #44\n"
+                "- Gate type: soft\n",
+                DeliveryDependencyDeclaration(
+                    depends_on_issues=(44,), gate_type="soft", sequence="via-main"
+                ),
+            ),
+            (
+                "## 8. Delivery Dependencies\n"
+                "### Delivery Dependencies\n"
+                "- Depends on tasks/issues: none\n"
+                "- Gate type: none\n",
+                DeliveryDependencyDeclaration(),
+            ),
+            (
+                "##### Delivery Dependencies\n"
+                "###### Nested fields\n"
+                "- Depends on tasks/issues: #45\n"
+                "- Gate type: hard\n"
+                "#### Next section\n"
+                "- Depends on tasks/issues: #99\n",
+                DeliveryDependencyDeclaration(depends_on_issues=(45,), gate_type="hard"),
+            ),
+        ],
+    )
+    def test_parses_delivery_dependency_heading_shapes(
+        self, prd_text: str, expected: DeliveryDependencyDeclaration
+    ) -> None:
+        """单层和双层标题下的门禁类型与 Sequence 均按声明解析。"""
+        assert parse_delivery_dependencies(prd_text) == expected
+
+    def test_matches_upstream_shared_delivery_dependency_samples_or_issue_fallback(
+        self,
+    ) -> None:
+        """逐例验证上游共享样例；样例同步前使用 Issue #315 的回归形状。"""
+        repository_root = Path(__file__).resolve().parents[1]
+        shared_samples_directory = repository_root / "tests/guards/shared"
+        shared_sample_paths = sorted(shared_samples_directory.glob("*delivery*dependenc*.json"))
+        if shared_sample_paths:
+            sample_cases: list[dict[str, object]] = []
+            for shared_sample_path in shared_sample_paths:
+                sample_payload = json.loads(shared_sample_path.read_text(encoding="utf-8"))
+                if isinstance(sample_payload, dict):
+                    sample_cases.extend(sample_payload["cases"])
+                else:
+                    sample_cases.extend(sample_payload)
+        else:
+            # TODO: 上游同步 Delivery Dependencies 共享样例后，删除本 Issue 的本地回退样例。
+            m13_fixture_path = (
+                repository_root
+                / "tasks/pending/P1-FEAT-20261019-180938-m13-keda-vs-claude-workflow-evaluation.md"
+            )
+            sample_cases = [
+                {
+                    "name": "m13-real-hard-via-main",
+                    "prd_fragment": m13_fixture_path.read_text(encoding="utf-8"),
+                    "expected": {
+                        "depends_on_issues": [],
+                        "depends_on_prds": [
+                            "tasks/pending/P1-FEAT-20261019-140531-m13-golden-eval-baseline.md"
+                        ],
+                        "gate_type": "hard",
+                        "sequence": "via-main",
+                        "notes": (
+                            "需要前置 PRD 已将 suite 校准、快照隔离、延后判分、重复结果账本及 "
+                            "v16 schema 落到主线；本 PRD 之后将账本推进到 v17。"
+                        ),
+                    },
+                },
+                {
+                    "name": "two-level-hard-stack",
+                    "prd_fragment": (
+                        "## 8. Delivery Dependencies\n### Delivery Dependencies\n"
+                        "- Depends on tasks/issues: #42\n- Gate type: hard\n"
+                        "- Sequence: stack\n"
+                    ),
+                    "expected": {
+                        "depends_on_issues": [42],
+                        "depends_on_prds": [],
+                        "gate_type": "hard",
+                        "sequence": "stack",
+                    },
+                },
+                {
+                    "name": "two-level-soft",
+                    "prd_fragment": (
+                        "## 8. Delivery Dependencies\n### Delivery Dependencies\n"
+                        "- Depends on tasks/issues: #43\n- Gate type: soft\n"
+                    ),
+                    "expected": {
+                        "depends_on_issues": [43],
+                        "depends_on_prds": [],
+                        "gate_type": "soft",
+                        "sequence": "via-main",
+                    },
+                },
+                {
+                    "name": "two-level-none",
+                    "prd_fragment": (
+                        "## 8. Delivery Dependencies\n### Delivery Dependencies\n"
+                        "- Depends on tasks/issues: none\n- Gate type: none\n"
+                    ),
+                    "expected": {
+                        "depends_on_issues": [],
+                        "depends_on_prds": [],
+                        "gate_type": "none",
+                        "sequence": "via-main",
+                    },
+                },
+            ]
+
+        for sample_case in sample_cases:
+            expected_declaration = sample_case["expected"]
+            assert isinstance(expected_declaration, dict), sample_case["name"]
+            assert parse_delivery_dependencies(sample_case["prd_fragment"]) == (
+                DeliveryDependencyDeclaration(
+                    depends_on_issues=tuple(expected_declaration["depends_on_issues"]),
+                    depends_on_prds=tuple(expected_declaration["depends_on_prds"]),
+                    gate_type=expected_declaration["gate_type"],
+                    sequence=expected_declaration["sequence"],
+                    notes=expected_declaration.get("notes", ""),
+                )
+            ), sample_case["name"]
+
 
 # ---------------------------------------------------------------------------
 # parse_dependency_marker
@@ -176,22 +414,25 @@ class TestParseDependencyMarker:
     def test_no_marker_returns_none(self) -> None:
         assert parse_dependency_marker("No markers here") is None
 
+    def test_retired_marker_name_returns_none(self) -> None:
+        assert parse_dependency_marker("<!-- iar:depends-on #42 -->") is None
+
     def test_parses_issue_numbers(self) -> None:
-        body = "<!-- iar:depends-on #42 #99 -->"
+        body = "<!-- kc:depends-on #42 #99 -->"
         result = parse_dependency_marker(body)
         assert result == DependencyDeclaration(issue_numbers=(42, 99))
 
     def test_legacy_group_token_only_returns_none(self) -> None:
-        body = "<!-- iar:depends-on group:alpha group:beta -->"
+        body = "<!-- kc:depends-on group:alpha group:beta -->"
         assert parse_dependency_marker(body) is None
 
     def test_mixed_marker_ignores_group_tokens(self) -> None:
-        body = "<!-- iar:depends-on #7 group:gamma #12 -->"
+        body = "<!-- kc:depends-on #7 group:gamma #12 -->"
         result = parse_dependency_marker(body)
         assert result == DependencyDeclaration(issue_numbers=(7, 12))
 
     def test_multiple_markers(self) -> None:
-        body = "<!-- iar:depends-on #1 -->\n<!-- iar:depends-on #2 -->"
+        body = "<!-- kc:depends-on #1 -->\n<!-- kc:depends-on #2 -->"
         result = parse_dependency_marker(body)
         assert result == DependencyDeclaration(issue_numbers=(1, 2))
 
@@ -206,7 +447,7 @@ class TestFormatDependencyMarker:
         assert format_dependency_marker() == ""
 
     def test_issues_only(self) -> None:
-        assert format_dependency_marker(issue_numbers=(42,)) == "<!-- iar:depends-on #42 -->"
+        assert format_dependency_marker(issue_numbers=(42,)) == "<!-- kc:depends-on #42 -->"
 
 
 # ---------------------------------------------------------------------------
@@ -225,8 +466,8 @@ class TestCommentDeduplication:
 
     def test_parse_latest_dependency_wait_marker(self) -> None:
         comments = [
-            "old\n<!-- iar:dependency-wait blockers=abc123 -->",
-            "new\n<!-- iar:dependency-wait blockers=def456 -->",
+            "old\n<!-- kc:dependency-wait blockers=abc123 -->",
+            "new\n<!-- kc:dependency-wait blockers=def456 -->",
         ]
         assert parse_latest_dependency_wait_marker(comments) == "def456"
 
@@ -435,7 +676,7 @@ class TestWaitingSideEffects:
         from tests.conftest import FakeGitHubClient
 
         client = FakeGitHubClient()
-        client.comment_issue(1, "first\n<!-- iar:dependency-wait blockers=abc -->")
+        client.comment_issue(1, "first\n<!-- kc:dependency-wait blockers=abc -->")
         issue = IssueSummary(number=1, title="T", url="", body="", labels=())
         # Same blockers as stored in comment above
         verdict = DependencyVerdict(
@@ -507,7 +748,7 @@ class TestBuildWaitingComment:
         comment = build_waiting_comment(verdict, 1, LabelConfig())
         assert "Issue #42" in comment
         assert "Issue #43" in comment
-        assert "iar:dependency-wait" in comment
+        assert "kc:dependency-wait" in comment
 
     def test_upstream_failure_warning(self) -> None:
         verdict = DependencyVerdict(
@@ -597,7 +838,7 @@ class TestResolveDependencies:
         assert issues == (1, 2)
 
     def test_explicit_marker_compat_ignores_group_token(self) -> None:
-        prd = "<!-- iar:depends-on #5 group:g3 -->\n# PRD\n"
+        prd = "<!-- kc:depends-on #5 group:g3 -->\n# PRD\n"
         gate, issues, sequence = _resolve_dependencies(prd)
         assert issues == (5,)
 
@@ -649,7 +890,7 @@ class TestResolveDependencies:
         assert issues == (42,)
 
     def test_explicit_stack_marker_preserved_without_sequence_field(self) -> None:
-        prd = '<!-- iar:depends-on #5 mode="stack" -->\n# PRD\n'
+        prd = '<!-- kc:depends-on #5 mode="stack" -->\n# PRD\n'
         gate, issues, sequence = _resolve_dependencies(prd)
         assert issues == (5,)
         assert sequence == "stack"

@@ -579,7 +579,7 @@ class BrowsableDirectoryEntry:
     name: str
     path: str
     is_git_repo: bool
-    has_iar_config: bool
+    has_repository_config: bool
     already_registered: bool
     suggested_repo_id: str
 
@@ -800,8 +800,10 @@ class IBacklogStore(ABC):
         ...
 
 
-#: 同步间隔合法区间（秒）：界面上 1–60 分钟的可调范围。
-MONITOR_SYNC_INTERVAL_MIN_SECONDS = 60
+#: 同步间隔合法区间（秒）：界面上 5–60 分钟的可调范围。下限 5 分钟是配额约束：
+#: 每轮同步要对每个仓库逐个 PRD 查 3~5 次 GitHub REST，再密就会挤占 daemon 与 kc
+#: 共用的 5000 次/小时额度。
+MONITOR_SYNC_INTERVAL_MIN_SECONDS = 300
 MONITOR_SYNC_INTERVAL_MAX_SECONDS = 3600
 
 #: 快照读取接口的状态取值。

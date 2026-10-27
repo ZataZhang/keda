@@ -8,9 +8,11 @@ agent: auto
 labels:
   - loop/cleanup
 publish_prd: true
+output: prd
 queue_ready: true
 run_now: true
 timezone: Asia/Shanghai
+managed_by: agent-daemon
 slug: nightly-cleanup-keda
 # pre_command uses a single-line shell command; the simple-YAML frontmatter parser
 # does not support `|` block scalars. Use `;` to chain so both KEY=value lines
@@ -53,13 +55,48 @@ pre_command: "gh run list --limit 1 --json conclusion -q '.[0].conclusion // \"n
 
 ## 3. 文档同步
 
-- **触发条件**：`rg "mkdocs.yml|docs/"` 命中路径对比发现：① `docs/` 引用了源码里不存在的 import 路径 / 类名 / 模块；② `mkdocs.yml` 缺少新加入的 `docs/*.md` 条目。
+目标是补漏：功能修改时仍须同步文档，夜间只沿近期 diff 检查受影响说明，不做全库重写。
+构建通过只能证明构建层面的有效性，不能证明行为描述符合代码。
+
+### 检查范围与进度
+
+1. 在本轮 Issue 评论记录检查开始时目标 base 分支的完整提交 SHA，作为固定上界 `head_sha`。
+   读取该 loop 最近已关闭 Issue 的文档检查记录，找最近有效的 `checked_through_sha`；
+   必须确认它是 `head_sha` 的祖先。不要把 Issue 的关闭或 PR 合并本身当作文档检查完成。
+2. 有有效检查点时，从它之后按 base 分支 first-parent 顺序检查，到固定上界为止；
+   使用包含合并结果的提交 diff（相对 first parent），避免漏掉合并提交引入的变更。
+   首次运行没有检查点时，以最近 7 天作为初始范围，并披露更早历史未覆盖。
+   记录读取失败或检查点不再是祖先时，标记范围未确认，不悄悄当作首次运行重置进度。
+3. 每轮最多检查最早的 20 个待查提交。逐提交查看 diff，再沿变更符号、入口、配置键与
+   直接调用方定位相关文档；单提交过大可分功能检查，未查完前不得越过该提交推进检查点。
+   不因代码和文档同一次提交就推定已同步，也不因没有同名文档就判定无需更新。
+4. `checked_through_sha` 只推进到连续完整核对的最后一个提交；记录剩余范围，下轮接续。
+   有发现但尚未修复时可记录已检查进度，但必须携带未解决项及对应 Issue/PR，后续轮次先
+   核对是否已修复或由开放任务承接，避免既丢问题又重复开修复 PR。
+
+### 核对与修复
+
+- **触发条件**：发现有源码依据的行为遗漏或矛盾，例如入口、参数及默认值、配置来源、
+  状态转换、持久化、请求范围、缓存与刷新节奏、权限和失败处理描述不符；或者发现相关
+  文档的失效路径、符号、链接及应纳入导航的正式页面缺项。
 - **行动指引**：
-  1. 跑 `uv run mkdocs build --strict` 看 broken link / missing file 报告；
-  2. 修 `docs/guides/*.md` 与 `mkdocs.yml` 同步补齐；
-  3. 再跑一次 `mkdocs build --strict` 确认无 warning；
-  4. 出 draft PR，标题前缀 `cleanup(docs):`。
-- **无事可做判定**：`mkdocs build --strict` 全绿，无 missing / broken 报告。
+  1. 从生产入口追踪当前实现。按 feature-docs 的方法维护已有指南或功能地图；技能不可用时
+     仍按本节执行，不将历史 PRD、旧文档或测试替身当成实现事实。
+  2. 每个发现写明“提交/变更符号 → 文档位置 → 当前描述或遗漏 → 实现依据 → 影响”，
+     优先修正会误导使用、运维或代码修改的问题，不为措辞偏好制造改动。
+  3. 修正相关权威文档和引用；仅新增、移动正式页面或导航确有缺项时更新 `mkdocs.yml`。
+     不修改生产代码来迎合旧文档，也不扩成无关文档整理。
+  4. 跑 `git diff --check` 和 `uv run mkdocs build --strict`，并回看修改后的行为描述与
+     源码是否一致；纯文档改动不声称完成产品行为验证。出 draft PR，标题前缀 `cleanup(docs):`。
+- **无事可做判定**：已完成所声明范围的行为核对，没有成立且未被其他任务承接的文档差异，
+  并完成适用的链接、导航与构建检查。仅构建通过、检查被跳过或依赖不可用均不代表无差异。
+
+### 每轮记录
+
+无论发现与否，均在本轮 Issue 留下文档检查记录：`head_sha`、起点及首次覆盖限制、
+`checked_through_sha`（未检查则不推进）、已查提交与相关文档、发现及源码证据、未解决项及
+承接链接、剩余范围、实际验证结果，以及检查耗时。没有适用文档也需简述判断依据。
+区分“已核对无差异”“发现待修复”“部分检查”“未执行”，不编造覆盖率。
 
 ## 4. 依赖升级
 
@@ -75,8 +112,9 @@ pre_command: "gh run list --limit 1 --json conclusion -q '.[0].conclusion // \"n
 
 - **当晚只做 1 个 scope**，优先级：`CI > refactor > docs > deps`。
 - **判定流程**：
-  1. 先按上节触发条件逐个判定（CI 看 `last_ci_status` → refactor 看扫描 → docs 看 mkdocs → deps 看 `outdated_count`）。
-  2. 命中最高优先级的 scope 即为当晚目标；跳过更低优先级。
+  1. 先按上节触发条件逐个判定（CI 看 `last_ci_status` → refactor 看扫描 → docs 看近期 diff 的行为核对及构建 → deps 看 `outdated_count`）。
+  2. 命中最高优先级的 scope 即为当晚目标；跳过更低优先级。文档被跳过时仍记录“未执行”及原因，
+     不推进文档检查点；下轮继续累计范围，不按当天时间窗口丢弃积压。
   3. 4 类都未命中 → `gh issue close <N> --comment "no actionable cleanup tonight"`，**不**出 PR。
 - **scope 标注**：选定 scope 后，在 worktree 内执行：
   ```bash

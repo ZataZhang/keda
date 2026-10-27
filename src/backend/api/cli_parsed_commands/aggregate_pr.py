@@ -42,7 +42,7 @@ def run_aggregate_pr_command(ctx: ParsedCommandContext) -> int:
     repository = require_single_repository_target("pr aggregate", contexts)
     from backend.api import cli as _cli
 
-    _cli.require_iar_repository_initialized(repository.repo_path, ctx.process_runner)
+    _cli.require_repository_initialized(repository.repo_path, ctx.process_runner)
     _ensure_gh_auth_or_prompt(repository.repo_path, ctx.process_runner)
     github_client = ctx.github_client_factory(repository.repo_path)
     try:

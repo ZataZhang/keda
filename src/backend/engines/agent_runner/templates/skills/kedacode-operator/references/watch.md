@@ -25,18 +25,23 @@ The same `kc logs --issue <N>` stream carries three structured markers. There is
 
 | Marker | Means | Read it as |
 |---|---|---|
-| `[iar-invocation-start]` | A real top-level Agent subprocess call is about to start | This call exists; a matching end marker with the same `invocation=` should follow, or the gap needs explaining |
-| `[iar-invocation-end]` | That call returned, raised, or was killed on timeout | Its outcome, wall-clock duration, and model facts |
-| `[iar-invocation-coverage-incomplete]` | Writing the observation ledger degraded (at most once per run) | This run's call list **may be incomplete**. Business results are unaffected, but do not quote the list as complete evidence |
+| `[kc-invocation-start]` | A real top-level Agent subprocess call is about to start | This call exists; a matching end marker with the same `invocation=` should follow, or the gap needs explaining |
+| `[kc-invocation-end]` | That call returned, raised, or was killed on timeout | Its outcome, wall-clock duration, and model facts |
+| `[kc-invocation-coverage-incomplete]` | Writing the observation ledger degraded (at most once per run) | This run's call list **may be incomplete**. Business results are unaffected, but do not quote the list as complete evidence |
 
 Start and end share one identity prefix, so attribution in concurrent runs comes from fields, never from adjacent lines:
 
 ```text
-[iar-invocation-start] invocation=inv-3f9a1c7b2d40 run=keda-main#issue-242#20261008T015223Z-a91f4c0b7e33 issue=242 attempt=1 phase=implementation role=implementer executor=claude model_requested=claude-sonnet-4-5 retry_of=- retry_reason=- log=agent-runner/issues/keda-main/issue-242-20261008-015223.log
-[iar-invocation-end] invocation=inv-3f9a1c7b2d40 run=keda-main#issue-242#20261008T015223Z-a91f4c0b7e33 issue=242 attempt=1 phase=implementation role=implementer executor=claude outcome=ok exit_code=0 duration_s=1843.207 model_requested=claude-sonnet-4-5 model_reported=claude-sonnet-4-5-20250929 model_source=executor_report retry_of=- failure_category=-
+[kc-invocation-start] invocation=inv-3f9a1c7b2d40 run=keda-main#issue-242#20261008T015223Z-a91f4c0b7e33 issue=242 attempt=1 phase=implementation role=implementer executor=claude model_requested=claude-sonnet-4-5 retry_of=- retry_reason=- log=agent-runner/issues/keda-main/issue-242-20261008-015223.log
+[kc-invocation-end] invocation=inv-3f9a1c7b2d40 run=keda-main#issue-242#20261008T015223Z-a91f4c0b7e33 issue=242 attempt=1 phase=implementation role=implementer executor=claude outcome=ok exit_code=0 duration_s=1843.207 model_requested=claude-sonnet-4-5 model_reported=claude-sonnet-4-5-20250929 model_source=executor_report retry_of=- failure_category=-
 ```
 
 Fields worth knowing:
+
+调用详情中的 `model_config_snapshot` 单独保存启动前默认配置的 `model_id`、`source`
+和 `is_alias`；`reported_model` / `model_source` 仍只表达执行器自报事实。没有自报或
+明确下发模型时，Stats 可按具体配置模型估价并披露来源；动态别名只提示待确认，仍归为
+未识别模型。快照不改变实际模型选择，不用于反推历史。配置源或覆盖参数不确定时会缺省。
 
 - `invocation=` — unique per real subprocess call; pair start/end on it.
 - `run=` — `<repo_id>#issue-<N>#<UTC timestamp>-<random 12 hex>`. **Does not depend on a PRD**, so PRD-less Issues are covered too.

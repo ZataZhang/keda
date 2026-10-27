@@ -16,8 +16,12 @@ from backend.api.cli import main
 from backend.api.cli_parser import build_parser
 from backend.api.cli_typer_app import app, config_app
 from backend.core.shared.models import product_identity
+from backend.core.shared.models.agent_runner import IssueSummary
+from tests.conftest import FakeGitHubClient
 from backend.engines.agent_runner import state_home_migration
 from tests.support.agent_runner import init_git_repo
+
+_TEST_GITHUB_CLIENT = FakeGitHubClient()
 
 LEGACY_PINNED_CONFIG = """\
 [agent_runner.repository]
@@ -51,10 +55,15 @@ def _isolated_global_config_and_home(tmp_path: Path, monkeypatch: pytest.MonkeyP
     """隔离配置、家目录和进程扫描，真实机器状态不会影响 CLI 断言。"""
     isolated_config_path = tmp_path / "isolated-config.toml"
     isolated_config_path.write_text("[agent_runner]\n", encoding="utf-8")
-    monkeypatch.setenv(product_identity.LEGACY_ENV_PREFIX + "CONFIG", str(isolated_config_path))
+    monkeypatch.setenv("KEDACODE_CONFIG", str(isolated_config_path))
     fake_home_path = tmp_path / "home"
     fake_home_path.mkdir()
     monkeypatch.setenv("HOME", str(fake_home_path))
+    _TEST_GITHUB_CLIENT.set_repository_items([])
+    monkeypatch.setattr(
+        "backend.api.cli.create_github_client",
+        lambda _repo_path, _process_runner: _TEST_GITHUB_CLIENT,
+    )
     # 真实进程扫描由 test_state_home_migration.py 覆盖；这里验证 CLI/文件迁移，
     # 不让 psutil 的宿主机权限或其他工作树里运行的 kc 进程污染隔离 HOME。
     monkeypatch.setattr(
@@ -68,15 +77,13 @@ def _isolated_global_config_and_home(tmp_path: Path, monkeypatch: pytest.MonkeyP
 def _init_git_repository(tmp_path: Path, name: str, config_text: str | None = None) -> Path:
     repo_path = init_git_repo(tmp_path / name)
     if config_text is not None:
-        (repo_path / product_identity.LEGACY_REPOSITORY_CONFIG_FILENAME).write_text(
-            config_text, encoding="utf-8"
-        )
+        (repo_path / ".iar.toml").write_text(config_text, encoding="utf-8")
     return repo_path
 
 
 def _make_legacy_state_dir(home_path: Path) -> Path:
     """在隔离家目录里造一个有内容的旧状态目录。"""
-    legacy_state_path = home_path / product_identity.LEGACY_STATE_DIR_NAME
+    legacy_state_path = home_path / ".iar"
     legacy_state_path.mkdir(parents=True, exist_ok=True)
     (legacy_state_path / "config.toml").write_text(
         '[agent_runner.console]\nhistory_db_path = "~/.iar/console.db"\n', encoding="utf-8"
@@ -104,6 +111,37 @@ def test_config_migrate_dry_run_prints_the_plan_and_writes_nothing(
     assert not (repo_path / ".kedacode.toml").exists()
 
 
+def test_config_migrate_defaults_to_preview_for_github_markers(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """不传 ``--apply`` 时列出 GitHub 标记迁移计划但不写评论。"""
+    repo_path = _init_git_repository(tmp_path, "target")
+    _TEST_GITHUB_CLIENT.set_repository_items(
+        [
+            IssueSummary(
+                number=35,
+                title="Open migration target",
+                url="https://github.com/example/repo/issues/35",
+                body="<!-- iar:depends-on #29 -->",
+                labels=(),
+            )
+        ]
+    )
+
+    assert main(["config", "migrate", "--repo", str(repo_path)]) == 0
+
+    preview_output = capsys.readouterr().out
+    assert "Issue/PR #35 · body · iar:depends-on × 1 · would update" in preview_output
+    assert "Dry run: nothing was written." in preview_output
+    assert _TEST_GITHUB_CLIENT.get_issue_body(35) is None
+
+    assert main(["config", "migrate", "--apply", "--repo", str(repo_path)]) == 0
+
+    apply_output = capsys.readouterr().out
+    assert "Issue/PR #35 · body · iar:depends-on × 1 · updated" in apply_output
+    assert _TEST_GITHUB_CLIENT.get_issue_body(35) == "<!-- kc:depends-on #29 -->"
+
+
 def test_config_migrate_renames_the_config_and_is_idempotent(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -112,7 +150,7 @@ def test_config_migrate_renames_the_config_and_is_idempotent(
     legacy_config_path = repo_path / ".iar.toml"
     new_config_path = repo_path / ".kedacode.toml"
 
-    assert main(["config", "migrate", "--repo", str(repo_path)]) == 0
+    assert main(["config", "migrate", "--apply", "--repo", str(repo_path)]) == 0
 
     first_output = capsys.readouterr().out
     assert "Removed 5 value(s)" in first_output
@@ -123,7 +161,7 @@ def test_config_migrate_renames_the_config_and_is_idempotent(
     assert not legacy_config_path.exists()
     assert new_config_path.read_text(encoding="utf-8") == CONFIG_WITHOUT_PINS
 
-    assert main(["config", "migrate", "--repo", str(repo_path)]) == 0
+    assert main(["config", "migrate", "--apply", "--repo", str(repo_path)]) == 0
 
     second_output = capsys.readouterr().out
     assert "already named .kedacode.toml" in second_output
@@ -140,7 +178,7 @@ def test_config_migrate_defaults_to_the_current_repository(
     nested_path.mkdir(parents=True)
     monkeypatch.chdir(nested_path)
 
-    assert main(["config", "migrate"]) == 0
+    assert main(["config", "migrate", "--apply"]) == 0
 
     assert not (repo_path / ".iar.toml").exists()
     assert (repo_path / ".kedacode.toml").read_text(encoding="utf-8") == CONFIG_WITHOUT_PINS
@@ -164,7 +202,7 @@ timeout_seconds = 120
 """,
     )
 
-    assert main(["config", "migrate", "--repo", str(repo_path)]) == 0
+    assert main(["config", "migrate", "--apply", "--repo", str(repo_path)]) == 0
 
     captured_output = capsys.readouterr().out
     assert "Kept 1 value(s)" in captured_output
@@ -183,6 +221,8 @@ def test_config_migrate_skips_an_uninitialized_repository(
     command_args = ["config", "migrate", "--repo", str(repo_path)]
     if dry_run:
         command_args.append("--dry-run")
+    else:
+        command_args.append("--apply")
 
     assert main(command_args) == 0
 
@@ -217,13 +257,15 @@ def test_config_migrate_outside_a_repository_handles_the_local_step_only(
     outside_path.mkdir()
     monkeypatch.chdir(outside_path)
 
-    assert main(["config", "migrate"]) == 0
+    assert main(["config", "migrate", "--apply"]) == 0
 
     captured_output = capsys.readouterr().out
     assert "Not inside a repository" in captured_output
     new_state_path = _isolated_global_config_and_home / product_identity.STATE_DIR_NAME
     assert new_state_path.is_dir()
-    assert legacy_state_path.is_symlink()
+    # 旧目录搬走后不再保留指向新目录的符号链接（见 state_home_migration）。
+    assert not legacy_state_path.exists()
+    assert not legacy_state_path.is_symlink()
 
 
 def test_config_migrate_rejects_repo_id(capsys: pytest.CaptureFixture[str]) -> None:
@@ -239,32 +281,32 @@ def test_config_migrate_rejects_repo_id(capsys: pytest.CaptureFixture[str]) -> N
 def test_config_migrate_reports_invalid_toml_without_touching_it(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """配置不是合法 TOML：退出码 1，文件不动，错误正文里的方括号不吞字。"""
+    """配置不是合法 TOML：预检失败且旧文件不改名，错误正文方括号不吞字。"""
     broken_text = "[agent_runner\nbroken = "
     repo_path = _init_git_repository(tmp_path, "target", broken_text)
 
-    assert main(["config", "migrate", "--repo", str(repo_path)]) == 1
+    assert main(["config", "migrate", "--apply", "--repo", str(repo_path)]) == 1
 
     assert "not valid TOML" in capsys.readouterr().err
-    assert (repo_path / ".kedacode.toml").read_text(encoding="utf-8") == broken_text
+    assert (repo_path / ".iar.toml").read_text(encoding="utf-8") == broken_text
+    assert not (repo_path / ".kedacode.toml").exists()
 
 
-def test_config_migrate_moves_the_state_home_and_leaves_a_link(
+def test_config_migrate_moves_the_state_home_without_a_link(
     tmp_path: Path,
     _isolated_global_config_and_home: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """仓库内执行时两步都做：状态目录搬走、旧位置成链接、仓库配置改名。"""
+    """仓库内执行时两步都做：状态目录搬走、旧路径移除、仓库配置改名。"""
     home_path = _isolated_global_config_and_home
     legacy_state_path = _make_legacy_state_dir(home_path)
     repo_path = _init_git_repository(tmp_path, "target", CONFIG_WITHOUT_PINS)
 
-    assert main(["config", "migrate", "--repo", str(repo_path)]) == 0
+    assert main(["config", "migrate", "--apply", "--repo", str(repo_path)]) == 0
 
     new_state_path = home_path / product_identity.STATE_DIR_NAME
     assert new_state_path.is_dir() and not new_state_path.is_symlink()
-    assert legacy_state_path.is_symlink()
-    assert os.readlink(legacy_state_path) == product_identity.STATE_DIR_NAME
+    assert not legacy_state_path.exists()
     assert (new_state_path / "config.toml").read_text(encoding="utf-8").count("~/.kedacode") == 1
     assert (repo_path / ".kedacode.toml").is_file()
     captured_output = capsys.readouterr().out
@@ -289,11 +331,12 @@ def test_config_migrate_refuses_while_a_runner_is_alive(
     (lock_dir_path / "demo.lock").write_text(f"{owner_pid}\n", encoding="utf-8")
     repo_path = _init_git_repository(tmp_path, "target", CONFIG_WITHOUT_PINS)
 
-    for arguments in (["--dry-run"], []):
+    for arguments in (["--dry-run"], ["--apply"]):
         assert main(["config", "migrate", "--repo", str(repo_path), *arguments]) == 5
 
         captured_output = capsys.readouterr().out
-        assert "Refusing to migrate the local state directory" in captured_output
+        if arguments == ["--apply"]:
+            assert "Refusing to migrate the local state directory" in captured_output
         assert str(owner_pid) in captured_output
 
     assert legacy_state_path.is_dir() and not legacy_state_path.is_symlink()
@@ -331,7 +374,7 @@ def test_config_migrate_refuses_when_both_config_names_exist(
         '[agent_runner.repository]\nid = "from-new"\n', encoding="utf-8"
     )
 
-    assert main(["config", "migrate", "--repo", str(repo_path)]) == 5
+    assert main(["config", "migrate", "--apply", "--repo", str(repo_path)]) == 5
 
     captured_output = capsys.readouterr().out
     assert "Refusing to migrate" in captured_output

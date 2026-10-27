@@ -316,7 +316,6 @@ def _run_daemon_rounds(
             contexts=[_context(tmp_path)],
             interval=100,
             agent="claude",
-            max_issues=1,
             process_runner=FakeProcessRunner(),
             github_client_factory=lambda _repo_path: FakeGitHubClient(),
             api_budget=api_budget,

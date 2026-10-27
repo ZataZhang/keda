@@ -1,7 +1,7 @@
-"""本机状态目录迁移：把旧 ``~/.iar``（legacy-alias）搬到 ``~/.kedacode``，旧位置留一个相对链接。
+"""本机状态目录迁移：把旧 ``~/.iar`` 搬到 ``~/.kedacode``，不保留旧路径链接。
 
-改名后程序**双读**两套位置（新名优先），所以不迁移也能继续用；本模块负责用户
-显式请求的那次搬迁。搬迁会动到管理终端的历史库、仓库注册表与锁文件，因此硬规则
+运行时只使用 ``~/.kedacode``；本模块负责用户显式请求的那次搬迁。搬迁会动到管理
+终端的历史库、仓库注册表与锁文件，因此硬规则
 是「有任何自有进程在跑就拒绝动手」：锁文件里存活的 PID、``processes.json`` 里存活
 的受管记录、psutil 扫到的以三个自有名字之一启动的进程，任一命中即零改动退出。
 
@@ -35,6 +35,10 @@ from backend.infrastructure.config.toml_section_editor import mutate_toml_docume
 _PROCESS_REGISTRY_FILE_NAME = "processes.json"
 #: 每个仓库一份 daemon 单实例锁，锁文件内容只有一个 PID。
 _DAEMON_LOCK_DIR_NAME = "daemon-locks"
+#: 仅供显式 ``kc config migrate`` 使用；运行时不再探测旧状态目录。
+_LEGACY_STATE_DIR_NAME = ".iar"
+#: 迁移时仍需识别旧命令进程，避免与它并发搬迁状态目录。
+_MIGRATION_COMMAND_NAMES = ("kc", "kedacode", "iar")
 
 StateHomeOutcome = Literal[
     "migrated",
@@ -45,7 +49,6 @@ StateHomeOutcome = Literal[
     "legacy_link_in_way",
     "cross_device",
     "move_failed",
-    "symlink_failed",
     "scanner_unavailable",
 ]
 """迁移结论：``migrated`` / ``already_migrated`` / ``nothing_to_do`` 之外都是拒绝或失败。"""
@@ -58,7 +61,7 @@ CONFLICT_OUTCOMES: frozenset[StateHomeOutcome] = frozenset(
 
 #: 这些结论意味着搬迁中途失败，磁盘状态已经不确定（或扫描能力缺失）。
 FAILURE_OUTCOMES: frozenset[StateHomeOutcome] = frozenset(
-    {"cross_device", "move_failed", "symlink_failed", "scanner_unavailable"}
+    {"cross_device", "move_failed", "scanner_unavailable"}
 )
 """已执行到一半或无法安全判定、必须报失败的结论集合。"""
 
@@ -71,14 +74,13 @@ class StateHomeMigrationResult:
         outcome: 结论，见 :data:`StateHomeOutcome`。
         home_path: 本次判定所用的家目录。
         new_state_path: 新状态目录路径（``~/.kedacode``）。
-        legacy_state_path: 旧状态目录路径（``~/.iar``，legacy-alias）。
+        legacy_state_path: 显式迁移使用的旧状态目录路径（``~/.iar``）。
         effective_source_path: 实际被搬走的路径；无需搬迁时为 ``None``。
         blocking_pid_set: 占用中的进程号（按升序），仅 ``occupied`` 时非空。
         plan_lines: 预演或报告用的一行式计划描述。
         rewritten_config_path: 被改写路径值的全局配置文件；未改写时为 ``None``。
         rewritten_value_count: 改写掉的旧路径取值个数。
         legacy_path_file_count: 其他仍写着旧状态路径的文件数（只报告、不改动）。
-        manual_symlink_command: 建链失败时给用户手工补建的命令。
         message: 面向用户的结论说明。
     """
 
@@ -92,7 +94,6 @@ class StateHomeMigrationResult:
     rewritten_config_path: Path | None = None
     rewritten_value_count: int = 0
     legacy_path_file_count: int = 0
-    manual_symlink_command: str | None = None
     message: str = ""
 
 
@@ -218,10 +219,14 @@ def _process_home_path(process_handle: Any) -> Path | None:
 
 
 def _launches_own_command(cmdline: list[str] | tuple[str, ...]) -> bool:
-    """命令行是否真的以自有可执行文件启动（argv[0] 或带路径分隔符的自有名字）。"""
+    """命令行是否以 KedaCode 或待迁移的旧版入口启动。"""
     for index, raw_token in enumerate(cmdline):
         token_text = str(raw_token)
-        if not product_identity.is_own_command_name(token_text):
+        command_name = Path(token_text).name.lower()
+        for extension in (".exe", ".cmd", ".bat"):
+            if command_name.endswith(extension):
+                command_name = command_name[: -len(extension)]
+        if command_name not in _MIGRATION_COMMAND_NAMES:
             continue
         if index == 0 or "/" in token_text or "\\" in token_text:
             return True
@@ -231,8 +236,8 @@ def _launches_own_command(cmdline: list[str] | tuple[str, ...]) -> bool:
 def _pids_from_command_scan(target_home_path: Path) -> frozenset[int] | None:
     """扫描以自有命令名启动、且服务于本次待迁移家目录的进程；扫不动时返回 ``None``。
 
-    命中条件是 argv[0] 就是自有名字，或命令行里出现了**带路径分隔符**的自有可执行文件
-    （控制台脚本 ``/…/bin/python /…/bin/iar run …`` 这种形态，旧命令名是 legacy-alias）。裸词匹配会让 ``vim kc``
+    命中条件是 argv[0] 就是 KedaCode 命令名，或命令行里出现了**带路径分隔符**的
+    KedaCode / 旧版 IAR 可执行文件（例如 ``/…/bin/python /…/bin/iar run …``）。裸词匹配会让 ``vim kc``
     这类无关进程误判为占用，因此不做。自身与祖先进程排除。另一个家目录（临时 HOME 沙
     箱、别的账号）里的自有进程写不到本次要搬的状态目录，因此不阻止搬迁；家目录读不到
     时按同家目录处理，宁可拒绝动手。
@@ -306,7 +311,7 @@ def _detect_occupancy(
 def _legacy_state_path_prefix_list(home_path: Path) -> tuple[tuple[str, str], ...]:
     """返回 ``(旧前缀, 新前缀)`` 配对，覆盖配置里可能出现的家目录写法。"""
     home_text = str(home_path)
-    legacy_dir_name = product_identity.LEGACY_STATE_DIR_NAME
+    legacy_dir_name = _LEGACY_STATE_DIR_NAME
     new_dir_name = product_identity.STATE_DIR_NAME
     return tuple(
         (f"{placeholder}/{legacy_dir_name}", f"{placeholder}/{new_dir_name}")
@@ -317,8 +322,8 @@ def _legacy_state_path_prefix_list(home_path: Path) -> tuple[tuple[str, str], ..
 def rewrite_legacy_state_path_text(value_text: str, home_path: Path) -> str | None:
     """把写着旧状态目录的路径取值改写到新状态目录，未命中时返回 ``None``。
 
-    只处理以旧状态目录为**前缀**的路径（``~/.iar/…``、``$HOME/.iar``，均为 legacy-alias、
-    ``${HOME}/.iar/…``（legacy-alias）与家目录绝对形式，避免误改路径中间恰好含有 ``.iar``
+    只处理以旧状态目录为**前缀**的路径（``~/.iar/…``、``$HOME/.iar``、
+    ``${HOME}/.iar/…`` 与家目录绝对形式，避免误改路径中间恰好含有 ``.iar``
     的取值。
 
     Args:
@@ -439,9 +444,8 @@ def _count_other_files_with_legacy_paths(
     if not state_dir_path.is_dir():
         return 0
     legacy_text_list = [
-        f"{placeholder}/{product_identity.LEGACY_STATE_DIR_NAME}"
-        for placeholder in ("~", "$HOME", "${HOME}")
-    ] + [str(home_path / product_identity.LEGACY_STATE_DIR_NAME)]
+        f"{placeholder}/{_LEGACY_STATE_DIR_NAME}" for placeholder in ("~", "$HOME", "${HOME}")
+    ] + [str(home_path / _LEGACY_STATE_DIR_NAME)]
     hit_file_count = 0
     scanned_file_count = 0
     for candidate_path in sorted(state_dir_path.rglob("*")):
@@ -477,13 +481,17 @@ def _state_dir_shape(
 ) -> tuple[Literal["migrate", "already", "absent", "separate", "link_in_way"], Path, Path]:
     """判定新旧状态目录的形状，返回 ``(形状, 新路径, 旧路径)``。"""
     new_state_path = home_path / product_identity.STATE_DIR_NAME
-    legacy_state_path = home_path / product_identity.LEGACY_STATE_DIR_NAME
+    legacy_state_path = home_path / _LEGACY_STATE_DIR_NAME
     new_is_dir = new_state_path.is_dir()
     legacy_is_symlink = legacy_state_path.is_symlink()
     legacy_is_dir = legacy_state_path.is_dir()
     if new_is_dir:
-        if legacy_is_symlink and product_identity.resolve_state_home(home_path).source == "new":
-            return "already", new_state_path, legacy_state_path
+        if legacy_is_symlink:
+            try:
+                if legacy_state_path.samefile(new_state_path):
+                    return "already", new_state_path, legacy_state_path
+            except OSError:
+                pass
         if legacy_is_dir:
             return "separate", new_state_path, legacy_state_path
         return "already", new_state_path, legacy_state_path
@@ -500,7 +508,7 @@ def migrate_state_home(
     dry_run: bool = False,
     occupancy_probe: Callable[[tuple[Path, ...], Path], OccupancyReport] | None = None,
 ) -> StateHomeMigrationResult:
-    """把旧状态目录搬到新位置并在旧位置留相对链接（预演时只给计划）。
+    """把旧状态目录搬到新位置并移除旧路径（预演时只给计划）。
 
     Args:
         home_path: 家目录；省略时取 :meth:`pathlib.Path.home`。
@@ -513,9 +521,7 @@ def migrate_state_home(
     """
     resolved_home_path = Path.home() if home_path is None else Path(home_path)
     shape, new_state_path, legacy_state_path = _state_dir_shape(resolved_home_path)
-    candidate_state_dir_tuple = (
-        (new_state_path, legacy_state_path) if shape == "separate" else (legacy_state_path,)
-    )
+    candidate_state_dir_tuple = (new_state_path, legacy_state_path)
     probe = _detect_occupancy if occupancy_probe is None else occupancy_probe
     occupancy_report = probe(candidate_state_dir_tuple, resolved_home_path)
     if not occupancy_report.scanner_available:
@@ -544,6 +550,41 @@ def migrate_state_home(
         )
 
     if shape == "already":
+        old_path_points_to_new = False
+        if legacy_state_path.is_symlink():
+            try:
+                old_path_points_to_new = legacy_state_path.samefile(new_state_path)
+            except OSError:
+                old_path_points_to_new = False
+        if old_path_points_to_new:
+            remove_link_plan = (f"remove compatibility link {legacy_state_path}",)
+            if dry_run:
+                return StateHomeMigrationResult(
+                    outcome="already_migrated",
+                    home_path=resolved_home_path,
+                    new_state_path=new_state_path,
+                    legacy_state_path=legacy_state_path,
+                    plan_lines=remove_link_plan,
+                    message="dry run: the existing old-path link would be removed.",
+                )
+            try:
+                legacy_state_path.unlink()
+            except OSError as exc:
+                return StateHomeMigrationResult(
+                    outcome="move_failed",
+                    home_path=resolved_home_path,
+                    new_state_path=new_state_path,
+                    legacy_state_path=legacy_state_path,
+                    message=f"could not remove the old-path link {legacy_state_path}: {exc}",
+                )
+            return StateHomeMigrationResult(
+                outcome="already_migrated",
+                home_path=resolved_home_path,
+                new_state_path=new_state_path,
+                legacy_state_path=legacy_state_path,
+                plan_lines=remove_link_plan,
+                message=f"state already lives in {new_state_path}; removed {legacy_state_path}.",
+            )
         return StateHomeMigrationResult(
             outcome="already_migrated",
             home_path=resolved_home_path,
@@ -584,10 +625,7 @@ def migrate_state_home(
             ),
         )
 
-    plan_line_tuple = (
-        f"move {legacy_state_path} -> {new_state_path}",
-        f"link {legacy_state_path} -> {product_identity.STATE_DIR_NAME} (relative)",
-    )
+    plan_line_tuple = (f"move {legacy_state_path} -> {new_state_path}",)
     if dry_run:
         # 搬迁前 config.toml 还在旧目录里，预演按旧目录的位置统计。
         rewritten_value_count = count_legacy_state_path_values(
@@ -631,37 +669,12 @@ def migrate_state_home(
             message=failure_message,
         )
 
-    symlink_error: OSError | None = None
-    try:
-        os.symlink(product_identity.STATE_DIR_NAME, legacy_state_path)
-    except OSError as exc:
-        symlink_error = exc
-
     rewritten_config_path, rewritten_value_count = _rewrite_global_config_paths(
         new_state_path, resolved_home_path
     )
     legacy_path_file_count = _count_other_files_with_legacy_paths(
         new_state_path, resolved_home_path, skip_relative_path="config.toml"
     )
-
-    if symlink_error is not None:
-        manual_command = f"ln -s {product_identity.STATE_DIR_NAME} {legacy_state_path}"
-        return StateHomeMigrationResult(
-            outcome="symlink_failed",
-            home_path=resolved_home_path,
-            new_state_path=new_state_path,
-            legacy_state_path=legacy_state_path,
-            effective_source_path=legacy_state_path,
-            rewritten_config_path=rewritten_config_path,
-            rewritten_value_count=rewritten_value_count,
-            legacy_path_file_count=legacy_path_file_count,
-            manual_symlink_command=manual_command,
-            message=(
-                f"moved {legacy_state_path} to {new_state_path} but could not create the "
-                f"compatibility link ({symlink_error}). The move is not rolled back; create "
-                f"the link yourself with: {manual_command}"
-            ),
-        )
 
     return StateHomeMigrationResult(
         outcome="migrated",
@@ -673,7 +686,7 @@ def migrate_state_home(
         rewritten_config_path=rewritten_config_path,
         rewritten_value_count=rewritten_value_count,
         legacy_path_file_count=legacy_path_file_count,
-        message=f"moved {legacy_state_path} to {new_state_path} and linked the old path to it.",
+        message=f"moved {legacy_state_path} to {new_state_path}; the old path was removed.",
     )
 
 

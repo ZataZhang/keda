@@ -8,7 +8,7 @@ from backend.core.shared.models.agent_runner import ReviewEventMarker
 
 
 _EVENT_MARKER_PATTERN = re.compile(
-    r"<!--\s*iar:event\s+"
+    r"<!--\s*kc:event\s+"
     r"version=(?P<version>\d+)\s+"
     r"phase=(?P<phase>[\w_]+)\s+"
     r"cycle=(?P<cycle>\d+)"
@@ -35,14 +35,14 @@ _REWORK_COMPLETION_PHASES = {
 
 
 # 交接记录（recovery 耗尽时写到 Issue 上的那条失败上下文评论）的定位锚点。
-# 沿用仓库既有的 ``iar:*`` 隐藏 marker 约定：它只是可确定性解析的键值元数据，
+# 沿用仓库既有的 ``kc:*`` 隐藏 marker 约定：它只是可确定性解析的键值元数据，
 # 不是标签、不是状态枚举，也不参与任何门禁判定。
 #
-# ``checkpoint`` 刻意收得比 ``iar:event`` 的 ``head=`` 宽（不限 [a-f0-9]+）：marker
+# ``checkpoint`` 刻意收得比 ``kc:event`` 的 ``head=`` 宽（不限 [a-f0-9]+）：marker
 # 解析不出时下一轮会按"没有上一轮上下文"处理，也就悄悄退回到本功能要消除的"从零反推"。
 # 定位能力比取值校验更重要，因此只要是单个非空白 token 就认。
 _FAILURE_CONTEXT_MARKER_PATTERN = re.compile(
-    r"<!--\s*iar:failure-context\s+"
+    r"<!--\s*kc:failure-context\s+"
     r"checkpoint=(?P<checkpoint>[^\s>]+)\s+"
     r"attempts=(?P<attempts>\d+)"
     r"(?:\s+verifier=(?P<verifier>[^\s>]+))?"
@@ -58,7 +58,7 @@ def format_failure_context_marker(
     verifier_state: str,
     evidence_dir: str,
 ) -> str:
-    """格式化交接记录用的隐藏 ``iar:failure-context`` marker。
+    """格式化交接记录用的隐藏 ``kc:failure-context`` marker。
 
     marker 只携带供下一轮定位与展示用的键值元数据，失败结论本身写在同一条评论的
     Markdown 正文里。``checkpoint_sha`` 为 ``None`` 表示本轮没有留下可安全推送的
@@ -71,7 +71,7 @@ def format_failure_context_marker(
         f"verifier={verifier_state}",
         f"evidence={evidence_dir}",
     ]
-    return f"<!-- iar:failure-context {' '.join(marker_parts)} -->"
+    return f"<!-- kc:failure-context {' '.join(marker_parts)} -->"
 
 
 def has_failure_context_marker(comment_body: str) -> bool:
@@ -80,7 +80,7 @@ def has_failure_context_marker(comment_body: str) -> bool:
 
 
 def find_latest_failure_context_comment(comment_bodies: list[str]) -> str | None:
-    """返回最近一条带 ``iar:failure-context`` marker 的 Issue 评论正文。
+    """返回最近一条带 ``kc:failure-context`` marker 的 Issue 评论正文。
 
     latest-wins 与 :func:`parse_latest_event_marker` 同构：按时间倒序取第一条命中。
     只取一条是刻意的限量——Issue 上的历史评论既有噪音也有早已修复的旧失败，全量
@@ -102,7 +102,7 @@ DELIBERATION_QUESTION_PHASE = "deliberation_question_posted"
 
 
 def _parse_event_marker(comment_body: str) -> ReviewEventMarker | None:
-    """Parse the first iar:event marker from one Issue comment."""
+    """Parse the first kc:event marker from one Issue comment."""
     match = _EVENT_MARKER_PATTERN.search(comment_body)
     if not match:
         return None
@@ -138,7 +138,7 @@ def _parse_event_marker(comment_body: str) -> ReviewEventMarker | None:
 
 
 def parse_latest_event_marker(comments: list[str]) -> ReviewEventMarker | None:
-    """Parse the latest iar:event marker from Issue comments."""
+    """Parse the latest kc:event marker from Issue comments."""
     for comment_body in reversed(comments):
         marker = _parse_event_marker(comment_body)
         if marker is not None:
@@ -161,7 +161,7 @@ def extract_pr_branch_from_comments(comment_bodies: list[str]) -> str | None:
 
 
 def iter_event_markers(comments: list[str]) -> list[ReviewEventMarker]:
-    """Return every parsed iar:event marker in chronological order.
+    """Return every parsed kc:event marker in chronological order.
 
     供派生视图统计轮次等场景使用（例如按 ``post_pr_rework_requested`` +
     ``action=repair_pr_branch`` 计数 CI 修复轮数）；不做去重、不做 latest-wins。
@@ -178,7 +178,7 @@ def parse_latest_event_marker_for_phases(
     comments: list[str],
     phases: set[str],
 ) -> ReviewEventMarker | None:
-    """Parse the latest iar:event marker whose phase is in ``phases``.
+    """Parse the latest kc:event marker whose phase is in ``phases``.
 
     Used by gates that need the most recent event of a specific kind (for
     example deduplicating ``validation_passed`` audit comments) without
@@ -215,12 +215,12 @@ def parse_latest_pending_rework_marker(
 
 
 # ── CI/CD 自动修复策略 marker（单 PRD 三态覆盖）────────────────────────────
-# 与 ``iar:event`` / ``iar:failure-context`` 同属 ``iar:*`` 隐藏 marker 约定：
+# 与 ``kc:event`` / ``kc:failure-context`` 同属 ``kc:*`` 隐藏 marker 约定：
 # 可确定性解析的键值元数据，写在对应 GitHub Issue 的评论里，latest-wins。
 # 合法取值 ``inherit``（未设置/清除覆盖）/ ``on``（强制开启）/ ``off``（强制关闭）。
 
 _CI_AUTO_REPAIR_POLICY_MARKER_PATTERN = re.compile(
-    r"<!--\s*iar:ci-auto-repair-policy\s+" r"value=(?P<value>inherit|on|off)" r"\s*-->"
+    r"<!--\s*kc:ci-auto-repair-policy\s+" r"value=(?P<value>inherit|on|off)" r"\s*-->"
 )
 
 VALID_CI_AUTO_REPAIR_POLICY_VALUES = ("inherit", "on", "off")
@@ -230,7 +230,7 @@ def format_ci_auto_repair_policy_marker(value: str) -> str:
     """格式化单 PRD CI/CD 自动修复策略的隐藏 marker。"""
     if value not in VALID_CI_AUTO_REPAIR_POLICY_VALUES:
         raise ValueError(f"非法的 CI 自动修复策略值: {value!r}")
-    return f"<!-- iar:ci-auto-repair-policy value={value} -->"
+    return f"<!-- kc:ci-auto-repair-policy value={value} -->"
 
 
 def parse_latest_ci_auto_repair_policy(comments: list[str]) -> str | None:
@@ -261,7 +261,7 @@ def format_event_marker(
     pr_comments_count: int | None = None,
     blocked_paths: tuple[str, ...] = (),
 ) -> str:
-    """Format a hidden iar:event marker for Issue comments."""
+    """Format a hidden kc:event marker for Issue comments."""
     parts = [
         "version=1",
         f"phase={phase}",
@@ -285,4 +285,4 @@ def format_event_marker(
         parts.append(f"pr_comments_count={pr_comments_count}")
     if blocked_paths:
         parts.append(f"blocked_paths={','.join(blocked_paths)}")
-    return f"<!-- iar:event {' '.join(parts)} -->"
+    return f"<!-- kc:event {' '.join(parts)} -->"

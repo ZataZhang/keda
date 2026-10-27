@@ -31,7 +31,7 @@ import uuid
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, cast
@@ -42,6 +42,11 @@ from backend.core.shared.interfaces.runner_console import (
     InvocationEventRecord,
 )
 from backend.core.shared.models.agent_runner import CommandResult
+from backend.core.shared.models.agent_model_observation import (
+    AGENT_MODEL_CONFIG_SNAPSHOT_ATTR,
+    AgentModelConfigSnapshot,
+)
+from backend.core.use_cases.agent_runner_failure import AgentUnavailableError
 from backend.core.use_cases.agent_runner_output_routing import active_issue_log_binding
 
 _logger = logging.getLogger(__name__)
@@ -50,12 +55,12 @@ _logger = logging.getLogger(__name__)
 # 闭集常量（标记文本与结构化字段共用，改这里就是改协议）
 # ---------------------------------------------------------------------------
 
-#: 既有 Issue 日志里的调用开始标记（与 ``[iar-attempt-end]`` 同族，可精确 grep）。
-INVOCATION_START_MARKER = "[iar-invocation-start]"
+#: 既有 Issue 日志里的调用开始标记（与 ``[kc-attempt-end]`` 同族，可精确 grep）。
+INVOCATION_START_MARKER = "[kc-invocation-start]"
 #: 既有 Issue 日志里的调用结束标记。
-INVOCATION_END_MARKER = "[iar-invocation-end]"
+INVOCATION_END_MARKER = "[kc-invocation-end]"
 #: 观测自身降级时写入既有 Issue 日志的覆盖不完整标记。
-INVOCATION_COVERAGE_INCOMPLETE_MARKER = "[iar-invocation-coverage-incomplete]"
+INVOCATION_COVERAGE_INCOMPLETE_MARKER = "[kc-invocation-coverage-incomplete]"
 
 EVENT_INVOCATION_STARTED = "invocation_started"
 EVENT_INVOCATION_FINISHED = "invocation_finished"
@@ -194,6 +199,9 @@ def classify_invocation_failure(exc: BaseException) -> str:
     if isinstance(exc, subprocess.TimeoutExpired):
         return FAILURE_TIMEOUT
     if isinstance(exc, FileNotFoundError):
+        return FAILURE_AGENT_UNAVAILABLE
+    if isinstance(exc, AgentUnavailableError):
+        # 起跑边界把 FileNotFoundError 收敛成领域异常后，观测口径仍是"agent 不可用"。
         return FAILURE_AGENT_UNAVAILABLE
     if isinstance(exc, subprocess.CalledProcessError):
         return FAILURE_NONZERO_EXIT
@@ -348,7 +356,7 @@ class InvocationTraceContext:
 
 
 _ACTIVE_TRACE_CONTEXT: ContextVar[InvocationTraceContext | None] = ContextVar(
-    "iar_invocation_trace_context", default=None
+    "kc_invocation_trace_context", default=None
 )
 
 
@@ -709,6 +717,11 @@ def finish_invocation(
         MODEL_SOURCE_EXECUTOR_REPORT if reported_model is not None else MODEL_SOURCE_UNKNOWN
     )
     token_usage = result.token_usage if result is not None else None
+    model_config_snapshot = (
+        getattr(result, "model_config_snapshot", None)
+        if result is not None
+        else getattr(exc, AGENT_MODEL_CONFIG_SNAPSHOT_ATTR, None)
+    )
     detail: dict[str, Any] = {
         **_identity_fields(context, observation.invocation_id, request),
         "parent_invocation_id": None,
@@ -720,6 +733,11 @@ def finish_invocation(
         )
         or None,
         "reported_model": reported_model,
+        "model_config_snapshot": (
+            asdict(model_config_snapshot)
+            if isinstance(model_config_snapshot, AgentModelConfigSnapshot)
+            else None
+        ),
         "model_source": model_source,
         "resumed_session_id": sanitize_identifier(request.resumed_session_id, fallback="") or None,
         "started_at": observation.started_at,

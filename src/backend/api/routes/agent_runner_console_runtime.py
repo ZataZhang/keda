@@ -34,6 +34,8 @@ from backend.core.shared.interfaces.desktop_companion import (
 )
 from backend.core.use_cases.agent_runner_factory import (
     create_console_store,
+    create_process_supervisor,
+    create_registry_editor,
     load_fresh_agent_runner_settings,
     resolve_repository_targets_with_diagnostics,
 )
@@ -103,13 +105,23 @@ def _trusted_console_origin(request: Request) -> str:
 
     Raises:
         HTTPException: 403 或 503——见 :func:`_bound_loopback_server`，以及缺少
-            ``Origin``、origin 与当前 Console 的 scheme/host 别名/端口不一致。
+            ``Origin`` / ``Referer``、origin 与当前 Console 的
+            scheme/host 别名/端口不一致。
     """
     bound_host, bound_port = _bound_loopback_server(request)
 
     raw_origin = (request.headers.get("origin") or "").strip()
+    # WebKit（pywebview 的 companion 窗口）对同源 POST 可能不带 Origin，或写成
+    # "null"。此时退回同源 Referer 校验：跨源页面带的是自己的 Referer，一样会被
+    # 下面的 host/port 校验拒绝，安全性不降级。
+    from_origin_header = bool(raw_origin) and raw_origin.lower() != "null"
+    if not from_origin_header:
+        raw_origin = (request.headers.get("referer") or "").strip()
     if not raw_origin:
-        raise HTTPException(status_code=403, detail="缺少 Origin，无法确认同源，拒绝启动桌面窗口。")
+        raise HTTPException(
+            status_code=403,
+            detail="缺少 Origin / Referer，无法确认同源，拒绝该桌面窗口操作。",
+        )
     parsed = urlsplit(raw_origin)
     try:
         request_port = parsed.port or (443 if parsed.scheme == "https" else 80)
@@ -118,19 +130,21 @@ def _trusted_console_origin(request: Request) -> str:
         # 不能让伪造的 Origin 头把请求打成 500。
         raise HTTPException(
             status_code=403,
-            detail=f"Origin {raw_origin!r} 端口无法解析，拒绝启动桌面窗口。",
+            detail=f"Origin {raw_origin!r} 端口无法解析，拒绝该桌面窗口操作。",
         ) from exc
+    # Referer 天然带页面路径（/app/companion/），因此只在 Origin 头路径必须为空。
+    path_is_origin_shaped = (not from_origin_header) or parsed.path in {"", "/"}
     if (
         parsed.scheme != "http"
         or (parsed.hostname or "") not in _LOOPBACK_HOSTS
         or request_port != bound_port
-        or parsed.path not in {"", "/"}
+        or not path_is_origin_shaped
         or parsed.query
         or parsed.fragment
     ):
         raise HTTPException(
             status_code=403,
-            detail=f"Origin {raw_origin!r} 与当前本机 Console 不一致，拒绝启动桌面窗口。",
+            detail=f"Origin {raw_origin!r} 与当前本机 Console 不一致，拒绝该桌面窗口操作。",
         )
     return _format_loopback_origin(bound_host, bound_port)
 
@@ -180,8 +194,31 @@ def get_runtime_tasks() -> dict[str, Any]:
         prd_lifecycle_store=store,
         enabled_repo_ids=enabled_repo_ids,
     )
+    try:
+        supervisor = create_process_supervisor()
+        process_records = [
+            *supervisor.list_processes(),
+            *supervisor.list_unmanaged_processes(create_registry_editor().list_repositories()),
+        ]
+        review_repo_ids = {
+            record.repo_id
+            for record in process_records
+            if record.kind == "review_daemon" and record.status == "running"
+        }
+    except Exception:  # noqa: BLE001 - 探活失败必须显示未知，不能假报未启动。
+        _logger.warning("读取 PR 值守进程失败", exc_info=True)
+        review_repo_ids = None
     payload = asdict(summary)
-    payload["tasks"] = [{**asdict(task), "task_key": task.task_key} for task in summary.tasks]
+    payload["tasks"] = [
+        {
+            **asdict(task),
+            "task_key": task.task_key,
+            "review_daemon_running": (
+                task.repo_id in review_repo_ids if review_repo_ids is not None else None
+            ),
+        }
+        for task in summary.tasks
+    ]
     return payload
 
 

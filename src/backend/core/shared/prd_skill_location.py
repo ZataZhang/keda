@@ -17,10 +17,11 @@ skill 的事"，而消费它的一般是 ``core/shared`` 下的模块（如 PRD 
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 
 from backend.core.shared.models import product_identity
-from backend.core.shared.models.agent_spec import BUILTIN_AGENT_SPECS
+from backend.core.shared.models.agent_spec import BUILTIN_AGENT_SPECS, AgentSpec
 
 _PRD_SKILL_PATH_ENV_SUFFIX = "PRD_SKILL_PATH"
 _SKILLS_DIR_ENV_SUFFIX = "SKILLS_DIR"
@@ -38,7 +39,7 @@ def keda_owned_skills_root(user_home_path: Path | None = None) -> Path:
     目录归 agent / 用户所有，随时可能被删除或替换（实测：本机三个 agent 目录里的
     ``prd`` 都是指向共享副本的符号链接）。``kc init`` 会把一份副本写进产品自己的
     状态目录下，解析时优先取它，于是"用户删掉 agent 里的 prd skill"不再影响
-    runner 正常工作。状态目录本身按新旧两个名字双读，因此迁移前后的机器都指向同一处。
+    runner 正常工作。状态目录统一使用 ``~/.kedacode``。
 
     Args:
         user_home_path: 用户主目录覆盖，主要供测试使用；``None`` 时取实际主目录。
@@ -49,7 +50,11 @@ def keda_owned_skills_root(user_home_path: Path | None = None) -> Path:
     return product_identity.state_home(user_home_path) / _SKILLS_ROOT_DIRECTORY_NAME
 
 
-def default_prd_skill_candidate_paths(user_home_path: Path | None = None) -> tuple[Path, ...]:
+def default_prd_skill_candidate_paths(
+    user_home_path: Path | None = None,
+    *,
+    agents: Mapping[str, AgentSpec] | None = None,
+) -> tuple[Path, ...]:
     """按优先级返回 prd skill 的候选 ``SKILL.md`` 路径。
 
     优先级：``SKILLS_DIR`` 产品环境变量覆盖（设置时即唯一候选）→ 产品自有
@@ -60,6 +65,8 @@ def default_prd_skill_candidate_paths(user_home_path: Path | None = None) -> tup
 
     Args:
         user_home_path: 用户主目录覆盖，主要供测试使用；``None`` 时取实际主目录。
+        agents: 生效 agent 注册表（内置 + ``[agent_runner.agents.*]`` 自定义条目）；
+            ``None`` 时只遍历内置注册表。
 
     Returns:
         候选路径元组（均不保证存在）。
@@ -74,7 +81,7 @@ def default_prd_skill_candidate_paths(user_home_path: Path | None = None) -> tup
     ]
     candidate_skill_paths.extend(
         skills_dir / _PRD_SKILL_RELATIVE_PATH
-        for agent_spec in BUILTIN_AGENT_SPECS.values()
+        for agent_spec in (agents if agents is not None else BUILTIN_AGENT_SPECS).values()
         if (skills_dir := agent_spec.user_skills_dir(effective_home_path)) is not None
     )
     return tuple(candidate_skill_paths)

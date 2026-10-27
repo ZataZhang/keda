@@ -24,14 +24,17 @@ import {
 import { explainImpactStatus } from "@/components/backlog/prd-progress-strip";
 import { fetchRunExecutionDetails } from "@/lib/api/console";
 import { fetchPrdProgress } from "@/lib/api/backlog";
+import { openExternalUrl } from "@/lib/open-external";
 import type {
   BacklogPrdProgress,
+  AnomalyType,
   RuntimeTaskEntry,
   RunInvocationDetailEntry,
 } from "@/lib/api/types";
-import { formatLocalDateTime } from "@/lib/utils";
+import { cn, formatLocalDateTime } from "@/lib/utils";
 
-import { runtimeStatusPresentation } from "./runtime-task-list";
+import { RuntimeTaskPhaseDescription, RuntimeTaskPhase } from "./runtime-task-phase";
+import { RuntimeTaskDuration, RuntimeTaskObservation, RuntimeTaskWatch, runtimeStatusPresentation } from "./runtime-task-list";
 
 /** `worktree_status` 独有原因：`impact_status` 里没有对应取值，只能在这里补。 */
 const WORKTREE_REASON: Record<string, string> = {
@@ -54,6 +57,37 @@ function describeImpactUnavailability(progress: BacklogPrdProgress): string | un
     WORKTREE_REASON[progress.worktree_status] ??
     explainImpactStatus(progress) ??
     `影响树暂不可用（${progress.impact_status}）`
+  );
+}
+
+interface RuntimeTaskAnomaliesProps {
+  /** 当前监控快照检测到的异常类型。 */
+  anomalyTypes: AnomalyType[];
+  /** 紧凑布局（桌面小窗）使用更小字号并允许长标识换行。 */
+  compact?: boolean;
+}
+
+/**
+ * 独立呈现监控异常，避免把状态不一致告警显示成任务失败原因。
+ *
+ * @param props - 监控快照提供的异常类型与展示密度。
+ * @returns 有异常时返回告警说明，否则返回 ``null``。
+ */
+export function RuntimeTaskAnomalies({ anomalyTypes, compact = false }: RuntimeTaskAnomaliesProps) {
+  if (anomalyTypes.length === 0) {
+    return null;
+  }
+  return (
+    <p
+      className={
+        compact
+          ? "text-[11px] break-words text-amber-700 dark:text-amber-300"
+          : "text-amber-700 dark:text-amber-300"
+      }
+      data-testid="runtime-task-anomalies"
+    >
+      监控告警（与任务状态分开）：{anomalyTypes.join("、")}
+    </p>
   );
 }
 
@@ -228,6 +262,8 @@ const IMPACT_WEAK_SIGNAL_HINT =
 interface RuntimeTaskDetailProps {
   /** 当前选中任务。 */
   task: RuntimeTaskEntry;
+  /** 追加到根容器的布局类；抽屉等受高度约束的宿主用它撑满可用空间。 */
+  className?: string;
 }
 
 /**
@@ -236,8 +272,8 @@ interface RuntimeTaskDetailProps {
  * @param props - 选中任务。
  * @returns 详情面板（观测摘要、触达弱信号、实时输出、折叠的结构化调用）。
  */
-export function RuntimeTaskDetail({ task }: RuntimeTaskDetailProps) {
-  const presentation = runtimeStatusPresentation(task.status);
+export function RuntimeTaskDetail({ task, className }: RuntimeTaskDetailProps) {
+  const presentation = runtimeStatusPresentation(task.status, task.waiting_reason);
   const [invocationsOpen, setInvocationsOpen] = useState(false);
   const [invocations, setInvocations] = useState<RunInvocationDetailEntry[] | null>(null);
   const [invocationError, setInvocationError] = useState<string | null>(null);
@@ -288,22 +324,46 @@ export function RuntimeTaskDetail({ task }: RuntimeTaskDetailProps) {
   ]);
 
   const identity = `${task.repo_display_name ?? task.repo_id}#${task.issue_number}`;
+  const issueUrl = task.issue_url;
+  const prUrl = task.pr_url;
 
   return (
-    <div className="flex min-h-0 flex-col gap-3" data-testid="runtime-task-detail">
+    <div className={cn("flex min-h-0 flex-col gap-3", className)} data-testid="runtime-task-detail">
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="flex flex-wrap items-center gap-2 text-sm">
             <Badge variant={presentation.variant}>{presentation.label}</Badge>
+            <RuntimeTaskPhase task={task} />
+            <RuntimeTaskWatch task={task} />
             <span>{identity}</span>
-            {task.issue_url ? (
+            {issueUrl ? (
               <a
-                href={task.issue_url}
+                href={issueUrl}
                 target="_blank"
                 rel="noreferrer"
+                onClick={(event) => {
+                  event.preventDefault();
+                  void openExternalUrl(issueUrl);
+                }}
                 className="text-xs font-normal text-sky-700 underline dark:text-sky-300"
+                data-testid="runtime-detail-issue-link"
               >
                 Issue 原文
+              </a>
+            ) : null}
+            {prUrl ? (
+              <a
+                href={prUrl}
+                target="_blank"
+                rel="noreferrer"
+                onClick={(event) => {
+                  event.preventDefault();
+                  void openExternalUrl(prUrl);
+                }}
+                className="text-xs font-normal text-sky-700 underline dark:text-sky-300"
+                data-testid="runtime-detail-pr-link"
+              >
+                PR {task.pr_number ? `#${task.pr_number}` : "原文"}
               </a>
             ) : null}
           </CardTitle>
@@ -312,11 +372,13 @@ export function RuntimeTaskDetail({ task }: RuntimeTaskDetailProps) {
           ) : null}
         </CardHeader>
         <CardContent className="flex flex-col gap-2 text-xs text-slate-600 dark:text-slate-300">
-          <p data-testid="runtime-task-status-reason">分桶依据：{task.status_reason ?? "未提供"}</p>
+          <p data-testid="runtime-task-status-reason">状态来源：{task.status_reason ?? "未提供"}</p>
+          <RuntimeTaskPhaseDescription task={task} />
+          <RuntimeTaskObservation task={task} />
+          <RuntimeTaskAnomalies anomalyTypes={task.anomaly_types ?? []} />
           <div className="flex flex-wrap gap-x-4 gap-y-1">
-            <span>阶段：{task.phase ?? "未知"}</span>
             <span>
-              执行：{task.agent ?? "未知"}
+              最近执行：{task.agent ?? "未知"}
               {task.preset ? ` · preset ${task.preset}` : ""}
               {task.model ? ` · 模型 ${task.model}` : ""}
             </span>
@@ -327,10 +389,10 @@ export function RuntimeTaskDetail({ task }: RuntimeTaskDetailProps) {
             </span>
             <span>
               结束：
-              {task.finished_at ? formatLocalDateTime(task.finished_at) : "尚未结束"}
+              {task.finished_at ? formatLocalDateTime(task.finished_at) : task.started_at ? "未记录结束时间" : "无运行记录"}
             </span>
-            <span>耗时：{formatLifecycleDuration(task.duration_seconds)}</span>
-            <span>终态：{task.last_outcome ?? "未收口"}</span>
+            <RuntimeTaskDuration task={task} />
+            <span>运行记录终态：{task.last_outcome ?? (task.started_at ? "未收口" : "无运行记录")}</span>
           </div>
           {task.prd_path ? (
             <p className="text-slate-500">

@@ -258,7 +258,7 @@ def test_process_ready_issue_continues_from_partial_commit(
     """已有部分提交但门禁未过时，应重跑 agent 续作（带 continuation prompt），不硬失败。"""
     from backend.core.shared.models.agent_runner import AgentCommitResult
     from backend.core.use_cases import agent_runner_issue_handlers as handlers
-    from backend.core.use_cases import run_agent_once
+    from backend.core.use_cases import run_agent_execution_loop
     from backend.core.use_cases.run_agent_once import PrdDeliveryError
 
     issue = make_prd_issue("tasks/pending/example.md")
@@ -277,11 +277,11 @@ def test_process_ready_issue_continues_from_partial_commit(
 
     def _fake_run_agent_until_committed(**kwargs: object) -> AgentCommitResult:
         captured["called"] = True
-        captured["prompt_override"] = kwargs.get("prompt_override")
+        captured["prompt_override"] = getattr(kwargs.get("request"), "prompt_override", None)
         return AgentCommitResult(verification_results=[], attempt_results=[])
 
     monkeypatch.setattr(
-        run_agent_once, "run_agent_until_committed", _fake_run_agent_until_committed
+        run_agent_execution_loop, "execute_agent_request", _fake_run_agent_until_committed
     )
 
     finish_called: dict[str, bool] = {}
@@ -312,7 +312,7 @@ def test_process_ready_issue_checkpoints_on_failure(
 ) -> None:
     """run_agent_until_committed 耗尽重试时，应 checkpoint 在途进度后再抛出。"""
     from backend.core.use_cases import agent_runner_issue_handlers as handlers
-    from backend.core.use_cases import run_agent_once
+    from backend.core.use_cases import run_agent_execution_loop, run_agent_once
     from backend.core.use_cases.run_agent_once import MaxRetriesExceededError
 
     issue = make_prd_issue("tasks/pending/example.md")
@@ -327,7 +327,7 @@ def test_process_ready_issue_checkpoints_on_failure(
     def _raise_max(**_kwargs: object) -> None:
         raise MaxRetriesExceededError([])
 
-    monkeypatch.setattr(run_agent_once, "run_agent_until_committed", _raise_max)
+    monkeypatch.setattr(run_agent_execution_loop, "execute_agent_request", _raise_max)
 
     checkpoint_called: dict[str, object] = {}
 
@@ -522,7 +522,7 @@ def test_next_claim_reflows_latest_handoff_record_into_continuation_prompt(
     """
     from backend.core.shared.models.agent_runner import AgentCommitResult
     from backend.core.use_cases import agent_runner_issue_handlers as handlers
-    from backend.core.use_cases import run_agent_once
+    from backend.core.use_cases import run_agent_execution_loop
     from backend.core.use_cases.run_agent_once import PrdDeliveryError
 
     issue = make_prd_issue("tasks/pending/example.md")
@@ -531,7 +531,7 @@ def test_next_claim_reflows_latest_handoff_record_into_continuation_prompt(
 
     latest_handoff = "\n".join(
         [
-            "<!-- iar:failure-context checkpoint=a1b2c3d4 attempts=3 verifier=red "
+            "<!-- kc:failure-context checkpoint=a1b2c3d4 attempts=3 verifier=red "
             "evidence=tasks/evidence/example -->",
             "## Agent Runner Handoff — Recovery Budget Exhausted",
             "- Checkpoint commit: `a1b2c3d4`",
@@ -539,7 +539,7 @@ def test_next_claim_reflows_latest_handoff_record_into_continuation_prompt(
         ]
     )
     stale_handoff = (
-        "<!-- iar:failure-context checkpoint=deadbee attempts=9 verifier=red -->\n"
+        "<!-- kc:failure-context checkpoint=deadbee attempts=9 verifier=red -->\n"
         "rv-1 not satisfied: the legacy export path was never wired."
     )
 
@@ -560,11 +560,11 @@ def test_next_claim_reflows_latest_handoff_record_into_continuation_prompt(
     captured: dict[str, object] = {}
 
     def _fake_run_agent_until_committed(**kwargs: object) -> AgentCommitResult:
-        captured["prompt_override"] = kwargs.get("prompt_override")
+        captured["prompt_override"] = getattr(kwargs.get("request"), "prompt_override", None)
         return AgentCommitResult(verification_results=[], attempt_results=[])
 
     monkeypatch.setattr(
-        run_agent_once, "run_agent_until_committed", _fake_run_agent_until_committed
+        run_agent_execution_loop, "execute_agent_request", _fake_run_agent_until_committed
     )
     monkeypatch.setattr(handlers, "_finish_implementation_publication", lambda **k: None)
 
@@ -592,7 +592,7 @@ def test_next_claim_without_any_handoff_record_continues_without_context(
     """Issue 上从未写过交接记录时，续作照常进行、不报错，prompt 里也不伪造上下文。"""
     from backend.core.shared.models.agent_runner import AgentCommitResult
     from backend.core.use_cases import agent_runner_issue_handlers as handlers
-    from backend.core.use_cases import run_agent_once
+    from backend.core.use_cases import run_agent_execution_loop
     from backend.core.use_cases.run_agent_once import PrdDeliveryError
 
     issue = make_prd_issue("tasks/pending/example.md")
@@ -613,11 +613,11 @@ def test_next_claim_without_any_handoff_record_continues_without_context(
     captured: dict[str, object] = {}
 
     def _fake_run_agent_until_committed(**kwargs: object) -> AgentCommitResult:
-        captured["prompt_override"] = kwargs.get("prompt_override")
+        captured["prompt_override"] = getattr(kwargs.get("request"), "prompt_override", None)
         return AgentCommitResult(verification_results=[], attempt_results=[])
 
     monkeypatch.setattr(
-        run_agent_once, "run_agent_until_committed", _fake_run_agent_until_committed
+        run_agent_execution_loop, "execute_agent_request", _fake_run_agent_until_committed
     )
     monkeypatch.setattr(handlers, "_finish_implementation_publication", lambda **k: None)
 

@@ -9,6 +9,7 @@ from backend.core.shared.interfaces.agent_output_protocol import (
     OutputRelayRequest,
 )
 from backend.core.shared.models.agent_runner import CommandResult
+from backend.infrastructure.agent_model_config_snapshot import observe_relay_model_config
 from backend.engines.agent_runner.output_protocols.structured_json_lines import (
     relay_structured_json_lines,
 )
@@ -17,6 +18,7 @@ from backend.engines.agent_runner.output_protocols.structured_json_lines import 
 class OpenCodeJsonLinesOutputProtocol:
     """渲染 OpenCode ``run --format json`` 事件。"""
 
+    @observe_relay_model_config
     def relay(self, request: OutputRelayRequest) -> CommandResult:
         """执行 OpenCode 并把 JSON 事件转为可读输出。"""
         return relay_structured_json_lines(

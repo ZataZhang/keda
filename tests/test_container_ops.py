@@ -132,7 +132,7 @@ def test_build_container_up_env_required_keys() -> None:
 
 
 def test_build_container_up_env_includes_gh_token_and_repo_id() -> None:
-    """``GH_TOKEN`` / ``IAR_REPO_ID`` 在传入时出现，未传入时不出现。"""
+    """``GH_TOKEN`` / ``KEDACODE_REPO_ID`` 在传入时出现，未传入时不出现。"""
     options = ContainerUpRequest(
         repo_path=Path("/Users/me/repo"),
         gh_token="ghp_xxx",
@@ -140,7 +140,7 @@ def test_build_container_up_env_includes_gh_token_and_repo_id() -> None:
     )
     env = build_container_up_env(options)
     assert env["GH_TOKEN"] == "ghp_xxx"
-    assert env["IAR_REPO_ID"] == "keda"
+    assert env["KEDACODE_REPO_ID"] == "keda"
 
 
 def test_build_container_up_env_explicit_uid_gid() -> None:
@@ -211,7 +211,7 @@ def test_run_container_up_invokes_runner_with_correct_env() -> None:
     assert env["RUNNER_UID"] == "501"
     assert env["RUNNER_GID"] == "20"
     assert env["GH_TOKEN"] == "ghp_xxx"
-    assert env["IAR_REPO_ID"] == "keda"
+    assert env["KEDACODE_REPO_ID"] == "keda"
     # 系统 PATH 等被合并到 env（不被替换）
     assert "PATH" in env
     assert check is True

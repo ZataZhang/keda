@@ -30,13 +30,27 @@ from tests.support.agent_runner import (
 )
 
 
-def test_recovery_loop_success_on_second_attempt(tmp_path: Path) -> None:
-    """Runner should succeed when recovery agent fixes the issue on attempt 2."""
+@pytest.mark.parametrize(
+    ("scenario", "expected_exit_code"),
+    [
+        ("recovered-commit", 0),
+        ("closed-noop", 0),
+        ("blocked-noop", 1),
+    ],
+    ids=["recovered-commit", "closed-noop", "blocked-noop"],
+)
+def test_run_once_completes_recovery_or_hands_off_no_change_issue(
+    tmp_path: Path,
+    scenario: str,
+    expected_exit_code: int,
+) -> None:
+    """run_once 应恢复提交、收敛 closed no-op，或保留执行期间新 blocked 状态。"""
     fake_client = FakeGitHubClient()
     issue = make_ready_issue()
     fake_client.list_ready_issues = lambda ready_label, limit: [issue]
     worktree_path = tmp_path / "issue-123"
     worktree_path.mkdir()
+    config = config_with_review_disabled(worktree_path)
 
     class _RecoverySuccessRunner(FakeProcessRunner):
         def __init__(self) -> None:
@@ -67,6 +81,10 @@ def test_recovery_loop_success_on_second_attempt(tmp_path: Path) -> None:
             if command_tuple[:1] == ("codex",):
                 self._agent_calls += 1
                 if self._agent_calls == 1:
+                    if scenario == "closed-noop":
+                        fake_client.close_issue(issue.number)
+                    elif scenario == "blocked-noop":
+                        fake_client.set_issue_labels(issue.number, (config.labels.blocked,))
                     # First attempt: produce no commits
                     return CommandResult(command_tuple, 0, "", "")
                 if self._agent_calls == 2:
@@ -75,12 +93,14 @@ def test_recovery_loop_success_on_second_attempt(tmp_path: Path) -> None:
                     return CommandResult(command_tuple, 0, "", "")
             if command_tuple == ("git", "rev-parse", "HEAD"):
                 self._sha_calls += 1
-                sha = "after-sha" if self._sha_calls > 1 else "before-sha"
+                no_change_scenario = scenario in ("closed-noop", "blocked-noop")
+                sha = "before-sha" if no_change_scenario or self._sha_calls == 1 else "after-sha"
                 return CommandResult(command_tuple, 0, f"{sha}\n", "")
             if command_tuple == ("git", "branch", "--show-current"):
                 return CommandResult(command_tuple, 0, "issue-123\n", "")
             if command_tuple == ("git", "status", "--porcelain"):
-                stdout = "" if self._committed else " M file.txt\n"
+                no_change_scenario = scenario in ("closed-noop", "blocked-noop")
+                stdout = "" if no_change_scenario or self._committed else " M file.txt\n"
                 return CommandResult(command_tuple, 0, stdout, "")
             if command_tuple == ("git", "commit", "-m", "agent: recovered"):
                 self._committed = True
@@ -93,7 +113,6 @@ def test_recovery_loop_success_on_second_attempt(tmp_path: Path) -> None:
         path_command: path_result,
         git_remote_command(): git_remote_result("origin"),
     }
-    config = config_with_review_disabled(worktree_path)
 
     from backend.core.use_cases.agent_runner_orchestrate import run_once
 
@@ -107,10 +126,29 @@ def test_recovery_loop_success_on_second_attempt(tmp_path: Path) -> None:
         process_runner=fake_runner,
     )
 
-    assert exit_code == 0
+    assert exit_code == expected_exit_code
     commands = [tuple(command) for command in fake_runner.calls]
     agent_commands = [command for command in commands if command[:1] == ("codex",)]
-    assert len(agent_commands) == 2
+    assert len(agent_commands) == (2 if scenario == "recovered-commit" else 1)
+    if scenario == "closed-noop":
+        assert any(call["method"] == "get_issue" for call in fake_client.calls)
+        assert not any(call["method"] == "create_draft_pr" for call in fake_client.calls)
+        assert not any(
+            call["method"] == "edit_issue_labels" and config.labels.failed in call.get("add", [])
+            for call in fake_client.calls
+        )
+        return
+    if scenario == "blocked-noop":
+        assert any(call["method"] == "get_issue" for call in fake_client.calls)
+        final_labels = set(fake_client._issue_labels[issue.number])
+        assert final_labels.intersection(
+            {config.labels.failed, config.labels.blocked, config.labels.running}
+        ) == {config.labels.blocked}
+        assert not any(call["method"] == "create_draft_pr" for call in fake_client.calls)
+        comment_calls = [c for c in fake_client.calls if c["method"] == "comment_issue"]
+        assert any("blocked_no_change_handoff" in call["body"] for call in comment_calls)
+        return
+
     comment_calls = [c for c in fake_client.calls if c["method"] == "comment_issue"]
     implementation_comment = [
         c for c in comment_calls if "Implementation Complete" in c.get("body", "")
@@ -181,6 +219,9 @@ def test_recovery_loop_exhausted_raises_max_retries(tmp_path: Path) -> None:
     )
 
     assert exit_code == 1
+    # 干净树 + HEAD 未前进会触发 fresh read，但 GitHub 上仍是 OPEN：
+    # 无改动闭合门禁必须被问过、并且没有放行，Issue 照旧落到 agent/failed。
+    assert any(call["method"] == "get_issue" for call in fake_client.calls)
     failed_calls = [
         c
         for c in fake_client.calls
@@ -630,7 +671,7 @@ def test_keyboard_interrupt_checkpoints_in_flight_work_before_exit(
 # commit 时发布同源的 Draft PR、把回链固定附到 PR 正文尾部；以及另两类异常
 # （ProviderCapacityError / KeyboardInterrupt）必须零副作用。
 
-_VERDICT_MARKER_RED = "<!-- iar:verifier-verdict risk=red -->"
+_VERDICT_MARKER_RED = "<!-- kc:verifier-verdict risk=red -->"
 
 _VERIFIER_RED_DETAIL = "\n".join(
     [
@@ -682,7 +723,8 @@ def _prepare_exhaustion_handler(
 ) -> dict[str, object]:
     """把 ``_process_ready_issue`` 打到"agent 耗尽 → checkpoint → 交接"这一步。
 
-    沿用仓库既有的补丁中枢：延迟导入的名字打在 ``run_agent_once`` 上,模块级名字打在
+    沿用仓库既有的补丁中枢：执行请求打在 ``run_agent_execution_loop`` 上，
+    checkpoint 延迟导入名打在 ``run_agent_once`` 上，模块级名字打在
     ``agent_runner_issue_handlers`` 上。``publish_changes`` 与
     ``format_failure_context_comment`` 打在交接模块
     ``agent_runner_failure_handoff`` 上（交接链路从 handlers 拆出后,函数在这
@@ -690,7 +732,7 @@ def _prepare_exhaustion_handler(
     ``require_prd_archived`` 取值。
     """
     from backend.core.use_cases import agent_runner_issue_handlers as handlers
-    from backend.core.use_cases import run_agent_once
+    from backend.core.use_cases import run_agent_execution_loop, run_agent_once
 
     monkeypatch.setattr(handlers, "_reuse_existing_local_commit", lambda *a, **k: None)
     monkeypatch.setattr(handlers, "create_or_reuse_worktree", lambda *a, **k: worktree_path)
@@ -700,7 +742,7 @@ def _prepare_exhaustion_handler(
     def _raise_exhausted(**_kwargs: object) -> None:
         raise failure_exc
 
-    monkeypatch.setattr(run_agent_once, "run_agent_until_committed", _raise_exhausted)
+    monkeypatch.setattr(run_agent_execution_loop, "execute_agent_request", _raise_exhausted)
 
     def _fake_checkpoint(*_args: object, **_kwargs: object) -> str | None:
         return checkpoint_sha
@@ -728,13 +770,13 @@ def _prepare_exhaustion_handler(
 
 
 def _handoff_comments(fake_client: FakeGitHubClient) -> list[str]:
-    """取出 Issue 上带 ``iar:failure-context`` marker 的评论正文。"""
+    """取出 Issue 上带 ``kc:failure-context`` marker 的评论正文。"""
     return [
         call["body"]
         for call in fake_client.calls
         if call["method"] == "comment_issue"
         and isinstance(call.get("body"), str)
-        and "iar:failure-context" in call["body"]
+        and "kc:failure-context" in call["body"]
     ]
 
 
@@ -797,7 +839,7 @@ def test_exhaustion_writes_failure_context_handoff_and_draft_pr(
     handoff_body = handoff_bodies[0]
     # marker 可被下一轮确定性定位,且带 checkpoint SHA / attempt 数 / 证据目录。
     assert (
-        f"<!-- iar:failure-context checkpoint=a1b2c3d4 attempts=3 "
+        f"<!-- kc:failure-context checkpoint=a1b2c3d4 attempts=3 "
         f"verifier={expected_verifier_state}"
     ) in handoff_body
     assert "evidence=" in handoff_body
@@ -1150,7 +1192,7 @@ def test_exhaustion_with_only_forbidden_changes_publishes_nothing(
     才能抓到"禁改内容被误当安全快照推出去"这类缺陷。
     """
     from backend.core.use_cases import agent_runner_issue_handlers as handlers
-    from backend.core.use_cases import run_agent_once
+    from backend.core.use_cases import run_agent_execution_loop
     from backend.core.use_cases.run_agent_once import MaxRetriesExceededError
     from backend.infrastructure.process_runner import SubprocessRunner
     from tests.support.agent_runner import init_git_repo, run_git
@@ -1169,7 +1211,7 @@ def test_exhaustion_with_only_forbidden_changes_publishes_nothing(
     def _raise_exhausted(**_kwargs: object) -> None:
         raise MaxRetriesExceededError(_handoff_attempt_results(_VERIFIER_RED_DETAIL))
 
-    monkeypatch.setattr(run_agent_once, "run_agent_until_committed", _raise_exhausted)
+    monkeypatch.setattr(run_agent_execution_loop, "execute_agent_request", _raise_exhausted)
 
     publish_calls: list[dict[str, object]] = []
 

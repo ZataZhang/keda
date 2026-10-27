@@ -7,7 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from backend.core.shared.interfaces.agent_runner import IProcessRunner
+from backend.core.shared.interfaces.agent_runner import IGitHubClient, IProcessRunner
 from backend.core.shared.models.agent_runner import (
     AgentCommitResult,
     AppConfig,
@@ -58,8 +58,10 @@ from backend.core.use_cases.agent_runner_delivery_closeout import (
 )
 from backend.core.use_cases.agent_runner_failure import (
     ForbiddenBlockedError,
+    IssueBlockedDuringNoChangeError,
     is_recoverable_commit_request_error,
 )
+from backend.core.use_cases.agent_runner_workflow import is_issue_newly_blocked
 from backend.core.use_cases.agent_runner_memory import _resolve_memory_stores
 from backend.core.use_cases.agent_runner_feedback import (
     VerificationFailedError,
@@ -105,6 +107,9 @@ class AgentExecutionRequest:
     process_runner: IProcessRunner
     before_sha: str
     expected_branch: str
+    #: 读取 Issue 最新状态的 GitHub 客户端。必填：「执行期间关闭且无变更」门禁依赖它，
+    #: 漏传客户端的调用面应当在构造请求时直接报错，而不是静默退回 no-commit 失败行为。
+    github_client: IGitHubClient
     prompt_override: str | None = None
     on_attempt_recorded: Callable[[AttemptResult, list[AttemptResult]], None] | None = None
     #: 旁路观测回调：本 Issue 处理期间每次非 attempt 主体的 agent 调用
@@ -159,6 +164,34 @@ def _attempt_resume_session_id(
     )
 
 
+def execute_agent_request(request: AgentExecutionRequest) -> AgentCommitResult:
+    """补齐首轮会话续传信息并执行 Agent recovery 状态机。
+
+    Args:
+        request: Agent 执行请求；若未指定首轮会话 id，则从 worktree 记录中解析。
+
+    Returns:
+        AgentCommitResult: 最终验证结果、attempt 历史及 verifier 结论。
+
+    Raises:
+        RuntimeError: 执行或 recovery 遇到无法继续的错误。
+    """
+    request_with_resume_session = (
+        request
+        if request.resume_session_id is not None
+        else replace(
+            request,
+            resume_session_id=resolve_resumable_session_id(
+                request.worktree_path,
+                config=request.config,
+                agent_name=request.selected_agent,
+                scope=AgentSessionScope(issue_number=request.issue.number),
+            ),
+        )
+    )
+    return run_agent_until_committed(request_with_resume_session)
+
+
 def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResult:
     """Run the agent, recover failed verification, and return final checks.
 
@@ -173,13 +206,8 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
     最终随失败评论一起发布到 GitHub Issue。
 
     Args:
-        selected_agent: 使用的 AI agent 名称（claude / kimi / codex）。
-        issue: 当前处理的 Issue。
-        worktree_path: agent 工作的 git worktree 路径。
-        config: Agent Runner 配置。
-        process_runner: 命令执行器。
-        before_sha: 循环开始前的 HEAD SHA，用于检测是否有新提交。
-        expected_branch: 期望的分支名，防止 agent 切换分支。
+        request: Agent 执行请求，携带所选 agent、Issue、worktree、配置、命令执行器、
+            执行前 HEAD SHA、期望分支，以及用于 fresh read Issue 状态的 GitHub 客户端。
 
     Returns:
         AgentCommitResult，包含最终验证结果和尝试历史。
@@ -383,6 +411,70 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                 agent_command_result.token_usage if agent_command_result is not None else None
             ),
         )
+
+        # 无代码变更时重新读取 Issue 状态：无 PRD 的闭合 Issue 可正常收敛；若 Issue
+        # 在本次执行期间转为 blocked，则作为人工交接结束，不进入 recovery 或 PR 发布。
+        # 其余状态（含 GitHub 读取失败）仍走原 no-commit recovery。
+        # has_changes 走 `git status --porcelain`，**含未跟踪文件**：留下任何未跟踪产物
+        # （被 .gitignore 排除的 runner 文件除外）都不算「无改动」，仍按原流程失败。
+        if get_head_sha(worktree_path, process_runner) == before_sha and not has_changes(
+            worktree_path, process_runner
+        ):
+            status_read_purpose = "closure" if prd_relative_path is None else "blocked status"
+            try:
+                latest_issue = request.github_client.get_issue(issue.number)
+            except Exception as exc:  # noqa: BLE001 - 读取失败时必须 fail-closed
+                _logger.warning(
+                    "Could not confirm Issue #%d %s after a no-change run; "
+                    "continuing normal recovery: %s",
+                    issue.number,
+                    status_read_purpose,
+                    exc,
+                )
+            else:
+                if is_issue_newly_blocked(issue, latest_issue, config):
+                    _logger.info(
+                        "Issue #%d was moved to blocked during a clean no-change run; "
+                        "handing off without recovery or publication.",
+                        issue.number,
+                    )
+                    attempt_phases.mark_failure_phase("agent")
+                    _record_attempt(
+                        attempt_record_context,
+                        failure_type=FailureType.NO_COMMITS,
+                        detail=(
+                            "Issue moved to blocked during a clean no-change run; "
+                            "handing off to a human."
+                        ),
+                        recovered=attempt_index > 0,
+                    )
+                    raise IssueBlockedDuringNoChangeError(issue.number, attempt_results)
+                if prd_relative_path is None and latest_issue.state.upper() == "CLOSED":
+                    _record_attempt(
+                        attempt_record_context,
+                        failure_type=FailureType.SUCCESS,
+                        detail="Issue closed during execution with no changes to publish.",
+                        recovered=attempt_index > 0,
+                    )
+                    mark_agent_session_complete(
+                        worktree_path,
+                        agent_name=selected_agent,
+                        scope=AgentSessionScope(
+                            issue_number=issue.number,
+                            phase=PHASE_IMPLEMENTATION,
+                        ),
+                    )
+                    _logger.info(
+                        "Issue #%d closed during execution with no changes; skipping validation "
+                        "and publication.",
+                        issue.number,
+                    )
+                    return AgentCommitResult(
+                        verification_results=[],
+                        attempt_results=attempt_results,
+                        verifier_verdict=None,
+                        issue_closed_without_changes=True,
+                    )
 
         # Phase 2: 验证 agent 产出的代码（staging 之前）
         # 直发档（--direct-pr）连 runner 自己的验证命令也不跑：结果恒为空，下面的

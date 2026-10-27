@@ -74,7 +74,7 @@ def test_resolve_user_skill_install_roots_keeps_detected_agents_only(
     (user_home_path / ".claude").mkdir(parents=True)
     (user_home_path / ".codex").mkdir(parents=True)
     (user_home_path / ".kimi-code").mkdir(parents=True)
-    monkeypatch.delenv("IAR_SKILLS_DIR", raising=False)
+    monkeypatch.delenv("KEDACODE_SKILLS_DIR", raising=False)
 
     assert resolve_user_skill_install_roots(user_home_path) == (
         keda_owned_skills_root(user_home_path),
@@ -91,7 +91,7 @@ def test_resolve_user_skill_install_roots_ignores_cc_switch_directory(
     """``~/.cc-switch`` 不再是安装目标；仅存在它时只有 keda 自有目录 + 注册表首个 agent。"""
     user_home_path = tmp_path / "home"
     (user_home_path / ".cc-switch").mkdir(parents=True)
-    monkeypatch.delenv("IAR_SKILLS_DIR", raising=False)
+    monkeypatch.delenv("KEDACODE_SKILLS_DIR", raising=False)
 
     assert resolve_user_skill_install_roots(user_home_path) == (
         keda_owned_skills_root(user_home_path),
@@ -106,7 +106,7 @@ def test_resolve_user_skill_install_roots_falls_back_to_first_registry_agent(
     """没有任何 agent 配置目录时仍给出 keda 自有目录 + 注册表首个声明 ``auth_home`` 的 agent。"""
     user_home_path = tmp_path / "home"
     user_home_path.mkdir(parents=True)
-    monkeypatch.delenv("IAR_SKILLS_DIR", raising=False)
+    monkeypatch.delenv("KEDACODE_SKILLS_DIR", raising=False)
 
     assert resolve_user_skill_install_roots(user_home_path) == (
         keda_owned_skills_root(user_home_path),
@@ -118,9 +118,9 @@ def test_resolve_user_skill_install_roots_prefers_configured_directory(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``IAR_SKILLS_DIR`` 必须覆盖所有自动探测到的目录（含 keda 自有目录）。"""
+    """``KEDACODE_SKILLS_DIR`` 必须覆盖所有自动探测到的目录（含 keda 自有目录）。"""
     configured_skills_path = tmp_path / "configured-skills"
-    monkeypatch.setenv("IAR_SKILLS_DIR", str(configured_skills_path))
+    monkeypatch.setenv("KEDACODE_SKILLS_DIR", str(configured_skills_path))
 
     assert resolve_user_skill_install_roots(tmp_path / "home") == (configured_skills_path,)
 
@@ -196,7 +196,7 @@ def test_install_remote_template_skills_writes_into_every_detected_agent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """keda 自有目录 + 每个检测到配置目录的 agent 都拿到同一份远程 Skill 副本。"""
-    monkeypatch.delenv("IAR_SKILLS_DIR", raising=False)
+    monkeypatch.delenv("KEDACODE_SKILLS_DIR", raising=False)
     user_home_path = tmp_path / "home"
     (user_home_path / ".codex").mkdir(parents=True)
     (user_home_path / ".claude").mkdir(parents=True)

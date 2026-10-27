@@ -50,14 +50,13 @@ class BacklogAutopilotState:
         auto_merge_enabled: 两道合并开关 ``autopilot.enabled`` 与
             ``safety.auto_merge`` 都开启时为真，只读展示。
         daemon_running: 该仓库是否存在运行中的 daemon 进程。
-        policy_max_parallel: Backlog「并发」策略值；``None`` 表示从未保存
-            （继承 runner 容量）。
-        effective_max_parallel: 解析后的单一生效并发上限，与 daemon 认领、
+        policy_max_parallel: Backlog 页面保存的并行上限；``None`` 表示从未保存
+            （使用配置文件值）。
+        effective_max_parallel: 解析后的单一生效并行上限，与 daemon 认领、
             补位、全局开始消费的是同一个值。
-        runner_capacity: runner 侧容量（``max_concurrent_issues``），策略只能
-            把生效值压得更低，不会超过它。
-        ceiling_source: 生效值来源：``inherited`` / ``policy`` /
-            ``capped_by_capacity``。
+        runner_capacity: 配置文件的并行上限（``max_concurrent_issues``），页面
+            未保存时生效；页面设置覆盖它。
+        ceiling_source: 生效值来源：``policy``（页面设置）/ ``config``（配置文件）。
         config_source: Backlog 持久值的来源文件（仓库相对路径）。
         persisted_enabled: 仓库本地 Backlog 配置中的持久值；``None`` 表示文件缺失或键
             未设置（此时生效值来自全局配置默认值）。
@@ -92,7 +91,9 @@ def daemon_is_running(repo_id: str, records: Sequence[RunnerProcessRecord]) -> b
     for record in records:
         if record.repo_id != repo_id:
             continue
-        if record.kind is not RunnerProcessKind.DAEMON:
+        # 按值比较：从注册表 JSON 读回的记录里 ``kind`` 是普通字符串，身份比较
+        # （``is``）对它永远不成立，曾让控件对正在运行的 daemon 显示「未运行」。
+        if record.kind != RunnerProcessKind.DAEMON:
             continue
         if _RUNNING_STATUS in str(record.status):
             return True
@@ -152,7 +153,7 @@ def load_autopilot_state(
         policy_max_parallel=policy_max_parallel,
         effective_max_parallel=effective_max_parallel,
         runner_capacity=runner_capacity,
-        ceiling_source=describe_ceiling_source(policy_max_parallel, effective_max_parallel),
+        ceiling_source=describe_ceiling_source(policy_max_parallel),
         config_source=_relative_source_name(
             editor.config_source_path(context.repo_path), context.repo_path
         ),

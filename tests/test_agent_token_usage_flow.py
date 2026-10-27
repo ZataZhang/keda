@@ -37,6 +37,7 @@ from backend.core.use_cases.agent_runner_lifecycle import (
 )
 from backend.infrastructure.persistence.console_store import SqliteConsoleStore
 from backend.infrastructure.process_runner import SubprocessRunner
+from tests.conftest import FakeGitHubClient
 
 _REPO_ID = "keda-main"
 _PRD_PATH = "tasks/pending/P1-FEAT-20260930-212702-agent-token-usage-stats.md"
@@ -176,6 +177,7 @@ def _run_loop(
             process_runner=SubprocessRunner(),
             before_sha="0" * 40,
             expected_branch="issue-7",
+            github_client=FakeGitHubClient(),
             on_attempt_recorded=on_attempt_recorded,
         )
     )

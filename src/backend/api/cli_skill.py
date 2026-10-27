@@ -11,10 +11,12 @@
 from __future__ import annotations
 
 import shlex
+from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from backend.api.cli_console import console
+from backend.core.shared.models.agent_spec import AgentSpec
 from backend.core.use_cases.agent_runner_init_assets import (
     PackagedSkillInstallResult,
     RemoteTemplateSkillInstallOptions,
@@ -22,13 +24,20 @@ from backend.core.use_cases.agent_runner_init_assets import (
     install_packaged_operator_skill,
     install_remote_template_skills,
     repair_packaged_operator_skill,
+    resolve_user_skill_install_roots,
 )
 
 if TYPE_CHECKING:
     from backend.core.shared.interfaces.agent_runner import IProcessRunner
 
 
-def sync_user_skills(*, process_runner: IProcessRunner, dry_run: bool, force: bool) -> None:
+def sync_user_skills(
+    *,
+    process_runner: IProcessRunner,
+    dry_run: bool,
+    force: bool,
+    agents: Mapping[str, AgentSpec] | None = None,
+) -> None:
     """把远程模板 Skill 与随包 operator Skill 同步到全部用户级安装根。
 
     安装根由安装实现自己解析（``KEDACODE_SKILLS_DIR`` 优先，其后是产品自有目录与
@@ -39,6 +48,8 @@ def sync_user_skills(*, process_runner: IProcessRunner, dry_run: bool, force: bo
         process_runner: 执行受限 Git 命令的端口（远程模板下载使用）。
         dry_run: 是否只打印计划、不触碰文件系统。
         force: 是否覆盖用户改动过的同名 Skill，并直接删除旧名 operator 副本。
+        agents: 生效 agent 注册表（内置 + ``[agent_runner.agents.*]`` 自定义条目），
+            决定还要给哪些 agent 的用户级目录装一份；``None`` 时只认内置注册表。
 
     Raises:
         RemoteTemplateSkillInstallError: 远程模板拉取失败，或远程模板 Skill 已被
@@ -51,6 +62,7 @@ def sync_user_skills(*, process_runner: IProcessRunner, dry_run: bool, force: bo
             process_runner=process_runner,
             dry_run=dry_run,
             force=force,
+            agents=agents,
         )
     )
     _print_remote_template_skill_result(remote_skill_result)
@@ -62,6 +74,38 @@ def sync_user_skills(*, process_runner: IProcessRunner, dry_run: bool, force: bo
                 force=force,
             )
         )
+
+
+def sync_packaged_operator_skills(
+    *,
+    dry_run: bool = False,
+    agents: Mapping[str, AgentSpec] | None = None,
+) -> list[PackagedSkillInstallResult]:
+    """只把随包 operator Skill 刷新到全部用户级安装根，绝不触碰远程模板 Skill。
+
+    与 :func:`sync_user_skills` 的区别是本函数**不下载也不写入** ``prd`` /
+    ``code-reviewer`` 等远程模板，因此不会撞上「用户改过的远程模板 fail-closed
+    拒绝」这条路径，适合在包升级后无人值守地自动同步。逐根调用
+    :func:`install_packaged_operator_skill` 且 ``force=False``：受管文件与随包一致
+    时幂等跳过，用户改过的 operator 副本保持原样（返回 ``preserve-conflict``）。
+
+    Args:
+        dry_run: 是否只返回计划、不触碰文件系统。
+        agents: 生效 agent 注册表；``None`` 时只遍历内置注册表解析安装根。
+
+    Returns:
+        每个安装根的 :class:`PackagedSkillInstallResult` 列表（顺序与安装根一致）。
+
+    Raises:
+        RemoteTemplateSkillInstallError: 某个随包目录缺少 ``SKILL.md``，或目标路径
+            无法安全写入（符号链接等）。调用方须自行兜底以保证启动钩子不阻断命令。
+    """
+    return [
+        install_packaged_operator_skill(
+            target_skills_root=skills_root, dry_run=dry_run, force=False
+        )
+        for skills_root in resolve_user_skill_install_roots(agents=agents)
+    ]
 
 
 def repair_operator_skill(*, skill_dir: Path, dry_run: bool, force: bool) -> None:
@@ -136,4 +180,4 @@ def _print_operator_skill_plan(result: PackagedSkillInstallResult) -> None:
         print(result.legacy_notice)
 
 
-__all__ = ["repair_operator_skill", "sync_user_skills"]
+__all__ = ["repair_operator_skill", "sync_packaged_operator_skills", "sync_user_skills"]

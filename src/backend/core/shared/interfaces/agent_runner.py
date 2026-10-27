@@ -47,8 +47,8 @@ from backend.core.shared.models.agent_stall import AttemptOwnership, StallCancel
 
 
 @dataclass(frozen=True)
-class IarExecRequest:
-    """A single command request parsed from an ``<<IAR_EXEC>>`` marker.
+class KCExecRequest:
+    """A single command request parsed from an ``<<KC_EXEC>>`` marker.
 
     Attributes:
         argv: Argument vector of the requested command. The first element is
@@ -196,7 +196,7 @@ class IProcessRunner(ABC):
             output_protocol: agent 调用路径专用的输出协议 id（来自
                 ``build_agent_invocation`` 的声明式 spec）。``None`` 或
                 ``"plain"`` 表示通用命令，按既有路径执行；非 plain 值由
-                执行层经 ``iar.agent_output_protocols`` 注册表解析出中继
+                执行层经 ``kedacode.agent_output_protocols`` 注册表解析出中继
                 实现。通用命令（git/gh/验证命令）永远传 ``None``。
             env_profile: 可选的子进程环境变量档名。``None`` 时实现端按
                 denylist 净化档组装子进程环境（剔除 ``SERVER__PORT`` 等
@@ -380,7 +380,7 @@ class IReplCommandExecutor(ABC):
     """在 REPL 入口中校验并执行 KedaCode 子命令的端口。
 
     REPL use case 本身只负责「读取用户输入、调用 agent、解析
-    ``<<IAR_EXEC>>`` 标记、把结果回填到对话历史」。所有与命令本身
+    ``<<KC_EXEC>>`` 标记、把结果回填到对话历史」。所有与命令本身
     的策略（白名单、是否需要用户确认、如何执行、如何截断输出）都
     收敛到本端口的实现里，方便在单元测试中替换成 fake 实现，也
     方便未来扩展（例如集成 dry-run / 沙箱执行）。
@@ -389,7 +389,7 @@ class IReplCommandExecutor(ABC):
     @abstractmethod
     def execute(
         self,
-        request: IarExecRequest,
+        request: KCExecRequest,
         *,
         repo_path: Path,
     ) -> ReplExecOutcome:
@@ -621,7 +621,12 @@ class IGitHubClient(ABC):
 
     @abstractmethod
     def list_issue_comment_entries(
-        self, issue_number: int, *, trusted_only: bool = False, body_contains: str | None = None
+        self,
+        issue_number: int,
+        *,
+        trusted_only: bool = False,
+        body_contains: str | None = None,
+        require_success: bool = False,
     ) -> list[tuple[int, str]]:
         """返回某个 Issue 的评论 ID 与正文列表。
 
@@ -630,6 +635,7 @@ class IGitHubClient(ABC):
             trusted_only: 只返回当前凭据作者或具备仓库 Issue 写权限者的评论；
                 开启时查询及权限判定必须成功。默认保留既有尽力读取语义。
             body_contains: 可选正文子串筛选，先筛选再确认作者权限，避免无关评论的权限查询。
+            require_success: 查询失败或响应不完整时抛错，而非返回空结果。
 
         Returns:
             list[tuple[int, str]]: 按时间顺序排列的评论 (id, body) 列表。
@@ -839,6 +845,14 @@ class IGitHubClient(ABC):
             list[IssueSummary]: 满足条件的 Issue 摘要列表。
         """
         ...
+
+    def list_repository_items(self, *, state: str = "open") -> list[IssueSummary]:
+        """列出仓库 Issue 与 PR 的完整正文，用于显式标记迁移。
+
+        默认实现保留已有端口适配器的兼容性；支持迁移的客户端必须返回完整分页结果，
+        并在读取失败时抛错，不能把不完整结果当成空仓库。
+        """
+        raise NotImplementedError
 
     @abstractmethod
     def list_pull_requests_for_issue(

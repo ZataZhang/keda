@@ -79,7 +79,7 @@ def mark_issue_merged(client: FakeGitHubClient, issue_number: int) -> None:
     """Make the fake report the issue as closed with a merged PR."""
     client._issue_states[issue_number] = "CLOSED"
     client._issue_comments[issue_number] = [
-        f"<!-- iar:event version=1 phase=draft_pr_created cycle=1 pr_branch=issue-{issue_number} -->"
+        f"<!-- kc:event version=1 phase=draft_pr_created cycle=1 pr_branch=issue-{issue_number} -->"
     ]
     client._merged_prs[f"issue-{issue_number}"] = (
         f"https://github.com/example/repo/pull/{issue_number}"
@@ -536,7 +536,6 @@ def _run_single_daemon_pass(
             contexts=[context],
             interval=0,
             agent="auto",
-            max_issues=1,
             process_runner=FakeProcessRunner(),
             github_client_factory=lambda repo_path: client,
             backlog_store_factory=lambda: store,

@@ -20,6 +20,7 @@ from backend.core.use_cases.agent_runner_memory import _persist_short_term_memor
 from backend.core.use_cases.run_agent_once import _resolve_repo_id
 from backend.infrastructure.memory import (
     LongTermMemoryStore,
+    ShortTermAttemptRecord,
     ShortTermMemoryContext,
     ShortTermMemoryStore,
     build_memory_stores,
@@ -67,6 +68,140 @@ def test_short_term_store_roundtrip(tmp_path: Path) -> None:
     loaded = store.load("keda-main", 124)
     assert loaded is not None
     assert loaded.summary == "first attempt"
+
+
+def test_short_term_store_keeps_context_compact_and_hydrates_detail_logs(
+    tmp_path: Path,
+) -> None:
+    detail_text = "Runner output header\n" + ("diagnostic line " * 80) + "\nFinal diagnostic"
+    store = ShortTermMemoryStore(tmp_path / "memory")
+    context = ShortTermMemoryContext(
+        repo_id="keda-main",
+        issue_number=125,
+        issue_title="Compact memory context",
+        issue_url="https://example/125",
+        summary=detail_text,
+        attempts=[
+            ShortTermAttemptRecord(
+                attempt_number=1,
+                failure_type="verification_failed",
+                detail=detail_text,
+            )
+        ],
+        final_solution=detail_text,
+    )
+
+    saved_path = store.save("keda-main", 125, context)
+    stored_payload = json.loads(saved_path.read_text(encoding="utf-8"))
+
+    assert len(stored_payload["summary"]) <= 240
+    assert len(stored_payload["attempts"][0]["detail"]) <= 240
+    assert stored_payload["attempts"][0]["detail_log_path"].startswith("attempt-details/")
+    assert (
+        stored_payload["final_solution_log_path"]
+        == stored_payload["attempts"][0]["detail_log_path"]
+    )
+    assert (saved_path.parent / stored_payload["attempts"][0]["detail_log_path"]).read_text(
+        encoding="utf-8"
+    ) == detail_text
+
+    loaded_context = store.load("keda-main", 125)
+
+    assert loaded_context is not None
+    assert loaded_context.attempts[0].detail == detail_text
+    assert loaded_context.final_solution == detail_text
+
+
+def test_short_term_summary_skips_trailing_output_fences(tmp_path: Path) -> None:
+    detail_text = (
+        "Agent command failed: provider connection lost\n"
+        "stdout:\n"
+        "```json\n"
+        '{"status": "failed"}\n'
+        "```\n"
+        "stderr:\n"
+        "```\n"
+        "connection closed\n"
+        "```"
+    )
+    store = ShortTermMemoryStore(tmp_path / "memory")
+    saved_path = store.save(
+        "keda-main",
+        127,
+        ShortTermMemoryContext(
+            repo_id="keda-main",
+            issue_number=127,
+            issue_title="Preserve a useful summary",
+            issue_url="https://example/127",
+            summary=detail_text,
+            attempts=[
+                ShortTermAttemptRecord(
+                    attempt_number=1,
+                    failure_type="runner_error",
+                    detail=detail_text,
+                )
+            ],
+        ),
+    )
+
+    stored_payload = json.loads(saved_path.read_text(encoding="utf-8"))
+
+    assert stored_payload["summary"] == "Agent command failed: provider connection lost"
+    assert stored_payload["attempts"][0]["detail"] == (
+        "Agent command failed: provider connection lost"
+    )
+
+
+def test_short_term_store_ignores_traversal_and_symlink_detail_references(
+    tmp_path: Path,
+) -> None:
+    memory_root = tmp_path / "memory"
+    issue_dir = memory_root / "short_term" / "keda-main" / "126"
+    detail_dir = issue_dir / "attempt-details"
+    detail_dir.mkdir(parents=True)
+    outside_log = tmp_path / "outside.log"
+    outside_log.write_text("private outside detail", encoding="utf-8")
+    (detail_dir / "linked.log").symlink_to(outside_log)
+    context_path = issue_dir / "context.json"
+    context_path.write_text(
+        json.dumps(
+            {
+                "repo_id": "keda-main",
+                "issue_number": 126,
+                "attempts": [
+                    {
+                        "attempt_number": 1,
+                        "failure_type": "runner_error",
+                        "detail": "traversal summary",
+                        "detail_log_path": "../../../../outside.log",
+                    },
+                    {
+                        "attempt_number": 2,
+                        "failure_type": "runner_error",
+                        "detail": "symlink summary",
+                        "detail_log_path": "attempt-details/linked.log",
+                    },
+                    {
+                        "attempt_number": 3,
+                        "failure_type": "runner_error",
+                        "detail": "invalid UTF-8 summary",
+                        "detail_log_path": "attempt-details/invalid-utf8.log",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (detail_dir / "invalid-utf8.log").write_bytes(b"\xff\xfe")
+
+    loaded_context = ShortTermMemoryStore(memory_root).load("keda-main", 126)
+
+    assert loaded_context is not None
+    assert [attempt.detail for attempt in loaded_context.attempts] == [
+        "traversal summary",
+        "symlink summary",
+        "invalid UTF-8 summary",
+    ]
 
 
 def test_long_term_store_append_and_load(tmp_path: Path) -> None:

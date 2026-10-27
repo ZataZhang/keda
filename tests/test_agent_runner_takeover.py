@@ -84,16 +84,12 @@ def _gh_list_response(repositories: list[dict]) -> CommandResult:
     )
 
 
-@pytest.mark.parametrize("state_directory", [".kedacode", ".iar"])
-def test_build_takeover_options_defaults(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, state_directory: str
-) -> None:
-    """新家目录使用新状态名，只有旧目录时沿用旧目录，其他默认选项不变。"""
+def test_build_takeover_options_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """默认克隆根目录落在当前状态目录下；只有旧 ``.iar`` 目录的机器也不会沿用旧路径。"""
     monkeypatch.setenv("HOME", str(tmp_path))
-    if state_directory == ".iar":
-        (tmp_path / state_directory).mkdir()
+    (tmp_path / ".iar").mkdir()
     options = build_takeover_options()
-    assert options.clone_root == tmp_path / state_directory / "repos"
+    assert options.clone_root == tmp_path / ".kedacode" / "repos"
     assert options.owner is None
     assert options.limit == 100
     assert options.selected_repos == ()
@@ -560,7 +556,7 @@ def test_execute_takeover_initializes_with_origin_remote(
 
     This guards against stale branch upstream remotes (e.g. a local branch
     tracking a no-longer-existent remote named after the old owner) being
-    written into .iar.toml.
+    written into .kedacode.toml.
     """
     clone_root = tmp_path / "repos"
     repo_path = _clone_target_path(clone_root, "owner/repo-a")
@@ -574,7 +570,7 @@ def test_execute_takeover_initializes_with_origin_remote(
         nonlocal captured_options
         captured_options = options
         repo_root = repo_path
-        config_path = repo_root / ".iar.toml"
+        config_path = repo_root / ".kedacode.toml"
         config_path.write_text(
             f'[agent_runner.repository]\nid = "{options.repo_id_override}"\n'
             f'[agent_runner.git]\nremote = "{options.remote_override}"\n',

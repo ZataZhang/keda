@@ -1,6 +1,6 @@
 """Worktree lifecycle helpers — owns the canonical worktree path layout.
 
-All worktree paths used by the iAR agent runner flow through this module
+All worktree paths used by the KedaCode agent runner flow through this module
 so the ``create`` and ``path`` shell commands cannot drift apart.
 """
 
@@ -10,9 +10,13 @@ from pathlib import Path
 from typing import Protocol
 
 from backend.infrastructure.process_runner import CommandResult, SubprocessRunner
+from backend.core.shared.models.repository_paths import (
+    DEFAULT_WORKTREE_DIR_NAME,
+    resolve_managed_worktree_root,
+)
 
 
-WORKTREE_DIR_NAME = ".iar-worktrees"
+WORKTREE_DIR_NAME = DEFAULT_WORKTREE_DIR_NAME
 
 
 class WorktreeProcessRunner(Protocol):
@@ -32,12 +36,11 @@ class WorktreeProcessRunner(Protocol):
 
 
 class WorktreeManager:
-    """Create, locate, and remove iAR-owned Git worktrees.
+    """Create, locate, and remove KedaCode-owned Git worktrees.
 
-    The path layout is fixed: every worktree for a given branch lives at
-    ``{repo_root}/.iar-worktrees/{branch}``. Both ``create`` and ``path``
-    resolve to this single layout, eliminating the historical class of bugs
-    where three independent shell strings could disagree on the location.
+    New worktrees live under ``{repo_root}/.kc-worktrees/{branch}``. If a
+    repository already has ``.iar-worktrees/``, it remains the active container
+    until the explicit config migration renames it.
     """
 
     def __init__(
@@ -66,7 +69,7 @@ class WorktreeManager:
     @property
     def worktree_root(self) -> Path:
         """Return the directory that holds all managed worktrees."""
-        return self._repo_root_path / WORKTREE_DIR_NAME
+        return resolve_managed_worktree_root(self._repo_root_path)
 
     def worktree_path(self, branch: str) -> Path:
         """Return the absolute path for ``branch`` (no side effects).

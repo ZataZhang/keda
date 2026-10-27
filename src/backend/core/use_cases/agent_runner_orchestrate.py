@@ -43,6 +43,7 @@ from backend.core.shared.models.agent_runner import (
     TokenUsage,
 )
 from backend.core.shared.models.pass_activity import PassActivity
+from backend.core.use_cases.daemon_execution_slots import DaemonExecutionSlots
 from backend.core.shared.models.publish_stage import (
     PublishStage,
 )
@@ -77,10 +78,13 @@ from backend.core.use_cases.run_agent_once import (
     get_head_sha,
     resolve_agent_fallback_candidate_specs,
 )
+from backend.core.use_cases.agent_onboarding import PrimaryAgentNotInstalledError
 from backend.core.use_cases.agent_runner_failure import (
     AgentExecutionError,
     AgentUnavailableError,
+    DependencyEnvironmentBlockedError,
     ForbiddenBlockedError,
+    IssueBlockedDuringNoChangeError,
     MaxRetriesExceededError,
     ProviderCapacityError,
     UnrecoverableError,
@@ -321,7 +325,7 @@ def _stamp_attempts_with_agent(
     return [attempt if attempt.agent else replace(attempt, agent=agent) for attempt in attempts]
 
 
-_ATTEMPT_HISTORY_MARKER = "<!-- iar-attempt-history -->"
+_ATTEMPT_HISTORY_MARKER = "<!-- kc:attempt-history -->"
 _ATTEMPT_HISTORY_TITLE = "### Attempt History"
 
 
@@ -364,8 +368,10 @@ def _persist_attempt_result(
     """Persist one attempt to SQLite and update the GitHub running comment.
 
     This is the incremental persistence callback wired into
-    :func:`run_agent_until_committed`. Failures are logged and swallowed so the
-    runner state machine is never blocked by the side-channel storage.
+    :attr:`AgentExecutionRequest.on_attempt_recorded` and driven by
+    :func:`run_agent_execution_loop.run_agent_until_committed`. Failures are
+    logged and swallowed so the runner state machine is never blocked by the
+    side-channel storage.
 
     The comment is rendered from the stored trail rather than from
     ``attempt_results``, because the in-memory list restarts at attempt 1 on
@@ -478,6 +484,7 @@ def run_issue_with_agent_fallback(
     Raises:
         UnrecoverableError: A security/branch violation that no agent can fix.
         ForbiddenBlockedError: Forbidden paths require human intervention.
+        IssueBlockedDuringNoChangeError: An Issue was newly blocked during a clean no-change run.
         MaxRetriesExceededError: Every candidate agent failed.
         AgentUnavailableError: Every candidate agent's CLI was unavailable.
     """
@@ -506,9 +513,20 @@ def run_issue_with_agent_fallback(
         try:
             process_for_agent(**process_kwargs)
             return candidate_agent
-        except (UnrecoverableError, ForbiddenBlockedError, ClaimArbitrationLost):
+        except (
+            UnrecoverableError,
+            ForbiddenBlockedError,
+            IssueBlockedDuringNoChangeError,
+            DependencyEnvironmentBlockedError,
+            ClaimArbitrationLost,
+        ):
             # Every agent would hit the same wall; do not switch. 首次领取仲裁
             # 落败同理：Issue 已归更早的认领者，换 agent 只会变成双跑。
+            # 依赖环境缺口同理：缺的是主机工具链/凭据，不是某个 agent 的能力问题。
+            raise
+        except PrimaryAgentNotInstalledError:
+            # 门禁 / 进程边界拦下的是"这台机器没装这个 CLI"，属于配置错误：
+            # 回退链的语义是"这个 agent 跑挂了换一个"，不能把没装悄悄变成换人。
             raise
         except AgentUnavailableError as exc:
             last_switch_exc = exc
@@ -590,8 +608,9 @@ def run_once(
     execution_ceiling: int | None = None,
     issue_admission_check: Callable[[], bool] | None = None,
     pass_activity: PassActivity | None = None,
+    execution_slots: DaemonExecutionSlots | None = None,
 ) -> int:
-    """执行一次 Agent Runner 轮询。"""
+    """执行一次 Agent Runner 轮询（``execution_slots`` 见 :class:`RunOnceRequest`）。"""
     module = _orchestration_runtime_module()
     return module.run_once(
         module.RunOnceRequest(
@@ -614,5 +633,6 @@ def run_once(
             execution_ceiling=execution_ceiling,
             issue_admission_check=issue_admission_check,
             pass_activity=pass_activity,
+            execution_slots=execution_slots,
         )
     )

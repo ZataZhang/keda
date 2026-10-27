@@ -7,7 +7,7 @@ The user says 「每天凌晨一点检查…」「定时跑一个任务」「周
 ## Confirm before acting
 
 1. **A loop is a persistent schedule with a bill attached** — every fire creates an Issue that an agent then works on. Confirm the schedule, the target repository, and which daemon advances it before registering.
-2. **The CLI registers a recipe; it does not write one.** Author `tasks/loops/<id>.md` first (YAML frontmatter + a body that is the task's full instructions). The frontmatter `id` must equal the `<id>` you pass to `kc loop create`, otherwise it is a usage error.
+2. **Choose a recipe or a built-in template.** For custom tasks the CLI does not write one: author `tasks/loops/<id>.md` first (YAML frontmatter + full task instructions); its `id` must equal the CLI ID. Alternatively, `kc loop create my-repo-blockers --template blocker-monitor --repo-id my-repo` generates and registers the optional recovery patrol. `--recipe` and `--template` are mutually exclusive. Install, upgrade and init never enable this template automatically. Template registration requires an enabled registered `--repo-id`, not `--repo`, and never overwrites an existing recipe file, even with `--force`.
 3. **Pick who advances it (`managed_by`)**: `agent-daemon` is advanced by the regular `kc daemon` before its queue phases, so a stopped daemon creates no new Issue and a freshly created Issue is claimed in the same pass (recommended for loops whose Issues the runner executes); the default `loop-daemon` is advanced by the separate loop-daemon process and keeps creating Issues even when no runner daemon is up.
 4. **Pick what a fire produces (`output`)**: the default `issue` creates one plain Issue whose body is the full recipe text — no PRD file, nothing pushed, nothing to clean up (right for work that repeats, e.g. a nightly CI check); `prd` renders a timestamped PRD per fire bound one-to-one to its Issue and runs the PRD lifecycle (archive, per-PRD evidence), and with `publish_prd: true` it commits and pushes that PRD to the base branch — set it explicitly, and only when that is wanted. A loop registered before `output` existed keeps running as `prd` until its recipe is re-registered. `kc loop create` prints the `output=` it registered.
 5. **Cron runs in UTC unless the recipe sets `timezone`** (an IANA name such as `Asia/Shanghai`). State timestamps stay UTC; `kc loop list` shows local time.
@@ -15,6 +15,8 @@ The user says 「每天凌晨一点检查…」「定时跑一个任务」「周
 ## Recipe frontmatter (the fields that matter)
 
 Required: `id`, `schedule` (5-field cron, or `10m` / `1h` / `1d`), `repo_id`. Optional: `issue_type` (`feature` / `refactor` / `bug`), `agent`, `labels` (a list; `loop/<id>` is always added), `queue_ready` (default true: label `agent/ready`), `timezone`, `priority`, `slug`, `managed_by`, `output`, and two scheduling helpers: `pre_command` (a shell command whose `KEY=value` stdout lines become `{{KEY}}` template variables; `{{date}}` and `{{loop_id}}` are built in) and `skip_when: KEY=v1,v2` (skip the fire, with no Issue and no agent cost, when that variable matches — e.g. skip a CI check when the last run is green). A missing variable never skips.
+
+Writing `pre_command`: keep it on one line (the frontmatter parser has no `|` blocks). In a double-quoted value write an inner `"` as `\"` (the YAML escapes `\\`, `\n`, `\t` are honored too); in a single-quoted value write `'` as `''`. `kc loop run <id> --dry-run` runs the `pre_command` and renders the template, so a broken command shows up there before registration: the error reads `undefined variable '<name>' ... The pre_command failed first: pre_command exited with N; stderr: …` — fix the command, not the frontmatter.
 
 ## Execute and never do
 
@@ -26,6 +28,8 @@ Required: `id`, `schedule` (5-field cron, or `10m` / `1h` / `1d`), `repo_id`. Op
 - Never edit the loop state file by hand, and never fire a loop repeatedly "to test" — each real fire is a billable Issue.
 
 ## Pause rule
+
+The built-in `blocker-monitor` template checks every 30 minutes using the target repository's GitHub identity and effective blocked/failed labels. Empty queues skip Issue creation and agent use; failed reads create a diagnostic Issue containing `unknown` and the captured error. Explicitly enabling it authorizes diagnosis, verified technical fixes and recovery; product decisions, credentials, permissions and approvals stay blocked for a human. It uses the ordinary `kc daemon` (`managed_by: agent-daemon`, `output: issue`), does not start one, and does not fire immediately. Use one patrol per repository and unique loop IDs across repositories. The generated recipe is maintained locally; edit and re-register with `--recipe ... --force` for changes, or `kc loop cancel <id>` to remove the schedule. Full guide: `docs/guides/loop-blocker-monitor.md`.
 
 The next fire of an `agent-daemon` loop waits while any open `loop/<id>` Issue exists, in any state including "PR created, awaiting human review"; it resumes once that Issue is closed (merging its PR closes it) and then fires once for the missed slot. This keeps a repair loop from redoing work that an unmerged PR already carries.
 

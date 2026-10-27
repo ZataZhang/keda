@@ -20,14 +20,14 @@
 # -----------------------------------------------------------------------------
 
 services:
-  iar-runner:
+  kedacode-runner:
     build:
       context: .
       dockerfile: Dockerfile.runner
       args:
         KEDACODE_DESKTOP_SUPPORT: "${KEDACODE_DESKTOP_ENABLED:-false}"
-    image: "iar-runner:${KEDACODE_RUNNER_PROFILE:-latest}"
-    container_name: iar-runner
+    image: "kedacode-runner:${KEDACODE_RUNNER_PROFILE:-latest}"
+    container_name: kedacode-runner
     restart: unless-stopped
     init: true
     logging:
@@ -44,10 +44,8 @@ services:
       HOME: /home/runner
       # 仓库定位（由宿主托管服务注入）
       REPO_PATH: "${REPO_PATH}"
-      # 仓库 id 同时传新旧两个名字：KEDACODE_REPO_ID 供新包读取；
-      # IAR_REPO_ID 供 KEDA_VERSION 钉到旧版本时旧包读取（legacy-alias）
+      # 仓库 id 供当前 Runner 包读取。
       KEDACODE_REPO_ID: "${KEDACODE_REPO_ID:-}"
-      IAR_REPO_ID: "${IAR_REPO_ID:-}" # legacy-alias
       # 托管模式关键差异：**不设 GH_TOKEN**。gh 从下面挂载的 GH_CONFIG_DIR 读
       # hosts.yml；该目录是 repo 专属 tmpfs 的 bind mount，只含路径不含 key 值。
       GH_CONFIG_DIR: /home/runner/.config/gh

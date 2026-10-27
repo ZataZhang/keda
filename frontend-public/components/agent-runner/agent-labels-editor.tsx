@@ -119,12 +119,14 @@ export function AgentLabelsEditor() {
   }
 
   return (
-    <div className="space-y-3" data-testid="agent-labels-editor">
+    <div className="min-w-0 space-y-3" data-testid="agent-labels-editor">
       <p className="text-xs text-slate-500 dark:text-slate-400">
         这里配置的是各 agent 在 issue 路由标签（如 agent/codex）中使用的名字、颜色与描述。
         工作流标签（agent/ready、agent/running 等）不在本表范围。
       </p>
 
+      <div className="overflow-x-auto" data-testid="agent-labels-table-scroll">
+        <div className="min-w-[30rem] space-y-3">
       <div className="grid grid-cols-[minmax(5rem,0.7fr)_minmax(7rem,1fr)_minmax(6rem,0.7fr)_minmax(10rem,1.6fr)] gap-2 border-b pb-1 text-xs font-medium text-slate-500 dark:text-slate-400">
         <span>agent</span>
         <span>标签名</span>
@@ -167,6 +169,9 @@ export function AgentLabelsEditor() {
           />
         </div>
       ))}
+
+        </div>
+      </div>
 
       {validationError ? (
         <p

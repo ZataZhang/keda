@@ -3,6 +3,8 @@ site_name: keda
 theme:
   name: material
   language: zh
+  logo: assets/brand/keda.svg
+  favicon: assets/brand/keda.svg
   features:
     - navigation.tabs
     - navigation.sections
@@ -54,6 +56,7 @@ nav:
       - 架构规范: ai-standards/architecture.md
       - 代码复用规范: ai-standards/code-reuse.md
       - 命名规范: ai-standards/naming.md
+      - 前端设计、页面骨架与滚动规范: ai-standards/frontend-design.md
       - 注释与 Docstring: ai-standards/comments-docstrings.md
       - 文档规范: ai-standards/documentation.md
       - 测试规范: ai-standards/testing.md
@@ -64,17 +67,21 @@ nav:
       - 部署指南: guides/deployment.md
       - 发布流程: guides/release-process.md
       - Agent Runner:
-          - 完整指南、模块职责、并发调度、统计、成本、会话续接与容器运维: guides/agent-runner.md
+          - 完整指南、值守看板与运行状态核实、刷新范围与缓存、模块职责、并发调度、无改动闭合、统计、成本、模型来源与会话续接: guides/agent-runner.md
+      - 目标仓库 Issue 与 PR 模板: guides/repository-templates.md
       - 生命周期 Agent 矩阵: guides/lifecycle-agent-matrix.md
       - Agent 模型预设: guides/model-presets.md
       - PRD 编写规范: guides/prd-standard.md
       - 想法收集（Idea Inbox）: guides/idea-inbox.md
+      - 本机文件与改动查看器: guides/file-viewer.md
       - Review Workflow: guides/review-workflow.md
       - Skill Lifecycle: guides/skill-lifecycle.md
       - Codex macOS 通知: guides/codex-notifications.md
-      - 桌面进度小窗: guides/desktop-companion.md
-      - 从 iar 迁移到 kc: guides/migrating-from-iar.md
+      - macOS 菜单栏 App 安装与状态面板: guides/desktop-companion.md
+      - 从 IAR 升级到 KedaCode: guides/migrating-from-iar.md
       - Loop 定时任务: guides/loop.md
+      - 内置任务恢复巡检: guides/loop-blocker-monitor.md
+      - 数据集样本导出: guides/dataset-export.md
   - 原型演示:
       - 概览: prototypes/index.md
       - Prototype Hub: prototypes/hub.html

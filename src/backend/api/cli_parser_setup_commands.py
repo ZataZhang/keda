@@ -36,8 +36,8 @@ def add_setup_commands(subparsers: argparse._SubParsersAction) -> None:
         "--no-update-gitignore",
         action="store_true",
         help=(
-            "Do not add KedaCode runtime patterns (.iar/, .agent-runner/, "
-            ".iar-worktrees/) to .gitignore. Default: managed by kc init."
+            "Do not add KedaCode runtime patterns (.kedacode/, .agent-runner/, "
+            ".kc-worktrees/) to .gitignore. Default: managed by kc init."
         ),
     )
 
@@ -126,7 +126,7 @@ def add_setup_commands(subparsers: argparse._SubParsersAction) -> None:
     issue_list_parser.add_argument(
         "--all-registered",
         action="store_true",
-        help="Force multi-repository scan even when cwd is an iAR project repo.",
+        help="Force multi-repository scan even when cwd is a KedaCode project repo.",
     )
     issue_list_parser.add_argument(
         "--state",

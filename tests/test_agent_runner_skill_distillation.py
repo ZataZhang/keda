@@ -279,8 +279,17 @@ def test_publication_distills_only_success_using_persisted_issue_context(
             issue_number=issue.number,
             issue_title=issue.title,
             issue_url=issue.url,
-            attempts=[ShortTermAttempt(1, "verification_failed", "Old failure context")],
-            final_solution="Removed the unused import and confirmed lint passes.",
+            attempts=[
+                ShortTermAttempt(
+                    1,
+                    "verification_failed",
+                    "Old failure context\n" + ("Complete diagnostic detail. " * 80),
+                )
+            ],
+            final_solution=(
+                "Removed the unused import and confirmed lint passes.\n"
+                + ("Detailed success evidence. " * 80)
+            ),
         ),
     )
 
@@ -342,7 +351,8 @@ def test_publication_distills_only_success_using_persisted_issue_context(
     assert process_runner.commands[0][-1] == "origin/main...HEAD"
     assert generator.agents == [expected_agent]
     assert "Old failure context" in generator.prompts[0]
-    assert "Removed the unused import and confirmed lint passes." in generator.prompts[0]
+    assert ("Complete diagnostic detail. " * 80) in generator.prompts[0]
+    assert ("Detailed success evidence. " * 80) in generator.prompts[0]
     assert "just lint: exit 0" in generator.prompts[0]
     assert "qoder, codex, claude" in generator.prompts[0]
     draft_files = list((tmp_path / ".iar" / "skills" / "drafts").glob("*.md"))

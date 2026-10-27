@@ -43,10 +43,10 @@ _PACKAGED_SKILL = _PACKAGED_SKILL_DIR / "SKILL.md"
 _PACKAGED_REFERENCES_DIR = _PACKAGED_SKILL_DIR / "references"
 
 #: 子命令说明的当前份数；新增路由时须同步受管集合与此契约。
-_EXPECTED_REFERENCE_COUNT = 10
+_EXPECTED_REFERENCE_COUNT = 11
 
 #: 改名前随包发行的旧名 skill 目录（安装根里遗留的副本，只用于清理判定）。
-_LEGACY_SKILL_NAME = product_identity.LEGACY_OPERATOR_SKILL_NAME
+_LEGACY_SKILL_NAME = "iar-operator"
 
 
 # ── 随包文件枚举：主文件 + 全部子命令说明 ────────────────────────────────────
@@ -384,17 +384,26 @@ _ALLOWED_FLAGS: dict[tuple[str, ...], set[str]] = {
         "--no-autopilot",
         "--interval",
         "--agent",
-        "--max-issues",
         "--concurrency",
         "--repo",
         "--repo-id",
         "--all",
     },
+    # 并行上限统一后 ``max_issues`` 退役，``kc config migrate`` 删除该旧键（skill 有示例）。
+    ("config", "migrate"): {"--repo", "--repo-id", "--dry-run", "--apply", "--include-closed"},
     # ``kc daemon --all`` 走的是 daemon 组自己的回调（不写 ``run`` 也能起守护），
     # ``build_command_schema`` 只导出叶子命令，所以这条路径由
     # ``_group_callback_flags_by_path()`` 从真实命令树补出来；旗标照抄派生结果，
     # 不凭记忆放行 schema 里查不到的名字。
-    ("loop", "create"): {"--recipe", "--cron", "--every", "--repo-id", "--repo", "--force"},
+    ("loop", "create"): {
+        "--recipe",
+        "--template",
+        "--cron",
+        "--every",
+        "--repo-id",
+        "--repo",
+        "--force",
+    },
     ("loop", "list"): {"--json"},
     ("loop", "run"): {"--now", "--dry-run", "--repo-id", "--repo"},
     ("loop", "cancel"): set(),
@@ -403,7 +412,6 @@ _ALLOWED_FLAGS: dict[tuple[str, ...], set[str]] = {
         "--no-autopilot",
         "--interval",
         "--agent",
-        "--max-issues",
         "--concurrency",
         "--repo",
         "--repo-id",
@@ -431,6 +439,10 @@ _ALLOWED_FLAGS: dict[tuple[str, ...], set[str]] = {
     # 旗标集合取自 ``kc schema --json`` 的真实命令树。
     ("labels", "sync"): {"--repo", "--repo-id", "--config", "--all"},
     ("init",): {"--dry-run", "--force"},
+    # console is an executable callback group without nested commands.
+    ("console",): {"--port", "--api-only", "--no-browser"},
+    # 菜单栏 App 可在首次提示被跳过后通过此命令手动安装，无专属旗标。
+    ("desktop", "install"): set(),
     # issue-245：随包 Skill 写明 skill 重装/刷新的独立入口；它不带仓库 selector。
     ("skill", "install"): {"--dry-run", "--force"},
     # 单目录 operator 修复不触碰其它安装根或远程模板 Skill。
@@ -446,17 +458,44 @@ _ALLOWED_FLAGS: dict[tuple[str, ...], set[str]] = {
     ("registry", "stop"): {"--repo-id", "--all"},
     ("backlog", "advance"): {"--dry-run", "--repo", "--repo-id", "--config"},
     ("registry", "list"): set(),
-    ("daemon", "status"): set(),
     # issue-265：随包 Skill 说明 host GC 的预览、显式执行与缓存保留期；
     # 旗标必须同时通过下方的实时命令树白名单检查。
     ("container", "gc"): {"--apply", "--dry-run", "--cache-retention-days"},
     # issue-265：托管 Console 首次引导的一次性引导码由 VM 本地 CLI 签发；
     # 路径与 --expires-in 旗标取自 ``kc schema --json`` 的真实命令树。
     ("console", "bootstrap-token", "create"): {"--expires-in"},
+    # skill 用 ``kc daemon status --repo-id <id> --json`` 读 daemon 实际生效的并行上限。
+    ("daemon", "status"): {"--repo", "--repo-id", "--json", "--all"},
     ("recover",): {"--issue", "--branch", "--repo", "--repo-id"},
     ("blocked-continue",): {"--issue", "--agent", "--repo", "--repo-id"},
     ("worktree", "path"): {"--branch"},
     ("agent", "presets"): set(),
+    # issue-292：可用性与本机引导的命令面（``kc agent list`` / ``setup`` / ``add``）。
+    # 旗标集合照抄 ``kc schema --json`` 的真实命令树，不凭记忆放行。
+    ("agent", "list"): {"--json", "--output"},
+    ("agent", "setup"): {
+        "--stage",
+        "--agent",
+        "--preset",
+        "--fix",
+        "--dry-run",
+        "--yes",
+        "--json",
+        "--output",
+    },
+    ("agent", "add"): {
+        "--bin",
+        "--arg",
+        "--prompt-delivery",
+        "--prompt-flag",
+        "--output-protocol",
+        "--auth-home",
+        "--label",
+        "--write",
+        "--yes",
+        "--json",
+        "--output",
+    },
     # issue-262：生命周期 / 预设 / 回退候选的持久化命令面；旗标集合取自
     # ``kc schema --json`` 真实命令树（写入均需显式 --scope，repo 层 --repo-id）。
     ("agent", "lifecycle", "list"): {
@@ -607,15 +646,15 @@ def _group_callback_flags_by_path() -> dict[tuple[str, ...], set[str]]:
 
     def _walk(command: Any, path: tuple[str, ...]) -> None:
         children = getattr(command, "commands", None)
-        if not children:
-            return
         own_flags = {
             name
             for param in getattr(command, "params", ())
             for name in list(param.opts) + list(getattr(param, "secondary_opts", None) or [])
         }
-        if path and own_flags:
+        if path and own_flags and (children or getattr(command, "invoke_without_command", False)):
             flags_by_path[path] = own_flags
+        if not children:
+            return
         context = click.Context(command)
         for name in command.list_commands(context):
             subcommand = command.get_command(context, name)
@@ -721,6 +760,7 @@ _ROUTE_KEYWORDS_BY_REFERENCE: dict[str, tuple[str, ...]] = {
     "watch.md": ("看进度", "live agent output"),
     "triage.md": ("卡住了", "triage stuck"),
     "daemon.md": ("后台跑", "daemons"),
+    "hosted-runner.md": ("托管 Runner", "hosted runner", "kc container gc"),
     "loop.md": ("定时任务", "recurring loops"),
     "ci.md": ("CI 交付", "auto-repair"),
     "setup-and-config.md": ("装环境", "initialize a repository"),
@@ -816,6 +856,27 @@ def test_packaged_skill_main_file_keeps_shared_baselines() -> None:
     assert "requires a target" in main_text, "主文件缺少 run 目标必填契约"
 
 
+def test_packaged_skill_routes_hosted_operations_to_reference() -> None:
+    """托管 Runner 的完整操作契约随包保留在专用 reference 中。"""
+    main_text = _PACKAGED_SKILL.read_text(encoding="utf-8")
+    hosted_reference_path = _PACKAGED_SKILL.parent / "references" / "hosted-runner.md"
+    hosted_reference_text = hosted_reference_path.read_text(encoding="utf-8")
+
+    assert "references/hosted-runner.md" in main_text
+    for required_phrase in (
+        "kc container gc --dry-run",
+        "kc container gc --apply",
+        "--cache-retention-days",
+        "kc console bootstrap-token create",
+        "hosted_maintenance_enabled = true",
+        "repo-specific tmpfs native-auth directory",
+        "does not revoke the upstream credential",
+        "kc-computer record start",
+        ".actions.jsonl",
+    ):
+        assert required_phrase in hosted_reference_text, required_phrase
+
+
 def test_packaged_skill_documents_issue_output_paths() -> None:
     """随包 Skill 必须覆盖按 Issue 查看、/ps 边界与网页查看三条路径。"""
     text = _all_skill_text()
@@ -835,7 +896,7 @@ def test_packaged_skill_documents_direct_pr_and_from_prompt_entries() -> None:
     text = _all_skill_text()
     # 直发档：无 PRD 锚点才可用，且跳过审核 Agent 与仓库验证命令。
     assert "`kc run --issue <N> --direct-pr`" in text
-    assert "iar:direct-pr" in text
+    assert "kc:direct-pr" in text
     # 从一句话需求开 Issue：正文默认不带 PRD 锚点，验收小节是显式 opt-in。
     assert "`kc issue create --from-prompt" in text
     assert "--require-validation" in text
@@ -879,7 +940,7 @@ def test_packaged_skill_drops_retired_absolute_claims() -> None:
     # 替代表述②：显式定向不再要求就绪标签，但认领状态必须响亮回报。
     assert "An explicit target does not need `agent/ready`" in text
     # 替代表述③：首次领取由 marker 选举裁决，落败方不改标签。
-    assert "iar:claim-withdrawn" in text
+    assert "kc:claim-withdrawn" in text
 
 
 def test_packaged_skill_separates_read_only_from_execution() -> None:

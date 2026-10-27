@@ -23,9 +23,9 @@ PRD 的章节结构、Human Review Map（介入与风险地图）、Realistic Va
 
 ### 单 PRD 与聚合 PR 的验收边界
 
-- 普通 Issue PR 沿用 `iar:merge-acceptance version=1`：正文只关联一个 PRD；该 PR 合并的共同接受范围只覆盖这一份 PRD。
+- 普通 Issue PR 沿用 `kc:merge-acceptance version=1`：正文只关联一个 PRD；该 PR 合并的共同接受范围只覆盖这一份 PRD。
 - Backlog 对单个 PRD 显式选择自动合并时，Issue 带 `prd-auto-merge` 标签：这会授权队列跳过独立 verifier 并在其余门禁通过后合并；该设置不产生人工确认，也不要求或触发合并后修改 PRD 的 `Human-Confirmed` 清单、验收横幅或 Change Log。
-- 夜间批次总 PR 是窄范围例外，必须同时包含 `iar:aggregate-pr version=1` 来源 marker 与 `iar:merge-acceptance version=2`。v2 正文按仓库相对路径稳定排序，逐个且仅逐个列出来源 Issue 对应的唯一 PRD 集；漏列、重复或多列路径均不合规。
+- 夜间批次总 PR 是窄范围例外，必须同时包含 `kc:aggregate-pr version=1` 来源 marker 与 `kc:merge-acceptance version=2`。v2 正文按仓库相对路径稳定排序，逐个且仅逐个列出来源 Issue 对应的唯一 PRD 集；漏列、重复或多列路径均不合规。
 - 合并 v2 总 PR 授权对正文列出的每份 PRD 分别回填验收记录。每份 PRD 仍须在最终合并 tree 中存在并有独立验证计划、证据报告和 verifier 报告；关闭来源 PR 不接受任何 PRD，也不替代其 `Human-Confirmed` 人工记录。
 - v1 普通 PR 的契约不因聚合例外而升级或改写。没有完整来源 marker 和 v2 集合声明的 PR 不能共同接受多份 PRD。
 
@@ -41,7 +41,7 @@ PRD 的章节结构、Human Review Map（介入与风险地图）、Realistic Va
 
 #### 不要把 runner 自持的门禁写成验收条目
 
-agent runner 的归档动作（`ensure_prd_delivery_ready`,执行循环 Phase 3）跑在它自己的 independent verifier（Phase 3.6）、PR 创建与评审**之前**。因此像"独立 verifier 对 rv-1～rv-N 全链证据 PASS 后才归档"这样的条目在被检查的那一刻永远无法成立：勾上是撒谎,不勾就被门禁打回,attempt 只能在同一行上空转（实证：freshai Issue #111 连续 5 次 attempt 失败在同一条上）。
+agent runner 的归档动作（`ensure_prd_delivery_ready`,执行循环 Phase 3）跑在它自己的 independent verifier（Phase 3.6）、PR 创建与评审**之前**。因此像"独立 verifier 对 rv-1～rv-N 全链证据 PASS 后才归档"这样的条目在被检查的那一刻永远无法成立：勾上是撒谎,不勾就被门禁打回,attempt 只能在同一行上空转（实证：示例仓库 Issue #111 连续 5 次 attempt 失败在同一条上）。
 
 - 写 PRD 时：验收条目只写**本轮执行 agent 能自己产出证据**的事；verifier / PR / 归档顺序这类 runner 门禁不进清单。
 - 已经写进去了：改成 `- [~] <原文> — runner-owned gate: <哪道门禁>`,把门禁本身交回 runner。

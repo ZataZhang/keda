@@ -120,10 +120,7 @@ _NON_RUNNER_NESTED_COMMANDS = frozenset({"status"})
 
 
 def _find_own_command_index(cmdline: tuple[str, ...]) -> int | None:
-    """在命令行中定位本产品可执行文件（``kc`` / ``kedacode`` / ``iar`` legacy-alias）的位置。
-
-    兼容 ``kc``、``uv run kc``、``/path/to/iar``（legacy-alias）等形态。
-    """
+    """在命令行中定位本产品可执行文件（``kc`` / ``kedacode``）的位置。"""
     for index, arg in enumerate(cmdline):
         if product_identity.is_own_command_name(arg):
             return index
@@ -219,7 +216,7 @@ class PidfileProcessSupervisor:
             registry_path: JSON pidfile 路径，支持 ``~`` 展开。
             log_dir: 托管进程日志根目录。
             config_path: 父进程当前生效的 ``config.toml``；给定后 spawn 子进程时
-                以配置环境变量（新旧名同时）注入，保证托管进程与创建它的进程读到同一份
+                以 ``KEDACODE_CONFIG`` 注入，保证托管进程与创建它的进程读到同一份
                 机器级配置。``None`` 表示不注入，子进程按自身 cwd 解析。
         """
         self._registry_path = Path(registry_path).expanduser()
@@ -302,17 +299,15 @@ class PidfileProcessSupervisor:
         log_directory.mkdir(parents=True, exist_ok=True)
         log_path = log_directory / f"{kind_value}-{process_id}.log"
 
-        # CONSOLE 标记保持新旧变量兼容，基底使用净化档，避免会话私有变量下传。
+        # CONSOLE 标记使用产品统一前缀，基底使用净化档，避免会话私有变量下传。
         child_env = build_sanitized_child_env()
-        child_env.update(product_identity.build_child_env_aliases({"CONSOLE": "1"}))
+        child_env.update(product_identity.build_child_env({"CONSOLE": "1"}))
         # 托管子进程的 cwd 是目标仓库（见 ``resolve_console_spawn_cwd``），若让它
         # 自行按 cwd 解析配置，会撞上该仓库自己的应用级 ``config.toml``，把机器级
         # 配置（生命周期矩阵、registry、超时…）整份顶掉。配置环境变量是发现顺序里的
         # 最高优先级，显式注入即让父子两进程锁定同一份文件。
         if self._config_path is not None:
-            child_env.update(
-                product_identity.build_child_env_aliases({"CONFIG": str(self._config_path)})
-            )
+            child_env.update(product_identity.build_child_env({"CONFIG": str(self._config_path)}))
         with open(log_path, "ab") as log_file:
             child_process = subprocess.Popen(  # noqa: S603 - argv 由白名单枚举构建。
                 list(argv),
@@ -386,12 +381,18 @@ class PidfileProcessSupervisor:
         """扫描系统进程，返回未在 pidfile 中登记的 kc daemon / supervise-daemon。
 
         仅返回当前用户拥有的进程；命令行无法解析或不属于 registry 的进程
-        被忽略。结果仅用于观测，不参与 ``stop`` / ``read_log`` 等托管操作。
+        被忽略。系统禁止读取完整进程表时记录 warning 并返回空列表，避免影响
+        registry 与托管进程状态查询。结果仅用于观测，不参与 ``stop`` / ``read_log``
+        等托管操作。
 
         Args:
             registry_entries: 与 ``RegistryRepositoryEntry`` 同构的对象序列，
                 每个条目至少包含 ``repo_id`` 与 ``path`` 属性，用于按 cwd
                 匹配未显式指定 ``--repo-id`` 的手动进程。
+
+        Returns:
+            list[RunnerProcessRecord]: 扫描到的未托管 runner 进程；系统进程表无法读取时
+                返回空列表。
         """
         if psutil is None:
             _logger.warning("psutil is not available; cannot scan for unmanaged runner processes.")
@@ -413,53 +414,60 @@ class PidfileProcessSupervisor:
         current_pid = os.getpid()
 
         unmanaged_records: list[RunnerProcessRecord] = []
-        for proc in psutil.process_iter(["pid", "name", "cmdline", "username", "create_time"]):
-            try:
-                proc_info = proc.info
-                if not isinstance(proc_info, dict):
-                    continue
-                pid = proc_info.get("pid")
-                username = proc_info.get("username")
-                cmdline = proc_info.get("cmdline")
-                if not isinstance(pid, int) or pid <= 0:
-                    continue
-                if pid == current_pid:
-                    continue
-                if current_username is not None and username != current_username:
-                    continue
-                if not isinstance(cmdline, (list, tuple)) or not cmdline:
-                    continue
-                cmdline_tuple = tuple(str(arg) for arg in cmdline)
-                kind = _parse_unmanaged_kind(cmdline_tuple)
-                if kind is None:
-                    continue
-                if pid in managed_pids:
-                    continue
-                repo_id = _parse_repo_id_from_argv(cmdline_tuple)
-                if repo_id is None:
-                    try:
-                        cwd = proc.cwd()
-                    except Exception:  # noqa: BLE001 - cwd 读取失败时跳过按路径匹配。
-                        cwd = None
-                    repo_id = _resolve_repo_id_from_cwd(cwd, registry_entries)
-                if repo_id is None:
-                    continue
-                unmanaged_records.append(
-                    RunnerProcessRecord(
-                        process_id=f"unmanaged-{pid}",
-                        repo_id=repo_id,
-                        kind=kind,
-                        pid=pid,
-                        status="running",
-                        exit_code=None,
-                        log_path="",
-                        command=cmdline_tuple,
-                        started_at=_format_create_time(proc_info.get("create_time")),
-                        stopped_at=None,
+        try:
+            for proc in psutil.process_iter(["pid", "name", "cmdline", "username", "create_time"]):
+                try:
+                    proc_info = proc.info
+                    if not isinstance(proc_info, dict):
+                        continue
+                    pid = proc_info.get("pid")
+                    username = proc_info.get("username")
+                    cmdline = proc_info.get("cmdline")
+                    if not isinstance(pid, int) or pid <= 0:
+                        continue
+                    if pid == current_pid:
+                        continue
+                    if current_username is not None and username != current_username:
+                        continue
+                    if not isinstance(cmdline, (list, tuple)) or not cmdline:
+                        continue
+                    cmdline_tuple = tuple(str(arg) for arg in cmdline)
+                    kind = _parse_unmanaged_kind(cmdline_tuple)
+                    if kind is None:
+                        continue
+                    if pid in managed_pids:
+                        continue
+                    repo_id = _parse_repo_id_from_argv(cmdline_tuple)
+                    if repo_id is None:
+                        try:
+                            cwd = proc.cwd()
+                        except Exception:  # noqa: BLE001 - cwd 读取失败时跳过按路径匹配。
+                            cwd = None
+                        repo_id = _resolve_repo_id_from_cwd(cwd, registry_entries)
+                    if repo_id is None:
+                        continue
+                    unmanaged_records.append(
+                        RunnerProcessRecord(
+                            process_id=f"unmanaged-{pid}",
+                            repo_id=repo_id,
+                            kind=kind,
+                            pid=pid,
+                            status="running",
+                            exit_code=None,
+                            log_path="",
+                            command=cmdline_tuple,
+                            started_at=_format_create_time(proc_info.get("create_time")),
+                            stopped_at=None,
+                        )
                     )
-                )
-            except Exception:  # noqa: BLE001 - 单个进程扫描失败不应中断整体。
-                continue
+                except Exception:  # noqa: BLE001 - 单个进程扫描失败不应中断整体。
+                    continue
+        except Exception as process_scan_error:  # noqa: BLE001 - 进程表扫描仅用于观测。
+            _logger.warning(
+                "系统进程表扫描失败，未托管 runner 状态暂不可用：%s",
+                process_scan_error,
+            )
+            return []
 
         return unmanaged_records
 

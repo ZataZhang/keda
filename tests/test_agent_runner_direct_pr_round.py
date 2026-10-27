@@ -21,7 +21,7 @@ from backend.core.shared.models.agent_runner import (
 )
 from backend.core.shared.models.publish_stage import PublishStage
 from backend.core.use_cases import agent_runner_issue_handlers as handlers
-from backend.core.use_cases import run_agent_once
+from backend.core.use_cases import run_agent_execution_loop
 from backend.core.use_cases.agent_runner_direct_pr_label import resolve_publish_stage
 from backend.core.use_cases.agent_runner_direct_pr_round import (
     DirectPrPublicationCandidate,
@@ -177,7 +177,7 @@ def _matching_pr() -> PullRequestContext:
         head_sha=_HEAD,
         base_sha="b" * 40,
         number=91,
-        body=f"<!-- iar:direct-pr issued={_NUMBER} -->",
+        body=f"<!-- kc:direct-pr issued={_NUMBER} -->",
     )
 
 
@@ -285,7 +285,7 @@ def test_candidate_rejects_a_different_publication(tmp_path: Path, mismatch: str
     altered = {
         "head": replace(context, head_sha="c" * 40),
         "branch": replace(context, branch="issue-99"),
-        "issue": replace(context, body="<!-- iar:direct-pr issued=99 -->"),
+        "issue": replace(context, body="<!-- kc:direct-pr issued=99 -->"),
         "repo": replace(context, pr_url="https://github.com/other/repo/pull/91"),
         "url": replace(context, pr_url="https://github.com/example/repo/pull/92"),
     }[mismatch]
@@ -354,7 +354,7 @@ def _forbid_builder(monkeypatch: pytest.MonkeyPatch) -> None:
     def reject_builder(**kwargs):
         pytest.fail("Published Direct PR recovery invoked the builder")
 
-    monkeypatch.setattr(run_agent_once, "run_agent_until_committed", reject_builder)
+    monkeypatch.setattr(run_agent_execution_loop, "execute_agent_request", reject_builder)
     monkeypatch.setattr(
         handlers, "arbitrate_first_claim", lambda **kwargs: SimpleNamespace(comment_id=999)
     )

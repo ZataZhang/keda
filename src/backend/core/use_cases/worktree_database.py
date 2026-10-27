@@ -55,7 +55,7 @@ def provision_worktree_database(
         :8
     ]
     database_identifier = (
-        f"{request.repository_path.name}_iar_issue_{request.issue_number}_{repository_digest}"
+        f"{request.repository_path.name}_kc_issue_{request.issue_number}_{repository_digest}"
     )
     setup_result = process_runner.run(
         [

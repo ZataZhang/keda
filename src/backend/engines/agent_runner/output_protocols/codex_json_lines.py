@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+from backend.infrastructure.agent_model_config_snapshot import observe_relay_model_config
+
 from backend.core.shared.interfaces.agent_output_protocol import (
     CODEX_JSON_LINES_PROTOCOL_ID,
     OutputRelayRequest,
@@ -17,6 +19,7 @@ from backend.engines.agent_runner.output_protocols.structured_json_lines import 
 class CodexJsonLinesOutputProtocol:
     """渲染 Codex ``exec --json`` 的消息与工具事件。"""
 
+    @observe_relay_model_config
     def relay(self, request: OutputRelayRequest) -> CommandResult:
         """执行 Codex 并把 JSONL 事件转为可读输出。"""
         return relay_structured_json_lines(

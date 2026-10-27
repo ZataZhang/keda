@@ -404,7 +404,7 @@ def test_set_prd_ci_policy_rejects_bad_value() -> None:
 def editor_repo(tmp_path: Path) -> Path:
     repo = tmp_path / "repo"
     repo.mkdir()
-    (repo / ".iar.toml").write_text(
+    (repo / ".kedacode.toml").write_text(
         "[agent_runner]\n[agent_runner.autopilot]\nenabled = true\n"
         "# 保留注释\n[agent_runner.post_pr_supervisor]\nmax_repair_attempts = 3\n",
         encoding="utf-8",
@@ -420,7 +420,7 @@ def test_editor_auto_repair_ci_roundtrip(editor_repo: Path) -> None:
     editor.set_auto_repair_ci(editor_repo, False)
     assert editor.read_auto_repair_ci(editor_repo) is False
     # 只改目标键：注释与相邻键必须逐字保留。
-    raw = (editor_repo / ".iar.toml").read_text(encoding="utf-8")
+    raw = (editor_repo / ".kedacode.toml").read_text(encoding="utf-8")
     assert "# 保留注释" in raw
     assert "max_repair_attempts = 3" in raw
     assert "enabled = true" in raw
@@ -434,7 +434,7 @@ def test_editor_auto_repair_ci_missing_file(tmp_path: Path) -> None:
 
 
 def test_editor_auto_repair_ci_rejects_non_bool(editor_repo: Path) -> None:
-    (editor_repo / ".iar.toml").write_text(
+    (editor_repo / ".kedacode.toml").write_text(
         '[agent_runner]\n[agent_runner.post_pr_supervisor]\nauto_repair_ci = "yes"\n',
         encoding="utf-8",
     )
@@ -477,7 +477,7 @@ def ci_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         "## Acceptance Checklist\n- [ ] item\n",
         encoding="utf-8",
     )
-    (repo_dir / ".iar.toml").write_text(
+    (repo_dir / ".kedacode.toml").write_text(
         "[agent_runner]\n[agent_runner.autopilot]\nenabled = false\n",
         encoding="utf-8",
     )
@@ -493,7 +493,7 @@ def ci_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(backlog_routes, "create_backlog_store", lambda: store)
 
     # `_resolve_contexts` 在生产路径每次都 fresh load；这里模拟同一语义：
-    # 每次调用都从磁盘 .iar.toml 重建 config，写回才能被后续读取看到。
+    # 每次调用都从磁盘 .kedacode.toml 重建 config，写回才能被后续读取看到。
     from dataclasses import replace as _dc_replace
 
     from backend.infrastructure.config.agent_runner_settings import (
@@ -574,7 +574,7 @@ def test_api_prd_policy_write_and_fresh_read(ci_environment) -> None:
     assert data["effective_enabled"] is True
     # marker 写进了 Issue 评论流（同一事实源，CLI/Console 双向可见）。
     assert any(
-        "iar:ci-auto-repair-policy value=on" in body
+        "kc:ci-auto-repair-policy value=on" in body
         for body in ci_environment["github"].list_issue_comments(42)
     )
     # 清除覆盖回到 inherit。

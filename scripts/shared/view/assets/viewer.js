@@ -14,9 +14,10 @@
  * 等提交的部分），`Changes` 默认展开（那才是手头正在改的），见 CHANGE_GROUPS 的
  * defaultExpanded。
  *
- * 页面只有一个写操作：`Changes` 里的加号（标题旁那一个、以及每个文件旁那一个）会把改动
- * 加进索引（`POST /api/stage`）。除此之外页面不写入任何东西——没有提交、没有撤销暂存、
- * 没有丢弃改动，服务端也只有这一个写口。
+ * 页面有两个写动作：`Changes` 里的加号（标题旁那一个、以及每个文件旁那一个）会把改动
+ * 加进索引（`POST /api/stage`）；内容区头部的「在系统中打开」把当前文件交给系统默认应用
+ * （`POST /api/open`，不写仓库）。除此之外页面不写入任何东西——没有提交、没有撤销暂存、
+ * 没有丢弃改动，服务端也只有这两条写路由。
  *
  * 两个视图各自记一份「上一次看的那一个」（成功读到内容才记），切视图时还原，而不是每次
  * 都回到空态。改动视图头部的「查看文件」是显式指定，优先于记忆。
@@ -101,6 +102,7 @@
     bodyGrid: document.querySelector(".body-grid"),
     viewerPath: document.getElementById("viewer-path"),
     copyPathButton: document.getElementById("copy-path"),
+    openInSystemButton: document.getElementById("open-in-system"),
     previewSwitch: document.getElementById("preview-switch"),
     tabSource: document.getElementById("tab-source"),
     tabPreview: document.getElementById("tab-preview"),
@@ -171,8 +173,9 @@
   /**
    * 请求一个接口。
    *
-   * GET 是只读读取；`POST` 只用于暂存（`/api/stage`）——那是页面唯一的写操作，且必须带
-   * JSON 请求体：服务端用 `Content-Type: application/json` 把跨站表单式 POST 挡在预检外。
+   * GET 是只读读取；`POST` 只用于两条写路由——暂存（`/api/stage`）与在系统中打开
+   * （`/api/open`），且必须带 JSON 请求体：服务端用 `Content-Type: application/json`
+   * 把跨站表单式 POST 挡在预检外。
    * @param {string} requestUrl 接口地址。
    * @param {{method?: string, body?: object}} [requestOptions] 方法与 JSON 请求体；缺省是 GET。
    * @returns {Promise<{status: number, body: object}>} 应答状态码与 JSON 正文。
@@ -212,6 +215,7 @@
     elements.viewerPath.textContent = "服务已退出";
     elements.copyPathButton.hidden = true;
     elements.copyPathButton.dataset.copied = "false";
+    elements.openInSystemButton.hidden = true;
     renderPreviewControls(null);
     elements.viewerMeta.textContent = "";
     elements.viewerBody.replaceChildren(
@@ -685,11 +689,11 @@
   }
 
   /**
-   * 写内容区头部的路径，并同步「复制路径」与「查看文件」的可见性。
+   * 写内容区头部的路径，并同步「复制路径」与「在系统中打开」「查看文件」的可见性。
    *
    * 头部没有真实路径（占位符、服务已退出、提示块）时必须把按钮收起来：留一个复制
    * 不到东西的按钮比没有按钮更糟。「查看文件」只在**改动视图**里有意义——文件视图本来
-   * 就在看正文，那里摆一个跳回自己的按钮是纯噪音。两个按钮都取
+   * 就在看正文，那里摆一个跳回自己的按钮是纯噪音。三个按钮都取
    * `viewState.selectedPath`，因此这里不另存一份路径，只负责显示与按钮的开关。
    * @param {string} repositoryPath 仓库相对路径；空串表示只显示占位符。
    */
@@ -697,6 +701,7 @@
     elements.viewerPath.textContent = repositoryPath || "—";
     elements.copyPathButton.hidden = !repositoryPath;
     elements.copyPathButton.dataset.copied = "false";
+    elements.openInSystemButton.hidden = !repositoryPath;
     elements.openFileButton.hidden = !repositoryPath || viewState.view !== DIFF_VIEW;
   }
 
@@ -728,11 +733,39 @@
   }
 
   /**
+   * 把内容区当前文件交给系统默认应用打开（`POST /api/open`；服务端调 macOS `open` /
+   * Windows `startfile` / 其它 `xdg-open`）。
+   *
+   * 与暂存同一条写口径：POST + JSON 体。结果只写状态条，界面布局与正文都不动——查看器里
+   * 看不了的二进制与超大文件正是靠它出去的，出去之后这里显示什么不该被打断。
+   */
+  async function openCurrentPathInSystem() {
+    const pathToOpen = viewState.selectedPath;
+    if (!pathToOpen || viewState.isDisconnected) {
+      return;
+    }
+    await guardAgainstServiceExit(async () => {
+      const openResponse = await requestJson("/api/open", {
+        method: "POST",
+        body: { path: pathToOpen },
+      });
+      if (openResponse.status !== 200) {
+        elements.statusHint.textContent = `打开失败：${openResponse.body.error}`;
+        return;
+      }
+      elements.statusHint.textContent = `已交给系统打开：${pathToOpen}`;
+    });
+  }
+
+  /**
    * 在内容区渲染一个提示块。
    * @param {HTMLElement} noticeNode 提示块节点。
+   * @param {string} [noticePath] 提示块针对的文件路径；给出的头部保留该路径与
+   *   「复制 / 在系统中打开」两个按钮（「文件过大」「二进制文件」这类提示正是最需要
+   *   它们的时候）。缺省按占位符处理，收起全部头部控件。
    */
-  function renderNotice(noticeNode) {
-    setViewerPath("");
+  function renderNotice(noticeNode, noticePath = "") {
+    setViewerPath(noticePath);
     // 提示块不是文件正文，预览控件必须跟着收起：留一个点到没有内容的开关比没有更糟。
     renderPreviewControls(null);
     elements.viewerMeta.textContent = "";
@@ -1435,7 +1468,7 @@
     const fileResponse = await requestJson(`/api/file?path=${encodeURIComponent(repositoryPath)}`);
     setViewerPath(repositoryPath);
     if (fileResponse.status !== 200) {
-      renderNotice(buildNotice({ isFailure: true, title: "无法读取", paragraphs: [fileResponse.body.error] }));
+      renderNotice(buildNotice({ isFailure: true, title: "无法读取", paragraphs: [fileResponse.body.error] }), repositoryPath);
       return;
     }
     // 读到了才算「在文件视图里看过这个文件」：读失败的提示块不该被记下来，否则每次切回
@@ -1458,8 +1491,9 @@
           hint:
             fileBody.kind === "binary"
               ? "二进制文件没有可读正文，查看器不猜测它的内容。"
-              : "大文件在浏览器里渲染既慢又难读，请用本地编辑器打开。",
-        })
+              : "大文件在浏览器里渲染既慢又难读，可用本地编辑器打开，或点头部的「在系统中打开」。",
+        }),
+        repositoryPath
       );
       return;
     }
@@ -1485,7 +1519,7 @@
     setViewerPath(repositoryPath);
     if (diffResponse.status !== 200) {
       elements.viewerMeta.textContent = "";
-      renderNotice(buildNotice({ isFailure: true, title: "无法读取改动", paragraphs: [diffResponse.body.error] }));
+      renderNotice(buildNotice({ isFailure: true, title: "无法读取改动", paragraphs: [diffResponse.body.error] }), repositoryPath);
       return;
     }
     // 与文件视图同一条口径：读到了才算「在改动视图里看过这条」，读失败的应答不记。
@@ -1499,8 +1533,8 @@
       renderImageComparison(diffBody.image_comparison, diffBody.path);
       return;
     }
-    // 头部在空态下会被 renderNotice 清成占位符，所以来源只在有逐行改动时才写头部，
-    // 纯重命名与二进制那两支交给提示块正文自己说。
+    // 头部在空态下由 renderNotice 保留路径（「复制 / 在系统中打开」还挂着），所以来源只在
+    // 有逐行改动时才写头部，纯重命名与二进制那两支交给提示块正文自己说。
     if (diffBody.empty) {
       renderNotice(
         buildNotice(
@@ -1520,13 +1554,14 @@
                   paragraphs: [
                     `该文件在「${diffBody.section_label}」里的内容有变化，但 git 判定它是二进制，不提供逐行 diff。`,
                   ],
-                  hint: "要对比二进制内容，请在本机用专门工具打开这两个版本。",
+                  hint: "要对比二进制内容，请在本机用专门工具打开这两个版本，或点头部的「在系统中打开」。",
                 }
               : {
                   title: "该文件在此区段下没有改动",
                   paragraphs: [`「${diffBody.section_label}」中没有这个文件的改动。`],
                 }
-        )
+        ),
+        repositoryPath
       );
       return;
     }
@@ -1951,6 +1986,11 @@
   });
   elements.copyPathButton.addEventListener("click", () => {
     void copyCurrentViewerPath();
+  });
+  // 交给系统打开：与「复制路径」一样现取 selectedPath，不在渲染时捕获进闭包——
+  // 每点一个条目都会换一份路径，捕获的那份会开错文件。
+  elements.openInSystemButton.addEventListener("click", () => {
+    void openCurrentPathInSystem();
   });
   elements.tabSource.addEventListener("click", () => {
     void setRenderMode(SOURCE_MODE);

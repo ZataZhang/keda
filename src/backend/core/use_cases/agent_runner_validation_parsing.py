@@ -41,14 +41,14 @@ _WAIVER_LINE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _WAIVER_MARKER_PATTERN = re.compile(
-    r"<!--\s*iar:validation-waived(?:\s+reason=\"(?P<reason>[^\"]*)\")?\s*-->"
+    r"<!--\s*kc:validation-waived(?:\s+reason=\"(?P<reason>[^\"]*)\")?\s*-->"
 )
 _FORMAT_WAIVER_LINE_PATTERN = re.compile(
     r"^[-*\s]*Evidence Format Waiver[:：]\s*(?P<reason>.+)$",
     re.IGNORECASE,
 )
 _FORMAT_WAIVER_MARKER_PATTERN = re.compile(
-    r"<!--\s*iar:evidence-format-waived(?:\s+reason=\"(?P<reason>[^\"]*)\")?\s*-->"
+    r"<!--\s*kc:evidence-format-waived(?:\s+reason=\"(?P<reason>[^\"]*)\")?\s*-->"
 )
 
 EVIDENCE_ORACLE_SUBDIR = "scripts"
@@ -225,11 +225,11 @@ def extract_validation_waiver_reason(markdown_text: str) -> str | None:
 def format_validation_waiver_marker(reason: str) -> str:
     """Format the hidden waiver marker for an Issue body."""
     sanitized_reason = reason.replace('"', "'").replace("\n", " ").strip()
-    return f'<!-- iar:validation-waived reason="{sanitized_reason}" -->'
+    return f'<!-- kc:validation-waived reason="{sanitized_reason}" -->'
 
 
 def has_validation_waiver_marker(text: str) -> bool:
-    """Return True when the text carries an iar:validation-waived marker."""
+    """Return True when the text carries an kc:validation-waived marker."""
     return _WAIVER_MARKER_PATTERN.search(text) is not None
 
 
@@ -253,11 +253,11 @@ def extract_evidence_format_waiver_reason(markdown_text: str) -> str | None:
 def format_evidence_format_waiver_marker(reason: str) -> str:
     """Format the hidden evidence-format waiver marker for an Issue body."""
     sanitized_reason = reason.replace('"', "'").replace("\n", " ").strip()
-    return f'<!-- iar:evidence-format-waived reason="{sanitized_reason}" -->'
+    return f'<!-- kc:evidence-format-waived reason="{sanitized_reason}" -->'
 
 
 def has_evidence_format_waiver_marker(text: str) -> bool:
-    """Return True when the text carries an iar:evidence-format-waived marker."""
+    """Return True when the text carries an kc:evidence-format-waived marker."""
     return _FORMAT_WAIVER_MARKER_PATTERN.search(text) is not None
 
 
@@ -265,7 +265,7 @@ def evidence_format_check_required(issue_body: str, config: AppConfig) -> bool:
     """Return True when per-item evidence format matching should run.
 
     配置 ``validation.evidence_format_check = false`` 全局关闭；Issue body
-    带 ``iar:evidence-format-waived`` marker（来自 PRD 的 Evidence Format
+    带 ``kc:evidence-format-waived`` marker（来自 PRD 的 Evidence Format
     Waiver 声明）按任务关闭。
     """
     if not config.validation.evidence_format_check:
@@ -289,7 +289,7 @@ def build_issue_validation_section(
     时附带格式豁免 marker（证据仍必须存在，仅跳过逐项格式对账）。
 
     当 ``structured_evidence`` 为 true 且存在 checklist 时，在区块开头附加
-    ``iar:structured-evidence`` hidden marker。
+    ``kc:structured-evidence`` hidden marker。
 
     Args:
         checklist_items: 规范化后的验收清单行。

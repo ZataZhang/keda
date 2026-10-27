@@ -53,19 +53,19 @@ from backend.core.use_cases.agent_runner_git import get_current_branch, get_head
 _logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# 可 grep 的标记（与既有 [iar-*] 标记同族）
+# 可 grep 的标记（与既有 [kc-*] 标记同族）
 # ---------------------------------------------------------------------------
 
-STALL_CHECK_MARKER = "[iar-stall-check]"
+STALL_CHECK_MARKER = "[kc-stall-check]"
 """一次巡检的结论行（进展/无进展计时）。"""
 
-STALL_DIAGNOSIS_MARKER = "[iar-stall-diagnosis]"
+STALL_DIAGNOSIS_MARKER = "[kc-stall-diagnosis]"
 """一次只读诊断的结论行。"""
 
-STALL_HANDOFF_MARKER = "[iar-stall-handoff]"
+STALL_HANDOFF_MARKER = "[kc-stall-handoff]"
 """交班行：需要人处理，或判据不足以动手（不写、不杀）。"""
 
-STALL_CANCEL_MARKER = "[iar-stall-cancel]"
+STALL_CANCEL_MARKER = "[kc-stall-cancel]"
 """精确取消结果行。"""
 
 #: 诊断输出里的三个协议字段（规范写法）。
@@ -541,7 +541,7 @@ class _StallObserver:
         self._state = _StallObserverState()
         self._thread = threading.Thread(
             target=self._run,
-            name=f"iar-stall-{request.attempt_key}",
+            name=f"kc-stall-{request.attempt_key}",
             daemon=True,
         )
 

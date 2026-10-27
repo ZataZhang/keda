@@ -113,6 +113,11 @@ forbidden_path_patterns = [
     "secrets/*",
     "docker-compose.prod.yml",
 ]
+# 仅放行明确安全的环境模板；例外会覆盖上方任意禁改模式，保持范围狭窄。
+forbidden_path_exceptions = [
+    ".env.example",
+    ".env.*.example",
+]
 
 # Autopilot 快速档（合并队列）：supervisor 之后串行合并；需配合 safety.auto_merge = true 同时启用
 [agent_runner.autopilot]
@@ -313,10 +318,11 @@ role = "implementer"
 behavior_prompt = "You are a pragmatic implementer. Focus on feasibility, concrete steps, and implementation details. Highlight what can be built and what resources are needed."
 
 # 阶段 -> 模型预设绑定（仓库级覆盖，优先级高于全局 config.toml 的同段）
-# 将 implementation 阶段改用 qoder + Qwen3.8-Flash + max 推理档；
-# 预设 qoder-qwen3_8-flash_max 定义在全局 config.toml 的 [agent_runner.presets.qoder-qwen3_8-flash_max]。
+# 将实现、修复、收尾、校验和审核阶段统一绑定到 codex-luna-max；
+# 预设定义在全局 config.toml 的 [agent_runner.presets.codex-luna-max]。
 [agent_runner.lifecycle_presets]
-implementation = "qoder-qwen3_8-flash_max"
-fix = "qoder-qwen3_8-max_xhigh"
-closeout = "qoder-qwen3_8-max_xhigh"
-review = "qoder-qwen3_8-max_xhigh"
+implementation = "codex-luna-max"
+fix = "codex-luna-max"
+closeout = "codex-luna-max"
+review = "codex-luna-max"
+verifier = "codex-luna-max"

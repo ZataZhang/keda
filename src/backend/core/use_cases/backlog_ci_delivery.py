@@ -2,10 +2,10 @@
 
 职责边界（刻意保守）：
 
-- **读**：从 GitHub PR context 与既有 ``iar:event`` / ``iar:ci-auto-repair-policy``
+- **读**：从 GitHub PR context 与既有 ``kc:event`` / ``kc:ci-auto-repair-policy``
   marker 投影出只读的 :class:`BacklogCiDelivery`；不持久化派生视图，每次调用
   fresh 读取。
-- **写**：单 PRD 策略只写对应 Issue 的 latest-wins ``iar:ci-auto-repair-policy``
+- **写**：单 PRD 策略只写对应 Issue 的 latest-wins ``kc:ci-auto-repair-policy``
   marker；单次手动修复复用既有 ``post_pr_rework_requested`` rework 意图评论 +
   既有 run 侧 ``execute_repair``（上限 / worktree / 禁止路径门禁全部沿用）。
 

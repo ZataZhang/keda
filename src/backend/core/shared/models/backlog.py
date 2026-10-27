@@ -123,10 +123,9 @@ class BacklogAdvanceReport:
     Attributes:
         repo_id: Target repository ID.
         dry_run: ``True`` when the pass only computed the plan without writing.
-        ceiling: The single resolved concurrency ceiling used by this pass
-            (``min(policy, runner capacity)``, policy ``None`` inherits capacity).
-        ceiling_source: Where the ceiling came from: ``"inherited"`` /
-            ``"policy"`` / ``"capped_by_capacity"``.
+        ceiling: The single resolved parallel limit used by this pass (the
+            Backlog page setting when saved, otherwise the config value).
+        ceiling_source: Where the ceiling came from: ``"policy"`` or ``"config"``.
         free_slots: Slots available for promotion in this pass.
         running_count: Live repository-wide ``agent/running`` count, or ``None``
             if the count query failed and promotions were skipped.
@@ -242,6 +241,7 @@ class PrdInvocationRow:
         requested_model: 本次实际下发的模型 id；未下发为 ``None``。
         reported_model: 执行器自报的模型 id；未上报为 ``None``。
         model_source: 实际模型信息来源；无自报时为 ``unknown``。
+        model_config_snapshot: 启动前读取的默认模型配置，仅作来源明确的估价线索。
         token_usage: 执行器自报用量；无数据时为 ``None``（≠ 0）。
         retry_of: 本次调用替代的上一次 invocation id；非重试为 ``None``。
         retry_reason: 与 :attr:`retry_of` 配套的闭集重试原因。
@@ -268,6 +268,7 @@ class PrdInvocationRow:
     retry_reason: str | None
     exit_code: int | None
     log_locator: str | None
+    model_config_snapshot: dict[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -365,12 +366,20 @@ class ModelTokenUsageStats:
         by_agent: Agent 名称到模型用量的嵌套映射。
         by_prd: PRD（Issue）与模型维度的用量条目。
         truncated: 是否有 Issue 的调用读取触达历史条数上限。
+        missing_usage_by_agent: 各 Agent 已结束但没有可用 usage 的调用数，不估算 token。
+        zero_usage_by_model: 各模型明确上报全零 usage 的调用数，不代表免费。
+        configuration_fallback_counts: 各模型按调用时默认配置归属的用量条数。
+        unresolved_model_alias_counts: 默认配置只提供别名的用量条数，仍归为 unknown。
     """
 
     by_model: dict[str, TokenUsageTotals] = field(default_factory=dict)
     by_agent: dict[str, dict[str, TokenUsageTotals]] = field(default_factory=dict)
     by_prd: tuple[PrdModelTokenUsageEntry, ...] = ()
     truncated: bool = False
+    missing_usage_by_agent: dict[str, int] = field(default_factory=dict)
+    zero_usage_by_model: dict[str, int] = field(default_factory=dict)
+    configuration_fallback_counts: dict[str, int] = field(default_factory=dict)
+    unresolved_model_alias_counts: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -456,7 +465,7 @@ class BacklogCiDelivery:
     """Backlog PRD 的 CI/CD 交付尾段投影（运行时派生，不持久化）。
 
     Console API 与 ``kc backlog ci status --json`` 共用同一份 DTO 结构；
-    轮次事实源是 GitHub PR head SHA 与既有 ``iar:event`` marker。
+    轮次事实源是 GitHub PR head SHA 与既有 ``kc:event`` marker。
     """
 
     prd_path: str
@@ -471,7 +480,7 @@ class BacklogCiDelivery:
     #: 修复轮数上限（复用 ``post_pr_supervisor.max_repair_attempts``）。
     max_rounds: int
     problems: tuple[CiCheckProblem, ...]
-    #: 对应 Issue 最新 ``iar:ci-auto-repair-policy`` marker；无 marker 即 inherit。
+    #: 对应 Issue 最新 ``kc:ci-auto-repair-policy`` marker；无 marker 即 inherit。
     stored_policy: CiRepairPolicy
     #: 仓库全局 ``post_pr_supervisor.auto_repair_ci``（fresh 配置值）。
     global_enabled: bool

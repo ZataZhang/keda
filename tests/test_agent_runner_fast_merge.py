@@ -45,10 +45,10 @@ from tests.support.agent_runner import make_ready_issue
 def test_fast_merge_marker_round_trip() -> None:
     """marker 由代码生成、可被同族解析函数读回 Issue 编号；非 marker 返回 None。"""
     marker = format_fast_merge_marker(12)
-    assert marker == "<!-- iar:fast-merge issued=12 -->"
+    assert marker == "<!-- kc:fast-merge issued=12 -->"
     assert parse_fast_merge_marker(f"body\n\n{marker}\n") == 12
-    assert parse_fast_merge_marker('<!-- iar:depends-on #3 mode="stack" -->') is None
-    assert parse_fast_merge_marker("<!-- iar:fast-merge -->") is None
+    assert parse_fast_merge_marker('<!-- kc:depends-on #3 mode="stack" -->') is None
+    assert parse_fast_merge_marker("<!-- kc:fast-merge -->") is None
 
 
 # ---------------------------------------------------------------------------
@@ -122,6 +122,7 @@ def _execution_request(
         process_runner=FakeProcessRunner(),
         before_sha="old",
         expected_branch="issue-7",
+        github_client=FakeGitHubClient(),
         fast_merge=fast_merge,
     )
 
@@ -327,7 +328,7 @@ def test_normal_pr_body_has_no_fast_merge_marker(
     """负例：默认发布的 PR 正文不含任何 fast-merge 标注。"""
     pr_body = _publish_draft_pr(monkeypatch, tmp_path, fast_merge=False)
 
-    assert "iar:fast-merge" not in pr_body
+    assert "kc:fast-merge" not in pr_body
 
 
 # ---------------------------------------------------------------------------
@@ -392,7 +393,7 @@ def test_fast_merge_rejected_with_all_ready() -> None:
 def _stack_issue_body(upstream: int = 3) -> str:
     return (
         "# PRD\n\n- GitHub Issue: https://github.com/org/repo/issues/7\n\n"
-        f'<!-- iar:depends-on #{upstream} mode="stack" -->\n'
+        f'<!-- kc:depends-on #{upstream} mode="stack" -->\n'
     )
 
 

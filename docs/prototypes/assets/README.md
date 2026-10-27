@@ -17,6 +17,10 @@
 - `component-library.css` / `component-library.js`: 原型组件库的展示布局与交互示例。
 - `component-detail.js`: 根据组件详情入口渲染变体、状态矩阵与组合示例。
 
+## 配对评测目标图
+
+- keda-vs-claude-paired-evaluation.svg 与 keda-vs-claude-paired-evaluation.source.md：M13 Keda 工作流与 Claude 单次执行的静态配对结果目标图及手工绘制来源说明；由 Prototype Hub 作为 image-state 原型入口登记。
+
 ## 页面资源命名
 
 - `prototype-page-01.css` / `prototype-page-01.js`

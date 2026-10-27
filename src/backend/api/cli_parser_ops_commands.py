@@ -240,10 +240,15 @@ def add_ops_commands(subparsers: argparse._SubParsersAction) -> None:
         "loop_id",
         help="Short kebab-case identifier for the loop.",
     )
-    loop_create_parser.add_argument(
+    loop_source_group = loop_create_parser.add_mutually_exclusive_group(required=True)
+    loop_source_group.add_argument(
         "--recipe",
-        required=True,
         help="Path to the loop recipe Markdown file (with YAML frontmatter).",
+    )
+    loop_source_group.add_argument(
+        "--template",
+        choices=["blocker-monitor"],
+        help="Generate and register a built-in recipe (requires --repo-id).",
     )
     loop_create_parser.add_argument(
         "--cron",
@@ -373,18 +378,29 @@ def add_ops_commands(subparsers: argparse._SubParsersAction) -> None:
 
     config_parser = subparsers.add_parser(
         "config",
-        help="Maintain local state: move ~/.iar, rename .iar.toml.",  # legacy-alias
+        help="Maintain local configuration and migrate older installations.",
     )
     config_subparsers = config_parser.add_subparsers(dest="config_command", required=True)
 
     config_migrate_parser = config_subparsers.add_parser(
         "migrate",
-        help="Move ~/.iar to ~/.kedacode, rename .iar.toml, drop pinned values.",  # legacy-alias
+        help="Preview or migrate local configuration and GitHub markers.",
     )
     config_migrate_parser.set_defaults(command="config migrate")
-    config_migrate_parser.add_argument(
+    migrate_mode_group = config_migrate_parser.add_mutually_exclusive_group()
+    migrate_mode_group.add_argument(
         "--dry-run",
         action="store_true",
-        help="Show the whole plan (state directory, rename, diff) without writing anything.",
+        help="Preview the migration without writing anything (default).",
+    )
+    migrate_mode_group.add_argument(
+        "--apply",
+        action="store_true",
+        help="Apply the migration after previewing it.",
+    )
+    config_migrate_parser.add_argument(
+        "--include-closed",
+        action="store_true",
+        help="Include closed Issues and PRs in GitHub marker migration.",
     )
     add_common_options(config_migrate_parser)

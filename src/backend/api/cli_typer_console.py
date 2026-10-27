@@ -25,6 +25,7 @@ from typing import Annotated
 import typer
 import uvicorn
 
+from backend.api import static as static_assets
 from backend.api.cli_typer_app import console_app, error_console
 from backend.core.use_cases.agent_runner_factory import (
     hosted_console_enabled,
@@ -242,6 +243,16 @@ def console_callback(
             ),
         ),
     ] = None,
+    api_only: Annotated[
+        bool,
+        typer.Option(
+            "--api-only",
+            help=(
+                "Start even when dashboard assets are missing or incomplete; "
+                "/ then returns 404. Complete assets keep the panel enabled."
+            ),
+        ),
+    ] = False,
     no_browser: Annotated[
         bool,
         typer.Option("--no-browser", help="Do not open the console in a browser tab."),
@@ -279,6 +290,17 @@ def console_callback(
     except ConsolePortUnavailableError as exc:
         error_console.print(f"[red]{exc}[/]")
         raise typer.Exit(code=1) from exc
+    if not api_only and static_assets.console_panel_dir_if_available() is None:
+        error_console.print(
+            "Console frontend static assets are missing or incomplete: "
+            "no index.html in backend.api.static/console.\n"
+            "In a source checkout, run `just console-sync` from the repository root.\n"
+            "Alternatively, install a release wheel; it includes the frontend assets.\n"
+            "If you only need the API, pass `kc console --api-only`.",
+            style="red",
+            markup=False,
+        )
+        raise typer.Exit(code=1)
     launch_console(
         host=CONSOLE_HOST,
         port=resolved_port,

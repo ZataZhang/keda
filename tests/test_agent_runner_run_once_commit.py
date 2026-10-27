@@ -461,7 +461,7 @@ def test_run_once_uncommitted_changes_validation_failure_does_not_stage(
     history_comment_calls = [
         c
         for c in fake_client.calls
-        if c["method"] == "comment_issue" and "<!-- iar-attempt-history -->" in c.get("body", "")
+        if c["method"] == "comment_issue" and "<!-- kc:attempt-history -->" in c.get("body", "")
     ]
     assert len(history_comment_calls) >= 1
     failure_comment_calls = [
@@ -469,7 +469,7 @@ def test_run_once_uncommitted_changes_validation_failure_does_not_stage(
         for c in fake_client.calls
         if c["method"] == "comment_issue"
         and "Command failed" in c.get("body", "")
-        and "<!-- iar-attempt-history -->" not in c.get("body", "")
+        and "<!-- kc:attempt-history -->" not in c.get("body", "")
     ]
     assert len(failure_comment_calls) == 1
 
@@ -535,7 +535,7 @@ def test_run_once_uncommitted_changes_missing_request_fails(tmp_path: Path) -> N
     history_comment_calls = [
         c
         for c in fake_client.calls
-        if c["method"] == "comment_issue" and "<!-- iar-attempt-history -->" in c.get("body", "")
+        if c["method"] == "comment_issue" and "<!-- kc:attempt-history -->" in c.get("body", "")
     ]
     assert len(history_comment_calls) >= 1
     # 交接记录会原样引用门禁报告文本（这里含 "commit request"），因此按 marker 把它
@@ -544,7 +544,7 @@ def test_run_once_uncommitted_changes_missing_request_fails(tmp_path: Path) -> N
     handoff_comment_calls = [
         c
         for c in fake_client.calls
-        if c["method"] == "comment_issue" and "iar:failure-context" in c.get("body", "")
+        if c["method"] == "comment_issue" and "kc:failure-context" in c.get("body", "")
     ]
     assert len(handoff_comment_calls) >= 1
     failure_comment_calls = [
@@ -552,8 +552,8 @@ def test_run_once_uncommitted_changes_missing_request_fails(tmp_path: Path) -> N
         for c in fake_client.calls
         if c["method"] == "comment_issue"
         and "commit request" in c.get("body", "")
-        and "<!-- iar-attempt-history -->" not in c.get("body", "")
-        and "iar:failure-context" not in c.get("body", "")
+        and "<!-- kc:attempt-history -->" not in c.get("body", "")
+        and "kc:failure-context" not in c.get("body", "")
     ]
     assert len(failure_comment_calls) == 1
 
@@ -634,7 +634,7 @@ def test_run_once_uncommitted_changes_commit_failure_fails(tmp_path: Path) -> No
     history_comment_calls = [
         c
         for c in fake_client.calls
-        if c["method"] == "comment_issue" and "<!-- iar-attempt-history -->" in c.get("body", "")
+        if c["method"] == "comment_issue" and "<!-- kc:attempt-history -->" in c.get("body", "")
     ]
     assert len(history_comment_calls) >= 1
     failure_comment_calls = [
@@ -642,6 +642,6 @@ def test_run_once_uncommitted_changes_commit_failure_fails(tmp_path: Path) -> No
         for c in fake_client.calls
         if c["method"] == "comment_issue"
         and "Command failed" in c.get("body", "")
-        and "<!-- iar-attempt-history -->" not in c.get("body", "")
+        and "<!-- kc:attempt-history -->" not in c.get("body", "")
     ]
     assert len(failure_comment_calls) == 1

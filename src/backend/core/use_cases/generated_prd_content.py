@@ -23,6 +23,10 @@ from backend.core.shared.models.agent_runner import (
     GeneratedContentConfig,
     IssueSummary,
 )
+from backend.core.shared.models.repository_paths import (
+    DEFAULT_REPOSITORY_STATE_DIR_NAME,
+    LEGACY_REPOSITORY_STATE_DIR_NAME,
+)
 from backend.core.shared.prd_machine_contract import (
     PrdSkillPreflightError,
     format_supported_machine_contract_versions,
@@ -61,7 +65,8 @@ _IGNORED_REPO_ENTRIES: frozenset[str] = frozenset(
         ".mypy_cache",
         ".ruff_cache",
         ".tox",
-        ".iar",
+        DEFAULT_REPOSITORY_STATE_DIR_NAME,
+        LEGACY_REPOSITORY_STATE_DIR_NAME,
         ".agent-runner",
         "dist",
         "build",

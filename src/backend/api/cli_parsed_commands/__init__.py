@@ -12,6 +12,7 @@ parsed ``argparse.Namespace`` to the matching handler.
 from __future__ import annotations
 
 from backend.api.cli_parsed_commands.agent import (
+    run_agent_add_command,
     run_agent_doctor_command,
     run_agent_fallback_candidate_add_command,
     run_agent_fallback_candidate_move_command,
@@ -25,6 +26,7 @@ from backend.api.cli_parsed_commands.agent import (
     run_agent_list_command,
     run_agent_preset_set_command,
     run_agent_presets_command,
+    run_agent_setup_command,
     run_ask_command,
     run_deliberate_command,
     run_repl_command,
@@ -123,6 +125,8 @@ _DISPATCH_TABLE: dict[str, callable] = {
     "agent list": run_agent_list_command,
     "agent doctor": run_agent_doctor_command,
     "agent presets": run_agent_presets_command,
+    "agent setup": run_agent_setup_command,
+    "agent add": run_agent_add_command,
     "agent lifecycle list": run_agent_lifecycle_list_command,
     "agent lifecycle set": run_agent_lifecycle_set_command,
     "agent lifecycle unset": run_agent_lifecycle_unset_command,

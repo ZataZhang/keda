@@ -18,8 +18,8 @@ SETTINGS_LOGGER_NAME = "backend.infrastructure.config.agent_runner_settings"
 def _load_local_generated_content_settings(
     repo_path: Path, generated_content_toml: str
 ) -> AgentRunnerRepositorySettings:
-    """把 ``generated_content_toml`` 写成仓库根的 ``.iar.toml`` 并经加载器读回。"""
-    (repo_path / ".iar.toml").write_text(
+    """把 ``generated_content_toml`` 写成仓库根的 ``.kedacode.toml`` 并经加载器读回。"""
+    (repo_path / ".kedacode.toml").write_text(
         '[agent_runner.repository]\nid = "pin-test"\n' + generated_content_toml,
         encoding="utf-8",
     )
@@ -66,7 +66,7 @@ def test_local_config_without_template_pins_does_not_warn(
 def test_template_pin_warning_is_logged_once_per_process(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """daemon 每轮都会重新加载 ``.iar.toml``：同一份配置的弃用提示只出现一次。"""
+    """daemon 每轮都会重新加载 ``.kedacode.toml``：同一份配置的弃用提示只出现一次。"""
     pinned_toml = '[agent_runner.generated_content.draft_pr]\nmode = "template"\n'
 
     with caplog.at_level(logging.WARNING, logger=SETTINGS_LOGGER_NAME):

@@ -21,7 +21,13 @@ set -euo pipefail
 TEMPLATE_REPO="${SYNC_TEMPLATE_TEMPLATE_REPO:-https://github.com/ZataZhang/zata-codes-template.git}"
 LOCAL_ROOT="$(git rev-parse --show-toplevel)"
 TEMP_DIR="$(mktemp -d)"
-trap 'rm -rf "$TEMP_DIR"' EXIT
+STAGING_DIR=""
+trap '
+    rm -rf "$TEMP_DIR"
+    if [ -n "$STAGING_DIR" ]; then
+        rm -rf "$STAGING_DIR"
+    fi
+' EXIT
 
 LIST_ONLY_MODE="${SYNC_TEMPLATE_LIST_ONLY:-0}"
 DRY_RUN_MODE=false
@@ -718,7 +724,9 @@ _collect_template_skill_updates() {
                 skill_status="NEW"
                 break
             fi
-            if ! diff -qr "$template_skill_dir" "$installed_skill_dir" >/dev/null 2>&1; then
+            # 技能目录可能带有本地 Python 字节码缓存；比较候选时忽略这些运行产物。
+            if ! diff -qr -x '__pycache__' -x '*.pyc' \
+                "$template_skill_dir" "$installed_skill_dir" >/dev/null 2>&1; then
                 skill_status="UPDATE"
             fi
         done
@@ -1356,13 +1364,27 @@ else
         local_file="$LOCAL_ROOT/$entry"
         tmpl_file="$TEMPLATE_ROOT/$entry"
         mkdir -p "$(dirname "$local_file")"
-        if [ ! -f "$local_file" ]; then
-            cp "$tmpl_file" "$local_file"
-            echo "  ✅ Added:   $entry"
+
+        if [ -f "$local_file" ]; then
+            file_action="Updated"
+        else
+            file_action="Added"
+        fi
+
+        if [[ "$local_file" -ef "$0" ]]; then
+            # 正在运行的脚本不能原地覆盖：用同目录临时目录准备完整文件，再原子替换路径。
+            local_dir="$(dirname "$local_file")"
+            local_name="$(basename "$local_file")"
+            STAGING_DIR="$(mktemp -d "$local_dir/.sync-template.XXXXXX")"
+            cp "$tmpl_file" "$STAGING_DIR/$local_name"
+            mv "$STAGING_DIR/$local_name" "$local_file"
+            rmdir "$STAGING_DIR"
+            STAGING_DIR=""
         else
             cp "$tmpl_file" "$local_file"
-            echo "  ✅ Updated: $entry"
         fi
+
+        echo "  ✅ $file_action: $entry"
         ((count_accepted++)) || true
     done
 

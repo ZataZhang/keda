@@ -1,9 +1,9 @@
 """Backlog 仓库级 Autopilot 控制的用例与 API 契约测试。
 
-覆盖链条：API 路由 → core 用例 → 受限端口 → 真实临时仓库的 ``.iar.toml``
+覆盖链条：API 路由 → core 用例 → 受限端口 → 真实临时仓库的 ``.kedacode.toml``
 → fresh load 读回。GitHub / store / supervisor 按测试目标使用 fake（不参与
 自动合并或 daemon 决策），配置文件本身与读写全程真实——写回目标必须是临时
-注册仓，不得改脏开发仓配置。注意本仓根 ``.iar.toml`` 受 git 跟踪。
+注册仓，不得改脏开发仓配置。注意本仓根 ``.kedacode.toml`` 受 git 跟踪。
 """
 
 from __future__ import annotations
@@ -72,7 +72,7 @@ def _contexts_for(repo_root: Path, *, auto_merge: bool = False):
     """构造当前 tmp 仓库的上下文：fresh load 的真实值来自磁盘文件本身。"""
 
     def loader():
-        with open(repo_root / ".iar.toml", "rb") as handle:
+        with open(repo_root / ".kedacode.toml", "rb") as handle:
             agent_runner_config = tomllib.load(handle)["agent_runner"]
         auto_advance = bool(agent_runner_config["backlog"]["auto_advance"])
         merge_autopilot = bool(agent_runner_config["autopilot"]["enabled"])
@@ -139,11 +139,20 @@ def test_daemon_is_running_detects_repo_daemon() -> None:
     assert daemon_is_running(REPO_ID, records + [_daemon_record(REPO_ID)]) is True
 
 
+def test_daemon_is_running_accepts_kind_read_back_as_plain_string() -> None:
+    """注册表 JSON 读回的记录 ``kind`` 是字符串 ``"daemon"``，也必须判为在跑。"""
+    from dataclasses import replace
+
+    registry_record = replace(_daemon_record(REPO_ID), kind="daemon")
+
+    assert daemon_is_running(REPO_ID, [registry_record]) is True
+
+
 def test_load_autopilot_state_reports_real_conditions(tmp_path: Path) -> None:
     """状态快照必须分别给出 Autopilot / 自动合并 / daemon 三件事。"""
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    (repo_root / ".iar.toml").write_text(_CONFIG_TEMPLATE, encoding="utf-8")
+    (repo_root / ".kedacode.toml").write_text(_CONFIG_TEMPLATE, encoding="utf-8")
 
     state = load_autopilot_state(
         repo_id=REPO_ID,
@@ -156,19 +165,19 @@ def test_load_autopilot_state_reports_real_conditions(tmp_path: Path) -> None:
     assert state.persisted_enabled is False
     assert state.auto_merge_enabled is False
     assert state.daemon_running is True
-    # AppConfig() 默认容量为 1：策略 3 高于容量时生效值被容量压低，来源如实标注。
+    # AppConfig() 默认配置文件值为 1：页面设置 3 覆盖它（不再被压低），来源如实标注。
     assert state.policy_max_parallel == 3
     assert state.runner_capacity == 1
-    assert state.effective_max_parallel == 1
-    assert state.ceiling_source == "capped_by_capacity"
-    assert state.config_source == ".iar.toml"
+    assert state.effective_max_parallel == 3
+    assert state.ceiling_source == "policy"
+    assert state.config_source == ".kedacode.toml"
 
 
 def test_set_backlog_auto_advance_writes_then_reads_back(tmp_path: Path) -> None:
     """写回后必须能从 fresh loader 读回同值，且只改一个键。"""
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    config_path = repo_root / ".iar.toml"
+    config_path = repo_root / ".kedacode.toml"
     config_path.write_text(_CONFIG_TEMPLATE, encoding="utf-8")
     before_lines = config_path.read_text(encoding="utf-8").splitlines()
 
@@ -192,7 +201,7 @@ def test_set_backlog_auto_advance_rejects_stale_fresh_loader(tmp_path: Path) -> 
     """fresh load 与请求值不一致（未真正落盘）必须报错，而不是 200 冒充成功。"""
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    (repo_root / ".iar.toml").write_text(_CONFIG_TEMPLATE, encoding="utf-8")
+    (repo_root / ".kedacode.toml").write_text(_CONFIG_TEMPLATE, encoding="utf-8")
 
     def stale_loader():
         return [
@@ -236,7 +245,7 @@ def _write_prd(repo_root: Path, relative_path: str, *, title: str, issue: int) -
 
 
 def _real_config_for(repo_root: Path) -> AppConfig:
-    """用产品自身的 loader 从临时仓真实 .iar.toml 读出生效配置片段。"""
+    """用产品自身的 loader 从临时仓真实 .kedacode.toml 读出生效配置片段。"""
     settings = load_agent_runner_local_settings(repo_root)
     assert settings is not None
     # local 配置里未写的段为 None：此时沿用 AppConfig 默认值（auto_merge=False）。
@@ -260,7 +269,7 @@ def test_upstream_merged_promotes_downstream_when_auto_advance_enabled(tmp_path:
     """Backlog 自动推进开启且上游已合并时会自动启动下游。"""
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    (repo_root / ".iar.toml").write_text(
+    (repo_root / ".kedacode.toml").write_text(
         _CONFIG_TEMPLATE.replace("auto_advance = false", "auto_advance = true"),
         encoding="utf-8",
     )
@@ -283,7 +292,7 @@ def test_upstream_merged_promotes_downstream_when_auto_advance_enabled(tmp_path:
     github_client = FakeGitHubClient()
     github_client._issue_states[1] = "CLOSED"
     github_client._issue_comments[1] = [
-        "<!-- iar:event version=1 phase=draft_pr_created cycle=1 pr_branch=issue-1 -->"
+        "<!-- kc:event version=1 phase=draft_pr_created cycle=1 pr_branch=issue-1 -->"
     ]
     github_client._merged_prs["issue-1"] = "https://github.com/example/repo/pull/1"
 
@@ -308,7 +317,7 @@ def test_auto_advance_disabled_promotes_nothing(tmp_path: Path) -> None:
     """合并 autopilot 开启但 backlog 自动推进关闭时仍不晋升。"""
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    (repo_root / ".iar.toml").write_text(
+    (repo_root / ".kedacode.toml").write_text(
         _CONFIG_TEMPLATE.replace("enabled = false", "enabled = true", 1),
         encoding="utf-8",
     )
@@ -326,7 +335,7 @@ def test_merge_queue_requires_both_switches(tmp_path: Path) -> None:
     """只有 autopilot.enabled 为真而 safety.auto_merge 为假时必须零自动合并。"""
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    (repo_root / ".iar.toml").write_text(
+    (repo_root / ".kedacode.toml").write_text(
         _CONFIG_TEMPLATE.replace("false", "true", 1), encoding="utf-8"
     )
     config = _real_config_for(repo_root)
@@ -355,7 +364,7 @@ def autopilot_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """把 Backlog 路由接到临时仓库 / 临时 store / fake supervisor。"""
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    (repo_root / ".iar.toml").write_text(_CONFIG_TEMPLATE, encoding="utf-8")
+    (repo_root / ".kedacode.toml").write_text(_CONFIG_TEMPLATE, encoding="utf-8")
     store = SqliteConsoleStore(tmp_path / "console.db")
 
     contexts_loader = _contexts_for(repo_root, auto_merge=False)
@@ -374,17 +383,48 @@ def test_get_autopilot_endpoint(autopilot_environment) -> None:
     assert data["enabled"] is False
     assert data["auto_merge_enabled"] is False
     assert data["daemon_running"] is False
-    # 无设置行 = 未设置：策略为 null，生效值继承 runner 容量（AppConfig 默认 1）。
+    # 无设置行 = 页面未保存：页面设置为 null，生效值取配置文件值（AppConfig 默认 1）。
     assert data["max_parallel"] is None
     assert data["effective_max_parallel"] == 1
     assert data["runner_capacity"] == 1
-    assert data["ceiling_source"] == "inherited"
-    assert data["config_source"] == ".iar.toml"
+    assert data["ceiling_source"] == "config"
+    assert data["config_source"] == ".kedacode.toml"
+    # 本机没有存活 daemon：实际生效值未知，页面以 effective_max_parallel 为准。
+    assert data["daemon_parallel_limit"] is None
+    assert data["daemon_parallel_limit_source"] is None
+
+
+def test_get_autopilot_reports_live_daemon_cli_override(
+    autopilot_environment, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """daemon 用 --concurrency 5 启动时，接口带出它实际在用的 5，而不只是页面值。"""
+    import backend.api.routes.agent_runner_backlog as backlog_routes
+    from backend.core.use_cases.daemon_parallel_limit_status import DaemonParallelLimitStatus
+
+    live_status = DaemonParallelLimitStatus(
+        repo_id=REPO_ID,
+        pid=4242,
+        parallel_limit=5,
+        source="cli_override",
+        in_flight=1,
+        updated_at="2026-10-25T00:00:00+00:00",
+    )
+    monkeypatch.setattr(
+        backlog_routes,
+        "read_daemon_parallel_limit_status",
+        lambda lock_dir, repo_id: live_status if repo_id == REPO_ID else None,
+    )
+
+    data = client.get(f"/api/v1/agent-runner/backlog/autopilot?repo_id={REPO_ID}").json()
+
+    assert data["effective_max_parallel"] == 1
+    assert data["daemon_parallel_limit"] == 5
+    assert data["daemon_parallel_limit_source"] == "cli_override"
 
 
 def test_get_autopilot_rejects_non_bool_enabled(autopilot_environment) -> None:
-    """`.iar.toml` 里的 enabled 不是布尔时必须返回 4xx，而不是漏成 500。"""
-    (autopilot_environment["repo_root"] / ".iar.toml").write_text(
+    """`.kedacode.toml` 里的 enabled 不是布尔时必须返回 4xx，而不是漏成 500。"""
+    (autopilot_environment["repo_root"] / ".kedacode.toml").write_text(
         _CONFIG_TEMPLATE.replace("auto_advance = false", 'auto_advance = "yes"'),
         encoding="utf-8",
     )
@@ -396,7 +436,7 @@ def test_get_autopilot_rejects_non_bool_enabled(autopilot_environment) -> None:
 def test_patch_autopilot_persists_and_reads_back(autopilot_environment) -> None:
     """PATCH → 写回 → fresh GET 读回同值；配置 diff 只能有一行变化。"""
     repo_root = autopilot_environment["repo_root"]
-    config_path = repo_root / ".iar.toml"
+    config_path = repo_root / ".kedacode.toml"
     before_lines = config_path.read_text(encoding="utf-8").splitlines()
 
     response = client.patch(
@@ -429,7 +469,7 @@ def test_patch_autopilot_rejects_unknown_repo(autopilot_environment) -> None:
 def test_patch_autopilot_conflicts_when_config_missing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """目标仓没有 .iar.toml → 409，且不得凭空创建配置文件。"""
+    """目标仓没有 .kedacode.toml → 409，且不得凭空创建配置文件。"""
     repo_root = tmp_path / "repo-without-config"
     repo_root.mkdir()
     store = SqliteConsoleStore(tmp_path / "console.db")
@@ -450,4 +490,4 @@ def test_patch_autopilot_conflicts_when_config_missing(
         json={"repo_id": REPO_ID, "enabled": True},
     )
     assert response.status_code == 409
-    assert not (repo_root / ".iar.toml").exists()
+    assert not (repo_root / ".kedacode.toml").exists()

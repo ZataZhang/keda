@@ -319,7 +319,7 @@ class TestInvocationMarkersReachExistingIssueLog:
     def test_start_and_end_markers_carry_identity_and_models(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("IAR_CONFIG", str(tmp_path / "unused-config.toml"))
+        monkeypatch.setenv("KEDACODE_CONFIG", str(tmp_path / "unused-config.toml"))
         harness = _InvocationRunHarness(tmp_path, script_body=_success_script_body())
         harness.invoke(model_selection=ModelSelection(agent="claude", model=_REQUESTED_MODEL))
 

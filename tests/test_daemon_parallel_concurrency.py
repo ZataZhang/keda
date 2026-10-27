@@ -161,6 +161,26 @@ def test_output_routed_runner_forwards_full_run_contract(tmp_path: Path) -> None
     assert base.labels[-1] == "mktree"
 
 
+def test_output_routed_runner_forwards_cancel_check(tmp_path: Path) -> None:
+    """The wrapper forwards the verifier's cancel probe instead of raising TypeError."""
+
+    class _CancelAwareRunner:
+        def __init__(self) -> None:
+            self.cancel_checks: list[object] = []
+
+        def run(self, command, *, cwd, cancel_check=None):
+            self.cancel_checks.append(cancel_check)
+            return CommandResult(tuple(command), 0, "", "")
+
+    base = _CancelAwareRunner()
+    wrapped = _OutputRoutedProcessRunner(base, lambda _c: None)
+    probe = lambda: False  # noqa: E731 - the identity is the assertion.
+
+    wrapped.run(["git", "status"], cwd=tmp_path, cancel_check=probe)
+
+    assert base.cancel_checks == [probe]
+
+
 def test_output_routed_runner_tolerates_partial_fake_signature(tmp_path: Path) -> None:
     """精简签名的运行器不认识的参数必须被过滤，而不是炸 TypeError。
 
@@ -257,7 +277,7 @@ def test_issue_output_routing_end_to_end_log_file_timestamps_agent_lines(
 
     其余路由用例直接喂 sink 裸 chunk，绕过了生产者；这条钉住运营者与 Console
     实际读到的那份产物：agent 流式输出的每个物理行在
-    ``issue-<N>-<ts>.log`` 里行首带 ``[HH:MM:SS]``，而 ``[iar-attempt-end]``
+    ``issue-<N>-<ts>.log`` 里行首带 ``[HH:MM:SS]``，而 ``[kc-attempt-end]``
     终态标记保持裸行——``iar logs --issue --follow`` 靠精确匹配它判断运行
     结束，被前缀污染就会一路跟到空闲兜底才退出。
     """

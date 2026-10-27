@@ -37,7 +37,7 @@ _logger = logging.getLogger(__name__)
 # 兼容老 marker:`host` 必填,`pid`/`started_at`/`agent` 可选;后两者分别供
 # TTL 路径与会话续传对账使用(老 marker 缺字段时按"无法判定"保守处理)。
 _CLAIM_MARKER_PATTERN = re.compile(
-    r'<!--\s*iar:claim\s+host="(?P<host>[^"]*)"'
+    r'<!--\s*kc:claim\s+host="(?P<host>[^"]*)"'
     r'(?:\s+pid="(?P<pid>\d+)")?'
     r'(?:\s+started_at="(?P<started_at>[^"]*)")?'
     r'(?:\s+agent="(?P<agent>[^"]*)")?'
@@ -84,7 +84,7 @@ def format_claim_marker(
         marker_attributes.append(f'started_at="{started_at.astimezone(timezone.utc).isoformat()}"')
     if agent:
         marker_attributes.append(f'agent="{agent}"')
-    return "<!-- iar:claim " + " ".join(marker_attributes) + " -->"
+    return "<!-- kc:claim " + " ".join(marker_attributes) + " -->"
 
 
 def parse_claim_marker(comment_body: str) -> tuple[str, int] | None:

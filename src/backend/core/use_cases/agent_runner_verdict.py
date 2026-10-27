@@ -4,7 +4,7 @@
 （跑 verifier 见 ``run_verifier_agent``，跑门禁见 ``run_verifier_gate``）。协议
 解析遵循 fail-safe：没有可解析的 verdict（verifier 没产出 / 产出畸形）一律按
 ``red``（阻断）处理，绝不让"无判定"静默放行。marker 与 ``agent_runner_events``
-的 ``iar:`` hidden marker 同型。
+的 ``kc:`` hidden marker 同型。
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from backend.core.use_cases.agent_runner_structured_evidence import EvidenceMani
 
 _VALID_RISKS: tuple[str, ...] = ("green", "yellow", "red")
 _VERDICT_MARKER_PATTERN = re.compile(
-    r"<!--\s*iar:verifier-verdict\s+risk=(?P<risk>green|yellow|red)\s*-->"
+    r"<!--\s*kc:verifier-verdict\s+risk=(?P<risk>green|yellow|red)\s*-->"
 )
 _NO_VERDICT_FINDINGS = "No parseable verifier verdict marker found; treating as blocked (red)."
 
@@ -69,10 +69,10 @@ class VerifierUnavailableError(RuntimeError):
 
 
 def format_verifier_verdict_marker(risk: str) -> str:
-    """Format the hidden ``iar:verifier-verdict`` marker for a PR/Issue comment."""
+    """Format the hidden ``kc:verifier-verdict`` marker for a PR/Issue comment."""
     if risk not in _VALID_RISKS:
         raise ValueError(f"invalid verifier risk: {risk!r}; expected one of {_VALID_RISKS}")
-    return f"<!-- iar:verifier-verdict risk={risk} -->"
+    return f"<!-- kc:verifier-verdict risk={risk} -->"
 
 
 def parse_verifier_verdict(text: str, *, findings: str = "") -> ValidationVerdict:
@@ -191,6 +191,6 @@ def build_verifier_prompt(
             "",
             "End your report with concrete findings (what you ran, what you observed,",
             "any gap between intent and behavior), then exactly one final line:",
-            "<!-- iar:verifier-verdict risk=green -->   (or yellow, or red)",
+            "<!-- kc:verifier-verdict risk=green -->   (or yellow, or red)",
         ]
     )

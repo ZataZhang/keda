@@ -1,7 +1,7 @@
 """管理终端首屏「当前项目」解析。
 
-``iar console`` 是一个多仓库面板：registry 里可以同时登记多个仓库，但用户在
-某个仓库目录敲下 ``iar console`` 时，他期待面板打开就落在**这个仓库**上，而不是
+``kc console`` 是一个多仓库面板：registry 里可以同时登记多个仓库，但用户在
+某个仓库目录敲下 ``kc console`` 时，他期待面板打开就落在**这个仓库**上，而不是
 registry 声明顺序最靠前的那个。本模块把「进程 cwd → registry 仓库 id」这一步推断
 收敛成唯一实现，供 ``api/`` 层的 console 上下文端点调用。
 
@@ -49,7 +49,7 @@ def resolve_console_context(cwd: Path) -> ConsoleContext:
     """推断 console 进程 cwd 对应的 registry 仓库。
 
     Args:
-        cwd: console 进程的当前工作目录（通常是用户敲 ``iar console`` 时所在目录）。
+        cwd: console 进程的当前工作目录（通常是用户敲 ``kc console`` 时所在目录）。
 
     Returns:
         ConsoleContext: 匹配结果。任何落空情形都通过 ``status`` 表达，不抛异常。

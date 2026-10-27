@@ -4,11 +4,13 @@
 本机回环地址、路由白名单固定；所有路径参数在 :mod:`workspace` 里解析成绝对路径后断言仍在
 仓库根之下。
 
-**写边界**：除「暂存」外，服务对被查看仓库不执行任何写操作。唯一的写入口是
-``POST /api/stage``（:meth:`ViewerRequestHandler.do_POST`），它只做 ``git add``；其余写方法
-（PUT / DELETE / PATCH）仍然一律 405。它要求 ``Content-Type: application/json``：跨站表单式
-POST 是「简单请求」，浏览器会直接发出去，而 JSON 类型会强制预检、预检又必然失败，于是「某个
-网页在你不知情时改动你的索引」这条路径被封住。要开新的写口之前，请先读
+**写边界**：仓库侧的写操作只有「暂存」——``POST /api/stage``，它只做 ``git add``。另有一条
+不写仓库的写路由 ``POST /api/open``：把仓库内的文件交给系统默认应用打开（macOS ``open`` /
+Windows ``startfile`` / 其它 ``xdg-open``），对被查看仓库零写入，但在用户机器上有副作用，
+因此与暂存走同一条口径。两条写路由都要求 ``Content-Type: application/json``：跨站表单式
+POST 是「简单请求」，浏览器会直接发出去，而 JSON 类型会强制预检、预检又必然失败，于是
+「某个网页在你不知情时改动你的索引（或拉起应用）」这条路径被封住。其余写方法
+（PUT / DELETE / PATCH）仍然一律 405。要开新的写口之前，请先读
 :mod:`workspace` 的模块 docstring——那条边界是用户拍板收窄过的。
 
 空闲回收：服务按「最后一次请求时间」计时，超过时限即优雅退出并清理登记文件。页面
@@ -52,12 +54,14 @@ _STATIC_CONTENT_TYPES_BY_FILENAME = {
 
 _READ_METHOD_HANDLER_PREFIX = "do_"
 
-#: 唯一的写入口：方法名与实际路由。写口只有一个、且只做暂存——见
-#: :meth:`ViewerRequestHandler.do_POST`。
+#: 写方法入口只有 ``POST`` 一个；路由白名单是「暂存」与「在系统中打开」两条——前者是
+#: 服务对仓库的唯一写操作，后者不写仓库但会在用户机器上拉起应用（见
+#: :meth:`ViewerRequestHandler.do_POST`）。
 _WRITE_METHOD_HANDLER_NAME = "do_POST"
 _STAGE_ROUTE_PATH = "/api/stage"
+_OPEN_ROUTE_PATH = "/api/open"
 
-#: 写请求体的长度上限。暂存请求只有一个小对象，超出它的都不是本服务的正常调用；不设上限的话，
+#: 写请求体的长度上限。两类写请求都只有一个小对象，超出它的都不是本服务的正常调用；不设上限的话，
 #: 一句 ``Content-Length: 10GB`` 就足以让服务端在读取时分配内存。
 _MAX_WRITE_BODY_BYTES = 64 * 1024
 
@@ -168,27 +172,31 @@ class ViewerRequestHandler(BaseHTTPRequestHandler):
             self._send_json_payload(500, {"error": f"读取仓库失败：{read_error}"})
 
     def do_POST(self) -> None:  # noqa: N802 - http.server 靠 do_<METHOD> 这个名字分发
-        """唯一的写入口：只做暂存，且只接受 JSON 请求体。
+        """唯一的写方法入口：按路由分发给「暂存」或「在系统中打开」，且只接受 JSON 请求体。
 
         要求 ``Content-Type: application/json`` 不是为了讲究，而是这里唯一说得通的防线：
         跨站表单式 POST 属于「简单请求」，浏览器会直接发出去（恶意页面读不到响应，但**副作用
         已经发生**）。JSON 类型会强制浏览器先发预检，而本服务不返回任何 CORS 头，预检必然
-        失败——于是「某个网页在你不知情时把仓库文件加进索引」这条路径被封住。非 JSON 一律
-        415，绝不「宽容地」处理。
+        失败——于是「某个网页在你不知情时改动你的索引（或拉起应用）」这条路径被封住。非 JSON
+        一律 415，绝不「宽容地」处理。
         """
         self.server.mark_request_served()
+        requested_route_path = urlsplit(self.path).path
         try:
-            self._dispatch_write_request()
+            self._dispatch_write_request(requested_route_path)
         except workspace.WorkspaceCommandError as write_error:
-            self._send_json_payload(500, {"error": f"暂存失败：{write_error}"})
+            # open_path_in_system 把自身的失败都转成了拒绝应答，正常不会走到这里；
+            # 标签仍按路由区分，免得万一冒出时把「打开失败」说成「暂存失败」。
+            failure_label = "打开" if requested_route_path == _OPEN_ROUTE_PATH else "暂存"
+            self._send_json_payload(500, {"error": f"{failure_label}失败：{write_error}"})
 
     def _refuse_non_read_method(self) -> None:
-        """拒绝除暂存之外的写方法：本服务只提供「读」与「暂存」两类操作。"""
+        """拒绝除暂存与打开之外的写方法：本服务只提供「读」与这两条写路由。"""
         self.server.mark_request_served()
         self._send_json_payload(
             405,
             {
-                "error": "拒绝：本服务只接受 GET 请求与暂存用的 POST，"
+                "error": "拒绝：本服务只接受 GET 请求与暂存、在系统中打开用的 POST，"
                 "不提供提交、撤销暂存或丢弃改动接口。",
                 "method": self.command,
             },
@@ -247,45 +255,63 @@ class ViewerRequestHandler(BaseHTTPRequestHandler):
             # 不回声请求路径：未知路由的应答里没有任何来自请求的可控内容。
             self._send_json_payload(404, {"error": "未知路由：本服务只提供白名单内的只读接口。"})
 
-    def _dispatch_write_request(self) -> None:
+    def _dispatch_write_request(self, requested_route_path: str) -> None:
         """按固定白名单分发写路由；白名单之外一律 405。
 
-        写路由只有一条：``POST /api/stage``，请求体是一个 JSON 对象，``scope`` 取值是封闭枚举
-        （``path`` 或 ``all``）。范围取值由服务端映射成具体命令，任何取值都不会作为参数流进
-        ``git``——与改动分区同一条口径。
+        写路由有两条，请求体都要求是 JSON 对象：``POST /api/stage`` 的 ``scope`` 取值是封闭
+        枚举（``path`` 或 ``all``）；``POST /api/open`` 的 ``path`` 是仓库相对路径，越界与
+        不存在都在 :func:`workspace.open_path_in_system` 里按拒绝应答处理。两类取值都由服务端
+        映射成具体命令，任何取值都不会作为字符串流进 ``git`` 或 shell——与改动分区同一条口径。
         """
-        if urlsplit(self.path).path != _STAGE_ROUTE_PATH:
-            self._refuse_non_read_method()
-            return
+        if requested_route_path == _STAGE_ROUTE_PATH:
+            stage_request, failure_payload = self._read_write_request_body()
+            if failure_payload is not None:
+                self._send_json_payload(failure_payload.status_code, failure_payload.payload)
+                return
 
-        stage_request, failure_payload = self._read_stage_request_body()
-        if failure_payload is not None:
-            self._send_json_payload(failure_payload.status_code, failure_payload.payload)
-            return
-
-        scope = stage_request.get("scope")
-        repository_root = self.server.repository_root
-        if scope == workspace.STAGE_SCOPE_ALL:
-            self._serve_workspace_payload(workspace.stage_all_changes(repository_root))
-            return
-        if scope == workspace.STAGE_SCOPE_PATH:
-            requested_path = stage_request.get("path")
-            if not isinstance(requested_path, str):
-                self._send_json_payload(
-                    400, {"error": "拒绝：scope 为 path 时必须给出字符串 path。"}
+            scope = stage_request.get("scope")
+            repository_root = self.server.repository_root
+            if scope == workspace.STAGE_SCOPE_ALL:
+                self._serve_workspace_payload(workspace.stage_all_changes(repository_root))
+                return
+            if scope == workspace.STAGE_SCOPE_PATH:
+                requested_path = stage_request.get("path")
+                if not isinstance(requested_path, str):
+                    self._send_json_payload(
+                        400, {"error": "拒绝：scope 为 path 时必须给出字符串 path。"}
+                    )
+                    return
+                self._serve_workspace_payload(
+                    workspace.stage_changes(repository_root, requested_path)
                 )
                 return
-            self._serve_workspace_payload(workspace.stage_changes(repository_root, requested_path))
+            self._send_json_payload(
+                400,
+                {
+                    "error": "拒绝：scope 不是可用的暂存范围，"
+                    f"请选择「{'」「'.join(sorted(workspace.KNOWN_STAGE_SCOPES))}」。"
+                },
+            )
             return
-        self._send_json_payload(
-            400,
-            {
-                "error": "拒绝：scope 不是可用的暂存范围，"
-                f"请选择「{'」「'.join(sorted(workspace.KNOWN_STAGE_SCOPES))}」。"
-            },
-        )
 
-    def _read_stage_request_body(
+        if requested_route_path == _OPEN_ROUTE_PATH:
+            open_request, failure_payload = self._read_write_request_body()
+            if failure_payload is not None:
+                self._send_json_payload(failure_payload.status_code, failure_payload.payload)
+                return
+
+            requested_path = open_request.get("path")
+            if not isinstance(requested_path, str):
+                self._send_json_payload(400, {"error": "拒绝：打开必须给出字符串 path。"})
+                return
+            self._serve_workspace_payload(
+                workspace.open_path_in_system(self.server.repository_root, requested_path)
+            )
+            return
+
+        self._refuse_non_read_method()
+
+    def _read_write_request_body(
         self,
     ) -> tuple[dict[str, object], workspace_read.WorkspacePayload | None]:
         """读取并校验写请求的 JSON 对象体。
@@ -302,7 +328,7 @@ class ViewerRequestHandler(BaseHTTPRequestHandler):
         if content_type.split(";")[0].strip().lower() != "application/json":
             return {}, workspace_read.build_refusal_payload(
                 415,
-                "拒绝：暂存只接受 application/json 请求体"
+                "拒绝：写接口只接受 application/json 请求体"
                 "（跨站表单式 POST 会被浏览器直接发出，因此这里用类型强制预检）。",
             )
 

@@ -39,10 +39,11 @@ from backend.api.cli_parsed_commands import (
 from backend.core.use_cases.agent_runner_factory import (
     create_github_client,
     create_process_runner,
+    ensure_standard_executable_path,
     logger,
 )
 from backend.core.use_cases.agent_runner_repository_local import (
-    IARRepositoryNotInitializedError,
+    RepositoryNotInitializedError,
 )
 
 if TYPE_CHECKING:
@@ -249,7 +250,7 @@ def _run_parsed_command(parsed: argparse.Namespace) -> int:
         )
 
         exit_code = dispatch_parsed_command(parsed_ctx)
-    except IARRepositoryNotInitializedError as exc:
+    except RepositoryNotInitializedError as exc:
         return _handle_not_initialized_error(exc, fmt=output_format)
     except CliError as exc:
         return render_cli_error(exc, fmt=output_format)
@@ -279,6 +280,9 @@ def _run_parsed_command(parsed: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     """Run the Typer-powered CLI."""
+    # GUI 入口（菜单栏 App / Dock）只继承 launchd 的最小 PATH；在任何子命令
+    # 启动前补齐 Homebrew 等常见目录，否则 gh / git / agent CLI 都会找不到。
+    ensure_standard_executable_path()
     from backend.api.cli_typer import main as typer_main
 
     return typer_main(argv)
@@ -320,7 +324,7 @@ from backend.api.cli_reexports import (  # noqa: E402,F401
     daemon_lock_dir,
     get_agent_runner_settings,
     release_daemon_locks,
-    require_iar_repository_initialized,
+    require_repository_initialized,
     resolve_issue_from_prd_target,
     resolve_prd_paths,
     resolve_repository_targets,

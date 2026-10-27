@@ -165,10 +165,8 @@ RUN chmod +x \
         /usr/local/bin/kedacode-runner-desktop-entrypoint.sh \
         /usr/local/bin/kc-computer
 
-# 预创建 runtime 目录：状态目录用新名 /home/runner/.kedacode；同时建一个相对
-# 符号链接 /home/runner/.iar -> .kedacode，让仍固定在旧路径的旧组件读到同一目录（legacy-alias）。
+# 预创建 KedaCode 状态目录。
 RUN mkdir -p /home/runner/.kedacode/logs \
-    && ln -s .kedacode /home/runner/.iar \
     && chown -R runner:runner /home/runner
 
 ENV PATH="/opt/keda/.venv/bin:${PATH}" \

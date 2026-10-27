@@ -129,13 +129,13 @@ def test_error_envelope_has_exactly_the_contract_fields() -> None:
     error = CliError(
         "no such repo",
         code=ExitCode.NOT_FOUND,
-        suggestion="iar registry list",
+        suggestion="kc registry list",
         retryable=False,
     )
     assert error_envelope(error) == {
         "error": "not_found",
         "message": "no such repo",
-        "suggestion": "iar registry list",
+        "suggestion": "kc registry list",
         "retryable": False,
         "exit_code": 3,
     }
@@ -146,7 +146,7 @@ def test_render_cli_error_json_mode_writes_envelope_to_stderr(
 ) -> None:
     """机器模式错误落 stderr 且 stdout 保持干净，返回语义退出码。"""
     code = render_cli_error(
-        CliError("no such repo", code=ExitCode.NOT_FOUND, suggestion="iar registry list"),
+        CliError("no such repo", code=ExitCode.NOT_FOUND, suggestion="kc registry list"),
         fmt=OUTPUT_FORMAT_JSON,
     )
     captured = capsys.readouterr()
@@ -163,7 +163,7 @@ def test_render_cli_error_human_mode_prints_plain_text_with_next_step(
         CliError(
             "TOML section [agent_runner] is broken",
             code=ExitCode.USAGE,
-            suggestion="iar config migrate --repo .",
+            suggestion="kc config migrate --repo .",
         ),
         fmt=OUTPUT_FORMAT_TABLE,
     )
@@ -171,7 +171,7 @@ def test_render_cli_error_human_mode_prints_plain_text_with_next_step(
     assert code == 2
     assert captured.out == ""
     assert "usage_error: TOML section [agent_runner] is broken" in captured.err
-    assert "next: iar config migrate --repo ." in captured.err
+    assert "next: kc config migrate --repo ." in captured.err
 
 
 def test_route_logs_to_stderr_keeps_machine_stdout_pure(

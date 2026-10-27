@@ -1075,7 +1075,7 @@ def test_audit_lines_are_replayed_in_the_calling_thread(
         supervision_logger.setLevel(previous_level)
 
     main_thread_lines = [text for name, text in seen if name == threading.main_thread().name]
-    observer_lines = [text for name, text in seen if name.startswith("iar-stall-")]
+    observer_lines = [text for name, text in seen if name.startswith("kc-stall-")]
     assert any(STALL_DIAGNOSIS_MARKER in text for text in observer_lines)
     assert any(STALL_HANDOFF_MARKER in text for text in main_thread_lines), main_thread_lines
 
@@ -1339,7 +1339,7 @@ def _run_cli_in_new_process(
         "HOME": str(state_home),
     }
     #: 宿主 runner 会注入机器级配置指针，新进程必须只看到本次临时配置。
-    for ambient_env_name in ("KEDACODE_CONFIG", "IAR_CONFIG"):
+    for ambient_env_name in ("KEDACODE_CONFIG", "KEDACODE_CONFIG"):
         child_env.pop(ambient_env_name, None)
     entrypoint = "from backend.api.cli import main; raise SystemExit(main())"
     return subprocess.run(
@@ -1359,8 +1359,8 @@ def _repo_with_session_toml(tmp_path: Path, session_toml: str, *, name: str = "c
 
     (tmp_path / name).mkdir(parents=True, exist_ok=True)
     repo_path = _init_iar_repo(tmp_path / name)
-    (repo_path / ".iar.toml").write_text(
-        (repo_path / ".iar.toml").read_text(encoding="utf-8") + session_toml,
+    (repo_path / ".kedacode.toml").write_text(
+        (repo_path / ".kedacode.toml").read_text(encoding="utf-8") + session_toml,
         encoding="utf-8",
     )
     return repo_path

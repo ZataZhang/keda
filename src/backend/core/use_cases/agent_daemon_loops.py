@@ -32,7 +32,6 @@ class _AgentDaemonLoopRequest:
     contexts: list[RepositoryRunContext]
     interval: int
     agent: str
-    max_issues: int
     process_runner: IProcessRunner
     github_client_factory: Callable[[Path], IGitHubClient]
     content_generator_factory: Callable[[Path], IContentGenerator] | None
@@ -51,6 +50,7 @@ class _AgentDaemonLoopRequest:
     loop_clock: ILoopClock | None
     api_budget: IGitHubApiBudget | None
     idle_backoff_max_factor: int
+    parallel_limit_status_dir: Path | None = None
 
 
 @dataclass(frozen=True)

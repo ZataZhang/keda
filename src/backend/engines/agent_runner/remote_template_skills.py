@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import shutil
 import tempfile
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -13,7 +14,7 @@ if TYPE_CHECKING:
     from backend.core.shared.interfaces.agent_runner import IProcessRunner
 
 from backend.core.shared.models import product_identity
-from backend.core.shared.models.agent_spec import BUILTIN_AGENT_SPECS
+from backend.core.shared.models.agent_spec import AgentSpec, BUILTIN_AGENT_SPECS
 from backend.core.shared.prd_skill_location import keda_owned_skills_root
 from backend.engines.agent_runner.packaged_operator_skill_sync import (
     _OPERATOR_SKILL_METADATA_FILENAME,
@@ -42,6 +43,9 @@ REMOTE_TEMPLATE_SKILLS_REF = "main"
 
 REMOTE_TEMPLATE_SKILL_NAMES: tuple[str, ...] = ("prd", "code-reviewer")
 """KedaCode 安装且仅安装的远程模板 Skills。"""
+
+_PRE_RENAME_OPERATOR_SKILL_NAME = "iar-operator"
+"""清理旧发行版安装过的 skill 副本；当前运行时不再加载它。"""
 
 _SKILLS_DIR_ENV_SUFFIX = "SKILLS_DIR"
 
@@ -194,7 +198,7 @@ def install_packaged_operator_skill(
     legacy_action = _LEGACY_ACTION_ABSENT
     legacy_notice: str | None = None
     if cleanup_legacy:
-        legacy_skill_path = target_skills_root / product_identity.LEGACY_OPERATOR_SKILL_NAME
+        legacy_skill_path = target_skills_root / _PRE_RENAME_OPERATOR_SKILL_NAME
         legacy_action, legacy_notice = _resolve_legacy_operator_skill(
             legacy_skill_path=legacy_skill_path,
             packaged_relative_paths=_packaged_relative_file_paths(source_path),
@@ -326,12 +330,15 @@ class RemoteTemplateSkillInstallOptions:
         user_home_path: 测试或受控运行时指定的用户主目录；为空时使用实际主目录。
         force: 是否允许覆盖用户修改过的同名 Skill。详见
             :func:`install_remote_template_skills`。
+        agents: 生效 agent 注册表（内置 + ``[agent_runner.agents.*]`` 自定义条目）；
+            为空时只遍历内置注册表。
     """
 
     process_runner: IProcessRunner
     dry_run: bool = False
     user_home_path: Path | None = None
     force: bool = False
+    agents: Mapping[str, AgentSpec] | None = None
 
 
 @dataclass(frozen=True)
@@ -356,7 +363,11 @@ class RemoteTemplateSkillInstallResult:
     dry_run: bool = False
 
 
-def resolve_user_skill_install_roots(user_home_path: Path | None = None) -> tuple[Path, ...]:
+def resolve_user_skill_install_roots(
+    user_home_path: Path | None = None,
+    *,
+    agents: Mapping[str, AgentSpec] | None = None,
+) -> tuple[Path, ...]:
     """解析 ``kc init`` 的 Skill 安装目标（可多于一个）。
 
     优先尊重 ``SKILLS_DIR`` 产品环境变量（显式覆盖，单目录；CI / 测试用它把安装落到
@@ -374,6 +385,8 @@ def resolve_user_skill_install_roots(user_home_path: Path | None = None) -> tupl
 
     Args:
         user_home_path: 可选的用户主目录覆盖，主要供测试使用。
+        agents: 生效 agent 注册表（内置 + ``[agent_runner.agents.*]`` 自定义条目）；
+            ``None`` 时只遍历内置注册表。
 
     Returns:
         安装目标根目录元组（产品自有目录在前；注册顺序、去重）。函数本身不创建目录。
@@ -385,7 +398,7 @@ def resolve_user_skill_install_roots(user_home_path: Path | None = None) -> tupl
     effective_home_path = Path.home() if user_home_path is None else user_home_path
     detected_agent_roots: list[Path] = []
     fallback_skills_root: Path | None = None
-    for agent_spec in BUILTIN_AGENT_SPECS.values():
+    for agent_spec in (agents if agents is not None else BUILTIN_AGENT_SPECS).values():
         agent_skills_root = agent_spec.user_skills_dir(effective_home_path)
         if agent_skills_root is None:
             continue
@@ -425,7 +438,9 @@ def install_remote_template_skills(
             或任一目标存在 ``SKILL.md`` 与远程不同的同名 Skill 且 ``force`` 为
             False。
     """
-    target_skills_roots = resolve_user_skill_install_roots(options.user_home_path)
+    target_skills_roots = resolve_user_skill_install_roots(
+        options.user_home_path, agents=options.agents
+    )
     if options.dry_run:
         return RemoteTemplateSkillInstallResult(
             target_skills_roots=target_skills_roots,

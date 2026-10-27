@@ -5,6 +5,8 @@
 //
 // 日志通过 offset 轮询续读（2.5s），仅在日志抽屉打开时轮询。
 
+import { ConsolePage, ConsolePageHeader, ConsoleToolbar } from "@/components/layout/console-page";
+import { NativeSelect } from "@/components/ui/native-select";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -57,7 +59,15 @@ export default function ProcessesPage() {
   } = useRepositorySelection();
   const [selectedKind, setSelectedKind] = useState<RunnerProcessKind>("daemon");
   const [starting, setStarting] = useState(false);
+  const [startingAll, setStartingAll] = useState(false);
   const [logProcess, setLogProcess] = useState<RunnerProcessRecord | null>(null);
+
+  // 已有在跑 daemon 的仓库：全局启动要跳过它们，否则后端会按同类常驻进程去重报错。
+  const daemonRepoIds = new Set(
+    processes
+      .filter((record) => record.kind === "daemon" && record.status === "running")
+      .map((record) => record.repo_id),
+  );
 
   const refreshProcesses = useCallback(async () => {
     try {
@@ -101,6 +111,55 @@ export default function ProcessesPage() {
     }
   }
 
+  /** 为所有启用仓库各启动一个 daemon，已在运行的仓库跳过。 */
+  async function handleStartAll() {
+    if (repositories.length === 0) {
+      toast.warning("没有可用的启用仓库。");
+      return;
+    }
+    const targets = repositories.filter(
+      (entry) => !daemonRepoIds.has(entry.repo_id),
+    );
+    if (targets.length === 0) {
+      toast.info("所有启用仓库都已有运行中的 daemon。");
+      return;
+    }
+    const confirmed = window.confirm(
+      `确认给 ${targets.length} 个仓库启动 daemon？已在运行的 ${daemonRepoIds.size} 个仓库会跳过。`,
+    );
+    if (!confirmed) {
+      return;
+    }
+    setStartingAll(true);
+    const started: string[] = [];
+    const failures: string[] = [];
+    // 串行启动：当前仓库数量是个位数，串行能给出稳定的顺序与逐条错误归属。
+    for (const entry of targets) {
+      try {
+        const record = await startProcess({
+          repo_id: entry.repo_id,
+          kind: "daemon",
+        });
+        started.push(`${entry.repo_id}（pid ${record.pid}）`);
+      } catch (error) {
+        failures.push(
+          `${entry.repo_id}：${error instanceof Error ? error.message : "启动失败。"}`,
+        );
+      }
+    }
+    try {
+      if (started.length > 0) {
+        toast.success(`已启动 ${started.length} 个 daemon：${started.join("、")}`);
+      }
+      if (failures.length > 0) {
+        toast.error(`${failures.length} 个仓库启动失败：${failures.join("；")}`);
+      }
+    } finally {
+      setStartingAll(false);
+      await refreshProcesses();
+    }
+  }
+
   async function handleStop(record: RunnerProcessRecord) {
     const confirmed = window.confirm(
       `确认停止进程 ${record.process_id}（${record.repo_id} / ${KIND_LABELS[record.kind]}）？`,
@@ -118,24 +177,18 @@ export default function ProcessesPage() {
   }
 
   return (
-    <div className="flex flex-col gap-4 p-4 lg:p-6">
-      <div>
-        <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-50">
-          托管进程
-        </h2>
-        <p className="mt-1 text-sm text-slate-500">
-          每个仓库一个 daemon 进程即可获得多项目并发。进程脱离后端运行，
-          后端重启不影响执行中的 runner。
-        </p>
-      </div>
+    <ConsolePage>
+      <ConsolePageHeader title="托管进程" description={<> 每个仓库一个 daemon 进程即可获得多项目并发。进程脱离后端运行，
+          后端重启不影响执行中的 runner。 </>} />
 
       <Card>
         <CardHeader>
           <CardTitle className="text-sm">启动新进程</CardTitle>
         </CardHeader>
-        <CardContent className="flex flex-wrap items-center gap-2">
-          <select
-            className="h-9 rounded-md border border-slate-200 bg-transparent px-2 text-sm dark:border-slate-700"
+        <CardContent>
+          <ConsoleToolbar>
+          <NativeSelect
+
             value={selectedRepoId}
             onChange={(event) => selectRepoId(event.target.value)}
             aria-label="目标仓库"
@@ -148,9 +201,9 @@ export default function ProcessesPage() {
                 {entry.display_name || entry.repo_id}
               </option>
             ))}
-          </select>
-          <select
-            className="h-9 rounded-md border border-slate-200 bg-transparent px-2 text-sm dark:border-slate-700"
+          </NativeSelect>
+          <NativeSelect
+
             value={selectedKind}
             onChange={(event) =>
               setSelectedKind(event.target.value as RunnerProcessKind)
@@ -162,10 +215,20 @@ export default function ProcessesPage() {
                 {KIND_LABELS[kind]}
               </option>
             ))}
-          </select>
+          </NativeSelect>
           <Button size="sm" onClick={() => void handleStart()} disabled={starting}>
             {starting ? "启动中…" : "启动"}
           </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => void handleStartAll()}
+            disabled={startingAll || repositories.length === 0}
+            title="为所有启用仓库各启动一个 daemon；已在运行的仓库自动跳过"
+          >
+            {startingAll ? "批量启动中…" : "全部仓库启动 daemon"}
+          </Button>
+          </ConsoleToolbar>
         </CardContent>
       </Card>
 
@@ -243,7 +306,7 @@ export default function ProcessesPage() {
         record={logProcess}
         onClose={() => setLogProcess(null)}
       />
-    </div>
+    </ConsolePage>
   );
 }
 

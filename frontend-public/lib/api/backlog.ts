@@ -21,12 +21,17 @@ const BASE_PATH = "/v1/agent-runner/backlog";
 export async function fetchBacklogPrds(params: {
   repoId: string;
   includeArchived?: boolean;
+  forceRefresh?: boolean;
   signal?: AbortSignal;
 }): Promise<BacklogPrdsResponse> {
   const searchParams = new URLSearchParams();
   searchParams.set("repo_id", params.repoId);
   if (params.includeArchived) {
     searchParams.set("include_archived", "true");
+  }
+  // 手动刷新：让后端立即排一次后台重扫，而不是等快照超过 TTL。
+  if (params.forceRefresh) {
+    searchParams.set("force_refresh", "true");
   }
   return get(`${BASE_PATH}/prds?${searchParams.toString()}`, { signal: params.signal });
 }
@@ -39,7 +44,7 @@ export async function fetchBacklogSettings(repoId: string): Promise<BacklogSetti
  * 更新 Backlog 并发策略与/或默认视图（PATCH 语义：省略的字段保持原值）。
  *
  * @param params.repoId - 仓库标识。
- * @param params.maxParallel - 省略＝不变；``null``＝恢复继承（清除策略，删除设置行）；
+ * @param params.maxParallel - 省略＝不变；``null``＝恢复为配置文件值（删除设置行）；
  *   1–10＝设置策略值。
  * @param params.defaultView - 省略＝不变；后端仅接受 timeline / list。
  * @returns 写后 fresh 读回的设置快照（含生效上限与来源）。

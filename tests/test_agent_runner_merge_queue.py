@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 
 from backend.core.shared.models.agent_runner import (
@@ -27,20 +29,20 @@ from tests.support.agent_runner import (
 
 # A PR checklist block as produced by build_validation_checklist_block().
 _UNTICKED_BODY = (
-    "<!-- iar:realistic-validation version=1 total=2 -->\n"
+    "<!-- kc:realistic-validation version=1 total=2 -->\n"
     "## Realistic Validation (human sign-off required)\n\n"
     "Then tick each item:\n\n"
     "- [ ] rv-1: first checklist behaviour\n"
     "- [ ] rv-2: second checklist behaviour\n\n"
-    "<!-- iar:realistic-validation-end -->"
+    "<!-- kc:realistic-validation-end -->"
 )
 _TICKED_BODY = (
-    "<!-- iar:realistic-validation version=1 total=2 -->\n"
+    "<!-- kc:realistic-validation version=1 total=2 -->\n"
     "## Realistic Validation (human sign-off required)\n\n"
     "Then tick each item:\n\n"
     "- [x] rv-1: first checklist behaviour\n"
     "- [x] rv-2: second checklist behaviour\n\n"
-    "<!-- iar:realistic-validation-end -->"
+    "<!-- kc:realistic-validation-end -->"
 )
 
 
@@ -122,7 +124,7 @@ def test_stack_downstream_skipped_until_upstream_merged(tmp_path) -> None:
         number=7,
         title="downstream",
         url="https://github.com/example/repo/issues/7",
-        body='<!-- iar:depends-on #42 mode="stack" -->',
+        body='<!-- kc:depends-on #42 mode="stack" -->',
         labels=("agent/automated-review-passed",),
     )
     outcome = merge_queue_module._process_one(
@@ -148,7 +150,7 @@ def test_stack_downstream_converges_after_upstream_merged(tmp_path, worktree_pat
         number=70,
         title="downstream",
         url="https://github.com/example/repo/issues/70",
-        body='<!-- iar:depends-on #42 mode="stack" -->',
+        body='<!-- kc:depends-on #42 mode="stack" -->',
         labels=("agent/automated-review-passed",),
     )
     github.set_pr_context(branch, _make_pr_context(branch=branch, number=70))
@@ -183,7 +185,7 @@ def test_stack_convergence_retarget_failure_skips(tmp_path, worktree_path) -> No
         number=70,
         title="downstream",
         url="https://github.com/example/repo/issues/70",
-        body='<!-- iar:depends-on #42 mode="stack" -->',
+        body='<!-- kc:depends-on #42 mode="stack" -->',
         labels=("agent/automated-review-passed",),
     )
     github.set_pr_context(branch, _make_pr_context(branch=branch, number=70))
@@ -247,7 +249,7 @@ def test_convergence_refreshes_head_before_forbidden_scan(tmp_path, worktree_pat
         number=70,
         title="downstream",
         url="https://github.com/example/repo/issues/70",
-        body='<!-- iar:depends-on #42 mode="stack" -->',
+        body='<!-- kc:depends-on #42 mode="stack" -->',
         labels=("agent/automated-review-passed",),
     )
     github._issue_comments[70] = [f"PR Branch: `{branch}`"]
@@ -907,7 +909,7 @@ def test_verifier_passed_then_full_path_merges(tmp_path, worktree_path, monkeypa
 
 
 def test_idempotent_no_duplicate_sign_off_comment(tmp_path, worktree_path, monkeypatch) -> None:
-    """If a previous run already produced an ``iar:auto-sign-off`` comment,
+    """If a previous run already produced an ``kc:auto-sign-off`` comment,
     the merge queue must NOT post another one — that is the crash-re-entry guarantee."""
     cfg = _make_config(require_verifier_pass=False)
     github = FakeGitHubClient()
@@ -928,10 +930,10 @@ def test_idempotent_no_duplicate_sign_off_comment(tmp_path, worktree_path, monke
     issue = _make_issue(number=77, labels=("agent/automated-review-passed",))
     github._issue_labels[77] = issue.labels
     branch_comment = "Build complete on PR Branch: `issue-77`."
-    github._issue_comments[77] = [branch_comment, "<!-- iar:auto-sign-off previous -->"]
+    github._issue_comments[77] = [branch_comment, "<!-- kc:auto-sign-off previous -->"]
     github._issue_comment_entries[77] = [
         (1, branch_comment),
-        (2, "<!-- iar:auto-sign-off previous -->"),
+        (2, "<!-- kc:auto-sign-off previous -->"),
     ]
     github.set_list_issues_by_label_result([issue])
 
@@ -1067,6 +1069,40 @@ def test_tick_sign_off_checklist_helper() -> None:
     assert _tick_sign_off_checklist(_TICKED_BODY) is None
     # No checklist → returns None.
     assert _tick_sign_off_checklist("") is None
+
+
+def test_auto_sign_off_warns_when_block_marker_is_unreadable(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """读不懂的签收区块不能被静默跳过：自动勾选必须留下可诊断的警告。"""
+    legacy_body = (
+        "<!-- iar:realistic-validation version=1 total=2 -->\n"
+        "- [ ] rv-1: first checklist behaviour\n"
+        "- [ ] rv-2: second checklist behaviour\n"
+        "<!-- iar:realistic-validation-end -->"
+    )
+    github = FakeGitHubClient()
+    request = merge_queue_module._AutoSignOffRequest(
+        issue=IssueSummary(
+            number=42,
+            title="Demo",
+            url="https://github.com/example/repo/issues/42",
+            body="",
+            labels=(),
+        ),
+        pr_number=7,
+        pr_branch="issue-42",
+        pr_body=legacy_body,
+        comments=[],
+        github_client=github,
+        scoped_prd_auto_merge=False,
+    )
+
+    with caplog.at_level(logging.WARNING):
+        assert merge_queue_module._apply_auto_sign_off(request) is False
+
+    assert [c for c in github.calls if c["method"] == "update_pull_request_body"] == []
+    assert "cannot read" in caplog.text
 
 
 def test_diff_unavailable_fails_closed(tmp_path, worktree_path, monkeypatch) -> None:

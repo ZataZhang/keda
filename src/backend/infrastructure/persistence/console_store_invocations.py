@@ -78,7 +78,7 @@ class InvocationEventStoreMixin:
 
     def append_invocation_event(self, event_record: InvocationEventRecord) -> bool:
         """追加一条调用观测事件，按 ``(run_id, event_key)`` 幂等；失败时抛出异常。"""
-        with self._connect() as connection:
+        with self._connection() as connection:
             cursor = connection.execute(
                 "INSERT OR IGNORE INTO agent_invocation_events "
                 f"({_INVOCATION_EVENT_COLUMNS}) "
@@ -130,7 +130,7 @@ class InvocationEventStoreMixin:
     ) -> list[InvocationEventRecord]:
         """执行一次调用事件查询；表缺失等读取故障降级为空列表（旁路观测语义）。"""
         try:
-            with self._connect() as connection:
+            with self._connection() as connection:
                 event_rows = connection.execute(query, params).fetchall()
         except sqlite3.Error as exc:
             _logger.warning(

@@ -157,7 +157,7 @@ def get_agent_runner_status_data() -> dict:
     return {
         "daemon_mode": False,
         "config": {
-            "max_issues": app_config.runner.max_issues,
+            "max_concurrent_issues": app_config.runner.max_concurrent_issues,
             "default_agent": app_config.runner.default_agent,
             "max_recovery_attempts": app_config.runner.max_recovery_attempts,
             "recovery_retry_delay_seconds": (app_config.runner.recovery_retry_delay_seconds),
@@ -170,6 +170,7 @@ def get_agent_runner_status_data() -> dict:
             "remote": app_config.git.remote,
             "auto_merge": app_config.safety.auto_merge,
             "forbidden_path_patterns": list(app_config.safety.forbidden_path_patterns),
+            "forbidden_path_exceptions": list(app_config.safety.forbidden_path_exceptions),
             "autopilot_enabled": app_config.autopilot.enabled,
             "autopilot_merge_method": app_config.autopilot.merge_method,
             "autopilot_require_verifier_pass": app_config.autopilot.require_verifier_pass,
@@ -233,7 +234,7 @@ def create_process_supervisor() -> IRunnerProcessSupervisor:
     """创建托管 runner 进程的监管器（pidfile + 日志目录已解析）。
 
     同时把本进程当前生效的 ``config.toml`` 交给监管器注入子进程的
-    ``KEDACODE_CONFIG``（旧前缀同名注入）：托管子进程的 cwd 是目标仓库，若由它自行按 cwd 解析配置，
+    ``KEDACODE_CONFIG``：托管子进程的 cwd 是目标仓库，若由它自行按 cwd 解析配置，
     会读到该仓库自己的应用级 ``config.toml``，与面板展示的机器级配置失配。
     """
     console_settings = get_agent_runner_settings().console
@@ -276,7 +277,7 @@ def resolve_console_spawn_cwd(
 ) -> Path:
     """托管进程的工作目录：目标仓库自身的路径。
 
-    面板托管的 runner 必须在目标仓库内运行——读取该仓库的 ``.iar`` 状态
+    面板托管的 runner 必须在目标仓库内运行——读取该仓库的 ``.kedacode``（或现存 ``.iar``）状态
     与 git 上下文。全局安装场景下 keda 项目根与目标仓库无关，继续把
     cwd 指向它会让 daemon 在错误目录用一个不存在的 uv 项目启动。
     （``kc registry start`` / ``kc takeover`` 仍以 registry config.toml

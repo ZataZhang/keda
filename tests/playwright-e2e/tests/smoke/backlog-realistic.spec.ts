@@ -248,9 +248,9 @@ test.describe('realistic: backlog page', () => {
     await page.goto('/app/backlog')
     await expect(page.getByRole('heading', { name: 'Backlog' })).toBeVisible()
 
-    // stale 态：如实显示数据截至时间，并追加「后台更新中」提示
+    // stale 态：如实显示数据截至时间，刷新按钮转入「更新中…」
     await expect(page.getByText(/数据截至/)).toBeVisible()
-    await expect(page.getByText(/后台更新中/)).toBeVisible()
+    await expect(page.getByTestId('backlog-snapshot-refresh')).toContainText('更新中')
     await saveRvEvidenceScreenshot(page, 'rv-7-stale.png')
     await expect(page.getByText('Backlog E2E Fresh Arrival PRD')).not.toBeVisible()
 
@@ -261,9 +261,9 @@ test.describe('realistic: backlog page', () => {
       .toBe(true)
     expect(requestTimestamps[1] - requestTimestamps[0]).toBeLessThanOrEqual(5_000)
 
-    // fresh 态：提示消失、列表反映新扫描结果、表头仅保留数据截至时间
+    // fresh 态：按钮回到刷新倒计时、列表反映新扫描结果、表头保留数据截至时间
     await expect(page.getByText('Backlog E2E Fresh Arrival PRD')).toBeVisible()
-    await expect(page.getByText(/后台更新中/)).not.toBeVisible()
+    await expect(page.getByTestId('backlog-snapshot-refresh')).toContainText('刷新')
     await expect(page.getByText(/数据截至/)).toBeVisible()
     await saveRvEvidenceScreenshot(page, 'rv-7-fresh.png')
   })

@@ -27,6 +27,7 @@ from backend.core.shared.interfaces.agent_runner import (
     IProcessRunner,
 )
 from backend.core.shared.models.agent_runner import (
+    AgentCommitResult,
     AppConfig,
     AttemptResult,
     CommandResult,
@@ -41,6 +42,7 @@ from backend.core.use_cases.agent_runner_blocked_claim import (
     worktree_claim_lock_path,
 )
 from backend.core.use_cases.agent_runner_claim_arbitration import arbitrate_first_claim
+from backend.core.use_cases.agent_onboarding import assert_run_gate
 from backend.core.use_cases.agent_runner_direct_pr_label import (
     PublishStageDecision,
     PublishStageSelection,
@@ -61,6 +63,10 @@ from backend.core.use_cases.agent_runner_failure_handoff import (
 from backend.core.use_cases.agent_runner_git import (
     get_current_branch,
     has_changes,
+)
+from backend.core.use_cases.agent_runner_issue_snapshot import (
+    IssueSnapshotRequest,
+    record_issue_input_snapshot,
 )
 from backend.core.use_cases.agent_runner_publication import (
     LocalCommitReuseRequest,
@@ -104,6 +110,21 @@ from backend.core.use_cases.run_agent_once import (
 )
 
 _logger = logging.getLogger(__name__)
+
+
+def _skip_publication_for_closed_no_change(
+    issue: IssueSummary,
+    commit_result: AgentCommitResult,
+) -> bool:
+    """当执行循环确认 Issue 无变更收敛时跳过 PR 发布。"""
+    if not commit_result.issue_closed_without_changes:
+        return False
+    _logger.info(
+        "Issue #%d was closed during execution without changes; skipping publication.",
+        issue.number,
+    )
+    return True
+
 
 __all__ = [
     "_guard_blocked_issue_has_resolution",
@@ -199,10 +220,11 @@ def _process_blocked_resolution(
         finalize_verifier_takeover,
     )
     from backend.core.use_cases.agent_runner_publish import validate_safe_changes
-    from backend.core.use_cases.run_agent_once import (
-        build_blocked_continuation_prompt,
-        run_agent_until_committed,
+    from backend.core.use_cases.run_agent_execution_loop import (
+        AgentExecutionRequest,
+        execute_agent_request,
     )
+    from backend.core.use_cases.run_agent_once import build_blocked_continuation_prompt
 
     selected_agent = choose_agent(issue, config, agent)
     # implementation 阶段绑定的模型选择：换人（CLI --agent 显式指定 / 回退链
@@ -279,23 +301,26 @@ def _process_blocked_resolution(
         before_sha = get_head_sha(worktree_path, process_runner)
 
         try:
-            commit_result = run_agent_until_committed(
-                selected_agent=selected_agent,
-                issue=issue,
-                worktree_path=worktree_path,
-                config=config,
-                process_runner=process_runner,
-                before_sha=before_sha,
-                expected_branch=current_branch,
-                prompt_override=continuation_prompt,
-                on_attempt_recorded=on_attempt_recorded,
-                on_agent_usage=on_agent_usage,
-                before_verifier_callback=partial(
-                    publish_draft_pr_before_verifier, pre_verifier_publication
-                ),
-                model_selection=implementation_model_selection,
-                publish_stage=publish_stage,
-                repo_id=repo_id,
+            commit_result = execute_agent_request(
+                request=AgentExecutionRequest(
+                    selected_agent=selected_agent,
+                    issue=issue,
+                    worktree_path=worktree_path,
+                    config=config,
+                    process_runner=process_runner,
+                    before_sha=before_sha,
+                    expected_branch=current_branch,
+                    prompt_override=continuation_prompt,
+                    on_attempt_recorded=on_attempt_recorded,
+                    on_agent_usage=on_agent_usage,
+                    before_verifier_callback=partial(
+                        publish_draft_pr_before_verifier, pre_verifier_publication
+                    ),
+                    model_selection=implementation_model_selection,
+                    publish_stage=publish_stage,
+                    repo_id=repo_id,
+                    github_client=github_client,
+                )
             )
         except VerifierCancelledByHumanError:
             # 人工接管（Issue #278）：解阻续作路径与首跑同样交班——verifier
@@ -311,6 +336,9 @@ def _process_blocked_resolution(
                 "Issue #%d: verifier during blocked resolution taken over by a human.",
                 issue.number,
             )
+            return
+
+        if _skip_publication_for_closed_no_change(issue, commit_result):
             return
 
         # 完成发布流程
@@ -375,6 +403,10 @@ def _process_ready_issue(
         VerifierCancelledByHumanError,
         finalize_verifier_takeover,
     )
+    from backend.core.use_cases.run_agent_execution_loop import (
+        AgentExecutionRequest,
+        execute_agent_request,
+    )
     from backend.core.use_cases.run_agent_once import (
         MaxRetriesExceededError,
         PrdDeliveryError,
@@ -382,7 +414,6 @@ def _process_ready_issue(
         VerificationFailedError,
         build_progress_continuation_prompt,
         checkpoint_uncommitted_progress,
-        run_agent_until_committed,
     )
 
     selected_agent = choose_agent(issue, config, agent)
@@ -395,6 +426,12 @@ def _process_ready_issue(
         issue=issue,
         fallback_preset=fallback_preset,
     )
+    # 启动前门禁（FR-5）：在投递认领标记、建 worktree 之前确认配置层解析出的阶段
+    # agent 在本机可执行。配置指向没装的 CLI 是配置错误，必须在 GitHub 上留下认领
+    # 痕迹之前停下。判定只看配置解析结果、不看 ``agent``：本函数会被回退阶梯按候选
+    # 逐个调用，候选没装属于运行时失败（起进程时 FileNotFoundError → AgentUnavailableError），
+    # 由阶梯跳过，不是配置错误。显式 ``--agent`` 由仓库轮询入口的那次预检负责。
+    assert_run_gate(config)
 
     # 步骤 1: 声明 Issue —— 真 CAS：先投递认领标记，回读后确认最早认领者才切 running。
     # 落败方不碰标签、worktree 或 agent，由派发层按 skip 处理。
@@ -419,6 +456,17 @@ def _process_ready_issue(
     worktree_path = create_or_reuse_worktree(repo_path, issue, config, process_runner)
     before_sha = get_head_sha(worktree_path, process_runner)
     expected_branch = get_current_branch(worktree_path, process_runner)
+
+    # 认领成功、工作目录就绪后、Agent 启动前：留存任务输入快照（只追加、失败只告警）。
+    record_issue_input_snapshot(
+        IssueSnapshotRequest(
+            issue=issue,
+            repo_id=repo_id or repo_path.name,
+            worktree_path=worktree_path,
+            config=config,
+            process_runner=process_runner,
+        )
+    )
 
     if _resume_direct_pr_handoff(
         github_client,
@@ -505,23 +553,26 @@ def _process_ready_issue(
     # 失败前把 agent 的在途进度提交成 WIP checkpoint，使其能被下一次 claim 复用、
     # 继续推进；否则体量较大的 PRD 会在每次 claim 从零开始、永远收敛不了。
     try:
-        new_commit_result = run_agent_until_committed(
-            selected_agent=selected_agent,
-            issue=issue,
-            worktree_path=worktree_path,
-            config=config,
-            process_runner=process_runner,
-            before_sha=before_sha,
-            expected_branch=expected_branch,
-            prompt_override=continuation_prompt,
-            on_attempt_recorded=on_attempt_recorded,
-            on_agent_usage=on_agent_usage,
-            before_verifier_callback=partial(
-                publish_draft_pr_before_verifier, pre_verifier_publication
-            ),
-            model_selection=implementation_model_selection,
-            publish_stage=publish_stage,
-            repo_id=repo_id,
+        new_commit_result = execute_agent_request(
+            request=AgentExecutionRequest(
+                selected_agent=selected_agent,
+                issue=issue,
+                worktree_path=worktree_path,
+                config=config,
+                process_runner=process_runner,
+                before_sha=before_sha,
+                expected_branch=expected_branch,
+                prompt_override=continuation_prompt,
+                on_attempt_recorded=on_attempt_recorded,
+                on_agent_usage=on_agent_usage,
+                before_verifier_callback=partial(
+                    publish_draft_pr_before_verifier, pre_verifier_publication
+                ),
+                model_selection=implementation_model_selection,
+                publish_stage=publish_stage,
+                repo_id=repo_id,
+                github_client=github_client,
+            )
         )
     except VerifierCancelledByHumanError:
         # 人工接管（Issue #278）：verifier 进程树已回收、控制行已落闸，交班
@@ -592,6 +643,9 @@ def _process_ready_issue(
                 content_generator=content_generator,
             )
         raise
+
+    if _skip_publication_for_closed_no_change(issue, new_commit_result):
+        return
 
     # 步骤 5: 完成发布流程
     _finish_implementation_publication(

@@ -1,6 +1,6 @@
 # 一键安装 kc CLI
 
-> PyPI / Homebrew 分发包名为 `kedacode`（避免与 CNCF KEDA 混淆）。安装后有两个完全等价的命令：主命令 `kc`，以及与安装名对齐的别名 `kedacode`——装完想不起来敲什么时，直接敲包名也能用。本文其余部分统一写 `kc`。
+> PyPI / Homebrew 分发包名为 `kedacode`（避免与 CNCF KEDA 混淆）。安装后有两个完全等价的命令：主命令 `kc`，以及与安装名对齐的别名 `kedacode`——装完想不起来敲什么时，直接敲包名也能用。旧命令 `iar` 已不再安装；旧脚本请改用 `kc`。本文其余部分统一写 `kc`。
 >
 > 刻意**不**提供 `keda` 命令：`bin/keda` 会与 CNCF KEDA 将来可能进入 homebrew-core 的同名 formula 抢符号链接，那时用户 `brew install` 会直接失败。
 
@@ -41,6 +41,14 @@ kc completion install --shell fish
 当前支持 bash、zsh 和 fish。之后输入 `kc ` 再按 Tab 可查看子命令；例如 `kc is<Tab>` 会补全为 `kc issue`。每台电脑、每个 shell 配置一次即可。
 
 如果还未配置补全，首次在交互式终端运行 `kc` 时会显示选择菜单，默认选中“安装”；按上下方向键可切换到“暂不安装”，按 Enter 确认。提示不会由 `kc<Tab>` 触发，因为此时 shell 尚未启动 `kc`；先运行一次 `kc` 或按上面的命令配置即可。选择安装后，`kc` 会安装补全并退出，不会继续执行刚才的命令；按提示重载 shell 配置，再重新运行刚才的 `kc` 命令。
+
+### macOS 菜单栏 App（可选）
+
+`uv tool install kedacode` 仍只安装 CLI，不会改变安装方式。macOS 用户首次在交互式终端运行 `kc` 时，如果 `~/Applications` 和 `/Applications` 中都没有 KedaCode App，会看到一次菜单栏 App 安装菜单；选择安装后，CLI 会下载与当前 `kedacode` 版本和 CPU 架构匹配的发布包，校验 SHA-256，并安装到 `~/Applications/KedaCode.app`。CLI 仍由 `uv` 管理，菜单栏 App 是可选的独立桌面程序。
+
+这个菜单与上面的 shell 补全菜单是两次独立选择；若两者都还未设置，菜单栏 App 菜单先出现，随后才会显示补全菜单。
+
+如果选择暂不安装，之后可手动执行 `kc desktop install`。自动提示只在 macOS 交互式终端出现，不影响脚本、机器输出、帮助或版本调用。安装后从 Finder 打开 `~/Applications/KedaCode.app` 即可显示菜单栏图标。当前公开构建使用 ad-hoc 签名且未公证；首次打开时 macOS 可能要求在「系统设置 → 隐私与安全性」中允许，详见[菜单栏 App 指南](../guides/desktop-companion.md)。
 
 **curl 一键脚本（macOS / Linux）：**
 
@@ -92,9 +100,9 @@ Skill，再安装到用户级目录；不会写入项目内 `.claude/skills`、`
 
 `kc` 还提供 `kc container` 子命令组，把 agent runner 跑进 Docker 容器：
 
-- 容器内预装 claude / codex / kimi 三个 agent CLI + gh + Node + uv + just + git，避免污染本机工具链。内置注册表里另有 `codebuddy` / `qoder` / `opencode`，但**容器镜像尚未预装它们**——容器里选中这些 agent 会在启动子进程时报可执行文件不存在；需要时请在本机跑，或自行在镜像里补装。
+- 容器内预装 claude / codex / kimi 三个 agent CLI + gh + Node + uv + just + git，避免污染本机工具链。内置注册表里另有 `codebuddy` / `qoder` / `opencode`，但**容器镜像尚未预装它们**——容器里选中这些 agent 会在认领 Issue 之前被启动前门禁拦下（未找到 3，点名阶段与可执行文件），不做静默换人；需要时请在本机跑，或自行在镜像里补装。
 - 认证通过 `kc container auth import` 一次性快照到 `~/.kedacode/container-auth/`，与本机 cc-switch 当前 profile 隔离——本机切账号不影响容器内 agent 认证。
-- 目标仓库挂载进容器，agent 在挂载目录的 `.iar-worktrees/` 建 worktree，宿主机可直接 `kc worktree open` 接管。
+- 目标仓库挂载进容器，agent 在挂载目录的 `.kc-worktrees/` 建 worktree，宿主机可直接 `kc worktree open` 接管。
 - runner 容器资产（Dockerfile / compose / .env.example）随 `kc` 包发布，无需克隆 keda 源码，全局安装后即可使用。
 - Compose 日志最多保留 5 个 10 MiB 文件；当前 Docker host 的缓存回收由运营者先运行 `kc container gc --dry-run` 检查，再用 `kc container gc --apply` 明确执行。候选也可能来自该主机上的其它本地项目；此清理不会移除 volume 或活动容器使用的镜像。
 - daemon 的 `hosted_maintenance_enabled` 默认关闭；仅托管部署显式开启时，在 worker 边界清理安全的关闭 Issue worktree、14 天前的 Issue 原始输出日志和 90 天前已完成的 run/attempt 摘要。可用磁盘低于 10 GiB 时暂停领取新 Issue，恢复到 15 GiB 后继续；当前任务不被清理流程终止。活动标签、dirty/unmerged worktree、远端分支、审计与队列设置均受保护。
@@ -125,11 +133,12 @@ kc container down
 要点：
 
 - **只提示正式版**：PyPI 最新版是预发布版（`rc` / `beta` / `dev`）时不提示，因为默认安装器不会装它。
-- **缓存**：检查结果写入状态目录的 `update-check.json`，通常是 `~/.kedacode/update-check.json`；若只有旧目录 `~/.iar` 存在，则写入 `~/.iar/update-check.json`，直到迁移状态目录。默认 24 小时内不再访问 PyPI；升级后已安装版本变化会让旧缓存自动失效。
+- **缓存**：检查结果写入 `~/.kedacode/update-check.json`。默认 24 小时内不再访问 PyPI；升级后已安装版本变化会让旧缓存自动失效。
 - **提示频率**：拒绝自动升级、安装方式无法识别而显示候选命令、或升级命令执行完却什么都没装上时，同一版本在当前缓存有效期内不会重复提示；缓存过期后会重新检查并按结果提示。
 - **离线容忍**：访问 PyPI 的超时只有 2 秒，失败即静默继续，不影响本次命令的退出码与输出。
 - **机器路径零打扰**：以下场景更新检查整段不发生（不联网、不提示、不询问）——`--json` / `--output json` 机器模式、shell 补全协议、`--help` / `-h`、`--version`、无参数调用（只打印用法）、非交互终端（管道 / CI / agent 子进程）。
-- **显式关闭**：设置 `KEDACODE_NO_UPDATE_CHECK=1`（旧名 `IAR_NO_UPDATE_CHECK` 同样生效）永久停用；想手动升级时按上方安装方式对应的升级命令操作即可。
+- **显式关闭**：设置 `KEDACODE_NO_UPDATE_CHECK=1` 永久停用；想手动升级时按上方安装方式对应的升级命令操作即可。
+
 ## 托管模式（可选，每客户独立 VM）
 
 托管模式把 runner 跑在客户专用 Linux VM 上，并用一个**需要认证的 HTTPS Console** 管理运行凭据。它完全可选——**默认 `enabled = false`，本地 `kc daemon` / `kc console` / `kc container` 免费路径不受影响，本机 console 仍只绑 `127.0.0.1` 且无需登录**。开启托管需设 `[agent_runner.hosted].enabled = true` 与 `public_base_url`（必须 HTTPS；明文 http 仅限本机反向代理自检），并由运营者预先准备 checkout、配置唯一的 `repository_id` 与绝对 `repository_path`。
@@ -146,7 +155,18 @@ Hosted Runner 也可选择启用 Linux 虚拟桌面：`[agent_runner.hosted].des
 6. GitHub PAT 与 Agent key 均验证后，客户可在 Console 点「启动 runner」。宿主服务只启动预先配置且 `origin` 与 PAT 仓库一致的 checkout；runner 使用按仓库命名的 Docker volume 持久化运行历史、审计、队列状态和日志，不挂载宿主全局状态目录。Console「停止 runner」会清除 tmpfs 明文并保留加密凭据。运营者须把 `runner_auth_root` 放在 Linux tmpfs 上。
 
 归属与撤销：**口令/会话属客户；GitHub PAT 属其 GitHub 账户；provider key 属其计费账户；GitHub Actions secrets、项目 DB 凭据、SSH 私钥、反向代理 TLS 私钥都不由该 Console 收集**（由客户/运营者在自有基础设施管理）。**Console 删除只停该仓库 runner 并清本地密文/tmpfs 副本，不代替你撤销上游 key/PAT**——上游仍有效，需你主动到 provider/GitHub revoke。信任边界：同一 runner 内的 agent/代码可读取该 runner 自己收到的 key，隔离发生在「按仓库 + 单租户 VM」层。运维侧：项目级 DB 检查仍由 PR CI 把关；daemon 可用磁盘低于 10 GiB 暂停领取、越过 15 GiB 恢复、不杀在跑任务；`hosted_maintenance_enabled` 默认关。退订：删本地凭据 → 撤销上游 key/PAT → 停 runner 与代理 → 数据保留期按确认值执行。
+## 随包 operator Skill 自动同步
 
+随发行包发行的 `kedacode-operator` Skill 会安装进 wheel，但用户级安装根（`~/.claude/skills`、`~/.codex/skills` 等）里的副本需要单独刷新，过去只能手动跑 `kc skill install`。现在 `kc` 启动时会**按已安装包版本比对**：版本相对上次同步记录发生变化时，自动把随包 operator Skill 刷新到全部安装根，之后同一版本不再重复触碰文件系统——升级 `kedacode` 后无需再手动同步。
+
+要点：
+
+- **只刷随包 operator Skill**：不下载、不覆盖 `prd` / `code-reviewer` 等远程模板 Skill；你本地改过的 operator 副本会被保留（冲突时不动它），手动 `kc skill install` 仍是刷新远程模板的入口。
+- **缓存**：同步到的版本记录在 `~/.kedacode/skill-sync.json`，与更新检查缓存相互独立；包版本变化会让记录自动失效并重新同步。
+- **不联网**：该钩子只读本地 wheel 与用户目录，离线照常工作。
+- **机器路径零打扰**：复用更新检查同一套跳过判定——`--json` / `--output json`、shell 补全协议、`--help` / `-h`、`--version`、无参数、非交互终端（管道 / CI / agent 子进程）下整段不发生。
+- **预览无写入**：带 `--dry-run` 的命令会跳过自动同步，避免在预览前改动 Skill 文件。
+- **显式关闭**：设置 `KEDACODE_NO_SKILL_SYNC=1` 停用自动同步（`KEDACODE_NO_UPDATE_CHECK=1` 同样会一并跳过），需要时手动 `kc skill install` 即可。
 ## 排错
 
 - `command -v kc` 没命中：把 `~/.local/bin` 加入 `PATH`，或在新 shell 中重试。

@@ -1098,7 +1098,7 @@ def test_pr_handoff_ref_block_replaces_instead_of_stacking() -> None:
 
     assert "issuecomment-9" in twice
     assert "issuecomment-1" not in twice
-    assert twice.count("<!-- iar:failure-context-ref -->") == 1
+    assert twice.count("<!-- kc:failure-context-ref -->") == 1
     assert twice.startswith("Closes #123")
 
 

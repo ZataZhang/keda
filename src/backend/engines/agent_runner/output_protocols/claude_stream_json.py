@@ -17,12 +17,14 @@ from backend.core.shared.interfaces.agent_output_protocol import (
 )
 from backend.core.shared.models.agent_runner import CommandResult
 from backend.infrastructure.agent_stream_usage import StreamUsageCollector
+from backend.infrastructure.agent_model_config_snapshot import observe_relay_model_config
 from backend.infrastructure.process_runner import run_filtered_claude_stream
 
 
 class ClaudeStreamJsonOutputProtocol:
     """Claude ``stream-json`` 事件流渲染协议。"""
 
+    @observe_relay_model_config
     def relay(self, request: OutputRelayRequest) -> CommandResult:
         """启动 claude 子进程，把事件流渲染成可读文本。"""
         argv = list(request.argv)

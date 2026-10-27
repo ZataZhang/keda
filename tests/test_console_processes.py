@@ -6,6 +6,7 @@ import dataclasses
 import json
 import sys
 import time
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -45,35 +46,35 @@ def _make_context(repo_id: str = "keda-main") -> RepositoryRunContext:
 
 
 def test_build_runner_argv_daemon() -> None:
-    """daemon kind should map to `iar daemon --repo-id <id>`."""
+    """daemon kind should map to `kc daemon --repo-id <id>`."""
     argv = build_runner_argv(
-        runner_command=["uv", "run", "iar"],
+        runner_command=["uv", "run", "kc"],
         kind=RunnerProcessKind.DAEMON,
         repo_id="keda-main",
     )
-    assert argv == ("uv", "run", "iar", "daemon", "--repo-id", "keda-main")
+    assert argv == ("uv", "run", "kc", "daemon", "--repo-id", "keda-main")
 
 
 def test_build_runner_argv_blocked_continue_requires_issue() -> None:
     """blocked_continue without an issue number must be rejected."""
     with pytest.raises(ConsoleProcessError):
         build_runner_argv(
-            runner_command=["iar"],
+            runner_command=["kc"],
             kind=RunnerProcessKind.BLOCKED_CONTINUE,
             repo_id="keda-main",
         )
 
 
 def test_build_runner_argv_blocked_continue_with_issue() -> None:
-    """blocked_continue maps to `iar blocked-continue --issue N --repo-id`."""
+    """blocked_continue maps to `kc blocked-continue --issue N --repo-id`."""
     argv = build_runner_argv(
-        runner_command=["iar"],
+        runner_command=["kc"],
         kind=RunnerProcessKind.BLOCKED_CONTINUE,
         repo_id="keda-main",
         issue_number=19,
     )
     assert argv == (
-        "iar",
+        "kc",
         "blocked-continue",
         "--issue",
         "19",
@@ -229,7 +230,7 @@ def test_exited_process_detected(tmp_path: Path) -> None:
 
 
 def test_spawn_injects_parent_config_path(tmp_path: Path) -> None:
-    """托管子进程必须继承父进程生效的 ``config.toml``（注入 ``IAR_CONFIG``）。
+    """托管子进程必须继承父进程生效的 ``config.toml``（注入 ``KEDACODE_CONFIG``）。
 
     子进程 cwd 是目标仓库，cwd 向上查找会命中该仓库自己的应用级
     ``config.toml``；不注入就会与面板展示的机器级配置（生命周期矩阵等）失配——
@@ -245,7 +246,7 @@ def test_spawn_injects_parent_config_path(tmp_path: Path) -> None:
     record = supervisor.spawn(
         repo_id="zata-codes-template",
         kind=RunnerProcessKind.RUN_ONCE,
-        argv=_print_env_argv("IAR_CONFIG"),
+        argv=_print_env_argv("KEDACODE_CONFIG"),
         cwd=tmp_path,
     )
 
@@ -255,13 +256,13 @@ def test_spawn_injects_parent_config_path(tmp_path: Path) -> None:
 def test_spawn_without_config_path_leaves_env_untouched(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """未给 ``config_path`` 时不注入 ``IAR_CONFIG``（子进程按自身 cwd 解析）。"""
-    monkeypatch.delenv("IAR_CONFIG", raising=False)
+    """未给 ``config_path`` 时不注入 ``KEDACODE_CONFIG``（子进程按自身 cwd 解析）。"""
+    monkeypatch.delenv("KEDACODE_CONFIG", raising=False)
     supervisor = _make_supervisor(tmp_path)
     record = supervisor.spawn(
         repo_id="keda-main",
         kind=RunnerProcessKind.RUN_ONCE,
-        argv=_print_env_argv("IAR_CONFIG"),
+        argv=_print_env_argv("KEDACODE_CONFIG"),
         cwd=tmp_path,
     )
 
@@ -393,7 +394,7 @@ def _process_record(
         status=status,
         exit_code=None,
         log_path="/tmp/log",
-        command=("iar", "daemon", "--repo-id", repo_id),
+        command=("kc", "daemon", "--repo-id", repo_id),
         started_at="2026-09-20T00:00:00+00:00",
         stopped_at=None,
     )
@@ -447,8 +448,8 @@ def test_stop_repository_persistent_processes_reports_failures() -> None:
 
 def test_find_own_command_index() -> None:
     """三个自有命令名都可能出现在包装器之后或绝对路径形式的位置。"""
-    assert _find_own_command_index(("uv", "run", "iar", "daemon")) == 2
-    assert _find_own_command_index(("/Users/x/.local/bin/iar", "daemon")) == 0
+    assert _find_own_command_index(("uv", "run", "kc", "daemon")) == 2
+    assert _find_own_command_index(("/Users/x/.local/bin/kc", "daemon")) == 0
     assert _find_own_command_index(("kc", "daemon", "--repo-id", "keda")) == 0
     assert _find_own_command_index(("/opt/bin/kedacode", "review")) == 0
     assert _find_own_command_index(("python", "-m", "backend.api.cli")) is None
@@ -457,19 +458,19 @@ def test_find_own_command_index() -> None:
 
 def test_parse_unmanaged_kind() -> None:
     """Detect daemon and review-daemon subcommands, ignoring options."""
-    assert _parse_unmanaged_kind(("uv", "run", "iar", "daemon", "--repo-id", "keda")) == "daemon"
+    assert _parse_unmanaged_kind(("uv", "run", "kc", "daemon", "--repo-id", "keda")) == "daemon"
     assert (
-        _parse_unmanaged_kind(("iar", "review-daemon", "--repo-id", "keda", "--agent", "claude"))
+        _parse_unmanaged_kind(("kc", "review-daemon", "--repo-id", "keda", "--agent", "claude"))
         == "review_daemon"
     )
-    assert _parse_unmanaged_kind(("iar", "run", "--repo-id", "keda")) is None
+    assert _parse_unmanaged_kind(("kc", "run", "--repo-id", "keda")) is None
     assert _parse_unmanaged_kind(("python", "-m", "backend.api.cli")) is None
 
 
 def test_parse_repo_id_from_argv() -> None:
     """Extract --repo-id value from command line."""
-    assert _parse_repo_id_from_argv(("iar", "daemon", "--repo-id", "keda-main")) == "keda-main"
-    assert _parse_repo_id_from_argv(("iar", "daemon")) is None
+    assert _parse_repo_id_from_argv(("kc", "daemon", "--repo-id", "keda-main")) == "keda-main"
+    assert _parse_repo_id_from_argv(("kc", "daemon")) is None
 
 
 def test_resolve_repo_id_from_cwd(tmp_path: Path) -> None:
@@ -494,7 +495,7 @@ def test_list_unmanaged_processes_skips_managed_pids(
 ) -> None:
     """A pid already present in processes.json must not be reported as unmanaged."""
     supervisor = _make_supervisor(tmp_path)
-    fake_cmdline = ["iar", "daemon", "--repo-id", "keda-main"]
+    fake_cmdline = ["kc", "daemon", "--repo-id", "keda-main"]
 
     class _FakeProc:
         info = {
@@ -521,7 +522,7 @@ def test_list_unmanaged_processes_skips_managed_pids(
     managed_record = supervisor.spawn(
         repo_id="keda-main",
         kind=RunnerProcessKind.DAEMON,
-        argv=fake_cmdline,
+        argv=_sleeper_argv(),
         cwd=tmp_path,
     )
     # Force the managed record to use the same pid as the fake scanner.
@@ -534,19 +535,67 @@ def test_list_unmanaged_processes_skips_managed_pids(
     registry_entries = [type("_Entry", (), {"repo_id": "keda-main", "path": str(tmp_path)})()]
     unmanaged = supervisor.list_unmanaged_processes(registry_entries)
     assert unmanaged == []
+    supervisor.stop(managed_record.process_id, timeout_seconds=5)
+
+
+def test_list_unmanaged_processes_discards_partial_scan_on_permission_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """系统进程表扫描被拒时不返回不完整的未托管进程列表。"""
+    supervisor = _make_supervisor(tmp_path)
+
+    class _FakeProcess:
+        """扫描中先成功读取到的未托管 runner 进程。"""
+
+        info: dict[str, object] = {
+            "pid": 12345,
+            "username": "testuser",
+            "cmdline": ["kc", "daemon", "--repo-id", "keda-main"],
+            "create_time": 1_700_000_000.0,
+        }
+
+    class _FakeCurrentProcess:
+        """返回测试用户，避免依赖宿主进程权限。"""
+
+        def username(self) -> str:
+            """返回固定的测试用户名。"""
+            return "testuser"
+
+    class _DeniedProcessIterator:
+        """模拟进程表迭代中途被系统拒绝。"""
+
+        def __iter__(self) -> Iterator[_FakeProcess]:
+            yield _FakeProcess()
+            raise PermissionError("sysctl access denied")
+
+    monkeypatch.setattr(
+        "backend.infrastructure.console.process_supervisor.psutil.Process",
+        lambda: _FakeCurrentProcess(),
+    )
+    monkeypatch.setattr(
+        "backend.infrastructure.console.process_supervisor.psutil.process_iter",
+        lambda _attributes: _DeniedProcessIterator(),
+    )
+
+    unmanaged_records = supervisor.list_unmanaged_processes([])
+
+    assert unmanaged_records == []
+    assert "系统进程表扫描失败" in caplog.text
 
 
 def test_list_unmanaged_processes_reports_unmanaged_by_repo_id(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """An unmanaged iar daemon with --repo-id is reported as running unmanaged."""
+    """An unmanaged kc daemon with --repo-id is reported as running unmanaged."""
     supervisor = _make_supervisor(tmp_path)
 
     class _FakeProc:
         info = {
             "pid": 12345,
             "username": "testuser",
-            "cmdline": ["iar", "daemon", "--repo-id", "keda-main"],
+            "cmdline": ["kc", "daemon", "--repo-id", "keda-main"],
             "create_time": 1_700_000_000.0,
         }
 

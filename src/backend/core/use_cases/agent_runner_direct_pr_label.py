@@ -479,7 +479,7 @@ def consume_label_after_publication(request: DirectPrLabelPublicationRequest) ->
         raise DirectPrLabelCleanupPendingError(
             f"Issue #{issue_number} was published with the '{direct_pr_label}' label (PR "
             f"{pr_url}), but no open PR on branch {branch} at head {head_sha} carries the "
-            "matching `iar:direct-pr` marker, so the label is kept and this run is not a full "
+            "matching `kc:direct-pr` marker, so the label is kept and this run is not a full "
             "success; the next claim confirms the published PR and only finishes the cleanup."
         )
     consume_direct_pr_label(

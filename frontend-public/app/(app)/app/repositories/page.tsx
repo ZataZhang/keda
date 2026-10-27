@@ -17,6 +17,7 @@ import {
   DirectoryPickerDialog,
   type DirectorySelection,
 } from "@/components/agent-runner/directory-picker-dialog";
+import { ConsolePage, ConsolePageHeader } from "@/components/layout/console-page";
 import { formatLocalDateTime } from "@/lib/utils";
 import {
   addRegistryRepository,
@@ -211,16 +212,9 @@ export default function RepositoriesPage() {
   }
 
   return (
-    <div className="flex flex-col gap-4 p-4 lg:p-6">
-      <div>
-        <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-50">
-          项目接入
-        </h2>
-        <p className="mt-1 text-sm text-slate-500">
-          registry 写回 <code>config.toml</code>，注释与格式保留。添加前会校验
-          路径存在、为 git 仓库且未被其他条目占用；移除只删除注册条目，不删除本地仓库。
-        </p>
-      </div>
+    <ConsolePage>
+      <ConsolePageHeader title="项目接入" description={<> registry 写回 <code>config.toml</code>，注释与格式保留。添加前会校验
+          路径存在、为 git 仓库且未被其他条目占用；移除只删除注册条目，不删除本地仓库。 </>} />
 
       <Card>
         <CardHeader>
@@ -487,6 +481,6 @@ export default function RepositoriesPage() {
         }
         onSelect={handleDirectorySelected}
       />
-    </div>
+    </ConsolePage>
   );
 }

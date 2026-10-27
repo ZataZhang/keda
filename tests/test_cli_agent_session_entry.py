@@ -412,7 +412,7 @@ def _init_repo_with_agents(
 
     repo_path = _init_iar_repo(tmp_path)
     config_text = (
-        (repo_path / ".iar.toml").read_text(encoding="utf-8")
+        (repo_path / ".kedacode.toml").read_text(encoding="utf-8")
         + "\n[agent_session]\n"
         + f'default_agent = "{default_agent}"\n'
         + "skill_install_check_enabled = false\n"
@@ -420,7 +420,7 @@ def _init_repo_with_agents(
         + extra_session_toml
         + agents_toml
     )
-    (repo_path / ".iar.toml").write_text(config_text, encoding="utf-8")
+    (repo_path / ".kedacode.toml").write_text(config_text, encoding="utf-8")
     return repo_path
 
 

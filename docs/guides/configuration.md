@@ -72,6 +72,8 @@ Issue 后执行同一流程。数据库 URL 支持 PostgreSQL（`postgresql...`�
 - `SYNC_TEMPLATE_PROJECT_SKIP_PATHS`：逗号或空格分隔的跳过路径列表。
 - `SYNC_TEMPLATE_PROJECT_INCLUDE_PATHS`：逗号或空格分隔的保留显示路径列表。
 
+<a id="agent-runner-repo-config"></a>
+
 ## Agent Runner 仓库配置
 
 `config.toml` 的 `[agent_runner.repositories.<repo_id>]` 段支持配置多个目标仓库：
@@ -79,27 +81,28 @@ Issue 后执行同一流程。数据库 URL 支持 PostgreSQL（`postgresql...`�
 - `enabled`：是否启用该仓库，默认为 `true`。
 - `display_name`：前端展示名称，默认为 `repo_id`。
 
-registry 用的 `config.toml` 是**全局共享**的一份，解析顺序为：`KEDACODE_CONFIG` 优先，未设置时由旧名
-`IAR_CONFIG` 兜底（仅在旧名被显式设置时提醒一次） <!-- legacy-alias -->
-→ `<本机状态目录>/config.toml` → 源码根 `config.toml`。本机状态目录取 `~/.kedacode`，
-只有旧目录的机器继续用旧目录 `~/.iar` <!-- legacy-alias -->。源码根模板存在时，首次调用会把默认配置 seed 进状态目录；
-全局安装的 `kc`（`uv tool install kedacode`，没有源码根模板可拷）则在状态目录里创建一份只含
-`[agent_runner]` 空表的最小配置作为 registry 载体，已有文件不会被覆盖。
+registry 用的 `config.toml` 是**全局共享**的一份，解析顺序为：`KEDACODE_CONFIG`
+→ `<本机状态目录>/config.toml` → 源码根 `config.toml`。本机状态目录固定为 `~/.kedacode`。
+正常运行时**状态目录那份是唯一的全局配置源**：首次需要写入时，`kc` 在 `~/.kedacode/config.toml`
+创建一份代码内骨架（只有 `[agent_runner]` 空表与指向本指南的注释），源码根模板不会被读取、
+复制或覆盖。骨架刻意不含任何模型预设与阶段绑定——仓库模板里的示例段落属于仓库维护者，播种给
+所有机器会让 runner 在本机从未配置过的阶段上指向**根本没安装的 agent**。已有文件不会被覆盖。
 
 每个仓库可独立覆盖 `labels`、`git`、`worktree`、`runner`、`safety` 子配置：
 
 ```toml
-[agent_runner.repositories.keda]
-path = "/Users/zata/code/keda"
+[agent_runner.repositories.example_service]
+path = "/path/to/your/repo"
 enabled = true
-display_name = "Keda"
+display_name = "Example Service"
+github_repo = "owner/repo"
 
-[agent_runner.repositories.keda.git]
+[agent_runner.repositories.example_service.git]
 remote = "origin"
 base_branch = "main"
 
 [agent_runner.repositories.backend_service]
-path = "/Users/zata/code/backend-service"
+path = "/path/to/your/backend-service"
 enabled = true
 
 [agent_runner.repositories.backend_service.runner]
@@ -136,6 +139,12 @@ agent 注册表按**三层**合并，后一层逐字段覆盖前一层：
 - `output_protocol` 必须指向已注册的输出协议（entry point group `kedacode.agent_output_protocols`），加载失败直接报错，不静默回落 `plain`。
 
 配置完成后用 `uv run kc agent doctor <name> --all-profiles` 自检，确认各用途 argv 与预期逐字节一致。
+
+手写这段 TOML 之外，`kc agent add <name> --bin <bin>` 走同一套校验来生成注册块：默认只打印
+TOML 预览，`--write` 才写入全局配置。注册完先看 `kc agent list` 里这台机器能不能解析到 `bin`
+（`missing (not found in PATH)` 说的是配置没问题、CLI 还没装），再用 `kc agent setup --agent
+<name>` 把它选进生命周期阶段——两个命令的落点与手改 `config.toml` 完全相同，不引入第二份配置。
+可用性与阶段选择的完整口径见 [Agent Runner 使用指南](agent-runner.md#agent-availability)。
 
 ### 模型参数模板与命名预设
 
@@ -266,7 +275,7 @@ confirm_commands = [
 - `max_context_chars`：首条 system prompt 的最大字符数（超出部分被
   截断并保留头尾）。
 - `agent_timeout_seconds`：每轮调用 agent 子进程的超时；超时或非零
-  退出码会作为 `[IAR_EXEC_RESULT] exit_code=...` 块追加到对话历史。
+  退出码会作为 `[KC_EXEC_RESULT] exit_code=...` 块追加到对话历史。
 - `auto_confirm_commands`：前缀匹配列表，匹配的命令直接执行。
 - `confirm_commands`：前缀匹配列表，匹配的命令执行前先询问用户
   `Execute? [y/N]`。

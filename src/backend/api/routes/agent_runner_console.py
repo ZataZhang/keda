@@ -26,6 +26,8 @@ from backend.api.response_cache import TTLResponseCache
 from backend.api.routes.agent_runner_console_takeover import build_issue_action_response
 from backend.api.version_info import resolve_keda_version
 from backend.core.shared.interfaces.runner_console import (
+    MONITOR_SYNC_INTERVAL_MAX_SECONDS,
+    MONITOR_SYNC_INTERVAL_MIN_SECONDS,
     IMonitorSnapshotStore,
     RunnerProcessKind,
 )
@@ -70,7 +72,7 @@ from backend.core.use_cases.agent_runner_factory import (
     resolve_console_spawn_cwd,
     resolve_repository_targets_with_diagnostics,
 )
-from backend.core.use_cases.agent_runner_repository_local import discover_iar_repositories
+from backend.core.use_cases.agent_runner_repository_local import discover_repositories
 from backend.core.use_cases.monitor_snapshots import (
     get_monitor_settings,
     update_monitor_settings,
@@ -390,9 +392,8 @@ def execute_console_issue_action(
 # 统计与审计
 # ─────────────────────────────────────────────────────────────────────────────
 
-#: 统计缓存的 TTL；并发聚合后构建落在秒级，30 秒窗口足够让 GitHub 查询
-#: 高频刷新时不会每次都打满 gh 子进程。
-_STATS_CACHE_TTL_SECONDS = 30
+#: 完成度采用独立的两分钟缓存，避免每次监控同步都重查历史 Issue。
+_STATS_CACHE_TTL_SECONDS = 120
 _STATS_CACHE = TTLResponseCache(ttl_seconds=_STATS_CACHE_TTL_SECONDS)
 
 
@@ -546,7 +547,7 @@ class BatchAddRepositoriesRequest(BaseModel):
 def get_console_context() -> dict:
     """返回 console 进程 cwd 匹配到的 registry 仓库。
 
-    这是面板首屏默认仓库的事实来源：在哪个仓库目录敲 ``iar console``，前端就
+    这是面板首屏默认仓库的事实来源：在哪个仓库目录敲 ``kc console``，前端就
     优先选中哪个仓库。cwd 匹配不上是正常状态（不在 git 仓库 / 未登记 / 停用），
     由 ``status`` 字段表达，因此不返回 4xx。
     """
@@ -589,7 +590,7 @@ def browse_console_directories(path: str | None = None) -> dict:
 def discover_console_repositories(scan_root: str) -> dict:
     """扫描本地目录，发现已初始化 KedaCode 的 git 仓库候选。"""
     try:
-        entries = discover_iar_repositories(
+        entries = discover_repositories(
             scan_root=Path(scan_root),
             editor=create_registry_editor(),
         )
@@ -726,7 +727,12 @@ class UpdateMonitorSettingsRequest(BaseModel):
     """
 
     sync_enabled: bool
-    sync_interval_seconds: int = Field(ge=60, le=3600)
+    # 下限 5 分钟是配额约束：每轮同步会逐个 PRD 查 3~5 次 GitHub REST，再密就会
+    # 挤占 daemon 与 kc 共用的 5000 次/小时额度。
+    sync_interval_seconds: int = Field(
+        ge=MONITOR_SYNC_INTERVAL_MIN_SECONDS,
+        le=MONITOR_SYNC_INTERVAL_MAX_SECONDS,
+    )
 
 
 @router.get("/agent-runner/console/monitor/settings")

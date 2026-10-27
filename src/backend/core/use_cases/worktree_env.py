@@ -36,6 +36,11 @@ import os
 import shutil
 from pathlib import Path
 
+from backend.core.shared.models.repository_paths import (
+    DEFAULT_WORKTREE_DIR_NAME,
+    LEGACY_WORKTREE_DIR_NAME,
+)
+
 _logger = logging.getLogger(__name__)
 
 ENV_FILE_NAME_PREFIX = ".env"
@@ -55,7 +60,8 @@ ENV_COPY_EXCLUDED_FILE_NAMES = frozenset({".env.run-state"})
 ENV_COPY_PRUNED_DIR_NAMES = frozenset(
     {
         ".git",
-        ".iar-worktrees",
+        DEFAULT_WORKTREE_DIR_NAME,
+        LEGACY_WORKTREE_DIR_NAME,
         ".venv",
         "venv",
         ".uv-cache",

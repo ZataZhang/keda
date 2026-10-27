@@ -34,8 +34,8 @@ from backend.infrastructure.config import settings_sources
 from backend.infrastructure.config.settings import AgentRunnerSettings
 from backend.infrastructure.process_runner import CommandFailedError
 
-#: 宿主（托管 runner 子进程）注入的新旧机器级配置变量名，两者都会顶掉仓库根解析。
-_AMBIENT_CONFIG_ENV_NAMES = ("KEDACODE_CONFIG", "IAR_CONFIG")
+#: 宿主（托管 runner 子进程）注入的机器级配置变量名，会顶掉仓库根解析。
+_AMBIENT_CONFIG_ENV_NAMES = ("KEDACODE_CONFIG",)
 
 #: golden 断言的唯一来源：仓库根 ``config.toml``（tests/support/agent_runner.py → 上两级）。
 _ROOT_CONFIG_TOML = Path(__file__).resolve().parents[2] / "config.toml"
@@ -46,8 +46,8 @@ def _ambient_config_env(config_toml: Path | None = None) -> Iterator[None]:
     """块内改写宿主注入的机器级配置变量，结束时恢复原值。
 
     Args:
-        config_toml: 要显式钉住的 ``config.toml``；``None`` 表示只剥离两名变量，
-            让解析回到默认发现顺序。旧前缀 ``IAR_CONFIG`` 始终剥离，避免它盖过 pin。
+        config_toml: 要显式钉住的 ``config.toml``；``None`` 表示剥离机器级覆盖，
+            让解析回到默认发现顺序。``KEDACODE_CONFIG`` 始终剥离，避免它盖过 pin。
 
     Yields:
         ``None``。
@@ -85,7 +85,7 @@ def default_config_discovery_env() -> Iterator[None]:
     """在块内剥离宿主注入的机器级变量，让配置解析走默认发现顺序。
 
     Returns:
-        剥离 ``KEDACODE_CONFIG`` / ``IAR_CONFIG`` 的配置环境上下文管理器。
+        剥离 ``KEDACODE_CONFIG`` / ``KEDACODE_CONFIG`` 的配置环境上下文管理器。
     """
     return _ambient_config_env()
 
@@ -95,7 +95,7 @@ def root_config_app_config() -> AppConfig:
 
     ``build_app_config()`` 读的是 settings 模块级单例，而该单例在 conftest 导入
     ``backend`` 的那一刻就已定型——托管 runner 会向子进程注入 ``KEDACODE_CONFIG`` /
-    ``IAR_CONFIG`` 指向机器级 ``config.toml``（``conftest._isolate_ambient_iar_config``
+    ``KEDACODE_CONFIG`` 指向机器级 ``config.toml``（``conftest._isolate_ambient_iar_config``
     在会话开始才剥离并重建，早于它的导入期取值不受它约束）。因此宿主上那份机器级配置
     一旦与仓库根漂移，直接用 ``build_app_config()`` 的 golden 断言测的就不是本仓
     ``config.toml``。本函数显式把配置来源钉到仓库根后重新装配，断言对象固定为那份。
@@ -298,7 +298,7 @@ def require_banner_aware_prd_skill() -> None:
         pytest.fail(
             "the prd skill used by this test run does not report `acceptance_status` "
             "(Machine Contract < 5); install the v5 prd skill (`iar init`) or point "
-            "IAR_PRD_SKILL_PATH at it before running banner assertions"
+            "KEDACODE_PRD_SKILL_PATH at it before running banner assertions"
         )
 
 

@@ -15,18 +15,18 @@ PR-Native Acceptance 结构（唯一 PRD 路径、"合并即接受"声明、证�
 3. **发布端软门**：对最终正文做可 grep 锚点校验；缺失时不阻断发布，而是
    在正文末尾追加显式的不合规标注块（机器 marker + 人读说明）。经第 2 段补齐
    后仍缺锚点的只剩 agent 无视教学的正文，标注正好把这个信号暴露出来。
-4. **合并端硬门**：合并队列只消费发布端写下的 ``iar:pr-contract`` 标注
+4. **合并端硬门**：合并队列只消费发布端写下的 ``kc:pr-contract`` 标注
    marker——runner 自己声明过不合规的 PR 不自动合并。发布于本机制上线前
    的存量 PR 无 marker，不受影响，避免在途 PR 被永久卡死。
 
 约定：契约校验只作用于 Issue body 带 ``PRD path:`` 锚点的 PRD 交付
 （prd skill 的管辖范围）；无 PRD 的轻量 Issue 不新增要求。
-所有 hidden marker 与 ``agent_runner_events.py`` 的 ``iar:event`` 同型
-（``<!-- iar:... -->`` + 命名捕获组正则）。
+所有 hidden marker 与 ``agent_runner_events.py`` 的 ``kc:event`` 同型
+（``<!-- kc:... -->`` + 命名捕获组正则）。
 
 批次总 PR（v2）：夜间聚合把一组同仓库来源 Issue / PR 合成唯一总 Draft PR，其正文
-用 ``<!-- iar:aggregate-pr version=1 issues=... source_prs=... -->`` 记录来源集合，
-用 ``<!-- iar:merge-acceptance version=2 -->`` 声明"合并本总 PR 即接受正文列出的每
+用 ``<!-- kc:aggregate-pr version=1 issues=... source_prs=... -->`` 记录来源集合，
+用 ``<!-- kc:merge-acceptance version=2 -->`` 声明"合并本总 PR 即接受正文列出的每
 一份 PRD"。下方 ``aggregate`` 前缀的一组纯函数只做**本地字符串**的集合断言（去重、
 完整性、重复拒绝、来源 marker 匹配），不发布 PR、不读取 GitHub。普通单 PRD ``v1``
 判定完全不变：v2 是叠加在聚合正文上的独立校验面，历史 v1 正文仍按 v1 规则通过。
@@ -40,22 +40,23 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
+from backend.core.shared.markdown_code_fence import strip_code_fences
+from backend.core.shared.prd_skill_location import resolve_prd_skill_path
 from backend.core.use_cases.agent_runner_feedback import (
     extract_prd_path,
     resolve_prd_archive_path,
 )
-from backend.core.shared.prd_skill_location import resolve_prd_skill_path
 
 # "合并即接受"声明必须携带的 hidden marker（prompt 教学与校验共用同一常量）。
-MERGE_ACCEPTANCE_MARKER_TEXT = "<!-- iar:merge-acceptance version=1 -->"
+MERGE_ACCEPTANCE_MARKER_TEXT = "<!-- kc:merge-acceptance version=1 -->"
 
 _MERGE_ACCEPTANCE_MARKER_PATTERN = re.compile(
-    r"<!--\s*iar:merge-acceptance\s+version=(?P<version>\d+)\s*-->"
+    r"<!--\s*kc:merge-acceptance\s+version=(?P<version>\d+)\s*-->"
 )
 
 # 发布端不合规标注块（合并端硬门的唯一事实源）。
 _PR_CONTRACT_MARKER_PATTERN = re.compile(
-    r"<!--\s*iar:pr-contract\s+version=(?P<version>\d+)\s+" r"missing=(?P<missing>[^\s>]+)\s*-->"
+    r"<!--\s*kc:pr-contract\s+version=(?P<version>\d+)\s+" r"missing=(?P<missing>[^\s>]+)\s*-->"
 )
 
 # 确定性正文补锚点时写入的"合并即接受"声明：形态取自 skill 参考文档的 PR body
@@ -78,7 +79,7 @@ _PUBLISH_CONTRACT_REFERENCE_RELPATH = Path("references") / "pr-evidence-and-merg
 _CONTRACT_ANCHOR_DESCRIPTIONS: dict[str, str] = {
     "prd-link": "body references neither the archived PRD path nor the Issue's pending PRD path",
     "merge-acceptance": (
-        "body is missing the `<!-- iar:merge-acceptance version=1 -->` "
+        "body is missing the `<!-- kc:merge-acceptance version=1 -->` "
         "merge-means-acceptance declaration"
     ),
 }
@@ -145,7 +146,8 @@ def find_pr_body_contract_violations(pr_body: str, issue_body: str) -> list[str]
     """返回 PR 正文缺失的契约锚点标识列表；完全合规时为空。
 
     仅当 Issue body 携带 ``PRD path:`` 锚点（即 PRD 交付）时才校验；无 PRD 的
-    Issue 返回空列表。当前锚点：
+    Issue 返回空列表。围栏代码块里的示例文字不算声明——它们既不会被 GitHub 解析，
+    也不构成人读正文里的引用，因此判定只读剥离围栏后的正文。当前锚点：
 
     - ``prd-link``：正文既未引用 PRD 的归档路径，也未引用 Issue 指向的 pending
       路径。PRD 在本 PR 里归档，归档路径是首选写法；pending 路径照样认，存量
@@ -155,14 +157,15 @@ def find_pr_body_contract_violations(pr_body: str, issue_body: str) -> list[str]
     prd_relative_path = extract_prd_path(issue_body)
     if prd_relative_path is None:
         return []
+    scannable_body = strip_code_fences(pr_body)
     violations: list[str] = []
     accepted_prd_paths = [prd_relative_path]
     archive_relative_path = resolve_prd_archive_path(prd_relative_path)
     if archive_relative_path is not None:
         accepted_prd_paths.append(archive_relative_path)
-    if not any(accepted_prd_path in pr_body for accepted_prd_path in accepted_prd_paths):
+    if not any(accepted_prd_path in scannable_body for accepted_prd_path in accepted_prd_paths):
         violations.append("prd-link")
-    if not _MERGE_ACCEPTANCE_MARKER_PATTERN.search(pr_body):
+    if not _MERGE_ACCEPTANCE_MARKER_PATTERN.search(scannable_body):
         violations.append("merge-acceptance")
     return violations
 
@@ -211,7 +214,7 @@ def build_contract_annotation_block(violations: list[str]) -> str:
     ]
     return "\n".join(
         [
-            f"<!-- iar:pr-contract version=1 missing={missing_text} -->",
+            f"<!-- kc:pr-contract version=1 missing={missing_text} -->",
             "## PR Body Contract Violation (auto-generated)",
             "",
             "This PR body does not satisfy the prd skill PR-Native Acceptance "
@@ -220,13 +223,13 @@ def build_contract_annotation_block(violations: list[str]) -> str:
             "",
             *violation_lines,
             "",
-            "<!-- iar:pr-contract-end -->",
+            "<!-- kc:pr-contract-end -->",
         ]
     )
 
 
 def parse_contract_annotation(pr_body: str) -> list[str]:
-    """解析正文中的 ``iar:pr-contract`` 标注 marker，返回缺失锚点列表。
+    """解析正文中的 ``kc:pr-contract`` 标注 marker，返回缺失锚点列表。
 
     无标注时返回空列表。列表内容以 marker 为准（发布时的判定结果），不重算。
     """
@@ -246,13 +249,13 @@ def has_contract_annotation(pr_body: str) -> bool:
 # ---------------------------------------------------------------------------
 
 # 总 PR "合并即接受整组 PRD"声明必须携带的 hidden marker（v2，区别于单 PRD 的 v1）。
-MERGE_ACCEPTANCE_V2_MARKER_TEXT = "<!-- iar:merge-acceptance version=2 -->"
+MERGE_ACCEPTANCE_V2_MARKER_TEXT = "<!-- kc:merge-acceptance version=2 -->"
 
 # 来源集合 marker 的版本与正则：``issues=`` 必填，``source_prs=`` 允许为空串
 # （dry-run 预览阶段来源 PR 尚未产生）。
 _AGGREGATE_SOURCE_MARKER_VERSION = 1
 _AGGREGATE_SOURCE_MARKER_PATTERN = re.compile(
-    r"<!--\s*iar:aggregate-pr\s+version=(?P<version>\d+)\s+"
+    r"<!--\s*kc:aggregate-pr\s+version=(?P<version>\d+)\s+"
     r"issues=(?P<issues>[^\s>]*)\s+source_prs=(?P<source_prs>[^\s>]*)\s*-->"
 )
 
@@ -273,12 +276,12 @@ AGGREGATE_MERGE_ACCEPTANCE_STATEMENT_TEXT = (
 # 聚合契约锚点标识 → 人读含义（错误信息与标注块共用，避免文案漂移）。
 _AGGREGATE_CONTRACT_ANCHOR_DESCRIPTIONS: dict[str, str] = {
     "aggregate-source-marker": (
-        "body is missing a valid `<!-- iar:aggregate-pr version=1 issues=... "
+        "body is missing a valid `<!-- kc:aggregate-pr version=1 issues=... "
         "source_prs=... -->` source marker, or its Issue / source PR set does not "
         "match the batch's declared members"
     ),
     "merge-acceptance-v2": (
-        "body is missing the `<!-- iar:merge-acceptance version=2 -->` "
+        "body is missing the `<!-- kc:merge-acceptance version=2 -->` "
         "merge-means-acceptance declaration for the aggregated PRD set"
     ),
     "prd-link": (
@@ -356,12 +359,12 @@ def build_aggregate_source_marker(
         source_pr_numbers: 批次来源 PR 编号；dry-run 阶段可为空。
 
     Returns:
-        ``<!-- iar:aggregate-pr version=1 issues=... source_prs=... -->`` 单行 marker。
+        ``<!-- kc:aggregate-pr version=1 issues=... source_prs=... -->`` 单行 marker。
     """
     issues_text = _format_marker_numbers(issue_numbers)
     source_prs_text = _format_marker_numbers(source_pr_numbers)
     return (
-        f"<!-- iar:aggregate-pr version={_AGGREGATE_SOURCE_MARKER_VERSION} "
+        f"<!-- kc:aggregate-pr version={_AGGREGATE_SOURCE_MARKER_VERSION} "
         f"issues={issues_text} source_prs={source_prs_text} -->"
     )
 
@@ -400,9 +403,13 @@ def extract_prd_reference_paths(pr_body: str) -> tuple[str, ...]:
     """按正文出现顺序抽取所有 ``- PRD: <path>`` 引用路径（不去重）。
 
     校验端据此同时判断"完整性"（集合相等）与"重复"（同一路径出现多次），因此保留
-    文档顺序与重复项，不在这里做 :func:`unique_prd_paths` 的收敛。
+    文档顺序与重复项，不在这里做 :func:`unique_prd_paths` 的收敛。围栏代码块里的
+    示例行不算声明，判定前先剥离。
     """
-    return tuple(match.group("path").strip() for match in _PRD_LIST_LINE_PATTERN.finditer(pr_body))
+    return tuple(
+        match.group("path").strip()
+        for match in _PRD_LIST_LINE_PATTERN.finditer(strip_code_fences(pr_body))
+    )
 
 
 def build_aggregate_merge_acceptance_block(prd_paths: Iterable[str]) -> str:
@@ -460,7 +467,8 @@ def find_aggregate_pr_body_contract_violations(
         缺失 / 不匹配的锚点标识列表（顺序稳定：marker 类 → PRD 集合类）。
     """
     violations: list[str] = []
-    declaration = parse_aggregate_source_marker(pr_body)
+    scannable_body = strip_code_fences(pr_body)
+    declaration = parse_aggregate_source_marker(scannable_body)
     expected_issues = tuple(sorted({int(number) for number in expected_issue_numbers}))
     expected_prs = tuple(sorted({int(number) for number in expected_source_pr_numbers}))
     if (
@@ -469,11 +477,11 @@ def find_aggregate_pr_body_contract_violations(
         or declaration.source_pr_numbers != expected_prs
     ):
         violations.append("aggregate-source-marker")
-    if not _has_merge_acceptance_version(pr_body, 2):
+    if not _has_merge_acceptance_version(scannable_body, 2):
         violations.append("merge-acceptance-v2")
-    if AGGREGATE_MERGE_ACCEPTANCE_STATEMENT_TEXT not in pr_body:
+    if AGGREGATE_MERGE_ACCEPTANCE_STATEMENT_TEXT not in scannable_body:
         violations.append("merge-acceptance-statement")
-    listed_paths = extract_prd_reference_paths(pr_body)
+    listed_paths = extract_prd_reference_paths(scannable_body)
     if any(count > 1 for count in Counter(listed_paths).values()):
         violations.append("prd-duplicate")
     expected_paths = unique_prd_paths(expected_prd_paths)
@@ -497,9 +505,9 @@ def find_aggregate_pr_body_contract_violations(
 def build_aggregate_contract_annotation_block(violations: list[str]) -> str:
     """构建追加到总 PR 正文末尾的 v2 不合规标注块（与 v1 标注块同型、独立 marker）。
 
-    ``iar:aggregate-contract`` 是**本地聚合门**的信号：``aggregate_batch`` 在正文仍
+    ``kc:aggregate-contract`` 是**本地聚合门**的信号：``aggregate_batch`` 在正文仍
     不合规时先抛错、根本不创建总 PR，因此这个标注块只出现在 dry-run / 本地预览产出里。
-    合并队列只消费单 PRD 的 ``iar:pr-contract``（见
+    合并队列只消费单 PRD 的 ``kc:pr-contract``（见
     :func:`has_contract_annotation`），没有任何路径读取本 marker，文案不得声称队列会
     据此拒绝自动合并——总 PR 本就保持 Draft 交人工合并。
     """
@@ -510,17 +518,17 @@ def build_aggregate_contract_annotation_block(violations: list[str]) -> str:
     ]
     return "\n".join(
         [
-            f"<!-- iar:aggregate-contract version=1 missing={missing_text} -->",
+            f"<!-- kc:aggregate-contract version=1 missing={missing_text} -->",
             "## Aggregate PR Body Contract Violation (auto-generated)",
             "",
             "This aggregate PR body does not satisfy the multi-PRD acceptance "
             "contract. `kc pr aggregate` refuses to publish a total Draft PR whose "
             "body still carries this marker, so it is a local gate signal only: no "
-            "autopilot merge queue reads `iar:aggregate-contract`, and the total PR "
+            "autopilot merge queue reads `kc:aggregate-contract`, and the total PR "
             "stays Draft for manual merge regardless. Missing or mismatched anchors:",
             "",
             *violation_lines,
             "",
-            "<!-- iar:aggregate-contract-end -->",
+            "<!-- kc:aggregate-contract-end -->",
         ]
     )

@@ -31,9 +31,9 @@ from backend.core.use_cases.agent_runner_factory import (
     resolve_repository_targets,
 )
 from backend.core.use_cases.agent_runner_repository_local import (
-    IARRepositoryNotInitializedError,
+    RepositoryNotInitializedError,
     detect_git_repository_root,
-    require_iar_repository_initialized,
+    require_repository_initialized,
 )
 from backend.core.use_cases.worktree_cleanup import (
     WorktreeCleanupResult,
@@ -64,7 +64,7 @@ def _ensure_gh_auth_or_prompt(repo_path: Path, process_runner: "IProcessRunner")
 def _print_worktree_cleanup_result(cleanup_result: WorktreeCleanupResult) -> None:
     """Print a concise branch cleanup summary."""
     if not cleanup_result.branches:
-        console.print("[green]No local iAR issue branches found.[/]")
+        console.print("[green]No local KedaCode issue branches found.[/]")
         return
 
     for branch_result in cleanup_result.branches:
@@ -251,7 +251,7 @@ def _resolve_default_daemon_target() -> _DefaultDaemonTarget:
             repo_id=None,
             error=(
                 "Current directory is not a Git repository. "
-                "Run from an initialized iAR repository, or use --all to target all enabled registry entries."
+                "Run from an initialized KedaCode repository, or use --all to target all enabled registry entries."
             ),
         )
     settings = load_fresh_agent_runner_settings()
@@ -259,8 +259,8 @@ def _resolve_default_daemon_target() -> _DefaultDaemonTarget:
     if match.is_unique_enabled:
         assert match.matched_repo_id is not None  # noqa: S101
         try:
-            require_iar_repository_initialized(cwd_git_root)
-        except IARRepositoryNotInitializedError:
+            require_repository_initialized(cwd_git_root)
+        except RepositoryNotInitializedError:
             return _DefaultDaemonTarget(
                 repo_id=None,
                 error=(
@@ -290,7 +290,7 @@ def _resolve_default_daemon_target() -> _DefaultDaemonTarget:
     return _DefaultDaemonTarget(
         repo_id=None,
         error=(
-            "Current directory is not an enabled iAR registry target. "
+            "Current directory is not an enabled KedaCode registry target. "
             "Use --repo-id to target a registered repository, or --all to target all enabled registry entries."
         ),
     )
@@ -320,7 +320,7 @@ def _create_run_history_store_or_none():
 
 
 def _handle_not_initialized_error(
-    exc: IARRepositoryNotInitializedError, *, fmt: str = OUTPUT_FORMAT_TABLE
+    exc: RepositoryNotInitializedError, *, fmt: str = OUTPUT_FORMAT_TABLE
 ) -> int:
     """Print a friendly error and suggest running `kc init`.
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import subprocess
 from pathlib import Path
 
@@ -23,8 +24,8 @@ from backend.engines.agent_runner.factory import (
     resolve_repository_targets,
 )
 from backend.engines.agent_runner.repository_local import (
-    IARRepositoryNotInitializedError,
-    require_iar_repository_initialized,
+    RepositoryNotInitializedError,
+    require_repository_initialized,
 )
 from backend.infrastructure.config import settings as settings_module
 from backend.infrastructure.config import settings_sources
@@ -66,7 +67,7 @@ def _init_git_repository(tmp_path: Path, name: str) -> Path:
 
 
 def _write_local_iar_config(repo_path: Path, content: str) -> None:
-    (repo_path / ".iar.toml").write_text(content, encoding="utf-8")
+    (repo_path / ".kedacode.toml").write_text(content, encoding="utf-8")
 
 
 def _make_settings(**kwargs) -> AgentRunnerSettings:
@@ -129,7 +130,7 @@ def isolate_agent_runner_toml(monkeypatch: pytest.MonkeyPatch) -> None:
         load_toml_section_without_agent_repositories,
     )
     # Registry repositories are loaded from a separate config path; keep those
-    # isolated from the developer's ~/.iar/config.toml as well.
+    # isolated from the developer's ~/.kedacode/config.toml as well.
     monkeypatch.setattr(
         settings_sources,
         "_load_registry_toml_section_data",
@@ -144,7 +145,8 @@ def test_build_app_config_from_settings_structure() -> None:
     assert isinstance(app_config, AppConfig)
     assert app_config.git.base_branch is not None
     assert app_config.git.remote is not None
-    assert app_config.runner.max_issues >= 1
+    assert app_config.runner.max_concurrent_issues >= 1
+    assert not hasattr(app_config.runner, "max_issues")
 
 
 def test_agent_runner_daemon_settings_defaults() -> None:
@@ -168,13 +170,13 @@ def test_merge_repository_config_overrides_git() -> None:
 
 def test_merge_repository_config_inherits_unset_fields() -> None:
     """Repository settings should inherit global values for unoverridden fields."""
-    global_config = AppConfig(runner=RunnerConfig(max_issues=5, default_agent="claude"))
+    global_config = AppConfig(runner=RunnerConfig(max_concurrent_issues=5, default_agent="claude"))
     repo_settings = AgentRunnerRepositorySettings(
         path="/tmp/repo",
-        runner=AgentRunnerRunnerSettings(max_issues=3),
+        runner=AgentRunnerRunnerSettings(max_concurrent_issues=3),
     )
     merged = merge_repository_config(global_config, repo_settings)
-    assert merged.runner.max_issues == 3
+    assert merged.runner.max_concurrent_issues == 3
     assert merged.runner.default_agent == "claude"
 
 
@@ -215,7 +217,7 @@ def test_merge_repository_config_inherits_max_concurrent_issues() -> None:
 def test_iar_toml_renders_max_concurrent_issues_comment() -> None:
     """`iar init` output documents max_concurrent_issues above the field."""
     from backend.engines.agent_runner.repository_local import (
-        _IAR_FIELD_COMMENTS,
+        _CONFIG_FIELD_COMMENTS,
         settings_to_toml_string,
     )
     from backend.infrastructure.config.settings import AgentRunnerLocalSettings
@@ -223,9 +225,9 @@ def test_iar_toml_renders_max_concurrent_issues_comment() -> None:
     settings = AgentRunnerLocalSettings(runner=AgentRunnerRunnerSettings())
     rendered = settings_to_toml_string(settings)
 
-    assert "runner.max_concurrent_issues" in _IAR_FIELD_COMMENTS
+    assert "runner.max_concurrent_issues" in _CONFIG_FIELD_COMMENTS
     assert "max_concurrent_issues = 1" in rendered
-    comment = _IAR_FIELD_COMMENTS["runner.max_concurrent_issues"]
+    comment = _CONFIG_FIELD_COMMENTS["runner.max_concurrent_issues"]
     assert any(comment in line for line in rendered.splitlines())
 
 
@@ -291,7 +293,7 @@ def test_resolve_repository_targets_ad_hoc_repo(tmp_path: Path) -> None:
 def test_resolve_repository_targets_repo_path_loads_local_config(
     tmp_path: Path,
 ) -> None:
-    """--repo should merge the target repository's .iar.toml."""
+    """--repo should merge the target repository's .kedacode.toml."""
     repo_path = _init_git_repository(tmp_path, "target")
     _write_local_iar_config(
         repo_path,
@@ -320,7 +322,7 @@ def test_resolve_repository_targets_local_config_disables_validation(
     """A repository-local [agent_runner.validation] override must reach AppConfig.
 
     Regression guard: the local-settings repack used to drop the validation
-    section, so `enabled = false` in .iar.toml was silently ignored and the
+    section, so `enabled = false` in .kedacode.toml was silently ignored and the
     evidence gate still fired.
     """
     repo_path = _init_git_repository(tmp_path, "target")
@@ -608,7 +610,7 @@ def test_generated_content_targets_default_to_agent_mode() -> None:
 
 
 def test_merge_repository_config_ignores_empty_template_overrides() -> None:
-    """Empty .iar.toml template/prompt placeholders must not wipe config.toml defaults."""
+    """Empty .kedacode.toml template/prompt placeholders must not wipe config.toml defaults."""
     from backend.engines.agent_runner.factory import merge_repository_config
 
     global_config = AppConfig(
@@ -639,10 +641,10 @@ def test_merge_repository_config_ignores_empty_template_overrides() -> None:
     assert merged.generated_content.draft_pr.prompt == "global prompt"
 
 
-def test_require_iar_repository_initialized_accepts_valid_config(
+def test_require_repository_initialized_accepts_valid_config(
     tmp_path: Path,
 ) -> None:
-    """A valid .iar.toml with non-empty repository.id should pass."""
+    """A valid .kedacode.toml with non-empty repository.id should pass."""
     repo_path = _init_git_repository(tmp_path, "initialized")
     _write_local_iar_config(
         repo_path,
@@ -651,23 +653,23 @@ def test_require_iar_repository_initialized_accepts_valid_config(
 id = "initialized"
 """,
     )
-    require_iar_repository_initialized(repo_path)
+    require_repository_initialized(repo_path)
 
 
-def test_require_iar_repository_initialized_rejects_missing_config(
+def test_require_repository_initialized_rejects_missing_config(
     tmp_path: Path,
 ) -> None:
-    """仓库缺少 ``.kedacode.toml`` 时应抛 ``IARRepositoryNotInitializedError``。"""
+    """仓库缺少 ``.kedacode.toml`` 时应抛 ``RepositoryNotInitializedError``。"""
     repo_path = _init_git_repository(tmp_path, "missing")
-    with pytest.raises(IARRepositoryNotInitializedError) as exc_info:
-        require_iar_repository_initialized(repo_path)
+    with pytest.raises(RepositoryNotInitializedError) as exc_info:
+        require_repository_initialized(repo_path)
     assert str(repo_path / product_identity.REPOSITORY_CONFIG_FILENAME) in str(exc_info.value)
 
 
-def test_require_iar_repository_initialized_rejects_empty_repo_id(
+def test_require_repository_initialized_rejects_empty_repo_id(
     tmp_path: Path,
 ) -> None:
-    """An empty repository.id should raise IARRepositoryNotInitializedError."""
+    """An empty repository.id should raise RepositoryNotInitializedError."""
     repo_path = _init_git_repository(tmp_path, "empty-id")
     _write_local_iar_config(
         repo_path,
@@ -676,31 +678,31 @@ def test_require_iar_repository_initialized_rejects_empty_repo_id(
 id = ""
 """,
     )
-    with pytest.raises(IARRepositoryNotInitializedError) as exc_info:
-        require_iar_repository_initialized(repo_path)
-    assert str(repo_path / ".iar.toml") in str(exc_info.value)
+    with pytest.raises(RepositoryNotInitializedError) as exc_info:
+        require_repository_initialized(repo_path)
+    assert str(repo_path / ".kedacode.toml") in str(exc_info.value)
 
 
-def test_require_iar_repository_initialized_rejects_invalid_toml(
+def test_require_repository_initialized_rejects_invalid_toml(
     tmp_path: Path,
 ) -> None:
-    """Invalid TOML should raise IARRepositoryNotInitializedError."""
+    """Invalid TOML should raise RepositoryNotInitializedError."""
     repo_path = _init_git_repository(tmp_path, "invalid")
     _write_local_iar_config(repo_path, "this is not valid toml")
-    with pytest.raises(IARRepositoryNotInitializedError) as exc_info:
-        require_iar_repository_initialized(repo_path)
-    assert str(repo_path / ".iar.toml") in str(exc_info.value)
+    with pytest.raises(RepositoryNotInitializedError) as exc_info:
+        require_repository_initialized(repo_path)
+    assert str(repo_path / ".kedacode.toml") in str(exc_info.value)
 
 
-def test_require_iar_repository_initialized_rejects_missing_agent_runner_section(
+def test_require_repository_initialized_rejects_missing_agent_runner_section(
     tmp_path: Path,
 ) -> None:
-    """TOML without [agent_runner] should raise IARRepositoryNotInitializedError."""
+    """TOML without [agent_runner] should raise RepositoryNotInitializedError."""
     repo_path = _init_git_repository(tmp_path, "no-section")
     _write_local_iar_config(repo_path, '[other]\nkey = "value"\n')
-    with pytest.raises(IARRepositoryNotInitializedError) as exc_info:
-        require_iar_repository_initialized(repo_path)
-    assert str(repo_path / ".iar.toml") in str(exc_info.value)
+    with pytest.raises(RepositoryNotInitializedError) as exc_info:
+        require_repository_initialized(repo_path)
+    assert str(repo_path / ".kedacode.toml") in str(exc_info.value)
 
 
 def test_merge_repository_config_inherits_generated_content() -> None:
@@ -755,7 +757,7 @@ def test_build_app_config_maps_validation_language_and_structured_evidence(
 def test_merge_repository_config_overrides_validation_language(
     tmp_path: Path,
 ) -> None:
-    """Repository-local .iar.toml can override validation language."""
+    """Repository-local .kedacode.toml can override validation language."""
     repo_path = _init_git_repository(tmp_path, "target")
     _write_local_iar_config(
         repo_path,
@@ -828,7 +830,7 @@ def test_merge_repository_config_inherits_deliberation_profiles() -> None:
 def test_resolve_repository_targets_merges_local_deliberation(
     tmp_path: Path,
 ) -> None:
-    """Repository-local .iar.toml can override deliberation settings."""
+    """Repository-local .kedacode.toml can override deliberation settings."""
     repo_path = _init_git_repository(tmp_path, "target")
     _write_local_iar_config(
         repo_path,
@@ -1061,7 +1063,7 @@ def test_merge_repository_config_overrides_backlog_auto_advance() -> None:
 
 
 def test_local_iar_toml_overrides_autopilot(tmp_path: Path) -> None:
-    """.iar.toml-level autopilot overrides flow through ``resolve_repository_targets``."""
+    """.kedacode.toml-level autopilot overrides flow through ``resolve_repository_targets``."""
     from backend.engines.agent_runner.factory import resolve_repository_targets
 
     repo_path = _init_git_repository(tmp_path, "target")
@@ -1095,3 +1097,15 @@ auto_advance = true
     assert contexts[0].config.autopilot.enabled is True
     assert contexts[0].config.autopilot.merge_check_timeout_seconds == 60
     assert contexts[0].config.backlog.auto_advance is True
+
+
+def test_retired_max_issues_is_ignored_with_a_warning(caplog: pytest.LogCaptureFixture) -> None:
+    """旧配置里的 ``max_issues`` 只告警、不参与计算；并行上限只看 max_concurrent_issues。"""
+    with caplog.at_level(logging.WARNING):
+        settings = AgentRunnerSettings.model_validate(
+            {"max_issues": 4, "runner": {"max_issues": 5, "max_concurrent_issues": 2}}
+        )
+
+    app_config = build_app_config_from_settings(settings)
+    assert app_config.runner.max_concurrent_issues == 2
+    assert "max_issues 已退役" in caplog.text

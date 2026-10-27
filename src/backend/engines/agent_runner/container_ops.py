@@ -48,7 +48,7 @@ from backend.engines.agent_runner.container_gc import run_container_gc
 TEMPLATE_PACKAGE_NAME = "backend.engines.agent_runner.templates"
 RUNNER_CONTAINER_TEMPLATE_NAME = "runner_container"
 
-# compose 文件内 service 名；与 docker-compose.runner.yml 中的 service 保持一致。
+# compose 文件内的持久化 service 名保持兼容，避免新版本无法停止已有容器。
 RUNNER_SERVICE_NAME = "iar-runner"
 
 # compose 文件名 + 示例 env 文件名。本地变体经 ``GH_TOKEN`` 环境变量认证（个人
@@ -194,7 +194,7 @@ def build_container_up_env(request: ContainerUpRequest) -> dict[str, str]:
     elif request.gh_token:
         base_env["GH_TOKEN"] = request.gh_token
     if request.repo_id:
-        base_env.update(product_identity.build_child_env_aliases({"REPO_ID": request.repo_id}))
+        base_env.update(product_identity.build_child_env({"REPO_ID": request.repo_id}))
     base_env.update(_build_host_state_env())
     base_env.update(request.extra_env)
     return base_env

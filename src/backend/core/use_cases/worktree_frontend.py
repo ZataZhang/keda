@@ -1,57 +1,103 @@
-"""Ensure frontend ``node_modules`` are usable inside worktrees.
+"""Worktree 前端依赖的**可恢复**准备与诊断（Issue #290）。
 
-``git worktree add`` only materializes tracked files, so gitignored
-``node_modules`` directories never reach a fresh worktree. This module makes
-frontend builds work by installing dependencies directly in the worktree
-whenever a lockfile is present. If no lockfile is found (or the install fails),
-it falls back to symlinking the project's ``node_modules`` from the main
-checkout, mirroring the legacy ``symlink-from-main`` strategy.
+``git worktree add`` 只落地被跟踪的文件，gitignore 掉的 ``node_modules``
+永远不会出现在新 worktree 里。本模块负责补齐前端依赖，但**绝不**把环境缺口
+变成 Issue 的致命错误：
 
-Design decisions:
+- 准备只做安全可行的动作：能复用就先复用（worktree 内已有依赖、主检出的依赖），
+  无法复用再按锁文件安装；可执行文件缺失、安装失败、锁文件互相冲突都只记录诊断。
+- 任何失败都不向上抛异常。缺失的工具、选择依据、尝试过的命令、失败原因都写成
+  :class:`~backend.core.use_cases.worktree_dependency_context.FrontendProjectRecord`，
+  由调用方落盘并作为结构化上下文交给 Agent，由 Agent 自主决定安全的仓库级安装
+  或替代方式。
+- 需要提权、改主机全局环境或使用 runner 没有的凭据的动作**不代做**，只在记录里
+  标注 ``requires_user_action``，供上层以可恢复状态呈现给人。
 
-- Lockfile-driven install is the default. Real ``node_modules`` directories
-  are the only form every frontend toolchain (including Next.js/Turbopack)
-  is guaranteed to support.
-- Package manager is auto-detected from lockfiles:
-  ``pnpm-lock.yaml`` → pnpm, ``package-lock.json`` → npm,
-  ``yarn.lock`` → yarn, ``bun.lock``/``bun.lockb`` → bun.
-  A project with ``package.json`` but no lockfile falls back to ``npm install``.
-- When install is unavailable or fails, the symlink fallback reuses the main
-  checkout's already-installed dependencies with zero extra disk cost.
-- Discovery walks the **worktree**, not the main checkout, so only frontend
-  projects that actually exist on the branch are handled.
-- Existing ``node_modules`` in the worktree (directory or symlink) are never
-  overwritten — re-running on an existing worktree only heals gaps.
-- Symlinks created by the fallback are kept out of git via ``info/exclude``
-  (:func:`exclude_frontend_node_modules_from_git`). A repository that ignores
-  ``node_modules/`` with a trailing slash only matches directories, so the
-  symlink would otherwise show as untracked and an agent's ``git add -A``
-  could commit a machine-local absolute symlink.
-- Both install and link are best effort per project. A single failure is
-  logged and skipped; it must never abort an agent run.
+包管理器识别（:func:`plan_package_manager`）结合三类证据，而不是「看见某个锁文件
+就静默选定」：
+
+1. ``package.json`` 的 ``packageManager`` 字段（corepack 钉定的权威声明）；
+2. workspace 根配置（祖先目录的 ``pnpm-workspace.yaml``，或 ``package.json`` 的
+   ``workspaces``）——成员目录由根安装覆盖，不在成员目录里重复安装；
+3. 目录内的锁文件。
+
+三类证据互相矛盾时不作出不可恢复的选择：``package_manager`` 留空、原因记
+``manager_conflict``，全部证据交给 Agent 判断，并优先尝试复用已有依赖。
+
+其他设计决定：
+
+- 安装命令与 ``scripts/shared/worktree/create.sh`` 的策略保持一致，含 pnpm 的
+  ``--ignore-workspace``：非 workspace 根目录执行 ``pnpm install`` 会去装 workspace
+  成员而不是当前目录，且退出码仍为 0——那是「安装成功但依赖缺失」的假绿灯。
+- 安装退出码为 0 但目录里没出现 ``node_modules`` 时不判成功，记
+  ``install_produced_no_dependencies`` 并保留「复用不可行」的诊断。
+- 复用主检出的 ``node_modules`` 前先比对锁文件内容：不一致说明分支依赖已漂移，
+  链接过来会让后续命令在错误环境里运行并伪装成就绪，宁可不复用。
+- worktree 内已存在的 ``node_modules``（目录或符号链接）永不覆盖——对已有
+  worktree 重跑只补空缺。
+- 符号链接通过 ``info/exclude`` 排除出 git（见
+  :func:`exclude_frontend_node_modules_from_git`），避免 agent 的 ``git add -A``
+  提交机器本地绝对链接。
 """
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import os
+import shutil
 from pathlib import Path
 
+from backend.core.shared.models.repository_paths import (
+    DEFAULT_WORKTREE_DIR_NAME,
+    LEGACY_WORKTREE_DIR_NAME,
+)
+
 from backend.core.shared.interfaces.agent_runner import IProcessRunner
+from backend.core.use_cases.worktree_dependency_context import (
+    OUTCOME_INSTALLED,
+    OUTCOME_NOT_PREPARED,
+    OUTCOME_PRESENT,
+    OUTCOME_REUSED,
+    OUTCOME_SKIPPED,
+    REASON_INSTALL_FAILED,
+    REASON_INSTALL_NO_OUTPUT,
+    REASON_EXISTING_NODE_MODULES_UNUSABLE,
+    REASON_LAUNCH_FAILED,
+    REASON_LINK_FAILED,
+    REASON_MANAGER_CONFLICT,
+    REASON_NO_ACTION_NEEDED,
+    REASON_PREPARATION_CRASHED,
+    REASON_REUSABLE_ABSENT,
+    REASON_REUSABLE_STALE,
+    REASON_TOOL_MISSING,
+    REASON_WORKSPACE_COVERED,
+    DependencyPreparationReport,
+    FrontendProjectRecord,
+    classify_user_action_from_failure_text,
+    format_command_text,
+    sanitize_detail_text,
+)
+from backend.core.use_cases.worktree_package_manager import (
+    PACKAGE_MANIFEST_FILE_NAME,
+    PNPM_WORKSPACE_FILE_NAME,
+    PackageManagerPlan,
+    _LOCKFILE_PACKAGE_MANAGERS,
+    _build_install_command,
+    plan_package_manager,
+)
 
 _logger = logging.getLogger(__name__)
 
-PACKAGE_MANIFEST_FILE_NAME = "package.json"
 NODE_MODULES_DIR_NAME = "node_modules"
 
-# Directories never descended into while scanning for frontend projects: VCS
-# internals, embedded worktree containers (so one worktree's tree can never
-# leak into another), language/build caches, and existing dependency or build
-# output directories.
+# 扫描时永不下钻的目录：VCS 内部、内嵌 worktree 容器（避免一个 worktree 的树泄漏进
+# 另一个）、语言/构建缓存，以及既有依赖与产物目录。
 FRONTEND_SCAN_PRUNED_DIR_NAMES = frozenset(
     {
         ".git",
-        ".iar-worktrees",
+        DEFAULT_WORKTREE_DIR_NAME,
+        LEGACY_WORKTREE_DIR_NAME,
         ".venv",
         "venv",
         ".uv-cache",
@@ -64,145 +110,274 @@ FRONTEND_SCAN_PRUNED_DIR_NAMES = frozenset(
     }
 )
 
-# Lockfile name → package manager name.
-_LOCKFILE_PACKAGE_MANAGERS = {
-    "pnpm-lock.yaml": "pnpm",
-    "package-lock.json": "npm",
-    "yarn.lock": "yarn",
-    "bun.lock": "bun",
-    "bun.lockb": "bun",
-}
-
 __all__ = [
     "FRONTEND_SCAN_PRUNED_DIR_NAMES",
     "NODE_MODULES_DIR_NAME",
     "PACKAGE_MANIFEST_FILE_NAME",
+    "PNPM_WORKSPACE_FILE_NAME",
+    "PackageManagerPlan",
     "ensure_frontend_node_modules",
     "exclude_frontend_node_modules_from_git",
     "link_frontend_node_modules",
+    "plan_package_manager",
 ]
 
 
-def _detect_package_manager(project_dir_path: Path) -> str | None:
-    """Return the package manager name detected from lockfiles.
+@dataclasses.dataclass(frozen=True)
+class _ProjectPreparationRequest:
+    """单个前端项目的准备输入（参数成组收敛，避免调用链层层展开）。"""
 
-    Args:
-        project_dir_path: Directory containing a ``package.json``.
-
-    Returns:
-        Package manager name, or ``None`` when no lockfile is present.
-    """
-    for lockfile_name, package_manager in _LOCKFILE_PACKAGE_MANAGERS.items():
-        if (project_dir_path / lockfile_name).exists():
-            return package_manager
-    return None
+    repo_root_path: Path
+    worktree_path: Path
+    project_dir_path: Path
+    relative_project_path: Path
+    process_runner: IProcessRunner
 
 
-def _build_install_command(package_manager: str) -> list[str]:
-    """Build an install command for the detected package manager.
+@dataclasses.dataclass(frozen=True)
+class _ReuseTarget:
+    """「复用主检出依赖」所需的路径三元组。"""
 
-    The commands mirror the ``install_frontend_dependencies_in_current_directory``
-    helper in ``scripts/shared/worktree/create.sh`` so the Python and shell
-    worktree paths behave identically.
+    repo_root_path: Path
+    project_dir_path: Path
+    relative_project_path: Path
 
-    Args:
-        package_manager: Name of the package manager (``pnpm``, ``npm``,
-            ``yarn``, or ``bun``).
 
-    Returns:
-        Argument vector for the install command.
-    """
-    if package_manager == "pnpm":
-        return ["pnpm", "install", "--ignore-scripts"]
-    if package_manager == "npm":
-        return ["npm", "ci", "--ignore-scripts"]
-    if package_manager == "yarn":
-        return ["yarn", "install", "--ignore-scripts"]
-    if package_manager == "bun":
-        return ["bun", "install", "--ignore-scripts"]
-    return ["npm", "install", "--ignore-scripts"]
+@dataclasses.dataclass(frozen=True)
+class _InstallAttempt:
+    """一次安装尝试的结论（不抛异常，全部事实进记录）。"""
+
+    succeeded: bool
+    reason: str = ""
+    requires_user_action: str | None = None
+    attempted_commands: tuple[str, ...] = ()
+    exit_code: int | None = None
+    detail: str = ""
+
+
+@dataclasses.dataclass(frozen=True)
+class _ReuseAttempt:
+    """一次「复用主检出依赖」的结论。"""
+
+    succeeded: bool
+    reason: str = ""
+    detail: str = ""
+
+
+@dataclasses.dataclass(frozen=True)
+class _ProjectOutcome:
+    """单个项目最终落进诊断记录的处置字段（结论 + 原因 + 人类决定需求）。"""
+
+    outcome: str
+    reason: str
+    requires_user_action: str | None = None
+    attempted_commands: tuple[str, ...] = ()
+    exit_code: int | None = None
+    detail: str = ""
 
 
 def _try_install_frontend_dependencies(
     project_dir_path: Path,
-    relative_project_path: Path,
+    install_plan: PackageManagerPlan,
     process_runner: IProcessRunner,
-) -> bool:
-    """Attempt a lockfile-driven install in the worktree project directory.
+) -> _InstallAttempt:
+    """在 worktree 项目目录里尝试一次锁文件驱动的安装。
+
+    本函数**不抛异常**：可执行文件缺失、进程启动失败、非零退出、退出 0 却没有产出
+    依赖，全部只写进返回值（Issue #290 的核心：环境缺口不得中断 Agent 启动）。
 
     Args:
-        project_dir_path: Absolute path to the frontend project in the worktree.
-        relative_project_path: Project path relative to the worktree root (for
-            logging).
-        process_runner: Runner used to execute the package manager install.
+        project_dir_path: worktree 内的前端项目目录。
+        install_plan: 包管理器识别结果。
+        process_runner: 执行安装命令的 runner。
 
     Returns:
-        ``True`` when the install command exits with code 0; ``False`` when no
-        lockfile is present, the package manager is unavailable, or the install
-        fails.
+        安装尝试结论。
     """
-    package_manager = _detect_package_manager(project_dir_path)
-    if package_manager is None:
-        _logger.info(
-            "No lockfile found for frontend project %s; will attempt symlink fallback.",
-            relative_project_path,
+    if install_plan.package_manager is None:
+        return _InstallAttempt(
+            succeeded=False,
+            reason=install_plan.reason,
+            detail=sanitize_detail_text("no install attempted: " + install_plan.reason),
         )
-        return False
-
-    install_command = _build_install_command(package_manager)
+    install_command = _build_install_command(install_plan)
+    attempted_commands = (format_command_text(install_command),)
+    if shutil.which(install_command[0]) is None:
+        return _InstallAttempt(
+            succeeded=False,
+            reason=REASON_TOOL_MISSING,
+            attempted_commands=attempted_commands,
+            detail=(
+                f"'{install_command[0]}' is not on PATH; Keda does not install host "
+                "toolchains, so the command was never run. The agent can choose a "
+                "safe repository-local alternative"
+            ),
+        )
     _logger.info(
-        "Installing frontend dependencies for %s with %s: %s",
-        relative_project_path,
-        package_manager,
+        "Installing frontend dependencies in %s: %s",
+        project_dir_path,
         " ".join(install_command),
     )
-    install_result = process_runner.run(
-        install_command,
-        cwd=project_dir_path,
-        check=False,
+    try:
+        install_result = process_runner.run(
+            install_command,
+            cwd=project_dir_path,
+            check=False,
+        )
+    except OSError as launch_error:
+        return _InstallAttempt(
+            succeeded=False,
+            reason=REASON_LAUNCH_FAILED,
+            attempted_commands=attempted_commands,
+            detail=sanitize_detail_text(f"{type(launch_error).__name__}: {launch_error}"),
+        )
+    if install_result.return_code != 0:
+        failure_detail = install_result.stderr.strip() or install_result.stdout.strip()
+        return _InstallAttempt(
+            succeeded=False,
+            reason=REASON_INSTALL_FAILED,
+            requires_user_action=classify_user_action_from_failure_text(failure_detail),
+            attempted_commands=attempted_commands,
+            exit_code=install_result.return_code,
+            detail=sanitize_detail_text(failure_detail),
+        )
+    if not (project_dir_path / NODE_MODULES_DIR_NAME).exists():
+        return _InstallAttempt(
+            succeeded=False,
+            reason=REASON_INSTALL_NO_OUTPUT,
+            attempted_commands=attempted_commands,
+            exit_code=install_result.return_code,
+            detail=sanitize_detail_text(
+                "install exited 0 but no node_modules appeared in the project directory"
+            ),
+        )
+    return _InstallAttempt(
+        succeeded=True,
+        attempted_commands=attempted_commands,
+        exit_code=install_result.return_code,
     )
-    if install_result.return_code == 0:
-        return True
-
-    _logger.warning(
-        "%s install failed for %s (exit %d)%s; falling back to symlink.",
-        package_manager,
-        relative_project_path,
-        install_result.return_code,
-        (f": {install_result.stderr.strip()}" if install_result.stderr.strip() else ""),
-    )
-    return False
 
 
-def _try_link_frontend_node_modules(
-    repo_root_path: Path,
-    worktree_path: Path,
-    project_dir_path: Path,
-    relative_project_path: Path,
-) -> bool:
-    """Create a symlink from the main checkout's node_modules as fallback.
+def _package_manifest_inputs(project_dir_path: Path) -> tuple[tuple[str, bytes], ...] | None:
+    """收集项目及其 workspace 成员的 manifest 输入；不可读时返回 ``None``。"""
+    manifest_inputs: list[tuple[str, bytes]] = []
+    walk_errors: list[OSError] = []
+    for current_dir_text, child_dir_names, child_file_names in os.walk(
+        project_dir_path,
+        onerror=walk_errors.append,
+    ):
+        child_dir_names[:] = sorted(
+            child_dir_name
+            for child_dir_name in child_dir_names
+            if child_dir_name not in FRONTEND_SCAN_PRUNED_DIR_NAMES
+            and not (Path(current_dir_text) / child_dir_name).is_symlink()
+        )
+        if PACKAGE_MANIFEST_FILE_NAME not in child_file_names:
+            continue
+        manifest_path = Path(current_dir_text) / PACKAGE_MANIFEST_FILE_NAME
+        try:
+            manifest_content = manifest_path.read_bytes()
+        except OSError:
+            return None
+        manifest_inputs.append(
+            (manifest_path.relative_to(project_dir_path).as_posix(), manifest_content)
+        )
+    if walk_errors:
+        return None
+    return tuple(manifest_inputs)
+
+
+def _dependency_inputs_match_across_checkouts(reuse_target: _ReuseTarget) -> bool:
+    """所有 manifest、workspace 声明和锁文件输入都匹配时才允许复用。"""
+    repo_project_path = reuse_target.repo_root_path / reuse_target.relative_project_path
+    worktree_project_path = reuse_target.project_dir_path
+
+    repo_manifest_path = repo_project_path / PACKAGE_MANIFEST_FILE_NAME
+    worktree_manifest_path = worktree_project_path / PACKAGE_MANIFEST_FILE_NAME
+    repo_has_manifest = repo_manifest_path.is_file()
+    worktree_has_manifest = worktree_manifest_path.is_file()
+    if repo_has_manifest != worktree_has_manifest:
+        return False
+
+    repo_workspace_path = repo_project_path / PNPM_WORKSPACE_FILE_NAME
+    worktree_workspace_path = worktree_project_path / PNPM_WORKSPACE_FILE_NAME
+    repo_has_workspace = repo_workspace_path.is_file()
+    worktree_has_workspace = worktree_workspace_path.is_file()
+    if repo_has_workspace != worktree_has_workspace:
+        return False
+    if repo_has_workspace:
+        try:
+            if repo_workspace_path.read_bytes() != worktree_workspace_path.read_bytes():
+                return False
+        except OSError:
+            return False
+    elif not repo_has_manifest:
+        # Manifestless 项目只有在可验证的 pnpm workspace 声明存在时才可复用。
+        return False
+
+    repo_manifest_inputs = _package_manifest_inputs(repo_project_path)
+    worktree_manifest_inputs = _package_manifest_inputs(worktree_project_path)
+    if (
+        repo_manifest_inputs is None
+        or worktree_manifest_inputs is None
+        or repo_manifest_inputs != worktree_manifest_inputs
+    ):
+        return False
+
+    matching_lockfile_count = 0
+    for lockfile_name in _LOCKFILE_PACKAGE_MANAGERS:
+        repo_lockfile_path = repo_project_path / lockfile_name
+        worktree_lockfile_path = worktree_project_path / lockfile_name
+        if repo_lockfile_path.is_file() != worktree_lockfile_path.is_file():
+            return False
+        if not repo_lockfile_path.is_file():
+            continue
+        matching_lockfile_count += 1
+        try:
+            if repo_lockfile_path.read_bytes() != worktree_lockfile_path.read_bytes():
+                return False
+        except OSError:
+            return False
+    return matching_lockfile_count > 0
+
+
+def _try_reuse_main_checkout_dependencies(
+    reuse_target: _ReuseTarget,
+) -> _ReuseAttempt:
+    """所有依赖输入一致时优先复用主检出的 ``node_modules``。
+
+    两棵树必须有完全相同的 manifest、workspace 配置和至少一份锁文件；缺少可比较的
+    输入或存在差异时不复用，避免把漂移过的依赖伪装成就绪。无根 manifest 的 pnpm
+    workspace 仅在 workspace 文件、成员 manifest 和根锁文件都匹配时可复用。
 
     Args:
-        repo_root_path: Absolute path to the main repository checkout.
-        worktree_path: Absolute path to the target worktree.
-        project_dir_path: Absolute path to the frontend project in the worktree.
-        relative_project_path: Project path relative to the worktree root.
+        reuse_target: 复用所需的三元组路径（主检出根、worktree 项目目录、相对路径）。
 
     Returns:
-        ``True`` when a symlink was created; ``False`` otherwise.
+        复用尝试结论。
     """
-    source_node_modules_path = repo_root_path / relative_project_path / NODE_MODULES_DIR_NAME
-    target_node_modules_path = project_dir_path / NODE_MODULES_DIR_NAME
+    repo_project_path = reuse_target.repo_root_path / reuse_target.relative_project_path
+    source_node_modules_path = repo_project_path / NODE_MODULES_DIR_NAME
+    target_node_modules_path = reuse_target.project_dir_path / NODE_MODULES_DIR_NAME
     if not source_node_modules_path.is_dir():
-        _logger.warning(
-            "Main checkout has no node_modules for frontend project %s; "
-            "cannot link it into worktree %s. Install dependencies under "
-            "%s, or the worktree build will fail with a missing binary.",
-            relative_project_path,
-            worktree_path,
-            source_node_modules_path.parent,
+        return _ReuseAttempt(
+            succeeded=False,
+            reason=REASON_REUSABLE_ABSENT,
+            detail=(
+                f"main checkout has no {NODE_MODULES_DIR_NAME} for this project "
+                f"({repo_project_path})"
+            ),
         )
-        return False
+    if not _dependency_inputs_match_across_checkouts(reuse_target):
+        return _ReuseAttempt(
+            succeeded=False,
+            reason=REASON_REUSABLE_STALE,
+            detail=(
+                "dependency inputs (package manifests, workspace config, and at least one "
+                "lockfile) must exist and match in both checkouts before dependencies can "
+                "be reused"
+            ),
+        )
     try:
         os.symlink(
             source_node_modules_path,
@@ -210,117 +385,264 @@ def _try_link_frontend_node_modules(
             target_is_directory=True,
         )
     except OSError as symlink_error:
-        _logger.warning(
-            "Skipped linking node_modules for %s into worktree %s: %s",
-            relative_project_path,
-            worktree_path,
-            symlink_error,
+        return _ReuseAttempt(
+            succeeded=False,
+            reason=REASON_LINK_FAILED,
+            detail=sanitize_detail_text(f"symlink failed: {symlink_error}"),
         )
-        return False
-    return True
+    return _ReuseAttempt(succeeded=True)
+
+
+def _diagnose_unusable_worktree_node_modules(
+    node_modules_path: Path,
+    install_plan: PackageManagerPlan,
+) -> _ProjectOutcome:
+    """保留不可用的既有路径，并把修复所需信息交给 Agent。"""
+    if node_modules_path.is_symlink() and not node_modules_path.exists():
+        path_state = "existing node_modules is a dangling symbolic link"
+    elif node_modules_path.is_symlink():
+        path_state = "existing node_modules symbolic link does not point to a directory"
+    else:
+        path_state = "existing node_modules path is not a directory"
+
+    if install_plan.package_manager is None:
+        return _ProjectOutcome(
+            outcome=OUTCOME_NOT_PREPARED,
+            reason=install_plan.reason or REASON_EXISTING_NODE_MODULES_UNUSABLE,
+            detail=f"{path_state}; path was left untouched",
+        )
+
+    install_command = _build_install_command(install_plan)
+    formatted_command = format_command_text(install_command)
+    if shutil.which(install_command[0]) is None:
+        return _ProjectOutcome(
+            outcome=OUTCOME_NOT_PREPARED,
+            reason=REASON_TOOL_MISSING,
+            attempted_commands=(formatted_command,),
+            detail=(
+                f"{path_state}; path was left untouched; '{install_command[0]}' is not on "
+                f"PATH, so '{formatted_command}' was not run"
+            ),
+        )
+    return _ProjectOutcome(
+        outcome=OUTCOME_NOT_PREPARED,
+        reason=REASON_EXISTING_NODE_MODULES_UNUSABLE,
+        attempted_commands=(formatted_command,),
+        detail=(
+            f"{path_state}; path was left untouched and '{formatted_command}' was not run "
+            "to avoid overwriting existing worktree state"
+        ),
+    )
+
+
+def _prepare_frontend_project(
+    preparation_request: _ProjectPreparationRequest,
+) -> FrontendProjectRecord:
+    """处理单个前端项目：所有失败都在此收敛成诊断记录，绝不上抛。"""
+    install_plan = plan_package_manager(
+        preparation_request.project_dir_path,
+        preparation_request.worktree_path,
+    )
+    target_node_modules_path = preparation_request.project_dir_path / NODE_MODULES_DIR_NAME
+    if target_node_modules_path.is_dir():
+        project_outcome = _ProjectOutcome(
+            outcome=OUTCOME_PRESENT,
+            reason=REASON_NO_ACTION_NEEDED,
+        )
+    elif target_node_modules_path.exists() or target_node_modules_path.is_symlink():
+        project_outcome = _diagnose_unusable_worktree_node_modules(
+            target_node_modules_path,
+            install_plan,
+        )
+    elif install_plan.is_workspace_member:
+        if install_plan.reason == REASON_MANAGER_CONFLICT:
+            project_outcome = _ProjectOutcome(
+                outcome=OUTCOME_NOT_PREPARED,
+                reason=REASON_MANAGER_CONFLICT,
+                detail=(
+                    "workspace root and member package-manager evidence conflicts; "
+                    "install was left to the agent"
+                ),
+            )
+        else:
+            project_outcome = _ProjectOutcome(
+                outcome=OUTCOME_SKIPPED,
+                reason=REASON_WORKSPACE_COVERED,
+                detail="an ancestor workspace install owns this directory's dependencies",
+            )
+    else:
+        reuse_attempt = _try_reuse_main_checkout_dependencies(
+            _ReuseTarget(
+                repo_root_path=preparation_request.repo_root_path,
+                project_dir_path=preparation_request.project_dir_path,
+                relative_project_path=preparation_request.relative_project_path,
+            )
+        )
+        if reuse_attempt.succeeded:
+            project_outcome = _ProjectOutcome(
+                outcome=OUTCOME_REUSED,
+                reason=REASON_NO_ACTION_NEEDED,
+                detail="matching main checkout dependencies were reused before installation",
+            )
+        else:
+            install_attempt = _try_install_frontend_dependencies(
+                preparation_request.project_dir_path,
+                install_plan,
+                preparation_request.process_runner,
+            )
+            if install_attempt.succeeded:
+                project_outcome = _ProjectOutcome(
+                    outcome=OUTCOME_INSTALLED,
+                    reason="",
+                    attempted_commands=install_attempt.attempted_commands,
+                    exit_code=install_attempt.exit_code,
+                )
+            else:
+                diagnostic_detail = " | ".join(
+                    detail_part
+                    for detail_part in (install_attempt.detail, reuse_attempt.detail)
+                    if detail_part
+                )
+                project_outcome = _ProjectOutcome(
+                    outcome=OUTCOME_NOT_PREPARED,
+                    reason=install_attempt.reason or reuse_attempt.reason,
+                    requires_user_action=install_attempt.requires_user_action,
+                    attempted_commands=install_attempt.attempted_commands,
+                    exit_code=install_attempt.exit_code,
+                    detail=diagnostic_detail,
+                )
+    return FrontendProjectRecord(
+        project_path=preparation_request.relative_project_path.as_posix(),
+        outcome=project_outcome.outcome,
+        reason=project_outcome.reason,
+        package_manager=install_plan.package_manager,
+        selection_evidence=install_plan.evidence,
+        attempted_commands=project_outcome.attempted_commands,
+        exit_code=project_outcome.exit_code,
+        requires_user_action=project_outcome.requires_user_action,
+        detail=project_outcome.detail,
+    )
 
 
 def ensure_frontend_node_modules(
     repo_root_path: Path,
     worktree_path: Path,
     process_runner: IProcessRunner,
-) -> tuple[list[Path], list[Path]]:
-    """Ensure frontend ``node_modules`` exist in a worktree.
+) -> DependencyPreparationReport:
+    """**可恢复地**为 worktree 内的前端项目准备 ``node_modules``。
 
-    Walks ``worktree_path`` (pruning :data:`FRONTEND_SCAN_PRUNED_DIR_NAMES`)
-    for directories holding a ``package.json``. For each such frontend project
-    whose ``node_modules`` does not yet exist in the worktree:
+    遍历 ``worktree_path``（剪掉 :data:`FRONTEND_SCAN_PRUNED_DIR_NAMES`）找出含
+    ``package.json`` 的项目，以及仅由 ``pnpm-workspace.yaml`` 定义的 workspace 根；
+    对每个尚未拥有可用 ``node_modules`` 的目录：
 
-    1. If a lockfile is present, run the matching package manager's install
-       command inside the worktree project directory.
-    2. If the install is skipped (no lockfile) or fails, and the main checkout
-       has ``node_modules`` for the same project, create an absolute symlink
-       pointing at the main checkout as a fallback.
+    1. 识别包管理器（packageManager 字段 + workspace 根配置 + 锁文件；冲突不硬选）。
+    2. 锁文件一致时优先复用主检出的 ``node_modules``，跳过不必要的安装。
+    3. 无法安全复用时，安全可行就尝试一次仓库内安装（可执行文件缺失或启动失败只记诊断）。
+    4. 两种准备方式都没有得到可用依赖时只记录诊断并继续下一个项目——**Agent 仍会启动**，
+       由它决定下一步。
 
-    Existing ``node_modules`` in the worktree are never overwritten.
+    worktree 内已有的有效目录或目录软链永不覆盖。断链、指向非目录的软链和普通文件
+    会保留原状并记录为未准备，避免误报依赖可用。
 
     Args:
-        repo_root_path: Absolute path to the main repository checkout whose
-            frontend projects may already have installed dependencies.
-        worktree_path: Absolute path to the target worktree.
-        process_runner: Runner used to execute package manager install
-            commands.
+        repo_root_path: 主检出根目录（其前端项目可能已装好依赖，可被复用）。
+        worktree_path: 目标 worktree 绝对路径。
+        process_runner: 执行安装命令的 runner。
 
     Returns:
-        Tuple of ``(installed_relative_paths, linked_relative_paths)`` — two
-        lists of worktree-relative frontend project directories handled by
-        each strategy, in walk order. Empty when nothing was actionable.
+        每个前端项目一条记录的 :class:`DependencyPreparationReport`。
     """
     repo_root_path = repo_root_path.resolve()
     worktree_path = worktree_path.resolve()
     if worktree_path == repo_root_path:
-        return [], []
+        return DependencyPreparationReport(worktree_path=str(worktree_path))
 
-    installed_relative_paths: list[Path] = []
-    linked_relative_paths: list[Path] = []
+    try:
+        project_dir_paths = _scan_frontend_project_paths(worktree_path)
+    except OSError as walk_error:
+        _logger.warning("Frontend project scan failed under %s: %s", worktree_path, walk_error)
+        return DependencyPreparationReport(
+            worktree_path=str(worktree_path),
+            records=(
+                FrontendProjectRecord(
+                    project_path=".",
+                    outcome=OUTCOME_NOT_PREPARED,
+                    reason=REASON_PREPARATION_CRASHED,
+                    detail=sanitize_detail_text(f"{type(walk_error).__name__}: {walk_error}"),
+                ),
+            ),
+        )
 
+    project_records: list[FrontendProjectRecord] = []
+    for project_dir_path in project_dir_paths:
+        preparation_request = _ProjectPreparationRequest(
+            repo_root_path=repo_root_path,
+            worktree_path=worktree_path,
+            project_dir_path=project_dir_path,
+            relative_project_path=project_dir_path.relative_to(worktree_path),
+            process_runner=process_runner,
+        )
+        try:
+            project_records.append(_prepare_frontend_project(preparation_request))
+        except Exception as prepare_error:  # noqa: BLE001 - 环境准备绝不允许终止 Agent 启动。
+            _logger.warning(
+                "Frontend dependency preparation for %s crashed; recorded instead: %s",
+                preparation_request.relative_project_path,
+                prepare_error,
+            )
+            project_records.append(
+                FrontendProjectRecord(
+                    project_path=preparation_request.relative_project_path.as_posix(),
+                    outcome=OUTCOME_NOT_PREPARED,
+                    reason=REASON_PREPARATION_CRASHED,
+                    detail=sanitize_detail_text(f"{type(prepare_error).__name__}: {prepare_error}"),
+                )
+            )
+    return DependencyPreparationReport(
+        worktree_path=str(worktree_path),
+        records=tuple(project_records),
+    )
+
+
+def _scan_frontend_project_paths(worktree_path: Path) -> list[Path]:
+    """按目录名字典序收集前端项目与 pnpm workspace 根目录。
+
+    显式排序子目录（而非 ``os.walk`` 的文件系统返回顺序）：诊断记录会进 Issue 评论和
+    prompt，顺序不稳定会让同一份代码两次跑出不同文本，无法逐字节比对。
+
+    pnpm workspace 根可以只有 ``pnpm-workspace.yaml`` 和锁文件而没有
+    ``package.json``；仍需把根目录作为准备目标，才能记录缺失 pnpm 的命令与诊断。
+    """
+    project_dir_paths: list[Path] = []
     for current_dir_text, child_dir_names, child_file_names in os.walk(worktree_path):
-        child_dir_names[:] = [
+        child_dir_names[:] = sorted(
             child_dir_name
             for child_dir_name in child_dir_names
             if child_dir_name not in FRONTEND_SCAN_PRUNED_DIR_NAMES
-        ]
-        if PACKAGE_MANIFEST_FILE_NAME not in child_file_names:
-            continue
-        current_dir_path = Path(current_dir_text)
-        relative_project_path = current_dir_path.relative_to(worktree_path)
-        target_node_modules_path = current_dir_path / NODE_MODULES_DIR_NAME
-        # is_symlink() guards broken links: exists() follows the link target,
-        # so a dangling symlink would otherwise look absent and get clobbered.
-        if target_node_modules_path.exists() or target_node_modules_path.is_symlink():
-            continue
-
-        if _try_install_frontend_dependencies(
-            current_dir_path,
-            relative_project_path,
-            process_runner,
+        )
+        if (
+            PACKAGE_MANIFEST_FILE_NAME in child_file_names
+            or PNPM_WORKSPACE_FILE_NAME in child_file_names
         ):
-            installed_relative_paths.append(relative_project_path)
-            continue
-
-        if _try_link_frontend_node_modules(
-            repo_root_path,
-            worktree_path,
-            current_dir_path,
-            relative_project_path,
-        ):
-            linked_relative_paths.append(relative_project_path)
-
-    return installed_relative_paths, linked_relative_paths
+            project_dir_paths.append(Path(current_dir_text))
+    return project_dir_paths
 
 
 def link_frontend_node_modules(
     repo_root_path: Path,
     worktree_path: Path,
 ) -> list[Path]:
-    """Symlink frontend ``node_modules`` from the main checkout into a worktree.
+    """把主检出的前端 ``node_modules`` 符号链接进 worktree（legacy 回退）。
 
-    This is the legacy ``symlink-from-main`` fallback. New code should call
-    :func:`ensure_frontend_node_modules`, which tries a lockfile-driven install
-    first and only falls back to symlinking when install is unavailable or
-    fails.
-
-    Walks ``worktree_path`` (pruning :data:`FRONTEND_SCAN_PRUNED_DIR_NAMES`)
-    for directories holding a ``package.json``. For each such frontend project
-    whose ``node_modules`` does not yet exist in the worktree, creates an
-    absolute symlink pointing at the same project's ``node_modules`` under
-    ``repo_root_path``. Existing ``node_modules`` in the worktree are never
-    overwritten.
+    新代码应调用 :func:`ensure_frontend_node_modules`：它先做可恢复的准备，只在安装
+    不可用或失败时回退到链接，并把诊断写成结构化记录交给 Agent。
 
     Args:
-        repo_root_path: Absolute path to the main repository checkout whose
-            frontend projects already have installed dependencies.
-        worktree_path: Absolute path to the target worktree.
+        repo_root_path: 主检出根目录（其前端项目已安装依赖）。
+        worktree_path: 目标 worktree 绝对路径。
 
     Returns:
-        Worktree-relative paths of the frontend project directories whose
-        ``node_modules`` was linked, in walk order. Empty when nothing was
-        linkable.
+        成功链接的项目 worktree 相对路径（按扫描顺序）。
     """
     repo_root_path = repo_root_path.resolve()
     worktree_path = worktree_path.resolve()
@@ -328,95 +650,159 @@ def link_frontend_node_modules(
         return []
 
     linked_relative_paths: list[Path] = []
-    for current_dir_text, child_dir_names, child_file_names in os.walk(worktree_path):
-        child_dir_names[:] = [
-            child_dir_name
-            for child_dir_name in child_dir_names
-            if child_dir_name not in FRONTEND_SCAN_PRUNED_DIR_NAMES
-        ]
-        if PACKAGE_MANIFEST_FILE_NAME not in child_file_names:
+    for project_dir_path in _scan_frontend_project_paths(worktree_path):
+        relative_project_path = project_dir_path.relative_to(worktree_path)
+        target_node_modules_path = project_dir_path / NODE_MODULES_DIR_NAME
+        if target_node_modules_path.exists() or target_node_modules_path.is_symlink():
             continue
-        current_dir_path = Path(current_dir_text)
-        relative_project_path = current_dir_path.relative_to(worktree_path)
-        if _try_link_frontend_node_modules(
-            repo_root_path,
-            worktree_path,
-            current_dir_path,
-            relative_project_path,
-        ):
+        reuse_attempt = _try_reuse_main_checkout_dependencies(
+            _ReuseTarget(
+                repo_root_path=repo_root_path,
+                project_dir_path=project_dir_path,
+                relative_project_path=relative_project_path,
+            )
+        )
+        if reuse_attempt.succeeded:
             linked_relative_paths.append(relative_project_path)
+        else:
+            _logger.warning(
+                "Could not reuse main-checkout dependencies for worktree project %s: %s",
+                relative_project_path,
+                reuse_attempt.detail,
+            )
     return linked_relative_paths
 
 
 def exclude_frontend_node_modules_from_git(
     worktree_path: Path,
-    linked_relative_paths: list[Path],
+    preparation_report: DependencyPreparationReport,
     process_runner: IProcessRunner,
-) -> None:
-    """Keep symlinked ``node_modules`` out of the worktree's git status.
+) -> DependencyPreparationReport:
+    """把报告中所有符号链接的 ``node_modules`` 排除出 worktree 的 git status。
 
-    Adds each linked project's ``node_modules`` to the worktree's
-    ``info/exclude`` as an **anchored, no-trailing-slash** pattern (e.g.
-    ``/frontend/node_modules``). Unlike a ``node_modules/`` rule, this form
-    matches a symlink as well as a directory, so the symlinks created by
-    :func:`link_frontend_node_modules` never show as untracked and can never
-    be committed by an agent's ``git add -A``.
+    为每个被链接项目的 ``node_modules`` 往 ``info/exclude`` 追加一条**锚定且不带尾部
+    斜杠**的规则（例如 ``/frontend/node_modules``）。``node_modules/`` 这类目录规则不
+    匹配符号链接，链接会显示为未跟踪文件，并可能被 agent 的 ``git add -A`` 提交成机器
+    本地绝对链接。
 
-    Real ``node_modules`` directories created by install are already covered
-    by the standard ``node_modules/`` gitignore rule, so they do not need to
-    be added here.
+    安装产出的真实 ``node_modules`` 目录已被仓库常规的 ``node_modules/`` 忽略规则覆盖，
+    不需要在这里重复登记。
 
-    The ``info/exclude`` file is local (it resolves to the shared common
-    checkout and is never versioned), so this produces no code diff. The
-    write is idempotent — already-present lines are not duplicated.
+    ``info/exclude`` 是本地文件（解析到共享 common checkout，永不进版本库），因此不产生
+    代码 diff；写入幂等，已存在的行不会重复。
 
     Args:
-        worktree_path: Absolute path to the worktree to update.
-        linked_relative_paths: Worktree-relative frontend project paths whose
-            ``node_modules`` are symlinks and must be excluded from git.
-        process_runner: Runner used to resolve the ``info/exclude`` location
-            via ``git rev-parse``.
+        worktree_path: 目标 worktree 绝对路径。
+        preparation_report: 本轮依赖准备结果；无法排除时新建软链会被移除，已有软链保留并标为未准备。
+        process_runner: 用于通过 ``git rev-parse`` 解析 ``info/exclude`` 位置。
+
+    Returns:
+        已更新的依赖准备报告。更新忽略规则失败时不会中断 Agent 启动；本轮新建的
+        软链会被尽力删除，已有软链保留并在诊断中标明。
     """
+    linked_relative_paths = [
+        Path(project_record.project_path)
+        for project_record in preparation_report.records
+        if (worktree_path / project_record.project_path / NODE_MODULES_DIR_NAME).is_symlink()
+    ]
     if not linked_relative_paths:
-        return
-    exclude_path_result = process_runner.run(
-        ["git", "rev-parse", "--git-path", "info/exclude"],
-        cwd=worktree_path,
-        check=False,
-    )
-    exclude_path_text = exclude_path_result.stdout.strip()
-    if exclude_path_result.return_code != 0 or not exclude_path_text:
-        _logger.warning(
-            "Could not resolve git info/exclude for %s; symlinked "
-            "node_modules may show as untracked.",
-            worktree_path,
+        return preparation_report
+
+    exclusion_failure_detail = ""
+    try:
+        exclude_path_result = process_runner.run(
+            ["git", "rev-parse", "--git-path", "info/exclude"],
+            cwd=worktree_path,
+            check=False,
         )
-        return
-    exclude_path = Path(exclude_path_text)
-    if not exclude_path.is_absolute():
-        exclude_path = worktree_path / exclude_path
-    if exclude_path.is_dir():
-        _logger.warning(
-            "Resolved info/exclude path is a directory (%s); skipping node_modules exclusion.",
-            exclude_path,
-        )
-        return
-    existing_text = exclude_path.read_text(encoding="utf-8") if exclude_path.exists() else ""
-    known_lines = set(existing_text.splitlines())
-    appended_lines: list[str] = []
-    for relative_project_path in linked_relative_paths:
-        posix_project_path = relative_project_path.as_posix().strip("/")
-        if posix_project_path in {"", "."}:
-            exclude_line = f"/{NODE_MODULES_DIR_NAME}"
+        exclude_path_text = exclude_path_result.stdout.strip()
+        if exclude_path_result.return_code != 0 or not exclude_path_text:
+            command_error_detail = (
+                exclude_path_result.stderr.strip() or exclude_path_result.stdout.strip()
+            )
+            exclusion_failure_detail = sanitize_detail_text(
+                "git could not resolve info/exclude"
+                + (f": {command_error_detail}" if command_error_detail else "")
+            )
         else:
-            exclude_line = f"/{posix_project_path}/{NODE_MODULES_DIR_NAME}"
-        if exclude_line not in known_lines:
-            appended_lines.append(exclude_line)
-            known_lines.add(exclude_line)
-    if not appended_lines:
-        return
-    exclude_path.parent.mkdir(parents=True, exist_ok=True)
-    prefix_text = existing_text
-    if prefix_text and not prefix_text.endswith("\n"):
-        prefix_text += "\n"
-    exclude_path.write_text(prefix_text + "\n".join(appended_lines) + "\n", encoding="utf-8")
+            exclude_path = Path(exclude_path_text)
+            if not exclude_path.is_absolute():
+                exclude_path = worktree_path / exclude_path
+            if exclude_path.is_dir():
+                exclusion_failure_detail = (
+                    f"resolved info/exclude path is a directory: {exclude_path}"
+                )
+            else:
+                existing_text = (
+                    exclude_path.read_text(encoding="utf-8") if exclude_path.exists() else ""
+                )
+                known_lines = set(existing_text.splitlines())
+                appended_lines: list[str] = []
+                for relative_project_path in linked_relative_paths:
+                    posix_project_path = relative_project_path.as_posix().strip("/")
+                    if posix_project_path in {"", "."}:
+                        exclude_line = f"/{NODE_MODULES_DIR_NAME}"
+                    else:
+                        exclude_line = f"/{posix_project_path}/{NODE_MODULES_DIR_NAME}"
+                    if exclude_line not in known_lines:
+                        appended_lines.append(exclude_line)
+                        known_lines.add(exclude_line)
+                if appended_lines:
+                    exclude_path.parent.mkdir(parents=True, exist_ok=True)
+                    with exclude_path.open("a", encoding="utf-8") as exclude_file:
+                        if existing_text and not existing_text.endswith("\n"):
+                            exclude_file.write("\n")
+                        exclude_file.write("\n".join(appended_lines) + "\n")
+    except Exception as exclusion_error:  # noqa: BLE001 - ignore 仅本地防误提交的副作用。
+        exclusion_failure_detail = sanitize_detail_text(
+            f"could not update git info/exclude: {type(exclusion_error).__name__}: "
+            f"{exclusion_error}"
+        )
+
+    if not exclusion_failure_detail:
+        return preparation_report
+
+    failed_link_details: dict[Path, str] = {}
+    reusable_paths = set(preparation_report.linked_relative_paths)
+    for relative_project_path in linked_relative_paths:
+        target_node_modules_path = worktree_path / relative_project_path / NODE_MODULES_DIR_NAME
+        cleanup_detail = ""
+        is_new_reuse = relative_project_path in reusable_paths
+        if is_new_reuse:
+            try:
+                if target_node_modules_path.is_symlink():
+                    target_node_modules_path.unlink()
+            except OSError as cleanup_error:
+                cleanup_detail = sanitize_detail_text(
+                    f"; symlink cleanup failed: {type(cleanup_error).__name__}: {cleanup_error}"
+                )
+        preservation_note = (
+            "the newly created symlink was removed to avoid committing a machine-local path"
+            if is_new_reuse
+            else "the existing symlink was preserved; do not stage this machine-local path"
+        )
+        failure_detail = sanitize_detail_text(
+            "could not exclude node_modules symlink from git: "
+            f"{exclusion_failure_detail}; {preservation_note}{cleanup_detail}"
+        )
+        _logger.warning(
+            "Could not exclude reused node_modules for %s; recorded as unprepared: %s",
+            relative_project_path,
+            failure_detail,
+        )
+        failed_link_details[relative_project_path] = failure_detail
+
+    return dataclasses.replace(
+        preparation_report,
+        records=tuple(
+            dataclasses.replace(
+                project_record,
+                outcome=OUTCOME_NOT_PREPARED,
+                reason=REASON_LINK_FAILED,
+                detail=failed_link_details[Path(project_record.project_path)],
+            )
+            if Path(project_record.project_path) in failed_link_details
+            else project_record
+            for project_record in preparation_report.records
+        ),
+    )

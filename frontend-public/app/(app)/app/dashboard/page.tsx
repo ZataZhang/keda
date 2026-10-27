@@ -1,16 +1,19 @@
 "use client"
 
+import { ConsolePage, ConsolePageHeader, ConsoleToolbar } from "@/components/layout/console-page";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { IssueDetail } from "@/components/agent-runner/issue-detail";
 import { ConsoleIssueDetail } from "@/components/agent-runner/console-issue-detail";
 import type { IssueLabelsChangedInfo } from "@/components/agent-runner/issue-label-editor";
 import { MonitorSettingsPanel } from "@/components/agent-runner/monitor-settings-panel";
+import { DashboardSyncControl } from "@/components/dashboard/dashboard-sync-control";
 import { RepositoryOverview } from "@/components/agent-runner/repository-overview";
 import type { IssueScope } from "@/components/agent-runner/repository-overview";
 import { RunnerStatusBar } from "@/components/agent-runner/runner-status-bar";
@@ -29,6 +32,7 @@ import {
   fetchAllRepositoryIssues,
   fetchCompletionStats,
   fetchDesktopCompanionStatus,
+  fetchMonitorSettings,
   fetchRuntimeTasks,
   openDesktopCompanionWindow,
 } from "@/lib/api/console";
@@ -116,6 +120,11 @@ export default function DashboardPage() {
   const [refreshState, setRefreshState] = useState<RefreshState>({ kind: "idle" });
   const [repoRefresh, setRepoRefresh] = useState<Record<string, RepoRefreshState>>({});
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // 当前生效的全局同步间隔与开关：表头的间隔文案/倒计时都跟着它们走。
+  const [syncIntervalMinutes, setSyncIntervalMinutes] = useState<number | null>(
+    null,
+  );
+  const [syncEnabled, setSyncEnabled] = useState(false);
   // 「监控中 / 全部」范围切换与全量列表按仓库缓存（FR-4）。
   const [repoScope, setRepoScope] = useState<Record<string, IssueScope>>({});
   const [allIssuesByRepo, setAllIssuesByRepo] = useState<
@@ -206,12 +215,17 @@ export default function DashboardPage() {
     };
   }, []);
 
-  // 看板首屏自动选中第一条任务，右侧详情不至于空着。
+  // 读一次全局同步设置：表头要显示「每 N 分钟」，与设置面板里的选项同源。
   useEffect(() => {
-    if (selectedTask !== null) return;
-    if (!runtimeSummary || runtimeSummary.tasks.length === 0) return;
-    setSelectedTask(runtimeSummary.tasks[0]);
-  }, [runtimeSummary, selectedTask]);
+    fetchMonitorSettings()
+      .then((loaded) => {
+        setSyncIntervalMinutes(Math.round(loaded.sync_interval_seconds / 60));
+        setSyncEnabled(loaded.sync_enabled);
+      })
+      .catch(() => {
+        // 读不到就不显示间隔，不猜默认值。
+      });
+  }, []);
 
   /**
    * 读本地快照并渲染。首屏与 15s 轮询都走这里——快照接口只查本地 SQLite,
@@ -252,6 +266,11 @@ export default function DashboardPage() {
       );
     }
   }, []);
+
+  /** 扫描落库后同时重读仓库快照与任务摘要，确保刷新结束时任务状态也已更新。 */
+  const reloadMonitoringViews = useCallback(async (signal?: AbortSignal) => {
+    await Promise.all([loadSnapshots(signal), loadRuntimeSummary(signal)]);
+  }, [loadSnapshots, loadRuntimeSummary]);
 
   /** 首屏进入后自动选中第一个 issue，避免右侧详情空着。 */
   useEffect(() => {
@@ -386,7 +405,7 @@ export default function DashboardPage() {
       if (controller.signal.aborted) return;
 
       // 刷新完成后重新读一次快照，让界面立即反映新数据。
-      await loadSnapshots(controller.signal);
+      await reloadMonitoringViews(controller.signal);
       void loadCompletionStats(controller.signal);
       if (failures.length > 0) {
         toast.error(`部分仓库刷新失败：${failures.join("；")}`);
@@ -401,7 +420,7 @@ export default function DashboardPage() {
       toast.error(message);
       setRefreshState({ kind: "idle" });
     }
-  }, [refreshState, loadCompletionStats, loadSnapshots]);
+  }, [refreshState, loadCompletionStats, reloadMonitoringViews]);
 
   useEffect(() => {
     return () => {
@@ -438,7 +457,7 @@ export default function DashboardPage() {
         throw new Error(snapshot.error ?? `${repoId} 失败`);
       }
       // 重新读快照：写入由后端完成，界面只负责呈现最新落库结果。
-      await loadSnapshots(controller.signal);
+      await reloadMonitoringViews(controller.signal);
       if (controller.signal.aborted) return;
       const seconds = Math.round((Date.now() - startedAt) / 1000);
       setRepoRefresh((prev) => ({
@@ -463,7 +482,7 @@ export default function DashboardPage() {
       }));
       toast.error(message);
     }
-  }, [loadSnapshots]);
+  }, [reloadMonitoringViews]);
 
   /** 切换仓库 Issue 范围；首次切到「全部」时实时拉取 GitHub 全量列表。 */
   const handleScopeChange = useCallback(
@@ -644,23 +663,24 @@ export default function DashboardPage() {
 
   const isRefreshingAll =
     refreshState.kind === "syncing" && refreshState.scope === "all";
-  const refreshElapsed = refreshState.kind === "syncing"
-    ? Math.floor((Date.now() - refreshState.startedAt) / 1000)
-    : 0;
+  const refreshStartedAt =
+    refreshState.kind === "syncing" && refreshState.scope === "all"
+      ? refreshState.startedAt
+      : null;
+  // 下一次后台自动同步：上次同步时间 + 设置里的间隔。关闭自动同步或还没有
+  // 可用快照时不给倒计时，避免显示一个不会发生的刷新。
+  const nextAutoSyncAt =
+    syncEnabled &&
+    syncIntervalMinutes !== null &&
+    state.kind === "ready" &&
+    state.scannedAt
+      ? new Date(state.scannedAt).getTime() + syncIntervalMinutes * 60_000
+      : null;
 
   return (
-    <div className="flex flex-col gap-4 p-4 lg:p-6">
-      <div className="flex flex-wrap items-end justify-between gap-2">
-        <div>
-          <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-50">
-            Agent Runner 管理终端
-          </h2>
-          <p className="mt-1 text-sm text-slate-500">
-            默认按任务值守看板列出各仓库 Issue 的真实生命周期；切到「仓库监控」看队列、
-            事件时间线与异常，failed/blocked Issue 可直接重试或继续。
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
+    <ConsolePage>
+      <ConsolePageHeader title="Agent Runner 管理终端" description="默认按任务值守看板列出各仓库 Issue 的真实生命周期；切到「仓库监控」看队列、事件时间线与异常，failed/blocked Issue 可直接重试或继续。" />
+      <ConsoleToolbar aria-label="看板视图与同步操作">
           <div
             className="flex items-center gap-1 rounded-md border border-slate-200 p-0.5 dark:border-slate-700"
             role="group"
@@ -692,34 +712,29 @@ export default function DashboardPage() {
             {state.kind === "ready" && state.scannedAt
               ? `上次同步 ${formatLocalDateTime(state.scannedAt)}`
               : "尚未同步"}
+            {syncIntervalMinutes === null
+              ? ""
+              : ` · 看板同步：每 ${syncIntervalMinutes} 分钟`}
           </span>
-          {isRefreshingAll ? (
-            <span className="text-xs text-slate-500">
-              正在全量刷新… {refreshElapsed}s
-            </span>
-          ) : null}
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setSettingsOpen((open) => !open)}
-            data-testid="dashboard-settings-toggle"
-          >
-            同步设置
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={isRefreshingAll}
-            onClick={() => void handleRefreshAll()}
-            data-testid="dashboard-refresh-all"
-          >
-            {isRefreshingAll ? "刷新中…" : "刷新全部"}
-          </Button>
-        </div>
-      </div>
+          <DashboardSyncControl
+            nextRefreshAt={nextAutoSyncAt}
+            refreshStartedAt={refreshStartedAt}
+            settingsOpen={settingsOpen}
+            onRefresh={() => void handleRefreshAll()}
+            onToggleSettings={() => setSettingsOpen((open) => !open)}
+          />
+      </ConsoleToolbar>
 
       {settingsOpen ? (
-        <MonitorSettingsPanel onClose={() => setSettingsOpen(false)} />
+        <MonitorSettingsPanel
+          onClose={() => setSettingsOpen(false)}
+          onSaved={(saved) => {
+            setSyncIntervalMinutes(
+              Math.round(saved.sync_interval_seconds / 60),
+            );
+            setSyncEnabled(saved.sync_enabled);
+          }}
+        />
       ) : null}
 
       <RunnerStatusBar />
@@ -737,9 +752,12 @@ export default function DashboardPage() {
               {companionPending
                 ? "开启中…"
                 : companionState?.window_exists
-                  ? "聚焦桌面小窗"
-                  : "开启桌面小窗"}
+                  ? "聚焦独立窗口"
+                  : "开启独立窗口"}
             </Button>
+            <span className="text-xs text-slate-500" data-testid="dashboard-menubar-hint">
+              macOS 菜单栏模式请启动 ~/Applications/KedaCode.app，再点击顶部图标。
+            </span>
             {companionState ? (
               <span
                 className="text-xs text-slate-500"
@@ -779,36 +797,47 @@ export default function DashboardPage() {
           ) : null}
 
           {runtimeSummary ? (
-            <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-              <RuntimeTaskList
-                tasks={runtimeSummary.tasks}
-                selectedKey={selectedTask?.task_key ?? null}
-                onSelect={setSelectedTask}
-                unavailableSources={runtimeSummary.unavailable_sources}
-                syncStatus={runtimeSummary.sync_status}
-                missingRepoIds={runtimeSummary.missing_repo_ids}
-                truncated={runtimeSummary.truncated}
-              />
-              <div className="min-h-[24rem]">
+            <>
+            <RuntimeTaskList
+              tasks={runtimeSummary.tasks}
+              selectedKey={selectedTask?.task_key ?? null}
+              onSelect={setSelectedTask}
+              unavailableSources={runtimeSummary.unavailable_sources}
+              syncStatus={runtimeSummary.sync_status}
+              missingRepoIds={runtimeSummary.missing_repo_ids}
+              truncated={runtimeSummary.truncated}
+            />
+
+            {/* 详情按需从右侧抽屉打开：长列表不再为它预留空白栏。 */}
+            <Sheet
+              open={selectedTask !== null}
+              onOpenChange={(open) => {
+                if (!open) {
+                  setSelectedTask(null);
+                }
+              }}
+            >
+              <SheetContent
+                side="right"
+                className="w-[min(760px,96vw)] p-0 sm:max-w-[760px]"
+                data-testid="runtime-task-detail-sheet"
+              >
+                <SheetHeader className="sr-only">
+                  <SheetTitle>任务详情</SheetTitle>
+                  <SheetDescription>任务状态、阶段说明与实时输出</SheetDescription>
+                </SheetHeader>
                 {selectedTask ? (
-                  <RuntimeTaskDetail
-                    key={selectedTask.task_key}
-                    task={selectedTask}
-                  />
-                ) : (
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="text-sm">任务详情</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <p className="text-sm text-slate-500">
-                        点击左侧任务行查看阶段、执行者与增量日志。
-                      </p>
-                    </CardContent>
-                  </Card>
-                )}
-              </div>
-            </div>
+                  <div className="flex h-full min-h-0 flex-col p-4">
+                    <RuntimeTaskDetail
+                      key={selectedTask.task_key}
+                      task={selectedTask}
+                      className="min-h-0 flex-1"
+                    />
+                  </div>
+                ) : null}
+              </SheetContent>
+            </Sheet>
+            </>
           ) : runtimeError ? null : (
             <Skeleton className="h-40" />
           )}
@@ -944,7 +973,7 @@ export default function DashboardPage() {
           </div>
         </>
       ) : null}
-    </div>
+    </ConsolePage>
   );
 }
 

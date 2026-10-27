@@ -17,7 +17,7 @@ from backend.core.use_cases import run_agent_execution_loop as execution_loop
 from backend.core.use_cases import run_verifier_agent as verifier_module
 from backend.core.use_cases.run_agent_once import MaxRetriesExceededError
 from backend.core.use_cases.run_verifier_agent import ValidationVerdict
-from tests.conftest import FakeProcessRunner
+from tests.conftest import FakeGitHubClient, FakeProcessRunner
 
 
 def _run_stalled_recovery(
@@ -52,7 +52,7 @@ def _run_stalled_recovery(
         prompts.append(prompt)
         if len(prompts) == 1:
             raise AgentStallCancelledError(
-                "[iar-stall-cancel] verified child group exited; "
+                "[kc-stall-cancel] verified child group exited; "
                 "stalled diagnosis: writer has made no progress"
             )
         recoveries.append(True)
@@ -121,6 +121,7 @@ def _run_stalled_recovery(
         process_runner=process_runner,
         before_sha="before-sha",
         expected_branch="issue-77",
+        github_client=FakeGitHubClient(),
         prompt_override="Implement the requested change.",
     )
     execution_loop.run_agent_until_committed(request)

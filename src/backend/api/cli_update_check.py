@@ -6,8 +6,7 @@
 - 机器路径整段跳过，逐字节保持原样：机器模式（``--json`` / ``--output json``）、
   shell 补全协议（补全环境变量存在）、``--help`` / ``-h``、``--version``（入口已
   先行短路）、无参数调用（只打印用法帮助）、非交互终端（stdin 或 stderr 不是
-  TTY），以及显式关闭 ``KEDACODE_NO_UPDATE_CHECK=1``（旧名 ``IAR_NO_UPDATE_CHECK``
-  双读）。
+  TTY），以及显式关闭 ``KEDACODE_NO_UPDATE_CHECK=1``。
 - 结果缓存到 ``<状态目录>/update-check.json``，默认 24 小时内不再访问 PyPI；
   缓存记录绑定了当时的已安装版本，升级后自动失效。
 - PyPI 最新版是预发布版（``rc`` / ``dev``）时不提示：默认安装器不会装它。
@@ -66,7 +65,7 @@ _CHECK_INTERVAL_SECONDS = 24 * 60 * 60
 #: 检查结果缓存文件名，落在 :func:`product_identity.state_home` 下。
 _CACHE_FILENAME = "update-check.json"
 
-#: 关闭开关后缀：``KEDACODE_NO_UPDATE_CHECK=1``（经产品双读含旧名 ``IAR_*``）。
+#: 关闭开关后缀：``KEDACODE_NO_UPDATE_CHECK=1``。
 _DISABLE_ENV_SUFFIX = "NO_UPDATE_CHECK"
 
 #: 识别不出安装方式时给出的可复制命令清单（覆盖安装文档里的全部路径）。

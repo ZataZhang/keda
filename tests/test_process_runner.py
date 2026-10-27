@@ -1013,6 +1013,65 @@ def test_subprocess_runner_kills_silent_process_on_inactivity_timeout(
         )
 
 
+def test_captured_output_includes_stdout_written_when_process_exits(tmp_path: Path) -> None:
+    """活动输出持续超过旧读取等待窗口时,仍须收齐退出前最后写入的 stdout。"""
+    runner = SubprocessRunner()
+    script = (
+        "import sys, time\n"
+        "for progress_index in range(110):\n"
+        "    print(f'progress {progress_index}', file=sys.stderr, flush=True)\n"
+        "    time.sleep(0.1)\n"
+        "print('FINAL VERDICT', flush=True)\n"
+    )
+
+    completed_process = runner.run(
+        [sys.executable, "-c", script],
+        cwd=tmp_path,
+        capture_output=True,
+        timeout=20,
+        inactivity_timeout=3,
+    )
+
+    assert completed_process.stdout == "FINAL VERDICT\n"
+    assert "progress 109" in completed_process.stderr
+
+
+def test_captured_output_returns_when_descendant_keeps_pipes_open(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """直接子进程退出后,孙进程持有输出管道也不能让调用无限等待。"""
+    monkeypatch.setattr(process_runner_module, "_PROCESS_OUTPUT_JOIN_TIMEOUT_SECONDS", 0.1)
+    grandchild_pid_path = tmp_path / "grandchild.pid"
+    script = (
+        "from pathlib import Path\n"
+        "import subprocess, sys\n"
+        "grandchild = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])\n"
+        "Path(sys.argv[1]).write_text(str(grandchild.pid), encoding='utf-8')\n"
+    )
+    started_at = time.monotonic()
+
+    try:
+        completed_process = SubprocessRunner().run(
+            [sys.executable, "-c", script, str(grandchild_pid_path)],
+            cwd=tmp_path,
+            capture_output=True,
+            timeout=10,
+            inactivity_timeout=5,
+        )
+
+        assert time.monotonic() - started_at < 1
+        assert completed_process.stdout == ""
+        assert completed_process.stderr == ""
+    finally:
+        if grandchild_pid_path.exists():
+            grandchild_pid = int(grandchild_pid_path.read_text(encoding="utf-8"))
+            try:
+                os.kill(grandchild_pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+
+
 def test_captured_timeout_exception_carries_partial_output(tmp_path: Path) -> None:
     """墙钟超时被杀时,已收到的输出必须挂在异常上。
 
@@ -1808,31 +1867,30 @@ def test_run_filtered_claude_stream_without_sanitizer_leaks_poison(
     assert "SERVER__PORT=56469" in child_env_text
 
 
-def test_with_available_own_command_accepts_legacy_and_preserves_wrapper(
+def test_with_available_own_command_uses_current_names_and_preserves_wrapper(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """SubprocessRunner 自有名替换只作用于 argv[0]：旧别名命中即接受，包装形态原样保留。
+    """SubprocessRunner 只在当前自有命令间替换 argv[0]，包装形态原样保留。
 
-    覆盖改名窗口里「配置写 kc、环境只装了 iar」这类错配，同时确认带包装的命令行
-    （``uv run kc daemon``）不会被误改——它的首个 token 不是自有名，交由身份识别在
-    别处处理。
+    覆盖「配置写 kc、环境里只有 kedacode」这类错配，同时确认旧 ``iar`` 名称与带包装
+    的命令行（``uv run kc daemon``）不会被误改。
     """
-    available_command_names = {"iar"}
+    available_command_names = {"kedacode"}
     monkeypatch.setattr(
         process_runner_module.shutil,
         "which",
         lambda name: f"/usr/local/bin/{name}" if name in available_command_names else None,
     )
 
-    # 旧别名 iar 在 PATH 上可用：argv[0] 就是它，原样接受（legacy-alias 长期可用）。
-    assert _with_available_own_command(["iar", "daemon"]) == ["iar", "daemon"]
-
-    # 主名 kc 缺失、仅旧别名可用：换成可用的自有名，其余参数逐字不动。
+    # 主命令 kc 缺失、长命令 kedacode 可用：换成当前支持的自有名。
     assert _with_available_own_command(["kc", "run", "--all-ready"]) == [
-        "iar",
+        "kedacode",
         "run",
         "--all-ready",
     ]
+
+    # 已移除的 iar 不再属于自有入口，不能触发命令名回退。
+    assert _with_available_own_command(["iar", "daemon"]) == ["iar", "daemon"]
 
     # 包装形态：首个 token 是 uv，不是自有命令名，整条命令行原样保留、不做替换。
     assert _with_available_own_command(["uv", "run", "kc", "daemon"]) == [

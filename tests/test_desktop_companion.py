@@ -126,7 +126,7 @@ def test_missing_runtime_reports_not_installed_without_spawning(
 
     assert snapshot.status is DesktopCompanionStatus.NOT_INSTALLED
     assert calls == []
-    assert "kedacode[desktop]" in snapshot.hint
+    assert "uv sync" in snapshot.hint
 
 
 def test_close_window_requests_exit_and_returns_idle(
@@ -339,6 +339,52 @@ def test_same_origin_launch_requests_are_accepted(
     """同源 POST 通过校验，返回由实际绑定推出的 origin 供固定窗口加载。"""
     request = _http_request(server, [("Origin", origin)])
     assert _trusted_console_origin(request) == expected
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        pytest.param(
+            [("Referer", "http://127.0.0.1:8313/app/companion/")],
+            id="referer-only",
+        ),
+        pytest.param(
+            [
+                ("Origin", "null"),
+                ("Referer", "http://127.0.0.1:8313/app/companion/"),
+            ],
+            id="null-origin-with-referer",
+        ),
+    ],
+)
+def test_webkit_same_origin_post_without_origin_header_is_accepted(
+    headers: list[tuple[str, str]],
+) -> None:
+    """WebKit 同源 POST 可能不带 Origin：同源 Referer 必须能通过校验。"""
+    request = _http_request(("127.0.0.1", 8313), headers)
+    assert _trusted_console_origin(request) == "http://127.0.0.1:8313"
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        pytest.param(
+            [("Referer", "http://evil.test:8313/app/companion/")],
+            id="cross-origin-referer",
+        ),
+        pytest.param(
+            [("Referer", "http://127.0.0.1:9999/app/companion/")],
+            id="other-local-port-referer",
+        ),
+    ],
+)
+def test_cross_origin_referer_is_rejected(
+    headers: list[tuple[str, str]],
+) -> None:
+    """缺少 Origin 时，跨源 Referer 仍然拿不到窗口操作能力。"""
+    with pytest.raises(HTTPException) as excinfo:
+        _trusted_console_origin(_http_request(("127.0.0.1", 8313), headers))
+    assert excinfo.value.status_code == 403
 
 
 def test_status_probe_reports_the_bound_origin_with_ipv6_brackets() -> None:

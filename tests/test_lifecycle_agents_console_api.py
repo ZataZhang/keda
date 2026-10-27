@@ -4,7 +4,7 @@
 rv-7（agent 标签写注册块且重复被拒）以及 PRD 覆盖读写（rv-4 的后端半边）。
 
 后端真实起 TestClient，配置走 tmp ``config.toml`` / 真实 git 仓库下的
-``.iar.toml``；断言的事实源是**磁盘文件内容**，不是内存状态。
+``.kedacode.toml``；断言的事实源是**磁盘文件内容**，不是内存状态。
 """
 
 from __future__ import annotations
@@ -55,7 +55,7 @@ def console_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[dic
     repo_path.mkdir()
     _git(repo_path, "init")
     _git(repo_path, "checkout", "-b", "main")
-    (repo_path / ".iar.toml").write_text("[agent_runner]\n", encoding="utf-8")
+    (repo_path / ".kedacode.toml").write_text("[agent_runner]\n", encoding="utf-8")
     prd_relative_path = "tasks/pending/P1-FEAT-20260101-demo.md"
     prd_file = repo_path / prd_relative_path
     prd_file.parent.mkdir(parents=True)
@@ -69,12 +69,12 @@ def console_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[dic
         "enabled = true\n",
         encoding="utf-8",
     )
-    monkeypatch.setenv("IAR_CONFIG", str(config_path))
+    monkeypatch.setenv("KEDACODE_CONFIG", str(config_path))
     return {
         "client": TestClient(app),
         "config_path": config_path,
         "repo_path": repo_path,
-        "iar_config_path": repo_path / ".iar.toml",
+        "iar_config_path": repo_path / ".kedacode.toml",
         "prd_relative_path": prd_relative_path,
         "prd_file": prd_file,
     }
@@ -182,7 +182,7 @@ def test_prd_override_view_carries_same_entry_groups(console_env: dict) -> None:
 
 
 def test_global_write_only_touches_config_toml(console_env: dict) -> None:
-    """rv-3：Settings 层保存只写 config.toml，仓库 .iar.toml 不变。"""
+    """rv-3：Settings 层保存只写 config.toml，仓库 .kedacode.toml 不变。"""
     client = console_env["client"]
     iar_before = console_env["iar_config_path"].read_text(encoding="utf-8")
 
@@ -205,7 +205,7 @@ def test_global_write_only_touches_config_toml(console_env: dict) -> None:
 
 
 def test_repository_write_only_touches_iar_toml(console_env: dict) -> None:
-    """rv-3：仓库层保存只写该仓库 .iar.toml，config.toml 不变。"""
+    """rv-3：仓库层保存只写该仓库 .kedacode.toml，config.toml 不变。"""
     client = console_env["client"]
     config_before = console_env["config_path"].read_text(encoding="utf-8")
 
@@ -249,7 +249,7 @@ def test_repository_layer_wins_over_global_in_view(console_env: dict) -> None:
 
 
 def test_repository_restore_key_falls_back_to_global(console_env: dict) -> None:
-    """rv-3：仓库层删除键后该键从 .iar.toml 消失并回落全局层。"""
+    """rv-3：仓库层删除键后该键从 .kedacode.toml 消失并回落全局层。"""
     client = console_env["client"]
     client.put(
         "/api/v1/agent-runner/lifecycle-agents",

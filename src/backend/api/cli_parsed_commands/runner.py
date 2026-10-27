@@ -22,10 +22,35 @@ from backend.api.cli_parsed_context import ParsedCommandContext
 from backend.api.cli_registry import _run_daemon_status_command
 from backend.api.agent_runner_views.runner_live_view import create_runner_live_view
 from backend.core.shared.interfaces.agent_runner import IGitHubClient
-from backend.core.shared.models.agent_runner import IssueSummary
+from backend.core.shared.models.agent_runner import IssueSummary, RepositoryRunContext
 from backend.core.shared.models.publish_stage import PublishStage
 from backend.api import cli as _cli
 from backend.core.use_cases.agent_runner_factory import logger
+
+
+#: ``kc run`` / ``kc supervise`` / ``kc supervise-daemon`` 未传 ``--max-issues`` 时
+#: 本次最多处理几个 Issue。配置项 ``runner.max_issues`` 已退役：常驻 daemon 的
+#: 并发只看并行上限（``--concurrency`` > Backlog 页面设置 > ``max_concurrent_issues``）。
+DEFAULT_BATCH_MAX_ISSUES = 1
+
+
+def _resolve_initialized_repository_contexts(
+    ctx: ParsedCommandContext, *, anchored_stage: str | None = None
+) -> list[RepositoryRunContext]:
+    """解析仓库目标、可选锚定模型预设，并检查每个仓库已初始化。"""
+    contexts = _resolve_cli_repository_targets(
+        parsed=ctx.parsed,
+        runner_settings=ctx.runner_settings,
+        repo_id=ctx.repo_id,
+        repo_override=ctx.repo_override,
+    )
+    if anchored_stage is not None:
+        from backend.api.cli_model_preset_anchor import apply_cli_model_preset
+
+        contexts = apply_cli_model_preset(contexts, ctx.parsed, anchored_stage=anchored_stage)
+    for context in contexts:
+        _cli.require_repository_initialized(context.repo_path, ctx.process_runner)
+    return contexts
 
 
 def _validate_aggregate_run_options(parsed: object, configured_max_issues: int) -> None:
@@ -107,10 +132,7 @@ def run_run_command(ctx: ParsedCommandContext) -> int:
     publish_stage = _resolve_publish_stage(fast_merge=fast_merge, direct_pr=direct_pr)
 
     if aggregate_pr:
-        _validate_aggregate_run_options(
-            parsed,
-            ctx.runner_settings.runner.max_issues,
-        )
+        _validate_aggregate_run_options(parsed, DEFAULT_BATCH_MAX_ISSUES)
 
     if direct_pr and all_ready:
         raise CliError(
@@ -161,7 +183,7 @@ def run_run_command(ctx: ParsedCommandContext) -> int:
 
     contexts = apply_cli_model_preset(contexts, parsed, anchored_stage="implementation")
     for context in contexts:
-        _cli.require_iar_repository_initialized(context.repo_path, ctx.process_runner)
+        _cli.require_repository_initialized(context.repo_path, ctx.process_runner)
     if contexts:
         _ensure_gh_auth_or_prompt(contexts[0].repo_path, ctx.process_runner)
     # PRD 路径目标只在单仓语义下成立：多个仓库无法共享一份 PRD 回链。
@@ -252,7 +274,7 @@ def run_run_command(ctx: ParsedCommandContext) -> int:
         contexts=contexts,
         dry_run=parsed.dry_run,
         agent=parsed.agent,
-        max_issues=parsed.max_issues or ctx.runner_settings.runner.max_issues,
+        max_issues=parsed.max_issues or DEFAULT_BATCH_MAX_ISSUES,
         process_runner=ctx.process_runner,
         github_client_factory=ctx.github_client_factory,
         content_generator=content_generator,
@@ -273,7 +295,7 @@ def run_run_command(ctx: ParsedCommandContext) -> int:
         _dry_run_preview(
             contexts,
             agent=parsed.agent,
-            max_issues=parsed.max_issues or ctx.runner_settings.runner.max_issues,
+            max_issues=parsed.max_issues or DEFAULT_BATCH_MAX_ISSUES,
             target_issue=target_issue,
             all_ready=all_ready,
             fast_merge=fast_merge,
@@ -657,18 +679,14 @@ def run_daemon_command(ctx: ParsedCommandContext) -> int:
             repo_id=ctx.repo_id,
             repo_override=ctx.repo_override,
         )
-    contexts = _resolve_cli_repository_targets(
-        parsed=ctx.parsed,
-        runner_settings=ctx.runner_settings,
-        repo_id=ctx.repo_id,
-        repo_override=ctx.repo_override,
-    )
-    # CLI --preset 一次性锚定（implementation 阶段）；未传旗标时原样返回。
-    from backend.api.cli_model_preset_anchor import apply_cli_model_preset
-
-    contexts = apply_cli_model_preset(contexts, ctx.parsed, anchored_stage="implementation")
-    for context in contexts:
-        _cli.require_iar_repository_initialized(context.repo_path, ctx.process_runner)
+    if getattr(ctx.parsed, "max_issues", None) is not None:
+        raise CliError(
+            "kc daemon no longer accepts --max-issues: the daemon keeps each repository "
+            "at its parallel limit and backfills every polling interval.",
+            code=ExitCode.USAGE,
+            suggestion="kc daemon run --concurrency <N>",
+        )
+    contexts = _resolve_initialized_repository_contexts(ctx, anchored_stage="implementation")
     if contexts:
         _ensure_gh_auth_or_prompt(contexts[0].repo_path, ctx.process_runner)
     interval = (
@@ -732,7 +750,6 @@ def run_daemon_command(ctx: ParsedCommandContext) -> int:
             contexts=contexts,
             interval=interval,
             agent=ctx.parsed.agent,
-            max_issues=ctx.parsed.max_issues or ctx.runner_settings.runner.max_issues,
             process_runner=ctx.process_runner,
             github_client_factory=ctx.github_client_factory,
             content_generator_factory=content_generator_factory,
@@ -757,6 +774,9 @@ def run_daemon_command(ctx: ParsedCommandContext) -> int:
             loop_clock=_cli.create_loop_clock(),
             # 与 Monitor、CLI 共用同一份额度账本：撞限流或额度见底时全员暂停到重置。
             api_budget=_cli.create_github_api_budget(),
+            # 实际生效的并行上限写到单实例锁旁，管理终端与 kc daemon status 据此显示
+            # 包含 --concurrency 在内的真实值。
+            parallel_limit_status_dir=daemon_locks_dir,
         )
     finally:
         _cli.release_daemon_locks(acquired_daemon_locks)
@@ -776,7 +796,7 @@ def run_review_command(ctx: ParsedCommandContext) -> int:
 
     review_contexts = apply_cli_model_preset(contexts, ctx.parsed, anchored_stage="supervisor")
     for context in review_contexts:
-        _cli.require_iar_repository_initialized(context.repo_path, ctx.process_runner)
+        _cli.require_repository_initialized(context.repo_path, ctx.process_runner)
     if review_contexts:
         _ensure_gh_auth_or_prompt(review_contexts[0].repo_path, ctx.process_runner)
     aggregated_exit_code = 0
@@ -788,7 +808,7 @@ def run_review_command(ctx: ParsedCommandContext) -> int:
                 config=context.config,
                 dry_run=ctx.parsed.dry_run,
                 agent=ctx.parsed.agent,
-                max_issues=ctx.parsed.max_issues or ctx.runner_settings.runner.max_issues,
+                max_issues=ctx.parsed.max_issues or DEFAULT_BATCH_MAX_ISSUES,
                 github_client=github_client,
                 process_runner=ctx.process_runner,
                 run_history_store=_create_run_history_store_or_none(),
@@ -808,18 +828,7 @@ def run_review_command(ctx: ParsedCommandContext) -> int:
 
 def run_review_daemon_command(ctx: ParsedCommandContext) -> int:
     """持续运行 post-PR supervisor 检查。"""
-    contexts = _resolve_cli_repository_targets(
-        parsed=ctx.parsed,
-        runner_settings=ctx.runner_settings,
-        repo_id=ctx.repo_id,
-        repo_override=ctx.repo_override,
-    )
-    # CLI --preset 一次性锚定（supervisor 阶段）；未传旗标时原样返回。
-    from backend.api.cli_model_preset_anchor import apply_cli_model_preset
-
-    contexts = apply_cli_model_preset(contexts, ctx.parsed, anchored_stage="supervisor")
-    for context in contexts:
-        _cli.require_iar_repository_initialized(context.repo_path, ctx.process_runner)
+    contexts = _resolve_initialized_repository_contexts(ctx, anchored_stage="supervisor")
     if contexts:
         _ensure_gh_auth_or_prompt(contexts[0].repo_path, ctx.process_runner)
     interval = (
@@ -831,7 +840,7 @@ def run_review_daemon_command(ctx: ParsedCommandContext) -> int:
         contexts=contexts,
         interval=interval,
         agent=ctx.parsed.agent,
-        max_issues=ctx.parsed.max_issues or ctx.runner_settings.runner.max_issues,
+        max_issues=ctx.parsed.max_issues or DEFAULT_BATCH_MAX_ISSUES,
         process_runner=ctx.process_runner,
         github_client_factory=ctx.github_client_factory,
         run_history_store=_create_run_history_store_or_none(),
@@ -847,14 +856,7 @@ def run_recover_command(ctx: ParsedCommandContext) -> int:
         recover_publish_issue,
     )
 
-    contexts = _resolve_cli_repository_targets(
-        parsed=ctx.parsed,
-        runner_settings=ctx.runner_settings,
-        repo_id=ctx.repo_id,
-        repo_override=ctx.repo_override,
-    )
-    for context in contexts:
-        _cli.require_iar_repository_initialized(context.repo_path, ctx.process_runner)
+    contexts = _resolve_initialized_repository_contexts(ctx)
     if len(contexts) != 1:
         raise CliError(
             "kc recover requires exactly one target repository. "
@@ -907,14 +909,7 @@ def run_blocked_continue_command(ctx: ParsedCommandContext) -> int:
     )
     from backend.api.cli_console import error_console
 
-    contexts = _resolve_cli_repository_targets(
-        parsed=ctx.parsed,
-        runner_settings=ctx.runner_settings,
-        repo_id=ctx.repo_id,
-        repo_override=ctx.repo_override,
-    )
-    for context in contexts:
-        _cli.require_iar_repository_initialized(context.repo_path, ctx.process_runner)
+    contexts = _resolve_initialized_repository_contexts(ctx)
     if len(contexts) != 1:
         raise CliError(
             "kc blocked-continue requires exactly one target repository. "

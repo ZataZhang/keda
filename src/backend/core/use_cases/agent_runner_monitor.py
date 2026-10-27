@@ -3,7 +3,7 @@
 本模块是 Agent Runner 监控面板的核心业务逻辑：
 - `build_overview`：按仓库汇总队列状态、最新 event 和异常计数。
 - `build_issue_detail`：单个 Issue 的 label、PR 上下文、worktree 状态、event timeline、anomaly 和建议 CLI。
-- `parse_event_timeline`：从 Issue comments 解析所有 iar:event marker 作为事件时间线。
+- `parse_event_timeline`：从 Issue comments 解析所有 kc:event marker 作为事件时间线。
 - 异常检测规则：label_pr_mismatch、pr_dirty_in_review、dirty_worktree_mismatch、event_label_mismatch。
 
 按照四层依赖方向，本模块属于 core/use_cases/，只依赖
@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 import re
 import shlex
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -123,6 +123,9 @@ class RepositoryMonitoringOverview:
     issues: tuple[IssueMonitoringSnapshot, ...]
     anomaly_count: int
     anomaly_summary: dict[str, int]
+    #: 最近运行账本里出现、但已不在队列标签范围内的 Issue（典型是已关闭）。
+    #: 只用于运行看板判定当前状态，不进入队列展示与异常统计。
+    tracked_issues: tuple[IssueMonitoringSnapshot, ...] = ()
     scanned_at: str = ""
 
 
@@ -152,7 +155,7 @@ class AnomalyDetectionContext:
 # ─────────────────────────────────────────────────────────────────────────────
 
 _EVENT_MARKER_LINE_PATTERN = re.compile(
-    r"<!--\s*iar:event\s+([^>]+?)\s*-->",
+    r"<!--\s*kc:event\s+([^>]+?)\s*-->",
     re.DOTALL,
 )
 
@@ -190,11 +193,11 @@ def _parse_marker_attributes(
 
 
 def parse_event_timeline(comments: Iterable[str]) -> list[EventTimelineEntry]:
-    """Parse all iar:event markers from Issue comments, oldest first.
+    """Parse all kc:event markers from Issue comments, oldest first.
 
     Args:
         comments: Iterable of comment bodies in chronological order. Bodies
-            that do not contain an ``iar:event`` marker are skipped.
+            that do not contain an ``kc:event`` marker are skipped.
 
     Returns:
         A list of :class:`EventTimelineEntry` ordered from oldest to newest.
@@ -404,7 +407,7 @@ _POST_PR_LABELS: frozenset[str] = frozenset(
 
 
 def _phase_implies_label(phase: str) -> str | None:
-    """Map an iar:event phase to the label it implies.
+    """Map an kc:event phase to the label it implies.
 
     Returns ``None`` when the phase does not pin a label decision.
     """
@@ -777,6 +780,58 @@ def _now_iso() -> str:
     return _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")
 
 
+def _minimal_issue_snapshot(
+    issue: IssueSummary,
+    config: AppConfig,
+) -> IssueMonitoringSnapshot:
+    """为队列外的历史 Issue 生成只含状态判定所需字段的最轻量快照。
+
+    运行看板需要知道这些 Issue 当前是否已关闭；它们通常带着历史 agent 标签，
+    若走完整 :func:`build_issue_snapshot` 会额外读取评论 / PR / worktree，
+    并把这些历史标签误算成当前异常。这里只保留身份、标签与状态。
+    """
+    labels = tuple(issue.labels)
+    return IssueMonitoringSnapshot(
+        number=issue.number,
+        title=issue.title,
+        url=issue.url,
+        labels=labels,
+        state=issue.state,
+        primary_label=_resolve_primary_label(labels, config.labels),
+        pr=None,
+        worktree=WorktreeStatus(exists=False),
+        timeline=(),
+        latest_event=None,
+        anomalies=(),
+        suggested_cli_commands=(),
+        has_anomaly=False,
+        anomaly_types=(),
+    )
+
+
+def _collect_tracked_issues(
+    *,
+    github_client: IGitHubClient,
+    tracked_issue_numbers: Sequence[int],
+    excluded_numbers: set[int],
+    config: AppConfig,
+) -> list[IssueMonitoringSnapshot]:
+    """读取运行账本中出现、但不在队列标签结果里的 Issue 当前状态。"""
+    snapshots: list[IssueMonitoringSnapshot] = []
+    seen: set[int] = set(excluded_numbers)
+    for issue_number in tracked_issue_numbers:
+        if issue_number in seen:
+            continue
+        seen.add(issue_number)
+        try:
+            issue = github_client.get_issue(issue_number)
+        except Exception as exc:  # noqa: BLE001 - 单个 Issue 读取失败只降级该行。
+            _logger.info("Tracked issue #%s read failed: %s", issue_number, exc)
+            continue
+        snapshots.append(_minimal_issue_snapshot(issue, config=config))
+    return snapshots
+
+
 def build_repository_overview(
     *,
     repo_id: str,
@@ -786,6 +841,7 @@ def build_repository_overview(
     github_client: IGitHubClient,
     process_runner: IProcessRunner,
     repo_path: Path,
+    tracked_issue_numbers: Sequence[int] = (),
 ) -> RepositoryMonitoringOverview:
     """Build a per-repository monitoring overview."""
     queue_issues = _collect_queue_issues(config=config, github_client=github_client)
@@ -811,6 +867,12 @@ def build_repository_overview(
                 continue
             issue_snapshots.append(snapshot)
 
+    tracked_snapshots = _collect_tracked_issues(
+        github_client=github_client,
+        tracked_issue_numbers=tracked_issue_numbers,
+        excluded_numbers={issue.number for issue in queue_issues},
+        config=config,
+    )
     queue_counts = _compute_queue_counts(queue_issues, config)
     anomaly_count = sum(1 for snap in issue_snapshots if snap.has_anomaly)
     anomaly_summary: dict[str, int] = {"warning": 0, "error": 0}
@@ -845,6 +907,7 @@ def build_repository_overview(
         issues=tuple(issue_snapshots),
         anomaly_count=anomaly_count,
         anomaly_summary=anomaly_summary,
+        tracked_issues=tuple(tracked_snapshots),
         scanned_at=_now_iso(),
     )
 
@@ -854,6 +917,7 @@ def build_overview(
     repositories: Iterable,
     github_client_factory,
     process_runner: IProcessRunner,
+    tracked_issue_numbers_by_repo: Mapping[str, Sequence[int]] | None = None,
 ) -> MonitoringResult:
     """Build the cross-repository monitoring overview.
 
@@ -863,6 +927,9 @@ def build_overview(
         github_client_factory: Callable accepting ``repo_path`` and returning
             a :class:`IGitHubClient` implementation.
         process_runner: Shared process runner.
+        tracked_issue_numbers_by_repo: 运行账本中近期出现、但可能已不在队列标签
+            范围内的 Issue 编号。用于给已关闭 / 已移出队列的 Issue 补当前状态，
+            避免运行看板把它们误报成「状态未知」。
 
     Returns:
         A :class:`MonitoringResult` containing per-repository overviews.
@@ -879,6 +946,11 @@ def build_overview(
                 github_client=github_client,
                 process_runner=process_runner,
                 repo_path=repository_context.repo_path,
+                tracked_issue_numbers=(
+                    tracked_issue_numbers_by_repo.get(repository_context.repo_id, ())
+                    if tracked_issue_numbers_by_repo is not None
+                    else ()
+                ),
             )
         except Exception as exc:  # noqa: BLE001 - one bad repository must not blank the page.
             _logger.warning(

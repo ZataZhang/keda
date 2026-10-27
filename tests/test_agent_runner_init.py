@@ -115,7 +115,7 @@ def test_iar_init_dry_run_real_entry(tmp_path: Path) -> None:
             "run",
             "--project",
             str(REPOSITORY_ROOT),
-            "iar",
+            "kc",
             "init",
             "--dry-run",
         ],
@@ -172,7 +172,7 @@ def test_iar_init_prints_review_hint_after_write(
     """`kc init` should print the bilingual review hint after writing the repo config."""
     repo_path = _init_git_repository(tmp_path, "target")
     monkeypatch.chdir(repo_path)
-    monkeypatch.setenv("IAR_CONFIG", str(_create_isolated_config(tmp_path)))
+    monkeypatch.setenv("KEDACODE_CONFIG", str(_create_isolated_config(tmp_path)))
 
     assert main(["init"]) == 0
 
@@ -180,6 +180,9 @@ def test_iar_init_prints_review_hint_after_write(
     assert "请检查" in captured.err
     assert "Please review verification_commands" in captured.err
     assert "git diff --check" in captured.err
+    assert "not enabled" in captured.out
+    assert "--template blocker-monitor" in captured.out
+    assert not (repo_path / "tasks" / "loops").exists()
 
 
 def test_iar_init_requests_remote_user_skill_install(
@@ -190,7 +193,7 @@ def test_iar_init_requests_remote_user_skill_install(
     repo_path = _init_git_repository(tmp_path, "target")
     requested_options: list[RemoteTemplateSkillInstallOptions] = []
     monkeypatch.chdir(repo_path)
-    monkeypatch.setenv("IAR_CONFIG", str(_create_isolated_config(tmp_path)))
+    monkeypatch.setenv("KEDACODE_CONFIG", str(_create_isolated_config(tmp_path)))
 
     def capture_install_options(
         options: RemoteTemplateSkillInstallOptions,
@@ -226,7 +229,7 @@ def test_iar_init_writes_idempotent_and_force_overwrites(
     """iar init should write once, stay idempotent when unchanged, and honor --force."""
     repo_path = _init_git_repository(tmp_path, "target")
     monkeypatch.chdir(repo_path)
-    monkeypatch.setenv("IAR_CONFIG", str(_create_isolated_config(tmp_path)))
+    monkeypatch.setenv("KEDACODE_CONFIG", str(_create_isolated_config(tmp_path)))
 
     first_exit_code = main(["init"])
     config_path = repo_path / product_identity.REPOSITORY_CONFIG_FILENAME
@@ -279,7 +282,7 @@ def test_iar_init_protects_diverged_config(
     """iar init should fail without --force when the existing config diverged."""
     repo_path = _init_git_repository(tmp_path, "target")
     monkeypatch.chdir(repo_path)
-    monkeypatch.setenv("IAR_CONFIG", str(_create_isolated_config(tmp_path)))
+    monkeypatch.setenv("KEDACODE_CONFIG", str(_create_isolated_config(tmp_path)))
 
     assert main(["init"]) == 0
     config_path = repo_path / product_identity.REPOSITORY_CONFIG_FILENAME
@@ -746,7 +749,7 @@ def test_iar_init_registers_repository_in_global_registry(
     repo_path = _init_git_repository(tmp_path, "target")
     monkeypatch.chdir(repo_path)
     config_path = _create_isolated_config(tmp_path)
-    monkeypatch.setenv("IAR_CONFIG", str(config_path))
+    monkeypatch.setenv("KEDACODE_CONFIG", str(config_path))
 
     assert main(["init"]) == 0
 
@@ -770,7 +773,7 @@ def test_iar_init_updates_registry_path_when_repository_moves(
     old_path = _init_git_repository(tmp_path, "old-target")
     new_path = _init_git_repository(tmp_path, "target")
     config_path = _create_isolated_config(tmp_path)
-    monkeypatch.setenv("IAR_CONFIG", str(config_path))
+    monkeypatch.setenv("KEDACODE_CONFIG", str(config_path))
 
     monkeypatch.chdir(old_path)
     assert main(["init"]) == 0
@@ -784,11 +787,11 @@ def test_iar_init_updates_registry_path_when_repository_moves(
     assert config_text.count("[agent_runner.repositories.target]") == 1
 
 
-def test_iar_init_does_not_pollute_target_repo_config_toml(
+def test_kc_init_does_not_pollute_target_repo_config_toml(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Without IAR_CONFIG, iar init must write registry to ~/.iar/config.toml only.
+    """Without KEDACODE_CONFIG, kc init must write registry to ~/.kedacode/config.toml only.
 
     Regression guard: previously ``create_registry_editor()`` resolved the
     registry path via ``resolve_config_toml_path()``, which walks upward from
@@ -796,9 +799,9 @@ def test_iar_init_does_not_pollute_target_repo_config_toml(
     ``config.toml``. That polluted the target repo with
     ``[agent_runner.repositories.<repo_id>]`` entries.
     """
-    # 本用例的前提就是"没有 IAR_CONFIG"；IAR agent 会给测试进程注入父进程的
-    # ``IAR_CONFIG``，那样 registry 会落进那份外部配置而不是 fake home。
-    monkeypatch.delenv("IAR_CONFIG", raising=False)
+    # 本用例的前提就是"没有 KEDACODE_CONFIG"；Agent runner 会给测试进程注入父进程的
+    # ``KEDACODE_CONFIG``，那样 registry 会落进那份外部配置而不是 fake home。
+    monkeypatch.delenv("KEDACODE_CONFIG", raising=False)
     fake_home = tmp_path / "home"
     fake_home.mkdir()
     monkeypatch.setenv("HOME", str(fake_home))
@@ -818,7 +821,7 @@ def test_iar_init_does_not_pollute_target_repo_config_toml(
     # The target repository's application config.toml must remain untouched.
     assert repo_config_path.read_text(encoding="utf-8") == original_repo_config
 
-    # Registry must land in the global IAR config instead.
+    # Registry must land in the global KedaCode config instead.
     global_config_path = fake_home / product_identity.STATE_DIR_NAME / "config.toml"
     assert global_config_path.is_file()
     global_config_text = global_config_path.read_text(encoding="utf-8")
@@ -846,6 +849,7 @@ def test_ensure_gitignore_inserts_block_when_missing(tmp_path: Path) -> None:
         ".kedacode/",
         ".agent-runner/",
         ".iar/",
+        ".kc-worktrees/",
         ".iar-worktrees/",
         "tasks/evidence/**",
         "!tasks/evidence/**/",
@@ -857,11 +861,13 @@ def test_ensure_gitignore_inserts_block_when_missing(tmp_path: Path) -> None:
     assert ".kedacode/" in text
     assert ".iar/" in text
     assert ".agent-runner/" in text
+    assert ".kc-worktrees/" in text
     assert ".iar-worktrees/" in text
-    # tasks/evidence 白名单段：整目录排除、放行子目录、只提交 .md 文本报告。
+    # tasks/evidence 白名单段：只允许 Markdown 报告，manifest 保留在本地。
     assert "tasks/evidence/**" in text
     assert "!tasks/evidence/**/" in text
     assert "!tasks/evidence/**/*.md" in text
+    assert "!tasks/evidence/**/evidence.json" not in text
 
 
 def test_ensure_gitignore_skips_patterns_already_outside_block(
@@ -883,6 +889,7 @@ def test_ensure_gitignore_skips_patterns_already_outside_block(
     assert result.entries_added == (
         ".kedacode/",
         ".iar/",
+        ".kc-worktrees/",
         ".iar-worktrees/",
         "tasks/evidence/**",
         "!tasks/evidence/**/",
@@ -934,12 +941,40 @@ def test_ensure_gitignore_updates_block_when_patterns_missing(
     assert result.block_updated is True
     assert ".kedacode/" in result.entries_added
     assert ".agent-runner/" in result.entries_added
+    assert ".kc-worktrees/" in result.entries_added
     assert ".iar-worktrees/" in result.entries_added
     assert ".kedacode/" in text
     assert ".agent-runner/" in text
+    assert ".kc-worktrees/" in text
     assert ".iar-worktrees/" in text
     # Header / footer order must be preserved.
     assert text.index(GITIGNORE_BLOCK_HEADER) < text.index(GITIGNORE_BLOCK_FOOTER)
+
+
+def test_ensure_gitignore_rewrites_the_legacy_managed_block(tmp_path: Path) -> None:
+    """新版 init 把旧 managed block 原位换成 kc block 并保留旧目录忽略规则。"""
+    repo_path = tmp_path / "target"
+    repo_path.mkdir()
+    gitignore_path = repo_path / ".gitignore"
+    gitignore_path.write_text(
+        "# project rule\ncustom/\n\n"
+        "# >>> iar (managed by `iar init`) >>>\n"
+        "# IAR-managed git worktrees (host-local)\n"
+        ".iar-worktrees/\n"
+        "# <<< iar <<<\n",
+        encoding="utf-8",
+    )
+
+    sync_result = ensure_gitignore_entries(GitignoreSyncOptions(repo_root_path=repo_path))
+
+    migrated_text = gitignore_path.read_text(encoding="utf-8")
+    assert sync_result.block_updated
+    assert "# >>> iar (managed by `iar init`) >>>" not in migrated_text
+    assert GITIGNORE_BLOCK_HEADER in migrated_text
+    assert GITIGNORE_BLOCK_FOOTER in migrated_text
+    assert ".kc-worktrees/" in migrated_text
+    assert ".iar-worktrees/" in migrated_text
+    assert migrated_text.startswith("# project rule\ncustom/\n")
 
 
 def test_ensure_gitignore_does_not_insert_empty_block_when_all_external(
@@ -950,7 +985,7 @@ def test_ensure_gitignore_does_not_insert_empty_block_when_all_external(
     repo_path.mkdir()
     gitignore = repo_path / ".gitignore"
     gitignore.write_text(
-        ".kedacode/\n.iar/\n.agent-runner/\n.iar-worktrees/\n"
+        ".kedacode/\n.iar/\n.agent-runner/\n.kc-worktrees/\n.iar-worktrees/\n"
         "tasks/evidence/**\n!tasks/evidence/**/\n!tasks/evidence/**/*.md\n",
         encoding="utf-8",
     )
@@ -965,6 +1000,7 @@ def test_ensure_gitignore_does_not_insert_empty_block_when_all_external(
         ".kedacode/",
         ".iar/",
         ".agent-runner/",
+        ".kc-worktrees/",
         ".iar-worktrees/",
         "tasks/evidence/**",
         "!tasks/evidence/**/",
@@ -1053,7 +1089,7 @@ def test_iar_init_writes_gitignore_block(tmp_path: Path, monkeypatch: pytest.Mon
     """``iar init`` should add the iar .gitignore block on a fresh repo."""
     repo_path = _init_git_repository(tmp_path, "target")
     monkeypatch.chdir(repo_path)
-    monkeypatch.setenv("IAR_CONFIG", str(_create_isolated_config(tmp_path)))
+    monkeypatch.setenv("KEDACODE_CONFIG", str(_create_isolated_config(tmp_path)))
 
     assert main(["init"]) == 0
 
@@ -1063,6 +1099,7 @@ def test_iar_init_writes_gitignore_block(tmp_path: Path, monkeypatch: pytest.Mon
     assert ".kedacode/" in gitignore_text
     assert ".iar/" in gitignore_text
     assert ".agent-runner/" in gitignore_text
+    assert ".kc-worktrees/" in gitignore_text
     assert ".iar-worktrees/" in gitignore_text
 
 
@@ -1072,7 +1109,7 @@ def test_iar_init_no_update_gitignore_skips_block(
     """``--no-update-gitignore`` should not create .gitignore."""
     repo_path = _init_git_repository(tmp_path, "target")
     monkeypatch.chdir(repo_path)
-    monkeypatch.setenv("IAR_CONFIG", str(_create_isolated_config(tmp_path)))
+    monkeypatch.setenv("KEDACODE_CONFIG", str(_create_isolated_config(tmp_path)))
 
     assert main(["init", "--no-update-gitignore"]) == 0
     assert not (repo_path / ".gitignore").exists()
@@ -1084,7 +1121,7 @@ def test_iar_init_dry_run_does_not_write_gitignore(
     """``--dry-run`` must not touch .gitignore even when the block would be added."""
     repo_path = _init_git_repository(tmp_path, "target")
     monkeypatch.chdir(repo_path)
-    monkeypatch.setenv("IAR_CONFIG", str(_create_isolated_config(tmp_path)))
+    monkeypatch.setenv("KEDACODE_CONFIG", str(_create_isolated_config(tmp_path)))
 
     assert main(["init", "--dry-run"]) == 0
     assert not (repo_path / ".gitignore").exists()
@@ -1098,7 +1135,7 @@ def test_iar_init_dry_run_emits_gitignore_block_lines(
     """The dry-run plan should print the managed block header and entries."""
     repo_path = _init_git_repository(tmp_path, "target")
     monkeypatch.chdir(repo_path)
-    monkeypatch.setenv("IAR_CONFIG", str(_create_isolated_config(tmp_path)))
+    monkeypatch.setenv("KEDACODE_CONFIG", str(_create_isolated_config(tmp_path)))
 
     assert main(["init", "--dry-run"]) == 0
 
@@ -1109,6 +1146,7 @@ def test_iar_init_dry_run_emits_gitignore_block_lines(
     assert ".kedacode/" in out
     assert ".iar/" in out
     assert ".agent-runner/" in out
+    assert ".kc-worktrees/" in out
     assert ".iar-worktrees/" in out
     assert GITIGNORE_BLOCK_FOOTER in out
 
@@ -1125,7 +1163,7 @@ def test_iar_init_dry_run_reports_packaged_operator_skill_conflict(
     user_skill.parent.mkdir(parents=True)
     user_skill.write_text("user version\n", encoding="utf-8")
     monkeypatch.chdir(repo_path)
-    monkeypatch.setenv("IAR_CONFIG", str(_create_isolated_config(tmp_path)))
+    monkeypatch.setenv("KEDACODE_CONFIG", str(_create_isolated_config(tmp_path)))
     monkeypatch.setattr(
         "backend.api.cli_skill.install_remote_template_skills",
         lambda options: RemoteTemplateSkillInstallResult(
@@ -1163,7 +1201,7 @@ def test_iar_init_surfaces_legacy_operator_skill_copy_notices(
         (pristine_root, pristine_contract_text),
         (modified_root, modified_contract_text),
     ):
-        legacy_skill_path = skills_root / product_identity.LEGACY_OPERATOR_SKILL_NAME
+        legacy_skill_path = skills_root / "iar-operator"
         legacy_skill_path.mkdir(parents=True)
         (legacy_skill_path / "SKILL.md").write_text(contract_text, encoding="utf-8")
     monkeypatch.setattr(
@@ -1172,7 +1210,7 @@ def test_iar_init_surfaces_legacy_operator_skill_copy_notices(
         frozenset({hashlib.sha256(pristine_contract_text.encode("utf-8")).hexdigest()}),
     )
     monkeypatch.chdir(repo_path)
-    monkeypatch.setenv("IAR_CONFIG", str(_create_isolated_config(tmp_path)))
+    monkeypatch.setenv("KEDACODE_CONFIG", str(_create_isolated_config(tmp_path)))
     monkeypatch.setattr(
         "backend.api.cli_skill.install_remote_template_skills",
         lambda options: RemoteTemplateSkillInstallResult(
@@ -1191,11 +1229,9 @@ def test_iar_init_surfaces_legacy_operator_skill_copy_notices(
     output = " ".join(capsys.readouterr().out.split())
     assert "Removed the legacy operator skill copy at" in output
     assert "Kept the modified legacy operator skill copy at" in output
-    assert str(modified_root / product_identity.LEGACY_OPERATOR_SKILL_NAME) in output
-    assert not (pristine_root / product_identity.LEGACY_OPERATOR_SKILL_NAME).exists()
-    preserved_contract_path = (
-        modified_root / product_identity.LEGACY_OPERATOR_SKILL_NAME / "SKILL.md"
-    )
+    assert str(modified_root / "iar-operator") in output
+    assert not (pristine_root / "iar-operator").exists()
+    preserved_contract_path = modified_root / "iar-operator" / "SKILL.md"
     assert preserved_contract_path.read_text(encoding="utf-8") == modified_contract_text
 
 
@@ -1205,7 +1241,7 @@ def test_iar_init_idempotent_does_not_rewrite_gitignore(
     """Running ``iar init`` twice must not change .gitignore after the first write."""
     repo_path = _init_git_repository(tmp_path, "target")
     monkeypatch.chdir(repo_path)
-    monkeypatch.setenv("IAR_CONFIG", str(_create_isolated_config(tmp_path)))
+    monkeypatch.setenv("KEDACODE_CONFIG", str(_create_isolated_config(tmp_path)))
 
     assert main(["init"]) == 0
     first = (repo_path / ".gitignore").read_text(encoding="utf-8")

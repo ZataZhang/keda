@@ -11,10 +11,12 @@ The user says 「把 tasks/pending/xxx.md 建成 issue」「建个 issue」「�
 3. **No in-flight PR already delivers this PRD** — ask `kc backlog ci status --prd <prd-path> --repo-id <repo-id>`; if a PR for this PRD is still open, a fresh Issue re-queues work that is already moving.
 4. **Whether the user wants the Issue to enter the queue now** — creating an Issue and enqueuing it (a daemon may pick it up) are different intents. PRD-path creation also back-writes the local PRD link and, by default, stages, commits, and pushes that PRD; only `--from-prompt` creation leaves local files untouched. Creation **enqueues by default**, so pass `--no-ready` when the user asked only to create the Issue and will run it explicitly later. Since enqueueing is the default, ask first when the user's wording does not make the intent clear.
 5. **The working directory resolves to exactly one registered repository** — when it matches several, commands refuse to guess; pass `--repo <path>` or `--repo-id <id>` so the create targets the repo the user means.
+6. **PRD companion files are committed and pushed first** — run `git status --porcelain` before creating the Issue, then commit the PRD's referenced prototypes, design docs, diagrams, evidence scripts, screenshots, and other companion files in a normal commit on the branch that will be pushed. Committed files travel with that branch push; uncommitted or untracked files do not reach the base branch. Do not pre-`git add` companion files: `kc issue create` publishes only the PRD and rejects an index containing non-PRD files, so staging companions instead of committing them blocks publication.
 
 ## Execute and never do
 
 - `kc issue create tasks/pending/<file>.md` creates and publishes the GitHub Issue, back-writes the link to the PRD, and **enqueues it by default**; add `--no-ready` when the user asked only to create it: `kc issue create tasks/pending/<file>.md --no-ready --repo <path>`.
+- Creating the Issue alone is **not a completed handoff**: the deliverable includes the PRD's companion files on the base branch. After creation, run `git status --porcelain`; if any PRD-related files remain uncommitted or untracked, report the result as `partial` and do not claim the deliverable is complete.
 - An Issue with no PRD behind it comes from a one-line request: `kc issue create --from-prompt "<一句话需求>"` — mutually exclusive with the PRD-path argument (neither or both is a usage error). Add `--require-validation` only when the user wants validation gates in the body.
 - Creating an Issue **writes GitHub state**; PRD-path creation also updates and, by default, publishes the local PRD — confirm the target, readiness choice, repository, and these side effects under the hub's existing-authorization rule before running it.
 - Never turn 「看看这个 PRD 有没有 issue」or any other read-only check into a create, and never invent a PRD path the user did not name.
@@ -23,6 +25,14 @@ The user says 「把 tasks/pending/xxx.md 建成 issue」「建个 issue」「�
 
 - Wrong or duplicate Issue: close the extra one (`gh issue close <N> --comment "duplicate of <M>"`) and keep the one the PRD links back to; fix the PRD's `- GitHub Issue:` line if it now points at a closed Issue.
 - Creation does not run an implementation Agent or create its Issue worktree. For `--from-prompt`, cleanup is GitHub-side only; for a PRD-path creation, also inspect the back-written local link and any already-published PRD commit. Correct the link through the normal authorized publication flow; do not reset Git history or discard unrelated changes.
+
+## Target repository templates
+
+AI content generation for PRD/prompt Issues and ordinary Draft PRs automatically reads the local repository's Issue/PR templates, including YAML Issue Forms (used as Markdown guidance). Template metadata does not change routing: the Issue/PRD commands and their gates stay exactly as documented in `docs/guides/agent-runner.md`.
+
+- Existing ordinary PRs are reused rather than replaced; preserve template sections and human-written content in later edits.
+- Disabled or failed AI generation falls back to the existing deterministic output without template guarantees, so do not describe a fallback Issue/PR body as template-compliant.
+- Aggregate PRs and organization-level default templates are outside this support; do not claim the repository template was applied there.
 
 ## Related
 

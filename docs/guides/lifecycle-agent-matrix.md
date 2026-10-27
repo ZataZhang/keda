@@ -88,6 +88,12 @@ console 的三处生命周期入口（统一设置页的全局 / 仓库范围、
 | `content_generation` | 讨论与内容生成 | **横切四个 target**，见下文 | `generated_prd_content.py::generate_prd_content` / `generated_content.py::generate_issue_content` / `generated_issue_prompt_content.py::generate_issue_prompt_content` / `generate_pr_content` |
 | `planner` | 独立入口 | `kc ask`，不在任何 Issue 流水线上 | `cli_parsed_commands/agent.py::run_ask_command` |
 
+上表之外还有一道**启动前门禁**消费矩阵里的三个键：`kc run` / daemon 在认领 Issue 之前按
+`implementation` → `verifier` → `review` 顺序解析各阶段的 agent（预设优先于矩阵），谁的
+`bin` 在本机 `PATH` 上解析不到就以未找到（3）fail-fast，点名阶段 / 预设 / agent /
+可执行文件并指向 `kc agent setup`；回退链不参与判定，也不会替"这台机器没装"偷偷换人。
+完整口径与本机引导见 [Agent Runner 使用指南](agent-runner.md#agent-pre-run-gate)。
+
 ### 三个入口
 
 **入口 A：`kc run` / `kc daemon` 的每轮三段式。** daemon 每轮依次执行
@@ -162,7 +168,10 @@ verifier = "codex"
 closeout = "executor"   # 跟随实现者（默认）
 ```
 
-`config.toml` 里给出的是**全注释模板**，取消注释即生效。
+状态目录的 `config.toml` 首次创建时只带**注释掉的骨架示例**（不会被源码根模板覆盖或
+播种），取消注释即生效；更常见的写法是不手工编辑——`kc agent setup --agent <name>`
+按本机实际装了的 agent 写这一层，`--fix` 批量清掉指向没装 agent 的绑定
+（[本机引导](agent-runner.md#agent-setup-guide)）。
 
 ### PRD 层：文件头部 `lifecycle_agents` 块
 
@@ -191,7 +200,7 @@ PRD 覆盖的生效范围是**有 PRD / Issue 上下文的八个阶段**：`impl
 
 | 层 | 写入文件 | 入口 |
 |---|---|---|
-| 全局（机器级） | `config.toml` | **Settings → 「生命周期、模型与推理深度统一设置」→ 范围选「全局」** |
+| 全局（机器级） | `config.toml` | **Settings → 「生命周期、模型与推理深度统一设置」→ 范围选「全局」**；命令行 **`kc agent setup`**（只列本机装了的 agent）或 `kc agent lifecycle set --scope global` |
 | 仓库级 | 该仓库 `.kedacode.toml` | **同一设置页 → 范围选「仓库」并选仓库**；或 **Backlog 仓库行齿轮**（直接带仓库进入该页） |
 | PRD 级 | 该 PRD 文件头部 | **PRD 原文页工具栏「Agent 覆盖」** |
 
@@ -201,7 +210,9 @@ PRD 覆盖的生效范围是**有 PRD / Issue 上下文的八个阶段**：`impl
 选择器**在「全局」与「仓库」间切换，仓库范围附一个仓库下拉；页首另有「生命周期矩阵 /
 模型预设 / 执行器回退」三个区块锚点。Settings 主页面保留**「Agent 标签设置」**
 （编辑每个 agent 的 GitHub 路由标签名 / 颜色 / 描述，是 `auto` 解析 Issue 标签的依据）
-与指向统一设置页的入口卡片；Backlog 的仓库齿轮进入同一页面并预选该仓库。
+与指向统一设置页的入口卡片；Backlog 的仓库齿轮进入同一页面并预选该仓库。矩阵与设置页
+逐 agent 显示**本机可用性**（「未安装」/ 解析到的可执行文件路径），事实源与
+`kc agent list` 的 `available` / `bin_path` 是同一份序列化，两边不会各说一套。
 
 矩阵区是**九阶段有效配置表**：各阶段按上表三组**导航分组**呈现，组标题旁有组说明，
 每行生命周期名下再带一行触发时机。每行同时呈递绑定预设、最终生效 Agent、模型 ID、推理

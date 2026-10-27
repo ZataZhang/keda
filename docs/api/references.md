@@ -60,11 +60,13 @@
 
 响应示例：
 
+`forbidden_path_exceptions` 使用与 `forbidden_path_patterns` 相同的 `fnmatch` 通配语义；路径或文件名命中例外后会跳过禁改拦截。例外会覆盖任意禁改模式，因此应只列出范围明确的安全文件。
+
 ```json
 {
   "daemon_mode": false,
   "config": {
-    "max_issues": 1,
+    "max_concurrent_issues": 1,
     "default_agent": "auto",
     "max_recovery_attempts": 5,
     "recovery_retry_delay_seconds": 30,
@@ -75,7 +77,8 @@
     "base_branch": "main",
     "remote": "origin",
     "auto_merge": false,
-    "forbidden_path_patterns": [".env", ".env.*", "secrets/*"]
+    "forbidden_path_patterns": [".env", ".env.*", "secrets/*"],
+    "forbidden_path_exceptions": [".env.example", ".env.*.example"]
   },
   "repositories": [
     {
@@ -134,7 +137,7 @@
       "name": "foo",
       "path": "/Users/me/code/foo",
       "is_git_repo": true,
-      "has_iar_config": true,
+      "has_repository_config": true,
       "already_registered": false,
       "suggested_repo_id": "foo"
     }
@@ -146,7 +149,7 @@
 
 - `path` / `parent` / `home`：当前目录、上级目录（已是文件系统根时为 `null`）与用户主目录。
 - `suggested_repo_id` / `suggested_display_name`：用于回填「添加仓库」表单的建议值，`suggested_repo_id` 由后端按 `normalize_repository_id` 规则从目录名生成，与 `kc registry` 扫描保持一致。
-- `directories[].is_git_repo` / `has_iar_config` / `already_registered`：该子目录是否为 git 仓库、是否已 `kc init`、是否已在 registry 中注册。
+- `directories[].is_git_repo` / `has_repository_config` / `already_registered`：该子目录是否为 git 仓库、是否已 `kc init`、是否已在 registry 中注册。
 
 ### `GET /api/v1/agent-runner/backlog/prds/{encoded_path}/content`
 
@@ -189,7 +192,7 @@ curl -sS \
   "max_parallel": null,
   "effective_max_parallel": 2,
   "runner_capacity": 2,
-  "ceiling_source": "inherited",
+  "ceiling_source": "config",
   "config_source": ".kedacode.toml",
   "persisted_enabled": true
 }
@@ -198,10 +201,11 @@ curl -sS \
 - `enabled`：生效配置中的 `agent_runner.autopilot.enabled`；
 - `auto_merge_enabled`：`safety.auto_merge`，即第二道危险动作门禁（只读展示）；
 - `daemon_running`：该仓库是否存在 `kind=daemon` 且存活的进程（来自既有 process supervisor 记录）；
-- `max_parallel`：Backlog「并发」**策略值**；`null` = 从未设置（存储层没有设置行），此时生效值继承 runner 容量；
-- `effective_max_parallel`：控制台按 `min(策略, runner_capacity)` 解析出的并发上限，用于控制条与「全局开始」；
-- `runner_capacity`：仓库配置 `[agent_runner.runner].max_concurrent_issues`（下限 1）。daemon 若显式传 `--concurrency`，本轮容量改用旗标值，其 daemon ceiling 可能低于此 API 快照；该端点不读取 daemon 进程旗标，实时值以 daemon 的 `Concurrency ceiling` 日志为准；
-- `ceiling_source`：`inherited` / `policy` / `capped_by_capacity` 三态来源，UI 据此标注生效值出处；
+- `max_parallel`：Backlog 页面保存的**并行上限**；`null` = 从未保存（存储层没有设置行），此时生效值取配置文件值；
+- `effective_max_parallel`：控制台解析出的生效并行上限（页面设置存在时取页面设置，否则取 `runner_capacity`），用于控制条与「全局开始」；
+- `runner_capacity`：仓库配置 `[agent_runner.runner].max_concurrent_issues`（下限 1）。daemon 若显式传 `--concurrency`，该 daemon 进程改用旗标值；该端点不读取 daemon 进程旗标，实时值以 daemon 的 `Parallel limit` 日志为准；
+- `ceiling_source`：`policy`（页面设置）/ `config`（配置文件）两态来源，UI 据此标注生效值出处；
+- `daemon_parallel_limit` / `daemon_parallel_limit_source`：本机存活 daemon 最近一次轮询实际使用的并行上限与来源（`cli_override` / `policy` / `config`），包含 daemon 进程的 `--concurrency`；本机没有存活 daemon 时为 `null`，此时以 `effective_max_parallel` 为准；
 - `persisted_enabled`：目标仓库 `.kedacode.toml` 中的持久值；文件缺失或键未设置时为 `null`。
 
 ### `PATCH /api/v1/agent-runner/backlog/autopilot`
@@ -242,7 +246,7 @@ curl -sS \
 
 ### `PATCH /api/v1/agent-runner/backlog/prds/{encoded_path}/ci-policy`
 
-设置单个 PRD 的策略覆盖，请求体 `{"repo_id": "...", "value": "inherit|on|off"}`。写入对应 GitHub Issue 的 latest-wins `iar:ci-auto-repair-policy` marker（`inherit` 表示清除显式覆盖），成功响应是**写后 fresh 回读评论流**得到的 `ci_delivery`。无关联 Issue 的 PRD 返回 `400`。
+设置单个 PRD 的策略覆盖，请求体 `{"repo_id": "...", "value": "inherit|on|off"}`。写入对应 GitHub Issue 的 latest-wins `kc:ci-auto-repair-policy` marker（`inherit` 表示清除显式覆盖），成功响应是**写后 fresh 回读评论流**得到的 `ci_delivery`。无关联 Issue 的 PRD 返回 `400`。
 
 ### `POST /api/v1/agent-runner/backlog/prds/{encoded_path}/ci-repair`
 
@@ -389,8 +393,9 @@ run 详情：`run`、`results`（逐候选执行）、`scores`（逐评审评分
 值守看板（`/app/dashboard/` 默认视图）的任务摘要，只读。**不新增任何存储**：任务身份与标签来自监控快照，运行终态来自运行账本，阶段 / preset / 模型来自 attempt 账本，PRD 关联来自生命周期账本。
 
 - 数据范围严格绑定当前 registry 的启用仓库：账本按 `repo_id` 逐仓库读取，已删除或禁用的仓库即使仍有历史运行行也不会回到看板。
-- 状态分桶由 `agent/*` 标签推导（`agent/review` 与 `agent/ready` 同归 `waiting`）；没有可判定标签时依次回落到「Issue 已关闭」、运行账本终态、`unknown`，未知不折算成零。
-- 分桶顺序为 `running` → `waiting` → `blocked` → `completed` → `unknown`，同状态内按开始时间新者在前。
+- GitHub Issue 为 closed 时优先归入 `closed`，不受残留 `agent/*` 标签影响，也不表示 Agent 已成功完成；open Issue 再按 `agent/*` 标签推导状态，其中 `agent/blocked` 对应 `blocked`、`agent/failed` 对应 `failed`、`agent/review` 与 `agent/ready` 同归 `waiting`。没有可判定标签时依次回落到运行账本终态、`unknown`，未知不折算成零。
+- 分桶顺序为 `running` → `blocked` → `failed` → `waiting` → `completed` → `closed` → `unknown`，同状态内按开始时间新者在前。
+- `status_reason` 说明状态来源（当前监控标签、Issue 关闭状态或运行账本终态）；监控异常只放在独立的 `anomaly_types` 列表中，不覆盖状态来源，也不直接表示失败原因。
 - `duration_seconds` 对运行中的任务由「attempt 开始时间 → 生成时间」推算，是如实的已耗时，不是任何百分比。
 
 ```json
@@ -405,7 +410,8 @@ run 详情：`run`、`results`（逐候选执行）、`scores`（逐评审评分
       "issue_title": "统一运行时看板与桌面进度窗",
       "issue_url": "https://github.com/…/issues/283",
       "status": "running",
-      "status_reason": "agent/running",
+      "status_reason": "当前监控标签：agent/running",
+      "anomaly_types": [],
       "phase": "implement",
       "agent": "claude",
       "preset": "fast",
@@ -419,7 +425,15 @@ run 详情：`run`、`results`（逐候选执行）、`scores`（逐评审评分
       "labels": ["agent/running"]
     }
   ],
-  "status_counts": { "running": 1, "waiting": 0, "blocked": 0, "completed": 0, "unknown": 0 },
+  "status_counts": {
+    "running": 1,
+    "waiting": 0,
+    "blocked": 0,
+    "failed": 0,
+    "completed": 0,
+    "closed": 0,
+    "unknown": 0
+  },
   "unavailable_sources": [],
   "missing_repo_ids": [],
   "sync_status": "ready",
@@ -519,14 +533,14 @@ run 详情：`run`、`results`（逐候选执行）、`scores`（逐评审评分
 
 `kc schema --json` 从已注册的 Typer/click 命令树派生，不维护第二份命令清单：顶层为 `name` / `help` / `exit_codes` / `command_count` / `commands`；每条命令含 `path`、`help`、`arguments`、`options`；每个参数含名称、类型、是否必填、枚举取值、默认值与示例。`kc ask` 与 `kc deliberate` 的 `--output` 是输出目录（文本型），不在机器格式之列。`kc run --fast-merge` 作为 `run` 的一次性旗标由该自动派生暴露，不另立清单。
 
-### PR 正文快速通道 marker `iar:fast-merge`
+### PR 正文快速通道 marker `kc:fast-merge`
 
-`kc run --fast-merge` 开出的 Draft PR 正文末尾带一条机器可读 marker（同族于 `iar:ci-auto-repair-policy` / `post_pr_rework_requested` 等 latest-wins marker）：
+`kc run --fast-merge` 开出的 Draft PR 正文末尾带一条机器可读 marker（同族于 `kc:ci-auto-repair-policy` / `post_pr_rework_requested` 等 latest-wins marker）：
 
 ```html
-<!-- iar:fast-merge issued=<Issue 编号> -->
+<!-- kc:fast-merge issued=<Issue 编号> -->
 ```
 
 - 语义：该 PR 经快速通道发布，builder 提交后**跳过了 Phase 4.5 的 rv re-exec 与独立 verifier 两道验证门禁**，未经自动化验证；正文同时附人读「合并前请人工验证」说明。
 - 判别：**无此 marker 的 PR 才代表走了完整验证**。下游工具（merge queue / CI）可据此拦截或降级处理未验证 PR。
-- 拒绝面：`--fast-merge` 与 `--all-ready` 组合、或目标 Issue 声明 `stack` 顺序依赖（`iar:depends-on ... mode="stack"`）时，以 `USAGE`（退出码 `2`）拒绝，不启动 agent、不产生 PR。该旗标不进入 daemon、无配置项，仅作用于当次显式调用。
+- 拒绝面：`--fast-merge` 与 `--all-ready` 组合、或目标 Issue 声明 `stack` 顺序依赖（`kc:depends-on ... mode="stack"`）时，以 `USAGE`（退出码 `2`）拒绝，不启动 agent、不产生 PR。该旗标不进入 daemon、无配置项，仅作用于当次显式调用。

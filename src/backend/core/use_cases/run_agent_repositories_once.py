@@ -91,6 +91,7 @@ def run_agent_repositories_once(
     Returns:
         Exit code (0 on success, 1 if any repository failed).
     """
+    from backend.core.use_cases.agent_onboarding import assert_run_gate
     from backend.core.use_cases.agent_runner_orchestrate import (
         process_prd_rework_issues,
     )
@@ -102,6 +103,10 @@ def run_agent_repositories_once(
             context.repo_id,
             context.display_name,
         )
+        # 启动前门禁（FR-5）：任何 GitHub 侧动作（claim / 标签 / worktree）之前，
+        # 先确认本轮会调用的 agent 在本机可执行。dry-run 同样检查——预览的用途
+        # 就是"这次会不会跑起来"，配置指向没装的 CLI 时必须当场说破。
+        assert_run_gate(context.config, agent_override=agent)
         github_client = github_client_factory(context.repo_path)
 
         # Phase 0: Asynchronous Issue-comment deliberation on Issues opted in

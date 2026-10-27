@@ -208,7 +208,7 @@ def test_disabled_settings_never_scan_and_wake_keeps_them_off() -> None:
     settings_reads: list[int] = []
     disabled_settings = MonitorSettingsEntry(
         sync_enabled=False,
-        sync_interval_seconds=60,
+        sync_interval_seconds=300,
         updated_at="2026-09-16T01:00:00+00:00",
     )
 

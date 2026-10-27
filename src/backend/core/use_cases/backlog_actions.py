@@ -190,6 +190,7 @@ def _create_issue_for_prd(
         generated_content_config=context.config.generated_content,
         labels_config=context.config.labels,
         evidence_dir=context.config.validation.evidence_dir,
+        agents=context.config.agents,
     )
     issue_url = create_issue_from_prd(
         request=request,
@@ -884,17 +885,17 @@ def advance_backlog_queue(
     )
     resolved_by_path = {prd.prd_path: prd for prd in resolved_prds}
 
-    # 「从未设置」就是没有设置行：策略为 None 时继承 runner 容量，不再伪造默认值。
+    # 「从未设置」就是没有设置行：页面设置为 None 时使用配置文件值，不伪造默认值。
     policy_max_parallel = read_policy_max_parallel(store, repo_id)
     if execution_ceiling is None:
-        # 容量来自用户配置，可能为非法值；与 daemon / 路由等消费点同口径兜底到 1，
+        # 配置文件值可能非法；与 daemon / 路由等消费点同口径兜底到 1，
         # 避免独立跑 advance 的 CLI 入口因非法配置抛 ValueError。
         ceiling = resolve_execution_ceiling(
             policy_max_parallel, max(1, context.config.runner.max_concurrent_issues)
         )
     else:
         ceiling = execution_ceiling
-    ceiling_source = describe_ceiling_source(policy_max_parallel, ceiling)
+    ceiling_source = describe_ceiling_source(policy_max_parallel)
 
     queue_entries = store.list_backlog_queue(repo_id=repo_id)
     entry_by_path = {entry.prd_path: entry for entry in queue_entries}

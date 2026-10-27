@@ -119,7 +119,7 @@ const COMPLETION_STATS = {  repositories: [
 
 /**
  * 值守看板任务摘要 fixture：与快照 fixture 同一份仓库/Issue 身份，
- * 覆盖「运行中」和「阻塞」两个分桶，用于断言默认视图渲染的是任务而不是仓库卡片。
+ * 覆盖「运行中」和「失败」两个分桶，用于断言默认视图渲染的是任务而不是仓库卡片。
  */
 const RUNTIME_TASKS = {
   generated_at: '2026-06-11T10:05:00+00:00',
@@ -132,7 +132,8 @@ const RUNTIME_TASKS = {
       issue_title: 'Running Issue',
       issue_url: 'https://example.test/21',
       status: 'running',
-      status_reason: 'agent/running',
+      status_reason: '当前监控标签：agent/running',
+      anomaly_types: [],
       phase: 'implement',
       agent: 'codex',
       preset: 'default',
@@ -152,8 +153,9 @@ const RUNTIME_TASKS = {
       repo_display_name: 'Keda Main',
       issue_title: 'Broken Issue',
       issue_url: 'https://example.test/19',
-      status: 'blocked',
-      status_reason: 'agent/failed',
+      status: 'failed',
+      status_reason: '当前监控标签：agent/failed',
+      anomaly_types: [],
       phase: null,
       agent: null,
       preset: null,
@@ -167,7 +169,15 @@ const RUNTIME_TASKS = {
       labels: ['agent/failed'],
     },
   ],
-  status_counts: { running: 1, waiting: 0, blocked: 1, completed: 0, unknown: 0 },
+  status_counts: {
+    running: 1,
+    waiting: 0,
+    blocked: 0,
+    failed: 1,
+    completed: 0,
+    closed: 0,
+    unknown: 0,
+  },
   unavailable_sources: [],
   missing_repo_ids: [],
   sync_status: 'ready',
@@ -386,10 +396,66 @@ test.describe('console pages smoke (mocked API)', () => {
     await expect(page.getByRole('button', { name: '停止' })).toBeVisible()
   })
 
+  test('processes page starts daemons for every repo that lacks one', async ({
+    page,
+  }) => {
+    await mockConsoleApi(page)
+    const startedBodies: unknown[] = []
+    // 在共用的 registry / processes mock 之上再注册一次：后注册的路由优先命中。
+    await page.route('**/api/v1/agent-runner/repositories', (route) =>
+      route.fulfill({
+        json: {
+          repositories: [
+            ...REGISTRY.repositories,
+            {
+              repo_id: 'ai-assistant',
+              path: '/Users/me/code/ai-assistant',
+              enabled: true,
+              display_name: 'ai-assistant',
+              path_exists: true,
+            },
+            {
+              repo_id: 'disabled-repo',
+              path: '/Users/me/code/disabled-repo',
+              enabled: false,
+              display_name: 'disabled-repo',
+              path_exists: true,
+            },
+          ],
+        },
+      }),
+    )
+    await page.route('**/api/v1/agent-runner/console/processes', (route) => {
+      const request = route.request()
+      if (request.method() !== 'POST') {
+        return route.fulfill({ json: PROCESSES })
+      }
+      const body = request.postDataJSON() as { repo_id: string; kind: string }
+      startedBodies.push(body)
+      return route.fulfill({
+        json: {
+          ...PROCESSES.processes[0],
+          process_id: 'new-process',
+          repo_id: body.repo_id,
+          pid: 5151,
+        },
+      })
+    })
+
+    page.once('dialog', (dialog) => void dialog.accept())
+    await page.goto('/app/processes')
+    await page.getByRole('button', { name: '全部仓库启动 daemon' }).click()
+
+    // keda-main 已有在跑 daemon、disabled-repo 未启用，都该被跳过。
+    await expect.poll(() => startedBodies, { timeout: 5_000 }).toEqual([
+      { repo_id: 'ai-assistant', kind: 'daemon' },
+    ])
+  })
+
   test('stats page shows completion table', async ({ page }) => {
     await mockConsoleApi(page)
     await page.goto('/app/stats')
-    await expect(page.getByRole('heading', { name: '完成度统计' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '统计与成本', level: 1 })).toBeVisible()
     await expect(page.getByText('70%')).toBeVisible()
   })
 
@@ -595,14 +661,14 @@ test.describe('console pages smoke (mocked API)', () => {
 
     await page.goto('/app/stats')
     await page.getByText('keda · Issue #263').click()
-    await expect(page.getByText('运行时间')).toBeVisible()
+    await expect(page.getByRole('columnheader', { name: '运行时间', exact: true }).first()).toBeVisible()
     await expect(page.getByText('最近 2 次运行')).toBeVisible()
     await expect(
       page.getByRole('link', {
         name: '在 GitHub 打开 Issue #263：agent preset performance stats',
       }),
     ).toHaveAttribute('href', 'https://github.com/ZataZhang/keda/issues/263')
-    await page.getByRole('button', { name: '查看 keda Issue #263 的运行详情' }).click()
+    await page.getByRole('row').filter({ hasText: 'failed' }).getByRole('button', { name: '查看 keda Issue #263 的运行详情' }).click()
 
     const detailsDialog = page.getByTestId('run-details-dialog')
     await expect(detailsDialog).toBeVisible()
@@ -740,7 +806,7 @@ async function openIssueOutputTab(page: Page): Promise<void> {
   await page.goto('/app/backlog')
   await page.getByText('Demo PRD').first().click()
   await expect(page.getByTestId('prd-detail')).toBeVisible()
-  await page.getByRole('button', { name: '实时输出' }).click()
+  await page.getByRole('tab', { name: '实时输出', exact: true }).click()
   await expect(page.getByTestId('prd-issue-output')).toBeVisible()
 }
 

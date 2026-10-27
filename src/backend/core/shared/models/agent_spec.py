@@ -141,7 +141,7 @@ class AgentProfileSpec:
             （如 kimi 的 ``--prompt``）；其余投递方式必须为 ``None``。
         prompt_delivery: 提示词投递方式，取值见 ``PROMPT_DELIVERIES``。
         output_protocol: 输出协议 id，经
-            ``iar.agent_output_protocols`` entry point 注册表解析。
+            ``kedacode.agent_output_protocols`` entry point 注册表解析。
         tail_args: 追加在展开器之后、提示词之前的 argv 片段
             （如 codex 的 ``exec`` 子命令）。
         resume_tail_args: 提供续传 id 时替换 ``tail_args`` 的 argv 片段。

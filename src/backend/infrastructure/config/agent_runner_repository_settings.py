@@ -191,7 +191,7 @@ def load_agent_runner_local_settings(
 ) -> AgentRunnerRepositorySettings | None:
     """Load repository-local KedaCode settings from the repository config file.
 
-    路径由身份模块双读解析（新配置文件优先，旧名兜底），并存时的警告只写 stderr。
+    只从当前命名的 ``.kedacode.toml`` 读取仓库配置。
 
     Args:
         repo_root_path: Target Git repository root path.

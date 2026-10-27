@@ -182,26 +182,21 @@ default_agent = "claude"
 #
 # 用 `kc agent presets` 枚举全部预设；`kc agent doctor <agent> --preset <名>`
 # 预览将被执行的完整命令行。
-
-[agent_runner.presets.codebuddy-glm5_3-flash-max]
-agent = "codebuddy"
-model = "glm-5.3-flash"
-reasoning_effort = "max"
-
-[agent_runner.presets.codebuddy-deepseek-v4_1-flash]
-agent = "codebuddy"
-model = "deepseek-v4.1-flash"
-reasoning_effort = "high"
-
-[agent_runner.presets.qoder-qwen3_8-flash_max]
-agent = "qoder"
-model = "Qwen3.8-Flash"
-reasoning_effort = "max"
-
-[agent_runner.presets.qoder-qwen3_8-max_xhigh]
-agent = "qoder"
-model = "Qwen3.8-Max"
-reasoning_effort = "xhigh"
+#
+# 本文件是**仓库模板**，不再作为新用户机器级配置的播种源（首启写入的是代码内
+# 最小骨架）；因此这里刻意不保留任何生效的预设与阶段绑定——把某个 agent 的
+# 个人偏好绑定到实现阶段，会让从未配置过的机器指向本机没安装的可执行文件。
+# 下面是本机存在对应 agent 时可取消注释的示例：
+#
+# [agent_runner.presets.codebuddy-glm5_3-flash-max]
+# agent = "codebuddy"
+# model = "glm-5.3-flash"
+# reasoning_effort = "max"
+#
+# [agent_runner.presets.qoder-qwen3_8-flash_max]
+# agent = "qoder"
+# model = "Qwen3.8-Flash"
+# reasoning_effort = "max"
 
 # =============================================================================
 # 模型评测（Console「Evaluations」页）：评审预设
@@ -233,13 +228,13 @@ reasoning_effort = "xhigh"
 #   > 仓库 .kedacode.toml > 本文件（全局层）。
 # fix / closeout 未自绑预设时跟随实现者并继承实现的模型绑定（同一 agent）。
 # 回退换人 / 显式换 agent 时丢弃模型绑定并在日志与 attempt 记录中标注。
-# 下面是当前生效的阶段 -> 预设绑定；未列出的阶段继续走生命周期矩阵 /
-# 既有散落键 / 内置默认（fix、closeout 未绑时默认跟随实现者并继承其模型）。
-[agent_runner.lifecycle_presets]
-implementation = "codebuddy-deepseek-v4_1-flash"
-verifier = "qoder-qwen3_8-flash_max"
-fix = "codebuddy-glm5_3-flash-max"
-closeout = "codebuddy-glm5_3-flash-max"
+# 本节刻意不保留任何生效绑定（模板不该替所有机器决定阶段用谁）；未绑定的阶段
+# 继续走生命周期矩阵 / 既有散落键 / 内置默认（fix、closeout 未绑时默认跟随
+# 实现者并继承其模型）。本机存在对应 agent 与预设时可参考：
+#
+# [agent_runner.lifecycle_presets]
+# implementation = "codebuddy-deepseek-v4_1-flash"
+# verifier = "qoder-qwen3_8-flash_max"
 
 # =============================================================================
 # Agent 注册表（声明式 agent 调用形态）
@@ -792,6 +787,8 @@ findings_artifact_dir = ".iar/state"
 #   {issue_body}    - Full Issue body markdown
 #   {prd_line}      - Auto-generated PRD reference line
 #   {validation_line} - Auto-generated Realistic Validation evidence rule
+#   {dependency_context_block} - worktree 前端依赖准备的可恢复诊断（缺失工具、
+#     选择依据、尝试过的命令与失败原因）；未准备或无缺口时为空串
 # 另注：execution 模板中的 "PRD map check (before coding):" 段是**固定规则文本**，
 # 不对应任何占位符；语义与收尾声明格式见 docs/guides/agent-runner.md。
 [agent_runner.prompts]
@@ -805,6 +802,7 @@ execution = [
   "Worktree: {worktree_path}",
   "{prd_line}",
   "{validation_line}",
+  "{dependency_context_block}",
   "",
   "Issue body:",
   "{issue_body}",
@@ -941,6 +939,8 @@ prompt = [
   "The PR title MUST be in English regardless of the issue language.",
   "The first non-empty line must be: Closes #{issue_number}",
   "Use these sections: Summary, Validation, Risk, Reviewer Notes.",
+  "When the Issue body contains a '本轮处置摘要（供 PR 描述生成）' section, include its target Issue references, symptom/root cause, fix, validation results, and unresolved decisions.",
+  "Keep the Closes anchor for the patrol Issue. Refer to unresolved target Issues as Addresses/Related to; use a closing keyword only when a target Issue is fully resolved.",
   "",
   "Issue title: {issue_title}",
   "Issue body:",
@@ -1107,7 +1107,7 @@ behavior_prompt = "You are a pragmatic implementer. Focus on feasibility, concre
 # repository's .kedacode.toml.
 
 # [agent_runner.repositories.keda-main]
-# path = "/Users/zata/code/keda"
+# path = "/path/to/your/repo"
 # enabled = true
 # display_name = "Keda Main"
 #
@@ -1116,7 +1116,7 @@ behavior_prompt = "You are a pragmatic implementer. Focus on feasibility, concre
 # base_branch = "main"
 #
 # [agent_runner.repositories.keda-worktree]
-# path = "/Users/zata/code/keda-worktrees/tasks/issue-2"
+# path = "/path/to/your/worktree"
 # enabled = true
 # display_name = "Keda Worktree Issue-2"
 #
@@ -1124,36 +1124,10 @@ behavior_prompt = "You are a pragmatic implementer. Focus on feasibility, concre
 # remote = "zata"
 # base_branch = "main"
 
-# 2026-06-11: 该路径已不存在（项目可能已改名/移动），暂时停用。
-# 路径恢复后改回 enabled = true，或在管理终端「项目」页重新启用。
-[agent_runner.repositories.transmaster]
-path = "/Users/zata/code/TransMaster"
-enabled = false
-
 # =============================================================================
 # Agent Runner Console（统一管理终端）
 # =============================================================================
 # 管理终端的运行历史 / 审计落库与托管进程设置。
-
-[agent_runner.repositories.keda]
-path = "/Users/zata/code/keda"
-enabled = true
-display_name = "keda"
-# GitHub owner/name used by `gh pr list --repo` for PR column population.
-# 缺省时 PR 列为空，并在 stderr 一次性打印 WARN。
-github_repo = "ZataZhang/keda"
-
-[agent_runner.repositories.zata-zhangtao-fsense]
-path = "/Users/zata/.iar/repos/zata-zhangtao/fsense"
-enabled = true
-display_name = "fsense"
-github_repo = "ZataZhang/fsense"
-
-[agent_runner.repositories.zata-zhangtao-freshai]
-path = "/Users/zata/.iar/repos/zata-zhangtao/freshai"
-enabled = true
-display_name = "freshai"
-github_repo = "ZataZhang/freshai"
 
 [agent_runner.console]
 # history_db_path / process_registry_path / runner_command 均沿用内置默认值
@@ -1180,7 +1154,7 @@ max_deliberation_issues = 1
 # （续传 / 重新入队 / 判失败三出口，均留对账 comment）。设为 false 即关闭该层。
 reconcile_stale_attempts = true
 # claim 老化阈值(秒)：claim 带 started_at 且超过该时长，即便 PID 仍活也判为 stale。
-reclaim_ttl_seconds = 10800
+reclaim_ttl_seconds = 18000
 
 [agent_runner.lifecycle_agents]
 implementation = "codebuddy"

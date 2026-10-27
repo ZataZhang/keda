@@ -93,7 +93,7 @@ class TomlRepositoryAutopilotSettingsEditor:
     def config_source_path(self, repo_root_path: Path) -> Path:
         """返回目标仓库本地配置文件的绝对路径（文件不存在时也返回规范路径）。
 
-        新旧两个文件名按「新名优先」解析，因此写回永远落在仓库当前实际使用的那份。
+        返回规范配置路径；文件不存在时也返回该路径供调用方创建。
         """
         resolved_repo_root = Path(repo_root_path).expanduser().resolve()
         return product_identity.effective_repository_config_path(resolved_repo_root)

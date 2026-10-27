@@ -8,14 +8,17 @@
 被测对象：``scripts/shared/view/server.py``、``launch.py`` 与 ``instance.py``。核心
 不变量：
 
-1. **写边界只剩「暂存」这一个口，其余写方法仍然一律拒绝。** 服务端唯一的写入口是
-   ``POST /api/stage``（只做 ``git add``）；``do_PUT`` / ``do_DELETE`` / ``do_PATCH`` 既
-   不存在也一律 405，指向别的路由的 POST 同样 405。这条边界由用户拍板从「完全不写」收窄
-   到这里（2026-09-22），因此它既不能悄悄扩大，也不能因为「更明确地拒绝」而在其余写方法上
-   补同名处理器——那样 ``rg -n "def do_PUT" scripts/shared/view/`` 这类静态断言就失去判别力。
-   写口额外要求 ``Content-Type: application/json``：跨站表单式 POST 是「简单请求」，浏览器
-   会直接发出去，而 JSON 类型强制预检、预检又必然失败，于是「某个网页在你不知情时改动你的
-   索引」这条路被封住。
+1. **写方法只有 ``POST`` 一个入口，路由白名单是「暂存」与「打开」两条。** ``POST /api/stage``
+   只做 ``git add``——那是服务端对仓库的**唯一**写操作；``POST /api/open`` 把仓库内文件交给
+   系统默认应用打开（macOS ``open`` / Windows ``startfile`` / 其它 ``xdg-open``），对仓库
+   零写入，但会在用户机器上拉起应用，因此走同一条写口径。``do_PUT`` / ``do_DELETE`` /
+   ``do_PATCH`` 既不存在也一律 405，指向别的路由的 POST 同样 405。这条边界由用户拍板两次
+   放宽（2026-09-22 暂存、2026-10-16 打开），因此它既不能悄悄扩大，也不能因为「更明确地拒绝」
+   而在其余写方法上补同名处理器——那样 ``rg -n "def do_PUT" scripts/shared/view/`` 这类静态
+   断言就失去判别力。两条写路由都额外要求 ``Content-Type: application/json``：跨站表单式
+   POST 是「简单请求」，浏览器会直接发出去，而 JSON 类型强制预检、预检又必然失败，于是
+   「某个网页在你不知情时改动你的索引（或拉起应用）」这条路被封住。``/api/open`` 交给系统
+   命令的只能是 ``resolve()`` 之后仍在仓库根之下的路径，且作为单个 argv 元素、绝不经过 shell。
 2. **路径不得越出仓库。** ``..`` 与符号链接都要在 ``resolve()`` 之后再断言，顺序颠倒
    时符号链接逃逸会漏网；拒绝信息本身也不得回声绝对路径，否则「被拒绝」就成了仓库外
    路径的探测口。
@@ -63,7 +66,7 @@
 15. **普通 ``mv`` 的重命名要配出来，而且只能靠一次性索引。** ``-M`` 对 ``git diff`` 收在眼里的
     路径才有效，而它从不收录未跟踪文件，「工作区删除 + 未跟踪新文件」因此在真实索引上永远配不出
     对。补齐手段是在仓库之外的一个临时 ``GIT_INDEX_FILE`` 上跑 ``git add -N``：真实索引一个字节
-    都不许改（查看器只有一个写口，就是 ``POST /api/stage``），临时目录用完必须清掉。配对只改
+    都不许改（查看器对仓库只有一个写口，就是 ``POST /api/stage``），临时目录用完必须清掉。配对只改
     **呈现**——未跟踪那一段列出的路径集合、段级的 ``stats_available``、以及未暂存段里那条删除，
     全都与终端逐项一致；一个删除配多个相似候选时也只能出一条 ``R``。
 
@@ -103,6 +106,7 @@ if str(_VIEW_SCRIPTS_PATH) not in sys.path:
 
 import instance  # noqa: E402
 import server  # noqa: E402
+import workspace  # noqa: E402
 
 _LOOPBACK_HOST = "127.0.0.1"
 _SERVER_START_TIMEOUT_SECONDS = 10.0
@@ -146,11 +150,12 @@ def _flip_one_byte(payload: bytes) -> bytes:
     return bytes(mutated_payload)
 
 
-#: 这些写方法的处理器名字不得出现在服务端源码里：唯一的写入口是 ``POST /api/stage``，
-#: 其余写方法既不存在也一律 405（逐个定义同名方法会让静态断言失去判别力）。
+#: 这些写方法的处理器名字不得出现在服务端源码里：写方法入口只有 ``do_POST`` 一个（路由
+#: 白名单是 /api/stage 与 /api/open），其余写方法既不存在也一律 405（逐个定义同名方法会让
+#: 静态断言失去判别力）。
 _FORBIDDEN_WRITE_METHOD_HANDLER_NAMES = ("do_PUT", "do_DELETE", "do_PATCH")
 
-#: 唯一允许存在的写入口处理器名字，且它必须只出现一次。
+#: 唯一允许存在的写方法处理器名字，且它必须只出现一次。
 _ALLOWED_WRITE_METHOD_HANDLER_NAME = "do_POST"
 
 
@@ -642,10 +647,11 @@ def test_malformed_path_parameters_are_refused_not_dropped(
         assert "越出仓库范围" in response_body["error"]
 
 
-def test_write_methods_outside_the_stage_route_are_refused(
+def test_write_methods_outside_the_write_routes_are_refused(
     running_view_server: RunningViewServer,
 ) -> None:
-    """只有 ``POST /api/stage`` 是写口：其它路由上的 POST、以及全部 PUT/DELETE/PATCH 一律 405。"""
+    """写路由只有 ``POST /api/stage`` 与 ``POST /api/open``：其它路由上的 POST、
+    以及全部 PUT/DELETE/PATCH 一律 405。"""
     for write_method in ("PUT", "DELETE", "PATCH"):
         status_code, response_body = running_view_server.request(
             "/api/file?path=src/module.py", method=write_method
@@ -653,12 +659,13 @@ def test_write_methods_outside_the_stage_route_are_refused(
         assert status_code == 405, f"{write_method} 未被拒绝：{status_code} {response_body}"
         assert "拒绝" in response_body["error"]
 
-    # 指错路由的 POST 同样不是写口：白名单只有一条。
-    misplaced_status, misplaced_body = running_view_server.request(
-        "/api/file?path=src/module.py", method="POST", json_body={"scope": "all"}
-    )
-    assert misplaced_status == 405, misplaced_body
-    assert "拒绝" in misplaced_body["error"]
+    # 指错路由的 POST 同样不是写口：白名单只有那两条。
+    for misplaced_route in ("/api/file?path=src/module.py", "/api/stage/all", "/api/open/path"):
+        misplaced_status, misplaced_body = running_view_server.request(
+            misplaced_route, method="POST", json_body={"scope": "all"}
+        )
+        assert misplaced_status == 405, f"{misplaced_route}：{misplaced_body}"
+        assert "拒绝" in misplaced_body["error"]
 
     unknown_route_status, unknown_route_body = running_view_server.request("/api/not-whitelisted")
     assert unknown_route_status == 404
@@ -671,17 +678,17 @@ def test_write_methods_outside_the_stage_route_are_refused(
 def test_server_source_has_exactly_one_write_method_handler() -> None:
     """服务端源码里只能有**一个**写方法处理器，且必须是 ``do_POST``。
 
-    这条静态断言与「写边界只剩暂存」互为因果：一旦有人为了「更明确地拒绝」而给 PUT /
-    DELETE / PATCH 定义同名方法，写边界的可审查性就没了；而多出第二个写入口（比如某个
-    顺手加上的 ``do_DELETE``）也会在这里显形——``rg -n "def do_" scripts/shared/view/``
-    扫一眼能数清写入口，是这条边界唯一的看护方式。
+    这条静态断言与「写边界只剩那两条路由」互为因果：一旦有人为了「更明确地拒绝」而给
+    PUT / DELETE / PATCH 定义同名方法，写边界的可审查性就没了；而多出第二个写方法入口
+    （比如某个顺手加上的 ``do_DELETE``）也会在这里显形——``rg -n "def do_" scripts/shared/view/``
+    扫一眼能数清写方法入口，是这条边界唯一的看护方式。
     """
     server_source_text = _SERVER_SCRIPT_PATH.read_text(encoding="utf-8")
     for forbidden_handler_name in _FORBIDDEN_WRITE_METHOD_HANDLER_NAMES:
         assert forbidden_handler_name not in server_source_text
     assert (
         server_source_text.count(f"def {_ALLOWED_WRITE_METHOD_HANDLER_NAME}") == 1
-    ), "服务端应当只有一个写方法处理器（暂存用），实际有多处或没有"
+    ), "服务端应当只有一个写方法处理器（写路由用），实际有多处或没有"
 
 
 def test_server_binds_loopback_address_only(fixture_repository: Path) -> None:
@@ -1275,6 +1282,81 @@ def test_stage_route_refuses_everything_but_a_json_object(
     assert "SECRET-OUTSIDE-CONTENT" not in json.dumps(escape_body, ensure_ascii=False)
 
     assert _staged_paths(repository_root) == staged_before
+
+
+def test_open_route_refuses_everything_but_an_existing_repo_path(
+    running_view_server: RunningViewServer,
+) -> None:
+    """``POST /api/open`` 的校验链：非 JSON 415、缺/空/非字符串 path 400、越界 403、不存在 404。
+
+    与暂存同一条防跨站口径（415 是防线不是洁癖）；越界拒绝不回声绝对路径。这条用例全部落在
+    拒绝侧，一个应用都不会拉起。
+    """
+    not_json_status, not_json_body = running_view_server.request("/api/open", method="POST")
+    assert not_json_status == 415, not_json_body
+    assert "application/json" in not_json_body["error"]
+
+    for refused_body in ({}, {"path": ""}, {"path": 3}):
+        status_code, response_body = running_view_server.request(
+            "/api/open", method="POST", json_body=refused_body
+        )
+        assert status_code == 400, f"{refused_body} 未被拒绝：{response_body}"
+
+    outside_path = running_view_server.repository_root.parent / "open-outside-secret.txt"
+    outside_path.write_text("SECRET-OUTSIDE-CONTENT\n", encoding="utf-8")
+    escape_status, escape_body = running_view_server.request(
+        "/api/open", method="POST", json_body={"path": "../open-outside-secret.txt"}
+    )
+    assert escape_status == 403, escape_body
+    response_text = json.dumps(escape_body, ensure_ascii=False)
+    assert "SECRET-OUTSIDE-CONTENT" not in response_text
+    assert str(running_view_server.repository_root) not in response_text
+
+    missing_status, missing_body = running_view_server.request(
+        "/api/open", method="POST", json_body={"path": "no-such-file.txt"}
+    )
+    assert missing_status == 404, missing_body
+
+
+def test_open_path_hands_the_resolved_path_to_the_platform_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``open_path_in_system`` 交给系统命令的必须是 ``resolve()`` 之后的单个 argv 元素。
+
+    「打开」的副作用发生在用户机器上，HTTP 用例不该真的拉起应用；而这条边界最要紧的形状——
+    路径整团作为一个参数列表元素、绝无一次经过 shell、越界路径根本走不到系统命令——恰恰
+    只能在进程内钉住。这里桩掉 ``subprocess.run`` 记下 argv，其余校验链由真实 HTTP 的
+    ``test_open_route_refuses_everything_but_an_existing_repo_path`` 覆盖。
+    """
+    recorded_commands: list[tuple[str, ...]] = []
+
+    def record_run(command: tuple[str, ...], **_kwargs: object) -> subprocess.CompletedProcess:
+        recorded_commands.append(command)
+        return subprocess.CompletedProcess(command, 0, b"", b"")
+
+    monkeypatch.setattr(workspace.subprocess, "run", record_run)
+
+    repository_root = tmp_path / "open-repo"
+    nested_directory = repository_root / "docs"
+    nested_directory.mkdir(parents=True)
+    target_path = nested_directory / "deck.pdf"
+    target_path.write_bytes(b"%PDF-1.4\n")
+
+    opened_payload = workspace.open_path_in_system(repository_root, "docs/deck.pdf")
+    assert opened_payload.status_code == 200
+    assert opened_payload.payload == {"opened": "docs/deck.pdf"}
+    assert len(recorded_commands) == 1
+    platform_command, handed_path = recorded_commands[0][0], recorded_commands[0][1]
+    # darwin 走 open，其余 POSIX 走 xdg-open；Windows 走 os.startfile，不经这条路径。
+    assert platform_command in ("open", "xdg-open")
+    assert handed_path == str(target_path.resolve())
+
+    # 越界与不存在的路径都到不了系统命令。
+    outside_refusal = workspace.open_path_in_system(repository_root, "../outside-secret.txt")
+    assert outside_refusal.status_code == 403
+    missing_refusal = workspace.open_path_in_system(repository_root, "docs/gone.pdf")
+    assert missing_refusal.status_code == 404
+    assert len(recorded_commands) == 1
 
 
 def test_each_section_matches_its_own_terminal_git_output(

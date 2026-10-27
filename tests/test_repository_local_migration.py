@@ -1,4 +1,4 @@
-"""Tests for migrating scaffold-pinned generated_content out of ``.iar.toml``."""
+"""Tests for migrating scaffold-pinned generated_content out of ``.kedacode.toml``."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from backend.core.shared.models import product_identity
 from backend.core.shared.models.agent_runner import AppConfig, GeneratedContentConfig
 from backend.engines.agent_runner import repository_local_migration as migration_module
 from backend.engines.agent_runner.factory import merge_repository_config
-from backend.engines.agent_runner.repository_local import IARRepositoryNotInitializedError
+from backend.engines.agent_runner.repository_local import RepositoryNotInitializedError
 from backend.engines.agent_runner.repository_local_migration import (
     ConfigMigrationError,
     ConfigMigrationResult,
@@ -37,11 +37,11 @@ enabled = false
 
 # 与旧脚手架里出现过的同名键：`enabled` / `default_agent` 也存在于 generated_content 之外。
 CONFIG_AFTER_GENERATED_CONTENT = """\
-# 交互式决策（iar ask）配置
+# 交互式决策（kc ask）配置
 [agent_runner.interactive_decision]
-# 是否启用 iar ask 交互式决策
+# 是否启用 kc ask 交互式决策
 enabled = true
-# iar ask 默认使用的 agent
+# kc ask 默认使用的 agent
 default_agent = "auto"
 """
 
@@ -83,7 +83,7 @@ include_commit_log = true
 include_diff_stat = true
 """
 
-# 旧 `iar init` 写入的完整 generated_content 区块：各 target 的 mode 取当时的默认值。
+# 旧 `kc init` 写入的完整 generated_content 区块：各 target 的 mode 取当时的默认值。
 LEGACY_GENERATED_CONTENT = "\n".join(
     [
         LEGACY_SECTION_TABLE,
@@ -120,9 +120,24 @@ output = "json"
 """
 
 
-def _write_config(repo_root_path: Path, *config_parts: str) -> Path:
-    """把若干段配置文本按空行拼接写成 ``.iar.toml``。"""
-    config_path = repo_root_path / ".iar.toml"
+CONFIG_FILENAME = product_identity.REPOSITORY_CONFIG_FILENAME
+LEGACY_CONFIG_FILENAME = migration_module._PRE_RENAME_REPOSITORY_CONFIG_FILENAME
+
+
+def _write_config(
+    repo_root_path: Path,
+    *config_parts: str,
+    config_file_name: str = CONFIG_FILENAME,
+) -> Path:
+    """按需指定文件名，把若干段配置文本按空行拼接写成仓库配置文件。"""
+    config_path = repo_root_path / config_file_name
+    config_path.write_text("\n".join(config_parts), encoding="utf-8")
+    return config_path
+
+
+def _write_legacy_config(repo_root_path: Path, *config_parts: str) -> Path:
+    """写成改名前的旧名 ``.iar.toml``，仅供改名用例使用。"""
+    config_path = repo_root_path / LEGACY_CONFIG_FILENAME
     config_path.write_text("\n".join(config_parts), encoding="utf-8")
     return config_path
 
@@ -132,7 +147,7 @@ def _parsed_config(config_text: str) -> dict[str, object]:
 
 
 def _effective_generated_content(repo_root_path: Path) -> GeneratedContentConfig:
-    """按 daemon 的合并规则，算出代码默认 + 该仓库 ``.iar.toml`` 后的 generated_content。
+    """按 daemon 的合并规则，算出代码默认 + 该仓库 ``.kedacode.toml`` 后的 generated_content。
 
     全局层用 ``AppConfig()`` 的代码默认值，不读开发机的 ``config.toml``，结果才稳定。
     """
@@ -271,7 +286,7 @@ output = "json"
 
     assert _kept_pin_keys(migration_result) == [("agent_runner.generated_content.draft_pr", "mode")]
     assert "custom title_template" in migration_result.kept_pins[0].reason
-    migrated_text = (tmp_path / ".iar.toml").read_text(encoding="utf-8")
+    migrated_text = (tmp_path / CONFIG_FILENAME).read_text(encoding="utf-8")
     assert 'mode = "template"' in migrated_text
     assert "output" not in migrated_text
     effective_draft_pr = _effective_generated_content(tmp_path).draft_pr
@@ -403,7 +418,7 @@ def test_dry_run_reports_the_plan_without_writing(tmp_path: Path) -> None:
     assert not dry_run_result.wrote_file
     assert len(dry_run_result.removed_pins) == 34
     assert config_path.read_bytes() == original_bytes
-    assert sorted(path.name for path in tmp_path.iterdir()) == [".iar.toml"]
+    assert sorted(path.name for path in tmp_path.iterdir()) == [CONFIG_FILENAME]
 
     real_result = migrate_repository_local_config(tmp_path)
 
@@ -538,8 +553,8 @@ def test_migration_preserves_crlf_line_endings(tmp_path: Path) -> None:
 
 
 def test_migration_writes_through_symlinks_and_keeps_permissions(tmp_path: Path) -> None:
-    """``.iar.toml`` 是符号链接时改的是链接目标，链接本身与文件权限都保持不变。"""
-    shared_config_path = tmp_path / "shared" / "iar.toml"
+    """``.kedacode.toml`` 是符号链接时改的是链接目标，链接本身与文件权限都保持不变。"""
+    shared_config_path = tmp_path / "shared" / "kedacode.toml"
     shared_config_path.parent.mkdir()
     shared_config_path.write_text(
         "\n".join([CONFIG_BEFORE_GENERATED_CONTENT, LEGACY_GENERATED_CONTENT]), encoding="utf-8"
@@ -547,20 +562,20 @@ def test_migration_writes_through_symlinks_and_keeps_permissions(tmp_path: Path)
     shared_config_path.chmod(0o600)
     repo_root_path = tmp_path / "repo"
     repo_root_path.mkdir()
-    (repo_root_path / ".iar.toml").symlink_to(shared_config_path)
+    (repo_root_path / CONFIG_FILENAME).symlink_to(shared_config_path)
 
     migration_result = migrate_repository_local_config(repo_root_path)
 
     assert migration_result.wrote_file
-    assert (repo_root_path / ".iar.toml").is_symlink()
+    assert (repo_root_path / CONFIG_FILENAME).is_symlink()
     assert "[agent_runner.generated_content" not in shared_config_path.read_text(encoding="utf-8")
     assert shared_config_path.stat().st_mode & 0o777 == 0o600
-    assert sorted(path.name for path in shared_config_path.parent.iterdir()) == ["iar.toml"]
+    assert sorted(path.name for path in shared_config_path.parent.iterdir()) == ["kedacode.toml"]
 
 
 def test_migration_rejects_invalid_toml_and_leaves_it_alone(tmp_path: Path) -> None:
     """不是合法 TOML 时报错而不是猜着改。"""
-    config_path = tmp_path / ".iar.toml"
+    config_path = tmp_path / CONFIG_FILENAME
     config_path.write_text("[agent_runner\nbroken = ", encoding="utf-8")
 
     with pytest.raises(ConfigMigrationError, match="not valid TOML"):
@@ -570,8 +585,8 @@ def test_migration_rejects_invalid_toml_and_leaves_it_alone(tmp_path: Path) -> N
 
 
 def test_migration_requires_an_initialized_repository(tmp_path: Path) -> None:
-    """没有 ``.iar.toml`` 时抛统一的“未初始化”错误，由 CLI 统一提示 ``iar init``。"""
-    with pytest.raises(IARRepositoryNotInitializedError) as exc_info:
+    """没有 ``.kedacode.toml`` 时抛统一的“未初始化”错误，由 CLI 统一提示 ``kc init``。"""
+    with pytest.raises(RepositoryNotInitializedError) as exc_info:
         migrate_repository_local_config(tmp_path)
 
     # 两份名字都不存在时，报错指向新名（用户接下来该看到的是一份 .kedacode.toml）。
@@ -597,7 +612,7 @@ def test_migration_refuses_to_write_when_the_result_does_not_verify(
         migrate_repository_local_config(tmp_path)
 
     assert config_path.read_bytes() == original_bytes
-    assert sorted(path.name for path in tmp_path.iterdir()) == [".iar.toml"]
+    assert sorted(path.name for path in tmp_path.iterdir()) == [CONFIG_FILENAME]
 
 
 def test_legacy_pin_tables_only_name_real_generated_content_fields() -> None:
@@ -682,53 +697,54 @@ id = "target-local"
 
 def test_rename_moves_the_legacy_config_to_the_new_name(tmp_path: Path) -> None:
     """只有旧名文件时改名，内容原样搬过去。"""
-    config_path = _write_config(tmp_path, '[agent_runner.repository]\nid = "target-local"\n')
+    config_path = _write_legacy_config(tmp_path, '[agent_runner.repository]\nid = "target-local"\n')
 
     rename_result = rename_repository_local_config_file(tmp_path)
 
-    new_config_path = tmp_path / ".kedacode.toml"
+    new_config_path = tmp_path / CONFIG_FILENAME
     assert rename_result.outcome == "renamed"
     assert rename_result.wrote_file is True
     assert rename_result.source_path == config_path
     assert new_config_path.read_text(encoding="utf-8").startswith("[agent_runner.repository]")
-    assert not (tmp_path / ".iar.toml").exists()
+    assert not (tmp_path / LEGACY_CONFIG_FILENAME).exists()
 
 
 def test_rename_dry_run_writes_nothing(tmp_path: Path) -> None:
     """预演结论与正式执行一致，但磁盘不变。"""
-    _write_config(tmp_path, '[agent_runner.repository]\nid = "target-local"\n')
+    _write_legacy_config(tmp_path, '[agent_runner.repository]\nid = "target-local"\n')
 
     rename_result = rename_repository_local_config_file(tmp_path, dry_run=True)
 
     assert rename_result.outcome == "renamed"
     assert rename_result.wrote_file is False
-    assert sorted(path.name for path in tmp_path.iterdir()) == [".iar.toml"]
+    assert sorted(path.name for path in tmp_path.iterdir()) == [LEGACY_CONFIG_FILENAME]
 
 
 def test_rename_is_idempotent_when_already_named(tmp_path: Path) -> None:
     """已是新名时报告 already_named，不做任何改动。"""
-    _write_config(tmp_path, '[agent_runner.repository]\nid = "target-local"\n')
-    rename_repository_local_config_file(tmp_path)
+    _write_legacy_config(tmp_path, '[agent_runner.repository]\nid = "target-local"\n')
+    first_result = rename_repository_local_config_file(tmp_path)
+    assert first_result.outcome == "renamed"
 
     second_result = rename_repository_local_config_file(tmp_path)
 
     assert second_result.outcome == "already_named"
     assert second_result.wrote_file is False
-    assert sorted(path.name for path in tmp_path.iterdir()) == [".kedacode.toml"]
+    assert sorted(path.name for path in tmp_path.iterdir()) == [CONFIG_FILENAME]
 
 
 def test_rename_refuses_when_both_names_exist(tmp_path: Path) -> None:
     """新旧两个配置文件并存时拒绝替用户挑选，两份内容都不动。"""
     legacy_text = '[agent_runner.repository]\nid = "from-legacy"\n'
     new_text = '[agent_runner.repository]\nid = "from-new"\n'
-    (tmp_path / ".iar.toml").write_text(legacy_text, encoding="utf-8")
-    (tmp_path / ".kedacode.toml").write_text(new_text, encoding="utf-8")
+    (tmp_path / LEGACY_CONFIG_FILENAME).write_text(legacy_text, encoding="utf-8")
+    (tmp_path / CONFIG_FILENAME).write_text(new_text, encoding="utf-8")
 
     rename_result = rename_repository_local_config_file(tmp_path)
 
     assert rename_result.outcome == "conflict"
-    assert (tmp_path / ".iar.toml").read_text(encoding="utf-8") == legacy_text
-    assert (tmp_path / ".kedacode.toml").read_text(encoding="utf-8") == new_text
+    assert (tmp_path / LEGACY_CONFIG_FILENAME).read_text(encoding="utf-8") == legacy_text
+    assert (tmp_path / CONFIG_FILENAME).read_text(encoding="utf-8") == new_text
 
 
 def test_rename_reports_absent_without_creating_a_config(tmp_path: Path) -> None:
@@ -741,7 +757,7 @@ def test_rename_reports_absent_without_creating_a_config(tmp_path: Path) -> None
 
 def test_rename_failure_is_reported(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """改名被拒绝时报 move_failed，旧文件仍在。"""
-    _write_config(tmp_path, '[agent_runner.repository]\nid = "target-local"\n')
+    _write_legacy_config(tmp_path, '[agent_runner.repository]\nid = "target-local"\n')
 
     def _denied(_src: Path, _dst: Path) -> None:
         raise OSError("permission denied")
@@ -751,4 +767,30 @@ def test_rename_failure_is_reported(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     rename_result = rename_repository_local_config_file(tmp_path)
 
     assert rename_result.outcome == "move_failed"
-    assert (tmp_path / ".iar.toml").is_file()
+    assert (tmp_path / LEGACY_CONFIG_FILENAME).is_file()
+
+
+def test_migration_removes_retired_max_issues_with_its_comment(tmp_path: Path) -> None:
+    """已退役的 ``runner.max_issues`` 不论值是多少都删除，并行上限键原样保留。"""
+    runner_table = """\
+[agent_runner.runner]
+# 每次轮询每个仓库最多处理多少个 Issue
+max_issues = 5
+# 并行上限
+max_concurrent_issues = 3
+"""
+    config_path = _write_config(tmp_path, CONFIG_BEFORE_GENERATED_CONTENT, runner_table)
+
+    dry_run_result = migrate_repository_local_config(tmp_path, dry_run=True)
+    assert not dry_run_result.wrote_file
+    assert [
+        (pin.table_name, pin.key_name, pin.pinned_value) for pin in dry_run_result.removed_pins
+    ] == [("agent_runner.runner", "max_issues", 5)]
+
+    migration_result = migrate_repository_local_config(tmp_path)
+
+    assert migration_result.wrote_file
+    migrated_config = _parsed_config(config_path.read_text(encoding="utf-8"))
+    assert migrated_config["agent_runner"]["runner"] == {"max_concurrent_issues": 3}
+    assert "每次轮询每个仓库最多处理多少个 Issue" not in config_path.read_text(encoding="utf-8")
+    assert migrate_repository_local_config(tmp_path).removed_pins == ()

@@ -16,6 +16,7 @@ from backend.core.shared.interfaces.runner_live_view import IRunnerLiveView
 from backend.core.shared.models.agent_runner import AppConfig
 from backend.core.shared.models.pass_activity import PassActivity
 from backend.core.shared.models.publish_stage import PublishStage
+from backend.core.use_cases.daemon_execution_slots import DaemonExecutionSlots
 
 
 @dataclass(frozen=True)
@@ -57,8 +58,8 @@ class RunOnceRequest:
     publish_stage: PublishStage = PublishStage.NORMAL
     #: 仅显式队列运行聚合；必须等待本轮全部 worker 完成后才可调用聚合用例。
     aggregate_pr: bool = False
-    #: 统一自动执行并发上限（由调用方经 ``resolve_execution_ceiling`` 解析出的
-    #: 单一生效值）。非 ``None`` 时只约束 **ready 通道的新认领**：本轮认领数 =
+    #: 并行上限（由调用方经 ``resolve_execution_ceiling`` 解析出的单一生效值）。
+    #: 非 ``None`` 时只约束 **ready 通道的新认领**：本轮认领数 =
     #: max(0, ceiling − 在途 running 数)，认领数不足即少领；``None`` 表示不设
     #: 闸门——人显式点名的路径（``kc run --issue`` / 控制台单PRD 开始）保持全量。
     #: running / blocked / cleanup 通道是恢复性处理，不新增并发，不受该值约束。
@@ -67,3 +68,7 @@ class RunOnceRequest:
     issue_admission_check: Callable[[], bool] | None = None
     #: daemon 传入的活动信号：``run_once`` 读到 ready 队列后回填数量，daemon 据此判断空闲。
     pass_activity: PassActivity | None = None
+    #: daemon 的常驻执行名单。非 ``None`` 时为补位模式：本轮最多接
+    #: ``concurrency − 本机在执行数`` 个 Issue，所有通道跳过名单里的 Issue，领到的
+    #: Issue 提交到名单后立即返回、不等待完成。``None`` 保持一次性运行的语义。
+    execution_slots: DaemonExecutionSlots | None = None

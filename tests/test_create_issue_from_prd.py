@@ -240,7 +240,7 @@ def test_create_issue_from_prd_materializes_prd_ref_issue_link(
     )
 
     create_calls = [c for c in fake_client.calls if c["method"] == "create_issue"]
-    assert "<!-- iar:depends-on #77 -->" in create_calls[0]["body"]
+    assert "<!-- kc:depends-on #77 -->" in create_calls[0]["body"]
 
 
 def test_create_issue_from_prd_missing_issue_link_fails_fast(
@@ -284,6 +284,147 @@ def test_create_issue_from_prd_missing_issue_link_fails_fast(
     message = str(exc_info.value)
     assert "has no '- GitHub Issue" in message
     assert [c for c in fake_client.calls if c["method"] == "create_issue"] == []
+
+
+def test_create_issue_from_prd_rejects_unparsed_non_none_dependency(
+    tmp_path: Path,
+) -> None:
+    """依赖字段有非 none 内容但解析为空时，必须带 PRD 路径失败且不创建 Issue。"""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo)
+    fake_client = FakeGitHubClient()
+    prd = repo / "tasks" / "pending" / "downstream.md"
+    prd.parent.mkdir(parents=True)
+    prd.write_text(
+        "# PRD: Downstream\n\n"
+        "## 8. Delivery Dependencies\n\n"
+        "- Depends on tasks/issues: none\n"
+        "- Gate type: none\n\n"
+        "## 9. Acceptance Checklist\n\n"
+        "- Depends on tasks/issues: #42\n"
+        "- Gate type: hard\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        create_issue_from_prd(
+            request=_request(repo, Path("tasks/pending/downstream.md")),
+            github_client=fake_client,
+        )
+
+    message = str(exc_info.value)
+    assert "tasks/pending/downstream.md" in message
+    assert "non-none 'Depends on tasks/issues'" in message
+    assert "outside any parsed 'Delivery Dependencies' section" in message
+    assert "no dependency references were parsed" in message
+    assert [call for call in fake_client.calls if call["method"] == "create_issue"] == []
+
+
+def test_create_issue_from_prd_ignores_dependency_example_in_code_fence(
+    tmp_path: Path,
+) -> None:
+    """围栏代码块里的依赖示例不是声明，不能拦下 none 小节的 Issue 创建。"""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo)
+    fake_client = FakeGitHubClient()
+    prd = repo / "tasks" / "pending" / "downstream.md"
+    prd.parent.mkdir(parents=True)
+    prd.write_text(
+        "# PRD: Downstream\n\n"
+        "## 8. Delivery Dependencies\n\n"
+        "- Depends on tasks/issues: none\n"
+        "- Gate type: none\n\n"
+        "## 9. Realistic Validation\n\n"
+        "PRD 模板里的示例区块（不是本 PRD 的声明）：\n\n"
+        "```markdown\n"
+        "## Delivery Dependencies\n\n"
+        "- Depends on tasks/issues: #42\n"
+        "- Gate type: hard\n"
+        "```\n\n"
+        "## Acceptance Checklist\n\n- [x] One\n",
+        encoding="utf-8",
+    )
+
+    issue_url = create_issue_from_prd(
+        request=_request(repo, Path("tasks/pending/downstream.md")),
+        github_client=fake_client,
+    )
+
+    assert issue_url == "https://github.com/example/repo/issues/42"
+
+
+@pytest.mark.parametrize(
+    "dependency_heading",
+    [
+        "## 8. Delivery Dependancies\n",
+        "# 8. Delivery Dependencies\n",
+        "",
+    ],
+    ids=["misspelled-heading", "unsupported-heading-level", "missing-heading"],
+)
+def test_create_issue_from_prd_rejects_dependencies_without_recognized_heading(
+    tmp_path: Path,
+    dependency_heading: str,
+) -> None:
+    """依赖字段位于未识别标题下时，应指出 PRD 并在创建 Issue 前失败。"""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo)
+    fake_client = FakeGitHubClient()
+    prd = repo / "tasks" / "pending" / "downstream.md"
+    prd.parent.mkdir(parents=True)
+    prd.write_text(
+        "# PRD: Downstream\n\n" + dependency_heading + "- Depends on tasks/issues: #42\n"
+        "- Gate type: hard\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        create_issue_from_prd(
+            request=_request(repo, Path("tasks/pending/downstream.md")),
+            github_client=fake_client,
+        )
+
+    message = str(exc_info.value)
+    assert "tasks/pending/downstream.md" in message
+    assert "non-none 'Depends on tasks/issues'" in message
+    assert "no dependency references were parsed" in message
+    assert [call for call in fake_client.calls if call["method"] == "create_issue"] == []
+
+
+def test_create_issue_from_prd_rejects_dependencies_in_later_section(
+    tmp_path: Path,
+) -> None:
+    """重复依赖小节里的后续引用不能在创建 Issue 时被静默丢弃。"""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo)
+    fake_client = FakeGitHubClient()
+    prd = repo / "tasks" / "pending" / "downstream.md"
+    prd.parent.mkdir(parents=True)
+    prd.write_text(
+        "# PRD: Downstream\n\n"
+        "## Delivery Dependencies\n\n"
+        "- Depends on tasks/issues: #41\n"
+        "- Gate type: hard\n\n"
+        "## Delivery Dependencies\n\n"
+        "- Depends on tasks/issues: #42\n"
+        "- Gate type: hard\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        create_issue_from_prd(
+            request=_request(repo, Path("tasks/pending/downstream.md")),
+            github_client=fake_client,
+        )
+
+    message = str(exc_info.value)
+    assert "tasks/pending/downstream.md" in message
+    assert "dependencies in multiple 'Delivery Dependencies' sections" in message
+    assert [call for call in fake_client.calls if call["method"] == "create_issue"] == []
 
 
 def test_create_issue_from_prd_unresolved_prd_ref_is_actionable(
@@ -935,7 +1076,7 @@ def test_create_issue_from_prd_materializes_structured_evidence_marker(
     )
 
     create_call = next(c for c in fake_client.calls if c["method"] == "create_issue")
-    assert '<!-- iar:structured-evidence version=1 language="zh-CN" -->' in create_call["body"]
+    assert '<!-- kc:structured-evidence version=1 language="zh-CN" -->' in create_call["body"]
 
 
 def test_create_issue_from_prd_honors_validation_language(
@@ -964,7 +1105,7 @@ def test_create_issue_from_prd_honors_validation_language(
     )
 
     create_call = next(c for c in fake_client.calls if c["method"] == "create_issue")
-    assert '<!-- iar:structured-evidence version=1 language="en-US" -->' in create_call["body"]
+    assert '<!-- kc:structured-evidence version=1 language="en-US" -->' in create_call["body"]
 
 
 def test_create_issue_from_prd_skips_marker_when_structured_evidence_disabled(
@@ -993,7 +1134,7 @@ def test_create_issue_from_prd_skips_marker_when_structured_evidence_disabled(
     )
 
     create_call = next(c for c in fake_client.calls if c["method"] == "create_issue")
-    assert "iar:structured-evidence" not in create_call["body"]
+    assert "kc:structured-evidence" not in create_call["body"]
 
 
 def test_extract_title_strips_prd_prefix() -> None:

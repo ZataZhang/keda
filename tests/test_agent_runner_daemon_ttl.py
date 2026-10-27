@@ -90,7 +90,6 @@ def _run_one_daemon_pass(
             contexts=[_build_context("reconcile-test", tmp_path, config=config)],
             interval=1,
             agent="claude",
-            max_issues=1,
             # worktree 现场探测用假执行器：默认 path_command 必须解析到一个存在的
             # 目录，否则对账会判成「现场不可解析」→ 判失败，而不是重新入队。
             process_runner=FakeProcessRunner(worktree_site_response(tmp_path, 7)),
@@ -258,7 +257,7 @@ def test_hosted_maintenance_prunes_only_when_repo_opts_in(
             contexts=[_build_context("maintenance-test", tmp_path, config=config)],
             interval=1,
             agent="claude",
-            max_issues=1,
+            max_prd_issues=1,
             process_runner=FakeProcessRunner(),
             github_client_factory=lambda _repo_path: FakeGitHubClient(),
             run_history_store=history_store,
@@ -296,7 +295,7 @@ def test_hosted_worktree_cleanup_runs_after_issue_workers_only_when_enabled(
     monkeypatch.setattr(daemon_module.time, "sleep", stop_after_one_pass)
     monkeypatch.setattr(daemon_module, "process_prd_rework_issues", lambda **_kwargs: None)
     monkeypatch.setattr(daemon_module, "run_once", finish_workers)
-    monkeypatch.setattr(daemon_module, "cleanup_iar_worktrees", record_cleanup)
+    monkeypatch.setattr(daemon_module, "cleanup_managed_worktrees", record_cleanup)
     monkeypatch.setattr(daemon_module, "_run_hosted_issue_log_cleanup", record_log_cleanup)
     config = AppConfig(daemon=DaemonConfig(hosted_maintenance_enabled=maintenance_enabled))
 
@@ -305,7 +304,7 @@ def test_hosted_worktree_cleanup_runs_after_issue_workers_only_when_enabled(
             contexts=[_build_context("worktree-maintenance-test", tmp_path, config=config)],
             interval=1,
             agent="claude",
-            max_issues=1,
+            max_prd_issues=1,
             process_runner=FakeProcessRunner(),
             github_client_factory=lambda _repo_path: FakeGitHubClient(),
             reconcile_stale_attempts=False,
@@ -317,3 +316,56 @@ def test_hosted_worktree_cleanup_runs_after_issue_workers_only_when_enabled(
         else ["workers-finished"]
     )
     assert events == expected_events
+
+
+def test_hosted_maintenance_waits_for_in_flight_issue_workers(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """异步 daemon worker 仍在执行时，托管清理应留到后续空闲 pass。"""
+    from backend.core.use_cases import run_agent_daemon as daemon_module
+
+    events: list[str] = []
+
+    class ActiveExecutionSlots:
+        """模拟仍有 Issue worker 的 daemon 执行名单。"""
+
+        def __init__(self, _repo_id: str) -> None:
+            pass
+
+        def reap(self) -> list[tuple[int, int]]:
+            return []
+
+        def in_flight_issue_numbers(self) -> frozenset[int]:
+            return frozenset({42})
+
+    def stop_after_one_pass(_seconds: float) -> None:
+        raise StopIteration
+
+    monkeypatch.setattr(daemon_module, "DaemonExecutionSlots", ActiveExecutionSlots)
+    monkeypatch.setattr(daemon_module.time, "sleep", stop_after_one_pass)
+    monkeypatch.setattr(daemon_module, "process_prd_rework_issues", lambda **_kwargs: None)
+    monkeypatch.setattr(daemon_module, "run_once", lambda **_kwargs: events.append("run-once"))
+    monkeypatch.setattr(
+        daemon_module,
+        "_run_hosted_worktree_cleanup",
+        lambda **_kwargs: events.append("worktree-cleanup"),
+    )
+    monkeypatch.setattr(
+        daemon_module,
+        "_run_hosted_issue_log_cleanup",
+        lambda *_args, **_kwargs: events.append("log-cleanup"),
+    )
+    config = AppConfig(daemon=DaemonConfig(hosted_maintenance_enabled=True))
+
+    with pytest.raises(StopIteration):
+        run_agent_daemon(
+            contexts=[_build_context("active-worker-maintenance-test", tmp_path, config=config)],
+            interval=1,
+            agent="claude",
+            process_runner=FakeProcessRunner(),
+            github_client_factory=lambda _repo_path: FakeGitHubClient(),
+            reconcile_stale_attempts=False,
+        )
+
+    assert events == ["run-once"]

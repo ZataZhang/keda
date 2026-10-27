@@ -511,7 +511,7 @@ def test_api_approve_draft_returns_400_on_already_approved(
 def test_api_inbound_rejects_missing_signature(
     api_environment: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("IAR_IDEA_INBOX_INBOUND_SECRET", "topsecret")
+    monkeypatch.setenv("KEDACODE_IDEA_INBOX_INBOUND_SECRET", "topsecret")
     client = TestClient(app)
     body = json.dumps(
         {
@@ -533,7 +533,7 @@ def test_api_inbound_rejects_missing_signature(
 def test_api_inbound_rejects_invalid_signature(
     api_environment: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("IAR_IDEA_INBOX_INBOUND_SECRET", "topsecret")
+    monkeypatch.setenv("KEDACODE_IDEA_INBOX_INBOUND_SECRET", "topsecret")
     client = TestClient(app)
     body = json.dumps(
         {
@@ -558,7 +558,7 @@ def test_api_inbound_rejects_invalid_signature(
 def test_api_inbound_rejects_missing_secret(
     api_environment: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.delenv("IAR_IDEA_INBOX_INBOUND_SECRET", raising=False)
+    monkeypatch.delenv("KEDACODE_IDEA_INBOX_INBOUND_SECRET", raising=False)
     client = TestClient(app)
     body = json.dumps(
         {
@@ -584,7 +584,7 @@ def test_api_inbound_rejects_missing_secret(
 def test_api_inbound_rejects_unknown_repo(
     api_environment: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("IAR_IDEA_INBOX_INBOUND_SECRET", "topsecret")
+    monkeypatch.setenv("KEDACODE_IDEA_INBOX_INBOUND_SECRET", "topsecret")
     from fastapi import HTTPException
 
     def _reject(_rid: str):
@@ -613,10 +613,13 @@ def test_api_inbound_rejects_unknown_repo(
     assert response.status_code == 400
 
 
+@pytest.mark.parametrize("signature_header_name", ["X-KC-Signature", "X-IAR-Signature"])
 def test_api_inbound_accepts_valid_signature(
-    api_environment: dict, monkeypatch: pytest.MonkeyPatch
+    api_environment: dict,
+    monkeypatch: pytest.MonkeyPatch,
+    signature_header_name: str,
 ) -> None:
-    monkeypatch.setenv("IAR_IDEA_INBOX_INBOUND_SECRET", "topsecret")
+    monkeypatch.setenv("KEDACODE_IDEA_INBOX_INBOUND_SECRET", "topsecret")
     client = TestClient(app)
     body = json.dumps(
         {
@@ -633,7 +636,7 @@ def test_api_inbound_accepts_valid_signature(
         content=body,
         headers={
             "Content-Type": "application/json",
-            "X-IAR-Signature": sig,
+            signature_header_name: sig,
         },
     )
     assert response.status_code == 202
@@ -650,7 +653,7 @@ def test_api_metadata_endpoint_returns_options(api_environment: dict) -> None:
     payload = response.json()
     assert "P1" in payload["priorities"]
     assert "FEAT" in payload["prd_types"]
-    assert payload["inbound_signature_header"] == "X-IAR-Signature"
+    assert payload["inbound_signature_header"] == "X-KC-Signature"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

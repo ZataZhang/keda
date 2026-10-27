@@ -492,17 +492,23 @@ export type BacklogPrdsResponse = {
   scanned_at: string | null;
   /** 快照缺失、损坏或已超过后端 TTL：后台正在重扫，前端应短间隔继续轮询。 */
   stale: boolean;
+  /** 全局后台同步间隔（秒）：前端自动刷新与倒计时跟着它走，避免各处各写一套。 */
+  refresh_interval_seconds?: number;
 };
 
-/** 生效并发上限的来源：继承 runner 容量 / Backlog 设置 / 被 runner 容量压低。 */
-export type BacklogCeilingSource = "inherited" | "policy" | "capped_by_capacity";
+/** 生效并行上限的来源：Backlog 页面设置 / 配置文件 max_concurrent_issues。 */
+export type BacklogCeilingSource = "policy" | "config";
+
+/** 本机 daemon 实际生效值的来源：多一个 `kc daemon run --concurrency` 命令行覆盖。 */
+export type DaemonParallelLimitSource = BacklogCeilingSource | "cli_override";
 
 export type BacklogSettings = {
   repo_id: string;
-  /** Backlog「并发」策略值；从未保存过时为 null（继承 runner 容量）。 */
+  /** Backlog 页面保存的并行上限；从未保存过时为 null（使用配置文件值）。 */
   max_parallel: number | null;
-  /** 解析后的单一生效并发上限，与 daemon 认领、补位、全局开始同值。 */
+  /** 解析后的单一生效并行上限，与 daemon 认领、补位、全局开始同值。 */
   effective_max_parallel: number;
+  /** 配置文件的并行上限（max_concurrent_issues），页面未保存时生效。 */
   runner_capacity: number;
   ceiling_source: BacklogCeilingSource;
   default_view: "timeline" | "list";
@@ -529,8 +535,8 @@ export type BacklogGlobalStartResult = {
  * `persisted_enabled` 是仓库 `.kedacode.toml` 里的值（缺失时为 null）。
  * `auto_merge_enabled` 表示自动合并的两道配置门都已开启，`daemon_running`
  * 表示后台进程正在运行。三者互相独立。
- * `max_parallel` 是可空的并发策略值（null = 从未保存），`effective_max_parallel`
- * 是与 daemon / 补位 / 全局开始共用同一解析函数的生效上限。
+ * `max_parallel` 是可空的页面设置（null = 从未保存，使用配置文件值），
+ * `effective_max_parallel` 是与 daemon / 补位 / 全局开始共用同一解析函数的生效上限。
  */
 export type BacklogAutopilotState = {
   repo_id: string;
@@ -543,6 +549,9 @@ export type BacklogAutopilotState = {
   ceiling_source: BacklogCeilingSource;
   config_source: string;
   persisted_enabled: boolean | null;
+  /** 本机存活 daemon 最近一次轮询实际使用的并行上限；没有存活 daemon 时为 null。 */
+  daemon_parallel_limit: number | null;
+  daemon_parallel_limit_source: DaemonParallelLimitSource | null;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -686,12 +695,7 @@ export type BacklogPrdProgress = {
   /** 事实来源：``worktree`` / ``main`` / null（来源不可用）。 */
   prd_source: string | null;
   /** 归档终态用 ``not_applicable``；其余见后端 WorktreeMatchStatus。 */
-  worktree_status:
-    | "matched"
-    | "none"
-    | "unavailable"
-    | "ambiguous"
-    | "not_applicable";
+  worktree_status: "matched" | "none" | "unavailable" | "ambiguous" | "not_applicable";
   worktree: PrdProgressWorktree | null;
   checklist: PrdProgressChecklist;
   evidence: PrdProgressEvidence;
@@ -765,6 +769,7 @@ export type PrdInvocationRow = {
   retry_reason: string | null;
   exit_code: number | null;
   log_locator: string | null;
+  model_config_snapshot?: AgentModelConfigSnapshot | null;
 };
 
 /**
@@ -908,6 +913,21 @@ export type ModelTokenUsageStats = {
   by_agent: Record<string, Record<string, TokenUsageTotals>>;
   by_prd: PrdModelTokenUsageEntry[];
   truncated: boolean;
+  /** 已结束但没有可用用量的调用，按 Agent 计数。 */
+  missing_usage_by_agent?: Record<string, number>;
+  /** 执行器明确上报全零用量的调用，不能视为免费。 */
+  zero_usage_by_model?: Record<string, number>;
+  /** 按启动时默认配置回退归属的调用数，费用仍为估算。 */
+  configuration_fallback_counts?: Record<string, number>;
+  /** 默认配置仅提供别名的调用数，仍归为 unknown。 */
+  unresolved_model_alias_counts?: Record<string, number>;
+};
+
+/** 启动时读取的默认模型配置，不能冒充执行器报告。 */
+export type AgentModelConfigSnapshot = {
+  model_id: string;
+  source: string;
+  is_alias: boolean;
 };
 
 /** 单个 PRD 在单个模型上的累计用量。 */
@@ -1022,6 +1042,24 @@ export type LifecycleAgentSource =
 /** 矩阵编辑视角：全局层（config.toml）或仓库层（.kedacode.toml）。 */
 export type LifecycleAgentScope = "global" | "repository";
 
+/**
+ * 单个已注册 agent 在本机的可用性事实。
+ *
+ * 后端只按 PATH 解析注册块声明的可执行文件（不起子进程、不探测 `--help`），
+ * 键名与 `kc agent list --json` 的 `available` / `bin_path` 保持一致。
+ */
+export type AgentAvailabilityEntry = {
+  agent: string;
+  /** 注册块声明的可执行文件名。 */
+  bin: string;
+  /** 可执行文件是否解析得到。 */
+  available: boolean;
+  /** 解析到的绝对路径；未安装时为 null。 */
+  bin_path: string | null;
+  /** 该 agent 声明的非交互用途名。 */
+  declared_profiles: string[];
+};
+
 /** 单个生命周期键在某视角下的生效视图。 */
 export type LifecycleAgentEntry = {
   key: LifecycleAgentKey;
@@ -1082,6 +1120,8 @@ export type PrdAgentOverrideView = {
   prd_path: string;
   overrides: Record<string, string>;
   agents: string[];
+  /** 注册表可用性事实（与矩阵视图同源），抽屉据此标注"未安装"。 */
+  agent_availability: AgentAvailabilityEntry[];
   lifecycles: LifecycleAgentEntry[];
   /** 触发入口分组，按展示顺序排列（PRD 覆盖抽屉沿用同一分组渲染）。 */
   entry_groups: LifecycleAgentEntryGroup[];
@@ -1184,6 +1224,11 @@ export type LifecycleSettingsView = {
   scope: LifecycleAgentScope;
   repo_id: string | null;
   agents: string[];
+  /**
+   * 注册表可用性事实（只查 PATH）。页面把"未安装 / 解析路径"标在 Agent 下拉项、
+   * 矩阵行、预设与回退候选上，只呈现不拦截：真正的阻断在 core 的启动前门禁。
+   */
+  agent_availability: AgentAvailabilityEntry[];
   lifecycles: LifecycleSettingsRow[];
   presets: AgentPresetDefinition[];
   fallback: AgentFallbackCandidatesView;
@@ -1264,7 +1309,8 @@ export type StartPrdLaunchOptions = {
 export type RunnerStatusSummary = {
   daemon_mode: boolean;
   config: {
-    max_issues: number;
+    /** 全局配置的默认并行上限（各仓库的生效值见 Backlog 页面）。 */
+    max_concurrent_issues: number;
     default_agent: string;
     max_recovery_attempts: number;
     recovery_retry_delay_seconds: number;
@@ -1520,7 +1566,9 @@ export type RuntimeTaskStatus =
   | "running"
   | "waiting"
   | "blocked"
+  | "failed"
   | "completed"
+  | "closed"
   | "unknown";
 
 /**
@@ -1530,14 +1578,25 @@ export type RuntimeTaskStatus =
  * 走现有 progress 契约取数，避免出现第二份检测实现。
  */
 export type RuntimeTaskEntry = {
+  /** 等待原因来自最近监督动作与当前标签；缺失时保守显示待再次检查。 */
+  waiting_reason?: "queued" | "human_review" | "recheck" | null;
+  /** 仅表示本机 PR 值守进程存活，不保证任务会自动合并。 */
+  review_daemon_running?: boolean | null;
   repo_id: string;
   issue_number: number;
   task_key: string;
   repo_display_name: string | null;
   issue_title: string | null;
   issue_url: string | null;
+  /** 已开 PR 的网页链接；尚未开 PR 或旧响应缺少该字段时为 null。 */
+  pr_url?: string | null;
+  /** PR 编号；链接无法解析编号时为 null。 */
+  pr_number?: number | null;
   status: RuntimeTaskStatus;
+  /** 当前状态的直接来源，例如监控标签或 Issue 关闭状态。 */
   status_reason: string | null;
+  /** 监控异常类型，与状态来源分开呈现。 */
+  anomaly_types: AnomalyType[];
   phase: string | null;
   agent: string | null;
   preset: string | null;

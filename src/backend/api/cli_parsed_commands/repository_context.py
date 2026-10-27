@@ -27,7 +27,7 @@ def resolve_initialized_repository_target(
         repo_override=ctx.repo_override,
     )
     for repository_context in repository_contexts:
-        _cli.require_iar_repository_initialized(
+        _cli.require_repository_initialized(
             repository_context.repo_path,
             ctx.process_runner,
         )

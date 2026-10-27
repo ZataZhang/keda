@@ -1,4 +1,4 @@
-"""Clean up stale iAR issue worktrees and local branches."""
+"""Clean up stale KedaCode issue worktrees and local branches."""
 
 from __future__ import annotations
 
@@ -8,10 +8,12 @@ from pathlib import Path
 import re
 
 from backend.core.shared.interfaces.agent_runner import IGitHubClient, IProcessRunner
+from backend.core.shared.models.repository_paths import (
+    resolve_managed_worktree_root,
+)
 
 
 DEFAULT_ISSUE_BRANCH_PREFIX = "issue-"
-DEFAULT_WORKTREE_DIR_NAME = ".iar-worktrees"
 
 
 class WorktreeCleanupStatus(str, Enum):
@@ -39,7 +41,7 @@ class WorktreeCleanupRequest:
 
 @dataclass(frozen=True)
 class IssueBranchCandidate:
-    """Local branch that follows the configured iAR issue branch pattern."""
+    """Local branch that follows the configured KedaCode issue branch pattern."""
 
     branch: str
     issue_number: int
@@ -86,7 +88,7 @@ class WorktreeCleanupResult:
         return sum(1 for branch_result in self.branches if branch_result.status is status)
 
 
-def cleanup_iar_worktrees(
+def cleanup_managed_worktrees(
     request: WorktreeCleanupRequest,
     *,
     github_client: IGitHubClient,
@@ -97,16 +99,16 @@ def cleanup_iar_worktrees(
     A branch is eligible only when all default safety checks pass:
     its name matches ``issue-<number>``, the corresponding remote branch is
     gone after ``git fetch --prune``, the GitHub Issue is closed, the worktree
-    is not marked active, is iAR-managed, the worktree is clean, and the branch
-    is merged into the configured remote base branch. ``force`` bypasses the
-    dirty and merged checks, but still requires a closed, inactive Issue and a
-    missing remote branch.
+    is not marked active, is KedaCode-managed, the worktree is clean, and the
+    branch is merged into the configured remote base branch. ``force`` bypasses
+    the dirty and merged checks, but still requires a closed, inactive Issue and
+    a missing remote branch.
     """
     repo_path = request.repo_path.resolve()
     managed_worktree_root_path = (
         request.managed_worktree_root_path
         if request.managed_worktree_root_path is not None
-        else repo_path / DEFAULT_WORKTREE_DIR_NAME
+        else resolve_managed_worktree_root(repo_path)
     ).resolve()
 
     _fetch_pruned_remote(repo_path, request.remote, process_runner)

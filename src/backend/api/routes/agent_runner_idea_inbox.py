@@ -7,7 +7,7 @@
 - 生成 PRD 草稿 / 草稿确认入 pending
 - 通用签名 inbound endpoint
 
-签名 secret 来自环境变量 ``KEDACODE_IDEA_INBOX_INBOUND_SECRET``（旧名兜底），不写入
+签名 secret 来自环境变量 ``KEDACODE_IDEA_INBOX_INBOUND_SECRET``，不写入
 ``config.toml`` / ``.kedacode.toml``。所有 DTO 转换、HTTP 状态码与签名校
 验在本模块完成；append-only 约束、状态机与命名规范在 core use case。
 """
@@ -55,11 +55,12 @@ _logger = logging.getLogger(__name__)
 router = APIRouter(tags=["agent-runner-idea-inbox"])
 
 _INBOUND_SECRET_ENV_SUFFIX = "IDEA_INBOX_INBOUND_SECRET"
-"""双读用的环境变量后缀：新旧两个名字都会读取。"""
+"""入站签名 secret 的环境变量后缀。"""
 
 INBOUND_SECRET_ENV = f"{product_identity.ENV_PREFIX}{_INBOUND_SECRET_ENV_SUFFIX}"
-"""对外报告的变量名（新名）；读取时旧名同样生效。"""
-INBOUND_SIGNATURE_HEADER = "X-IAR-Signature"
+"""对外报告的入站签名 secret 环境变量名。"""
+INBOUND_SIGNATURE_HEADER = "X-KC-Signature"
+LEGACY_INBOUND_SIGNATURE_HEADER = "X-IAR-Signature"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -296,13 +297,14 @@ def _resolve_source(provider: str) -> IdeaInboxSource:
 @router.post("/agent-runner/idea-inbox/inbound", status_code=202)
 async def inbound_idea(
     request: Request,
-    x_iar_signature: str | None = Header(default=None, alias=INBOUND_SIGNATURE_HEADER),
+    x_kc_signature: str | None = Header(default=None, alias=INBOUND_SIGNATURE_HEADER),
+    legacy_signature: str | None = Header(default=None, alias=LEGACY_INBOUND_SIGNATURE_HEADER),
 ) -> dict:
     """外部 IM / webhook 入口。
 
     必须：
 
-    1. 携带 ``X-IAR-Signature`` HMAC SHA256 签名（基于 raw request body）。
+    1. 携带 ``X-KC-Signature`` HMAC SHA256 签名；旧 ``X-IAR-Signature`` 仍可使用。
     2. 显式携带 ``repo_id``，且该 repo 必须在 registry 中 enabled。
     3. ``text`` 非空。
 
@@ -317,7 +319,7 @@ async def inbound_idea(
     raw_body_bytes = await request.body()
     raw_body = raw_body_bytes.decode("utf-8")
     secret = product_identity.read_product_env_value(_INBOUND_SECRET_ENV_SUFFIX)
-    _verify_signature(raw_body, x_iar_signature, secret)
+    _verify_signature(raw_body, x_kc_signature or legacy_signature, secret)
 
     try:
         payload_dict = json.loads(raw_body)

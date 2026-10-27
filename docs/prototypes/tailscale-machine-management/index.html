@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f8f8fc" />
+    <title>Keda 多机连接 · 交互原型</title>
+    <link rel="stylesheet" href="../assets/prototype-chrome.css" />
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="app-sidebar" aria-label="KedaCode 主导航">
+        <a class="brand" href="#machines" aria-label="KedaCode 首页"><span class="brand-mark">K</span><strong>KedaCode</strong></a>
+        <nav class="primary-nav" aria-label="主导航">
+          <a class="nav-item" href="#machines"><span>▦</span>Dashboard</a>
+          <a class="nav-item" href="#machines"><span>◷</span>Processes</a>
+          <a class="nav-item is-active" href="#machines"><span>▣</span>Machines</a>
+          <a class="nav-item" href="#machines"><span>⑂</span>Repositories</a>
+          <a class="nav-item" href="#machines"><span>▤</span>Stats</a>
+          <a class="nav-item" href="#machines"><span>◇</span>Backlog</a>
+          <a class="nav-item" href="#machines"><span>⚙</span>Settings</a>
+        </nav>
+        <div class="sidebar-footer"><span class="online-dot"></span><span>zata-macbook · 已连接</span></div>
+      </aside>
+
+      <main class="page-content">
+        <header class="page-header">
+          <div>
+            <p class="breadcrumb">设备管理 <span>/</span> Machines</p>
+            <h1 id="page-title">机器管理</h1>
+            <p class="page-description" id="page-description">把自己的电脑加入同一安全网络。Agent 负责安装检测、连接检查和后续配置；你只在目标电脑完成登录与系统授权。</p>
+          </div>
+          <span class="demo-badge"><span></span>交互原型 · 模拟数据</span>
+        </header>
+
+        <div class="screen screen-active" data-screen="machines">
+          <section class="connection-note" aria-label="连接说明">
+            <div class="note-icon">↗</div>
+            <div><strong>不需要公网 IP，也不用配置路由器</strong><p>两台电脑登录同一个 Tailscale 账号后，Keda 会自动发现设备并检查连接。首次加入时，每台电脑都要在本机完成账号登录；macOS 等系统还会要求允许网络权限。</p></div>
+            <a href="https://tailscale.com/download" target="_blank" rel="noreferrer">官方安装页 ↗</a>
+          </section>
+
+          <div class="section-heading">
+            <div><h2>你的电脑 <span class="count-pill" id="machine-count">2</span></h2><p>已连接设备会显示在线状态、文档授权范围和 Agent Runner 状态。</p></div>
+            <button class="primary-button hotspot-target" type="button" data-action="open-wizard">＋ 添加电脑</button>
+          </div>
+
+          <div class="machine-grid" id="machine-grid">
+            <article class="machine-card">
+              <div class="machine-card-top"><div class="device-icon device-current">⌘</div><span class="status status-online"><i></i>在线 · 本机</span></div>
+              <h3>zata-macbook</h3><p class="device-subtitle">MacBook Pro · macOS · 上次连接 刚刚</p>
+              <div class="machine-facts"><div><span>安全连接</span><strong><i class="tiny-dot"></i>Tailscale 已连接</strong></div><div><span>Agent Runner</span><strong>空闲 · 2 个仓库</strong></div></div>
+              <div class="scope-row"><span>可读文件夹</span><strong>此设备仅本地使用</strong></div>
+              <div class="card-actions"><button class="outline-button hotspot-target" type="button" data-action="files" data-machine="zata-macbook">浏览文档</button><button class="text-button hotspot-target" type="button" data-action="runner" data-machine="zata-macbook">管理 Agent →</button></div>
+            </article>
+
+            <article class="machine-card">
+              <div class="machine-card-top"><div class="device-icon">▱</div><span class="status status-online"><i></i>在线</span></div>
+              <h3>office-macbook</h3><p class="device-subtitle">MacBook Air · macOS · 上次连接 2 分钟前</p>
+              <div class="machine-facts"><div><span>安全连接</span><strong><i class="tiny-dot"></i>Tailscale 已连接</strong></div><div><span>Agent Runner</span><strong>运行中 · keda</strong></div></div>
+              <div class="scope-row"><span>可读文件夹</span><strong>Documents · 2 个</strong></div>
+              <div class="card-actions"><button class="outline-button hotspot-target" type="button" data-action="files" data-machine="office-macbook">浏览文档</button><button class="text-button hotspot-target" type="button" data-action="web" data-machine="office-macbook">预览网页</button><button class="text-button hotspot-target" type="button" data-action="runner" data-machine="office-macbook">管理 Agent →</button></div>
+            </article>
+          </div>
+
+          <section class="how-it-works"><div class="how-heading"><span class="eyebrow">HOW IT WORKS</span><h2>你只需要做一次的事</h2></div><div class="step-strip"><div><b>1</b><strong>在目标电脑安装并登录</strong><span>Agent 会给出官方安装入口；登录和系统授权必须由你在那台电脑完成。</span></div><div><b>2</b><strong>允许安全远程登录</strong><span>Keda 引导开启系统自带 SSH；凭据只在本机安全保存，可随时撤销。</span></div><div><b>3</b><strong>选择允许读取的文件夹</strong><span>Agent 只浏览你选定的目录，默认只读；随时可收回授权。</span></div></div></section>
+        </div>
+
+        <div class="screen" data-screen="files" hidden>
+          <div class="subnav"><button class="back-button hotspot-target" data-action="back-machines">← 机器</button><span>/</span><strong id="files-machine-name">office-macbook</strong><span>/</span><strong>文档</strong></div>
+          <section class="files-layout">
+            <div class="files-list-panel">
+              <div class="panel-title-row"><div><h2>已授权文件夹</h2><p>Agent 只能读取你在这台电脑上授权的内容。</p></div><span class="read-only-pill">只读</span></div>
+              <div class="folder-chip-row"><button class="folder-chip is-selected" data-folder="Documents">▣ Documents</button><button class="folder-chip" data-folder="工作资料">▣ 工作资料</button><button class="folder-chip add-folder" data-action="toast">＋ 增加文件夹</button></div>
+              <div class="file-list" id="file-list">
+                <button class="file-row is-selected" data-file="项目计划.md"><span class="file-icon markdown">MD</span><span><strong>项目计划.md</strong><small>更新于 今天 10:24 · 8 KB</small></span><span class="file-type">Markdown</span></button>
+                <button class="file-row" data-file="产品截图.png"><span class="file-icon image">IMG</span><span><strong>产品截图.png</strong><small>更新于 昨天 18:06 · 1.2 MB</small></span><span class="file-type">图片</span></button>
+                <button class="file-row" data-file="会议纪要.pdf"><span class="file-icon pdf">PDF</span><span><strong>会议纪要.pdf</strong><small>更新于 周一 15:40 · 304 KB</small></span><span class="file-type">PDF</span></button>
+              </div>
+            </div>
+            <aside class="file-preview" id="file-preview"><span class="preview-label">预览 · 只读</span><h3 id="preview-title">项目计划.md</h3><div class="fake-document"><div class="doc-kicker">KEDA PROJECT</div><h4>项目计划</h4><p>本周目标</p><ul><li>完成机器连接向导</li><li>验证文档只读浏览</li><li>整理下次评审问题</li></ul><div class="doc-rule"></div><p class="doc-muted">文件内容在目标电脑上保持原样。Keda 不会修改或删除远程文件。</p></div></aside>
+          </section>
+        </div>
+
+        <div class="screen" data-screen="runner" hidden>
+          <div class="subnav"><button class="back-button hotspot-target" data-action="back-machines">← 机器</button><span>/</span><strong id="runner-machine-name">office-macbook</strong><span>/</span><strong>Agent Runner</strong></div>
+          <section class="runner-card"><div class="runner-card-head"><div><span class="eyebrow">REMOTE AGENT RUNNER</span><h2>office-macbook</h2><p>此页面只提供明确的 Keda 操作，不开放任意远程命令或桌面控制。</p></div><span class="status status-running"><i></i>运行中</span></div><div class="runner-details"><div><span>当前仓库</span><strong>zata / keda</strong></div><div><span>当前任务</span><strong>#284 · 多机连接说明</strong></div><div><span>运行时间</span><strong>18 分钟</strong></div></div><div class="runner-actions"><button class="outline-button hotspot-target" data-action="confirm-runner" data-kind="restart">重启 Runner</button><button class="danger-button hotspot-target" data-action="confirm-runner" data-kind="stop">停止 Runner</button></div><p class="permission-note">每次启动或停止前都会显示目标机器和影响范围，需你确认。命令与结果会记录在操作历史中。</p></section>
+        </div>
+
+        <div class="screen" data-screen="webview" hidden>
+          <div class="subnav"><button class="back-button hotspot-target" data-action="back-machines">← 机器</button><span>/</span><strong id="web-machine-name">office-macbook</strong><span>/</span><strong>项目预览</strong></div>
+          <section class="web-preview-card"><div class="web-preview-heading"><div><span class="eyebrow">PRIVATE WEB PREVIEW</span><h2>keda 项目预览</h2><p>此页来自目标电脑上由 KedaCode 启动的开发预览。</p></div><span class="tailnet-pill"><i></i>仅限 Tailscale 网络</span></div><div class="preview-address"><span>⊙</span><code>https://office-macbook.example.ts.net</code><span class="secure-label">加密连接</span></div><div class="web-mock-browser"><div class="mock-browser-bar"><span></span><span></span><span></span><small>keda · 本地开发预览</small></div><div class="mock-site"><div class="mock-site-nav"><strong>KedaCode</strong><span>文档</span><span>功能</span><span>关于</span><button>开始使用</button></div><div class="mock-site-hero"><span class="mock-site-kicker">BUILD WITH AGENTS</span><h3>把机器连接起来<br/>让 Agent 在正确的地方工作</h3><p>由目标电脑上的 KedaCode 本地预览服务提供。停止预览后，页面立即不可访问。</p><button>查看项目 →</button></div></div></div><div class="private-note"><strong>这是私有预览，不是公开网站</strong><span>只允许 tailnet 中符合访问策略的设备打开。Keda 不会启用公开分享（Funnel），也不会通过此入口暴露 Keda Console。</span></div></section>
+        </div>
+      </main>
+    </div>
+
+    <dialog class="wizard-dialog" id="wizard-dialog" aria-labelledby="wizard-title">
+      <div class="wizard-top"><div><p class="eyebrow">添加一台电脑</p><h2 id="wizard-title">连接向导</h2></div><button class="icon-close" data-action="close-wizard" aria-label="关闭">×</button></div>
+      <div class="wizard-progress" aria-label="设置进度"><span class="is-current" data-progress="1">1</span><i></i><span data-progress="2">2</span><i></i><span data-progress="3">3</span></div>
+      <section class="wizard-step is-active" data-step="1"><div class="step-illustration network-illustration"><span>这台电脑</span><b>↔</b><span>另一台电脑</span></div><h3>先让目标电脑加入同一安全网络</h3><p class="wizard-copy">目前没有互联网直连地址也没关系。请在要连接的电脑上安装 Tailscale，并使用和这台电脑相同的账号登录。</p><div class="agent-does"><strong><span>✦</span> Agent 会自动完成</strong><ul><li>检查这台电脑的系统和 Tailscale 状态</li><li>打开官方安装页，安装后自动检测连接</li><li>发现新电脑并检查网络连通性</li></ul></div><div class="human-does"><strong><span>你需要在目标电脑完成</span></strong><ol><li>安装 Tailscale 并登录同一账号</li><li>按系统提示允许 VPN / 网络权限</li><li>如果启用了设备审批，在管理页面批准这台设备</li></ol></div><a class="install-link" href="https://tailscale.com/download" target="_blank" rel="noreferrer">打开 Tailscale 官方下载页 ↗</a><div class="wizard-actions"><button class="primary-button hotspot-target" data-action="wizard-next">目标电脑已登录，继续检查 <span>→</span></button></div></section>
+      <section class="wizard-step" data-step="2"><h3>启用安全远程访问</h3><p class="wizard-copy">Tailscale 负责安全连接；浏览文件和管理 Agent 还需要目标电脑允许 SSH 访问。Keda 不会公开电脑端口到互联网。</p><div class="check-list"><div class="check-row is-done"><span>✓</span><div><strong>Tailscale 已找到 office-macbook</strong><small>网络在线 · 无需公网 IP</small></div></div><div class="check-row is-waiting"><span>2</span><div><strong>等待在目标电脑开启“远程登录”</strong><small>macOS：系统设置 → 通用 → 共享 → 远程登录</small></div></div><div class="check-row"><span>3</span><div><strong>验证加密登录并登记本机密钥</strong><small>一次性系统授权；密码不会由 Keda 保存</small></div></div></div><div class="warning-note"><strong>只对你有权管理的电脑开启</strong><span>公司设备若受 IT 管理，请先确认公司政策允许。</span></div><div class="wizard-actions"><button class="secondary-button" data-action="wizard-back">← 上一步</button><button class="primary-button hotspot-target" data-action="wizard-next">我已开启，继续 <span>→</span></button></div></section>
+      <section class="wizard-step" data-step="3"><h3>选择 Agent 可以读取的文件夹</h3><p class="wizard-copy">默认不开放任何个人文件。选择后，Agent 才能查看和引用其中的文档；文件始终只读。</p><div class="folder-options"><label><input type="checkbox" checked /><span class="folder-option-icon">▣</span><span><strong>Documents</strong><small>~/Documents · 12 个文件夹</small></span></label><label><input type="checkbox" /><span class="folder-option-icon">▣</span><span><strong>Desktop</strong><small>~/Desktop · 6 个项目</small></span></label><label><input type="checkbox" /><span class="folder-option-icon">▣</span><span><strong>选择其他文件夹…</strong><small>可随时在机器设置中修改范围</small></span></label></div><div class="permission-note">授权范围可随时撤销。Agent 无法浏览未选目录，也不能通过链接跳出授权目录。</div><div class="wizard-actions"><button class="secondary-button" data-action="wizard-back">← 上一步</button><button class="primary-button hotspot-target" data-action="wizard-finish">完成连接 <span>✓</span></button></div></section>
+    </dialog>
+
+    <dialog class="confirm-dialog" id="confirm-dialog"><div class="confirm-icon">!</div><h2 id="confirm-title">确认操作</h2><p id="confirm-copy">请确认目标机器和操作范围。</p><div class="dialog-actions"><button class="secondary-button" data-action="cancel-confirm">返回</button><button class="danger-button" data-action="apply-confirm">确认执行</button></div></dialog>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <nav class="prototype-chrome" data-prototype-chrome aria-label="原型评审工具"><span class="prototype-chrome__label">原型</span><a href="../hub.html">⌂ Hub</a><a href="./prototype.md">ⓘ 说明</a><button type="button" data-hotspot-toggle aria-pressed="true">◎ 可点击区域：开</button><button type="button" data-prototype-reset>↺ 重置</button></nav>
+    <script src="../assets/prototype-chrome.js"></script>
+    <script src="./prototype.js"></script>
+  </body>
+</html>

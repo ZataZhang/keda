@@ -1,7 +1,7 @@
 """REPL (Read-Eval-Print Loop) use case for the ``kc`` no-arg entrypoint.
 
 The REPL drives a multi-turn conversation between the user and a configured
-agent, parsing ``<<IAR_EXEC>> ... <<END_IAR_EXEC>>`` markers in the agent
+agent, parsing ``<<KC_EXEC>> ... <<END_KC_EXEC>>`` markers in the agent
 reply to execute whitelisted KedaCode subcommands and feed the captured
 back into the conversation history.
 
@@ -28,7 +28,7 @@ from typing import Any
 
 from backend.core.shared.models import product_identity
 from backend.core.shared.interfaces.agent_runner import (
-    IarExecRequest,
+    KCExecRequest,
     IContentGenerator,
     IGitHubClient,
     IProcessRunner,
@@ -48,10 +48,10 @@ from backend.core.use_cases.interactive_decision import (
 
 _logger = logging.getLogger(__name__)
 
-IAR_EXEC_OPEN_MARKER = "<<IAR_EXEC>>"
-IAR_EXEC_CLOSE_MARKER = "<<END_IAR_EXEC>>"
-IAR_EXEC_RESULT_OPEN_TAG = "[IAR_EXEC_RESULT]"
-IAR_EXEC_RESULT_CLOSE_TAG = "[/IAR_EXEC_RESULT]"
+KC_EXEC_OPEN_MARKER = "<<KC_EXEC>>"
+KC_EXEC_CLOSE_MARKER = "<<END_KC_EXEC>>"
+KC_EXEC_RESULT_OPEN_TAG = "[KC_EXEC_RESULT]"
+KC_EXEC_RESULT_CLOSE_TAG = "[/KC_EXEC_RESULT]"
 
 EXIT_COMMAND = "/exit"
 HELP_COMMAND = "/help"
@@ -59,9 +59,8 @@ HELP_COMMAND = "/help"
 DEFAULT_PROMPT_SUFFIX = f"{product_identity.PRIMARY_COMMAND_NAME}> "
 MAX_TURNS = 64
 
-_IAR_AVAILABLE_SUBCOMMAND_HINT = (
-    "Available `kc` subcommands (`kedacode` and the deprecated `iar` "
-    "alias run the same code): "
+_AVAILABLE_SUBCOMMAND_HINT = (
+    "Available `kc` subcommands (`kedacode` is an equivalent command name): "
     "init, labels, issue, run, daemon, supervise, supervise-daemon, recover, "
     "blocked-continue, ask, deliberate, takeover, worktree, registry, "
     "workflow, completion."
@@ -127,8 +126,8 @@ def _generate_session_id() -> str:
     return datetime.now(timezone.utc).strftime("repl-%Y%m%d-%H%M%S-%f")[:-3]
 
 
-def parse_iar_exec_markers(text: str) -> tuple[IarExecRequest, ...]:
-    """Extract ``<<IAR_EXEC>>`` command requests from an agent reply.
+def parse_kc_exec_markers(text: str) -> tuple[KCExecRequest, ...]:
+    """Extract ``<<KC_EXEC>>`` command requests from an agent reply.
 
     The protocol accepts multiple markers per reply. Each marker body is
     parsed via :func:`shlex.split` so that quoted arguments stay intact
@@ -138,39 +137,38 @@ def parse_iar_exec_markers(text: str) -> tuple[IarExecRequest, ...]:
     """
     if not text:
         return ()
-    requests: list[IarExecRequest] = []
+    requests: list[KCExecRequest] = []
     cursor = 0
     while cursor < len(text):
-        start_idx = text.find(IAR_EXEC_OPEN_MARKER, cursor)
+        start_idx = text.find(KC_EXEC_OPEN_MARKER, cursor)
         if start_idx == -1:
             break
-        end_idx = text.find(IAR_EXEC_CLOSE_MARKER, start_idx)
+        end_idx = text.find(KC_EXEC_CLOSE_MARKER, start_idx)
         if end_idx == -1:
             break
-        body = text[start_idx + len(IAR_EXEC_OPEN_MARKER) : end_idx].strip()
-        cursor = end_idx + len(IAR_EXEC_CLOSE_MARKER)
+        body = text[start_idx + len(KC_EXEC_OPEN_MARKER) : end_idx].strip()
+        cursor = end_idx + len(KC_EXEC_CLOSE_MARKER)
         if not body:
             continue
         try:
             argv = shlex.split(body)
         except ValueError as exc:
-            _logger.warning("Skipping malformed IAR_EXEC body %r: %s", body, exc)
+            _logger.warning("Skipping malformed KC_EXEC body %r: %s", body, exc)
             continue
         if not argv:
             continue
         # 剥掉首个命令名 token，执行器才不会拿到 ``["kc", "kc", ...]``。
-        # 协议要求标记体内带命令名，而三个自有名字（kc / kedacode / 旧别名
-        # legacy-alias）都算，新旧 agent 混跑时任意一种写法都能解析。
+        # 协议要求标记体内带命令名；当前支持的入口是 kc 与 kedacode。
         if product_identity.is_own_command_name(argv[0]):
             argv = argv[1:]
         if not argv:
             continue
-        requests.append(IarExecRequest(argv=tuple(argv), raw_text=body))
+        requests.append(KCExecRequest(argv=tuple(argv), raw_text=body))
     return tuple(requests)
 
 
 def _strip_exec_markers(text: str) -> str:
-    """Remove ``<<IAR_EXEC>>...<<END_IAR_EXEC>>`` markers from assistant text.
+    """Remove ``<<KC_EXEC>>...<<END_KC_EXEC>>`` markers from assistant text.
 
     Used for the visible reply printed to the terminal so that the
     conversation transcript shown to the user does not include raw
@@ -182,15 +180,15 @@ def _strip_exec_markers(text: str) -> str:
     result: list[str] = []
     cursor = 0
     while cursor < len(text):
-        start_idx = text.find(IAR_EXEC_OPEN_MARKER, cursor)
+        start_idx = text.find(KC_EXEC_OPEN_MARKER, cursor)
         if start_idx == -1:
             result.append(text[cursor:])
             break
         result.append(text[cursor:start_idx])
-        end_idx = text.find(IAR_EXEC_CLOSE_MARKER, start_idx)
+        end_idx = text.find(KC_EXEC_CLOSE_MARKER, start_idx)
         if end_idx == -1:
             break
-        cursor = end_idx + len(IAR_EXEC_CLOSE_MARKER)
+        cursor = end_idx + len(KC_EXEC_CLOSE_MARKER)
     return "".join(result).strip()
 
 
@@ -230,14 +228,14 @@ def _build_system_prompt(
         "Command execution protocol:\n"
         f"- To ask me to run a `kc` subcommand, wrap the full command "
         f"(including `kc`) inside markers like:\n"
-        f"  {IAR_EXEC_OPEN_MARKER} kc labels sync {IAR_EXEC_CLOSE_MARKER}\n"
+        f"  {KC_EXEC_OPEN_MARKER} kc labels sync {KC_EXEC_CLOSE_MARKER}\n"
         f"- Only whitelisted `kc` subcommands are allowed. Direct shell "
         f"commands, `git push` / `git merge` / `git reset`, and arbitrary "
         f"`rm` invocations are refused.\n"
         f"- I will execute read-only/dry-run commands automatically. "
         f"Write or risky commands require explicit user confirmation.\n"
         f"- Each execution result is appended back to our conversation as a "
-        f"`{IAR_EXEC_RESULT_OPEN_TAG}` block.\n"
+        f"`{KC_EXEC_RESULT_OPEN_TAG}` block.\n"
         "- You do not need to confirm successful commands; just react to "
         "their output."
     )
@@ -253,7 +251,7 @@ def _build_system_prompt(
         "invoke a `kc` subcommand on the user's behalf, follow the "
         "command-execution protocol strictly.\n\n"
         f"{protocol}\n\n"
-        f"{_IAR_AVAILABLE_SUBCOMMAND_HINT}\n"
+        f"{_AVAILABLE_SUBCOMMAND_HINT}\n"
     )
     parts.append(f"## Repository .kedacode.toml summary\n{config_summary}\n")
     parts.append(
@@ -288,16 +286,16 @@ def _format_exec_result_for_agent(outcome: ReplExecOutcome) -> str:
     cmd_text = f"{product_identity.PRIMARY_COMMAND_NAME} " + " ".join(outcome.argv)
     if outcome.rejected:
         body = (
-            f"{IAR_EXEC_RESULT_OPEN_TAG}\n"
+            f"{KC_EXEC_RESULT_OPEN_TAG}\n"
             f"command: {cmd_text}\n"
             f"status: rejected\n"
             f"reason: {outcome.rejection_reason}\n"
-            f"{IAR_EXEC_RESULT_CLOSE_TAG}"
+            f"{KC_EXEC_RESULT_CLOSE_TAG}"
         )
         return body
     status_label = "ok" if outcome.return_code == 0 else "failed"
     body_lines = [
-        IAR_EXEC_RESULT_OPEN_TAG,
+        KC_EXEC_RESULT_OPEN_TAG,
         f"command: {cmd_text}",
         f"status: {status_label}",
         f"exit_code: {outcome.return_code}",
@@ -306,7 +304,7 @@ def _format_exec_result_for_agent(outcome: ReplExecOutcome) -> str:
         body_lines.append(f"stdout:\n{outcome.stdout}")
     if outcome.stderr:
         body_lines.append(f"stderr:\n{outcome.stderr}")
-    body_lines.append(IAR_EXEC_RESULT_CLOSE_TAG)
+    body_lines.append(KC_EXEC_RESULT_CLOSE_TAG)
     return "\n".join(body_lines)
 
 
@@ -433,7 +431,7 @@ def run_repl_session(inputs: ReplSessionInputs, deps: ReplSessionDeps) -> int:
                     f"  {EXIT_COMMAND}    quit the session\n"
                     f"  {HELP_COMMAND}    show this help\n"
                     "  anything else     forwarded to the agent\n\n"
-                    f"{_IAR_AVAILABLE_SUBCOMMAND_HINT}"
+                    f"{_AVAILABLE_SUBCOMMAND_HINT}"
                 )
                 continue
 
@@ -462,7 +460,7 @@ def run_repl_session(inputs: ReplSessionInputs, deps: ReplSessionDeps) -> int:
             assistant_text = agent_result.stdout
             history.append(ReplTurn(role="assistant", content=assistant_text))
 
-            marker_requests: Sequence[IarExecRequest] = parse_iar_exec_markers(assistant_text)
+            marker_requests: Sequence[KCExecRequest] = parse_kc_exec_markers(assistant_text)
             for exec_request in marker_requests:
                 outcome: ReplExecOutcome = deps.command_executor.execute(
                     exec_request, repo_path=repo_path
@@ -520,12 +518,12 @@ __all__ = [
     "ReplSessionInputs",
     "ReplSessionDeps",
     "ReplTurn",
-    "IAR_EXEC_OPEN_MARKER",
-    "IAR_EXEC_CLOSE_MARKER",
-    "IAR_EXEC_RESULT_OPEN_TAG",
-    "IAR_EXEC_RESULT_CLOSE_TAG",
+    "KC_EXEC_OPEN_MARKER",
+    "KC_EXEC_CLOSE_MARKER",
+    "KC_EXEC_RESULT_OPEN_TAG",
+    "KC_EXEC_RESULT_CLOSE_TAG",
     "EXIT_COMMAND",
     "HELP_COMMAND",
-    "parse_iar_exec_markers",
+    "parse_kc_exec_markers",
     "run_repl_session",
 ]

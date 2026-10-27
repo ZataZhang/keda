@@ -6,7 +6,7 @@
 - 缺失源目录时跳过该 agent 并返回 ``skipped=True``
 - 目标目录权限 0700
 - 容器认证根目录不存在时自动创建
-- ``container-auth`` 路径写入 ``~/.iar/info/exclude``（在 iar 全局目录是 git 仓库时）
+- ``container-auth`` 路径写入 ``~/.kedacode/info/exclude``（在全局状态目录是 git 仓库时）
 """
 
 from __future__ import annotations
@@ -176,7 +176,7 @@ def test_import_container_auth_full_flow(tmp_path: Path, monkeypatch) -> None:
     ]
 
     result: ContainerAuthImportResult = import_container_auth(
-        global_iar_dir=fake_home / ".iar", specs=tuple(specs)
+        global_state_dir=fake_home / ".iar", specs=tuple(specs)
     )
 
     target_root = fake_home / ".iar" / "container-auth"
@@ -222,7 +222,7 @@ def test_import_container_auth_skips_missing_agent_without_failing(
         ),
     ]
 
-    result = import_container_auth(global_iar_dir=fake_home / ".iar", specs=tuple(specs))
+    result = import_container_auth(global_state_dir=fake_home / ".iar", specs=tuple(specs))
 
     by_agent = {r.agent_name: r for r in result.agent_results}
     assert by_agent["claude"].skipped is False
@@ -236,7 +236,7 @@ def test_import_container_auth_skips_missing_agent_without_failing(
 def test_container_auth_gitignore_when_global_iar_is_git_repo(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """当 ``~/.iar`` 本身是 git 仓库时，``container-auth`` 路径被写入 info/exclude。"""
+    """当 ``~/.kedacode`` 本身是 git 仓库时，``container-auth`` 路径被写入 info/exclude。"""
     fake_home = tmp_path / "fake-home"
     iar_dir = fake_home / ".iar"
     iar_dir.mkdir(parents=True)
@@ -251,7 +251,7 @@ def test_container_auth_gitignore_when_global_iar_is_git_repo(
             include_top_level=(),
         ),
     )
-    result = import_container_auth(global_iar_dir=iar_dir, specs=specs)
+    result = import_container_auth(global_state_dir=iar_dir, specs=specs)
 
     exclude_file = iar_dir / "info" / "exclude"
     assert exclude_file.is_file()
@@ -263,7 +263,7 @@ def test_container_auth_gitignore_when_global_iar_is_git_repo(
 def test_container_auth_gitignore_skipped_when_not_git_repo(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``~/.iar`` 不是 git 仓库时，gitignore 步骤跳过但命令仍 exit 0。"""
+    """``~/.kedacode`` 不是 git 仓库时，gitignore 步骤跳过但命令仍 exit 0。"""
     fake_home = tmp_path / "fake-home"
     iar_dir = fake_home / ".iar"
     iar_dir.mkdir(parents=True)
@@ -277,7 +277,7 @@ def test_container_auth_gitignore_skipped_when_not_git_repo(
             include_top_level=(),
         ),
     )
-    result = import_container_auth(global_iar_dir=iar_dir, specs=specs)
+    result = import_container_auth(global_state_dir=iar_dir, specs=specs)
 
     # 不会创建 info/exclude；状态返回 False（best-effort）
     assert not (iar_dir / "info" / "exclude").exists()

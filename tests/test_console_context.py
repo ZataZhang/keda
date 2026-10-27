@@ -39,7 +39,7 @@ def _settings(repositories: dict[str, tuple[Path, bool]]) -> AgentRunnerSettings
 
     不走 ``AgentRunnerSettings(repositories=...)``：它的 settings source 链里
     ``_RegistryRepositoriesSource`` 优先级高于 init kwargs，会把传入的仓库表
-    替换成真实 ``~/.iar/config.toml`` 的内容。这里用鸭子类型替身，只提供
+    替换成真实 ``~/.kedacode/config.toml`` 的内容。这里用鸭子类型替身，只提供
     :func:`find_repository_match_for_path` 真正读到的 ``path`` / ``enabled``。
     """
     entries = {

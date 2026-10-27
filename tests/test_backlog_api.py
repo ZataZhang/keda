@@ -152,6 +152,7 @@ def snapshot_wiring(
 
     monkeypatch.setattr(backlog_sync, "get_backlog_snapshot_store", lambda: store)
     monkeypatch.setattr(backlog_sync, "get_backlog_sync_coordinator", lambda: coordinator)
+    monkeypatch.setattr(backlog_sync, "request_backlog_resync", recording_resync)
     monkeypatch.setattr(backlog_routes, "request_backlog_resync", recording_resync)
     monkeypatch.setattr(backlog_sync, "_BACKLOG_COORDINATOR", None)
     monkeypatch.setattr(backlog_sync, "_BACKLOG_SCHEDULER", None)
@@ -208,6 +209,47 @@ def test_list_backlog_prds_serves_snapshot_without_rescanning(
 
     assert build_calls == []
     assert snapshot_wiring.coordinator.in_flight_repo_ids() == ()
+
+
+def test_force_refresh_requests_rescan_and_reports_stale(
+    backlog_environment,
+    snapshot_wiring: _SnapshotWiring,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`?force_refresh=true` 立即排一次后台重扫，并如实回报 stale，供手动刷新按钮使用。"""
+    client.get("/api/v1/agent-runner/backlog/prds?repo_id=keda-main&include_archived=false")
+    assert snapshot_wiring.coordinator.wait_until_idle(timeout_seconds=5)
+    fresh_snapshot_entry = backlog_environment["store"].get_backlog_snapshot(
+        repo_id="keda-main",
+        include_archived=False,
+    )
+    assert fresh_snapshot_entry is not None
+    backlog_environment["store"].upsert_backlog_snapshot(
+        replace(fresh_snapshot_entry, scanned_at="2000-01-01T00:00:00+00:00")
+    )
+
+    build_calls: list[tuple[str, bool]] = []
+    original_build_backlog_response = backlog_routes._build_backlog_response
+
+    def counting_build(repo_id: str, include_archived: bool) -> dict:
+        build_calls.append((repo_id, include_archived))
+        return original_build_backlog_response(repo_id, include_archived)
+
+    monkeypatch.setattr(backlog_routes, "_build_backlog_response", counting_build)
+    snapshot_wiring.resync_requests.clear()
+
+    response = client.get(
+        "/api/v1/agent-runner/backlog/prds"
+        "?repo_id=keda-main&include_archived=false&force_refresh=true"
+    )
+    assert response.status_code == 200
+    # 快照也已过期，强制刷新仍只排一次重扫并回报 stale，供前端按短节奏追平。
+    assert response.json()["stale"] is True
+    assert snapshot_wiring.resync_requests == [
+        build_backlog_task_key("keda-main", include_archived=False)
+    ]
+    assert snapshot_wiring.coordinator.wait_until_idle(timeout_seconds=5)
+    assert build_calls == [("keda-main", False)]
 
 
 def test_github_failure_keeps_previous_backlog_snapshot(
@@ -537,8 +579,8 @@ def test_update_settings(backlog_environment) -> None:
     assert response.json()["max_parallel"] == 3
 
 
-def test_clear_settings_restores_inheritance(backlog_environment) -> None:
-    """PATCH max_parallel=null 应删除设置行（恢复继承），fresh 读回策略为空。"""
+def test_clear_settings_restores_config_value(backlog_environment) -> None:
+    """PATCH max_parallel=null 应删除设置行（恢复为配置文件值），fresh 读回页面设置为空。"""
     store: SqliteConsoleStore = backlog_environment["store"]
     response = client.patch(
         "/api/v1/agent-runner/backlog/settings?repo_id=keda-main",
@@ -554,7 +596,7 @@ def test_clear_settings_restores_inheritance(backlog_environment) -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["max_parallel"] is None
-    assert payload["ceiling_source"] == "inherited"
+    assert payload["ceiling_source"] == "config"
     assert store.get_backlog_settings("keda-main") is None
 
     # 恢复继承是删行语义，重复清除保持幂等成功。

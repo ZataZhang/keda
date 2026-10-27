@@ -35,6 +35,7 @@ from backend.core.shared.models.agent_runner import (
     IssueSummary,
     MemoryConfig,
 )
+from backend.core.shared.models import product_identity
 from backend.engines.agent_runner.factory import (
     _anchor_memory_config,
 )
@@ -111,6 +112,182 @@ def test_anchor_memory_config_expands_tilde() -> None:
         anchored.promoted_skills_dirs[0],
     ):
         assert "~" not in resolved
+
+
+def test_default_short_term_memory_is_external_and_repository_scoped(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_home_path = tmp_path / "home" / ".kedacode"
+    monkeypatch.setattr(product_identity, "state_home", lambda: state_home_path)
+    first_repository_root = tmp_path / "owner-a" / "same-name"
+    second_repository_root = tmp_path / "owner-b" / "same-name"
+
+    first_memory = _anchor_memory_config(MemoryConfig(), first_repository_root)
+    explicitly_defaulted_memory = _anchor_memory_config(
+        MemoryConfig(base_dir=".kedacode/memory"),
+        first_repository_root,
+    )
+    second_memory = _anchor_memory_config(MemoryConfig(), second_repository_root)
+    repeated_first_memory = _anchor_memory_config(MemoryConfig(), first_repository_root)
+
+    assert first_memory.base_dir == str(first_repository_root.resolve() / ".kedacode" / "memory")
+    assert first_memory.short_term_base_dir == str(state_home_path / "memory")
+    assert explicitly_defaulted_memory.short_term_base_dir == str(state_home_path / "memory")
+    assert first_memory.short_term_repository_identity
+    assert (
+        first_memory.short_term_repository_identity != second_memory.short_term_repository_identity
+    )
+    assert (
+        first_memory.short_term_repository_identity
+        == repeated_first_memory.short_term_repository_identity
+    )
+    assert first_memory.legacy_short_term_base_dirs == (
+        str(first_repository_root.resolve() / ".kedacode" / "memory"),
+    )
+
+    first_store = ShortTermMemoryStore(
+        first_memory.short_term_base_dir,
+        repository_identity=first_memory.short_term_repository_identity,
+        legacy_base_dirs=first_memory.legacy_short_term_base_dirs,
+    )
+    second_store = ShortTermMemoryStore(
+        second_memory.short_term_base_dir,
+        repository_identity=second_memory.short_term_repository_identity,
+        legacy_base_dirs=second_memory.legacy_short_term_base_dirs,
+    )
+    assert first_store._context_path(first_memory.short_term_repository_identity, 1) != (
+        second_store._context_path(second_memory.short_term_repository_identity, 1)
+    )
+    assert first_store._context_path(first_memory.short_term_repository_identity, 1) == (
+        ShortTermMemoryStore(
+            repeated_first_memory.short_term_base_dir,
+            repository_identity=repeated_first_memory.short_term_repository_identity,
+            legacy_base_dirs=repeated_first_memory.legacy_short_term_base_dirs,
+        )._context_path(repeated_first_memory.short_term_repository_identity, 1)
+    )
+
+
+def test_custom_base_dir_keeps_short_term_memory_at_repository_path(tmp_path: Path) -> None:
+    repository_root = tmp_path / "repo"
+    memory = MemoryConfig(base_dir="./.kedacode/memory")
+
+    anchored = _anchor_memory_config(memory, repository_root)
+
+    expected_base_dir = str(repository_root.resolve() / "./.kedacode/memory")
+    assert anchored.base_dir == expected_base_dir
+    assert anchored.short_term_base_dir == expected_base_dir
+    assert anchored.legacy_short_term_base_dirs == (expected_base_dir,)
+
+
+def test_custom_base_dir_reads_its_legacy_short_term_records(tmp_path: Path) -> None:
+    repository_root = tmp_path / "repo"
+    custom_base_dir = repository_root / ".custom" / "memory"
+    issue_number = 43
+    legacy_context_path = (
+        custom_base_dir / "short_term" / "repo-id" / str(issue_number) / "context.json"
+    )
+    legacy_context_path.parent.mkdir(parents=True)
+    legacy_context_path.write_text(
+        json.dumps(
+            {
+                "repo_id": "repo-id",
+                "issue_number": issue_number,
+                "attempts": [
+                    {
+                        "attempt_number": 1,
+                        "failure_type": "verification_failed",
+                        "detail": "custom legacy full detail",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    anchored = _anchor_memory_config(
+        MemoryConfig(base_dir=".custom/memory"),
+        repository_root,
+    )
+    store = ShortTermMemoryStore(
+        anchored.short_term_base_dir,
+        repository_identity=anchored.short_term_repository_identity,
+        legacy_base_dirs=anchored.legacy_short_term_base_dirs,
+    )
+
+    loaded_context = store.load("repo-id", issue_number)
+
+    assert loaded_context is not None
+    assert loaded_context.attempts[0].detail == "custom legacy full detail"
+    assert legacy_context_path.is_file()
+
+
+def test_short_term_store_reads_only_repository_local_legacy_memory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_home_path = tmp_path / "home" / ".kedacode"
+    monkeypatch.setattr(product_identity, "state_home", lambda: state_home_path)
+    repository_root = tmp_path / "repo"
+    issue_number = 42
+    legacy_context_path = (
+        repository_root
+        / ".kedacode"
+        / "memory"
+        / "short_term"
+        / "repo-id"
+        / str(issue_number)
+        / "context.json"
+    )
+    legacy_context_path.parent.mkdir(parents=True)
+    legacy_context_path.write_text(
+        json.dumps(
+            {
+                "repo_id": "repo-id",
+                "issue_number": issue_number,
+                "attempts": [
+                    {
+                        "attempt_number": 1,
+                        "failure_type": "verification_failed",
+                        "detail": "legacy full detail",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    legacy_bytes = legacy_context_path.read_bytes()
+    anchored = _anchor_memory_config(MemoryConfig(), repository_root)
+    store = ShortTermMemoryStore(
+        anchored.short_term_base_dir,
+        repository_identity=anchored.short_term_repository_identity,
+        legacy_base_dirs=anchored.legacy_short_term_base_dirs,
+    )
+
+    loaded_context = store.load("repo-id", issue_number)
+
+    assert loaded_context is not None
+    assert loaded_context.attempts[0].detail == "legacy full detail"
+    assert legacy_context_path.read_bytes() == legacy_bytes
+    assert not store._context_path(
+        anchored.short_term_repository_identity,
+        issue_number,
+    ).exists()
+
+    unscoped_global_context = (
+        state_home_path / "memory" / "short_term" / "repo-id" / str(issue_number) / "context.json"
+    )
+    unscoped_global_context.parent.mkdir(parents=True)
+    unscoped_global_context.write_text(
+        json.dumps({"repo_id": "repo-id", "issue_number": issue_number}),
+        encoding="utf-8",
+    )
+    missing_repo_store = ShortTermMemoryStore(
+        state_home_path / "memory",
+        repository_identity="different-repository-identity",
+        legacy_base_dirs=(tmp_path / "other-repo" / ".kedacode" / "memory",),
+    )
+    assert missing_repo_store.load("repo-id", issue_number) is None
 
 
 # ---------------------------------------------------------------------------

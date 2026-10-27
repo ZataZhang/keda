@@ -145,8 +145,8 @@ def test_append_missing_contract_anchors_makes_fallback_body_compliant() -> None
     assert f"- PRD: {_ARCHIVED_PRD_PATH}" in completed_body
     assert _PENDING_PRD_PATH not in completed_body
     assert "## Human Acceptance And PRD Archive" in completed_body
-    assert "<!-- iar:merge-acceptance version=1 -->" in completed_body
-    assert MERGE_ACCEPTANCE_MARKER_TEXT == "<!-- iar:merge-acceptance version=1 -->"
+    assert "<!-- kc:merge-acceptance version=1 -->" in completed_body
+    assert MERGE_ACCEPTANCE_MARKER_TEXT == "<!-- kc:merge-acceptance version=1 -->"
     assert "authorizes post-merge acceptance recording" in completed_body
     assert "post-merge archival" not in completed_body
     assert find_pr_body_contract_violations(completed_body, _ISSUE_BODY_WITH_PRD) == []
@@ -195,12 +195,12 @@ def test_annotation_block_lists_human_readable_descriptions() -> None:
 @pytest.mark.parametrize(
     ("marker_line", "expected"),
     [
-        ("<!-- iar:pr-contract version=1 missing=prd-link -->", ["prd-link"]),
+        ("<!-- kc:pr-contract version=1 missing=prd-link -->", ["prd-link"]),
         (
-            "<!--iar:pr-contract version=1 missing=prd-link,merge-acceptance-->",
+            "<!--kc:pr-contract version=1 missing=prd-link,merge-acceptance-->",
             ["prd-link", "merge-acceptance"],
         ),
-        ("<!-- iar:pr-contract version=1 missing= -->", []),
+        ("<!-- kc:pr-contract version=1 missing= -->", []),
     ],
 )
 def test_parse_contract_annotation_marker_variants(marker_line: str, expected: list[str]) -> None:
@@ -442,7 +442,7 @@ def test_create_draft_pr_injects_contract_teaching_into_agent_prompt(
 
 
 def test_merge_queue_skips_prs_with_contract_annotation(tmp_path) -> None:
-    """发布端标注过 ``iar:pr-contract`` 的 PR 必须被合并队列拒绝。"""
+    """发布端标注过 ``kc:pr-contract`` 的 PR 必须被合并队列拒绝。"""
     from backend.core.shared.models.agent_runner import PullRequestContext
     from backend.core.use_cases.agent_runner_merge_queue import _process_one
     from tests.conftest import FakeGitHubClient, FakeProcessRunner
@@ -718,7 +718,7 @@ def test_aggregate_source_marker_roundtrip() -> None:
 def test_aggregate_source_marker_ignores_wrong_version() -> None:
     """未知 version 的来源 marker 视为无法识别，解析返回 None（fail closed）。"""
     assert (
-        parse_aggregate_source_marker("<!-- iar:aggregate-pr version=2 issues=1 source_prs=2 -->")
+        parse_aggregate_source_marker("<!-- kc:aggregate-pr version=2 issues=1 source_prs=2 -->")
         is None
     )
 
@@ -726,9 +726,9 @@ def test_aggregate_source_marker_ignores_wrong_version() -> None:
 @pytest.mark.parametrize(
     "marker",
     [
-        "<!-- iar:aggregate-pr version=1 issues=101,garbage source_prs=201,202 -->",
-        "<!-- iar:aggregate-pr version=1 issues=101,101 source_prs=201,202 -->",
-        "<!-- iar:aggregate-pr version=1 issues=0,102 source_prs=201,202 -->",
+        "<!-- kc:aggregate-pr version=1 issues=101,garbage source_prs=201,202 -->",
+        "<!-- kc:aggregate-pr version=1 issues=101,101 source_prs=201,202 -->",
+        "<!-- kc:aggregate-pr version=1 issues=0,102 source_prs=201,202 -->",
     ],
 )
 def test_aggregate_source_marker_rejects_malformed_number_sets(marker: str) -> None:
@@ -742,6 +742,51 @@ def test_unique_prd_paths_is_order_independent_and_deduped() -> None:
     ordered = [_AGGREGATE_PRD_A, _AGGREGATE_PRD_B]
     assert unique_prd_paths(scrambled) == unique_prd_paths(ordered)
     assert unique_prd_paths(scrambled) == (_AGGREGATE_PRD_A, _AGGREGATE_PRD_B)
+
+
+def test_fenced_anchors_do_not_satisfy_pr_body_contract() -> None:
+    """围栏代码块里的 PRD 路径与 marker 示例不算声明，两个锚点仍判为缺失。"""
+    fenced_body = "\n".join(
+        [
+            "Closes #42",
+            "",
+            "## 正文模板",
+            "",
+            "```markdown",
+            f"- PRD: {_ARCHIVED_PRD_PATH}",
+            MERGE_ACCEPTANCE_MARKER_TEXT,
+            "```",
+            "",
+        ]
+    )
+
+    assert find_pr_body_contract_violations(fenced_body, _ISSUE_BODY_WITH_PRD) == [
+        "prd-link",
+        "merge-acceptance",
+    ]
+    # 同样的两行移出围栏后锚点即成立：判定只看书写位置，不看内容。
+    unfenced_body = fenced_body.replace("```markdown\n", "").replace("```\n", "")
+    assert find_pr_body_contract_violations(unfenced_body, _ISSUE_BODY_WITH_PRD) == []
+
+
+def test_aggregate_contract_ignores_prd_lines_inside_code_fence() -> None:
+    """总 PR 只在围栏里列 PRD 时判为漏列：示例不能充当合并即接受清单。"""
+    fenced_body = _build_aggregate_body(
+        prd_lines=[
+            "```markdown",
+            *_prd_lines(_AGGREGATE_PRD_A, _AGGREGATE_PRD_B),
+            "```",
+        ]
+    )
+
+    violations = find_aggregate_pr_body_contract_violations(
+        fenced_body,
+        expected_prd_paths=[_AGGREGATE_PRD_A, _AGGREGATE_PRD_B],
+        expected_issue_numbers=_AGGREGATE_ISSUES,
+        expected_source_pr_numbers=_AGGREGATE_SOURCE_PRS,
+    )
+
+    assert violations == ["prd-link"]
 
 
 def test_extract_prd_reference_paths_preserves_order_and_duplicates() -> None:
@@ -770,7 +815,7 @@ def test_aggregate_contract_annotation_block_marks_missing_anchors() -> None:
     """不合规标注块写入 aggregate-contract marker 并逐项说明缺失锚点。"""
     annotation = build_aggregate_contract_annotation_block(["merge-acceptance-v2", "prd-link"])
     assert (
-        "<!-- iar:aggregate-contract version=1 missing=merge-acceptance-v2,prd-link -->"
+        "<!-- kc:aggregate-contract version=1 missing=merge-acceptance-v2,prd-link -->"
         in annotation
     )
     assert "merge-acceptance-v2" in annotation
@@ -778,7 +823,7 @@ def test_aggregate_contract_annotation_block_marks_missing_anchors() -> None:
 
 
 def test_aggregate_contract_annotation_block_does_not_claim_merge_queue_gate() -> None:
-    """标注块只声明本地聚合门：没有任何合并队列路径消费 ``iar:aggregate-contract``。"""
+    """标注块只声明本地聚合门：没有任何合并队列路径消费 ``kc:aggregate-contract``。"""
     annotation = build_aggregate_contract_annotation_block(["prd-link"])
     assert "merge queue will refuse to auto-merge" not in annotation
     assert "refuses to publish" in annotation

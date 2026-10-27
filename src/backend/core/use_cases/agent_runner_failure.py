@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import re
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from backend.core.shared.models.agent_runner import (
     AttemptResult,
@@ -33,12 +35,18 @@ from backend.core.use_cases.agent_runner_failure_format import (
     summarize_failure_exception,
 )
 
+if TYPE_CHECKING:
+    # 仅注解使用：运行时无需依赖依赖准备上下文模块，避免 use case 之间成环。
+    from backend.core.use_cases.worktree_dependency_context import FrontendProjectRecord
+
 __all__ = [
     "ATTEMPT_HISTORY_HEADING",
     "AgentExecutionError",
     "AgentRunnerAttemptError",
     "AgentUnavailableError",
+    "DependencyEnvironmentBlockedError",
     "ForbiddenBlockedError",
+    "IssueBlockedDuringNoChangeError",
     "MaxRetriesExceededError",
     "ProviderCapacityError",
     "PublishFailureError",
@@ -106,6 +114,64 @@ class ForbiddenBlockedError(AgentRunnerAttemptError):
         super().__init__(message, attempt_results)
 
 
+class IssueBlockedDuringNoChangeError(AgentRunnerAttemptError):
+    """无代码变更的执行期间 Issue 转为 blocked 时发起人工交接。"""
+
+    def __init__(self, issue_number: int, attempt_results: list[AttemptResult]) -> None:
+        message = f"Issue #{issue_number} was moved to the blocked state during a no-change run."
+        super().__init__(message, attempt_results)
+        self.issue_comment_body = "\n".join(
+            [
+                "## Agent Runner Blocked",
+                "",
+                "- Block type: `blocked_no_change_handoff`",
+                "",
+                f"Issue #{issue_number} was re-read as open with the configured blocked label "
+                "after the agent produced no commits and left a clean worktree. The runner "
+                "stopped recovery and skipped validation and publication.",
+                "",
+                "Resolve the human decision recorded in the Issue comments, then continue with:",
+                "",
+                "```bash",
+                f"kc blocked-continue --issue {issue_number}",
+                "```",
+            ]
+        )
+
+
+class DependencyEnvironmentBlockedError(RuntimeError):
+    """项目依赖准备需要人类决定时的**可恢复阻塞**。
+
+    与 :class:`ForbiddenBlockedError` 同属「等人」而非「执行失败」：
+    ``agent/failed`` 表示 Agent/执行本身失败，而缺主机工具链、缺凭据、需要提权这类
+    环境事实只能由人决定，因此走 ``agent/blocked``（可用 ``kc blocked-continue`` 续）。
+
+    Attributes:
+        issue_comment_body: 面向 Issue 的完整 Markdown 说明（诊断 + 可选动作），
+            由 runner 直接发出，不复用 forbidden-path 模板（那是另一种阻塞）。
+        dependency_records: 触发本次判定的依赖准备诊断记录。
+    """
+
+    def __init__(
+        self,
+        message: str,
+        dependency_records: Sequence[FrontendProjectRecord],
+    ) -> None:
+        super().__init__(message)
+        self.dependency_records = tuple(dependency_records)
+        self.issue_comment_body = "\n".join(
+            [
+                "## Agent Runner Blocked",
+                "",
+                "- Block type: `blocked_dependency_environment`",
+                "- Meaning: project dependency preparation is recoverable but needs a "
+                "human decision; the agent was **not** failed for it.",
+                "",
+                message,
+            ]
+        )
+
+
 class ProviderCapacityError(AgentRunnerAttemptError):
     """Raised when the agent's model provider is at capacity or rate limited.
 
@@ -139,12 +205,19 @@ class AgentUnavailableError(AgentRunnerAttemptError):
         self,
         agent: str,
         attempt_results: list[AttemptResult] | None = None,
+        *,
+        context: str | None = None,
     ) -> None:
         super().__init__(
             f"Agent '{agent}' is unavailable (command not found).",
             attempt_results or [],
         )
         self.agent = agent
+        #: 哪一次调用发现它不可用（阶段 / profile / 可执行文件名）。异常分类不变，
+        #: 只是让"没装"在日志与失败评论里能被点名，而不是只剩一句 command not found。
+        self.context = context
+        if context is not None:
+            self.args = (f"{self.args[0]} While {context}.",)
 
 
 class PublishFailureError(RuntimeError):

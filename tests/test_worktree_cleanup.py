@@ -13,7 +13,7 @@ from backend.api.cli import main
 from backend.core.use_cases.worktree_cleanup import (
     WorktreeCleanupRequest,
     WorktreeCleanupStatus,
-    cleanup_iar_worktrees,
+    cleanup_managed_worktrees,
 )
 from backend.infrastructure.git.worktree import WORKTREE_DIR_NAME
 from backend.infrastructure.process_runner import SubprocessRunner
@@ -79,7 +79,7 @@ def test_cleanup_dry_run_reports_closed_issue_with_deleted_remote_branch(
     worktree_path = _create_issue_worktree(repo_path, 7)
     github_client = _closed_issue_client(7)
 
-    cleanup_result = cleanup_iar_worktrees(
+    cleanup_result = cleanup_managed_worktrees(
         WorktreeCleanupRequest(repo_path=repo_path, dry_run=True),
         github_client=github_client,
         process_runner=SubprocessRunner(),
@@ -97,7 +97,7 @@ def test_cleanup_deletes_clean_merged_closed_issue_branch(tmp_path: Path) -> Non
     worktree_path = _create_issue_worktree(repo_path, 8)
     github_client = _closed_issue_client(8)
 
-    cleanup_result = cleanup_iar_worktrees(
+    cleanup_result = cleanup_managed_worktrees(
         WorktreeCleanupRequest(repo_path=repo_path, dry_run=False),
         github_client=github_client,
         process_runner=SubprocessRunner(),
@@ -124,7 +124,7 @@ def test_cleanup_handles_manually_deleted_worktree_directory(
     shutil.rmtree(worktree_path)
     github_client = _closed_issue_client(31)
 
-    cleanup_result = cleanup_iar_worktrees(
+    cleanup_result = cleanup_managed_worktrees(
         WorktreeCleanupRequest(repo_path=repo_path, dry_run=False),
         github_client=github_client,
         process_runner=SubprocessRunner(),
@@ -144,7 +144,7 @@ def test_cleanup_skips_dirty_worktree_by_default(tmp_path: Path) -> None:
     (worktree_path / "dirty.txt").write_text("local notes", encoding="utf-8")
     github_client = _closed_issue_client(9)
 
-    cleanup_result = cleanup_iar_worktrees(
+    cleanup_result = cleanup_managed_worktrees(
         WorktreeCleanupRequest(repo_path=repo_path, dry_run=False),
         github_client=github_client,
         process_runner=SubprocessRunner(),
@@ -164,7 +164,7 @@ def test_cleanup_skips_issue_still_marked_as_running(tmp_path: Path) -> None:
     github_client = _closed_issue_client(32)
     github_client.edit_issue_labels(32, add=["agent/running"])
 
-    cleanup_result = cleanup_iar_worktrees(
+    cleanup_result = cleanup_managed_worktrees(
         WorktreeCleanupRequest(repo_path=repo_path, dry_run=False),
         github_client=github_client,
         process_runner=SubprocessRunner(),
@@ -184,7 +184,7 @@ def test_cleanup_skips_when_remote_branch_still_exists(tmp_path: Path) -> None:
     _run_git(repo_path, "push", "origin", "issue-10")
     github_client = _closed_issue_client(10)
 
-    cleanup_result = cleanup_iar_worktrees(
+    cleanup_result = cleanup_managed_worktrees(
         WorktreeCleanupRequest(repo_path=repo_path, dry_run=False),
         github_client=github_client,
         process_runner=SubprocessRunner(),
@@ -210,7 +210,7 @@ def test_cleanup_skips_when_github_issue_status_is_unavailable(
         raise RuntimeError("GitHub API unavailable")
 
     monkeypatch.setattr(github_client, "get_issue", fail_issue_lookup)
-    cleanup_result = cleanup_iar_worktrees(
+    cleanup_result = cleanup_managed_worktrees(
         WorktreeCleanupRequest(repo_path=repo_path, dry_run=False),
         github_client=github_client,
         process_runner=SubprocessRunner(),
@@ -232,7 +232,7 @@ def test_cleanup_skips_unmerged_branch_by_default(tmp_path: Path) -> None:
     _run_git(worktree_path, "commit", "-m", "feature")
     github_client = _closed_issue_client(11)
 
-    cleanup_result = cleanup_iar_worktrees(
+    cleanup_result = cleanup_managed_worktrees(
         WorktreeCleanupRequest(repo_path=repo_path, dry_run=False),
         github_client=github_client,
         process_runner=SubprocessRunner(),
@@ -258,7 +258,7 @@ def test_cleanup_deletes_squash_merged_branch_with_merged_pr(
     github_client = _closed_issue_client(13)
     github_client._merged_prs["issue-13"] = "https://github.com/example/repo/pull/13"
 
-    cleanup_result = cleanup_iar_worktrees(
+    cleanup_result = cleanup_managed_worktrees(
         WorktreeCleanupRequest(repo_path=repo_path, dry_run=False),
         github_client=github_client,
         process_runner=SubprocessRunner(),
@@ -282,7 +282,7 @@ def test_cleanup_dry_run_reports_squash_merged_branch_with_merged_pr(
     github_client = _closed_issue_client(14)
     github_client._merged_prs["issue-14"] = "https://github.com/example/repo/pull/14"
 
-    cleanup_result = cleanup_iar_worktrees(
+    cleanup_result = cleanup_managed_worktrees(
         WorktreeCleanupRequest(repo_path=repo_path, dry_run=True),
         github_client=github_client,
         process_runner=SubprocessRunner(),
@@ -300,7 +300,7 @@ def test_iar_worktree_cleanup_yes_deletes_eligible_branch(
 ) -> None:
     """The real CLI entry should wire cleanup to the GitHub client factory."""
     repo_path = _init_remote_backed_repository(tmp_path)
-    (repo_path / ".iar.toml").write_text(
+    (repo_path / ".kedacode.toml").write_text(
         """
 [agent_runner.repository]
 id = "target"
@@ -314,7 +314,7 @@ base_branch = "main"
     worktree_path = _create_issue_worktree(repo_path, 12)
     github_client = _closed_issue_client(12)
     monkeypatch.chdir(repo_path)
-    monkeypatch.setenv("IAR_SKIP_GH_AUTH_CHECK", "1")
+    monkeypatch.setenv("KEDACODE_SKIP_GH_AUTH_CHECK", "1")
 
     with patch("backend.api.cli.create_github_client", return_value=github_client):
         exit_code = main(["worktree", "cleanup", "--yes"])

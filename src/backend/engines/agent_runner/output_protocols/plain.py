@@ -22,12 +22,14 @@ from backend.core.shared.interfaces.output_timestamps import format_timestamped_
 from backend.core.shared.models.agent_runner import CommandResult
 from backend.core.shared.models.agent_spec import PROMPT_DELIVERY_STDIN
 from backend.infrastructure.child_env import build_sanitized_child_env
+from backend.infrastructure.agent_model_config_snapshot import observe_relay_model_config
 from backend.infrastructure.logging.logger import logger
 
 
 class PlainOutputProtocol:
     """通用文本中继协议。"""
 
+    @observe_relay_model_config
     def relay(self, request: OutputRelayRequest) -> CommandResult:
         """启动子进程并逐行中继其输出直至退出。"""
         write_stdin = (
