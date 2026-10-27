@@ -585,6 +585,8 @@ _PREAMBLE_LEAD = re.compile(
 )
 # 水平分隔线（``---`` / ``***`` / ``___`` / ``===``），常见于开场白与正文之间。
 _HORIZONTAL_RULE = re.compile(r"^(?:[-*_=]\s*){3,}$")
+# 正文已开始的 Markdown 标题：其后的围栏属于正文示例，不是包裹整份输出的外层围栏。
+_MARKDOWN_HEADING = re.compile(r"^ {0,3}#{1,6}(?:[ \t]+|$)")
 # Markdown 代码围栏起始行（``` 或 ~~~，可带语言标记）。
 _CODE_FENCE = re.compile(r"^(`{3,}|~{3,})")
 # draft_pr 的 prompt 契约规定正文首行是关闭引用（``Closes #{issue_number}``）。锚点之前
@@ -669,6 +671,11 @@ def _trim_before_closing_anchor(markdown_text: str) -> str:
     lines = markdown_text.splitlines()
     anchor_index = _closing_anchor_index(lines)
     if anchor_index is None or anchor_index == 0:
+        return markdown_text
+    unfenced_lines = strip_code_fences("\n".join(lines)).splitlines()
+    anchor_is_fenced = not unfenced_lines[anchor_index].strip()
+    if anchor_is_fenced and any(_MARKDOWN_HEADING.match(line) for line in lines[:anchor_index]):
+        # 标题表明正文已开始；后续 ``Closes`` 是围栏示例，不能被提升为真实锚点。
         return markdown_text
     if _is_plausible_pr_title(lines[:anchor_index]):
         return markdown_text
