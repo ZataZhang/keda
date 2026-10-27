@@ -40,6 +40,11 @@ from backend.core.shared.interfaces.output_timestamps import TimestampedStreamFo
 from backend.core.shared.interfaces.runner_live_view import IRunnerLiveView
 from backend.core.shared.models.agent_runner import CommandResult
 from backend.core.shared.models.agent_stall import AttemptOwnership, StallCancelOutcome
+from backend.core.use_cases.agent_daemon_shutdown import (
+    AgentDaemonShutdownInterrupt,
+    is_agent_daemon_stopping,
+    raise_if_agent_daemon_stopping,
+)
 from backend.core.use_cases.issue_logs import ATTEMPT_END_MARKER
 
 # Logger namespace the per-Issue handler attaches to. All backend modules log
@@ -138,7 +143,17 @@ class _OutputRoutedProcessRunner:
             run_kwargs = {
                 name: value for name, value in run_kwargs.items() if name in self._accepted_params
             }
-        return self._wrapped.run(command, **run_kwargs)
+        raise_if_agent_daemon_stopping()
+        try:
+            command_result = self._wrapped.run(command, **run_kwargs)
+        except BaseException as exc:
+            if is_agent_daemon_stopping():
+                raise AgentDaemonShutdownInterrupt(
+                    "Agent daemon stopped while an Issue subprocess was running."
+                ) from exc
+            raise
+        raise_if_agent_daemon_stopping()
+        return command_result
 
     def probe_live_attempt(self, attempt_key: str) -> AttemptOwnership:
         """把进程归属复核委托给被包装的执行器——登记册在它手里，包装器不持有进程。

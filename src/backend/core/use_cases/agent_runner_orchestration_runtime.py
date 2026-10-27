@@ -24,6 +24,10 @@ from backend.core.use_cases.agent_runner_batch_aggregate_queue import (
     complete_aggregate_queue,
     log_aggregate_dry_run_preview,
 )
+from backend.core.use_cases.agent_daemon_shutdown import (
+    AgentDaemonShutdownInterrupt,
+    is_agent_daemon_stopping,
+)
 from backend.core.use_cases.agent_runner_blocked_claim import BlockedWorktreeClaimedError
 from backend.core.use_cases.agent_runner_claim_arbitration import ClaimArbitrationLost
 from backend.core.use_cases.agent_runner_dependencies import (
@@ -119,6 +123,18 @@ def _resolve_lifecycle_prd_path(issue: IssueSummary) -> str:
         return extract_prd_path(issue.body) or ""
     except Exception:  # noqa: BLE001 - observation must not break the run.
         return ""
+
+
+def _skip_issue_on_daemon_shutdown(
+    issue_number: int,
+    output_view: IRunnerLiveView,
+) -> bool:
+    """停机期间跳过 Issue 失败处置，并保留远端工作流状态。"""
+    if not is_agent_daemon_stopping():
+        return False
+    _logger.info("Daemon is stopping; leaving Issue #%d in its current state.", issue_number)
+    output_view.update_status(issue_number, "skipped")
+    return True
 
 
 def _process_single_issue(
@@ -437,7 +453,12 @@ def _process_single_issue(
             started_at=run_started_at,
         )
         return 0
+    except AgentDaemonShutdownInterrupt:
+        _skip_issue_on_daemon_shutdown(issue.number, output_view)
+        return 0
     except GitHubApiRateLimitError:
+        if _skip_issue_on_daemon_shutdown(issue.number, output_view):
+            return 0
         output_view.update_status(issue.number, "skipped")
         raise
 
@@ -446,6 +467,8 @@ def _process_single_issue(
         IssueBlockedDuringNoChangeError,
         DependencyEnvironmentBlockedError,
     ) as exc:
+        if _skip_issue_on_daemon_shutdown(issue.number, output_view):
+            return 0
         # 这些情况都是「等人」而非「执行失败」：Issue 进入可恢复的 agent/blocked，
         # 人给出决定后 `kc blocked-continue` 继续，不占用 agent/failed 语义。
         _mark_issue_blocked(
@@ -503,6 +526,8 @@ def _process_single_issue(
         output_view.update_status(issue.number, "skipped")
         return 0
     except Exception as exc:  # noqa: BLE001 - report queue failures and continue.
+        if _skip_issue_on_daemon_shutdown(issue.number, output_view):
+            return 0
         _mark_issue_failed(
             issue=issue,
             config=config,
