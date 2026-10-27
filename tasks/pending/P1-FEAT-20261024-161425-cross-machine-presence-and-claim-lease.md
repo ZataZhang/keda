@@ -683,13 +683,13 @@ No external validation required; repository evidence was sufficient.（GitHub RE
 
 ## Change Log
 
-### Record independent verifier result on the final candidate tree
+### Preserve the superseded independent verifier result
 - Type: validation evidence
 - Before: 当前树没有通过独立性检查的 runner-owned verifier verdict；历史 GREEN 与 builder 使用相同 agent。
 - After: Qoder 曾在 builder HEAD `9119bc370bfde2b04be769621356aa2383a7a105`、candidate implementation tree `2bd42838188f29bc252a6216082a21f4bf187c9c` 返回 `risk=green`；该结果早于行数门禁修复，不再代表当前候选树。
-- Reason: 满足 PRD 的独立 verifier 门禁，不把执行者自审冒充独立结论。
+- Reason: 保留历史复核记录，同时明确它不满足当前树的独立 verifier 门禁，也不把执行者自审冒充独立结论。
 - Impact: 不改变运行行为；验证证据只覆盖 PRD 声明的替身 GitHub 边界，并披露真实写入、两个处置分支和无心跳内部调用窗口。
-- Review: 独立 verifier PASS；9.1 人读内容接受由 PR #330 的 merge-acceptance 契约在 squash merge 后记录。
+- Review: 历史 Qoder GREEN 已被后续代码树取代；当前树的独立复核待完成。9.1 人读内容接受由 PR #330 的 merge-acceptance 契约在 squash merge 后记录。
 
 ### Align marker compatibility and realistic validation evidence
 - Type: evidence / scope clarification
