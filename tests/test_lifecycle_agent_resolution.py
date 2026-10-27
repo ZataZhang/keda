@@ -397,6 +397,38 @@ def test_auto_declared_by_matrix_follows_concrete_legacy_keys() -> None:
     assert resolve_supervisor_agent(issue, config, "auto", fallback_agent="claude") == "kimi"
 
 
+def test_verifier_preset_matching_builder_uses_distinct_fallback() -> None:
+    """verifier 预设若绑定到 builder agent，门禁改用不同 agent。"""
+    from backend.core.shared.models.agent_model_preset import AgentModelPreset
+    from backend.core.shared.models.lifecycle_agent import LifecyclePresetsConfig
+    from backend.core.use_cases.run_verifier_agent import _choose_verifier_agent
+
+    config = AppConfig(
+        runner=RunnerConfig(agent_fallback_order=("codex", "qoder", "codebuddy")),
+        agent_presets={"codex-luna-max": AgentModelPreset(agent="codex", model="gpt-6-luna")},
+        lifecycle_presets=LifecyclePresetsConfig(repository_layer={"verifier": "codex-luna-max"}),
+    )
+
+    assert _choose_verifier_agent(config, "codex") == "qoder"
+
+
+def test_verifier_gate_fails_when_no_agent_is_independent() -> None:
+    """没有不同于 builder 的 verifier 候选时必须阻断，不能自我复核。"""
+    from backend.core.shared.models.agent_runner import ValidationConfig
+    from backend.core.use_cases.run_verifier_agent import (
+        VerifierUnavailableError,
+        _choose_verifier_agent,
+    )
+
+    config = AppConfig(
+        runner=RunnerConfig(agent_fallback_order=("codex",)),
+        validation=ValidationConfig(verifier_agent="codex"),
+    )
+
+    with pytest.raises(VerifierUnavailableError, match="no configured agent distinct from builder"):
+        _choose_verifier_agent(config, "codex")
+
+
 def test_fallback_order_still_driven_by_runner_config() -> None:
     """回退顺序仍由 [agent_runner.runner] 驱动（矩阵只选主 agent）。"""
     config = AppConfig(runner=RunnerConfig(agent_fallback_order=("kimi",)))

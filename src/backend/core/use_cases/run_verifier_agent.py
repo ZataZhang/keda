@@ -238,11 +238,12 @@ def _choose_verifier_agent(
         issue=issue,
         prd_preset_overrides=prd_preset_overrides,
     )
+    configured_verifier_agent: str | None = None
     if bound_preset_name is not None or (
         declared_value is not None
         and normalize_lifecycle_agent_value(declared_value) != LIFECYCLE_AGENT_AUTO
     ):
-        return resolve_lifecycle_agent(
+        configured_verifier_agent = resolve_lifecycle_agent(
             "verifier",
             config,
             issue=issue,
@@ -250,15 +251,30 @@ def _choose_verifier_agent(
             prd_overrides=merged_overrides,
             prd_preset_overrides=prd_preset_overrides,
         )
-    configured = config.validation.verifier_agent
-    if configured and configured != "auto":
-        return configured
+    else:
+        configured = config.validation.verifier_agent
+        if configured and configured != "auto":
+            configured_verifier_agent = configured
+
+    if configured_verifier_agent and configured_verifier_agent != builder_agent:
+        return configured_verifier_agent
+    if configured_verifier_agent == builder_agent:
+        _logger.warning(
+            "Configured verifier agent %r matches builder for Issue #%s; selecting a distinct "
+            "fallback agent instead.",
+            configured_verifier_agent,
+            issue.number if issue is not None else "unknown",
+        )
+
     # 有效回退链（候选数组非空时整体接管、空数组把旧名单折叠为无预设候选）上
     # 第一个 ≠ builder 的 agent；直接读旧名单会在候选数组写后读到 stale 顺序。
     for fallback_candidate in effective_fallback_candidates(config):
         if fallback_candidate.agent != builder_agent:
             return fallback_candidate.agent
-    return builder_agent
+    raise VerifierUnavailableError(
+        f"Independent verifier for Issue #{issue.number if issue is not None else '?'} has no "
+        f"configured agent distinct from builder {builder_agent!r}."
+    )
 
 
 def _verifier_candidate_agents(
