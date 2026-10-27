@@ -4,7 +4,7 @@
 |---|---|---|
 | 在一台机器上看到两台机器及各自在做的 Issue（rv-1） | `tasks/evidence/P1-FEAT-20261024-161425-cross-machine-presence-and-claim-lease/rv-1-kc-peers.txt`；打开：`open "$(git rev-parse --show-toplevel)/tasks/evidence/P1-FEAT-20261024-161425-cross-machine-presence-and-claim-lease/rv-1-kc-peers.txt"`。这是终端原始输出；本项没有截图或其他静态图片。 | 表格里 B 那一行的"正在处理"列是 `#42`；JSON 中 `machines` 长度为 2 |
 
-执行者已用两个独立状态目录、两个真实 daemon 与真实 `kc peers` 交叉核对这份输出。对话中可打开工作树里的文本文件；也可运行 `just prd review tasks/archive/P1-FEAT-20261024-161425-cross-machine-presence-and-claim-lease.md` 定位交互清单。PR #330 已由执行者接管；本地验证通过；当前候选分支尚未推送，GitHub CI 与独立 verifier 仍待完成。
+执行者已用两个独立状态目录、两个真实 daemon 与真实 `kc peers` 交叉核对这份输出。对话中可打开工作树里的文本文件；也可运行 `just prd review tasks/archive/P1-FEAT-20261024-161425-cross-machine-presence-and-claim-lease.md` 定位交互清单。PR #330 已由执行者接管；当前 candidate tree `2bd42838188f29bc252a6216082a21f4bf187c9c` 的独立 Qoder verifier 为 GREEN，本地相关验证通过；候选分支尚未推送，GitHub CI 待当前 head 更新后运行。
 
 ## 验证身份
 
@@ -52,8 +52,8 @@
 - 相关测试：`uv run pytest -o addopts="" tests/test_agent_runner_claim_lease.py tests/test_coordination_heartbeat.py tests/test_machine_presence.py tests/test_agent_runner_reconcile.py tests/test_run_target_admission.py tests/test_agent_runner_claim_arbitration.py tests/test_agent_runner_reclaim.py tests/test_github_client.py tests/test_kc_peers.py` — **149 passed**。
 - 配置映射回归：设置 TTL 为 900 秒的认领评论包含 `ttl="900"`。
 - `SKIP=check-test-flag just lint --full` — **passed**；`just lint --reuse` — **passed**；`uv run mkdocs build --strict` — **passed**。
-- `just test`（testmon 增量档）通过；完整单元套件 `uv run pytest -o addopts="" tests/` 在最终候选树上为 **5043 passed, 1 skipped**，相关九模块另用不带 testmon 过滤的命令单独确认 `149 passed`。
-- PRD acceptance archive-readiness checker — **passed**。独立 verifier 已在 commit `0a8d9cf0` 上重跑四项 RV 并给出 **GREEN**（`iar:verifier-verdict risk=green`，见 `verifier-response.txt`）；本轮代码审查修复后的最终候选树仍需 runner 重跑独立 verifier 门禁。PRD 已由 runner 归档；归档记录执行侧交付完成，不代表人工验收。
+- `just test`（testmon 增量档）通过；完整单元套件 `uv run pytest -o addopts="" tests/` 在先前 tree `6658504731e5dbc2cfc5b751d470123789c3464c` 上为 **5043 passed, 1 skipped**，默认租约改为 1200 秒后的当前树未重跑全量套件。当前树的九个相关模块不带 testmon 过滤为 `149 passed`。
+- PRD acceptance archive-readiness checker — **passed**。Qoder 作为独立 verifier 在 builder HEAD `9119bc370bfde2b04be769621356aa2383a7a105`、candidate implementation tree `2bd42838188f29bc252a6216082a21f4bf187c9c` 上重跑并给出 **GREEN**（`kc:verifier-verdict risk=green`，完整回复见 `verifier-response.txt`）。PRD 已由 runner 归档；归档记录执行侧交付完成，不代表人工验收。
 
 ## 人审清单浏览器检查
 
@@ -73,8 +73,8 @@
 四项 RV 在 candidate tree `2bd42838188f29bc252a6216082a21f4bf187c9c` 上重新运行，负控与绿色路径均符合预期；rv-2 直接验证默认 TTL 为 1200 秒，1170 秒不接手，1230 秒后回收。四项输出和 manifest 已与该树哈希同步。
 
 - 九个相关模块无 testmon 过滤：**149 passed**；生命周期/verifier 两个测试模块：**75 passed**。
-- `just test`：Lint passed；本地增量测试为 **51 passed, 47 deselected**。
+- `just test`：Lint passed；本地增量测试为 **55 passed, 129 deselected**。
 - `just lint --reuse`：passed；`uv run mkdocs build --strict`：passed。
 - 前一候选树 `735690ebd1fccd8215261885511ae90f166752eb` 的 `just lint --repo` 为 **5138 passed, 1 skipped**；这项历史结果不冒充当前树结果。
 - Microsoft Edge 人审清单 smoke：首卡显示、三卡翻页、结果 Markdown 生成均通过；0 个 page error，3 条 textarea 可访问性警告。
-- `kc peers` 的人读输出已在 rv-1 表格与 JSON 中检查；独立 verifier 尚待对最终提交运行。
+- `kc peers` 的人读输出已在 rv-1 表格与 JSON 中检查；Qoder 独立 verifier 已对当前 candidate tree 给出 GREEN。9.1 内容是否符合预期仍由显式 merge-acceptance 契约在 PR 合并时确认。

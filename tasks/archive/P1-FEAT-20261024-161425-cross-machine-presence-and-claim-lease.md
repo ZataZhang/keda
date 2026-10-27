@@ -568,7 +568,7 @@ No external validation required; repository evidence was sufficient.（GitHub RE
 
 ### 9.2 Acceptance Evidence Package
 
-按风险排序：决策一（rv-2、rv-3，R3）→ 决策二（rv-4，R2）→ rv-1 与 R1/R0 门禁。rv-1 至 rv-4 均通过真实 `kc` CLI/daemon 与本地 Git，GitHub 和 agent CLI 由无凭据替身提供。每个场景先执行负控并观察到 oracle 失败，再去掉故障注入观察到通过；四项在默认租约调整后重新运行，共享 candidate implementation tree `552d0b85faf6748fa773d3d7e4f8f7454089db77`（不含本 PRD 与 evidence delivery records）：
+按风险排序：决策一（rv-2、rv-3，R3）→ 决策二（rv-4，R2）→ rv-1 与 R1/R0 门禁。rv-1 至 rv-4 均通过真实 `kc` CLI/daemon 与本地 Git，GitHub 和 agent CLI 由无凭据替身提供。每个场景先执行负控并观察到 oracle 失败，再去掉故障注入观察到通过；四项在默认租约调整后重新运行，共享 candidate implementation tree `2bd42838188f29bc252a6216082a21f4bf187c9c`（不含本 PRD 与 evidence delivery records）：
 
 | 顺序 | 结果与判别证据 | 原始证据 |
 |---|---|---|
@@ -577,7 +577,7 @@ No external validation required; repository evidence was sufficient.（GitHub RE
 | 决策二 · rv-4（R2） | 负控拒绝重复标签移除后留下 2 条状态 Issue，唯一板 oracle 失败；重试及并发首启绿色路径都收敛至 1 条。关闭状态开关后状态评论不变而租约继续续期；同主机名、不同 machine_id 的远端有效租约保持运行。 | `rv-4-presence.txt` |
 | 双机可见 · rv-1（R1） | 负控隐藏 B 评论后真实 `kc peers --json` 只见 1 台，数量断言失败；绿色表格与 JSON 都见两台在线机器，B 正在处理 #42 / `codex`，状态 Issue 有两条评论。 | `rv-1-kc-peers.txt` |
 
-每项的完整实际命令、负控、预期失败、输出摘要、解释与风险见 `evidence.json`；终端原始输出只含本项内容。执行者最终代码审查完成；独立 verifier 由 runner 后续门禁单独执行，当前不把执行者自审记为 verifier `PASS`。
+每项的完整实际命令、负控、预期失败、输出摘要、解释与风险见 `evidence.json`；终端原始输出只含本项内容。Qoder 以独立 verifier 身份在 builder HEAD `9119bc370bfde2b04be769621356aa2383a7a105`、candidate implementation tree `2bd42838188f29bc252a6216082a21f4bf187c9c` 上完成复验，返回 `risk=green`；完整原始回复见 `tasks/evidence/P1-FEAT-20261024-161425-cross-machine-presence-and-claim-lease/verifier-response.txt`。Verifier 披露：真实 GitHub 写入尚未覆盖；预算耗尽与待返工两个 FR-6 分支只有单测覆盖；无心跳的内部直接调用可能留下无租约认领。受支持的 CLI/daemon 入口会先启动心跳；该窄范围窗口被 verifier 判为非阻塞。
 
 ### Human-Confirmed (来自 Part A 风险地图)
 
@@ -593,13 +593,13 @@ No external validation required; repository evidence was sufficient.（GitHub RE
 
 ### Behavior Acceptance
 
-- [x] rv-2 通过：默认 1200 秒租约下，1170 秒时不接手、1230 秒后恰好 1 条 `remote_lease_expired` 对账评论并回到 `agent/ready`，旧认领永不接手（证据：`rv-2-remote-lease.txt`；candidate tree `552d0b85faf6748fa773d3d7e4f8f7454089db77`）。
-- [x] rv-3 通过：ttl/2 时 agent 被终止；失租后远端分支 ref 未变化、`pr create` 为 0 次、标签写入为 0 次（初始 ready→running 认领的 2 次标签写入除外，证据：`rv-3-self-fence.txt`；candidate tree `552d0b85faf6748fa773d3d7e4f8f7454089db77`）。
-- [x] rv-4 通过：状态 Issue 恰好 1 条、关闭开关后状态停止更新但租约照常、同名主机不被误对账（证据：`rv-4-presence.txt`；candidate tree `552d0b85faf6748fa773d3d7e4f8f7454089db77`）。
-- [x] `kc:claim` 文本与本 PRD 基线逐字节一致，基线解析器能解析新认领评论（证据：`rv-2-remote-lease.txt` 中的兼容断言；candidate tree `552d0b85faf6748fa773d3d7e4f8f7454089db77`）。
-- [x] 租约有效的远端认领，`kc run --issue N` 返回退出码 5，提示中包含剩余时间（证据：当前九模块命令 `149 passed`，包含 `tests/test_run_target_admission.py::test_cli_run_on_live_remote_lease_exits_conflict`；candidate tree `552d0b85faf6748fa773d3d7e4f8f7454089db77`）。
-- [x] 同名主机 + 同数字 PID 的**另一台机器**先认领时，仲裁不按本机重入放行：带租约的投标一律按机器编号判定（当前九模块命令 `149 passed` 覆盖 `test_same_host_same_pid_remote_lease_bid_is_not_a_reentry` 与同机重入回归；candidate tree `552d0b85faf6748fa773d3d7e4f8f7454089db77`）。
-- [x] 本进程未登记认领时，推送/开 PR 前的归属栅栏仍回读服务端按机器编号确认，确认不了就拒绝交付（当前九模块命令 `149 passed` 覆盖两个 publish-fence 回归；candidate tree `552d0b85faf6748fa773d3d7e4f8f7454089db77`）。
+- [x] rv-2 通过：默认 1200 秒租约下，1170 秒时不接手、1230 秒后恰好 1 条 `remote_lease_expired` 对账评论并回到 `agent/ready`，旧认领永不接手（证据：`rv-2-remote-lease.txt`；candidate tree `2bd42838188f29bc252a6216082a21f4bf187c9c`）。
+- [x] rv-3 通过：ttl/2 时 agent 被终止；失租后远端分支 ref 未变化、`pr create` 为 0 次、标签写入为 0 次（初始 ready→running 认领的 2 次标签写入除外，证据：`rv-3-self-fence.txt`；candidate tree `2bd42838188f29bc252a6216082a21f4bf187c9c`）。
+- [x] rv-4 通过：状态 Issue 恰好 1 条、关闭开关后状态停止更新但租约照常、同名主机不被误对账（证据：`rv-4-presence.txt`；candidate tree `2bd42838188f29bc252a6216082a21f4bf187c9c`）。
+- [x] `kc:claim` 文本与本 PRD 基线逐字节一致，基线解析器能解析新认领评论（证据：`rv-2-remote-lease.txt` 中的兼容断言；candidate tree `2bd42838188f29bc252a6216082a21f4bf187c9c`）。
+- [x] 租约有效的远端认领，`kc run --issue N` 返回退出码 5，提示中包含剩余时间（证据：当前九模块命令 `149 passed`，包含 `tests/test_run_target_admission.py::test_cli_run_on_live_remote_lease_exits_conflict`；candidate tree `2bd42838188f29bc252a6216082a21f4bf187c9c`）。
+- [x] 同名主机 + 同数字 PID 的**另一台机器**先认领时，仲裁不按本机重入放行：带租约的投标一律按机器编号判定（当前九模块命令 `149 passed` 覆盖 `test_same_host_same_pid_remote_lease_bid_is_not_a_reentry` 与同机重入回归；candidate tree `2bd42838188f29bc252a6216082a21f4bf187c9c`）。
+- [x] 本进程未登记认领时，推送/开 PR 前的归属栅栏仍回读服务端按机器编号确认，确认不了就拒绝交付（当前九模块命令 `149 passed` 覆盖两个 publish-fence 回归；candidate tree `2bd42838188f29bc252a6216082a21f4bf187c9c`）。
 
 ### Dependency Acceptance
 
@@ -607,7 +607,7 @@ No external validation required; repository evidence was sufficient.（GitHub RE
 
 ### Validation Acceptance
 
-- [x] 最高保真入口：rv-1 至 rv-4 均通过真实 `kc` CLI 与 daemon 进程执行，只替换 `gh` 与 agent CLI；每份证据记录由 RV tree helper 计算的 candidate implementation tree（不含 PRD/evidence delivery records），且彼此相同并对应最终实现代码。默认租约调整后重新执行，四份 `rv-*.txt` 均记录 `552d0b85faf6748fa773d3d7e4f8f7454089db77`，manifest 位于 `evidence.json`。
+- [x] 最高保真入口：rv-1 至 rv-4 均通过真实 `kc` CLI 与 daemon 进程执行，只替换 `gh` 与 agent CLI；每份证据记录由 RV tree helper 计算的 candidate implementation tree（不含 PRD/evidence delivery records），且彼此相同并对应最终实现代码。默认租约调整后重新执行，四份 `rv-*.txt` 均记录 `2bd42838188f29bc252a6216082a21f4bf187c9c`，manifest 位于 `evidence.json`。
 - [x] 配置三处映射：设置 `lease_ttl_seconds = 900` 后，新认领评论中出现 `ttl="900"`（证据：`tests/test_agent_runner_claim_lease.py::test_configured_ttl_is_written_into_new_claim_comment`；对应相关测试输出）。
 - [x] 全量相关测试：`uv run pytest -o addopts="" tests/test_agent_runner_claim_lease.py tests/test_coordination_heartbeat.py tests/test_machine_presence.py tests/test_agent_runner_reconcile.py tests/test_run_target_admission.py tests/test_agent_runner_claim_arbitration.py tests/test_agent_runner_reclaim.py tests/test_github_client.py tests/test_kc_peers.py` 全部通过（不依赖 testmon 增量）。默认租约调整后的当前树结果为 `149 passed`。完整单元套件 `5043 passed, 1 skipped` 是先前 tree `6658504731e5dbc2cfc5b751d470123789c3464c` 的历史结果，未在本次默认值改动后重跑。
 
@@ -620,10 +620,10 @@ No external validation required; repository evidence was sufficient.（GitHub RE
 ### Delivery Readiness
 
 - [x] 推荐方案已完整实现，没有遗留的 Phase 2 或临时兼容层。证据：最终代码审查、四项 RV 与相关回归测试；没有新增运行时依赖或临时旁路。
-- [x] 如果交付走 PR，PR 证据评论包含 9.1 呈递区的内容；否则完成消息原样附上 9.1 内容。证据：本次不创建 PR，完成消息将逐字附上 9.1 行。
-- [x] `just lint --full` 与上述 pytest 通过，单文件非空行均少于 1000 行。证据：最终 `just lint --full`、相关测试 `149 passed` 与 `just lint --reuse` 通过；全文件行数检查无超限。`just test`（testmon 增量档）通过，完整单元套件 `uv run pytest -o addopts="" tests/` 在最终候选树上为 `5043 passed, 1 skipped`，针对性全量命令不依赖 testmon 亦 `149 passed`。
-- [~] 独立 verifier 的最终判定 — runner-owned gate: runner 在所有 executor-owned 清单项完成后执行独立审查并记录有效 verdict；执行者不得把自身代码审查记为 verifier `PASS`。
-- [~] 人审 HTML 的真实浏览器渲染与翻页 smoke — runner-owned gate: 在可用浏览器中确认零 `pageerror`、首卡可见、能到末页生成 Markdown。执行者的 CUA 环境没有可用 browser tab 且拒绝访问已安装浏览器；未把静态结构检查冒充浏览器通过。
+- [x] 如果交付走 PR，PR 描述包含 9.1 呈递区与证据链接；否则完成消息原样附上 9.1 内容。证据：PR #330 的 Human Visible Outcomes 列出 rv-1 表格/JSON 断言，并链接 `rv-1-kc-peers.txt` 与交互清单。
+- [x] `just lint --full` 与上述 pytest 通过，单文件非空行均少于 1000 行。证据：最终 `just lint --full`、相关测试 `149 passed` 与 `just lint --reuse` 通过；全文件行数检查无超限。`just test`（testmon 增量档）为 `55 passed, 129 deselected`；完整单元套件 `uv run pytest -o addopts="" tests/` 在先前 tree `6658504731e5dbc2cfc5b751d470123789c3464c` 上为 `5043 passed, 1 skipped`，默认租约改为 1200 秒后的当前树未重跑全量套件；相关九模块不依赖 testmon 为 `149 passed`。
+- [x] 独立 verifier 的最终判定 — Qoder 与 builder 不同，在 HEAD `9119bc370bfde2b04be769621356aa2383a7a105` / candidate tree `2bd42838188f29bc252a6216082a21f4bf187c9c` 返回 GREEN；负控与六项额外行为样例结果见 `verifier-response.txt`。
+- [x] 人审 HTML 的真实浏览器渲染与翻页 smoke — 2026-10-27 Microsoft Edge 首卡显示、三卡翻页和 Markdown 结果生成通过；0 个 `pageerror`。另有 3 条 textarea 缺少 id/name 的可访问性警告，不影响已验证交互。
 
 ## 10. Functional Requirements
 
@@ -677,11 +677,19 @@ No external validation required; repository evidence was sufficient.（GitHub RE
 - Related PRD status: 归档的命名清理 PRD 与 hard via-main 依赖由基线 commit `f4886655` 满足；Tailscale onboarding 与 hosted-runner deployment 仍独立，无额外顺序依赖。
 - Requirements and risks: rv-1 到 rv-4 均以真实 kc CLI/daemon、真实本地 git、假 GitHub 与确定性 agent CLI 运行；服务器时间通过假 GitHub 的 `updated_at` 设置。rv-3 区分初始领取的两次标签写入与失租后的零次标签写入，并覆盖推送前与开 PR 前两个归属读取点。远端接手仍受双方时钟偏差小于 ttl/2 的 PRD 前提约束；状态评论仍在公开仓库可见。
 - **实现中发现并纳入的边界**：进程因失租被终止后，`ClaimLeaseLost` 必须穿过执行恢复循环并阻止启动新的 recovery attempt；该修复已由定向回归测试与 rv-3 子进程场景验证。`kc run --takeover` 在停本机 daemon 前先拒绝有效远端租约，停止后再次准入；旧 takeover reclaim 路径也改为按 machine_id 识别本机，避免同名主机误回收。状态 Issue 重复项先写带 canonical 标记的清理留言，再移除重复标签；若留言失败，重复项仍留在查询集合中供下一次重试，回归测试覆盖失败后重试。低 TTL 配置留给运行期下限钳制，机器编号文件仅接受带时区创建时间的 UUID4。
-- **当前执行者证据树**：租约默认值调整后，rv-1 至 rv-4 逐项重跑，四份原始输出与 `evidence.json` 均记录 candidate implementation tree `552d0b85faf6748fa773d3d7e4f8f7454089db77`；该身份排除 PRD 与 evidence delivery-record 路径。九模块相关测试 `149 passed`。独立 verifier 尚未在该树重跑；runner 后续门禁需给出 verifier 结论，执行者自审不冒充 `PASS`。
-- **人审包检查**：Markdown 与 HTML 源码静态核对包含相同的三张决定卡和结果卡；官方 warning checker 因未修改的模板注释中出现字面 `<h2>` 产生 2 张卡的误报，HTMLParser 检查实际正文为 4 张卡。真实浏览器检查因 CUA inventory 无 browser 且两个已安装浏览器均拒绝访问，记录为 `REVIEW_INCIDENT / INCONCLUSIVE`；runner 需在可用浏览器环境重试翻页、首卡可见与结果生成检查。
-- **验收投影**：实现侧清单项在对应验证通过后勾选；用户已确认决策一、决策二，9.1 呈递审阅仍未完成，因此状态横幅仍为 `🧍 待人工验收`。
+- **当前执行者证据树**：默认租约调整后，rv-1 至 rv-4 逐项重跑，四份原始输出和 `evidence.json` 均记录 candidate implementation tree `2bd42838188f29bc252a6216082a21f4bf187c9c`；该身份排除 PRD 与 evidence delivery-record 路径。九模块相关测试 `149 passed`，生命周期/verifier 模块 `75 passed`，`just test` 为 `55 passed, 129 deselected`。Qoder 已在该树给出独立 GREEN，详见 verifier report 与 raw response。
+- **人审包检查**：Markdown 与 HTML 源码静态核对包含相同的三张决定卡和结果卡。2026-10-27 Microsoft Edge 实际浏览器 smoke 确认首卡可见、三卡可翻页并生成结果 Markdown；0 个 page error，3 条 textarea 缺少 id/name 的可访问性警告。
+- **验收投影**：实现与 runner-owned gate 项均有对应验证；用户已确认决策一、决策二。PR #330 显式声明 squash merge 即接受 9.1 人读呈递；在合并前状态仍为 `🧍 待人工验收`，只有满足门禁且 squash commit 的 record-excluded tree 与上述候选树相同后，才按契约回填 Human-Confirmed 并更新横幅。
 
 ## Change Log
+
+### Record independent verifier result on the final candidate tree
+- Type: validation evidence
+- Before: 当前树没有通过独立性检查的 runner-owned verifier verdict；历史 GREEN 与 builder 使用相同 agent。
+- After: Qoder 以不同 agent 身份在 HEAD `9119bc370bfde2b04be769621356aa2383a7a105`、candidate implementation tree `2bd42838188f29bc252a6216082a21f4bf187c9c` 完成独立复核并返回 `risk=green`；原始响应、报告与 PR 描述同步记录。
+- Reason: 满足 PRD 的独立 verifier 门禁，不把执行者自审冒充独立结论。
+- Impact: 不改变运行行为；验证证据只覆盖 PRD 声明的替身 GitHub 边界，并披露真实写入、两个处置分支和无心跳内部调用窗口。
+- Review: 独立 verifier PASS；9.1 人读内容接受由 PR #330 的 merge-acceptance 契约在 squash merge 后记录。
 
 ### Align marker compatibility and realistic validation evidence
 - Type: evidence / scope clarification
