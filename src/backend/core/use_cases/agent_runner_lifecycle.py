@@ -29,7 +29,7 @@ from backend.core.shared.interfaces.runner_console import (
     PrdLifecycleEventRecord,
     PrdLifecycleRunRecord,
 )
-from backend.core.shared.models.agent_runner import AttemptResult
+from backend.core.shared.models.agent_runner import AttemptResult, IssueSummary
 from backend.core.shared.statistics import linear_percentile
 from backend.core.shared.models.backlog import (
     ModelTokenUsageStats,
@@ -66,6 +66,7 @@ __all__ = [
     "list_issue_lifecycle_details",
     "record_lifecycle_event",
     "record_lifecycle_terminal",
+    "resolve_lifecycle_prd_path",
     "resolve_lifecycle_store",
     "status_for_event_type",
 ]
@@ -254,6 +255,27 @@ def lifecycle_run_id(*, repo_id: str, issue_number: int | None, prd_path: str) -
         return f"{repo_id}#{issue_number}"
     digest = hashlib.sha1(prd_path.encode("utf-8")).hexdigest()[:12]
     return f"{repo_id}#prd-{digest}"
+
+
+def resolve_lifecycle_prd_path(issue: IssueSummary) -> str:
+    """从 Issue 正文解析其引用的 PRD 相对路径；解析失败返回空串。
+
+    返回空串表示 runner 无法定位该 PRD：此时 run id 仍由 Issue 编号决定，
+    run 行的 ``prd_path`` 保留 backlog 启动侧已写入的真实路径，不会被空值
+    覆盖。观测失败绝不阻断 Issue 处理。
+
+    Args:
+        issue (IssueSummary): 当前处理的 GitHub Issue。
+
+    Returns:
+        str: 可定位的 PRD 相对路径，或空串。
+    """
+    from backend.core.use_cases.agent_runner_feedback import extract_prd_path
+
+    try:
+        return extract_prd_path(issue.body) or ""
+    except Exception:  # noqa: BLE001 - observation must not break the run.
+        return ""
 
 
 def resolve_lifecycle_store(store: object | None) -> IPrdLifecycleStore | None:
