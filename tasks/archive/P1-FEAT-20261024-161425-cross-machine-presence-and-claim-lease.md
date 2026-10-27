@@ -4,7 +4,7 @@
 
 > ⛔ **交付前置**：排在 `P1-REFACTOR-20261020-021715-purge-residual-iar-naming` 合并进 main 之后开工（hard 门禁）。两份 PRD 改的是同一批认领标记的格式化与解析代码；本 PRD 单独先做也能构建，但会和命名清理反复改同一组函数并在合并时冲突，所以由 runner 的依赖门禁强制先后。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
-> 🧍 **验收状态**：待人工验收。
+> ✅ **验收状态**：已验收。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 本 PRD 分两层：Part A（§1–4）供人确认目标行为与两项关键决策；Part B（§5–13）供执行者按现有架构实现并验证。
@@ -583,7 +583,7 @@ No external validation required; repository evidence was sufficient.（GitHub RE
 
 - [x] 决策一：接受"远端认领租约过期（默认 20 分钟）即可被放回队列，持有者 10 分钟续不上期就自停"及默认时长 — 依据 rv-2、rv-3 结果 <!-- 证据: 用户于 2026-10-26 明确同意，并确认租约默认值为 1200 秒。 -->
 - [x] 决策二：接受状态 Issue 默认开启（包括公开仓库），只提供按仓库关闭的开关 — 依据 rv-4 结果 <!-- 证据: 用户于 2026-10-26 明确同意。 -->
-- [ ] 已查看 9.1 呈递区，`kc peers` 的输出内容与格式符合预期
+- [x] 已查看 9.1 呈递区，`kc peers` 的输出内容与格式符合预期 <!-- 证据: PR #330 于 2026-10-27 squash merge；PR v1 契约明确合并即接受 9.1 人读呈递。合并提交 ec5ad44e37676c65165de7a56039b0caf622d6e2 的 record-excluded tree 为 bfaad53e278da7a66af2ffad1d0732654f569fc4，与已验证候选树一致。 -->
 
 ### Architecture Acceptance
 
@@ -754,3 +754,11 @@ No external validation required; repository evidence was sufficient.（GitHub RE
 - Reason: Keep the CI fix behavior-preserving and bind delivery evidence to the code it actually exercises.
 - Impact: No runtime behavior or accepted scope changed; current CI checks and the direct focused suite cover the refactor.
 - Review: executor review complete; fresh independent verifier result pending.
+
+### Record human acceptance through the PR squash-merge contract
+- Type: human acceptance
+- Before: Human-Confirmed item 3 remained unchecked and the banner showed `🧍 待人工验收`; PR #330's version-1 contract explicitly stated that squash merge accepts its linked human-visible outcomes and authorizes post-merge PRD recording.
+- After: PR #330 was squash-merged on 2026-10-27 as `ec5ad44e37676c65165de7a56039b0caf622d6e2`. Its record-excluded tree recomputed to `bfaad53e278da7a66af2ffad1d0732654f569fc4`, matching the independently reviewed candidate tree. Human-Confirmed item 3 is checked and this banner now reads `✅ 已验收`.
+- Reason: Record the user's authorized squash merge as acceptance under the PR's explicit merge-acceptance contract.
+- Impact: No implementation behavior changed; the PRD now records the human-visible `kc peers` acceptance that the merge contract covered.
+- Review: Merge commit `ec5ad44e37676c65165de7a56039b0caf622d6e2`; filtered implementation tree matched candidate `bfaad53e278da7a66af2ffad1d0732654f569fc4`.
