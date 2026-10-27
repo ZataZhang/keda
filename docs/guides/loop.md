@@ -1,5 +1,8 @@
 # KedaCode Loop — 定时循环任务
 
+需要开箱可用的 blocked / failed 巡检时，可显式启用
+[内置任务恢复巡检模板](loop-blocker-monitor.md)；安装与初始化不会自动启用。
+
 > Issue #110 交付物。`kc loop` 子系统让运维者把 GitHub Issue 的“造票”变成
 > 定时任务，每天/每小时自动生成一份 PRD + Issue，交给现有 runner 流转到 PR。
 
@@ -265,6 +268,15 @@ stderr 并新增一个 `state_read_error` 变量（模板占位符必须与 pre_
 > ROI 的 scope 即可。本节给出这种 **triage decision tree recipe** 的
 > 写作约定，示例见 `tasks/loops/nightly-cleanup-keda.md` 与
 > `tasks/loops/nightly-cleanup-product.md`。
+
+Keda 夜间清理配方的文档 scope 按近期 base 分支 diff 核对受影响文档的实际行为，
+不以 MkDocs 构建通过代替内容核对。每轮最多检查最早的 20 个待查提交，检查结果与
+`checked_through_sha` 记录在本轮 Issue 评论中；下轮从最近有效检查点继续。
+首次运行只覆盖最近 7 天并披露历史限制；检查不完整、记录读取失败或文档 scope 被
+更高优先级任务跳过时不推进检查点。发现的未解决项保留承接 Issue/PR 链接，避免漏修或重复修复。
+这些是 Agent 执行约定，不是 loop 调度器自动维护的状态字段；具体步骤以配方为准。
+调度器每次触发会重新读取登记的 recipe 路径，因此路径不变时正文修改在下一次触发生效，
+已经创建的 Issue 正文不会自动更新。
 
 ### 何时用 triage 决策树
 

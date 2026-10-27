@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
@@ -23,6 +23,10 @@ from backend.core.use_cases.agent_runner_batch_aggregate_queue import (
     check_aggregate_candidate_shortfall,
     complete_aggregate_queue,
     log_aggregate_dry_run_preview,
+)
+from backend.core.use_cases.agent_daemon_shutdown import (
+    AgentDaemonShutdownInterrupt,
+    _skip_issue_on_daemon_shutdown,
 )
 from backend.core.use_cases.agent_runner_blocked_claim import BlockedWorktreeClaimedError
 from backend.core.use_cases.agent_runner_claim_arbitration import ClaimArbitrationLost
@@ -51,6 +55,7 @@ from backend.core.use_cases.agent_runner_orchestrate import (
     AttemptResult,
     DependencyEnvironmentBlockedError,
     ForbiddenBlockedError,
+    IssueBlockedDuringNoChangeError,
     IContentGenerator,
     IGitHubClient,
     IProcessRunner,
@@ -355,14 +360,23 @@ def _process_single_issue(
             if marker is None:
                 output_view.update_status(issue.number, "skipped")
                 return 0
-            claimed = claim_blocked_issue(github_client, issue.number, config)
-            if not claimed:
+            claimed_issue_snapshot = claim_blocked_issue(github_client, issue.number, config)
+            if claimed_issue_snapshot is None:
                 _logger.info(
                     "Issue #%d already claimed by another runner, skipping.",
                     issue.number,
                 )
                 output_view.update_status(issue.number, "skipped")
                 return 0
+            # 认领后的新鲜快照是「无改动交接」判定的基线（标签已翻成 running），
+            # 但它来自 get_issue，不带入口处回填的 PRD 级 lifecycle 覆盖。直接整体
+            # 赋值会让 review / supervisor 这类只读 Issue 上覆盖字段的阶段静默丢绑定，
+            # 因此以新鲜快照为底、把两个 lifecycle 覆盖字段带过来。
+            issue = replace(
+                claimed_issue_snapshot,
+                lifecycle_overrides=issue.lifecycle_overrides,
+                lifecycle_preset_overrides=issue.lifecycle_preset_overrides,
+            )
             # 生命周期观测：阻塞 Issue 被重新领取，说明阻塞已解除并进入新一轮执行。
             record_lifecycle_event(
                 store=run_history_store,
@@ -438,12 +452,21 @@ def _process_single_issue(
             started_at=run_started_at,
         )
         return 0
+    except AgentDaemonShutdownInterrupt:
+        _skip_issue_on_daemon_shutdown(issue.number, output_view)
+        return 0
     except GitHubApiRateLimitError:
+        if _skip_issue_on_daemon_shutdown(issue.number, output_view):
+            return 0
         output_view.update_status(issue.number, "skipped")
         raise
 
-    except (ForbiddenBlockedError, DependencyEnvironmentBlockedError) as exc:
-        # 两者都是「等人」而非「执行失败」：Issue 进入可恢复的 agent/blocked，
+    except (
+        ForbiddenBlockedError,
+        IssueBlockedDuringNoChangeError,
+        DependencyEnvironmentBlockedError,
+    ) as exc:
+        # 这些情况都是「等人」而非「执行失败」：Issue 进入可恢复的 agent/blocked，
         # 人给出决定后 `kc blocked-continue` 继续，不占用 agent/failed 语义。
         _mark_issue_blocked(
             issue=issue,
@@ -506,6 +529,8 @@ def _process_single_issue(
         output_view.update_status(issue.number, "skipped")
         return 0
     except Exception as exc:  # noqa: BLE001 - report queue failures and continue.
+        if _skip_issue_on_daemon_shutdown(issue.number, output_view):
+            return 0
         _mark_issue_failed(
             issue=issue,
             config=config,

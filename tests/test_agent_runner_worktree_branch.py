@@ -374,8 +374,11 @@ def test_ensure_worktree_branch_rejects_unconfirmed_rebase_target(
     assert ("git", "rebase", "--abort") not in commands
 
 
-def test_ensure_worktree_branch_resolves_conflicts_via_agent(tmp_path: Path) -> None:
-    """Active rebase with conflicts is resolved by the configured agent."""
+@pytest.mark.parametrize("agent_writes_changes", [True, False], ids=["resolved", "empty-request"])
+def test_ensure_worktree_branch_resolves_conflicts_via_agent(
+    tmp_path: Path, agent_writes_changes: bool
+) -> None:
+    """Agent rebase fixes commit changed files or continue an empty request."""
     worktree_path = tmp_path / "issue-123"
     worktree_path.mkdir()
     git_dir = worktree_path / ".git"
@@ -386,6 +389,10 @@ def test_ensure_worktree_branch_resolves_conflicts_via_agent(tmp_path: Path) -> 
     head_name.write_text("refs/heads/issue-123", encoding="utf-8")
 
     class _AgentWritingRunner(FakeProcessRunner):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.agent_writes_changes = agent_writes_changes
+
         def run(
             self,
             command,
@@ -407,10 +414,12 @@ def test_ensure_worktree_branch_resolves_conflicts_via_agent(tmp_path: Path) -> 
                     '{"commit_message": "agent: resolve rebase conflicts"}',
                     encoding="utf-8",
                 )
-                (cwd / "file.txt").write_text("resolved\n", encoding="utf-8")
+                if self.agent_writes_changes:
+                    (cwd / "file.txt").write_text("resolved\n", encoding="utf-8")
                 return CommandResult(tuple(command), 0, "", "")
             if tuple(command) == ("git", "status", "--porcelain"):
-                return CommandResult(tuple(command), 0, " M file.txt\n", "")
+                porcelain_status = " M file.txt\n" if self.agent_writes_changes else ""
+                return CommandResult(tuple(command), 0, porcelain_status, "")
             return super().run(
                 command,
                 cwd=cwd,
@@ -499,7 +508,10 @@ def test_ensure_worktree_branch_resolves_conflicts_via_agent(tmp_path: Path) -> 
 
     commands = [tuple(c) for c in fake_runner.calls]
     assert ("git", "-c", "core.editor=true", "rebase", "--continue") in commands
-    assert ("git", "commit", "-m", "agent: resolve rebase conflicts") in commands
+    commit_command = ("git", "commit", "-m", "agent: resolve rebase conflicts")
+    assert (commit_command in commands) is agent_writes_changes
+    assert (("git", "add", "-A") in commands) is agent_writes_changes
+    assert not (worktree_path / ".agent-runner" / "commit-request.json").exists()
 
 
 def test_commit_requested_changes_rejects_detached_head(tmp_path: Path) -> None:

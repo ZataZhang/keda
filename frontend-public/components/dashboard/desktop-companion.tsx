@@ -18,9 +18,9 @@ import { closeDesktopCompanionWindow, fetchRuntimeTasks } from "@/lib/api/consol
 import type { RuntimeTaskEntry, RuntimeTaskSummary } from "@/lib/api/types";
 import { formatLocalDateTime } from "@/lib/utils";
 
-import { runtimePhaseDescription, RuntimeTaskPhase } from "./runtime-task-phase";
+import { RuntimeTaskPhaseDescription, RuntimeTaskPhase } from "./runtime-task-phase";
 import { RuntimeTaskAnomalies, RuntimeTaskImpact } from "./runtime-task-detail";
-import { RuntimeTaskDuration, RuntimeTaskWatch, runtimeStatusPresentation, runtimeTaskKey } from "./runtime-task-list";
+import { RuntimeTaskDuration, RuntimeTaskObservation, RuntimeTaskWatch, isActiveRuntimeTask, runtimeStatusPresentation, runtimeTaskKey } from "./runtime-task-list";
 
 /** 小窗轮询间隔：与网页看板同一节奏（PRD §7.1.5「沿用现有 Dashboard 监控刷新」）。 */
 const COMPANION_POLL_MS = 15_000;
@@ -30,9 +30,6 @@ const MAX_ACTIVE_TASKS = 4;
 
 /** 每轮读取触达读数的条数上限：滚动到的行不擅自增加取数量。 */
 const MAX_IMPACT_READS_PER_ROUND = 4;
-
-/** 活动分桶：值守者离开浏览器后仍需要盯的运行、阻塞、失败和等待状态。 */
-const ACTIVE_STATUSES = new Set(["running", "blocked", "failed", "waiting"]);
 
 interface DesktopCompanionProps {
   /** 关闭按钮的目标动作；在原生窗口里由 helper 关窗，在浏览器里退化为隐藏。 */
@@ -50,7 +47,7 @@ interface DesktopCompanionProps {
 }
 
 /** 顶部计数条的分桶顺序：与看板状态优先级一致，计数为 0 的桶不占位。 */
-const STATUS_COUNT_ORDER = ["running", "waiting", "blocked", "failed"] as const;
+const STATUS_COUNT_ORDER = ["running", "waiting", "blocked", "failed", "unknown"] as const;
 
 /**
  * 渲染活动任务的分状态计数。
@@ -134,7 +131,7 @@ export function DesktopCompanion({
     };
   }, [paused, onSummary]);
 
-  const activeTasks = (summary?.tasks ?? []).filter((task) => ACTIVE_STATUSES.has(task.status));
+  const activeTasks = (summary?.tasks ?? []).filter(isActiveRuntimeTask);
   const overflowCount = Math.max(0, activeTasks.length - MAX_ACTIVE_TASKS);
 
   return (
@@ -289,7 +286,7 @@ function CompanionTaskRow({
     >
       <span className="flex flex-wrap items-center gap-1.5 text-xs">
         <Badge variant={presentation.variant}>{presentation.label}</Badge>
-        <RuntimeTaskPhase phase={task.phase} />
+        <RuntimeTaskPhase task={task} />
         <RuntimeTaskWatch task={task} />
         <span className="font-medium text-slate-900 dark:text-slate-100">
           {task.repo_display_name ?? task.repo_id}#{task.issue_number}
@@ -298,16 +295,15 @@ function CompanionTaskRow({
       <span className="truncate text-[11px] text-slate-600 dark:text-slate-300">
         {task.issue_title ?? "（账本未记录标题）"}
       </span>
-      <p
+      <RuntimeTaskPhaseDescription
+        task={task}
         className="line-clamp-2 text-[11px] leading-snug text-slate-500 dark:text-slate-400"
-        data-testid="runtime-task-phase-description"
-      >
-        阶段说明：{runtimePhaseDescription(task.phase)}
-      </p>
+      />
+      <RuntimeTaskObservation task={task} />
       <span className="flex flex-wrap gap-x-2 text-[11px] text-slate-500">
         {task.agent ? (
           <span>
-            {task.agent}
+            最近执行：{task.agent}
             {task.preset ? ` · ${task.preset}` : ""}
           </span>
         ) : null}

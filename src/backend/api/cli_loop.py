@@ -176,7 +176,21 @@ def run_loop_create_command(
             code=ExitCode.USAGE,
             suggestion="kc loop create my-daily-triage --recipe tasks/loop/my-daily-triage.md",
         )
-    recipe_path = validate_recipe_path(getattr(parsed, "recipe", ""))
+    recipe_arg = getattr(parsed, "recipe", None)
+    template_arg = getattr(parsed, "template", None)
+    if bool(recipe_arg) == bool(template_arg):
+        raise CliError("Provide exactly one of --recipe or --template.", code=ExitCode.USAGE)
+    if template_arg:
+        from backend.api.cli_loop_template import run_builtin_loop_create
+
+        try:
+            template_schedule = build_schedule_from_args(parsed)
+        except ValueError as exc:
+            raise CliError(str(exc), code=ExitCode.USAGE) from exc
+        return run_builtin_loop_create(
+            parsed, state_store=state_store_factory(), schedule=template_schedule
+        )
+    recipe_path = validate_recipe_path(recipe_arg)
     # 生效注册表（内置 + [agent_runner.agents.*] 自定义条目）：配方点名自定义
     # agent 时必须认得，否则合法的自定义名会被当成拼写错误拒掉。
     agent_registry = build_app_config().agents

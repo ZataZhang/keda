@@ -59,8 +59,10 @@ from backend.core.use_cases.agent_runner_delivery_closeout import (
 )
 from backend.core.use_cases.agent_runner_failure import (
     ForbiddenBlockedError,
+    IssueBlockedDuringNoChangeError,
     is_recoverable_commit_request_error,
 )
+from backend.core.use_cases.agent_runner_workflow import is_issue_newly_blocked
 from backend.core.use_cases.agent_runner_memory import _resolve_memory_stores
 from backend.core.use_cases.agent_runner_feedback import (
     VerificationFailedError,
@@ -414,26 +416,44 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
             ),
         )
 
-        # 无 PRD 的 Issue 可以在确认无剩余工作后被明确关闭。此时没有可验证或发布的
-        # 代码树；重新读取到 CLOSED 才把本轮当作正常收敛，读取失败仍走原 recovery。
+        # 无代码变更时重新读取 Issue 状态：无 PRD 的闭合 Issue 可正常收敛；若 Issue
+        # 在本次执行期间转为 blocked，则作为人工交接结束，不进入 recovery 或 PR 发布。
+        # 其余状态（含 GitHub 读取失败）仍走原 no-commit recovery。
         # has_changes 走 `git status --porcelain`，**含未跟踪文件**：留下任何未跟踪产物
         # （被 .gitignore 排除的 runner 文件除外）都不算「无改动」，仍按原流程失败。
-        if (
-            prd_relative_path is None
-            and get_head_sha(worktree_path, process_runner) == before_sha
-            and not has_changes(worktree_path, process_runner)
+        if get_head_sha(worktree_path, process_runner) == before_sha and not has_changes(
+            worktree_path, process_runner
         ):
+            status_read_purpose = "closure" if prd_relative_path is None else "blocked status"
             try:
                 latest_issue = request.github_client.get_issue(issue.number)
             except Exception as exc:  # noqa: BLE001 - 读取失败时必须 fail-closed
                 _logger.warning(
-                    "Could not confirm Issue #%d closure after a no-change run; "
+                    "Could not confirm Issue #%d %s after a no-change run; "
                     "continuing normal recovery: %s",
                     issue.number,
+                    status_read_purpose,
                     exc,
                 )
             else:
-                if latest_issue.state.upper() == "CLOSED":
+                if is_issue_newly_blocked(issue, latest_issue, config):
+                    _logger.info(
+                        "Issue #%d was moved to blocked during a clean no-change run; "
+                        "handing off without recovery or publication.",
+                        issue.number,
+                    )
+                    attempt_phases.mark_failure_phase("agent")
+                    _record_attempt(
+                        attempt_record_context,
+                        failure_type=FailureType.NO_COMMITS,
+                        detail=(
+                            "Issue moved to blocked during a clean no-change run; "
+                            "handing off to a human."
+                        ),
+                        recovered=attempt_index > 0,
+                    )
+                    raise IssueBlockedDuringNoChangeError(issue.number, attempt_results)
+                if prd_relative_path is None and latest_issue.state.upper() == "CLOSED":
                     _record_attempt(
                         attempt_record_context,
                         failure_type=FailureType.SUCCESS,

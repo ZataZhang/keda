@@ -83,6 +83,9 @@ from backend.core.use_cases.agent_runner_validation_checklist import (
     build_validation_checklist_block as build_validation_checklist_block,
 )
 from backend.core.use_cases.agent_runner_validation_checklist import (
+    find_unrecognized_validation_block_marker as find_unrecognized_validation_block_marker,
+)
+from backend.core.use_cases.agent_runner_validation_checklist import (
     parse_validation_checklist_state as parse_validation_checklist_state,
 )
 from backend.core.use_cases.agent_runner_validation_checklist import (

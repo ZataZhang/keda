@@ -38,6 +38,7 @@ from backend.core.shared.interfaces.agent_runner import (
     IContentGenerator,
     IProcessRunner,
 )
+from backend.core.shared.markdown_code_fence import strip_code_fences
 from backend.core.shared.models.agent_model_preset import ModelSelection
 from backend.core.shared.models.agent_runner import (
     GeneratedContentConfig,
@@ -399,22 +400,24 @@ def _validate_issue_body(body: str, relative_prd_path: str) -> bool:
 
 
 def _validate_pr_body(body: str, issue_number: int) -> bool:
-    """验证 PR 正文是否包含必需的 Closes 锚点。
+    """验证 PR 正文是否在可被 GitHub 识别的位置包含必需的 Closes 锚点。
 
     PR 正文必须包含 ``Closes #{issue_number}`` 形式的文本，
-    以便 GitHub 在合并 PR 时自动关闭关联的 Issue。
+    以便 GitHub 在合并 PR 时自动关闭关联的 Issue。围栏代码块里的同一段文字
+    只是示例，GitHub 不会据此建立 Issue 关联，因此不能算通过——否则正文会带着
+    一个平台看不见的锚点发布出去，关联静默缺失。
 
     Args:
         body: 待验证的 PR 正文。
         issue_number: 期望关闭的 Issue 编号。
 
     Returns:
-        包含锚点时返回 ``True``，否则返回 ``False``。
+        锚点位于正文（非围栏内容）时返回 ``True``，否则返回 ``False``。
     """
     if not body or not body.strip():
         return False
     closes_pattern = rf"Closes\s*#\s*{issue_number}"
-    return bool(re.search(closes_pattern, body))
+    return bool(re.search(closes_pattern, strip_code_fences(body)))
 
 
 # ---------------------------------------------------------------------------
@@ -582,8 +585,21 @@ _PREAMBLE_LEAD = re.compile(
 )
 # 水平分隔线（``---`` / ``***`` / ``___`` / ``===``），常见于开场白与正文之间。
 _HORIZONTAL_RULE = re.compile(r"^(?:[-*_=]\s*){3,}$")
+# 正文已开始的 Markdown 标题：其后的围栏属于正文示例，不是包裹整份输出的外层围栏。
+_MARKDOWN_HEADING = re.compile(r"^ {0,3}#{1,6}(?:[ \t]+|$)")
 # Markdown 代码围栏起始行（``` 或 ~~~，可带语言标记）。
 _CODE_FENCE = re.compile(r"^(`{3,}|~{3,})")
+# draft_pr 的 prompt 契约规定正文首行是关闭引用（``Closes #{issue_number}``）。锚点之前
+# 的内容按定义不是正文，因此整段丢弃；``_PREAMBLE_LEAD`` 只认对话式引导语，认不出用完整
+# 句子写的开场白（见 :func:`_trim_before_closing_anchor`）。与
+# :data:`_CLOSING_REFERENCE_TITLE` 的区别：那是标题作废判定（整行匹配），这里只要求行首
+# 匹配，允许 ``Closes #42 for this patrol`` 这类带后缀的锚点行。
+_CLOSING_REFERENCE_LINE = re.compile(r"^(?:close|fix|resolve)(?:e?[sd])?:?\s*#\d+", re.IGNORECASE)
+# agent 有时把标题单独写成一行标签（``**Title:** `fix: ...` ``）：它是 PR 元数据，不是正文。
+_TITLE_ANNOTATION_LINE = re.compile(r"^\**\s*Title\s*:\**\s*(?P<title>.+?)\s*$", re.IGNORECASE)
+# 标题候选行超过这个长度就按多句散文处理（阈值取仓库提交规范的 subject ≤72 字符，
+# 见 ``docs/ai-standards/tooling.md``），宁可回退到模板标题也不把散文发成 PR 标题。
+_MAX_PR_TITLE_LINE_LENGTH = 72
 
 
 def _is_markdown_preamble_line(line: str) -> bool:
@@ -609,13 +625,97 @@ def _is_markdown_preamble_line(line: str) -> bool:
     return stripped.endswith(":") and len(stripped) <= 120
 
 
+def _closing_anchor_index(lines: list[str]) -> int | None:
+    """返回第一个关闭引用行（draft_pr 正文首行）的下标，没有则返回 ``None``。"""
+    for index, line in enumerate(lines):
+        if _CLOSING_REFERENCE_LINE.match(line.strip()):
+            return index
+    return None
+
+
+def _is_plausible_pr_title(region_lines: list[str]) -> bool:
+    """锚点之前是否只有一行够短、且没被标成标题的文本——那种行按既有约定就是 PR 标题。"""
+    non_blank_lines = [line.strip() for line in region_lines if line.strip()]
+    if len(non_blank_lines) != 1:
+        return False
+    candidate_line = non_blank_lines[0]
+    if _TITLE_ANNOTATION_LINE.match(candidate_line):
+        return False
+    return len(candidate_line) <= _MAX_PR_TITLE_LINE_LENGTH
+
+
+def _drop_unpaired_code_fence_closer(body_lines: list[str]) -> list[str]:
+    """正文围栏数为奇数时丢掉末尾的关闭行：它的配对起始行在锚点之前已被当作开场白。"""
+    fence_line_indexes = [
+        index for index, line in enumerate(body_lines) if _CODE_FENCE.match(line.strip())
+    ]
+    if len(fence_line_indexes) % 2 == 0:
+        return body_lines
+    return body_lines[: fence_line_indexes[-1]]
+
+
+def _trim_before_closing_anchor(markdown_text: str) -> str:
+    """剥离 :func:`_is_markdown_preamble_line` 认不出的散文开场白与包裹正文的代码围栏。
+
+    PR #328 的标题是 ``I compared the branch against the upstream ...`` ——agent 用完整
+    句子写开场白、再写 ``**Title:**`` 标签并把正文包进 ```markdown 围栏，既有的引导语
+    白名单一条都不命中，于是整段开场白既进了 PR 标题也留在了正文里。prompt 契约规定正文
+    首行是 ``Closes #N``，所以锚点之前的多行内容按定义不是正文，整段丢弃。
+
+    Args:
+        markdown_text: 已剥离可识别引导语之后的 draft_pr Markdown 文本。
+
+    Returns:
+        从关闭锚点开始的正文；锚点前只有一行可能的标题时原样返回。
+    """
+    lines = markdown_text.splitlines()
+    anchor_index = _closing_anchor_index(lines)
+    if anchor_index is None or anchor_index == 0:
+        return markdown_text
+    unfenced_lines = strip_code_fences("\n".join(lines)).splitlines()
+    anchor_is_fenced = not unfenced_lines[anchor_index].strip()
+    if anchor_is_fenced and any(_MARKDOWN_HEADING.match(line) for line in lines[:anchor_index]):
+        # 标题表明正文已开始；后续 ``Closes`` 是围栏示例，不能被提升为真实锚点。
+        return markdown_text
+    if _is_plausible_pr_title(lines[:anchor_index]):
+        return markdown_text
+    body_lines = lines[anchor_index:]
+    preceding_lines = [line for line in lines[:anchor_index] if line.strip()]
+    if preceding_lines and _CODE_FENCE.match(preceding_lines[-1].strip()):
+        body_lines = _drop_unpaired_code_fence_closer(body_lines)
+    return "\n".join(body_lines).strip()
+
+
+def _extract_pr_title_annotation(output_text: str) -> str:
+    """回收关闭锚点之前 agent 显式写出的 ``Title:`` 标签值。
+
+    Args:
+        output_text: agent 输出的原始 Markdown 文本。
+
+    Returns:
+        标签里的标题（去掉包裹的反引号）；没有标签、或标签值长到更像散文时返回空串。
+    """
+    lines = output_text.splitlines()
+    anchor_index = _closing_anchor_index(lines)
+    region_lines = lines if anchor_index is None else lines[:anchor_index]
+    title = ""
+    for line in region_lines:
+        annotation_match = _TITLE_ANNOTATION_LINE.match(line.strip())
+        if annotation_match:
+            title = annotation_match.group("title").strip().strip("`").strip()
+    if len(title) > _MAX_PR_TITLE_LINE_LENGTH:
+        return ""
+    return title
+
+
 def _strip_markdown_preamble(output_text: str) -> str:
     """剥离 draft_pr markdown 输出的开头开场白与最外层代码围栏。
 
     agent 常以 ``Here is the draft PR body:`` 之类的开场白起头，并可能把整份正文包进
     一层 ```markdown 围栏。这些内容不是标题也不是正文，若不剥离，首行会被当作 PR
     标题、正文也会被围栏包住。最多迭代两轮：先剥开场白，再拆最外层围栏，并处理围栏
-    内仍残留开场白的情况。
+    内仍残留开场白的情况。最后一轮之后仍认不出的散文开场白交给
+    :func:`_trim_before_closing_anchor` 按关闭锚点剥离。
 
     Args:
         output_text: agent 输出的原始 Markdown 文本。
@@ -646,7 +746,7 @@ def _strip_markdown_preamble(output_text: str) -> str:
         else:
             lines = lines[1:]
 
-    return "\n".join(lines).strip()
+    return _trim_before_closing_anchor("\n".join(lines).strip())
 
 
 # ---------------------------------------------------------------------------
@@ -700,11 +800,16 @@ def _generate_repository_content(
     )
     if request.target.output == "json":
         parsed_content = _parse_json_output(output_text)
-    else:
-        markdown_output = (
-            _strip_markdown_preamble(output_text) if request.kind == "pr" else output_text
+    elif request.kind == "pr":
+        stripped_output = _strip_markdown_preamble(output_text)
+        annotated_title = _extract_pr_title_annotation(output_text)
+        parsed_content = (
+            (annotated_title, stripped_output)
+            if annotated_title
+            else _parse_markdown_output(stripped_output)
         )
-        parsed_content = _parse_markdown_output(markdown_output)
+    else:
+        parsed_content = _parse_markdown_output(output_text)
     return _bound_repository_content(parsed_content, request)
 
 

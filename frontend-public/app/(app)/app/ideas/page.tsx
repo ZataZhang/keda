@@ -26,7 +26,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ConsolePage, ConsolePageHeader, ConsoleToolbar } from "@/components/layout/console-page";
 import { useRepositorySelection } from "@/lib/console-repository-selection";
 import {
   appendIdea,
@@ -225,22 +227,16 @@ export default function IdeasPage() {
   }
 
   return (
-    <div className="flex flex-col gap-4 p-4 lg:p-6">
-      <div>
-        <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-50">
-          Idea Inbox
-        </h2>
-        <p className="mt-1 text-sm text-slate-500">
-          跨项目采集想法，由 AI 生成 PRD 草稿，人确认后落入{" "}
-          <code>tasks/pending/</code>。
-        </p>
-      </div>
+    <ConsolePage>
+      <ConsolePageHeader title="Idea Inbox" description={<> 跨项目采集想法，由 AI 生成 PRD 草稿，人确认后落入{" "}
+          <code>tasks/pending/</code>。 </>} />
 
       <Card>
         <CardHeader>
           <CardTitle className="text-sm">仓库与操作</CardTitle>
         </CardHeader>
-        <CardContent className="flex flex-wrap items-center gap-3">
+        <CardContent>
+          <ConsoleToolbar>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm">
@@ -322,6 +318,7 @@ export default function IdeasPage() {
               {creatingDraft ? "生成中…" : "从选中想法生成草稿"}
             </Button>
           </div>
+        </ConsoleToolbar>
         </CardContent>
       </Card>
 
@@ -339,9 +336,9 @@ export default function IdeasPage() {
                 value={newIdeaAuthor}
                 onChange={(event) => setNewIdeaAuthor(event.target.value)}
               />
-              <textarea
+              <Textarea
                 aria-label="新想法"
-                className="min-h-24 w-full rounded-md border border-slate-200 bg-white p-2 text-sm shadow-sm focus:border-slate-400 focus:outline-none dark:border-slate-800 dark:bg-slate-950"
+                className="min-h-24"
                 placeholder="记录一条新想法…"
                 value={newIdeaText}
                 onChange={(event) => setNewIdeaText(event.target.value)}
@@ -399,9 +396,9 @@ export default function IdeasPage() {
               事实来源是 <code>tasks/inbox/ideas.md</code>；summary.md
               为 AI 派生可重写。
             </p>
-            <textarea
+            <Textarea
               aria-label="summary"
-              className="min-h-40 w-full rounded-md border border-slate-200 bg-white p-2 text-sm shadow-sm focus:border-slate-400 focus:outline-none dark:border-slate-800 dark:bg-slate-950"
+              className="min-h-40"
               value={summaryDraft}
               onChange={(event) => setSummaryDraft(event.target.value)}
               placeholder={
@@ -484,6 +481,6 @@ export default function IdeasPage() {
           </CardContent>
         </Card>
       </div>
-    </div>
+    </ConsolePage>
   );
 }

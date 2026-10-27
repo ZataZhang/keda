@@ -5,6 +5,8 @@
 //
 // 日志通过 offset 轮询续读（2.5s），仅在日志抽屉打开时轮询。
 
+import { ConsolePage, ConsolePageHeader, ConsoleToolbar } from "@/components/layout/console-page";
+import { NativeSelect } from "@/components/ui/native-select";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -175,24 +177,18 @@ export default function ProcessesPage() {
   }
 
   return (
-    <div className="flex flex-col gap-4 p-4 lg:p-6">
-      <div>
-        <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-50">
-          托管进程
-        </h2>
-        <p className="mt-1 text-sm text-slate-500">
-          每个仓库一个 daemon 进程即可获得多项目并发。进程脱离后端运行，
-          后端重启不影响执行中的 runner。
-        </p>
-      </div>
+    <ConsolePage>
+      <ConsolePageHeader title="托管进程" description={<> 每个仓库一个 daemon 进程即可获得多项目并发。进程脱离后端运行，
+          后端重启不影响执行中的 runner。 </>} />
 
       <Card>
         <CardHeader>
           <CardTitle className="text-sm">启动新进程</CardTitle>
         </CardHeader>
-        <CardContent className="flex flex-wrap items-center gap-2">
-          <select
-            className="h-9 rounded-md border border-slate-200 bg-transparent px-2 text-sm dark:border-slate-700"
+        <CardContent>
+          <ConsoleToolbar>
+          <NativeSelect
+
             value={selectedRepoId}
             onChange={(event) => selectRepoId(event.target.value)}
             aria-label="目标仓库"
@@ -205,9 +201,9 @@ export default function ProcessesPage() {
                 {entry.display_name || entry.repo_id}
               </option>
             ))}
-          </select>
-          <select
-            className="h-9 rounded-md border border-slate-200 bg-transparent px-2 text-sm dark:border-slate-700"
+          </NativeSelect>
+          <NativeSelect
+
             value={selectedKind}
             onChange={(event) =>
               setSelectedKind(event.target.value as RunnerProcessKind)
@@ -219,7 +215,7 @@ export default function ProcessesPage() {
                 {KIND_LABELS[kind]}
               </option>
             ))}
-          </select>
+          </NativeSelect>
           <Button size="sm" onClick={() => void handleStart()} disabled={starting}>
             {starting ? "启动中…" : "启动"}
           </Button>
@@ -232,6 +228,7 @@ export default function ProcessesPage() {
           >
             {startingAll ? "批量启动中…" : "全部仓库启动 daemon"}
           </Button>
+          </ConsoleToolbar>
         </CardContent>
       </Card>
 
@@ -309,7 +306,7 @@ export default function ProcessesPage() {
         record={logProcess}
         onClose={() => setLogProcess(null)}
       />
-    </div>
+    </ConsolePage>
   );
 }
 

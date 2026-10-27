@@ -91,10 +91,11 @@ def _recover_from_active_rebase(
     Reuses the same agent-driven conflict resolution strategy as the post-PR
     supervisor: when ``git rebase --continue`` cannot proceed because of
     conflicts, the configured agent is prompted to resolve them and write a
-    commit request. The runner stages the resolved files and continues the
-    rebase, then verifies the completed rebase once. Only after exhausting the
-    configured repair attempts for the current commit do we fall back to
-    ``git rebase --abort``.
+    commit request. The runner stages and commits changed files; an empty
+    request is treated as a possible already-applied commit and the rebase is
+    continued without creating a commit. The completed rebase is verified
+    once. Only after exhausting the configured repair attempts for the current
+    commit do we fall back to ``git rebase --abort``.
     """
     from backend.core.use_cases.pr_supervisor import (
         _current_rebase_conflict_commit,
@@ -190,14 +191,19 @@ def _recover_from_active_rebase(
             continue
         commit_message = read_commit_request(worktree_path, issue)
         remove_commit_request(worktree_path)
-        if not has_changes(worktree_path, process_runner):
-            raise RuntimeError("Agent requested a commit but produced no file changes.")
-        validate_safe_changes(worktree_path, config, process_runner)
-        process_runner.run(["git", "add", "-A"], cwd=worktree_path)
-        process_runner.run(
-            ["git", "commit", "-m", commit_message],
-            cwd=worktree_path,
-        )
+        if has_changes(worktree_path, process_runner):
+            validate_safe_changes(worktree_path, config, process_runner)
+            process_runner.run(["git", "add", "-A"], cwd=worktree_path)
+            process_runner.run(
+                ["git", "commit", "-m", commit_message],
+                cwd=worktree_path,
+            )
+        else:
+            _logger.info(
+                "Rebase conflict agent produced no file changes for Issue #%d; "
+                "attempting to continue the rebase before retrying.",
+                issue.number,
+            )
         if _try_continue_rebase():
             _verify_completed_rebase()
             return

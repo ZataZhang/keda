@@ -6,6 +6,10 @@ name: Validation Gate
 # 存在未勾选项则 check 失败。配合 branch protection 将本 check 设为
 # required，即可阻止签收清单未完成的 PR 合并。人工审查或授权的自动签收
 # 路径都可更新清单；此 workflow 只检查完整性，不判断签收者身份或证据质量。
+#
+# 读不懂的签收区块（旧前缀 `iar:` 或形态残缺）不能静默放行：runner 侧的自动勾选
+# 与软门禁同样匹配不到它，三方一致空转就等于门禁零保护，因此这里 fail closed。
+# 围栏代码块里的示例不算声明，判定前先剥离。
 
 on:
   pull_request:
@@ -32,20 +36,67 @@ jobs:
           import re
           import sys
 
-          pr_body = os.environ.get("PR_BODY") or ""
-          block_match = re.search(
-              r"<!--\s*kc:realistic-validation\s+version=\d+\s+total=(\d+)\s*-->"
-              r"(.*?)"
-              r"(?:<!--\s*kc:realistic-validation-end\s*-->|\Z)",
-              pr_body,
-              re.S,
+          CURRENT_BLOCK_PATTERN = re.compile(
+              r"<!--\s*kc:realistic-validation\s+version=\d+\s+total=(?P<total>\d+)\s*-->"
           )
+          CURRENT_END_PATTERN = re.compile(r"<!--\s*kc:realistic-validation-end\s*-->")
+          # 任意前缀 / 任意形态的签收区块起始 marker（排除 -end 结束 marker）。
+          ANY_BLOCK_START_PATTERN = re.compile(
+              r"<!--\s*(?P<marker>[a-z0-9_-]+:realistic-validation(?![\w-])[^>]*)-->",
+              re.IGNORECASE,
+          )
+          FENCE_LINE_PATTERN = re.compile(r"^[ \t]{0,3}(?P<fence>```+|~~~+)")
+
+
+          def strip_code_fences(text):
+              """把围栏代码块（含定界行）替换成等长空白，保持偏移量不变。"""
+              kept_lines = []
+              open_fence = None
+              for raw_line in text.splitlines(keepends=True):
+                  fence_match = FENCE_LINE_PATTERN.match(raw_line)
+                  fence_delimiter = fence_match.group("fence") if fence_match else None
+                  if open_fence is None:
+                      if fence_delimiter is None:
+                          kept_lines.append(raw_line)
+                          continue
+                      open_fence = fence_delimiter
+                  elif (
+                      fence_delimiter is not None
+                      and fence_delimiter[0] == open_fence[0]
+                      and len(fence_delimiter) >= len(open_fence)
+                  ):
+                      open_fence = None
+                  kept_lines.append(re.sub(r"\S", " ", raw_line))
+              return "".join(kept_lines)
+
+
+          pr_body = strip_code_fences(os.environ.get("PR_BODY") or "")
+
+          for candidate in ANY_BLOCK_START_PATTERN.finditer(pr_body):
+              if CURRENT_BLOCK_PATTERN.match(candidate.group(0)):
+                  continue
+              print(
+                  "Unrecognized Realistic Validation sign-off block marker: "
+                  f"{candidate.group('marker').strip()!r}. Only the checklist block the runner "
+                  "writes (<!-- kc:realistic-validation version=1 total=N --> ... "
+                  "<!-- kc:realistic-validation-end -->) can be signed off; a block with "
+                  "another prefix (for example the retired iar:) or a truncated shape is "
+                  "invisible to this gate and to the merge queue, so its items can never "
+                  "be completed. Replace it with a current block, or run "
+                  "`kc config migrate` to rewrite in-flight markers."
+              )
+              sys.exit(1)
+
+          block_match = CURRENT_BLOCK_PATTERN.search(pr_body)
           if not block_match:
               print("No realistic-validation block in PR body; gate passes.")
               sys.exit(0)
 
-          declared_total = int(block_match.group(1))
-          block_text = block_match.group(2)
+          declared_total = int(block_match.group("total"))
+          block_text = pr_body[block_match.end() :]
+          end_match = CURRENT_END_PATTERN.search(block_text)
+          if end_match:
+              block_text = block_text[: end_match.start()]
           if declared_total == 0:
               print(
                   "Realistic Validation explicitly skipped (total=0); gate passes."

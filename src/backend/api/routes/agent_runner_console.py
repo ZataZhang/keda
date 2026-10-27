@@ -406,9 +406,8 @@ def execute_console_issue_action(
 # 统计与审计
 # ─────────────────────────────────────────────────────────────────────────────
 
-#: 统计缓存的 TTL；并发聚合后构建落在秒级，30 秒窗口足够让 GitHub 查询
-#: 高频刷新时不会每次都打满 gh 子进程。
-_STATS_CACHE_TTL_SECONDS = 30
+#: 完成度采用独立的两分钟缓存，避免每次监控同步都重查历史 Issue。
+_STATS_CACHE_TTL_SECONDS = 120
 _STATS_CACHE = TTLResponseCache(ttl_seconds=_STATS_CACHE_TTL_SECONDS)
 
 

@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from backend.core.shared.interfaces.agent_runner import IProcessRunner
 from backend.core.shared.models.agent_runner import (
     AppConfig,
     CommandResult,
@@ -802,6 +803,99 @@ def test_execute_repair_runs_agent_and_commits() -> None:
     commands = [tuple(c) for c in fake_runner.calls]
     assert ("git", "commit", "-m", "repair commit") in commands
     assert ("git", "push", "origin", "issue-1") in commands
+
+
+def test_execute_repair_treats_empty_commit_request_as_verified_noop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """空提交请求应重跑验证并继续，不应让 post-PR repair 直接失败。"""
+    issue = IssueSummary(number=1, title="T", url="U", body="B", labels=())
+    worktree_path = tmp_path / "empty-repair"
+    worktree_path.mkdir()
+    request_path = worktree_path / ".agent-runner" / "commit-request.json"
+    request_path.parent.mkdir()
+    request_path.write_text(
+        json.dumps({"commit_message": "update PR metadata"}),
+        encoding="utf-8",
+    )
+    fake_runner = FakeProcessRunner(
+        responses={
+            ("git", "rev-parse", "HEAD"): CommandResult(
+                command=("git", "rev-parse", "HEAD"),
+                return_code=0,
+                stdout="abc123\n",
+                stderr="",
+            ),
+            ("git", "branch", "--show-current"): CommandResult(
+                command=("git", "branch", "--show-current"),
+                return_code=0,
+                stdout="issue-1\n",
+                stderr="",
+            ),
+            ("git", "status", "--porcelain"): CommandResult(
+                command=("git", "status", "--porcelain"),
+                return_code=0,
+                stdout="",
+                stderr="",
+            ),
+            ("git", "push", "origin", "issue-1"): CommandResult(
+                command=("git", "push", "origin", "issue-1"),
+                return_code=0,
+                stdout="",
+                stderr="",
+            ),
+        }
+    )
+    agent_calls: list[str] = []
+    verification_calls: list[Path] = []
+    verification_results = [
+        CommandResult(command=("just", "test"), return_code=0, stdout="ok", stderr="")
+    ]
+
+    def _record_repair_agent(
+        agent_name: str,
+        prompt: str,
+        checked_worktree_path: Path,
+        process_runner: FakeProcessRunner,
+        **agent_options: object,
+    ) -> CommandResult:
+        del agent_name, prompt, checked_worktree_path, process_runner, agent_options
+        agent_calls.append("called")
+        return CommandResult(command=("noop",), return_code=0, stdout="", stderr="")
+
+    def _record_verification(
+        checked_worktree_path: Path, config: AppConfig, process_runner: FakeProcessRunner
+    ) -> list[CommandResult]:
+        del config, process_runner
+        verification_calls.append(checked_worktree_path)
+        return verification_results
+
+    monkeypatch.setattr(
+        "backend.core.use_cases.pr_supervisor_repair.run_agent_with_prompt",
+        _record_repair_agent,
+    )
+    monkeypatch.setattr(
+        "backend.core.use_cases.pr_supervisor_repair.run_verification",
+        _record_verification,
+    )
+
+    result = execute_repair(
+        issue=issue,
+        worktree_path=worktree_path,
+        config=AppConfig(runner=RunnerConfig(verification_commands=())),
+        process_runner=fake_runner,
+        pr_branch="issue-1",
+        expected_head="abc123",
+        repair_agent="codex",
+    )
+
+    commands = [tuple(command) for command in fake_runner.calls]
+    assert agent_calls == ["called"]
+    assert verification_calls == [worktree_path]
+    assert result == verification_results
+    assert not request_path.exists()
+    assert ("git", "push", "origin", "issue-1") in commands
+    assert not any(command[:2] == ("git", "commit") for command in commands)
 
 
 def test_execute_repair_rejects_uncommitted_changes_without_request(
@@ -2486,11 +2580,20 @@ def test_execute_rebase_conflict_path_does_not_run_git_commit(
     assert not any(c[:2] == ("git", "commit") for c in commands)
 
 
+@pytest.mark.parametrize(
+    ("use_empty_resolution", "expected_file_content"),
+    [
+        (False, "resolved content"),
+        (True, "main updated content"),
+    ],
+)
 def test_execute_rebase_real_git_conflict_allows_detached_head(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    use_empty_resolution: bool,
+    expected_file_content: str,
 ) -> None:
-    """Real git rebase conflict with detached HEAD resolves successfully."""
+    """真实 Git rebase 冲突可在普通修复或空修复请求后继续。"""
     import json
     import subprocess
 
@@ -2596,14 +2699,6 @@ def test_execute_rebase_real_git_conflict_allows_detached_head(
     )
     assert rebase_result.returncode != 0, "Expected rebase to conflict"
 
-    shared_file.write_text("resolved content", encoding="utf-8")
-    subprocess.run(
-        ["git", "add", "shared.txt"],
-        cwd=repo_path,
-        check=True,
-        capture_output=True,
-    )
-
     branch_result = subprocess.run(
         ["git", "branch", "--show-current"],
         cwd=repo_path,
@@ -2614,11 +2709,35 @@ def test_execute_rebase_real_git_conflict_allows_detached_head(
     assert branch_result.stdout.strip() == "", "Expected detached HEAD during rebase"
 
     request_path = repo_path / ".agent-runner" / "commit-request.json"
-    request_path.parent.mkdir(parents=True, exist_ok=True)
-    request_path.write_text(
-        json.dumps({"commit_message": "resolve conflict"}),
-        encoding="utf-8",
-    )
+
+    def resolve_conflict_and_write_empty_or_normal_request(
+        _agent_name: str,
+        _prompt: str,
+        agent_worktree_path: Path,
+        _process_runner: IProcessRunner,
+        **_kwargs: object,
+    ) -> CommandResult:
+        if use_empty_resolution:
+            subprocess.run(
+                ["git", "checkout", "--ours", "shared.txt"],
+                cwd=agent_worktree_path,
+                check=True,
+                capture_output=True,
+            )
+        else:
+            shared_file.write_text("resolved content", encoding="utf-8")
+        subprocess.run(
+            ["git", "add", "shared.txt"],
+            cwd=agent_worktree_path,
+            check=True,
+            capture_output=True,
+        )
+        request_path.parent.mkdir(parents=True, exist_ok=True)
+        request_path.write_text(
+            json.dumps({"commit_message": "resolve conflict"}),
+            encoding="utf-8",
+        )
+        return CommandResult(command=("noop",), return_code=0, stdout="", stderr="")
 
     head_result = subprocess.run(
         ["git", "rev-parse", "HEAD"],
@@ -2631,7 +2750,7 @@ def test_execute_rebase_real_git_conflict_allows_detached_head(
 
     monkeypatch.setattr(
         "backend.core.use_cases.pr_supervisor.run_agent_with_prompt",
-        _noop_run_agent,
+        resolve_conflict_and_write_empty_or_normal_request,
     )
 
     class _NoOpFetchRebasePushRunner:
@@ -2707,7 +2826,8 @@ def test_execute_rebase_real_git_conflict_allows_detached_head(
         supervisor_agent="codex",
     )
 
-    assert shared_file.read_text(encoding="utf-8") == "resolved content"
+    assert shared_file.read_text(encoding="utf-8") == expected_file_content
+    assert not request_path.exists()
 
     branch_after = subprocess.run(
         ["git", "branch", "--show-current"],
@@ -2726,7 +2846,7 @@ def test_execute_rebase_real_git_conflict_allows_detached_head(
         text=True,
     )
     assert "main update" in log_result.stdout
-    assert "pr commit" in log_result.stdout
+    assert ("pr commit" in log_result.stdout) == (not use_empty_resolution)
 
 
 def test_ensure_rebase_context_rejects_mismatched_target(tmp_path: Path) -> None:

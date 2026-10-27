@@ -16,6 +16,7 @@ import logging
 import re
 
 from backend.core.shared.interfaces.agent_runner import IGitHubClient
+from backend.core.shared.markdown_code_fence import strip_code_fences
 from backend.core.shared.models.agent_runner import (
     DependencyBlocker,
     DependencyDeclaration,
@@ -41,10 +42,11 @@ _DEPENDENCY_WAIT_MARKER_PATTERN = re.compile(
 # PRD "Delivery Dependencies" section parsing
 # ---------------------------------------------------------------------------
 
-_DELIVERY_DEPENDENCIES_HEADER_RE = re.compile(
-    r"^#{2,4}\s+(?:\d+\.\s+)?Delivery Dependencies\s*$",
-    re.IGNORECASE | re.MULTILINE,
+_DELIVERY_DEPENDENCIES_HEADING_RE = re.compile(
+    r"^(?P<heading>#{2,6})[ \t]+(?:\d+\.[ \t]+)?Delivery Dependencies[ \t]*\r?$",
+    re.IGNORECASE,
 )
+_MARKDOWN_HEADING_RE = re.compile(r"^(?P<heading>#{1,6})[ \t]+")
 
 _DELIVERY_FIELD_RE = re.compile(r"^-\s+(?P<key>[A-Za-z/\s]+?)\s*:\s*(?P<value>.*?)\s*$")
 _DELIVERY_LIST_ITEM_RE = re.compile(r"^\s+-\s+(?P<value>.*?)\s*$")
@@ -56,12 +58,24 @@ _DELIVERY_PRD_PATH_RE = re.compile(
     r"(?P<path>(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\.md)" r"(?=$|[\s,;，；()（）])"
 )
 _NONE_DEPENDENCY_VALUES = {"", "none", "n/a", "na", "-"}
+_DELIVERY_FIELD_ALIASES = {
+    "depends_on_tasks/issues": "depends_on_issues",
+    "depends_on_tasks": "depends_on_issues",
+    "depends_on_issues": "depends_on_issues",
+    "gate_type": "gate_type",
+    "gate": "gate_type",
+    "sequence": "sequence",
+    "notes": "notes",
+    "note": "notes",
+}
 
 
 def parse_delivery_dependencies(prd_text: str) -> DeliveryDependencyDeclaration:
     """Parse the structured ``Delivery Dependencies`` section from a PRD.
 
     Only structured fields are accepted; free-form prose is ignored.
+    匹配到标题后会把更低级标题作为小节内容，仅在同级或更高级标题处结束。
+    小节里的围栏代码块是示例，不参与字段解析，也不会触发未知字段报错。
 
     Args:
         prd_text: Full PRD Markdown text.
@@ -69,21 +83,10 @@ def parse_delivery_dependencies(prd_text: str) -> DeliveryDependencyDeclaration:
     Returns:
         Parsed delivery dependency declaration.
     """
-    match = _DELIVERY_DEPENDENCIES_HEADER_RE.search(prd_text)
-    if not match:
+    section_texts = _delivery_dependencies_section_texts(prd_text)
+    if not section_texts:
         return DeliveryDependencyDeclaration()
-
-    section_start = match.end()
-    # Section ends at the next header of same or higher level
-    next_header_match = re.search(
-        r"^#{1,4}\s+",
-        prd_text[section_start:],
-        re.MULTILINE,
-    )
-    if next_header_match:
-        section_text = prd_text[section_start : section_start + next_header_match.start()]
-    else:
-        section_text = prd_text[section_start:]
+    section_text = section_texts[0]
 
     field_values: dict[str, list[str]] = {
         "depends_on_issues": [],
@@ -144,6 +147,133 @@ def parse_delivery_dependencies(prd_text: str) -> DeliveryDependencyDeclaration:
     )
 
 
+def validate_delivery_dependencies_not_dropped(
+    prd_text: str,
+    declaration: DeliveryDependencyDeclaration,
+    *,
+    prd_path: str,
+) -> None:
+    """在 Issue 创建前拒绝非空依赖声明被解析成空结果。
+
+    Args:
+        prd_text: 完整 PRD Markdown 正文。
+        declaration: 已解析的依赖声明。
+        prd_path: 用于报错的 PRD 仓库相对路径。
+
+    Raises:
+        ValueError: PRD 声明了非 ``none`` 依赖但解析结果无引用，或后续依赖小节会被丢弃。
+    """
+    scannable_text = strip_code_fences(prd_text)
+    section_spans = _delivery_dependencies_section_spans(scannable_text)
+    declaration_has_dependencies = bool(
+        declaration.depends_on_issues or declaration.depends_on_prds
+    )
+    if not declaration_has_dependencies:
+        # 只扫解析器没有覆盖的区域：小节内的声明由 parse 负责，小节外的声明
+        # 说明标题写法没被认出。正文其余位置（示例、验证计划）不算声明。
+        unmatched_text = _text_outside_spans(scannable_text, section_spans)
+        if _declares_non_none_dependency(unmatched_text):
+            raise ValueError(
+                f"PRD '{prd_path}' declares a non-none 'Depends on tasks/issues' value "
+                "outside any parsed 'Delivery Dependencies' section, but no dependency "
+                "references were parsed. Check the Delivery Dependencies "
+                "section heading and dependency field."
+            )
+
+    for section_index, (body_start, body_end) in enumerate(section_spans):
+        if section_index == 0:
+            continue
+        if _declares_non_none_dependency(scannable_text[body_start:body_end]):
+            raise ValueError(
+                f"PRD '{prd_path}' declares dependencies in multiple 'Delivery Dependencies' "
+                "sections, but dependencies after the first section were not parsed. "
+                "Consolidate dependency references into one section."
+            )
+
+
+def _declares_non_none_dependency(markdown_text: str) -> bool:
+    """文本中是否声明了非 ``none`` 的依赖字段值。"""
+    return any(
+        dependency_value.strip().lower() not in _NONE_DEPENDENCY_VALUES
+        for dependency_value in _delivery_dependency_field_values(markdown_text)
+    )
+
+
+def _text_outside_spans(markdown_text: str, body_spans: list[tuple[int, int]]) -> str:
+    """返回区间列表未覆盖的正文；区间边界都落在行首，拼接不会切断任何一行。"""
+    uncovered_texts: list[str] = []
+    scan_offset = 0
+    for body_start, body_end in body_spans:
+        uncovered_texts.append(markdown_text[scan_offset:body_start])
+        scan_offset = max(scan_offset, body_end)
+    uncovered_texts.append(markdown_text[scan_offset:])
+    return "".join(uncovered_texts)
+
+
+def _delivery_dependency_field_values(markdown_text: str) -> list[str]:
+    """提取 Markdown 文本中的依赖字段值及其列表续行。"""
+    dependency_values: list[str] = []
+    current_field_is_dependency = False
+
+    for line in markdown_text.splitlines():
+        stripped_line = line.strip()
+        if not stripped_line or stripped_line.startswith("#"):
+            continue
+
+        field_match = _DELIVERY_FIELD_RE.match(stripped_line)
+        if field_match:
+            normalized_field_key = field_match.group("key").strip().lower().replace(" ", "_")
+            current_field_is_dependency = (
+                _DELIVERY_FIELD_ALIASES.get(normalized_field_key) == "depends_on_issues"
+            )
+            if current_field_is_dependency:
+                dependency_values.append(field_match.group("value").strip())
+            continue
+
+        list_item_match = _DELIVERY_LIST_ITEM_RE.match(line)
+        if list_item_match and current_field_is_dependency:
+            dependency_values.append(list_item_match.group("value").strip())
+
+    return dependency_values
+
+
+def _delivery_dependencies_section_texts(prd_text: str) -> list[str]:
+    """返回独立 Delivery Dependencies 小节正文，保留嵌套同名子标题。"""
+    scannable_text = strip_code_fences(prd_text)
+    return [
+        scannable_text[body_start:body_end]
+        for body_start, body_end in _delivery_dependencies_section_spans(scannable_text)
+    ]
+
+
+def _delivery_dependencies_section_spans(scannable_text: str) -> list[tuple[int, int]]:
+    """线性扫描标题，返回每个独立小节的 ``[正文起点, 正文终点)`` 偏移区间。
+
+    入参必须是 :func:`strip_code_fences` 处理过的文本，围栏里的假标题才不会被当成
+    边界。同名子标题层级更深，留在父小节正文里；同级或更高级标题才关闭小节。
+    """
+    body_spans: list[tuple[int, int]] = []
+    section_body_start = -1
+    section_heading_level = 0
+    line_start_offset = 0
+
+    for line in scannable_text.splitlines(keepends=True):
+        heading_match = _MARKDOWN_HEADING_RE.match(line)
+        if heading_match:
+            heading_level = len(heading_match.group("heading"))
+            if section_body_start >= 0 and heading_level <= section_heading_level:
+                body_spans.append((section_body_start, line_start_offset))
+                section_body_start = -1
+            if section_body_start < 0 and _DELIVERY_DEPENDENCIES_HEADING_RE.match(line):
+                section_heading_level = heading_level
+                section_body_start = line_start_offset + len(line)
+        line_start_offset += len(line)
+
+    if section_body_start >= 0:
+        body_spans.append((section_body_start, len(scannable_text)))
+    return body_spans
+
+
 def _normalize_delivery_field_key(raw_key: str) -> str:
     """Normalize a structured Delivery Dependencies field name.
 
@@ -158,21 +288,15 @@ def _normalize_delivery_field_key(raw_key: str) -> str:
             "with GitHub Issue numbers under 'Depends on tasks/issues' "
             "(for example '#42')."
         )
-    if key in (
-        "depends_on_tasks/issues",
-        "depends_on_tasks",
-        "depends_on_issues",
-    ):
-        return "depends_on_issues"
-    if key in ("gate_type", "gate"):
-        return "gate_type"
-    if key in ("sequence",):
-        return "sequence"
-    if key in ("notes", "note"):
-        return "notes"
+    if key in _DELIVERY_FIELD_ALIASES:
+        return _DELIVERY_FIELD_ALIASES[key]
     raise ValueError(
         f"Unknown field in Delivery Dependencies: {raw_key!r}. "
-        "Expected one of: Depends on tasks/issues, Gate type, Sequence, Notes."
+        "Expected one of: Depends on tasks/issues, Gate type, Sequence, Notes. "
+        "Only structured fields written as direct bullets of a 'Delivery Dependencies' "
+        "section are read: a sub-heading under it still belongs to the section, so put "
+        "unrelated content under its own heading, and fenced code blocks are treated as "
+        "examples rather than declarations."
     )
 
 

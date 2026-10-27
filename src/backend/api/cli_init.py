@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import shlex
 from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -127,6 +128,13 @@ def _run_init_command(parsed: argparse.Namespace, process_runner: IProcessRunner
         console.print(f"[green]Labels synced for:[/] {init_result.repo_root_path}")
     except Exception as exc:  # noqa: BLE001
         error_console.print(f"[yellow]Label sync failed:[/] {exc}")
+    if init_result.repo_id:
+        console.print(
+            "Optional blocker recovery loop (30m; not enabled): "
+            "kc loop create <unique-loop-id> "
+            f"--template blocker-monitor --repo-id {shlex.quote(init_result.repo_id)}",
+            markup=False,
+        )
     return 0
 
 

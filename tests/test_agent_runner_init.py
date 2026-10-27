@@ -180,6 +180,9 @@ def test_iar_init_prints_review_hint_after_write(
     assert "请检查" in captured.err
     assert "Please review verification_commands" in captured.err
     assert "git diff --check" in captured.err
+    assert "not enabled" in captured.out
+    assert "--template blocker-monitor" in captured.out
+    assert not (repo_path / "tasks" / "loops").exists()
 
 
 def test_iar_init_requests_remote_user_skill_install(
