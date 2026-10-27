@@ -17,11 +17,13 @@ import json
 import logging
 import subprocess
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, Sequence
 from urllib.parse import quote
 
 from backend.core.shared.interfaces.agent_runner import GitHubApiRateLimitError
+from backend.core.shared.models.agent_runner import IssueCommentRecord
 from backend.infrastructure.github_models import IssueSummary
 
 if TYPE_CHECKING:
@@ -413,6 +415,77 @@ def list_issue_comment_entries(
     Raises:
         RuntimeError: 严格模式无法读取或确认评论结构，或可信模式无法确认作者权限。
     """
+    raw_comments = _list_issue_comment_payloads(
+        client,
+        issue_number,
+        trusted_only=trusted_only,
+        body_contains=body_contains,
+        require_success=require_success,
+    )
+    entries: list[tuple[int, str]] = []
+    for raw_comment in raw_comments:
+        try:
+            comment_id = int(raw_comment.get("id", 0))
+        except (TypeError, ValueError):
+            comment_id = 0
+        entries.append((comment_id, str(raw_comment.get("body", "") or "")))
+    return entries
+
+
+def list_issue_comment_records(
+    client: _ClientProtocol,
+    issue_number: int,
+    *,
+    trusted_only: bool = False,
+    body_contains: str | None = None,
+    require_success: bool = False,
+) -> list[IssueCommentRecord]:
+    """读取评论及服务端更新时间，供租约和状态槽位判定使用。"""
+    raw_comments = _list_issue_comment_payloads(
+        client,
+        issue_number,
+        trusted_only=trusted_only,
+        body_contains=body_contains,
+        require_success=require_success,
+    )
+    comment_records: list[IssueCommentRecord] = []
+    for raw_comment in raw_comments:
+        try:
+            comment_id = int(raw_comment.get("id", 0))
+            updated_at_text = raw_comment.get("updated_at")
+            author_metadata = raw_comment.get("user")
+            author = author_metadata.get("login") if isinstance(author_metadata, dict) else None
+            if not isinstance(updated_at_text, str) or not isinstance(author, str) or not author:
+                raise ValueError("comment is missing updated_at or author")
+            updated_at = datetime.fromisoformat(updated_at_text.replace("Z", "+00:00"))
+            if updated_at.tzinfo is None or comment_id <= 0:
+                raise ValueError("comment has an invalid timestamp or identity")
+        except (AttributeError, TypeError, ValueError) as exc:
+            if require_success or trusted_only:
+                raise RuntimeError(
+                    f"Issue #{issue_number} comment has invalid timestamp or author metadata."
+                ) from exc
+            continue
+        comment_records.append(
+            IssueCommentRecord(
+                comment_id=comment_id,
+                body=str(raw_comment.get("body", "") or ""),
+                updated_at=updated_at.astimezone(timezone.utc),
+                author=author,
+            )
+        )
+    return comment_records
+
+
+def _list_issue_comment_payloads(
+    client: _ClientProtocol,
+    issue_number: int,
+    *,
+    trusted_only: bool,
+    body_contains: str | None,
+    require_success: bool,
+) -> list[dict[str, object]]:
+    """分页读取评论并共享可信作者筛选与失败语义。"""
     try:
         result = client._run_with_retry(
             [
@@ -456,7 +529,7 @@ def list_issue_comment_entries(
         if current_login is None:
             raise RuntimeError("Cannot establish the authenticated GitHub user.")
     author_permissions: dict[str, bool] = {}
-    entries: list[tuple[int, str]] = []
+    selected_comments: list[dict[str, object]] = []
     for raw_comment in comments:
         if body_contains is not None:
             if not isinstance(raw_comment, dict) or not isinstance(raw_comment.get("body"), str):
@@ -488,9 +561,8 @@ def list_issue_comment_entries(
             raise RuntimeError("Issue comment query has invalid comment identity.")
         if trusted_only and (comment_id <= 0 or not isinstance(raw_comment.get("body"), str)):
             raise RuntimeError("Trusted comment query has invalid comment identity or body.")
-        body = str(raw_comment.get("body", "") or "")
-        entries.append((comment_id, body))
-    return entries
+        selected_comments.append(raw_comment)
+    return selected_comments
 
 
 def edit_issue_comment(client: _ClientProtocol, comment_id: int, body: str) -> None:
@@ -512,14 +584,31 @@ def edit_issue_comment(client: _ClientProtocol, comment_id: int, body: str) -> N
         )
 
 
+def delete_issue_comment(client: _ClientProtocol, comment_id: int) -> None:
+    """删除 GitHub Issue 评论。"""
+    owner_repo = client._get_owner_repo()
+    client._run_with_retry(
+        [
+            "gh",
+            "api",
+            "-X",
+            "DELETE",
+            f"repos/{owner_repo}/issues/comments/{comment_id}",
+        ],
+        cwd=client.repo_path,
+    )
+
+
 __all__ = [
     "comment_issue",
     "create_issue",
+    "delete_issue_comment",
     "edit_issue_body",
     "edit_issue_comment",
     "edit_issue_labels",
     "get_issue",
     "list_issue_comment_entries",
+    "list_issue_comment_records",
     "list_issue_comments",
     "list_issue_label_names",
     "list_issues_by_label",

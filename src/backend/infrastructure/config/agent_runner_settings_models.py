@@ -624,6 +624,8 @@ class AgentRunnerDaemonSettings(BaseModel):
     # 默认 5 小时：必须大于 ``runner.timeout_seconds``（默认 4 小时），否则仍在正常运行
     # 的 attempt 会被误判 ttl_expired。仅在 ``reconcile_stale_attempts=True`` 时生效。
     reclaim_ttl_seconds: int = 18000
+    presence_enabled: bool = True
+    lease_ttl_seconds: int = 1200
 
 
 class AgentRunnerPromptSettings(BaseModel):

@@ -179,6 +179,7 @@ def reclaim_stale_running_issues(
     pid_alive: Callable[[int], bool] = is_pid_alive,
     ttl_seconds: int | None = None,
     now: datetime | None = None,
+    machine_id: str | None = None,
 ) -> list[int]:
     """Flip abandoned ``agent/running`` Issues back to ``agent/ready``.
 
@@ -199,6 +200,7 @@ def reclaim_stale_running_issues(
             (走原"PID 死了才 reclaim"逻辑)。daemon 调用点暂时传 ``None`` 保持
             现有行为,留给将来打开 TTL 留口子。
         now: 当前时间(测试可注入);默认 ``datetime.now(timezone.utc)``。
+        machine_id: 当前稳定机器编号；带租约的认领用它判断本机，缺省时保守跳过。
 
     Returns:
         The Issue numbers that were reclaimed to ``agent/ready``.
@@ -207,19 +209,32 @@ def reclaim_stale_running_issues(
     effective_now = now if now is not None else datetime.now(timezone.utc)
     running_issues = github_client.list_issues_by_label(config.labels.running, limit)
     reclaimed: list[int] = []
+    from backend.core.use_cases.agent_runner_claim_lease import is_local_claim, latest_claim_record
+
     for issue in running_issues:
         if issue.state.upper() != "OPEN":
             continue
-        claim = _latest_claim_full(issue.number, github_client)
-        if claim is None:
+        comment_records = github_client.list_issue_comment_records(
+            issue.number,
+            trusted_only=True,
+            body_contains="<!-- kc:claim ",
+            require_success=True,
+        )
+        latest_record = latest_claim_record(comment_records)
+        if latest_record is None:
             # 拿不到归属信息,无法证明它死了,保守跳过。
             continue
-        claim_host, claim_pid, claim_started_at = claim
-        if claim_host != this_host:
+        _, claim_detail, lease = latest_record
+        if not is_local_claim(
+            claim_host=claim_detail.host,
+            lease=lease,
+            machine_id=machine_id,
+            host=this_host,
+        ):
             continue
         reclaim_reason = classify_claim_staleness(
-            claim_pid=claim_pid,
-            claim_started_at=claim_started_at,
+            claim_pid=claim_detail.pid,
+            claim_started_at=claim_detail.started_at,
             effective_now=effective_now,
             ttl_seconds=ttl_seconds,
             pid_alive=pid_alive,
@@ -229,12 +244,12 @@ def reclaim_stale_running_issues(
         try:
             if _reclaim_one(
                 issue_number=issue.number,
-                claim_pid=claim_pid,
+                claim_pid=claim_detail.pid,
                 config=config,
                 github_client=github_client,
                 this_host=this_host,
                 reclaim_reason=reclaim_reason,
-                claim_started_at=claim_started_at,
+                claim_started_at=claim_detail.started_at,
             ):
                 reclaimed.append(issue.number)
         except Exception as exc:  # noqa: BLE001 - one bad Issue must not stop the sweep.

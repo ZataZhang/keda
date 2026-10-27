@@ -1075,3 +1075,42 @@ def test_take_over_verifier_oversized_identity_returns_400(console_environment) 
         console_environment["store"].get_issue_run(repo_id="keda-main", issue_number=7).state
         == "running"
     )
+
+
+def test_recover_publish_action_starts_and_stops_coordination_heartbeat(
+    console_environment, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Console 的发布恢复动作在执行期间持有并释放状态/租约服务。"""
+    import backend.api.cli_coordination as cli_coordination
+    from backend.core.use_cases.console_actions import ConsoleActionResult
+
+    lifecycle: list[str] = []
+
+    class FakeHeartbeat:
+        def stop(self) -> None:
+            lifecycle.append("stop")
+
+    def start_heartbeat(**kwargs):
+        assert kwargs["role"] == "recover"
+        assert [context.repo_id for context in kwargs["contexts"]] == ["keda-main"]
+        lifecycle.append("start")
+        return FakeHeartbeat()
+
+    monkeypatch.setattr(cli_coordination, "start_coordination_heartbeat", start_heartbeat)
+    monkeypatch.setattr(console_routes, "create_process_runner", lambda: object())
+    monkeypatch.setattr(
+        console_routes,
+        "execute_issue_action",
+        lambda **kwargs: ConsoleActionResult(
+            action="recover_failed_publish", result="accepted", detail="recovered"
+        ),
+    )
+
+    response = client.post(
+        "/api/v1/agent-runner/console/repositories/keda-main/issues/73/actions",
+        json={"action": "recover_failed_publish"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["result"] == "accepted"
+    assert lifecycle == ["start", "stop"]

@@ -4,7 +4,7 @@
 
 > ⛔ **交付前置**：排在 `P1-REFACTOR-20261020-021715-purge-residual-iar-naming` 合并进 main 之后开工（hard 门禁）。两份 PRD 改的是同一批认领标记的格式化与解析代码；本 PRD 单独先做也能构建，但会和命名清理反复改同一组函数并在合并时冲突，所以由 runner 的依赖门禁强制先后。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
-> ⬜ **验收状态**：未开工。
+> 🧍 **验收状态**：待人工验收。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 本 PRD 分两层：Part A（§1–4）供人确认目标行为与两项关键决策；Part B（§5–13）供执行者按现有架构实现并验证。
@@ -46,8 +46,8 @@
 | 验证方式 | 输入 / 操作 | 期望观察到的结果 |
 |---|---|---|
 | 👀 人审 + 自动验证 | A、B 两台电脑都对同一仓库运行 daemon，B 正在执行 #42；在 A 上运行 `kc peers` | 输出两行机器：A 和 B 的主机名、kc 版本、在线状态、最后上报时间；B 一行写明正在做 #42、所用 agent、开始时间。仓库里的"机器状态" Issue 网页上有 A、B 各一条评论，内容一致。 |
-| 🤖 自动验证 | B 认领 #42 后直接断电，A 的 daemon 继续运行 | 租约到期前（默认 10 分钟）A 不碰 #42；到期后 A 的下一轮对账在 #42 留下一条写明"远端租约过期"的对账评论，并把它放回 `agent/ready`，随后由某台机器重新认领、从远端分支已有的状态重跑。 |
-| 🤖 自动验证 | B 正在执行 #42 时断网 6 分钟，进程一直活着 | 断网满 5 分钟（租约时长的一半）时，B 主动终止自己这次 agent 运行，不推送、不开 PR、不改标签；网络恢复后 B 发现最近一条认领已不是自己，同样不推送。 |
+| 🤖 自动验证 | B 认领 #42 后直接断电，A 的 daemon 继续运行 | 租约到期前（默认 20 分钟）A 不碰 #42；到期后 A 的下一轮对账在 #42 留下一条写明"远端租约过期"的对账评论，并把它放回 `agent/ready`，随后由某台机器重新认领、从远端分支已有的状态重跑。 |
+| 🤖 自动验证 | B 正在执行 #42 时断网 11 分钟，进程一直活着 | 断网满 10 分钟（租约时长的一半）时，B 主动终止自己这次 agent 运行，不推送、不开 PR、不改标签；网络恢复后 B 发现最近一条认领已不是自己，同样不推送。 |
 | 🤖 自动验证 | C 运行旧版 kc 认领 #43（认领评论没有租约信息）后宕机 | A 永远不接手 #43，行为与今天相同；`kc peers` 把 #43 列为"持有者未上报状态（可能是旧版本）"，并显示认领评论里的主机名。 |
 | 🤖 自动验证 | 两台主机名都叫 `macbook` 的电脑分别认领不同 Issue，其中一台的 kc 进程退出 | 另一台不会把对方的认领当成本机认领，也不会因为本机查不到对方 PID 就回收它。 |
 | 🤖 自动验证 | 一个从未用过本功能的仓库里，两台机器在同一分钟首次启动 daemon | 最终只有一条带状态标签的"机器状态" Issue；多建出来的那条被移除标签，并留言指向保留的那条。 |
@@ -61,8 +61,8 @@
 - 状态评论超过 5 分钟没有更新就显示为"离线"；离线评论不自动删除。
 - 新命令叫 `kc peers`，支持表格和 `--json` 两种输出；不改现有 `kc daemon status`（它继续只看本机进程）。
 - 租约时长由持有者写进认领评论，接手方按持有者声明的时长判定，不用自己的配置，避免两台机器配置不同导致误判。
-- 续期间隔为租约时长的 1/10（默认 60 秒），自我隔离阈值为租约时长的 1/2（默认 5 分钟）。
-- 接手方用"评论在 GitHub 服务器上的最后更新时间"与本机 UTC 时间比较；两台机器的时钟偏差在租约一半以内（默认 5 分钟）时判定依然安全，超出这个偏差不在本期保护范围内。
+- 续期间隔为租约时长的 1/10（默认 120 秒），自我隔离阈值为租约时长的 1/2（默认 10 分钟）。
+- 接手方用"评论在 GitHub 服务器上的最后更新时间"与本机 UTC 时间比较；两台机器的时钟偏差在租约一半以内（默认 10 分钟）时判定依然安全，超出这个偏差不在本期保护范围内。
 - 远端接手一律是"放回队列从头跑"：远端未推送的本地进度（WIP checkpoint 只存在本地分支）和会话都拿不到，因此不尝试续传；恢复次数预算沿用现有设置。
 - 有租约且仍处于"等待返工"状态的远端认领过期后，保留 `agent/running`，交给现有返工通道重新认领，与本机崩溃对账的规则一致。
 - 续期属于必须执行的调用：daemon 因 GitHub API 预算暂停时，续期照常进行，但仍计入用量；真被限流导致的失败按"续期失败"处理。
@@ -80,7 +80,7 @@
 
 - **在任意一台装了 kc 的电脑上**：运行 `kc peers`，就能看到这个仓库上有哪几台机器、哪些在线、各自在跑什么 Issue。
 - **不装 kc 的人**：打开仓库里的"机器状态" Issue，网页上就能看到同样的信息。
-- **daemon 机器的操作者**：一台执行机宕机、断网或被收走以后，它手上的任务会在约 10 分钟后自动回到队列，由还活着的机器接着做，不用再人工改标签。
+- **daemon 机器的操作者**：一台执行机宕机、断网或被收走以后，它手上的任务会在约 20 分钟后自动回到队列，由还活着的机器接着做，不用再人工改标签。
 - **所有人**：同名电脑和断网恢复不会造成同一条 Issue 被两台机器同时交付。
 
 ### Measurable Objectives
@@ -88,7 +88,7 @@
 - 两台机器（两个独立的 KedaCode 状态目录）对同一仓库运行时，任一台上的 `kc peers --json` 都包含这两台机器，在做的 Issue 编号也正确。
 - 带租约的远端认领：服务器端最后更新时间距今不到声明时长时，对账 0 次接手；超过声明时长后的第一次对账恰好把 Issue 放回 `agent/ready`，并留下 1 条对账评论。
 - 无租约标记的远端认领：任意时长后对账都是 0 次接手。
-- 续期连续失败达到租约时长一半时，持有者的 agent 子进程被终止，之后 0 次 `git push`、0 次开 PR、0 次标签写入。
+- 续期连续失败达到租约时长一半时，持有者的 agent 子进程被终止；从失租时起 0 次 `git push`、0 次开 PR、0 次标签写入（不计初始认领的标签变更）。
 - 推送前回读发现最近一条认领不是自己时，0 次 `git push`。
 - 两台机器同时首次启动后，带 `kedacode/presence` 标签的 open Issue 恰好 1 条。
 
@@ -96,11 +96,11 @@
 
 ### 决策一：允许接手"租约已过期"的远端认领
 
-这一项改变了一个现有的安全承诺。今天跨机器的认领一律当作还活着，代价是远端宕机后任务永久卡住；本期改为远端认领如果带租约，并且超过持有者声明的时长（默认 10 分钟）没有续期，就视为失效，可以由任何机器放回队列。为了不出现两台机器同时干活，持有者这边配了两道刹车：一是续期连续失败满一半时长（默认 5 分钟）就停掉自己的 agent，不推送、不开 PR；二是每次推送和开 PR 之前，回读确认最近一条认领仍是自己。
+这一项改变了一个现有的安全承诺。今天跨机器的认领一律当作还活着，代价是远端宕机后任务永久卡住；本期改为远端认领如果带租约，并且超过持有者声明的时长（默认 20 分钟）没有续期，就视为失效，可以由任何机器放回队列。为了不出现两台机器同时干活，持有者这边配了两道刹车：一是续期连续失败满一半时长（默认 10 分钟）就停掉自己的 agent，不推送、不开 PR；二是每次推送和开 PR 之前，回读确认最近一条认领仍是自己。
 
-主要风险有两个。一是两台机器时钟偏差超过 5 分钟时，接手可能早于持有者自停，造成短时间双跑；第二道刹车（推送前确认认领归属）可以挡住其中一方的交付，但挡不住双方都消耗 agent 调用。二是接手方拿不到远端未推送的进度，只能从远端分支已推送的状态重跑，上一台机器没推送的工作会重做一遍。没有租约标记的旧认领完全保持现状，混用新旧版本时不会更不安全。
+主要风险有两个。一是两台机器时钟偏差超过 10 分钟时，接手可能早于持有者自停，造成短时间双跑；第二道刹车（推送前确认认领归属）可以挡住其中一方的交付，但挡不住双方都消耗 agent 调用。二是接手方拿不到远端未推送的进度，只能从远端分支已推送的状态重跑，上一台机器没推送的工作会重做一遍。没有租约标记的旧认领完全保持现状，混用新旧版本时不会更不安全。
 
-**请确认：** 是否接受"远端认领租约过期（默认 10 分钟）即可由其他机器放回队列重跑，持有者 5 分钟续不上期就自停"这一规则，以及默认时长？
+**请确认：** 是否接受"远端认领租约过期（默认 20 分钟）即可由其他机器放回队列重跑，持有者 10 分钟续不上期就自停"这一规则，以及默认时长？
 
 **验收：** 在本机模拟两台机器：一台认领后被强杀，另一台在到期前不接手、到期后接手并留下对账评论；另一组模拟断网，持有者在一半时长时自停，并且全程没有推送。
 
@@ -145,7 +145,7 @@ skill 新增"看别的机器"路由，指向 `kc peers --json`。
 **对现有行为的影响**
 - 没有租约标记的认领（旧版本或历史认领）：所有判定与今天完全一致。
 - 旧版 kc 与新版混跑：旧版读不到新标记，按今天的方式工作；新版对旧版的认领一律不接手。
-- 新增配置项都有默认值，未配置时状态上报开启、租约时长 10 分钟。关闭状态上报只影响状态 Issue，不影响租约。
+- 新增配置项都有默认值，未配置时状态上报开启、租约时长 20 分钟。关闭状态上报只影响状态 Issue，不影响租约。
 
 ## 4. Requirement Shape
 
@@ -185,7 +185,7 @@ skill 新增"看别的机器"路由，指向 `kc peers --json`。
 
 **约束**
 
-- 本 PRD 不改认领标记本身的文本格式：往里加属性会让未升级的 kc 把新认领当成"无认领"，在准入和仲裁中重复执行同一 Issue。认领标记的前缀迁移（`iar:claim` → `kc:claim`、不再识别旧名）由 `P1-REFACTOR-20261020-021715-purge-residual-iar-naming` 负责；无论两份 PRD 哪个先合入，本 PRD 的 `kc:lease` 都不需要再改名。下文凡写 `iar:claim` 的地方，都指"交付时代码里实际写出的认领标记"；若命名清理已先合入，就是它的新前缀版本。
+- 本 PRD 不改认领标记本身的文本格式：往里加属性会让未升级的 kc 把新认领当成"无认领"，在准入和仲裁中重复执行同一 Issue。依赖的命名清理已进入本 worktree 基线（commit `f4886655`），实际认领标记使用 `kc:claim`，旧 `iar:claim` 名称不再识别；本 PRD 的 `kc:lease` 不需要迁移。
 - 本 PRD 新增的所有标记、常量、函数和文件名都不得带 `iar`；命名清理 PRD 的回潮守卫测试（若已合入）必须保持通过。
 - 新增 runner 配置字段需要同步 domain dataclass、pydantic settings 和 factory 映射三处（仓库已有的配置双类结构），否则会被相同的默认值掩盖、看起来生效其实没生效。
 - 改动 `kc` CLI 表面必须同步 `kedacode-operator` skill 与 `docs/`（`docs/ai-standards/tooling.md` 的 CLI Surface And Packaged Skill Sync）。
@@ -193,7 +193,7 @@ skill 新增"看别的机器"路由，指向 `kc peers --json`。
 
 **相关 PRD**
 
-- `tasks/pending/P1-REFACTOR-20261020-021715-purge-residual-iar-naming.md`：hard 顺序依赖（via-main）。它把认领等协作标记的读写统一改成 `kc:` 前缀、不再识别 `iar:`，并提供一次性迁移和回潮守卫；两份 PRD 都改 `agent_runner_reclaim.py` 与 `agent_runner_claim_arbitration.py` 里的认领标记格式化和解析。建议它先合入，本 PRD 再基于新前缀实现；如果顺序反过来，命名清理只需替换认领标记的前缀，`kc:lease` 与 `kc:presence` 已经是新前缀，不受影响。
+- `tasks/archive/P1-REFACTOR-20261020-021715-purge-residual-iar-naming.md`：hard 顺序依赖（via-main），已由基线中的 commit `f4886655` 满足。该 PRD 将认领标记迁移为 `kc:claim` 并停止识别旧 `iar:` 名称；本 PRD 只在独立标记中新增租约，不重写认领标记格式。
 - `tasks/pending/P1-FEAT-20261018-034216-kc-tailscale-machine-onboarding.md`：独立。它规划经 Tailscale 与 SSH 管理机器，并新建 `kc machine` 命令组与 Console `/app/machines/` 页面。本 PRD 不占用 `kc machine` 命名；本 PRD 的机器编号文件今后可以被它复用，但两边互不依赖。
 - `tasks/pending/P1-FEAT-20261009-161453-kc-hosted-runner-deployment.md`：独立。托管 runner 运行在容器里，状态目录由 `KEDACODE_HOME` 指定，本 PRD 的机器编号随之落在容器的状态目录中。
 - `tasks/archive/P1-FEAT-20260930-225000-daemon-crash-reconciliation-session-resume.md`：前序工作，定义了"不引入心跳表或租约库"和三出口对账。本 PRD 在它之上新增"远端租约过期"这一证据来源，租约信息依然写在 Issue 评论里，没有引入第二个状态源。
@@ -206,7 +206,7 @@ skill 新增"看别的机器"路由，指向 `kc peers --json`。
 在现有"GitHub Issue 即共享状态"的模型上做最小扩展：
 
 1. **机器编号**：首次需要时在状态目录写入 `machine.json`（含 UUID）。
-2. **认领租约**：认领评论在 `iar:claim` 之后追加一个独立的 `kc:lease` 标记。持有进程启动一个后台续期线程，定期编辑这条评论刷新续期时间。接手方读取评论的服务器端 `updated_at` 判定是否过期。
+2. **认领租约**：认领评论在 `kc:claim` 之后追加一个独立的 `kc:lease` 标记。持有进程启动一个后台续期线程，定期编辑这条评论刷新续期时间。接手方读取评论的服务器端 `updated_at` 判定是否过期。
 3. **远端接手**：对账在"认领来自别的机器"的分支里，对带租约且已过期的认领走新的"远端接手"出口：放回队列，预算耗尽则判失败。
 4. **自我隔离**：续期线程连续失败达到一半时长时，终止本 attempt 的 agent 子进程，并给本次领取打上"已失去认领"标志；推送和开 PR 前回读确认认领归属。
 5. **状态 Issue**：同一个后台线程在每个仓库维护状态评论；`kc peers` 读取并汇总。
@@ -221,11 +221,11 @@ skill 新增"看别的机器"路由，指向 `kc peers --json`。
 - **谁提供什么**：租约时长由持有者的配置决定，并写进标记；接手方只读取标记里的时长，不做推断。机器编号由 kc 首次运行时生成，用户不需要提供。
 - **接入点**：认领成功后的处理边界（`arbitrate_first_claim` 返回之后、各 handler 的 `finally` 之前）启动和停止续期；对账 `_reconcile_one_issue` 的远端分支；准入 `_claim_is_active`；发布路径 `push_changes` 与开 PR 之前；daemon 与 `kc run` 进程的生命周期（启动和停止状态上报）。
 - **状态与可见变化**：认领评论多一行"最后续期"文字和一个隐藏标记；仓库多一条状态 Issue；新增 `kc peers`；对账新增 `remote_lease_expired` 原因。
-- **刻意避免的复杂度**：新服务、新表、标签状态机变更、`iar:claim` 格式变更、续传式远端接手。
+- **刻意避免的复杂度**：新服务、新表、标签状态机变更、`kc:claim` 格式变更、续传式远端接手。
 
 ### Alternatives Considered
 
-- **把新字段加进 `iar:claim` 标记**：实现更少，但旧版解析器的正则要求属性顺序固定、结尾紧跟 `-->`，加字段会让旧版认不出新认领，进而在准入时放行、在仲裁时把对方投标排除，造成双跑。因此拒绝。
+- **把新字段加进 `kc:claim` 标记**：实现更少，但旧版解析器的正则要求属性顺序固定、结尾紧跟 `-->`，加字段会让旧版认不出新认领，进而在准入时放行、在仲裁时把对方投标排除，造成双跑。因此拒绝。
 - **`kc hub` + Tailscale 的中心服务**：实时性更好，但违背"只装 kc 和登录 GitHub"的最简配置目标，用户已明确暂缓。
 - **用 git ref 做心跳（推送隐藏 ref）**：不占 REST 配额，但网页上看不到，`kc peers` 还要额外 fetch，且没有服务器端时间戳。因此拒绝。
 
@@ -244,14 +244,14 @@ This section is a living implementation guide based on current repository analys
 ```text
   ## Agent Runner Claimed（评论标题，原样）
 - Host / PID / Agent / Started at（原样）
-- Lease: renews every 60s, expires 600s after the last renewal（人读）
+- Lease: renews every 120s, expires 1200s after the last renewal（人读）
 - Last renewed: `<UTC ISO>`（人读，每次续期改写，保证正文变化从而刷新 updated_at）
 
-<!-- iar:claim host=... pid=... started_at=... agent=... -->   ← 原样，不得改动
-<!-- kc:lease machine="<machine_id>" ttl="600" renewed_at="<UTC ISO>" v="1" -->
+<!-- kc:claim host=... pid=... started_at=... agent=... -->   ← 原样，不得改动
+<!-- kc:lease machine="<machine_id>" ttl="1200" renewed_at="<UTC ISO>" v="1" -->
 ```
 
-解析 `kc:lease` 用新的独立正则，属性顺序宽松。`iar:claim` 的正则与格式化函数不改。
+解析 `kc:lease` 用新的独立正则，属性顺序宽松。`kc:claim` 的正则与格式化函数不改。
 
 **续期线程（每个 kc 进程一个 `CoordinationHeartbeat`）**
 - 进程内维护"本进程持有的认领"集合：`(repo, issue_number, comment_id, ttl)`。认领入口成功后登记，handler 结束（`finally`）时注销。
@@ -261,7 +261,7 @@ This section is a living implementation guide based on current repository analys
 - 续期调用计入 `IGitHubApiBudget.record_call`，但不受预算暂停跳过；遇到限流异常按续期失败计。
 
 **推送与开 PR 前的认领确认（第二道刹车）**
-在 `push_changes` 与开 PR 之前调用 `assert_claim_still_owned(issue, own_comment_id)`：用 `trusted_only=True` 读评论，取最近一条可解析的 `iar:claim`。如果它不是本进程那条评论（按 comment id 比较），或本进程已被续期线程标记为失去认领，就抛出 `ClaimLeaseLost`。调用方按"放弃本次交付"处理，不改标签、不写失败评论（标签归新的持有者）。只对带租约的认领做这一检查；本进程的认领一定带租约。
+在 `push_changes` 与开 PR 之前调用 `assert_claim_still_owned(issue, own_comment_id)`：用 `trusted_only=True` 读评论，取最近一条可解析的 `kc:claim`。如果它不是本进程那条评论（按 comment id 比较），或本进程已被续期线程标记为失去认领，就抛出 `ClaimLeaseLost`。调用方按"放弃本次交付"处理，不改标签、不写失败评论（标签归新的持有者）。只对带租约的认领做这一检查；本进程的认领一定带租约。
 
 **远端租约判定（纯函数）**
 `classify_remote_lease(claim_comment_updated_at, lease, now) -> "live" | "expired" | "no_lease"`：
@@ -331,7 +331,7 @@ This section is a living implementation guide based on current repository analys
 │   │   [修改]
 │   │   【总结】认领评论追加 kc:lease 与续期文字；concurrent_bids 的本机判定改用 is_local_claim。
 │   │   ├── format_claim_comment 接收 machine_id 与 ttl
-│   │   └── iar:claim marker 文本保持逐字节不变
+│   │   └── kc:claim marker 文本保持逐字节不变
 │   ├── src/backend/core/use_cases/agent_runner_reclaim.py
 │   │   [修改]
 │   │   【总结】旧 reclaim 路径的本机判定改用 is_local_claim；_CLAIM_MARKER_PATTERN 不改。
@@ -363,7 +363,7 @@ This section is a living implementation guide based on current repository analys
 ├── Config
 │   ├── src/backend/infrastructure/config/agent_runner_settings_models.py
 │   │   [修改]
-│   │   【总结】[agent_runner.daemon] 增加 presence_enabled（默认 true）与 lease_ttl_seconds（默认 600，最小 120）。
+│   │   【总结】[agent_runner.daemon] 增加 presence_enabled（默认 true）与 lease_ttl_seconds（默认 1200，最小 120）。
 │   ├── src/backend/core/shared/models/agent_runner.py
 │   │   [修改]
 │   │   【总结】对应 domain dataclass 字段同步。
@@ -381,7 +381,7 @@ This section is a living implementation guide based on current repository analys
 │
 ├── Tests
 │   ├── tests/test_agent_runner_claim_lease.py [新增]
-│   │   【总结】标记往返、旧解析器对新评论的兼容、远端判定边界、is_local_claim、归属确认。
+│   │   【总结】标记往返、基线解析器对新评论的兼容、远端判定边界、is_local_claim、归属确认。
 │   ├── tests/test_coordination_heartbeat.py [新增]
 │   │   【总结】续期节奏、失败计时、ttl/2 自我隔离触发终止、预算记录与暂停豁免。
 │   ├── tests/test_machine_presence.py [新增]
@@ -391,7 +391,7 @@ This section is a living implementation guide based on current repository analys
 │   ├── tests/test_run_target_admission.py [修改]
 │   │   【总结】远端租约有效时冲突带剩余时间、过期时放行。
 │   ├── tests/test_agent_runner_claim_arbitration.py [修改]
-│   │   【总结】同名主机不同机器编号时不剔除对方投标；iar:claim 文本逐字节不变。
+│   │   【总结】同名主机不同机器编号时不剔除对方投标；kc:claim 文本逐字节不变。
 │   └── tests/conftest.py [修改]
 │       【总结】FakeGitHubClient 实现 list_issue_comment_records，支持注入评论 updated_at。
 │
@@ -410,7 +410,7 @@ This section is a living implementation guide based on current repository analys
 |---|---|---|---|---|
 | 远端租约过期接手 + 持有者自我隔离 + 推送前归属确认 | R3 | 正确性：同一 Issue 双重执行；固定区：core 编排 + 并发 | 人工确认（决策一） | rv-2、rv-3 |
 | 状态 Issue 默认开启并公开 | R2 | 安全/隐私：公开仓库暴露机器信息；外部可见行为 | 人工确认（决策二） | rv-4 |
-| `iar:claim` 格式保持不变、新标记独立 | R3 | 兼容：旧版误判导致双跑 | 执行者 + 判别性测试（归入决策一的证据） | rv-2 中旧解析器对新评论的断言 |
+| `kc:claim` 格式保持不变、新标记独立 | R3 | 兼容：旧版误判导致双跑 | 执行者 + 判别性测试（归入决策一的证据） | rv-2 中基线解析器对新评论的断言 |
 | 按机器编号判定本机 | R2 | 正确性：同名主机误回收 | 执行者 + 强 oracle（并入 rv-4 场景） | rv-4 |
 | `kc peers` 输出 | R1 | 单一只读入口 | 执行者 + 端到端 | rv-1 |
 | 配置项与三处映射 | R1 | 局部；漏映射被默认值掩盖 | 执行者 + 非默认值的配置往返测试 | 单测：设置 `lease_ttl_seconds=900` 后标记里出现 `ttl="900"` |
@@ -430,7 +430,7 @@ rg -n "reclaim_ttl_seconds|reconcile_stale_attempts" src/backend docs
 
 - 第二条命令列出的每个"按主机名判定本机"的位置，都要改用 `is_local_claim`，否则同名主机问题只修了一半。
 - 第一条命令列出的所有认领入口，都必须登记续期；漏登记的入口在长时间运行后会被别的机器误接手。
-- 交付前必须确认 `iar:claim` 的格式化输出与改动前逐字节一致（rv-2 中的兼容断言）。
+- 交付前必须确认 `kc:claim` 的格式化输出与本 PRD 基线逐字节一致（rv-2 中的兼容断言）。
 
 ### 7.5 Flow Diagram
 
@@ -439,7 +439,7 @@ sequenceDiagram
     participant B as "B 机 (持有者)"
     participant GH as "GitHub Issue #42"
     participant A as "A 机 (对账方)"
-    B->>GH: "认领评论: iar:claim + kc:lease(ttl=600)"
+    B->>GH: "认领评论: kc:claim + kc:lease(ttl=1200)"
     loop "每 ttl/10 秒"
         B->>GH: "编辑评论 (刷新 updated_at)"
     end
@@ -467,43 +467,45 @@ sequenceDiagram
   test_layer: e2e
   required_for_acceptance: true
   presentation: "tasks/evidence/<prd-stem>/rv-1-kc-peers.txt（表格与 JSON 原样输出）+ 可选的真实 GitHub 沙箱状态 Issue 网页截图 rv-1-presence-issue.png；自检：表格中 B 一行的 Issue 列是 #42"
+  negative_control: "假 gh 设置 FAKE_GH_HIDE_MACHINE_ID=<B 的 machine_id> 隐藏 B 的状态评论，再运行同一个真实 kc peers --json 入口。"
+  expected_fail: "--json 的 machines 只有 1 台，machines 长度为 2 的断言失败；去掉隐藏后真实入口读到两台机器。"
 - id: rv-2
-  behavior: 带租约的远端认领到期前不被接手、到期后被放回队列；无租约的旧认领永不被接手；iar:claim 格式与旧解析器兼容
+  behavior: 带租约的远端认领到期前不被接手、到期后被放回队列；无租约的旧认领永不被接手；kc:claim 格式与基线解析器兼容
   reviewer: verifier
-  real_entry: "RV 脚本：B 用 kc run --issue 42 认领后 kill -9；A 运行 kc daemon，假 gh 依次把时间推进到 ttl-30s 与 ttl+30s；另取一条只有 iar:claim、没有 kc:lease 的旧格式认领 #43，推进 24 小时"
-  expected: "ttl-30s 时 #42 仍是 agent/running、对账评论 0 条；ttl+30s 后 #42 恰好 1 条含 remote_lease_expired 的对账评论并回到 agent/ready；#43 始终 agent/running、对账评论 0 条；把新认领评论正文交给改动前版本的 parse_claim_marker_detail，能解析出相同的 host/pid/started_at/agent"
-  mock_boundary: "只替换 gh 与 agent CLI；对账、准入、认领评论渲染走真实 kc 代码；时间推进只发生在假 gh 的 updated_at 与注入的 now 上"
+  real_entry: "RV 脚本：B 用真实 kc run --issue 42 认领后 kill -9；A 运行真实 kc daemon，假 gh 分别把服务端 updated_at 存为当前时间前 ttl-30s 与 ttl+30s；另取只有 kc:claim、没有 kc:lease 的旧认领 #43，服务端时间设为 24 小时前"
+  expected: "ttl-30s 时 #42 仍是 agent/running、对账评论 0 条；ttl+30s 后 #42 恰好 1 条含 remote_lease_expired 的对账评论并回到 agent/ready；#43 始终 agent/running、对账评论 0 条；把新认领评论正文交给基线中的 parse_claim_marker_detail，能解析出相同的 host/pid/started_at/agent"
+  mock_boundary: "只替换 gh 与 agent CLI；对账、准入、认领评论渲染走真实 kc 代码；假 gh 仅修改它存储的服务器端 updated_at，客户端使用实际 UTC 时钟"
   tier: R3
   test_layer: e2e
   required_for_acceptance: true
   critical_value_source: "假 gh 存储的评论 updated_at（服务器端时间）与评论正文中的 kc:lease ttl"
   must_cross: "kc daemon 进程 → reconcile_stale_attempts → IGitHubClient(list_issue_comment_records, trusted_only) → gh 子进程 → 文件存储 → 标签写回"
-  forbidden_bypasses: "直接调用 classify_remote_lease 代替 daemon；在测试里手写对账评论；用客户端本地时间伪造 updated_at"
+  forbidden_bypasses: "直接调用 classify_remote_lease 代替 daemon；在测试里手写对账评论；用客户端本地时间代替假 gh 存储的服务端 updated_at"
   fresh_state_probe: "对账结束后用一个新的 gh 进程读取 #42/#43 的标签与评论数"
-  final_tree_evidence: "rv-2 输出记录 git rev-parse HEAD^{tree}；任何 core/use_cases 下的改动后重跑"
-  negative_control: "在改动前的代码树上跑同一脚本：ttl+30s 后 #42 仍停在 agent/running（远端一律跳过）"
-  expected_fail: "断言 '#42 恰好 1 条 remote_lease_expired 对账评论' 失败，实际为 0 条"
+  final_tree_evidence: "rv-2 输出由 scripts/working_tree_hash.py 计算的 candidate implementation tree（排除 PRD/evidence delivery records）；任何 core/use_cases 下的改动后重跑"
+  negative_control: "当 #42 服务端 updated_at 已早于声明 TTL 1230 秒时，设置 FAKE_GH_FORCE_UPDATED_AT_ISSUE=42，让假 gh 对真实 kc daemon 返回新鲜更新时间。"
+  expected_fail: "目标 Issue 仍停在 agent/running 且 remote_lease_expired 评论为 0 条；要求过期后恰好一条对账评论的断言失败。"
 - id: rv-3
   behavior: 持有者续期连续失败满 ttl/2 时终止自己的 agent 且不交付；恢复联网后发现认领已易主同样不推送
   reviewer: verifier
-  real_entry: "RV 脚本：B 用 kc run --issue 42 认领（假 agent 长时间运行并在结束时请求提交），假 gh 对 B 的评论编辑请求返回网络错误（模拟断网）；随后恢复网络，并预先让 A 在 #42 写入一条更新的认领"
-  expected: "断网满 ttl/2 后 B 的假 agent 进程被终止（PID 不再存活）；B 的日志出现失去认领的告警；整个过程中远端仓库的分支 ref 未变化、假 gh 记录的 pr create 调用 0 次、B 发起的标签写入 0 次"
-  mock_boundary: "只替换 gh 与 agent CLI；续期线程、进程登记簿与终止、push_changes 前的归属确认走真实代码；git 远端是本地裸仓库"
+  real_entry: "RV 脚本经真实 kc run --issue 42 执行三种时序：无竞争认领负控；A 在 agent 完成后、push_changes 认领读取前写入新 kc:claim；以及真实推送后、开 PR 认领读取前写入新 kc:claim。另以 gh 对租约评论持续返回网络错误模拟断网。"
+  expected: "断网满 ttl/2 后 agent PID 不再存活，kc run 放弃 delivery，不再启动 recovery attempt；失租后远端 ref 未变、pr create 为 0、初始 ready→running 领取以外的标签写入为 0。竞争认领若在 push_changes 读取前出现，则没有推送；若在开 PR 读取前出现，则已推送的 ref 保留但不会创建 PR。"
+  mock_boundary: "只替换 gh 与 agent CLI；续期线程、进程登记簿与终止、push_changes 和 create_draft_pr 前的归属确认走真实代码；git 远端是本地裸仓库"
   tier: R3
   test_layer: e2e
   required_for_acceptance: true
   critical_value_source: "本地裸仓库的 refs/heads/issue-42 与假 gh 的调用日志"
-  must_cross: "kc run 进程 → CoordinationHeartbeat → attempt_process_registry 终止 → handler 捕获 ClaimLeaseLost → push_changes 前置确认"
+  must_cross: "kc run 进程 → CoordinationHeartbeat → attempt_process_registry 终止 → run_agent_execution_loop / handler 传播 ClaimLeaseLost → push_changes 与 create_draft_pr 前置确认"
   forbidden_bypasses: "在测试中直接设置失去认领标志；绕过 push_changes 调用 git push；用 monkeypatch 替换终止函数"
-  fresh_state_probe: "B 进程退出后，用新进程执行 git ls-remote 与 ps 检查"
-  final_tree_evidence: "rv-3 输出记录 git rev-parse HEAD^{tree}；任何 coordination_heartbeat / agent_runner_publish 改动后重跑"
-  negative_control: "在改动前的代码树上跑同一脚本：断网期间 agent 不会被终止，结束后执行 git push"
-  expected_fail: "断言 '远端分支 ref 未变化' 失败，ls-remote 显示新提交"
+  fresh_state_probe: "每个 kc run 退出后，用新进程执行 git ls-remote、读取假 gh 调用日志并核对 agent PID 存活"
+  final_tree_evidence: "rv-3 输出由 scripts/working_tree_hash.py 计算的 candidate implementation tree（排除 PRD/evidence delivery records）；任何 run_agent_once / run_agent_execution_loop / coordination_heartbeat / agent_runner_publish 改动后重跑"
+  negative_control: "ownership 负控设置 FAKE_GH_DISABLE_CLAIM_SWITCH=1，真实 agent 提交后不向假 gh 写入竞争认领；真实 direct-pr 发布路径继续推送并尝试 gh pr create。"
+  expected_fail: "远端 ref 从 absent 变为 issue-42 提交 SHA，且 gh pr create 调用数大于 0；要求失去认领后无推送、无 PR 的 oracle 按预期失败。"
 - id: rv-4
   behavior: 状态 Issue 默认创建且重复时收敛为一条；关闭开关后不写状态但租约照常；同名主机按机器编号区分
   reviewer: verifier
-  real_entry: "RV 脚本：两个 KEDACODE_HOME、同一主机名，同时首次启动 kc daemon；随后在其中一台的仓库配置里设置 presence_enabled = false 并重启；再让一台认领后正常退出、另一台运行对账"
-  expected: "带 kedacode/presence 标签的 open Issue 恰好 1 条，另一条被移除标签并有指向正本的留言；关闭后该机状态评论的 updated_at 不再变化，但其新认领评论仍含 kc:lease 且持续续期；对账方不把同名主机的认领当本机，对账评论 0 条"
+  real_entry: "RV 脚本启动两份真实 kc daemon，并用假 gh barrier 让两边并发读到空状态板后同时尝试创建；随后经 TOML 更新 presence_enabled=false，以真实 kc run 续租；另由真实 daemon 对账同主机名、不同 machine_id 的活动远端认领"
+  expected: "无故障注入时两机并发首启最终只有 1 条带 kedacode/presence 标签的 open Issue，重复项移除标签并留一条指向正本的留言；默认开启会创建状态；关闭后已有评论的 updated_at 不变，但 claim 评论 kc:lease.updated_at 续期；同名主机不同 machine_id 的活动认领保持 agent/running、不产生过期对账评论"
   mock_boundary: "只替换 gh 与 agent CLI；配置读取走真实 settings → domain 映射"
   tier: R2
   test_layer: e2e
@@ -511,8 +513,10 @@ sequenceDiagram
   critical_value_source: "假 gh 中 Issue 的标签集合与评论 updated_at"
   must_cross: "kc daemon 进程 → machine_presence → IGitHubClient → gh 子进程 → 文件存储"
   forbidden_bypasses: "在测试里直接构造 AppConfig 跳过 TOML 解析；手动删除重复 Issue"
-  fresh_state_probe: "两个 daemon 停止后，用新的 gh 进程按标签列出 Issue 并读取评论"
-  final_tree_evidence: "rv-4 输出记录 git rev-parse HEAD^{tree}；machine_presence 或配置映射改动后重跑"
+  fresh_state_probe: "daemon 停止后以及 kc run 续租后，用新 gh 进程读取状态 Issue 标签、评论 updated_at 和认领租约 updated_at"
+  final_tree_evidence: "rv-4 输出由 scripts/working_tree_hash.py 计算的 candidate implementation tree（排除 PRD/evidence delivery records）；machine_presence、配置映射或 duplicate cleanup 改动后重跑"
+  negative_control: "并发首次启动时设置 FAKE_GH_FAIL_PRESENCE_DEDUP=1，让假 gh 拒绝删除重复 Issue 的 kedacode/presence 标签。"
+  expected_fail: "两台真实 daemon 各创建一条状态 Issue，open_presence_issues=2，要求恰好一条的断言失败；去掉故障注入后重试收敛为一条并写入指向留言。"
 ```
 
 **失败排查**：rv-1、rv-4 先检查两个进程是否真的使用了不同的 `KEDACODE_HOME`（`machine.json` 是否不同）以及假 `gh` 是否在 PATH 最前面；rv-2 先检查假 `gh` 返回的评论 JSON 是否带 `updated_at`、认领评论是否带 `kc:lease`；rv-3 先检查假 agent 是否经过 attempt 进程登记簿（只有走 `Popen` 的路径会登记），以及 `push_changes` 前的确认是否用了本进程的 comment id。
@@ -558,55 +562,68 @@ No external validation required; repository evidence was sufficient.（GitHub RE
 
 | 看什么 | 呈递物 | 10 秒自检 |
 |---|---|---|
-| 在一台机器上看到两台机器及各自在做的 Issue（rv-1） | `tasks/evidence/<prd-stem>/rv-1-kc-peers.txt`（交付时填入）；打开：`just prd review tasks/archive/<prd-file>` 或 `open tasks/evidence/<prd-stem>/rv-1-kc-peers.txt`；可选沙箱网页截图在交付时内嵌 | 表格里 B 那一行的"正在处理"列是 `#42`；JSON 中 `machines` 长度为 2 |
+| 在一台机器上看到两台机器及各自在做的 Issue（rv-1） | `tasks/evidence/P1-FEAT-20261024-161425-cross-machine-presence-and-claim-lease/rv-1-kc-peers.txt`；打开：`open "tasks/evidence/P1-FEAT-20261024-161425-cross-machine-presence-and-claim-lease/rv-1-kc-peers.txt"` | 表格里 B 那一行的"正在处理"列是 `#42`；JSON 中 `machines` 长度为 2 |
 
 未在此展示的是 `reviewer: verifier` 的证据组：rv-2（远端接手与旧认领不受影响）、rv-3（自我隔离与推送前确认）、rv-4（状态 Issue 收敛、开关、同名主机）。这三组结论在 9.2 中，只在失败时需要人看。
 
 ### 9.2 Acceptance Evidence Package
 
-按风险排序：决策一（rv-2、rv-3，R3）→ 决策二（rv-4，R2）→ rv-1 与 R1/R0 门禁。交付时在此附各 rv 的结果摘要、验证时的 Git tree 与证据文件路径。
+按风险排序：决策一（rv-2、rv-3，R3）→ 决策二（rv-4，R2）→ rv-1 与 R1/R0 门禁。rv-1 至 rv-4 均通过真实 `kc` CLI/daemon 与本地 Git，GitHub 和 agent CLI 由无凭据替身提供。每个场景先执行负控并观察到 oracle 失败，再去掉故障注入观察到通过；四项在默认租约调整后重新运行，共享 candidate implementation tree `bfaad53e278da7a66af2ffad1d0732654f569fc4`（不含本 PRD 与 evidence delivery records）：
+
+| 顺序 | 结果与判别证据 | 原始证据 |
+|---|---|---|
+| 决策一 · rv-2（R3） | 负控强制返回新鲜服务器时间，过期 oracle 观察到 0 条接手评论、#42 仍为 `agent/running`；默认 1200 秒租约下正常路径 1170 秒未接手、1230 秒后恰有 1 条 `remote_lease_expired` 并回到 `agent/ready`。无租约 #43 在模拟 24 小时后仍为 `agent/running`；基线解析器读到 `kc:claim` 的 host、pid、started_at、agent。 | `rv-2-remote-lease.txt` |
+| 决策一 · rv-3（R3） | 负控确实推送分支并尝试开 PR，保护 oracle 失败；绿色路径分别在推送前与开 PR 前发现认领易主并阻止交付。续期失败到 120 秒 TTL 的一半时 agent 子进程退出；失租后的远端分支不存在、PR 调用为 0、标签写入为 0（初始认领的 2 次除外）。 | `rv-3-self-fence.txt` |
+| 决策二 · rv-4（R2） | 负控拒绝重复标签移除后留下 2 条状态 Issue，唯一板 oracle 失败；重试及并发首启绿色路径都收敛至 1 条。关闭状态开关后状态评论不变而租约继续续期；同主机名、不同 machine_id 的远端有效租约保持运行。 | `rv-4-presence.txt` |
+| 双机可见 · rv-1（R1） | 负控隐藏 B 评论后真实 `kc peers --json` 只见 1 台，数量断言失败；绿色表格与 JSON 都见两台在线机器，B 正在处理 #42 / `codex`，状态 Issue 有两条评论。 | `rv-1-kc-peers.txt` |
+
+每项的完整实际命令、负控、预期失败、输出摘要、解释与风险见 `evidence.json`；终端原始输出只含本项内容。上一轮 Qoder 曾在 builder HEAD `9119bc370bfde2b04be769621356aa2383a7a105`、candidate implementation tree `2bd42838188f29bc252a6216082a21f4bf187c9c` 返回 `risk=green`；该候选树早于行数门禁修复，不构成本轮独立验收。Qoder 后续在 builder HEAD `e58f70b3c4213d1598f0f667b08e0cce061d81be` 上对当前 candidate implementation tree `bfaad53e278da7a66af2ffad1d0732654f569fc4` 独立复核并返回 **PASS**。它发现的三项非阻塞呈递问题已在 docs-only PR head `deb4a48586f5dea9cbf057c395ebc86034283d5a` 修正；当前 PR head 过滤后的实现树仍为 `bfaad53e278da7a66af2ffad1d0732654f569fc4`。上一轮 verifier 披露：真实 GitHub 写入尚未覆盖；预算耗尽与待返工两个 FR-6 分支只有单测覆盖；无心跳的内部直接调用可能留下无租约认领。
 
 ### Human-Confirmed (来自 Part A 风险地图)
 
-- [ ] 决策一：接受"远端认领租约过期（默认 10 分钟）即可被放回队列，持有者 5 分钟续不上期就自停"及默认时长 — 依据 rv-2、rv-3 结果
-- [ ] 决策二：接受状态 Issue 默认开启（包括公开仓库），只提供按仓库关闭的开关 — 依据 rv-4 结果
+- [x] 决策一：接受"远端认领租约过期（默认 20 分钟）即可被放回队列，持有者 10 分钟续不上期就自停"及默认时长 — 依据 rv-2、rv-3 结果 <!-- 证据: 用户于 2026-10-26 明确同意，并确认租约默认值为 1200 秒。 -->
+- [x] 决策二：接受状态 Issue 默认开启（包括公开仓库），只提供按仓库关闭的开关 — 依据 rv-4 结果 <!-- 证据: 用户于 2026-10-26 明确同意。 -->
 - [ ] 已查看 9.1 呈递区，`kc peers` 的输出内容与格式符合预期
 
 ### Architecture Acceptance
 
-- [ ] 判定逻辑（租约解析与判定、状态评论渲染与解析、重复状态 Issue 的收敛选择）位于 `src/backend/core/use_cases/`，GitHub I/O 只经 `IGitHubClient`；`rg -n "import subprocess|gh api" src/backend/core/use_cases/agent_runner_claim_lease.py src/backend/core/use_cases/machine_presence.py src/backend/core/use_cases/coordination_heartbeat.py` 无结果
-- [ ] 没有新增数据库表或迁移：`git diff --name-only main... | rg "alembic|migrations"` 无结果
-- [ ] 本机判定统一经 `is_local_claim`：`rg -n "claim\.host\s*[!=]=" src/backend/core` 只剩 `is_local_claim` 内部的旧版回退分支
+- [x] 判定逻辑（租约解析与判定、状态评论渲染与解析、重复状态 Issue 的收敛选择）位于 `src/backend/core/use_cases/`，GitHub I/O 只经 `IGitHubClient`；`rg -n "import subprocess|gh api" src/backend/core/use_cases/agent_runner_claim_lease.py src/backend/core/use_cases/machine_presence.py src/backend/core/use_cases/coordination_heartbeat.py` 无结果。证据：`src/backend/core/use_cases/agent_runner_claim_lease.py`、`machine_presence.py`、`coordination_heartbeat.py`；源码搜索退出码 1（无命中）。
+- [x] 没有新增数据库表或迁移：`git diff --name-only main... | rg "alembic|migrations"` 无结果。证据：当前变更文件清单不含 Alembic 或 migration 路径。
+- [x] 本机判定统一经 `is_local_claim`：`rg -n "claim_host\s*==\s*host" src/backend/core` 只命中 `is_local_claim` 内部的旧版回退分支。证据：旧认领只在 `agent_runner_claim_lease.py` 回退至主机名；`agent_runner_reconcile.py`、`run_target_admission.py`、`agent_runner_claim_arbitration.py` 调用统一 helper。
 
 ### Behavior Acceptance
 
-- [ ] rv-2 通过：到期前不接手、到期后恰好 1 条 `remote_lease_expired` 对账评论并回到 `agent/ready`、旧认领永不接手（证据：`rv-2-remote-lease.txt`）
-- [ ] rv-3 通过：ttl/2 时 agent 被终止，远端分支 ref 未变化，`pr create` 0 次，标签写入 0 次（证据：`rv-3-self-fence.txt`）
-- [ ] rv-4 通过：状态 Issue 恰好 1 条、关闭开关后状态停止更新但租约照常、同名主机不被误对账（证据：`rv-4-presence.txt`）
-- [ ] `iar:claim` 文本与改动前逐字节一致，旧解析器能解析新认领评论（证据：rv-2 输出中的兼容断言）
-- [ ] 租约有效的远端认领，`kc run --issue N` 返回退出码 5，提示中包含剩余时间（证据：`tests/test_run_target_admission.py` 新用例输出）
+- [x] rv-2 通过：默认 1200 秒租约下，1170 秒时不接手、1230 秒后恰好 1 条 `remote_lease_expired` 对账评论并回到 `agent/ready`，旧认领永不接手（证据：`rv-2-remote-lease.txt`；candidate tree `bfaad53e278da7a66af2ffad1d0732654f569fc4`）。
+- [x] rv-3 通过：ttl/2 时 agent 被终止；失租后远端分支 ref 未变化、`pr create` 为 0 次、标签写入为 0 次（初始 ready→running 认领的 2 次标签写入除外，证据：`rv-3-self-fence.txt`；candidate tree `bfaad53e278da7a66af2ffad1d0732654f569fc4`）。
+- [x] rv-4 通过：状态 Issue 恰好 1 条、关闭开关后状态停止更新但租约照常、同名主机不被误对账（证据：`rv-4-presence.txt`；candidate tree `bfaad53e278da7a66af2ffad1d0732654f569fc4`）。
+- [x] `kc:claim` 文本与本 PRD 基线逐字节一致，基线解析器能解析新认领评论（证据：`rv-2-remote-lease.txt` 中的兼容断言；candidate tree `bfaad53e278da7a66af2ffad1d0732654f569fc4`）。
+- [x] 租约有效的远端认领，`kc run --issue N` 返回退出码 5，提示中包含剩余时间（证据：当前九模块命令 `149 passed`，包含 `tests/test_run_target_admission.py::test_cli_run_on_live_remote_lease_exits_conflict`；candidate tree `bfaad53e278da7a66af2ffad1d0732654f569fc4`）。
+- [x] 同名主机 + 同数字 PID 的**另一台机器**先认领时，仲裁不按本机重入放行：带租约的投标一律按机器编号判定（当前九模块命令 `149 passed` 覆盖 `test_same_host_same_pid_remote_lease_bid_is_not_a_reentry` 与同机重入回归；candidate tree `bfaad53e278da7a66af2ffad1d0732654f569fc4`）。
+- [x] 本进程未登记认领时，推送/开 PR 前的归属栅栏仍回读服务端按机器编号确认，确认不了就拒绝交付（当前九模块命令 `149 passed` 覆盖两个 publish-fence 回归；candidate tree `bfaad53e278da7a66af2ffad1d0732654f569fc4`）。
 
 ### Dependency Acceptance
 
-- [ ] 未新增第三方依赖：`git diff main... -- pyproject.toml uv.lock` 无依赖变更
+- [x] 未新增第三方依赖：`git diff main... -- pyproject.toml uv.lock` 无依赖变更。证据：变更文件清单无 `pyproject.toml` 或 `uv.lock`。
 
 ### Validation Acceptance
 
-- [ ] 最高保真入口：rv-1 至 rv-4 均通过真实 `kc` CLI 与 daemon 进程执行，只替换 `gh` 与 agent CLI；每份证据记录了生成时的 `git rev-parse HEAD^{tree}`，且与最终交付的 tree 一致
-- [ ] 配置三处映射：设置 `lease_ttl_seconds = 900` 后，新认领评论中出现 `ttl="900"`（证据：配置往返单测输出）
-- [ ] 全量相关测试：`uv run pytest -o addopts="" tests/test_agent_runner_claim_lease.py tests/test_coordination_heartbeat.py tests/test_machine_presence.py tests/test_agent_runner_reconcile.py tests/test_run_target_admission.py tests/test_agent_runner_claim_arbitration.py tests/test_agent_runner_reclaim.py` 全部通过（不依赖 testmon 增量）
+- [x] 最高保真入口：rv-1 至 rv-4 均通过真实 `kc` CLI 与 daemon 进程执行，只替换 `gh` 与 agent CLI；每份证据记录由 RV tree helper 计算的 candidate implementation tree（不含 PRD/evidence delivery records），且彼此相同并对应最终实现代码。默认租约调整后重新执行，四份 `rv-*.txt` 均记录 `bfaad53e278da7a66af2ffad1d0732654f569fc4`，manifest 位于 `evidence.json`。
+- [x] 配置三处映射：设置 `lease_ttl_seconds = 900` 后，新认领评论中出现 `ttl="900"`（证据：`tests/test_agent_runner_claim_lease.py::test_configured_ttl_is_written_into_new_claim_comment`；对应相关测试输出）。
+- [x] 全量相关测试：`uv run pytest -o addopts="" tests/test_agent_runner_claim_lease.py tests/test_coordination_heartbeat.py tests/test_machine_presence.py tests/test_agent_runner_reconcile.py tests/test_run_target_admission.py tests/test_agent_runner_claim_arbitration.py tests/test_agent_runner_reclaim.py tests/test_github_client.py tests/test_kc_peers.py` 全部通过（不依赖 testmon 增量）。默认租约调整后的当前树结果为 `149 passed`。完整单元套件 `5043 passed, 1 skipped` 是先前 tree `6658504731e5dbc2cfc5b751d470123789c3464c` 的历史结果，未在本次默认值改动后重跑。
 
 ### Documentation Acceptance
 
-- [ ] `docs/guides/agent-runner.md` 的多机部署、崩溃对账、定向准入、首次领取仲裁四节已更新；`rg -n "kc peers|kedacode/presence|remote_lease_expired|lease_ttl_seconds" docs/guides/agent-runner.md` 四个词都能命中
-- [ ] 文档中旧的"系统没有强制接管远端认领的入口"等表述已改为准确描述（带租约且过期可被接手；租约有效时仍不能接手）：`rg -n "跨机器的认领无法探测远端进程" docs` 的命中处已同步改写
-- [ ] operator skill 新增路由：`rg -n "kc peers" src/backend/engines/agent_runner/templates/skills/kedacode-operator` 有命中
+- [x] `docs/guides/agent-runner.md` 的多机部署、崩溃对账、定向准入、首次领取仲裁四节已更新；`rg -n "kc peers|kedacode/presence|remote_lease_expired|lease_ttl_seconds" docs/guides/agent-runner.md` 四个词都能命中。证据：四个术语搜索均有命中。
+- [x] 文档中旧的"系统没有强制接管远端认领的入口"等表述已改为准确描述（带租约且过期可被接手；租约有效时仍不能接手）：`rg -n "跨机器的认领无法探测远端进程" docs` 的命中处已同步改写。证据：旧语义搜索无命中；agent-runner guide 明确区分有效租约与过期租约。
+- [x] operator skill 新增路由：`rg -n "kc peers" src/backend/engines/agent_runner/templates/skills/kedacode-operator` 有命中。证据：`SKILL.md` 与 `references/peers.md`。
 
 ### Delivery Readiness
 
-- [ ] 推荐方案已完整实现，没有遗留的 Phase 2 或临时兼容层
-- [ ] 如果交付走 PR，PR 证据评论包含 9.1 呈递区的内容；否则完成消息原样附上 9.1 内容
-- [ ] `just lint --full` 与上述 pytest 通过，单文件非空行均少于 1000 行
+- [x] 推荐方案已完整实现，没有遗留的 Phase 2 或临时兼容层。证据：最终代码审查、四项 RV 与相关回归测试；没有新增运行时依赖或临时旁路。
+- [x] 如果交付走 PR，PR 描述包含 9.1 呈递区与证据链接；否则完成消息原样附上 9.1 内容。证据：PR #330 的 Human Visible Outcomes 列出 rv-1 表格/JSON 断言，并链接 `rv-1-kc-peers.txt` 与交互清单。
+- [x] `SKIP=check-test-flag just lint --full` 与上述 pytest 通过，单文件非空行均少于 1000 行。证据：本轮 `SKIP=check-test-flag just lint --full`、相关测试 `149 passed` 与 `just lint --reuse` 通过；全文件行数检查无超限。`just test` 受 testmon 增量标记影响，实际输出 `no tests ran`，不作为测试通过证据。完整单元套件 `uv run pytest -o addopts="" tests/` 在先前 tree `6658504731e5dbc2cfc5b751d470123789c3464c` 上为 `5043 passed, 1 skipped`；默认租约改为 1200 秒后的当前树未重跑全量套件。
+- [x] 独立 verifier 的最终判定 — Qoder 对 candidate implementation tree `bfaad53e278da7a66af2ffad1d0732654f569fc4` 返回 PASS，相关证据写入 `verifier-response.txt` 和 verifier report；三项非阻塞证据呈递问题已在当前 PR head 与发布包中修正。
+- [x] 人审 HTML 的真实浏览器渲染与翻页 smoke — 2026-10-27 Microsoft Edge 首卡显示、三卡翻页和 Markdown 结果生成通过；0 个 `pageerror`。另有 3 条 textarea 缺少 id/name 的可访问性警告，不影响已验证交互。
 
 ## 10. Functional Requirements
 
@@ -618,7 +635,7 @@ No external validation required; repository evidence was sufficient.（GitHub RE
 - **FR-6**：**远端接手**：对账遇到来自别的机器、带 `kc:lease` 的认领时，用评论的服务器端 `updated_at` 判断是否过期（以持有者声明的时长为准，只信任有写权限作者的评论）。过期时：有未消费的返工标记则保持 `agent/running`；恢复预算未耗尽则放回 `agent/ready`；预算耗尽则判 `agent/failed`。每种处置都写一条原因为 `remote_lease_expired` 的对账评论，并保持幂等。没有 `kc:lease` 的远端认领一律不碰。定向 `kc run --issue N` 在租约有效时返回冲突并提示剩余时间，过期时先执行同一对账再认领。
 - **FR-7**：**自我隔离**：持有者某个认领"距上次续期成功"达到 `ttl/2` 时，终止该 Issue 当前在册的 agent 子进程，标记失去认领，之后不推送、不开 PR、不改标签。每次推送和开 PR 之前，回读确认最近一条可信认领仍是本进程那条评论，否则放弃交付。
 - **FR-8**：**本机判定**：带 `kc:lease` 的认领用机器编号判断是否本机；没有的退回主机名。对账、准入、仲裁三处统一使用同一判定。
-- **FR-9**：**配置**：仓库级 `[agent_runner.daemon]` 新增 `presence_enabled`（默认 `true`）和 `lease_ttl_seconds`（默认 `600`，低于 `120` 时按 `120` 处理并告警）。关闭状态上报不影响租约与远端接手。
+- **FR-9**：**配置**：仓库级 `[agent_runner.daemon]` 新增 `presence_enabled`（默认 `true`）和 `lease_ttl_seconds`（默认 `1200`，低于 `120` 时按 `120` 处理并告警）。关闭状态上报不影响租约与远端接手。
 - **FR-10**：**文档与 skill 同步**：更新 `docs/guides/agent-runner.md` 中相关章节与 `kedacode-operator` skill，说明 `kc peers`、状态 Issue、租约、远端接手和自我隔离。
 
 ## 11. Non-Goals
@@ -652,3 +669,88 @@ No external validation required; repository evidence was sufficient.（GitHub RE
 | D-06 | 防双交付 | 持有者 ttl/2 自停 + 推送前确认归属 | 只靠接手方等待更长时间 | 等待再久也挡不住"断网但进程还活着"的持有者在恢复后推送，只有持有者侧检查才能堵住。 |
 | D-07 | 查看入口 | `kc peers` + 状态 Issue 网页 | Console 机器页面 | 本期保持后端改动；Console 机器页面已在 Tailscale PRD 中规划，避免两份页面设计。 |
 | D-08 | 状态评论粒度 | 每个 kc 进程一条，复用本机已退出进程的评论 | 每台机器一条、多个进程共同写 | 多个进程写同一条评论会互相覆盖；复用槽位把评论数控制在单机并发进程数以内。 |
+
+### Final Reconciliation
+
+- Interpretation: 交付实现仍是每仓一块 GitHub 状态 Issue 与认领评论中的独立 `kc:lease`；命名清理依赖已在基线完成（`f4886655`），所以当前认领标记是 `kc:claim`。它的格式不变，rv-2 用基线解析器验证 host、pid、started_at 与 agent 可读。
+- Public behavior and contracts: 实现入口为 `kc peers`，支持 `--repo`、`--repo-id` 与 `--json`；`presence_enabled` 默认为开启，关闭只停止状态 Issue 读写，租约续期继续工作；`lease_ttl_seconds` 默认 1200，配置低于 120 时运行期按 120 处理并告警。配置经 settings、domain dataclass 与 factory 映射传递。CLI 表格与 GitHub 状态评论的人读时间按生成机器本地时区显示，JSON 时间保留带偏移 UTC。
+- Related PRD status: 归档的命名清理 PRD 与 hard via-main 依赖由基线 commit `f4886655` 满足；Tailscale onboarding 与 hosted-runner deployment 仍独立，无额外顺序依赖。
+- Requirements and risks: rv-1 到 rv-4 均以真实 kc CLI/daemon、真实本地 git、假 GitHub 与确定性 agent CLI 运行；服务器时间通过假 GitHub 的 `updated_at` 设置。rv-3 区分初始领取的两次标签写入与失租后的零次标签写入，并覆盖推送前与开 PR 前两个归属读取点。远端接手仍受双方时钟偏差小于 ttl/2 的 PRD 前提约束；状态评论仍在公开仓库可见。
+- **实现中发现并纳入的边界**：进程因失租被终止后，`ClaimLeaseLost` 必须穿过执行恢复循环并阻止启动新的 recovery attempt；该修复已由定向回归测试与 rv-3 子进程场景验证。`kc run --takeover` 在停本机 daemon 前先拒绝有效远端租约，停止后再次准入；旧 takeover reclaim 路径也改为按 machine_id 识别本机，避免同名主机误回收。状态 Issue 重复项先写带 canonical 标记的清理留言，再移除重复标签；若留言失败，重复项仍留在查询集合中供下一次重试，回归测试覆盖失败后重试。低 TTL 配置留给运行期下限钳制，机器编号文件仅接受带时区创建时间的 UUID4。
+- **当前执行者证据树**：默认租约调整后，rv-1 至 rv-4 逐项重跑，四份原始输出和 `evidence.json` 均记录 candidate implementation tree `bfaad53e278da7a66af2ffad1d0732654f569fc4`；该身份通过排除 PRD 与整个 evidence delivery-record 目录计算。当前九个相关测试模块 `149 passed`。生命周期/verifier 测试计数不再引用：此前记录的文件在当前分支不存在。`just test` 实际输出 `no tests ran`，不作为测试通过证据。Qoder 独立 verifier 在同一候选实现树上返回 PASS；当前 PR HEAD 的过滤树仍相同。
+- **人审包检查**：Markdown 与 HTML 源码静态核对包含相同的三张决定卡和结果卡。2026-10-27 Microsoft Edge 实际浏览器 smoke 确认首卡可见、三卡可翻页并生成结果 Markdown；0 个 page error，3 条 textarea 缺少 id/name 的可访问性警告。
+- **验收投影**：实现与 runner-owned gate 项均有对应验证；用户已确认决策一、决策二。PR #330 显式声明 squash merge 即接受 9.1 人读呈递；在合并前状态仍为 `🧍 待人工验收`，只有满足门禁且 squash commit 的 record-excluded tree 与上述候选树相同后，才按契约回填 Human-Confirmed 并更新横幅。
+
+## Change Log
+
+### Preserve the superseded independent verifier result
+- Type: validation evidence
+- Before: 当前树没有通过独立性检查的 runner-owned verifier verdict；历史 GREEN 与 builder 使用相同 agent。
+- After: Qoder 曾在 builder HEAD `9119bc370bfde2b04be769621356aa2383a7a105`、candidate implementation tree `2bd42838188f29bc252a6216082a21f4bf187c9c` 返回 `risk=green`；该结果早于行数门禁修复，不再代表当前候选树。
+- Reason: 保留历史复核记录，同时明确它不满足当前树的独立 verifier 门禁，也不把执行者自审冒充独立结论。
+- Impact: 不改变运行行为；验证证据只覆盖 PRD 声明的替身 GitHub 边界，并披露真实写入、两个处置分支和无心跳内部调用窗口。
+- Review: 本记录只保留当时对旧候选树的结果；旧 Qoder GREEN 不覆盖当前树。当时记录此 Change Log 时，当前树的独立复核仍待完成。9.1 人读内容接受由 PR #330 的 merge-acceptance 契约在 squash merge 后记录。
+
+### Complete independent verification and refresh published review artifacts
+- Type: validation evidence / delivery records
+- Before: 当前候选树的独立 verifier 结论仍待复核；发布包缺少 HTML 清单，rv-3 清单 PID 对应旧运行，历史 Change Log 的 Review 行容易被误读为当前 GREEN。
+- After: Qoder 对 builder HEAD `e58f70b3c4213d1598f0f667b08e0cce061d81be` 上的 candidate implementation tree `bfaad53e278da7a66af2ffad1d0732654f569fc4` 返回 PASS，独立重跑九模块得到 `149 passed` 并核对 25 条 manifest 断言。执行者随后将 HTML 清单与当前 rv-3 PID `35838` 发布到 evidence branch `12e09af2eb9ffa6dbfe12ce1540650dd91febcff`，并澄清历史 Change Log。PR HEAD `deb4a48586f5dea9cbf057c395ebc86034283d5a` 的过滤候选树仍为 `bfaad53e278da7a66af2ffad1d0732654f569fc4`。
+- Reason: 将独立 verdict、实际 RV 输出和审阅者可访问的清单绑定到同一交付身份，并关闭 verifier 指出的三项非阻塞呈递问题。
+- Impact: 运行时实现未改变；清单与 9.1 的人工接受仍按 PR 的 squash-merge 契约记录，合并前横幅保持待人工验收。
+- Review: Qoder independent verifier PASS on candidate tree `bfaad53e278da7a66af2ffad1d0732654f569fc4`; residual test and live-write limitations remain disclosed above.
+
+### Align marker compatibility and realistic validation evidence
+- Type: evidence / scope clarification
+- Before: The oracle described the old `iar:claim` marker and an “old parser” without accounting for the prerequisite migration already present in the worktree base; rv-3 also said zero label writes without separating initial claim setup from post-loss writes; the explicit daemon takeover path still skipped remote target admission and reclaim used hostname only.
+- After: The compatibility oracle compares the current `kc:claim` baseline parser and keeps the claim marker byte-for-byte unchanged; rv-1 through rv-4 each declare an executed negative control; rv-3 covers both push and pre-PR ownership fences and states that zero label writes applies after lease loss, excluding the two initial claim writes. Targeted takeover checks a live remote lease before stopping the local daemon, rechecks after stop, and reclaim uses machine_id. Low TTL values clamp to 120 seconds with a warning, and human issue start times display in local time.
+- Reason: The hard dependency PRD was merged into the worktree base before this feature began; focused code review exposed takeover and local-time paths outside the first set of RV scenarios; realistic validation exposed the exact production boundary where a lost-lease child error could otherwise enter recovery again.
+- Impact: No user-visible safety promise or accepted scope was weakened. The validation wording now matches the merged marker name and observed label/publish sequencing; added regression tests cover the new takeover, TTL clamp, identity file and time display behavior.
+- Review: executor review complete; independent verifier and human decisions pending
+
+### Make duplicate-board cleanup retryable and refresh final evidence
+- Type: implementation / evidence
+- Before: Duplicate status Issues lost the `kedacode/presence` label before the pointer comment was written; a transient comment failure could make the duplicate undiscoverable for retry. The four RV records referenced an earlier candidate tree.
+- After: The canonical pointer comment is ensured before label removal. A regression test injects the comment failure, proves the duplicate remains discoverable, then verifies a retry writes the pointer and removes the label. rv-1 through rv-4 were rerun and all record candidate tree `6658504731e5dbc2cfc5b751d470123789c3464c`.
+- Reason: Preserve the PRD's promised duplicate-issue convergence and pointer comment under a transient GitHub write failure, and bind every realistic validation result to the final source tree.
+- Impact: No scope or user-visible behavior changed; convergence now retries safely. The 4 realistic oracles passed with their negative controls, and focused tests cover the retry path.
+- Review: executor code review complete; independent verifier and human decisions pending
+
+### Reconcile archive-readiness fields and final test count
+- Type: evidence / documentation
+- Before: The PRD acceptance checker could not read the rv-2 `expected_fail` scalar because it began with a `#` token, Final Reconciliation used descriptive labels the checker did not recognize, and the focused test count predated the new duplicate-comment retry regression test.
+- After: The expected failure is phrased without a leading Issue-number marker, Final Reconciliation uses the four required field labels, and the recorded focused result is 96 passed. The reviewer checklist headings use the same text in Markdown and HTML.
+- Reason: Make the final evidence parseable and traceable without changing any accepted product behavior.
+- Impact: No scope or behavior changed; archive readiness now reflects the final source and evidence.
+- Review: executor code review complete; independent verifier and human decisions pending
+
+### Record browser-review environment limitation
+- Type: validation / delivery status
+- Before: The interactive reviewer companion was generated, but the executing session had not recorded the browser-level pageerror, first-card, pagination, and result-card checks.
+- After: Static Markdown/HTML content is cross-checked and the mechanical checker false-positive is explained; CUA reports no browser sessions and denies access to the installed Edge and Chrome-for-Testing apps. The real-browser check is explicitly left to the runner-owned handoff gate as `REVIEW_INCIDENT / INCONCLUSIVE`.
+- Reason: Preserve the distinction between static artifact inspection and actual browser rendering.
+- Impact: No product behavior or scope changed. Independent verifier/archive remains pending until the runner completes its verdict and real-browser checklist smoke.
+- Review: executor review complete; independent verifier, browser smoke, and human decisions pending
+
+### Close second-round review findings and rebind final evidence
+- Type: implementation / evidence
+- Before: Arbitration treated a winning bid as a same-process re-entry on hostname + PID alone, so two machines sharing a hostname and a numeric PID inside the concurrent-claim window both flipped the Issue to `agent/running`. The pre-push/pre-PR ownership fence returned silently whenever the claim was not registered under the publish-time repository id. Machine identity came only from the heartbeat, so a heartbeat-less entry judged its own leased claims remote. Duplicate `remote_lease_expired` reconcile comments depended on a stale comment snapshot, `kc peers` rendered comment-authored hostname/version/agent straight into Rich cells, `json.dumps(ensure_ascii=False)` left `>` unescaped so a `-->` hostname truncated its own presence block, the guide described the lease request bound as one 5-second limit, and an unreadable claim comment surfaced as a bare traceback instead of exit 5. §9 and the verifier report still cited the pre-review candidate tree and `96 passed`.
+- After: `ClaimBid` carries the lease it declared and the re-entry test goes through `is_local_claim`, so a leased bid counts as ours only when the machine id matches (legacy unleased bids keep the hostname fallback). The fence reuses `_resolve_claim_repo_id` for repo_id/config drift and otherwise re-reads the server to confirm the latest trusted claim belongs to this machine, raising `ClaimLeaseLost` when it cannot. `current_machine_id()` sources identity from the heartbeat first and the persisted `machine.json` second, with `tests/conftest.py` isolating the state directory. Reconcile re-checks the dedupe hash immediately before writing and documents the residual multi-writer window. Presence payloads escape `<`/`>`, and `kc peers` strips control characters, escapes markup and bounds length before table rendering. The guide states the per-attempt limit with the 3-attempt/17-second worst case, serial renewal head-of-line effect, and monotonic self-fence clock, and the CLI maps claim-record read failures to `ExitCode.CONFLICT`. rv-1 through rv-4 were rerun and all record candidate tree `6658504731e5dbc2cfc5b751d470123789c3464c`; the focused suite is `149 passed` across nine modules and the full unit suite `5043 passed, 1 skipped`.
+- Reason: A reviewer found the same-hostname harm the Issue itself named, a fail-open path in FR-7's second brake, and identity, comment, output-safety and evidence-binding gaps; the acceptance source of truth has to name the tree the reruns actually used.
+- Impact: FR-8 locality now holds on the arbitration path and FR-7 refuses delivery that cannot be attributed, which is fail-closed for unattributable publishes. Legacy hostname-only claims keep their previous fallback. No CLI subcommand, flag or machine-readable output changed, so the packaged operator skill needs no update. Independent verifier still has to rerun on the final tree, and the browser smoke stays `REVIEW_INCIDENT / INCONCLUSIVE`.
+- Review: executor review complete for both rounds; independent verifier on the final tree, browser smoke, and human decisions pending
+
+### Record human decisions and widen the default lease grace period
+- Type: user decision / configuration default
+- Before: Default `lease_ttl_seconds` was 600 seconds (10-minute remote expiry, 5-minute owner self-fence), and both human decisions were unchecked.
+- After: Default `lease_ttl_seconds` is 1200 seconds; renewal cadence follows the existing TTL/10 rule (120 seconds by default) and owner self-fence remains TTL/2 (10 minutes). The user approved the lease policy and public status Issue default with a repository-level opt-out. The `kc peers` presentation review remains open.
+- Reason: Add more tolerance for temporary connectivity or GitHub API interruptions before stopping an active agent, while keeping a bounded recovery time after a machine goes away.
+- Impact: Default remote takeover can take up to 20 minutes; renewal calls are less frequent under the existing TTL/10 rule. No new setting or service was added. RV-1 through RV-4 and the nine relevant test modules were rerun on current candidate tree `552d0b85faf6748fa773d3d7e4f8f7454089db77`; independent verifier and browser presentation review remain pending.
+- Review: User decisions confirmed 2026-10-26; executor validation passed, independent verifier and remaining presentation review pending.
+
+### Rebind evidence after the CI file-length fix
+- Type: implementation / evidence
+- Before: The runtime orchestration module exceeded the CI limit at 1007 nonempty lines, while the PRD, manifest, and reports still identified the pre-fix candidate tree `2bd42838188f29bc252a6216082a21f4bf187c9c`.
+- After: The unchanged lifecycle path resolver moved into its lifecycle module, bringing the runtime module to 997 nonempty lines. All four realistic validations were rerun against candidate implementation tree `bfaad53e278da7a66af2ffad1d0732654f569fc4`; the nine relevant pytest modules pass (**149 passed**). The evidence manifest and current acceptance records now use the same tree identity. The earlier lifecycle/verifier count was removed because its named test files do not exist on this branch; `just test` produced `no tests ran` under testmon and is not counted. Independent verification of the refreshed records remains pending.
+- Reason: Keep the CI fix behavior-preserving and bind delivery evidence to the code it actually exercises.
+- Impact: No runtime behavior or accepted scope changed; current CI checks and the direct focused suite cover the refactor.
+- Review: executor review complete; fresh independent verifier result pending.

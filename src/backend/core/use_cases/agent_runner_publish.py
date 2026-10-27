@@ -28,6 +28,7 @@ from backend.core.use_cases.agent_runner_git import (
     list_changed_paths,
     list_git_remotes,
 )
+from backend.core.use_cases.coordination_heartbeat import active_coordination_heartbeat
 from backend.core.use_cases.agent_runner_pr_body_contract import (
     append_missing_contract_anchors,
     build_contract_annotation_block,
@@ -194,6 +195,7 @@ def push_changes(
     config: AppConfig,
     process_runner: IProcessRunner,
     *,
+    github_client: IGitHubClient | None = None,
     expected_branch: str | None = None,
     require_prd_archived: bool = True,
 ) -> str:
@@ -233,6 +235,13 @@ def push_changes(
     validate_safe_changes(worktree_path, config, process_runner)
     ensure_no_evidence_paths_in_changes(worktree_path, config, process_runner)
     publish_remote_name = validate_publish_remote(worktree_path, config, process_runner)
+    heartbeat = active_coordination_heartbeat()
+    if heartbeat is not None:
+        if github_client is None:
+            raise RuntimeError(
+                f"Issue #{issue.number} has no GitHub client for the claim ownership check."
+            )
+        heartbeat.assert_claim_owned(github_client=github_client, issue_number=issue.number)
     try:
         process_runner.run(["git", "push", "-u", publish_remote_name, branch], cwd=worktree_path)
     except (RuntimeError, OSError) as exc:
@@ -324,6 +333,9 @@ def create_draft_pr(
         expected_branch=expected_branch,
         issue=issue,
     )
+    heartbeat = active_coordination_heartbeat()
+    if heartbeat is not None:
+        heartbeat.assert_claim_owned(github_client=github_client, issue_number=issue.number)
 
     # 标签直发先持久化当前轮次候选，历史同 head PR 不能被新标签复用。
     from backend.core.use_cases.agent_runner_direct_pr_round import (
@@ -500,6 +512,7 @@ def publish_changes(
         worktree_path,
         config,
         process_runner,
+        github_client=github_client,
         expected_branch=expected_branch,
         require_prd_archived=require_prd_archived,
     )

@@ -366,6 +366,17 @@ def execute_console_issue_action(
         spawn_cwd = resolve_console_spawn_cwd(repo_id, contexts)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    process_runner = create_process_runner()
+    heartbeat = None
+    if request.action == "recover_failed_publish":
+        from backend.api.cli_coordination import start_coordination_heartbeat
+
+        heartbeat = start_coordination_heartbeat(
+            contexts=contexts,
+            github_client_factory=create_github_client,
+            process_runner=process_runner,
+            role="recover",
+        )
     try:
         action_result = execute_issue_action(
             action=request.action,
@@ -377,12 +388,15 @@ def execute_console_issue_action(
             store=create_console_store(),
             runner_command=settings.console.runner_command,
             spawn_cwd=spawn_cwd,
-            process_runner=create_process_runner(),
+            process_runner=process_runner,
             run_id=request.run_id,
             head_sha=request.head_sha,
         )
     except ConsoleActionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        if heartbeat is not None:
+            heartbeat.stop()
     return build_issue_action_response(
         _serialize(action_result), action_result.takeover_http_status
     )

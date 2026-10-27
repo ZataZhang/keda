@@ -25,13 +25,28 @@ from backend.core.shared.interfaces.agent_runner import IGitHubClient
 from backend.core.shared.models.agent_runner import IssueSummary, RepositoryRunContext
 from backend.core.shared.models.publish_stage import PublishStage
 from backend.api import cli as _cli
-from backend.core.use_cases.agent_runner_factory import logger
+from backend.core.use_cases.agent_runner_factory import (
+    create_machine_identity_store,
+    logger,
+)
 
 
 #: ``kc run`` / ``kc supervise`` / ``kc supervise-daemon`` 未传 ``--max-issues`` 时
 #: 本次最多处理几个 Issue。配置项 ``runner.max_issues`` 已退役：常驻 daemon 的
 #: 并发只看并行上限（``--concurrency`` > Backlog 页面设置 > ``max_concurrent_issues``）。
 DEFAULT_BATCH_MAX_ISSUES = 1
+
+
+def _start_coordination_heartbeat(ctx: ParsedCommandContext, contexts: list, *, role: str):
+    """为真实运行入口启动机器状态与认领租约服务。"""
+    from backend.api.cli_coordination import start_coordination_heartbeat
+
+    return start_coordination_heartbeat(
+        contexts=contexts,
+        github_client_factory=ctx.github_client_factory,
+        process_runner=ctx.process_runner,
+        role=role,
+    )
 
 
 def _resolve_initialized_repository_contexts(
@@ -229,11 +244,15 @@ def run_run_command(ctx: ParsedCommandContext) -> int:
     if direct_pr and target_issue is not None:
         _reject_direct_pr_on_prd_backed_issue(ctx, contexts=contexts, target_issue=target_issue)
 
-    # 显式定向准入（FR-21）：人点名 Issue 时，「领不领得到」必须响亮回报，而不是像
-    # 守护进程那样把不合条件的目标静默跳过。--takeover 本身就是「强制回收在途
-    # Issue」的入口，因此跳过本判定，由 takeover 的 reclaim 决定能不能领。
-    if target_issue is not None and not takeover:
-        _require_explicit_target_claimable(ctx, contexts=contexts, target_issue=target_issue)
+    # 显式定向始终检查目标认领。takeover 前的预检允许本机 daemon 当前持有目标，
+    # 但不能跳过远端有效租约；daemon 停止后再做一次普通准入，挡住仍存活的本机 kc run。
+    if target_issue is not None and not parsed.dry_run:
+        _require_explicit_target_claimable(
+            ctx,
+            contexts=contexts,
+            target_issue=target_issue,
+            ignore_active_local_claim=takeover,
+        )
 
     # 默认互斥（FR-4 / FR-24）：同仓 daemon 在跑时**只拒绝队列轮询**——显式单目标
     # 与守护进程共存（工作树按 Issue 隔离），同目标的排他改由上面的认领状态准入
@@ -245,6 +264,8 @@ def run_run_command(ctx: ParsedCommandContext) -> int:
             contexts=contexts,
             assume_yes=assume_yes,
         )
+        if target_issue is not None and not parsed.dry_run:
+            _require_explicit_target_claimable(ctx, contexts=contexts, target_issue=target_issue)
     elif target_issue is None:
         from backend.core.use_cases.daemon_single_instance import find_live_daemon_pid
 
@@ -270,23 +291,28 @@ def run_run_command(ctx: ParsedCommandContext) -> int:
     def transcript_runner_factory(repo_path: Path) -> object:
         return _cli.create_transcript_runner(config=config_by_repo_path.get(repo_path))
 
-    exit_code = _cli.run_agent_repositories_once(
-        contexts=contexts,
-        dry_run=parsed.dry_run,
-        agent=parsed.agent,
-        max_issues=parsed.max_issues or DEFAULT_BATCH_MAX_ISSUES,
-        process_runner=ctx.process_runner,
-        github_client_factory=ctx.github_client_factory,
-        content_generator=content_generator,
-        run_history_store=_create_run_history_store_or_none(),
-        run_trigger=_resolve_run_trigger("run"),
-        max_prd_issues=1,
-        transcript_runner_factory=transcript_runner_factory,
-        max_deliberation_issues=ctx.runner_settings.daemon.max_deliberation_issues,
-        target_issue=target_issue,
-        publish_stage=publish_stage,
-        aggregate_pr=aggregate_pr,
-    )
+    heartbeat = None if parsed.dry_run else _start_coordination_heartbeat(ctx, contexts, role="run")
+    try:
+        exit_code = _cli.run_agent_repositories_once(
+            contexts=contexts,
+            dry_run=parsed.dry_run,
+            agent=parsed.agent,
+            max_issues=parsed.max_issues or DEFAULT_BATCH_MAX_ISSUES,
+            process_runner=ctx.process_runner,
+            github_client_factory=ctx.github_client_factory,
+            content_generator=content_generator,
+            run_history_store=_create_run_history_store_or_none(),
+            run_trigger=_resolve_run_trigger("run"),
+            max_prd_issues=1,
+            transcript_runner_factory=transcript_runner_factory,
+            max_deliberation_issues=ctx.runner_settings.daemon.max_deliberation_issues,
+            target_issue=target_issue,
+            publish_stage=publish_stage,
+            aggregate_pr=aggregate_pr,
+        )
+    finally:
+        if heartbeat is not None:
+            heartbeat.stop()
     if not parsed.dry_run or ctx.output_format != OUTPUT_FORMAT_JSON:
         return exit_code
     # 机器模式的 dry-run：stdout 只放执行计划预览（逐 Issue 明细已由日志走
@@ -420,15 +446,18 @@ def _require_explicit_target_claimable(
     *,
     contexts: list,
     target_issue: int,
+    ignore_active_local_claim: bool = False,
 ) -> None:
     """显式定向准入：目标不可领取时给出响亮错误与非零退出码（FR-21）。
 
     错误原因由 core 层给出（core 不引用 ``ExitCode``），这里映射成退出码：
     读不到 / 非 open → ``NOT_FOUND (3)``，被他人活跃认领或 blocked 未解除 →
-    ``CONFLICT (5)``。
+    ``CONFLICT (5)``。确认认领归属时 GitHub 评论结构不完整（缺更新时间或作者）会
+    直接报错，同样按 ``CONFLICT (5)`` 回报「现在领不动」，而不是把 traceback
+    抛给操作者。
 
     Raises:
-        CliError: 目标 Issue 当前不可被本进程领取。
+        CliError: 目标 Issue 当前不可被本进程领取，或无法确认其认领归属。
     """
     from backend.core.use_cases.run_target_admission import (
         TARGET_UNCLAIMABLE_NOT_FOUND,
@@ -438,10 +467,31 @@ def _require_explicit_target_claimable(
 
     for context in _unique_repository_contexts(contexts):
         try:
+            github_client = ctx.github_client_factory(context.repo_path)
+            machine_id = create_machine_identity_store().load_or_create().machine_id
+            from backend.core.use_cases.agent_runner_reconcile import reconcile_stale_attempts
+
             require_explicit_target_claimable(
                 issue_number=target_issue,
-                github_client=ctx.github_client_factory(context.repo_path),
+                github_client=github_client,
                 config=context.config,
+                machine_id=machine_id,
+                ignore_active_local_claim=ignore_active_local_claim,
+            )
+            reconcile_stale_attempts(
+                repo_path=context.repo_path,
+                config=context.config,
+                github_client=github_client,
+                process_runner=ctx.process_runner,
+                issue_number=target_issue,
+                machine_id=machine_id,
+            )
+            require_explicit_target_claimable(
+                issue_number=target_issue,
+                github_client=github_client,
+                config=context.config,
+                machine_id=machine_id,
+                ignore_active_local_claim=ignore_active_local_claim,
             )
         except TargetNotClaimableError as exc:
             raise CliError(
@@ -452,6 +502,14 @@ def _require_explicit_target_claimable(
                     else ExitCode.CONFLICT
                 ),
                 suggestion=exc.suggestion,
+            ) from exc
+        except RuntimeError as exc:
+            raise CliError(
+                f"Cannot confirm the claim on Issue #{target_issue}: {exc}",
+                code=ExitCode.CONFLICT,
+                suggestion=(
+                    f"kc peers --repo-id {context.repo_id}  " "# 确认机器状态与在途认领后重试"
+                ),
             ) from exc
 
 
@@ -617,6 +675,7 @@ def _confirm_and_take_over_daemons(
             targets.append((context, live_daemon_pid))
     if not targets:
         return
+    machine_id = create_machine_identity_store().load_or_create().machine_id
 
     # 机器模式没有交互确认的余地：必须显式 --yes。
     if ctx.output_format == OUTPUT_FORMAT_JSON and not assume_yes:
@@ -661,6 +720,7 @@ def _confirm_and_take_over_daemons(
             github_client=github_clients[context.repo_path],
             process_registry_path=ctx.runner_settings.console.process_registry_path,
             process_log_dir=ctx.runner_settings.console.process_log_dir,
+            machine_id=machine_id,
         )
         console.print(
             f"[green]Daemon stopped ({takeover_result.final_signal}); reclaimed "
@@ -745,7 +805,9 @@ def run_daemon_command(ctx: ParsedCommandContext) -> int:
             code=ExitCode.CONFLICT,
             suggestion="kc daemon status",
         ) from already_running
+    heartbeat = None
     try:
+        heartbeat = _start_coordination_heartbeat(ctx, contexts, role="daemon")
         _cli.run_agent_daemon(
             contexts=contexts,
             interval=interval,
@@ -779,6 +841,8 @@ def run_daemon_command(ctx: ParsedCommandContext) -> int:
             parallel_limit_status_dir=daemon_locks_dir,
         )
     finally:
+        if heartbeat is not None:
+            heartbeat.stop()
         _cli.release_daemon_locks(acquired_daemon_locks)
     return 0
 
@@ -836,15 +900,19 @@ def run_review_daemon_command(ctx: ParsedCommandContext) -> int:
         if ctx.parsed.interval is not None
         else ctx.runner_settings.daemon.review_interval_seconds
     )
-    _cli.run_review_daemon(
-        contexts=contexts,
-        interval=interval,
-        agent=ctx.parsed.agent,
-        max_issues=ctx.parsed.max_issues or DEFAULT_BATCH_MAX_ISSUES,
-        process_runner=ctx.process_runner,
-        github_client_factory=ctx.github_client_factory,
-        run_history_store=_create_run_history_store_or_none(),
-    )
+    heartbeat = _start_coordination_heartbeat(ctx, contexts, role="supervise-daemon")
+    try:
+        _cli.run_review_daemon(
+            contexts=contexts,
+            interval=interval,
+            agent=ctx.parsed.agent,
+            max_issues=ctx.parsed.max_issues or DEFAULT_BATCH_MAX_ISSUES,
+            process_runner=ctx.process_runner,
+            github_client_factory=ctx.github_client_factory,
+            run_history_store=_create_run_history_store_or_none(),
+        )
+    finally:
+        heartbeat.stop()
     return 0
 
 
@@ -873,6 +941,7 @@ def run_recover_command(ctx: ParsedCommandContext) -> int:
         issue_number=ctx.parsed.issue,
         expected_branch=ctx.parsed.branch,
     )
+    heartbeat = _start_coordination_heartbeat(ctx, contexts, role="recover")
     try:
         result = recover_publish_issue(
             request=request,
@@ -883,15 +952,6 @@ def run_recover_command(ctx: ParsedCommandContext) -> int:
             content_generator=content_generator,
             repo_id=context.repo_id,
         )
-        logger.info(
-            "Publish recovered for Issue #%d: %s",
-            result.issue_number,
-            result.pr_url,
-        )
-        console.print(
-            f"[green]Publish recovered for Issue #{result.issue_number}:[/] {result.pr_url}"
-        )
-        return 0
     except PublishRecoveryError as exc:
         logger.error(
             "Publish recovery failed (category=%s): %s",
@@ -899,6 +959,15 @@ def run_recover_command(ctx: ParsedCommandContext) -> int:
             exc,
         )
         return 1
+    finally:
+        heartbeat.stop()
+    logger.info(
+        "Publish recovered for Issue #%d: %s",
+        result.issue_number,
+        result.pr_url,
+    )
+    console.print(f"[green]Publish recovered for Issue #{result.issue_number}:[/] {result.pr_url}")
+    return 0
 
 
 def run_blocked_continue_command(ctx: ParsedCommandContext) -> int:

@@ -30,6 +30,8 @@ from backend.core.use_cases.agent_daemon_shutdown import (
 )
 from backend.core.use_cases.agent_runner_blocked_claim import BlockedWorktreeClaimedError
 from backend.core.use_cases.agent_runner_claim_arbitration import ClaimArbitrationLost
+from backend.core.use_cases.agent_runner_claim_lease import ClaimLeaseLost
+from backend.core.use_cases.coordination_heartbeat import active_coordination_heartbeat
 from backend.core.use_cases.agent_runner_dependencies import (
     clear_dependency_waiting,
     evaluate_dependencies,
@@ -46,6 +48,7 @@ from backend.core.use_cases.agent_runner_lifecycle import (
     build_attempt_event_detail,
     record_lifecycle_event,
     record_lifecycle_terminal,
+    resolve_lifecycle_prd_path,
 )
 from backend.core.use_cases.agent_runner_orchestrate import (
     _READY_DISCOVERY_LIMIT,
@@ -110,21 +113,6 @@ RUNTIME_DEPENDENCY_NAMES = (
 )
 
 
-def _resolve_lifecycle_prd_path(issue: IssueSummary) -> str:
-    """从 Issue 正文解析其引用的 PRD 相对路径；解析失败返回空串。
-
-    返回空串表示 runner 无法定位该 PRD：此时 run id 仍由 Issue 编号决定，
-    run 行的 ``prd_path`` 保留 backlog 启动侧已写入的真实路径，不会被空值
-    覆盖。观测失败绝不阻断 Issue 处理。
-    """
-    from backend.core.use_cases.agent_runner_feedback import extract_prd_path
-
-    try:
-        return extract_prd_path(issue.body) or ""
-    except Exception:  # noqa: BLE001 - observation must not break the run.
-        return ""
-
-
 def _process_single_issue(
     issue: IssueSummary,
     issue_kind: str,
@@ -155,7 +143,7 @@ def _process_single_issue(
     # Issue 引用的 PRD 文件解析头部 lifecycle_agents 块并回填，使实现 / 审核 / 监督
     # 等阶段的解析函数无需额外参数即可读到 PRD 级覆盖（最高优先级）。
     issue = attach_prd_lifecycle_overrides(issue, repo_path)
-    lifecycle_prd_path = _resolve_lifecycle_prd_path(issue)
+    lifecycle_prd_path = resolve_lifecycle_prd_path(issue)
     selected_agent = choose_agent(issue, config, agent)
     output_view.register_issue(issue.number, selected_agent)
     run_started_at = datetime.now(timezone.utc)
@@ -512,6 +500,12 @@ def _process_single_issue(
         output_view.update_status(issue.number, "skipped")
         return 0
 
+    except ClaimLeaseLost as exc:
+        # 租约失效时标签归新持有者；只交班，不写失败评论或工作流标签。
+        _logger.warning("Issue #%d claim lease lost; abandoning delivery: %s", issue.number, exc)
+        output_view.update_status(issue.number, "skipped")
+        return 0
+
     except BlockedWorktreeClaimedError as exc:
         _logger.info(
             "Issue #%d worktree already claimed by another runner, skipping: %s",
@@ -557,6 +551,9 @@ def _process_single_issue(
 
     finally:
         prd_activity_lease.close()
+        heartbeat = active_coordination_heartbeat()
+        if heartbeat is not None:
+            heartbeat.release_claim(github_client=github_client, issue_number=issue.number)
 
 
 def _has_published_direct_pr_handoff(github_client: IGitHubClient, issue: IssueSummary) -> bool:
@@ -702,7 +699,7 @@ def run_once(request: RunOnceRequest) -> int:
             record_lifecycle_event(
                 store=run_history_store,
                 repo_id=effective_repo_id,
-                prd_path=_resolve_lifecycle_prd_path(validation_issue),
+                prd_path=resolve_lifecycle_prd_path(validation_issue),
                 issue_number=validation_issue.number,
                 trigger=run_trigger,
                 event_type=event_type,

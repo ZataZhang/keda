@@ -30,6 +30,8 @@ Issue 执行与交付区共享 claim 上下文，但阶段仍按各自触发条�
 | `content_generation` | 内容生成 | ❌ | ❌ | `generated_content.default_agent` |
 | `deliberate` | 辩论 | ✅ 按 Issue 上的 `agent/deliberate` 标签路由 | ❌ | `deliberation.default_synthesizer` |
 
+`verifier` 必须与本次 builder 使用不同的 agent。即使生命周期 agent 或模型预设显式绑定到了 builder，runner 也会跳过该绑定并从回退链选择首个不同的 agent；没有可用候选时，校验会失败并阻止交付。
+
 取值域：
 
 - **已注册 agent 名**（`codex` / `claude` / `kimi` / `pi` / `codebuddy` / `qoder` /

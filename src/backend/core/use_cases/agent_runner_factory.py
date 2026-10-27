@@ -32,6 +32,7 @@ create_content_generator = _engines_factory_module.create_content_generator
 create_event_sink = _engines_factory_module.create_event_sink
 create_github_api_budget = _engines_factory_module.create_github_api_budget
 create_github_client = _engines_factory_module.create_github_client
+create_machine_identity_store = _engines_factory_module.create_machine_identity_store
 create_lifecycle_settings_editor = _engines_factory_module.create_lifecycle_settings_editor
 create_loop_clock = _engines_factory_module.create_loop_clock
 create_loop_state_store = _engines_factory_module.create_loop_state_store
@@ -74,6 +75,7 @@ __all__ = [
     "create_event_sink",
     "create_foreground_session_launcher",
     "create_github_client",
+    "create_machine_identity_store",
     "create_lifecycle_settings_editor",
     "create_github_api_budget",
     "create_loop_clock",

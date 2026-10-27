@@ -7,6 +7,7 @@ import shlex
 import sys
 from collections.abc import Iterator
 from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Sequence
 
@@ -25,6 +26,7 @@ from backend.core.shared.interfaces.runner_console import (
 )
 from backend.core.shared.models.agent_runner import (
     CommandResult,
+    IssueCommentRecord,
     IssueSummary,
     LabelConfig,
     PullRequestContext,
@@ -143,6 +145,7 @@ class FakeGitHubClient(IGitHubClient):
         self.calls: list[dict] = []
         self._issue_comments: dict[int, list[str]] = {}
         self._issue_comment_entries: dict[int, list[tuple[int, str]]] = {}
+        self._issue_comment_updated_at: dict[int, datetime] = {}
         self._next_comment_id = 1
         self._issue_bodies: dict[int, str] = {}
         self._issue_get_bodies: dict[int, str] = {}
@@ -232,6 +235,7 @@ class FakeGitHubClient(IGitHubClient):
         comment_id = self._next_comment_id
         self._next_comment_id += 1
         self._issue_comment_entries.setdefault(issue_number, []).append((comment_id, body))
+        self._issue_comment_updated_at[comment_id] = datetime.now(timezone.utc)
 
     def edit_issue_body(self, issue_number: int, body: str) -> None:
         self.calls.append({"method": "edit_issue_body", "issue_number": issue_number, "body": body})
@@ -387,6 +391,9 @@ class FakeGitHubClient(IGitHubClient):
             {
                 "method": "list_issue_comment_entries",
                 "issue_number": issue_number,
+                "trusted_only": trusted_only,
+                "body_contains": body_contains,
+                "require_success": require_success,
             }
         )
         return [
@@ -401,7 +408,44 @@ class FakeGitHubClient(IGitHubClient):
             for index, (existing_id, _) in enumerate(entries):
                 if existing_id == comment_id:
                     entries[index] = (comment_id, body)
+                    self._issue_comment_updated_at[comment_id] = datetime.now(timezone.utc)
                     return
+
+    def delete_issue_comment(self, comment_id: int) -> None:
+        self.calls.append({"method": "delete_issue_comment", "comment_id": comment_id})
+        for issue_number, entries in self._issue_comment_entries.items():
+            for index, (existing_id, body) in enumerate(entries):
+                if existing_id != comment_id:
+                    continue
+                entries.pop(index)
+                self._issue_comment_updated_at.pop(comment_id, None)
+                issue_comments = self._issue_comments.get(issue_number, [])
+                if index < len(issue_comments) and issue_comments[index] == body:
+                    issue_comments.pop(index)
+                return
+
+    def list_issue_comment_records(
+        self,
+        issue_number: int,
+        *,
+        trusted_only: bool = False,
+        body_contains: str | None = None,
+        require_success: bool = False,
+    ) -> list[IssueCommentRecord]:
+        """为租约与状态用例返回带时间戳的假评论。"""
+        self.calls.append({"method": "list_issue_comment_records", "issue_number": issue_number})
+        return [
+            IssueCommentRecord(
+                comment_id=comment_id,
+                body=body,
+                updated_at=self._issue_comment_updated_at.get(
+                    comment_id, datetime.now(timezone.utc)
+                ),
+                author="fake-user",
+            )
+            for comment_id, body in self._issue_comment_entries.get(issue_number, [])
+            if body_contains is None or body_contains in body
+        ]
 
     def list_pr_comments(self, pr_number: int) -> list[str]:
         self.calls.append({"method": "list_pr_comments", "pr_number": pr_number})
@@ -819,6 +863,27 @@ def _isolate_issue_snapshot_dir(tmp_path_factory: pytest.TempPathFactory) -> Ite
 
     session_monkeypatch = pytest.MonkeyPatch()
     session_monkeypatch.setattr(snapshot_module, "snapshot_file_path", _isolated_snapshot_file_path)
+    try:
+        yield
+    finally:
+        session_monkeypatch.undo()
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _isolate_machine_identity(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    """把机器身份文件指到临时状态目录，测试不会写进真实的 ``~/.kedacode``。
+
+    没有心跳的入口（直接驱动 core use case 的用例）会经持久身份解析机器编号；不隔离
+    的话，这些用例会在开发机上创建真实的 ``machine.json`` 与槽位锁。显式传入
+    ``machine_file`` 的用例不受影响。
+    """
+    from backend.infrastructure import machine_identity_store as identity_module
+
+    isolated_state_dir = tmp_path_factory.mktemp("machine-identity")
+    session_monkeypatch = pytest.MonkeyPatch()
+    session_monkeypatch.setattr(
+        identity_module, "state_home", lambda home_path=None: isolated_state_dir
+    )
     try:
         yield
     finally:

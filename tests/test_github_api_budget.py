@@ -212,6 +212,31 @@ def test_client_counts_calls_and_skips_gh_when_paused(tmp_path: Path) -> None:
     assert len(runner.commands) == commands_before  # 暂停期内一个真实请求都没发
 
 
+def test_lease_client_bypasses_pause_but_still_records_the_call(tmp_path: Path) -> None:
+    """租约续期忽略预算暂停闸门，但请求仍计入 REST 用量账本。"""
+    budget = _budget(tmp_path, flush_every_calls=1)
+    budget.record_rate_limited("rest", _NOW + timedelta(minutes=10))
+    runner = _GhRunner()
+    client = GitHubCliClient(
+        tmp_path,
+        runner,
+        api_budget=budget,
+        bypass_budget_pause=True,
+    )  # type: ignore[arg-type]
+
+    renewal_command = [
+        "gh",
+        "api",
+        "-X",
+        "PATCH",
+        "repos/o/r/issues/comments/2",
+    ]
+    client._run_with_retry(renewal_command, cwd=tmp_path)
+
+    assert tuple(renewal_command) in runner.commands
+    assert "rest:api PATCH issues/comments/N" in budget.usage_summary()
+
+
 def test_client_rate_limit_error_pauses_budget_until_real_reset(tmp_path: Path) -> None:
     budget = _budget(tmp_path)
     runner = _GhRunner(fail_issue_with="GraphQL: API rate limit already exceeded for user ID 1.")

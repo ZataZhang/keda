@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, Sequence
 if TYPE_CHECKING:
     # 仅注解使用：避免 interfaces -> models 的运行时反向依赖。
     from backend.core.shared.models.agent_model_preset import ModelSelection
+    from backend.core.shared.models.agent_runner import IssueCommentRecord
 
 from backend.core.shared.models.agent_deliberation import (
     DeliberationEvent,
@@ -645,6 +646,21 @@ class IGitHubClient(ABC):
         """
         ...
 
+    def list_issue_comment_records(
+        self,
+        issue_number: int,
+        *,
+        trusted_only: bool = False,
+        body_contains: str | None = None,
+        require_success: bool = False,
+    ) -> list[IssueCommentRecord]:
+        """返回包含 GitHub 服务端更新时间和作者的评论记录。
+
+        默认实现保留旧适配器兼容性。需要租约判断的调用必须使用支持
+        ``updated_at`` 的基础设施实现；不支持时会显式失败，不能猜测时间。
+        """
+        raise NotImplementedError("GitHub client does not expose comment timestamps.")
+
     @abstractmethod
     def edit_issue_comment(self, comment_id: int, body: str) -> None:
         """编辑某个 Issue 评论的正文。
@@ -652,6 +668,15 @@ class IGitHubClient(ABC):
         Args:
             comment_id: 目标评论的 numeric ID。
             body: 新的 Markdown 正文。
+        """
+        ...
+
+    @abstractmethod
+    def delete_issue_comment(self, comment_id: int) -> None:
+        """删除指定的 Issue 评论。
+
+        Args:
+            comment_id: 要删除的 numeric 评论 ID。
         """
         ...
 
