@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -63,6 +64,8 @@ class RunOnceRequest:
     #: 闸门——人显式点名的路径（``kc run --issue`` / 控制台单PRD 开始）保持全量。
     #: running / blocked / cleanup 通道是恢复性处理，不新增并发，不受该值约束。
     execution_ceiling: int | None = None
+    #: 资源不足时在创建 claim/worktree 前拒绝新任务；None 表示沿用原行为。
+    issue_admission_check: Callable[[], bool] | None = None
     #: daemon 传入的活动信号：``run_once`` 读到 ready 队列后回填数量，daemon 据此判断空闲。
     pass_activity: PassActivity | None = None
     #: daemon 的常驻执行名单。非 ``None`` 时为补位模式：本轮最多接

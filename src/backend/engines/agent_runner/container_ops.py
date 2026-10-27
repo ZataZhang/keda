@@ -35,12 +35,15 @@ from typing import Protocol
 from backend.core.shared.models import product_identity
 from backend.core.shared.interfaces.container_runner import (
     ContainerCommandPlan,
+    ContainerGcRequest,
+    ContainerGcResult,
     ContainerUpRequest,
     DockerRunnerCallable,
     IContainerRunnerController,
     RunnerContainerAssets,
 )
 from backend.infrastructure.child_env import build_sanitized_child_env
+from backend.engines.agent_runner.container_gc import run_container_gc
 
 TEMPLATE_PACKAGE_NAME = "backend.engines.agent_runner.templates"
 RUNNER_CONTAINER_TEMPLATE_NAME = "runner_container"
@@ -48,9 +51,14 @@ RUNNER_CONTAINER_TEMPLATE_NAME = "runner_container"
 # compose 文件内的持久化 service 名保持兼容，避免新版本无法停止已有容器。
 RUNNER_SERVICE_NAME = "iar-runner"
 
-# compose 文件名 + 示例 env 文件名。
+# compose 文件名 + 示例 env 文件名。本地变体经 ``GH_TOKEN`` 环境变量认证（个人
+# 电脑 keychain 容器读不到的权宜之计）；托管变体把 secret 边界改成 tmpfs 原生
+# 认证文件挂载，environment 里**不含任何 key 值**（Issue #265 FR-5）。
 COMPOSE_FILE_NAME = "docker-compose.runner.yml"
+COMPOSE_HOSTED_FILE_NAME = "docker-compose.runner.hosted.yml"
 COMPOSE_ENV_EXAMPLE_NAME = ".env.example"
+
+RUNNER_AUTH_DIR_ENV_KEY = "KEDACODE_RUNNER_AUTH_DIR"
 
 
 class _DockerRunner(Protocol):
@@ -105,24 +113,29 @@ def _streaming_docker_runner(
     return subprocess.run(argv, cwd=cwd, env=env, check=check)
 
 
-def resolve_packaged_runner_assets() -> RunnerContainerAssets:
+def resolve_packaged_runner_assets(*, hosted: bool = False) -> RunnerContainerAssets:
     """从 keda package data 定位 runner 容器资产路径。
 
+    Args:
+        hosted: True 时返回托管 compose 变体（``docker-compose.runner.hosted.yml``，
+            environment 不含 secret），False 时返回本地变体（``GH_TOKEN`` 环境变量）。
+
     Returns:
-        已解析为绝对 Path 的资产集合。
+        已解析为绝对 Path 的资产集合，``compose_file`` 指向所选变体。
 
     Raises:
-        FileNotFoundError: 当 compose 文件不在 package data 中（典型：开发期
+        FileNotFoundError: 当所选 compose 文件不在 package data 中（典型：开发期
             keda 改动未安装，wheel 不含此目录）。
     """
     template_root = files(TEMPLATE_PACKAGE_NAME).joinpath(RUNNER_CONTAINER_TEMPLATE_NAME)
-    compose_resource = template_root.joinpath(COMPOSE_FILE_NAME)
+    selected_compose_name = COMPOSE_HOSTED_FILE_NAME if hosted else COMPOSE_FILE_NAME
+    compose_resource = template_root.joinpath(selected_compose_name)
     env_example_resource = template_root.joinpath(COMPOSE_ENV_EXAMPLE_NAME)
 
     if not compose_resource.is_file():
         raise FileNotFoundError(
             f"runner container compose file not found in package data: "
-            f"{TEMPLATE_PACKAGE_NAME}/{RUNNER_CONTAINER_TEMPLATE_NAME}/{COMPOSE_FILE_NAME}"
+            f"{TEMPLATE_PACKAGE_NAME}/{RUNNER_CONTAINER_TEMPLATE_NAME}/{selected_compose_name}"
         )
 
     return RunnerContainerAssets(
@@ -151,11 +164,19 @@ def _resolve_uid_gid(request: ContainerUpRequest) -> tuple[int, int]:
 def build_container_up_env(request: ContainerUpRequest) -> dict[str, str]:
     """构造传给 ``docker compose`` 的环境变量集合。
 
-    ``GH_TOKEN``、``REPO_PATH``、``RUNNER_UID``/``RUNNER_GID`` 是核心契约。
+    ``REPO_PATH``、``RUNNER_UID``/``RUNNER_GID`` 是核心契约。本地模式（``hosted``
+    为假）额外透传 ``GH_TOKEN``；**托管模式绝不注入任何 secret 值**，只传
+    ``KEDACODE_RUNNER_AUTH_DIR``（该仓库 tmpfs 认证目录的宿主路径，不含 key），
+    对应 compose 用 bind mount 把原生认证文件挂进容器（Issue #265 FR-5）。
+
     ``KEDACODE_HOST_STATE_HOME`` 取当前生效状态目录的绝对路径，供 compose 挂载
-    宿主侧状态目录（及其 ``container-auth`` 子目录）；直接跑 compose 时未设置会
-    由 ``${KEDACODE_HOST_STATE_HOME:?...}`` 立即报错而非挂错目录。
+    宿主侧状态目录（本地模式还含其 ``container-auth`` 子目录）；直接跑 compose 时
+    未设置会由 ``${KEDACODE_HOST_STATE_HOME:?...}`` 立即报错而非挂错目录。
     ``extra_env`` 覆盖默认项，便于调用方在不重写本函数的前提下补字段。
+
+    Raises:
+        ValueError: 托管模式下未提供 ``runner_auth_dir``（会导致 tmpfs 挂载缺失、
+            runner 无凭据可读），fail-closed 拒绝而非静默启动无认证容器。
     """
     resolved_uid, resolved_gid = _resolve_uid_gid(request)
     base_env: dict[str, str] = {
@@ -163,7 +184,14 @@ def build_container_up_env(request: ContainerUpRequest) -> dict[str, str]:
         "RUNNER_UID": str(resolved_uid),
         "RUNNER_GID": str(resolved_gid),
     }
-    if request.gh_token:
+    if request.hosted:
+        if not request.runner_auth_dir:
+            raise ValueError(
+                "hosted runner start requires runner_auth_dir (this repo's tmpfs "
+                "credential directory); refusing to launch an unauthenticated container."
+            )
+        base_env[RUNNER_AUTH_DIR_ENV_KEY] = request.runner_auth_dir
+    elif request.gh_token:
         base_env["GH_TOKEN"] = request.gh_token
     if request.repo_id:
         base_env.update(product_identity.build_child_env({"REPO_ID": request.repo_id}))
@@ -251,6 +279,7 @@ def run_container_up(
 def run_container_down(
     compose_file: Path,
     *,
+    env_overrides: dict[str, str] | None = None,
     runner: DockerRunnerCallable | None = None,
 ) -> list[str]:
     """执行 ``docker compose down``。"""
@@ -258,7 +287,7 @@ def run_container_down(
     effective_runner = runner if runner is not None else _default_docker_runner
     effective_runner(
         list(argv),
-        env=_build_compose_env({}),
+        env=_build_compose_env(env_overrides or {}),
         cwd=compose_file.parent,
         check=True,
     )
@@ -295,9 +324,9 @@ class ContainerOpsController(IContainerRunnerController):
     所有方法都委托给模块级纯函数。
     """
 
-    def resolve_packaged_runner_assets(self) -> RunnerContainerAssets:
-        """从 keda package data 定位 runner 容器资产路径。"""
-        return resolve_packaged_runner_assets()
+    def resolve_packaged_runner_assets(self, *, hosted: bool = False) -> RunnerContainerAssets:
+        """从 keda package data 定位 runner 容器资产路径（hosted 选择托管变体）。"""
+        return resolve_packaged_runner_assets(hosted=hosted)
 
     def run_container_up(
         self,
@@ -310,10 +339,14 @@ class ContainerOpsController(IContainerRunnerController):
         return run_container_up(compose_file, request, runner=runner)
 
     def run_container_down(
-        self, compose_file: Path, *, runner: DockerRunnerCallable | None = None
+        self,
+        compose_file: Path,
+        *,
+        env_overrides: dict[str, str] | None = None,
+        runner: DockerRunnerCallable | None = None,
     ) -> list[str]:
-        """执行 ``docker compose down``。"""
-        return run_container_down(compose_file, runner=runner)
+        """执行 ``docker compose down``，可为托管 Compose 提供 repo 插值变量。"""
+        return run_container_down(compose_file, env_overrides=env_overrides, runner=runner)
 
     def run_container_logs(
         self,
@@ -325,13 +358,26 @@ class ContainerOpsController(IContainerRunnerController):
         """执行 ``docker compose logs``（默认 streaming）。"""
         return run_container_logs(compose_file, follow=follow, runner=runner)
 
+    def run_container_gc(
+        self,
+        request: ContainerGcRequest,
+        *,
+        runner: DockerRunnerCallable | None = None,
+    ) -> ContainerGcResult:
+        """扫描或清理安全的宿主 Docker 缓存。"""
+        return run_container_gc(request, runner=runner)
+
 
 __all__ = [
     "COMPOSE_ENV_EXAMPLE_NAME",
     "COMPOSE_FILE_NAME",
+    "COMPOSE_HOSTED_FILE_NAME",
     "ContainerCommandPlan",
+    "ContainerGcRequest",
+    "ContainerGcResult",
     "ContainerOpsController",
     "ContainerUpRequest",
+    "RUNNER_AUTH_DIR_ENV_KEY",
     "RUNNER_CONTAINER_TEMPLATE_NAME",
     "RUNNER_SERVICE_NAME",
     "RunnerContainerAssets",
@@ -342,6 +388,7 @@ __all__ = [
     "plan_container_up",
     "resolve_packaged_runner_assets",
     "run_container_down",
+    "run_container_gc",
     "run_container_logs",
     "run_container_up",
 ]

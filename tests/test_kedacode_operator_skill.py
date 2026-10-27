@@ -43,7 +43,7 @@ _PACKAGED_SKILL = _PACKAGED_SKILL_DIR / "SKILL.md"
 _PACKAGED_REFERENCES_DIR = _PACKAGED_SKILL_DIR / "references"
 
 #: 子命令说明的当前份数；新增路由时须同步受管集合与此契约。
-_EXPECTED_REFERENCE_COUNT = 10
+_EXPECTED_REFERENCE_COUNT = 11
 
 #: 改名前随包发行的旧名 skill 目录（安装根里遗留的副本，只用于清理判定）。
 _LEGACY_SKILL_NAME = "iar-operator"
@@ -458,6 +458,12 @@ _ALLOWED_FLAGS: dict[tuple[str, ...], set[str]] = {
     ("registry", "stop"): {"--repo-id", "--all"},
     ("backlog", "advance"): {"--dry-run", "--repo", "--repo-id", "--config"},
     ("registry", "list"): set(),
+    # issue-265：随包 Skill 说明 host GC 的预览、显式执行与缓存保留期；
+    # 旗标必须同时通过下方的实时命令树白名单检查。
+    ("container", "gc"): {"--apply", "--dry-run", "--cache-retention-days"},
+    # issue-265：托管 Console 首次引导的一次性引导码由 VM 本地 CLI 签发；
+    # 路径与 --expires-in 旗标取自 ``kc schema --json`` 的真实命令树。
+    ("console", "bootstrap-token", "create"): {"--expires-in"},
     # skill 用 ``kc daemon status --repo-id <id> --json`` 读 daemon 实际生效的并行上限。
     ("daemon", "status"): {"--repo", "--repo-id", "--json", "--all"},
     ("recover",): {"--issue", "--branch", "--repo", "--repo-id"},
@@ -754,6 +760,7 @@ _ROUTE_KEYWORDS_BY_REFERENCE: dict[str, tuple[str, ...]] = {
     "watch.md": ("看进度", "live agent output"),
     "triage.md": ("卡住了", "triage stuck"),
     "daemon.md": ("后台跑", "daemons"),
+    "hosted-runner.md": ("托管 Runner", "hosted runner", "kc container gc"),
     "loop.md": ("定时任务", "recurring loops"),
     "ci.md": ("CI 交付", "auto-repair"),
     "setup-and-config.md": ("装环境", "initialize a repository"),
@@ -847,6 +854,27 @@ def test_packaged_skill_main_file_keeps_shared_baselines() -> None:
     assert "kc schema --json" in main_text, "主文件缺少自省入口"
     # run 的目标必填契约。
     assert "requires a target" in main_text, "主文件缺少 run 目标必填契约"
+
+
+def test_packaged_skill_routes_hosted_operations_to_reference() -> None:
+    """托管 Runner 的完整操作契约随包保留在专用 reference 中。"""
+    main_text = _PACKAGED_SKILL.read_text(encoding="utf-8")
+    hosted_reference_path = _PACKAGED_SKILL.parent / "references" / "hosted-runner.md"
+    hosted_reference_text = hosted_reference_path.read_text(encoding="utf-8")
+
+    assert "references/hosted-runner.md" in main_text
+    for required_phrase in (
+        "kc container gc --dry-run",
+        "kc container gc --apply",
+        "--cache-retention-days",
+        "kc console bootstrap-token create",
+        "hosted_maintenance_enabled = true",
+        "repo-specific tmpfs native-auth directory",
+        "does not revoke the upstream credential",
+        "kc-computer record start",
+        ".actions.jsonl",
+    ):
+        assert required_phrase in hosted_reference_text, required_phrase
 
 
 def test_packaged_skill_documents_issue_output_paths() -> None:

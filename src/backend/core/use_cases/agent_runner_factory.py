@@ -22,11 +22,18 @@ from __future__ import annotations
 import importlib
 
 _engines_factory_module = importlib.import_module("backend.engines.agent_runner.factory")
+_engines_hosted_composition_module = importlib.import_module(
+    "backend.engines.agent_runner.hosted_console_composition"
+)
 
 logger = _engines_factory_module.logger
 build_app_config = _engines_factory_module.build_app_config
 build_app_config_from_settings = _engines_factory_module.build_app_config_from_settings
 collect_repository_own_presets = _engines_factory_module.collect_repository_own_presets
+build_hosted_console_service = _engines_hosted_composition_module.build_hosted_console_service
+create_hosted_console_service = _engines_hosted_composition_module.create_hosted_console_service
+hosted_console_enabled = _engines_hosted_composition_module.hosted_console_enabled
+issue_hosted_bootstrap_code = _engines_hosted_composition_module.issue_hosted_bootstrap_code
 create_console_store = _engines_factory_module.create_console_store
 create_content_generator = _engines_factory_module.create_content_generator
 create_event_sink = _engines_factory_module.create_event_sink
@@ -69,11 +76,15 @@ __all__ = [
     "build_app_config",
     "build_app_config_from_settings",
     "collect_repository_own_presets",
+    "build_hosted_console_service",
     "create_console_store",
     "create_content_generator",
     "create_event_sink",
     "create_foreground_session_launcher",
     "create_github_client",
+    "create_hosted_console_service",
+    "hosted_console_enabled",
+    "issue_hosted_bootstrap_code",
     "create_lifecycle_settings_editor",
     "create_github_api_budget",
     "create_loop_clock",

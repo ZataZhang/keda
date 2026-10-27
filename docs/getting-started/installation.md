@@ -104,6 +104,8 @@ Skill，再安装到用户级目录；不会写入项目内 `.claude/skills`、`
 - 认证通过 `kc container auth import` 一次性快照到 `~/.kedacode/container-auth/`，与本机 cc-switch 当前 profile 隔离——本机切账号不影响容器内 agent 认证。
 - 目标仓库挂载进容器，agent 在挂载目录的 `.kc-worktrees/` 建 worktree，宿主机可直接 `kc worktree open` 接管。
 - runner 容器资产（Dockerfile / compose / .env.example）随 `kc` 包发布，无需克隆 keda 源码，全局安装后即可使用。
+- Compose 日志最多保留 5 个 10 MiB 文件；当前 Docker host 的缓存回收由运营者先运行 `kc container gc --dry-run` 检查，再用 `kc container gc --apply` 明确执行。候选也可能来自该主机上的其它本地项目；此清理不会移除 volume 或活动容器使用的镜像。
+- daemon 的 `hosted_maintenance_enabled` 默认关闭；仅托管部署显式开启时，在 worker 边界清理安全的关闭 Issue worktree、14 天前的 Issue 原始输出日志和 90 天前已完成的 run/attempt 摘要。可用磁盘低于 10 GiB 时暂停领取新 Issue，恢复到 15 GiB 后继续；当前任务不被清理流程终止。活动标签、dirty/unmerged worktree、远端分支、审计与队列设置均受保护。
 
 最小启动流程：
 
@@ -137,6 +139,22 @@ kc container down
 - **机器路径零打扰**：以下场景更新检查整段不发生（不联网、不提示、不询问）——`--json` / `--output json` 机器模式、shell 补全协议、`--help` / `-h`、`--version`、无参数调用（只打印用法）、非交互终端（管道 / CI / agent 子进程）。
 - **显式关闭**：设置 `KEDACODE_NO_UPDATE_CHECK=1` 永久停用；想手动升级时按上方安装方式对应的升级命令操作即可。
 
+## 托管模式（可选，每客户独立 VM）
+
+托管模式把 runner 跑在客户专用 Linux VM 上，并用一个**需要认证的 HTTPS Console** 管理运行凭据。它完全可选——**默认 `enabled = false`，本地 `kc daemon` / `kc console` / `kc container` 免费路径不受影响，本机 console 仍只绑 `127.0.0.1` 且无需登录**。开启托管需设 `[agent_runner.hosted].enabled = true` 与 `public_base_url`（必须 HTTPS；明文 http 仅限本机反向代理自检），并由运营者预先准备 checkout、配置唯一的 `repository_id` 与绝对 `repository_path`。
+
+Hosted Runner 也可选择启用 Linux 虚拟桌面：`[agent_runner.hosted].desktop_enabled = true` 会让 Agent 在该 VM 的 Runner 容器内实际操作任意可启动的 Linux GUI，并按任务要求录制 WebM 与动作轨迹。它默认关闭，不开放 VNC/远程桌面端口，也不会自动录制所有任务；配置和命令说明见 Agent Runner 指南。
+
+首次设置顺序（详见 `docs/guides/agent-runner.md` 的「托管模式」章节）：
+
+1. **引导码由运营者在客户 VM 本地签发**：`kc console bootstrap-token create --expires-in 24h`。原码只打印一次、经独立渠道转交、服务端仅存哈希、单次消费、到期作废；再次 `create` 使上一个未消费码失效；托管未开启时该命令退出 `1`。Console **不开放自助注册**。
+2. **客户用引导码在网页首次设置管理员口令**（≥12 位，服务端存 PBKDF2 摘要；会话走 HttpOnly cookie，默认 8 小时）。同一来源 15 分钟内最多尝试登录 5 次，超限后按 `Retry-After` 等待；未认证或会话失效后所有凭据读写一律 401。
+3. **按 Console 指引创建单仓库 fine-grained GitHub PAT**：入口 `https://github.com/settings/personal-access-tokens/new`，仓库范围 Only select repositories，精确权限 `Metadata: read` / `Contents: read/write` / `Issues: read/write` / `Pull requests: read/write`；保存即只读校验，权限不足/不可见/待审批/格式错误一律拒绝且不启用 runner。
+4. **粘贴 Claude / Codex / Kimi 的 provider API key**：入口与计费前置条件见 Console（Anthropic Console / OpenAI platform / Kimi platform 的 API Keys 页）；保存不调模型，「测试连接」需显式确认费用后才发一次最小真实请求（会产生上游费用）。
+5. **凭据按仓库加密保存、只经 tmpfs 原生认证文件交付给匹配 runner**：设置与验证阶段只保存密文；显式启动 runner 时才解密到 Linux tmpfs。轮换前先停 runner 并清除旧文件，停止失败时保留旧凭据。secret 不进 URL、浏览器存储、SQLite、日志、Compose environment、`docker inspect` 环境值或 argv；页面只回状态不回显 secret。
+6. GitHub PAT 与 Agent key 均验证后，客户可在 Console 点「启动 runner」。宿主服务只启动预先配置且 `origin` 与 PAT 仓库一致的 checkout；runner 使用按仓库命名的 Docker volume 持久化运行历史、审计、队列状态和日志，不挂载宿主全局状态目录。Console「停止 runner」会清除 tmpfs 明文并保留加密凭据。运营者须把 `runner_auth_root` 放在 Linux tmpfs 上。
+
+归属与撤销：**口令/会话属客户；GitHub PAT 属其 GitHub 账户；provider key 属其计费账户；GitHub Actions secrets、项目 DB 凭据、SSH 私钥、反向代理 TLS 私钥都不由该 Console 收集**（由客户/运营者在自有基础设施管理）。**Console 删除只停该仓库 runner 并清本地密文/tmpfs 副本，不代替你撤销上游 key/PAT**——上游仍有效，需你主动到 provider/GitHub revoke。信任边界：同一 runner 内的 agent/代码可读取该 runner 自己收到的 key，隔离发生在「按仓库 + 单租户 VM」层。运维侧：项目级 DB 检查仍由 PR CI 把关；daemon 可用磁盘低于 10 GiB 暂停领取、越过 15 GiB 恢复、不杀在跑任务；`hosted_maintenance_enabled` 默认关。退订：删本地凭据 → 撤销上游 key/PAT → 停 runner 与代理 → 数据保留期按确认值执行。
 ## 随包 operator Skill 自动同步
 
 随发行包发行的 `kedacode-operator` Skill 会安装进 wheel，但用户级安装根（`~/.claude/skills`、`~/.codex/skills` 等）里的副本需要单独刷新，过去只能手动跑 `kc skill install`。现在 `kc` 启动时会**按已安装包版本比对**：版本相对上次同步记录发生变化时，自动把随包 operator Skill 刷新到全部安装根，之后同一版本不再重复触碰文件系统——升级 `kedacode` 后无需再手动同步。
@@ -149,7 +167,6 @@ kc container down
 - **机器路径零打扰**：复用更新检查同一套跳过判定——`--json` / `--output json`、shell 补全协议、`--help` / `-h`、`--version`、无参数、非交互终端（管道 / CI / agent 子进程）下整段不发生。
 - **预览无写入**：带 `--dry-run` 的命令会跳过自动同步，避免在预览前改动 Skill 文件。
 - **显式关闭**：设置 `KEDACODE_NO_SKILL_SYNC=1` 停用自动同步（`KEDACODE_NO_UPDATE_CHECK=1` 同样会一并跳过），需要时手动 `kc skill install` 即可。
-
 ## 排错
 
 - `command -v kc` 没命中：把 `~/.local/bin` 加入 `PATH`，或在新 shell 中重试。

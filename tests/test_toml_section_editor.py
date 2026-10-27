@@ -215,6 +215,23 @@ model = "sonnet"
     return path
 
 
+def test_new_lock_file_without_fchmod_support(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """没有 ``os.fchmod`` 的平台仍能打开配置锁文件。"""
+    if hasattr(os, "fchmod"):
+        monkeypatch.delattr(os, "fchmod")
+
+    lock_path = tmp_path / "config.toml.lock"
+    file_descriptor = toml_section_editor._open_lock_file(lock_path)
+    try:
+        os.write(file_descriptor, b"lock")
+    finally:
+        os.close(file_descriptor)
+
+    assert lock_path.read_bytes() == b"lock"
+
+
 def test_write_keeps_existing_file_mode(config_path: Path) -> None:
     """原子替换沿用目标权限位：一次写回不把 0644 降级成 mkstemp 的 0600。
 

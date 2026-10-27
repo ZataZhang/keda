@@ -18,6 +18,8 @@ import pytest
 
 from backend.engines.agent_runner.container_ops import (
     COMPOSE_FILE_NAME,
+    COMPOSE_HOSTED_FILE_NAME,
+    RUNNER_AUTH_DIR_ENV_KEY,
     ContainerUpRequest,
     build_container_down_argv,
     build_container_logs_argv,
@@ -240,6 +242,24 @@ def test_run_container_down_invokes_runner() -> None:
     assert captured[0][0] == argv
 
 
+def test_run_container_down_merges_repo_id_for_hosted_volume() -> None:
+    """托管 Compose down 获得与 up 相同的 repo id volume 插值。"""
+    captured_environments: list[dict[str, str]] = []
+
+    def fake_runner(argv, *, env, cwd, check):  # noqa: ARG001
+        captured_environments.append(env)
+        return subprocess.CompletedProcess(args=argv, returncode=0, stdout="", stderr="")
+
+    run_container_down(
+        Path("/tmp/compose.yml"),
+        env_overrides={"KEDACODE_REPO_ID": "pilot", "IAR_REPO_ID": "pilot"},
+        runner=fake_runner,
+    )
+
+    assert captured_environments[0]["KEDACODE_REPO_ID"] == "pilot"
+    assert captured_environments[0]["IAR_REPO_ID"] == "pilot"
+
+
 def test_run_container_logs_invokes_runner() -> None:
     """``run_container_logs`` 调注入的 runner，argv 含 ``logs --follow``。"""
     captured: list[tuple] = []
@@ -264,3 +284,42 @@ def test_run_container_logs_no_follow() -> None:
 
     argv = run_container_logs(Path("/tmp/compose.yml"), follow=False, runner=fake_runner)
     assert "--follow" not in argv
+
+
+def test_resolve_packaged_runner_assets_hosted_variant_selects_hosted_file() -> None:
+    """``hosted=True`` 定位到托管 compose 变体，本地默认仍是本地变体。"""
+    local_assets = resolve_packaged_runner_assets()
+    hosted_assets = resolve_packaged_runner_assets(hosted=True)
+    assert local_assets.compose_file.name == COMPOSE_FILE_NAME
+    assert hosted_assets.compose_file.name == COMPOSE_HOSTED_FILE_NAME
+    assert hosted_assets.compose_file.is_file()
+
+
+def test_build_container_up_env_hosted_omits_gh_token() -> None:
+    """托管模式即使传入 gh_token 也不写入 env；改传 tmpfs 认证目录路径。"""
+    options = ContainerUpRequest(
+        repo_path=Path("/Users/me/repo"),
+        gh_token="ghp_secret_should_not_leak",
+        repo_id="keda",
+        hosted=True,
+        runner_auth_dir="/run/kedacode/runner-auth/keda",
+    )
+    env = build_container_up_env(options)
+    assert "GH_TOKEN" not in env
+    assert env[RUNNER_AUTH_DIR_ENV_KEY] == "/run/kedacode/runner-auth/keda"
+    assert env["REPO_PATH"] == "/Users/me/repo"
+
+
+def test_build_container_up_env_hosted_requires_auth_dir() -> None:
+    """托管模式未提供 runner_auth_dir 时 fail-closed，拒绝启动无凭据容器。"""
+    options = ContainerUpRequest(repo_path=Path("/tmp/repo"), repo_id="keda", hosted=True)
+    with pytest.raises(ValueError, match="runner_auth_dir"):
+        build_container_up_env(options)
+
+
+def test_build_container_up_env_local_still_injects_gh_token() -> None:
+    """本地模式回归：``hosted`` 缺省时仍按 ``GH_TOKEN`` 环境变量认证。"""
+    options = ContainerUpRequest(repo_path=Path("/tmp/repo"), gh_token="ghp_local")
+    env = build_container_up_env(options)
+    assert env["GH_TOKEN"] == "ghp_local"
+    assert RUNNER_AUTH_DIR_ENV_KEY not in env

@@ -30,6 +30,7 @@ from backend.engines.agent_runner.repository_local import (
 from backend.infrastructure.config import settings as settings_module
 from backend.infrastructure.config import settings_sources
 from backend.infrastructure.config.settings import (
+    AgentRunnerHostedSettings,
     AgentRunnerAutopilotSettings,
     AgentRunnerBacklogSettings,
     AgentRunnerDeliberationProfileSettings,
@@ -71,6 +72,48 @@ def _write_local_iar_config(repo_path: Path, content: str) -> None:
 
 def _make_settings(**kwargs) -> AgentRunnerSettings:
     return AgentRunnerSettings(**kwargs)
+
+
+def test_hosted_runner_auth_root_default_is_valid_for_linux_hosted_path() -> None:
+    """Linux hosted tmpfs 默认路径在 Windows CLI 环境中也能完成配置加载。"""
+    settings = AgentRunnerHostedSettings()
+
+    assert settings.runner_auth_root == "/run/kedacode/runner-auth"
+
+
+def test_hosted_runner_repository_binding_requires_absolute_path_pair(tmp_path: Path):
+    """托管 runner 的 repo id 与 checkout 路径必须成对配置且路径为绝对路径。"""
+    with pytest.raises(ValueError, match="must be configured together"):
+        AgentRunnerHostedSettings(repository_id="pilot")
+    with pytest.raises(ValueError, match="absolute path"):
+        AgentRunnerHostedSettings(repository_id="pilot", repository_path="relative/repo")
+    with pytest.raises(ValueError, match="runner_auth_root must be an absolute path"):
+        AgentRunnerHostedSettings(runner_auth_root="relative/auth")
+
+    settings = AgentRunnerHostedSettings(
+        repository_id="pilot",
+        repository_path=str(tmp_path / "repo"),
+    )
+    assert settings.repository_id == "pilot"
+    assert settings.repository_path == str((tmp_path / "repo").resolve())
+
+
+def test_hosted_public_base_url_requires_https_except_localhost() -> None:
+    """托管外部入口必须 HTTPS，但允许本机 HTTP 反向代理自检。"""
+    with pytest.raises(ValueError, match="HTTPS"):
+        AgentRunnerHostedSettings(enabled=True, public_base_url="http://console.example.com")
+
+    hosted_settings = AgentRunnerHostedSettings(
+        enabled=True,
+        public_base_url="https://console.example.com",
+    )
+    assert hosted_settings.public_base_url == "https://console.example.com"
+
+    local_settings = AgentRunnerHostedSettings(
+        enabled=True,
+        public_base_url="http://127.0.0.1:8313",
+    )
+    assert local_settings.public_base_url == "http://127.0.0.1:8313"
 
 
 @pytest.fixture(autouse=True)

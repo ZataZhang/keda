@@ -384,6 +384,11 @@ rebase 到最新 base 时进程退出），会把 Issue 的 worktree 留在 **de
 `skip` 不是出口而是"不触碰"：claim 来自别的机器、或进程仍存活且 claim 未过 `reclaim_ttl_seconds`，
 一律原样保留——宁可漏对账，也不把健康任务重新入队造成双跑。
 
+会话记录只由**可续传的工作会话**（实现 / fix / recovery）写入。独立 verifier 虽然复用 `run`
+模板，但它的 verdict 靠重跑产生、永不续传，因此不写这条记录：写进去既会把主实现会话覆盖掉
+（下一轮续错对象），又会把已提交的 worktree 弄脏，使「verifier 不得改动已提交代码树」的门禁
+永远无法通过。
+
 对账动作幂等：comment 末尾带隐藏标记 `<!-- kc:reconcile hash="<16hex>" seq="<n>" -->`，hash 覆盖
 Issue / 主机 / PID / 中断时间 / agent / 处置结论 / 是否仍有返工（不含 seq）。同一判定重放时零新增 comment；若上次
 是在"comment 已写、label 未改回"之间被打断（写序固定为**先 comment 后 label**），重放会补齐那次缺失
@@ -417,12 +422,27 @@ recovery 轮次。
 [agent_runner.daemon]
 reconcile_stale_attempts = true   # 主开关；设为 false 即回到本特性落地前的现状
 reclaim_ttl_seconds = 18000       # claim 含 started_at 且超过该时长，即便 PID 仍活也判为 stale
+hosted_maintenance_enabled = false # 仅托管部署显式开启；本地 daemon 默认不执行托管维护
+disk_low_watermark_bytes = 10737418240 # 可用空间低于 10 GiB 时停止领取新 Issue
+disk_resume_watermark_bytes = 16106127360 # 可用空间达到 15 GiB 后恢复领取
 ```
 
 `reclaim_ttl_seconds` 必须大于 `runner.timeout_seconds`（默认 14400 秒）：否则运行时间超过 TTL 的 attempt 即便仍在正常工作也会被按 `ttl_expired` 误回收。配置加载时若发现 TTL 不大于超时会打 WARNING（不拒绝加载）。
 
 `reconcile_stale_attempts = false` 时 Phase -1 整轮空转，僵尸 Issue 保持 `agent/running` 不被触碰、
 不留任何 comment（负控口径见 `.iar/evidence/`：rv-1 关掉开关后僵尸确实纹丝不动）。
+
+`hosted_maintenance_enabled` 默认关闭。开启后 daemon 在一轮 Issue worker 全部结束后运行既有
+worktree 清理器，删除 14 天前的 Issue 原始输出日志，并删除 SQLite 中超过 90 天的已完成
+run 与 attempt 摘要。日志清理只检查当前仓库 `logs/agent-runner/issues/<repo_id>/` 下的普通
+`.log` 文件，不跟随符号链接或越界 repo id。worktree 必须属于
+仓库的 `.iar-worktrees/`，对应 Issue 已关闭且不再带 `agent/running` 标签，远端分支已删除，
+工作树干净并且分支已合并；自动流程固定 `force=False`。活动、dirty、未合并、远端仍存在或
+GitHub 状态无法读取的候选会保留并记录跳过原因。审计、队列、设置和活动状态不受摘要策略
+影响。托管维护还会在领取边界检查仓库所在文件系统的可用空间：低于 10 GiB 时保留当前
+worker 并停止启动新 Issue；容量恢复到 15 GiB 后继续领取。两个阈值按字节配置，恢复水位
+必须高于低水位。Compose 容器日志使用 10 MiB × 5 个文件轮转。宿主镜像和 Buildx 缓存仍由
+运营者手动执行 `kc container gc`，默认预览，需显式传 `--apply` 才删除。
 
 ## 复杂需求：异步 Issue 评论讨论（`agent/deliberate`）
 
@@ -5493,6 +5513,24 @@ kc container logs
 kc container down
 ```
 
+### 容器日志轮转与宿主缓存清理
+
+runner Compose 为 Docker `json-file` 日志设置 `10m` 单文件上限和最多 `5` 个轮转文件。宿主机需要回收 Docker 镜像或当前 Buildx builder 的构建缓存时，先预览：
+
+```bash
+kc container gc --dry-run
+```
+
+`kc container gc` 默认只预览；确认候选后才显式执行：
+
+```bash
+kc container gc --apply
+```
+
+清理只针对没有容器引用的悬空镜像，以及 Buildx 标记可回收且最后使用时间明确超过 90 天的缓存记录。可用 `--cache-retention-days <天数>` 调整 build cache 保留期；Docker 只给出粗略相对时间且无法证明已超过保留期时，命令会跳过该记录。Buildx 缓存属于当前选中的 builder，可能包含其它本地项目构建产生的缓存。命令逐项报告扫描、符合条件、删除、跳过和失败数量，并显示宿主根文件系统已用与可用空间。Docker/Buildx 无法扫描或删除时会报告失败并返回非零状态。
+
+此命令作用于当前 Docker host：悬空镜像和当前选中 builder 的缓存可能来自该主机上的其它本地项目，执行前应检查预览。它不会删除 Docker volume、bind mount、非悬空镜像或活动容器引用的镜像；镜像删除不使用强制选项。不要用 `docker system prune --volumes` 替代该命令。它是运营者显式运行的宿主清理工具，不会在普通本地 `kc daemon` 中自动运行；runner 容器也不挂载 Docker socket。
+
 ### 容器资产定位
 
 runner 容器资产（`Dockerfile.runner`、`docker-compose.runner.yml`、`.env.example`、`kedacode-runner-entrypoint.sh`）随 keda 包发布在 `backend.engines.agent_runner.templates.runner_container/`，由 `kc container up` 通过 `importlib.resources` 自动定位。无需克隆 keda 源码，全局安装 `kc` 后即可使用。
@@ -5658,8 +5696,151 @@ uv run kc agent add myagent --bin myagent --prompt-delivery flag --prompt-flag -
 not on PATH；装好后用 `kc agent list` 确认可用性，再 `kc agent setup --agent myagent` 选它。
 注册块字段本身见下一节。
 
-<a id="new-agent-registry"></a>
+## 托管模式（Hosted Console 与自动资源清理）
 
+托管模式让每个客户在**独立 Linux VM** 上跑一套 KedaCode runner，并暴露一个需要认证的公网 Console 来管理凭据与查看进度。它是可选的：**本地免费路径完全不受影响**，托管功能与维护策略默认关闭。
+
+### 本地免费路径（默认，无需云端账户）
+
+- 默认 `[agent_runner.hosted].enabled = false`。本机 `kc daemon` / `kc container up` 照常独立运行，不要求任何云端账户或云端连通。
+- 本机 `kc console`（Operations Console）无论何种模式都只绑 `127.0.0.1` 回环，维持本机免登录的 no-op 会话——它不对外网开放，也不需要引导码。
+- 托管维护（Issue 原始日志清理、运行摘要清理、磁盘准入）由 `[agent_runner.daemon].hosted_maintenance_enabled` 控制，默认 `false`；关闭时 daemon 完全不进入任何新清理分支。
+
+### 何时进入托管模式
+
+把 `[agent_runner.hosted].enabled` 设为 `true` 并配置 `public_base_url`（必须是一个 HTTPS 公网入口；明文 `http` 仅允许 `127.0.0.1`/`localhost` 的反向代理本机自检）。开启后：
+
+- 后端只在托管模式挂载 `/api/hosted/*` 与 `/api/auth/*` 路由，并对所有 `/api/*` 装一层 fail-closed 认证中间件——**未认证的请求一律 401**。托管登录不会退化成本机 `local_auth.py` 的 no-op 会话。
+- 对外 HTTPS 入口由运营者的反向代理（TLS）承担；KedaCode 只负责应用层认证与「必须 HTTPS」的配置校验。
+- 运营者在 VM 上预先准备唯一仓库 checkout，并固定 `repository_id` 与绝对 `repository_path`。Console 不接收客户提交的主机路径；启动时会核对 checkout 的 GitHub `origin`、repo id 和 tmpfs 认证文件。
+- 客户验证并保存该仓库 GitHub PAT 与 Agent API key 后，可以在凭据行点击「启动 runner」。宿主服务只启动配置绑定的单仓库容器；仓库不匹配、凭据未齐或 auth 根目录不是 tmpfs 时均拒绝启动。
+
+托管相关配置项（`[agent_runner.hosted]`，除非显式写入否则按默认）：
+
+| 键 | 默认 | 说明 |
+|---|---|---|
+| `enabled` | `false` | 托管总开关 |
+| `public_base_url` | 无（enabled 时必填） | Console 对外 HTTPS 基址 |
+| `session_ttl_seconds` | `28800`（8 小时） | 管理员会话有效期 |
+| `runner_auth_root` | `/run/kedacode/runner-auth` | tmpfs 原生认证文件根（交付给 runner 的目录） |
+| `repository_id` / `repository_path` | 无（需成对配置） | 本 VM 唯一允许启动的仓库 id 与运营者准备的绝对 checkout 路径；checkout 的 `origin` 必须匹配 Console 中验证的 `owner/repo` |
+| `desktop_enabled` | `false` | 仅在该专用 Linux VM 的 Runner 容器中启动可选虚拟桌面；启用时构建桌面 profile 镜像 |
+| `console_db_path` / `credentials_file` / `data_key_file` | 由产品状态目录派生 | 会话/审计存储、加密凭据、加密主密钥；均落在状态目录，不入库不入日志 |
+
+### Hosted Runner 的 Agent 桌面操作与录屏
+
+当 Agent 需要检查真实图形应用（不限于网页）时，运营者可在客户专属 VM 的 `config.toml` 中设置：
+
+```toml
+[agent_runner.hosted]
+desktop_enabled = true
+```
+
+重新启动 Hosted Runner 时，托管控制器会构建 `desktop` 镜像 profile。镜像包含 Xvfb、Openbox、xdotool、scrot 和 ffmpeg；Runner 在容器内以非 root 用户启动 `DISPLAY=:99`。Xvfb 只提供本机 Unix socket、使用 `-nolisten tcp`，Compose 不开放 VNC/noVNC 或其他桌面端口。保持 `desktop_enabled = false` 时使用原有精简镜像并且不启动显示服务。
+
+容器中的任意 shell-capable Agent 都可调用同一 `kc-computer` 工具：
+
+```bash
+kc-computer status
+kc-computer screenshot --output /workspace/repo/current-screen.png
+kc-computer click 420 260 --button left
+kc-computer key Return
+printf '%s' "$FORM_TEXT" | kc-computer type
+kc-computer scroll down --steps 3
+```
+
+只有任务需要展示视觉操作时，Agent 才显式录屏，并将视频放进该 PRD/Issue 的 evidence 目录：
+
+```bash
+kc-computer record start --output /workspace/repo/tasks/evidence/<prd-stem>/rv-1-desktop-operation.webm
+# Agent 在真实 Linux 桌面里启动并操作目标应用
+kc-computer record stop
+```
+
+停止后会用独立 `ffprobe` 校验 WebM，并生成相邻的 `.actions.jsonl`。轨迹记录 UTC 时间、动作种类、坐标/滚动步数或输入字符数，不写入输入文本；视频只录屏幕、不录音，原始视频仍遵循 evidence 原始文件不入 Git 的策略。运行时不预装目标应用或浏览器，目标仓/VM 负责提供应用及其运行依赖。桌面关闭、显示缺失、参数越界或录屏无法结束都会返回非零状态，不伪造成功产物。
+
+通过 `kc container up` 启动本地 runner 的直接 Compose 使用者如需实验桌面 profile，需在 Compose 环境同时设置 `KEDACODE_DESKTOP_ENABLED=true` 与 `KEDACODE_RUNNER_PROFILE=desktop` 并传 `--build`；Hosted Console 会根据 `[agent_runner.hosted].desktop_enabled` 自动传这两个值。
+
+daemon 维护与磁盘相关键（`[agent_runner.daemon]`）：`hosted_maintenance_enabled`（默认 `false`）、`disk_low_watermark_bytes`（默认 10 GiB）、`disk_resume_watermark_bytes`（默认 15 GiB）。
+
+### 首次引导：一次性引导码（由运营者在客户 VM 本地签发）
+
+托管 Console **不开放自助注册**。第一位管理员密码通过一次性引导码设置，签发者是**在该 VM 上操作的运营者**（不是网页、不是远端 API）：
+
+```bash
+# 在客户专用 VM 本地执行；默认 24 小时有效，也可 --expires-in 30m / 2d / 纯秒数
+kc console bootstrap-token create --expires-in 24h
+```
+
+- 原码**只在 stdout 打印一次**，经独立渠道（线下/加密 IM）交给客户，客户端只把它粘贴进网页首次设置表单。服务端仅存 SHA-256 摘要、**单次消费**、到期自动作废。
+- 过期码或重放一律拒绝。再次 `create` 会使上一个**未消费**的码失效（重发是有意的、覆盖前一个）。
+- `--expires-in` 非正数或格式非法 → 退出码 `2`（usage）；托管未开启时执行 → 退出码 `1`（本机 console 无需引导码）。
+
+### 客户 Console 认证模型
+
+- 每部署一个客户管理员；成功用引导码后设置管理员口令（服务端存 PBKDF2-HMAC-SHA256 加盐摘要，最低 12 位）。
+- 登录走 `POST /api/auth/login`（口令）→ 下发 HttpOnly、SameSite 会话 cookie（仅在 HTTPS 源下设 `Secure`），有效期即 `session_ttl_seconds`；同一来源 15 分钟内最多尝试 5 次，超限返回 `429` 和 `Retry-After`，成功登录后清除计数；登出 `POST /api/auth/logout`。
+- 未认证或会话失效后，凭据读写一律 401。
+
+### 运行凭据：单仓库 fine-grained GitHub PAT
+
+Console 指导客户自行创建**只针对目标仓库**的 fine-grained PAT：
+
+- 创建入口：`https://github.com/settings/personal-access-tokens/new`。
+- 仓库范围：Repository access → **Only select repositories**（单仓库）。
+- 精确权限（首期最小集）：`Metadata: read`、`Contents: read/write`、`Issues: read/write`、`Pull requests: read/write`。
+- **只接受 fine-grained PAT**：经典 token（`ghp_/gho_/…`）、`gh` 前缀 token、OAuth/session 一律格式层拒绝。
+- 保存即经只读 GET 校验（身份 → 仓库可见性 → Issues/Pulls/Contents 读取探测），**绝不创建 Issue/PR/分支**；token 只进请求头，不进 URL/argv/日志。权限不足（403）→ `github_permissions_insufficient`、仓库不可见（404）→ `github_repo_inaccessible`、待审批/无效 token → 拒绝。校验不通过则保留旧值且**不启用 runner**。
+
+### 运行凭据：Agent provider API key
+
+首期仅支持 runner 镜像预装的三个 CLI 对应的 provider key；不接受 OAuth/session、认证文件上传或自定义端点：
+
+| provider | 创建/撤销入口 | 计费前置 |
+|---|---|---|
+| Claude Code（Anthropic） | `https://console.anthropic.com/settings/keys` | Anthropic Console 已开通 API 计费 |
+| Codex CLI（OpenAI） | `https://platform.openai.com/api-keys` | OpenAI 平台 API 账户有可用额度 |
+| Kimi Code CLI | `https://platform.kimi.com/console/api-keys` | Kimi 平台 API 账户有可用额度 |
+
+- **保存 key 不调用模型**，只做格式校验、状态记为「未验证」。
+- 「测试连接」只有在页面显式确认费用提示后才发起**一次最小真实模型请求**（`max_tokens=1`），会产生上游费用；失败保留旧值并给出可操作原因。凭据未测试成功前不会启用 runner。
+- 上游 key 的**创建与撤销始终在 provider 官网完成**；KedaCode 只保存/交付/删除本地副本，不代管上游。
+
+### 凭据的保存、交付与生命周期（安全不变量）
+
+- 每个 secret **按仓库加密保存**（Fernet 主密钥落在状态目录的 `data_key_file`），只通过 **tmpfs 原生认证文件**交付给该仓库匹配的 runner。
+- 凭据设置和验证时只写入加密持久层；客户显式启动 runner 时才解密并 materialize 到 Linux tmpfs。凭据轮换前会先停止对应 runner 并清除旧 tmpfs 文件；停止失败则保留旧凭据，不接受新值。
+- GitHub 与 Agent 凭据都验证通过后，客户可在 Console 点击「启动 runner」。服务只启动运营者预先配置的 `repository_id` / `repository_path`，并核对 checkout 的 `origin` 与凭据所属 `owner/repo` 一致。
+- Console 的「停止 runner」会先停止容器再清除该仓库 tmpfs 明文，保留加密保存的凭据，之后可再次启动；无法确认容器已停止时不会清理文件或宣称停止成功。
+- hosted Compose 只挂载该 checkout、对应的 repo 专属 tmpfs auth 目录，以及按 `repository_id` 命名的 Docker 状态 volume。该 volume 持久化运行历史、审计、队列状态和原始日志；宿主全局 KedaCode 状态目录（含其他凭据、数据密钥和 Console 状态）不会挂载，`kc container gc` 也不会清理 volume。
+- secret **绝不进入** URL、浏览器本地存储、SQLite、日志、Compose environment、`docker inspect` 的环境值或命令行 argv。API 与页面只返回状态视图，不回显 secret。
+- 更新（轮换）先验证再原子替换；成功后 runner 只使用新值。
+- **Console 删除 = 停该仓库 runner + 清本地密文 + 清 tmpfs 副本**，但**不代替客户 revoke 上游**——上游 key/PAT 仍然有效，直到客户主动到 provider/GitHub 撤销。UI 会明确提示这一点。
+- 归属边界：管理员口令/会话属客户；GitHub PAT 属客户 GitHub 账户；provider API key 属客户的计费账户；GitHub Actions secrets、项目 DB 凭据、SSH 私钥、反向代理 TLS 私钥**都不由该凭据 API 收集**，由客户/运营者在其自有基础设施管理。
+
+### 信任边界与风险披露
+
+- **同一 runner 内的 agent/代码可以读取该 runner 自己收到的 key**：隔离发生在「按仓库目录 + 单租户 VM」这一层，而不是对抗同进程内运行的代码。请只把可信仓库纳入托管。
+- 跨仓库/跨客户读取负例由文件权限（owner-only）、路径逃逸防护与跨密钥解密 fail-closed 保证；真正的跨客户隔离来自每客户独立 VM 的部署边界。
+- runner Compose **从不挂载宿主 Docker socket**；不含 DB/中间件 sidecar、不对公网开端口。
+
+### CI、磁盘与维护
+
+- 项目级数据库/集成检查仍由 **PR CI** 执行，GitHub required check 未绿即不声称集成通过——托管不改变 CI 权威门禁。
+- daemon 每轮领取新 Issue 前查看仓库文件系统可用空间：低于低水位（默认 10 GiB）时**暂停领取新 Issue 但不杀在跑的 worker**，并输出已用/可用/总量；越过恢复高水位（默认 15 GiB）后自动恢复领取。探测失败或水位配置非法时 fail-closed 拒绝领取。
+- 开启 `hosted_maintenance_enabled` 后，在全部 Issue worker 收尾时：清理安全的关闭 Issue worktree、删除 14 天前的 Issue 原始输出日志、按 90 天保留期删除已完成的 run/attempt 摘要（仅删旧终态行，保留 audit、queue settings、活动队列、已保存凭据与 Console sessions）。
+- 宿主 Docker 缓存/悬空镜像回收是**手动、全主机**操作：先 `kc container gc --dry-run` 预览，确认后再 `kc container gc --apply`；它不 prune volume、不删活动容器引用的镜像。
+
+### 退订与数据保留
+
+退订一台托管部署时，按顺序：
+
+1. 在 Console 删除各仓库凭据（停 runner + 清本地密文/tmpfs）；
+2. 到 provider/GitHub **撤销上游 key 与 PAT**（本地删除不会让上游失效）；
+3. 停掉该 VM 上的 runner/daemon 与反向代理；
+4. 数据保留期（原始日志、运行摘要、退订时的整体删除周期）以 PRD 的 D-02 人工确认值为准，落配置示例后再生效。
+
+<a id="new-agent-registry"></a>
 ## 接入一个新 agent（声明式注册表）
 
 一个 agent 的全部调用差异——可执行文件、认证/skills 路径、各用途的 argv 片段、提示词投递方式、输出协议——都沉淀为**纯数据**的注册块（`[agent_runner.agents.<name>]`），由统一的命令构造器 `core/use_cases/agent_invocation.py` 组装。`src/` 下没有任何 agent 专有的分支代码：接入新 agent **不需要改 Python 代码**，只需写配置（内置 `codex` / `claude` / `kimi` / `pi` / `codebuddy` / `qoder` / `opencode` 的出厂默认已在代码注册表中生效）。

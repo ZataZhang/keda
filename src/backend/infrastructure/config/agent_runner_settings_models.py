@@ -615,6 +615,16 @@ class AgentRunnerDaemonSettings(BaseModel):
     review_interval_seconds: int = 120
     run_interval_seconds: int = 120
     max_deliberation_issues: int = 1
+    # 托管资源与历史维护须显式开启；默认本地 daemon 不进入新清理路径。
+    hosted_maintenance_enabled: bool = False
+    # 低水位暂停新任务；恢复水位采用滞回，避免容量在阈值附近时反复启停。
+    disk_low_watermark_bytes: int = 10 * 1024**3
+    disk_resume_watermark_bytes: int = 15 * 1024**3
+    # 托管资源与历史维护须显式开启；默认本地 daemon 不进入新清理路径。
+    hosted_maintenance_enabled: bool = False
+    # 低水位暂停新任务；恢复水位采用滞回，避免容量在阈值附近时反复启停。
+    disk_low_watermark_bytes: int = 10 * 1024**3
+    disk_resume_watermark_bytes: int = 15 * 1024**3
     # 崩溃对账主开关：daemon 每轮开头（Phase -1）扫描本机认领、但认领进程已死的
     # ``agent/running`` 僵尸 attempt，给出续传 / 重跑 / 判失败三出口留痕。关闭后
     # Phase -1 整轮空转（僵尸保持 agent/running 不被触碰），即回退到本特性前的现状。
@@ -624,6 +634,18 @@ class AgentRunnerDaemonSettings(BaseModel):
     # 默认 5 小时：必须大于 ``runner.timeout_seconds``（默认 4 小时），否则仍在正常运行
     # 的 attempt 会被误判 ttl_expired。仅在 ``reconcile_stale_attempts=True`` 时生效。
     reclaim_ttl_seconds: int = 18000
+
+    @model_validator(mode="after")
+    def _validate_disk_watermarks(self) -> "AgentRunnerDaemonSettings":
+        """确保磁盘恢复水位高于暂停水位。"""
+        if self.disk_low_watermark_bytes < 0:
+            raise ValueError("daemon.disk_low_watermark_bytes must be non-negative")
+        if self.disk_resume_watermark_bytes <= self.disk_low_watermark_bytes:
+            raise ValueError(
+                "daemon.disk_resume_watermark_bytes must be greater than "
+                "daemon.disk_low_watermark_bytes"
+            )
+        return self
 
 
 class AgentRunnerPromptSettings(BaseModel):

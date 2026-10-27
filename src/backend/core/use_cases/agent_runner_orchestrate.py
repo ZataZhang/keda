@@ -606,6 +606,7 @@ def run_once(
     publish_stage: PublishStage = PublishStage.NORMAL,
     aggregate_pr: bool = False,
     execution_ceiling: int | None = None,
+    issue_admission_check: Callable[[], bool] | None = None,
     pass_activity: PassActivity | None = None,
     execution_slots: DaemonExecutionSlots | None = None,
 ) -> int:
@@ -630,6 +631,7 @@ def run_once(
             publish_stage=publish_stage,
             aggregate_pr=aggregate_pr,
             execution_ceiling=execution_ceiling,
+            issue_admission_check=issue_admission_check,
             pass_activity=pass_activity,
             execution_slots=execution_slots,
         )

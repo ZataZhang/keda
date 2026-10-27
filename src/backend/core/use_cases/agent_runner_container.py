@@ -38,6 +38,8 @@ from pathlib import Path
 from backend.core.shared.models import product_identity
 from backend.core.shared.interfaces.container_runner import (
     ContainerCommandPlan,
+    ContainerGcRequest,
+    ContainerGcResult,
     ContainerUpRequest,
     DockerRunnerCallable,
     IContainerAuthImporter,
@@ -70,6 +72,10 @@ class StartRunnerContainerOptions:
         extra_env: 其它要注入 compose 的环境变量（合并而非覆盖）。
         build: ``docker compose up --build`` 开关。
         dry_run: True 时不调 docker compose，仅返回计划。
+        hosted: True 时使用托管 compose 变体：不注入 ``GH_TOKEN``，凭据改由
+            ``runner_auth_dir`` 指向的该仓库 tmpfs 原生认证文件挂载交付。
+        runner_auth_dir: 托管模式下该仓库专属 tmpfs 认证目录的宿主绝对路径；
+            ``hosted=True`` 且为空时启动会 fail-closed 报错。
     """
 
     repo_path: Path
@@ -83,6 +89,8 @@ class StartRunnerContainerOptions:
     extra_env: dict[str, str] = field(default_factory=dict)
     build: bool = False
     dry_run: bool = False
+    hosted: bool = False
+    runner_auth_dir: str = ""
 
 
 @dataclass(frozen=True)
@@ -150,10 +158,12 @@ def start_runner_container(
         DaemonAlreadyRunningError: 当 ``repo_id`` 非空且已有活 PID daemon 时。
         FileNotFoundError: 当 ``repo_path`` 不存在或 docker CLI / compose 资产
             缺失时。
+        ValueError: 托管模式（``hosted=True``）未提供 ``runner_auth_dir`` 时
+            fail-closed 拒绝启动无凭据容器。
     """
     _ensure_repo_path_exists(options.repo_path)
 
-    assets = controller.resolve_packaged_runner_assets()
+    assets = controller.resolve_packaged_runner_assets(hosted=options.hosted)
 
     daemon_lock_check_skipped = False
     if options.repo_id:
@@ -200,13 +210,15 @@ def _to_engine_request(options: StartRunnerContainerOptions) -> ContainerUpReque
     """把 core 编排选项转成端口层 ``ContainerUpRequest``。"""
     return ContainerUpRequest(
         repo_path=options.repo_path,
-        gh_token=options.gh_token,
+        gh_token="" if options.hosted else options.gh_token,
         repo_id=options.repo_id,
         uid=options.uid,
         gid=options.gid,
         extra_env=options.extra_env,
         dry_run=options.dry_run,
         build=options.build,
+        hosted=options.hosted,
+        runner_auth_dir=options.runner_auth_dir,
     )
 
 
@@ -229,6 +241,25 @@ def stream_runner_container_logs(
 ) -> list[str]:
     """streaming 容器日志（薄封装）。"""
     return controller.run_container_logs(compose_file, follow=follow, runner=runner)
+
+
+def garbage_collect_runner_resources(
+    controller: IContainerRunnerController,
+    request: ContainerGcRequest,
+    *,
+    runner: DockerRunnerCallable | None = None,
+) -> ContainerGcResult:
+    """扫描或清理悬空 runner 镜像与过期 build cache。
+
+    Args:
+        controller: Docker CLI 生命周期端口实现。
+        request: 预览/执行选项与 cache 保留期。
+        runner: 可注入的 Docker 命令执行器。
+
+    Returns:
+        按资源分类的扫描、跳过、删除或失败结果。
+    """
+    return controller.run_container_gc(request, runner=runner)
 
 
 def _is_pid_alive(pid: int) -> bool:
@@ -267,6 +298,7 @@ __all__ = [
     "StartRunnerContainerResult",
     "create_default_container_auth_importer",
     "create_default_container_ops_controller",
+    "garbage_collect_runner_resources",
     "import_container_auth",
     "start_runner_container",
     "stop_runner_container",

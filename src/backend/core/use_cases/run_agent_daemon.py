@@ -7,7 +7,7 @@ import os
 import signal
 import time
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -40,12 +40,22 @@ from backend.core.use_cases.agent_runner_orchestrate import (
     process_prd_rework_issues,
     run_once,
 )
+from backend.core.use_cases.agent_runner_deliberation_issues import run_deliberation_phase
 from backend.core.use_cases.backlog_actions import advance_backlog_queue
 from backend.core.use_cases.backlog_concurrency import (
     CEILING_SOURCE_CLI_OVERRIDE,
     describe_ceiling_source,
     read_policy_max_parallel,
     resolve_execution_ceiling,
+)
+from backend.core.use_cases.hosted_maintenance import (
+    DiskWatermarkAdmissionGate,
+    cleanup_expired_issue_logs,
+)
+from backend.core.use_cases.worktree_cleanup import (
+    WorktreeCleanupRequest,
+    WorktreeCleanupStatus,
+    cleanup_managed_worktrees,
 )
 from backend.core.use_cases.daemon_execution_slots import DaemonExecutionSlots
 from backend.core.use_cases.agent_daemon_shutdown import (
@@ -300,6 +310,75 @@ def _resolve_reconcile_settings(
     return enabled, ttl_seconds
 
 
+def _run_hosted_worktree_cleanup(
+    *,
+    context: RepositoryRunContext,
+    github_client: IGitHubClient,
+    process_runner: IProcessRunner,
+) -> None:
+    """在 daemon worker 全部退出后复用安全清理器回收托管 worktree。"""
+    try:
+        cleanup_result = cleanup_managed_worktrees(
+            WorktreeCleanupRequest(
+                repo_path=context.repo_path,
+                remote=context.config.git.remote,
+                base_branch=context.config.git.base_branch,
+                dry_run=False,
+                force=False,
+                active_issue_label=context.config.labels.running,
+            ),
+            github_client=github_client,
+            process_runner=process_runner,
+        )
+    except Exception:  # noqa: BLE001 - 维护失败不能中断 daemon 后续轮询。
+        _logger.exception("Hosted worktree cleanup failed for '%s'.", context.repo_id)
+        return
+
+    if cleanup_result.branches:
+        _logger.info(
+            "Hosted worktree cleanup for '%s': scanned=%d deleted=%d skipped=%d failed=%d",
+            context.repo_id,
+            len(cleanup_result.branches),
+            cleanup_result.deleted_count,
+            cleanup_result.skipped_count,
+            cleanup_result.failed_count,
+        )
+    for branch_result in cleanup_result.branches:
+        if branch_result.status is WorktreeCleanupStatus.FAILED:
+            _logger.warning(
+                "Hosted worktree cleanup failed for '%s' (%s): %s",
+                context.repo_id,
+                branch_result.branch,
+                branch_result.reason,
+            )
+        elif branch_result.status is WorktreeCleanupStatus.SKIPPED:
+            _logger.debug(
+                "Hosted worktree cleanup skipped for '%s' (%s): %s",
+                context.repo_id,
+                branch_result.branch,
+                branch_result.reason,
+            )
+
+
+def _run_hosted_issue_log_cleanup(context: RepositoryRunContext) -> None:
+    """在当前仓库全部 Issue worker 退出后回收 14 天前的原始输出。"""
+    try:
+        cleanup_result = cleanup_expired_issue_logs(context.repo_path, context.repo_id)
+    except Exception:  # noqa: BLE001 - maintenance must not stop the daemon.
+        _logger.exception("Hosted Issue log cleanup failed for '%s'.", context.repo_id)
+        return
+    _logger.info(
+        "Hosted Issue log cleanup for '%s' (retention_days=14): "
+        "scanned=%d eligible=%d deleted=%d skipped=%d failed=%d",
+        context.repo_id,
+        cleanup_result.scanned_count,
+        cleanup_result.eligible_count,
+        cleanup_result.deleted_count,
+        cleanup_result.skipped_count,
+        cleanup_result.failed_count,
+    )
+
+
 def _run_daemon_loop(request: _AgentDaemonLoopRequest) -> None:
     """daemon 主循环（由 :func:`run_agent_daemon` 包装信号钩子后调用）。"""
     contexts = request.contexts
@@ -322,6 +401,15 @@ def _run_daemon_loop(request: _AgentDaemonLoopRequest) -> None:
     loop_state_store_factory = request.loop_state_store_factory
     loop_clock = request.loop_clock
     api_budget = request.api_budget
+    disk_admission_gates = {
+        context.repo_id: DiskWatermarkAdmissionGate(
+            repo_path=context.repo_path,
+            low_watermark_bytes=context.config.daemon.disk_low_watermark_bytes,
+            resume_watermark_bytes=context.config.daemon.disk_resume_watermark_bytes,
+        )
+        for context in contexts
+        if context.config.daemon.hosted_maintenance_enabled
+    }
     idle_streak = 0
     last_usage_log_monotonic = time.monotonic()
     # 每个仓库一份常驻执行名单：领到的 Issue 在后台线程里跑，主循环不等它们结束。
@@ -345,11 +433,31 @@ def _run_daemon_loop(request: _AgentDaemonLoopRequest) -> None:
         round_ready_found = 0
         round_failed = False
         for context in contexts:
+            disk_admission_gate = disk_admission_gates.get(context.repo_id)
             _logger.info(
                 "Daemon pass for repository '%s' (%s).",
                 context.repo_id,
                 context.display_name,
             )
+            if context.config.daemon.hosted_maintenance_enabled and run_history_store is not None:
+                summary_cutoff = (datetime.now(UTC) - timedelta(days=90)).isoformat()
+                try:
+                    removed_runs, removed_attempts = run_history_store.prune_expired_summaries(
+                        cutoff=summary_cutoff
+                    )
+                    if removed_runs or removed_attempts:
+                        _logger.info(
+                            "Hosted maintenance pruned run summaries for '%s': "
+                            "runs=%d attempts=%d cutoff=%s",
+                            context.repo_id,
+                            removed_runs,
+                            removed_attempts,
+                            summary_cutoff,
+                        )
+                except Exception:  # noqa: BLE001 - maintenance must not stop the daemon.
+                    _logger.exception(
+                        "Hosted run-history maintenance failed for '%s'.", context.repo_id
+                    )
             github_client = github_client_factory(context.repo_path)
             execution_slots = execution_slots_by_repo.setdefault(
                 context.repo_id, DaemonExecutionSlots(context.repo_id)
@@ -437,32 +545,28 @@ def _run_daemon_loop(request: _AgentDaemonLoopRequest) -> None:
             # when no transcript runner factory was injected so existing
             # callers (tests, ad-hoc scripts) keep their previous behaviour.
             if transcript_runner_factory is not None:
-                try:
-                    from backend.core.use_cases.agent_runner_deliberation_issues import (
-                        process_deliberation_issues,
-                    )
-
-                    process_deliberation_issues(
-                        repo_path=context.repo_path,
-                        config=context.config,
-                        github_client=github_client,
-                        transcript_runner_factory=transcript_runner_factory,
-                        max_issues=max_deliberation_issues,
-                        stale_rounds_before_hint=context.config.deliberation.stale_rounds_before_hint,
-                    )
-                except Exception as exc:  # noqa: BLE001 - daemon must survive Phase 0 faults.
-                    _logger.error("Deliberation phase failed: %s", exc)
-
-            try:
-                # Phase 1: PRD rework before normal ready-issue execution.
-                process_prd_rework_issues(
+                run_deliberation_phase(
                     repo_path=context.repo_path,
                     config=context.config,
                     github_client=github_client,
-                    process_runner=process_runner,
-                    content_generator=content_generator,
-                    max_issues=max_prd_issues,
+                    transcript_runner_factory=transcript_runner_factory,
+                    max_issues=max_deliberation_issues,
+                    stale_rounds_before_hint=context.config.deliberation.stale_rounds_before_hint,
+                    repo_id=context.repo_id,
+                    issue_admission_check=disk_admission_gate,
                 )
+
+            try:
+                # Phase 1: PRD rework before normal ready-issue execution.
+                if disk_admission_gate is None or disk_admission_gate():
+                    process_prd_rework_issues(
+                        repo_path=context.repo_path,
+                        config=context.config,
+                        github_client=github_client,
+                        process_runner=process_runner,
+                        content_generator=content_generator,
+                        max_issues=max_prd_issues,
+                    )
             except Exception as exc:  # noqa: BLE001 - daemon should survive unexpected errors.
                 _logger.error("PRD rework phase failed: %s", exc)
 
@@ -570,6 +674,7 @@ def _run_daemon_loop(request: _AgentDaemonLoopRequest) -> None:
                     concurrency=execution_ceiling,
                     output_view=output_view,
                     execution_ceiling=execution_ceiling,
+                    issue_admission_check=disk_admission_gate,
                     pass_activity=pass_activity,
                     execution_slots=execution_slots,
                 )
@@ -581,6 +686,20 @@ def _run_daemon_loop(request: _AgentDaemonLoopRequest) -> None:
                     context.repo_id,
                     exc,
                 )
+            has_in_flight_issues = bool(execution_slots.in_flight_issue_numbers())
+            if context.config.daemon.hosted_maintenance_enabled and has_in_flight_issues:
+                _logger.info(
+                    "Hosted maintenance deferred for '%s' while Issue workers remain active: %s",
+                    context.repo_id,
+                    sorted(execution_slots.in_flight_issue_numbers()),
+                )
+            elif context.config.daemon.hosted_maintenance_enabled:
+                _run_hosted_worktree_cleanup(
+                    context=context,
+                    github_client=github_client,
+                    process_runner=process_runner,
+                )
+                _run_hosted_issue_log_cleanup(context)
         if (
             api_budget is not None
             and time.monotonic() - last_usage_log_monotonic >= USAGE_LOG_INTERVAL_SECONDS

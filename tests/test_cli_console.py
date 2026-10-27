@@ -280,7 +280,7 @@ def test_static_mount_and_cli_check_share_the_console_static_dir(
     mounted_app = FastAPI()
     monkeypatch.setattr(api_app, "app", mounted_app)
     monkeypatch.setattr(static_assets, "console_static_dir", _shared_console_static_dir)
-    api_app._mount_console_static()
+    api_app._mount_console_static(mounted_app)
 
     mounted_static_route = mounted_app.router.routes[-1]
     assert mounted_static_route.path == ""
@@ -512,7 +512,7 @@ def test_static_mount_skips_panel_when_entry_file_is_missing(
     monkeypatch.setattr(api_app, "app", mounted_app)
     _stub_console_static_dir(monkeypatch, directory=partial_panel_dir)
 
-    api_app._mount_console_static()
+    api_app._mount_console_static(mounted_app)
 
     assert _mounted_panel_directories(mounted_app) == []
 
@@ -527,7 +527,7 @@ def test_static_mount_serves_panel_when_entry_file_exists(
     monkeypatch.setattr(api_app, "app", mounted_app)
     _stub_console_static_dir(monkeypatch, directory=panel_dir)
 
-    api_app._mount_console_static()
+    api_app._mount_console_static(mounted_app)
 
     assert _mounted_panel_directories(mounted_app) == [str(panel_dir)]
 
