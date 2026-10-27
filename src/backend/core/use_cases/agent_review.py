@@ -72,6 +72,7 @@ from backend.core.use_cases.agent_review_decisions import (
     _merge_reviewer_decisions,
     parse_reviewer_decision,
 )
+from backend.core.use_cases.agent_daemon_shutdown import raise_if_agent_daemon_stopping
 
 _logger = logging.getLogger(__name__)
 
@@ -384,6 +385,7 @@ def run_pre_pr_review(
                         invocation_phase=PHASE_REVIEW,
                         invocation_attempt=cycle,
                     )
+                    raise_if_agent_daemon_stopping()
                     break
                 except (
                     AgentUnavailableError,

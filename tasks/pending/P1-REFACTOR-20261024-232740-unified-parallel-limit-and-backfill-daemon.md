@@ -498,8 +498,8 @@ No external validation required; repository evidence was sufficient.
 
 ### Human-Confirmed (来自 Part A 风险地图)
 
-- [ ] 决策一：接受页面设置优先于配置文件、不再取较小值 — 依据 rv-3
-- [ ] 决策二：接受 daemon 执行期间持续补位，对账等阶段照常运行 — 依据 rv-1、rv-2
+- [x] 决策一：接受页面设置优先于配置文件、不再取较小值 — 依据 rv-3 <!-- 证据: 用户于 2026-10-26 明确同意。 -->
+- [x] 决策二：接受 daemon 执行期间持续补位，对账等阶段照常运行 — 依据 rv-1、rv-2 <!-- 证据: 用户于 2026-10-26 明确同意。 -->
 - [ ] 已查看 9.1 呈递区截图，状态栏与 Backlog 控件的数字和来源符合预期
 
 ### Architecture Acceptance
@@ -613,3 +613,11 @@ No external validation required; repository evidence was sufficient.
 - Reason: 用户 2026-10-25 指出 `--concurrency 5` 与页面设置 4 并存时无处看到真实值，并要求页面设置是否改配置文件说清楚、skill 描述准确便于 agent 使用。
 - Impact: FR-7、FR-8 更新；新增 `daemon_parallel_limit_status.py`、rv-4 证据；上一条变更中"kc daemon status 不显示并行上限"被本条取代。
 - Review: 用户 2026-10-25 已同意按推荐方案实施。
+
+### Record approval of parallel limit and daemon backfill decisions
+- Type: user decision
+- Before: 决策一、决策二仍留在 `Human-Confirmed`，等用户确认页面覆盖优先级与执行期间持续补位。
+- After: 两项决策均记录为用户于 2026-10-26 在对话中明确同意；9.2 的状态栏截图审阅仍待完成。
+- Reason: 用户确认页面设置覆盖配置文件，以及 daemon 执行期间继续轮询并补位。
+- Impact: 只记录设计决定，不代表完整人工验收；未完成的验证与截图项继续保持未勾选。
+- Review: 用户于 2026-10-26 明确确认。

@@ -36,8 +36,10 @@ pre_command: 'blocked="$(gh issue list --repo ZataZhang/keda --state open --labe
 ## 巡查结果与 PR 描述
 
 - 若本轮产生代码修复 PR，在本巡查 Issue 正文末尾追加 `## 本轮处置摘要（供 PR 描述生成）`，逐个列出目标 Issue、相关 PR、问题症状与根因、本轮修复、实际验证命令及结果、目标 Issue 当前状态和剩余人工决定。不要只把这些信息写在 Issue 评论里，因为 PR 描述生成读取 Issue 正文、提交记录和 diff，不读取评论。
+- 追加只能在正文**最末尾**新增内容：写回前先读回当前正文，写回后 `## 处理步骤`、`## 巡查结果与 PR 描述`、`## 约束`、`## Delivery Notes` 等既有章节必须逐字还在。不要按标题文本定位再替换其后的全部内容——本轮就是替换目标匹配到了上面那条指令里写在反引号中的小节标题，把 `## 约束` 之后的正文一起吃掉了；本巡查 Issue 正文是需求的唯一来源，丢一段就没人知道约束是什么。
 - 修复提交标题或正文应包含目标 Issue 编号和具体改动，保证 PR 描述生成回退时，提交记录仍能说明改了什么。
 - Draft PR 正文必须写明目标 Issue、症状/根因、修复内容、验证结果和未完成事项。保留 `Closes #<本巡查 Issue>` 以关闭本轮巡查并允许下一轮调度；目标 Issue 仍有未完成验收或待人决策时，只用 `Addresses #<目标 Issue>` / `Related to #<目标 Issue>`，不要用会自动关闭目标 Issue 的关键词。
+- PR 元数据不会因为生成器修好了就自己变对：`create_draft_pr` 按分支查到已有 open PR 时**直接返回原 URL，不重跑**标题与正文生成（见 `docs/guides/agent-runner.md`）。每个修复 cycle 之后要自己核对并用 `gh pr edit --title` / `--body-file` 刷新：标题是 ≤72 字符的 Conventional Commits 主题；`Closes #<本巡查 Issue>` 是正文**首行的裸文本**——写进 ``` 围栏里 GitHub 不认（`closingIssuesReferences` 为空），本轮 Issue 不会随 PR 合并关闭，`loop/<id>` 的「上一轮未关闭则暂停」会卡住下一轮；正文按**当前提交集与当前验证结果**重写，不要留下上一轮的提交号和「未运行」结论。
 
 ## 约束
 
