@@ -2,15 +2,67 @@
 
 from __future__ import annotations
 
-from backend.core.shared.models.agent_runner import AppConfig
+from backend.core.shared.models.agent_runner import AppConfig, IssueSummary
 from backend.core.use_cases.agent_runner_events import format_event_marker
 from backend.core.use_cases.agent_runner_workflow import (
     build_transition_labels,
     claim_blocked_issue,
     find_latest_unconsumed_marker,
+    is_issue_newly_blocked,
     workflow_state_labels,
 )
 from tests.conftest import FakeGitHubClient
+
+
+def test_is_issue_newly_blocked_requires_open_fresh_transition() -> None:
+    """只有执行期间新发生的 open/blocked 状态才算人工交接。"""
+    config = AppConfig()
+    issue_snapshot = IssueSummary(
+        number=42,
+        title="Issue #42",
+        url="https://github.com/example/repo/issues/42",
+        body="",
+        labels=(config.labels.running,),
+    )
+    blocked_issue = IssueSummary(
+        number=42,
+        title="Issue #42",
+        url=issue_snapshot.url,
+        body="",
+        labels=(config.labels.blocked,),
+        state="OPEN",
+    )
+    preexisting_blocked_issue = IssueSummary(
+        number=42,
+        title="Issue #42",
+        url=issue_snapshot.url,
+        body="",
+        labels=(config.labels.blocked,),
+        state="OPEN",
+    )
+    closed_blocked_issue = IssueSummary(
+        number=42,
+        title="Issue #42",
+        url=issue_snapshot.url,
+        body="",
+        labels=(config.labels.blocked,),
+        state="CLOSED",
+    )
+    issue_snapshot_already_blocked = IssueSummary(
+        number=42,
+        title="Issue #42",
+        url=issue_snapshot.url,
+        body="",
+        labels=(config.labels.blocked,),
+    )
+
+    assert is_issue_newly_blocked(issue_snapshot, blocked_issue, config)
+    assert not is_issue_newly_blocked(
+        issue_snapshot_already_blocked,
+        preexisting_blocked_issue,
+        config,
+    )
+    assert not is_issue_newly_blocked(issue_snapshot, closed_blocked_issue, config)
 
 
 def test_workflow_state_labels_includes_all_durable_states() -> None:
@@ -112,8 +164,18 @@ def test_claim_blocked_issue_success() -> None:
     fake_client.get_issue = _get_issue_with_blocked
     config = AppConfig()
 
-    claimed = claim_blocked_issue(fake_client, 1, config)
-    assert claimed is True
+    claimed_issue_snapshot = claim_blocked_issue(fake_client, 1, config)
+    assert claimed_issue_snapshot is not None
+    assert config.labels.running in claimed_issue_snapshot.labels
+    assert config.labels.blocked not in claimed_issue_snapshot.labels
+    reblocked_issue = IssueSummary(
+        number=claimed_issue_snapshot.number,
+        title=claimed_issue_snapshot.title,
+        url=claimed_issue_snapshot.url,
+        body=claimed_issue_snapshot.body,
+        labels=(config.labels.blocked,),
+    )
+    assert is_issue_newly_blocked(claimed_issue_snapshot, reblocked_issue, config)
 
     # Verify label transition happened
     label_calls = [c for c in fake_client.calls if c["method"] == "edit_issue_labels"]
@@ -140,7 +202,7 @@ def test_claim_blocked_issue_fails_when_not_blocked() -> None:
     fake_client.get_issue = _get_issue_running
     config = AppConfig()
 
-    claimed = claim_blocked_issue(fake_client, 1, config)
-    assert claimed is False
+    claimed_issue_snapshot = claim_blocked_issue(fake_client, 1, config)
+    assert claimed_issue_snapshot is None
     label_calls = [c for c in fake_client.calls if c["method"] == "edit_issue_labels"]
     assert len(label_calls) == 0

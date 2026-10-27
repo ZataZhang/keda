@@ -455,7 +455,7 @@ test.describe('console pages smoke (mocked API)', () => {
   test('stats page shows completion table', async ({ page }) => {
     await mockConsoleApi(page)
     await page.goto('/app/stats')
-    await expect(page.getByRole('heading', { name: '完成度统计' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '统计与成本', level: 1 })).toBeVisible()
     await expect(page.getByText('70%')).toBeVisible()
   })
 
@@ -661,14 +661,14 @@ test.describe('console pages smoke (mocked API)', () => {
 
     await page.goto('/app/stats')
     await page.getByText('keda · Issue #263').click()
-    await expect(page.getByText('运行时间')).toBeVisible()
+    await expect(page.getByRole('columnheader', { name: '运行时间', exact: true }).first()).toBeVisible()
     await expect(page.getByText('最近 2 次运行')).toBeVisible()
     await expect(
       page.getByRole('link', {
         name: '在 GitHub 打开 Issue #263：agent preset performance stats',
       }),
     ).toHaveAttribute('href', 'https://github.com/ZataZhang/keda/issues/263')
-    await page.getByRole('button', { name: '查看 keda Issue #263 的运行详情' }).click()
+    await page.getByRole('row').filter({ hasText: 'failed' }).getByRole('button', { name: '查看 keda Issue #263 的运行详情' }).click()
 
     const detailsDialog = page.getByTestId('run-details-dialog')
     await expect(detailsDialog).toBeVisible()
@@ -806,7 +806,7 @@ async function openIssueOutputTab(page: Page): Promise<void> {
   await page.goto('/app/backlog')
   await page.getByText('Demo PRD').first().click()
   await expect(page.getByTestId('prd-detail')).toBeVisible()
-  await page.getByRole('button', { name: '实时输出' }).click()
+  await page.getByRole('tab', { name: '实时输出', exact: true }).click()
   await expect(page.getByTestId('prd-issue-output')).toBeVisible()
 }
 

@@ -30,6 +30,7 @@ initialize_repository_local_config = (
     _engines_repository_local_module.initialize_repository_local_config
 )
 normalize_repository_id = _engines_repository_local_module.normalize_repository_id
+load_agent_runner_local_settings = _engines_repository_local_module.load_agent_runner_local_settings
 require_repository_initialized = _engines_repository_local_module.require_repository_initialized
 
 __all__ = [
@@ -47,5 +48,6 @@ __all__ = [
     "ensure_gitignore_entries",
     "initialize_repository_local_config",
     "normalize_repository_id",
+    "load_agent_runner_local_settings",
     "require_repository_initialized",
 ]

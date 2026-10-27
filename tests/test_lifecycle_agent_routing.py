@@ -7,6 +7,7 @@
   声明 ``auto`` 或未声明时保持既有语义；
 - rv-2：执行循环把矩阵解析出的 agent 真正传给 ``run_fix_agent`` /
   ``run_closeout_agent``（含默认跟随实现者的对照）。
+- daemon 的 blocked 续作路径：认领后的新鲜快照仍带着 PRD 级覆盖。
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from backend.core.shared.interfaces.runner_live_view import NoOpRunnerLiveView
 from backend.core.shared.models.agent_runner import (
     AppConfig,
     DeliveryGateFailureKind,
@@ -24,7 +26,11 @@ from backend.core.shared.models.agent_runner import (
 from backend.core.shared.models.lifecycle_agent import LifecycleAgentsConfig
 from backend.core.use_cases import agent_review as agent_review_module
 from backend.core.use_cases import agent_runner_delivery_closeout as delivery_closeout_module
+from backend.core.use_cases import (
+    agent_runner_orchestration_runtime as orchestration_runtime_module,
+)
 from backend.core.use_cases import run_agent_execution_loop as execution_loop_module
+from backend.core.use_cases.agent_runner_events import format_event_marker
 from backend.core.use_cases.agent_runner_feedback import (
     PrdDeliveryError,
     VerificationFailedError,
@@ -499,3 +505,94 @@ def test_orchestration_entry_attaches_prd_overrides() -> None:
     }
     assert "attach_prd_lifecycle_overrides" in called_names
     assert "choose_agent" in called_names
+
+
+def test_blocked_resolution_claim_keeps_prd_overrides(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """行为护点：blocked 续作接管认领后的新鲜快照时，PRD 级覆盖必须留在 Issue 上。
+
+    上面的 AST 守卫只看得到「入口调过 attach」，看不出快照替换把回填字段抹掉：
+    ``claim_blocked_issue`` 返回的是 ``get_issue`` 的结果，两个 lifecycle 字段恒为默认
+    空值。实现（``_process_blocked_resolution`` 用交接的 Issue 重跑 ``choose_agent``）、
+    review（``resolve_reviewer_agent(issue, ...)``）与监督（
+    ``resolve_lifecycle_agent("supervisor", ..., issue=issue)``）都只读 Issue 上回填的
+    字段、没有显式 prd_overrides 入参，被抹掉后是静默回落到默认 agent 而不是报错。
+    """
+    repo_path = tmp_path / "repo"
+    prd_relative_path = "tasks/pending/P1-FEAT-20260101-blocked-demo.md"
+    prd_path = repo_path / prd_relative_path
+    prd_path.parent.mkdir(parents=True)
+    prd_path.write_text(
+        "# PRD: Blocked demo\n\n- GitHub Issue: x\n\n"
+        "- lifecycle_agents:\n  - implementation: claude\n  - review: kimi\n"
+        "  - supervisor: kimi\n\n"
+        "- lifecycle_presets:\n  - review: strict\n\n"
+        "## 1. Intro\n正文\n",
+        encoding="utf-8",
+    )
+    config = AppConfig()
+    client = FakeGitHubClient()
+    client.set_issue_labels(9, (config.labels.blocked,))
+    client.set_issue_body(9, f"Body\n\n- PRD path: `{prd_relative_path}`\n")
+    client.comment_issue(
+        9,
+        format_event_marker(
+            phase="blocked_resolution_requested",
+            cycle=1,
+            blocked_paths=(".env.local",),
+        ),
+    )
+    discovered_issue = IssueSummary(
+        number=9,
+        title="Issue #9",
+        url="https://example/9",
+        body=f"Body\n\n- PRD path: `{prd_relative_path}`\n",
+        labels=(config.labels.blocked,),
+    )
+    handed_off_issues: list[IssueSummary] = []
+
+    def _capture_blocked_resolution(**kwargs: object) -> None:
+        handed_off_issues.append(kwargs["issue"])
+
+    def _run_first_candidate(*, process_for_agent, **_kwargs: object) -> str:
+        process_for_agent(agent="claude")
+        return "claude"
+
+    monkeypatch.setattr(
+        orchestration_runtime_module, "_process_blocked_resolution", _capture_blocked_resolution
+    )
+    monkeypatch.setattr(
+        orchestration_runtime_module, "run_issue_with_agent_fallback", _run_first_candidate
+    )
+
+    assert (
+        orchestration_runtime_module._process_single_issue(
+            discovered_issue,
+            "blocked_resolution",
+            repo_path=repo_path,
+            config=config,
+            agent="auto",
+            github_client=client,
+            process_runner=FakeProcessRunner(),
+            content_generator=None,
+            run_history_store=None,
+            run_trigger="cli_run",
+            effective_repo_id="repo",
+            output_view=NoOpRunnerLiveView(),
+        )
+        == 0
+    )
+
+    assert handed_off_issues, "blocked_resolution 没有把 Issue 交给续作处理器"
+    (handled_issue,) = handed_off_issues
+    assert dict(handled_issue.lifecycle_overrides) == {
+        "implementation": "claude",
+        "review": "kimi",
+        "supervisor": "kimi",
+    }
+    assert dict(handled_issue.lifecycle_preset_overrides) == {"review": "strict"}
+    # 交接基线仍是认领后的新鲜状态：blocked 已翻成 running，不会把旧标签当成基线。
+    assert config.labels.running in handled_issue.labels
+    assert config.labels.blocked not in handled_issue.labels

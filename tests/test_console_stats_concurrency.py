@@ -143,3 +143,30 @@ def test_stats_overview_cache_hit_within_ttl(
     assert first.json() == second.json()
     assert stats_api["client_builds"] == 1
     assert stats_api["label_queries"] == 6  # 1 repo × 6 workflow labels
+
+
+def test_stats_refresh_after_two_minutes(stats_api: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """真实统计路由在两分钟窗口内复用查询，到期后重建。"""
+    from backend.api import response_cache
+
+    clock_seconds = [0.0]
+    monkeypatch.setattr(response_cache.time, "monotonic", lambda: clock_seconds[0])
+    monkeypatch.setattr(
+        console_routes,
+        "_STATS_CACHE",
+        console_routes.TTLResponseCache(ttl_seconds=console_routes._STATS_CACHE_TTL_SECONDS),
+    )
+    monkeypatch.setattr(
+        console_routes,
+        "load_fresh_agent_runner_settings",
+        lambda: AgentRunnerSettings(console=AgentRunnerConsoleSettings(runner_command=["kc"])),
+    )
+    client = TestClient(app)
+    endpoint = "/api/v1/agent-runner/console/stats/overview"
+    assert client.get(endpoint).status_code == 200
+    clock_seconds[0] = 119
+    assert client.get(endpoint).status_code == 200
+    assert stats_api["label_queries"] == 6
+    clock_seconds[0] = 120
+    assert client.get(endpoint).status_code == 200
+    assert stats_api["label_queries"] == 12

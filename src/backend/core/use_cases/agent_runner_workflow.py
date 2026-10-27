@@ -31,6 +31,28 @@ def workflow_state_labels(config: AppConfig) -> list[str]:
     ]
 
 
+def is_issue_newly_blocked(
+    issue_snapshot: IssueSummary,
+    current_issue: IssueSummary,
+    config: AppConfig,
+) -> bool:
+    """判断 open Issue 是否在本次执行开始后进入 blocked 状态。
+
+    Args:
+        issue_snapshot: 本次执行开始时读取的 Issue。
+        current_issue: 刚从 GitHub 重新读取的 Issue。
+        config: 当前运行配置。
+
+    Returns:
+        Issue 仍 open、当前带 blocked 标签且执行前没有该标签时返回 True。
+    """
+    return (
+        current_issue.state.upper() == "OPEN"
+        and config.labels.blocked in current_issue.labels
+        and config.labels.blocked not in issue_snapshot.labels
+    )
+
+
 def issue_requires_human_review(issue: IssueSummary, config: AppConfig) -> bool:
     """判断自动审查通过后是否仍需要人工处理。
 
@@ -187,12 +209,13 @@ def claim_blocked_issue(
     github_client: IGitHubClient,
     issue_number: int,
     config: AppConfig,
-) -> bool:
+) -> IssueSummary | None:
     """尝试竞争认领一个 blocked Issue，将其切换到 running。
 
     采用读-检查-写模式（best-effort CAS）：先读取当前 labels，确认仍是
     blocked；然后执行 transition；最后重新读取 labels，确认已成功切换为
-    running 且不再包含 blocked。二次确认失败时返回 False。
+    running 且不再包含 blocked。二次确认失败时返回 ``None``，成功时返回认领后的
+    Issue 快照，供后续执行状态判定使用。
 
     .. note::
         这不是真正的 compare-and-swap。在极高并发下存在 TOCTOU 窗口：
@@ -206,16 +229,21 @@ def claim_blocked_issue(
         config: 应用配置
 
     Returns:
-        是否成功认领
+        成功认领后的 Issue 快照；状态竞争失败时返回 ``None``。快照只含 GitHub 侧
+        字段，不含编排入口从 PRD 头部回填的 ``lifecycle_overrides`` /
+        ``lifecycle_preset_overrides``，已回填过覆盖的调用方接管快照时必须把这两个
+        字段带过去。
     """
     issue_before = github_client.get_issue(issue_number)
     if config.labels.blocked not in issue_before.labels:
-        return False
+        return None
 
     transition_issue_workflow_state(github_client, issue_number, config, config.labels.running)
 
     issue_after = github_client.get_issue(issue_number)
-    return (
+    if (
         config.labels.running in issue_after.labels
         and config.labels.blocked not in issue_after.labels
-    )
+    ):
+        return issue_after
+    return None

@@ -33,8 +33,8 @@ import type {
 } from "@/lib/api/types";
 import { cn, formatLocalDateTime } from "@/lib/utils";
 
-import { runtimePhaseDescription, RuntimeTaskPhase } from "./runtime-task-phase";
-import { RuntimeTaskDuration, RuntimeTaskWatch, runtimeStatusPresentation } from "./runtime-task-list";
+import { RuntimeTaskPhaseDescription, RuntimeTaskPhase } from "./runtime-task-phase";
+import { RuntimeTaskDuration, RuntimeTaskObservation, RuntimeTaskWatch, runtimeStatusPresentation } from "./runtime-task-list";
 
 /** `worktree_status` 独有原因：`impact_status` 里没有对应取值，只能在这里补。 */
 const WORKTREE_REASON: Record<string, string> = {
@@ -333,7 +333,7 @@ export function RuntimeTaskDetail({ task, className }: RuntimeTaskDetailProps) {
         <CardHeader className="pb-2">
           <CardTitle className="flex flex-wrap items-center gap-2 text-sm">
             <Badge variant={presentation.variant}>{presentation.label}</Badge>
-            <RuntimeTaskPhase phase={task.phase} />
+            <RuntimeTaskPhase task={task} />
             <RuntimeTaskWatch task={task} />
             <span>{identity}</span>
             {issueUrl ? (
@@ -373,13 +373,12 @@ export function RuntimeTaskDetail({ task, className }: RuntimeTaskDetailProps) {
         </CardHeader>
         <CardContent className="flex flex-col gap-2 text-xs text-slate-600 dark:text-slate-300">
           <p data-testid="runtime-task-status-reason">状态来源：{task.status_reason ?? "未提供"}</p>
-          <p data-testid="runtime-task-phase-description">
-            阶段说明：{runtimePhaseDescription(task.phase)}
-          </p>
+          <RuntimeTaskPhaseDescription task={task} />
+          <RuntimeTaskObservation task={task} />
           <RuntimeTaskAnomalies anomalyTypes={task.anomaly_types ?? []} />
           <div className="flex flex-wrap gap-x-4 gap-y-1">
             <span>
-              {task.finished_at ? "上次执行" : "执行"}：{task.agent ?? "未知"}
+              最近执行：{task.agent ?? "未知"}
               {task.preset ? ` · preset ${task.preset}` : ""}
               {task.model ? ` · 模型 ${task.model}` : ""}
             </span>
@@ -390,10 +389,10 @@ export function RuntimeTaskDetail({ task, className }: RuntimeTaskDetailProps) {
             </span>
             <span>
               结束：
-              {task.finished_at ? formatLocalDateTime(task.finished_at) : "尚未结束"}
+              {task.finished_at ? formatLocalDateTime(task.finished_at) : task.started_at ? "未记录结束时间" : "无运行记录"}
             </span>
             <RuntimeTaskDuration task={task} />
-            <span>终态：{task.last_outcome ?? "未收口"}</span>
+            <span>运行记录终态：{task.last_outcome ?? (task.started_at ? "未收口" : "无运行记录")}</span>
           </div>
           {task.prd_path ? (
             <p className="text-slate-500">

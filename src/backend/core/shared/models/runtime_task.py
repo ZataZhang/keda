@@ -53,9 +53,9 @@ _STATUS_DISPLAY_ORDER: dict["RuntimeTaskStatus", int] = {
     RuntimeTaskStatus.BLOCKED: 1,
     RuntimeTaskStatus.FAILED: 2,
     RuntimeTaskStatus.WAITING: 3,
-    RuntimeTaskStatus.COMPLETED: 4,
-    RuntimeTaskStatus.CLOSED: 5,
-    RuntimeTaskStatus.UNKNOWN: 6,
+    RuntimeTaskStatus.UNKNOWN: 4,
+    RuntimeTaskStatus.COMPLETED: 5,
+    RuntimeTaskStatus.CLOSED: 6,
 }
 
 

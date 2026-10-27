@@ -41,7 +41,7 @@ const navItems = [
   { href: "/app/settings", label: "Settings", icon: Settings },
 ]
 
-/** Sidebar navigation for authenticated pages. */
+/** 共享侧栏导航；桌面端保持窗口高度，菜单过长时在侧栏内滚动。 */
 export function AppSidebar() {
   const pathname = usePathname()
   const { theme, setTheme } = useTheme()
@@ -52,13 +52,13 @@ export function AppSidebar() {
     <aside
       className={cn(
         // 窄屏（<md）侧栏改为顶部整宽导航条，把横向空间让给内容；md 起恢复左侧栏。
-        "flex flex-col border-b bg-sidebar transition-[width] duration-200 md:border-r md:border-b-0",
+        "flex shrink-0 flex-col border-b bg-sidebar transition-[width] duration-200 md:h-full md:min-h-0 md:border-r md:border-b-0",
         collapsed ? "w-full md:w-14" : "w-full md:w-64"
       )}
     >
       <div
         className={cn(
-          "flex h-14 items-center border-b",
+          "flex h-14 shrink-0 items-center border-b",
           collapsed ? "justify-center px-2" : "gap-2 px-4"
         )}
       >
@@ -109,7 +109,7 @@ export function AppSidebar() {
           {collapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
         </Button>
       </div>
-      <nav className="flex-1 p-3">
+      <nav className="flex-1 p-3 md:min-h-0 md:overflow-y-auto">
         <ul className="space-y-1">
           {navItems.map((item) => (
             <li key={item.href}>

@@ -1,5 +1,6 @@
 "use client"
 
+import { ConsolePage, ConsolePageHeader, ConsoleSectionTabs, consoleTabClassName } from "@/components/layout/console-page";
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useEffect, useRef, useState } from "react"
@@ -63,19 +64,13 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="flex flex-col gap-6" data-testid="settings-page">
-      <div>
-        <h1 className="text-3xl font-bold">设置</h1>
-        <p className="text-muted-foreground">
-          {user.display_name} · {user.email}
-        </p>
-      </div>
+    <ConsolePage data-testid="settings-page">
+      <ConsolePageHeader title="设置" description={<>{user.display_name} · {user.email}</>} />
 
-      <nav
+      <ConsoleSectionTabs
         ref={settingsTablistRef}
         role="tablist"
         aria-label="设置分类"
-        className="sticky top-0 z-20 -mx-4 flex gap-1 overflow-x-auto whitespace-nowrap border-b bg-background/95 px-4 pt-2 backdrop-blur md:-mx-8 md:px-8"
         data-testid="settings-section-tabs"
       >
         {SETTINGS_TABS.map((tab) => (
@@ -88,16 +83,12 @@ export default function SettingsPage() {
             aria-controls={`settings-panel-${tab.id}`}
             data-testid={`settings-tab-${tab.id}`}
             onClick={() => switchSettingsTab(tab.id)}
-            className={`-mb-px shrink-0 border-b-2 px-3 py-2 text-sm transition-colors ${
-              activeSettingsTab === tab.id
-                ? "border-foreground font-medium text-foreground"
-                : "border-transparent text-muted-foreground hover:text-foreground"
-            }`}
+            className={consoleTabClassName(activeSettingsTab === tab.id)}
           >
             {tab.label}
           </button>
         ))}
-      </nav>
+      </ConsoleSectionTabs>
 
       <section
         id="settings-panel-agents"
@@ -105,10 +96,10 @@ export default function SettingsPage() {
         aria-labelledby="settings-tab-agents"
         tabIndex={0}
         hidden={activeSettingsTab !== "agents"}
-        className="rounded-2xl border p-6 focus:outline-none"
+        className="rounded-xl border border-border bg-card p-6 text-card-foreground shadow-sm focus:outline-none"
         data-testid="settings-agent-management"
       >
-        <h2 className="mb-3 text-lg font-semibold">Agent 管理</h2>
+        <h2 className="mb-3 text-sm font-semibold">Agent 管理</h2>
 
         <div className="space-y-6">
           <AgentLabelsEditor />
@@ -138,11 +129,11 @@ export default function SettingsPage() {
         aria-labelledby="settings-tab-cost"
         tabIndex={0}
         hidden={activeSettingsTab !== "cost"}
-        className="rounded-2xl border p-6 focus:outline-none"
+        className="rounded-xl border border-border bg-card p-6 text-card-foreground shadow-sm focus:outline-none"
         data-testid="settings-cost-management"
       >
         <div className="mb-4">
-          <h2 className="text-lg font-semibold">成本估算</h2>
+          <h2 className="text-sm font-semibold">成本估算</h2>
           <p className="mt-1 text-sm text-muted-foreground">
             价格只影响统计页的本机估算，不会更改 Agent 配置或供应商账单。
           </p>
@@ -159,8 +150,8 @@ export default function SettingsPage() {
         className="space-y-4 focus:outline-none"
         data-testid="settings-about-account"
       >
-        <div className="rounded-2xl border bg-muted/30 p-6">
-          <h2 className="mb-2 text-lg font-semibold">关于 KedaCode 管理终端</h2>
+        <div className="rounded-xl border border-border bg-card p-6 text-card-foreground shadow-sm">
+          <h2 className="mb-2 text-sm font-semibold">关于 KedaCode 管理终端</h2>
           <p className="text-sm text-muted-foreground">
             这是 KedaCode 内置的 Agent Runner 管理终端（本机单用户模式，仅监听
             127.0.0.1）。仓库队列、托管进程与 backlog 数据均来自本机后端
@@ -172,6 +163,6 @@ export default function SettingsPage() {
           退出登录
         </Button>
       </section>
-    </div>
+    </ConsolePage>
   )
 }

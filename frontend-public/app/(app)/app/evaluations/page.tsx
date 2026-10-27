@@ -6,6 +6,8 @@
 // 评审 payload 必须先预览、后显式授权；失败/拒绝/未授权状态原样展示，
 // 不折算为 0 分。
 
+import { ConsolePage, ConsolePageHeader, ConsoleToolbar } from "@/components/layout/console-page";
+import { NativeSelect } from "@/components/ui/native-select";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
@@ -248,40 +250,25 @@ export default function EvaluationsPage() {
   // ── 渲染 ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="mx-auto flex w-full max-w-7xl flex-col gap-5 p-4 sm:p-6 lg:p-8">
-      <section className="relative overflow-hidden rounded-2xl border bg-gradient-to-br from-white via-white to-violet-50/70 p-5 shadow-sm sm:p-7 dark:from-slate-950 dark:via-slate-950 dark:to-violet-950/30">
-        <div className="pointer-events-none absolute -top-16 -right-10 size-56 rounded-full bg-violet-200/25 blur-3xl dark:bg-violet-500/10" />
-        <div className="relative max-w-2xl">
-          <span className="inline-flex items-center rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-[10px] font-semibold tracking-[0.16em] text-violet-800 dark:border-violet-900 dark:bg-violet-950/50 dark:text-violet-300">
-            MODEL EVALUATION
-          </span>
-          <h1 className="mt-3 text-2xl font-semibold tracking-tight text-slate-950 sm:text-3xl dark:text-slate-50">
-            模型评测
-          </h1>
-          <p className="mt-2 text-sm leading-6 text-muted-foreground">
-            同一评测集下对比多个执行预设（Agent × 模型），候选在各自干净的
-            isolated worktree 中执行；评审模型打分前必须逐条预览 payload
-            并显式授权。费用口径：cost unknown（仅记 token usage）。
-          </p>
-        </div>
-      </section>
+    <ConsolePage>
+      <ConsolePageHeader title="模型评测" description="同一评测集下对比多个执行预设（Agent × 模型），候选在各自干净的 isolated worktree 中执行；评审模型打分前必须逐条预览 payload 并显式授权。费用口径：cost unknown（仅记 token usage）。" />
 
-      <Card className="gap-4 border-border/70 shadow-sm">
+      <Card className="gap-4">
         <CardHeader>
-          <CardTitle className="text-base">新建评测 run</CardTitle>
+          <CardTitle className="text-sm">新建评测 run</CardTitle>
           <CardDescription>
             创建只做校验与快照冻结；启动执行也不会发起任何评审调用，评审在
             候选完成后由你显式授权。
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="flex flex-wrap items-center gap-2">
+          <ConsoleToolbar>
             <label className="text-sm font-medium" htmlFor="evaluation-suite-select">
               评测集
             </label>
-            <select
+            <NativeSelect
               id="evaluation-suite-select"
-              className="h-9 min-w-56 rounded-lg border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-violet-500/40"
+              className="min-w-56"
               value={suiteId}
               onChange={(event) => setSuiteId(event.target.value)}
             >
@@ -292,14 +279,14 @@ export default function EvaluationsPage() {
                   {entry.cases?.length ?? 0} cases
                 </option>
               ))}
-            </select>
+            </NativeSelect>
             {suites === null ? <Skeleton className="h-5 w-24" /> : null}
             {suites !== null && validSuites.length === 0 ? (
               <Badge variant="warning">
                 registry 内没有校验通过的 suite（检查 tasks/evaluation-suites/）
               </Badge>
             ) : null}
-          </div>
+          </ConsoleToolbar>
           {selectedSuite ? (
             <p className="rounded-lg bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
               {selectedSuite.title} · 仓库 {selectedSuite.repo_path} · 基线{" "}
@@ -423,9 +410,9 @@ export default function EvaluationsPage() {
         </CardContent>
       </Card>
 
-      <Card className="gap-4 border-border/70 shadow-sm">
+      <Card className="gap-4">
         <CardHeader>
-          <CardTitle className="text-base">评测 run</CardTitle>
+          <CardTitle className="text-sm">评测 run</CardTitle>
           <CardDescription>
             点击行选择查看下方详情；活跃 run 每 5 秒自动刷新。
           </CardDescription>
@@ -532,6 +519,6 @@ export default function EvaluationsPage() {
           }
         }}
       />
-    </div>
+    </ConsolePage>
   );
 }

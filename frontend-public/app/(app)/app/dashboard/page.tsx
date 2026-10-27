@@ -1,5 +1,6 @@
 "use client"
 
+import { ConsolePage, ConsolePageHeader, ConsoleToolbar } from "@/components/layout/console-page";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -266,6 +267,11 @@ export default function DashboardPage() {
     }
   }, []);
 
+  /** 扫描落库后同时重读仓库快照与任务摘要，确保刷新结束时任务状态也已更新。 */
+  const reloadMonitoringViews = useCallback(async (signal?: AbortSignal) => {
+    await Promise.all([loadSnapshots(signal), loadRuntimeSummary(signal)]);
+  }, [loadSnapshots, loadRuntimeSummary]);
+
   /** 首屏进入后自动选中第一个 issue，避免右侧详情空着。 */
   useEffect(() => {
     if (selectedIssueNumber !== null) return;
@@ -399,7 +405,7 @@ export default function DashboardPage() {
       if (controller.signal.aborted) return;
 
       // 刷新完成后重新读一次快照，让界面立即反映新数据。
-      await loadSnapshots(controller.signal);
+      await reloadMonitoringViews(controller.signal);
       void loadCompletionStats(controller.signal);
       if (failures.length > 0) {
         toast.error(`部分仓库刷新失败：${failures.join("；")}`);
@@ -414,7 +420,7 @@ export default function DashboardPage() {
       toast.error(message);
       setRefreshState({ kind: "idle" });
     }
-  }, [refreshState, loadCompletionStats, loadSnapshots]);
+  }, [refreshState, loadCompletionStats, reloadMonitoringViews]);
 
   useEffect(() => {
     return () => {
@@ -451,7 +457,7 @@ export default function DashboardPage() {
         throw new Error(snapshot.error ?? `${repoId} 失败`);
       }
       // 重新读快照：写入由后端完成，界面只负责呈现最新落库结果。
-      await loadSnapshots(controller.signal);
+      await reloadMonitoringViews(controller.signal);
       if (controller.signal.aborted) return;
       const seconds = Math.round((Date.now() - startedAt) / 1000);
       setRepoRefresh((prev) => ({
@@ -476,7 +482,7 @@ export default function DashboardPage() {
       }));
       toast.error(message);
     }
-  }, [loadSnapshots]);
+  }, [reloadMonitoringViews]);
 
   /** 切换仓库 Issue 范围；首次切到「全部」时实时拉取 GitHub 全量列表。 */
   const handleScopeChange = useCallback(
@@ -672,18 +678,9 @@ export default function DashboardPage() {
       : null;
 
   return (
-    <div className="flex flex-col gap-4 p-4 lg:p-6">
-      <div className="flex flex-wrap items-end justify-between gap-2">
-        <div>
-          <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-50">
-            Agent Runner 管理终端
-          </h2>
-          <p className="mt-1 text-sm text-slate-500">
-            默认按任务值守看板列出各仓库 Issue 的真实生命周期；切到「仓库监控」看队列、
-            事件时间线与异常，failed/blocked Issue 可直接重试或继续。
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
+    <ConsolePage>
+      <ConsolePageHeader title="Agent Runner 管理终端" description="默认按任务值守看板列出各仓库 Issue 的真实生命周期；切到「仓库监控」看队列、事件时间线与异常，failed/blocked Issue 可直接重试或继续。" />
+      <ConsoleToolbar aria-label="看板视图与同步操作">
           <div
             className="flex items-center gap-1 rounded-md border border-slate-200 p-0.5 dark:border-slate-700"
             role="group"
@@ -726,8 +723,7 @@ export default function DashboardPage() {
             onRefresh={() => void handleRefreshAll()}
             onToggleSettings={() => setSettingsOpen((open) => !open)}
           />
-        </div>
-      </div>
+      </ConsoleToolbar>
 
       {settingsOpen ? (
         <MonitorSettingsPanel
@@ -977,7 +973,7 @@ export default function DashboardPage() {
           </div>
         </>
       ) : null}
-    </div>
+    </ConsolePage>
   );
 }
 

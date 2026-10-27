@@ -32,7 +32,13 @@ from backend.api.cli_typer_app import (
 @loop_app.command("create")
 def loop_create_command(
     loop_id: Annotated[str, typer.Argument(help="Short kebab-case identifier.")],
-    recipe: Annotated[str, typer.Option("--recipe", help="Path to the loop recipe Markdown file.")],
+    recipe: Annotated[
+        str | None, typer.Option("--recipe", help="Path to the loop recipe Markdown file.")
+    ] = None,
+    template: Annotated[
+        str | None,
+        typer.Option("--template", help="Built-in template: blocker-monitor (requires --repo-id)."),
+    ] = None,
     cron: Annotated[
         str | None,
         typer.Option("--cron", help="5-field cron expression overriding the recipe."),
@@ -62,6 +68,7 @@ def loop_create_command(
         "loop create",
         loop_id=loop_id,
         recipe=recipe,
+        template=template,
         cron=cron,
         every=every,
         loop_repo_id=repo_id,

@@ -53,7 +53,7 @@ export function RunDetailPanel({
     return (
       <Card className="gap-4 border-border/70 shadow-sm">
         <CardHeader>
-          <CardTitle className="text-base">Run 详情</CardTitle>
+          <CardTitle className="text-sm">Run 详情</CardTitle>
           <CardDescription>正在读取评测明细…</CardDescription>
         </CardHeader>
         <CardContent>
@@ -77,7 +77,7 @@ export function RunDetailPanel({
       <CardHeader>
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
-            <CardTitle className="flex items-center gap-2 text-base">
+            <CardTitle className="flex items-center gap-2 text-sm">
               <code className="text-sm">{run.run_id}</code>
               {statusMeta ? (
                 <Badge variant={statusMeta.variant}>{statusMeta.label}</Badge>

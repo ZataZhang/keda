@@ -36,6 +36,12 @@ from backend.core.shared.models.runtime_task import (
     RuntimeTaskSummary,
 )
 from backend.core.use_cases.monitor_snapshots import SnapshotOverviewResult
+from backend.core.use_cases.runtime_task_observation import (
+    SOURCE_PRD_LIFECYCLE,
+    RuntimeObservationContext,
+    parse_runtime_timestamp,
+    reconcile_runtime_task,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -61,39 +67,13 @@ _OUTCOME_STATUS_MAP: dict[str, RuntimeTaskStatus] = {
 #: ``unavailable_sources`` 的取值：前端据此把对应面板标为不可用。
 SOURCE_MONITOR_SNAPSHOT = "monitor_snapshot"
 SOURCE_RUN_HISTORY = "run_history"
-SOURCE_PRD_LIFECYCLE = "prd_lifecycle"
 SOURCE_ATTEMPT_LEDGER = "attempt_ledger"
 
 #: 快照同步状态里，「整体还不可信」的取值。``partial`` 仍可用（缺的仓库单独披露）。
 _UNTRUSTED_SYNC_STATUSES = frozenset({"pending_first_sync"})
 
-#: 只为这些分桶回查 attempt 账本，避免对整表任务做无界读取。
-_ATTEMPT_ENRICHED_STATUSES = frozenset(
-    {RuntimeTaskStatus.RUNNING, RuntimeTaskStatus.BLOCKED, RuntimeTaskStatus.FAILED}
-)
-
 #: 运行账本一次扫描的最大行数：窗口内正常量级远小于此，超出即属历史复盘（Stats 页面）。
 _RUN_SCAN_LIMIT = 1000
-
-
-def parse_runtime_timestamp(value: str | None) -> datetime | None:
-    """把账本里的 ISO-8601 字符串解析成带时区时间；坏值返回 ``None``。
-
-    Args:
-        value: 账本存储的 ISO-8601 时间戳，可能为空、缺失时区或格式损坏。
-
-    Returns:
-        带 UTC 时区的时间；无法解析时返回 ``None``，调用方据此保留「未知」。
-    """
-    if not value:
-        return None
-    try:
-        parsed = datetime.fromisoformat(value)
-    except ValueError:
-        return None
-    if parsed.utcoffset() is None:
-        return parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
 
 
 def _is_before_runtime_window(started_at: str | None, window_start: datetime) -> bool:
@@ -231,7 +211,7 @@ def _snapshot_task(
     issue_is_closed = str(issue_entry.get("state") or "").lower() == "closed"
     if issue_is_closed:
         status = RuntimeTaskStatus.CLOSED
-        status_reason = "GitHub Issue 已关闭"
+        status_reason = "GitHub Issue 已关闭；关闭原因未记录"
     else:
         status = status_for_labels(labels)
         status_labels = tuple(
@@ -323,8 +303,8 @@ def _attempt_record_task(
 ) -> RuntimeTask:
     """生命周期账本里仍在进行、但运行账本尚未收口的任务。
 
-    运行记录在 run 结束才写入，因此「进程还活着」只能由未收口的 lifecycle run
-    识别；缺这一步会把正在跑的任务从看板上整体漏掉。
+    运行记录在 run 结束才写入，未收口的 lifecycle run 可补充进行中的记录；
+    账本未收口本身不证明进程存活。
     """
     key_status = RuntimeTaskStatus.RUNNING
     return RuntimeTask(
@@ -370,34 +350,31 @@ def _enrich_from_attempt(
     if not attempts:
         return task
     latest_attempt = attempts[-1]
+    attempt_start = parse_runtime_timestamp(latest_attempt.started_at)
+    run_start = parse_runtime_timestamp(task.started_at)
+    run_finish = parse_runtime_timestamp(task.finished_at)
+    # 不把别轮 attempt 的阶段与模型拼到本轮运行上。
+    if (
+        attempt_start is None
+        or (run_start and attempt_start < run_start)
+        or (run_finish and attempt_start > run_finish)
+    ):
+        return task
     started_at = task.started_at or latest_attempt.started_at
     duration_seconds = task.duration_seconds
-    if task.status is RuntimeTaskStatus.RUNNING:
+    if task.status is RuntimeTaskStatus.RUNNING and not task.finished_at:
         parsed_start = parse_runtime_timestamp(started_at)
         if parsed_start is not None:
             duration_seconds = max(0.0, (reference_time - parsed_start).total_seconds())
-    return RuntimeTask(
-        repo_id=task.repo_id,
-        issue_number=task.issue_number,
-        repo_display_name=task.repo_display_name,
-        issue_title=task.issue_title,
-        issue_url=task.issue_url,
-        pr_url=task.pr_url,
-        pr_number=task.pr_number,
-        status=task.status,
-        status_reason=task.status_reason,
+    return replace(
+        task,
         phase=latest_attempt.failure_phase or task.phase,
         agent=task.agent or latest_attempt.agent,
         preset=latest_attempt.preset,
         model=latest_attempt.model,
         attempt_number=latest_attempt.attempt_number,
-        prd_path=task.prd_path,
         started_at=started_at,
-        finished_at=task.finished_at,
         duration_seconds=duration_seconds,
-        last_outcome=task.last_outcome,
-        labels=task.labels,
-        anomaly_types=task.anomaly_types,
     )
 
 
@@ -515,6 +492,20 @@ def build_runtime_task_summary(
         seen_keys.add(key)
         tasks.append(_attempt_record_task(lifecycle_run, None))
 
+    observation_context = RuntimeObservationContext(
+        lifecycle_store=prd_lifecycle_store,
+        reference_time=reference_time,
+        unavailable_sources=unavailable_sources,
+    )
+    tasks = [
+        reconcile_runtime_task(
+            task,
+            lifecycle_by_issue.get((task.repo_id, task.issue_number)),
+            context=observation_context,
+        )
+        for task in tasks
+    ]
+
     if run_history_store is not None:
         tasks = [
             _enrich_from_attempt(
@@ -523,8 +514,6 @@ def build_runtime_task_summary(
                 unavailable_sources=unavailable_sources,
                 reference_time=reference_time,
             )
-            if task.status in _ATTEMPT_ENRICHED_STATUSES
-            else task
             for task in tasks
         ]
 

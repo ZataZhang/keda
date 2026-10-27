@@ -15,6 +15,7 @@ import pytest
 from backend.core.shared.interfaces.runner_console import (
     AttemptRecord,
     MonitorSnapshotEntry,
+    PrdLifecycleEventRecord,
     PrdLifecycleRunRecord,
     RunRecord,
 )
@@ -166,7 +167,7 @@ def test_snapshot_labels_drive_status_and_running_duration(tmp_path) -> None:
     assert tasks[5].status is RuntimeTaskStatus.BLOCKED
     assert tasks[5].status_reason == "当前监控标签：agent/blocked"
     assert tasks[4].status is RuntimeTaskStatus.CLOSED
-    assert tasks[4].status_reason == "GitHub Issue 已关闭"
+    assert tasks[4].status_reason == "GitHub Issue 已关闭；关闭原因未记录"
     assert summary.status_counts["running"] == 1
     assert summary.status_counts["closed"] == 1
     # 排序把运行中的任务放在最前，值守者不必翻页去找正在跑的东西。
@@ -246,7 +247,7 @@ def test_tracked_issue_state_marks_closed_task(tmp_path) -> None:
     summary = _summary(store, ["keda"])
     task = next(task for task in summary.tasks if task.issue_number == 3)
     assert task.status is RuntimeTaskStatus.CLOSED
-    assert task.status_reason == "GitHub Issue 已关闭"
+    assert task.status_reason == "GitHub Issue 已关闭；关闭原因未记录"
     assert summary.status_counts["closed"] == 1
     assert summary.status_counts["unknown"] == 0
 
@@ -329,7 +330,7 @@ def test_unregistered_repository_history_stays_off_the_board(tmp_path) -> None:
 
 
 def test_unfinished_lifecycle_run_is_running_even_without_run_record(tmp_path) -> None:
-    """生命周期账本尚未收口 = 进程还活着；缺这一步会把运行中的任务整体漏掉。"""
+    """未收口账本补充运行记录，但不能凭此断言进程存活。"""
     store = _store(tmp_path)
     _seed_snapshot(store, "keda", [])
     store.upsert_lifecycle_run(
@@ -451,3 +452,234 @@ def test_summary_truncates_and_says_so(tmp_path) -> None:
     summary = _summary(store, ["keda"], max_rows=3)
     assert len(summary.tasks) == 3
     assert summary.truncated is True
+
+
+@pytest.mark.parametrize("lifecycle_offset", [None, -180, -30])
+@pytest.mark.parametrize("label", ["agent/running", "agent/supervising"])
+def test_finished_run_is_not_live_unless_a_new_lifecycle_started(
+    tmp_path, monkeypatch, lifecycle_offset: int | None, label: str
+) -> None:
+    """残留标签不能把已结束耗时累加到现在；新一轮运行不能沿用旧结束时间。"""
+    store = _store(tmp_path)
+    _seed_snapshot(store, "keda", [_issue(7, labels=[label])])
+    store.append_run(
+        RunRecord(
+            repo_id="keda",
+            repo_path="/tmp/keda",
+            issue_number=7,
+            trigger="console_run",
+            agent="old-agent",
+            outcome="failed",
+            error_summary="旧失败",
+            started_at=_iso(-120),
+            finished_at=_iso(-100),
+            duration_seconds=1200,
+        )
+    )
+    if lifecycle_offset is not None:
+        store.upsert_lifecycle_run(
+            PrdLifecycleRunRecord(
+                run_id="active",
+                repo_id="keda",
+                issue_number=7,
+                prd_path="tasks/pending/demo.md",
+                trigger="console_run",
+                started_at=_iso(lifecycle_offset),
+                finished_at=None,
+                outcome=None,
+                history_complete=True,
+            )
+        )
+    store.append_attempt(
+        AttemptRecord(
+            repo_id="keda",
+            issue_number=7,
+            agent="old-agent",
+            attempt_number=1,
+            failure_type="error",
+            recovered=False,
+            detail="旧失败",
+            started_at=_iso(-120),
+            finished_at=_iso(-100),
+            duration_seconds=1200,
+            failure_phase="agent",
+            preset="old",
+        )
+    )
+    task = _summary(store, ["keda"]).tasks[0]
+    if lifecycle_offset == -30:
+        assert task.status is RuntimeTaskStatus.RUNNING
+        assert task.started_at == _iso(-30)
+        assert task.finished_at is None
+        assert task.last_outcome is None
+        assert task.agent is None
+        assert task.preset is None
+        assert task.phase is None
+        assert task.duration_seconds == 1800
+    else:
+        assert task.status is RuntimeTaskStatus.UNKNOWN
+        assert "最近运行已结束" in task.status_reason
+        assert task.duration_seconds == 1200
+        assert task.finished_at == _iso(-100)
+        assert task.last_outcome == "failed"
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from backend.api.routes import agent_runner_console_runtime as runtime_routes
+
+    monkeypatch.setattr(runtime_routes, "_enabled_repo_ids", lambda: ["keda"])
+    monkeypatch.setattr(runtime_routes, "create_console_store", lambda: _store(tmp_path))
+    runtime_app = FastAPI()
+    runtime_app.include_router(runtime_routes.router)
+    with TestClient(runtime_app) as runtime_client:
+        response = runtime_client.get("/agent-runner/console/runtime/tasks")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["tasks"][0]["status"] == task.status.value
+    assert payload["tasks"][0]["finished_at"] == task.finished_at
+    if lifecycle_offset != -30:
+        assert payload["tasks"][0]["duration_seconds"] == 1200
+
+
+@pytest.mark.parametrize("status_label", ["agent/review", "agent/failed", "agent/running"])
+def test_attempt_enrichment_keeps_the_run_window_and_waiting_reason(tmp_path, status_label) -> None:
+    """同一运行补齐阶段且保留等待原因，不能丢失状态字段或重算历史耗时。"""
+    store = _store(tmp_path)
+    _seed_snapshot(
+        store,
+        "keda",
+        [
+            _issue(
+                7,
+                labels=[status_label],
+                timeline=[
+                    {"action": "approve_for_human_review", "phase": "post_pr_supervisor"},
+                ],
+            )
+        ],
+    )
+    store.append_attempt(
+        AttemptRecord(
+            repo_id="keda",
+            issue_number=7,
+            agent="codex",
+            attempt_number=1,
+            failure_type="",
+            recovered=False,
+            detail="",
+            started_at=_iso(-10),
+            finished_at="",
+            duration_seconds=0,
+            failure_phase="agent",
+        )
+    )
+    task = _summary(store, ["keda"]).tasks[0]
+    assert task.phase == "agent"
+    if status_label == "agent/review":
+        assert task.waiting_reason == "human_review"
+    if status_label == "agent/running":
+        assert task.duration_seconds == 600
+
+
+def test_closed_lifecycle_without_run_history_does_not_imply_live_process(tmp_path) -> None:
+    """运行账本缺失时，生命周期终态仍足以识别残留运行标签。"""
+    store = _store(tmp_path)
+    _seed_snapshot(store, "keda", [_issue(7, labels=["agent/running"])])
+    store.upsert_lifecycle_run(
+        PrdLifecycleRunRecord(
+            run_id="finished",
+            repo_id="keda",
+            issue_number=7,
+            prd_path="tasks/pending/demo.md",
+            trigger="console_run",
+            started_at=_iso(-30),
+            finished_at=None,
+            outcome=None,
+            history_complete=True,
+        )
+    )
+    store.finish_lifecycle_run(run_id="finished", outcome="completed", finished_at=_iso(-20))
+    task = _summary(store, ["keda"]).tasks[0]
+    assert task.status is RuntimeTaskStatus.UNKNOWN
+    assert task.finished_at == _iso(-20)
+    assert task.duration_seconds == 600
+
+
+def test_unknown_tasks_remain_ahead_of_history_when_truncated(tmp_path) -> None:
+    """状态待核实的任务不能被历史任务挤出摘要行数上限。"""
+    store = _store(tmp_path)
+    _seed_snapshot(
+        store,
+        "keda",
+        [
+            _issue(1, labels=["agent/running"], state="closed"),
+            _issue(2, labels=[]),
+            _issue(3, labels=["agent/ready"]),
+        ],
+    )
+    summary = _summary(store, ["keda"], max_rows=2)
+    assert [task.issue_number for task in summary.tasks] == [3, 2]
+    assert summary.truncated
+
+
+@pytest.mark.parametrize("has_terminal", [False, True])
+def test_reused_lifecycle_uses_the_new_session_events(tmp_path, has_terminal: bool) -> None:
+    """真实写侧会复用同一个生命周期身份；新会话应从 started 事件识别。"""
+    store = _store(tmp_path)
+    _seed_snapshot(store, "keda", [_issue(7, labels=["agent/running"])])
+    store.append_run(
+        RunRecord(
+            repo_id="keda",
+            repo_path="/tmp/keda",
+            issue_number=7,
+            trigger="console_run",
+            agent="old-agent",
+            outcome="failed",
+            error_summary="旧失败",
+            started_at=_iso(-120),
+            finished_at=_iso(-100),
+            duration_seconds=1200,
+        )
+    )
+    store.upsert_lifecycle_run(
+        PrdLifecycleRunRecord(
+            run_id="reused",
+            repo_id="keda",
+            issue_number=7,
+            prd_path="tasks/pending/demo.md",
+            trigger="console_run",
+            started_at=_iso(-180),
+            finished_at=None,
+            outcome=None,
+            history_complete=True,
+        )
+    )
+    for event_type, phase, minute in [
+        ("started", "executing", -30),
+        *(([("failed", "failed", -20)]) if has_terminal else []),
+        ("agent_token_usage", "none", -10),
+    ]:
+        store.append_lifecycle_event(
+            PrdLifecycleEventRecord(
+                run_id="reused",
+                event_key=f"{event_type}@{minute}",
+                event_type=event_type,
+                phase=phase,
+                actor="runner",
+                occurred_at=_iso(minute),
+                detail_json="{}",
+            )
+        )
+    task = _summary(store, ["keda"]).tasks[0]
+    assert task.started_at == _iso(-30)
+    assert task.agent is None
+    if has_terminal:
+        assert task.status is RuntimeTaskStatus.UNKNOWN
+        assert task.finished_at == _iso(-20)
+        assert task.duration_seconds == 600
+    else:
+        assert task.status is RuntimeTaskStatus.RUNNING
+        assert task.finished_at is None
+        assert task.duration_seconds == 1800
+        assert task.phase == "executing"

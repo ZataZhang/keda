@@ -395,7 +395,15 @@ _ALLOWED_FLAGS: dict[tuple[str, ...], set[str]] = {
     # ``build_command_schema`` 只导出叶子命令，所以这条路径由
     # ``_group_callback_flags_by_path()`` 从真实命令树补出来；旗标照抄派生结果，
     # 不凭记忆放行 schema 里查不到的名字。
-    ("loop", "create"): {"--recipe", "--cron", "--every", "--repo-id", "--repo", "--force"},
+    ("loop", "create"): {
+        "--recipe",
+        "--template",
+        "--cron",
+        "--every",
+        "--repo-id",
+        "--repo",
+        "--force",
+    },
     ("loop", "list"): {"--json"},
     ("loop", "run"): {"--now", "--dry-run", "--repo-id", "--repo"},
     ("loop", "cancel"): set(),

@@ -4,7 +4,10 @@
  * 分工：`workflows/*-real-entry.no-auth.spec.ts` 走真实后端与真实入口交付验收证据；
  * **本 spec 用 `page.route` 顶替读端点**，只为稳定锁住前端渲染契约——默认视图是任务看板、
  * 状态文字与颜色同现、筛选/搜索可用、结构化调用默认折叠、来源不可用如实披露。
- * 这里断言的都不是真实运行数据。
+ * 验证层级：production composition；从 /app/dashboard 与 /app/companion 真实页面入口操作，
+ * 保留生产布局、主题、Dialog/Portal 与筛选交互，仅替换后端读响应和本地会话。
+ * Chromium，默认 1440×1200 浅色，另覆盖 440×900 深色与 380×760 小窗、长文本和历史筛选。
+ * 截图断言活动默认、历史缺失阶段降噪与详情边界；这里断言的都不是真实运行数据。
  */
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
@@ -163,12 +166,160 @@ async function mockBoardApi(
     }),
   )
   // 小窗页面复用的日志端点：给一个空窗口，避免真实后端被打穿。
-  await page.route('**/api/v1/agent-runner/issues/*/logs*', (route) =>
-    route.fulfill({ json: { lines: [], next_offset: 0, eof: true } }),
+  await page.route('**/api/v1/agent-runner/console/repositories/*/issues/*/logs*', (route) =>
+    route.fulfill({ json: { status: 'no_attempt', content: '', next_offset: 0, attempt_id: null, truncated: false } }),
   )
 }
 
 test.describe('runtime board (mocked API)', () => {
+  test('desktop sidebar stays visible while the long task list scrolls', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 })
+    const longTasks = Array.from({ length: 40 }, (_, index) => ({
+      ...RUNNING_TASK, issue_number: 500 + index, task_key: `keda-main#${500 + index}`,
+      issue_title: `Long list task ${index + 1}`,
+    }))
+    await mockBoardApi(page, { tasks: { tasks: longTasks } })
+    await page.goto('/app/dashboard')
+    await expect(page.getByTestId(/runtime-task-row-keda-main-/)).toHaveCount(40)
+    const sidebar = page.getByRole('complementary')
+    const main = page.getByRole('main')
+    const sidebarBefore = await sidebar.boundingBox()
+    await main.hover()
+    await page.mouse.wheel(0, 10000)
+    await expect.poll(() => main.evaluate((element) => element.scrollTop)).toBeGreaterThan(1000)
+    await expect(page.getByTestId('runtime-task-row-keda-main-539')).toBeInViewport()
+    await expect(sidebar.getByRole('link', { name: 'Dashboard', exact: true })).toBeInViewport()
+    await expect(sidebar.getByRole('link', { name: 'Settings', exact: true })).toBeInViewport()
+    const sidebarAfter = await sidebar.boundingBox()
+    expect(sidebarAfter!.y).toBe(sidebarBefore!.y)
+    expect(sidebarAfter!.height).toBe(720)
+    expect(await page.evaluate(() => window.scrollY)).toBe(0)
+    await page.screenshot({ path: '/tmp/keda-sidebar-long-list-fixed.png', animations: 'disabled' })
+
+    await sidebar.getByRole('button', { name: '收起导航栏', exact: true }).click()
+    await expect(sidebar).toHaveCSS('width', '56px')
+    await expect(sidebar.getByRole('link', { name: 'Settings', exact: true })).toBeInViewport()
+    await expect(page.getByTestId('runtime-task-row-keda-main-539')).toBeInViewport()
+    await page.screenshot({ path: '/tmp/keda-sidebar-collapsed-fixed.png', animations: 'disabled' })
+  })
+
+  test('short desktop windows scroll only the sidebar menu and keep its controls visible', async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 320 })
+    await mockBoardApi(page)
+    await page.goto('/app/dashboard')
+    const sidebar = page.getByRole('complementary')
+    const menu = sidebar.getByRole('navigation')
+    const main = page.getByRole('main')
+    await expect(menu).toHaveCSS('overflow-y', 'auto')
+    await menu.hover()
+    await page.mouse.wheel(0, 1000)
+    await expect.poll(() => menu.evaluate((element) => element.scrollTop)).toBeGreaterThan(0)
+    await expect(sidebar.getByRole('link', { name: 'Settings', exact: true })).toBeInViewport()
+    await expect(sidebar.getByRole('button', { name: '选择配色风格', exact: true })).toBeInViewport()
+    await expect(sidebar.getByRole('button', { name: '收起导航栏', exact: true })).toBeInViewport()
+    expect(await main.evaluate((element) => element.scrollTop)).toBe(0)
+    expect(await page.evaluate(() => window.scrollY)).toBe(0)
+    await page.screenshot({ path: '/tmp/keda-sidebar-short-window-fixed.png', animations: 'disabled' })
+  })
+
+  test('manual refresh reconciles closed tasks before the next periodic poll', async ({ page }) => {
+    await page.clock.install()
+    await page.clock.pauseAt(new Date())
+    await mockBoardApi(page)
+    let scanCompleted = false
+    let runtimeReads = 0
+    await page.route(TASKS_ENDPOINT, (route) => {
+      runtimeReads += 1
+      return route.fulfill({ json: tasksPayload({ tasks: [{ ...FAILED_TASK,
+        status: scanCompleted ? 'closed' : 'failed', phase: null }] }) })
+    })
+    await page.route('**/api/v1/agent-runner/overview/snapshots', (route) => route.fulfill({ json: {
+      repositories: [], missing_repo_ids: [], sync_status: 'ready',
+      scanned_at: scanCompleted ? '2026-10-26T02:47:54+00:00' : '2026-10-26T02:03:19+00:00',
+    } }))
+    await page.route('**/api/v1/agent-runner/overview/per-repo', (route) => route.fulfill({
+      json: { jobs_by_repo: { 'keda-main': 'scan-closed' } },
+    }))
+    await page.route('**/api/v1/agent-runner/overview/jobs/scan-closed', (route) => {
+      scanCompleted = true
+      return route.fulfill({ json: { job_id: 'scan-closed', status: 'completed', error: null } })
+    })
+    await page.goto('/app/dashboard')
+    await expect(page.getByTestId('runtime-task-row-keda-main-19')).toBeVisible()
+    const readsBeforeRefresh = runtimeReads
+    await page.getByRole('button', { name: /^刷新全部/ }).click()
+    await expect(page.getByTestId('runtime-task-row-keda-main-19')).toHaveCount(0)
+    await expect(page.getByTestId('runtime-filter-closed')).toContainText('1')
+    expect(runtimeReads).toBe(readsBeforeRefresh + 1)
+    await page.getByTestId('runtime-filter-closed').click()
+    await expect(page.getByTestId('runtime-task-row-keda-main-19')).toContainText('已关闭')
+  })
+
+  test('active default keeps unknown tasks and makes history explicitly available', async ({ page }) => {
+    const closed = { ...FAILED_TASK, issue_number: 18, status: 'closed', phase: null,
+      status_reason: 'GitHub Issue 已关闭；关闭原因未记录', labels: ['agent/running'] }
+    const completed = { ...FAILED_TASK, issue_number: 17, status: 'completed', phase: null,
+      last_outcome: 'completed', status_reason: '运行账本终态：completed' }
+    const unknown = { ...RUNNING_TASK, issue_number: 16, status: 'unknown', phase: 'implementation_complete',
+      finished_at: '2026-06-11T10:00:00+00:00', duration_seconds: 1500, last_outcome: 'completed',
+      status_reason: '监控标签仍标记运行，但最近运行已结束；当前执行状态待核实' }
+    await mockBoardApi(page, { tasks: { tasks: [RUNNING_TASK, { ...FAILED_TASK, phase: 'agent' }, unknown, closed, completed] } })
+    await page.goto('/app/dashboard')
+    await expect(page.getByTestId('runtime-filter-active')).toHaveAttribute('aria-pressed', 'true')
+    await expect(page.getByTestId('runtime-filter-active')).toContainText('3')
+    await expect(page.getByTestId('runtime-task-row-keda-main-18')).toHaveCount(0)
+    const unknownRow = page.getByTestId('runtime-task-row-keda-main-16')
+    await expect(unknownRow).toContainText('最近运行已结束')
+    await expect(unknownRow).toContainText('上次运行耗时：25m')
+    await expect(unknownRow).not.toContainText('接下来进入')
+    await expect(page.getByTestId('runtime-task-row-keda-main-19')).not.toContainText('正在处理')
+    await page.screenshot({ path: '/tmp/keda-runtime-active-fixed.png', fullPage: true, animations: 'disabled' })
+
+    await page.getByTestId('runtime-filter-all').click()
+    await expect(page.getByTestId(/runtime-task-row-keda-main-/)).toHaveCount(5)
+    const closedRow = page.getByTestId('runtime-task-row-keda-main-18')
+    await expect(closedRow).toContainText('关闭原因未记录')
+    await expect(closedRow).toContainText('上次运行结果：失败')
+    await expect(closedRow.getByTestId('runtime-task-phase')).toHaveCount(0)
+    await expect(closedRow.getByTestId('runtime-task-phase-description')).toHaveCount(0)
+    await page.getByTestId('runtime-filter-closed').click()
+    await expect(closedRow).toBeVisible()
+    await closedRow.click()
+    await expect(page.getByTestId('runtime-task-detail')).toContainText('关闭原因未记录')
+    await page.screenshot({ path: '/tmp/keda-runtime-history-detail-fixed.png', fullPage: true, animations: 'disabled' })
+    const sheet = page.getByTestId('runtime-task-detail-sheet')
+    await expect(sheet).toBeVisible()
+    const sheetBounds = await sheet.boundingBox()
+    expect(sheetBounds!.x + sheetBounds!.width).toBeLessThanOrEqual(1440)
+  })
+
+  test('history-only board explains the empty active view and filters search together', async ({ page }) => {
+    await mockBoardApi(page, { tasks: { tasks: [{ ...FAILED_TASK, status: 'closed', phase: null }] } })
+    await page.goto('/app/dashboard')
+    await expect(page.getByTestId('runtime-task-empty')).toContainText('当前没有活动任务')
+    await page.getByTestId('runtime-filter-closed').click()
+    await page.getByTestId('runtime-task-search').fill('Broken')
+    await expect(page.getByTestId('runtime-task-row-keda-main-19')).toBeVisible()
+    await page.getByTestId('runtime-task-search').fill('no-match')
+    await expect(page.getByTestId('runtime-task-empty')).toContainText('没有符合筛选条件')
+  })
+
+  test('long recent phase and status remain readable on a narrow dark board', async ({ page }) => {
+    await page.setViewportSize({ width: 440, height: 900 })
+    await page.addInitScript(() => localStorage.setItem('theme', 'dark'))
+    await mockBoardApi(page, { tasks: { tasks: [{ ...FAILED_TASK, phase: 'implementation_complete',
+      issue_title: '很长的任务标题，用于验证窄屏布局中的阶段说明、状态来源与外链布局' }] } })
+    await page.goto('/app/dashboard')
+    const row = page.getByTestId('runtime-task-row-keda-main-19')
+    await expect(page.locator('html')).toHaveClass(/dark/)
+    await expect(row.getByTestId('runtime-task-phase')).toContainText('最近阶段：实现完成')
+    await expect(row).not.toContainText('接下来进入')
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy()
+    const pillHeight = await page.getByTestId('runtime-task-issue-link').evaluate((link) => link.getBoundingClientRect().height)
+    expect(pillHeight).toBeGreaterThan(0)
+    await page.screenshot({ path: '/tmp/keda-runtime-narrow-dark-fixed.png', fullPage: true, animations: 'disabled' })
+  })
+
   test('default view is the task board with readable status labels', async ({ page }) => {
     await mockBoardApi(page)
     await page.goto('/app/dashboard')
@@ -187,6 +338,14 @@ test.describe('runtime board (mocked API)', () => {
       'href',
       'https://example.test/pr/21',
     )
+    const issuePill = page.getByTestId('runtime-task-issue-link').first()
+    const prPill = page.getByTestId('runtime-task-pr-link')
+    const issueStyle = await issuePill.evaluate((element) => ({ height: element.getBoundingClientRect().height,
+      color: getComputedStyle(element).color, border: getComputedStyle(element.parentElement!).borderColor }))
+    const prHeight = await prPill.evaluate((element) => element.getBoundingClientRect().height)
+    expect(issueStyle.height).toBe(prHeight)
+    expect(issueStyle.color).not.toBe('')
+    expect(issueStyle.border).not.toBe('')
     // 默认视图不再铺仓库卡片：仓库级动作收在「仓库监控」一侧。
     await expect(page.getByTestId('dashboard-repo-header')).toHaveCount(0)
   })
@@ -295,6 +454,15 @@ test.describe('runtime board (mocked API)', () => {
 })
 
 test.describe('desktop companion page (mocked API)', () => {
+  test('stale running labels remain visible as unknown in the companion', async ({ page }) => {
+    await mockBoardApi(page, { tasks: { tasks: [{ ...FAILED_TASK, status: 'unknown',
+      status_reason: '监控标签仍标记运行，但最近运行已结束；当前执行状态待核实' }],
+      status_counts: { running: 0, waiting: 0, blocked: 0, failed: 0, completed: 0, closed: 0, unknown: 1 } } })
+    await page.goto('/app/companion')
+    await expect(page.getByTestId('desktop-companion-count-unknown')).toHaveText('状态未知 1')
+    await expect(page.getByTestId('desktop-companion-row-keda-main-19')).toContainText('当前执行状态待核实')
+  })
+
   test('shows readable stages beside blocked status in a narrow window', async ({ page }) => {
     await page.setViewportSize({ width: 380, height: 760 })
     const phases = ['rv_reexec', 'implementation_complete', 'pre_pr_review', null, 'future_phase']
@@ -323,10 +491,15 @@ test.describe('desktop companion page (mocked API)', () => {
       },
     })
     await page.goto('/app/companion')
-    const labels = ['提交后验收重跑', '实现完成', 'PR 前审查', '未记录阶段', 'future_phase']
+    const labels = ['提交后验收重跑', '实现完成', 'PR 前审查', null, 'future_phase']
     for (const [index, label] of labels.entries()) {
       const row = page.getByTestId(`desktop-companion-row-keda-main-${294 + index}`)
-      await expect(row.getByTestId('runtime-task-phase')).toHaveText(`阶段：${label}`)
+      if (label) {
+        await expect(row.getByTestId('runtime-task-phase')).toHaveText(`最近阶段：${label}`)
+      } else {
+        await expect(row.getByTestId('runtime-task-phase')).toHaveCount(0)
+        await expect(row).toContainText('暂无阶段记录')
+      }
       await expect(row.getByTestId('runtime-task-status-reason')).toContainText('agent/blocked')
     }
     await expect(page.getByTestId('desktop-companion-list')).toBeVisible()
