@@ -11,6 +11,7 @@ from backend.core.shared.models.agent_runner import (
     CommandResult,
     PrePrReviewConfig,
 )
+from backend.core.use_cases.agent_runner_failure import DependencyEnvironmentBlockedError
 from tests.conftest import FakeGitHubClient, FakeProcessRunner
 from tests.support.agent_runner import make_ready_issue
 
@@ -117,3 +118,56 @@ def test_shutdown_during_unparseable_review_keeps_issue_running(
         for call in fake_client.calls
     )
     assert not any(call["method"] == "comment_issue" for call in fake_client.calls)
+
+
+def test_shutdown_does_not_swallow_a_real_environment_block(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """停机窗口内确认的环境阻塞仍记录为 blocked，供人工处理。"""
+    from backend.core.shared.interfaces.runner_live_view import NoOpRunnerLiveView
+    from backend.core.use_cases import agent_runner_orchestration_runtime as runtime
+    from backend.core.use_cases.agent_daemon_shutdown import (
+        mark_agent_daemon_stopping,
+        reset_agent_daemon_stopping,
+    )
+
+    issue = make_ready_issue()
+    running_labels = ("agent/running", "agent/codex")
+    fake_client = FakeGitHubClient()
+    fake_client.set_issue_labels(issue.number, running_labels)
+    config = AppConfig()
+
+    def _raise_environment_block(**_kwargs: object) -> None:
+        mark_agent_daemon_stopping()
+        raise DependencyEnvironmentBlockedError("Missing host dependency.", ())
+
+    def _run_with_agent_fallback(*, process_for_agent, **_kwargs: object) -> str:
+        process_for_agent(agent="codex")
+        return "codex"
+
+    monkeypatch.setattr(runtime, "_process_running_publish_recovery", _raise_environment_block)
+    monkeypatch.setattr(runtime, "run_issue_with_agent_fallback", _run_with_agent_fallback)
+    reset_agent_daemon_stopping()
+    try:
+        exit_code = runtime._process_single_issue(
+            issue,
+            "running_publish_recovery",
+            repo_path=tmp_path,
+            config=config,
+            agent="auto",
+            github_client=fake_client,
+            process_runner=FakeProcessRunner(),
+            content_generator=None,
+            run_history_store=None,
+            run_trigger="cli_daemon",
+            effective_repo_id="test-repo",
+            output_view=NoOpRunnerLiveView(),
+        )
+    finally:
+        reset_agent_daemon_stopping()
+
+    assert exit_code == 1
+    assert config.labels.blocked in fake_client._issue_labels[issue.number]
+    assert config.labels.failed not in fake_client._issue_labels[issue.number]
+    assert any(call["method"] == "comment_issue" for call in fake_client.calls)

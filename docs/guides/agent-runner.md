@@ -348,7 +348,7 @@ rebase 到最新 base 时进程退出），会把 Issue 的 worktree 留在 **de
 `agent/ready`，所以"本机认领、进程已死"的僵尸 attempt 过去会永久卡死。现在 daemon 每轮 tick
 开头（Phase -1，早于审议与领取）先做一次崩溃对账。
 
-收到 `SIGTERM` 时，daemon 先设置进程级停机标记，再终止在途 agent 进程组。等待进程退出期间，工作线程把因停机产生的实现、修复、验证、pre-PR review、verifier 或 closeout 中断直接作为取消处理：不写失败评论、不改 Issue 标签、不消耗恢复预算，并保留 `agent/running`。daemon 退出后重启时，Phase -1 崩溃对账按下述规则续传或重新入队。`SIGKILL` 等无法运行停机处理器的硬中断继续由同一崩溃对账处理。
+收到 `SIGTERM` 时，daemon 先设置进程级停机标记，再终止在途 agent 进程组。等待进程退出期间，工作线程把因停机产生的实现、修复、验证、pre-PR review、verifier 或 closeout 中断直接作为取消处理：不写失败评论、不改 Issue 标签、不消耗恢复预算，并保留 `agent/running`。如果处理期间已明确发现需要人工处理的权限、依赖或 Issue 阻塞，仍照常记录为 `agent/blocked`。daemon 退出后重启时，Phase -1 崩溃对账按下述规则续传或重新入队。`SIGKILL` 等无法运行停机处理器的硬中断继续由同一崩溃对账处理。
 
 判定**只读四类现成事实**，不引入心跳表 / 租约库等第二状态源：
 

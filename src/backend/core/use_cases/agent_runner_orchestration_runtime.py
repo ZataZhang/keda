@@ -467,8 +467,6 @@ def _process_single_issue(
         IssueBlockedDuringNoChangeError,
         DependencyEnvironmentBlockedError,
     ) as exc:
-        if _skip_issue_on_daemon_shutdown(issue.number, output_view):
-            return 0
         # 这些情况都是「等人」而非「执行失败」：Issue 进入可恢复的 agent/blocked，
         # 人给出决定后 `kc blocked-continue` 继续，不占用 agent/failed 语义。
         _mark_issue_blocked(
