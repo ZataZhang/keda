@@ -37,7 +37,10 @@ from backend.core.use_cases.agent_runner_git import (
 _logger = logging.getLogger(__name__)
 
 _COMMIT_REQUEST_RELATIVE_PATH = Path(".agent-runner/commit-request.json")
-_MAX_COMMIT_MESSAGE_LENGTH = 200
+# 提交规范（docs/ai-standards/tooling.md）：subject ≤72 字符，why 写在正文。
+_MAX_COMMIT_SUBJECT_LENGTH = 72
+# agent 可以一次写入 subject + body，总长度仍设上限，避免把整份报告塞进提交信息。
+_MAX_COMMIT_MESSAGE_LENGTH = 2000
 
 # 空提交请求的固定文案；保留原始字符串以兼容 is_recoverable_commit_request_error
 # 等基于 message 前缀匹配的旧逻辑。
@@ -75,14 +78,64 @@ def default_commit_message(issue: IssueSummary) -> str:
     return f"[Agent] Issue #{issue.number}: {issue.title}"
 
 
+def _commit_message_lines(raw_message: str) -> list[str]:
+    """规范化提交请求的行：统一换行符、去掉行首尾空白、折叠连续空行、去掉首尾空行。"""
+    normalized_text = raw_message.replace("\r\n", "\n").replace("\r", "\n")
+    lines: list[str] = []
+    for raw_line in normalized_text.split("\n"):
+        line = raw_line.strip()
+        if not line and (not lines or not lines[-1]):
+            continue
+        lines.append(line)
+    while lines and not lines[-1]:
+        lines.pop()
+    return lines
+
+
+def _bounded_commit_subject(first_line: str) -> tuple[str, str]:
+    """收敛标题到规范长度，溢出内容回到正文，不在词中间丢字。"""
+    if len(first_line) <= _MAX_COMMIT_SUBJECT_LENGTH:
+        return first_line, ""
+    break_index = first_line.rfind(" ", 0, _MAX_COMMIT_SUBJECT_LENGTH)
+    if break_index <= 0:
+        head = first_line[:_MAX_COMMIT_SUBJECT_LENGTH]
+        return head, first_line[_MAX_COMMIT_SUBJECT_LENGTH:].lstrip()
+    return first_line[:break_index], first_line[break_index + 1 :]
+
+
+def _bounded_commit_message(subject: str, body_text: str) -> str:
+    """拼 ``subject`` + 空行 + body，超总长时按整行丢弃而不是切在词中间。"""
+    if not body_text:
+        return subject
+    message = f"{subject}\n\n{body_text}"
+    if len(message) <= _MAX_COMMIT_MESSAGE_LENGTH:
+        return message
+    cut_index = message.rfind("\n", 0, _MAX_COMMIT_MESSAGE_LENGTH)
+    return message[: cut_index if cut_index > 0 else _MAX_COMMIT_MESSAGE_LENGTH].rstrip()
+
+
 def sanitize_commit_message(raw_message: object, issue: IssueSummary) -> str:
-    """Return a single-line commit message safe to pass to Git."""
+    """Return a commit message safe to pass to Git, keeping subject and body apart.
+
+    commit proxy 原先把请求压成一行再截 200 字符：正文因此被拼进标题行，标题还在词中间
+    被切断（Issue #326 巡查到的 ``71ab5aad``）。现在保留 agent 写的段落结构，只对标题做
+    长度收敛并把溢出内容放回正文。
+
+    Args:
+        raw_message (object): commit request 里 ``commit_message`` 字段的原值。
+        issue (IssueSummary): 当前 Issue，用于构造缺省提交信息。
+
+    Returns:
+        str: ``subject`` + 空行 + ``body`` 形式的提交信息；请求缺失或为空时返回缺省信息。
+    """
     if not isinstance(raw_message, str):
         return default_commit_message(issue)
-    message = " ".join(raw_message.split())
-    if not message:
+    message_lines = _commit_message_lines(raw_message)
+    if not message_lines:
         return default_commit_message(issue)
-    return message[:_MAX_COMMIT_MESSAGE_LENGTH]
+    subject, subject_overflow = _bounded_commit_subject(message_lines[0])
+    body_lines = [subject_overflow, *message_lines[1:]] if subject_overflow else message_lines[1:]
+    return _bounded_commit_message(subject, "\n".join(body_lines).strip())
 
 
 def read_commit_request(worktree_path: Path, issue: IssueSummary) -> str:
