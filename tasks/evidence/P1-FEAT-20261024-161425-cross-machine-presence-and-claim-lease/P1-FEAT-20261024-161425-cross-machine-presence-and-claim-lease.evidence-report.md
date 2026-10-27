@@ -11,6 +11,7 @@
 - Current executor candidate implementation tree：`bfaad53e278da7a66af2ffad1d0732654f569fc4`
 - RV source HEAD tree（commit `40652d14` 的完整 tree）：`ab6d0208a74baf73ed0b11f8dc3edb1ad98ab376`
 - 四项 RV 各自在最终实现树上重跑；证据命令、输出摘要、expected fail、解释和风险见同目录 `evidence.json`。
+- 原始 RV 终端输出保留 harness 当时输出的 `base_head_tree` 字段；它取自 RV source checkout 的 `git rev-parse HEAD^{tree}`，对应 commit `40652d14` 的完整 tree `ab6d0208a74baf73ed0b11f8dc3edb1ad98ab376`，不是 merge-base。报告采用更精确的 `RV source HEAD tree` 标签，原始输出不改写。
 - 原始终端文件按 RV item 分开保存；RV harness、假 GitHub/agent 与 tree helper 都位于 `scripts/`，不进入代码 diff，脚本和输出不含凭据。
 
 ## 风险优先证据
