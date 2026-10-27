@@ -26,7 +26,7 @@ from backend.core.use_cases.agent_runner_batch_aggregate_queue import (
 )
 from backend.core.use_cases.agent_daemon_shutdown import (
     AgentDaemonShutdownInterrupt,
-    is_agent_daemon_stopping,
+    _skip_issue_on_daemon_shutdown,
 )
 from backend.core.use_cases.agent_runner_blocked_claim import BlockedWorktreeClaimedError
 from backend.core.use_cases.agent_runner_claim_arbitration import ClaimArbitrationLost
@@ -123,18 +123,6 @@ def _resolve_lifecycle_prd_path(issue: IssueSummary) -> str:
         return extract_prd_path(issue.body) or ""
     except Exception:  # noqa: BLE001 - observation must not break the run.
         return ""
-
-
-def _skip_issue_on_daemon_shutdown(
-    issue_number: int,
-    output_view: IRunnerLiveView,
-) -> bool:
-    """停机期间跳过 Issue 失败处置，并保留远端工作流状态。"""
-    if not is_agent_daemon_stopping():
-        return False
-    _logger.info("Daemon is stopping; leaving Issue #%d in its current state.", issue_number)
-    output_view.update_status(issue_number, "skipped")
-    return True
 
 
 def _process_single_issue(
