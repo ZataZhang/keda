@@ -723,64 +723,49 @@ def execute_rebase(
 
             # Agent 通过 commit-request.json 显式表达提交意图
             request_path = worktree_path / ".agent-runner" / "commit-request.json"
-            if request_path.is_file():
+            has_commit_request = request_path.is_file()
+            if has_commit_request:
                 # 再次确认分支上下文，防止 Agent 中途切换分支
                 _ensure_rebase_context_matches_pr_branch(worktree_path, process_runner, pr_branch)
                 _ = read_commit_request(worktree_path, issue)
                 remove_commit_request(worktree_path)
-                if not has_changes(worktree_path, process_runner):
-                    raise RuntimeError("Agent requested a commit but produced no file changes.")
+            has_uncommitted_changes = has_changes(worktree_path, process_runner)
+            if has_uncommitted_changes and not has_commit_request:
+                raise RuntimeError(
+                    "Rebase conflict agent changed files without writing "
+                    ".agent-runner/commit-request.json."
+                )
+            if has_uncommitted_changes:
                 validate_safe_changes(worktree_path, config, process_runner)
                 process_runner.run(["git", "add", "-A"], cwd=worktree_path)
-                continue_result = process_runner.run(
-                    ["git", "-c", "core.editor=true", "rebase", "--continue"],
-                    cwd=worktree_path,
-                    check=False,
+            elif has_commit_request:
+                _logger.info(
+                    "Rebase conflict agent produced no file changes for Issue #%d; "
+                    "attempting to continue the rebase before retrying.",
+                    issue.number,
                 )
-                if continue_result.return_code == 0:
-                    # rebase 成功后再验证并推送
-                    verification_results = ensure_verification_passed_with_recovery(
-                        issue=issue,
-                        worktree_path=worktree_path,
-                        config=config,
-                        process_runner=process_runner,
-                        supervisor_agent=supervisor_agent,
-                        pr_branch=pr_branch,
-                    )
-                    process_runner.run(
-                        ["git", "push", "--force-with-lease", remote, pr_branch],
-                        cwd=worktree_path,
-                    )
-                    return verification_results
-                reset_attempt_budget_for_next_commit()
-            else:
-                # Agent 未写 commit-request 却改文件，拒绝
-                if has_changes(worktree_path, process_runner):
-                    raise RuntimeError(
-                        "Rebase conflict agent changed files without writing "
-                        ".agent-runner/commit-request.json."
-                    )
-                # Agent 未改文件，尝试继续 rebase
-                continue_result = process_runner.run(
-                    ["git", "-c", "core.editor=true", "rebase", "--continue"],
-                    cwd=worktree_path,
-                    check=False,
+
+            continue_result = process_runner.run(
+                ["git", "-c", "core.editor=true", "rebase", "--continue"],
+                cwd=worktree_path,
+                check=False,
+            )
+            if continue_result.return_code == 0:
+                # rebase 成功后再验证并推送
+                verification_results = ensure_verification_passed_with_recovery(
+                    issue=issue,
+                    worktree_path=worktree_path,
+                    config=config,
+                    process_runner=process_runner,
+                    supervisor_agent=supervisor_agent,
+                    pr_branch=pr_branch,
                 )
-                if continue_result.return_code == 0:
-                    verification_results = ensure_verification_passed_with_recovery(
-                        issue=issue,
-                        worktree_path=worktree_path,
-                        config=config,
-                        process_runner=process_runner,
-                        supervisor_agent=supervisor_agent,
-                        pr_branch=pr_branch,
-                    )
-                    process_runner.run(
-                        ["git", "push", "--force-with-lease", remote, pr_branch],
-                        cwd=worktree_path,
-                    )
-                    return verification_results
-                reset_attempt_budget_for_next_commit()
+                process_runner.run(
+                    ["git", "push", "--force-with-lease", remote, pr_branch],
+                    cwd=worktree_path,
+                )
+                return verification_results
+            reset_attempt_budget_for_next_commit()
 
         # 重试用尽后回退 rebase
         process_runner.run(

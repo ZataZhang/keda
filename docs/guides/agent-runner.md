@@ -1236,7 +1236,7 @@ CI 容器镜像预装浏览器运行时是后续工作；首版只保证本地 r
 
 1. **远程分支对齐**：如果 `refs/remotes/<remote>/issue-<number>` 存在，则 fetch 并仅当本地分支是其祖先、且 worktree 干净时做 fast-forward；dirty、diverged 或本地领先场景会保留本地状态并失败/继续，不会 destructive reset。
 2. **分支状态自愈**：如果 worktree 处于 detached HEAD（例如 post-PR supervisor 正在 rebase 或被人工 checkout 到某个 commit），runner 会尝试自动恢复：
-   - 处于 active rebase 时：无冲突则 `rebase --continue`；有冲突则调用配置的 AI agent 解决冲突并继续 rebase，和 post-PR supervisor 的冲突解决策略一致。`max_repair_attempts` 限制同一待重放提交的冲突修复次数；rebase 成功推进到下一提交后计数重置，并在整个 rebase 完成后统一验证。agent 在该提交的次数上限内仍无法解决，才会 fallback 到 `rebase --abort` 并 checkout 目标分支。
+   - 处于 active rebase 时：无冲突则 `rebase --continue`；有冲突则调用配置的 AI agent 解决。agent 写入提交请求且确有文件改动时，runner 会验证、暂存并提交；请求为空时不造空提交，而是尝试继续 rebase，让 Git 处理已在目标分支中的变更。`max_repair_attempts` 限制同一待重放提交的冲突修复次数；rebase 成功推进到下一提交后计数重置，并在整个 rebase 完成后统一验证。agent 在该提交的次数上限内仍无法解决，才会 fallback 到 `rebase --abort` 并 checkout 目标分支。
    - 如果这次自愈替 post-PR supervisor 完成了 rebase，后续 supervisor 会校验原始 head、rebase 完成记录、worktree 清洁状态和远端跟踪 head，再从已 rebased head 继续最终验证与发布。
    - 单纯 detached HEAD：若 `issue-<number>` 分支不存在或当前 HEAD 领先于该分支，则把分支指到当前 HEAD 并 checkout；若已分叉则报错，避免静默丢失历史。
 
@@ -2017,6 +2017,8 @@ supervisor 本身始终是只读审阅；`[agent_runner.post_pr_supervisor].repa
 在 rebase conflict recovery 过程中，runner 会在继续 rebase 之前先校验当前 branch。如果 `git branch --show-current` 返回 PR branch 名称，说明工作区处于正常 branch 上，恢复流程继续执行。如果返回空（表示处于 detached HEAD 的 rebase 中间态），runner 不会仅凭空 branch 名称就继续，而是进一步读取 Git 的 active rebase metadata（`.git/rebase-merge/head-name` 或 `.git/rebase-apply/head-name`），确认 rebase 目标 branch 与预期的 PR branch 一致后才允许继续。
 
 如果 rebase metadata 缺失、目标 branch 未知，或者解析出的目标与预期 PR branch 不匹配，runner 会拒绝继续并抛出带有诊断信息的错误，且**不会自动 abort rebase**。这样可以把工作区保留在冲突状态，供运维人员手动排查。该检查独立于普通的 commit proxy branch validation，专门用于保护 rebase 中间态。
+
+冲突修复 Agent 写了 `commit-request.json`、但没有产生文件变更时，runner 会清理请求并尝试 `git rebase --continue`。只有 Git 确认 rebase 继续成功后才运行验证并推送；若冲突仍未解决，则继续现有重试流程，不会仅因空提交请求就把 Issue 判为失败。Agent 未写提交请求却留下文件变更时仍拒绝继续。
 
 - 正常 branch：直接校验 branch 名称与预期 PR branch 是否一致。
 - Detached HEAD rebase：读取 `.git/rebase-merge/head-name` 或 `.git/rebase-apply/head-name` 解析目标 branch。

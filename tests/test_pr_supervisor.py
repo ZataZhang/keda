@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from backend.core.shared.interfaces.agent_runner import IProcessRunner
 from backend.core.shared.models.agent_runner import (
     AppConfig,
     CommandResult,
@@ -2579,11 +2580,20 @@ def test_execute_rebase_conflict_path_does_not_run_git_commit(
     assert not any(c[:2] == ("git", "commit") for c in commands)
 
 
+@pytest.mark.parametrize(
+    ("use_empty_resolution", "expected_file_content"),
+    [
+        (False, "resolved content"),
+        (True, "main updated content"),
+    ],
+)
 def test_execute_rebase_real_git_conflict_allows_detached_head(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    use_empty_resolution: bool,
+    expected_file_content: str,
 ) -> None:
-    """Real git rebase conflict with detached HEAD resolves successfully."""
+    """真实 Git rebase 冲突可在普通修复或空修复请求后继续。"""
     import json
     import subprocess
 
@@ -2689,14 +2699,6 @@ def test_execute_rebase_real_git_conflict_allows_detached_head(
     )
     assert rebase_result.returncode != 0, "Expected rebase to conflict"
 
-    shared_file.write_text("resolved content", encoding="utf-8")
-    subprocess.run(
-        ["git", "add", "shared.txt"],
-        cwd=repo_path,
-        check=True,
-        capture_output=True,
-    )
-
     branch_result = subprocess.run(
         ["git", "branch", "--show-current"],
         cwd=repo_path,
@@ -2707,11 +2709,35 @@ def test_execute_rebase_real_git_conflict_allows_detached_head(
     assert branch_result.stdout.strip() == "", "Expected detached HEAD during rebase"
 
     request_path = repo_path / ".agent-runner" / "commit-request.json"
-    request_path.parent.mkdir(parents=True, exist_ok=True)
-    request_path.write_text(
-        json.dumps({"commit_message": "resolve conflict"}),
-        encoding="utf-8",
-    )
+
+    def resolve_conflict_and_write_empty_or_normal_request(
+        _agent_name: str,
+        _prompt: str,
+        agent_worktree_path: Path,
+        _process_runner: IProcessRunner,
+        **_kwargs: object,
+    ) -> CommandResult:
+        if use_empty_resolution:
+            subprocess.run(
+                ["git", "checkout", "--ours", "shared.txt"],
+                cwd=agent_worktree_path,
+                check=True,
+                capture_output=True,
+            )
+        else:
+            shared_file.write_text("resolved content", encoding="utf-8")
+        subprocess.run(
+            ["git", "add", "shared.txt"],
+            cwd=agent_worktree_path,
+            check=True,
+            capture_output=True,
+        )
+        request_path.parent.mkdir(parents=True, exist_ok=True)
+        request_path.write_text(
+            json.dumps({"commit_message": "resolve conflict"}),
+            encoding="utf-8",
+        )
+        return CommandResult(command=("noop",), return_code=0, stdout="", stderr="")
 
     head_result = subprocess.run(
         ["git", "rev-parse", "HEAD"],
@@ -2724,7 +2750,7 @@ def test_execute_rebase_real_git_conflict_allows_detached_head(
 
     monkeypatch.setattr(
         "backend.core.use_cases.pr_supervisor.run_agent_with_prompt",
-        _noop_run_agent,
+        resolve_conflict_and_write_empty_or_normal_request,
     )
 
     class _NoOpFetchRebasePushRunner:
@@ -2800,7 +2826,8 @@ def test_execute_rebase_real_git_conflict_allows_detached_head(
         supervisor_agent="codex",
     )
 
-    assert shared_file.read_text(encoding="utf-8") == "resolved content"
+    assert shared_file.read_text(encoding="utf-8") == expected_file_content
+    assert not request_path.exists()
 
     branch_after = subprocess.run(
         ["git", "branch", "--show-current"],
@@ -2819,7 +2846,7 @@ def test_execute_rebase_real_git_conflict_allows_detached_head(
         text=True,
     )
     assert "main update" in log_result.stdout
-    assert "pr commit" in log_result.stdout
+    assert ("pr commit" in log_result.stdout) == (not use_empty_resolution)
 
 
 def test_ensure_rebase_context_rejects_mismatched_target(tmp_path: Path) -> None:
