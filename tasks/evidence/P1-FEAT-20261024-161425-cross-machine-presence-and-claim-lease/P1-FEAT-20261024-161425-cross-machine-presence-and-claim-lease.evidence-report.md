@@ -4,12 +4,12 @@
 |---|---|---|
 | 在一台机器上看到两台机器及各自在做的 Issue（rv-1） | `tasks/evidence/P1-FEAT-20261024-161425-cross-machine-presence-and-claim-lease/rv-1-kc-peers.txt`；打开：`open "$(git rev-parse --show-toplevel)/tasks/evidence/P1-FEAT-20261024-161425-cross-machine-presence-and-claim-lease/rv-1-kc-peers.txt"`。这是终端原始输出；本项没有截图或其他静态图片。 | 表格里 B 那一行的"正在处理"列是 `#42`；JSON 中 `machines` 长度为 2 |
 
-执行者已用两个独立状态目录、两个真实 daemon 与真实 `kc peers` 交叉核对这份输出。PRD 已归档到 `tasks/archive/P1-FEAT-20261024-161425-cross-machine-presence-and-claim-lease.md`；运行 `just prd review tasks/archive/P1-FEAT-20261024-161425-cross-machine-presence-and-claim-lease.md` 可定位交互清单。PR #330 已由执行者接管；candidate tree `bfaad53e278da7a66af2ffad1d0732654f569fc4` 的四项 RV 与九模块测试已通过（149 passed）。Qoder 在同一候选实现树上返回独立 verifier **PASS**；它提出的 HTML 缺失、rv-3 PID 过期和 Change Log 歧义三项呈递问题，已在当前 PR HEAD `deb4a48586f5dea9cbf057c395ebc86034283d5a` 和 evidence branch `12e09af2eb9ffa6dbfe12ce1540650dd91febcff` 修正。GitHub CI 以最终 PR head 的结果为准。
+执行者已用两个独立状态目录、两个真实 daemon 与真实 `kc peers` 交叉核对这份输出。PRD 已归档到 `tasks/archive/P1-FEAT-20261024-161425-cross-machine-presence-and-claim-lease.md`；运行 `just prd review tasks/archive/P1-FEAT-20261024-161425-cross-machine-presence-and-claim-lease.md` 可定位交互清单。PR #330 已由执行者接管；candidate tree `bfaad53e278da7a66af2ffad1d0732654f569fc4` 的四项 RV 与九模块测试已通过（149 passed）。Qoder 在同一候选实现树上返回独立 verifier **PASS**；它提出的 HTML 缺失、rv-3 PID 过期和 Change Log 歧义三项呈递问题，已在当时的 PR follow-up head `deb4a48586f5dea9cbf057c395ebc86034283d5a` 和当时发布的 evidence branch revision `12e09af2eb9ffa6dbfe12ce1540650dd91febcff` 修正；这些是历史发布身份，不代表最终 PR head 或当前 evidence ref。GitHub CI 以最终 PR head 的结果为准。
 
 ## 验证身份
 
 - Current executor candidate implementation tree：`bfaad53e278da7a66af2ffad1d0732654f569fc4`
-- Base HEAD tree：`ab6d0208a74baf73ed0b11f8dc3edb1ad98ab376`
+- RV source HEAD tree（commit `40652d14` 的完整 tree）：`ab6d0208a74baf73ed0b11f8dc3edb1ad98ab376`
 - 四项 RV 各自在最终实现树上重跑；证据命令、输出摘要、expected fail、解释和风险见同目录 `evidence.json`。
 - 原始终端文件按 RV item 分开保存；RV harness、假 GitHub/agent 与 tree helper 都位于 `scripts/`，不进入代码 diff，脚本和输出不含凭据。
 

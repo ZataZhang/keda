@@ -577,7 +577,7 @@ No external validation required; repository evidence was sufficient.（GitHub RE
 | 决策二 · rv-4（R2） | 负控拒绝重复标签移除后留下 2 条状态 Issue，唯一板 oracle 失败；重试及并发首启绿色路径都收敛至 1 条。关闭状态开关后状态评论不变而租约继续续期；同主机名、不同 machine_id 的远端有效租约保持运行。 | `rv-4-presence.txt` |
 | 双机可见 · rv-1（R1） | 负控隐藏 B 评论后真实 `kc peers --json` 只见 1 台，数量断言失败；绿色表格与 JSON 都见两台在线机器，B 正在处理 #42 / `codex`，状态 Issue 有两条评论。 | `rv-1-kc-peers.txt` |
 
-每项的完整实际命令、负控、预期失败、输出摘要、解释与风险见 `evidence.json`；终端原始输出只含本项内容。上一轮 Qoder 曾在 builder HEAD `9119bc370bfde2b04be769621356aa2383a7a105`、candidate implementation tree `2bd42838188f29bc252a6216082a21f4bf187c9c` 返回 `risk=green`；该候选树早于行数门禁修复，不构成本轮独立验收。Qoder 后续在 builder HEAD `e58f70b3c4213d1598f0f667b08e0cce061d81be` 上对当前 candidate implementation tree `bfaad53e278da7a66af2ffad1d0732654f569fc4` 独立复核并返回 **PASS**。它发现的三项非阻塞呈递问题已在 docs-only PR head `deb4a48586f5dea9cbf057c395ebc86034283d5a` 修正；当前 PR head 过滤后的实现树仍为 `bfaad53e278da7a66af2ffad1d0732654f569fc4`。上一轮 verifier 披露：真实 GitHub 写入尚未覆盖；预算耗尽与待返工两个 FR-6 分支只有单测覆盖；无心跳的内部直接调用可能留下无租约认领。
+每项的完整实际命令、负控、预期失败、输出摘要、解释与风险见 `evidence.json`；终端原始输出只含本项内容。上一轮 Qoder 曾在 builder HEAD `9119bc370bfde2b04be769621356aa2383a7a105`、candidate implementation tree `2bd42838188f29bc252a6216082a21f4bf187c9c` 返回 `risk=green`；该候选树早于行数门禁修复，不构成本轮独立验收。Qoder 后续对 RV source HEAD `e58f70b3c4213d1598f0f667b08e0cce061d81be` 对应的 candidate implementation tree `bfaad53e278da7a66af2ffad1d0732654f569fc4` 独立复核并返回 **PASS**，独立重跑九模块并核对 25 条 manifest 断言。它发现的三项非阻塞呈递问题已在当时的 follow-up PR head `deb4a48586f5dea9cbf057c395ebc86034283d5a` 修正；该提交是中间 docs-only head。最终 PR head `fb4d3329e65d36ac22c3d04a5f1544f2ea426ddb` 与 squash merge `ec5ad44e37676c65165de7a56039b0caf622d6e2` 的完整 tree 均为 `f2ae48f91ad861868b9299e3be1a8461b51e6f22`，排除 PRD/evidence records 后的实现树仍为 `bfaad53e278da7a66af2ffad1d0732654f569fc4`。上一轮 verifier 披露：真实 GitHub 写入尚未覆盖；预算耗尽与待返工两个 FR-6 分支只有单测覆盖；无心跳的内部直接调用可能留下无租约认领。
 
 ### Human-Confirmed (来自 Part A 风险地图)
 
@@ -762,3 +762,11 @@ No external validation required; repository evidence was sufficient.（GitHub RE
 - Reason: Record the user's authorized squash merge as acceptance under the PR's explicit merge-acceptance contract.
 - Impact: No implementation behavior changed; the PRD now records the human-visible `kc peers` acceptance that the merge contract covered.
 - Review: Merge commit `ec5ad44e37676c65165de7a56039b0caf622d6e2`; filtered implementation tree matched candidate `bfaad53e278da7a66af2ffad1d0732654f569fc4`.
+
+### Correct post-merge verifier delivery pointers
+- Type: delivery-record correction
+- Before: Verification records still pointed to evidence revision `12e09af2eb9ffa6dbfe12ce1540650dd91febcff` as current, described intermediate PR head `deb4a48586f5dea9cbf057c395ebc86034283d5a` as final, labeled tree `ab6d0208a74baf73ed0b11f8dc3edb1ad98ab376` as a base tree, and included unnecessary executable-bit changes on Python scripts.
+- After: The final PR head `fb4d3329e65d36ac22c3d04a5f1544f2ea426ddb` and squash merge `ec5ad44e37676c65165de7a56039b0caf622d6e2` have the same full tree `f2ae48f91ad861868b9299e3be1a8461b51e6f22`; the filtered implementation tree remains `bfaad53e278da7a66af2ffad1d0732654f569fc4`. Tree `ab6d0208a74baf73ed0b11f8dc3edb1ad98ab376` is the full tree of RV source commit `40652d14`. The evidence ref is published at `e714f16f3326a485b75b4f4126d526c49abd12eb`; only the directly invoked `fake-agent` and `gh` shell wrappers have executable mode.
+- Reason: Preserve accurate links between the reviewed candidate, final PR head, squash tree, and published evidence after the post-merge record audit.
+- Impact: No implementation behavior or acceptance decision changed; all updates are limited to verifier and delivery records.
+- Review: The first post-merge Qoder CLI audit returned qualified PASS (6 of 7 obligations verified) and could not inspect the PR body because its `gh` call was denied. The executor independently checked the body and corrected the four reported record issues; a read-only Qoder CLI follow-up will verify the corrected bundle.

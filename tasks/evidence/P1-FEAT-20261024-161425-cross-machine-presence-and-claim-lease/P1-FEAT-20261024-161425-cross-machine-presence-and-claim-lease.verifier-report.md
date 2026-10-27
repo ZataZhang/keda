@@ -6,7 +6,7 @@
 - 独立性 review 发现仓库的 verifier preset 可与 builder 同为 codex；`_choose_verifier_agent` 已改为跳过同一 agent、选回退链里的不同 agent，并在没有候选时 fail closed。回归测试覆盖两种情况。
 - 当前验证：相关九模块 **149 passed**；`just test` 实际输出 `no tests ran`，不作为测试通过证据；`SKIP=check-test-flag just lint --full`、reuse lint 与严格 MkDocs 构建通过。
 - Microsoft Edge smoke 已完成：首卡、三卡翻页和结果 Markdown 通过；0 个 page error，3 条 textarea 可访问性警告。
-- 旧 Qoder GREEN 绑定到此前候选树，不能覆盖本轮文件行数修复。Qoder 首次检查刷新后的候选树时发现 manifest 与报告仍指向旧哈希；这些记录现已统一绑定到当前树。Qoder 对 builder HEAD `e58f70b3c4213d1598f0f667b08e0cce061d81be` 的只读独立复核返回 **PASS**，candidate implementation tree 为 `bfaad53e278da7a66af2ffad1d0732654f569fc4`。它提出的三个非阻塞证据呈递问题已在 `deb4a48586f5dea9cbf057c395ebc86034283d5a` 修复，且没有改变该候选实现树；最终 PR HEAD 上的过滤树仍为同一哈希。
+- 旧 Qoder GREEN 绑定到此前候选树，不能覆盖本轮文件行数修复。Qoder 首次检查刷新后的候选树时发现 manifest 与报告仍指向旧哈希；这些记录现已统一绑定到当前树。Qoder 对 builder HEAD `e58f70b3c4213d1598f0f667b08e0cce061d81be` 的只读独立复核返回 **PASS**，candidate implementation tree 为 `bfaad53e278da7a66af2ffad1d0732654f569fc4`。它提出的三个非阻塞证据呈递问题已在 `deb4a48586f5dea9cbf057c395ebc86034283d5a` 修复，且没有改变该候选实现树。执行者之后核对最终 PR head `fb4d3329e65d36ac22c3d04a5f1544f2ea426ddb` 与 squash merge `ec5ad44e37676c65165de7a56039b0caf622d6e2` 的完整 tree 均为 `f2ae48f91ad861868b9299e3be1a8461b51e6f22`，过滤候选树仍为 `bfaad53e278da7a66af2ffad1d0732654f569fc4`。
 
 ## 评审基准
 
@@ -14,7 +14,7 @@
 - 要实现：GitHub 上按仓库共享机器在线状态；`kc peers` 表格/JSON；含 machine_id 的独立租约；远端过期对账；续租失败后自停；push/PR 前认领确认；兼容无租约旧认领。
 - 明确不做：新协调服务、数据库迁移、标签状态机重构、租约有效时强制接手、续传另一台机器的本地 WIP、Console 机器页面。
 - 真实交付边界：CLI 与 daemon、GitHub Issue/comment adapter、claim arbitration/reconcile/admission/publication、machine identity/config、guide 与 packaged operator skill。
-- 最终候选实现树：`bfaad53e278da7a66af2ffad1d0732654f569fc4`（不含本 PRD 与 evidence delivery records），base HEAD tree `ab6d0208a74baf73ed0b11f8dc3edb1ad98ab376`。
+- 最终候选实现树：`bfaad53e278da7a66af2ffad1d0732654f569fc4`（不含本 PRD 与 evidence delivery records），RV source HEAD tree（commit `40652d14` 的完整 tree）`ab6d0208a74baf73ed0b11f8dc3edb1ad98ab376`。
 
 ## Findings
 
@@ -46,7 +46,7 @@
 
 **历史 verdict（不满足独立性）**：commit `0a8d9cf06c54f547c93cd2d40ed2b1260e4bd320`（tree `8b8c0d22461ab066fef954d7b88b376a3f3884af`）上的 GREEN 使用 codex verifier，而 builder 同为 codex；它也早于当前候选树。该结果不得作为本 PR 的独立 verifier PASS。
 
-**当前候选树门禁：PASS。** Qoder 以只读独立 verifier 身份审查 builder HEAD `e58f70b3c4213d1598f0f667b08e0cce061d81be`，重新计算 candidate implementation tree `bfaad53e278da7a66af2ffad1d0732654f569fc4`，并独立重跑九个相关测试模块（149 passed），返回 **PASS**。RV-1 至 RV-4、manifest 和此候选树一致，base HEAD tree 为 `ab6d0208a74baf73ed0b11f8dc3edb1ad98ab376`。Qoder 另指出的三个非阻塞记录问题已由执行者修复并核对：HTML 清单已发布到 evidence branch，rv-3 PID 与原始输出相同，历史 Change Log 用语不再暗示旧 verdict 覆盖当前树。修复仅变更交付记录；最终 PR HEAD `deb4a48586f5dea9cbf057c395ebc86034283d5a` 的过滤候选树仍可复算为 `bfaad53e278da7a66af2ffad1d0732654f569fc4`。完整单元测试与真实 GitHub 首次写入等披露边界见下文。
+**当前候选树门禁：PASS。** Qoder 以只读独立 verifier 身份审查 builder HEAD `e58f70b3c4213d1598f0f667b08e0cce061d81be`，重新计算 candidate implementation tree `bfaad53e278da7a66af2ffad1d0732654f569fc4`，并独立重跑九个相关测试模块（149 passed），返回 **PASS**。RV-1 至 RV-4、manifest 和此候选树一致，RV source HEAD tree 为 `ab6d0208a74baf73ed0b11f8dc3edb1ad98ab376`（commit `40652d14` 的完整 tree）。Qoder 另指出的三个非阻塞记录问题已由执行者修复并核对：HTML 清单已发布到 evidence branch，rv-3 PID 与原始输出相同，历史 Change Log 用语不再暗示旧 verdict 覆盖当前树。修复仅变更交付记录；当时的 PR follow-up head `deb4a48586f5dea9cbf057c395ebc86034283d5a` 是中间 docs-only 版本；最终 PR head `fb4d3329e65d36ac22c3d04a5f1544f2ea426ddb` 以及 squash merge `ec5ad44e37676c65165de7a56039b0caf622d6e2` 的完整树均为 `f2ae48f91ad861868b9299e3be1a8461b51e6f22`，过滤候选树仍可复算为 `bfaad53e278da7a66af2ffad1d0732654f569fc4`。完整单元测试与真实 GitHub 首次写入等披露边界见下文。
 
 **Verifier 披露的非阻塞覆盖边界**：
 
@@ -74,7 +74,7 @@
 ```json
 {
   "verdict": "pass",
-  "summary": "Qoder independently reviewed builder HEAD e58f70b3c4213d1598f0f667b08e0cce061d81be and recomputed the candidate implementation tree bfaad53e278da7a66af2ffad1d0732654f569fc4. RV-1 through RV-4 passed with negative controls; the nine relevant pytest modules passed (149 passed); all 25 manifest stdout assertions matched their raw outputs. The current PR head deb4a48586f5dea9cbf057c395ebc86034283d5a keeps the same filtered implementation tree. Three non-blocking evidence presentation findings were corrected in that docs-only commit and the published evidence bundle.",
+  "summary": "Qoder independently reviewed builder/RV source HEAD e58f70b3c4213d1598f0f667b08e0cce061d81be and recomputed candidate implementation tree bfaad53e278da7a66af2ffad1d0732654f569fc4. RV-1 through RV-4 passed with negative controls; nine relevant pytest modules passed (149 passed); all 25 manifest assertions matched their raw outputs. At the time of that review, intermediate follow-up PR head deb4a48586f5dea9cbf057c395ebc86034283d5a kept the same filtered tree, and its three delivery-record findings were corrected. This original review does not claim to cover the final PR head."
   "findings": []
 }
 ```
