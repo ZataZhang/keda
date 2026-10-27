@@ -74,6 +74,13 @@ def _make_settings(**kwargs) -> AgentRunnerSettings:
     return AgentRunnerSettings(**kwargs)
 
 
+def test_hosted_runner_auth_root_default_is_valid_for_linux_hosted_path() -> None:
+    """Linux hosted tmpfs 默认路径在 Windows CLI 环境中也能完成配置加载。"""
+    settings = AgentRunnerHostedSettings()
+
+    assert settings.runner_auth_root == "/run/kedacode/runner-auth"
+
+
 def test_hosted_runner_repository_binding_requires_absolute_path_pair(tmp_path: Path):
     """托管 runner 的 repo id 与 checkout 路径必须成对配置且路径为绝对路径。"""
     with pytest.raises(ValueError, match="must be configured together"):

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+import os
+from pathlib import Path, PurePosixPath
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field, model_validator
@@ -68,10 +69,19 @@ class AgentRunnerHostedSettings(BaseModel):
             raise ValueError(
                 "hosted.repository_id and hosted.repository_path must be configured together"
             )
-        runner_auth_root = Path(self.runner_auth_root).expanduser()
-        if not runner_auth_root.is_absolute():
-            raise ValueError("hosted.runner_auth_root must be an absolute path")
-        object.__setattr__(self, "runner_auth_root", str(runner_auth_root.resolve()))
+        expanded_runner_auth_root = os.path.expanduser(self.runner_auth_root)
+        if os.name == "nt":
+            # 该目录属于 Linux hosted 主机，不按 Windows 客户端的路径语法解释。
+            runner_auth_root = PurePosixPath(expanded_runner_auth_root)
+            if not runner_auth_root.is_absolute():
+                raise ValueError("hosted.runner_auth_root must be an absolute path")
+            normalized_runner_auth_root = runner_auth_root.as_posix()
+        else:
+            runner_auth_root = Path(expanded_runner_auth_root)
+            if not runner_auth_root.is_absolute():
+                raise ValueError("hosted.runner_auth_root must be an absolute path")
+            normalized_runner_auth_root = str(runner_auth_root.resolve())
+        object.__setattr__(self, "runner_auth_root", normalized_runner_auth_root)
         if self.repository_path:
             repository_path = Path(self.repository_path).expanduser()
             if not repository_path.is_absolute():

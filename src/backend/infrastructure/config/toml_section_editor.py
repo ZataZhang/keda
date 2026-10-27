@@ -171,9 +171,9 @@ def _thread_held_locks() -> set[str]:
 def _open_lock_file(lock_path: Path) -> int:
     """打开（必要时以 :data:`_LOCK_FILE_MODE` 新建）锁文件，返回其 fd。
 
-    先 ``O_EXCL`` 再回落 ``O_CREAT``：只有"确实是本进程建出来的"那次才 fchmod，避免
-    把别人建好的锁文件权限改来改去；``O_EXCL`` 分支的 mode 会被 umask 削，所以补一次
-    显式 ``fchmod`` 保证是 0600。
+    先 ``O_EXCL`` 再回落 ``O_CREAT``：只有"确实是本进程建出来的"那次才设置权限，避免
+    把别人建好的锁文件权限改来改去；POSIX 平台补一次显式 ``fchmod``，抵消 ``umask``
+    对 0600 的影响。Windows 使用父目录 ACL。
     """
     try:
         created_fd = os.open(
@@ -183,7 +183,8 @@ def _open_lock_file(lock_path: Path) -> int:
         )
     except FileExistsError:
         return os.open(str(lock_path), os.O_RDWR | os.O_CREAT)
-    os.fchmod(created_fd, _LOCK_FILE_MODE)
+    if hasattr(os, "fchmod"):
+        os.fchmod(created_fd, _LOCK_FILE_MODE)
     return created_fd
 
 
