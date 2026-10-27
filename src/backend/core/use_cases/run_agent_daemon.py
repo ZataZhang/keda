@@ -48,6 +48,10 @@ from backend.core.use_cases.backlog_concurrency import (
     resolve_execution_ceiling,
 )
 from backend.core.use_cases.daemon_execution_slots import DaemonExecutionSlots
+from backend.core.use_cases.agent_daemon_shutdown import (
+    mark_agent_daemon_stopping,
+    reset_agent_daemon_stopping,
+)
 from backend.core.use_cases.daemon_parallel_limit_status import (
     DaemonParallelLimitStatus,
     clear_daemon_parallel_limit_status,
@@ -211,9 +215,11 @@ def run_agent_daemon(
             读取（命令行 ``--concurrency`` 只有 daemon 自己知道）；退出时删除。
     """
     previous_sigterm_handler: Any = signal.getsignal(signal.SIGTERM)
+    reset_agent_daemon_stopping()
 
     def _handle_sigterm(signum: int, frame: Any) -> None:
         """优雅停机：先整组终止在途 agent 子进程树，再退出主循环。"""
+        mark_agent_daemon_stopping()
         _logger.info("Daemon received SIGTERM; terminating in-flight agent trees before exit.")
         _terminate_descendant_process_trees()
         raise SystemExit(0)
