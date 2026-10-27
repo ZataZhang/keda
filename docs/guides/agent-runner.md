@@ -262,6 +262,16 @@ kc labels sync --repo-id keda
 - Notes: 等待上游 API 改造完成
 ```
 
+依赖小节支持 `## Delivery Dependencies` 单层标题，也支持 PRD 模板使用的
+`## 8. Delivery Dependencies` 外层标题加 `### Delivery Dependencies` 子标题。
+解析器按匹配标题的级别确定边界：更低级标题仍属于该小节，遇到同级或更高级标题才结束。
+围栏代码块（``` / ~~~）里的内容是示例，不参与字段解析，也不会被当成第二个依赖小节；
+声明必须写成小节里的普通列表项。
+每份 PRD 应只声明一个依赖小节；重复小节若包含额外依赖，`kc issue create` 会报错并停止，避免遗漏后续依赖。
+`Depends on tasks/issues` 声明非 `none` 内容却没有解析到依赖引用时（例如依赖标题拼写错误），
+`kc issue create` 会报告 PRD 路径并在创建 Issue 前失败；该检查只看解析器没有覆盖到的正文区域，
+因此小节外的散文或围栏示例不会误拦。
+
 字段说明：
 
 | 字段 | 说明 |
@@ -3266,7 +3276,9 @@ AI 或模板生成路径，请显式设置 `enabled = true`。关闭仅影响 PR
 ### 必需锚点
 
 - Issue body 必须包含精确行：`- PRD path: \`<relative_prd_path>\``
-- PR body 必须包含：`Closes #<issue_number>`
+- PR body 必须包含：`Closes #<issue_number>`，且必须写在正文里而不是围栏代码块里——
+  GitHub 不认块内的 closing 引用，只认块内文本的正文会被判为生成失败并回退到
+  template / 确定性正文，避免发布一个没有 Issue 关联的 PR。
 - PR 标题不能只是 `Closes #<issue_number>` 这类 closing 引用行：`output = "markdown"` 时
   首个非空行会被解析成标题，而约定的首行恰是 `Closes #N`；这类标题作废，回退到
   `[Agent] <issue 标题>`。
@@ -3711,12 +3723,19 @@ verifier 能跑的就是 builder 写进 manifest 的那些 capture 脚本，而�
 
 **branch protection 配置（一次性，operator 手动）**：GitHub 仓库 Settings → Branches → 对 `main` 添加/编辑 protection rule → Require status checks to pass → 勾选 `Realistic Validation sign-off`。配置后未全勾的 PR 物理无法合并；在 PR body 点勾会触发 `pull_request: edited` 事件自动重跑 check。
 
+该 check 对**读不懂的签收区块**同样判失败：正文里出现 `*:realistic-validation` 起始 marker，
+但不是 runner 当前写入的 `kc:realistic-validation version=1 total=N` 形态（改名前的旧前缀、
+被截断的 marker 都属此类）时，工作流直接报错而不是按"没有清单"放行——runner 侧的 CI 判定、
+daemon 软门禁与合并队列自动勾选共用同一份 marker 契约，一处静默跳过就等于三处同时空转。
+围栏代码块里的示例区块不算声明，判定前一律先剥离。
+
 注意事项：
 
 - 私有仓库中证据评论的内联图片可能不渲染，点击评论中的 `Open image` / `Open file` 链接进入 blob 页查看。
 - 证据分支与代码历史零共同祖先（`git log kc-evidence/issue-<N>` 只有一个无父提交），永不合并；Issue 关闭后由 daemon 轮询清理。
 - 其他目标仓库使用该能力时，需要把 `validation-gate.yml` 复制到该仓库的 `.github/workflows/` 并配置 required check。
   升级标记格式时也须同步该工作流：当前版本解析 `kc:realistic-validation`，与 runner 生成的清单一致；迁移在途标记后再恢复 runner。
+  旧版工作流遇到不认识的区块一律放行，新版会把残留旧前缀或残缺形态的签收区块判失败。
 - PRD 侧规范：Realistic Validation 默认必做；只有 operator 确认的 PRD 才允许在 `### Realistic Validation` 小节写 `Validation Waiver: <理由>` 行，`kc issue create` 会将其物化为豁免 marker。同一小节写 `Evidence Format Waiver: <理由>` 行则只关闭该任务的逐项格式对账（证据仍必须存在），物化为 `kc:evidence-format-waived` marker。
 
 ## 安全边界

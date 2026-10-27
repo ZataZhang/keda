@@ -64,7 +64,10 @@ from backend.core.use_cases.agent_runner_git import (
 )
 from backend.core.use_cases.agent_runner_publish import is_forbidden_path
 from backend.core.use_cases.agent_runner_pr_body_contract import has_contract_annotation
-from backend.core.use_cases.agent_runner_validation import validation_required
+from backend.core.use_cases.agent_runner_validation import (
+    find_unrecognized_validation_block_marker,
+    validation_required,
+)
 from backend.core.use_cases.agent_runner_workflow import transition_issue_workflow_state
 from backend.core.use_cases.pr_supervisor import execute_rebase
 from backend.core.use_cases.run_agent_once import create_or_reuse_worktree
@@ -144,8 +147,17 @@ def _apply_auto_sign_off(request: _AutoSignOffRequest) -> bool:
     """更新 PR 验证清单，并记录 runner 自动签核的依据。"""
     if not request.pr_body:
         return False
-    ticked_body = _tick_sign_off_checklist(request.pr_body)
-    if ticked_body is None or ticked_body == request.pr_body:
+    pr_body_text = request.pr_body
+    ticked_body = _tick_sign_off_checklist(pr_body_text)
+    if ticked_body is None or ticked_body == pr_body_text:
+        unreadable_marker = find_unrecognized_validation_block_marker(pr_body_text)
+        if unreadable_marker is not None:
+            _logger.warning(
+                "PR #%d carries sign-off block marker %r that the merge queue cannot "
+                "read; no checklist item was ticked.",
+                request.pr_number,
+                unreadable_marker,
+            )
         return False
     request.github_client.update_pull_request_body(request.pr_number, ticked_body)
     if _has_auto_sign_off_marker(request.comments):

@@ -41,6 +41,7 @@ from backend.core.use_cases.agent_runner_validation import (
     extract_evidence_format_waiver_reason,
     extract_realistic_validation_items,
     extract_validation_waiver_reason,
+    find_unrecognized_validation_block_marker,
     format_evidence_format_waiver_marker,
     format_validation_evidence_detail,
     format_validation_evidence_failure,
@@ -915,6 +916,34 @@ def test_parse_checklist_state_without_block() -> None:
     assert parse_validation_checklist_state("plain body") is None
 
 
+@pytest.mark.parametrize(
+    ("pr_body", "expected_marker"),
+    [
+        (build_validation_checklist_block(["- [ ] item A"]), None),
+        ("plain body", None),
+        (
+            "<!-- iar:realistic-validation version=1 total=1 -->\n- [ ] item A\n",
+            "iar:realistic-validation version=1 total=1",
+        ),
+        (
+            "<!-- kc:realistic-validation version=1 -->\n- [ ] item A\n",
+            "kc:realistic-validation version=1",
+        ),
+        (
+            "Closes #42\n\n```markdown\n<!-- iar:realistic-validation "
+            "version=1 total=1 -->\n```\n",
+            None,
+        ),
+    ],
+    ids=["production", "no-block", "legacy-prefix", "truncated-shape", "fenced-example"],
+)
+def test_find_unrecognized_validation_block_marker(
+    pr_body: str, expected_marker: str | None
+) -> None:
+    """签收区块可读性判定抓住旧前缀与残缺形态，放过当前契约区块与围栏示例。"""
+    assert find_unrecognized_validation_block_marker(pr_body) == expected_marker
+
+
 # ---------------------------------------------------------------------------
 # 证据上传与 PR 证据评论
 # ---------------------------------------------------------------------------
@@ -1476,6 +1505,49 @@ def test_gate_keeps_pending_while_unchecked(tmp_path: Path) -> None:
             "remove": ["validation/passed"],
         }
     ]
+
+
+def test_gate_blocks_when_sign_off_block_is_unreadable(tmp_path: Path) -> None:
+    """旧前缀签收区块不能被当成"没有清单"放行：门禁收敛到 validation/pending 且不写通过审计。"""
+    legacy_body = (
+        "Closes #42\n\n"
+        "<!-- iar:realistic-validation version=1 total=2 -->\n"
+        "- [x] item A\n"
+        "- [x] item B\n"
+        "<!-- iar:realistic-validation-end -->\n"
+    )
+    gate_client, _review_issue = _gate_setup(
+        pr_body=legacy_body,
+        issue_labels=("agent/automated-review-passed", "validation/verifier-passed"),
+    )
+
+    process_validation_gate(
+        repo_path=tmp_path,
+        config=AppConfig(),
+        github_client=gate_client,
+        process_runner=FakeProcessRunner(),
+    )
+
+    label_calls = [call for call in gate_client.calls if call["method"] == "edit_issue_labels"]
+    assert label_calls == [
+        {
+            "method": "edit_issue_labels",
+            "issue_number": 42,
+            "add": ["validation/pending"],
+            "remove": ["validation/passed"],
+        },
+        {
+            "method": "edit_issue_labels",
+            "issue_number": 42,
+            "add": [],
+            "remove": ["validation/verifier-passed"],
+        },
+    ]
+    assert [
+        call
+        for call in gate_client.calls
+        if call["method"] == "comment_issue" and "validation_passed" in call["body"]
+    ] == []
 
 
 def test_gate_passes_and_audits_once(tmp_path: Path) -> None:

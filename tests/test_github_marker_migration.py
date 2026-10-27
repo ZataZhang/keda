@@ -71,6 +71,37 @@ def test_marker_migration_previews_applies_and_is_idempotent() -> None:
     assert repeated_preview_result.occurrence_count == 0
 
 
+def test_pull_request_bodies_migrate_through_the_pulls_endpoint() -> None:
+    """PR 正文经 pulls 端口写回：issues 端口接受写入但不会改动 PR 正文。"""
+    github_client = FakeGitHubClient()
+    github_client.set_repository_items(
+        [
+            IssueSummary(
+                number=329,
+                title="Migration sample PR",
+                url="https://github.com/example/repo/pull/329",
+                body="<!-- iar:realistic-validation version=1 total=1 -->",
+                labels=(),
+            )
+        ]
+    )
+
+    preview_result = migrate_github_markers(github_client)
+
+    assert [entry.field_name for entry in preview_result.entries] == ["PR body"]
+    assert preview_result.entries[0].is_pull_request is True
+
+    apply_result = migrate_github_markers(github_client, apply=True)
+
+    assert apply_result.updated_count == 1
+    assert not apply_result.failures
+    body_write_methods = {"edit_issue_body", "update_pull_request_body"}
+    write_calls = [call for call in github_client.calls if call["method"] in body_write_methods]
+    assert [call["method"] for call in write_calls] == ["update_pull_request_body"]
+    assert write_calls[0]["pr_number"] == 329
+    assert write_calls[0]["body"] == "<!-- kc:realistic-validation version=1 total=1 -->"
+
+
 def test_closed_repository_items_are_only_included_by_request() -> None:
     """默认只迁移 open 条目，include_closed 才扫描 closed Issue 与 PR。"""
     github_client = FakeGitHubClient()

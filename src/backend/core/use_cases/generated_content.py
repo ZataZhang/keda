@@ -38,6 +38,7 @@ from backend.core.shared.interfaces.agent_runner import (
     IContentGenerator,
     IProcessRunner,
 )
+from backend.core.shared.markdown_code_fence import strip_code_fences
 from backend.core.shared.models.agent_model_preset import ModelSelection
 from backend.core.shared.models.agent_runner import (
     GeneratedContentConfig,
@@ -399,22 +400,24 @@ def _validate_issue_body(body: str, relative_prd_path: str) -> bool:
 
 
 def _validate_pr_body(body: str, issue_number: int) -> bool:
-    """验证 PR 正文是否包含必需的 Closes 锚点。
+    """验证 PR 正文是否在可被 GitHub 识别的位置包含必需的 Closes 锚点。
 
     PR 正文必须包含 ``Closes #{issue_number}`` 形式的文本，
-    以便 GitHub 在合并 PR 时自动关闭关联的 Issue。
+    以便 GitHub 在合并 PR 时自动关闭关联的 Issue。围栏代码块里的同一段文字
+    只是示例，GitHub 不会据此建立 Issue 关联，因此不能算通过——否则正文会带着
+    一个平台看不见的锚点发布出去，关联静默缺失。
 
     Args:
         body: 待验证的 PR 正文。
         issue_number: 期望关闭的 Issue 编号。
 
     Returns:
-        包含锚点时返回 ``True``，否则返回 ``False``。
+        锚点位于正文（非围栏内容）时返回 ``True``，否则返回 ``False``。
     """
     if not body or not body.strip():
         return False
     closes_pattern = rf"Closes\s*#\s*{issue_number}"
-    return bool(re.search(closes_pattern, body))
+    return bool(re.search(closes_pattern, strip_code_fences(body)))
 
 
 # ---------------------------------------------------------------------------
@@ -582,6 +585,8 @@ _PREAMBLE_LEAD = re.compile(
 )
 # 水平分隔线（``---`` / ``***`` / ``___`` / ``===``），常见于开场白与正文之间。
 _HORIZONTAL_RULE = re.compile(r"^(?:[-*_=]\s*){3,}$")
+# 正文已开始的 Markdown 标题：其后的围栏属于正文示例，不是包裹整份输出的外层围栏。
+_MARKDOWN_HEADING = re.compile(r"^ {0,3}#{1,6}(?:[ \t]+|$)")
 # Markdown 代码围栏起始行（``` 或 ~~~，可带语言标记）。
 _CODE_FENCE = re.compile(r"^(`{3,}|~{3,})")
 # draft_pr 的 prompt 契约规定正文首行是关闭引用（``Closes #{issue_number}``）。锚点之前
@@ -666,6 +671,11 @@ def _trim_before_closing_anchor(markdown_text: str) -> str:
     lines = markdown_text.splitlines()
     anchor_index = _closing_anchor_index(lines)
     if anchor_index is None or anchor_index == 0:
+        return markdown_text
+    unfenced_lines = strip_code_fences("\n".join(lines)).splitlines()
+    anchor_is_fenced = not unfenced_lines[anchor_index].strip()
+    if anchor_is_fenced and any(_MARKDOWN_HEADING.match(line) for line in lines[:anchor_index]):
+        # 标题表明正文已开始；后续 ``Closes`` 是围栏示例，不能被提升为真实锚点。
         return markdown_text
     if _is_plausible_pr_title(lines[:anchor_index]):
         return markdown_text
