@@ -164,8 +164,18 @@ def test_claim_blocked_issue_success() -> None:
     fake_client.get_issue = _get_issue_with_blocked
     config = AppConfig()
 
-    claimed = claim_blocked_issue(fake_client, 1, config)
-    assert claimed is True
+    claimed_issue_snapshot = claim_blocked_issue(fake_client, 1, config)
+    assert claimed_issue_snapshot is not None
+    assert config.labels.running in claimed_issue_snapshot.labels
+    assert config.labels.blocked not in claimed_issue_snapshot.labels
+    reblocked_issue = IssueSummary(
+        number=claimed_issue_snapshot.number,
+        title=claimed_issue_snapshot.title,
+        url=claimed_issue_snapshot.url,
+        body=claimed_issue_snapshot.body,
+        labels=(config.labels.blocked,),
+    )
+    assert is_issue_newly_blocked(claimed_issue_snapshot, reblocked_issue, config)
 
     # Verify label transition happened
     label_calls = [c for c in fake_client.calls if c["method"] == "edit_issue_labels"]
@@ -192,7 +202,7 @@ def test_claim_blocked_issue_fails_when_not_blocked() -> None:
     fake_client.get_issue = _get_issue_running
     config = AppConfig()
 
-    claimed = claim_blocked_issue(fake_client, 1, config)
-    assert claimed is False
+    claimed_issue_snapshot = claim_blocked_issue(fake_client, 1, config)
+    assert claimed_issue_snapshot is None
     label_calls = [c for c in fake_client.calls if c["method"] == "edit_issue_labels"]
     assert len(label_calls) == 0

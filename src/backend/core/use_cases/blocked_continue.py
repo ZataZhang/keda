@@ -109,10 +109,11 @@ def blocked_continue_issue(
     _logger.info("Wrote blocked_resolution_requested marker for Issue #%d.", issue_number)
 
     # CAS claim
-    claimed = claim_blocked_issue(github_client, issue_number, config)
-    if not claimed:
+    claimed_issue_snapshot = claim_blocked_issue(github_client, issue_number, config)
+    if claimed_issue_snapshot is None:
         _logger.info("Issue #%d already claimed by another runner.", issue_number)
         return False
+    issue = claimed_issue_snapshot
 
     # Proceed with blocked resolution
     # 本入口不经过 daemon 派发，因此注入面不会自动刷新；状态处理器在自己模块的
