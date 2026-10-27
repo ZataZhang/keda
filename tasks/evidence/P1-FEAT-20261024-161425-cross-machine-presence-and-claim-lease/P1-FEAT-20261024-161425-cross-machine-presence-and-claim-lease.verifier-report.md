@@ -2,11 +2,11 @@
 
 ## Current candidate follow-up · 2026-10-27
 
-- 当前候选实现树：`2bd42838188f29bc252a6216082a21f4bf187c9c`。四项真实入口 RV 在这棵树上全部通过，四项负控均按预期转红。
+- 当前候选实现树：`bfaad53e278da7a66af2ffad1d0732654f569fc4`。四项真实入口 RV 在这棵树上全部通过，四项负控均按预期转红。
 - 独立性 review 发现仓库的 verifier preset 可与 builder 同为 codex；`_choose_verifier_agent` 已改为跳过同一 agent、选回退链里的不同 agent，并在没有候选时 fail closed。回归测试覆盖两种情况。
-- 当前验证：相关九模块 **149 passed**；生命周期/verifier 两模块 **75 passed**；`just test` 为 **55 passed, 129 deselected** 且 lint passed；reuse lint 与严格 MkDocs 构建通过。
+- 当前验证：相关九模块 **149 passed**；`just test` 实际输出 `no tests ran`，不作为测试通过证据；`SKIP=check-test-flag just lint --full`、reuse lint 与严格 MkDocs 构建通过。
 - Microsoft Edge smoke 已完成：首卡、三卡翻页和结果 Markdown 通过；0 个 page error，3 条 textarea 可访问性警告。
-- 独立 verifier Qoder 已在 builder HEAD `9119bc370bfde2b04be769621356aa2383a7a105`、candidate implementation tree `2bd42838188f29bc252a6216082a21f4bf187c9c` 上完成复验并给出 GREEN。详细 verdict 与风险见下方当前树门禁结果及原始回复。
+- 旧 Qoder GREEN 绑定到此前候选树，不能覆盖本轮文件行数修复。Qoder 首次检查刷新后的候选树时发现 manifest 与报告仍指向旧哈希；这些记录现已统一绑定到当前树，最终独立复核待对提交后的文件重新运行。
 
 ## 评审基准
 
@@ -14,7 +14,7 @@
 - 要实现：GitHub 上按仓库共享机器在线状态；`kc peers` 表格/JSON；含 machine_id 的独立租约；远端过期对账；续租失败后自停；push/PR 前认领确认；兼容无租约旧认领。
 - 明确不做：新协调服务、数据库迁移、标签状态机重构、租约有效时强制接手、续传另一台机器的本地 WIP、Console 机器页面。
 - 真实交付边界：CLI 与 daemon、GitHub Issue/comment adapter、claim arbitration/reconcile/admission/publication、machine identity/config、guide 与 packaged operator skill。
-- 最终候选实现树：`2bd42838188f29bc252a6216082a21f4bf187c9c`（不含本 PRD 与 evidence delivery records），base HEAD tree `a5c9f292abf283ce73eb2ff8557eeac7a9e5db7e`。
+- 最终候选实现树：`bfaad53e278da7a66af2ffad1d0732654f569fc4`（不含本 PRD 与 evidence delivery records），base HEAD tree `ab6d0208a74baf73ed0b11f8dc3edb1ad98ab376`。
 
 ## Findings
 
@@ -36,9 +36,9 @@
 - `SKIP=check-test-flag just lint --full`: **通过**（Ruff、ruff-format、架构分层、指南一致性、文件行数、守卫测试改动检查）。
 - `just lint --reuse`: **通过**（重复代码与复用门禁）。
 - 最终候选树上的相关九模块 pytest（`-o addopts=""`，不依赖 testmon）：**149 passed**。
-- 完整单元套件：先前 tree `6658504731e5dbc2cfc5b751d470123789c3464c` 上 `uv run pytest -o addopts="" tests/` → **5043 passed, 1 skipped**；默认租约改为 1200 秒后的当前树未重跑全量套件。当前树 `just test`（testmon 增量档）为 **55 passed, 129 deselected**。
+- 完整单元套件：先前 tree `6658504731e5dbc2cfc5b751d470123789c3464c` 上 `uv run pytest -o addopts="" tests/` → **5043 passed, 1 skipped**；默认租约改为 1200 秒后的当前树未重跑全量套件。当前树 `just test` 受 testmon 标记影响，输出 `no tests ran`，未计入测试通过证据。
 - `uv run mkdocs build --strict`: **通过**（仅仓库既有 unnav-page 与 docstring formatter 提示）。
-- rv-1 至 rv-4：全部在最终候选实现树 `2bd42838188f29bc252a6216082a21f4bf187c9c` 上重跑，每项先观察到负控变红、再去掉注入后同一真实入口转绿；详见 `evidence.json` 与四份原始输出。
+- rv-1 至 rv-4：全部在最终候选实现树 `bfaad53e278da7a66af2ffad1d0732654f569fc4` 上重跑，每项先观察到负控变红、再去掉注入后同一真实入口转绿；详见 `evidence.json` 与四份原始输出。
 - PRD archive-readiness checker：**通过**。
 - 文档同步：`docs/guides/agent-runner.md` 已更新租约时限口径、发布前归属确认与 machine_id 判定口径；`kc` CLI 子命令/旗标/退出码表面未新增，随包 `kedacode-operator` skill 无需改动。
 
@@ -46,7 +46,7 @@
 
 **历史 verdict（不满足独立性）**：commit `0a8d9cf06c54f547c93cd2d40ed2b1260e4bd320`（tree `8b8c0d22461ab066fef954d7b88b376a3f3884af`）上的 GREEN 使用 codex verifier，而 builder 同为 codex；它也早于当前候选树。该结果不得作为本 PR 的独立 verifier PASS。
 
-**当前树门禁：PASS。** Qoder 与 builder Codex 为不同 agent，在 HEAD `9119bc370bfde2b04be769621356aa2383a7a105` 对 candidate implementation tree `2bd42838188f29bc252a6216082a21f4bf187c9c` 完成复验。rv-1 至 rv-4 与六项额外行为样例均通过，负控按预期转红；原始回复末尾为 `<!-- kc:verifier-verdict risk=green -->`，见 `verifier-response.txt`。
+**当前树门禁：待独立复核。** 本轮修复后，四项真实入口 RV 与九个相关测试模块（149 passed）均绑定 candidate implementation tree `bfaad53e278da7a66af2ffad1d0732654f569fc4`；base HEAD tree 为 `ab6d0208a74baf73ed0b11f8dc3edb1ad98ab376`。Qoder 上轮发现的 evidence identity 不一致已修正。最终 verifier 将审查提交 HEAD、实际 full tree 与上述排除交付记录后的候选树，结果写入 `verifier-response.txt` 后再更新此报告。
 
 **Verifier 披露的非阻塞覆盖边界**：
 
@@ -66,34 +66,15 @@
 
 需求状态: ✅ 与 PRD 范围一致
 代码审查: ✅ 两轮审查发现全部闭环（当前未解发现: 0）
-验证状态: ✅ 当前树 RV、149 个相关测试与独立 verifier 均通过；全量单测沿用旧默认值树结果，未在 1200 秒默认值后重跑。浏览器 smoke 已通过并披露 3 条可访问性警告。
+验证状态: ⏳ 当前树 RV 与 149 个相关测试通过；全量单测沿用旧默认值树结果，未在 1200 秒默认值后重跑。浏览器 smoke 已通过并披露 3 条可访问性警告；独立 verifier 待复核。
 文档状态: ✅ 通过
 
-结论: ✅ 当前树的独立 verifier 为 GREEN。真实 GitHub 写入、两项 FR-6 处置的 RV 覆盖和 9.1 人工接受边界如上披露；PRD 人工验收状态在授权 squash merge 前保持待验收。
+结论: ⏳ 当前候选树已通过四项 RV 与 149 个相关测试；独立 verifier 待重新复核。真实 GitHub 写入、两项 FR-6 处置的 RV 覆盖和 9.1 人工接受边界如上披露；PRD 人工验收状态在授权 squash merge 前保持待验收。
 
 ```json
 {
-  "verdict": "pass",
-  "summary": "Qoder, distinct from builder codex, independently verified candidate implementation tree 2bd42838188f29bc252a6216082a21f4bf187c9c and returned GREEN. RV-1 through RV-4 and six additional behavior samples passed; their negative controls turned red. The verifier disclosed untested real GitHub writes, two FR-6 dispositions covered only by unit tests, and a narrow heartbeat-less internal-call window. Edge review smoke passed with three low-priority textarea accessibility warnings; human acceptance remains governed by the PR merge contract.",
-  "findings": [
-    {
-      "category": "validation",
-      "severity": "low",
-      "file": "tasks/evidence/P1-FEAT-20261024-161425-cross-machine-presence-and-claim-lease/verifier-response.txt",
-      "line": 746,
-      "title": "Live GitHub write and failure dispositions remain outside realistic validation",
-      "description": "All GitHub writes used a no-credential fake. Budget-exhausted and pending-rework FR-6 outcomes have unit coverage but were not run through the realistic entrypoint scenarios.",
-      "recommendation": "Observe the first real presence-board write and add realistic scenarios for the remaining FR-6 dispositions when a suitable GitHub sandbox is available."
-    },
-    {
-      "category": "validation",
-      "severity": "low",
-      "file": "tasks/evidence/P1-FEAT-20261024-161425-cross-machine-presence-and-claim-lease/human-review-checklist.html",
-      "line": 1,
-      "title": "Checklist browser smoke passed with remaining accessibility warnings",
-      "description": "Microsoft Edge smoke verified first-card visibility, pagination across all three cards, and generated result Markdown with zero page errors. DevTools reported three accessibility warnings because the notes textareas lack id/name.",
-      "recommendation": "Optionally add accessible names to the three notes textareas; this low-priority warning does not block the verified flow."
-    }
-  ]
+  "verdict": "pending",
+  "summary": "The refreshed delivery records now identify candidate implementation tree bfaad53e278da7a66af2ffad1d0732654f569fc4 and base HEAD tree ab6d0208a74baf73ed0b11f8dc3edb1ad98ab376. RV-1 through RV-4 passed with negative controls; the nine relevant pytest modules passed (149 passed). The first review found stale evidence identities, which have been corrected. A final independent review of the committed HEAD and filtered candidate tree is pending.",
+  "findings": []
 }
 ```
