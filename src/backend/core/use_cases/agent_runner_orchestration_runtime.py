@@ -24,6 +24,10 @@ from backend.core.use_cases.agent_runner_batch_aggregate_queue import (
     complete_aggregate_queue,
     log_aggregate_dry_run_preview,
 )
+from backend.core.use_cases.agent_daemon_shutdown import (
+    AgentDaemonShutdownInterrupt,
+    _skip_issue_on_daemon_shutdown,
+)
 from backend.core.use_cases.agent_runner_blocked_claim import BlockedWorktreeClaimedError
 from backend.core.use_cases.agent_runner_claim_arbitration import ClaimArbitrationLost
 from backend.core.use_cases.agent_runner_dependencies import (
@@ -446,7 +450,12 @@ def _process_single_issue(
             started_at=run_started_at,
         )
         return 0
+    except AgentDaemonShutdownInterrupt:
+        _skip_issue_on_daemon_shutdown(issue.number, output_view)
+        return 0
     except GitHubApiRateLimitError:
+        if _skip_issue_on_daemon_shutdown(issue.number, output_view):
+            return 0
         output_view.update_status(issue.number, "skipped")
         raise
 
@@ -512,6 +521,8 @@ def _process_single_issue(
         output_view.update_status(issue.number, "skipped")
         return 0
     except Exception as exc:  # noqa: BLE001 - report queue failures and continue.
+        if _skip_issue_on_daemon_shutdown(issue.number, output_view):
+            return 0
         _mark_issue_failed(
             issue=issue,
             config=config,
