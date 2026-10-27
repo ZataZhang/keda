@@ -1,12 +1,20 @@
 # 独立验证与代码审查报告 · Issue #314
 
+## Current candidate follow-up · 2026-10-27
+
+- 当前候选实现树：`2bd42838188f29bc252a6216082a21f4bf187c9c`。四项真实入口 RV 在这棵树上全部通过，四项负控均按预期转红。
+- 独立性 review 发现仓库的 verifier preset 可与 builder 同为 codex；`_choose_verifier_agent` 已改为跳过同一 agent、选回退链里的不同 agent，并在没有候选时 fail closed。回归测试覆盖两种情况。
+- 当前验证：相关九模块 **149 passed**；生命周期/verifier 两模块 **75 passed**；`just test` 为 **51 passed, 47 deselected** 且 lint passed；reuse lint 与严格 MkDocs 构建通过。
+- Microsoft Edge smoke 已完成：首卡、三卡翻页和结果 Markdown 通过；0 个 page error，3 条 textarea 可访问性警告。
+- 旧 commit `0a8d9cf0` 的 **GREEN** 由 codex 产出，而 builder 也是 codex，因此该结果不是独立 verdict，且树已过期。当前 qoder verifier 尚待运行；本跟进不预写其结论。
+
 ## 评审基准
 
 - 需求来源：`tasks/archive/P1-FEAT-20261024-161425-cross-machine-presence-and-claim-lease.md` 与 GitHub Issue #314。
 - 要实现：GitHub 上按仓库共享机器在线状态；`kc peers` 表格/JSON；含 machine_id 的独立租约；远端过期对账；续租失败后自停；push/PR 前认领确认；兼容无租约旧认领。
 - 明确不做：新协调服务、数据库迁移、标签状态机重构、租约有效时强制接手、续传另一台机器的本地 WIP、Console 机器页面。
 - 真实交付边界：CLI 与 daemon、GitHub Issue/comment adapter、claim arbitration/reconcile/admission/publication、machine identity/config、guide 与 packaged operator skill。
-- 最终候选实现树：`6658504731e5dbc2cfc5b751d470123789c3464c`（不含本 PRD 与 evidence delivery records），base HEAD tree `d03d049a1a95efc7f5b19e2d1a3247884a936ed3`。
+- 最终候选实现树：`2bd42838188f29bc252a6216082a21f4bf187c9c`（不含本 PRD 与 evidence delivery records），base HEAD tree `a5c9f292abf283ce73eb2ff8557eeac7a9e5db7e`。
 
 ## Findings
 
@@ -30,17 +38,17 @@
 - 最终候选树上的相关九模块 pytest（`-o addopts=""`，不依赖 testmon）：**149 passed**。
 - 完整单元套件：`uv run pytest -o addopts="" tests/` → **5043 passed, 1 skipped**；`just test`（testmon 增量档）通过。
 - `uv run mkdocs build --strict`: **通过**（仅仓库既有 unnav-page 与 docstring formatter 提示）。
-- rv-1 至 rv-4：全部在最终候选实现树 `6658504731e5dbc2cfc5b751d470123789c3464c` 上重跑，每项先观察到负控变红、再去掉注入后同一真实入口转绿；详见 `evidence.json` 与四份原始输出。
+- rv-1 至 rv-4：全部在最终候选实现树 `2bd42838188f29bc252a6216082a21f4bf187c9c` 上重跑，每项先观察到负控变红、再去掉注入后同一真实入口转绿；详见 `evidence.json` 与四份原始输出。
 - PRD archive-readiness checker：**通过**。
 - 文档同步：`docs/guides/agent-runner.md` 已更新租约时限口径、发布前归属确认与 machine_id 判定口径；`kc` CLI 子命令/旗标/退出码表面未新增，随包 `kedacode-operator` skill 无需改动。
 
 ## Runner-owned verdict gate
 
-**独立 verifier 的最新结论（针对修复前的树）**：verifier 在 commit `0a8d9cf06c54f547c93cd2d40ed2b1260e4bd320`（candidate tree `8b8c0d22461ab066fef954d7b88b376a3f3884af`）上亲自重跑 rv-1 至 rv-4，判定 **GREEN** 并写入 `iar:verifier-verdict risk=green`，原始记录见 `verifier-response.txt`。
+**历史 verdict（不满足独立性）**：commit `0a8d9cf06c54f547c93cd2d40ed2b1260e4bd320`（tree `8b8c0d22461ab066fef954d7b88b376a3f3884af`）上的 GREEN 使用 codex verifier，而 builder 同为 codex；它也早于当前候选树。该结果不得作为本 PR 的独立 verifier PASS。
 
-**本最终树的门禁状态：待重跑。** 本轮审查修复改变了实现树，上述 GREEN 不覆盖 `6658504731e5dbc2cfc5b751d470123789c3464c`；该结论只能由 runner-owned 独立 verifier 给出，本报告不代其签署。
+**当前树门禁状态：待运行。** qoder verifier 需在 candidate tree `2bd42838188f29bc252a6216082a21f4bf187c9c` 上完成真实入口复验后，才记录最终 verdict。
 
-**Review incident：** 人审 HTML 的浏览器 smoke 仍未执行。CUA inventory 没有浏览器，Edge 与 Chrome-for-Testing app 均被 UI 自动化权限拒绝；浏览器 pageerror、首卡可见性、分页与末页 Markdown 生成因此为 `REVIEW_INCIDENT / INCONCLUSIVE`，不是产品缺陷，也不视为已通过。runner 应在启用浏览器的环境重试并保留结果。
+**人审 smoke：已完成**：Microsoft Edge 中首卡显示、三卡翻页与结果 Markdown 生成均通过；0 个 page error。仍有 3 条 textarea 缺少 id/name 的可访问性警告，记为低优先级 UI 改进项，不阻挡当前功能验收。
 
 ## 评审总结
 
@@ -51,15 +59,15 @@
 
 需求状态: ✅ 与 PRD 范围一致
 代码审查: ✅ 两轮审查发现全部闭环（当前未解发现: 0）
-验证状态: ⚠️ 最终树的功能验证通过；独立 verifier 需在最终树重跑，浏览器 smoke 仍待人工环境
+验证状态: ⚠️ 最终树的功能验证通过；qoder 独立 verifier 需在最终树重跑，浏览器 smoke 已通过并披露 3 条可访问性警告
 文档状态: ✅ 通过
 
-结论: ⛔ 独立 verifier 在最终候选树上重跑、以及浏览器 smoke 完成前，不得写 verifier 结论或据此翻动验收状态；本结论不表示实现功能失败。
+结论: ⛔ 当前树的 qoder 独立 verifier 完成前不得翻动 verifier 验收状态；本结论不表示实现功能失败。
 
 ```json
 {
   "verdict": "pending_final_tree_verification",
-  "summary": "All eight review findings are fixed with regression tests, and rv-1 through rv-4 plus the focused and full unit suites pass on final candidate tree 6658504731e5dbc2cfc5b751d470123789c3464c. The independent verifier's GREEN covers the pre-fix tree 8b8c0d22461ab066fef954d7b88b376a3f3884af at commit 0a8d9cf0; the runner-owned verifier must rerun against the final tree, and the real-browser checklist smoke remains inconclusive.",
+  "summary": "All eight review findings are fixed with regression tests, and rv-1 through rv-4 plus the focused and full unit suites pass on final candidate tree 2bd42838188f29bc252a6216082a21f4bf187c9c. The historical GREEN at commit 0a8d9cf0 used codex for both builder and verifier and does not satisfy independence. Qoder must run against the current tree. The real-browser checklist smoke passed with three low-priority textarea accessibility warnings.",
   "findings": [
     {
       "category": "validation",
@@ -67,17 +75,17 @@
       "file": "tasks/evidence/P1-FEAT-20261024-161425-cross-machine-presence-and-claim-lease/verifier-response.txt",
       "line": 746,
       "title": "Independent verifier verdict predates the review-fix tree",
-      "description": "The verifier reran the four real-entry scenarios at commit 0a8d9cf0 and recorded GREEN with risk=green, but the review fixes changed the implementation tree to 6658504731e5dbc2cfc5b751d470123789c3464c, so no independent verdict exists for the final candidate tree.",
-      "recommendation": "Have the runner-owned independent verifier rerun against final candidate tree 6658504731e5dbc2cfc5b751d470123789c3464c and record its verdict before the PRD acceptance state is advanced."
+      "description": "The verifier reran the four real-entry scenarios at commit 0a8d9cf0 and recorded GREEN with risk=green, but it used codex, the same agent as the builder, and the implementation tree later changed to 2bd42838188f29bc252a6216082a21f4bf187c9c.",
+      "recommendation": "Run the runner-owned verifier with an agent distinct from codex (currently qoder) against final candidate tree 2bd42838188f29bc252a6216082a21f4bf187c9c before advancing the PRD acceptance state."
     },
     {
       "category": "validation",
-      "severity": "medium",
+      "severity": "low",
       "file": "tasks/evidence/P1-FEAT-20261024-161425-cross-machine-presence-and-claim-lease/human-review-checklist.html",
       "line": 1,
-      "title": "Real-browser checklist smoke still unavailable",
-      "description": "CUA reports no browser sessions and denies access to the installed Edge and Chrome-for-Testing apps, so pageerror, first-card visibility, pagination and result-markdown generation cannot be observed. Static structure checks were not counted as browser verification.",
-      "recommendation": "Retry the checklist in an enabled browser environment and record the smoke result; keep it disclosed as inconclusive until then."
+      "title": "Checklist browser smoke passed with remaining accessibility warnings",
+      "description": "Microsoft Edge smoke verified first-card visibility, pagination across all three cards, and generated result Markdown with zero page errors. DevTools reported three accessibility warnings because the notes textareas lack id/name.",
+      "recommendation": "Optionally add accessible names to the three notes textareas; this low-priority warning does not block the verified flow."
     }
   ]
 }
