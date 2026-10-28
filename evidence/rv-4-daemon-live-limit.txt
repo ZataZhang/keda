@@ -1,0 +1,11 @@
+## 模拟：以存活 daemon（PID 78808，持有 keda 单实例锁）的名义写入 --concurrency 5 的状态文件
+## $ kc daemon status --repo-id keda --json（节选）
+{"repo_id": "keda", "kind": "daemon", "pid": 78808, "parallel_limit": 5, "parallel_limit_source": "cli_override", "in_flight": 1}
+## $ GET /api/v1/agent-runner/backlog/autopilot?repo_id=keda（节选）
+{"effective_max_parallel": 10, "ceiling_source": "config", "daemon_parallel_limit": 5, "daemon_parallel_limit_source": "cli_override"}
+## 页面
+{
+  "label": "并行上限 5（daemon 命令行 --concurrency；配置文件 10 未生效）",
+  "title": "页面设置只保存在这台电脑的管理终端里，不修改 .kedacode.toml，其他电脑不受影响",
+  "pageErrors": []
+}

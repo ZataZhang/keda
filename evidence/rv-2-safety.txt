@@ -1,0 +1,33 @@
+# rv-2-safety.txt
+# git tree: bdb67a92ce68688bfdb0e2e70a1930dba39de633 (HEAD 3bd595d5cbf2ef2bf10c4617eadddc160d301aa2)
+# generated: 2026-10-28T06:55:09Z
+
+## rv-2
+[PASS] rv-2 返工标记不触发重复认领: A 认领评论=1
+[PASS] rv-2 对账不把在执行的 A 当僵尸: 无对账/失败评论，日志无 stale-attempt 处理记录
+
+# rv-2-safety.txt
+# git tree: bdb67a92ce68688bfdb0e2e70a1930dba39de633 (HEAD 3bd595d5cbf2ef2bf10c4617eadddc160d301aa2)
+# generated: 2026-10-28T06:55:20Z
+
+## rv-2
+[PASS] rv-2 计数失败时本轮不领取: fail-closed 日志=True 新 Issue 认领评论=0
+[PASS] rv-2 已在执行的 Issue 不受影响: A 标签=['type/refactor', 'agent/running']
+[PASS] rv-2 下一次正常轮询恢复领取: 105 标签=['type/refactor', 'agent/running']
+
+# rv-2-safety.txt
+# git tree: bdb67a92ce68688bfdb0e2e70a1930dba39de633 (HEAD 3bd595d5cbf2ef2bf10c4617eadddc160d301aa2)
+# generated: 2026-10-28T06:55:37Z
+
+## rv-2
+[PASS] rv-2 旧 max_issues 只提示一次: 弃用提示 1 条
+[PASS] rv-2 旧配置下同时运行数不超过 1: 采样最大并发=1 样本=[0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+[PASS] rv-2 生效上限取 max_concurrent_issues: 日志 limit=1 source=config
+
+# rv-2-safety.txt
+# git tree: bdb67a92ce68688bfdb0e2e70a1930dba39de633 (HEAD 3bd595d5cbf2ef2bf10c4617eadddc160d301aa2)
+# generated: 2026-10-28T06:55:37Z
+
+## rv-2
+[PASS] rv-2 daemon 拒绝 --max-issues: exit=2 输出片段=next: kc daemon run --concurrency <N>
+

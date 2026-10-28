@@ -1,0 +1,7 @@
+{
+  "before": "并行上限 10（配置文件）\n保存",
+  "saved": "并行上限 4（页面设置）\n保存\n恢复为配置文件值：10",
+  "restored": "并行上限 10（配置文件）\n保存",
+  "pageErrors": []
+}
+{"repo_id":"keda","max_parallel":null,"effective_max_parallel":10,"runner_capacity":10,"ceiling_source":"config","default_view":"list","updated_at":""}

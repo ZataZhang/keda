@@ -1,0 +1,9 @@
+# rv-3-daemon-log.txt
+# git tree: bdb67a92ce68688bfdb0e2e70a1930dba39de633 (HEAD 3bd595d5cbf2ef2bf10c4617eadddc160d301aa2)
+# generated: 2026-10-28T06:55:40Z
+
+## rv-3
+[PASS] rv-3 页面保存后接口报告页面设置: 保存前 2/config → 保存后 4/policy
+[PASS] rv-3 daemon 按下一次轮询采用页面设置: 日志出现 limit=4 source=policy
+[PASS] rv-3 恢复为配置文件值后回到 2（配置文件）: 恢复后 2/config
+

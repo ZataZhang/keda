@@ -1,0 +1,15 @@
+# rv-1-backfill.txt
+# git tree: bdb67a92ce68688bfdb0e2e70a1930dba39de633 (HEAD 3bd595d5cbf2ef2bf10c4617eadddc160d301aa2)
+# generated: 2026-10-28T06:54:55Z
+
+## rv-1
+rv-1 A claimed at 14:54:46
+[PASS] rv-1 B 在一个轮询间隔内被领取: B 就绪后 4.0s 被领取（上限 4s 轮询 + 处理开销）
+[PASS] rv-1 A 仍在执行: A 标签=['type/refactor', 'agent/running']
+[PASS] rv-1 C 在空位出现前保持就绪: C 标签=['agent/ready', 'type/refactor'] 认领评论=0
+[PASS] rv-1 A 结束后的下一次轮询领取 C: C 标签=['type/refactor', 'agent/running']
+rv-1 C claimed at 14:54:54
+[PASS] rv-1 每个 Issue 认领评论各 1 条: {101: 1, 103: 1, 104: 1}
+[PASS] rv-1 每次轮询都有 Parallel limit 行: pass 行 3 条，Parallel limit 行 3 条
+[PASS] rv-1 补位期间没有重复处理: 无重复认领 / 仲裁失败记录
+
