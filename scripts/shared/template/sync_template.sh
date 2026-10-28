@@ -397,6 +397,8 @@ _is_upstream_owned() {
         tests/playwright-e2e/README.md) return 1 ;;
         # Shared justfile recipes (the project-private justfile imports this)
         justfile.shared) return 0 ;;
+        # PR 交付命令依赖这两份互相链接的共享指南；其他项目文档仍归项目所有。
+        docs/guides/ai-pr.md|docs/guides/agent-dataset.md) return 0 ;;
         # Shared shell / Python / bash utilities shipped with the template
         scripts/shared/*) return 0 ;;
         # Cross-cutting build scripts maintained by the template

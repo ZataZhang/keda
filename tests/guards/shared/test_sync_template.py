@@ -139,6 +139,37 @@ def test_sync_template_skips_configured_project_paths_by_default(
     assert "deploy/prod.yml" not in completed_process.stdout
 
 
+def test_sync_template_includes_shared_pr_guides_but_not_project_docs(tmp_path: Path) -> None:
+    """共享 PR 指南随默认同步出现，其他项目文档仍受保护。"""
+    template_repo_path = tmp_path / "template-repo"
+    project_repo_path = tmp_path / "project-repo"
+    create_repo(
+        template_repo_path,
+        {
+            "docs/guides/ai-pr.md": "template PR guide\n",
+            "docs/guides/agent-dataset.md": "template dataset guide\n",
+            "docs/guides/project.md": "template project guide\n",
+        },
+        commit_all=True,
+    )
+    create_repo(
+        project_repo_path,
+        {
+            "config.toml": '[template_sync]\nproject_skip_paths = ["docs/"]\n',
+            "docs/guides/ai-pr.md": "old PR guide\n",
+            "docs/guides/project.md": "project guide\n",
+        },
+        commit_all=False,
+    )
+
+    for args in ((), ("--all",)):
+        result = run_sync_template(project_repo_path, template_repo_path, *args)
+        assert result.returncode == 0, result.stderr
+        assert "CHANGED\tdocs/guides/ai-pr.md" in result.stdout
+        assert "NEW\tdocs/guides/agent-dataset.md" in result.stdout
+        assert "docs/guides/project.md" not in result.stdout
+
+
 def test_sync_template_all_mode_respects_default_project_skip_paths(
     tmp_path: Path,
 ) -> None:
