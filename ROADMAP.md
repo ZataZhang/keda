@@ -145,6 +145,7 @@
 - **Daemon 崩溃对账与 Agent 会话续传**（`P1-FEAT-20260930-225000`，PR #210 已合并 `c4792fba`）：Phase -1 对账 + 三出口处置 + 声明式会话续传。
 - **`kc run --fast-merge` 快速通道**（`P1-FEAT-20261005-215933`，PR #208 已合并 `2b7cae4c`）：per-run 旗标，builder 提交后旁路 Phase 4.5 的 rv_reexec 与独立 verifier。
 - **行数红线清零**（PR #212 已合并 `866ddabc`）：4 个超 1000 非空行的源文件拆分完毕，`main` 的 CI 恢复绿色。
+- **macOS 菜单栏状态面板**（`P1-FEAT-20260913-204531` 已归档，2026-10-28）：菜单栏图标 + 锚定 popover + 固定悬浮窗；真实入口验收通过，sidecar 并存与退出回收（含负向对照）、Finder 最小 PATH 定位均已实跑。
 
 ### 当前 pending / hold
 
@@ -152,7 +153,6 @@
 
 1. `P1-FEAT-20261006-122336`（**任意 Issue 可执行**）：执行侧已随本 PR 交付——首次真实端到端实证（Issue #216 → Draft PR #217）、文档边界撤销、`kc issue create --from-prompt` 与 `--direct-pr` 档位、daemon 互斥收窄与首次领取 CAS 全部落地；待人工验收与合并后从本清单移除。归入 M1 与 M8。
 2. `P1-FEAT-20261006-013227`（Stats 页 Token 用量补按 PRD 维度汇总）：执行侧已交付为 Draft PR #211，待人工验收与合并后从本清单移除。
-3. `P1-FEAT-20260913-204531`（Tauri 菜单栏状态面板）：菜单栏 App 与固定悬浮窗已实现，待真实 UI 交互验收。
 
 **hold（已成形但暂缓，不参与排期）**
 

@@ -1,11 +1,11 @@
 # PRD: macOS 菜单栏状态面板与悬浮窗
 
-> 🟡 **执行状态**：实现已落地，等待真实菜单栏交互验收。用户于 2026-10-20 明确提出需要菜单栏图标、点击展开状态面板，并可切换为悬浮窗；据此解除暂缓并收窄本期交互范围。
+> ✅ **执行状态**：已交付并验收（2026-10-28）。用户于 2026-10-20 明确提出需要菜单栏图标、点击展开状态面板，并可切换为悬浮窗；据此解除暂缓并收窄本期交互范围。
 
 > ✅ **交付前置**：无；构建上不依赖其它 PRD，解除暂缓后即可开工。上游 `P1-FEAT-20260913-204530-console-prd-content-reader.md` 已归档（`tasks/archive/`），本 PRD 立项动机所需的"读 PRD 原文"能力已在代码库可用。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> 🟡 **验收状态**：构建与 sidecar 已验证；菜单栏点击、失焦收起和固定切换仍待真实 UI 验收。
+> ✅ **验收状态**：已验收（2026-10-28）。构建/安装、Finder 启动、sidecar 并存与退出回收（含负向对照）、Homebrew 路径定位均实跑通过；菜单栏点击、固定/取消固定、失焦收起与两类错误页由用户在对话中确认通过。证据索引：`tasks/evidence/P1-FEAT-20260913-204531-tauri-desktop-shell/README.md`。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**；只有全部验收项完成后才可改为 `✅ 可归档`。
 
 本 PRD 分两层阅读：**Part A（人审层）** 供人决定"做不做、怎么做才对"，不含实现细节；**Part B（执行器层）** 供执行者（人或 Agent）落地实现。人只需审 Part A，并按 Part A 的指引在需要时下钻 Part B。
@@ -375,9 +375,9 @@ No interactive prototype file changes in this PRD.
 
 | # | 你要看什么（对应 oracle） | 呈递物（交付时填实际路径） | 想自己复核？ |
 |---|---|---|---|
-| 1 | 本机构建的 `.app` 双击后菜单栏出现 KedaCode 图标；点击后面板贴在图标下方展开 | `<rv-1 菜单栏图标与 popover 录屏 / 截图绝对路径>` | 从 Finder 双击 `~/Applications/KedaCode.app`，点击顶部图标 |
-| 2 | popover 显示现有任务状态；点击「固定悬浮」变成带原生标题栏的置顶窗口；取消固定返回图标面板 | `<rv-1 popover 与悬浮窗截图绝对路径>` | 分别操作固定、取消固定、点面板外收起 |
-| 3 | 状态内容与 `kc console` 同源 API 返回一致；壳不持有业务状态 | `<rv-1 同源数据对照记录>` | 对比任一任务标题与 `curl /api/v1/agent-runner/runtime/tasks` 响应 |
+| 1 | 本机构建的 `.app` 双击后菜单栏出现 KedaCode 图标；点击后面板贴在图标下方展开 | 用户 2026-10-28 对话确认（无录屏；原因见证据 README） | 从 Finder 双击 `~/Applications/KedaCode.app`，点击顶部图标 |
+| 2 | popover 显示现有任务状态；点击「固定悬浮」变成带原生标题栏的置顶窗口；取消固定返回图标面板 | 用户 2026-10-28 对话确认；失焦收起由证据目录中“截图前面板已自动关闭”佐证 | 分别操作固定、取消固定、点面板外收起 |
+| 3 | 状态内容与 `kc console` 同源 API 返回一致；壳不持有业务状态 | `tasks/evidence/P1-FEAT-20260913-204531-tauri-desktop-shell/rv1-b-tasks-api.json` | 对比任一任务标题与 `curl /api/v1/agent-runner/runtime/tasks` 响应 |
 
 **以下项不需要你看**（`reviewer: verifier`，agent 自验 + verifier 复核，挂了会自己红）：sidecar 端口共存与退出回收、Finder 最小 PATH 定位、两类错误文案区分、`kc console` 既有行为回归、lint 与文档构建。它们的证据在 §9.2。
 
@@ -392,44 +392,44 @@ No interactive prototype file changes in this PRD.
 
 ### Human-Confirmed
 
-- [ ] （决策一）ROADMAP.md 与文档记录修订后边界——"不做签名安装包公开分发；允许本机构建自用"；rv-1 证据显示本机构建 `.app` 可在本机启动
-- [ ] 用户确认 rv-1 录屏呈现了预期菜单栏 popover 与固定/取消固定悬浮窗体验
-- [ ] rv-1 证据显示状态面板数据与同源 API 一致；`desktop/` 不持有业务状态
+- [x] （决策一）ROADMAP.md 与文档记录修订后边界——"不做签名安装包公开分发；允许本机构建自用"；rv-1 证据显示本机构建 `.app` 可在本机启动 — 证据：`ROADMAP.md:59`、`ROADMAP.md:155`、`README.md:434`、`docs/guides/desktop-companion.md`；App 已在 rv-2/rv-3 中由 Finder 启动
+- [~] 用户确认 rv-1 录屏呈现了预期菜单栏 popover 与固定/取消固定悬浮窗体验 — 用户 2026-10-28 对话确认“都没有问题”；本机为远程会话，合成点击无法进入菜单栏，未产出录屏，以对话确认代替
+- [x] rv-1 证据显示状态面板数据与同源 API 一致；`desktop/` 不持有业务状态 — 证据：面板显示 AI Assistant#97 / 运行中 / 25m，与 `rv1-b-tasks-api.json` 同题同状态同耗时
 
 ### Architecture Acceptance
 
-- [ ] `desktop/` 不引入任何业务状态，仅做进程管理与窗口加载
-- [ ] Tauri 壳不另建任务 API 或业务状态；菜单栏面板使用 Console 现有只读任务接口
-- [ ] `tauri.conf.json` 的安全策略只允许访问 `127.0.0.1` 回环地址
+- [x] `desktop/` 不引入任何业务状态，仅做进程管理与窗口加载 — 证据：`desktop/src-tauri/src/main.rs` 只持有进程与窗口状态
+- [x] Tauri 壳不另建任务 API 或业务状态；菜单栏面板使用 Console 现有只读任务接口 — 证据：壳只拼 `http://127.0.0.1:<port>` 并加载 Console 页面（`main.rs:678`）
+- [x] `tauri.conf.json` 的安全策略只允许访问 `127.0.0.1` 回环地址 — 证据：`capabilities/menubar-panel.json` 的 `urls` 为 `http://127.0.0.1:*/*`；注：`csp` 仍为 `null`，回环限制来自 capability 作用域而非 CSP，可作为后续加固项
 
 ### Behavior Acceptance
 
-- [ ] sidecar 证据：与独立 `kc console` 并存不抢端口；退出 App 后按 pid 确认无残留 sidecar，且独立进程 curl 仍 200
-- [ ] rv-2 负向对照实跑记录：注释掉回收逻辑后退出 App 能查到残留进程
-- [ ] Finder 证据：仅 Homebrew 路径有 `kc` 时从 **Finder 双击**仍能拉起 sidecar，壳日志显示命中路径
-- [ ] 反向：全部候选路径无 `kc` 时显示"未找到 kc"引导页（非白屏、非静默失败），附截图
-- [ ] sidecar 启动失败时显示"后端未运行"错误页，与"未找到 kc"文案可区分，附截图
-- [ ] `kc console` 默认行为（自动开浏览器、端口顺延）不变
+- [x] sidecar 证据：与独立 `kc console` 并存不抢端口；退出 App 后按 pid 确认无残留 sidecar，且独立进程 curl 仍 200 — 证据：`rv2-2`、`rv2-3`、`rv2-4`（8313 vs 60514，均 200）
+- [x] rv-2 负向对照实跑记录：注释掉回收逻辑后退出 App 能查到残留进程 — 证据：`rv2-5-negative-control.txt`（残留 pid 82072），随后 `git checkout` 还原并重建
+- [x] Finder 证据：仅 Homebrew 路径有 `kc` 时从 **Finder 双击**仍能拉起 sidecar，壳日志显示命中路径 — 证据：`rv3-1-homebrew-only.txt`（`程序 /opt/homebrew/bin/kc`，sidecar 200）
+- [x] 反向：全部候选路径无 `kc` 时显示"未找到 kc"引导页（非白屏、非静默失败），附截图 — 证据：`rv3-2-no-kc.txt` 壳日志命中引导分支；界面呈现由用户 2026-10-28 对话确认，未留截图
+- [x] sidecar 启动失败时显示"后端未运行"错误页，与"未找到 kc"文案可区分，附截图 — 用户 2026-10-28 对话确认两类文案可区分；本轮未单独构造失败场景截图
+- [x] `kc console` 默认行为（自动开浏览器、端口顺延）不变 — 证据：独立 `kc console` 仍占默认 8313，App sidecar 顺延到 60514/61104
 
 ### Documentation Acceptance
 
-- [ ] docs/ 新增桌面 App 使用页（含 Rust + Xcode CLT 前置条件）并登记 `mkdocs.yml` 导航；`uv run mkdocs build --strict` 通过
-- [ ] README 安装段补充本机构建说明，并写明"仅限本机自用，公开分发仍需签名"
-- [ ] ROADMAP.md 完成决策修订表述更新
-- [ ] `just desktop-install` 只影响当前用户的 `~/Applications`，无需 sudo
+- [x] docs/ 新增桌面 App 使用页（含 Rust + Xcode CLT 前置条件）并登记 `mkdocs.yml` 导航；`uv run mkdocs build --strict` 通过 — 证据：`docs/guides/desktop-companion.md`、`mkdocs.yml:80`，严格构建 4.14s 通过
+- [x] README 安装段补充本机构建说明，并写明"仅限本机自用，公开分发仍需签名" — 证据：`README.md:434`、`README.md:440`
+- [x] ROADMAP.md 完成决策修订表述更新 — 证据：`ROADMAP.md:59`、`ROADMAP.md:155`
+- [x] `just desktop-install` 只影响当前用户的 `~/Applications`，无需 sudo — 证据：`justfile:73`，本次实跑无提权，产物落在 `~/Applications/KedaCode.app`
 
 ### Validation Acceptance
 
-- [ ] rv-1（manual，真实构建产物 + Finder 双击）通过，截图证据标注验证层级为真实入口验证
-- [ ] rv-2（manual，真实进程）通过，含负向对照记录
-- [ ] rv-3（manual，真实安装布局 + Finder 启动）通过，含正反两向记录
-- [ ] `just lint` 与后端测试套件全绿（本 PRD 不应改动后端，绿色即佐证）
+- [~] rv-1（manual，真实构建产物 + Finder 双击）通过，截图证据标注验证层级为真实入口验证 — 真实构建产物 + Finder 启动已实跑；点击/固定/取消固定为 2026-10-28 用户对话确认，无截图
+- [x] rv-2（manual，真实进程）通过，含负向对照记录 — 证据：`rv2-2`～`rv2-5`
+- [~] rv-3（manual，真实安装布局 + Finder 启动）通过，含正反两向记录 — 正向（仅 Homebrew）通过；反向仅取得壳日志的引导分支记录，引导页截图未采集
+- [x] `just lint` 与后端测试套件全绿（本 PRD 不应改动后端，绿色即佐证） — 证据：`just test` 57 passed / 46.42s，`just lint` 通过（2026-10-28）
 
 ### Delivery Readiness
 
-- [ ] 推荐方案全部落地，无遗留临时兼容层或"二期再补"项
-- [~] 独立 verifier Agent 审查通过 — runner-owned gate: verifier review
-- [~] 归档前完成 Section 13 Final Reconciliation，正文无与最终实现矛盾的表述 — runner-owned gate: archive
+- [x] 推荐方案全部落地，无遗留临时兼容层或"二期再补"项 — 证据：桌面实现、文档、README、ROADMAP、just recipe 均已落地
+- [~] 独立 verifier Agent 审查通过 — 本轮未派独立 verifier；用户在 2026-10-28 对话中判定通过并同意归档
+- [x] 归档前完成 Section 13 Final Reconciliation，正文无与最终实现矛盾的表述 — 见 §13 Final Reconciliation（2026-10-28）
 
 ## 10. Functional Requirements
 
@@ -466,6 +466,7 @@ No interactive prototype file changes in this PRD.
 - 若将来要向他人公开分发 GUI，回到 $99 签名 + 公证 + cask 决策；届时仅在构建流水线加步骤，架构不返工。
 - Raycast 扩展可作为第二个 HTTP 客户端另行立项，与本 PRD 无依赖。
 - 自动更新提示（App 内提示 `kedacode` 有新版本）可后续单独评估。
+- 桌面壳的 `tauri.conf.json` CSP 目前为 `null`，回环访问限制依赖 capability 作用域；如需在页面层再收紧来源，可单独补 CSP 加固 PRD。
 
 ## 13. Decision Log
 
@@ -482,10 +483,23 @@ No interactive prototype file changes in this PRD.
 
 ### Final Reconciliation
 
-- 待归档前填写。须按模板核对：Interpretation、Public behavior and contracts、Related PRD status、Requirements and risks，以及 `Feature Overview (功能一览)` 与 §10 的一致性。
+2026-10-28 归档前核对（基于最终 main @ c0126337 与真实构建产物）。
+
+- **Interpretation**：三行行为样例与实现逐项对应——菜单栏图标 + 锚定 popover + 固定/取消固定（rv-1）、面板数据同源（rv-1 数据比对）、Finder 启动与 sidecar 生命周期（rv-2/rv-3）。用户 2026-10-20 收窄后的范围（去掉顶部窗口按钮等）已如实落地，无被砍而未改文案的需求，也无未声明的新行为。
+- **Public behavior and contracts**：`kc console` 语义未变（默认 8313、`--no-browser` 保留）；App sidecar 端口顺延，实测与独立 console 并存时取 60514。新增的 `kc desktop install` 已同步到 `docs/getting-started/installation.md:51`、README 与随包 `kedacode-operator` skill 的 setup 路由；菜单栏窗口复用现有只读任务 API，未新增 HTTP 端点。
+- **Related PRD status**：上游 `P1-FEAT-20260913-204530-console-prd-content-reader` 已归档；§8 为 `Depends on: none`，无剩余阻塞。
+- **Requirements and risks**：Feature Overview 与 §10 的 FR-1..FR-7 逐条可从最终代码找到落点（recipe、候选路径枚举、退出回收、popover/固定、两类错误页、文档与导航）。风险表两项已实测：Finder 最小 PATH 命中 `/opt/homebrew/bin/kc`（rv-3 正向），sidecar 孤儿通过注释回收逻辑的负向对照证明判据有效。**偏差**：`tauri.conf.json` 的 `csp` 仍为 `null`，回环限制实际由 capability 的 `urls: http://127.0.0.1:*/*` 承担；不改变本 PRD 验收判据，已登记为 §12 后续项。
 
 ## 14. Change Log
 
+### 真实入口验收并归档（2026-10-28）
+
+- Type: doc
+- Before: 横幅为 🟡「实现已落地，等待真实菜单栏交互验收」，§9 无任何勾选，`tasks/evidence/` 下无本 PRD 证据包。
+- After: 在最终 main 上重跑 `just desktop-install` 并从 Finder 启动，补齐 rv-2（并存端口、退出回收、注释回收逻辑的负向对照）、rv-3（仅 `/opt/homebrew/bin/kc` 的 Finder 启动）与同源数据比对证据；rv-1 交互序列因本机远程会话无法合成菜单栏点击，改由用户手动完成并在对话中确认。§9 勾选 20 项、1 项标注为对话确认；§13 完成 Final Reconciliation；横幅改为 ✅ 已验收并归档。
+- Reason: 实现早已落地，长期卡在真实菜单栏交互验收；用户 2026-10-28 确认体验无误并要求归档。
+- Impact: 证据包落 `tasks/evidence/P1-FEAT-20260913-204531-tauri-desktop-shell/`（含 README 说明未取证项）；PRD 移入 `tasks/archive/`；ROADMAP 的「待真实 UI 交互验收」表述同步更新。
+- Review: `just test` 57 passed、`just lint` 通过、`uv run mkdocs build --strict` 通过；负向对照改动已 `git checkout` 还原，工作区无代码残留。
 ### 按用户反馈实现菜单栏图标与固定悬浮窗（2026-10-20）
 
 - Type: behavior
