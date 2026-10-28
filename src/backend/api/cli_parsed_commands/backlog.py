@@ -3,7 +3,8 @@
 Runs exactly one continuous-scheduling pass for a single target repository:
 reconcile finished/failed queue entries, then promote queued PRDs (and PRDs
 newly discovered in ``tasks/pending/``) up to the resolved execution ceiling
-(``min(policy, runner capacity)``; unsaved policy inherits capacity).
+(Backlog page setting, else runner capacity; the setting never gets merged with
+the capacity through ``min``).
 
 This is the manual entry point for the same logic the fast-lane daemon runs
 every pass, so ``--dry-run`` doubles as the "what would the next pass do?"

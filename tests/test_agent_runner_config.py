@@ -1063,8 +1063,16 @@ auto_advance = true
     assert contexts[0].config.backlog.auto_advance is True
 
 
-def test_retired_max_issues_is_ignored_with_a_warning(caplog: pytest.LogCaptureFixture) -> None:
+def _reset_retired_max_issues_warning(monkeypatch: pytest.MonkeyPatch) -> None:
+    """让弃用警告的进程内去重从干净状态开始，测试彼此不互相吞掉警告。"""
+    monkeypatch.setattr(settings_module, "_retired_max_issues_warned", False)
+
+
+def test_retired_max_issues_is_ignored_with_a_warning(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """旧配置里的 ``max_issues`` 只告警、不参与计算；并行上限只看 max_concurrent_issues。"""
+    _reset_retired_max_issues_warning(monkeypatch)
     with caplog.at_level(logging.WARNING):
         settings = AgentRunnerSettings.model_validate(
             {"max_issues": 4, "runner": {"max_issues": 5, "max_concurrent_issues": 2}}
@@ -1073,3 +1081,15 @@ def test_retired_max_issues_is_ignored_with_a_warning(caplog: pytest.LogCaptureF
     app_config = build_app_config_from_settings(settings)
     assert app_config.runner.max_concurrent_issues == 2
     assert "max_issues 已退役" in caplog.text
+
+
+def test_retired_max_issues_warns_only_once_per_process(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """同一进程里重复构造设置（多仓库/多命令）只提示一次，避免启动日志被同一行刷屏。"""
+    _reset_retired_max_issues_warning(monkeypatch)
+    with caplog.at_level(logging.WARNING):
+        for _ in range(3):
+            AgentRunnerSettings.model_validate({"runner": {"max_issues": 5}})
+
+    assert caplog.text.count("max_issues 已退役") == 1

@@ -475,159 +475,167 @@ def test_remote_expiry_keeps_pending_rework_running_and_honors_budget() -> None:
     assert pending_rework.pending_rework is True
     assert exhausted_budget.disposition is StaleAttemptDisposition.FAIL
 
-    def test_live_claim_within_ttl_untouched(self, tmp_path: Path) -> None:
-        """PID 仍活且未过 TTL 的在途运行不得被对账打扰。"""
-        config = AppConfig()
-        github = FakeGitHubClient()
-        _seed_running_claim(github, config, pid=os.getpid(), started_at=datetime.now(timezone.utc))
 
-        outcomes = _run_reconcile(tmp_path, github, config, ttl_seconds=3600)
+def test_live_claim_within_ttl_untouched(tmp_path: Path) -> None:
+    """PID 仍活且未过 TTL 的在途运行不得被对账打扰。"""
+    config = AppConfig()
+    github = FakeGitHubClient()
+    _seed_running_claim(github, config, pid=os.getpid(), started_at=datetime.now(timezone.utc))
 
-        assert outcomes == []
-        assert config.labels.running in github.get_issue(7).labels
+    outcomes = _run_reconcile(tmp_path, github, config, ttl_seconds=3600)
 
-    def test_live_claim_past_ttl_is_reconciled(self, tmp_path: Path) -> None:
-        """PID 仍活但 claim 超龄 → 按 ``ttl_expired`` 对账（卡死兜底）。"""
-        config = AppConfig()
-        github = FakeGitHubClient()
-        _seed_running_claim(github, config, pid=os.getpid(), started_at=OLD_CLAIM_START)
+    assert outcomes == []
+    assert config.labels.running in github.get_issue(7).labels
 
-        outcomes = _run_reconcile(tmp_path, github, config, ttl_seconds=3600)
 
-        assert [outcome.disposition for outcome in outcomes] == [StaleAttemptDisposition.REENQUEUE]
-        assert "ttl_expired" in outcomes[0].reason
+def test_live_claim_past_ttl_is_reconciled(tmp_path: Path) -> None:
+    """PID 仍活但 claim 超龄 → 按 ``ttl_expired`` 对账（卡死兜底）。"""
+    config = AppConfig()
+    github = FakeGitHubClient()
+    _seed_running_claim(github, config, pid=os.getpid(), started_at=OLD_CLAIM_START)
 
-    def test_in_flight_issue_past_ttl_is_skipped(self, tmp_path: Path) -> None:
-        """本机 daemon 正在执行的 Issue 即使超过 TTL 也不对账（执行期间补位后对账与执行并存）。"""
-        config = AppConfig()
-        github = FakeGitHubClient()
-        _seed_running_claim(github, config, pid=os.getpid(), started_at=OLD_CLAIM_START)
+    outcomes = _run_reconcile(tmp_path, github, config, ttl_seconds=3600)
 
-        outcomes = _run_reconcile(
-            tmp_path, github, config, ttl_seconds=3600, exclude_issue_numbers=frozenset({7})
+    assert [outcome.disposition for outcome in outcomes] == [StaleAttemptDisposition.REENQUEUE]
+    assert "ttl_expired" in outcomes[0].reason
+
+
+def test_in_flight_issue_past_ttl_is_skipped(tmp_path: Path) -> None:
+    """本机 daemon 正在执行的 Issue 即使超过 TTL 也不对账（执行期间补位后对账与执行并存）。"""
+    config = AppConfig()
+    github = FakeGitHubClient()
+    _seed_running_claim(github, config, pid=os.getpid(), started_at=OLD_CLAIM_START)
+
+    outcomes = _run_reconcile(
+        tmp_path, github, config, ttl_seconds=3600, exclude_issue_numbers=frozenset({7})
+    )
+
+    assert outcomes == []
+    assert _reconcile_comments(github) == []
+    assert config.labels.running in github.get_issue(7).labels
+
+
+def test_unresolvable_worktree_marks_failed(tmp_path: Path) -> None:
+    """现场不可解析（path_command 空 stdout）→ 判失败并转 agent/failed。"""
+    config = AppConfig()
+    github = FakeGitHubClient()
+    _seed_running_claim(github, config)
+
+    outcomes = _run_reconcile(tmp_path, github, config, process_runner=FakeProcessRunner())
+
+    assert [outcome.disposition for outcome in outcomes] == [StaleAttemptDisposition.FAIL]
+    assert config.labels.failed in github.get_issue(7).labels
+    assert config.labels.running not in github.get_issue(7).labels
+    assert "- worktree: unresolvable" in _reconcile_comments(github)[0]
+
+
+def test_worktree_without_git_pointer_marks_failed(tmp_path: Path) -> None:
+    """现场目录还在但 ``.git`` 指针被删 → 同判不可解析，不能放回 ready 白跑一轮。"""
+    config = AppConfig()
+    github = FakeGitHubClient()
+    _seed_running_claim(github, config)
+    responses = worktree_site_response(tmp_path, 7)
+    worktree_site(tmp_path, 7).joinpath(".git").unlink()
+
+    outcomes = _run_reconcile(tmp_path, github, config, process_runner=FakeProcessRunner(responses))
+
+    assert [outcome.disposition for outcome in outcomes] == [StaleAttemptDisposition.FAIL]
+    assert config.labels.failed in github.get_issue(7).labels
+    comment = _reconcile_comments(github)[0]
+    assert "- worktree: unresolvable" in comment
+    assert "no .git entry" in comment
+
+
+def test_budget_exhaustion_marks_failed(tmp_path: Path) -> None:
+    """已有 ``max_recovery_attempts`` 条对账记录 → 判失败，不再重跑。"""
+    config = AppConfig()
+    github = FakeGitHubClient()
+    _seed_running_claim(github, config)
+    for seq in range(1, config.runner.max_recovery_attempts + 1):
+        github.comment_issue(
+            7,
+            "## Stale Attempt Reconciled\n" + format_reconcile_marker(f"{seq:016x}", seq),
         )
 
-        assert outcomes == []
-        assert _reconcile_comments(github) == []
-        assert config.labels.running in github.get_issue(7).labels
+    outcomes = _run_reconcile(tmp_path, github, config)
 
-    def test_unresolvable_worktree_marks_failed(self, tmp_path: Path) -> None:
-        """现场不可解析（path_command 空 stdout）→ 判失败并转 agent/failed。"""
-        config = AppConfig()
-        github = FakeGitHubClient()
-        _seed_running_claim(github, config)
+    assert [outcome.disposition for outcome in outcomes] == [StaleAttemptDisposition.FAIL]
+    assert "budget is exhausted" in outcomes[0].reason
+    assert config.labels.failed in github.get_issue(7).labels
 
-        outcomes = _run_reconcile(tmp_path, github, config, process_runner=FakeProcessRunner())
 
-        assert [outcome.disposition for outcome in outcomes] == [StaleAttemptDisposition.FAIL]
-        assert config.labels.failed in github.get_issue(7).labels
-        assert config.labels.running not in github.get_issue(7).labels
-        assert "- worktree: unresolvable" in _reconcile_comments(github)[0]
+def test_recorded_session_resumes_next_claim(tmp_path: Path) -> None:
+    """claim 带 agent + worktree 留有本 Issue 会话记录 → 判续传恢复（同样回 ready）。"""
+    config = AppConfig()
+    github = FakeGitHubClient()
+    _seed_running_claim(github, config, agent="claude")
+    save_agent_session_record(
+        worktree_site(tmp_path, 7),
+        agent_name="claude",
+        session_id="sess-abc",
+        scope=AgentSessionScope(issue_number=7),
+    )
 
-    def test_worktree_without_git_pointer_marks_failed(self, tmp_path: Path) -> None:
-        """现场目录还在但 ``.git`` 指针被删 → 同判不可解析，不能放回 ready 白跑一轮。"""
-        config = AppConfig()
-        github = FakeGitHubClient()
-        _seed_running_claim(github, config)
-        responses = worktree_site_response(tmp_path, 7)
-        worktree_site(tmp_path, 7).joinpath(".git").unlink()
+    outcomes = _run_reconcile(tmp_path, github, config)
 
-        outcomes = _run_reconcile(
-            tmp_path, github, config, process_runner=FakeProcessRunner(responses)
-        )
+    assert [outcome.disposition for outcome in outcomes] == [StaleAttemptDisposition.RESUME]
+    assert config.labels.ready in github.get_issue(7).labels
 
-        assert [outcome.disposition for outcome in outcomes] == [StaleAttemptDisposition.FAIL]
-        assert config.labels.failed in github.get_issue(7).labels
-        comment = _reconcile_comments(github)[0]
-        assert "- worktree: unresolvable" in comment
-        assert "no .git entry" in comment
 
-    def test_budget_exhaustion_marks_failed(self, tmp_path: Path) -> None:
-        """已有 ``max_recovery_attempts`` 条对账记录 → 判失败，不再重跑。"""
-        config = AppConfig()
-        github = FakeGitHubClient()
-        _seed_running_claim(github, config)
-        for seq in range(1, config.runner.max_recovery_attempts + 1):
-            github.comment_issue(
-                7,
-                "## Stale Attempt Reconciled\n" + format_reconcile_marker(f"{seq:016x}", seq),
+def test_completed_session_is_not_used_for_stale_resume(tmp_path: Path) -> None:
+    """成功完成的旧会话不因 worktree 里仍有 id 就被当作崩溃续传。"""
+    config = AppConfig()
+    github = FakeGitHubClient()
+    _seed_running_claim(github, config, agent="claude")
+    save_agent_session_record(
+        worktree_site(tmp_path, 7),
+        agent_name="claude",
+        session_id="sess-complete",
+        scope=AgentSessionScope(issue_number=7),
+        resume_eligible=False,
+    )
+
+    outcomes = _run_reconcile(tmp_path, github, config)
+
+    assert [outcome.disposition for outcome in outcomes] == [StaleAttemptDisposition.REENQUEUE]
+    assert config.labels.ready in github.get_issue(7).labels
+
+
+def test_session_of_other_issue_does_not_resume(tmp_path: Path) -> None:
+    """worktree 复用到别的 Issue 时，历史会话不得污染本轮判定。"""
+    config = AppConfig()
+    github = FakeGitHubClient()
+    _seed_running_claim(github, config, agent="claude")
+    save_agent_session_record(
+        worktree_site(tmp_path, 7),
+        agent_name="claude",
+        session_id="sess-other",
+        scope=AgentSessionScope(issue_number=999),
+    )
+
+    outcomes = _run_reconcile(tmp_path, github, config)
+
+    assert [outcome.disposition for outcome in outcomes] == [StaleAttemptDisposition.REENQUEUE]
+    assert "- session record: absent" in _reconcile_comments(github)[0]
+
+
+def test_closed_issue_untouched(tmp_path: Path) -> None:
+    """已关闭的 Issue 不参与对账（僵尸判定只针对在跑的开放任务）。"""
+    config = AppConfig()
+    github = FakeGitHubClient()
+    _seed_running_claim(github, config)
+    github.set_list_issues_by_label_result(
+        [
+            IssueSummary(
+                number=7,
+                title="closed zombie",
+                url="https://example.invalid/7",
+                body="",
+                labels=(config.labels.running,),
+                state="CLOSED",
             )
+        ]
+    )
 
-        outcomes = _run_reconcile(tmp_path, github, config)
-
-        assert [outcome.disposition for outcome in outcomes] == [StaleAttemptDisposition.FAIL]
-        assert "budget is exhausted" in outcomes[0].reason
-        assert config.labels.failed in github.get_issue(7).labels
-
-    def test_recorded_session_resumes_next_claim(self, tmp_path: Path) -> None:
-        """claim 带 agent + worktree 留有本 Issue 会话记录 → 判续传恢复（同样回 ready）。"""
-        config = AppConfig()
-        github = FakeGitHubClient()
-        _seed_running_claim(github, config, agent="claude")
-        save_agent_session_record(
-            worktree_site(tmp_path, 7),
-            agent_name="claude",
-            session_id="sess-abc",
-            scope=AgentSessionScope(issue_number=7),
-        )
-
-        outcomes = _run_reconcile(tmp_path, github, config)
-
-        assert [outcome.disposition for outcome in outcomes] == [StaleAttemptDisposition.RESUME]
-        assert config.labels.ready in github.get_issue(7).labels
-
-    def test_completed_session_is_not_used_for_stale_resume(self, tmp_path: Path) -> None:
-        """成功完成的旧会话不因 worktree 里仍有 id 就被当作崩溃续传。"""
-        config = AppConfig()
-        github = FakeGitHubClient()
-        _seed_running_claim(github, config, agent="claude")
-        save_agent_session_record(
-            worktree_site(tmp_path, 7),
-            agent_name="claude",
-            session_id="sess-complete",
-            scope=AgentSessionScope(issue_number=7),
-            resume_eligible=False,
-        )
-
-        outcomes = _run_reconcile(tmp_path, github, config)
-
-        assert [outcome.disposition for outcome in outcomes] == [StaleAttemptDisposition.REENQUEUE]
-        assert config.labels.ready in github.get_issue(7).labels
-
-    def test_session_of_other_issue_does_not_resume(self, tmp_path: Path) -> None:
-        """worktree 复用到别的 Issue 时，历史会话不得污染本轮判定。"""
-        config = AppConfig()
-        github = FakeGitHubClient()
-        _seed_running_claim(github, config, agent="claude")
-        save_agent_session_record(
-            worktree_site(tmp_path, 7),
-            agent_name="claude",
-            session_id="sess-other",
-            scope=AgentSessionScope(issue_number=999),
-        )
-
-        outcomes = _run_reconcile(tmp_path, github, config)
-
-        assert [outcome.disposition for outcome in outcomes] == [StaleAttemptDisposition.REENQUEUE]
-        assert "- session record: absent" in _reconcile_comments(github)[0]
-
-    def test_closed_issue_untouched(self, tmp_path: Path) -> None:
-        """已关闭的 Issue 不参与对账（僵尸判定只针对在跑的开放任务）。"""
-        config = AppConfig()
-        github = FakeGitHubClient()
-        _seed_running_claim(github, config)
-        github.set_list_issues_by_label_result(
-            [
-                IssueSummary(
-                    number=7,
-                    title="closed zombie",
-                    url="https://example.invalid/7",
-                    body="",
-                    labels=(config.labels.running,),
-                    state="CLOSED",
-                )
-            ]
-        )
-
-        assert _run_reconcile(tmp_path, github, config) == []
-        assert config.labels.running in github.get_issue(7).labels
+    assert _run_reconcile(tmp_path, github, config) == []
+    assert config.labels.running in github.get_issue(7).labels

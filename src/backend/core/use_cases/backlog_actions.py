@@ -523,8 +523,9 @@ def start_global_backlog(
     Args:
         repo_id: Target repository ID.
         execution_ceiling: The single resolved concurrency ceiling for this
-            batch (``min(policy, runner capacity)``), computed by the caller
-            through :func:`resolve_execution_ceiling`. This path never
+            batch (page setting, else runner capacity — never ``min`` of the
+            two), computed by the caller through
+            :func:`resolve_execution_ceiling`. This path never
             persists Backlog settings — the console button is a one-shot burst
             bounded by the same ceiling the daemon gates use.
         contexts: Resolved enabled repository contexts.

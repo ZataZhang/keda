@@ -91,6 +91,9 @@ from backend.infrastructure.config.settings_sources import (
 _DEFAULT_LOG_RETENTION_DAYS = 14
 
 _logger = logging.getLogger(__name__)
+#: 同一进程里重复构造设置对象（每个仓库一次、每个命令一次）时只提示一次退役键，
+#: 否则启动日志会被同一条弃用警告刷屏。
+_retired_max_issues_warned = False
 
 
 class DatabaseSettings(BaseSettings):
@@ -327,11 +330,14 @@ class AgentRunnerSettings(BaseSettings):
             cleaned_settings["runner"] = {
                 key: value for key, value in runner_section.items() if key != "max_issues"
             }
-        _logger.warning(
-            "[agent_runner.runner] max_issues 已退役，不再参与任何计算：并行上限只看 "
-            "max_concurrent_issues；kc supervise / kc run 的批量请改用命令行 --max-issues。"
-            "运行 kc config migrate 可删除该行。"
-        )
+        global _retired_max_issues_warned
+        if not _retired_max_issues_warned:
+            _retired_max_issues_warned = True
+            _logger.warning(
+                "[agent_runner.runner] max_issues 已退役，不再参与任何计算：并行上限只看 "
+                "max_concurrent_issues；kc supervise / kc run 的批量请改用命令行 --max-issues。"
+                "运行 kc config migrate 可删除该行。"
+            )
         return cleaned_settings
 
     @model_validator(mode="after")

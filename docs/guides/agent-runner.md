@@ -5244,7 +5244,7 @@ Backlog 顶部的「并行上限」是仓库级页面设置（1–10，可以从
    - FAILED → `failed` 并写入 `error_detail`（**失败泊车**），槽位释放；泊车条目不会被重试，需要人工在 `/backlog` 页面处理后再回到调度。
    - BLOCKED → 保留为 `running`，但**不占槽也不晋升**，等人工解除阻塞。
    - WAITING → 不动，依赖未满足的 PRD 继续等待。
-2. **槽位核算**：`free_slots = max(0, ceiling - open agent/running 标签数)`。计数覆盖整个仓库，不要求 Issue 有 Backlog PRD 锚点；查询最多读到 ceiling + 1，用于显示超额下限。计数失败时保留对账、跳过本轮新补位并记录原因。`ceiling` 使用统一解析函数 `min(Backlog「并发」策略, 本轮 runner 容量)`（策略未设置 = 继承容量）；daemon 同一轮把同一个结果分发给补位闸门与 Phase 2 认领闸门。这里的 daemon 容量来自显式 `--concurrency`（若提供），否则来自仓库配置；控制台显示与「全局开始」按仓库配置容量解析，所以使用旗标覆盖时它们可能显示更高的 ceiling。「全局开始」与不带显式上限的 `kc backlog advance` 按仓库配置容量自解析。
+2. **槽位核算**：`free_slots = max(0, ceiling - open agent/running 标签数)`。计数覆盖整个仓库，不要求 Issue 有 Backlog PRD 锚点；查询最多读到 ceiling + 1，用于显示超额下限。计数失败时保留对账、跳过本轮新补位并记录原因。`ceiling` 走统一解析函数 `resolve_execution_ceiling`，优先级为 `kc daemon run --concurrency` > Backlog 页面设置的并行上限 > 配置文件 `max_concurrent_issues` > 1，页面设置直接覆盖配置文件、不再与之取较小值；daemon 同一轮把同一个结果分发给补位闸门与 Phase 2 认领闸门。这里的命令行覆盖来自显式 `--concurrency`（若提供），否则来自页面设置与仓库配置；控制台显示与「全局开始」读页面设置与仓库配置，所以使用旗标覆盖时它们可能显示更高的 ceiling。「全局开始」与不带显式上限的 `kc backlog advance` 按仓库配置容量自解析。
 3. **晋升（promote）**：候选集 = 队列中 `queued` 的条目 ∪ 新发现的未入队 pending PRD（**发现式入队**）。候选经依赖重算后过滤出 `NOT_STARTED` 且无 `block_reason` 的 PRD，按 `P0 > P1 > P2 > P3`、再按 `updated_at` 升序排序，最多晋升 `free_slots` 个。
 
 排序与过滤复用 `_select_eligible_prds` 这一个共享 helper，手动「全局开始」与自动调度走的是同一段代码，两条路径不会漂移。
