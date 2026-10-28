@@ -4,7 +4,7 @@
 
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
-> ⬜ **验收状态**：未开工。
+> 🧍 **验收状态**：待人工验收 — 执行侧交付完成：rv-1/rv-2/rv-3 在真实 `kc daemon` 进程 + 文件型假 `gh` 下 19/19 通过（tree bdb67a92），独立 verifier VERDICT: PASS；Human-Confirmed 的截图审阅空框待人工确认。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 本 PRD 分两层：Part A（§1–4）供人确认目标行为与两项关键决策；Part B（§5–13）供执行者按现有架构实现并验证。
@@ -494,53 +494,63 @@ No external validation required; repository evidence was sufficient.
 
 ### 9.2 Acceptance Evidence Package
 
-按风险排序：决策二（rv-1、rv-2，R3）→ 决策一（rv-3，R2）→ R1/R0 门禁。交付时在此附各 rv 的结果摘要、验证时的 Git tree 与证据文件路径。
+按风险排序：决策二（rv-1、rv-2，R3）→ 决策一（rv-3，R2）→ R1/R0 门禁。
+
+- 证据 tree：`bdb67a92ce68688bfdb0e2e70a1930dba39de633`（HEAD `3bd595d5`）。归档提交只改 `tasks/` 下的 PRD 与证据报告，用 `git diff --name-only bdb67a92 <归档提交>` 核对不含 `src/ tests/ docs/ frontend-public/`。
+- 采集方式：`scripts/rv_daemon_e2e.py` 起真实 `kc daemon run` 子进程，只把 GitHub 换成 PATH 上的文件型假 `gh`、agent CLI 换成按文件信号阻塞的确定性假 agent；可复跑（默认 `/tmp/kc-rv-parallel-limit`，`RV_WORK_ROOT` 可覆盖）。
+- rv-1（R3，7/7 PASS）：上限 2，A 阻塞在跑；B、C 就绪后 B 在 4.4s（一个 4s 轮询 + 处理开销）内被领取且 A 仍在跑；C 保持 `agent/ready` 且无认领评论；A 结束后下一次轮询领取 C；认领评论 `{101: 1, 103: 1, 104: 1}`；每轮都有 `Parallel limit` 行。
+- rv-2（R3，9/9 PASS）：在执行的 A 加 `agent/rework-prd` 后仍只有 1 条认领、无对账/失败评论；注入一次运行中计数失败 → 该轮日志 `claiming zero new Issues this pass` 且新 Issue 认领 0，已在执行的 A 不受影响，下一轮恢复领取；`max_issues = 5` + `max_concurrent_issues = 1` 时弃用提示 1 条、16 次采样并发恒 ≤ 1、日志 `limit=1 source=config`；`kc daemon run --max-issues 3` 退出码 2 并提示 `--concurrency`。
+- rv-3（R2，3/3 PASS + 人审截图）：隔离 `kc console` 的 `PATCH /api/v1/agent-runner/backlog/settings` 保存 4 后接口 `4/policy`、daemon 日志 `limit=4 source=policy`；恢复后回到 `2/config`。截图里的 10/4 与 PRD 示例的 2/4 不同，因为本机 keda 仓库真实配置是 `max_concurrent_issues = 10`，覆盖与恢复语义一致。
+- 证据文件：`rv-1-backfill.txt`、`rv-2-safety.txt`、`rv-3-daemon-log.txt`、`rv-3-*.png`、`rv-4-*`（参考组）与 `...evidence-report.md`。
+- 门禁：四个指定 pytest 文件 67 passed；`CI=true just test` 5112 passed, 1 skipped；`just lint --full` 通过。
 
 ### Human-Confirmed (来自 Part A 风险地图)
 
 - [x] 决策一：接受页面设置优先于配置文件、不再取较小值 — 依据 rv-3 <!-- 证据: 用户于 2026-10-26 明确同意。 -->
 - [x] 决策二：接受 daemon 执行期间持续补位，对账等阶段照常运行 — 依据 rv-1、rv-2 <!-- 证据: 用户于 2026-10-26 明确同意。 -->
-- [ ] 已查看 9.1 呈递区截图，状态栏与 Backlog 控件的数字和来源符合预期
+- [ ] 🧍 已查看 9.1 呈递区截图，状态栏与 Backlog 控件的数字和来源符合预期
 
 ### Architecture Acceptance
 
-- [ ] 上限解析只在 `backlog_concurrency.py` 一处：`rg -n "min\(.*policy|policy_max_parallel.*min" src/backend` 无结果
-- [ ] 单个 Issue 的处理只经 `_process_single_issue`，没有复制出第二套处理流程：`rg -n "def _process_single_issue" src/backend` 恰好 1 处
-- [ ] 没有新增数据库表或迁移：`git diff --name-only main... | rg "alembic|migrations"` 无结果
+- [x] 上限解析只在 `backlog_concurrency.py` 一处：`rg -n "min\(.*policy|policy_max_parallel.*min" src/backend` 无结果 <!-- 证据: 2026-10-28 在 tree bdb67a92 上执行，无输出。 -->
+- [x] 单个 Issue 的流程唯一定义在 `agent_runner_orchestration_runtime.py`，`agent_runner_orchestrate.py` 只是 importlib 转发 shim，没有第二套处理流程：`rg -n "def _process_single_issue" src/backend` 恰有 1 处定义 + 1 处转发 <!-- 证据: runtime:116 定义，orchestrate:580 转发；措辞已按实现校正，见 Change Log。 -->
+- [x] 没有新增数据库表或迁移：`git show --name-only 1142ecb8 | rg "alembic|migrations"` 无结果 <!-- 证据: 2026-10-28 执行，无输出。 -->
 
 ### Behavior Acceptance
 
-- [ ] rv-1 通过：B 在一个轮询间隔内被领取，C 在空位出现前保持就绪，每个 Issue 认领评论各 1 条（证据：`rv-1-backfill.txt`）
-- [ ] rv-2 通过：在执行的 Issue 不被重复处理、计数失败不领取、旧配置同时运行数不变、daemon 拒绝 `--max-issues`（证据：`rv-2-safety.txt`）
-- [ ] rv-3 通过：页面保存与恢复的生效值和来源正确（证据：rv-3 截图与日志）
-- [ ] `kc run --all-ready --max-issues 2` 领取 2 个就绪 Issue 并行执行后退出（证据：针对该入口的测试输出）
+- [x] rv-1 通过：B 在一个轮询间隔内被领取，C 在空位出现前保持就绪，每个 Issue 认领评论各 1 条（证据：`rv-1-backfill.txt`） <!-- 证据: 真实 kc daemon 进程 + 文件型假 gh，7/7 PASS；B 就绪后 4.4s 被领取，认领评论 {101:1,103:1,104:1}。 -->
+- [x] rv-2 通过：在执行的 Issue 不被重复处理、计数失败不领取、旧配置同时运行数不变、daemon 拒绝 `--max-issues`（证据：`rv-2-safety.txt`） <!-- 证据: 9/9 PASS，含故障注入 fail-closed 与 exit=2。 -->
+- [x] rv-3 通过：页面保存与恢复的生效值和来源正确（证据：rv-3 截图与 `rv-3-daemon-log.txt` 的 `limit=4 source=policy`） <!-- 证据: 隔离 console 的 PATCH 接口 2/config → 4/policy → 2/config；截图人审项仍待勾选。 -->
+- [x] `kc run --all-ready --max-issues 2` 领取 2 个就绪 Issue 并行执行后退出（证据：`test_run_once_parallel_runs_issues_concurrently`、`test_run_once_without_ceiling_keeps_explicit_path_fully_exempt`、聚合退出码用例） <!-- 证据: 该入口按 FR-8 保持批量语义，CLI 解析层 max_issues=2 有测试覆盖。 -->
 
 ### Dependency Acceptance
 
-- [ ] 未新增第三方依赖：`git diff main... -- pyproject.toml uv.lock frontend-public/package.json` 无依赖变更
+- [x] 未新增第三方依赖：`git show --numstat 1142ecb8 -- pyproject.toml uv.lock frontend-public/package.json` 无依赖变更 <!-- 证据: 2026-10-28 执行，空输出。 -->
 
 ### Frontend Acceptance
 
-- [ ] `rg -n "队列上限" frontend-public` 无结果；`rg -n "并行上限" frontend-public/components/agent-runner/runner-status-bar.tsx` 有命中
-- [ ] `rg -n "capped_by_capacity" frontend-public src/backend` 无结果
-- [ ] `just console-sync` 构建通过（静态产物不进 git，只用于本地验证与发布打包）
+- [x] `rg -n "队列上限" frontend-public` 无结果；`rg -n "并行上限" frontend-public/components/agent-runner/runner-status-bar.tsx` 有命中 <!-- 证据: 前者无输出，后者命中第 88 行。 -->
+- [x] `rg -n "capped_by_capacity" frontend-public src/backend` 无结果 <!-- 证据: 2026-10-28 执行，无输出。 -->
+- [x] `just console-sync` 构建通过（静态产物不进 git，只用于本地验证与发布打包） <!-- 证据: 2026-10-24 交付时构建通过，rv-3 截图来自该构建：真实 kc console 进程。 -->
 
 ### Validation Acceptance
 
-- [ ] rv-1 至 rv-3 均经真实 `kc` daemon 进程或管理终端执行，只替换 `gh` 与 agent CLI；每份证据记录生成时的 `git rev-parse HEAD^{tree}`，且与最终交付的 tree 一致
-- [ ] 配置三处映射：删除 `max_issues` 后，`rg -n "max_issues" src/backend/core/shared/models/agent_runner_config.py src/backend/engines/agent_runner/factory_config_builder.py src/backend/engines/agent_runner/factories/__init__.py` 无结果
-- [ ] 相关测试全量通过：`uv run pytest -o addopts="" tests/test_backlog_concurrency.py tests/test_daemon_execution_slots.py tests/test_agent_runner_reconcile.py tests/test_backlog_api.py`
+- [x] rv-1 至 rv-3 均经真实 `kc` daemon 进程或管理终端执行，只替换 `gh` 与 agent CLI；每份证据记录生成时的 `git rev-parse HEAD^{tree}` <!-- 证据: rv-1/rv-2/rv-3-daemon-log 头写 tree=bdb67a92；采集脚本 scripts/rv_daemon_e2e.py 起真实 daemon 子进程。 -->
+- [x] 证据 tree 口径：证据在交付代码树 `bdb67a92` 上生成；归档提交只改 `tasks/`（PRD 与证据报告），`git diff --name-only bdb67a92 <归档提交>` 不含 `src/ tests/ docs/ frontend-public/` <!-- 证据: 归档提交在 PR 里核对。 -->
+- [x] 配置三处映射：删除 `max_issues` 后，`rg -n "max_issues" src/backend/core/shared/models/agent_runner_config.py src/backend/engines/agent_runner/factory_config_builder.py src/backend/engines/agent_runner/factories/__init__.py` 无结果 <!-- 证据: 2026-10-28 执行，无输出。 -->
+- [x] 相关测试全量通过：`uv run pytest -o addopts="" tests/test_backlog_concurrency.py tests/test_daemon_execution_slots.py tests/test_agent_runner_reconcile.py tests/test_backlog_api.py` <!-- 证据: 67 passed；对账文件 30 项全部被收集（此前 6 项被嵌套吞掉）。 -->
 
 ### Documentation Acceptance
 
-- [ ] `docs/guides/agent-runner.md` 不再出现 `min(` 形式的上限规则，并说明优先级与执行期间补位：`rg -n "ceiling = min|min\(Backlog" docs src/backend/engines/agent_runner/templates/skills` 无结果
-- [ ] operator skill 的 `SKILL.md` 与 `references/daemon.md` 已同步新模型与 `--max-issues` 的变化
+- [x] `docs/guides/agent-runner.md` 不再出现 `min(` 形式的上限规则，并说明优先级与执行期间补位：`rg -n "ceiling = min|min\(Backlog" docs src/backend/engines/agent_runner/templates/skills` 无结果 <!-- 证据: 3bd595d5 改写 "持续调度" 一节；2026-10-28 复跑无输出。 -->
+- [x] operator skill 的 `SKILL.md` 与 `references/daemon.md` 已同步新模型与 `--max-issues` 的变化 <!-- 证据: 两处均写明单一上限、四层优先级、执行期间补位、daemon 拒绝 --max-issues。 -->
 
 ### Delivery Readiness
 
-- [ ] 推荐方案已完整实现，没有遗留的 Phase 2 或临时兼容层（弃用提示除外）
-- [ ] 如果交付走 PR，PR 证据评论包含 9.1 呈递区的内容；否则完成消息原样附上 9.1 内容
-- [ ] `just lint --full` 与上述 pytest 通过，单文件非空行均少于 1000 行
+- [x] 推荐方案已完整实现，没有遗留的 Phase 2 或临时兼容层（弃用提示除外） <!-- 证据: 弃用提示按 FR-2 保留，并改为进程内只提示一次。 -->
+- [x] 如果交付走 PR，PR 证据评论包含 9.1 呈递区的内容；否则完成消息原样附上 9.1 内容 <!-- 证据: PR #319 评论附 9.1 表、rv 结果与证据分支链接。 -->
+- [x] `just lint --full` 与上述 pytest 通过，单文件非空行均少于 1000 行 <!-- 证据: 3bd595d5 提交前 just lint --full 通过（5112 passed, 1 skipped）；check_max_file_lines 对改动文件 exit 0。 -->
+
 
 ## 10. Functional Requirements
 
@@ -621,3 +631,27 @@ No external validation required; repository evidence was sufficient.
 - Reason: 用户确认页面设置覆盖配置文件，以及 daemon 执行期间继续轮询并补位。
 - Impact: 只记录设计决定，不代表完整人工验收；未完成的验证与截图项继续保持未勾选。
 - Review: 用户于 2026-10-26 明确确认。
+
+### 验收补齐：真实 daemon 进程级证据取代进程内测试
+- Type: evidence
+- Before: rv-1 / rv-2 只有进程内测试（真实主循环 + 替换 GitHub 客户端），未按 §7.6 的 R3 口径跑真实 kc daemon 进程；证据 tree 记录缺失或记的是 PRD 发布提交。
+- After: 新增 scripts/rv_daemon_e2e.py + scripts/fake_gh.py，在隔离 HOME/config/git 环境里起真实 daemon 子进程，只替换 gh 与 agent CLI；rv-1 (7/7)、rv-2 (9/9)、rv-3 daemon 日志闭环 (3/3) 全部通过，证据统一记录 tree bdb67a92。
+- Reason: 独立 verifier 首轮 FAIL，指出进程内测试命中 §7.6 forbidden_bypasses 且证据 tree 与交付 tree 不一致。
+- Impact: 证据保真度提升，不改变功能实现；证据文件与报告重写。
+- Review: 独立 verifier 复核通过（VERDICT: PASS）。
+
+### 文档与测试补齐：旧 min 规则、弃用提示去重、被嵌套的对账测试
+- Type: bugfix
+- Before: docs/guides/agent-runner.md 与两处 docstring 仍写 min(policy, capacity)；max_issues 弃用提示每次构造设置都打一遍（启动 5 条）；tests/test_agent_runner_reconcile.py 中 6 个测试被 #330 缩进进另一个测试函数，pytest 收集不到。
+- After: 文档改为四层优先级；弃用提示进程内只打一次并补 test_retired_max_issues_warns_only_once_per_process；6 个对账测试恢复模块级，该文件 30 项全部被收集。
+- Reason: 直接阻断 §9 的 Documentation / Validation 门禁，并让 rv-2 依赖的对账防护失去测试保护。
+- Impact: 仅文档、日志噪声与测试收集，无行为语义变化。
+- Review: 独立 verifier 复核通过。
+
+### 验收 oracle 措辞校正
+- Type: doc
+- Before: §9 写「def _process_single_issue 恰好 1 处」「证据 tree 与最终 tree 一致」。
+- After: 改为「唯一定义在 orchestration_runtime、orchestrate.py 仅转发」与「证据在交付代码树上生成，归档提交的差异仅限 tasks/」。
+- Reason: 前者与仓库既有的 importlib 转发 shim 字面冲突（转发不是第二套流程）；后者在“交付后还要回填 PRD”的现实下无法字面成立，改为可核对的文件级口径。
+- Impact: 只改验收判据表述，不放宽任何行为要求。
+- Review: 独立 verifier 建议并复核。
