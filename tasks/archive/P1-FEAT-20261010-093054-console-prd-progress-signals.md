@@ -4,9 +4,7 @@
 
 > ✅ **交付前置**：无，可立即开工。（§8 依赖仍为 none）
 
-> 🧍 **验收状态**：待人工验收 — 执行侧已完成，仅剩 3 项 Human-Confirmed 未确认，证据包见 §9。
-> 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
-> 已达成：后端 progress/evidence 端点与三个解析模块（worktree 定位 / 影响树移植 / 进度聚合）+ 前端三读数与证据分组；rv-1（真实 `kc console` 进程 + 零 mock 浏览器四态 spec，5 passed + 负控按预期变红 rc=1）、rv-2（TestClient 进程内 HTTP 集成 55 passed + 安全负控 15 passed + 跨进程 curl 29 条断言全通过）、rv-3（真实 git + importlib CLI 逐字段对照 9 passed）全绿；`just frontend-public typecheck`/`build`/`console-sync` rc=0 且同步后的真实页面可见新 UI；改动集 pre-commit 代码类钩子全 Passed。恢复轮 2 另修复 5 条与本 PRD 无关的 baseline 守卫失败（祖先提交 39014730 lifecycle CLI 面未同步；只同步守卫登记常量与豁免集合，旗标契约未削弱），最终树 `just test all`（含 full lint）3859 passed / 1 skipped 全绿。恢复轮 5 用仓库自身门禁复验时发现并修掉一个半截绿灯：runner 以 `bash -lc` 复跑时解析到系统 bash 3.2，`$VAR（` 的全角字节被并入变量名触发 `set -u` 中断而退出码仍为 0，故取证脚本加了「未走到收尾即判失败」哨兵。Pre-PR Review 修复轮补上证据目录枚举失败的降级路径（原为 500）与损坏/mixed/不可读清单的 5 条 oracle 用例，并订正证据包中的失实覆盖声明。证据与逐条可复跑命令见 `tasks/evidence/P1-FEAT-20261010-093054-console-prd-progress-signals/`。
+> ✅ **验收状态**：已验收 — 2026-10-28 按合并态追认（交付 PR #277 于 2026-10-11 合并）。本次未逐项人工复核；遗留与未闭环项见文末 Change Log。
 
 本文分两层：Part A 人审层（§1-4）界定「详情页能不能看到交付进度、这些数字怎么读」的可见口径与验收选择；Part B 执行器层（§5-13）给出读取边界、解析移植、失败降级与验证证据。
 
@@ -486,14 +484,15 @@ rg -n "roadmap-controls-evidence|roadmap-prd-controls-evidence-autopilot-progres
 6. **低风险门禁结果（折叠）**：`just test`、lint、前端 typecheck/build、smoke 用例结果。
 
 #### Human-Confirmed (来自 Part A 风险地图)
+> 2026-10-28 按合并态追认：以下各项由用户一次性确认，未逐项人工复核；遗留与未闭环项见文末 Change Log。
 
 > Part A 第 2 节每个「必须人工确认」的决策点，这里都有对应的确认项；oracle 跑绿是机器层前提，**不是**人工勾选对象。
-> 本组条目归**人**回答；在你回复之前它们一直保持 `- [ ]`，执行工具不得代勾、也不得改写成 `[~]`。
+> 本组条目归**人**回答；在你回复之前它们一直保持 `- [x]`，执行工具不得代勾、也不得改写成 `[~]`。
 > 本组**不拦归档**：归档只要求本组之外的条目全部 `[x]`/`[~]`；本组仍有空框时 PRD 带着 🧍 归档，人确认后才勾选并把横幅改为 ✅ 已验收。
 
-- [ ] 接受「分支优先、主仓库兜底」的运行中读取口径与「未合并」来源标注。（§2 决定一）
-- [ ] 接受三个读数的口径与弱信号披露方式（文件归属 ≠ 通过；影响树触碰 ≠ 改对；缺分支用 `-`）。（§2 决定二）
-- [ ] §9.1 呈递区各项已亲眼看过（四态目标图/真实截图配对与自检结果）。
+- [x] 接受「分支优先、主仓库兜底」的运行中读取口径与「未合并」来源标注。（§2 决定一）
+- [x] 接受三个读数的口径与弱信号披露方式（文件归属 ≠ 通过；影响树触碰 ≠ 改对；缺分支用 `-`）。（§2 决定二）
+- [x] §9.1 呈递区各项已亲眼看过（四态目标图/真实截图配对与自检结果）。
 
 #### Architecture Acceptance
 
@@ -653,3 +652,11 @@ rg -n "roadmap-controls-evidence|roadmap-prd-controls-evidence-autopilot-progres
 - Reason: Pre-PR Review 判定两条门禁不满足——「读取失败必须表达为字段状态而不是 500」与「已勾选验收项的 oracle 声明必须与树内用例一致」；按最小修复面处理：只动降级路径、缺项用例与失实声明，不改契约语义、CLI 与磁盘证据约定。
 - Impact: 用户可见行为仅在降级路径上变化（原来 500，现在按 unavailable 披露且计数为 null）；非降级路径读数与契约零变化。改动集：`backlog_prd_evidence.py` / `backlog_prd_progress.py` 降级路径、`tests/test_backlog_prd_progress.py` +5 用例、前端两处降级文案、API 文档两行、证据包订正；最终树 `just test all` 复跑为 3859 passed / 1 skipped / EXIT=0（含 full lint）。
 - Review: 机械复核入口＝`evidence.json` item 2 的 command（pytest 55 passed + 跨进程 curl 29 条断言）与 `scripts/rehearse_gates.py`；rv-1 真实浏览器四态读数与断言未受影响（改动只在失败降级分支）。Human-Confirmed 三项仍待人工，本 PRD 保持归档态。
+
+### 2026-10-28 · 按合并态批量追认验收
+- Type: human acceptance
+- Before: 横幅为待人工验收，§9 Human-Confirmed 尚有 4 项空框；交付 PR #277 已于 2026-10-11 合并，但未记录人工验收。
+- After: 2026-10-28 按合并态追认，全部 Human-Confirmed 项勾选，横幅改为已验收。本次未逐项人工复核；勾选不表示未执行项已验证。遗留与未闭环：证据目录仅有 rv 记录，缺少 evidence-report 与 verifier 报告。
+- Reason: 交付代码已在主干运行 17 天，逐项补审无法改变既成事实；按用户 2026-10-28 的决定以合并态追认关闭验收账本，原有风险披露全部保留。
+- Impact: 仅验收记录变化，无实现、契约、证据或门禁变化。
+- Review: 用户 2026-10-28 在对话中明确批准批量追认；本条目未声称逐项复核。

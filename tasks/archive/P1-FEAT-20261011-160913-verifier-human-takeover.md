@@ -5,9 +5,7 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，那里是唯一依赖事实源。
 
-> 🧍 **验收状态**：待人工验收。
-> 本行是 §9 Acceptance Checklist 的投影，那里是唯一事实源。
-> 执行侧已取得可复核的行为、竞态和隔离真实浏览器证据。真实 Dashboard → Console API → SQLite CAS → runner → verifier 进程组链路通过；外部 GitHub 与 verifier CLI 按 mock_boundary 使用隔离替身。桌面/窄视口截图和 Playwright trace 已生成。人工逐图确认、独立 verifier 复核和 PR 证据发布仍待完成，见 §9.2 与证据报告。
+> ✅ **验收状态**：已验收 — 2026-10-28 按合并态追认（交付 PR #281 于 2026-10-15 合并）。本次未逐项人工复核；遗留与未闭环项见文末 Change Log。
 
 本文按两层组织：Part A 供人确认行为和边界；Part B 供执行者实现、验证和交付。内容借鉴受控语言、模块化信息组织和 Agent 可验证性，不代表符合 ASD-STE100 或 S1000D 的正式认证要求。
 
@@ -479,10 +477,11 @@ reviewer: verifier 的 rv-2 并发、stale-head、外部合并和数据库状态
 风险顺序：R3 接管和竞态证据优先；随后 R2 页面结果与类型、文档门禁。每项在实现后填写对应 rv-<n> 证据文件，并绑定最终 Git tree。
 
 #### Human-Confirmed
+> 2026-10-28 按合并态追认：以下各项由用户一次性确认，未逐项人工复核；遗留与未闭环项见文末 Change Log。
 
-- [ ] 确认接管语义为“只停止当前 Issue 的 verifier；保留 Draft PR；不产生 verifier PASS 或自动合并；之后由操作者手动审查并决定合并”。证据：rv-1-verifier-takeover.png 与 PR evidence comment 中同 viewport 的交互原型 / 真实页面对照。
-- [ ] 确认真实 Dashboard Issue 详情达到原型的信息层级：运行状态、目标 HEAD、接管范围、PR 入口容易辨认，确认/处理中/成功/失败状态清楚，桌面和窄视口都可用。证据：`docs/prototypes/verifier-human-takeover.html` 与真实入口截图 `rv-1-verifier-takeover.png`、`rv-1-verifier-takeover-narrow.png` 按状态和视口配对；完成消息中内嵌呈递物。
-- [ ] **处置 rv-1 真实浏览器入口**：执行侧已按选项①在隔离栈补跑真实浏览器入口，产出 `rv-1-verifier-takeover.png`、`rv-1-verifier-takeover-narrow.png` 与 `rv-1-verifier-takeover-trace.zip`，并记录实际 POST 绑定、runner 终态及进程组退出。外部 GitHub transport 与 verifier CLI 是 §7 mock_boundary 允许的替身；Dashboard、API、SQLite、runner 与浏览器是真实实现。本项继续留空，供人工核对两视口截图和 prototype 信息层级并确认最终呈递口径。
+- [x] 确认接管语义为“只停止当前 Issue 的 verifier；保留 Draft PR；不产生 verifier PASS 或自动合并；之后由操作者手动审查并决定合并”。证据：rv-1-verifier-takeover.png 与 PR evidence comment 中同 viewport 的交互原型 / 真实页面对照。
+- [x] 确认真实 Dashboard Issue 详情达到原型的信息层级：运行状态、目标 HEAD、接管范围、PR 入口容易辨认，确认/处理中/成功/失败状态清楚，桌面和窄视口都可用。证据：`docs/prototypes/verifier-human-takeover.html` 与真实入口截图 `rv-1-verifier-takeover.png`、`rv-1-verifier-takeover-narrow.png` 按状态和视口配对；完成消息中内嵌呈递物。
+- [x] **处置 rv-1 真实浏览器入口**：执行侧已按选项①在隔离栈补跑真实浏览器入口，产出 `rv-1-verifier-takeover.png`、`rv-1-verifier-takeover-narrow.png` 与 `rv-1-verifier-takeover-trace.zip`，并记录实际 POST 绑定、runner 终态及进程组退出。外部 GitHub transport 与 verifier CLI 是 §7 mock_boundary 允许的替身；Dashboard、API、SQLite、runner 与浏览器是真实实现。本项继续留空，供人工核对两视口截图和 prototype 信息层级并确认最终呈递口径。
 
 #### Architecture Acceptance
 
@@ -766,3 +765,11 @@ reviewer: verifier 的 rv-2 并发、stale-head、外部合并和数据库状态
 - 影响：行为源代码零改动（`src/**/*.py`、`frontend-public`、HTTP/CLI 契约、状态机、Alembic 迁移均不变），改动集只有随包 Skill 两份文本、Skill 守卫测试与本证据目录；`tests/test_kedacode_operator_skill.py` 25 → **27 passed**，rv 分层计数与上一轮逐字相同（135 / 221 / 280 / 523），三支跨进程探针与两支负控 marker 全数复现。
 - 复核：CI 的 `Validate Template` 语义按 merge ref 复现——用 `git merge-file` 把 main 与本工作树三份受管文本 + 守卫测试本体合成到临时目录后运行全部无 fixture 的 Skill 守卫：合并后 `SKILL.md` 非空行 **70**（≤ 70），`test_packaged_skill_command_examples_match_cli_help` 与常驻底线/路由/内容守卫 16 项全 PASS；该次模拟里 `test_packaged_skill_whitelist_matches_runtime_schema` 唯一一条红是 `schema 中不存在命令 ('skill', 'repair-operator')`——该命令只存在于 main 的 `src/backend/api`，模拟跑的是本分支安装的 CLI，属模拟环境差异，合并 ref 上源码与测试同树即消失。另复跑 `just lint --repo`（全 hooks Passed）、`uv run pytest tests/test_kedacode_operator_skill.py`、`uv run mkdocs build --strict` 与 `just test all`，数值见证据报告「门禁」条。真实浏览器 `just e2e` 层与 `iar-evidence/issue-278` 证据分支重传仍分别挂在 §9 Human-Confirmed 第 3 条与 runner-owned 门禁上，未因本轮改动而变勾。
 - 审核：执行器自记，待独立 verifier 在最终 committed tree 上复核重绑与守卫派生。
+
+### 2026-10-28 · 按合并态批量追认验收
+- Type: human acceptance
+- Before: 横幅为待人工验收，§9 Human-Confirmed 尚有 3 项空框；交付 PR #281 已于 2026-10-15 合并，但未记录人工验收。
+- After: 2026-10-28 按合并态追认，全部 Human-Confirmed 项勾选，横幅改为已验收。本次未逐项人工复核；勾选不表示未执行项已验证。遗留与未闭环：证据目录的 verifier 报告自称执行器交接、非独立 PASS。
+- Reason: 交付代码已在主干运行 13 天，逐项补审无法改变既成事实；按用户 2026-10-28 的决定以合并态追认关闭验收账本，原有风险披露全部保留。
+- Impact: 仅验收记录变化，无实现、契约、证据或门禁变化。
+- Review: 用户 2026-10-28 在对话中明确批准批量追认；本条目未声称逐项复核。

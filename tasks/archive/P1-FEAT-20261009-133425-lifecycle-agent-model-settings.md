@@ -5,8 +5,7 @@
 > ✅ **交付前置**：无硬依赖，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> 🧍 **验收状态**：待人工验收（执行侧交付完成，§9 非人工项已按证据勾选）。
-> 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
+> ✅ **验收状态**：已验收 — 2026-10-28 按合并态追认（交付 PR #268 于 2026-10-11 合并）。本次未逐项人工复核；遗留与未闭环项见文末 Change Log。
 
 本文分两层：Part A 需求层（§1-4）说明用户目标、已明确的范围与实现约束；Part B 执行器层（§5-13）给出复用路径、实现边界与验收证据。
 
@@ -472,14 +471,15 @@ verifier-only 组：旧命令/route 兼容、invalid template fail-fast、PRD/on
 ### 9.2 Acceptance Evidence Package
 
 #### Human-Confirmed
+> 2026-10-28 按合并态追认：以下各项由用户一次性确认，未逐项人工复核；遗留与未闭环项见文末 Change Log。
 
 以下项目是实现完成后对真实交付证据的人工验收，不是要求用户再次确认需求范围：
 
-- [ ] Settings 独立生命周期页面是主入口；Backlog 仓库快捷入口打开同一页面并预选该仓库。（§2；rv-2）
-- [ ] CLI 持久化修改显式指定 global/repository；repository 修改显式提供 `repo_id`。（§2；rv-1）
-- [ ] 九阶段都可查看/编辑；缺省与不支持的模型/推理深度如实标记，不强制更改现有运行默认。（§2；rv-1、rv-2）
-- [ ] 执行器回退候选可绑定匹配的命名预设，未绑定时沿用执行器默认配置。（§2；rv-1、rv-2）
-- [ ] 同一执行器可通过不同模型预设重复出现在回退队列；预算按候选步数计算，完全相同的执行器/预设组合不能重复。（§2；rv-1、rv-2）
+- [x] Settings 独立生命周期页面是主入口；Backlog 仓库快捷入口打开同一页面并预选该仓库。（§2；rv-2）
+- [x] CLI 持久化修改显式指定 global/repository；repository 修改显式提供 `repo_id`。（§2；rv-1）
+- [x] 九阶段都可查看/编辑；缺省与不支持的模型/推理深度如实标记，不强制更改现有运行默认。（§2；rv-1、rv-2）
+- [x] 执行器回退候选可绑定匹配的命名预设，未绑定时沿用执行器默认配置。（§2；rv-1、rv-2）
+- [x] 同一执行器可通过不同模型预设重复出现在回退队列；预算按候选步数计算，完全相同的执行器/预设组合不能重复。（§2；rv-1、rv-2）
 
 #### Architecture Acceptance
 
@@ -783,3 +783,11 @@ verifier-only 组：旧命令/route 兼容、invalid template fail-fast、PRD/on
 - Impact: 代码侧 9 个文件（infrastructure 2、engines 4、api 2、core 1）+ `config_edit.py` 新增一个错误类型；新增 8 条判别测试（有界超时不挂死、同线程重入不自死锁、对外锁与内部锁是同一把、锁文件 0600、属主沿用、chown 被拒仍写完、CLI 基线在锁内、console 基线在锁内）与 rv-2 的 4 条浏览器断言；删除 1 个无调用者的公开辅助（断言迁至生产入口，未削弱）。用户可见变化两处：配置写入撞锁时从"卡住"变为退出码 5 / HTTP 409 并提示重试（`kc` 的子命令、旗标与机器输出未变，退出码 5 本就在既有码表内），以及写 `config.toml` 不再改其属主。已按 CLI Surface Sync 规则同步 `docs/guides/model-presets.md` §7.2 与随包 skill 的 `references/setup-and-config.md`。
 - Validation: 合并后在同一棵树整体重跑——`just test`（本地档）840 passed 并刷新 flag；`JUST_FULL_TEST_FLAGS=--no-testmon just test all` → **`3965 passed, 1 skipped`、exit 0**（较第七轮 3866 多 99 条 = 合并带入的 main 新用例 + 本轮 8 条判别测试）；`just lint --full`（含 architecture / max-file-lines / guidelines / PRD checklist）与 `just lint --reuse` 的四条 reuse hook 中，除 `jscpd` 外全部 Passed；`ruff check` 与 `ruff format --check` 对 `src tests` 干净、`git diff --check` 干净；`uv run mkdocs build --strict` exit 0；`just console-sync` 用合并后的前端产物重建 bundle 后，`rv1_capture` / `rv3_capture` / `rv3_delete_integrity` / `rv2_run`（正控 + 负控各一次）/ `rv1_final_tree` 全 PASS——`RV-1 / RV-3 / RV-3-DEL / RV-2 / RV-2 WRAPPER RESULT: PASS`、负控 `RED-CONFIRMED 3/3`、真实 Playwright `7 passed`、rv-2 判别性检查失败数 0，`rv1_final_tree` 定向 **405 passed**（第七轮 389，差值来自合并进来的 main 用例）。绑定树：本轮 rv-1 / rv-2 / rv-3 采集首部 `tree stamp · head_commit=be1228ee / head_tree=47713888 / working_state_tree=6947101b572f0b5fdc8c087984ee972b7f364402 / working_tree_clean=no`；最后重采的两份门禁产物（`rv-1-final-tree-reverification.txt` 定向 405 passed、`rv-just-test-all.txt` 全量 3965 passed）stamp 为 `working_state_tree=044995df1307282a416b93792ebce5cf552ddbf4`，两者之间**代码与测试树一字未动**——`git diff --name-only 6947101b 044995df` 与 `git diff --name-only 044995df <最终交付前 tree>` 只含 `tasks/` 下的 PRD 与证据报告（纯文档追加）。合并 commit 由 runner 落，其 tree 应与最后一次 stamp 的差额同样只有这些文档文件。。**远端 CI 仍未验证**：本轮规则禁止 push，PR #268 的 check-runs 需要在冲突解决、合并落库、推送后由远端流水线实际跑一次；在此之前本 PRD 只声称本地门禁绿，不声称远端已验证。§9 Human-Confirmed 五项继续留空，横幅保持 🧍 待人工验收。
 - Review: 三点如实交代，不粉饰。**(a) `jscpd` 在合并树上判出一处不属于本 PR 的重复**：`src/backend/api/cli_typer_lifecycle.py:8-25 <-> src/backend/api/cli_typer_tokens.py:13-30`（18 行、**0 tokens**，即两模块逐字相同的 import 横幅）。两个文件在本分支的合并结果里与 main 逐字节相同（`git diff 29a5ea32 -- <两文件>` 为空），`cli_typer_lifecycle.py` 更是 main 新增、本 PR 从未触碰；它之所以被算作"候选文件"，只是因为合并把这些行带进了本次变更集（`docs/ai-standards/tooling.md` 的候选/语料口径）。本轮没有为把它判绿去改另一个特性面的模块，也没有放宽守卫（不动阈值、不加 ignore、不改 hook），处置方式是把归属如实记录并交给该表面的 owner：要么由 main 侧把两个 CLI typer 模块的共享导入收敛成一处，要么由规范侧为"纯 import 横幅（0 tokens）"设定判定口径。`just lint --reuse` 其余三条（pylint duplicate-code / architecture / guidelines / max-file-lines）均 Passed，且该 hook 属 `manual` stage，不在 `just lint`、`just lint --full` 或默认 `git commit` 门禁内，`.github/workflows/ci.yml` 也没有 reuse diagnostics 步骤。**(b) 半完成 merge 留下的 index/worktree 差异**：上一次会话把 6 处冲突解完并 `git add` 了，但索引里那份 `run_agent_once.py` 仍带着已不再使用的 `PHASE_VERIFICATION` import（工作树版本已由 ruff 去掉，`ruff check` 对 `src tests` 全绿）。因此直接跑 `just lint` 时，pre-commit 的 autostash 会先退回索引内容、ruff 再判一次 F401 并"修改文件"，随之 `check-test-flag` 报标记过期——这不是代码问题，而是**索引尚未与工作树对齐**：runner 执行 `git add` + merge commit 后索引即取工作树的干净版本，随后重跑一次 `just test` 刷新 flag，`just lint` 便端到端绿。本轮规则禁止执行侧 `git add` / `git commit`，故留此说明而不自行代劳。**(c) 远端 CI 仍未验证**：本轮不推送，PR #268 的 check-runs 需要在合并 commit 落库并推送后由 GitHub 实际跑一次；在结果出来前，本 PRD 只声称上述本地门禁绿。§9 Human-Confirmed 五项继续留空，验收横幅保持 🧍 待人工验收。
+
+### 2026-10-28 · 按合并态批量追认验收
+- Type: human acceptance
+- Before: 横幅为待人工验收，§9 Human-Confirmed 尚有 5 项空框；交付 PR #268 已于 2026-10-11 合并，但未记录人工验收。
+- After: 2026-10-28 按合并态追认，全部 Human-Confirmed 项勾选，横幅改为已验收。本次未逐项人工复核；勾选不表示未执行项已验证。遗留与未闭环：仓库内无独立 verifier 报告文件，Change Log 仍记待 runner 复跑。
+- Reason: 交付代码已在主干运行 17 天，逐项补审无法改变既成事实；按用户 2026-10-28 的决定以合并态追认关闭验收账本，原有风险披露全部保留。
+- Impact: 仅验收记录变化，无实现、契约、证据或门禁变化。
+- Review: 用户 2026-10-28 在对话中明确批准批量追认；本条目未声称逐项复核。

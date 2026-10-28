@@ -22,7 +22,7 @@
 - **校准不过的题不让用**（FR-5）：每道题的校准结论可见；没校准通过的题、以及留出集（除非显式勾选）不能用来跑 Agent。
 - **同一道题重复跑，并有用量上限**（FR-6）：创建评测时可选重复次数，创建时就告知将发生多少次候选执行，超过上限直接拒绝。
 - **如实展示稳定与不稳定**（FR-7）：每道题每个预设显示几次通过，三次结论不一致的单列为"不稳定"；基础设施故障与判分失败分开计数；不折算总分，不设阈值。
-- **首批 12 道真实任务**（FR-8）：取自 keda 自己已合并的历史修复（8 道开发集 + 4 道留出集），全部校准通过。
+- **从已有数据集选出首批 12 道基准题**（FR-8）：复用已有归档、描述补全与离线校准，筛选 keda 已合并的历史修复（8 道开发集 + 4 道留出集），在最终评测流程中全部校准通过；12 是首批基准规模，不是数据集总量。
 - **本地账本升级**（FR-9）：保存重复次数与每题冻结的起点；已有评测记录原样保留。
 - **文档与路线图同步**（FR-10）。
 
@@ -42,6 +42,8 @@ ROADMAP 把 M13 定为 2026-10-16 起的主线：先有可信的评测基线，�
 - **每个组合只跑一次**。同一个任务、同一个预设只有一条结果，看不出结论是稳定的还是碰巧的。
 
 ### Interpretation (解读回显)
+
+**2026-10-28 范围校正**：任务数据集、描述补全与离线判分校准工具已经建立，本次优先复用这些成果。已有校准用于筛题，不能直接代替最终冻结材料在 Console 中的三次重复校准；本次主要补齐隔离执行、重复账本和结果展示。
 
 这是你**前置批准**的对象，也是唯一能拦住"解读错了"的关卡——oracle 和实现都是同一份解读的产物，解读错了它们会互相印证，下游检查全绿在错的行为上。散文没法逐条否证，所以先给可以逐格改的具体样例。
 
@@ -68,6 +70,8 @@ ROADMAP 把 M13 定为 2026-10-16 起的主线：先有可信的评测基线，�
 - **用量上限 → 按候选执行次数卡，不按金额卡**：调用模型的候选执行最多 48 次、校准（不调模型）最多 144 次；金额无法可靠计量（主力执行器的 Token 上报覆盖率约 3%），所以不假装按钱限制。
 - **"极小模板仓冒烟" → 读成测试里现建的一个小 fixture 仓库**，不依赖本机某个模板目录。
 - **题目描述的写法 → 只写问题与期望行为，不写解法，也不照抄原 PR 描述**，避免把答案提示写进 prompt。
+- **题目来源 → 从已有数据集筛选**：优先复用已通过离线校准的候选和已复核的描述补全，不重新采集一套数据。旧校准结论不直接写入 Console，最终仍走同一执行流程三次校准。
+- **留出资格 → 逐题核对使用记录**：已用于调 prompt、skill、预设或流程的题只能作开发集；使用情况不明的题不能默认当留出集，不能靠改标签恢复留出资格。
 - **本里程碑不改评审打分**：评审模型与打分口径保持现状，评审仍然是可选的、逐次授权的。
 
 **我理解为不做**（你可能想要、但我读成不在范围内的）
@@ -142,7 +146,7 @@ erDiagram
 
 **请确认：** 是否接受"首期只有基线一组、不出现'Keda 比原生 Agent 强多少'的结论"，以及上面的验收口径与 12 道任务的范围？
 
-**验收：** 评测页上 12 道题全部"校准通过"，且真实 Agent 三次重复的稳定/不稳定结果可见；本 PRD 的交付物里没有任何对比组结论。
+**验收：** 评测页上 12 道题全部"校准通过"；必需的三次重复展示通过受控探针验证，真实 Agent 效果实验为 opt-in，显示实际结果、不要求出现不稳定；本 PRD 的交付物里没有任何对比组结论。
 
 ### 自动门禁，不需要逐项人工审阅
 
@@ -197,6 +201,10 @@ erDiagram
 
 ## 5. Repository Context And Architecture Fit
 
+- **已有数据资产（2026-10-28 本机只读盘点快照，非验收目标）**：独立私有仓库 `keda-datasets` 的 `MANIFEST.json` 与 `raw/` 共 580 条样本（`git_commit` 346、`github_pr` 85、`keda_run` 149）；原始归档的 `labels.eval_ready=true` 共 35 条，尚未重新叠加 curation。`calibration/` 有 37 条记录：`calibrated` 16、`coupled_to_new_symbols` 12、`no_tests` 8、`no_fail_to_pass` 1；`curation/` 有 42 行补全记录。数量随归档变化，执行时重新盘点；16 条不保证全部属于 keda 或满足本 PRD 的输入、范围与留出要求。
+- **已有工具与职责**：`scripts/dataset_export` 已支持 Issue/PR/commit 样本导出、原始输入来源标记、raw 归档和 curation 叠加；`scripts/dataset_export/calibrate.py` 的 `plan_calibration`、`materialize_tree`、`overlay_tests`、`parse_junit` 已实现判分材料发现、快照导出、测试辅助文件覆盖及删除、行为失败与新增符号耦合分类。维护说明见 `docs/guides/dataset-export.md`。该工具的 `calibrated` 是单次前后对照事实，不是 Console 的三次校准。
+- **复用边界**：不重建采集、归档、补全或离线校准系统；沿用现有工具选题，整理成固定版本的 suite 发布物。Console 不扫描私有数据仓库，不自动同步，不直接导入旧校准结论；engines 不反向导入开发脚本。如需共享实现，先按四层边界提取最小公共能力并更新本文，不复制粘贴现有实现。
+
 - Existing path：评测引擎 `src/backend/engines/model_evaluation/`（`execution.py` 的 `_execute_cell` 编排"worktree → Agent → diff → check"，`workspace.py` 的 `create_detached_worktree`，`checks.py` 的 `run_check_recipe`，`agent_adapter.py` 的 `run_candidate`）；领域模型与规则在 `src/backend/core/shared/models/model_evaluation.py`（`parse_evaluation_suite`、`CHECK_RECIPES`）与 `src/backend/core/use_cases/model_evaluation.py`（`build_run_snapshot`，`MAX_EVALUATION_MATRIX_CELLS = 32`）；账本在 `src/backend/infrastructure/persistence/console_store_evaluation.py`（`evaluation_result` 含 `UNIQUE (run_id, case_id, execution_preset_id)`）与 `console_store.py`（`_SCHEMA_VERSION = 15`，`PRAGMA user_version` 就地迁移）；API 在 `src/backend/api/routes/agent_runner_console_evaluation.py`；页面在 `frontend-public/app/(app)/app/evaluations/page.tsx` 与 `frontend-public/components/evaluations/`。
 - Reuse candidates：现有 run 快照冻结与"执行前 live 预设与快照一致性守卫"、`workspace.worktree_tree_hash` 同基线断言、`checks.py` 的最小环境变量白名单与超时/输出上限、`_host_gate` 进程级并发闸门、现有汇总函数 `build_evaluation_summary`、Playwright 用例 `console-evaluations.no-auth.spec.ts`。
 - Architecture pattern to preserve：`api → core → engines → infrastructure` 单向依赖；core 只放纯数据与规则，进程/文件/git/SQLite 都在 engines/infrastructure，经 `evaluation_store` 端口访问；`api` 只导入 `core`。
@@ -207,6 +215,8 @@ erDiagram
 ## 6. Recommendation
 
 ### Recommended Approach
+
+- **先复用数据，再补运行能力**：从已有 raw、叠加后的 curation 与 calibration 筛题，优先复核离线校准通过的候选；冻结后经 Console 的同一 `_execute_cell` 完成三次校准。已有工具承担样本准备，本次承担生产评测入口与重复运行。避免重复建设采集和校准平台；首批仍保留 12 题以证明最终 harness 可靠。
 
 - Approach：在现有评测引擎上做**增量升级**：suite 格式增加每题可选字段；候选工作目录创建改为"导出基线快照 + 全新单提交仓库"；`_execute_cell` 在 Agent 结束后放入判分材料再判分；用两个保留名预设（`@noop`、`@gold`）作为不调模型的校准候选，走同一条执行路径；矩阵增加 `repeat_index` 维度；校准裁决与稳定性都从逐条结果派生。
 - Why this is the best fit：复用已有的快照冻结、守卫、清理、并发闸门与汇总口径；core 仍只放纯规则，新增副作用都在 engines/infrastructure；不引入新服务、新依赖、新命令面。
@@ -223,7 +233,7 @@ erDiagram
 7. **重复与上限**：`create_run` 新增 `repeats`（1–5；校准 run 要求 ≥3）与 `include_holdout`；矩阵格数 = 题数 × 预设数 × 重复数；含模型调用的格 ≤ 48，纯校准格 ≤ 144，超限拒绝并说明。创建响应带"预计候选执行次数"。启动仍是显式动作。
 8. **稳定性汇总（派生）**：`build_evaluation_summary` 同族新增纯函数，按（题 × 预设）统计重复次数 n、判分通过次数、执行故障次数（`failed`/`timeout`/取消，不含判分失败）；n 次判分结论全部相同为"稳定"，否则"不稳定"。不产生总分、不设阈值。
 9. **账本迁移 v16**：`evaluation_result` 增加 `repeat_index INTEGER NOT NULL DEFAULT 0`，唯一约束改为 `(run_id, case_id, execution_preset_id, repeat_index)`（SQLite 需重建表并保留外键级联）；`evaluation_run` 增加 `repeats INTEGER NOT NULL DEFAULT 1` 与 `case_bases_json TEXT`（每题冻结的 `{base_ref, commit, tree}`）；`_SCHEMA_VERSION` 15 → 16，沿用现有就地迁移机制。
-10. **首批评测集**：新增 `keda-history-v1`，12 题（8 dev + 4 holdout），均为 keda 已合并的后端修复，判分仅 pytest；入选标准见 §7.1。
+10. **首批评测集**：从已有数据集筛选并冻结 `keda-history-v1`，12 题（8 dev + 4 holdout），均为 keda 已合并的后端修复，判分仅 pytest。复用补全与离线校准，README 保留来源映射和复核记录；私有归档只读，公开发布物不复制完整原始记录。入选标准见 §7.1。
 
 ### Alternatives Considered (Only When Useful)
 
@@ -254,13 +264,17 @@ This section is a living implementation guide based on current repository analys
   → 汇总：从逐条结果派生 校准裁决 / 稳定性
 ```
 
-**首批 12 道任务的入选标准**（执行器按此筛选，清单与每道题的 prompt 写入评测集 README 供人审）：
+**首批 12 道任务的入选与冻结流程**（12 是首批基准规模，不是数据集容量限制）：
 
-1. 取 keda 主线上已合并的 `fix` / `feat` 提交（2026-09 以来），同时改了 `src/` 与 `tests/`；
-2. 触及源码文件 ≤ 6 个，判分测试在本机连续 3 次结果一致、无网络与凭据依赖、不依赖前端构建；
-3. 修复前提交上"仅覆盖判分测试"必须失败（有判别力）；
-4. prompt 只描述问题与期望行为，不写解法、不照抄原 PR 描述；
-5. 8 题 `dev`、4 题 `holdout`，留出集在迭代期间不对任何 Agent 的记忆/skill 来源开放。
+1. 用现有导出器叠加 curation，按稳定 `sample_id` 对应 raw 与 calibration；记录数据源 Git commit，若有未提交变化则同时记录所用文件摘要。重新统计候选，优先复核 `calibrated`，不把快照中的 16 条当作必然合格。
+2. 仅选 keda 主线上已合并的后端开发任务（2026-09 以来），有真实 `base_sha` / `final_sha` 与 pytest 判分。按任务完整提交范围提取修复，不默认一题一个 commit；确认没有夹带无关改动。触及源码文件 ≤ 6 个，无网络与凭据依赖，不依赖前端构建。
+3. 复用可信任务原文或经人复核的描述补全；输入偏弱、被排除或 Agent 补全未复核的题不能直接入集。prompt 只描述问题与期望行为，不写解法、不照抄 PR 描述。需要补全时继续使用现有只追加的 curation，不改原始记录。
+4. 核对既有校准的 base/final 与任务一致，至少有一条黑盒 `fail_to_pass`；仅因新增符号、fixture 或 conftest 导入失败的题不能冒充行为判分。依据已有 `plan_calibration` / `overlay_tests` 核对测试及辅助文件范围；需要测试删除操作而当前覆盖格式无法表达的候选暂不入选，不能静默忽略。旧校准只用于筛题，最终 recipe 与依赖环境仍须重验。
+5. 逐题核对使用记录后划分 8 dev + 4 holdout；已用于 prompt、skill、预设或流程优化的题只能作 dev，使用情况不明的不能默认当 holdout。冻结后留出题不用于迭代，不进入 Agent 的记忆/skill 来源。
+6. 冻结 YAML、源码 gold patch 和判分材料；README 记录 case id → sample id、base/final SHA、输入来源与复核状态、离线校准记录标识/摘要、split 及理由。候选工作目录不得携带答案或溯源材料。已有私有归档只读，公开发布物仅含经审查允许公开的 keda 题目材料，不复制其他仓库样本、未经审查的原始输入或本机路径。
+7. 冻结后经 Console/API 完成 `@noop` 与 `@gold` 各三次校准，达到 12/12；不把旧 calibration 状态直接灌入账本。材料变化后重新校准。
+
+候选不足 12 道时，先沿现有工具补全、复核或补校准其他已归档的 keda 样本；仍不足则记录缺口并更新 PRD 范围，不能降低输入、判分或留出要求来凑数，不为本次选题新增采集系统。
 
 参考：提交 `d3e5b616`（fix(loop)）符合标准，已验证其校准特性（§7.9）。
 
@@ -347,7 +361,7 @@ This section is a living implementation guide based on current repository analys
 │   │   【总结】每题的 gold.patch 与 held_out 判分测试文件树。
 │   └── tasks/evaluation-suites/README.md
 │       [修改]
-│       【总结】v2 字段规范、校准流程、入选标准与 12 题清单。
+│       【总结】v2 字段规范、已有数据集选题与冻结流程、12 题来源映射、输入复核和留出依据、最终校准要求。
 │
 ├── Tests
 │   ├── tests/test_model_evaluation_domain.py
@@ -416,6 +430,10 @@ flowchart TD
 
 ### 7.6 Realistic Validation Plan (Oracle 块)
 
+**受控验证与真实实验**：rv-3 的交替通过/失败、始终通过和超时由 Agent CLI 边界的探针产生可判分代码或执行行为，最终状态由真实判分器记录，不直接写结果。真实 Agent 的三次成败、是否出现不稳定均不可预设；opt-in 实验只要求完整记录并按实际判分核对统计与展示，全通过或全失败都可成立，不反复重跑凑分布。`@noop` / `@gold` 是确定性候选，三次失败/通过仍是题目校准要求，与随机 Agent 效果实验不同。
+
+**探针与隔离边界**：探针按 `(case_id, execution_preset_id, repeat_index)` 固定行为，不按全局调用计数或进程启动顺序分配结果。单提交快照保证候选仓库内无后续对象、无 remote、不预置判分材料；不提供同用户跨目录读取或网络访问的系统级隔离。探针可检查这些限制，但不能把它们记录成已被阻止。
+
 ```yaml
 - id: rv-1
   behavior: 候选 Agent 在运行期间看不到任何基线之后的提交与判分测试文件；Agent 改过的判分测试与依赖清单在判分前被还原。
@@ -443,7 +461,7 @@ flowchart TD
   test_layer: e2e
   required_for_acceptance: true
   presentation: "tasks/evidence/<prd-stem>/rv-2-calibration-12of12.png（评测集清单头部 + 逐题校准列的真实页面截图）与 tasks/evidence/<prd-stem>/rv-2-seed-tasks.md（12 题清单：提交、split、prompt）；自验：打开评测页，评测集 keda-history-v1 的头部应读到 “12/12 已校准”，任选一题详情应看到 @noop 三次“判分失败”、@gold 三次“判分通过”。"
-  critical_value_source: "12 题的基线提交与判分测试取自真实 git 历史；校准结论取自详情接口返回的逐条 result，而不是脚本自行统计。"
+  critical_value_source: "12 题通过既有数据集 sample id、数据源版本或文件摘要追溯到真实 base/final 与判分材料；补全和旧离线校准仅作筛选依据。校准结论取自本次详情接口返回的逐条 result，禁止直接导入私有数据集 calibration 状态。"
   must_cross: "评测页/API 创建 → 冻结每题起点 → 启动 → create_snapshot_repo → @noop/@gold → 覆盖 held_out → uv-pytest → 账本 → 详情页"
   forbidden_bypasses: "跳过快照直接在主仓库检出目录判分；手工改写 check_status；复用上一次的结果；用 mock 的详情接口截图。"
   fresh_state_probe: "运行结束后由新进程查询 evaluation_result，按（题 × @noop/@gold）核对 repeat_index 0–2 全部到齐且结论与页面一致。"
@@ -480,8 +498,8 @@ flowchart TD
 - id: rv-5
   behavior: 创建门禁与旧格式兼容：未校准题、未勾选的留出集、超过上限都被拒绝且零候选执行；旧格式评测集行为不变。
   reviewer: verifier
-  real_entry: "console API：POST /api/v1/agent-runner/console/evaluation/runs（分别提交：含未校准题、含 holdout 题但 include_holdout=false、47/49 次模型调用格数、旧格式 example 风格评测集），随后查询 runs 列表与账本。"
-  expected: "前三种返回 400 且 detail 逐条说明原因，列表与账本无新 run、无候选执行；48 次恰好被接受；旧格式评测集创建成功并按旧语义运行（repeats 缺省 1，不要求校准）。"
+  real_entry: "通过创建 API 分别提交未校准题、未明确包含的 holdout 题、不可达 base_ref；另用 5/6/7 道已校准 dev fixture 题 × 2 个有效模型候选预设 × 4 次重复构造 40/48/56 格，其他配置均合法。再提交旧格式 example 风格评测集，查询 API 与账本。"
+  expected: "未校准、holdout 未确认、不可达基线和 56 格请求返回 400，逐条说明原因且无新 run、无候选调用；40 格和 48 格均接受。旧格式创建成功，缺省 repeats=1 且不要求校准。创建成功本身不启动候选。"
   mock_boundary: "API、校验、账本真实；Agent CLI 可替换为探针（本 oracle 不依赖其行为）。"
   tier: R1
   test_layer: integration
@@ -490,9 +508,9 @@ flowchart TD
 - id: rv-6
   behavior: 执行故障（超时、Agent 崩溃、快照创建失败）与判分失败分开计数，且不影响同题其他重复。
   reviewer: verifier
-  real_entry: "console API 创建并启动 repeats=3 的 run，探针预设依次表现为：正常通过、超时、崩溃；另用一个不可达的基线引用制造快照失败的题。"
+  real_entry: "通过 API 创建并启动 repeats=3 的 run，探针按 repeat_index 0/1/2 分别写出正确代码、阻塞超过候选超时、以非零码退出，不依赖启动顺序。另一个独立场景使用有效且已冻结的基线，在 tests/ 下的 Git 子进程替身边界仅让指定格的快照导出命令失败；其余命令走真实 Git，API、调度、故障处理、清理与账本均真实。无效引用的创建拒绝另见 rv-5。"
   expected: "详情接口的稳定性汇总中，执行故障计数为 2、判分通过为 1、判分失败为 0；快照失败的题标为执行故障并说明原因；同一题的其他重复结果完整保留。"
-  mock_boundary: "只替换外部 Agent CLI；其余真实。"
+  mock_boundary: "超时与崩溃只替换外部 Agent CLI；快照失败子场景额外允许 tests/ 下替换 Git 导出子进程的结果，并明确标注该边界，不宣称该命令的真实 Git 执行已验证。禁止直接写终态或新增生产故障开关。"
   tier: R1
   test_layer: integration
   required_for_acceptance: true
@@ -578,7 +596,7 @@ Failure triage：
 |---|---|---|---|
 | 1 | 12 道任务全部校准通过，且整个校准过程没有模型调用（rv-2） | 交付时填：`tasks/evidence/<prd-stem>/rv-2-calibration-12of12.png` 与 `tasks/evidence/<prd-stem>/rv-2-seed-tasks.md`（嵌图 + 本地标注 + `open` 命令） | 打开评测页，`keda-history-v1` 头部读到“12/12 已校准”；任选一题，应见 @noop 三次“判分失败”、@gold 三次“判分通过”。 |
 | 2 | 重复运行的稳定/不稳定展示，无总分与阈值，目标图与真实页面成对（rv-3） | 交付时填：`tasks/evidence/<prd-stem>/rv-3-variance-view.png` 与 `prototype-variance-view.png`（成对嵌图，标注验证层级） | 详情页：“稳定”那题读到 3/3，“不稳定”题出现在单独区域，页面全文搜不到“总分”。 |
-| 3 | 12 道任务的清单与每题的题目描述没有泄露解法（来自 §7.1 入选标准） | 交付时填：`tasks/evidence/<prd-stem>/rv-2-seed-tasks.md` | 随机抽 3 题，读 prompt：只应描述问题与期望行为，不应出现修复的函数名或做法。 |
+| 3 | 12 道任务来自已有数据集，描述无解法泄漏，留出资格有依据（来自 §7.1） | 交付时填：`tasks/evidence/<prd-stem>/rv-2-seed-tasks.md`（来源 sample id、base/final、输入复核、旧校准记录与 split 使用依据） | 随机抽 3 题，核对来源与复核记录；prompt 只描述问题和期望行为，不出现修复的函数名或做法；留出题未用于迭代优化。 |
 
 **以下项不需要你看**（`reviewer: verifier`，agent 自验 + verifier 复核，挂了会自己红）：rv-1 隔离与判分延后、rv-4 账本迁移、rv-5 创建门禁与旧格式兼容、rv-6 执行故障分类；以及构建、类型检查、架构依赖方向、既有评测测试回归。它们的证据在 §9.2。
 
@@ -587,7 +605,7 @@ Failure triage：
 1. **人审项与 R3 的 oracle 证据（先看）**：rv-1（隔离，R3）、rv-4（迁移，R3）、rv-2（校准，R2）、rv-3：各自证据文件与最终 tree hash。
 2. **verifier-only 项结果**：rv-5、rv-6 输出。
 3. **风险地图对账 Predicted → Reconciled**：见下方 Risk Classification Register，实现中未预测到的高风险面如何处理。
-4. **对抗自检**：对"校准结论派生"做反方检查——构造一次评测集内容变化后旧校准是否失效；对隔离做反方检查——探针尝试 `git fetch`、`git remote -v`、读取上级目录。
+4. **对抗自检**：修改评测集内容后旧校准应失效；候选仓库 `git remote -v` 应为空，无 remote 的默认 fetch 不应取回历史，本地后续对象与判分材料不存在。显式指定源仓库路径、网络地址或读取上级目录不属于本方案可阻止的能力，不得据此宣称系统级沙箱隔离。
 5. **对锁定契约的 diff**：旧格式评测集、既有 API 响应字段、评审授权流程相对升级前无破坏性变化。
 6. **低风险门禁结果（折叠）**：lint、类型检查、架构依赖方向、既有测试。
 
@@ -624,6 +642,8 @@ Failure triage：
 
 ### Documentation Acceptance
 
+- [ ] 12 题的 README 与 rv-2 选题证据记录来源 sample id、数据源版本/摘要、base/final、输入复核、旧校准记录与 split 使用依据；公开材料经审查，私有原始归档未改写。数量快照不作为固定验收值。
+
 - [ ] `docs/dev/evaluation.md` 与 `tasks/evaluation-suites/README.md` 记录 suite v2 字段、校准流程、快照隔离与"公开仓库泄漏为已知限制"。
 - [ ] `ROADMAP.md` 的 M13 状态与"近期顺序 1"已链接本 PRD，并注明对比组与核心指标入账另开 PRD；未改动 `kc` CLI，随包 operator skill 无需同步（`git diff --stat -- src/backend/engines/agent_runner/templates/skills/kedacode-operator` 无变化）。
 
@@ -656,13 +676,15 @@ Failure triage：
 - FR-5: 某题"已校准"当且仅当存在一个已完成的、评测集内容指纹一致且重复次数不少于 3 的校准 run，其 `@noop` 结果全部为判分失败、`@gold` 结果全部为判分通过；创建含真实预设的 run 时，所选题必须均已校准，留出集题必须显式 `include_holdout=true`，否则创建被拒绝并逐条说明，且零候选执行；评测集清单展示逐题与整体校准状态。
 - FR-6: 创建评测时可选重复次数 `repeats`（1–5，校准 run 须 ≥3）；矩阵格数为题数 × 预设数 × 重复数；含模型调用的格数上限 48、纯校准格数上限 144，超限拒绝；创建响应给出预计候选执行次数；启动仍是显式动作；评测不改动任何 Agent 配置。
 - FR-7: 详情页与接口按（题 × 预设）展示重复次数、判分通过次数与执行故障次数；同一题同一预设全部重复的判分结论一致为"稳定"，否则为"不稳定"并单列；不产生合成总分，不设合格/不合格阈值；执行故障与判分失败分开计数。
-- FR-8: 交付首批评测集 `keda-history-v1`：12 道 keda 已合并的后端修复（8 道 `dev` + 4 道 `holdout`，仅 pytest 判分），入选标准与每题 prompt 写入评测集 README，且全部通过校准；另在测试中提供现建的极小 fixture 仓库作 harness 冒烟。
+- FR-8: 复用已有数据集 raw/curation/calibration，筛选并冻结首批 `keda-history-v1`：12 道 keda 已合并的后端任务（8 道 dev + 4 道 holdout，仅 pytest 判分）。12 是首批规模，不限制总数据量。README 记录来源 sample id、数据源版本/摘要、base/final、输入复核、旧校准记录与 split 使用依据；私有归档只读，公开材料须审查。旧校准用于筛题，全部题仍经最终 Console/API 完成三次校准；不足时按 §7.1 处理。另在测试中提供极小 fixture 仓库作 harness 冒烟。
 - FR-9: 本地账本迁移到 v16：结果表增加 `repeat_index`（默认 0）并以 `(run_id, case_id, execution_preset_id, repeat_index)` 为唯一约束，运行表增加 `repeats`（默认 1）与每题冻结的起点；已有评测记录全部保留且可读，外键级联保持。
 - FR-10: 同步 `docs/dev/evaluation.md`、`tasks/evaluation-suites/README.md` 与 `ROADMAP.md`（M13 状态与近期顺序），在文档中写明"公开仓库泄漏与模型记忆无法消除"的已知限制。
 
 ---
 
 ## 11. Non-Goals
+
+- 不重建已有样本采集、raw 归档、curation 补全与离线判分校准系统；不新增私有数据集同步服务，不直接把旧校准结论写入 Console 账本。
 
 - 不做"用 Keda 流水线 vs 原生 Agent"的对比组；不新建绕开 GitHub 的流水线驱动。
 - 不做 M13「前置：度量数据完整性」的三项（合并结果入账、人工事件入账、Token 上报覆盖）。
@@ -673,6 +695,9 @@ Failure triage：
 - 不设置数字阈值，不计算合成总分，不按金额设上限。
 
 ## 12. Risks And Follow-Ups
+
+- **已有候选不等于合格题**：`eval_ready` 是候选筛选，`calibrated` 是单次判分事实，均不证明描述充分、三次稳定性或留出资格；16 条校准通过不保证足够选出 12 题，按 §7.1 处理缺口。
+- **留出污染与发布范围**：既有题可能已用于优化，私有数据仓库还含其他项目原始输入；逐题复核使用记录，只公开经审查的 keda 材料，不能通过改 split 标签把已用于迭代的题变成留出题。
 
 - **公开仓库泄漏与模型记忆无法消除**：快照隔离只能堵住"工作目录里的答案"；联网读取已合并 PR 与模型预训练记忆是已知限制。缓解：对留出集只用相对变化下结论；后续可评估用私有仓库历史任务作留出集（需显式授权，本 PRD 不做）。
 - **账本迁移不可逆**：结果表唯一约束重建后不再原样回退；缓解：迁移前在旧库副本上验证（rv-4），迁移保持纯增量并保留全部旧行。
@@ -688,10 +713,19 @@ Failure triage：
 |---|---|---|---|---|
 | D-01 | 本 PRD 是否包含 M13「度量数据完整性」前置 | 拆开，本 PRD 只做评测集 + harness | 合并成一个 PRD 做完整个首个里程碑 | 三项前置各自可独立实现、回滚、验证，且 harness 的价值不依赖它们；冻结任务上自动运行本就没有人工介入。 |
 | D-02 | 是否同时跑"用 Keda / 不用 Keda"两组 | 只做单 Agent 一组（"不用 Keda"基线） | 本 PRD 内新造"Keda 流水线离线入口" | 现有候选执行不经过 Keda 流水线；判分未校准就比较没有可信度，ROADMAP 也要求首个里程碑先证明 harness 可靠。 |
-| D-03 | 评测集来源与规模 | keda 已合并后端修复 12 题（8 dev + 4 holdout），仅 pytest 判分 | 含前端任务；加私有仓历史任务作留出集 | 把方差来源压到最少才能分清"Agent 随机性"和"harness 不稳"；私有代码外发与跨仓库超出首期范围。 |
+| D-03 | 评测集来源与规模 | 从已有数据集筛选 keda 后端任务 12 题（8 dev + 4 holdout），仅 pytest 判分 | 从零采集；把全部原始样本当基准题 | 复用已有归档、补全与校准；12 仅是首批规模，输入复核、留出资格与最终三次校准仍须证明。 |
 | D-04 | 防泄题方式 | 导出基线文件 + 新建单提交仓库，判分材料延后放入 | 沿用 detached worktree；浅克隆 | detached worktree 共享对象库，Agent 可直接读到修复；浅克隆保留 remote 可取回历史。 |
 | D-05 | "可靠"的验收口径 | 零成本校准（@noop 3/3 失败、@gold 3/3 通过）+ 真实 Agent 重复 3 次如实展示，无阈值 | 只做重复方差；设一致率硬阈值 | 校准把判分有效性变成确定、可重复、零成本的检查；没有基线的数字阈值是拍脑袋，ROADMAP 明确反对。 |
 | D-06 | 入口 | 扩展现有 API 与 Console 页 | 新增 `kc eval` 命令 | 最小改动，复用现有入口与端到端用例，不开新的对外命令面。 |
 | D-07 | 判分材料放入方式与判分命令 | 整文件覆盖 + 依赖清单还原 + 新增白名单配方 `uv-pytest` | 补丁合并；沿用 `python3 -m pytest` | 补丁在 Agent 改过同一测试文件时会冲突；`python3 -m pytest` 在 keda 上缺依赖跑不起来（已实测可行性）。 |
 | D-08 | 校准结论的存放 | 从已完成校准 run 派生，不建表 | 独立"校准结论"表 | 可由 `suite_hash` 与逐条结果精确派生，独立表要额外同步状态。 |
 | D-09 | 用量上限口径 | 按候选执行次数卡（模型调用 48 / 校准 144） | 按金额或 Token 卡 | 主力执行器 Token 上报覆盖率约 3%，金额无法可靠计量。 |
+| D-10 | 旧离线校准与最终校准的关系 | 复用候选和运行事实，冻结材料后走最终入口三次校准 | 重建采集工具；直接导入旧 calibrated 状态 | 2026-10-28 用户确认复用已有数据资产；单次离线校准不能证明最终 recipe、suite 指纹与重复执行有效。 |
+
+## 14. Change Log
+
+- **2026-10-28**：按用户确认收紧隔离承诺，区分创建时无效基线与运行时快照故障；执行次数边界改为实际可构造的 40/48/56 格；探针按重复标识固定行为，故障由测试依赖边界触发，不直接指定终态。
+
+- **2026-10-28**：区分探针控制的固定成败分布与真实 Agent 效果实验；真实三次运行不要求出现波动或固定成败次数，确定性 noop/gold 的题目校准要求保留。
+
+- **2026-10-28**：按用户确认更新规划，补充已有数据集与导出、补全、校准工具的能力及数量快照；将首批 12 题改为从已有候选筛选冻结，增加来源映射、输入复核、留出资格、发布边界及候选不足时的处理。旧校准用于筛题，最终 Console 三次校准仍保留。此次仅修改 PRD，功能状态保持未开工，原人工验收项未代勾。

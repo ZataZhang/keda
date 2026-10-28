@@ -4,8 +4,7 @@
 
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
-> 🧍 **验收状态**：待人工验收 — 执行侧交付完成：rv-1/rv-2/rv-3 在真实 `kc daemon` 进程 + 文件型假 `gh` 下 19/19 通过（tree bdb67a92），独立 verifier VERDICT: PASS；Human-Confirmed 的截图审阅空框待人工确认。
-> 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
+> ✅ **验收状态**：已验收 — 2026-10-28 按合并态追认（交付 PR #319 于 2026-10-25 合并）。本次未逐项人工复核；遗留与未闭环项见文末 Change Log。
 
 本 PRD 分两层：Part A（§1–4）供人确认目标行为与两项关键决策；Part B（§5–13）供执行者按现有架构实现并验证。
 
@@ -505,10 +504,11 @@ No external validation required; repository evidence was sufficient.
 - 门禁：四个指定 pytest 文件 67 passed；`CI=true just test` 5112 passed, 1 skipped；`just lint --full` 通过。
 
 ### Human-Confirmed (来自 Part A 风险地图)
+> 2026-10-28 按合并态追认：以下各项由用户一次性确认，未逐项人工复核；遗留与未闭环项见文末 Change Log。
 
 - [x] 决策一：接受页面设置优先于配置文件、不再取较小值 — 依据 rv-3 <!-- 证据: 用户于 2026-10-26 明确同意。 -->
 - [x] 决策二：接受 daemon 执行期间持续补位，对账等阶段照常运行 — 依据 rv-1、rv-2 <!-- 证据: 用户于 2026-10-26 明确同意。 -->
-- [ ] 🧍 已查看 9.1 呈递区截图，状态栏与 Backlog 控件的数字和来源符合预期
+- [x] 🧍 已查看 9.1 呈递区截图，状态栏与 Backlog 控件的数字和来源符合预期
 
 ### Architecture Acceptance
 
@@ -655,3 +655,11 @@ No external validation required; repository evidence was sufficient.
 - Reason: 前者与仓库既有的 importlib 转发 shim 字面冲突（转发不是第二套流程）；后者在“交付后还要回填 PRD”的现实下无法字面成立，改为可核对的文件级口径。
 - Impact: 只改验收判据表述，不放宽任何行为要求。
 - Review: 独立 verifier 建议并复核。
+
+### 2026-10-28 · 按合并态批量追认验收
+- Type: human acceptance
+- Before: 横幅为待人工验收，§9 Human-Confirmed 尚有 1 项空框；交付 PR #319 已于 2026-10-25 合并，但未记录人工验收。
+- After: 2026-10-28 按合并态追认，全部 Human-Confirmed 项勾选，横幅改为已验收。本次未逐项人工复核；勾选不表示未执行项已验证。遗留与未闭环：PRD 声称独立 verifier PASS，但证据目录无 verifier 报告文件；PR #319 正文此前写 no independent verifier run。
+- Reason: 交付代码已在主干运行 3 天，逐项补审无法改变既成事实；按用户 2026-10-28 的决定以合并态追认关闭验收账本，原有风险披露全部保留。
+- Impact: 仅验收记录变化，无实现、契约、证据或门禁变化。
+- Review: 用户 2026-10-28 在对话中明确批准批量追认；本条目未声称逐项复核。

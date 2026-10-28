@@ -5,8 +5,7 @@
 > ✅ **交付前置**：无硬依赖，可立即开工。
 > 结构化声明见 §8，那里是唯一依赖事实源。
 
-> 🧍 **验收状态**：待人工验收 — Human-Confirmed 仍有 3 项未确认；执行器侧证据（含 rv-1 真实 TTY 现场）已全部收集，唯一未决的非人工项是 runner-owned 的独立 verifier 门禁。
-> 本行投影 §9 Acceptance Checklist，那里是唯一事实源。
+> ✅ **验收状态**：已验收 — 2026-10-28 按合并态追认（交付 PR #275 于 2026-10-11 合并）。本次未逐项人工复核；遗留与未闭环项见文末 Change Log。
 
 本文分两层：Part A 人审层（§1-4）说明用户价值与需确认事项；Part B 执行器层（§5-13）记录架构、实现和验收证据。
 
@@ -462,10 +461,11 @@ verifier-only 组：停滞监督、`kc repl`/`kc console` 兼容路由、config/
 ### 9.2 Acceptance Evidence Package
 
 #### Human-Confirmed
+> 2026-10-28 按合并态追认：以下各项由用户一次性确认，未逐项人工复核；遗留与未闭环项见文末 Change Log。
 
-- [ ] 确认原生 TTY 使用所选执行器的正常权限、sandbox 与确认配置；不附加无人值守 skip-confirm 参数。（§2 决定三；rv-1）
-- [ ] 确认监督默认关闭；启用后默认每 30 分钟巡检，周期、停滞阈值和执行器均可通过配置覆盖。（§2 决定一；rv-4）
-- [ ] 确认裸 `kc` 默认启动配置的 provider TUI；只用 `--agent` 覆盖执行器。项目预览只在对话请求时启动并返回 URL；已查看终端/preview 概念原型。（§2 决定四；rv-1）
+- [x] 确认原生 TTY 使用所选执行器的正常权限、sandbox 与确认配置；不附加无人值守 skip-confirm 参数。（§2 决定三；rv-1）
+- [x] 确认监督默认关闭；启用后默认每 30 分钟巡检，周期、停滞阈值和执行器均可通过配置覆盖。（§2 决定一；rv-4）
+- [x] 确认裸 `kc` 默认启动配置的 provider TUI；只用 `--agent` 覆盖执行器。项目预览只在对话请求时启动并返回 URL；已查看终端/preview 概念原型。（§2 决定四；rv-1）
 
 #### Architecture Acceptance
 
@@ -731,3 +731,11 @@ verifier-only 组：停滞监督、`kc repl`/`kc console` 兼容路由、config/
 - Reason: 树已前进且改动落在被验证的调用路径上，旧的「不在调用路径上」表述不再成立；独立 verifier 门禁与 R2/R3 代码变化后 oracle 复跑、证据绑定最终树的要求必须在记录中如实反映，否则验收者会读到过期绑定与计数。
 - Impact: 只更新执行侧记录层（PRD Validation/Delivery state、Change Log、证据报告、`evidence.json` 指针与披露、验证计划）；未更改任何验收标准、§7.6 oracle 文本、安全边界或范围要求；未勾选任何 Human-Confirmed 项，runner-owned `[~]` 独立 verifier 投影项保持由 runner 判定；未修改 hook、`.gitignore`、`tests/guards/**`，未放宽负控。
 - Review: 本轮复跑证据：`UV_CACHE_DIR=/private/tmp/issue256-uv-cache just test all` → `3905 passed, 1 skipped`（exit 0）；`just lint --reuse` exit 0（0 Failed）；`uv run mkdocs build --strict` exit 0；PRD checker `--all` 与 `--check-provided --archive-ready` exit 0；`check_prd_evidence.sh` 通过（1 图已嵌入、无前端改动）；`git diff --check` 干净；`pre-commit run check-test-flag --all-files` Passed。`evidence.json` 38 条 `stdout_assertions` 全部在各项新鲜输出中命中。banner 维持 🧍 待人工验收（Human-Confirmed 三项空框），归档状态不因本轮改变。
+
+### 2026-10-28 · 按合并态批量追认验收
+- Type: human acceptance
+- Before: 横幅为待人工验收，§9 Human-Confirmed 尚有 3 项空框；交付 PR #275 已于 2026-10-11 合并，但未记录人工验收。
+- After: 2026-10-28 按合并态追认，全部 Human-Confirmed 项勾选，横幅改为已验收。本次未逐项人工复核；勾选不表示未执行项已验证。遗留与未闭环：证据目录的 verifier 报告自称 BLOCKED/执行器交接，与 Change Log 记载的 2026-10-11 green 判定不一致；按遗留记录。
+- Reason: 交付代码已在主干运行 17 天，逐项补审无法改变既成事实；按用户 2026-10-28 的决定以合并态追认关闭验收账本，原有风险披露全部保留。
+- Impact: 仅验收记录变化，无实现、契约、证据或门禁变化。
+- Review: 用户 2026-10-28 在对话中明确批准批量追认；本条目未声称逐项复核。
