@@ -1,5 +1,7 @@
 # PRD: M13 黄金评测集与可复现的基线 harness（防泄题、判分校准、重复运行方差）
 
+- GitHub Issue: https://github.com/ZataZhang/keda/issues/334
+
 > ✅ **交付前置**：无，可立即开工。（它建立在已合并的多评审模型评测 `P1-FEAT-20261012-103909` 之上；该 PRD 的代码已在主线，仅其人工验收记录未回填，不构成阻塞。）
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
