@@ -26,6 +26,8 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tauri_plugin_notification::NotificationExt;
 #[cfg(not(target_os = "macos"))]
 use tauri_plugin_positioner::{Position, WindowExt};
+#[cfg(target_os = "macos")]
+mod shell_path;
 
 const CONSOLE_PROBE_PATH: &str = "/api/v1/agent-runner/console/version";
 const COMPANION_PATH: &str = "/app/companion/?desktop=tauri";
@@ -463,6 +465,7 @@ fn main() {
         }))
         .plugin(tauri_plugin_positioner::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             Some(vec![AUTOSTART_FLAG]),
@@ -686,6 +689,14 @@ fn launch_console(app: &AppHandle) -> Result<String, String> {
         .stdin(Stdio::null())
         .stdout(Stdio::from(log_copy))
         .stderr(Stdio::from(log_file));
+
+    #[cfg(target_os = "macos")]
+    if let Some(login_shell_path) = shell_path::resolve_user_path() {
+        command.env("PATH", login_shell_path);
+        append_log("已将用户登录 shell 的 PATH 传给 Console 与后台 runner。\n");
+    } else {
+        append_log("读取用户登录 shell 的 PATH 失败，Console 将沿用桌面 App 的 PATH。\n");
+    }
 
     if let Some(repository_root) = repository_root() {
         command.current_dir(repository_root);

@@ -1,11 +1,11 @@
 "use client";
 
-// 运行看板单任务详情：身份与运行观测 + Issue 实时输出 + 默认折叠的结构化调用。
+// 运行看板单任务详情：身份与运行观测 + Issue 实时输出 + 默认展开的结构化调用。
 //
 // 三条口径：
 // 1. 日志走**既有** Issue 增量日志端点（复用 `PrdIssueOutputView` 的 offset 续读
 //    状态机），本组件不新造日志通道，也不过滤/截断原始文本；
-// 2. 结构化调用来自既有 invocation ledger，**默认折叠**——展开才请求，收起不轮询；
+// 2. 结构化调用来自既有 invocation ledger，**默认展开**——选中任务后读取，收起不轮询；
 // 3. 改动树触达只读现有 progress 契约：可比时画真实比例条，不可比时逐条说明
 //    原因，绝不把「读不到」画成 0% 或空条。
 //
@@ -274,7 +274,7 @@ interface RuntimeTaskDetailProps {
  */
 export function RuntimeTaskDetail({ task, className }: RuntimeTaskDetailProps) {
   const presentation = runtimeStatusPresentation(task.status, task.waiting_reason);
-  const [invocationsOpen, setInvocationsOpen] = useState(false);
+  const [invocationsOpen, setInvocationsOpen] = useState(true);
   const [invocations, setInvocations] = useState<RunInvocationDetailEntry[] | null>(null);
   const [invocationError, setInvocationError] = useState<string | null>(null);
   // 调用账本要有一段收口的运行窗口才能按时间窗查询；没窗口不是读取失败，

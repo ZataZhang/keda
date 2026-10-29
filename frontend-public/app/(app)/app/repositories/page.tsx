@@ -18,6 +18,7 @@ import {
   type DirectorySelection,
 } from "@/components/agent-runner/directory-picker-dialog";
 import { ConsolePage, ConsolePageHeader } from "@/components/layout/console-page";
+import { confirmAction } from "@/lib/confirm-action";
 import { formatLocalDateTime } from "@/lib/utils";
 import {
   addRegistryRepository,
@@ -168,7 +169,7 @@ export default function RepositoriesPage() {
 
   async function handleToggle(entry: RegistryRepositoryEntry) {
     const verb = entry.enabled ? "停用" : "启用";
-    const confirmed = window.confirm(`确认${verb}仓库 ${entry.repo_id}？`);
+    const confirmed = await confirmAction(`确认${verb}仓库 ${entry.repo_id}？`);
     if (!confirmed) {
       return;
     }
@@ -182,7 +183,7 @@ export default function RepositoriesPage() {
   }
 
   async function handleRemove(entry: RegistryRepositoryEntry) {
-    const confirmed = window.confirm(
+    const confirmed = await confirmAction(
       `确认移除仓库 ${entry.repo_id} 的注册？\n\n` +
         "只会停止它的 daemon 并从 config.toml 删除注册条目；" +
         "本地仓库目录不会被删除，需要时请自行在外部处理。",

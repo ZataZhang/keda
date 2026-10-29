@@ -3,7 +3,7 @@
  *
  * 分工：`workflows/*-real-entry.no-auth.spec.ts` 走真实后端与真实入口交付验收证据；
  * **本 spec 用 `page.route` 顶替读端点**，只为稳定锁住前端渲染契约——默认视图是任务看板、
- * 状态文字与颜色同现、筛选/搜索可用、结构化调用默认折叠、来源不可用如实披露。
+ * 状态文字与颜色同现、筛选/搜索可用、结构化调用默认展开、来源不可用如实披露。
  * 验证层级：production composition；从 /app/dashboard 与 /app/companion 真实页面入口操作，
  * 保留生产布局、主题、Dialog/Portal 与筛选交互，仅替换后端读响应和本地会话。
  * Chromium，默认 1440×1200 浅色，另覆盖 440×900 深色与 380×760 小窗、长文本和历史筛选。
@@ -375,7 +375,7 @@ test.describe('runtime board (mocked API)', () => {
     await expect(page.getByTestId('runtime-task-empty')).toContainText('没有符合筛选条件')
   })
 
-  test('structured tool calls are collapsed by default and load on expand', async ({
+  test('structured tool calls are expanded by default and load automatically', async ({
     page,
   }) => {
     await mockBoardApi(page)
@@ -383,10 +383,7 @@ test.describe('runtime board (mocked API)', () => {
 
     await page.getByTestId('runtime-task-row-keda-main-19').click()
     const toggle = page.getByTestId('runtime-invocation-toggle')
-    await expect(toggle).toHaveAttribute('aria-expanded', 'false')
-    await expect(page.getByTestId('runtime-invocation-panel')).toHaveCount(0)
-
-    await toggle.click()
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true')
     await expect(page.getByTestId('runtime-invocation-panel')).toBeVisible()
     await expect(page.getByTestId('runtime-invocation-row')).toHaveCount(1)
   })

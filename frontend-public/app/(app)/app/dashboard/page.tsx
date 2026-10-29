@@ -20,6 +20,7 @@ import { RunnerStatusBar } from "@/components/agent-runner/runner-status-bar";
 import { RuntimeTaskDetail } from "@/components/dashboard/runtime-task-detail";
 import { RuntimeTaskList } from "@/components/dashboard/runtime-task-list";
 import { formatLocalDateTime } from "@/lib/utils";
+import { confirmAction } from "@/lib/confirm-action";
 import {
   fetchIssueDetail,
   fetchOverviewJobsByRepo,
@@ -568,7 +569,7 @@ export default function DashboardPage() {
   const handleRepoAction = useCallback(
     async (repoId: string, action: "run_once" | "review_once") => {
       const verb = action === "run_once" ? "跑一轮" : "复核一轮";
-      const confirmed = window.confirm(
+      const confirmed = await confirmAction(
         `确认对 ${repoId}「${verb}」？将启动一个一次性托管进程。`,
       );
       if (!confirmed) return;
@@ -642,7 +643,7 @@ export default function DashboardPage() {
         : action === "blocked_continue"
           ? "继续"
           : "恢复发布";
-    const confirmed = window.confirm(
+    const confirmed = await confirmAction(
       `确认对 Issue #${selectedIssue.number} 执行「${verb}」？`,
     );
     if (!confirmed) return;

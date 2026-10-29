@@ -52,9 +52,13 @@ KedaCode 菜单栏图标，也应在当前空间展开面板。
 macOS 13 及以上还启用 `canJoinAllApplications`，允许浮动面板加入其他应用的全屏空间  
 （[Apple 窗口行为说明](https://developer.apple.com/documentation/appkit/nswindow/collectionbehavior-swift.struct/canjoinallapplications)）。
 
-App 查找 `kc` 的位置依次包括 `~/.local/bin/kc`、`/opt/homebrew/bin/kc`、  
-`/usr/local/bin/kc` 和进程 `PATH`。Finder 启动时不会继承登录 shell 的 PATH，因此这些固定路径  
-是主要查找来源。启动诊断日志在 `~/Library/Logs/KedaCode/desktop-console.log`。
+App 查找 `kc` 的位置依次包括 `~/.local/bin/kc`、`/opt/homebrew/bin/kc`、
+`/usr/local/bin/kc` 和进程 `PATH`。Finder 启动时不会继承登录 shell 的 PATH；找到 `kc` 后，App
+会在限时子进程中读取用户登录 shell 配置后的 PATH，并传给 Console 与后台 runner。这样通过 fnm、
+`~/.kimi-code/bin`、`~/.qoder-cn/entry` 等用户目录安装的 agent CLI 也能被按 PATH 的启动门禁找到。
+若 shell 初始化未在 5 秒内完成，App 会沿用自己的 PATH；对应情况会记入
+`~/Library/Logs/KedaCode/desktop-console.log`。读取时 shell 的标准输入关闭，输出丢弃，只采集 PATH，
+不会把 shell 中的其它环境变量复制给 Console。
 
 ### 数据与行为
 

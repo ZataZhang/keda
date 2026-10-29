@@ -13,11 +13,12 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2.12.4",
     "@base-ui/react": "^1.5.0",
     "@hookform/resolvers": "^5.4.0",
     "@radix-ui/react-slot": "^1.2.5",
     "@tabler/icons-react": "^3.41.1",
+    "@tauri-apps/api": "^2.12.4",
+    "@tauri-apps/plugin-dialog": "^2.8.3",
     "@xyflow/react": "^12.11.1",
     "axios": "^1.17.0",
     "class-variance-authority": "^0.7.1",

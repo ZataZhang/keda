@@ -29,6 +29,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ConsolePage, ConsolePageHeader, ConsoleToolbar } from "@/components/layout/console-page";
+import { confirmAction } from "@/lib/confirm-action";
 import { useRepositorySelection } from "@/lib/console-repository-selection";
 import {
   appendIdea,
@@ -191,7 +192,7 @@ export default function IdeasPage() {
     if (!selectedRepoId) {
       return;
     }
-    const confirmed = window.confirm(
+    const confirmed = await confirmAction(
       `确认将草稿「${draft.title}」写入 tasks/pending/？\n\n草稿 ID: ${draft.metadata.draft_id}\n目标文件: tasks/pending/<PRIORITY>-<TYPE>-<draft_id>-<slug>.md`,
     );
     if (!confirmed) {

@@ -14,6 +14,7 @@ import { toast } from "sonner";
 import { ConsentPreviewDialog } from "@/components/evaluations/consent-preview-dialog";
 import { RunDetailPanel } from "@/components/evaluations/run-detail-panel";
 import { RUN_STATUS_META } from "@/components/evaluations/evaluation-format";
+import { confirmAction } from "@/lib/confirm-action";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -232,7 +233,10 @@ export default function EvaluationsPage() {
 
   const removeRun = async (runId: string) => {
     // 删除不可逆（DB 行 + 本机产物），先确认再动手。
-    if (!window.confirm(`确认删除 run ${runId}？其 DB 记录与本机暂存产物将一并清除。`)) {
+    const confirmed = await confirmAction(
+      `确认删除 run ${runId}？其 DB 记录与本机暂存产物将一并清除。`,
+    );
+    if (!confirmed) {
       return;
     }
     if (selectedRunId === runId) {
