@@ -48,14 +48,9 @@ LEGACY_NAME_ALLOWANCES = (
         "远程 Skill 安装器需识别用户已有的旧名目录以完成一次性迁移。",
     ),
     _allowance(
-        "src/backend/infrastructure/git/worktree.py",
-        r"\.iar-worktrees",
-        "已有旧工作树目录继续作为写入目标，直到显式目录迁移。",
-    ),
-    _allowance(
         "src/backend/core/shared/models/repository_paths.py",
         r"\.iar",
-        "集中声明仍需读取的旧仓库状态与工作树目录名。",
+        "集中声明旧仓库状态目录，并供显式工作树目录迁移使用。",
     ),
     _allowance(
         "src/backend/api/routes/agent_runner_idea_inbox.py",
@@ -129,8 +124,8 @@ LEGACY_NAME_ALLOWANCES = (
     ),
     _allowance(
         "src/backend/engines/agent_runner/templates/skills/kedacode-operator/SKILL.md",
-        r"\bold `iar` command|\.iar-worktrees",
-        "随包 Skill 明确说明旧命令已退场，并记录旧工作树目录兼容行为。",
+        r"\bold `iar` command",
+        "随包 Skill 明确说明旧命令已退场。",
     ),
     _allowance(
         "README.md",
@@ -140,7 +135,7 @@ LEGACY_NAME_ALLOWANCES = (
     _allowance(
         "README.md",
         r"\.iar-worktrees",
-        "README 说明已有工作树目录继续复用的兼容行为。",
+        "README 说明旧工作树需迁入新容器后才会由清理命令管理。",
     ),
     _allowance(
         "ROADMAP.md",

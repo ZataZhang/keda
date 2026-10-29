@@ -299,7 +299,7 @@ uv run kc ask "运行一次 dry-run 看看 ready 队列" --execute --yes
 ### 清理已关闭 Issue 的本地分支
 
 `kc worktree cleanup` 用于清理本地遗留的 `issue-<number>` 分支及
-`.kc-worktrees/issue-<number>` worktree；已有 `.iar-worktrees/` 仓库继续沿用旧目录。默认只预览；只有传入 `--yes` 才会删除。
+`.kc-worktrees/issue-<number>` worktree。旧 `.iar-worktrees/` 中的工作树需先迁入默认目录，才会由此命令管理。默认只预览；只有传入 `--yes` 才会删除。
 清理前会执行 `git fetch <remote> --prune`，并且默认只删除同时满足“GitHub Issue
 已关闭、远端同名分支已不存在、worktree 干净、分支已合入远端 base branch”的分支。
 历史 `<repo>-worktrees/tasks/issue-<number>` worktree 不会被该命令自动删除，应按需

@@ -54,9 +54,10 @@ Issue / PR 默认跳过，需要时加 `--include-closed`。`--apply`
 ## 本机状态、仓库配置与工作树目录
 
 `kc config migrate --apply` 还会迁移本机 `~/.iar` 状态、将 `.iar.toml` 改名为 `.kedacode.toml`，并清理
-旧版 `kc init` 写入的部分固定默认值。若仓库存在旧 `.iar-worktrees/` 且没有活动的 linked worktree，
-同一命令会将其改名为 `.kc-worktrees/`；若有活动 worktree 则拒绝改名。运行 `kc worktree create` 时，
-如果旧 `.iar-worktrees/` 仍存在，会继续在该目录创建工作树，不会另建平行目录。
+旧版 `kc init` 写入的部分固定默认值。新建工作树始终使用 `.kc-worktrees/`；已有 `.iar-worktrees/`
+不会再作为新工作树的写入位置。若旧目录内还有 linked worktree，请逐个用 `git worktree move`
+迁入 `.kc-worktrees/`，并确认工作区状态未变。旧目录没有活动 linked worktree 时，`kc config migrate --apply`
+可将整个旧目录改名为 `.kc-worktrees/`；若活动 worktree 仍在旧目录内，迁移命令会拒绝改名。
 
 仓库状态与工作树的默认目录现在分别是 `.kedacode/` 和 `.kc-worktrees/`。旧 `.iar/` 状态根存在时，
 会话与 findings 继续沿用它，尚未创建的子目录也在旧根内创建；明确配置为旧路径的仓库也不自动改写。若本机同时存在新旧状态目录，或仓库

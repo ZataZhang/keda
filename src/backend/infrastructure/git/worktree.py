@@ -38,9 +38,8 @@ class WorktreeProcessRunner(Protocol):
 class WorktreeManager:
     """Create, locate, and remove KedaCode-owned Git worktrees.
 
-    New worktrees live under ``{repo_root}/.kc-worktrees/{branch}``. If a
-    repository already has ``.iar-worktrees/``, it remains the active container
-    until the explicit config migration renames it.
+    New worktrees always live under ``{repo_root}/.kc-worktrees/{branch}``.
+    Existing legacy worktrees remain where they are until explicitly moved.
     """
 
     def __init__(

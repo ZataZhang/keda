@@ -12,17 +12,14 @@ LEGACY_REPOSITORY_STATE_DIR_NAME = ".iar"
 
 
 def resolve_managed_worktree_root(repository_root_path: Path) -> Path:
-    """解析工作树容器目录，已有旧目录时继续使用它。
+    """解析 KedaCode 新建工作树的容器目录。
 
     Args:
         repository_root_path: 已解析的仓库根目录。
 
     Returns:
-        新工作树容器路径，或已经存在的旧容器路径。
+        默认工作树容器路径。
     """
-    legacy_worktree_root_path = repository_root_path / LEGACY_WORKTREE_DIR_NAME
-    if legacy_worktree_root_path.is_dir():
-        return legacy_worktree_root_path
     return repository_root_path / DEFAULT_WORKTREE_DIR_NAME
 
 
