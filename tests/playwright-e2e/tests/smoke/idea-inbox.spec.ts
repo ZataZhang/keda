@@ -33,6 +33,7 @@ test.describe('smoke: idea inbox page', () => {
                 source: 'manual',
                 author: 'alice',
                 text: '第一条想法',
+                status: 'pending',
               },
             ],
             drafts: [
@@ -121,6 +122,7 @@ test.describe('smoke: idea inbox page', () => {
                 source: 'frontend',
                 author: 'operator',
                 text: capturedPayload?.text ?? '',
+                status: 'pending',
               },
               ideas_path: 'tasks/inbox/ideas.md',
             }),

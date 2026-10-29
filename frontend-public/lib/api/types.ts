@@ -947,6 +947,8 @@ export type PrdModelTokenUsageEntry = {
 
 export type IdeaInboxSource = "frontend" | "inbound" | "feishu" | "manual";
 
+export type IdeaStatus = "pending" | "in_progress" | "completed" | "abandoned";
+
 export type PrdDraftStatus = "pending-review" | "approved" | "rejected";
 
 export type IdeaEntry = {
@@ -955,6 +957,7 @@ export type IdeaEntry = {
   source: IdeaInboxSource;
   author: string;
   text: string;
+  status: IdeaStatus;
 };
 
 export type PrdDraftMetadata = {

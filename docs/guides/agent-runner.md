@@ -5331,8 +5331,9 @@ PRD 的 `Delivery Dependencies` 小节会解析为两类依赖边（Issue 与 PR
 
 ### 事实源与目录约定
 
-- `tasks/inbox/ideas.md` 是 append-only 原话日志，AI 永不重写已有条目（仅在末尾追加 `## YYYY-MM-DD HH:MM · <source> · <author> (idea-id)` 块）。
+- `tasks/inbox/ideas.md` 保存 append-only 的原话与 AI 背景；标题中的 ID / `idea-status` 元数据可更新（例如 `## YYYY-MM-DD HH:MM · <source> · <author> (idea-id) <!-- idea-status: pending -->`），状态同步不会改动原话或背景块。
 - `tasks/inbox/summary.md` 是 AI 派生的可重写总结，刷新时整文覆盖并在文件头明确标注「事实以 `ideas.md` 为准」。
+- `/ideas` 根据待审阅草稿和活动 PRD 投影 `in_progress`，根据 `tasks/archive/` 中关联 PRD 投影 `completed`，并把状态写入对应标题标记；用户也可手动标记无 PRD 引用的旧想法为 `completed`，或明确标记 `abandoned`。
 - `tasks/inbox/prd-drafts/` 存放待审阅的 PRD 草稿；文件名 `<YYYYMMDD-HHMMSS>-<slug>.md`，草稿顶部 metadata 块（`Draft Status: pending-review|approved|rejected`、`Source Idea Refs:` 等）由 `core/use_cases/idea_prd_drafts.py` 注入。
 - 草稿经人在 `/ideas` 页面确认后复制到 `tasks/pending/`，命名为 `<PRIORITY>-<TYPE>-<YYYYMMDD-HHMMSS>-<slug>.md`；草稿状态同步改为 `approved`，并把目标 pending 路径写回 metadata。
 
@@ -5342,6 +5343,7 @@ PRD 的 `Delivery Dependencies` 小节会解析为两类依赖边（Issue 与 PR
 | --- | --- | --- |
 | `GET` | `/repositories/{repo_id}` | 读取 inbox 快照（ideas / summary / drafts） |
 | `POST` | `/repositories/{repo_id}/ideas` | 前端追加想法到 `ideas.md` |
+| `POST` | `/repositories/{repo_id}/ideas/{entry_id}/status` | 将想法标记为 `completed` / `abandoned`，或用 `pending` 恢复跟踪 |
 | `POST` | `/repositories/{repo_id}/summary/refresh` | 重写 `summary.md` |
 | `POST` | `/repositories/{repo_id}/drafts` | 生成 PRD 草稿到 `prd-drafts/` |
 | `POST` | `/repositories/{repo_id}/drafts/{encoded}/approve` | 草稿确认入 pending |
@@ -5375,6 +5377,7 @@ PRD 的 `Delivery Dependencies` 小节会解析为两类依赖边（Issue 与 PR
 - secrets 不进 `config.toml` / `.kedacode.toml`；inbound secret 走环境变量。
 - 草稿 AI 生成复用 `IContentGenerator` / `generated_content.py` 模式，不新增 LLM SDK；当 generator 不可用时草稿退化为带原话摘录的 fallback 模板，待人补全。
 - Idea → Draft → Pending 三段是单向流：草稿不会自动跑 runner，必须等人在 `/ideas` 确认才进入 pending。
+- `/ideas` 默认展示待处理与进行中想法；已完成与已放弃项目默认收起，可切换查看全部历史。进行中 / 已完成可由关联 PRD 的存放位置推导；用户也能显式标记完成、放弃或恢复跟踪。
 - 飞书自定义机器人 webhook 主要用于向群发送消息，不应被当作入站通道；事件订阅或自建通用 inbound 才是正确路径。
 
 ## 本地记忆持久化与 Skill 蒸馏（Memory Persistence & Skill Distillation）

@@ -37,6 +37,7 @@ from backend.core.use_cases.idea_inbox import (
     append_idea,
     atomic_write_text,
     build_excerpt,
+    clear_abandoned_idea_statuses,
     ensure_inbox_layout,
     extract_draft_title,
     parse_draft_header,
@@ -296,6 +297,7 @@ def create_prd_draft(
     draft_filename = _draft_filename(draft_id, slug)
     drafts_dir = repo_resolved / IDEAS_DIR_NAME / DRAFTS_DIR_NAME
     draft_path = drafts_dir / draft_filename
+    clear_abandoned_idea_statuses(repo_resolved, idea_refs)
     atomic_write_text(draft_path, _render_draft_text(payload))
     metadata = PrdDraftMetadata(
         draft_id=draft_id,

@@ -5,7 +5,7 @@
 //
 // 数据流：
 // - 顶部项目选择器从 registry 拉 enabled repo。
-// - 左侧为原话流（append-only），支持新增想法。
+// - 左侧默认显示待处理 / 进行中的原话，可切换查看已完成 / 已放弃历史。
 // - 中间为 AI 总结（summary.md），可手动刷新。
 // - 右侧为 PRD 草稿列表，支持生成、查看、确认入 pending。
 //
@@ -38,15 +38,23 @@ import {
   fetchIdeaInboxMetadata,
   fetchIdeaInboxSnapshot,
   refreshIdeaSummary,
+  updateIdeaStatus,
 } from "@/lib/api/ideaInbox";
 import type {
   IdeaEntry,
   IdeaInboxMetadata,
   IdeaInboxSnapshot,
+  IdeaStatus,
   PrdDraftSummary,
 } from "@/lib/api/types";
 
 const POLL_INTERVAL_MS = 30000;
+const IDEA_STATUS_LABELS: Record<IdeaStatus, string> = {
+  pending: "待处理",
+  in_progress: "进行中",
+  completed: "已完成",
+  abandoned: "已放弃",
+};
 
 export default function IdeasPage() {
   const [metadata, setMetadata] = useState<IdeaInboxMetadata | null>(null);
@@ -57,6 +65,7 @@ export default function IdeasPage() {
   } = useRepositorySelection();
   const [snapshot, setSnapshot] = useState<IdeaInboxSnapshot | null>(null);
   const [loading, setLoading] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
   const [selectedIdeaIds, setSelectedIdeaIds] = useState<Set<string>>(new Set());
   const [newIdeaText, setNewIdeaText] = useState("");
   const [newIdeaAuthor, setNewIdeaAuthor] = useState("operator");
@@ -67,6 +76,7 @@ export default function IdeasPage() {
   const [refreshingSummary, setRefreshingSummary] = useState(false);
   const [creatingDraft, setCreatingDraft] = useState(false);
   const [approvingPath, setApprovingPath] = useState<string | null>(null);
+  const [updatingEntryId, setUpdatingEntryId] = useState<string | null>(null);
 
   const loadMetadata = useCallback(async () => {
     try {
@@ -138,6 +148,36 @@ export default function IdeasPage() {
       toast.error(error instanceof Error ? error.message : "追加想法失败。");
     } finally {
       setSubmittingIdea(false);
+    }
+  }
+
+  async function handleUpdateIdeaStatus(
+    entry: IdeaEntry,
+    nextStatus: "pending" | "completed" | "abandoned",
+  ) {
+    if (!selectedRepoId) {
+      return;
+    }
+    setUpdatingEntryId(entry.entry_id);
+    try {
+      await updateIdeaStatus({
+        repoId: selectedRepoId,
+        entryId: entry.entry_id,
+        status: nextStatus,
+      });
+      const statusMessages = {
+        pending: "已恢复想法跟踪。",
+        completed: "已将想法标记为已完成。",
+        abandoned: "已将想法标记为放弃。",
+      };
+      toast.success(statusMessages[nextStatus]);
+      await loadSnapshot(selectedRepoId);
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "更新想法状态失败。",
+      );
+    } finally {
+      setUpdatingEntryId(null);
     }
   }
 
@@ -226,6 +266,17 @@ export default function IdeasPage() {
       return next;
     });
   }
+
+  const activeIdeaCount =
+    snapshot?.entries.filter(
+      (entry) => entry.status === "pending" || entry.status === "in_progress",
+    ).length ?? 0;
+  const visibleIdeaEntries = (snapshot?.entries ?? [])
+    .filter(
+      (entry) =>
+        showHistory || entry.status === "pending" || entry.status === "in_progress",
+    )
+    .reverse();
 
   return (
     <ConsolePage>
@@ -352,6 +403,21 @@ export default function IdeasPage() {
                 {submittingIdea ? "追加中…" : "追加到 inbox"}
               </Button>
             </div>
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs text-slate-500">
+                {showHistory
+                  ? `全部 ${snapshot?.entries.length ?? 0} 条`
+                  : `${activeIdeaCount} 条待处理或进行中`}
+              </p>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setShowHistory((current) => !current)}
+                disabled={!snapshot || snapshot.entries.length === 0}
+              >
+                {showHistory ? "仅看当前想法" : "显示全部历史"}
+              </Button>
+            </div>
             <div className="flex flex-col gap-2">
               {loading ? (
                 <Skeleton className="h-24" />
@@ -359,29 +425,83 @@ export default function IdeasPage() {
                 <p className="text-sm text-slate-500">
                   该仓库暂未收录任何想法。
                 </p>
+              ) : visibleIdeaEntries.length === 0 ? (
+                <p className="text-sm text-slate-500">
+                  当前没有待处理或进行中的想法，可切换查看历史记录。
+                </p>
               ) : (
-                snapshot.entries.map((entry) => (
-                  <label
+                visibleIdeaEntries.map((entry) => (
+                  <div
                     key={entry.entry_id}
-                    className="flex cursor-pointer items-start gap-2 rounded border border-slate-200 p-2 text-sm dark:border-slate-800"
+                    className="flex items-start gap-2 rounded border border-slate-200 p-2 text-sm dark:border-slate-800"
                   >
                     <input
                       type="checkbox"
                       className="mt-1"
                       checked={selectedIdeaIds.has(entry.entry_id)}
+                      disabled={entry.status !== "pending" || updatingEntryId !== null}
+                      aria-label={`选择想法 ${entry.occurred_at}`}
                       onChange={() => toggleIdeaSelection(entry)}
                     />
-                    <div className="flex flex-col">
+                    <div className="flex min-w-0 flex-1 flex-col">
                       <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
                         <span>{entry.occurred_at}</span>
                         <Badge variant="secondary">{entry.source}</Badge>
                         <span>· {entry.author}</span>
+                        <Badge variant="outline">
+                          {IDEA_STATUS_LABELS[entry.status]}
+                        </Badge>
                       </div>
                       <p className="mt-1 whitespace-pre-wrap text-slate-800 dark:text-slate-100">
                         {entry.text}
                       </p>
                     </div>
-                  </label>
+                    {entry.status !== "completed" && (
+                      <div className="flex shrink-0 flex-col gap-1">
+                        {entry.status === "abandoned" ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() =>
+                              void handleUpdateIdeaStatus(entry, "pending")
+                            }
+                            disabled={updatingEntryId !== null}
+                          >
+                            {updatingEntryId === entry.entry_id
+                              ? "保存中…"
+                              : "恢复跟踪"}
+                          </Button>
+                        ) : (
+                          <>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() =>
+                                void handleUpdateIdeaStatus(entry, "completed")
+                              }
+                              disabled={updatingEntryId !== null}
+                            >
+                              {updatingEntryId === entry.entry_id
+                                ? "保存中…"
+                                : "完成"}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() =>
+                                void handleUpdateIdeaStatus(entry, "abandoned")
+                              }
+                              disabled={updatingEntryId !== null}
+                            >
+                              {updatingEntryId === entry.entry_id
+                                ? "保存中…"
+                                : "放弃"}
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 ))
               )}
             </div>

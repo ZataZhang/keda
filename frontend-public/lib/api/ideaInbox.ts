@@ -8,6 +8,7 @@ import type {
   IdeaEntry,
   IdeaInboxMetadata,
   IdeaInboxSnapshot,
+  IdeaStatus,
   PrdDraftSummary,
   RefreshSummaryResponse,
 } from "./types";
@@ -35,6 +36,18 @@ export async function appendIdea(params: {
       author: params.author ?? "anonymous",
       ...(params.occurredAt ? { occurred_at: params.occurredAt } : {}),
     },
+  );
+}
+
+/** 更新单条想法的人工处理状态。 */
+export async function updateIdeaStatus(params: {
+  repoId: string;
+  entryId: string;
+  status: "pending" | "completed" | "abandoned";
+}): Promise<IdeaEntry> {
+  return post<IdeaEntry>(
+    `${BASE_PATH}/repositories/${encodeURIComponent(params.repoId)}/ideas/${encodeURIComponent(params.entryId)}/status`,
+    { status: params.status },
   );
 }
 
@@ -106,5 +119,6 @@ function encodeDraftPath(draftPath: string): string {
 export type {
   IdeaEntry,
   IdeaInboxSnapshot,
+  IdeaStatus,
   PrdDraftSummary,
 };

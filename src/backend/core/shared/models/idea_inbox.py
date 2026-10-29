@@ -27,6 +27,15 @@ class IdeaInboxSource(str, Enum):
     MANUAL = "manual"
 
 
+class IdeaStatus(str, Enum):
+    """想法在收件箱中的生命周期状态。"""
+
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    ABANDONED = "abandoned"
+
+
 class PrdDraftStatus(str, Enum):
     """PRD 草稿状态机。"""
 
@@ -53,6 +62,15 @@ class IdeaEntry:
     source: IdeaInboxSource
     author: str
     text: str
+    status: IdeaStatus = IdeaStatus.PENDING
+
+
+@dataclass(frozen=True)
+class IdeaStatusUpdate:
+    """对单条想法执行的人工状态变更。"""
+
+    entry_id: str
+    status: IdeaStatus
 
 
 @dataclass(frozen=True)

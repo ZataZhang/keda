@@ -24,22 +24,37 @@ tasks/inbox/              →   tasks/pending/   →   tasks/archive/
 
 | 路径 | 角色 | 谁来写 | 可否改写 |
 |---|---|---|---|
-| `tasks/inbox/ideas.md` | 原话引用 + 标注的 AI 背景 | 人（原话）+ AI（背景块）+ 产品 API | **只追加，永不改写** |
+| `tasks/inbox/ideas.md` | 原话引用 + 标注的 AI 背景 + 条目状态 | 人（原话）+ AI（背景块）+ 产品 API | 原话和背景只追加；标题元数据可更新 |
 | `tasks/inbox/summary.md` | AI 总结 | AI | 可随时重写 / 再生 |
 | `tasks/inbox/prd-drafts/` | 待审阅的 PRD 草稿 | `core/use_cases/idea_prd_drafts.py` | 由草稿状态机管理 |
 
-想法的事实来源只有一个：`ideas.md`。`summary.md` 是派生产物，任何时候都可以从 `ideas.md` 重新生成。
+想法原话和生命周期标记都记录在 `ideas.md`；`summary.md` 是派生产物，任何时候都可以从 `ideas.md` 重新生成。
+
+### 想法状态与 `/ideas` 页面
+
+`/ideas` 页面默认只显示待处理和进行中的想法，并提供历史记录开关。有效状态按以下规则读取：
+
+- `待处理`：没有关联草稿或 PRD，也没有人工放弃标记；标题写入 `pending`。
+- `进行中`：关联的草稿等待审阅，或关联 PRD 位于 `tasks/`、`tasks/pending/`、`tasks/hold/`。
+- `已完成`：关联 PRD 位于 `tasks/archive/`，或用户在页面手动标记完成（适用于没有 PRD 引用的旧条目）。
+- `已放弃`：用户明确放弃后，标题写入 `abandoned`；用户可在页面恢复跟踪。
+
+关联 PRD 通过头部的 `- Source Idea Refs: <idea-id>, ...` 引用想法 ID。草稿生成时自动写入引用；手工创建 PRD 时也应保留该字段。新想法 ID 和状态写入 `ideas.md` 标题；旧条目缺少 ID 时，根据原始内容稳定派生并补进标题。读取快照时，系统根据草稿和 PRD 位置同步状态标记，只更新标题行，不改动原话引用和 AI 背景块。
+
+已有历史条目若没有可关联的 PRD 引用，会先保持待处理；页面不会仅凭创建时间猜测它们已完成或已放弃。用户可以在页面逐条标记完成或放弃，也可以通过新建 PRD 建立明确关联。
+
+勾选想法只用于选择待处理条目并生成 PRD 草稿，不代表状态已保存。生成草稿后自动进入进行中；关联 PRD 归档后自动变为已完成。用户也可以手动标记旧条目为已完成；标记放弃与恢复跟踪同样会更新 `ideas.md` 标题中的状态，原话与 AI 背景始终保持不变。
 
 ## ideas.md 条目格式
 
 解析器是 `src/backend/core/use_cases/idea_inbox.py`，它对标题有硬性要求：
 
 ```
-## YYYY-MM-DD HH:MM[ · <tag>]
+## YYYY-MM-DD HH:MM[ · <tag>] <!-- idea-status: pending -->
 ```
 
 - 时间戳必须**零填充到分钟**（`2026-09-20 00:28`）。只写日期（历史遗留的 `## 2026-07-03 · 某标签`）或省略分钟，解析器**认不出这条条目**，它不会出现在 `/ideas` 页面里。
-- `· <tag>` 可选。产品写入方会把 tag 用成 `· <source> · <author> (<entry-id>)`；agent 手写条目只给短标签时，解析器回退为 `source=manual`、`author=anonymous`，两者在同一份文件里共存。
+- `· <tag>` 可选。产品写入方会把 tag 用成 `· <source> · <author> (<entry-id>)`；agent 手写条目只给短标签时，解析器回退为 `source=manual`、`author=anonymous`，两者在同一份文件里共存。标题末尾的 HTML 注释保存生命周期状态，例如 `<!-- idea-status: pending -->`。
 - 条目正文只认紧随其后的 `> ...` 引用块（读到下一个标题为止）。
 
 ### agent 捕获的条目
@@ -67,7 +82,7 @@ tasks/inbox/              →   tasks/pending/   →   tasks/archive/
 `/ideas` 页面、inbound 与 Feishu 适配器写入的条目长这样（`source` ∈ `frontend` / `inbound` / `feishu` / `manual`）：
 
 ```markdown
-## 2026-09-20 00:28 · frontend · alice (idea-20260920002800-a1b2c3)
+## 2026-09-20 00:28 · frontend · alice (idea-20260920002800-a1b2c3) <!-- idea-status: pending -->
 
 > 想法原文...
 ```
@@ -86,7 +101,7 @@ tasks/inbox/              →   tasks/pending/   →   tasks/archive/
 
 - 在 `ideas.md` **末尾追加**一条新条目，时间戳用当前本地时间（`date "+%Y-%m-%d %H:%M"`）。
 - `>` 引用块必须是用户**自己的措辞**，逐字保留。想法横跨多轮对话时，引用其中承载主张的原话；任何归纳都放进 AI 背景块。**不得编造引用**——没有可引用的用户原话就不要建条目。
-- **禁止**编辑、合并、删除、重排或"优化"已有条目（包括其中的 AI 背景块）。原话是证据，不是草稿。
+- **禁止**改写、合并、删除、重排或"优化"已有条目的原话与 AI 背景块。状态变化只更新 H2 标题中的 HTML 注释；给旧条目补稳定 ID 也只改标题元数据。原话是证据，不是草稿。
 - 想法后续演进了就**追加新条目**并引用早先的时间戳，不要回头改写旧条目。
 - 跨条目的聚类与评论放在 `summary.md`，不要混进 `ideas.md`。
 - 一次对话通常一个想法只产出一条，不要把同一个想法拆成多条碎片。
@@ -107,7 +122,7 @@ tasks/inbox/              →   tasks/pending/   →   tasks/archive/
 1. 在 `tasks/inbox/prd-drafts/` 生成草稿 `<YYYYMMDD-HHMMSS>-<slug>.md`，顶部 metadata 由 `core/use_cases/idea_prd_drafts.py` 注入。
 2. 人在 `/ideas` 页面确认后，草稿复制到 `tasks/pending/`，命名为 `<PRIORITY>-<TYPE>-<YYYYMMDD-HHMMSS>-<slug>.md`，状态改为 `approved`。
 3. 手工路径（不经产品页）则直接用 PRD skill 在 `tasks/pending/` 下创建正式 PRD（命名与规范见 `skills/prd/SKILL.md`），并在 `summary.md` 的"已升级"区标注。
-4. 原话条目保留在 `ideas.md` 不动，作为需求溯源。
+4. 原话和 AI 背景保留在 `ideas.md` 不动，作为需求溯源；生命周期状态保存在同一条目的标题元数据中。
 
 ## 约定与边界
 
