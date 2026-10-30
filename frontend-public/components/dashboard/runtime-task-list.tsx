@@ -332,7 +332,12 @@ function RuntimeTaskRow({
         <RuntimeTaskPhaseDescription task={task} className="mt-1 block text-xs text-slate-500" />
         <RuntimeTaskObservation task={task} />
         <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
-          {task.agent ? (
+          {task.unclosed_invocation_executor ? (
+            <span title="调用账本尚未记录该调用的结束事件；此信息不能单独证明执行进程仍存活。">
+              未结束调用：{task.unclosed_invocation_executor}
+              {task.unclosed_invocation_model ? ` · ${task.unclosed_invocation_model}` : ""}
+            </span>
+          ) : task.agent ? (
             <span>
               最近执行：{task.agent}
               {task.preset ? ` · ${task.preset}` : ""}

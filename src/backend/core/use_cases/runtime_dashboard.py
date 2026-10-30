@@ -4,8 +4,8 @@
 
 - **只读复用**：任务身份与标签来自监控快照（:mod:`monitor_snapshots`），运行终态
   来自运行账本（``IRunHistoryStore``），阶段 / preset / 模型来自 attempt 账本，
-  PRD 关联来自生命周期账本（``IPrdLifecycleStore``）。本模块不打开 GitHub、
-  不读日志文件、不算改动树，也不新增任何存储。
+  PRD 关联来自生命周期账本（``IPrdLifecycleStore``），未收口调用执行器来自既有
+  invocation 账本。本模块不打开 GitHub、不读日志文件、不算改动树，也不新增任何存储。
 - **改动树触达读数不在这里**：唯一来源仍是现有
   ``GET /api/v1/agent-runner/backlog/prds/{encoded_path}/progress`` 契约，摘要只带
   ``prd_path``，由展示侧按需取数，避免第二份检测实现漂移。
@@ -23,6 +23,7 @@ from typing import Any
 
 from backend.core.shared.interfaces.runner_console import (
     AttemptRecord,
+    IInvocationEventStore,
     IPrdLifecycleStore,
     IRunHistoryStore,
     PrdLifecycleRunRecord,
@@ -34,6 +35,11 @@ from backend.core.shared.models.runtime_task import (
     RuntimeTask,
     RuntimeTaskStatus,
     RuntimeTaskSummary,
+)
+from backend.core.use_cases.agent_invocation_tracing import (
+    OUTCOME_UNCLOSED,
+    build_invocation_timeline,
+    resolve_invocation_store,
 )
 from backend.core.use_cases.monitor_snapshots import SnapshotOverviewResult
 from backend.core.use_cases.runtime_task_observation import (
@@ -68,6 +74,7 @@ _OUTCOME_STATUS_MAP: dict[str, RuntimeTaskStatus] = {
 SOURCE_MONITOR_SNAPSHOT = "monitor_snapshot"
 SOURCE_RUN_HISTORY = "run_history"
 SOURCE_ATTEMPT_LEDGER = "attempt_ledger"
+SOURCE_INVOCATION_LEDGER = "invocation_ledger"
 
 #: 快照同步状态里，「整体还不可信」的取值。``partial`` 仍可用（缺的仓库单独披露）。
 _UNTRUSTED_SYNC_STATUSES = frozenset({"pending_first_sync"})
@@ -378,6 +385,55 @@ def _enrich_from_attempt(
     )
 
 
+def _enrich_from_unclosed_invocation(
+    task: RuntimeTask,
+    *,
+    invocation_store: IInvocationEventStore | None,
+    unavailable_sources: set[str],
+) -> RuntimeTask:
+    """用当前会话中最近一条未收口调用补出实际执行器，不推测进程存活。"""
+    if task.status is not RuntimeTaskStatus.RUNNING:
+        return task
+    session_started_at = parse_runtime_timestamp(task.started_at)
+    if session_started_at is None:
+        return task
+    if invocation_store is None:
+        unavailable_sources.add(SOURCE_INVOCATION_LEDGER)
+        return task
+
+    try:
+        invocation_events = invocation_store.list_issue_invocation_events(
+            repo_id=task.repo_id,
+            issue_number=task.issue_number,
+        )
+    except Exception as exc:  # noqa: BLE001 - 调用账本读失败只降级当前执行器字段。
+        _logger.warning(
+            "Runtime summary failed to read invocation ledger for %s#%d: %s",
+            task.repo_id,
+            task.issue_number,
+            exc,
+        )
+        unavailable_sources.add(SOURCE_INVOCATION_LEDGER)
+        return task
+
+    session_events = [
+        event
+        for event in invocation_events
+        if (event_time := parse_runtime_timestamp(event.occurred_at)) is not None
+        and event_time >= session_started_at
+    ]
+    invocation_rows = build_invocation_timeline(session_events)
+    latest_invocation = invocation_rows[-1] if invocation_rows else None
+    if latest_invocation is None or latest_invocation.outcome != OUTCOME_UNCLOSED:
+        return task
+
+    return replace(
+        task,
+        unclosed_invocation_executor=latest_invocation.executor,
+        unclosed_invocation_model=latest_invocation.requested_model,
+    )
+
+
 def _task_sort_key(task: RuntimeTask) -> tuple[int, float, str, int]:
     """看板排序键：状态优先级 → 开始时间倒序 → 仓库 → Issue 编号。"""
     parsed_start = parse_runtime_timestamp(task.started_at)
@@ -399,7 +455,7 @@ def build_runtime_task_summary(
 
     Args:
         snapshot_overview: 按当前 registry 过滤后的监控快照读路径结果。
-        run_history_store: 运行与 attempt 账本端口；``None`` 记为不可用来源。
+        run_history_store: 运行 / attempt 账本端口及可选 invocation 读能力；``None`` 记为不可用来源。
         prd_lifecycle_store: PRD 生命周期账本端口；``None`` 记为不可用来源。
         enabled_repo_ids: 当前注册且启用的仓库标识。**账本按仓库逐个读取**，
             因此已注销或停用仓库的历史运行不会带着旧 Issue 身份回到看板上。
@@ -532,6 +588,15 @@ def build_runtime_task_summary(
     tasks.sort(key=_task_sort_key)
     truncated = len(tasks) > max_rows
     visible_tasks = tuple(tasks[:max_rows])
+    invocation_store = resolve_invocation_store(run_history_store)
+    visible_tasks = tuple(
+        _enrich_from_unclosed_invocation(
+            task,
+            invocation_store=invocation_store,
+            unavailable_sources=unavailable_sources,
+        )
+        for task in visible_tasks
+    )
 
     status_counts = {status.value: 0 for status in RuntimeTaskStatus}
     for task in visible_tasks:
@@ -551,6 +616,7 @@ def build_runtime_task_summary(
 
 __all__ = [
     "SOURCE_ATTEMPT_LEDGER",
+    "SOURCE_INVOCATION_LEDGER",
     "SOURCE_MONITOR_SNAPSHOT",
     "SOURCE_PRD_LIFECYCLE",
     "SOURCE_RUN_HISTORY",

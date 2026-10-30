@@ -390,13 +390,14 @@ run 详情：`run`、`results`（逐候选执行）、`scores`（逐评审评分
 
 ### `GET /api/v1/agent-runner/console/runtime/tasks`
 
-值守看板（`/app/dashboard/` 默认视图）的任务摘要，只读。**不新增任何存储**：任务身份与标签来自监控快照，运行终态来自运行账本，阶段 / preset / 模型来自 attempt 账本，PRD 关联来自生命周期账本。
+值守看板（`/app/dashboard/` 默认视图）的任务摘要，只读。**不新增任何存储**：任务身份与标签来自监控快照，运行终态来自运行账本，阶段 / preset / 模型来自 attempt 账本，PRD 关联来自生命周期账本。运行中的任务还会读取既有 invocation 账本；只有当前会话最近一条调用没有结束事件时，才返回该调用的实际执行器与请求模型。
 
 - 数据范围严格绑定当前 registry 的启用仓库：账本按 `repo_id` 逐仓库读取，已删除或禁用的仓库即使仍有历史运行行也不会回到看板。
 - GitHub Issue 为 closed 时优先归入 `closed`，不受残留 `agent/*` 标签影响，也不表示 Agent 已成功完成；open Issue 再按 `agent/*` 标签推导状态，其中 `agent/blocked` 对应 `blocked`、`agent/failed` 对应 `failed`、`agent/review` 与 `agent/ready` 同归 `waiting`。没有可判定标签时依次回落到运行账本终态、`unknown`，未知不折算成零。
 - 分桶顺序为 `running` → `blocked` → `failed` → `waiting` → `completed` → `closed` → `unknown`，同状态内按开始时间新者在前。
 - `status_reason` 说明状态来源（当前监控标签、Issue 关闭状态或运行账本终态）；监控异常只放在独立的 `anomaly_types` 列表中，不覆盖状态来源，也不直接表示失败原因。
 - `duration_seconds` 对运行中的任务由「attempt 开始时间 → 生成时间」推算，是如实的已耗时，不是任何百分比。
+- `unclosed_invocation_executor` / `unclosed_invocation_model` 仅表示当前会话最近一次实际调用尚无结束事件；账本未收口不能单独证明执行进程仍存活。没有匹配调用、读端不可用或时间无法关联时留空，读取失败会把 `invocation_ledger` 加入 `unavailable_sources`。
 
 ```json
 {
@@ -414,6 +415,8 @@ run 详情：`run`、`results`（逐候选执行）、`scores`（逐评审评分
       "anomaly_types": [],
       "phase": "implement",
       "agent": "claude",
+      "unclosed_invocation_executor": "claude",
+      "unclosed_invocation_model": "…",
       "preset": "fast",
       "model": "…",
       "attempt_number": 2,
@@ -444,7 +447,7 @@ run 详情：`run`、`results`（逐候选执行）、`scores`（逐评审评分
 
 字段语义：
 
-- `unavailable_sources`：读取失败或整体不可信的数据来源名（`monitor_snapshot` / `run_history` / `prd_lifecycle` / `attempt_ledger`）。任一来源失败只把该来源标为不可用，不折叠成「没有任务」。
+- `unavailable_sources`：读取失败或整体不可信的数据来源名（`monitor_snapshot` / `run_history` / `prd_lifecycle` / `attempt_ledger` / `invocation_ledger`）。任一来源失败只把该来源标为不可用，不折叠成「没有任务」。
 - `sync_status` / `scanned_at` / `missing_repo_ids`：直接透传快照读路径的结果，`pending_first_sync` 表示整体还不可信。
 - `truncated`：任务数超过 100 行上限时为 `true`，此时列表是排序后的前 100 条；历史复盘请看 Stats 页面。
 - **改动树触达读数不在本响应里**：摘要只带 `prd_path`，展示侧按它调用 `GET …/backlog/prds/{encoded_path}/progress`，避免出现第二份影响树检测逻辑。

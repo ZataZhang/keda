@@ -81,6 +81,8 @@ class RuntimeTask:
         review_daemon_running: 本机 PR 值守进程是否存活；未探测或读取失败时为空。
         phase: 最近一次观测到的生命周期阶段名。
         agent: 最近一次运行选择的 Agent 名称。
+        unclosed_invocation_executor: 当前运行会话里最近一次尚无结束事件的调用执行器。
+        unclosed_invocation_model: 该未收口调用实际请求的模型；未请求模型时为空。
         preset: 最近一次 attempt 使用的模型 preset；旧记录为 ``None``。
         model: 最近一次 attempt 上报的模型名；旧记录为 ``None``。
         attempt_number: 最近一次 attempt 序号。
@@ -103,6 +105,8 @@ class RuntimeTask:
     status_reason: str | None = None
     phase: str | None = None
     agent: str | None = None
+    unclosed_invocation_executor: str | None = None
+    unclosed_invocation_model: str | None = None
     preset: str | None = None
     model: str | None = None
     attempt_number: int | None = None

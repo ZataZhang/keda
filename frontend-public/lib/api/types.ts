@@ -1602,6 +1602,10 @@ export type RuntimeTaskEntry = {
   anomaly_types: AnomalyType[];
   phase: string | null;
   agent: string | null;
+  /** 当前会话最近一条尚无结束事件的实际调用执行器；缺少调用记录时为空。 */
+  unclosed_invocation_executor?: string | null;
+  /** 未收口调用实际请求的模型；未请求模型或旧后端未提供时为空。 */
+  unclosed_invocation_model?: string | null;
   preset: string | null;
   model: string | null;
   attempt_number: number | null;
