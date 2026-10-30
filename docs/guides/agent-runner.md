@@ -5337,6 +5337,10 @@ PRD 的 `Delivery Dependencies` 小节会解析为两类依赖边（Issue 与 PR
 - `tasks/inbox/prd-drafts/` 存放待审阅的 PRD 草稿；文件名 `<YYYYMMDD-HHMMSS>-<slug>.md`，草稿顶部 metadata 块（`Draft Status: pending-review|approved|rejected`、`Source Idea Refs:` 等）由 `core/use_cases/idea_prd_drafts.py` 注入。
 - 草稿经人在 `/ideas` 页面确认后复制到 `tasks/pending/`，命名为 `<PRIORITY>-<TYPE>-<YYYYMMDD-HHMMSS>-<slug>.md`；草稿状态同步改为 `approved`，并把目标 pending 路径写回 metadata。
 
+### 页面视图
+
+`/ideas` 将操作拆为「收件箱」「AI 总结」「PRD 草稿」三个视图。收件箱以列表 + 详情浏览想法，支持搜索、当前条目/历史切换和批量选择待处理想法；新想法表单默认收起，避免挤占浏览空间。AI 总结以 Markdown 渲染，手动编辑后保存到 `summary.md`；此操作只落盘调用方提供的总结文本，不会自动请求模型，也不会改写原话日志。PRD 草稿集中展示并提供待审草稿确认入口。
+
 ### API 端点（`/api/v1/agent-runner/idea-inbox/*`）
 
 | 方法 | 路径 | 作用 |
@@ -5344,7 +5348,7 @@ PRD 的 `Delivery Dependencies` 小节会解析为两类依赖边（Issue 与 PR
 | `GET` | `/repositories/{repo_id}` | 读取 inbox 快照（ideas / summary / drafts） |
 | `POST` | `/repositories/{repo_id}/ideas` | 前端追加想法到 `ideas.md` |
 | `POST` | `/repositories/{repo_id}/ideas/{entry_id}/status` | 将想法标记为 `completed` / `abandoned`，或用 `pending` 恢复跟踪 |
-| `POST` | `/repositories/{repo_id}/summary/refresh` | 重写 `summary.md` |
+| `POST` | `/repositories/{repo_id}/summary/refresh` | 将调用方提供的总结文本写入 `summary.md` |
 | `POST` | `/repositories/{repo_id}/drafts` | 生成 PRD 草稿到 `prd-drafts/` |
 | `POST` | `/repositories/{repo_id}/drafts/{encoded}/approve` | 草稿确认入 pending |
 | `POST` | `/inbound` | 外部 IM / webhook 通用入站（签名校验） |

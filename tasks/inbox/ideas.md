@@ -2,39 +2,39 @@
 
 > 追加式、逐字保留。AI 只在末尾追加，永不改写已有条目。事实来源是本文件。
 
-## 2026-06-14 19:07
+## 2026-06-14 19:07 · manual · anonymous (idea-legacy-568357855721-1) <!-- idea-status: completed -->
 
 > 我想要加一个路线图的功能，就是在前端里面看每一个PRD的执行情况，当前哪些PRD已经做完了，还有哪些PRD已经没有做完，PRD之间的依赖关系。当然最主要的是看没有做完的PRD，就是没有归档的PRD。但是归档的PRD也可以说加在里面去。也就是说我有个开关可以看全部的PRD，一个顺序，一个路线图，以及每已经完成的或者未完成的这些。
 
-## 2026-06-14 19:41
+## 2026-06-14 19:41 · manual · anonymous (idea-legacy-1ec04b9a2c91-1) <!-- idea-status: completed -->
 
 > 我还想再加一个，就是可以直接在路线图上面点击，然后开始PRD，然后以及PRD如果好了，需要我review，它要亮起来，让我点击去review，去PR，合并PR。然后我完成之后，它需要再进行下一个这样的流程
 
-## 2026-06-14 19:45
+## 2026-06-14 19:45 · manual · anonymous (idea-legacy-8232b1a69d12-1) <!-- idea-status: completed -->
 
 > 5. 路线图上的「开始 PRD」操作是触发什么：创建分支/worktree，还是仅仅标记状态为 in_progress？这个我要求他直接就开始工作了，也就是改GitHub的level，然后同时本地去创建一个WorkTree去工作
 
-## 2026-06-14 19:46
+## 2026-06-14 19:46 · manual · anonymous (idea-legacy-5edb426894f9-1) <!-- idea-status: completed -->
 
 > 6. 「需要 review / 去 PR / 合并 PR」这些状态由谁驱动：AI 自动检测，还是用户手动点击？这个你需要去看项目，本来就是由Agent自己驱动的。
 
-## 2026-06-14 19:48
+## 2026-06-14 19:48 · manual · anonymous (idea-legacy-47c9a738edc3-1) <!-- idea-status: completed -->
 
 > 开始 → Review → PR → 合并 → 下一个」 这个流程和当前的好像有点不一样, 人需要做的只是 确认开始和审阅pr吧
 
-## 2026-06-14 19:53
+## 2026-06-14 19:53 · manual · anonymous (idea-legacy-301fbcd877d4-1) <!-- idea-status: completed -->
 
 > 7. 「完成之后进行下一个」是自动开始下一个 PRD，还是仅高亮下一个可开始的项？如果有依赖关系的PRD。用户审阅完成之后可以自动开始, 如果没有依赖关系的PRD，点击开始按钮可以并行执行，用户可以设置并行执行的数量，也可以单个PRD由用户开始选择。我想表达的是，有两种开始方式。一种是全局开始，全局开始就是用户点击之后，可以设置并行的数量，然后没有依赖关系的可以并行的执行，有依赖关系的需要等待上一个用户审阅并合并到主分支之后，才可以开始执行。然后另外一种执行方式就是单个执行，用户可以点击单个PRD开始执行。
 
-## 2026-06-14 19:54
+## 2026-06-14 19:54 · manual · anonymous (idea-legacy-cf0f8ea2c5a0-1) <!-- idea-status: completed -->
 
 > 8. 这个工作流与现有 iar / PR 自动化流程的关系是什么？是替代、封装还是只读展示？是封装
 
-## 2026-06-14 20:15
+## 2026-06-14 20:15 · manual · anonymous (idea-legacy-5702ee38091c-1) <!-- idea-status: completed -->
 
 > 现在加了一个PRD的路线图，但是我突然感觉也可以把这个idea_inbox也加进到前端里面去，和PRD Roadmap分开，这个是相当于作为PRD产生的上游,当然还需要专门接一个Cloud或者Codex去用来和人类交互。后续我也要接上例如飞书等跨平台能力, 让我直接能够在飞书上面发布我的想法到我的每个项目里面去，让它自动记录到我的每个项目里面去。然后也可以相当于直接由我的想法去创建一个PRD。
 
-## 2026-06-14 20:24
+## 2026-06-14 20:24 · manual · anonymous (idea-legacy-0176b0f97e46-1) <!-- idea-status: completed -->
 
 > 这个是 Realistic Validation Evidence 的一个真实例子, 我觉得它没有很直观，首先我前面有列出Closes #71
 >
@@ -48,63 +48,63 @@
 >  保护本地状态真实验证：通过真实 Git 临时仓库制造 dirty worktree、local-ahead、diverged 三类状态，验证 runner 不执行 destructive reset，且 dirty/diverged 给出明确失败。
 >  为什么单元测试不够：单元测试可以验证命令序列，但不能证明 Git refspec、remote-tracking ref、fast-forward 判定和真实 worktree 状态在实际 Git 仓库中正确工作。 但是他给证据的时候，并没有关联到哪一个验证上面去。同时现在的语言都是使用的英文，我希望他能够以中文给出。当然以我项目的语言去区分，当然是更好了。 还有一个就是他虽然给出了证据，但是并没有给出理由，也就是可能他随意地给出一个虚假的证据，也就通过了。我觉得需要给出一下解释。
 
-## 2026-06-14 21:16 · 部署
+## 2026-06-14 21:16 · 部署 (idea-legacy-0fe9b9a79b0c-1) <!-- idea-status: completed -->
 
 > 我想要增加一个能力，就是我填入好我设置好的远程的服务器。然后他提交PR之后，实际上是会把应用部署到服务器上面，然后人去做审阅的时候可以到对应网址上面去查看应用的具体实践情况。可能要填写服务器的密钥。这个我觉得没关系，直接填到环境变量里面就行了。我觉得是不是需要设计一套部署的模板？或者说还是让他自己去部署？部署模板的话，就相当于它要传入commit信息或者一些其他的东西。然后让他通过脚本的方式去把当前的代码通过CD之后去部署。
 
-## 2026-06-14 21:17 · 部署
+## 2026-06-14 21:17 · 部署 (idea-legacy-7f3b818c46e1-1) <!-- idea-status: completed -->
 
 > 我部署的话，我觉得默认可以用Docker加Traffic去部署。我的zata-ops那个项目里面，有关于部署的脚本。然后可以把那套部署脚本复制到当前的项目里面来，作为一个封装的工具，可以给用户使用。
 
-## 2026-06-15 00:41
+## 2026-06-15 00:41 · manual · anonymous (idea-legacy-264a22818f64-1) <!-- idea-status: pending -->
 
 > 我想要增加一个功能，就是当进入审阅环节时，给我发一个邮件
 
-## 2026-06-15 00:48
+## 2026-06-15 00:48 · manual · anonymous (idea-legacy-89be06b9416d-1) <!-- idea-status: completed -->
 
 > 现在有个问题，就是我完全看不到它运营中的输出了。我想要的是做原本CLI的封装，但是现在好像封装的不是很好。
 
-## 2026-06-15 00:50
+## 2026-06-15 00:50 · manual · anonymous (idea-legacy-94c51b237b53-1) <!-- idea-status: completed -->
 
 > 在路线图页面新增一个“依赖图/流程图”视图，将 PRD 卡片作为节点、按 delivery_dependencies 依赖关系用连线串联起来，形成可视化的工作流拓扑；支持线性的主链路展示，清晰表达 PRD 之间的先后依赖与并行分支，作为现有“时间轴”和“列表”视图的补充。
 
-## 2026-06-15 09:30
+## 2026-06-15 09:30 · manual · anonymous (idea-legacy-3e312a8dec2e-1) <!-- idea-status: completed -->
 
 > 我感觉我当前丢失了对于各个agent 上下文的控制, 我看不到注入给runner agent 的上下文信息， 同时我也看不到注入给其他agent 的上下文信息
 
-## 2026-06-17 09:44 · cc-switch 模型切换
+## 2026-06-17 09:44 · cc-switch 模型切换 (idea-legacy-454dbab0d9cf-1) <!-- idea-status: pending -->
 
 > 有时候, 我的code plan 会达到额度, 这个时候全部失败了, 应该要他通过cc-switch 去切换模型, 这个咋弄, 不知道cc-switch 是不是有接口可以换, 如果没有接口怎么办
 
-## 2026-06-23 10:21 · iar-loop
+## 2026-06-23 10:21 · iar-loop (idea-legacy-118bf69b2edf-1) <!-- idea-status: completed -->
 
 > 我想要在当前的iar 上面增加loop 的功能, 主要用途在于定时项目的任务, 比如某一个项目的任务是每天早上8点更新关于github trending项目的介绍,这个可以做一个prd ,但是这个prd 可能是要每天执行的, 每天新建一个pr, 你觉得呢, 怎么做这个loop 先说说
 
-## 2026-06-26 13:39 · runner-context
+## 2026-06-26 13:39 · runner-context (idea-legacy-ccc940a87cb8-1) <!-- idea-status: completed -->
 
 > 可以直接查看 just ai check  这个里面就提供了会话恢复的能力,  关于runner agnet ,完全可以服用相关的逻辑, 防止说出了问题就完全忘记前面的内容了
 
-## 2026-06-26 15:55 · agent-runner
+## 2026-06-26 15:55 · agent-runner (idea-legacy-ec1a33b53029-1) <!-- idea-status: completed -->
 
 > session 丢失问题,  当前在 agnet runner , 尝试失败之后, 可能session 就直接丢失了, 这个需要解决, 无论 claude / codex 还是 kimi 都有解决办法的
 
-## 2026-06-26 15:56 · memory · skill
+## 2026-06-26 15:56 · memory · skill (idea-legacy-b20d9fa8e4a0-1) <!-- idea-status: completed -->
 
 > 当前缺少memory 机制,  每一次的任务都没有记录, 没有沉淀, 这个是一个问题, 是不是要沉淀一个skill
 
-## 2026-06-26 15:57 · deploy · docker
+## 2026-06-26 15:57 · deploy · docker (idea-legacy-1862e0548ca6-1) <!-- idea-status: completed -->
 
 > 还需要增加一个额docker 部署的能力 , 将当前的项目部署到远程服务器, 在服务器上面配置 api key 然后iar 项目直接长期的在远程服务器上面运行
 
-## 2026-06-26 15:59 · token · metrics
+## 2026-06-26 15:59 · token · metrics (idea-legacy-4194fdd93110-1) <!-- idea-status: completed -->
 
 > 缺少关于token 的统计功能, 现在的agent 在每个环节消耗了多少token是一个未知数
 
-## 2026-06-26 16:01 · test · benchmark
+## 2026-06-26 16:01 · test · benchmark (idea-legacy-dfd85d2ff868-1) <!-- idea-status: pending -->
 
 > 需要增加一个用于测试的能力, 预设几个prd ,copy  ~/code/zata_code_template的模板之后 在模板仓库上面完成prd  然后对比完成的效果  ( 可以让人自己去评判完成度, 也可以对比没有用 iar 的效果) 以及耗时( 人介入的时间)
 
-## 2026-06-30 09:52 · SIGTERM
+## 2026-06-30 09:52 · SIGTERM <!-- idea-status: abandoned -->
 
 ```text
 L3.1 的 SIGTERM 覆盖  是什么
@@ -214,11 +214,11 @@ Traceback (most recent call last):
     return await future
 ```
 
-## 2026-07-03 16:17
+## 2026-07-03 16:17 · manual · anonymous (idea-legacy-f0bf38a95c17-1) <!-- idea-status: pending -->
 
 > .iar/memory 完成之后 还要做记忆分层的功能
 
-## 2026-07-08 02:35 · iar-init-skill
+## 2026-07-08 02:35 · iar-init-skill (idea-legacy-55aaaa26c913-1) <!-- idea-status: completed -->
 
 > iar init 的skill 不应该再从本机安装,而是从~/code/zata_code_template  所对应的github 仓库安装那两个skill 并且是按照到~/.claude 里面
 
@@ -226,7 +226,7 @@ Traceback (most recent call last):
 
 > 一个很大的问题是 我iar init 创建的 toml 没有[agent_runner.autopilot]段，freshai 这种已经初始化过的仓库就缺这段，必须手动补才能用 autopilot 快速档。
 
-## 2026-07-31 15:37 · attempt-history-timing
+## 2026-07-31 15:37 · attempt-history-timing <!-- idea-status: completed -->
 
 ```
 Attempt History (live)
@@ -237,15 +237,15 @@ Attempt    Started (UTC)    Agent    Failure Type    Recovered    Duration    De
 4    2026-07-31 06:17Z    claude    no_commits    No    4667.9s    error: recipe lint failed with exit code 1  这个只有在任务结束的时候才会更新, 应该任务开始的时候更新, 你觉得呢, 而且只有任务开始时间, 没有任务结束时间呀
 ```
 
-## 2026-09-18 11:19 · repo-picker-and-config-view
+## 2026-09-18 11:19 · repo-picker-and-config-view (idea-legacy-2072e781ed1d-1) <!-- idea-status: completed -->
 
 > 应该要支持直接通过选择文件夹目录的形式来选择仓库 ，还有应该要能查看每个仓库具体的配置
 
-## 2026-09-20 00:28 · prd-multi-agent-split-and-verify
+## 2026-09-20 00:28 · prd-multi-agent-split-and-verify (idea-legacy-5d4b49a8a1a7-1) <!-- idea-status: pending -->
 
 > 我有一个想法，就是把PRD是不是可以拆分成若干个任务，让不同的Agent去做，然后有一个组的Agent去验收。
 
-## 2026-09-28 23:17 · iar-child-env-sanitize
+## 2026-09-28 23:17 · iar-child-env-sanitize (idea-legacy-c5d4059f69f4-1) <!-- idea-status: completed -->
 
 > 起草 runner 子进程 env sanitize 提案
 
@@ -256,7 +256,7 @@ Attempt    Started (UTC)    Agent    Failure Type    Recovered    Duration    De
 - 代码事实：`src/backend/infrastructure/process_runner.py` 的多处 `subprocess.Popen(...)`（约 :273/:365/:675/:814）以及 `src/backend/engines/agent_runner/output_protocols/plain.py:35`、`pi_json_lines.py:36` 均未传 `env=`，子进程原样继承父进程完整环境。
 - 临时规避：以 `env -u SERVER__PORT uv run iar run ...` 启动 runner；卡死 Issue 需手工把 `agent/running` 换回 `agent/ready` 重排队。
 
-## 2026-09-29 10:57 · iar-verifier-stdout-lost-and-codex-sandbox
+## 2026-09-29 10:57 · iar-verifier-stdout-lost-and-codex-sandbox (idea-legacy-6a68d1c5f9db-1) <!-- idea-status: pending -->
 
 > 当前的这个prd issue  怎么一直失败， 我使用iar 去做的，你帮我看看为什么
 
@@ -274,7 +274,7 @@ Attempt    Started (UTC)    Agent    Failure Type    Recovered    Duration    De
 - 收敛结论：这是 keda 侧两个独立缺陷。修复方向 = (1) 改 `_communicate_with_activity_tracking`：在 `process.wait()` 之后再 join 读取线程并收集，别提前定格 stdout；(2) 解决 verifier 的浏览器沙箱冲突（放开 codex 沙箱 / 换非沙箱 verifier agent / 或把浏览器类 RV 降级为「builder 产物 + verifier 文件级核验」并在 PRD 写明边界）。
 - 本次处置：用户决定**暂不使用 keda 实现**，#39 由交互式会话直接接管实现；此条目仅作 keda 待办登记。
 
-## 2026-09-30 15:55 · logging-capability-upgrade-deferred
+## 2026-09-30 15:55 · logging-capability-upgrade-deferred (idea-legacy-9629cb853086-1) <!-- idea-status: pending -->
 
 > ## 明确不做
 >
@@ -288,7 +288,7 @@ Attempt    Started (UTC)    Agent    Failure Type    Recovered    Duration    De
 - 暂缓清单：① 结构化 JSON 日志与人类可读双通道；② `run_id` / `trace_id` 关联键，以及把文本日志与 SQLite 生命周期账本打通；③ 统一 `logging.getLogger(__name__)`（约 90 个模块）与共享 `logger` 单例两种惯例；④ 把每 Issue 日志路由的线程过滤器改成 `contextvar`（`core/use_cases/agent_runner_output_routing.py`）；⑤ uvicorn 访问日志；⑥ 事件溯源式重写。
 - 后续如要启动其中任一项，应另开 PRD，并复用本 Issue 建立的 `daily_log_path()`（日文件路径唯一产出点）与 handler 私有标记 `_keda_handler`（幂等只认自己）两个约定，不要另起平行抽象。
 
-## 2026-09-30 19:59 · logging-log-dir-single-source
+## 2026-09-30 19:59 · logging-log-dir-single-source (idea-legacy-f5d801699ee2-1) <!-- idea-status: pending -->
 
 > - 日志目录的单点只到"消费方取自 `daily_log_dir()`"这一层：`log_dir` 与 `log_file` 仍是两个配置字段，单独设置 `LOG_DIR` 不会移动日文件（既有行为，改动它会挪走已有部署的日志落点，不在本 PRD 范围）。文档已显式提醒运维。
 
@@ -302,7 +302,7 @@ Attempt    Started (UTC)    Agent    Failure Type    Recovered    Duration    De
 - 剩下的一致性问题：`log_dir` 与 `log_file` 这两个字段本身仍是两套来源。让 `log_file` 默认由 `log_dir` 派生（或让日文件直接写 `log_dir`）会改变已有部署的日志落点，属于需要单独决策的行为变更，因此本次只做文档披露（`docs/guides/configuration.md` 明确写了"单独设置 `LOG_DIR` 不会把日文件挪走"）。
 - 后续如要开工，需要一并决定：`iar logs` 回退提示、`agent_runner` 的托管进程日志目录（`[agent_runner.console].process_log_dir`）、以及派生项目里已经写了 `LOG_DIR` 的 `.env` 是否要迁移。
 
-## 2026-09-30 14:53 · keda 日志升级（P1/P2）暂时不做
+## 2026-09-30 14:53 · keda 日志升级（P1/P2）暂时不做 (idea-legacy-0dce99e4fe88-1) <!-- idea-status: pending -->
 
 > 那么 当下keda 的日志 有什么修改建议
 
@@ -367,7 +367,7 @@ Attempt    Started (UTC)    Agent    Failure Type    Recovered    Duration    De
 - **可能修法（供后续选型，非结论）**：① 最小改动 = 标题无效化守卫从"精确匹配 `Closes #N`"扩展为"跳过 `Closes #N` 行取下一非空行"或"对 `Here is…`/`Sure…`/以 `:` 结尾的对话式开场白判废并回退 `fallback_title`"，并加回归测试；② 更彻底 = `draft_pr` 改 `output="json"`，走 `_parse_json_output`（`:506-516`）结构化解析，天然不会把开场白当标题（但需确认 agent 侧稳定产出合法 JSON）。严重度中（污染 PR 元数据、影响可读性与检索，但不阻断合并）。
 - **来源**：用户 2026-10-05 会话发现（原话逐字引用如上），当时明确"等你一句话"再决定是否开 Issue/PRD；本条目为待办登记。
 
-## 2026-10-09 16:05 · 夜间任务批次总 PR
+## 2026-10-09 16:05 · 夜间任务批次总 PR (idea-legacy-a1e9e841a1e8-1) <!-- idea-status: completed -->
 
 > 我现在碰到一个问题，就是比如我一次性可能会在晚上跑若干个任务， 最后形成若干个pr， 那么能不能在所有任务都完成之后，让自己去把所有pr都合并到一个分支里面，让我早晨醒来，我就不用一个个pr 的看了， 我只要看一个总的pr 就行了 ， 你觉得呢
 
@@ -376,7 +376,7 @@ Attempt    Started (UTC)    Agent    Failure Type    Recovered    Duration    De
 - 边界/约束：只聚合同一显式批次的任务；任务完成并通过现有验证/审查后才生成集成分支和总 PR；冲突或整批验证失败时停止并报告；总 PR 由用户审阅后再决定是否合并。
 - 收敛结论：建议先写 PRD。该能力涉及任务批次身份、PR 分支组合、依赖顺序、冲突恢复及源 PR / Issue 状态衔接，超出适合直接修补的小范围。
 
-## 2026-10-09 16:14 · 托管 daemon 部署与自动清理
+## 2026-10-09 16:14 · 托管 daemon 部署与自动清理 (idea-legacy-af6565b18ecc-1) <!-- idea-status: pending -->
 
 > 当前的这个项目，我想要把deamon 做到托管， 部署到容器上， 可以吗？ 我下一步想要做商业化，别人本地使用不要花钱， 但是如果想要做云端的deamon 我可以帮他们部署，但是需要收一些基础建设的费用， 不过我在此之前先要和你确定， 到底可行不行？ 其中涉及到的一个点是在容器里面安装相关的执行器，还有涉及到数据库这些中间件，可能是一个比较难解决的问题
 
@@ -396,7 +396,7 @@ Attempt    Started (UTC)    Agent    Failure Type    Recovered    Duration    De
 - **收敛结论**：基于已有 Docker runner、单仓库挂载、GitHub PR/CI 和保守 worktree cleaner，建议先做专用 VM 单客户部署，不建 SaaS 控制面/集中数据库/自动计费。托管隔离/费用边界和数据保留周期列为待确认项。
 - **PRD**：`tasks/pending/P1-FEAT-20261009-161453-kc-hosted-runner-deployment.md`。
 
-## 2026-10-10 09:25 · Console 显示「计划 vs 产出」进度（验收证据 / 影响树）
+## 2026-10-10 09:25 · Console 显示「计划 vs 产出」进度（验收证据 / 影响树） (idea-legacy-dd05f7904b7a-1) <!-- idea-status: completed -->
 
 > 关于验收证据，为什么不显示规划了多少验收证据，当前已经产出了多少呢？还有一点就是，我的 just prd status 里面有一个内容，是显示出 PRD 里面规划改动多少文件，而实际多少文件已经落盘了的功能，我感觉也可以加进来，你觉得呢
 
@@ -408,7 +408,7 @@ Attempt    Started (UTC)    Agent    Failure Type    Recovered    Duration    De
 - **影响树口径**：CLI 的 FILES 列由 `scripts/shared/just/prd_impact_tree.py` 计算——§7.2 Change Impact Tree 节点 × 分支实际 diff 求交（`~touched/judgeable?unresolvable`，明确弱信号、无分支时显示 `-`）。console 要复用需把解析移植到 backend（scripts 脚本不可 import，且 console 跨仓库服务、各仓 scripts 版本不同步），并复用同一套 worktree/git（merge-base/diff/ls-files）定位。
 - **收敛结论**：建议先写 PRD；两个能力（证据计划/产出、影响树触达）共享同一前置"console 按 PRD 读 worktree 证据与分支 diff"，展示落点建议为 PRD 详情头部进度摘要 + 证据 tab 明细分组；弱信号口径与 CLI 逐条对齐。
 
-## 2026-10-10 18:20 · review-base-freshness
+## 2026-10-10 18:20 · review-base-freshness (idea-legacy-015a7c0a05ff-1) <!-- idea-status: pending -->
 
 > 那么后期如果想要它能够发现这种最新的更新，是不是只要改提示词就行了？
 >
@@ -419,7 +419,7 @@ Attempt    Started (UTC)    Agent    Failure Type    Recovered    Duration    De
 - 边界/约束：提示词或 Skill 可以要求 Agent 检查最新 base 并发现变化，但要保证审查内容包含更新，还需流程提供新提交内容，或在基线变化时刷新并重新审查。采用提示词/Skill 提示还是 runner 级确定性检查，尚未决定。
 - 收敛结论：这是 Agent Runner review 输入新鲜度问题，适合后续单独评估是否升级为 PRD；不属于当前生命周期时间线 PRD 的范围。
 
-## 2026-10-12 10:04 · dashboard-runtime-board
+## 2026-10-12 10:04 · dashboard-runtime-board (idea-legacy-2d097f569807-1) <!-- idea-status: completed -->
 
 > 我想要加一个设计就是dashboard 加一个统一的运行时看板， 而且是设计成默认的，同时出一个悬浮框， 开启悬浮框可以再桌面上开启一个running 进度显示（简化版本） ， 在网页上面的是要详细版本，每一个任务是一个卡片，卡片通过颜色来区分处于不同的生命周期，同时实时的显示日志打印，但是日志打印可以把工具的调用给缩减掉，给折叠。 加入到 ideas
 
@@ -428,7 +428,7 @@ Attempt    Started (UTC)    Agent    Failure Type    Recovered    Duration    De
 - 边界/约束：统一运行时看板作为默认视图；网页端提供详细版本，以任务卡片呈现并用颜色区分生命周期；日志实时显示，工具调用可折叠；悬浮框提供精简的 running 进度显示。
 - 待澄清：悬浮框所说的“桌面上”是网页内浮层，还是独立的系统桌面窗口。
 
-## 2026-10-12 19:19 · multi-agent-prd-cli
+## 2026-10-12 19:19 · multi-agent-prd-cli (idea-legacy-66bb7326bfff-1) <!-- idea-status: pending -->
 
 > 我现在想要做的是能让keda创建PRD，但是这个创建并不是单一模型的去创建。而是首先由用户指定的模型去创建完成之后，由用户指定的高级模型再去审核、去优化。
 >
@@ -442,7 +442,7 @@ Attempt    Started (UTC)    Agent    Failure Type    Recovered    Duration    De
 - 收敛结论：网页 `/ideas` 与新增 CLI 命令应复用同一套 PRD 编排逻辑，避免模型选择、审核规则与决策记录分叉。多个低阶 Agent 并行写稿不作为默认流程，可在后续有质量证据时再评估。
 - 待澄清：CLI 命令名与参数形式；CLI 默认作用于当前仓库还是支持按 repo registry 选择仓库。
 
-## 2026-10-14 02:18 · evidence-check-filename-optional
+## 2026-10-14 02:18 · evidence-check-filename-optional (idea-legacy-22525042af07-1) <!-- idea-status: pending -->
 
 > 还有关于证据的检查，现在证据检查是必须要写死成固定文件名的下一步计划是让它可以不显示文件名，如何？可以先记在idea里面。
 
@@ -451,7 +451,7 @@ Attempt    Started (UTC)    Agent    Failure Type    Recovered    Duration    De
 - 边界/约束：具体验证方式尚未确定；调整文件名要求时仍需保留证据与对应验证项之间的可追溯性和可验证性。
 - 待澄清：这里的“可以不显示文件名”暂按“证据检查/计划可以不要求指定固定文件名”理解；是否也指界面不展示文件名，尚未确定。
 
-## 2026-10-14 10:44 · loop-普通-daemon 承载循环检查
+## 2026-10-14 10:44 · loop-普通-daemon 承载循环检查 (idea-legacy-a2617214349e-1) <!-- idea-status: completed -->
 
 > 我想要让这个项目每天的凌晨1点检查main的CI是不是有问题，如果有问题就要看看帮我恢复的定时任务，要怎么做？
 >
@@ -465,7 +465,7 @@ Attempt    Started (UTC)    Agent    Failure Type    Recovered    Duration    De
 - 待澄清：固定墙钟时间触发与“上一天任务完成后再生成下一天”是不同调度语义；失败、阻塞或 daemon 停机时是否继续产生后续任务，以及重启后是否补跑，尚未决定。
 - 背景：当前实现由 loop-daemon 到期生成 PRD/Issue，普通 daemon 认领 ready Issue；若改为普通 daemon 内调度，还需定义重复触发、暂停和未完成任务的处理方式。
 
-## 2026-10-15 20:42 · video-evidence-recording
+## 2026-10-15 20:42 · video-evidence-recording (idea-legacy-d15609670f12-1) <!-- idea-status: completed -->
 
 > 但是很奇怪的是，为什么我在使用keda的过程中，很少见过有证据是以录屏的形式呢？ 你能帮我看看日志找找原因吗？
 >
@@ -489,7 +489,7 @@ Attempt    Started (UTC)    Agent    Failure Type    Recovered    Duration    De
 - 已知限制：视频不能在 PR 评论里内嵌播放，只有 `[Open file]` 链接；证据分支在 Issue 关闭后自动删除，链接随之失效。手写 Issue（无 PRD）没有证据报告，内嵌检查会直接跳过。结构化证据（`iar:structured-evidence`）评论走另一套渲染，未加汇总。
 - 待澄清：是否在 `build_validation_prompt_line` 里给手写 Issue 注入“多步流程交付录屏”规则；是否需要让关闭 Issue 后视频仍可查看（延长证据分支保留，或另行存档）；模板仓里的 `check_prd_evidence.sh` 是否也要认视频内嵌。
 
-## 2026-10-16 02:07 · roadmap-slim-down
+## 2026-10-16 02:07 · roadmap-slim-down (idea-legacy-5158eb658e93-1) <!-- idea-status: pending -->
 
 > 觉得我这个路线图怎么样？
 >
@@ -506,7 +506,7 @@ Attempt    Started (UTC)    Agent    Failure Type    Recovered    Duration    De
 - 边界/约束：不丢信息，只是换位置；历史内容在迁移后仍要可检索；`mkdocs.yml` 导航要同步（见 `docs/ai-standards/documentation.md`）。
 - 待澄清：历史页放在哪（`docs/` 下新建 status / history 页，还是并入已有页面）；`ROADMAP.md` 是否仍留在仓库根目录；“已知漂移”由谁、在什么时机校准，避免瘦身后又堆积成同样的文档。
 
-## 2026-10-19 11:44 · keda-agent-工程证据
+## 2026-10-19 11:44 · keda-agent-工程证据 (idea-legacy-03f7d65ac3ae-1) <!-- idea-status: pending -->
 
 > 把这些优化方案都记录到keda那个里吧
 
@@ -518,7 +518,7 @@ Attempt    Started (UTC)    Agent    Failure Type    Recovered    Duration    De
 - 收敛结论：先承接 Keda 已规划的 M13 评测基线，梳理并复用现有度量能力，再按真实使用情况补可靠性、安全与采用证据；不重复创建与 M13 重叠的路线项。
 - 待澄清：评测首批任务集、基线对照组和最低样本量；可靠性与安全建设的验收阈值；是否需要把后续候选拆成独立 PRD。
 
-## 2026-10-19 17:10 · sample-construction
+## 2026-10-19 17:10 · sample-construction (idea-legacy-5841251e568b-1) <!-- idea-status: pending -->
 
 > 关于keda项目数据集的构建， 之前一般来讲，我一个数据集是一个commmit或者说一个pr 但是在当前这个场景下面，我是涉及到部署的，我可能多个commit才解决了一个问题。那这样的话，我要怎么样去构建数据集呢？
 >
@@ -536,7 +536,7 @@ Attempt    Started (UTC)    Agent    Failure Type    Recovered    Duration    De
 - 与既有想法的关系：细化 `2026-06-26 16:01 · test · benchmark` 与 `2026-10-19 11:44 · keda-agent-工程证据` 中的评测集方向，聚焦样本构建与原始输入、commit 链、部署结果之间的关联，不重复立项泛化评测基线。
 - 待澄清：首期数据源是仅采集 GitHub Issue/PR，还是也接入非 Issue 的临时输入；部署结果的最小验收字段；首期采用文件清单/JSONL 导出还是 Keda 页面管理。
 
-## 2026-10-19 17:13 · sample-construction-refs
+## 2026-10-19 17:13 · sample-construction-refs (idea-legacy-dd1fb3740beb-1) <!-- idea-status: pending -->
 
 > 我发现你前面给我说的那些项目，你没有放进去，可以把项目也放进去。
 
@@ -549,7 +549,7 @@ Attempt    Started (UTC)    Agent    Failure Type    Recovered    Duration    De
   - [LangSmith Dataset Management](https://docs.langchain.com/langsmith/manage-datasets-in-application)：参考从 traces 筛选/导入数据集、人工标注与样本管理。
 - 边界/约束：这些是分层参考，不意味着 Keda 要直接依赖或完整照搬；仍需补足 Keda 场景里的原始任务输入、跨 commit/PR 关联和部署结果。
 
-## 2026-10-23 05:09 · loop-patrol-unknown-reason
+## 2026-10-23 05:09 · loop-patrol-unknown-reason (idea-legacy-16180d08da9d-1) <!-- idea-status: pending -->
 
 > Root cause of the pre-trigger 'unknown' counts was never diagnosed
 > The Issue requires diagnosing a failed GitHub state read rather than treating it as an empty queue. […] nothing explains why the 30-minute trigger reported `unknown` — that condition may recur every round. State the diagnosis, or record it as an explicit open item on the patrol Issue.

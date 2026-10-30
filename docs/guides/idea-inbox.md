@@ -45,6 +45,8 @@ tasks/inbox/              →   tasks/pending/   →   tasks/archive/
 
 勾选想法只用于选择待处理条目并生成 PRD 草稿，不代表状态已保存。生成草稿后自动进入进行中；关联 PRD 归档后自动变为已完成。用户也可以手动标记旧条目为已完成；标记放弃与恢复跟踪同样会更新 `ideas.md` 标题中的状态，原话与 AI 背景始终保持不变。
 
+页面按「收件箱」「AI 总结」「PRD 草稿」三个视图组织：收件箱用列表和详情分栏浏览想法，默认折叠记录表单，可搜索并切换历史记录；AI 总结以 Markdown 格式显示，进入编辑后保存到 `summary.md`，不会调用模型或改写 `ideas.md`；PRD 草稿单独展示，待审草稿可在此确认入 `tasks/pending/`。
+
 ## ideas.md 条目格式
 
 解析器是 `src/backend/core/use_cases/idea_inbox.py`，它对标题有硬性要求：
