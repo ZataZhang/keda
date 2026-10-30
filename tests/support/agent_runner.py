@@ -244,9 +244,10 @@ def write_commit_request(worktree_path: Path, commit_message: str) -> None:
     )
 
 
-# 验收状态横幅（prd skill Machine Contract v5）三种状态的原文行。交付与发布门禁会
+# 验收状态横幅（prd skill Machine Contract v6）四种状态的原文行。交付与发布门禁会
 # 核对横幅与清单是否一致，所以凡是期望"能归档 / 能发布"的夹具都要带上对的那一行。
 NOT_STARTED_BANNER = "> ⬜ **验收状态**：未开工。"
+VALIDATION_BLOCKED_BANNER = "> ⏸️ **验收状态**：验证阻塞 — 原因与后续任务已登记。"
 AWAITING_HUMAN_BANNER = (
     "> 🧍 **验收状态**：待人工验收 — 执行侧已完成，仅剩 1 项 Human-Confirmed 未确认，证据包见 §9。"
 )
@@ -299,6 +300,18 @@ def require_banner_aware_prd_skill() -> None:
             "the prd skill used by this test run does not report `acceptance_status` "
             "(Machine Contract < 5); install the v5 prd skill (`iar init`) or point "
             "KEDACODE_PRD_SKILL_PATH at it before running banner assertions"
+        )
+
+
+def require_validation_blocked_prd_skill() -> None:
+    """v6 阻塞状态用例的前置；旧版 skill 下明确跳过而不是假通过。"""
+    blocked_status = parse_prd_checklist(
+        build_acceptance_prd(VALIDATION_BLOCKED_BANNER)
+    ).acceptance_status
+    if blocked_status != "validation_blocked":
+        pytest.skip(
+            "validation-blocked assertions require the v6 prd skill; point "
+            "KEDACODE_PRD_SKILL_PATH at the updated skill to run them"
         )
 
 

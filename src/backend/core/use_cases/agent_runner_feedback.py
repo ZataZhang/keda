@@ -162,17 +162,18 @@ def _read_prd_text(prd_path: Path) -> str | None:
 # ``ensure_prd_delivery_ready`` 里合法完成的归档判成越权并回滚，紧接着推送前的
 # ``assert_prd_archived_for_publish`` 又硬要求 PRD 位于 archive，两道门禁互相打架，
 # reviewer 每轮来回搬运文件、永不收敛（实证：freshai Issue #99）。
-# 归档只代表执行侧交付完成（prd skill Machine Contract v5）：仍有 Human-Confirmed
-# 空框的 PRD 也在交付时归档，人审项留给人在 PR 上回答，agent 不得代勾。
+# 归档只代表代码落地（prd skill Machine Contract v6）：人审空框与显式验证阻塞
+# 都可随交付归档，执行器不得代勾或借此跳过后续验证与验收。
 PRD_ARCHIVE_OWNERSHIP_RULE = (
     "During automated execution, archiving the PRD is the runner's job alone: "
     "never `git mv` it into `tasks/archive/` yourself, and once archived never "
     "move it back to `tasks/pending/` (reopening a PRD after a rejected human "
-    "acceptance is a human decision). The runner archives the PRD at delivery as "
-    "soon as every executor-owned Acceptance Checklist item is resolved, even while "
-    "`Human-Confirmed` items are still open: archiving records that the executor's "
-    "work is done, not that a human accepted it. Never tick `Human-Confirmed` items "
-    "on the reviewer's behalf."
+    "acceptance is a human decision). The runner archives the PRD when every "
+    "executor-owned Acceptance Checklist item is resolved, or when the banner explicitly "
+    "declares `⏸️ **验收状态**：验证阻塞` with open executor-owned items and the required "
+    "Validation blocker / Validation follow-up fields. Archiving records code landing, "
+    "not validation or human acceptance. Never tick `Human-Confirmed` items or unproven "
+    "executor-owned items on anyone's behalf."
 )
 
 # 归档门禁（:func:`ensure_prd_delivery_ready`，执行循环 Phase 3）跑在 runner 自己的
@@ -191,9 +192,12 @@ RUNNER_OWNED_CHECKLIST_ITEM_RULE = (
     "whose evidence you did not actually produce. Human-Confirmed items belong to a "
     "human: keep them `- [ ]`, never tick them and never rewrite them as `- [~]`. In the "
     "final review set the PRD's acceptance status banner by the formula — any "
+    "executor-owned item still `- [ ]` → `⏸️ **验收状态**：验证阻塞` (validation_blocked) "
+    "with non-empty Validation blocker and Validation follow-up fields; otherwise any "
     "Human-Confirmed item still `- [ ]` → `🧍 **验收状态**：待人工验收` (awaiting_human), "
-    "none → `✅ **验收状态**：已验收` (accepted); the runner neither archives nor "
-    "publishes a PRD whose banner disagrees with its checklist."
+    "none → `✅ **验收状态**：已验收` (accepted). The runner neither archives nor "
+    "publishes a PRD whose banner disagrees with its checklist, and the blocked banner "
+    "never skips the subsequent repository, RV, verifier, or merge gates."
 )
 
 
@@ -449,12 +453,10 @@ def ensure_prd_delivery_ready(
     *,
     prd_baseline_content: str | None = None,
 ) -> None:
-    """Validate canonical PRD state and archive it once the executor side is done.
+    """Validate canonical PRD state and archive it when its banner is consistent.
 
-    归档只看执行侧条目（prd skill Machine Contract v5）：执行侧全部 ``[x]`` / ``[~]``
-    且验收状态横幅与清单一致，就把 PRD 从 ``tasks/pending/`` 移到 ``tasks/archive/``，
-    随实现一起提交——不论 Human-Confirmed 组是否还有空框。归档不改 PRD 内容，
-    人审空框与横幅原样保留，留给人回答。
+    正常路径要求执行侧条目全部解决；显式 ``validation_blocked`` 可带执行侧空框。
+    两种路径都只表示代码落地，归档不改 PRD 内容，后续验证与人工验收仍按横幅推进。
 
     Raises:
         PrdDeliveryError: When the PRD is not ready for delivery.

@@ -135,17 +135,15 @@
 本仓库通过 `pre-commit` 调用项目本地 `hooks/shared/check_prd_acceptance_checklist.py` 维护 PRD 交付状态；PRD skill 另带 `scripts/check_prd_acceptance_checklist.py`，供 agent 按 skill 相对路径运行，或由其他仓库自行接入：
 
 - `tasks/pending/` 下的 PRD 可以保留未完成验收项
-- `tasks/` 根目录下的旧 active PRD 必须完成 `Acceptance Checklist`，`Human-Confirmed` 分组内的空框除外
-- 新增、复制或重命名进入 `tasks/archive/` 的 PRD 也必须完成验收清单，同样放行 `Human-Confirmed` 空框：归档只代表**执行侧交付完成**，人工验收是另一条轴线，由验收状态横幅（`🧍 待人工验收` → `✅ 已验收`）承载，不阻塞归档
+- `tasks/` 根目录下的旧 active PRD 必须完成 `Acceptance Checklist`，`Human-Confirmed` 分组内的空框除外；显式 `⏸️ 验证阻塞` 是唯一的未完成归档例外
+- 新增、复制或重命名进入 `tasks/archive/` 的 PRD 通常必须完成执行侧清单，只放行 `Human-Confirmed` 空框；若执行侧验证确实无法完成，可用 `⏸️ 验证阻塞` 归档，但必须在 Final Reconciliation 填写非空 `Validation blocker` 与 `Validation follow-up`，且不得称为待人工验收或已验收
 - 已存在的历史 archive PRD 不会因为普通修改被重新套用新规则
 - 验收清单标题支持英文 `Acceptance Checklist`、中文 `验收清单` 和双语标题
 - skill 内 checker 还会拒绝缺失关键值来源、必经边界、禁止旁路、fresh-state probe 或最终代码树证据的可执行 oracle
-- 准备把 pending PRD 归档时，使用 `--check-provided --archive-ready <prd-path>` 显式启用归档门禁：Final Reconciliation 完整，且验收状态横幅与 §9 一致（`Human-Confirmed` 仍有空框 → `🧍 待人工验收`，一个也没有 → `✅ 已验收`；`⬜ 未开工`、缺横幅或认不出状态词都不可归档）；普通 `--check-provided` 不会提前要求这些归档记录
-- hook 只做 `Human-Confirmed` 分组感知的空框扫描，不看横幅，横幅一致性由 skill checker 把关。hook 随模板同步而 skill 可选安装，二者不能互相 import，所以 hook 自带一份轻量分组解析（`###`–`######` 标题或整行加粗标签为分组；嵌套按“包含它的任一层是否人属”判定；前缀匹配 `human-confirmed` 且大小写不敏感），语义须与 skill 的 `prd_contract` 保持一致，改动分组语义时两处一起改
+- 准备归档时使用 `--check-provided --archive-ready <prd-path>`：正常路径要求执行侧完成、Final Reconciliation 完整且横幅与 §9 一致；阻塞路径额外要求上述两个字段。执行侧有空框 ⇔ `⏸️ 验证阻塞`；执行侧完成后，人属空框 → `🧍 待人工验收`，否则 → `✅ 已验收`；`⬜ 未开工`、缺横幅或未知状态都不可归档
+- hook 做 `Human-Confirmed` 分组与 `⏸️ 验证阻塞` 横幅感知；完整横幅和阻塞字段一致性由 skill checker 把关。分组轻量解析仍须与 skill 的 `prd_contract` 同步
 
-**PRD 归档动作**：通常在独立 verifier `PASS` 且执行侧条目全部完成后，随交付改动（分支 / PR）一并将对应 PRD 从 `tasks/pending/` 移动到 `tasks/archive/`，横幅与 §9 对齐——不等人工验收，也不在合并后另起一次移动。因此“`tasks/archive/` 里有这条 PRD”等价于“代码已落地”。人工验收的结果只回填验收记录；若验收发现 PRD 自身的 oracle / 范围未达成，则把 PRD 移回 `tasks/pending/` 重开（横幅 `⬜ 未开工`、追加 Change Log），需求本身变了则新开关联 PRD。例外：Backlog 对单个 PRD 显式选择 `prd-auto-merge` 时，runner 跳过独立 verifier 但保留仓库验证、PR checks 与分支保护；合并队列可越过该 PRD 的 `Human-Confirmed` hold，且不会在合并后修改 PRD 清单、验收横幅或 Change Log。该选择是自动化合并授权，不是人工确认。
-
-这条规则的目标是让“归档”代表执行侧交付完成，同时避免历史归档文档被新标准批量翻旧账。
+**PRD 归档动作**：通常在独立 verifier `PASS` 且执行侧条目全部完成后，随交付改动一并将 PRD 从 `tasks/pending/` 移到 `tasks/archive/`；验证受阻时也可按上述显式阻塞路径归档。归档只表示代码落地，不等于验证或人工验收完成。阻塞验证后续完成后，补新证据、勾选被证明的执行侧条目，再进入正常人工验收。人工验收若发现 PRD 自身 oracle / 范围未达成，则移回 pending 重开；需求本身变了则新开关联 PRD。`prd-auto-merge` 的既有显式授权语义保持不变。
 
 当 agent 已加载 PRD skill 时，也可以从 skill 目录运行：
 
@@ -155,15 +153,15 @@ python scripts/check_prd_acceptance_checklist.py --repo-root "$PWD" --all
 
 ### PRD 状态看板
 
-`just prd status` 汇总上述状态，输出 `tasks/pending` 的逐条明细、`AWAITING HUMAN` 段与 `tasks/archive` 的月份折叠概览（`all` 展开每条）：
+`just prd status` 输出 `PENDING`、`VALIDATION BLOCKED`、`AWAITING HUMAN` 与 `ARCHIVE` 分区；后两个待办分区在任何 scope 下非空时都显示，空分区不打印：
 
-- 明细列：优先级与类型（取自文件名前缀）、创建日期、验收清单 `已勾/总数`、影响树触达进度（FILES 列）、证据包 `plan` / `report` / `verifier` 三个槽位。
-- 看板把两条相互正交的轴线分开呈现：**构建轴**是目录（`tasks/pending` → `tasks/archive`，归档 = 执行侧交付完成并随代码落地），**验收轴**是验收状态横幅（`🧍 待人工验收` → `✅ 已验收`）。**已归档**且横幅为 `🧍 待人工验收` 的记录——主线 `tasks/archive` 里的，或分支 worktree 里已归档、尚待合并的——汇总进 `AWAITING HUMAN` 段（执行侧已完成、机器证据齐备，只等人工确认），在任何 scope 下非空时都会打印，并从 ARCHIVE 月视图里摘出，每条只出现一次；空分区不打印。仍在 `tasks/pending` 的记录即使残留 `🧍` 横幅也留在 `PENDING`：目录说它还没交付，横幅是过期的投影（典型是重开后忘了把横幅改回 `⬜ 未开工`），不能把它报成「已交付、等你验收」。分区只做呈现、不搬文件，目的是把「等你看」从「等你做」里摘出来，也让归档月视图不再把待人工的 `Human-Confirmed` 空框当成异常。
-- `PENDING` 段只留还在 `tasks/pending` 目录里的记录（横幅 `⬜ 未开工`、没有横幅、认不出状态词，或残留的 `🧍`）。已归档且待人工的记录在 ACTIVITY 列显示黄色 `🧍 waiting <时长>`，自主线归档落地的 commit 时间起算（取不到 git 时间退回文件 mtime），让积压多久一眼可见；有活跃锁时仍显示锁状态（过期锁无活性佐证时显示 `🧍 waiting <时长> · stale lock`，不吞掉待验收信号）。
-- `--detail`：在每个 PRD 行下方追加该 PRD 的一级标题与描述摘要——优先取 `Introduction & Goals` 章节正文（兼容编号写法），缺章节时退化为标题后的引言；最多 4 行，单行超宽截断、仍有剩余正文时末行补省略号。摘要与清单进度同源，读分支副本优先的 PRD 正文；archive 折叠视图不展开行，该选项只在逐条列出的视图（`status` / `pending` / `all`）下生效。
-- archive 概览：每月 PRD 条数、清单全完成的条数、有证据包的条数与 verifier `REJECT` 条数；月份下出现 `⚠ 有未勾完的清单` 时，会列出具体是哪几条。待人工验收的记录已移到 `AWAITING HUMAN`，所以这个 `⚠` 只剩**异常**含义：归档记录既没有待人工横幅、清单又没勾完（例如横幅写着 `✅ 已验收` 却仍有空框，历史记录缺横幅或认不出状态词，或同名 PRD 在 `tasks/pending` 与 `tasks/archive` 并存——重开后遗留的归档副本以 pending 为准，不会被当成待验收）。
+- 明细列保留优先级、类型、创建日期、清单进度、FILES、证据包、依赖与 ACTIVITY。
+- **构建轴**是目录（pending → archive，归档 = 代码落地）；**验收轴**是四态横幅（`⬜ 未开工` / `⏸️ 验证阻塞` / `🧍 待人工验收` / `✅ 已验收`）。只有已归档副本才进入两个待办分区；pending 中残留的 `⏸️` 或 `🧍` 仍留在 PENDING。
+- `⏸️ 验证阻塞` 记录进入 `VALIDATION BLOCKED`，提示原因与后续任务见 Final Reconciliation，ACTIVITY 显示 `⏸️ blocked <时长>`；`🧍 待人工验收` 记录进入 `AWAITING HUMAN`，显示 `🧍 waiting <时长>`。分支里已归档待合并的记录同样分区展示。
+- 两类待办记录都从 ARCHIVE 月视图摘出，因此其中的空框不会被 `⚠ 有未勾完的清单` 误报为异常。剩余 `⚠` 只表示已验收但有空框、历史缺横幅或同名副本冲突等异常。
+- `--detail` 在逐条视图中追加标题与描述摘要；archive 折叠视图不展开。
 
-**AWAITING HUMAN 只认验收状态横幅**：判定读 PRD 头部那行可 grep 的声明（`验收状态` / `Acceptance Status`），取标记之后**最先出现**的状态词——三态 `⬜ 未开工` / `🧍 待人工验收` / `✅ 已验收` 见 prd skill（`kc init` 安装）的 Acceptance Status Banner（旧名 `✅ 可归档` 仍按 `已验收` 读取），模板括号里的提示文字不会把 `⬜ 未开工` 误判成待人工。只看引用块行（`>` 开头），正文或决策日志里对该横幅的讨论不构成状态声明；横幅同样取分支副本，执行方在 worktree 里翻的状态才算数。没有横幅或认不出状态词时不入 `AWAITING HUMAN`：在 `tasks/pending` 里按未开工留在 `PENDING`，在 `tasks/archive` 里留在月视图（清单没勾完会被 `⚠` 标出）——按 §9 未勾项结构反推会漏判真实的人工项（常挂在 `Human-Confirmed` 之外的小节下，如手动执行的 probe），也会把尚未完工的 PRD 误报成「等你验收」。合并前的窗口也算数：分支里已归档且横幅为 `🧍` 而主线仍在 `tasks/pending` 时，该记录同样进 `AWAITING HUMAN`，ACTIVITY 显示 `✔ branch-archived @<branch> · awaiting merge`。
+横幅解析只看引用块中的 `验收状态` / `Acceptance Status` 声明，取标记后最先出现的状态词；旧名 `✅ 可归档` 仍按已验收读取。没有横幅或状态未知时不进入待办分区，也不按 §9 结构反推。
 
 **进度与证据取分支副本**：执行发生在 worktree 里，主仓库的 `tasks/pending` 副本与证据目录要等合并回主线才更新。因此存在匹配的 worktree 时，清单进度取该 worktree 内 `tasks/archive` → `tasks/pending` 的 PRD 副本，证据包按 `plan` / `report` / `verifier` 每个槽位单独「分支目录先查、主仓库目录后查」；没有匹配 worktree（例如直接在主仓库开工）时读主仓库副本。优先按 PRD slug 匹配分支；PRD 有唯一的 `GitHub Issue: .../issues/<N>` 行时，也可匹配 `issue-<N>` 分支。普通 Issue 无 PRD 关联时仍使用 Issue 命名，不会被错配到别的 PRD。例外是主线 `tasks/archive` 已有该 PRD 时一律读主线副本（归档是终态，分支上合并前的快照已过时）。副本取自哪个目录同时决定它属于哪一段，所以主线已把 PRD 重开回 `tasks/pending`、而匹配的 worktree 里还留着旧的归档副本时，看板会按那份旧副本判段；清理掉用完的 worktree 即可恢复。
 

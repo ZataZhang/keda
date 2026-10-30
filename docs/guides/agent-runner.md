@@ -550,7 +550,7 @@ tasks/evidence/**
 
 这段白名单是 daemon 流证据目录约定的 git 语义基础：执行 agent 把证据写进 `tasks/evidence/<prd-stem>/`（无 PRD 的 Issue 兜底 `tasks/evidence/issue-<N>/`），gitignore 让 Markdown 报告与 `evidence.json` manifest 可被本地证据流程发现；代码发布前拦截（`ensure_no_evidence_paths_in_changes`）只允许 Markdown 报告进入代码 diff，manifest、截图、录屏、oracle 脚本等证据由独立证据分支交付。显式配置 `validation.evidence_dir = ".iar/evidence"` 的仓库不受此影响，保持整目录排除的旧行为。手工配置 `evidence_dir = "tasks/evidence"` 而绕过 init 的仓库必须自行保证上述白名单规则在场。
 
-同时 `kc init` 会从远程模板仓库安装 prd / code-reviewer skill（`--force` 会传递给 skill 安装，允许覆盖本地改过的同名 skill）。PRD 格式约定（Change Log 条目结构、验收复选框语法、分组标题、rv-id 证据命名、证据目录布局）的唯一出处是 prd skill 的 `## Machine Contract (vN)` 章节，而且**解析实现也只有一份**——skill 自带的 `scripts/prd_contract.py`：kc 各 prompt 只注入一行指向该契约的指针、不复述教学，验收清单与 Change Log 也不再由 kc 自己解析，而是把 PRD 文本交给该脚本、取回 JSON 结构。**daemon 在每轮执行循环前预检**三件事：prd skill 可解析、契约主版本落在受支持集合内（当前 v3/v4/v5；集合语义让"skill 先 bump、keda 后跟进"的发版错峰不会卡住）、以及兄弟 `scripts/prd_contract.py` 与 `SKILL.md` 成套存在（只装半套会在启动时就点名缺哪个文件，而不是拖到交付门禁）。错误给出安全修复方式（重装 skill 用 `kc skill install`、重建仓库配置才用 `kc init --force`，或设置 `KEDACODE_PRD_SKILL_PATH` 指向完整 skill），不建议盲目运行可能覆盖用户级 Skill 的 `--force` 形式。**安装目标首位是 keda 自有目录 `~/.kedacode/skills`**：解析时优先取这份，因此用户删掉 agent 目录里的 prd 副本不影响 `kc` 的正常解析；其后才是各 agent 用户级目录。CI / 测试可用 `KEDACODE_SKILLS_DIR` 把安装根覆盖到临时目录。
+同时 `kc init` 会从远程模板仓库安装 prd / code-reviewer skill（`--force` 会传递给 skill 安装，允许覆盖本地改过的同名 skill）。PRD 格式约定（Change Log 条目结构、验收复选框语法、分组标题、rv-id 证据命名、证据目录布局）的唯一出处是 prd skill 的 `## Machine Contract (vN)` 章节，而且**解析实现也只有一份**——skill 自带的 `scripts/prd_contract.py`：kc 各 prompt 只注入一行指向该契约的指针、不复述教学，验收清单与 Change Log 也不再由 kc 自己解析，而是把 PRD 文本交给该脚本、取回 JSON 结构。**daemon 在每轮执行循环前预检**三件事：prd skill 可解析、契约主版本落在受支持集合内（当前 v3/v4/v5/v6；集合语义让"skill 先 bump、keda 后跟进"的发版错峰不会卡住）、以及兄弟 `scripts/prd_contract.py` 与 `SKILL.md` 成套存在（只装半套会在启动时就点名缺哪个文件，而不是拖到交付门禁）。错误给出安全修复方式（重装 skill 用 `kc skill install`、重建仓库配置才用 `kc init --force`，或设置 `KEDACODE_PRD_SKILL_PATH` 指向完整 skill），不建议盲目运行可能覆盖用户级 Skill 的 `--force` 形式。**安装目标首位是 keda 自有目录 `~/.kedacode/skills`**：解析时优先取这份，因此用户删掉 agent 目录里的 prd 副本不影响 `kc` 的正常解析；其后才是各 agent 用户级目录。CI / 测试可用 `KEDACODE_SKILLS_DIR` 把安装根覆盖到临时目录。
 
 KedaCode 自带的 `kedacode-operator` Skill 随 Python 发行包安装，无需联网下载。它是 hub + references 结构：主文件 `SKILL.md` 只有路由表、共享基线（只读请求不启动执行、`kc run` 必须带目标、机器输出用 `kc schema --json` 自检）与 Safety 不变量，各子命令的流程步骤拆在同目录 `references/*.md`（建 issue / 查 issue / 查生命周期 / 跑一次 / 看进度 / 卡住了 / 后台跑 / CI 交付 / 装环境与查 Agent 配置共 9 份）。命令语义与参数以本文档和真实命令树（`kc --help` / `kc schema --json`）为权威，references 只写"什么时候用、按什么顺序用、别做什么"的流程分工。每次启动原生会话时，`kc` 会检查当前 Agent 的 Skill 目录：安装包能证明为未编辑的旧发行版会自动刷新，因此安装新 `kc` 后首次启动会同步该 Agent 的 operator Skill。`kc init` / `kc skill install` 仍可用于刷新所有检测到的 Skill 根。安装元数据记录已安装文件摘要；首次升级时也能识别与历史发行包完全一致的旧副本。
 
@@ -3479,7 +3479,7 @@ agent 执行              prompt 强制要求实跑验证计划，证据写入 w
                         的 scripts/prd_contract.py；验收清单与 Change Log 由
                         kc 把文本交给该脚本、取回 JSON，kc 不再自带解析。
                         daemon 起执行循环前预检 prd skill 可解析、契约主版本在
-                        受支持集合内（当前 v3/v4/v5），且该脚本与 SKILL.md 成套
+                        受支持集合内（当前 v3/v4/v5/v6），且该脚本与 SKILL.md 成套
                         存在；缺失、不支持版本或只装半套均 fail fast 并提示
                         安全修复方式。
                         所有 RV 脚本——截图采集、临时 server、探针，以及被
@@ -3790,12 +3790,12 @@ daemon 软门禁与合并队列自动勾选共用同一份 marker 契约，一�
    - `build_progress_continuation_prompt()` 在跨 claim 续作时附带上一次失败的 failure summary 和 verification 输出，并提醒检查项目规范。
 2. **提交前 Delivery Gate**：runner 在 `publish_changes()` 之前执行 PRD delivery gate：
    - 无 PRD path：跳过 gate，保持现有行为。
-   - PRD 仍在 `tasks/pending/`：归档只看**执行侧**条目（`Human-Confirmed` 组之外的条目，prd skill Machine Contract v5）。执行侧有未勾条目即阻塞提交（`CHECKLIST_UNCHECKED`，报错点名条目）；本轮 PRD 内容若相较执行开始时发生变更，须有完整结构化 `Change Log`；验收状态横幅须与清单一致（见下）。全部满足后 runner 执行 `git add -- tasks/pending/<name>.md` 与 `git mv tasks/pending/<name>.md tasks/archive/<name>.md`——**不论 `Human-Confirmed` 组是否还有空框**。归档不改 PRD 内容：人审空框与 🧍 横幅原样保留，留给人在 PR 上回答。
-   - PRD 已在 `tasks/archive/`：同样校验 Change Log、执行侧条目与横幅；人审空框不拦交付与发布。
-   - **横幅一致性**：skill（v5 起）在契约 JSON 里报告横幅状态。`Human-Confirmed` 组仍有 `- [ ]` 时横幅必须是 `🧍 **验收状态**：待人工验收`（`awaiting_human`），一个都没有时必须是 `✅ **验收状态**：已验收`（`accepted`）；`⬜ 未开工` 与横幅缺失都算不一致。不一致时不归档、不发布，抛 `ACCEPTANCE_BANNER_MISMATCH`，可交给 Closeout Agent：只改横幅这一行并追加一条 Change Log，不得勾选、取消或改写任何复选框。本机 skill 仍是 v3/v4（不报告横幅）时跳过这项检查，只按执行侧判据归档。横幅文本由 skill 解析，keda 不另写横幅解析。
-   - **发布前检查**（`push_changes(require_prd_archived=True)`，正常交付路径）：PRD 必须已在 `tasks/archive/`，且执行侧条目与横幅校验通过；仍在 pending（包括带人审空框的情形）一律拒绝。两条既有例外不变：recovery 耗尽后的失败 Draft PR 与 PRD rework 提案传 `require_prd_archived=False`，二者都不调用交付检查，也都不归档——失败交付永不归档。
+   - PRD 仍在 `tasks/pending/`：正常归档要求执行侧条目全部解决（Machine Contract v6）；执行侧有空框时，只有横幅明确为 `⏸️ **验收状态**：验证阻塞`（`validation_blocked`）才允许继续，且 PRD 须按契约填写 `Validation blocker` 与 `Validation follow-up`。其他未勾情形仍报 `CHECKLIST_UNCHECKED`。满足后 runner 执行 `git add` 与 `git mv` 到 archive，不改 PRD 内容。
+   - PRD 已在 `tasks/archive/`：同样校验 Change Log、执行侧条目与横幅；阻塞归档不会冒充待人工验收。
+   - **横幅一致性**：skill（v5 起）在契约 JSON 里报告横幅状态，v6 增加 `validation_blocked`。公式为：执行侧有空框 → `⏸️ 验证阻塞`；执行侧完成后，人属空框 → `🧍 待人工验收`，否则 → `✅ 已验收`。`⬜ 未开工`、缺失或状态不一致都拒绝归档/发布，并抛 `ACCEPTANCE_BANNER_MISMATCH`。v3/v4 不报告横幅时沿用旧的跳过行为。
+   - **发布前检查**：PRD 必须已在 archive 且上述 PRD 检查通过。阻塞横幅只通过 PRD 归档检查，**不会跳过后续仓库验证、RV、独立 verifier 或合并门禁**。recovery 失败 Draft PR 与 PRD rework 的 `require_prd_archived=False` 例外保持不变。
    - PRD 文件不存在、archive 目录缺失或 `Acceptance Checklist` section 缺失：进入 recovery loop，重试耗尽后标记 `agent/failed`。
-3. **归档时机**：`git mv` 发生在 `git add -A` 之前，归档随实现一起提交，包括仍待人工验收的 PRD。正常路径在独立 verifier 之前完成这一步；verifier 是后续验收，不改变“归档代表执行侧交付完成”的定义。**已归档 ≠ 已验收**：归档只记录执行侧交付完成，验收与否看横幅与 `Human-Confirmed` 组。人在 PR 上确认后勾选人审项、把横幅改为 ✅ 已验收（同一个 PR 的后续提交，或合并后补记；合并时自动补记是后续 PRD）。合并队列对人审未答的 PRD（不论在 pending 还是 archive）一律跳过等人，见"8 步门禁链"下的 PRD hold。
+3. **归档时机**：`git mv` 发生在 `git add -A` 之前，归档随实现一起提交。**归档只代表代码落地**：正常完成路径用 🧍/✅ 表示验收状态，显式阻塞路径用 ⏸️ 保留验证欠账和后续任务。阻塞项补验并补齐证据后才进入正常人工验收；合并队列与 PRD hold 的既有规则继续执行。
 4. **Pre-PR Review 与归档的关系**：`build_prd_review_reference()` 读取 worktree 中实际存在的 pending 或 archive 路径。runner 已归档的 PRD 不得被 agent 或 reviewer 挪回 pending；人工验收驳回后是否重开 PRD 由人决定。
 
 > **注意**：runner 不会只因 PRD 的 checkbox 而信任业务完成度；Realistic Validation 与独立 verifier 仍需提供实际证据。Change Log 解释需求为何演进，不能替代任何验收项或证据。

@@ -147,6 +147,14 @@ class PrdRecord:
             and self.acceptance_status == prd_acceptance.ACCEPTANCE_STATUS_AWAITING_HUMAN
         )
 
+    @property
+    def validation_blocked(self) -> bool:
+        """读到的副本已归档，且横幅明确声明执行侧验证仍阻塞。"""
+        return (
+            self.source_is_archived
+            and self.acceptance_status == prd_acceptance.ACCEPTANCE_STATUS_VALIDATION_BLOCKED
+        )
+
 
 def parse_verifier_verdict(verifier_report_text: str) -> tuple[str, bool]:
     """从 verifier 报告中推断最终结论。
@@ -632,28 +640,17 @@ def print_bucket_section(
     print()
 
 
-def split_awaiting_human_records(
+def split_acceptance_records(
     pending_records_list: list[PrdRecord], archive_records_list: list[PrdRecord]
-) -> tuple[list[PrdRecord], list[PrdRecord], list[PrdRecord]]:
-    """把两个目录的记录按验收轴分流：待人工验收单列一段，其余各归各的目录。
+) -> tuple[list[PrdRecord], list[PrdRecord], list[PrdRecord], list[PrdRecord]]:
+    """把待人工验收与验证阻塞的已归档记录从目录分区中摘出。
 
-    目录轴（pending / archive）与验收轴（横幅）相互正交：归档只代表执行侧交付完成，
-    人工验收可以晚于归档。待人工验收的记录因此从两个目录里汇总成一段待办——它既是
-    「等你看」，又不该淹没可开工项，也不该让归档月视图把还没勾的 Human-Confirmed 项
-    当成异常报 ⚠。入段后不再出现在各自的目录分区里。
-
-    同名 PRD（按文件 stem）在 pending 与 archive 并存本身就是异常：以 pending 副本为准，
-    archive 那份不入 AWAITING HUMAN、留在 ARCHIVE（月视图会把它没勾完的空框报成 ⚠），
-    免得去验收一条已经重开的 PRD。因此一个 stem 在该段里至多出现一次。
-
-    Args:
-        pending_records_list (list[PrdRecord]): ``tasks/pending`` 下的记录。
-        archive_records_list (list[PrdRecord]): ``tasks/archive`` 下的记录。
+    两类记录都不能在 ARCHIVE 月视图里被未勾清单误报为异常；pending 副本仍归 PENDING。
+    同名 pending / archive 并存时以 pending 为准，archive 残留不进入待办分区。
 
     Returns:
-        tuple[list[PrdRecord], list[PrdRecord], list[PrdRecord]]:
-        ``(待人工验收, 其余 pending, 其余 archive)``；待人工验收段按文件名排序（优先级
-        前缀在前），与 PENDING 的排序口径一致。
+        tuple[list[PrdRecord], list[PrdRecord], list[PrdRecord], list[PrdRecord]]:
+        ``(待人工验收, 验证阻塞, 其余 pending, 其余 archive)``。
     """
     pending_stems_set = {prd_record.prd_path.stem for prd_record in pending_records_list}
     awaiting_review_records_list = sorted(
@@ -668,7 +665,22 @@ def split_awaiting_human_records(
         ],
         key=lambda prd_record: prd_record.prd_path.name,
     )
-    claimed_paths_set = {prd_record.prd_path for prd_record in awaiting_review_records_list}
+    validation_blocked_records_list = sorted(
+        [
+            *(prd_record for prd_record in pending_records_list if prd_record.validation_blocked),
+            *(
+                prd_record
+                for prd_record in archive_records_list
+                if prd_record.validation_blocked
+                and prd_record.prd_path.stem not in pending_stems_set
+            ),
+        ],
+        key=lambda prd_record: prd_record.prd_path.name,
+    )
+    claimed_paths_set = {
+        prd_record.prd_path
+        for prd_record in awaiting_review_records_list + validation_blocked_records_list
+    }
     actionable_pending_records_list = [
         prd_record
         for prd_record in pending_records_list
@@ -681,6 +693,7 @@ def split_awaiting_human_records(
     ]
     return (
         awaiting_review_records_list,
+        validation_blocked_records_list,
         actionable_pending_records_list,
         settled_archive_records_list,
     )
@@ -732,17 +745,26 @@ def main() -> int:
         for prd_path in sorted(archive_dir_path.glob("*.md"), reverse=True)
     ]
 
-    awaiting_review_records_list, actionable_pending_records_list, settled_archive_records_list = (
-        split_awaiting_human_records(pending_records_list, archive_records_list)
-    )
+    (
+        awaiting_review_records_list,
+        validation_blocked_records_list,
+        actionable_pending_records_list,
+        settled_archive_records_list,
+    ) = split_acceptance_records(pending_records_list, archive_records_list)
 
     raw_scope_text = raw_parsed_arguments.scope
-    # (标题, 记录, 目录说明, 是否按月折叠)；空的 AWAITING HUMAN 不打印，免得每次多出一段
-    # 没有信息量的 (无)，但只要有就在任何范围都露出——它是验收欠账，不能因为查看范围
-    # 选了 archive 就悄悄消失。
     sections_list: list[tuple[str, list[PrdRecord], str, bool]] = []
     if raw_scope_text in ("status", "pending"):
         sections_list.append(("PENDING", actionable_pending_records_list, "tasks/pending", False))
+    if validation_blocked_records_list:
+        sections_list.append(
+            (
+                "VALIDATION BLOCKED",
+                validation_blocked_records_list,
+                "已归档 · ⏸️ 验证阻塞（原因与后续任务见 Final Reconciliation）",
+                False,
+            )
+        )
     if awaiting_review_records_list:
         sections_list.append(
             (

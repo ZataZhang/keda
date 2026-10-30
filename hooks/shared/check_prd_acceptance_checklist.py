@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Check that the executor-owed items of PRD acceptance checklists are completed.
 
-归档只代表执行侧交付完成：``Human-Confirmed`` 分组内的空框是留给人的待答项，不拦
-提交；其余空框照旧拦截。分组识别语义与 prd skill 的 ``prd_contract.parse_checklist``
+归档只代表代码落地：``Human-Confirmed`` 空框不拦提交，显式 ``⏸️ 验证阻塞``
+也允许保留执行侧空框；其余执行侧空框照旧拦截。分组识别语义与 prd skill 的
+``prd_contract.parse_checklist``
 一致（标题 ``###``–``######`` 或整行加粗的分组标签、嵌套分组按"包含它的任一层是否
 人属"判定、前缀匹配且大小写不敏感）。skill 是可选安装的，本 hook 随模板同步，二者
 不能互相 import，所以这里自带一份轻量实现；模板仓库的守卫测试会逐例校验两者等价，
@@ -31,6 +32,10 @@ GROUP_HEADING_RE = re.compile(r"^(#{3,6})\s+(.+?)\s*$")
 BOLD_GROUP_LABEL_RE = re.compile(r"^\s*(?:\*\*|__)\s*(?P<label>.+?)\s*(?:\*\*|__)\s*$")
 BOLD_GROUP_DEPTH = 3
 HUMAN_CONFIRMED_GROUP_PREFIX = "human-confirmed"
+ACCEPTANCE_STATUS_BANNER_RE = re.compile(
+    r"^\s*>\s*.*?(?:验收状态|Acceptance Status)", re.IGNORECASE
+)
+VALIDATION_BLOCKED_TOKEN = "验证阻塞"
 
 
 def _repo_root() -> Path:
@@ -180,16 +185,24 @@ def _enter_group(group_stack: list[tuple[int, bool]], depth: int, label: str) ->
     group_stack.append((depth, is_human_group))
 
 
-def _unchecked_items_in_acceptance_section(file_content: str) -> list[tuple[int, str]]:
-    """Return unchecked checklist items the executing agent still owes.
+def _has_validation_blocked_banner(lines: list[str]) -> bool:
+    """Return whether the first acceptance banner explicitly declares blocked validation."""
+    for raw_line_text in lines:
+        banner_match = ACCEPTANCE_STATUS_BANNER_RE.match(raw_line_text)
+        if banner_match is not None:
+            return VALIDATION_BLOCKED_TOKEN in raw_line_text[banner_match.end() :]
+    return False
 
-    ``Human-Confirmed`` 分组作用范围内的空框不计入：它们是人的待答项，执行侧不得代勾。
-    """
+
+def _unchecked_items_in_acceptance_section(file_content: str) -> list[tuple[int, str]]:
+    """Return unchecked executor items unless validation is explicitly blocked."""
 
     lines = file_content.splitlines()
     section_bounds = _section_bounds(lines)
     if section_bounds is None:
         return [(-1, "Missing Acceptance Checklist section")]
+    if _has_validation_blocked_banner(lines):
+        return []
 
     start_index, end_index = section_bounds
     unchecked_items: list[tuple[int, str]] = []

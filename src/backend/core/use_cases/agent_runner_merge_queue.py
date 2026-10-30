@@ -504,7 +504,7 @@ def _process_one(
         _logger.warning("Could not prepare worktree for Issue #%d: %s", issue.number, exc)
         return MergeQueueOutcome(issue_number=issue.number, action="skipped_no_worktree")
 
-    # PRD hold：归档只代表执行侧交付完成（prd skill Machine Contract v5），人审项
+    # PRD hold：归档只代表代码落地（prd skill Machine Contract v6），人审项
     # 会带着空框一起归档。所以必须按 PRD 的实际位置（pending 或 archive）读清单——
     # 只看 pending 的话，已归档但人还没回答的 PR 会被照常 rebase 并合并，等于自动化
     # 替人验收。人审组的 ``[ ]`` 与误标成 ``[~]`` 的人审项都算没回答（保守口径）。

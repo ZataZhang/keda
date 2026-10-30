@@ -242,7 +242,7 @@ HTML 报告仍固定在 `tests/playwright-e2e/playwright-report/`，可用 `just
 
 ## AI 实现后的验证证据
 
-使用 `just ai implement` 实现 PRD 时，Agent 必须生成可审查的证据包，而不是直接勾选 Acceptance Checklist。
+使用 `just ai implement` 实现 PRD 时，Agent 必须生成可审查的证据包，而不是直接勾选 Acceptance Checklist。验证确实受阻时不得伪造证据或验收：只能以 `⏸️ 验证阻塞` 保留未勾执行侧条目，并在 Final Reconciliation 记录 `Validation blocker` 与 `Validation follow-up` 后归档；这不等于待人工验收，后续仍须补验证并回到正常门禁。
 
 > **证据留存策略**：`tasks/evidence/` 的 Markdown 报告（`*.verification-plan.md`、`*.evidence-report.md`、`*.verifier-report.md`）可以进入代码变更；`evidence.json` manifest 保持本地可读，由证据发布流程单独上传；原始证据产物（截图、录屏、命令输出、大日志、脚本）不进代码 diff，避免二进制膨胀与密钥泄漏永久化。verifier 与 `check_prd_evidence.sh` 在实现期仍针对本地文件运行。**本地 `just ai implement` 流与 kc daemon 的 Issue→PR 流使用同一约定**：daemon 流同样写入 `tasks/evidence/<prd-stem>/`（无 PRD 的 Issue 兜底 `tasks/evidence/issue-<N>/`），三份 `.md` 报告随 PR 进版本库，其余证据文件额外发布到 PR 评论与 orphan 证据分支，见 `docs/guides/agent-runner.md`。显式配置 `validation.evidence_dir = ".iar/evidence"` 的 legacy 仓库保持整目录排除的旧行为。
 

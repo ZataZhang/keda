@@ -238,6 +238,7 @@ def prd_text_with_acceptance_banner(banner_line: str, *, human_item_mark: str = 
 
 
 NOT_STARTED_BANNER_LINE = "⬜ **验收状态**：未开工。"
+VALIDATION_BLOCKED_BANNER_LINE = "⏸️ **验收状态**：验证阻塞 — 后续任务已登记。"
 AWAITING_BANNER_LINE = "🧍 **验收状态**：待人工验收 — 仅剩 1 项未确认。"
 ACCEPTED_BANNER_LINE = "✅ **验收状态**：已验收 — 验收清单已全部完成。"
 # 归档落地"3 天又 10 分钟前"：多出的 10 分钟让 ``3d0h`` 断言不被测试自身耗时推过整点。
