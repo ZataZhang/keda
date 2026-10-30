@@ -1,0 +1,53 @@
+diff --git a/src/backend/engines/agent_runner/persistence/github_api_budget_json.py b/src/backend/engines/agent_runner/persistence/github_api_budget_json.py
+index bb2be6d2..b54e0793 100644
+--- a/src/backend/engines/agent_runner/persistence/github_api_budget_json.py
++++ b/src/backend/engines/agent_runner/persistence/github_api_budget_json.py
+@@ -20,0 +21 @@ import json
++import logging
+@@ -38,0 +40,2 @@ except ImportError:  # pragma: no cover - 非 POSIX 平台退化为无锁
++_logger = logging.getLogger(__name__)
++
+@@ -95,0 +99 @@ class JsonGitHubApiBudget(IGitHubApiBudget):
++        self._write_failure_logged = False
+@@ -190 +194,7 @@ class JsonGitHubApiBudget(IGitHubApiBudget):
+-        """持锁重读账本、合并待落盘的用量、应用修改后原子写回。"""
++        """持锁重读账本、合并待落盘的用量、应用修改后原子写回。
++
++        记账绝不能弄坏被记账的操作：账本写不进去（只读目录、磁盘满、权限问题）时只
++        告警一次并放弃本次写入，**不抛异常**。否则 ``record_call`` 的异常会让每个
++        ``gh`` 调用失败，``record_rate_limited`` 的异常还会盖住本该抛出的限流延期信号，
++        把"限流"误当成真实失败。代价只是这一次的用量或暂停标记没有落盘。
++        """
+@@ -195,6 +205,16 @@ class JsonGitHubApiBudget(IGitHubApiBudget):
+-        with self._write_lock():
+-            state = self._read_state()
+-            state["version"] = 1
+-            self._merge_usage(state, drained_usage)
+-            mutate(state)
+-            self._write_state(state)
++        try:
++            with self._write_lock():
++                state = self._read_state()
++                state["version"] = 1
++                self._merge_usage(state, drained_usage)
++                mutate(state)
++                self._write_state(state)
++        except OSError as exc:
++            if not self._write_failure_logged:
++                self._write_failure_logged = True
++                _logger.warning(
++                    "GitHub API budget ledger %s is not writable (%s); usage and pause "
++                    "marks will not be shared across processes until it is.",
++                    self._state_path,
++                    exc,
++                )
+diff --git a/src/backend/infrastructure/github_client.py b/src/backend/infrastructure/github_client.py
+index 24f7a961..440369b0 100644
+--- a/src/backend/infrastructure/github_client.py
++++ b/src/backend/infrastructure/github_client.py
+@@ -287 +287,4 @@ class GitHubCliClient:
+-        self._api_budget.record_rate_limited(api_kind, resume_at)
++        try:
++            self._api_budget.record_rate_limited(api_kind, resume_at)
++        except Exception:  # noqa: BLE001 - 记账失败不得盖住限流延期信号。
++            _logger.warning("Could not record the %s rate-limit pause.", api_kind, exc_info=True)

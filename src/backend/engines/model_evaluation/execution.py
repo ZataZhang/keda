@@ -3,10 +3,10 @@
 执行模型：每个 run 一个后台线程（外层池），run 内矩阵单元（case ×
 execution preset）用小并发线程池执行，上限同时受
 ``evaluation.max_concurrency`` 与既有 runner 并发 ceiling 约束；矩阵池的
-上限是 **per-run** 的，因此候选真正落地（worktree + Agent 子进程 + check）
+    上限是 **per-run** 的，因此候选真正落地（快照仓库 + Agent 子进程 + check）
 另外要过一道进程级闸门，保证多个 run 同时在跑时主机上的在飞候选数仍是同一
-个 ceiling，而不是 N × ceiling。候选之间**绝不共享 worktree**；diff 产出后
-worktree 即移除，暂存 payload 只在等待授权 / 评分期间存在。
+    个 ceiling，而不是 N × ceiling。候选之间**绝不共享工作目录**；diff 产出后
+    快照仓库即移除，暂存 payload 只在等待授权 / 评分期间存在。
 """
 
 from __future__ import annotations
@@ -59,11 +59,26 @@ _AGENT_SUMMARY_LIMIT = 1200
 _SAFE_NAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
 #: 跨 run 共享的候选执行闸门。矩阵池的 ceiling 是 **per-run** 的，而外层池允许
-#: 4 个 run 同时在跑，实际 worktree/Agent 子进程数会叠成 N × ceiling，突破 runner
+#: 4 个 run 同时在跑，实际快照仓库/Agent 子进程数会叠成 N × ceiling，突破 runner
 #: 主机容量约定。这里用进程级信号量把「同时在跑的候选单元数」压回同一个 ceiling。
 #: 首个进入闸门的调用按其 ceiling 定型，之后所有 run 复用同一实例。
 _HOST_GATE: threading.BoundedSemaphore | None = None
 _HOST_GATE_LOCK = threading.Lock()
+
+
+@dataclasses.dataclass(frozen=True)
+class _EvaluationCellContext:
+    """一个候选执行单元共享的运行时依赖与输入。"""
+
+    run: EvaluationRunRecord
+    case: EvaluationSuiteCase
+    preset_snapshot: Mapping[str, Any]
+    root: Path
+    settings: Any
+    staged_entries: list[dict[str, Any]]
+    lock: threading.Lock
+    repeat_index: int = 0
+    suite: Any | None = None
 
 
 def _candidate_ceiling(settings: Any) -> int:
@@ -154,10 +169,11 @@ def run_run_execution(run_id: str) -> None:
     root = workspace.evaluation_root(settings.console.history_db_path)
     cases_by_id = {case.case_id: case for case in suite.cases}
     cells = [
-        (cases_by_id[case_id], preset_snapshot)
+        (cases_by_id[case_id], preset_snapshot, repeat_index)
         for case_id in run.case_ids
         if case_id in cases_by_id
         for preset_snapshot in run.execution_preset_snapshots
+        for repeat_index in range(run.repeats)
     ]
     ceiling = _candidate_ceiling(settings)
     staged_entries: list[dict[str, Any]] = []
@@ -165,9 +181,20 @@ def run_run_execution(run_id: str) -> None:
     with ThreadPoolExecutor(max_workers=ceiling, thread_name_prefix="evaluation-cell") as pool:
         futures = [
             pool.submit(
-                _execute_cell, run, cell_case, preset_snapshot, root, settings, staged_entries, lock
+                _execute_cell,
+                _EvaluationCellContext(
+                    run=run,
+                    case=cell_case,
+                    preset_snapshot=preset_snapshot,
+                    root=root,
+                    settings=settings,
+                    staged_entries=staged_entries,
+                    lock=lock,
+                    repeat_index=repeat_index,
+                    suite=suite,
+                ),
             )
-            for cell_case, preset_snapshot in cells
+            for cell_case, preset_snapshot, repeat_index in cells
         ]
         for future in futures:
             future.result()
@@ -202,21 +229,29 @@ def run_run_execution(run_id: str) -> None:
         purge_run_artifacts(run_id)
 
 
-def _execute_cell(
-    run: EvaluationRunRecord,
-    case: EvaluationSuiteCase,
-    preset_snapshot: Mapping[str, Any],
-    root: Path,
-    settings: Any,
-    staged_entries: list[dict[str, Any]],
-    lock: threading.Lock,
-) -> None:
-    """执行一个矩阵单元：干净 worktree -> Agent -> diff -> check -> 清理。"""
+def _execute_cell(context: _EvaluationCellContext) -> None:
+    """执行一个矩阵单元：干净快照仓库 -> 候选 -> diff -> 判分 -> 清理。"""
+    run = context.run
+    case = context.case
+    preset_snapshot = context.preset_snapshot
+    root = context.root
+    settings = context.settings
+    staged_entries = context.staged_entries
+    lock = context.lock
+    repeat_index = context.repeat_index
+    suite = context.suite
     store = _store()
     current = store.get_evaluation_run(run.run_id)
     if current is None or current.status != EvaluationRunStatus.running.value:
         return
     preset_name = str(preset_snapshot.get("preset_name") or "")
+    calibration_candidate = preset_name in {"@noop", "@gold"}
+    case_base = run.case_bases.get(
+        case.case_id,
+        {"commit": run.base_commit, "tree": run.base_tree_hash},
+    )
+    base_commit = case_base["commit"]
+    base_tree_hash = case_base["tree"]
     result_id = f"res-{uuid.uuid4().hex[:12]}"
     created_at = now_iso()
     result = EvaluationResultRecord(
@@ -225,7 +260,7 @@ def _execute_cell(
         case_id=case.case_id,
         execution_preset_id=preset_name,
         execution_model_snapshot=dict(preset_snapshot),
-        base_tree_hash=run.base_tree_hash,
+        base_tree_hash=base_tree_hash,
         worktree_path=None,
         result_status=EvaluationResultStatus.pending.value,
         check_status=EvaluationCheckStatus.not_run.value,
@@ -240,11 +275,12 @@ def _execute_cell(
         error=None,
         created_at=created_at,
         updated_at=now_iso(),
+        repeat_index=repeat_index,
     )
     store.save_evaluation_result(result)
     worktree_path = (
         workspace.run_workspace_dir(root, run.run_id)
-        / f"{_safe(case.case_id)}--{_safe(preset_name)}"
+        / f"{_safe(case.case_id)}--{_safe(preset_name)}--{repeat_index}"
     )
     result = dataclasses.replace(
         result, result_status=EvaluationResultStatus.running.value, updated_at=now_iso()
@@ -268,7 +304,7 @@ def _execute_cell(
             return
         try:
             live_preset = settings.presets.get(preset_name)
-            if live_preset is not None:
+            if live_preset is not None and not calibration_candidate:
                 drifted = preset_snapshot_mismatch(
                     preset_snapshot,
                     {
@@ -282,22 +318,71 @@ def _execute_cell(
                         f"执行预设 '{preset_name}' 配置在 run 创建后已变化（{', '.join(drifted)}），"
                         "与冻结快照不一致，为避免不可解释对照已停止执行"
                     )
-            workspace.create_detached_worktree(run.repo_path, run.base_commit, worktree_path)
+            workspace.create_snapshot_repo(run.repo_path, base_commit, worktree_path)
             result = dataclasses.replace(result, worktree_path=str(worktree_path))
             store.save_evaluation_result(result)
             observed_tree = workspace.worktree_tree_hash(worktree_path)
-            if observed_tree != run.base_tree_hash:
+            if observed_tree != base_tree_hash:
                 raise ValueError(
-                    f"worktree 基线 tree 不一致: 期望 {run.base_tree_hash}，实际 {observed_tree}"
+                    f"快照基线 tree 不一致: 期望 {base_tree_hash}，实际 {observed_tree}"
                 )
-            outcome = agent_adapter.run_candidate(
-                preset_name=preset_name,
-                prompt=case.prompt,
-                worktree_path=worktree_path,
-                settings=settings,
-                timeout_seconds=settings.evaluation.agent_timeout_seconds,
+            material_root = (
+                Path(suite.source_path)
+                .with_suffix("")
+                .with_name(f"{Path(suite.source_path).stem}.d")
+                / case.case_id
+                if suite is not None
+                else None
             )
-            diff_text = workspace.collect_diff(worktree_path, run.base_commit)
+            if suite is not None and suite.requires_calibration:
+                workspace.remove_held_out_files(
+                    worktree_path, (*case.held_out, *case.candidate_hidden)
+                )
+            if preset_name == "@gold":
+                if not case.gold_patch or material_root is None:
+                    raise ValueError(f"题目 '{case.case_id}' 缺少 gold_patch")
+                workspace.apply_gold_patch(worktree_path, material_root / case.gold_patch)
+                outcome = agent_adapter.CandidateAgentOutcome(
+                    ok=True,
+                    timed_out=False,
+                    summary="已应用冻结的原始修复",
+                    exit_code=0,
+                    duration_seconds=0.0,
+                    usage_summary=None,
+                    error=None,
+                )
+            elif preset_name == "@noop":
+                outcome = agent_adapter.CandidateAgentOutcome(
+                    ok=True,
+                    timed_out=False,
+                    summary="未修改基线文件",
+                    exit_code=0,
+                    duration_seconds=0.0,
+                    usage_summary=None,
+                    error=None,
+                )
+            else:
+                outcome = agent_adapter.run_candidate(
+                    preset_name=preset_name,
+                    prompt=case.prompt,
+                    worktree_path=worktree_path,
+                    settings=settings,
+                    timeout_seconds=settings.evaluation.agent_timeout_seconds,
+                )
+            if outcome.ok and suite is not None and suite.requires_calibration:
+                workspace.restore_held_out_base_files(
+                    run.repo_path,
+                    base_commit,
+                    worktree_path,
+                    (*case.held_out, *case.candidate_hidden),
+                )
+                workspace.restore_dependency_manifests(run.repo_path, base_commit, worktree_path)
+                diff_text = workspace.collect_diff(worktree_path, "HEAD")
+                assert material_root is not None
+                held_out_dir = material_root / "held_out"
+                workspace.overlay_held_out(worktree_path, held_out_dir, case.held_out)
+            else:
+                diff_text = workspace.collect_diff(worktree_path, "HEAD")
         except subprocess.TimeoutExpired:
             result = dataclasses.replace(
                 result,
@@ -329,7 +414,10 @@ def _execute_cell(
         if result_status is EvaluationResultStatus.succeeded:
             try:
                 check_outcome = checks.run_check_recipe(
-                    case.check_recipe, worktree_path, run.check_timeout_seconds
+                    case.check_recipe,
+                    worktree_path,
+                    run.check_timeout_seconds,
+                    case.check_targets,
                 )
             except ValueError as exc:
                 check_outcome = checks.CheckRunOutcome(
@@ -389,9 +477,9 @@ def _cleanup_worktree(
     store: Any,
     result: EvaluationResultRecord,
 ) -> None:
-    """移除单元 worktree 并把记录里的路径引用置空。"""
+    """移除单元快照仓库并把记录里的路径引用置空。"""
     if worktree_path.exists():
-        workspace.remove_worktree(run.repo_path, worktree_path)
+        workspace.purge_directory(worktree_path)
     if result.worktree_path is not None:
         store.save_evaluation_result(dataclasses.replace(result, worktree_path=None))
 
@@ -454,20 +542,9 @@ def purge_run_artifacts(run_id: str) -> None:
 
 
 def purge_run_worktrees(run: EvaluationRunRecord) -> None:
-    """删除 run 时兜底清理其 worktree 根目录（含 git 引用）。"""
-    store = _store()
+    """删除 run 时兜底清理所有候选快照目录。"""
     root = _evaluation_root()
-    for row in store.list_evaluation_results(run.run_id):
-        result = _core_result(row)
-        if result.worktree_path:
-            path = Path(result.worktree_path)
-            if path.exists():
-                workspace.remove_worktree(run.repo_path, path)
     workspace.purge_directory(workspace.run_workspace_dir(root, run.run_id))
-    try:
-        workspace._git(Path(run.repo_path), ["worktree", "prune"])
-    except (workspace.EvaluationWorkspaceError, OSError):
-        _logger.warning("评测清理：git worktree prune 失败 repo=%s", run.repo_path)
 
 
 def _evaluation_root() -> Path:
