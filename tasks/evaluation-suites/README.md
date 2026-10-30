@@ -75,6 +75,27 @@ v2 suite 必须通过三次重复校准才能用于真实执行：每题 `@noop`
 
 公开仓库可能允许 Agent 联网查看历史修复，模型也可能记住公开内容；快照隔离不能消除这类泄漏，因此留出集只用于相对变化判断。
 
+## 首批 suite `keda-history-v1` 来源映射
+
+`keda-history-v1.yaml` 的 12 题（8 dev + 4 holdout）冻结自 `keda-datasets` 数据版本 `c9cb2672364d4db26580498b490bf79e6d28e0b9`（`manifest_sha256` = `2a6585a1eeb3d9e273d133b76fa9e218d70df20166226caf50bb4577b768e5b0`）。suite YAML 文件摘要为 `48792e3aecf3cae29dbacb77186634cbe084b867bd822c1ceb2a08d41050191e`；Console 使用的 suite 内容 hash（YAML + 全部资料）为 `5f78f39cd2d604f79b3c98c00e68025312446c2967ea3237be1c1c3fb3cdfbea`。下表与 `tasks/evidence/P1-FEAT-20261019-140531-m13-golden-eval-baseline/rv-2-seed-selection.json` 同源（更细的 source 文件摘要、gold patch 路径与逐题资料清单见该 JSON 与 suite YAML）。`base → final` 是冻结修复的提交范围，用于核对 gold patch 来源；旧离线校准只用于筛题，最终以 Console 的 `@noop` / `@gold` 三次校准为准。
+
+| case id | sample id | 输入来源、复核与 split 依据 | base → final | 合并日期 | 旧离线校准记录 |
+|---|---|---|---|---|---|
+| `supervisor-check-decisions` | `keda#issue-156` | 原始 Issue 正文；7 次 attempt、1 次 run，归 dev。 | `f6c51fdc8a58bfab1a21f3dcf28b8d4a80b1498e` → `3f324938af0c10512ac43ff6717b7e1c401faf6d` | 2026-09-29 | 数据集校准记录：9 个行为 fail-to-pass，gold 82 passed。 |
+| `captured-process-final-output` | `keda#issue-306` | 认领时 Issue 快照；1 次 attempt、8 次 invocation、2 次 run，归 dev。 | `e17f599a14a243dcdd1e7fefec04aa42674a0655` → `7f25d483721e2d71d9a79a805b2ce8710dc0b23b` | 2026-10-22 | 数据集校准记录：1 个行为 fail-to-pass，gold 67 passed。 |
+| `daemon-safe-logging` | `keda-main#issue-175` | 原始 Issue 正文；5 次 attempt、1 次 run，归 dev。 | `f0af2d60c18dc157feb918364552e31bf56d8290` → `04fb34a1a523dad613732453b73c4140562747e9` | 2026-10-03 | 数据集校准记录：2 个行为 fail-to-pass，gold 53 passed。 |
+| `idea-local-wall-clock` | `keda#issue-239` | 原始 Issue 正文中的 CLI/idea-inbox 行为切片；2 次 attempt、9 次 invocation、1 次 run，归 dev。 | `155797a1f803a38f510eae6d3d8671fc5b25fc2d` → `1983b9a533dd358e023a412a2382d65c65cf8302` | 2026-10-12 | 数据集校准记录：1 个行为 fail-to-pass，gold 322 passed（其他失败不在本题目标内）。 |
+| `short-term-memory-records` | `ZataZhang/keda#commit-5f1414c562` | 人工确认补全；样本级 attempt/invocation/run 均为 0。因涉及记忆与 skill 蒸馏，保守归 dev。 | `d0595887f838686cb21caacd503cf2ffe4310413` → `5f1414c562cf65f1fbc971c45243fa5f1be7267e` | 2026-10-20 | 本机预筛报告：2 个行为 fail-to-pass，gold 41 passed。 |
+| `failure-handoff-across-claims` | `ZataZhang/keda#pr-154` | 原始 PR 描述中的行为需求；无样本级运行记录，但属于故障恢复流程，保守归 dev。 | `87ab96ee149eae7240f7ecd16eb1de81d7ef4dae` → `381fa8668003c85b53405037588fdda16a23a42d` | 2026-09-23 | 本机预筛报告：4 个行为 fail-to-pass，gold 82 passed。 |
+| `generated-pr-content-contract` | `ZataZhang/keda#pr-173` | 原始 PR 描述中的行为需求；无样本级运行记录，涉及生成内容流程，归 dev。 | `076aa00eb684daec1f3ff28c101a53614cc00595` → `24b18bc0621ce66e36c95a67d94ff6299a57cfab` | 2026-09-29 | 本机预筛报告：5 个行为 fail-to-pass，gold 69 passed。 |
+| `issue-create-ready-default` | `ZataZhang/keda#pr-261` | 人工确认补全；样本级运行记录为 0。因直接影响 Issue 创建/排队默认流程，保守归 dev。 | `0522db0839631c2c997d0641699519ba3ee7a44e` → `ab150c260dfaec3b1d81909e3ed9bff850056eb6` | 2026-10-09 | 数据集校准记录：1 个行为 fail-to-pass。 |
+| `github-budget-ledger-failure` | `ZataZhang/keda#commit-3a064d11a2` | 人工确认补全；样本级 attempt/invocation/run 均为 0。行为不涉及提示词、技能或预设调优，归 holdout。 | `51faf140236c84d64f24d7721a2afe779ed182c4` → `3a064d11a2a95d0ac1f06d7cfb5115415a01f995` | 2026-10-16 | 数据集校准记录：3 个行为 fail-to-pass，gold 33 passed。 |
+| `issue-list-table-output` | `ZataZhang/keda#pr-166` | 原始 PR 描述；样本级 attempt/invocation/run 均为 0，属于独立 CLI 展示行为，归 holdout。 | `947fd1e6f7ab1738683aeba977d535b3b76f73e0` → `363c7d6faaff60a24b2e459cb6276ef5953c1d22` | 2026-09-29 | 本机预筛报告：2 个行为 fail-to-pass，gold 20 passed。 |
+| `worktree-env-run-state` | `ZataZhang/keda#pr-189` | 原始 PR 描述；样本级 attempt/invocation/run 均为 0。无提示词/技能/预设调优记录，归 holdout。 | `13641cdce5cc095953f7f002659e030b6323ef11` → `ebc88c815cff2194c07c0a9f6637d3dccce20cd2` | 2026-10-04 | 本机预筛报告：1 个行为 fail-to-pass，gold 8 passed。 |
+| `token-usage-by-prd` | `ZataZhang/keda#pr-211` | 原始 Issue 正文；样本级 attempt/invocation/run 均为 0，属于 Stats 展示数据聚合，不影响提示词/技能/预设，归 holdout。 | `d486dbdc9f0a41a14b9a572425a11f9b7161c226` → `55c759ea9e3e13e2b76b41ba17a74704a764c05e` | 2026-10-06 | 数据集校准记录：黑盒失败目标 1；本 suite 扩展为 PRD 维度聚合与降级行为测试。 |
+
+公开材料只含 keda 已合并任务，私有数据集原始归档未复制进仓库。`candidate_hidden` 逐题列在 suite YAML；其中 `idea-local-wall-clock` 声明的 `docs/ai-standards/time-display.md` 在基线上不存在，删除为无操作。
+
 ## 隐私和外发
 
 - 不写入私有 Issue 正文、客户代码、凭据或本机数据路径；prompt 仅作最小的问题/期望行为复述。
