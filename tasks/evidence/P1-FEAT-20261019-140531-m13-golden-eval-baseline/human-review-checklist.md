@@ -48,7 +48,7 @@ Issue #334 · PRD：`tasks/archive/P1-FEAT-20261019-140531-m13-golden-eval-basel
 
 ![真实 Console 页面：keda-history-v1 显示 12/12 已校准，属于真实页面验证](rv-2-calibration-console.png)
 
-本地图片，GitHub 上不显示。打开截图：`open "tasks/evidence/P1-FEAT-20261019-140531-m13-golden-eval-baseline/rv-2-calibration-console.png"`。预期：页面头部显示“12/12 已校准”，逐题显示校准通过；详情运行显示 @noop 三次判分失败、@gold 三次判分通过。
+本地图片，GitHub 上不显示。打开截图：`open "tasks/evidence/P1-FEAT-20261019-140531-m13-golden-eval-baseline/rv-2-calibration-console.png"`。预期：页面头部显示“12/12 已校准”，逐题显示校准通过；详情运行显示 @noop 三次判分失败、@gold 三次判分通过。红色负控另用故意失败的隐藏测试并按真实 API 要求运行 @noop/@gold 各三次，确认该题不会校准通过。
 
 ![设计意图：3/3 稳定与 2/3 不稳定的目标态，属于 prototype preview](rv-3-prototype-variance-view.png)
 

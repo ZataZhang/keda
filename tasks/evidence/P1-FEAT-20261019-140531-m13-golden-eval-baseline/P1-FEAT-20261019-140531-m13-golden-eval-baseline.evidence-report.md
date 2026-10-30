@@ -4,7 +4,7 @@ Issue：[GitHub #334](https://github.com/ZataZhang/keda/issues/334) · PR：[查
 
 本地人工审阅包：在 worktree 根目录运行 `just prd review tasks/archive/P1-FEAT-20261019-140531-m13-golden-eval-baseline.md`，或打开 `"/Users/zata/code/keda/.kc-worktrees/issue-334/tasks/evidence/P1-FEAT-20261019-140531-m13-golden-eval-baseline/human-review-checklist.html"`。该页面使用相对路径加载本地截图，不需要启动应用。
 
-当前没有创建 PR；runner 在执行独立 verifier 与发布流程。实现源码的已验证 Git tree（排除 PRD、证据目录和 runner 交付记录）为 `9c4253e1249b4d730bc4be7528cd4c0636c1ce80`。
+当前没有创建 PR；runner 在执行独立 verifier 与发布流程。实现源码的已验证 Git tree（排除 PRD、证据目录和 runner 交付记录）为 `c90a803f09b4cae2657d48567c92d70e74c2d91c`。
 
 | # | 对应 §9.1 验收结果 | 呈递物、打开方式与预期值 |
 |---|---|---|

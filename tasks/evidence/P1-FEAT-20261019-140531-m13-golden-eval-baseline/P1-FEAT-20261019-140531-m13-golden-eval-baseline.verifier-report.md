@@ -4,7 +4,7 @@
 
 **Independent verifier: PENDING RUNNER — no independent PASS is claimed.** 当前会话未提供独立 verifier 运行入口；本报告记录执行器的代码与证据复核，不能替代 runner 的独立结论。PRD 已由 runner 放在 `tasks/archive/`，顶部状态为 `🧍 待人工验收`，四个 `Human-Confirmed` 项保持未勾选。
 
-实现源码的 verified Git tree（从当前 HEAD 与工作树重算，排除 PRD、证据目录和 `.agent-runner/commit-request.json`）为 `9c4253e1249b4d730bc4be7528cd4c0636c1ce80`。六个 RV 文本输出和 `evidence.json` 均绑定该 tree。
+实现源码的 verified Git tree（从当前 HEAD 与工作树重算，排除 PRD、证据目录和 `.agent-runner/commit-request.json`）为 `c90a803f09b4cae2657d48567c92d70e74c2d91c`。六个 RV 文本输出和 `evidence.json` 均绑定该 tree。
 
 ## Executor review findings
 
