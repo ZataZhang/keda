@@ -10,7 +10,7 @@
    块内会跳过该条目,避免冗余。
 
 ``.git/info/exclude`` 是仓库内每个 clone 独立的本地文件,无法从工具
-统一写入,因此这里只检测并提示历史漂移,不在 init 阶段强改。
+统一写入,因此这里只检测并提示重复条目,不在 init 阶段强改。
 """
 
 from __future__ import annotations
@@ -32,8 +32,7 @@ _LEGACY_GITIGNORE_BLOCK_FOOTER = "# <<< iar <<<"
 GITIGNORE_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("# KedaCode runner state (worktree-local)", (".kedacode/",)),
     ("# Agent runner state (worktree-local)", (".agent-runner/",)),
-    ("# Legacy IAR state (for existing repositories)", (".iar/",)),
-    ("# KedaCode-managed git worktrees (host-local)", (".kc-worktrees/", ".iar-worktrees/")),
+    ("# KedaCode-managed git worktrees (host-local)", (".kc-worktrees/",)),
     (
         "# PRD task evidence (commit only *.md reports; manifest and raw artifacts stay local)",
         (
@@ -44,13 +43,6 @@ GITIGNORE_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
 )
 """``kc init`` 需要写入 ``.gitignore`` 的所有条目,按段分组。"""
-
-# 出现在 ``.git/info/exclude`` 中、且应被 ``.gitignore`` 块取代的
-# 历史条目。检测到时给用户打印提示,提示手动清理。
-_LEGACY_INFO_EXCLUDE_PATTERNS: tuple[str, ...] = (
-    "/.iar/evidence/",
-    "/.iar-worktrees/",
-)
 
 
 @dataclass(frozen=True)
@@ -83,8 +75,8 @@ class GitignoreSyncResult:
             :data:`GITIGNORE_SECTIONS` 一致)。
         entries_skipped_external: 因已在托管块外的 ``.gitignore`` 中
             声明而被跳过的模式列表。
-        info_exclude_hint: 检测到 ``.git/info/exclude`` 含历史遗留条目,
-            应提示用户清理。
+        info_exclude_hint: 检测到 ``.git/info/exclude`` 含与托管块重复
+            的条目,应提示用户清理。
         dry_run: 透传 :class:`GitignoreSyncOptions` 的 ``dry_run``。
         skipped: 用户显式 opt-out(``--no-update-gitignore``)。
     """
@@ -213,8 +205,8 @@ def _build_block_text(
     return block_text, tuple(added), tuple(skipped)
 
 
-def _info_exclude_has_legacy_entries(repo_root_path: Path) -> bool:
-    """检测 ``.git/info/exclude`` 是否含历史遗留条目。"""
+def _info_exclude_has_duplicate_patterns(repo_root_path: Path) -> bool:
+    """检测 ``.git/info/exclude`` 是否含与托管块重复的条目。"""
     info_exclude = repo_root_path / ".git" / "info" / "exclude"
     if not info_exclude.is_file():
         return False
@@ -226,9 +218,6 @@ def _info_exclude_has_legacy_entries(repo_root_path: Path) -> bool:
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
-        if stripped in _LEGACY_INFO_EXCLUDE_PATTERNS:
-            return True
-        # 块外 .gitignore 已声明的模式(用户搬过来的副本)也算漂移。
         for _, patterns in GITIGNORE_SECTIONS:
             if stripped in patterns:
                 return True
@@ -256,8 +245,8 @@ def ensure_gitignore_entries(
       比较,避免段间空行差异触发误更新)。
     - 块已存在但需要同步 → 原地更新块。
     - 块损坏(header 在但 footer 缺失) → 拒绝修改,等用户手工修复。
-    - ``.git/info/exclude`` 含历史遗留条目 → 返回 ``info_exclude_hint=True``,
-      由调用方负责打印提示。
+    - ``.git/info/exclude`` 含与托管块重复的条目 → 返回
+      ``info_exclude_hint=True``,由调用方负责打印提示。
 
     Args:
         options: 控制仓库根、dry-run、是否整体跳过。
@@ -267,7 +256,7 @@ def ensure_gitignore_entries(
         副作用,以及 ``.git/info/exclude`` 的检测结果。
     """
     gitignore_path = options.repo_root_path / ".gitignore"
-    info_hint = _info_exclude_has_legacy_entries(options.repo_root_path)
+    info_hint = _info_exclude_has_duplicate_patterns(options.repo_root_path)
 
     if options.skip:
         return GitignoreSyncResult(

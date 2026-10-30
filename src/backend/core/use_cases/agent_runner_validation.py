@@ -679,7 +679,8 @@ _LEGACY_RV_REEXEC_CACHE_RELPATH = (
 
 默认留在 ``.kedacode/``，与证据目录父目录解耦：RV 脚本每轮会清空自己产生的
 ``rv-*`` 证据，缓存放进证据目录会被一并抹掉；旧 ``.iar/`` 缓存存在时继续沿用。
-两种状态目录均由 init 的 ``.gitignore`` 托管块与 :func:`ensure_evidence_dir_excluded` 排除。
+``.kedacode/`` 由 init 的 ``.gitignore`` 托管块覆盖，旧 ``.iar/`` 需仓库自行在
+本地忽略（如 ``.git/info/exclude``）中保留规则。
 """
 
 

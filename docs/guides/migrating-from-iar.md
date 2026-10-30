@@ -63,6 +63,9 @@ Issue / PR 默认跳过，需要时加 `--include-closed`。`--apply`
 会话与 findings 继续沿用它，尚未创建的子目录也在旧根内创建；明确配置为旧路径的仓库也不自动改写。若本机同时存在新旧状态目录，或仓库
 同时存在 `.iar.toml` 和 `.kedacode.toml`，迁移命令会拒绝自动合并。请先备份并整理，再重试。
 
+新版 `kc init` 不再把 `.iar/`、`.iar-worktrees/` 写入 `.gitignore` 托管块。仍保留这两类目录的老仓库，
+请在本地忽略（如 `.git/info/exclude`）中自行维持这些规则，避免遗留状态或工作树数据进入 Git。
+
 ## 仍接受的旧名称
 
 Idea Inbox Webhook 新签名头是 `X-KC-Signature`，同时继续接受 `X-IAR-Signature`，便于发送方分批升级。

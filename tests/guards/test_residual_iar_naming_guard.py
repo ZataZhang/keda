@@ -60,7 +60,7 @@ LEGACY_NAME_ALLOWANCES = (
     _allowance(
         "src/backend/engines/agent_runner/repository_gitignore.py",
         r"iar|\.iar",
-        "原位升级旧托管块，并继续忽略已有旧状态与工作树目录。",
+        "识别并原位升级旧 iar 托管块；不再写入旧目录忽略规则。",
     ),
     _allowance(
         "src/backend/engines/agent_runner/container_ops.py",
@@ -96,11 +96,6 @@ LEGACY_NAME_ALLOWANCES = (
         "src/backend/core/shared/models/agent_runner_execution.py",
         r"\.iar/evidence",
         "执行配置继续兼容用户显式指定的旧证据路径。",
-    ),
-    _allowance(
-        "src/backend/api/cli_init.py",
-        r"历史 iar|\.iar",
-        "初始化命令提示用户清理已有的旧 .git/info/exclude 规则。",
     ),
     _allowance(
         "src/backend/engines/agent_runner/repository_local.py",

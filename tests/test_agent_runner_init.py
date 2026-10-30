@@ -848,9 +848,7 @@ def test_ensure_gitignore_inserts_block_when_missing(tmp_path: Path) -> None:
     assert result.entries_added == (
         ".kedacode/",
         ".agent-runner/",
-        ".iar/",
         ".kc-worktrees/",
-        ".iar-worktrees/",
         "tasks/evidence/**",
         "!tasks/evidence/**/",
         "!tasks/evidence/**/*.md",
@@ -859,10 +857,11 @@ def test_ensure_gitignore_inserts_block_when_missing(tmp_path: Path) -> None:
     assert GITIGNORE_BLOCK_HEADER in text
     assert GITIGNORE_BLOCK_FOOTER in text
     assert ".kedacode/" in text
-    assert ".iar/" in text
     assert ".agent-runner/" in text
     assert ".kc-worktrees/" in text
-    assert ".iar-worktrees/" in text
+    # 已退役的旧 IAR 目录不再写入托管块。
+    assert ".iar/" not in text
+    assert ".iar-worktrees/" not in text
     # tasks/evidence 白名单段：只允许 Markdown 报告，manifest 保留在本地。
     assert "tasks/evidence/**" in text
     assert "!tasks/evidence/**/" in text
@@ -888,9 +887,7 @@ def test_ensure_gitignore_skips_patterns_already_outside_block(
     assert result.block_inserted is True
     assert result.entries_added == (
         ".kedacode/",
-        ".iar/",
         ".kc-worktrees/",
-        ".iar-worktrees/",
         "tasks/evidence/**",
         "!tasks/evidence/**/",
         "!tasks/evidence/**/*.md",
@@ -942,17 +939,17 @@ def test_ensure_gitignore_updates_block_when_patterns_missing(
     assert ".kedacode/" in result.entries_added
     assert ".agent-runner/" in result.entries_added
     assert ".kc-worktrees/" in result.entries_added
-    assert ".iar-worktrees/" in result.entries_added
     assert ".kedacode/" in text
     assert ".agent-runner/" in text
     assert ".kc-worktrees/" in text
-    assert ".iar-worktrees/" in text
+    # 块里遗留的旧 IAR 条目会在原位更新时被移除。
+    assert ".iar/" not in text
     # Header / footer order must be preserved.
     assert text.index(GITIGNORE_BLOCK_HEADER) < text.index(GITIGNORE_BLOCK_FOOTER)
 
 
 def test_ensure_gitignore_rewrites_the_legacy_managed_block(tmp_path: Path) -> None:
-    """新版 init 把旧 managed block 原位换成 kc block 并保留旧目录忽略规则。"""
+    """新版 init 把旧 managed block 原位换成 kc block，并丢弃旧目录忽略规则。"""
     repo_path = tmp_path / "target"
     repo_path.mkdir()
     gitignore_path = repo_path / ".gitignore"
@@ -973,7 +970,7 @@ def test_ensure_gitignore_rewrites_the_legacy_managed_block(tmp_path: Path) -> N
     assert GITIGNORE_BLOCK_HEADER in migrated_text
     assert GITIGNORE_BLOCK_FOOTER in migrated_text
     assert ".kc-worktrees/" in migrated_text
-    assert ".iar-worktrees/" in migrated_text
+    assert ".iar-worktrees/" not in migrated_text
     assert migrated_text.startswith("# project rule\ncustom/\n")
 
 
@@ -985,7 +982,7 @@ def test_ensure_gitignore_does_not_insert_empty_block_when_all_external(
     repo_path.mkdir()
     gitignore = repo_path / ".gitignore"
     gitignore.write_text(
-        ".kedacode/\n.iar/\n.agent-runner/\n.kc-worktrees/\n.iar-worktrees/\n"
+        ".kedacode/\n.agent-runner/\n.kc-worktrees/\n"
         "tasks/evidence/**\n!tasks/evidence/**/\n!tasks/evidence/**/*.md\n",
         encoding="utf-8",
     )
@@ -998,10 +995,8 @@ def test_ensure_gitignore_does_not_insert_empty_block_when_all_external(
     assert result.entries_added == ()
     assert set(result.entries_skipped_external) == {
         ".kedacode/",
-        ".iar/",
         ".agent-runner/",
         ".kc-worktrees/",
-        ".iar-worktrees/",
         "tasks/evidence/**",
         "!tasks/evidence/**/",
         "!tasks/evidence/**/*.md",
@@ -1050,17 +1045,30 @@ def test_ensure_gitignore_refuses_to_touch_corrupted_block(tmp_path: Path) -> No
     assert gitignore.read_text(encoding="utf-8") == initial
 
 
-def test_ensure_gitignore_hints_legacy_info_exclude(tmp_path: Path) -> None:
-    """Legacy ``.git/info/exclude`` entries should surface as a hint to the user."""
+def test_ensure_gitignore_hints_duplicate_info_exclude(tmp_path: Path) -> None:
+    """``.git/info/exclude`` 中与托管块重复的条目应提示用户清理。"""
     repo_path = tmp_path / "target"
     repo_path.mkdir()
     info_dir = repo_path / ".git" / "info"
     info_dir.mkdir(parents=True)
-    (info_dir / "exclude").write_text("/.iar/evidence/\n", encoding="utf-8")
+    (info_dir / "exclude").write_text(".kc-worktrees/\n", encoding="utf-8")
 
     result = ensure_gitignore_entries(GitignoreSyncOptions(repo_root_path=repo_path))
 
     assert result.info_exclude_hint is True
+
+
+def test_ensure_gitignore_ignores_legacy_info_exclude_entries(tmp_path: Path) -> None:
+    """旧 IAR 目录的本地忽略条目不再计入托管块漂移。"""
+    repo_path = tmp_path / "target"
+    repo_path.mkdir()
+    info_dir = repo_path / ".git" / "info"
+    info_dir.mkdir(parents=True)
+    (info_dir / "exclude").write_text("/.iar/evidence/\n.iar-worktrees/\n", encoding="utf-8")
+
+    result = ensure_gitignore_entries(GitignoreSyncOptions(repo_root_path=repo_path))
+
+    assert result.info_exclude_hint is False
 
 
 def test_ensure_gitignore_preserves_postlude_text(tmp_path: Path) -> None:
@@ -1070,7 +1078,7 @@ def test_ensure_gitignore_preserves_postlude_text(tmp_path: Path) -> None:
     gitignore = repo_path / ".gitignore"
     initial = (
         f"{GITIGNORE_BLOCK_HEADER}\n"
-        f".iar/\n"
+        f".kedacode/\n"
         f"{GITIGNORE_BLOCK_FOOTER}\n"
         "\n"
         "# trailing section\n"
@@ -1081,7 +1089,7 @@ def test_ensure_gitignore_preserves_postlude_text(tmp_path: Path) -> None:
     ensure_gitignore_entries(GitignoreSyncOptions(repo_root_path=repo_path))
 
     text = gitignore.read_text(encoding="utf-8")
-    # Trailing content (after the iar block) must be preserved verbatim.
+    # Trailing content (after the managed block) must be preserved verbatim.
     assert text.endswith("\n# trailing section\nbar/\n")
 
 
@@ -1097,10 +1105,10 @@ def test_iar_init_writes_gitignore_block(tmp_path: Path, monkeypatch: pytest.Mon
     assert GITIGNORE_BLOCK_HEADER in gitignore_text
     assert GITIGNORE_BLOCK_FOOTER in gitignore_text
     assert ".kedacode/" in gitignore_text
-    assert ".iar/" in gitignore_text
     assert ".agent-runner/" in gitignore_text
     assert ".kc-worktrees/" in gitignore_text
-    assert ".iar-worktrees/" in gitignore_text
+    assert ".iar/" not in gitignore_text
+    assert ".iar-worktrees/" not in gitignore_text
 
 
 def test_iar_init_no_update_gitignore_skips_block(
@@ -1144,10 +1152,12 @@ def test_iar_init_dry_run_emits_gitignore_block_lines(
     assert "Would install packaged KedaCode operator skill:" in out
     assert "Would overwrite packaged KedaCode operator skill:" not in out
     assert ".kedacode/" in out
-    assert ".iar/" in out
     assert ".agent-runner/" in out
     assert ".kc-worktrees/" in out
-    assert ".iar-worktrees/" in out
+    # 托管块预览里不再出现旧 IAR 目录（配置模板注释中的 .iar/evidence 不算）。
+    block_entry_lines = {line.strip() for line in out.splitlines()}
+    assert ".iar/" not in block_entry_lines
+    assert ".iar-worktrees/" not in block_entry_lines
     assert GITIGNORE_BLOCK_FOOTER in out
 
 
