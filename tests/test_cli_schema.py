@@ -22,9 +22,10 @@ from backend.api.cli_schema import build_command_schema, render_schema_human
 from backend.api.cli_typer_app import app
 
 #: ``argparse`` 门面未收录的命令：只在 Typer 侧存在，不参与旗标对齐检查。
-#: ``lifecycle`` 与 ``schema``/``tokens`` 同类：只读 Typer 原生命令，直接查本机账本并发射结果，
-#: 不经过 argparse 门面的执行后端；收录到门面只会留下解析得了、执行不了的死条目。
-FACADE_EXEMPT_COMMANDS = frozenset({"schema", "tokens", "lifecycle"})
+#: ``lifecycle`` 与 ``schema``/``tokens``/``evidence check`` 同类：只读 Typer 原生命令，
+#: 直接调用 core 用例并发射结果，不经过 argparse 门面的执行后端；收录到门面只会
+#: 留下解析得了、执行不了的死条目。
+FACADE_EXEMPT_COMMANDS = frozenset({"schema", "tokens", "lifecycle", "evidence check"})
 
 #: ``--output`` 在这些命令上是**输出目录**，不是格式取值域，必须被排除在机读契约之外。
 DIRECTORY_OUTPUT_COMMANDS = frozenset({"ask", "deliberate"})
