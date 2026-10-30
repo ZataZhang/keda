@@ -422,7 +422,7 @@ export function RunDetailPanel({
   );
 }
 
-/** 单组维度聚合的小表格（median / min / max / N）。 */
+/** 校准 run 的逐题 @noop / @gold 判分结论与是否校准通过。 */
 function CalibrationResults({
   caseIds,
   results,

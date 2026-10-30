@@ -247,6 +247,44 @@ def test_run_snapshot_rejects_model_and_calibration_cell_overages() -> None:
         )
 
 
+def test_calibration_run_requires_v2_suite_and_gold_patch_for_every_case() -> None:
+    legacy_suite = parse_evaluation_suite(
+        "id: old\nversion: 1.0.0\nrepo_path: /tmp/repo\nbase_ref: main\n"
+        "cases:\n  - id: old-case\n    prompt: 旧格式\n    check_recipe: pytest\n",
+        "example.yaml",
+    )
+    with pytest.raises(evaluation_rules.EvaluationValidationError, match="仅适用于"):
+        evaluation_rules.build_run_snapshot(
+            BuildRunSnapshotInput(
+                suite=legacy_suite,
+                execution_preset_names=[CALIBRATION_PRESET_NOOP, CALIBRATION_PRESET_GOLD],
+                judge_preset_names=[],
+                execution_presets={},
+                repeats=3,
+            ),
+            judge_availability_probe=lambda _name: {"available": True, "reason": None},
+            base_probe=lambda _repo, _ref: ("commit", "tree"),
+        )
+
+    partial_suite = parse_evaluation_suite(
+        _suite_text(case_count=1).replace("    gold_patch: gold.patch\n", ""),
+        "suite.yaml",
+        {"case-0/held_out/tests/test_behavior.py": b"def test_behavior(): pass\n"},
+    )
+    with pytest.raises(evaluation_rules.EvaluationValidationError, match="gold_patch"):
+        evaluation_rules.build_run_snapshot(
+            BuildRunSnapshotInput(
+                suite=partial_suite,
+                execution_preset_names=[CALIBRATION_PRESET_NOOP, CALIBRATION_PRESET_GOLD],
+                judge_preset_names=[],
+                execution_presets={},
+                repeats=3,
+            ),
+            judge_availability_probe=lambda _name: {"available": True, "reason": None},
+            base_probe=lambda _repo, _ref: ("commit", "tree"),
+        )
+
+
 def test_calibration_derivation_requires_complete_noop_and_gold_runs() -> None:
     run = EvaluationRunRecord(
         run_id="eval-fixture",

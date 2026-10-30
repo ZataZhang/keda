@@ -778,3 +778,11 @@ Failure triage：
 - Reason: 发布前须让评审者从 §9.1 直接看到页面、知道预期值并能打开证据，同时让 verifier 能从 manifest 复现 negative control 与绿控。
 - Impact: 交付状态仍为 `🧍 待人工验收`；决策一至三与 §9.1 人工确认保持未勾选。独立 verifier、CI、PR 与归档均由 runner 后续执行；本报告没有把执行器自查称为独立 PASS。
 - Review: source tree=`9c4253e1249b4d730bc4be7528cd4c0636c1ce80`（排除 PRD、证据与 runner 交付记录）；证据/清单结构检查通过。真实模型实验为 opt-in，`just lint --repo` 存有本机状态目录写权限导致的 64 项失败，详细限制见验证报告。
+
+### 校准 run 的创建门禁
+- Type: behavior
+- Before: 旧格式 suite（无 v2 字段）或缺少 `gold_patch` 的题目也能创建 `@noop` / `@gold` 校准 run；`@gold` 在运行时才因缺少补丁落执行故障，浪费候选执行且结论注定无法通过。
+- After: `build_run_snapshot` 在创建阶段拒绝"校准候选 + 无 v2 判分材料的 suite"与"校准题目缺少 `gold_patch`"两类请求，逐条给出原因且零候选执行；新增负向测试覆盖。
+- Reason: 校准是 v2 题目的有效性门禁；不可校准的请求应在花任何候选执行之前被挡住，而不是等到运行时失败。
+- Impact: 仅收紧校准 run 的创建条件；真实模型 run、旧格式 suite 的校验与运行行为、判分口径与留出集规则均不变。
+- Review: core 规则变更（workspace/execution/checks 与 suite 材料未变）；RV-2 与 RV-5 已在 verified tree `257da6a287b2ffc4df327186bcad66022a0fb4e3` 上复跑通过，证据与验证计划已更新。

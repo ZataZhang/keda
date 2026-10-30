@@ -3,9 +3,10 @@
 ## 验证身份
 
 - PRD：`tasks/archive/P1-FEAT-20261019-140531-m13-golden-eval-baseline.md`
-- 验证的实现 Git tree（排除 PRD、证据目录与 runner 交付记录）：`fb21a75247599f6d64d1162c9c6e113b0ead80be`
-- 来源 HEAD：`b502181b5877f3ba790497f58ddbca0401c9bd7c`。tree 由 `scripts/compute_verified_source_tree.py` 在临时 Git index/object store 中计算，没有暂存或提交文件。
+- 验证的实现 Git tree（排除 PRD、证据目录与 runner 交付记录）：`257da6a287b2ffc4df327186bcad66022a0fb4e3`
+- 来源 HEAD：`f0d72e61dacb10a865dac01525da103cb2e63a0f`。本轮 review 修复（校准创建门禁与文档）基于该提交；修复提交由 runner 生成，tree 由 `scripts/compute_verified_source_tree.py` 在临时 Git index/object store 中包含工作树改动计算，没有暂存或提交文件。
 - 最终 pre-PR review 补入了 PRD FR-8 要求的首批 12 题来源映射表（`tasks/evaluation-suites/README.md`）。该文档变更把 verified tree 从 `59049dec0d2accd91d8448e1bf25c48711452a0e` 更新为 `fb21a75247599f6d64d1162c9c6e113b0ead80be`；实现源码与 suite 材料未变。RV-2 已在最终 tree 上复跑并通过；RV-1/3/4/5/6 的输出采集于前次 tree，按 PRD 的重跑规则（workspace/execution/checks/suite 材料未变）继续适用。
+- 本轮 follow-up review 在 `build_run_snapshot` 增加校准创建门禁：校准 run 仅适用于带 v2 判分材料的 suite，且每个 case 必须提供 `gold_patch`；同时修正 ROADMAP 归档路径引用与前端注释。该变更触及 core 创建规则，未触及 workspace/execution/checks 与 suite 材料；verified tree 更新为 `257da6a287b2ffc4df327186bcad66022a0fb4e3`，RV-2 与 RV-5 已在该 tree 上复跑并通过，RV-1/3/4/6 的输出继续适用。
 - RV scripts 和原始证据位于本目录 `scripts/` 与根目录中；`.gitignore` 仅允许 Markdown 报告与人工审阅清单进入代码 diff。
 
 RV-2 原始完整命令执行 12×2×3 绿控时超过 runner 的 300 秒命令上限；runner 超时后，隔离 FastAPI 后台仍完成了红控和 72 格绿控，完成结果已从真实 SQLite 账本核验并保存。为使 runner 可复跑，manifest 当前使用 `scripts/rv2_verify_captured_api.py`：它在新真实 API 服务中重新执行 6 格故意失败判分红控，再通过真实 API 读取已完成的 72 格绿控、检查校准字段并由 Chromium 打开生产 Console 页面；本次在当前实现树上复跑，以退出码 0 完成。这条短命令不会重新运行 72 格绿控，限制已写入 manifest `risks`，SQLite 原始账本、SHA-256、provider 探针和 tree 标识均随 RV-2 证据提供。`.kedacode.toml` 保持 `agent_runner.validation.reexecute_commands=true`，没有关闭 runner 的命令复跑；本次六项 manifest 命令均真实重跑。证据与配置均待人工审阅；PRD 的 `Human-Confirmed` 项保持未勾选。
@@ -14,11 +15,13 @@ RV-2 原始完整命令执行 12×2×3 绿控时超过 runner 的 300 秒命令�
 
 第 5 次恢复中，runner 复跑 RV-4 发现旧账本 fixture 从当前 `HEAD` 导出，导致 v15 的 20 列 INSERT 面对已是 v16 的 21 列表并以 `sqlite3.OperationalError` 失败。harness 现从 Git 历史定位引入 `repeat_index` 的 schema 提交，再导出其父提交 `8ed4ece677c56378e070b7769f29d9a8a85e3948`；负控前还断言 `user_version=15` 且 `evaluation_result` 为 20 列。完整 RV-4 manifest 命令已重跑并以退出码 0 完成：v15 唯一键重复写入负控变红，真实 API 启动后迁移到 v16，旧记录和重复结果校验通过。更新后的逐项输出为 [rv-4-v15-migration.txt](rv-4-v15-migration.txt)。RV scripts 仍仅在 evidence `scripts/` 下；产品源码未改。
 
-Pre-PR code review 修复并验证了五项实现边界：恢复 `reexecute_commands=true`；校准派生与 run 创建均绑定当前逐题解析的 commit/tree，避免符号 ref 移动后复用旧校准；拒绝重复执行/评审预设，避免 v16 唯一键冲突；前端仅把保留名 `@noop` / `@gold` 识别为校准候选；run 创建、快照校验和执行 cell 的成组参数已收敛到类型化 request/context 对象。对应后端回归测试与真实 Console 页面 E2E 已执行。当前实现源码 tree 为 `fb21a75247599f6d64d1162c9c6e113b0ead80be`；六项 RV 的采集 tree 为 `59049dec0d2accd91d8448e1bf25c48711452a0e`，RV-2 已在最终 tree 复跑，73 项评测相关聚焦测试和已完成的 lint/typecheck/MkDocs gates 在实现源码 tree 上验证（最终差异仅为 README 来源映射文档）；全量测试复跑状态见下表。
+Pre-PR code review 修复并验证了五项实现边界：恢复 `reexecute_commands=true`；校准派生与 run 创建均绑定当前逐题解析的 commit/tree，避免符号 ref 移动后复用旧校准；拒绝重复执行/评审预设，避免 v16 唯一键冲突；前端仅把保留名 `@noop` / `@gold` 识别为校准候选；run 创建、快照校验和执行 cell 的成组参数已收敛到类型化 request/context 对象。对应后端回归测试与真实 Console 页面 E2E 已执行。当前实现源码 tree 为 `257da6a287b2ffc4df327186bcad66022a0fb4e3`；六项 RV 中 RV-2 与 RV-5 已在该 tree 复跑，其余四项的采集 tree 为 `59049dec0d2accd91d8448e1bf25c48711452a0e` / `fb21a75247599f6d64d1162c9c6e113b0ead80be`，73 项评测相关聚焦测试和已完成的 lint/typecheck/MkDocs gates 在实现源码 tree 上验证（最终差异仅为 README 来源映射文档与本次 review 的校准创建门禁）；全量测试复跑状态见下表。
+
+本轮 follow-up review 补充：`build_run_snapshot` 现在拒绝在无 v2 判分材料的 suite 上创建校准 run，也拒绝任何缺少 `gold_patch` 的题目进入校准；这样 `@noop` / `@gold` 不再对旧格式 suite 或材料不全的题目产生注定失败的候选执行。对应新增负向测试；RV-2 与 RV-5 已在 `257da6a287b2ffc4df327186bcad66022a0fb4e3` 上复跑通过。
 
 ## Realistic Validation
 
-所有六项均经各自真实入口执行。每项先运行会变红的负控，再执行修复后的通过路径。完整复现命令及结构化 oracle 保存在 [`evidence.json`](evidence.json)；manifest 与 RV-2 输出绑定 verified source tree：`fb21a75247599f6d64d1162c9c6e113b0ead80be`。
+所有六项均经各自真实入口执行。每项先运行会变红的负控，再执行修复后的通过路径。完整复现命令及结构化 oracle 保存在 [`evidence.json`](evidence.json)；manifest 与 RV-2 输出绑定 verified source tree：`257da6a287b2ffc4df327186bcad66022a0fb4e3`。
 
 | 项 | 真实入口与负控 | 结果与证据 |
 |---|---|---|

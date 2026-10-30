@@ -4,7 +4,7 @@ Issue：[GitHub #334](https://github.com/ZataZhang/keda/issues/334) · PR：[查
 
 本地人工审阅包：在 worktree 根目录运行 `just prd review tasks/archive/P1-FEAT-20261019-140531-m13-golden-eval-baseline.md`，或打开 `"/Users/zata/code/keda/.kc-worktrees/issue-334/tasks/evidence/P1-FEAT-20261019-140531-m13-golden-eval-baseline/human-review-checklist.html"`。该页面使用相对路径加载本地截图，不需要启动应用。
 
-当前没有创建 PR；runner 在执行独立 verifier 与发布流程。实现源码的已验证 Git tree（排除 PRD、证据目录和 runner 交付记录）为 `fb21a75247599f6d64d1162c9c6e113b0ead80be`。最终 pre-PR review 补入了 FR-8 要求的 12 题来源映射（[tasks/evaluation-suites/README.md](../../evaluation-suites/README.md)）；RV-2 已在最终 tree 上复跑并通过，RV-1/3/4/5/6 的输出采集于前次源码 tree `59049dec0d2accd91d8448e1bf25c48711452a0e`，两者差异仅为该 README 文档。
+当前没有创建 PR；runner 在执行独立 verifier 与发布流程。实现源码的已验证 Git tree（排除 PRD、证据目录和 runner 交付记录）为 `257da6a287b2ffc4df327186bcad66022a0fb4e3`。最终 pre-PR review 补入了 FR-8 要求的 12 题来源映射（[tasks/evaluation-suites/README.md](../../evaluation-suites/README.md)），并新增"校准 run 仅适用于带 v2 判分材料且每题有 `gold_patch` 的 suite"创建门禁；RV-2 与 RV-5 已在最终 tree 上复跑并通过，RV-1/3/4/6 的输出采集于前次源码 tree `fb21a75247599f6d64d1162c9c6e113b0ead80be`（其采集基线为 `59049dec0d2accd91d8448e1bf25c48711452a0e`），差异为 README 来源映射与该创建门禁；workspace/execution/checks 与 suite 材料未变。
 
 | # | 对应 §9.1 验收结果 | 呈递物、打开方式与预期值 |
 |---|---|---|

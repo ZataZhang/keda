@@ -170,6 +170,12 @@ def build_run_snapshot(
     ]
     if not selected_cases:
         problems.append("所选评测范围没有可执行题目")
+    if calibration_run and not suite.requires_calibration:
+        problems.append("校准候选仅适用于带 v2 判分材料的评测集")
+    if calibration_run:
+        missing_gold_patch = [case.case_id for case in selected_cases if not case.gold_patch]
+        if missing_gold_patch:
+            problems.append(f"题目缺少 gold_patch，无法校准: {', '.join(missing_gold_patch)}")
     matrix_cells = len(selected_cases) * len(execution_preset_names) * repeats
     matrix_limit = (
         MAX_CALIBRATION_EVALUATION_CELLS if calibration_run else MAX_MODEL_EVALUATION_CELLS
