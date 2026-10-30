@@ -11,6 +11,8 @@ RV-2 原始完整命令执行 12×2×3 绿控时超过 runner 的 300 秒命令�
 
 第 4 次恢复中，runner 的 RV-3 复跑在 API 就绪前失败，首个可见错误是等待服务超时，隔离 `backend.log` 为空。根因是共享 `rv2_uv_cache_wrapper.py` 固定排除了 RV-2 的旧临时 `bin`；RV-3/RV-5 切换 scene 后，当前包装器目录仍留在 PATH，真实 `uv` 查找会命中包装器自身。现改为隔离环境显式传递本次 wrapper 目录、查找真实 `uv` 时排除该目录并拒绝自调用；RV-3 使用真实 `backend.api.app:app`、仅绑定 loopback 的 Uvicorn 服务。修复后，完整 manifest RV-3 命令以退出码 0 完成：红控断言触发、API 与真实 Console/原型校验通过，4/4 no-auth Playwright 用例通过。因 wrapper 为 RV-2/RV-5 共用，另重跑这两项的 manifest 命令，均以退出码 0 完成。RV scripts 仍仅在 evidence `scripts/` 下；产品源码未改。
 
+第 5 次恢复中，runner 复跑 RV-4 发现旧账本 fixture 从当前 `HEAD` 导出，导致 v15 的 20 列 INSERT 面对已是 v16 的 21 列表并以 `sqlite3.OperationalError` 失败。harness 现从 Git 历史定位引入 `repeat_index` 的 schema 提交，再导出其父提交 `8ed4ece677c56378e070b7769f29d9a8a85e3948`；负控前还断言 `user_version=15` 且 `evaluation_result` 为 20 列。完整 RV-4 manifest 命令已重跑并以退出码 0 完成：v15 唯一键重复写入负控变红，真实 API 启动后迁移到 v16，旧记录和重复结果校验通过。更新后的逐项输出为 [rv-4-v15-migration.txt](rv-4-v15-migration.txt)。RV scripts 仍仅在 evidence `scripts/` 下；产品源码未改。
+
 ## Realistic Validation
 
 所有六项均经各自真实入口执行。每项先运行会变红的负控，再执行修复后的通过路径。完整复现命令及结构化 oracle 保存在 [`evidence.json`](evidence.json)；每项文本输出末尾记录同一 verified source tree：`c90a803f09b4cae2657d48567c92d70e74c2d91c`。
