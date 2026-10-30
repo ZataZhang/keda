@@ -4,10 +4,12 @@
 
 - PRD：`tasks/archive/P1-FEAT-20261019-140531-m13-golden-eval-baseline.md`
 - 验证的实现 Git tree（排除 PRD、证据目录与 runner 交付记录）：`c90a803f09b4cae2657d48567c92d70e74c2d91c`
-- 来源 HEAD：`ecb4e23aab7f6e6b88310246757285efedb0e292`。tree 由 `scripts/compute_verified_source_tree.py` 在临时 Git index/object store 中计算，没有暂存或提交文件。
+- 来源 HEAD：`36a0b3dcbfe848e148935f9a7498cfc6ad005f39`。tree 由 `scripts/compute_verified_source_tree.py` 在临时 Git index/object store 中计算，没有暂存或提交文件。
 - RV scripts 和原始证据位于本目录 `scripts/` 与根目录中；`.gitignore` 仅允许三个 Markdown 报告进入代码 diff。
 
 RV-2 原始完整命令执行 12×2×3 绿控时超过 runner 的 300 秒命令上限；runner 超时后，隔离 FastAPI 后台仍完成了红控和 72 格绿控，完成结果已从真实 SQLite 账本核验并保存。为使 runner 可复跑，manifest 当前使用 `scripts/rv2_verify_captured_api.py`：它在新真实 API 服务中重新执行 6 格故意失败判分红控，再通过真实 API 读取已完成的 72 格绿控、检查校准字段并由 Chromium 打开生产 Console 页面；最新一次完整命令在 44 秒内以退出码 0 完成。这条短命令不会重新运行 72 格绿控，限制已写入 manifest `risks`，SQLite 原始账本、SHA-256、provider 探针和 tree 标识均随 RV-2 证据提供。工作树 `.kedacode.toml` 保留 `agent_runner.validation.reexecute_commands=false` 的 opt-out；本次仍手动执行并验证 manifest 命令。其余项目均已真实执行并保留各自输出。证据与配置均待人工审阅；PRD 的 `Human-Confirmed` 项保持未勾选。
+
+第 4 次恢复中，runner 的 RV-3 复跑在 API 就绪前失败，首个可见错误是等待服务超时，隔离 `backend.log` 为空。根因是共享 `rv2_uv_cache_wrapper.py` 固定排除了 RV-2 的旧临时 `bin`；RV-3/RV-5 切换 scene 后，当前包装器目录仍留在 PATH，真实 `uv` 查找会命中包装器自身。现改为隔离环境显式传递本次 wrapper 目录、查找真实 `uv` 时排除该目录并拒绝自调用；RV-3 使用真实 `backend.api.app:app`、仅绑定 loopback 的 Uvicorn 服务。修复后，完整 manifest RV-3 命令以退出码 0 完成：红控断言触发、API 与真实 Console/原型校验通过，4/4 no-auth Playwright 用例通过。因 wrapper 为 RV-2/RV-5 共用，另重跑这两项的 manifest 命令，均以退出码 0 完成。RV scripts 仍仅在 evidence `scripts/` 下；产品源码未改。
 
 ## Realistic Validation
 
