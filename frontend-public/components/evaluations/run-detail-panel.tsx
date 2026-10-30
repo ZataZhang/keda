@@ -15,6 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { formatLocalDateTime } from "@/lib/utils";
 import type {
   EvaluationDimensionAggregate,
+  EvaluationResult,
   EvaluationRunDetail,
 } from "@/lib/api/types";
 import {
@@ -64,6 +65,9 @@ export function RunDetailPanel({
   }
 
   const { run, results, scores, summary, payload_state } = detail;
+  const calibrationRun = run.execution_preset_snapshots.some(
+    (preset) => preset.kind === "calibration",
+  );
   const statusMeta = RUN_STATUS_META[run.status];
   const cancellable = [
     "created",
@@ -168,30 +172,96 @@ export function RunDetailPanel({
         </div>
       </CardHeader>
       <CardContent className="space-y-6">
-        <section aria-label="维度聚合">
-          <h3 className="mb-2 text-sm font-semibold">
-            维度聚合 · 仅由 valid 评分派生（有效评审 ×{" "}
-            {summary.valid_judge_count}）
-          </h3>
-          <AggregateTable
-            title="全部执行预设"
-            aggregates={summary.aggregates}
+        {scores.length > 0 ? (
+          <section aria-label="评审维度汇总">
+            <h3 className="mb-2 text-sm font-semibold">
+              评审维度汇总 · 仅由 valid 评分派生（有效评审 × {summary.valid_judge_count}）
+            </h3>
+            <AggregateTable title="全部执行预设" aggregates={summary.aggregates} />
+            {Object.entries(summary.by_execution_preset).map(([preset, aggregates]) => (
+              <AggregateTable
+                key={preset}
+                title={`执行预设：${preset}`}
+                aggregates={aggregates}
+              />
+            ))}
+            {Object.keys(summary.status_counts).length > 0 ? (
+              <p className="mt-2 rounded-lg bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                非评分状态计数：
+                {Object.entries(summary.status_counts)
+                  .map(([bucket, count]) => `${bucket} × ${count}`)
+                  .join("；")}
+                （失败/拒绝/未授权不进入评分汇总）
+              </p>
+            ) : null}
+          </section>
+        ) : null}
+
+        {calibrationRun ? (
+          <CalibrationResults
+            caseIds={run.case_ids}
+            results={results}
+            repeats={run.repeats}
           />
-          {Object.entries(summary.by_execution_preset).map(([preset, aggregates]) => (
-            <AggregateTable
-              key={preset}
-              title={`执行预设：${preset}`}
-              aggregates={aggregates}
-            />
-          ))}
-          {Object.keys(summary.status_counts).length > 0 ? (
-            <p className="mt-2 rounded-lg bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-              非评分状态计数：
-              {Object.entries(summary.status_counts)
-                .map(([bucket, count]) => `${bucket} × ${count}`)
-                .join("；")}
-              （失败/拒绝/未授权不进入分数聚合）
-            </p>
+        ) : null}
+
+        <section aria-label="重复结果稳定性" data-testid="evaluation-stability">
+          <h3 className="mb-2 text-sm font-semibold">重复结果</h3>
+          {detail.stability.length === 0 ? (
+            <p className="text-sm text-muted-foreground">候选尚未开始。</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[640px] text-left text-sm">
+                <thead className="bg-muted/40 text-xs text-muted-foreground">
+                  <tr>
+                    <th className="rounded-l-lg px-3 py-2 font-medium">题目</th>
+                    <th className="px-3 py-2 font-medium">执行预设</th>
+                    <th className="px-3 py-2 font-medium">判分通过</th>
+                    <th className="px-3 py-2 font-medium">稳定性</th>
+                    <th className="rounded-r-lg px-3 py-2 font-medium">执行故障</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {detail.stability.map((entry) => (
+                    <tr
+                      key={`${entry.case_id}-${entry.execution_preset_id}`}
+                      className="border-b last:border-b-0"
+                    >
+                      <td className="px-3 py-2 font-mono text-xs">{entry.case_id}</td>
+                      <td className="px-3 py-2 text-xs">{entry.execution_preset_id}</td>
+                      <td className="px-3 py-2 text-xs">
+                        {entry.passed_count}/{entry.repeat_count} 次通过
+                        {entry.check_failure_count > 0
+                          ? ` · ${entry.check_failure_count} 次判分失败`
+                          : ""}
+                      </td>
+                      <td className="px-3 py-2">
+                        {entry.stable === null ? (
+                          <Badge>判分未齐</Badge>
+                        ) : (
+                          <Badge variant={entry.stable ? "ready" : "warning"}>
+                            {entry.stable ? "稳定" : "不稳定"}
+                          </Badge>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-xs">{entry.execution_fault_count}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {detail.unstable_cases.length > 0 ? (
+            <div className="mt-3 rounded-lg border border-amber-300/70 bg-amber-50/60 p-3 dark:border-amber-900 dark:bg-amber-950/30">
+              <h4 className="mb-2 text-xs font-semibold">不稳定的题（{detail.unstable_cases.length}）</h4>
+              <ul className="space-y-1 text-xs">
+                {detail.unstable_cases.map((entry) => (
+                  <li key={`${entry.case_id}-${entry.execution_preset_id}`}>
+                    {entry.case_id} · {entry.execution_preset_id} · {entry.passed_count}/{entry.repeat_count} 次通过
+                  </li>
+                ))}
+              </ul>
+            </div>
           ) : null}
         </section>
 
@@ -224,6 +294,9 @@ export function RunDetailPanel({
                       <tr key={result.result_id} className="border-b last:border-b-0 align-top">
                         <td className="px-3 py-2 font-mono text-xs">
                           {result.case_id}
+                          {run.repeats > 1 ? (
+                            <span className="block text-muted-foreground">第 {result.repeat_index + 1} 次</span>
+                          ) : null}
                         </td>
                         <td className="px-3 py-2 text-xs">{result.execution_preset_id}</td>
                         <td className="px-3 py-2">
@@ -346,6 +419,56 @@ export function RunDetailPanel({
         </section>
       </CardContent>
     </Card>
+  );
+}
+
+/** 单组维度聚合的小表格（median / min / max / N）。 */
+function CalibrationResults({
+  caseIds,
+  results,
+  repeats,
+}: {
+  caseIds: string[];
+  results: EvaluationResult[];
+  repeats: number;
+}) {
+  const caseStates = caseIds.map((caseId) => {
+    const noopResults = results.filter(
+      (result) => result.case_id === caseId && result.execution_preset_id === "@noop",
+    );
+    const goldResults = results.filter(
+      (result) => result.case_id === caseId && result.execution_preset_id === "@gold",
+    );
+    const noopValid =
+      noopResults.length === repeats &&
+      noopResults.every(
+        (result) => result.result_status === "succeeded" && result.check_status === "failed",
+      );
+    const goldValid =
+      goldResults.length === repeats &&
+      goldResults.every(
+        (result) => result.result_status === "succeeded" && result.check_status === "passed",
+      );
+    return { caseId, noopResults, goldResults, calibrated: noopValid && goldValid };
+  });
+
+  return (
+    <section aria-label="逐题校准结果" data-testid="evaluation-calibration-results">
+      <h3 className="mb-2 text-sm font-semibold">逐题校准结果</h3>
+      <div className="space-y-1 text-xs">
+        {caseStates.map((caseState) => (
+          <p key={caseState.caseId}>
+            <span className="font-mono">{caseState.caseId}</span>
+            {" · "}@noop {caseState.noopResults.filter((result) => result.check_status === "failed").length}/{repeats} 次判分失败
+            {" · "}@gold {caseState.goldResults.filter((result) => result.check_status === "passed").length}/{repeats} 次判分通过
+            {" · "}
+            <Badge variant={caseState.calibrated ? "ready" : "warning"}>
+              {caseState.calibrated ? "校准通过" : "校准中 / 未通过"}
+            </Badge>
+          </p>
+        ))}
+      </div>
+    </section>
   );
 }
 

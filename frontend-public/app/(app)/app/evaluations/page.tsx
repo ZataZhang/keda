@@ -1,6 +1,6 @@
 "use client";
 
-// 模型评测页：多执行预设 × 多评审模型的 Agent/模型效果对照。
+// 模型评测页：校准候选、重复执行与可复现基线观察。
 //
 // 关键红线（与后端一致）：创建 run 只做校验与快照冻结；启动执行不触发评审；
 // 评审 payload 必须先预览、后显式授权；失败/拒绝/未授权状态原样展示，
@@ -68,6 +68,8 @@ export default function EvaluationsPage() {
   const [suiteId, setSuiteId] = useState("");
   const [executionPresetNames, setExecutionPresetNames] = useState<string[]>([]);
   const [judgePresetNames, setJudgePresetNames] = useState<string[]>([]);
+  const [repeats, setRepeats] = useState(1);
+  const [includeHoldout, setIncludeHoldout] = useState(false);
 
   // ── 数据加载 ────────────────────────────────────────────────────────────
 
@@ -178,9 +180,34 @@ export default function EvaluationsPage() {
     [suites]
   );
   const selectedSuite = validSuites.find((entry) => entry.suite_id === suiteId);
+  const isCalibrationRun = executionPresetNames.some((name) => name.startsWith("@"));
+  const selectedCaseCount = (selectedSuite?.cases ?? []).filter(
+    (evaluationCase) => isCalibrationRun || includeHoldout || evaluationCase.split !== "holdout",
+  ).length;
+  const estimatedCandidateExecutions =
+    selectedCaseCount * executionPresetNames.length * repeats;
+  const executionLimit = isCalibrationRun ? 144 : 48;
 
   const toggle = (list: string[], name: string): string[] =>
     list.includes(name) ? list.filter((item) => item !== name) : [...list, name];
+
+  /** 更新候选选择；校准模式始终成对选择并排除真实 Agent。 */
+  const toggleExecutionPreset = (presetName: string) => {
+    const calibrationPresetNames = ["@noop", "@gold"];
+    const nextPresetNames = calibrationPresetNames.includes(presetName)
+      ? executionPresetNames.includes(presetName)
+        ? executionPresetNames.filter((name) => !calibrationPresetNames.includes(name))
+        : [...calibrationPresetNames]
+      : toggle(
+          executionPresetNames.filter((name) => !calibrationPresetNames.includes(name)),
+          presetName,
+        );
+    setExecutionPresetNames(nextPresetNames);
+    if (calibrationPresetNames.some((name) => nextPresetNames.includes(name))) {
+      setJudgePresetNames([]);
+      setRepeats((currentRepeats) => Math.max(3, currentRepeats));
+    }
+  };
 
   const create = async () => {
     if (!suiteId || executionPresetNames.length === 0) {
@@ -192,9 +219,13 @@ export default function EvaluationsPage() {
       const run = await createEvaluationRun({
         suite_id: suiteId,
         execution_presets: executionPresetNames,
-        judge_presets: judgePresetNames,
+        judge_presets: isCalibrationRun ? [] : judgePresetNames,
+        repeats,
+        include_holdout: includeHoldout || isCalibrationRun,
       });
-      toast.success(`run ${run.run_id} 已创建（尚未启动）。`);
+      toast.success(
+        `run ${run.run_id} 已创建，预计执行 ${run.estimated_candidate_executions ?? estimatedCandidateExecutions} 次（尚未启动）。`,
+      );
       await refreshRuns();
       setSelectedRunId(run.run_id);
     } catch (error: unknown) {
@@ -251,7 +282,7 @@ export default function EvaluationsPage() {
 
   return (
     <ConsolePage>
-      <ConsolePageHeader title="模型评测" description="同一评测集下对比多个执行预设（Agent × 模型），候选在各自干净的 isolated worktree 中执行；评审模型打分前必须逐条预览 payload 并显式授权。费用口径：cost unknown（仅记 token usage）。" />
+      <ConsolePageHeader title="模型评测" description="在隔离快照中校准并重复运行任务，逐题查看判分结果与稳定性。外发评审仍需先预览 payload 并显式授权。" />
 
       <Card className="gap-4">
         <CardHeader>
@@ -292,6 +323,23 @@ export default function EvaluationsPage() {
               {selectedSuite.title} · 仓库 {selectedSuite.repo_path} · 基线{" "}
               {selectedSuite.base_ref} · 内容 hash{" "}
               <code>{selectedSuite.content_hash?.slice(0, 12)}…</code>
+              {selectedSuite.calibration?.required ? (
+                <span className="ml-2 font-medium text-foreground">
+                  · {selectedSuite.calibration.calibrated_count}/{selectedSuite.calibration.case_count} 已校准
+                </span>
+              ) : null}
+              {selectedSuite.calibration?.required ? (
+                <span className="mt-2 block">
+                  {selectedSuite.calibration.cases
+                    .map((caseStatus) => `${caseStatus.case_id}：${caseStatus.calibrated ? "校准通过" : "未校准"}`)
+                    .join("；")}
+                </span>
+              ) : null}
+              {selectedSuite.calibration?.required ? (
+                <span className="mt-1 block" data-testid="evaluation-suite-calibration-summary">
+                  校准状态：{selectedSuite.calibration.calibrated_count}/{selectedSuite.calibration.case_count} 已校准
+                </span>
+              ) : null}
               {(suites ?? [])
                 .filter((entry) => !entry.valid)
                 .map((entry) => (
@@ -320,21 +368,24 @@ export default function EvaluationsPage() {
                       <Checkbox
                         className="mt-0.5"
                         checked={executionPresetNames.includes(preset.name)}
-                        onCheckedChange={() =>
-                          setExecutionPresetNames((current) =>
-                            toggle(current, preset.name)
-                          )
-                        }
+                        onCheckedChange={() => toggleExecutionPreset(preset.name)}
                         aria-label={`执行预设 ${preset.name}`}
                       />
                       <span>
                         {preset.name}
+                        {preset.kind === "calibration" ? (
+                          <Badge variant="supervising" className="ml-2 text-[10px]">
+                            校准用 · 不调用模型
+                          </Badge>
+                        ) : null}
                         <span className="block text-xs text-muted-foreground">
-                          agent {preset.agent} · model {preset.model ?? "跟随默认"}
+                          {preset.kind === "calibration"
+                            ? "不改动 / 应用原始修复"
+                            : `agent ${preset.agent ?? "?"} · model ${preset.model ?? "跟随默认"}`}
                           {preset.reasoning_effort
                             ? ` · effort ${preset.reasoning_effort}`
                             : ""}
-                          {" · 费用 unknown（未接费用源）"}
+                          {preset.kind !== "calibration" ? " · 费用 unknown（未接费用源）" : ""}
                         </span>
                       </span>
                     </li>
@@ -360,7 +411,7 @@ export default function EvaluationsPage() {
                       <Checkbox
                         className="mt-0.5"
                         checked={judgePresetNames.includes(preset.name)}
-                        disabled={!preset.available}
+                        disabled={!preset.available || isCalibrationRun}
                         onCheckedChange={() =>
                           setJudgePresetNames((current) =>
                             toggle(current, preset.name)
@@ -391,16 +442,50 @@ export default function EvaluationsPage() {
             </div>
           </div>
 
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-4">
+            <label className="flex items-center gap-2 text-sm" htmlFor="evaluation-repeats">
+              重复次数
+              <NativeSelect
+                id="evaluation-repeats"
+                className="h-8 min-w-20"
+                value={repeats}
+                onChange={(event) => setRepeats(Number(event.target.value))}
+              >
+                {[1, 2, 3, 4, 5]
+                  .filter((count) => !isCalibrationRun || count >= 3)
+                  .map((count) => (
+                    <option key={count} value={count}>{count}</option>
+                  ))}
+              </NativeSelect>
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={includeHoldout || isCalibrationRun}
+                disabled={isCalibrationRun}
+                onCheckedChange={(checked) => setIncludeHoldout(checked === true)}
+                aria-label="包含留出集"
+              />
+              包含留出集
+            </label>
+            {isCalibrationRun && (
+              <span className="text-xs text-muted-foreground">
+                校准自动包含开发集与留出集
+              </span>
+            )}
             <p className="text-xs text-muted-foreground">
-              矩阵上限 32 单元（cases × 执行预设）；agent 超时{" "}
+              预计候选执行 {estimatedCandidateExecutions} 次（上限 {executionLimit}）；agent 超时{" "}
               {presetOptions?.agent_timeout_seconds ?? "—"}s，评审超时{" "}
               {presetOptions?.judge_timeout_seconds ?? "—"}s。
             </p>
             <Button
               data-testid="evaluation-create"
               disabled={
-                busy || !suiteId || executionPresetNames.length === 0
+                busy ||
+                !suiteId ||
+                executionPresetNames.length === 0 ||
+                (isCalibrationRun &&
+                  (!executionPresetNames.includes("@noop") ||
+                    !executionPresetNames.includes("@gold")))
               }
               onClick={() => void create()}
             >

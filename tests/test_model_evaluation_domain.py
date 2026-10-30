@@ -360,7 +360,7 @@ def test_build_run_snapshot_fail_fast_aggregates_problems() -> None:
 
 def test_build_run_snapshot_rejects_matrix_over_ceiling() -> None:
     suite = _suite()
-    with pytest.raises(evaluation_rules.EvaluationValidationError, match="矩阵规模"):
+    with pytest.raises(evaluation_rules.EvaluationValidationError, match="预计候选执行"):
         evaluation_rules.build_run_snapshot(
             **_snapshot_kwargs(
                 suite=suite,

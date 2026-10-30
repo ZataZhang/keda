@@ -1,0 +1,470 @@
+diff --git a/src/backend/core/agent/memory/_composition.py b/src/backend/core/agent/memory/_composition.py
+index 2a903b1f..97456852 100644
+--- a/src/backend/core/agent/memory/_composition.py
++++ b/src/backend/core/agent/memory/_composition.py
+@@ -75,0 +76,3 @@ def _build_short_term_impl(worktree_path: Path, memory_config: "MemoryConfig"):
++        short_term_base_dir=memory_config.short_term_base_dir,
++        short_term_repository_identity=memory_config.short_term_repository_identity,
++        legacy_short_term_base_dirs=memory_config.legacy_short_term_base_dirs,
+@@ -78 +81,5 @@ def _build_short_term_impl(worktree_path: Path, memory_config: "MemoryConfig"):
+-    return bundle.short_term(paths["short_term_base"])
++    return bundle.short_term(
++        paths["short_term_base"],
++        repository_identity=paths["short_term_repository_identity"],
++        legacy_base_dirs=paths["legacy_short_term_base_dirs"],
++    )
+diff --git a/src/backend/core/agent/memory/protocols.py b/src/backend/core/agent/memory/protocols.py
+index e92a06ca..0e6e41b4 100644
+--- a/src/backend/core/agent/memory/protocols.py
++++ b/src/backend/core/agent/memory/protocols.py
+@@ -22,0 +23,2 @@ class ShortTermAttempt:
++    detail_log_path: str = ""
++    detail_summary: str = ""
+@@ -37,0 +40,2 @@ class ShortTermContextPayload:
++    final_solution_log_path: str = ""
++    final_solution_summary: str = ""
+diff --git a/src/backend/core/shared/models/agent_runner.py b/src/backend/core/shared/models/agent_runner.py
+index 08b1bf23..b35be566 100644
+--- a/src/backend/core/shared/models/agent_runner.py
++++ b/src/backend/core/shared/models/agent_runner.py
+@@ -614 +614 @@ class MemoryConfig:
+-    """Local memory and skill distillation configuration.
++    """Agent Runner 的本地记忆与 Skill 蒸馏配置。
+@@ -621,0 +622,3 @@ class MemoryConfig:
++    - 默认 ``base_dir`` 字符串 ``.kedacode/memory`` 仅把短期记忆放到
++      Keda 用户状态目录；长期记忆仍保留在仓库。显式自定义 ``base_dir``
++      同时决定短期与长期记忆路径。
+@@ -623,2 +626 @@ class MemoryConfig:
+-      锚点下；运营者把目录移出仓库外（防 ``git clean -fdx`` 误删或
+-      多机共享）只需把相对路径改为绝对路径即可。
++      锚点下。
+@@ -633 +635 @@ class MemoryConfig:
+-        base_dir: 短期/长期记忆的相对或绝对目录；详见上方"锚点语义"。
++        base_dir: 长期记忆目录，以及自定义时的短期记忆目录；详见上方"锚点语义"。
+@@ -647,0 +650,3 @@ class MemoryConfig:
++        short_term_base_dir: 短期记忆的运行期路径；由 engines 工厂锚定，不从用户配置直接读取。
++        short_term_repository_identity: 当前主检出仓库的稳定本地身份，仅用于短期记忆隔离。
++        legacy_short_term_base_dirs: 只读兼容旧短期记忆的仓库内路径列表。
+@@ -658,0 +664,4 @@ class MemoryConfig:
++    # 以下字段只由 engines 工厂在仓库解析时填入，不映射到 config.toml。
++    short_term_base_dir: str | None = field(default=None, repr=False, compare=False)
++    short_term_repository_identity: str | None = field(default=None, repr=False, compare=False)
++    legacy_short_term_base_dirs: tuple[str, ...] = field(default=(), repr=False, compare=False)
+diff --git a/src/backend/engines/agent_runner/factory_repository_resolver.py b/src/backend/engines/agent_runner/factory_repository_resolver.py
+index 6b64e4de..39c3508a 100644
+--- a/src/backend/engines/agent_runner/factory_repository_resolver.py
++++ b/src/backend/engines/agent_runner/factory_repository_resolver.py
+@@ -13,0 +14 @@ import dataclasses
++import hashlib
+@@ -422,0 +424,2 @@ def _anchor_memory_config(
++    - 默认 ``base_dir`` 只让短期记忆移到本机状态目录；长期记忆仍留在仓库中。
++      显式自定义 ``base_dir`` 继续同时控制短期与长期记忆。
+@@ -427,2 +430,3 @@ def _anchor_memory_config(
+-    resolved_base = _resolve_anchor_path(memory.base_dir, repo_root_path)
+-    resolved_drafts = _resolve_anchor_path(memory.skill_drafts_dir, repo_root_path)
++    canonical_repo_root = repo_root_path.resolve()
++    resolved_base = _resolve_anchor_path(memory.base_dir, canonical_repo_root)
++    resolved_drafts = _resolve_anchor_path(memory.skill_drafts_dir, canonical_repo_root)
+@@ -430 +434,2 @@ def _anchor_memory_config(
+-        _resolve_anchor_path(directory, repo_root_path) for directory in memory.promoted_skills_dirs
++        _resolve_anchor_path(directory, canonical_repo_root)
++        for directory in memory.promoted_skills_dirs
+@@ -431,0 +437,22 @@ def _anchor_memory_config(
++    if memory.short_term_base_dir is not None:
++        resolved_short_term_base = _resolve_anchor_path(
++            memory.short_term_base_dir,
++            canonical_repo_root,
++        )
++    elif memory.base_dir == ".kedacode/memory":
++        resolved_short_term_base = str(product_identity.state_home() / "memory")
++    else:
++        # 自定义 base_dir 仍是短期记忆的显式落点；默认值只改变短期记忆的位置。
++        resolved_short_term_base = resolved_base
++    repository_local_legacy_base = str(canonical_repo_root / ".kedacode" / "memory")
++    if memory.base_dir == ".kedacode/memory":
++        default_legacy_base_dirs = (repository_local_legacy_base,)
++    else:
++        # 自定义路径上的旧 repo_id 分区也要可读；旧默认仓库路径继续只读兼容。
++        default_legacy_base_dirs = (resolved_base, repository_local_legacy_base)
++    legacy_short_term_base_dirs = memory.legacy_short_term_base_dirs or tuple(
++        dict.fromkeys(default_legacy_base_dirs)
++    )
++    short_term_repository_identity = hashlib.sha256(
++        str(canonical_repo_root).encode("utf-8")
++    ).hexdigest()
+@@ -436,0 +464,3 @@ def _anchor_memory_config(
++        short_term_base_dir=resolved_short_term_base,
++        short_term_repository_identity=short_term_repository_identity,
++        legacy_short_term_base_dirs=legacy_short_term_base_dirs,
+diff --git a/src/backend/infrastructure/memory/adapters.py b/src/backend/infrastructure/memory/adapters.py
+index 275626e9..ef3f780f 100644
+--- a/src/backend/infrastructure/memory/adapters.py
++++ b/src/backend/infrastructure/memory/adapters.py
+@@ -23 +23,7 @@ class MemoryStores(Protocol):
+-    def short_term(self, base_dir: str | Path) -> object: ...
++    def short_term(
++        self,
++        base_dir: str | Path,
++        *,
++        repository_identity: str | None = None,
++        legacy_base_dirs: Iterable[str | Path] = (),
++    ) -> object: ...
+@@ -41,2 +47,14 @@ def build_memory_stores() -> MemoryStores:
+-        def short_term(self, base_dir):
+-            return _ShortTermAdapter(ShortTermMemoryStore(base_dir))
++        def short_term(
++            self,
++            base_dir,
++            *,
++            repository_identity=None,
++            legacy_base_dirs=(),
++        ):
++            return _ShortTermAdapter(
++                ShortTermMemoryStore(
++                    base_dir,
++                    repository_identity=repository_identity,
++                    legacy_base_dirs=legacy_base_dirs,
++                )
++            )
+@@ -58,0 +77,3 @@ def resolve_memory_paths(
++    short_term_base_dir: str | None = None,
++    short_term_repository_identity: str | None = None,
++    legacy_short_term_base_dirs: Iterable[str] = (),
+@@ -79 +100,2 @@ def resolve_memory_paths(
+-        "promoted_skills_dirs"}``，所有路径都是 :class:`pathlib.Path`。
++        "promoted_skills_dirs"}``，以及短期记忆身份和只读旧目录。路径为
++        :class:`pathlib.Path`；未设置身份时保留旧的 ``repo_id`` 分区语义。
+@@ -88 +110,5 @@ def resolve_memory_paths(
+-        "short_term_base": anchor(base_dir),
++        "short_term_base": anchor(short_term_base_dir or base_dir),
++        "short_term_repository_identity": short_term_repository_identity,
++        "legacy_short_term_base_dirs": tuple(
++            anchor(directory) for directory in legacy_short_term_base_dirs
++        ),
+@@ -121,0 +148,2 @@ class _ShortTermAdapter:
++                detail_log_path=a.detail_log_path,
++                detail_summary=a.detail_summary,
+@@ -134,0 +163,2 @@ class _ShortTermAdapter:
++            final_solution_log_path=payload.final_solution_log_path,
++            final_solution_summary=payload.final_solution_summary,
+@@ -283,0 +314,2 @@ def _short_term_context_to_protocol(context):
++    payload.final_solution_log_path = context.final_solution_log_path
++    payload.final_solution_summary = context.final_solution_summary
+@@ -297,0 +330,2 @@ def _attempt_to_protocol(record):
++    attempt.detail_log_path = record.detail_log_path
++    attempt.detail_summary = record.detail_summary
+diff --git a/src/backend/infrastructure/memory/short_term_store.py b/src/backend/infrastructure/memory/short_term_store.py
+index 8c800429..e543dfb4 100644
+--- a/src/backend/infrastructure/memory/short_term_store.py
++++ b/src/backend/infrastructure/memory/short_term_store.py
+@@ -3,5 +3,3 @@
+-短期记忆按 ``<base_dir>/short_term/<repo_id>/<issue_number>/context.json`` 组织；
+-文件内容是结构化 JSON 上下文，包含任务摘要、尝试轮次、最终成功方案、关键文件路径。
+-所有文件 I/O 显式使用 ``encoding="utf-8"``，写入操作通过共享的
+-``infrastructure/memory/_atomic_io.atomic_write_text`` 完成，避免
+-并发场景下产生半写损坏文件。
++短期记忆按仓库身份与 Issue 分区。上下文 JSON 只保留有界摘要和相对详情引用；完整的
++attempt detail 放在同一 Issue 目录下的 ``attempt-details/`` 日志文件中。读取时会安全
++地加载日志并还原完整 detail，供 Skill 蒸馏等消费者使用。旧格式仍可读取。
+@@ -11,0 +10 @@ from __future__ import annotations
++import hashlib
+@@ -15 +14,2 @@ from datetime import datetime, timezone
+-from pathlib import Path
++from pathlib import Path, PurePosixPath
++from typing import Iterable
+@@ -18,0 +19,2 @@ from ._atomic_io import atomic_write_text
++_SUMMARY_MAX_LENGTH = 240
++
+@@ -22 +24 @@ class ShortTermAttemptRecord:
+-    """短期记忆中一次尝试的精简记录。"""
++    """短期记忆中一次尝试的记录。"""
+@@ -27,0 +30,2 @@ class ShortTermAttemptRecord:
++    detail_log_path: str = ""
++    detail_summary: str = ""
+@@ -42,0 +47,2 @@ class ShortTermMemoryContext:
++    final_solution_log_path: str = ""
++    final_solution_summary: str = ""
+@@ -47 +53,10 @@ class ShortTermMemoryContext:
+-        payload["attempts"] = [asdict(record) for record in self.attempts]
++        payload["attempts"] = [
++            {
++                "attempt_number": record.attempt_number,
++                "failure_type": record.failure_type,
++                "detail": record.detail,
++                "recovered": record.recovered,
++                "detail_log_path": record.detail_log_path,
++            }
++            for record in self.attempts
++        ]
+@@ -48,0 +64 @@ class ShortTermMemoryContext:
++        payload.pop("final_solution_summary", None)
+@@ -53 +69 @@ class ShortTermMemoryContext:
+-        """Rehydrate from a persisted dict."""
++        """Rehydrate a current or legacy persisted dict."""
+@@ -55 +71,14 @@ class ShortTermMemoryContext:
+-        attempts = tuple(ShortTermAttemptRecord(**record) for record in attempts_raw)
++        attempts = [
++            ShortTermAttemptRecord(
++                attempt_number=int(record.get("attempt_number", 0)),
++                failure_type=str(record.get("failure_type", "")),
++                detail=str(record.get("detail", "")),
++                recovered=bool(record.get("recovered", False)),
++                detail_log_path=str(record.get("detail_log_path", "")),
++                detail_summary=(
++                    str(record.get("detail", "")) if record.get("detail_log_path") else ""
++                ),
++            )
++            for record in attempts_raw
++            if isinstance(record, dict)
++        ]
+@@ -56,0 +86 @@ class ShortTermMemoryContext:
++        final_solution_log_path = str(payload.get("final_solution_log_path", ""))
+@@ -63 +93 @@ class ShortTermMemoryContext:
+-            attempts=list(attempts),
++            attempts=attempts,
+@@ -66,0 +97,4 @@ class ShortTermMemoryContext:
++            final_solution_log_path=final_solution_log_path,
++            final_solution_summary=(
++                str(payload.get("final_solution", "")) if final_solution_log_path else ""
++            ),
+@@ -73 +107,7 @@ class ShortTermMemoryStore:
+-    def __init__(self, base_dir: str | Path) -> None:
++    def __init__(
++        self,
++        base_dir: str | Path,
++        *,
++        repository_identity: str | None = None,
++        legacy_base_dirs: Iterable[str | Path] = (),
++    ) -> None:
+@@ -74,0 +115,2 @@ class ShortTermMemoryStore:
++        self._repository_identity = repository_identity
++        self._legacy_base_dirs = tuple(Path(directory) for directory in legacy_base_dirs)
+@@ -81 +123,8 @@ class ShortTermMemoryStore:
+-    def _context_path(self, repo_id: str, issue_number: int) -> Path:
++    def _context_path(
++        self,
++        repository_key: str,
++        issue_number: int,
++        *,
++        base_dir: Path | None = None,
++    ) -> Path:
++        selected_base_dir = self._base_dir if base_dir is None else base_dir
+@@ -83 +132 @@ class ShortTermMemoryStore:
+-            self._base_dir
++            selected_base_dir
+@@ -85 +134 @@ class ShortTermMemoryStore:
+-            / _safe_segment(repo_id)
++            / _safe_segment(repository_key)
+@@ -98,3 +147,2 @@ class ShortTermMemoryStore:
+-        每次写入都会刷新 ``updated_at``。文件通过 ``tmp + os.replace`` 原子落盘：
+-        先在同一父目录写入临时文件，再替换目标路径，避免并发写入留下半个文件；
+-        并发冲突时采用最后写入者生效。
++        每次写入都会刷新 ``updated_at``。完整 attempt detail 以内容哈希命名的 UTF-8
++        日志独立保存；上下文 JSON 只写摘要和相对引用，并通过共享原子写入器落盘。
+@@ -102 +150,5 @@ class ShortTermMemoryStore:
+-        path = self._context_path(repo_id, issue_number)
++        path = self._context_path(
++            self._repository_identity or repo_id,
++            issue_number,
++        )
++        issue_dir = path.parent
+@@ -103,0 +156,12 @@ class ShortTermMemoryStore:
++        payload["summary"] = _compact_summary(memory_context.summary)
++        payload["attempts"] = [
++            self._attempt_payload(issue_dir, attempt) for attempt in memory_context.attempts
++        ]
++        final_solution_log_path, final_solution_summary = self._detail_payload(
++            issue_dir,
++            detail=memory_context.final_solution,
++            prior_log_path=memory_context.final_solution_log_path,
++            prior_summary=memory_context.final_solution_summary,
++        )
++        payload["final_solution"] = final_solution_summary
++        payload["final_solution_log_path"] = final_solution_log_path
+@@ -107,0 +172,40 @@ class ShortTermMemoryStore:
++    def _attempt_payload(
++        self,
++        issue_dir: Path,
++        attempt_record: ShortTermAttemptRecord,
++    ) -> dict[str, object]:
++        """持久化单条 attempt 的短摘要和完整详情引用。"""
++        detail_log_path, detail_summary = self._detail_payload(
++            issue_dir,
++            detail=attempt_record.detail,
++            prior_log_path=attempt_record.detail_log_path,
++            prior_summary=attempt_record.detail_summary,
++        )
++        return {
++            "attempt_number": attempt_record.attempt_number,
++            "failure_type": attempt_record.failure_type,
++            "detail": detail_summary,
++            "recovered": attempt_record.recovered,
++            "detail_log_path": detail_log_path,
++        }
++
++    def _detail_payload(
++        self,
++        issue_dir: Path,
++        *,
++        detail: str,
++        prior_log_path: str,
++        prior_summary: str,
++    ) -> tuple[str, str]:
++        """写入完整详情，或保留不可用日志的安全摘要与引用。"""
++        detail_summary = _compact_summary(prior_summary or detail)
++        if prior_summary and detail == prior_summary:
++            safe_reference = _safe_detail_reference(issue_dir, prior_log_path)
++            return (prior_log_path if safe_reference is not None else ""), detail_summary
++        if not detail:
++            safe_reference = _safe_detail_reference(issue_dir, prior_log_path)
++            return (prior_log_path if safe_reference is not None else ""), detail_summary
++        detail_path = _write_detail_log(issue_dir, detail)
++        relative_reference = detail_path.relative_to(issue_dir).as_posix()
++        return relative_reference, _compact_summary(detail)
++
+@@ -109,9 +213,4 @@ class ShortTermMemoryStore:
+-        """按 registry id 读取短期记忆，并兼容旧版 worktree 分区键。"""
+-        path = self._context_path(repo_id, issue_number)
+-        if not path.is_file():
+-            # 旧版把 worktree 名 issue-N 当作 repo_id；后续 save 会写入稳定仓库分区。
+-            legacy_repo_id = f"issue-{int(issue_number)}"
+-            legacy_path = self._context_path(legacy_repo_id, issue_number)
+-            if not legacy_path.is_file():
+-                return None
+-            path = legacy_path
++        """按仓库身份读取短期记忆，并兼容仓库内旧路径与旧分区键。"""
++        path = self._find_context_path(repo_id, issue_number)
++        if path is None:
++            return None
+@@ -120 +219 @@ class ShortTermMemoryStore:
+-        except OSError:
++        except (OSError, UnicodeError):
+@@ -129,0 +229 @@ class ShortTermMemoryStore:
++        self._hydrate_details(path.parent, memory_context)
+@@ -131,0 +232,123 @@ class ShortTermMemoryStore:
++    def _find_context_path(self, repo_id: str, issue_number: int) -> Path | None:
++        """查找新分区或允许读取的旧仓库内分区。"""
++        repository_key = self._repository_identity or repo_id
++        primary_path = self._context_path(repository_key, issue_number)
++        if primary_path.is_file():
++            return primary_path
++
++        if self._repository_identity is None:
++            legacy_issue_key_path = self._context_path(f"issue-{issue_number}", issue_number)
++            return legacy_issue_key_path if legacy_issue_key_path.is_file() else None
++
++        legacy_repository_keys = (repo_id, f"issue-{issue_number}")
++        for legacy_base_dir in self._legacy_base_dirs:
++            for legacy_repository_key in legacy_repository_keys:
++                legacy_path = self._context_path(
++                    legacy_repository_key,
++                    issue_number,
++                    base_dir=legacy_base_dir,
++                )
++                if legacy_path.is_file():
++                    return legacy_path
++        return None
++
++    def _hydrate_details(
++        self,
++        issue_dir: Path,
++        memory_context: ShortTermMemoryContext,
++    ) -> None:
++        """安全地读取详情引用；缺失或越界时保留 JSON 摘要。"""
++        for attempt_record in memory_context.attempts:
++            stored_summary = attempt_record.detail
++            had_reference = bool(attempt_record.detail_log_path)
++            detail_text, normalized_reference = _read_detail_log(
++                issue_dir,
++                attempt_record.detail_log_path,
++                stored_summary,
++            )
++            attempt_record.detail = detail_text
++            attempt_record.detail_log_path = normalized_reference
++            attempt_record.detail_summary = stored_summary if had_reference else ""
++
++        stored_solution_summary = memory_context.final_solution
++        had_solution_reference = bool(memory_context.final_solution_log_path)
++        final_solution_text, normalized_reference = _read_detail_log(
++            issue_dir,
++            memory_context.final_solution_log_path,
++            stored_solution_summary,
++        )
++        memory_context.final_solution = final_solution_text
++        memory_context.final_solution_log_path = normalized_reference
++        memory_context.final_solution_summary = (
++            stored_solution_summary if had_solution_reference else ""
++        )
++
++
++def _read_detail_log(
++    issue_dir: Path,
++    detail_log_reference: str,
++    fallback_summary: str,
++) -> tuple[str, str]:
++    """读取安全的相对日志引用，失败时返回原摘要。"""
++    if not detail_log_reference:
++        return fallback_summary, ""
++    detail_path = _safe_detail_reference(issue_dir, detail_log_reference)
++    if detail_path is None:
++        return fallback_summary, ""
++    try:
++        detail_text = detail_path.read_text(encoding="utf-8")
++    except (OSError, UnicodeError):
++        return fallback_summary, detail_log_reference
++    return detail_text, detail_log_reference
++
++
++def _safe_detail_reference(issue_dir: Path, detail_log_reference: str) -> Path | None:
++    """解析相对日志引用，并拒绝目录穿越或符号链接越界。"""
++    if not detail_log_reference or "\\" in detail_log_reference:
++        return None
++    relative_path = PurePosixPath(detail_log_reference)
++    if relative_path.is_absolute() or any(part in ("", ".", "..") for part in relative_path.parts):
++        return None
++    detail_path = issue_dir.joinpath(*relative_path.parts)
++    try:
++        resolved_base_dir = issue_dir.parents[2].resolve()
++        resolved_issue_dir = issue_dir.resolve()
++        resolved_detail_path = detail_path.resolve(strict=False)
++    except OSError:
++        return None
++    if not resolved_issue_dir.is_relative_to(resolved_base_dir):
++        return None
++    if not resolved_detail_path.is_relative_to(resolved_issue_dir):
++        return None
++    return detail_path
++
++
++def _write_detail_log(issue_dir: Path, detail_text: str) -> Path:
++    """原子写入内容寻址的 UTF-8 attempt detail 日志。"""
++    detail_digest = hashlib.sha256(detail_text.encode("utf-8")).hexdigest()
++    relative_reference = f"attempt-details/{detail_digest}.log"
++    detail_path = _safe_detail_reference(issue_dir, relative_reference)
++    if detail_path is None:
++        raise OSError("Attempt detail log path escaped its Issue directory.")
++    atomic_write_text(detail_path, detail_text)
++    return detail_path
++
++
++def _compact_summary(detail_text: str) -> str:
++    """从详情中选择首条有效诊断行，并限制摘要长度。"""
++    summary_line = next(
++        (line.strip() for line in detail_text.splitlines() if _is_summary_line(line)),
++        "",
++    )
++    if len(summary_line) > _SUMMARY_MAX_LENGTH:
++        return summary_line[: _SUMMARY_MAX_LENGTH - 1] + "…"
++    return summary_line
++
++
++def _is_summary_line(line: str) -> bool:
++    """跳过空行、代码围栏和 stdout/stderr 标签。"""
++    normalized_line = line.strip()
++    if not normalized_line or normalized_line.startswith("```"):
++        return False
++    return normalized_line.casefold() not in {"stdout:", "stderr:"}
++
+@@ -135,0 +359,2 @@ def _safe_segment(value: str) -> str:
++    if cleaned in {".", ".."}:
++        cleaned = cleaned.replace(".", "_")

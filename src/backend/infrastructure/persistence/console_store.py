@@ -5,7 +5,7 @@
 - 使用 stdlib ``sqlite3`` 而非 SQLAlchemy/alembic：CLI 直跑 ``kc run``
   也要写运行记录，不能要求 PostgreSQL 常驻；本地单文件零依赖。
 - WAL + busy_timeout 容忍多个 runner 进程并发收尾写库。
-- 通过 ``PRAGMA user_version`` 做就地迁移（当前版本 15：v5 新增
+- 通过 ``PRAGMA user_version`` 做就地迁移（当前版本 16：v5 新增
   ``prd_lifecycle_runs`` 与 ``prd_lifecycle_events`` 两张 PRD 生命周期账本表；
   v6 为 ``attempt_records`` 附加可空 ``preset`` / ``model`` 观测列；
   v7 把队列与设置两张表按新功能名重建；v8 为 ``prd_lifecycle_events`` 附加
@@ -15,7 +15,8 @@
   ``attempt_records`` 附加失败阶段；v12 附加生命周期阶段耗时；v13 为运行历史
   追加可空的 Issue 标题与 URL 快照；v14 新增单行模型 token 价格设置表；
   v15 新增模型评测三表 ``evaluation_run`` / ``evaluation_result`` /
-  ``evaluation_score``）。
+  ``evaluation_score``；v16 为评测 run 增加重复次数与逐题冻结基线，结果表增加
+  ``repeat_index`` 并按重复序号重建唯一约束）。
 - 旁路记录（运行历史 / 审计 / attempt）的写入失败不允许向上抛出阻断
   runner 主流程，降级为日志警告；而 dashboard 事实读取路径（监控快照
   与同步设置）的写入失败必须抛给调用方，避免"刷新成功但数据没更新"。
@@ -39,6 +40,7 @@ from typing import cast
 from backend.infrastructure.persistence.console_store_evaluation import (
     CREATE_EVALUATION_INDEXES,
     CREATE_EVALUATION_RESULT,
+    CREATE_EVALUATION_RESULT_V16,
     CREATE_EVALUATION_RUN,
     CREATE_EVALUATION_SCORE,
     EvaluationStoreMixin,
@@ -65,7 +67,7 @@ from backend.infrastructure.persistence.console_store_takeover import (
 _logger = logging.getLogger(__name__)
 
 
-_SCHEMA_VERSION = 15
+_SCHEMA_VERSION = 16
 
 _RUN_V13_ADD_ISSUE_TITLE = "ALTER TABLE run_records ADD COLUMN issue_title TEXT"
 _RUN_V13_ADD_ISSUE_URL = "ALTER TABLE run_records ADD COLUMN issue_url TEXT"
@@ -408,6 +410,47 @@ class SqliteConsoleStore(
             connection.execute(CREATE_EVALUATION_SCORE)
             for index_statement in CREATE_EVALUATION_INDEXES:
                 connection.execute(index_statement)
+        if current_version < 16:
+            run_columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(evaluation_run)").fetchall()
+            }
+            if "repeats" not in run_columns:
+                connection.execute(
+                    "ALTER TABLE evaluation_run ADD COLUMN repeats INTEGER NOT NULL DEFAULT 1"
+                )
+            if "case_bases_json" not in run_columns:
+                connection.execute(
+                    "ALTER TABLE evaluation_run ADD COLUMN case_bases_json TEXT NOT NULL DEFAULT '{}'"
+                )
+            result_columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(evaluation_result)").fetchall()
+            }
+            if "repeat_index" not in result_columns:
+                versioned_table_sql = CREATE_EVALUATION_RESULT_V16.replace(
+                    "CREATE TABLE IF NOT EXISTS evaluation_result (",
+                    "CREATE TABLE evaluation_result_v16 (",
+                    1,
+                )
+                connection.execute(versioned_table_sql)
+                existing_result_columns = (
+                    "result_id, run_id, case_id, execution_preset_id, "
+                    "execution_model_snapshot_json, base_tree_hash, worktree_path, "
+                    "result_status, check_status, check_recipe, check_exit_code, "
+                    "check_output_summary, agent_summary, duration_seconds, "
+                    "usage_summary_json, cost_status, diff_hash, error, created_at, updated_at"
+                )
+                connection.execute(
+                    "INSERT INTO evaluation_result_v16 ("
+                    f"{existing_result_columns}, repeat_index) "
+                    "SELECT "
+                    f"{existing_result_columns}, 0 FROM evaluation_result"
+                )
+                connection.execute("DROP TABLE evaluation_result")
+                connection.execute("ALTER TABLE evaluation_result_v16 RENAME TO evaluation_result")
+                for index_statement in CREATE_EVALUATION_INDEXES:
+                    connection.execute(index_statement)
         connection.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
         connection.commit()
 

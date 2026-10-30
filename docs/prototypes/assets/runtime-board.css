@@ -133,3 +133,55 @@ progress.mini-progress::-moz-progress-bar { border-radius:999px; background:#735
   .score-dimensions { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .payload-preview pre { max-height:180px; }
 }
+
+/* M13 可复现基线视图：配置重复次数，并把稳定性和执行故障分开展示。 */
+.evaluation-baseline-page { display:none; }
+.evaluation-baseline-page.is-visible { display:block; }
+.evaluation-baseline-status { display:grid; grid-template-columns:auto auto; align-items:center; gap:3px 8px; padding:10px 12px; border:1px solid #d7eadb; border-radius:10px; background:#f3faf4; }
+.evaluation-baseline-status strong { font-size:11px; }
+.evaluation-baseline-status small { grid-column:2; color:#54715a; font-size:9px; }
+.baseline-status-dot { grid-row:1 / span 2; width:8px; height:8px; border-radius:50%; background:#2c965a; box-shadow:0 0 0 3px #dff2e4; }
+.evaluation-baseline-card { margin-top:14px; padding:16px; border:1px solid var(--border); border-radius:13px; background:#fff; box-shadow:0 2px 8px rgb(45 37 59 / 3%); }
+.baseline-card-heading { display:flex; align-items:center; justify-content:space-between; gap:14px; }
+.baseline-card-heading>div:first-child strong,.baseline-card-heading>div:first-child span { display:block; }
+.baseline-card-heading>div:first-child strong { font-size:12px; }
+.baseline-card-heading>div:first-child span { margin-top:4px; color:var(--muted); font-size:10px; }
+.baseline-mode { display:flex; gap:3px; padding:3px; border-radius:8px; background:#f1eef4; }
+.baseline-mode button { padding:6px 9px; border:0; border-radius:6px; background:transparent; color:var(--muted); font-size:9px; cursor:pointer; }
+.baseline-mode button.is-active { background:white; color:#4f37c9; box-shadow:0 1px 4px rgb(34 25 49 / 10%); font-weight:750; }
+.baseline-form-grid { display:grid; grid-template-columns:minmax(190px,1.5fr) minmax(110px,.65fr) minmax(170px,1fr) minmax(160px,1fr); align-items:end; gap:10px; margin-top:14px; }
+.baseline-form-grid>label:not(.baseline-holdout) { display:grid; gap:5px; color:var(--muted); font-size:9px; }
+.baseline-form-grid select { min-width:0; height:34px; padding:0 9px; border:1px solid var(--border); border-radius:7px; background:#fff; color:#403b48; font:inherit; font-size:10px; }
+.baseline-holdout { display:flex; min-height:34px; align-items:center; gap:7px; color:#403b48; font-size:9px; }
+.baseline-holdout input,.baseline-calibration-presets input { accent-color:#5d48d7; }
+.baseline-calibration-presets { display:flex; flex-wrap:wrap; gap:12px; margin-top:13px; padding:10px 12px; border:1px solid var(--border); border-radius:9px; }
+.baseline-calibration-presets legend { padding:0 5px; color:var(--muted); font-size:9px; }
+.baseline-calibration-presets label { display:flex; align-items:center; gap:6px; font-size:10px; }
+.baseline-calibration-presets small { color:var(--muted); font-size:9px; }
+.baseline-calibration-proof { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:11px; padding:10px 12px; border-radius:8px; background:#f3faf4; color:#315e3c; }
+.baseline-calibration-proof>span { color:#52715a; font-size:9px; }
+.baseline-calibration-proof>strong { padding:4px 7px; border:1px solid #d5ead8; border-radius:999px; background:white; font-size:9px; }
+.baseline-calibration-proof>small { margin-left:auto; color:#54715a; font-size:9px; }
+.baseline-create-row { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; margin-top:13px; padding-top:12px; border-top:1px solid #eeecf1; }
+.baseline-create-row p { color:#403b48; font-size:10px; }.baseline-create-row p strong { color:#4f37c9; font-size:14px; }.baseline-create-row p small { color:var(--muted); font-size:9px; }
+.baseline-create-row .primary-button { padding:8px 12px; border:0; border-radius:8px; background:#5d48d7; color:white; font-size:10px; font-weight:750; }
+.baseline-feedback { margin-top:9px; color:#315e3c; font-size:10px; }
+.baseline-run-state { padding:4px 7px; border-radius:999px; background:#e8f5eb; color:#286541; font-size:9px; font-weight:750; }
+.baseline-table-wrap { margin-top:12px; overflow-x:auto; }
+.baseline-table-wrap table { min-width:690px; }
+.baseline-table-wrap th,.baseline-table-wrap td { padding:10px 9px; border-bottom:1px solid #eeecf1; text-align:left; font-size:10px; }
+.baseline-table-wrap th { color:var(--muted); font-size:9px; font-weight:650; }
+.baseline-table-wrap code { color:#494255; font-size:9px; }
+.baseline-stable,.baseline-unstable { display:inline-flex; padding:4px 7px; border-radius:999px; font-size:9px; font-weight:750; }
+.baseline-stable { background:#e7f5eb; color:#286541; }.baseline-unstable { border:1px solid #f4c98a; background:#fff7e8; color:#94600c; }
+.baseline-unstable-list { margin-top:13px; padding:11px 12px; border:1px solid #efd49e; border-radius:9px; background:#fffaf0; }
+.baseline-unstable-list>div { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.baseline-unstable-list>div strong { color:#6e4c14; font-size:10px; }.baseline-unstable-list>div span { color:#8b7551; font-size:9px; }
+.baseline-unstable-list p { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; color:#604c2c; font-size:9px; }.baseline-unstable-list p span { color:#7b684d; }
+.baseline-no-total { margin-top:9px; color:#797482; font-size:9px; }
+@media (max-width:960px) { .baseline-form-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }.baseline-calibration-proof>small { margin-left:0; } }
+@media (max-width:560px) { .baseline-card-heading { align-items:flex-start; flex-direction:column; }.baseline-mode { width:100%; }.baseline-mode button { flex:1; }.baseline-form-grid { grid-template-columns:1fr 1fr; }.baseline-form-grid>label:first-child,.baseline-agent-preset { grid-column:1/-1; }.baseline-calibration-proof { align-items:flex-start; flex-direction:column; }.baseline-create-row { align-items:stretch; flex-direction:column; }.baseline-create-row .primary-button { width:100%; }.evaluation-baseline-status { align-self:stretch; } }
+.evaluation-baseline-results { max-width:1246px; }
+.evaluation-baseline-results .baseline-card-heading { min-height:18px; }
+.evaluation-baseline-results .baseline-unstable-list { padding:11px 12px; }
+.evaluation-baseline-results .baseline-unstable-list>div { min-height:14px; }

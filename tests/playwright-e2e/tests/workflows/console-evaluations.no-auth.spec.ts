@@ -44,6 +44,8 @@ function buildRun(overrides: Record<string, unknown>): MockRun {
     manifest_hash: null,
     case_ids: ['case-a'],
     check_timeout_seconds: 60,
+    repeats: 1,
+    case_bases: { 'case-a': { base_ref: 'main', commit: 'abc123def456', tree: 'tree-demo' } },
     error: null,
     created_at: '2026-10-13T00:00:00+00:00',
     updated_at: '2026-10-13T00:00:00+00:00',
@@ -76,6 +78,7 @@ const RESULTS = [
     error: null,
     created_at: '2026-10-13T00:10:00+00:00',
     updated_at: '2026-10-13T00:11:00+00:00',
+    repeat_index: 0,
   },
   {
     result_id: 'res-2',
@@ -98,6 +101,7 @@ const RESULTS = [
     error: 'agent 超时',
     created_at: '2026-10-13T00:10:00+00:00',
     updated_at: '2026-10-13T00:25:00+00:00',
+    repeat_index: 0,
   },
 ]
 
@@ -188,7 +192,10 @@ type EvaluationState = {
  * @param page - Playwright 页面对象。
  * @returns mock 状态引用，供断言请求序列与改写应答。
  */
-async function mockEvaluationApi(page: Page): Promise<EvaluationState> {
+async function mockEvaluationApi(
+  page: Page,
+  { calibration = false }: { calibration?: boolean } = {},
+): Promise<EvaluationState> {
   const state: EvaluationState = {
     runs: [
       buildRun({ run_id: 'eval-await01', status: 'awaiting_judge_consent', manifest_hash: 'hash-await' }),
@@ -210,9 +217,16 @@ async function mockEvaluationApi(page: Page): Promise<EvaluationState> {
         content_hash: 'sha-demo',
         rubric_version: 'v1',
         check_timeout_seconds: 60,
-        cases: [
-          { case_id: 'case-a', prompt: '实现 FizzBuzz', check_recipe: 'pytest' },
-        ],
+        cases: calibration
+          ? [
+              { case_id: 'case-a', prompt: '开发题', check_recipe: 'pytest', split: 'dev' },
+              { case_id: 'case-h', prompt: '留出题', check_recipe: 'pytest', split: 'holdout' },
+            ]
+          : [
+              { case_id: 'case-a', prompt: '实现 FizzBuzz', check_recipe: 'pytest' },
+            ],
+        requires_calibration: calibration,
+        calibration: { required: calibration, calibrated_count: 0, case_count: calibration ? 2 : 1, cases: [] },
         errors: [],
       },
     ],
@@ -221,6 +235,8 @@ async function mockEvaluationApi(page: Page): Promise<EvaluationState> {
     execution_presets: [
       { name: 'alpha', agent: 'codex', model: 'gpt-a', reasoning_effort: null, cost_status: 'unknown', cost_estimate: null },
       { name: 'beta', agent: 'claude', model: 'claude-b', reasoning_effort: 'high', cost_status: 'unknown', cost_estimate: null },
+      { name: '@noop', agent: null, model: null, reasoning_effort: null, cost_status: 'unknown', cost_estimate: null, kind: 'calibration' },
+      { name: '@gold', agent: null, model: null, reasoning_effort: null, cost_status: 'unknown', cost_estimate: null, kind: 'calibration' },
     ],
     judge_presets: [
       { name: 'judge-1', agent: 'claude', model: 'model-judge', reasoning_effort: null, available: true, reason: null, cost_status: 'unknown' },
@@ -292,6 +308,14 @@ async function mockEvaluationApi(page: Page): Promise<EvaluationState> {
               ]
             : [],
         summary: awaiting || run.status === 'completed' ? AWAITING_SUMMARY : { aggregates: EMPTY_AGGREGATES, by_execution_preset: {}, status_counts: {}, valid_judge_count: 0 },
+        stability: awaiting || run.status === 'completed'
+          ? [
+              { case_id: 'case-a', execution_preset_id: 'alpha', repeat_count: 1, passed_count: 1, execution_fault_count: 0, check_failure_count: 0, stable: true },
+              { case_id: 'case-a', execution_preset_id: 'beta', repeat_count: 1, passed_count: 0, execution_fault_count: 1, check_failure_count: 0, stable: null },
+            ]
+          : [],
+        unstable_cases: [],
+        calibration: { required: false, calibrated_count: 0, case_count: 1, cases: [] },
         payload_state: {
           is_active: ['created', 'queued', 'running', 'awaiting_judge_consent', 'judging'].includes(run.status),
           awaiting_consent: awaiting,
@@ -355,6 +379,29 @@ async function openEvaluationsPage(page: Page) {
 }
 
 test.describe('Console 模型评测页', () => {
+  test('校准候选自动包含留出集并显示完整矩阵', async ({ page }) => {
+    const state = await mockEvaluationApi(page, { calibration: true })
+    await openEvaluationsPage(page)
+    await page.selectOption('#evaluation-suite-select', 'demo-suite')
+    await page.getByRole('checkbox', { name: '执行预设 @noop' }).click()
+
+    const holdoutCheckbox = page.getByRole('checkbox', { name: '包含留出集' })
+    await expect(holdoutCheckbox).toBeChecked()
+    await expect(holdoutCheckbox).toBeDisabled()
+    await expect(page.getByText('校准自动包含开发集与留出集')).toBeVisible()
+    await expect(page.locator('#evaluation-repeats')).toHaveValue('3')
+    await expect(page.getByText(/预计候选执行 12 次/)).toBeVisible()
+
+    await page.getByTestId('evaluation-create').click()
+    const createRequest = state.requests.find((item) => item.path === '/runs' && item.method === 'POST')
+    expect(createRequest?.body).toMatchObject({
+      suite_id: 'demo-suite',
+      execution_presets: ['@noop', '@gold'],
+      repeats: 3,
+      include_holdout: true,
+    })
+  })
+
   test('从导航进入评测页并可创建/启动 run（创建与启动都不触发评审）', async ({ page }) => {
     const state = await mockEvaluationApi(page)
     await page.goto('/')
@@ -365,6 +412,9 @@ test.describe('Console 模型评测页', () => {
     await expect(page.getByText('演示评测集 · 仓库 /tmp/demo-repo')).toBeVisible()
     await page.getByRole('checkbox', { name: '执行预设 alpha' }).click()
     await page.getByRole('checkbox', { name: '执行预设 beta' }).click()
+    await page.selectOption('#evaluation-repeats', '3')
+    await page.getByRole('checkbox', { name: '包含留出集' }).click()
+    await expect(page.getByText(/预计候选执行 6 次/)).toBeVisible()
     // 页面按 default_judge_presets 预选 judge-1；点击反而会把已勾选项取消。
     await expect(page.getByRole('checkbox', { name: '评审预设 judge-1' })).toBeChecked()
     await expect(page.getByRole('checkbox', { name: '评审预设 judge-offline' })).toBeDisabled()
@@ -375,6 +425,8 @@ test.describe('Console 模型评测页', () => {
       suite_id: 'demo-suite',
       execution_presets: ['alpha', 'beta'],
       judge_presets: ['judge-1'],
+      repeats: 3,
+      include_holdout: true,
     })
     const createdRow = page.locator('tr', { hasText: 'eval-created01' })
     await expect(createdRow).toContainText('待启动')

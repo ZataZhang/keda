@@ -1,0 +1,87 @@
+diff --git a/src/backend/core/shared/models/backlog.py b/src/backend/core/shared/models/backlog.py
+index 0f72e215..783e6821 100644
+--- a/src/backend/core/shared/models/backlog.py
++++ b/src/backend/core/shared/models/backlog.py
+@@ -263,0 +264,3 @@ class PrdLifecycleStats:
++    ``token_usage_by_prd`` 是同一窗口 / 同一批 run 上的 PRD（Issue）维度
++    token 汇总（按 ``total_tokens`` 降序，口径与 CLI ``iar tokens`` 的
++    「按 PRD」表同源）；账本不可用时降级为空列表。
+@@ -278,0 +282 @@ class PrdLifecycleStats:
++    token_usage_by_prd: list[PrdTokenUsageEntry]
+diff --git a/src/backend/core/use_cases/agent_runner_lifecycle.py b/src/backend/core/use_cases/agent_runner_lifecycle.py
+index 4d869c83..0d5978ce 100644
+--- a/src/backend/core/use_cases/agent_runner_lifecycle.py
++++ b/src/backend/core/use_cases/agent_runner_lifecycle.py
+@@ -42 +42,4 @@ from backend.core.shared.models.backlog import (
+-from backend.core.use_cases.agent_runner_token_stats import aggregate_token_usage
++from backend.core.use_cases.agent_runner_token_stats import (
++    aggregate_token_usage,
++    build_token_usage_by_prd,
++)
+@@ -656,0 +660 @@ def build_prd_lifecycle_stats(
++            token_usage_by_prd=[],
+@@ -670,0 +675 @@ def build_prd_lifecycle_stats(
++    events_by_run: dict[str, list[object]] = {}
+@@ -676,0 +682 @@ def build_prd_lifecycle_stats(
++        events_by_run[run_record.run_id] = list(stored_events)
+@@ -730,0 +737,15 @@ def build_prd_lifecycle_stats(
++    # PRD 维度汇总复用已持有的 run_records 与 events_by_run（同一读集，
++    # 不做二次读库）；异常按账本降级语义收敛为空列表，不拖垮 Stats 页。
++    try:
++        token_usage_by_prd = build_token_usage_by_prd(
++            store=lifecycle_store,
++            repo_id=repo_id,
++            days=bounded_days,
++            now=reference_now,
++            run_records=run_records,
++            events_by_run=events_by_run,
++        )
++    except Exception as exc:  # noqa: BLE001 - degraded stats beat a broken page.
++        _logger.warning("Failed to build PRD-dimension token usage: %s", exc)
++        token_usage_by_prd = []
++
+@@ -752,0 +774 @@ def build_prd_lifecycle_stats(
++        token_usage_by_prd=token_usage_by_prd,
+diff --git a/src/backend/core/use_cases/agent_runner_token_stats.py b/src/backend/core/use_cases/agent_runner_token_stats.py
+index 1a251ab3..12e90f86 100644
+--- a/src/backend/core/use_cases/agent_runner_token_stats.py
++++ b/src/backend/core/use_cases/agent_runner_token_stats.py
+@@ -4 +4 @@
+-**流程**与 **agent** 两个维度汇总。两类来源：
++**流程**、**agent** 与 **PRD（Issue）** 三个维度汇总。两类来源：
+@@ -204,0 +205,2 @@ def build_token_usage_by_prd(
++    run_records: list[object] | None = None,
++    events_by_run: dict[str, list[object]] | None = None,
+@@ -213,4 +215,5 @@ def build_token_usage_by_prd(
+-            ``list_lifecycle_events`` 两个读方法）。
+-        repo_id: 仓库过滤；``None`` 表示全部仓库。
+-        days: 时间窗口天数（内部钳制 1–365）。
+-        now: 统计基准时间；缺省取当前 UTC 时间。
++            ``list_lifecycle_events`` 两个读方法）；调用方自带
++            ``run_records`` 与 ``events_by_run`` 时不会被读取。
++        repo_id: 仓库过滤；``None`` 表示全部仓库（仅自读账本时生效）。
++        days: 时间窗口天数（内部钳制 1–365；仅自读账本时生效）。
++        now: 统计基准时间；缺省取当前 UTC 时间（仅自读账本时生效）。
+@@ -217,0 +221,4 @@ def build_token_usage_by_prd(
++        run_records: 调用方已持有的窗口内 run 记录；提供时不再
++            ``list_lifecycle_runs``，保证与调用方同一读集、不做二次读库。
++        events_by_run: run_id 到事件列表的映射；提供时单 run 事件直接取
++            用映射（缺失视为无事件），不再 ``list_lifecycle_events``。
+@@ -223 +230,5 @@ def build_token_usage_by_prd(
+-    run_records = _list_window_runs(store, repo_id=repo_id, days=days, now=now)
++    window_runs = (
++        list(run_records)
++        if run_records is not None
++        else _list_window_runs(store, repo_id=repo_id, days=days, now=now)
++    )
+@@ -225 +236 @@ def build_token_usage_by_prd(
+-        run_records = [record for record in run_records if record.issue_number == issue_number]
++        window_runs = [record for record in window_runs if record.issue_number == issue_number]
+@@ -228,2 +239,5 @@ def build_token_usage_by_prd(
+-    for run_record in run_records:
+-        events = _run_events(store, run_record.run_id)
++    for run_record in window_runs:
++        if events_by_run is not None:
++            events = events_by_run.get(run_record.run_id, [])
++        else:
++            events = _run_events(store, run_record.run_id)

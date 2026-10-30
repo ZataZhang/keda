@@ -178,19 +178,17 @@ def harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
 
     monkeypatch.setattr(execution, "_store", lambda: store)
     monkeypatch.setattr(execution, "_evaluation_root", lambda: tmp_path / "evaluation")
-    monkeypatch.setattr(workspace, "create_detached_worktree", _fake_create_worktree)
+    monkeypatch.setattr(workspace, "create_snapshot_repo", _fake_create_worktree)
     monkeypatch.setattr(workspace, "worktree_tree_hash", lambda path: "tree-hash")
     monkeypatch.setattr(workspace, "collect_diff", lambda path, base_commit: "diff text")
     monkeypatch.setattr(
-        workspace,
-        "remove_worktree",
-        lambda repo_path, path: shutil.rmtree(path, ignore_errors=True),
+        workspace, "purge_directory", lambda path: shutil.rmtree(path, ignore_errors=True)
     )
     monkeypatch.setattr(agent_adapter, "run_candidate", _fake_run_candidate)
     monkeypatch.setattr(
         checks,
         "run_check_recipe",
-        lambda recipe, path, timeout: CheckRunOutcome(
+        lambda recipe, path, timeout, targets=(): CheckRunOutcome(
             status=EvaluationCheckStatus.passed, exit_code=0, output_summary="1 passed"
         ),
     )

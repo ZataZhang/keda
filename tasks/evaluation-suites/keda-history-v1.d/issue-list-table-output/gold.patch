@@ -1,0 +1,34 @@
+diff --git a/src/backend/api/cli_parsed_commands/labels_issue.py b/src/backend/api/cli_parsed_commands/labels_issue.py
+index c652e8a6..a75cd076 100644
+--- a/src/backend/api/cli_parsed_commands/labels_issue.py
++++ b/src/backend/api/cli_parsed_commands/labels_issue.py
+@@ -212,0 +213,2 @@ def run_issue_list_command(ctx: ParsedCommandContext) -> int:
++    # Only list multiple repositories in one table when the rows actually span
++    # more than one repo; a single-repo listing stays narrow.
+@@ -214,6 +215,0 @@ def run_issue_list_command(ctx: ParsedCommandContext) -> int:
+-    output_format = ctx.parsed.output
+-    if output_format == "table":
+-        render_pr_column(result, render_console, multi_repo=multi_repo)
+-        if result.errors:
+-            return 1
+-        return 0
+@@ -221 +217,2 @@ def run_issue_list_command(ctx: ParsedCommandContext) -> int:
+-    table.add_column("Repo")
++    if multi_repo:
++        table.add_column("Repo")
+@@ -228,3 +225,2 @@ def run_issue_list_command(ctx: ParsedCommandContext) -> int:
+-        table.add_row(
+-            row.repo or "-",
+-            f"#{row.issue_number}",
++        cells = [
++            f"#{row.number}",
+@@ -233,3 +229,6 @@ def run_issue_list_command(ctx: ParsedCommandContext) -> int:
+-            ",".join(row.labels),
+-            ",".join(row.pr_urls) if row.pr_urls else "-",
+-        )
++            ", ".join(row.labels),
++            render_pr_column(row.pulls),
++        ]
++        if multi_repo:
++            cells.insert(0, row.repo or "-")
++        table.add_row(*cells)

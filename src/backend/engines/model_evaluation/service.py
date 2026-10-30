@@ -135,7 +135,7 @@ def _describe_suite_file(path: Path) -> dict[str, Any]:
     except OSError as exc:
         return {"file": path.name, "valid": False, "errors": [f"读取失败: {exc}"]}
     try:
-        suite = parse_evaluation_suite(raw, str(path))
+        suite = parse_evaluation_suite(raw, str(path), _read_suite_material_files(path))
     except ValueError as exc:
         return {"file": path.name, "valid": False, "errors": [str(exc)]}
     return {
@@ -150,6 +150,8 @@ def _describe_suite_file(path: Path) -> dict[str, Any]:
         "rubric_version": suite.rubric_version,
         "check_timeout_seconds": suite.check_timeout_seconds,
         "cases": [dataclasses.asdict(case) for case in suite.cases],
+        "requires_calibration": suite.requires_calibration,
+        "calibration": _suite_calibration(suite),
         "errors": [],
     }
 
@@ -163,7 +165,11 @@ def load_suite(suite_id: str) -> EvaluationSuite:
     problems: list[str] = []
     for path in sorted(root.glob("*.yaml")):
         try:
-            suite = parse_evaluation_suite(path.read_text(encoding="utf-8"), str(path))
+            suite = parse_evaluation_suite(
+                path.read_text(encoding="utf-8"),
+                str(path),
+                _read_suite_material_files(path),
+            )
         except (OSError, ValueError) as exc:
             problems.append(f"{path.name}: {exc}")
             continue
@@ -175,6 +181,58 @@ def load_suite(suite_id: str) -> EvaluationSuite:
     if len(matches) > 1:
         raise EvaluationActionError("invalid", f"suite id '{suite_id}' 在多个文件中重复定义")
     return matches[0]
+
+
+def _read_suite_material_files(suite_path: Path) -> dict[str, bytes]:
+    """读取 suite 同级资料树，拒绝符号链接与逃出资料目录的路径。"""
+    material_root = suite_path.with_suffix("").with_name(f"{suite_path.stem}.d")
+    if not material_root.is_dir():
+        return {}
+    material_files: dict[str, bytes] = {}
+    for material_path in sorted(material_root.rglob("*")):
+        if material_path.is_symlink():
+            raise ValueError(f"suite 资料不允许符号链接: {material_path.name}")
+        if not material_path.is_file():
+            continue
+        relative_path = material_path.relative_to(material_root).as_posix()
+        material_files[relative_path] = material_path.read_bytes()
+    return material_files
+
+
+def _suite_calibration(suite: EvaluationSuite) -> dict[str, Any]:
+    """从本地评测账本派生 suite 的逐题校准状态。"""
+    if not suite.requires_calibration:
+        return {
+            "required": False,
+            "calibrated_count": 0,
+            "case_count": len(suite.cases),
+            "cases": [],
+        }
+    store = _store()
+    run_rows = store.list_evaluation_runs()
+    calibration_rows = evaluation_rules.derive_case_calibration(
+        [_core_run(row) for row in run_rows],
+        [
+            _core_result(result_row)
+            for run_row in run_rows
+            for result_row in store.list_evaluation_results(run_row.run_id)
+        ],
+        suite.content_hash,
+    )
+    calibration_by_case = {row["case_id"]: row for row in calibration_rows}
+    cases = [
+        calibration_by_case.get(
+            case.case_id,
+            {"case_id": case.case_id, "calibrated": False, "noop": 0, "gold": 0},
+        )
+        for case in suite.cases
+    ]
+    return {
+        "required": True,
+        "calibrated_count": sum(case["calibrated"] for case in cases),
+        "case_count": len(cases),
+        "cases": cases,
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -196,6 +254,18 @@ def list_preset_options() -> dict[str, Any]:
         }
         for name, preset in sorted(settings.presets.items())
     ]
+    execution_presets.extend(
+        {
+            "name": preset_name,
+            "agent": None,
+            "model": None,
+            "reasoning_effort": None,
+            "cost_status": "none",
+            "cost_estimate": None,
+            "kind": "calibration",
+        }
+        for preset_name in sorted(evaluation_rules.CALIBRATION_PRESET_NAMES)
+    )
     judge_items: list[dict[str, Any]] = []
     for name, preset in sorted(settings.presets.items()):
         availability = judge_client.probe_judge_availability(name, settings)
@@ -226,11 +296,18 @@ def list_preset_options() -> dict[str, Any]:
 
 
 def create_run(
-    *, suite_id: str, execution_presets: list[str], judge_presets: list[str]
+    *,
+    suite_id: str,
+    execution_presets: list[str],
+    judge_presets: list[str],
+    repeats: int = 1,
+    include_holdout: bool = False,
 ) -> EvaluationRunRecord:
     """校验并冻结 run 快照（不执行）。评审预设清单为空时只做确定性对照。"""
     settings = load_fresh_agent_runner_settings()
     suite = load_suite(suite_id)
+    if suite.repo_path == ".":
+        suite = dataclasses.replace(suite, repo_path=str(resolve_project_root_path()))
     preset_map = {
         name: {
             "agent": preset.agent,
@@ -239,6 +316,17 @@ def create_run(
         }
         for name, preset in settings.presets.items()
     }
+    preset_map.update(
+        {
+            preset_name: {"agent": None, "model": None, "reasoning_effort": None}
+            for preset_name in evaluation_rules.CALIBRATION_PRESET_NAMES
+        }
+    )
+    store = _store()
+    current_calibration = _suite_calibration(suite)
+    calibrated_case_ids = [
+        case["case_id"] for case in current_calibration["cases"] if case["calibrated"]
+    ]
     try:
         run = evaluation_rules.build_run_snapshot(
             suite=suite,
@@ -249,10 +337,13 @@ def create_run(
                 judge_client.probe_judge_availability(name, settings)
             ),
             base_probe=workspace.probe_base,
+            repeats=repeats,
+            include_holdout=include_holdout,
+            calibrated_case_ids=calibrated_case_ids,
         )
     except evaluation_rules.EvaluationValidationError as exc:
         raise EvaluationActionError("invalid", str(exc)) from exc
-    _store().save_evaluation_run(run)
+    store.save_evaluation_run(run)
     return run
 
 
@@ -366,11 +457,24 @@ def get_run_detail(run_id: str) -> dict[str, Any]:
     results = [_core_result(row) for row in store.list_evaluation_results(run_id)]
     scores = [_core_score(row) for row in store.list_evaluation_scores(run_id)]
     summary = evaluation_rules.build_evaluation_summary(results, scores)
+    stability = evaluation_rules.build_stability_summary(results, run.repeats)
+    try:
+        suite_calibration = _suite_calibration(load_suite(run.suite_id))
+    except EvaluationActionError:
+        suite_calibration = {
+            "required": False,
+            "calibrated_count": 0,
+            "case_count": len(run.case_ids),
+            "cases": [],
+        }
     return {
         "run": run,
         "results": results,
         "scores": scores,
         "summary": summary,
+        "stability": stability,
+        "unstable_cases": [entry for entry in stability if entry.stable is False],
+        "calibration": suite_calibration,
         "payload_state": evaluation_rules.summarize_run_payload_state(run),
     }
 

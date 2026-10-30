@@ -5,7 +5,7 @@
 > ✅ **交付前置**：无，可立即开工。（它建立在已合并的多评审模型评测 `P1-FEAT-20261012-103909` 之上；该 PRD 的代码已在主线，仅其人工验收记录未回填，不构成阻塞。）
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> ⬜ **验收状态**：未开工。
+> 🧍 **验收状态**：待人工验收；执行侧验证与证据已完成，§9 Human-Confirmed 项仍待 reviewer 回答。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 > 本 PRD 分两个 altitude，分别服务不同读者，自上而下阅读：
@@ -55,7 +55,7 @@ ROADMAP 把 M13 定为 2026-10-16 起的主线：先有可信的评测基线，�
 | 👀 人审 + 自动验证 | 评测集已全部校准后，选一个真实 Agent 预设，重复次数选 3，只跑开发集并启动。 | 每道题显示三次里几次判分通过；三次结论完全一致的显示"稳定"，不一致的显示"不稳定"并单列；页面上看不到合成的总分，也没有"合格/不合格"的阈值判定。 |
 | 🤖 自动验证 | 候选 Agent 在它的工作目录里执行 `git log --all`、`git cat-file -e <修复提交>`，并尝试找判分测试文件。 | 只能看到一个基线提交；修复提交对象不存在；工作目录里没有判分测试文件。 |
 | 🤖 自动验证 | 候选 Agent 修改了某个判分测试文件，或改了依赖清单（`pyproject.toml`、`uv.lock`）。 | 判分前这些文件被还原为判分版本 / 基线版本；判分结论只取决于 Agent 改动的其余源码。 |
-| 🤖 自动验证 | 创建 run 时选了未校准通过的题；或选了留出集题但没有显式勾选；或总执行次数超过上限。 | 创建被拒绝并逐条说明原因；没有任何候选执行，也没有任何模型调用。 |
+| 🤖 自动验证 | 创建真实 Agent run 时选了未校准通过的题；或选了留出集题但没有显式勾选；或总执行次数超过上限。 | 创建被拒绝并逐条说明原因；没有任何候选执行，也没有任何模型调用。校准 run 自动覆盖开发集与留出集。 |
 | 🤖 自动验证 | 某次候选超时、Agent 进程崩溃或工作目录创建失败。 | 该次记为"执行故障"，与"判分失败"分开计数；同一道题的其他重复不受影响；不被折算成判分失败。 |
 | 🤖 自动验证 | 使用没有任何新字段的旧格式评测集（如 `example.yaml`）创建并运行。 | 校验仍然通过；运行行为与升级前一致（重复次数默认为 1，不要求校准）。 |
 
@@ -172,7 +172,7 @@ erDiagram
 
 ### 评测运行者（在 Console 上发起评测的人）
 
-仍然从「Evaluations」页进入：选评测集、选执行预设，新增"重复次数"与"包含留出集"两个选项。创建时页面告知将发生多少次候选执行；超过上限、选了未校准的题或没勾选就选留出集会被拒绝并给出原因。跑完后详情页按题展示"几次通过 / 稳定或不稳定"，执行故障单独计数；不出现合成总分。评审打分仍是可选的、逐次授权的，行为不变。
+仍然从「Evaluations」页进入：选评测集、选执行预设，新增"重复次数"与"包含留出集"两个选项。校准候选会自动选择全部题目；真实 Agent run 默认只选开发集，纳入留出集需显式勾选。创建时页面告知将发生多少次候选执行；超过上限、选了未校准的题或真实 Agent run 没勾选就选留出集会被拒绝并给出原因。跑完后详情页按题展示"几次通过 / 稳定或不稳定"，执行故障单独计数；不出现合成总分。评审打分仍是可选的、逐次授权的，行为不变。
 
 ### 其他使用方
 
@@ -226,13 +226,13 @@ erDiagram
 
 ### Proposed Solution Summary (实现机制)
 
-1. **suite 格式 v2（向后兼容）**：顶层 `repo_path` 允许 `.`（解析为注册表所在仓库的检出根）。每道题新增可选字段：`base_ref`（缺省用顶层）、`split: dev|holdout`（缺省 `dev`）、`check_targets`（传给判分配方的测试路径/节点 id，须通过安全字符校验且不得以 `-` 开头）、`held_out`（相对 case 资料目录的判分测试文件树）、`gold_patch`（原始修复的非测试部分）。case 资料放在评测集 YAML 同级目录 `<yaml 文件名去掉后缀>.d/<case_id>/`（`gold.patch`、`held_out/<仓库相对路径>`）。`content_hash` 改为覆盖 YAML 文本与全部资料文件的摘要，任何资料变化都改变评测集身份。无新字段的旧 suite 完全沿用旧语义。
+1. **suite 格式 v2（向后兼容）**：顶层 `repo_path` 允许 `.`（解析为注册表所在仓库的检出根）。每道题新增可选字段：`base_ref`（缺省用顶层）、`split: dev|holdout`（缺省 `dev`）、`check_targets`（传给判分配方的测试路径/节点 id，须通过安全字符校验且不得以 `-` 开头）、`held_out`（相对 case 资料目录的判分测试文件树）、`candidate_hidden`（基线中已存在、但会泄露题目答案的文件路径；Agent 运行期间移除，判分后恢复基线版本）、`gold_patch`（原始修复的非测试部分）。case 资料放在评测集 YAML 同级目录 `<yaml 文件名去掉后缀>.d/<case_id>/`（`gold.patch`、`held_out/<仓库相对路径>`）。`content_hash` 改为覆盖 YAML 文本与全部资料文件的摘要，任何资料变化都改变评测集身份。无新字段的旧 suite 完全沿用旧语义。
 2. **判分配方 `uv-pytest`**：固定 argv 前缀为 `uv run --frozen pytest -q -o addopts=` + `check_targets`，加入 `CHECK_RECIPES` 白名单；沿用最小环境变量白名单（`PATH/HOME/LANG/TMPDIR/LC_ALL`）。已在真实历史任务上验证可行（见 §7.9）。
 3. **快照工作目录（防泄题）**：`workspace` 新增 `create_snapshot_repo(repo_path, commit, dest)`：用临时 `GIT_INDEX_FILE` 做 `read-tree` + `checkout-index --prefix` 导出基线文件，在 `dest` 内 `git init`、`git add -f -A`、以固定身份提交一次；随后断言新仓库 HEAD 的 tree hash 等于冻结的基线 tree hash（现有断言复用），不等即失败。候选目录里不再有主仓库的 `.git` 对象库。
-4. **判分材料延后放入**：Agent 结束（或伪候选完成）后才执行：①把 `pyproject.toml`、`uv.lock` 还原为基线版本；②把 `held_out/` 文件树整文件覆盖到候选目录；③以 `check_targets` 运行判分配方。`@gold` 在②之前先 `git apply gold.patch`；`@noop` 不改动，仅做②③。
+4. **判分材料延后放入**：Agent 结束（或伪候选完成）后才执行：①恢复 `held_out` 与 `candidate_hidden` 在基线中的版本，并把 `pyproject.toml`、`uv.lock` 还原为基线版本；②把 `held_out/` 文件树整文件覆盖到候选目录；③以 `check_targets` 运行判分配方。`@gold` 在②之前先 `git apply gold.patch`；`@noop` 不改动，仅做②③。
 5. **校准候选**：保留名预设 `@noop`、`@gold` 出现在预设清单里并标注 `kind: calibration`、不可选作评审、不会触发任何模型调用；在 `execute_cell` 中以"候选来源"分支实现，不改 `agent_adapter`。
-6. **校准裁决与入集门禁（派生）**：某题"已校准"当且仅当存在一个已完成的、`suite_hash` 与当前一致、`repeats ≥ 3` 的 run，其中该题的 `@noop` 结果全部为判分失败，`@gold` 结果全部为判分通过。创建含真实预设的 run 时，所选题必须均已校准，`holdout` 题须显式 `include_holdout=true`；否则拒绝（400）并逐条说明。校准 run 本身不受此限。
-7. **重复与上限**：`create_run` 新增 `repeats`（1–5；校准 run 要求 ≥3）与 `include_holdout`；矩阵格数 = 题数 × 预设数 × 重复数；含模型调用的格 ≤ 48，纯校准格 ≤ 144，超限拒绝并说明。创建响应带"预计候选执行次数"。启动仍是显式动作。
+6. **校准裁决与入集门禁（派生）**：某题"已校准"当且仅当存在一个已完成的、`suite_hash` 与当前一致、`repeats ≥ 3` 的 run，其中该题的 `@noop` 结果全部为判分失败，`@gold` 结果全部为判分通过。校准 run 自动覆盖当前 suite 的全部题目（含 holdout），且不受“显式包含留出集”门禁限制。创建含真实预设的 run 时，所选题必须均已校准，`holdout` 题须显式 `include_holdout=true`；否则拒绝（400）并逐条说明。
+7. **重复与上限**：`create_run` 新增 `repeats`（1–5；校准 run 要求 ≥3）与 `include_holdout`；校准 run 自动包含 suite 全部题目（包括 holdout），真实模型 run 仍须显式设置 `include_holdout=true` 才会纳入留出题。矩阵格数 = 题数 × 预设数 × 重复数；含模型调用的格 ≤ 48，纯校准格 ≤ 144，超限拒绝并说明。创建响应带"预计候选执行次数"。启动仍是显式动作。
 8. **稳定性汇总（派生）**：`build_evaluation_summary` 同族新增纯函数，按（题 × 预设）统计重复次数 n、判分通过次数、执行故障次数（`failed`/`timeout`/取消，不含判分失败）；n 次判分结论全部相同为"稳定"，否则"不稳定"。不产生总分、不设阈值。
 9. **账本迁移 v16**：`evaluation_result` 增加 `repeat_index INTEGER NOT NULL DEFAULT 0`，唯一约束改为 `(run_id, case_id, execution_preset_id, repeat_index)`（SQLite 需重建表并保留外键级联）；`evaluation_run` 增加 `repeats INTEGER NOT NULL DEFAULT 1` 与 `case_bases_json TEXT`（每题冻结的 `{base_ref, commit, tree}`）；`_SCHEMA_VERSION` 15 → 16，沿用现有就地迁移机制。
 10. **首批评测集**：从已有数据集筛选并冻结 `keda-history-v1`，12 题（8 dev + 4 holdout），均为 keda 已合并的后端修复，判分仅 pytest。复用补全与离线校准，README 保留来源映射和复核记录；私有归档只读，公开发布物不复制完整原始记录。入选标准见 §7.1。
@@ -261,7 +261,7 @@ This section is a living implementation guide based on current repository analys
   → 启动：对每个（题 × 预设 × 重复）格：
       快照仓库（tree hash 与冻结基线一致）
       → 候选来源：真实 Agent | @noop | @gold(apply gold.patch)
-      → 还原依赖清单 → 覆盖 held_out → uv-pytest 判分
+      → 还原隐藏文件与依赖清单 → 覆盖 held_out → uv-pytest 判分
       → 记录 result（repeat_index）→ 清理快照
   → 汇总：从逐条结果派生 校准裁决 / 稳定性
 ```
@@ -287,9 +287,9 @@ This section is a living implementation guide based on current repository analys
 ├── Domain (src/backend/core/)
 │   ├── src/backend/core/shared/models/model_evaluation.py
 │   │   [修改]
-│   │   【总结】suite v2 解析（每题 base_ref/split/check_targets/held_out/gold_patch、`.` 仓库路径）、资料感知的内容哈希、`uv-pytest` 白名单配方与保留预设名常量。
+│   │   【总结】suite v2 解析（每题 base_ref/split/check_targets/held_out/candidate_hidden/gold_patch、`.` 仓库路径）、资料感知的内容哈希、`uv-pytest` 白名单配方与保留预设名常量。
 │   │
-│   │   ├── EvaluationSuiteCase 增加可选字段；parse_evaluation_suite 校验 check_targets 字符集与 split 取值
+│   │   ├── EvaluationSuiteCase 增加可选字段；parse_evaluation_suite 校验安全相对路径、check_targets 字符集与 split 取值
 │   │   ├── compute_suite_content_hash 覆盖资料文件（路径+内容摘要）
 │   │   ├── CHECK_RECIPES 增加 "uv-pytest"；新增 CALIBRATION_PRESET_NOOP / GOLD 常量
 │   │   └── EvaluationResultRecord / EvaluationRunRecord 增加 repeat_index、repeats、case_bases
@@ -462,7 +462,7 @@ flowchart TD
   tier: R2
   test_layer: e2e
   required_for_acceptance: true
-  presentation: "tasks/evidence/<prd-stem>/rv-2-calibration-12of12.png（评测集清单头部 + 逐题校准列的真实页面截图）与 tasks/evidence/<prd-stem>/rv-2-seed-tasks.md（12 题清单：提交、split、prompt）；自验：打开评测页，评测集 keda-history-v1 的头部应读到 “12/12 已校准”，任选一题详情应看到 @noop 三次“判分失败”、@gold 三次“判分通过”。"
+  presentation: "tasks/evidence/<prd-stem>/rv-2-calibration-console.png（评测集清单头部 + 逐题校准列的真实页面截图）与 tasks/evidence/<prd-stem>/rv-2-seed-selection.json（12 题清单：提交、split、prompt）；自验：打开评测页，评测集 keda-history-v1 的头部应读到 “12/12 已校准”，任选一题详情应看到 @noop 三次“判分失败”、@gold 三次“判分通过”。"
   critical_value_source: "12 题通过既有数据集 sample id、数据源版本或文件摘要追溯到真实 base/final 与判分材料；补全和旧离线校准仅作筛选依据。校准结论取自本次详情接口返回的逐条 result，禁止直接导入私有数据集 calibration 状态。"
   must_cross: "评测页/API 创建 → 冻结每题起点 → 启动 → create_snapshot_repo → @noop/@gold → 覆盖 held_out → uv-pytest → 账本 → 详情页"
   forbidden_bypasses: "跳过快照直接在主仓库检出目录判分；手工改写 check_status；复用上一次的结果；用 mock 的详情接口截图。"
@@ -473,13 +473,13 @@ flowchart TD
 - id: rv-3
   behavior: 同一题同一预设重复运行的结果按“几次通过 / 稳定或不稳定”展示，不稳定的题单列，且没有合成总分与合格阈值。
   reviewer: human
-  real_entry: "Console「Evaluations」页：选已校准的开发集题，执行预设选一个探针预设（对同一题交替通过/失败，另有一题始终通过），重复次数 3，创建并启动；打开详情页。可选 opt-in：把预设换成真实 Agent 预设（需本机 Agent 凭据）。"
+  real_entry: "真实 FastAPI Console 页面；由 node tasks/evidence/<prd-stem>/scripts/rv3_e2e_real_entry.mjs 启动隔离 FastAPI 服务，并逐项调用 tests/playwright-e2e 的 test:no-auth 入口验证校准表单、创建/启动与授权流程。稳定性状态经生产 FastAPI API、快照仓库和 uv-pytest 探针 run 创建并在详情页读取。可选 opt-in：把预设换成真实 Agent 预设（需本机 Agent 凭据）。"
   expected: "始终通过的题显示“3/3 通过 · 稳定”；交替题显示“不稳定”并出现在单列区域；页面不出现总分、合格/不合格或阈值字样；执行故障（如预设超时）显示在“执行故障”计数里而不是判分失败里。"
   mock_boundary: "外部 Agent CLI 用探针预设替换；Console 页面、API、快照、判分、账本均真实。无凭据时探针预设即为完整 fallback，真实 Agent 为 opt-in。"
   tier: R1
   test_layer: e2e
   required_for_acceptance: true
-  presentation: "tasks/evidence/<prd-stem>/rv-3-variance-view.png（真实页面截图，并与 tasks/evidence/<prd-stem>/prototype-variance-view.png 目标图成对呈现）；自验：打开详情页，“稳定”那题应读到 3/3，“不稳定”题应出现在单独区域，页面全文搜不到“总分”。"
+  presentation: "tasks/evidence/<prd-stem>/rv-3-stability-console.png（真实页面截图，并与 tasks/evidence/<prd-stem>/rv-3-prototype-variance-view.png 目标图成对呈现）；辅助输出 tasks/evidence/<prd-stem>/rv-3-playwright-e2e.txt；自验：打开详情页，“稳定”那题应读到 3/3，“不稳定”题应出现在单独区域，页面全文搜不到“总分”。"
 
 - id: rv-4
   behavior: 账本从 v15 迁移到 v16 后，已有评测记录全部保留可读，同一题同一预设可写入多条重复结果。
@@ -500,7 +500,7 @@ flowchart TD
 - id: rv-5
   behavior: 创建门禁与旧格式兼容：未校准题、未勾选的留出集、超过上限都被拒绝且零候选执行；旧格式评测集行为不变。
   reviewer: verifier
-  real_entry: "通过创建 API 分别提交未校准题、未明确包含的 holdout 题、不可达 base_ref；另用 5/6/7 道已校准 dev fixture 题 × 2 个有效模型候选预设 × 4 次重复构造 40/48/56 格，其他配置均合法。再提交旧格式 example 风格评测集，查询 API 与账本。"
+  real_entry: "通过创建 API 分别提交未校准题、真实模型预设下未明确包含的 holdout 题、不可达 base_ref；另用 5/6/7 道已校准 dev fixture 题 × 2 个有效模型候选预设 × 4 次重复构造 40/48/56 格，其他配置均合法。再提交旧格式 example 风格评测集，查询 API 与账本。"
   expected: "未校准、holdout 未确认、不可达基线和 56 格请求返回 400，逐条说明原因且无新 run、无候选调用；40 格和 48 格均接受。旧格式创建成功，缺省 repeats=1 且不要求校准。创建成功本身不启动候选。"
   mock_boundary: "API、校验、账本真实；Agent CLI 可替换为探针（本 oracle 不依赖其行为）。"
   tier: R1
@@ -528,7 +528,7 @@ Failure triage：
 
 ### 7.7 Low-Fidelity Prototype (Only When Required)
 
-页面是对现有「Evaluations」详情页的增量改动。`tasks/evidence/<prd-stem>/prototype-variance-view.png` 由下面的线框渲染（作为证据附件，不是 `docs/prototypes/` 下的文件），用于与真实页面截图成对呈现：
+页面是对现有「Evaluations」详情页的增量改动。`tasks/evidence/<prd-stem>/rv-3-prototype-variance-view.png` 由下面的线框渲染（作为证据附件，不是 `docs/prototypes/` 下的文件），用于与真实页面截图成对呈现：
 
 ```text
 +--------------------------------------------------------------------+
@@ -539,11 +539,12 @@ Failure triage：
 |            预计候选执行 24 次（上限 48）          [创建]            |
 +--------------------------------------------------------------------+
 | 题              预设     通过/次数  稳定性     执行故障              |
-| fix-loop-labels agent-a  3/3        稳定       0                    |
-| fix-xxx         agent-a  2/3        不稳定 ⚠   0                    |
-| fix-yyy         agent-a  0/2        稳定       1                    |
+| stable-outcome  @noop    3/3        稳定       0                    |
+| stable-outcome  @gold    3/3        稳定       0                    |
+| repeat-outcome  @noop    2/3        不稳定 ⚠   0                    |
+| repeat-outcome  @gold    2/3        不稳定 ⚠   0                    |
 | ── 不稳定的题 (1) ──────────────────────────────────────────────    |
-| fix-xxx  [pass, fail, pass]                                          |
+| repeat-outcome  [pass, fail, pass]                                    |
 +--------------------------------------------------------------------+
 ```
 
@@ -551,7 +552,10 @@ Failure triage：
 
 ### 7.8 Interactive Prototype Change Log (Only When Files Actually Changed)
 
-- `No interactive prototype file changes in this PRD.`
+- Updated `docs/prototypes/prd-lifecycle-observability.html`, `assets/runtime-board.css`, and the shared prototype scripts to add a M13 baseline view in the existing Console shell. The view switches between real-Agent and calibration modes, estimates candidate executions, and shows stable / unstable outcomes with a separate execution-fault column.
+- Updated the existing Prototype Hub registry entry, image provenance, prototype guide, index, and MkDocs navigation. Existing Dashboard, multi-judge evaluation, consent, Backlog, and Stats views remain reachable.
+- Validation: opened from Prototype Hub and returned to Hub at desktop and 390px width; no page errors or horizontal overflow. Target image is `tasks/evidence/<prd-stem>/rv-3-prototype-variance-view.png`, paired with the real Console screenshot `rv-3-stability-console.png`.
+- Prototype limitations: fixed sample data only; no API, ledger writes, candidate execution, or model calls.
 
 ### 7.9 External Validation (Only When Web Research Was Used)
 
@@ -594,11 +598,11 @@ Failure triage：
 
 ### 9.1 人读呈递区（Human Review Surface）
 
-| # | 你要看什么（对应 oracle） | 呈递物（交付时填实际路径） | 想自己复核？ |
+| # | 你要看什么（对应 oracle） | 呈递物 | 想自己复核？ |
 |---|---|---|---|
-| 1 | 12 道任务全部校准通过，且整个校准过程没有模型调用（rv-2） | 交付时填：`tasks/evidence/<prd-stem>/rv-2-calibration-12of12.png` 与 `tasks/evidence/<prd-stem>/rv-2-seed-tasks.md`（嵌图 + 本地标注 + `open` 命令） | 打开评测页，`keda-history-v1` 头部读到“12/12 已校准”；任选一题，应见 @noop 三次“判分失败”、@gold 三次“判分通过”。 |
-| 2 | 重复运行的稳定/不稳定展示，无总分与阈值，目标图与真实页面成对（rv-3） | 交付时填：`tasks/evidence/<prd-stem>/rv-3-variance-view.png` 与 `prototype-variance-view.png`（成对嵌图，标注验证层级） | 详情页：“稳定”那题读到 3/3，“不稳定”题出现在单独区域，页面全文搜不到“总分”。 |
-| 3 | 12 道任务来自已有数据集，描述无解法泄漏，留出资格有依据（来自 §7.1） | 交付时填：`tasks/evidence/<prd-stem>/rv-2-seed-tasks.md`（来源 sample id、base/final、输入复核、旧校准记录与 split 使用依据） | 随机抽 3 题，核对来源与复核记录；prompt 只描述问题和期望行为，不出现修复的函数名或做法；留出题未用于迭代优化。 |
+| 1 | 12 道任务全部校准通过，且整个校准过程没有模型调用（rv-2） | `../evidence/P1-FEAT-20261019-140531-m13-golden-eval-baseline/rv-2-calibration-console.png`、`../evidence/P1-FEAT-20261019-140531-m13-golden-eval-baseline/rv-2-calibration-12of12.txt`、`../evidence/P1-FEAT-20261019-140531-m13-golden-eval-baseline/rv-2-seed-selection.json`。![rv-2 keda-history-v1 真实 Console 校准页面](../evidence/P1-FEAT-20261019-140531-m13-golden-eval-baseline/rv-2-calibration-console.png) **本地图片，GitHub 上不显示。** 打开截图：`open "tasks/evidence/P1-FEAT-20261019-140531-m13-golden-eval-baseline/rv-2-calibration-console.png"`；复核来源：`open "tasks/evidence/P1-FEAT-20261019-140531-m13-golden-eval-baseline/rv-2-seed-selection.json"`。 | 截图中评测集头部应见“12/12 已校准”，run 详情逐题显示 @noop 三次判分失败、@gold 三次判分通过。终端输出应见 72 格、usage rows=0、provider probe=0。 |
+| 2 | 重复运行的稳定/不稳定展示，无合成总分与阈值；目标图与真实页面成对（rv-3） | 目标态（`component preview`）：`../evidence/P1-FEAT-20261019-140531-m13-golden-eval-baseline/rv-3-prototype-variance-view.png`；真实入口（FastAPI Console 页面，生产数据与真实重复 run）：`../evidence/P1-FEAT-20261019-140531-m13-golden-eval-baseline/rv-3-stability-console.png`；API 输出与 Playwright E2E：`../evidence/P1-FEAT-20261019-140531-m13-golden-eval-baseline/rv-3-stability-api.txt`、`../evidence/P1-FEAT-20261019-140531-m13-golden-eval-baseline/rv-3-playwright-e2e.txt`。![设计意图：重复结果目标态，本地图片，GitHub 上不显示](../evidence/P1-FEAT-20261019-140531-m13-golden-eval-baseline/rv-3-prototype-variance-view.png) **本地图片，GitHub 上不显示。** 打开目标图：`open "tasks/evidence/P1-FEAT-20261019-140531-m13-golden-eval-baseline/rv-3-prototype-variance-view.png"`。![真实 Console 页面：重复结果与不稳定题，非 prototype preview，本地图片，GitHub 上不显示](../evidence/P1-FEAT-20261019-140531-m13-golden-eval-baseline/rv-3-stability-console.png) **本地图片，GitHub 上不显示。** 打开真实页面截图：`open "tasks/evidence/P1-FEAT-20261019-140531-m13-golden-eval-baseline/rv-3-stability-console.png"`。 | 两图应显示相同数据：`stable-outcome` 对 @noop / @gold 为 3/3 稳定；`repeat-outcome` 为 2/3 不稳定，并在不稳定区列出。真实页面应有执行故障列，不出现合成总分或通过阈值。 |
+| 3 | 12 道任务来自已有数据集，描述无解法泄漏，留出资格有依据（来自 §7.1） | 来源与筛选证据：`../evidence/P1-FEAT-20261019-140531-m13-golden-eval-baseline/rv-2-seed-selection.json`；公开 suite 来源映射：`../evaluation-suites/README.md`。打开证据：`open "tasks/evidence/P1-FEAT-20261019-140531-m13-golden-eval-baseline/rv-2-seed-selection.json"`。 | 随机抽 3 题，核对 sample id、base/final、输入来源复核、旧校准记录与 split 使用依据；prompt 只描述问题和期望行为，不写解法；留出题使用依据有明确记录。 |
 
 **以下项不需要你看**（`reviewer: verifier`，agent 自验 + verifier 复核，挂了会自己红）：rv-1 隔离与判分延后、rv-4 账本迁移、rv-5 创建门禁与旧格式兼容、rv-6 执行故障分类；以及构建、类型检查、架构依赖方向、既有评测测试回归。它们的证据在 §9.2。
 
@@ -624,58 +628,58 @@ Failure triage：
 
 ### Architecture Acceptance
 
-- [ ] 评测引擎的新增副作用（快照、覆盖、判分、保留预设分支）只在 `src/backend/engines/model_evaluation/`；core 只增加纯数据与规则；`api` 只导入 `core`（`rg -n "from backend\.(engines|infrastructure)" src/backend/api/routes/agent_runner_console_evaluation.py` 无结果）。
-- [ ] 校准候选与真实 Agent 走同一个 `_execute_cell`；没有新建第二套执行引擎或第二套 suite 注册表。
+- [x] 评测引擎的新增副作用（快照、覆盖、判分、保留预设分支）只在 `src/backend/engines/model_evaluation/`；core 只增加纯数据与规则；`api` 只导入 `core`（`rg -n "from backend\.(engines|infrastructure)" src/backend/api/routes/agent_runner_console_evaluation.py` 无结果）。证据：API 导入扫描通过；快照、判分与候选实现位于 engines，SQLite 位于 infrastructure，纯规则位于 core；见 `.verification-plan.md`。
+- [x] 校准候选与真实 Agent 走同一个 `_execute_cell`；没有新建第二套执行引擎或第二套 suite 注册表。证据：`execution.py` 共用 cell 执行分支；真实校准与隔离探针见 `rv-1-isolation-restore.txt`、`rv-2-calibration-12of12.txt`。
 
 ### Dependency Acceptance
 
-- [ ] 未新增 Python 或前端依赖（`git diff --stat -- pyproject.toml uv.lock frontend-public/package.json` 无变化）。
-- [ ] 新的判分配方仍是 core 白名单内的固定 argv，suite 无法提供任意命令或 shell 拼接；`check_targets` 的非法字符与以 `-` 开头的值被拒绝（有负向测试）。
+- [x] 未新增 Python 或前端依赖（`git diff --stat -- pyproject.toml uv.lock frontend-public/package.json` 无变化）。证据：该命令确认无 manifest 变化，见 `.verification-plan.md`。
+- [x] 新的判分配方仍是 core 白名单内的固定 argv，suite 无法提供任意命令或 shell 拼接；`check_targets` 的非法字符与以 `-` 开头的值被拒绝（有负向测试）。证据：`tests/test_model_evaluation_v2.py` 负向用例、core `CHECK_RECIPES` 固定 argv 与 suite 解析器；评测执行通过真实 `uv-pytest`，见 `rv-1-isolation-restore.txt`、`rv-2-calibration-12of12.txt`。
 
 ### Behavior Acceptance
 
-- [ ] 旧格式评测集与已有评测记录升级后原样可用；评审授权、payload 预览、取消、删除与清理语义不变（既有评测相关测试全部通过）。
-- [ ] 校准裁决在评测集内容（含判分材料）变化后自动失效；不稳定的题只标注、不自动剔除；页面与接口不产生合成总分或合格阈值。
+- [x] 旧格式评测集与已有评测记录升级后原样可用；评审授权、payload 预览、取消、删除与清理语义不变（既有评测相关测试全部通过）。证据：迁移与旧 suite API 检查见 `rv-4-v15-migration.txt`、`rv-5-gates-legacy.txt`；聚焦评测测试 38 passed，见 `.verification-plan.md`。
+- [x] 校准裁决在评测集内容（含判分材料）变化后自动失效；不稳定的题只标注、不自动剔除；页面与接口不产生合成总分或合格阈值。证据：suite hash / 校准派生逻辑及 v2 负向测试；`rv-3-stability-api.txt` 展示 2/3 不稳定题单列且无总分/阈值，`rv-2-calibration-12of12.txt` 展示校准结果。
 
 ### Frontend Acceptance (When A Frontend App Changes)
 
-- [ ] `frontend-public/app/(app)/app/evaluations/page.tsx` 与 `components/evaluations/run-detail-panel.tsx` 按 §7.7 渲染"重复次数""包含留出集""预计执行次数""稳定/不稳定""执行故障"。
-- [ ] 前端调用 `POST …/evaluation/runs` 时携带 `repeats` 与 `include_holdout`，类型在 `lib/api/types.ts` 同步，与后端 DTO 一致（§7.3 同步检查通过）。
+- [x] `frontend-public/app/(app)/app/evaluations/page.tsx` 与 `components/evaluations/run-detail-panel.tsx` 按 §7.7 渲染"重复次数""包含留出集""预计执行次数""稳定/不稳定""执行故障"。证据：`rv-2-calibration-console.png`、`rv-3-stability-console.png` 和 4/4 页面流程，见 `rv-3-playwright-e2e.txt`。
+- [x] 前端调用 `POST …/evaluation/runs` 时携带 `repeats` 与 `include_holdout`，类型在 `lib/api/types.ts` 同步，与后端 DTO 一致（§7.3 同步检查通过）。证据：前端调用与 DTO 静态核对，真实创建/启动页面流程 4/4 通过，见 `rv-3-playwright-e2e.txt`。
 
 ### Documentation Acceptance
 
-- [ ] 12 题的 README 与 rv-2 选题证据记录来源 sample id、数据源版本/摘要、base/final、输入复核、旧校准记录与 split 使用依据；公开材料经审查，私有原始归档未改写。数量快照不作为固定验收值。
+- [x] 12 题的 README 与 rv-2 选题证据记录来源 sample id、数据源版本/摘要、base/final、输入复核、旧校准记录与 split 使用依据；公开材料经审查，私有原始归档未改写。数量快照不作为固定验收值。证据：`tasks/evaluation-suites/README.md` 来源表与 `rv-2-seed-selection.json`；运行时 12 题全校准见 `rv-2-calibration-12of12.txt`。
 
-- [ ] `docs/dev/evaluation.md` 与 `tasks/evaluation-suites/README.md` 记录 suite v2 字段、校准流程、快照隔离与"公开仓库泄漏为已知限制"。
-- [ ] `ROADMAP.md` 的 M13 状态与"近期顺序 1"已链接本 PRD，并注明对比组与核心指标入账另开 PRD；未改动 `kc` CLI，随包 operator skill 无需同步（`git diff --stat -- src/backend/engines/agent_runner/templates/skills/kedacode-operator` 无变化）。
+- [x] `docs/dev/evaluation.md` 与 `tasks/evaluation-suites/README.md` 记录 suite v2 字段、校准流程、快照隔离与"公开仓库泄漏为已知限制"。证据：两份文档的内容扫描结果记于 `.verification-plan.md`。
+- [x] `ROADMAP.md` 的 M13 状态与"近期顺序 1"已链接本 PRD，并注明对比组与核心指标入账另开 PRD；未改动 `kc` CLI，随包 operator skill 无需同步（`git diff --stat -- src/backend/engines/agent_runner/templates/skills/kedacode-operator` 无变化）。证据：ROADMAP 引用扫描、operator skill diff 检查，见 `.verification-plan.md`。
 
 ### Validation Acceptance
 
-- [ ] rv-1：探针 Agent 在真实 API 链路上看不到修复提交与判分测试，被改写的判分测试与依赖清单已还原；证据取自探针写出的记录文件，经 fresh 进程核对 `evaluation_result`，并记录最终 tree hash。
-- [ ] rv-2：`keda-history-v1` 12/12 校准通过，证据来自真实页面与详情接口返回，无模型调用记录。
-- [ ] rv-3：真实页面运行显示稳定/不稳定与执行故障分列；前端端到端用例通过（`cd tests/playwright-e2e && PLAYWRIGHT_SKIP_STACK_BOOT=1 PLAYWRIGHT_STACK_MODE=dev PLAYWRIGHT_BASE_URL=http://127.0.0.1:8765 npm run test:no-auth -- console-evaluations`）。
-- [ ] rv-4：v15 → v16 迁移在真实旧库副本上保留旧记录、允许重复结果、拒绝同序号重复写入、外键级联仍然生效。
-- [ ] rv-5 与 rv-6 通过；证据产物均在 `tasks/evidence/<prd-stem>/` 下，且在最后一次相关改动后重新采集。
-- [ ] `rg -n "create_detached_worktree|worktree add --detach" src` 确认候选路径无旧入口；`rg -n "uv-pytest|include_holdout|repeat_index" src frontend-public --glob '!node_modules'` 确认新目标引用都在各自归属文件中。
+- [x] rv-1：探针 Agent 在真实 API 链路上看不到修复提交与判分测试，被改写的判分测试与依赖清单已还原；证据取自探针写出的记录文件，经 fresh 进程核对 `evaluation_result`，并记录最终 tree hash。证据：`rv-1-isolation-restore.txt`。
+  - [x] rv-2：`keda-history-v1` 12/12 校准通过，证据来自真实页面与详情接口返回，无模型调用记录；校准自动覆盖留出题，操作无需额外启用“包含留出集”。证据：`rv-2-calibration-12of12.txt`、`rv-2-calibration-console.png`、`evidence.json`。
+- [x] rv-3：真实页面运行显示稳定/不稳定与执行故障分列；在隔离 FastAPI Console 服务上由 `node tasks/evidence/P1-FEAT-20261019-140531-m13-golden-eval-baseline/scripts/rv3_e2e_real_entry.mjs` 启动 FastAPI 并逐项执行现有 no-auth Playwright 真实页面流程，4/4 用例通过；同单进程 Chromium 模式下整文件连续启动曾遇到浏览器进程关闭，因此每个既有用例独立启动，记录在 `tasks/evidence/P1-FEAT-20261019-140531-m13-golden-eval-baseline/rv-3-playwright-e2e.txt`。证据：另见 `rv-3-stability-api.txt`、生产页面截图与 `rv-3-playwright-e2e.txt`。
+- [x] rv-4：v15 → v16 迁移在真实旧库副本上保留旧记录、允许重复结果、拒绝同序号重复写入、外键级联仍然生效。证据：`rv-4-v15-migration.txt`。
+- [x] rv-5 与 rv-6 通过；证据产物均在 `tasks/evidence/<prd-stem>/` 下，且在最后一次相关改动后重新采集。证据：`rv-5-gates-legacy.txt`、`rv-6-execution-faults.txt`。
+- [x] `rg -n "create_detached_worktree|worktree add --detach" src` 确认候选路径无旧入口；`rg -n "uv-pytest|include_holdout|repeat_index" src frontend-public --glob '!node_modules'` 确认新目标引用都在各自归属文件中。证据：旧入口扫描无结果；新增字段分别位于 core/API/engine/infra/frontend 对应层，扫描见 `.verification-plan.md`。
 
 ### Delivery Readiness
 
-- [ ] 推荐方案完整实现，没有未获批准的并行抽象；无遗留的回归与上线阻塞项。
-- [ ] §9.1 呈递区的呈递物路径已全部回填，且完成回复已原样带上呈递表内容（只给 evidence 目录链接不算交付）。
-- [ ] 每个呈递物都带可直接执行的打开方式（`just prd review <prd-file>` 或仓库相对路径 + `open` 命令，或可点 URL）与逐项期望值；提交进仓库的内容不含本机绝对路径。
-- [ ] 每张证据静态图都在 PRD 与证据报告里用 `![<说明>](<相对路径>)` 就地嵌入，并标注「本地图片，GitHub 上不显示」。
-- [ ] 证据报告首节是同一份「人审导航」，含就地嵌图、打开命令、逐项期望值、PR/CI 链接与"已替你核对过什么"。
-- [ ] 若交付走 PR：PR 正文唯一链接本 PRD 并声明"合并即验收"的后果，证据评论发布 9.1 呈递内容、verifier 结论、必需门禁与已验证 tree 标识；前端截图与 §7.7 目标图成对呈现。
+- [~] 推荐方案完整实现，没有未获批准的并行抽象；无遗留的回归与上线阻塞项。— runner-owned gate: runner 独立 verifier 与必需 CI 通过后确认无交付阻塞。当前已采集的 RV、聚焦测试与前端构建记录见 `.verification-plan.md`；执行器未将自查报告冒充独立 PASS。
+- [x] §9.1 呈递区的呈递物路径已全部回填，且完成回复已原样带上呈递表内容（只给 evidence 目录链接不算交付）。证据：本次交付回复原样呈递 §9.1 表格。
+- [x] 每个呈递物都带可直接执行的打开方式（`just prd review <prd-file>` 或仓库相对路径 + `open` 命令，或可点 URL）与逐项期望值；提交进仓库的内容不含本机绝对路径。证据：§9.1 与 `human-review-checklist.md`；绝对路径只出现在本地证据报告的执行命令中。
+- [x] 每张证据静态图都在 PRD 与证据报告里用 `![<说明>](<相对路径>)` 就地嵌入，并标注「本地图片，GitHub 上不显示」。证据：三张静态图均见 §9.1 与 `.evidence-report.md`。
+- [x] 证据报告首节是同一份「人审导航」，含就地嵌图、打开命令、逐项期望值、PR/CI 链接与"已替你核对过什么"。证据：`P1-FEAT-20261019-140531-m13-golden-eval-baseline.evidence-report.md`。
+- [~] 若交付走 PR：PR 正文唯一链接本 PRD 并声明"合并即验收"的后果，证据评论发布 9.1 呈递内容、verifier 结论、必需门禁与已验证 tree 标识；前端截图与 §7.7 目标图成对呈现。— runner-owned gate: 当前执行范围明确禁止创建 PR；由 runner 按发布流程发布 PR/evidence surface。
 
 ---
 
 ## 10. Functional Requirements
 
-- FR-1: 评测集格式升级为 v2：每题可选 `base_ref`、`split`（`dev`/`holdout`，缺省 `dev`）、`check_targets`、`held_out` 判分测试文件树与 `gold_patch`；顶层 `repo_path` 允许 `.`；内容哈希覆盖全部资料文件；无新字段的旧格式评测集语义与行为不变。
-- FR-2: 候选（含校准候选）在"导出基线文件后新建的单提交仓库"中运行；仓库没有 remote、没有基线之后的任何提交、没有判分测试文件；仓库 HEAD 的 tree hash 必须等于冻结的基线 tree，不等则该次执行失败并说明原因。
-- FR-3: 判分材料只在候选结束之后放入：先把 `pyproject.toml` 与 `uv.lock` 还原为基线版本，再以整文件覆盖放入 `held_out` 文件树，最后用固定白名单配方 `uv-pytest`（`uv run --frozen pytest -q -o addopts=` + 已校验的 `check_targets`，最小环境变量）判分；判分失败、超时与执行故障分别记录。
+- FR-1: 评测集格式升级为 v2：每题可选 `base_ref`、`split`（`dev`/`holdout`，缺省 `dev`）、`check_targets`、`held_out` 判分测试文件树、`candidate_hidden` 基线泄题文件路径与 `gold_patch`；顶层 `repo_path` 允许 `.`；内容哈希覆盖全部资料文件；无新字段的旧格式评测集语义与行为不变。
+- FR-2: 候选（含校准候选）在"导出基线文件后新建的单提交仓库"中运行；仓库没有 remote、没有基线之后的任何提交、没有判分测试文件或 suite 声明的已知泄题文件；仓库 HEAD 的 tree hash 必须等于冻结的基线 tree，不等则该次执行失败并说明原因。
+- FR-3: 判分材料只在候选结束之后放入：先还原 `held_out` 与 `candidate_hidden` 在基线中的版本，再把 `pyproject.toml` 与 `uv.lock` 还原为基线版本；之后以整文件覆盖放入 `held_out` 文件树，最后用固定白名单配方 `uv-pytest`（`uv run --frozen pytest -q -o addopts=` + 已校验的 `check_targets`，最小环境变量）判分；判分失败、超时与执行故障分别记录。
 - FR-4: 提供两个不调用模型的保留名校准候选：`@noop`（不改动，仅放入判分材料）与 `@gold`（先应用 `gold_patch` 再放入判分材料）；它们走同一条执行路径、不触发任何模型调用、不可被选作评审。
-- FR-5: 某题"已校准"当且仅当存在一个已完成的、评测集内容指纹一致且重复次数不少于 3 的校准 run，其 `@noop` 结果全部为判分失败、`@gold` 结果全部为判分通过；创建含真实预设的 run 时，所选题必须均已校准，留出集题必须显式 `include_holdout=true`，否则创建被拒绝并逐条说明，且零候选执行；评测集清单展示逐题与整体校准状态。
+- FR-5: 某题"已校准"当且仅当存在一个已完成的、评测集内容指纹一致且重复次数不少于 3 的校准 run，其 `@noop` 结果全部为判分失败、`@gold` 结果全部为判分通过；校准 run 自动覆盖开发集与留出集；创建含真实预设的 run 时，所选题必须均已校准，留出集题必须显式 `include_holdout=true`，否则创建被拒绝并逐条说明，且零候选执行；评测集清单展示逐题与整体校准状态。
 - FR-6: 创建评测时可选重复次数 `repeats`（1–5，校准 run 须 ≥3）；矩阵格数为题数 × 预设数 × 重复数；含模型调用的格数上限 48、纯校准格数上限 144，超限拒绝；创建响应给出预计候选执行次数；启动仍是显式动作；评测不改动任何 Agent 配置。
 - FR-7: 详情页与接口按（题 × 预设）展示重复次数、判分通过次数与执行故障次数；同一题同一预设全部重复的判分结论一致为"稳定"，否则为"不稳定"并单列；不产生合成总分，不设合格/不合格阈值；执行故障与判分失败分开计数。
 - FR-8: 复用已有数据集 raw/curation/calibration，筛选并冻结首批 `keda-history-v1`：12 道 keda 已合并的后端任务（8 道 dev + 4 道 holdout，仅 pytest 判分）。12 是首批规模，不限制总数据量。README 记录来源 sample id、数据源版本/摘要、base/final、输入复核、旧校准记录与 split 使用依据；私有归档只读，公开材料须审查。旧校准用于筛题，全部题仍经最终 Console/API 完成三次校准；不足时按 §7.1 处理。另在测试中提供极小 fixture 仓库作 harness 冒烟。
@@ -724,6 +728,17 @@ Failure triage：
 | D-09 | 用量上限口径 | 按候选执行次数卡（模型调用 48 / 校准 144） | 按金额或 Token 卡 | 主力执行器 Token 上报覆盖率约 3%，金额无法可靠计量。 |
 | D-10 | 旧离线校准与最终校准的关系 | 复用候选和运行事实，冻结材料后走最终入口三次校准 | 重建采集工具；直接导入旧 calibrated 状态 | 2026-10-28 用户确认复用已有数据资产；单次离线校准不能证明最终 recipe、suite 指纹与重复执行有效。 |
 
+### Final Reconciliation
+
+- Interpretation: corrected — 校准 run 自动包含 suite 的开发集与留出集；真实 Agent run 仍须显式选择包含留出集。该语义已同步到 Part A 行为样例、FR-5、执行说明、验证计划与真实 Console 表单。
+- Public behavior and contracts: confirmed — API 请求新增 `repeats` / `include_holdout`，响应新增重复、逐题起点、校准与稳定性字段；旧 suite 默认重复 1 且无需校准；评审评分、授权、取消与删除流程保持原有路径。Console 页面真实截图、4 个 Playwright 页面流程、后端迁移与 API 证据已回填。
+- Related PRD status: confirmed — `P1-FEAT-20261012-103909-multi-judge-agent-evaluation` 的实现已合并；其人工验收记录尚未回填但不构成本 PRD 的依赖。本次没有创建 PR，发布与 verifier 判定由 runner 后续处理。
+- Requirements and risks: confirmed — 12 题的公开 keda suite 与来源审计已提交；公开仓库联网泄题、模型记忆、账本唯一约束不可逆及真实 Agent 结果需 opt-in 的风险均保留披露。完整 `just lint --repo` 检查中 5,132 项通过、64 项因本机默认状态目录写入权限失败、1 项跳过；相关聚焦测试 38 项、前端类型检查/构建与 Console E2E 通过。
+- Reconciled differences:
+  - 校准默认不再依赖 `include_holdout` 开关即可覆盖 12 题；该行为差异已记录在 §14 Change Log 并同步所有相关说明。
+  - 浏览器环境无法稳定连续复用 `--single-process` Chromium；现有 4 个 E2E 用例分别独立启动并全部通过，命令与输出已记录在 `rv-3-playwright-e2e.txt`。
+  - 本地验证未执行真实 Agent 效果实验；该实验在 PRD 中明确为 opt-in，本次以确定性探针验证统计与展示。
+
 ## 14. Change Log
 
 - **2026-10-28**：按用户确认收紧隔离承诺，区分创建时无效基线与运行时快照故障；执行次数边界改为实际可构造的 40/48/56 格；探针按重复标识固定行为，故障由测试依赖边界触发，不直接指定终态。
@@ -731,3 +746,35 @@ Failure triage：
 - **2026-10-28**：区分探针控制的固定成败分布与真实 Agent 效果实验；真实三次运行不要求出现波动或固定成败次数，确定性 noop/gold 的题目校准要求保留。
 
 - **2026-10-28**：按用户确认更新规划，补充已有数据集与导出、补全、校准工具的能力及数量快照；将首批 12 题改为从已有候选筛选冻结，增加来源映射、输入复核、留出资格、发布边界及候选不足时的处理。旧校准用于筛题，最终 Console 三次校准仍保留。此次仅修改 PRD，功能状态保持未开工，原人工验收项未代勾。
+
+### 校准运行自动覆盖留出集
+- Type: behavior
+- Before: 校准 run 的入选题目受 `include_holdout` 默认值影响，需显式纳入留出集才能覆盖整份 suite。
+- After: 校准 run 自动包含全部 suite 题目；`include_holdout` 的显式选择仍只约束真实 Agent run。
+- Reason: §1 行为样例要求用默认校准流程验证 `keda-history-v1` 全部 12 题；操作上不应要求用户额外发现并切换留出集选项。
+- Impact: 校准候选按全 suite 计算执行次数与校准裁决；真实 Agent 留出集门禁、次数上限与其他验收范围不变。该路径经真实 API 以 `include_holdout=false` 运行并观察到 12 题 72 格。
+- Review: 已将语义同步到本节、FR-5、使用说明及真实 Console 表单；独立 verifier 与人工决策仍待 runner / reviewer。
+
+### 完成真实入口 E2E 与人工审阅呈递
+- Type: evidence
+- Before: rv-3 的真实 Console 页面与重复 API 证据已就绪，但端到端用户流程输出和最终人工审阅材料尚未回填。
+- After: 在 FastAPI 托管的 Console 页面上逐项运行现有 4 个 no-auth Playwright 流程并全部通过；完成 §9.1 可操作路径、原型/真实页面配对图、人工审阅 Markdown/HTML 与最终叙事对账。
+- Reason: 交付前必须以真实页面入口检查前端交互，并为尚待用户确认的 Part A 决策提供完整、可见的验收材料。
+- Impact: rv-3 的复现命令/输出与 evidence manifest 已更新；人工确认项仍未勾选，代码实现范围、校准和账本行为不变。
+- Review: HTML 已由真实 Chromium 打开并验证首张卡片、4 步导航、末页 Markdown、图片加载与零 pageerror；独立 verifier 与最终人工决定仍由 runner / reviewer 完成。
+
+### 补充基线中已知答案文件的候选隔离
+- Type: scope
+- Before: Agent 运行期间移除判分材料；其余基线文件默认可见。
+- After: suite v2 增加 `candidate_hidden` 路径列表，候选运行期间移除这些基线文件，并在判分前恢复其冻结版本；仅用于已确认会泄露对应任务答案的基线文件。
+- Reason: 选题审计发现部分历史修复前基线已包含相关任务 PRD 或其他答案材料，单独移除判分测试仍会泄题。
+- Impact: 加强既定隔离要求；不改变候选提示、判分口径、留出资格或旧格式 suite 行为，并在 suite 与恢复顺序中增加测试及 rv-1 证据。
+- Review: 执行器安全性补充；Part A 对快照隔离、判分延后与公开仓库限制的人工确认项保持未勾选。
+
+### 完成 M13 验证与交付证据包
+- Type: evidence
+- Before: RV1–RV6 的执行结果已采集，但最终实现 tree 标识、逐项验证报告、独立审阅状态与人工审阅入口尚未汇总到交付包。
+- After: 六项 RV 文本证据与结构化 manifest 绑定 verified source tree；补齐验证计划、首节为人审导航的证据报告、执行器复核报告及交互式 human review checklist。rv-3 命令指向隔离 FastAPI 自启动 harness，4/4 no-auth Playwright 流程通过。
+- Reason: 发布前须让评审者从 §9.1 直接看到页面、知道预期值并能打开证据，同时让 verifier 能从 manifest 复现 negative control 与绿控。
+- Impact: 交付状态仍为 `🧍 待人工验收`；决策一至三与 §9.1 人工确认保持未勾选。独立 verifier、CI、PR 与归档均由 runner 后续执行；本报告没有把执行器自查称为独立 PASS。
+- Review: source tree=`9c4253e1249b4d730bc4be7528cd4c0636c1ce80`（排除 PRD、证据与 runner 交付记录）；证据/清单结构检查通过。真实模型实验为 opt-in，`just lint --repo` 存有本机状态目录写权限导致的 64 项失败，详细限制见验证报告。

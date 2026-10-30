@@ -19,9 +19,9 @@ Agent/模型效果对照）已落地为一条本地 Console 产品路径，下�
 
 ### 定位与语义
 
-- 评测是**手动、离线、本机发起**的对照任务：同一 suite、同一 `base_ref` 基线下，
-  多个执行预设（agent × 模型 × 推理档）各自在**隔离 git worktree** 中跑同一批
-  样本，再由多个评审模型独立打分。
+- 评测是**手动、本机发起**的对照任务。旧格式 suite 沿用单一 `base_ref` 与单次
+  执行；v2 suite 可为每题冻结独立基线并重复运行。候选在从基线文件导出的单提交
+  仓库中执行，该仓库不共享来源仓库的 Git 对象库。
 - 结果**只作比较，不作验收**：分数用于横向观察 Agent/模型表现，不构成任何
   Issue 或 PRD 的完成证据。
 - 确定性检查（checks）与评审评分**分列存储、互不折算**：check 结论
@@ -41,12 +41,26 @@ Agent/模型效果对照）已落地为一条本地 Console 产品路径，下�
   `README.md`（样例：`tasks/evaluation-suites/example.yaml`）。
 - 必填字段：`id`、`version`（semver）、`repo_path`、`base_ref`、非空 `cases`；
   每条 case 含 `id`（`^[a-z0-9][a-z0-9._-]{0,79}$`）、`prompt` 与白名单
-  `check_recipe`（pytest / unittest / node-test）。
+  `check_recipe`（pytest / uv-pytest / unittest / node-test）。v2 case 还可指定
+  `base_ref`、`split`、`check_targets`、`held_out`、`candidate_hidden` 与 `gold_patch`；资料存于 YAML
+  同级 `<stem>.d/<case_id>/`，资料内容也参与 suite hash。`repo_path: .` 表示当前
+  Keda 检出根。`check_targets` 使用 pytest 文件路径或节点 id（如
+  `tests/test_example.py::test_empty`），不使用 Python 导入路径写法。
 - suite `id` 在 registry 目录内必须唯一：重复定义会让两个文件一起被判
   invalid（清单接口与页面都据此标红），因为此时「按 id 加载」无法确定取哪个
   文件，历史 run 的 `suite_hash` 也会失去唯一解释。
 - run 创建时冻结 suite 内容 hash、base commit 与全部预设快照；此后修改
   suite 文件或 config.toml 不影响历史 run 的解释口径。
+- v2 候选 Agent 运行期间看不到判分资料或 suite 声明的已知泄题路径。Agent 结束后，执行器先还原
+  `held_out`、`candidate_hidden` 与基线中的 `pyproject.toml` / `uv.lock`，再整文件覆盖
+  `held_out` 测试材料并运行固定 recipe；
+  `@noop` 与 `@gold` 校准候选不启动模型。任一逐题材料改变都会改变 suite hash，
+  先前的校准不能复用。
+- v2 校准 run 自动覆盖全部 suite 题目（含 holdout），不需要额外勾选；真实模型候选
+  仍仅默认选择 dev 题，纳入 holdout 时必须显式勾选。
+  真实候选必须使用已完成的三次 `@noop` / `@gold` 校准题。
+  重复次数范围为 1–5，校准至少 3 次；模型候选矩阵最多 48 格，纯校准最多 144 格。
+  汇总按题和预设展示通过次数、执行故障数与稳定性，不折算总分，也不设阈值。
 - 冻结口径是**执行前守卫**而不只是展示：候选执行前核对 live 执行预设、评审
   调用前核对 live 评审预设，任一字段（模型、agent、端点、密钥变量名等）与快照
   不一致即停止——候选落 `failed`、评审落 `provider_error` 且**零外发**，避免
@@ -100,7 +114,7 @@ Agent/模型效果对照）已落地为一条本地 Console 产品路径，下�
 
 ### 数据保留与删除
 
-- 持久层（Console SQLite，`PRAGMA user_version` v15）只存结构化摘要：
+- 持久层（Console SQLite，`PRAGMA user_version` v16）只存结构化摘要：
   不保存 raw prompt、完整 patch、token 用量原文、环境变量或密钥值。
 - 暂存 payload 与隔离 worktree 在评分完成、拒绝、取消或删除 run 时清除；
   删除 run 级联清除其结果与评分行。强制删除仍在执行的 run 时，在飞线程的
@@ -113,6 +127,15 @@ Agent/模型效果对照）已落地为一条本地 Console 产品路径，下�
   无人负责的代码差异）；隔离 worktree 的目录清理仍归「删除 run」，避免把
   git 调用压在启动路径上。不提供续跑，由用户新建 run 重跑或删除，绝不自动
   重跑（避免不可解释的重复外部调用副作用）。
+
+### v16 重复账本与泄漏边界
+
+- `evaluation_run.repeats` 保存重复次数，`case_bases_json` 保存每题创建 run 时冻结的
+  `{base_ref, commit, tree}`。
+- `evaluation_result.repeat_index` 从 0 开始。旧记录迁移为第 0 次；新唯一约束为
+  `(run_id, case_id, execution_preset_id, repeat_index)`，旧结果和评分行保留。
+- 单提交快照不防止公开 GitHub 历史被 Agent 联网读取，也不防止模型记忆修复；
+  对留出题只解释相对变化，不把绝对通过率作为未泄漏的估计。
 
 ### 无凭据验证入口
 

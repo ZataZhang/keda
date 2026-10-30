@@ -67,6 +67,8 @@ class CreateRunRequest(BaseModel):
     suite_id: str = Field(min_length=1)
     execution_presets: list[str] = Field(min_length=1)
     judge_presets: list[str] = Field(default_factory=list)
+    repeats: int = Field(default=1, ge=1, le=5)
+    include_holdout: bool = False
 
 
 class ConsentRequest(BaseModel):
@@ -111,10 +113,16 @@ def create_evaluation_run(request: CreateRunRequest) -> dict:
             suite_id=request.suite_id,
             execution_presets=request.execution_presets,
             judge_presets=request.judge_presets,
+            repeats=request.repeats,
+            include_holdout=request.include_holdout,
         )
     except EvaluationActionError as exc:
         _raise_http(exc)
-    return _serialize(run)
+    response = _serialize(run)
+    response["estimated_candidate_executions"] = (
+        len(run.case_ids) * len(run.execution_preset_snapshots) * run.repeats
+    )
+    return response
 
 
 @router.get("/agent-runner/console/evaluation/runs/{run_id}")

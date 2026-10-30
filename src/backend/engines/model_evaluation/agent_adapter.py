@@ -1,4 +1,4 @@
-"""候选执行适配器：用现有 Agent Runner 在隔离 worktree 里跑一个 case。
+"""候选执行适配器：用现有 Agent Runner 在隔离快照仓库里跑一个 case。
 
 复用 :func:`backend.core.use_cases.run_agent_once.run_agent_with_prompt`
 作为唯一进程边界（含停滞监督关闭、输出协议与 usage 自报），因此评测候选
@@ -62,7 +62,7 @@ def run_candidate(
     Args:
         preset_name: 已冻结在执行快照中的预设名（在 settings.presets 里解析）。
         prompt: suite 声明的任务提示词（原样投递，不注入评测侧指令）。
-        worktree_path: 该候选专属的干净 worktree。
+        worktree_path: 该候选专属的单提交快照仓库。
         settings: 新鲜加载的 Agent Runner settings（配置装配的唯一事实源）。
         timeout_seconds: 本次编排加载的 `evaluation.agent_timeout_seconds`
             （同一 run 的全部候选共用同一个值，不是逐 run 落库快照）。
