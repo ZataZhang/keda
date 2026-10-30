@@ -1,0 +1,16 @@
+== phase 1: real evidence package through kc evidence check --json ==
+real_exit=0
+json_parse=ok
+real_passed=True
+real_evidence_dir=tasks/evidence/P1-FEAT-20261030-163441-evidence-self-check
+real_summary={'total': 5, 'passed': 5, 'failed': 0, 'timed_out': 0, 'skipped': 0}
+real_item_statuses=['passed', 'passed', 'passed', 'passed', 'passed']
+== phase 2: negative control — corrupt one assertion in a copy ==
+corrupted_exit=1
+corrupted_failed_item_numbers=[5]
+corrupted_assertion_pattern=RV-5 IMPOSSIBLE PATTERN
+== phase 3: default resolution with one candidate (no --evidence) ==
+default_exit=0
+default_evidence_dir=tasks/evidence/only-task
+default_resolution_verdict=unique-candidate-resolved-without-flag
+RV-5 PASS: real package passes with parseable JSON; corruption turns it red

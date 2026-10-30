@@ -1,0 +1,91 @@
+{
+  "version": 1,
+  "language": "zh-CN",
+  "items": [
+    {
+      "item_number": 1,
+      "item_name": "自检与交付门禁对同一份证据包给出相同的断言判定结论",
+      "command": "uv run python tasks/evidence/P1-FEAT-20261030-163441-evidence-self-check/scripts/rv-1-capture.py",
+      "evidence_files": ["rv-1-self-check-vs-gate.txt"],
+      "output_summary": "同一份断言差一个词的 fixture：kc evidence check 报 item 1 断言未命中并给出最接近行 'LEGACY GREEN: v1 suite'；新进程里的 ensure_validation_commands_pass 同样报 item 1 与相同 pattern；负控关闭断言判定后同一 fixture 变为 passed。",
+      "explanation": "自检与门禁都调用 run_evidence_check 与 _validate_stdout_assertions，fixture 命令真实经 bash 复跑；两边报告的 item 序号和期望 pattern 逐字相同，因此能证明判定同源。",
+      "risks": "fixture 的探测命令是 printf，不覆盖网络/外部服务差异；本项只证明断言判定一致，不证明交付门禁整体通过。",
+      "negative_control": "只把编排里的 _validate_stdout_assertions 替换为空操作（保留 manifest 解析、真实复跑与结果分类），同一 fixture 应变绿。",
+      "expected_fail": "负控下 fixture 仍为 failed，或自检与门禁报出不同的 item / pattern。",
+      "stdout_assertions": [
+        {"severity": "high", "pattern": "consistent_verdict=item-number-and-pattern-identical"},
+        {"severity": "high", "pattern": "negative_control_verdict=exit-0-command-passes-without-assertion-judgment"},
+        {"severity": "high", "pattern": "RV-1 PASS"}
+      ]
+    },
+    {
+      "item_number": 2,
+      "item_name": "断言错误一次列全，而不是只报第一条",
+      "command": "uv run python tasks/evidence/P1-FEAT-20261030-163441-evidence-self-check/scripts/rv-2-capture.py",
+      "evidence_files": ["rv-2-collect-all-assertions.txt"],
+      "output_summary": "三个题目各写错一条断言时，一次运行列出三条失败（failed_item_count=3，item 1/2/3 各自带期望串与最接近实际行），退出码 1；改回正确断言后同一命令 0 条失败、退出码 0。",
+      "explanation": "kc evidence check 的编排遍历全部 item 并在每个 item 内收集全部未满足断言，不短路；证据同时展示红→绿两侧，证明三条失败没有被跳过。",
+      "risks": "fixture 断言失败是刻意注入的错误，不覆盖真实业务断言写错的全部形态；判定语义仍是子串匹配。",
+      "negative_control": "把 fixture 的三条断言改回正确值后重跑同一命令，应输出 0 条失败、退出码 0。",
+      "expected_fail": "只输出一条失败、其余两条被跳过，或改正后仍有失败。",
+      "stdout_assertions": [
+        {"severity": "high", "pattern": "failed_item_count=3"},
+        {"severity": "high", "pattern": "collect_all_verdict=three-failures-in-one-run"},
+        {"severity": "high", "pattern": "green_failed_item_count=0"},
+        {"severity": "high", "pattern": "RV-2 PASS"}
+      ]
+    },
+    {
+      "item_number": 3,
+      "item_name": "单题超时不中断其余题目，且被明确标为超时",
+      "command": "uv run python tasks/evidence/P1-FEAT-20261030-163441-evidence-self-check/scripts/rv-3-capture.py",
+      "evidence_files": ["rv-3-timeout-isolation.txt"],
+      "output_summary": "--timeout 1 时 sleep 5 的 item 标为 TIMEOUT，输出写明 delivery gate limit is 300s，另一 item 仍以 PASSED 给出结论，汇总 1/2 passed、1 timed out，退出码 1；去掉 --timeout 后同一 fixture 通过；--timeout 301 被拒绝为用法错误（退出码 2）。",
+      "explanation": "超时由本地参数触发并只中断当前 item，其余 item 继续复跑；负控使用门禁默认超时让同一命令通过，证明失败来源是本地超时而非证据或实现。",
+      "risks": "sleep 5 是夹具命令；本项不证明真实长任务的超时行为，只证明编排在单题超时后继续。",
+      "negative_control": "去掉 --timeout 改用门禁默认值重跑，该题应通过（sleep 5 在 300s 内完成），证明超时来自本地参数。",
+      "expected_fail": "一题超时后整个命令中断、其余题目没有任何结论，或默认超时下仍报超时。",
+      "stdout_assertions": [
+        {"severity": "high", "pattern": "timeout_annotation_verdict=marked-TIMEOUT-with-gate-limit-and-rest-still-evaluated"},
+        {"severity": "high", "pattern": "Result: 1/2 passed, 1 timed out"},
+        {"severity": "high", "pattern": "negative_control_verdict=no-timeout-at-gate-limit-so-local-flag-caused-it"},
+        {"severity": "high", "pattern": "RV-3 PASS"}
+      ]
+    },
+    {
+      "item_number": 4,
+      "item_name": "manifest 格式错误时不执行任何证据命令",
+      "command": "uv run python tasks/evidence/P1-FEAT-20261030-163441-evidence-self-check/scripts/rv-4-capture.py",
+      "evidence_files": ["rv-4-format-error-no-execution.txt"],
+      "output_summary": "evidence.json 缺少必填字段 risks 时，自检逐条报格式错误、声明 no evidence command was executed、退出码 1，探针文件不存在（probe_executed=False）；补齐 risks 后同一命令进入正常逐项判定并执行探针。",
+      "explanation": "manifest 解析在复跑之前完成，解析失败直接返回格式错误报告，不进入任何命令执行路径；探针文件是命令副作用的客观痕迹，其缺失证明没有执行。",
+      "risks": "只覆盖缺少必填字段这一种格式错误；version 非 1 等错误由同一解析器处理但本项未逐一枚举。",
+      "negative_control": "补齐 risks 字段后重跑同一命令，应进入正常流程并留下探针执行痕迹。",
+      "expected_fail": "格式错误时仍执行了探针（探针文件存在），或补齐后仍停在格式错误。",
+      "stdout_assertions": [
+        {"severity": "high", "pattern": "no_execution_verdict=format-error-left-no-execution-trace"},
+        {"severity": "high", "pattern": "probe_executed=False"},
+        {"severity": "high", "pattern": "fixed_flow_verdict=normal-per-item-execution-resumed"},
+        {"severity": "high", "pattern": "RV-4 PASS"}
+      ]
+    },
+    {
+      "item_number": 5,
+      "item_name": "正确证据包通过自检并以机器可读形式输出",
+      "command": "uv run python tasks/evidence/P1-FEAT-20261030-163441-evidence-self-check/scripts/rv-5-command.py",
+      "evidence_files": ["rv-5-real-package-json.txt"],
+      "output_summary": "真实证据目录通过 kc evidence check --json（退出码 0，5/5 passed，JSON 可被标准解析器读取）；把副本中一条断言改错后重跑，退出码 1 且 JSON 中 item 5 状态为 failed；无 stdout_assertions 的旧 manifest 只校验退出码并通过。",
+      "explanation": "真实入口运行真实证据包，JSON 由 cli_output 唯一出口序列化并被 json.loads 解析；负控证明退出码与 JSON 状态会随断言错误改变；旧 manifest 相位证明没有断言时行为不变。",
+      "risks": "自检命令自身的 manifest command 是 rv-5-command.py 的限界探针（避免递归）；它覆盖与捕获脚本相同的 --json 契约，但不重复运行整包。",
+      "negative_control": "复制真实证据目录并把 item 5 的一条断言改成不可能命中的字符串后重跑，应退出码 1 且 JSON 报 item 5 失败。",
+      "expected_fail": "正确证据包退出码非 0 或 JSON 不可解析；改错断言后仍返回 0 或 item 状态仍为 passed。",
+      "stdout_assertions": [
+        {"severity": "high", "pattern": "json_parse=ok"},
+        {"severity": "high", "pattern": "negative_control_status=failed"},
+        {"severity": "high", "pattern": "legacy_manifest_status=passed"},
+        {"severity": "high", "pattern": "legacy_manifest_assertion_failures=0"},
+        {"severity": "high", "pattern": "RV-5 COMMAND PASS"}
+      ]
+    }
+  ]
+}

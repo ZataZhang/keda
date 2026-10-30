@@ -1,0 +1,12 @@
+== phase 1: three wrong assertions in one run (expected RED) ==
+red_exit=1
+failed_item_count=3
+failed_item_1=pattern:EXPECTED-ONE|closest:'ACTUAL-1 value'
+failed_item_2=pattern:EXPECTED-TWO|closest:'ACTUAL-2 value'
+failed_item_3=pattern:EXPECTED-THREE|closest:'ACTUAL-3 value'
+collect_all_verdict=three-failures-in-one-run
+== phase 2: corrected assertions, same command (expected GREEN) ==
+green_exit=0
+green_failed_item_count=0
+green_summary={'total': 3, 'passed': 3, 'failed': 0, 'timed_out': 0, 'skipped': 0}
+RV-2 PASS: three assertion failures reported together, zero after correction

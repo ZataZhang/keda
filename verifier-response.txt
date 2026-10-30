@@ -1,0 +1,502 @@
+# Independent verifier raw response
+# issue: #341
+# verifier agent: codebuddy
+# builder sha: 162884813b396ee25de8644d4eba3b785d3a1c87
+# parsed risk: green
+# verdict marker found: yes
+# response chars: 35987
+
+I'll start by reading the PRD and understanding the implementation.
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341 && git log --oneline -3 && git status --short | head -30
+
+[agent tool] Read: /Users/zata/code/keda/.kc-worktrees/issue-341/tasks/pending/P1-FEAT-20261030-163441-evidence-self-check.md
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341 && ls tasks/pending tasks/completed 2>/dev/null | grep -i evidence; echo ---; ls tasks/evidence/P1-FEAT-20261030-163441-evidence-self-check/ 2>/dev/null; echo ---; git show --stat HEAD
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341 && find tasks -name "*evidence-self-check*" -maxdepth 2 | head; echo ---; cat tasks/evidence/P1-FEAT-20261030-163441-evidence-self-check/evidence.json
+
+[agent tool] Read: /Users/zata/code/keda/.kc-worktrees/issue-341/src/backend/api/cli_typer_evidence.py
+
+[agent tool] Read: /Users/zata/code/keda/.kc-worktrees/issue-341/src/backend/core/use_cases/agent_runner_evidence_check.py
+
+[agent tool] Read: /Users/zata/code/keda/.kc-worktrees/issue-341/src/backend/core/use_cases/agent_runner_evidence_assertions.py
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341 && git show HEAD -- src/backend/core/use_cases/agent_runner_validation.py
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341 && uv run kc evidence check --timeout 120 2>&1 | tail -60; echo "EXIT=${PIPESTATUS[0]}"
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341 && uv run kc evidence check --evidence tasks/evidence/P1-FEAT-20261030-163441-evidence-self-check > /tmp/v1.out 2>&1; echo "EXIT=$?"; tail -60 /tmp/v1.out
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341 && git show HEAD -- src/backend/api/cli_typer_app.py src/backend/core/use_cases/agent_runner_structured_evidence.py docs/guides/agent-runner.md docs/guides/prd-standard.md src/backend/engines/agent_runner/templates/skills/kedacode-operator/SKILL.md src/backend/engines/agent_runner/templates/skills/kedacode-operator/references/run-once.md | head -200
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341 && grep -n "def load_evidence_manifest" -A 80 src/backend/core/use_cases/agent_runner_structured_evidence.py | head -120
+
+[agent tool] Bash: set -e
+rm -rf /tmp/evchk && mkdir -p /tmp/evchk/tasks/evidence/case-a /tmp/evchk/tasks/evidence/case-b
+cat > /tmp/evchk/tasks/evidence/case-a/evidence.json <<'EOF'
+{
+  "version": 1,
+  "language": "en",
+  "items": [
+    {"item_number": 1, "item_name": "alpha", "command": "printf 'HELLO world\\nsecond line\\n'", "evidence_files": ["rv-1-alpha.txt"], "output_summary": "s", "explanation": "e", "risks": "r", "negative_control": "n", "expected_fail": "f",
+     "stdout_assertions": [{"severity":"high","pattern":"HELLO WORLD"}]},
+    {"item_number": 2, "item_name": "beta", "command": "printf 'the quick brown fox\\n'", "evidence_files": ["rv-2-beta.txt"], "output_summary": "s", "explanation": "e", "risks": "r", "negative_control": "n", "expected_fail": "f",
+     "stdout_assertions": [{"severity":"high","pattern":"quick blue fox"}]},
+    {"item_number": 3, "item_name": "gamma", "command": "echo 'status: ok'; exit 1", "evidence_files": ["rv-3-gamma.txt"], "output_summary": "s", "explanation": "e", "risks": "r", "negative_control": "n", "expected_fail": "f",
+     "stdout_assertions": [{"severity":"high","pattern":"status: fine"}]},
+    {"item_number": 4, "item_name": "delta", "command": "echo delta-ok", "evidence_files": ["rv-4-delta.txt"], "output_summary": "s", "explanation": "e", "risks": "r", "negative_control": "n", "expected_fail": "f",
+     "stdout_assertions": [{"severity":"high","pattern":"delta-ok"}]}
+  ]
+}
+EOF
+mkdir -p /tmp/evchk/tasks/evidence/case-b && cp /tmp/evchk/tasks/evidence/case-a/evidence.json /tmp/evchk/tasks/evidence/case-b/evidence.json
+cd /Users/zata/code/keda/.kc-worktrees/issue-341 && uv run kc evidence check --worktree /tmp/evchk --evidence /tmp/evchk/tasks/evidence/case-a > /tmp/probe1.out 2>&1; echo "EXIT=$?"; grep -v "^20.*WARNING" /tmp/probe1.out
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341 && uv run kc evidence check --worktree /tmp/evchk --evidence /tmp/evchk/tasks/evidence/case-a > /tmp/probe1.out 2>&1; echo "EXIT=$?"; grep -v "WARNING - child_env" /tmp/probe1.out
+
+[agent tool] Bash: cd /tmp/evchk && git init -q 2>/dev/null; cd /Users/zata/code/keda/.kc-worktrees/issue-341 && uv run kc evidence check --worktree /tmp/evchk --evidence /tmp/evchk/tasks/evidence/case-a > /tmp/probe1.out 2>&1; echo "EXIT=$?"; grep -v "WARNING - child_env" /tmp/probe1.out
+
+[agent tool] Bash: mkdir -p /tmp/evchk/tasks/evidence/case-timeout && cat > /tmp/evchk/tasks/evidence/case-timeout/evidence.json <<'EOF'
+{
+  "version": 1, "language": "en",
+  "items": [
+    {"item_number": 1, "item_name": "slow", "command": "sleep 5; echo slow-done", "evidence_files": ["rv-1-slow.txt"], "output_summary": "s", "explanation": "e", "risks": "r", "negative_control": "n", "expected_fail": "f", "stdout_assertions": [{"pattern":"slow-done"}]},
+    {"item_number": 2, "item_name": "fast", "command": "echo fast-done", "evidence_files": ["rv-2-fast.txt"], "output_summary": "s", "explanation": "e", "risks": "r", "negative_control": "n", "expected_fail": "f", "stdout_assertions": [{"pattern":"fast-done"}]}
+  ]
+}
+EOF
+cd /Users/zata/code/keda/.kc-worktrees/issue-341
+echo "===== timeout=1 ====="; uv run kc evidence check --worktree /tmp/evchk --evidence /tmp/evchk/tasks/evidence/case-timeout --timeout 1 2>/dev/null; echo "EXIT=$?"
+echo "===== default ====="; uv run kc evidence check --worktree /tmp/evchk --evidence /tmp/evchk/tasks/evidence/case-timeout 2>/dev/null | tail -5; echo "EXIT=${PIPESTATUS[0]}"
+echo "===== timeout=301 ====="; uv run kc evidence check --worktree /tmp/evchk --evidence /tmp/evchk/tasks/evidence/case-timeout --timeout 301 2>&1 | tail -2; echo "EXIT=${PIPESTATUS[0]}"
+echo "===== timeout=0 ====="; uv run kc evidence check --worktree /tmp/evchk --evidence /tmp/evchk/tasks/evidence/case-timeout --timeout 0 2>&1 | tail -2
+
+[agent tool] Bash: mkdir -p /tmp/evchk/tasks/evidence/case-bad && rm -f /tmp/evchk/probe-marker
+cat > /tmp/evchk/tasks/evidence/case-bad/evidence.json <<'EOF'
+{
+  "version": 1, "language": "en",
+  "items": [
+    {"item_number": 1, "item_name": "probe", "command": "touch /tmp/evchk/probe-marker; echo done", "evidence_files": ["rv-1-probe.txt"], "output_summary": "s", "explanation": "e", "negative_control": "n", "expected_fail": "f"}
+  ]
+}
+EOF
+cd /Users/zata/code/keda/.kc-worktrees/issue-341
+echo "===== missing risks ====="; uv run kc evidence check --worktree /tmp/evchk --evidence /tmp/evchk/tasks/evidence/case-bad 2>/dev/null; echo "EXIT=$?"; ls -la /tmp/evchk/probe-marker 2>&1
+echo "===== bad version ====="; python3 - <<'PY'
+import json
+p='/tmp/evchk/tasks/evidence/case-bad/evidence.json'
+d=json.load(open(p)); d['version']=2
+json.dump(d,open(p,'w'))
+PY
+uv run kc evidence check --worktree /tmp/evchk --evidence /tmp/evchk/tasks/evidence/case-bad 2>/dev/null; echo "EXIT=$?"; ls /tmp/evchk/probe-marker 2>&1
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341 && sed -n '745,760p' src/backend/core/use_cases/agent_runner_validation.py && grep -n "def ensure_validation_commands_pass" -A 20 src/backend/core/use_cases/agent_runner_validation.py | head -30 && grep -n "class IssueSummary" -A 40 src/backend/core/shared/models/agent_runner.py | head -50
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341 && grep -rn "class IssueSummary" src/backend | head; grep -rn "class AppConfig" src/backend/core/shared/models/agent_runner.py | head
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341 && sed -n '25,80p' src/backend/core/shared/models/agent_runner_config.py; grep -n "def load_config\|def load_app_config\|from_toml" src/backend/core/shared/models/agent_runner_config.py | head
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341 && grep -n "def resolve_issue_evidence_dir" -A 60 src/backend/core/use_cases/agent_runner_validation.py | head -80; grep -n "def has_structured_evidence_marker" -A 20 src/backend/core/use_cases/agent_runner_structured_evidence.py
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341 && grep -rn "def resolve_evidence_dir" -A 40 src/backend/core/use_cases/*.py src/backend/core/shared/models/*.py | head -60
+
+[agent tool] Bash: mkdir -p /tmp/evchk/tasks/evidence/issue-999 && cp /tmp/evchk/tasks/evidence/case-a/evidence.json /tmp/evchk/tasks/evidence/issue-999/evidence.json
+cat > /tmp/gatecmp.py <<'PY'
+import sys
+from pathlib import Path
+sys.path.insert(0, "/Users/zata/code/keda/.kc-worktrees/issue-341/src")
+
+from backend.core.use_cases.agent_runner_factory import (
+    create_process_runner, get_agent_runner_settings, resolve_repository_targets,
+)
+from backend.core.shared.models.agent_runner import IssueSummary
+from backend.core.use_cases.agent_runner_validation import ensure_validation_commands_pass
+from backend.core.use_cases.agent_runner_evidence_check import (
+    EvidenceCheckRequest, run_evidence_check,
+)
+from backend.core.use_cases import agent_runner_evidence_assertions as Aa
+from backend.core.use_cases.agent_runner_structured_evidence import ValidationEvidenceError
+
+wt = Path("/tmp/evchk")
+cfg = resolve_repository_targets(get_agent_runner_settings(), fallback_path=str(wt))[0].config
+cfg = cfg.__class__(**{**cfg.__dict__, "validation": cfg.validation.__class__(**{**cfg.validation.__dict__, "reexecute_cache_enabled": False})}) if hasattr(cfg, "__dict__") else cfg
+pr = create_process_runner()
+body = "<!-- kc:structured-evidence version=1 language=\"en\" -->"
+issue = IssueSummary(number=999, title="t", url="u", body=body, labels=())
+req = EvidenceCheckRequest(evidence_dir=wt/"tasks/evidence/issue-999", timeout_seconds=300, gate_timeout_seconds=300)
+rep = run_evidence_check(wt, cfg, pr, req)
+print("CHECK passed=", rep.passed, "failed items=", [r.block.item_number for r in rep.failed_item_results])
+try:
+    ensure_validation_commands_pass(issue, wt, cfg, pr)
+    print("GATE: PASSED (unexpected)")
+except ValidationEvidenceError as e:
+    msg = str(e)
+    print("GATE: raised kind=", e.kind)
+    print("GATE message item headers:", [l for l in msg.splitlines() if l.startswith("=== Item")])
+    print("GATE contains HELLO WORLD:", "HELLO WORLD" in msg, "| quick blue fox:", "quick blue fox" in msg)
+print("--- negative control: assertion validator no-op ---")
+orig = Aa._validate_stdout_assertions
+Aa._validate_stdout_assertions = lambda block, result: None
+try:
+    rep2 = run_evidence_check(wt, cfg, pr, req)
+    print("negctl passed=", rep2.passed, "failed items=", [r.block.item_number for r in rep2.failed_item_results])
+    try:
+        ensure_validation_commands_pass(issue, wt, cfg, pr)
+        print("negctl GATE: passed")
+    except ValidationEvidenceError as e:
+        print("negctl GATE: still raised for items", [l for l in str(e).splitlines() if l.startswith("=== Item")])
+finally:
+    Aa._validate_stdout_assertions = orig
+PY
+cd /Users/zata/code/keda/.kc-worktrees/issue-341 && uv run python /tmp/gatecmp.py 2>&1 | grep -v "WARNING - child_env"
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341 && cat > /tmp/dbg.py <<'PY'
+import sys
+from pathlib import Path
+sys.path.insert(0, "/Users/zata/code/keda/.kc-worktrees/issue-341/src")
+from backend.core.use_cases.agent_runner_factory import get_agent_runner_settings, resolve_repository_targets
+from backend.core.use_cases.agent_runner_structured_evidence import has_structured_evidence_marker, parse_structured_evidence_marker
+wt=Path("/tmp/evchk")
+cfgs = resolve_repository_targets(get_agent_runner_settings(), fallback_path=str(wt))
+print("n contexts", len(cfgs))
+cfg=cfgs[0].config
+print("reexecute_commands", cfg.validation.reexecute_commands, "cache", cfg.validation.reexecute_cache_enabled, "evidence_dir", cfg.validation.evidence_dir, "timeout", cfg.validation.reexecute_timeout_seconds)
+for b in ['<!-- kc:structured-evidence version=1 language="en" -->', '<!-- kc:structured-evidence version=1 language="zh-CN" -->']:
+    print(repr(b), has_structured_evidence_marker(b), parse_structured_evidence_marker(b))
+PY
+uv run python /tmp/dbg.py 2>&1 | grep -v "WARNING - child_env"
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341 && ls -a | grep -i keda; grep -n "evidence_dir" config.toml .kedacode.toml 2>/dev/null | head
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341 && sed -n '130,155p' .kedacode.toml
+
+[agent tool] Bash: cat > /tmp/evchk/.kedacode.toml <<'EOF'
+[agent_runner.validation]
+enabled = true
+evidence_dir = "tasks/evidence"
+structured_evidence = true
+reexecute_commands = true
+reexecute_cache_enabled = false
+EOF
+cd /Users/zata/code/keda/.kc-worktrees/issue-341 && uv run python /tmp/gatecmp.py 2>&1 | grep -v "WARNING - child_env"
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341 && cat > /tmp/dbg2.py <<'PY'
+import sys
+from pathlib import Path
+sys.path.insert(0, "/Users/zata/code/keda/.kc-worktrees/issue-341/src")
+from backend.core.use_cases.agent_runner_factory import get_agent_runner_settings, resolve_repository_targets
+from backend.core.use_cases.agent_runner_validation import ensure_validation_commands_pass, resolve_issue_evidence_dir
+from backend.core.shared.models.agent_runner import IssueSummary
+wt=Path("/tmp/evchk")
+cfg=resolve_repository_targets(get_agent_runner_settings(), fallback_path=str(wt))[0].config
+issue=IssueSummary(number=999,title="t",url="u",body='<!-- kc:structured-evidence version=1 language="en" -->',labels=())
+print("cfg dir", cfg.validation.evidence_dir, "reexec", cfg.validation.reexecute_commands, "cache", cfg.validation.reexecute_cache_enabled)
+print("resolved evidence dir", resolve_issue_evidence_dir(wt,cfg,issue))
+import inspect
+print(inspect.getsource(ensure_validation_commands_pass)[-2500:])
+PY
+uv run python /tmp/dbg2.py 2>&1 | grep -v "WARNING - child_env" | tail -50
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341 && uv run python /tmp/dbg2.py 2>&1 | grep -v "WARNING - child_env" | head -5
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341 && sed -n '778,830p' src/backend/core/use_cases/agent_runner_validation.py
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341 && grep -rn "def validation_required" -A 30 src/backend/core/use_cases/*.py | head -40
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341 && python3 - <<'PY'
+p='/tmp/gatecmp.py'
+s=open(p).read()
+s=s.replace('body = "<!-- kc:structured-evidence version=1 language=\\"en\\" -->"', 'body = "<!-- kc:structured-evidence version=1 language=\\"en\\" -->\\n\\n### Realistic Validation\\n\\n- [ ] rv-1: ok\\n- [ ] rv-2: ok"')
+open(p,'w').write(s)
+PY
+grep -n "body =" /tmp/gatecmp.py; uv run python /tmp/gatecmp.py 2>&1 | grep -v "WARNING - child_env"
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341
+echo "=== json failure ==="
+uv run kc evidence check --worktree /tmp/evchk --evidence /tmp/evchk/tasks/evidence/case-a --json > /tmp/jfail.out 2>/tmp/jfail.err; echo "EXIT=$?"
+python3 - <<'PY'
+import json
+raw=open('/tmp/jfail.out').read()
+try:
+    d=json.loads(raw)
+except Exception as e:
+    print("PARSE FAIL", e); print(raw[:500]); raise SystemExit
+print("parsed ok; passed=",d["passed"],"summary=",d["summary"])
+for it in d["items"]:
+    print(it["item_number"], it["status"], it["failure_kind"], [(a["pattern"], a["closest_output_line"]) for a in it["assertion_failures"]])
+PY
+echo "stderr lines: $(wc -l < /tmp/jfail.err)"
+echo "=== json on real package ==="
+uv run kc evidence check --evidence tasks/evidence/P1-FEAT-20261030-163441-evidence-self-check --json --timeout 120 > /tmp/jok.out 2>/tmp/jok.err; echo "EXIT=$?"
+python3 -c "import json;d=json.load(open('/tmp/jok.out'));print('passed',d['passed'],d['summary'])"
+
+[agent tool] Bash: mkdir -p /tmp/evchk/tasks/evidence/case-multi && cat > /tmp/evchk/tasks/evidence/case-multi/evidence.json <<'EOF'
+{
+  "version": 1, "language": "en",
+  "items": [
+    {"item_number": 1, "item_name": "multi", "command": "printf 'alpha\\nbeta\\n' >&2; echo ok", "evidence_files": ["rv-1-multi.txt"], "output_summary": "s", "explanation": "e", "risks": "r", "negative_control": "n", "expected_fail": "f",
+     "stdout_assertions": [
+        {"pattern":"gamma"},
+        {"pattern":"delta"},
+        {"pattern":"ok","source":"stderr"},
+        {"pattern":"Traceback","must_match":false}
+     ]},
+    {"item_number": 2, "item_name": "legacy-no-assertions", "command": "echo legacy", "evidence_files": ["rv-2-legacy.txt"], "output_summary": "s", "explanation": "e", "risks": "r", "negative_control": "n", "expected_fail": "f"}
+  ]
+}
+EOF
+cd /Users/zata/code/keda/.kc-worktrees/issue-341 && uv run kc evidence check --worktree /tmp/evchk --evidence /tmp/evchk/tasks/evidence/case-multi 2>/dev/null | grep -E "FAILED|PASSED|assertion #|closest|Result"; echo "EXIT=$?"
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341 && uv run kc schema --json 2>/dev/null | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+def walk(n,path=''):
+    if isinstance(n,dict):
+        if n.get('name')=='check' or n.get('path','').endswith('evidence check'):
+            print(json.dumps(n,ensure_ascii=False)[:800]); return True
+        for k,v in n.items():
+            if walk(v): return True
+    elif isinstance(n,list):
+        for v in n:
+            if walk(v): return True
+    return False
+print('found:',walk(d))
+"
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341 && uv run kc schema --json 2>/dev/null > /tmp/schema.json; python3 - <<'PY'
+import json
+d=json.load(open('/tmp/schema.json'))
+print(type(d), list(d)[:10] if isinstance(d,dict) else len(d))
+s=json.dumps(d,ensure_ascii=False)
+i=s.find('evidence')
+print(s[max(0,i-200):i+1200])
+PY
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341 && python3 - <<'PY'
+import json
+d=json.load(open('/tmp/schema.json'))
+def iter_cmds(node):
+    if isinstance(node,dict):
+        if 'path' in node and 'arguments' in node or ('path' in node and node.get('path','').strip()=='evidence check'):
+            yield node
+        for v in node.values():
+            yield from iter_cmds(v)
+    elif isinstance(node,list):
+        for v in node: yield from iter_cmds(v)
+hits=[c for c in iter_cmds(d) if isinstance(c.get('path'),str) and 'evidence' in c['path']]
+for h in hits: print(h.get('path'), '| flags:', [a['name'] for a in h.get('arguments',[])])
+PY
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341 && python3 - <<'PY'
+import json
+d=json.load(open('/tmp/schema.json'))
+cs=d['commands']
+print(len(cs))
+print(json.dumps(cs[0],ensure_ascii=False)[:600])
+print([c.get('path') or c.get('name') for c in cs][:40])
+PY
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341 && python3 - <<'PY'
+import json
+d=json.load(open('/tmp/schema.json'))
+hits=[c for c in d['commands'] if c['path'][0]=='evidence']
+for c in hits:
+    print(c['path'], c['help'])
+    print([o['name'] for o in c['options']])
+print("exit_codes:", d.get('exit_codes'))
+PY
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341 && just test 2>&1 | tail -25
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341 && just lint 2>&1 | tail -15
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341
+mkdir -p /tmp/evchk/tasks/evidence/case-missing /tmp/evchk/tasks/evidence/case-badjson /tmp/evchk/tasks/evidence/case-twofmt
+echo '{not json' > /tmp/evchk/tasks/evidence/case-badjson/evidence.json
+cat > /tmp/evchk/tasks/evidence/case-twofmt/evidence.json <<'EOF'
+{"version": 1, "language": "en", "items": [
+  {"item_number": 1, "item_name": "a", "command": "echo a", "evidence_files": ["rv-1-a.txt"], "output_summary": "s", "explanation": "e", "negative_control": "n", "expected_fail": "f"},
+  {"item_number": 2, "item_name": "b", "command": "echo b", "evidence_files": ["rv-2-b.txt"], "output_summary": "s", "explanation": "e", "risks": "r", "negative_control": "n", "expected_fail": "f"}
+]}
+EOF
+for c in case-missing case-badjson case-twofmt; do echo "===== $c ====="; uv run kc evidence check --worktree /tmp/evchk --evidence /tmp/evchk/tasks/evidence/$c 2>/dev/null | grep -v "child_env"; echo "EXIT=$?"; done
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341
+cat > /tmp/evchk/tasks/evidence/case-twofmt/evidence.json <<'EOF'
+{"version": 1, "language": "en", "items": [
+  {"item_number": 1, "item_name": "a", "command": "echo a", "evidence_files": ["rv-1-a.txt"], "output_summary": "s", "explanation": "e", "negative_control": "n", "expected_fail": "f"},
+  {"item_number": 2, "item_name": "b", "command": "echo b", "evidence_files": ["rv-2-b.txt"], "output_summary": "s", "explanation": "e", "risks": "r", "negative_control": "n"}
+]}
+EOF
+uv run kc evidence check --worktree /tmp/evchk --evidence /tmp/evchk/tasks/evidence/case-twofmt > /tmp/two.out 2>/dev/null; echo "REAL_EXIT=$?"
+grep -E "Manifest errors|^- " /tmp/two.out
+uv run kc evidence check --worktree /tmp/evchk --evidence /tmp/evchk/tasks/evidence/case-twofmt --json > /tmp/two.json 2>/dev/null; echo "JSON_EXIT=$?"
+python3 -c "import json;d=json.load(open('/tmp/two.json'));print('passed',d['passed'],'manifest_errors',len(d['manifest_errors']),'items',len(d['items']))"
+echo "--- missing dir ---"
+uv run kc evidence check --worktree /tmp/evchk --evidence /tmp/evchk/tasks/evidence/nope > /dev/null 2>&1; echo "EXIT=$?"
+echo "--- nonexistent worktree ---"
+uv run kc evidence check --worktree /tmp/evchk/nope > /dev/null 2>&1; echo "EXIT=$?"
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341 && for f in tasks/evidence/P1-FEAT-20261030-163441-evidence-self-check/rv-*.txt; do echo "===== $f ($(wc -l < "$f") lines) ====="; head -12 "$f"; done
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341 && grep -rn "_validate_stdout_assertions\|_is_stdout_assertion_satisfied\|_assertion_target_text" src tests | grep -v "agent_runner_evidence_assertions.py"
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341 && grep -n "def test_\|_validate_stdout_assertions\|import" tests/test_agent_runner_validation.py | sed -n '1,80p'
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341
+rm -rf /tmp/evone && mkdir -p /tmp/evone && cp -r /tmp/evchk/tasks /tmp/evone/ && cp /tmp/evchk/.kedacode.toml /tmp/evone/ && cd /tmp/evone && git init -q
+cd /Users/zata/code/keda/.kc-worktrees/issue-341
+echo "=== default resolution, multiple candidates in /tmp/evone ==="
+uv run kc evidence check --worktree /tmp/evone > /tmp/def.out 2>&1; echo "EXIT=$?"; tail -2 /tmp/def.out
+rm -rf /tmp/evone/tasks/evidence/case-* /tmp/evone/tasks/evidence/issue-999
+echo "=== default resolution, single candidate ==="
+uv run kc evidence check --worktree /tmp/evone 2>/dev/null | tail -4; echo
+echo "=== relative --evidence under --worktree ==="
+uv run kc evidence check --worktree /tmp/evone --evidence tasks/evidence/case-a 2>/dev/null | head -3
+echo "=== json usage error (ambiguous) ==="
+uv run kc evidence check --worktree /tmp/evchk --json > /tmp/amb.out 2>/tmp/amb.err; echo "EXIT=$?"; echo "stdout bytes: $(wc -c < /tmp/amb.out)"; head -3 /tmp/amb.err | grep -v child_env
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341
+rm -rf /tmp/evsingle && mkdir -p /tmp/evsingle/tasks/evidence/only-one && cp /tmp/evchk/tasks/evidence/case-a/evidence.json /tmp/evsingle/tasks/evidence/only-one/ && cp /tmp/evchk/.kedacode.toml /tmp/evsingle/ && (cd /tmp/evsingle && git init -q)
+uv run kc evidence check --worktree /tmp/evsingle 2>/dev/null | grep -E "Evidence directory|Result"; echo "---"
+uv run kc evidence check --worktree /tmp/evsingle --evidence tasks/evidence/only-one 2>/dev/null | grep -E "Evidence directory|Result"
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341 && sed -n '1,140p' tasks/archive/P1-FEAT-20261030-163441-evidence-self-check.md
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341 && grep -n "7.6\|Acceptance Checklist" -n tasks/archive/P1-FEAT-20261030-163441-evidence-self-check.md | head; sed -n '/## 9. Acceptance Checklist/,/## 10/p' tasks/archive/P1-FEAT-20261030-163441-evidence-self-check.md | head -60
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341
+mkdir -p /tmp/evchk/tasks/evidence/issue-998
+cat > /tmp/evchk/tasks/evidence/issue-998/evidence.json <<'EOF'
+{"version":1,"language":"en","items":[
+ {"item_number":1,"item_name":"slow","command":"sleep 20","evidence_files":["rv-1-a.txt"],"output_summary":"s","explanation":"e","risks":"r","negative_control":"n","expected_fail":"f"},
+ {"item_number":2,"item_name":"assert","command":"echo actual-value","evidence_files":["rv-2-b.txt"],"output_summary":"s","explanation":"e","risks":"r","negative_control":"n","expected_fail":"f","stdout_assertions":[{"pattern":"expected-value"}]},
+ {"item_number":3,"item_name":"ok","command":"echo ok","evidence_files":["rv-3-c.txt"],"output_summary":"s","explanation":"e","risks":"r","negative_control":"n","expected_fail":"f"}
+]}
+EOF
+python3 - <<'PY'
+p='/tmp/evchk/.kedacode.toml'
+s=open(p).read()
+if 'reexecute_timeout_seconds' not in s:
+    s += 'reexecute_timeout_seconds = 2\n'
+open(p,'w').write(s)
+PY
+sed 's#issue-999#issue-998#g' /tmp/gatecmp.py > /tmp/gatecmp2.py
+uv run python /tmp/gatecmp2.py 2>&1 | grep -v "WARNING - child_env"
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341 && sed -e 's#issue-999#issue-998#g' -e 's#number=999#number=998#' /tmp/gatecmp.py > /tmp/gatecmp2.py && uv run python /tmp/gatecmp2.py 2>&1 | grep -v "WARNING - child_env"
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341 && sed -e 's#issue-999#issue-998#g' -e 's#number=999#number=998#' -e 's#timeout_seconds=300#timeout_seconds=2#g' -e 's#gate_timeout_seconds=300#gate_timeout_seconds=2#' /tmp/gatecmp.py > /tmp/gatecmp3.py && time uv run python /tmp/gatecmp3.py 2>&1 | grep -v "WARNING - child_env"
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341 && git show HEAD -- tests/test_kedacode_operator_skill.py tests/test_cli_schema.py | head -80
+
+[agent tool] Bash: mkdir -p /tmp/evchk/tasks/evidence/case-perm && cp /tmp/evchk/tasks/evidence/case-multi/evidence.json /tmp/evchk/tasks/evidence/case-perm/ && chmod 000 /tmp/evchk/tasks/evidence/case-perm/evidence.json
+cd /Users/zata/code/keda/.kc-worktrees/issue-341 && uv run kc evidence check --worktree /tmp/evchk --evidence /tmp/evchk/tasks/evidence/case-perm > /tmp/perm.out 2>&1; echo "EXIT=$?"; grep -v child_env /tmp/perm.out | tail -8; chmod 644 /tmp/evchk/tasks/evidence/case-perm/evidence.json
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341
+uv run kc evidence check --worktree /tmp/evchk --evidence /tmp/evchk/tasks/evidence/case-timeout --timeout 1 --json > /tmp/jto.json 2>/dev/null; echo "EXIT=$?"
+python3 -c "
+import json;d=json.load(open('/tmp/jto.json'))
+print('passed',d['passed'],'local_timeout',d['local_timeout'],'summary',d['summary'])
+for i in d['items']: print(i['item_number'],i['status'],i['failure_kind'],i['detail'][:60])
+"
+uv run kc evidence --help 2>/dev/null | head -15
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341 && uv run python hooks/shared/check_architecture.py; echo "ARCH_EXIT=$?"
+# legacy nonzero exit & --output json alias
+mkdir -p /tmp/evchk/tasks/evidence/case-legacyfail
+cat > /tmp/evchk/tasks/evidence/case-legacyfail/evidence.json <<'EOF'
+{"version":1,"language":"en","items":[{"item_number":1,"item_name":"bad","command":"echo boom; exit 3","evidence_files":["rv-1-x.txt"],"output_summary":"s","explanation":"e","risks":"r","negative_control":"n","expected_fail":"f"}]}
+EOF
+uv run kc evidence check --worktree /tmp/evchk --evidence /tmp/evchk/tasks/evidence/case-legacyfail --output json > /tmp/legacy.json 2>/dev/null; echo "EXIT=$?"; python3 -c "import json;d=json.load(open('/tmp/legacy.json'));print(d['passed'],d['items'][0]['status'],d['items'][0]['exit_code'])"
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341 && grep -n "def resolve_repository_targets" -A 60 src/backend/core/use_cases/agent_runner_factory.py | head -70
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341 && grep -rn "def resolve_repository_targets" src/backend | head; f=$(grep -rln "def resolve_repository_targets" src/backend | head -1); grep -n "def resolve_repository_targets" -A 70 "$f" | head -80
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341 && sed -n '236,268p' src/backend/engines/agent_runner/factory_repository_resolver.py
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341
+echo "=== rv-2 green control: corrected assertions ==="
+mkdir -p /tmp/evchk/tasks/evidence/case-green
+cat > /tmp/evchk/tasks/evidence/case-green/evidence.json <<'EOF'
+{"version":1,"language":"en","items":[
+ {"item_number":1,"item_name":"a","command":"echo ACTUAL-1 value","evidence_files":["rv-1-a.txt"],"output_summary":"s","explanation":"e","risks":"r","negative_control":"n","expected_fail":"f","stdout_assertions":[{"pattern":"ACTUAL-1 value"}]},
+ {"item_number":2,"item_name":"b","command":"echo ACTUAL-2 value","evidence_files":["rv-2-b.txt"],"output_summary":"s","explanation":"e","risks":"r","negative_control":"n","expected_fail":"f","stdout_assertions":[{"pattern":"ACTUAL-2 value"}]},
+ {"item_number":3,"item_name":"c","command":"echo ACTUAL-3 value","evidence_files":["rv-3-c.txt"],"output_summary":"s","explanation":"e","risks":"r","negative_control":"n","expected_fail":"f","stdout_assertions":[{"pattern":"ACTUAL-3 value"}]}
+]}
+EOF
+uv run kc evidence check --worktree /tmp/evchk --evidence /tmp/evchk/tasks/evidence/case-green > /tmp/green.out 2>/dev/null; echo "EXIT=$?"; grep Result /tmp/green.out
+
+echo "=== rv-4 negative control: add risks, probe should execute ==="
+rm -f /tmp/evchk/probe-marker
+python3 - <<'PY'
+import json
+p='/tmp/evchk/tasks/evidence/case-bad/evidence.json'
+d=json.load(open(p)); d['version']=1
+d['items'][0]['risks']='r'
+d['items'][0]['command']="touch /tmp/evchk/probe-marker; echo done"
+json.dump(d,open(p,'w'))
+PY
+uv run kc evidence check --worktree /tmp/evchk --evidence /tmp/evchk/tasks/evidence/case-bad 2>/dev/null | grep -E "PASSED|FAILED|Result"; echo "probe exists: $([ -f /tmp/evchk/probe-marker ] && echo YES || echo NO)"
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-341
+rm -rf /tmp/evreal-ok /tmp/evreal-bad && cp -R tasks/evidence/P1-FEAT-20261030-163441-evidence-self-check /tmp/evreal-ok && cp -R tasks/evidence/P1-FEAT-20261030-163441-evidence-self-check /tmp/evreal-bad
+python3 - <<'PY'
+import json
+p='/tmp/evreal-bad/evidence.json'
+d=json.load(open(p))
+for it in d['items']:
+    if it['item_number']==5:
+        it['stdout_assertions'][0]['pattern']='RV-5 IMPOSSIBLE PATTERN'
+json.dump(d,open(p,'w'),ensure_ascii=False,indent=2)
+PY
+uv run kc evidence check --evidence /tmp/evreal-ok --json > /tmp/realok.json 2>/dev/null; echo "OK_EXIT=$?"
+python3 -c "import json;d=json.load(open('/tmp/realok.json'));print('ok passed',d['passed'],d['summary'])"
+uv run kc evidence check --evidence /tmp/evreal-bad --json > /tmp/realbad.json 2>/dev/null; echo "BAD_EXIT=$?"
+python3 -c "import json;d=json.load(open('/tmp/realbad.json'));print('bad passed',d['passed'],[(i['item_number'],i['status']) for i in d['items'] if i['status']!='passed'],d['items'][4]['assertion_failures'][0]['pattern'] if d['items'][4]['assertion_failures'] else None)"
+I ran the real CLI and my own fixtures rather than re-running the builder's tests. Findings below.
+
+## What "working" means (my own oracle)
+
+1. `kc evidence check` re-runs every `evidence.json` command through the same parser/timeout/assertion path as the gate, and the gate (`ensure_validation_commands_pass`) produces the identical failure set.
+2. All failing items and all failing assertions are reported in one pass, each with expected substring + closest actual line; exit 0 clean / 1 failures / 2 usage.
+3. A single timeout is isolated; other items still get verdicts; output names the gate limit.
+4. Manifest format errors run zero commands (observable by side-effect probe).
+5. `--json` is clean, schema-introspectable, legacy manifests unchanged, docs/skill/prompt updated.
+
+## What I actually ran and observed
+
+**Real entry, real package** (worktree `issue-341`):
+- `uv run kc evidence check --evidence tasks/evidence/P1-FEAT-.../` → `5/5 passed`, exit 0.
+- `--json` → parsed by `json.loads`, `passed=true`, summary 5/5; logs went to stderr, stdout pure JSON.
+- Bare `kc evidence check` → exit 2, lists all 11 candidate dirs (matches the "don't guess" contract).
+
+**My own fixtures** (git repo at `/tmp/evchk`, `.kedacode.toml`):
+- 3 wrong assertions across items 1/2/3 + one nonzero exit → one run listed all four failures, with `HELLO world` and `the quick brown fox` as closest lines; exit 1.
+- One item with 2 missing stdout assertions + a wrong `source=stderr` assertion → all 3 reported inside one item; `must_match:false` honored; legacy item without assertions only checked exit code.
+- `--timeout 1` with `sleep 5`: item 1 `TIMEOUT` ("gate limit is 300s"), item 2 `PASSED`, exit 1; same fixture without `--timeout` → 2/2 passed. `--timeout 301` and `--timeout 0` → exit 2.
+- Manifest missing `risks` → "Manifest errors (no evidence command was executed)", exit 1, probe file absent; adding `risks` → probe file created and item passed.
+
+**Same-source proof (independent of builder tests):** I loaded the gate directly (`ensure_validation_commands_pass`) on the same fixture through a fresh process and compared:
+- check → failed items `[1,2,3]`; gate → `=== Item 1/2/3 ===` with identical patterns (`HELLO WORLD`, `quick blue fox`).
+- Negative control: monkeypatched `_validate_stdout_assertions` to a no-op → items 1/2 turned green on **both** sides, leaving only the real nonzero-exit item — so the assertion judgment is actually load-bearing.
+- Timeout + assertion fixture with config timeout=2: check `[1 timeout, 2 assertion]`; gate `=== Item 1 (timeout) ===`, `=== Item 2 (failed) ===`, and item 3 still evaluated — decision-two acceptance independently confirmed.
+
+**rv-5 negative control:** copied the real package, corrupted item 5's assertion → exit 1, JSON `items[4].status=failed`, pattern `RV-5 IMPOSSIBLE PATTERN`; original copy remained 5/5 / exit 0.
+
+**Other:** `kc schema --json` contains `["evidence","check"]` with `--evidence/--worktree/--timeout/--output/--json`; `just test` 317 passed; `just lint` exit 0; `hooks/shared/check_architecture.py` exit 0; prompt/docs/skill diffs present (300s cap, mandatory self-check when `stdout_assertions` declared).
+
+Evidence artifacts: all five are `.txt` (no images/video/audio), and their content matches what I reproduced independently (real temp paths, real JSON, real gate excerpts).
+
+## Gaps / risks (non-blocking, not contradicted by acceptance)
+
+- **Multiple simultaneous manifest format errors**: loader is fail-fast, so a manifest with two bad fields reports only the first (`Item 1: missing risks`), though the oracle row says "逐条列出格式错误". Single-error case is correct and no command executes; this is a consequence of FR-2's "reuse `load_evidence_manifest`".
+- **Unreadable `evidence.json`** (chmod 000) surfaces a raw `PermissionError` traceback with exit 1 instead of a clean CLI error. Edge case, pre-existing loader behavior.
+- **Cosmetic**: timed-out items render `(0.0s)`.
+- Running from a subdirectory defaults `--worktree` to cwd, so `tasks/evidence` is resolved relative to the subdirectory; docs steer users to `--worktree`/`--evidence`, so not a break.
+
+Verdict: main path and all five acceptance behaviors independently confirmed, including adversarial negative controls; no proven break.
+
+<!-- kc:verifier-verdict risk=green -->

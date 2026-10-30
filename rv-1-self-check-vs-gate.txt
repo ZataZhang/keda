@@ -1,0 +1,15 @@
+== phase 1: same fixture through kc evidence check (expected RED) ==
+self_check_exit=1
+self_check_item=1
+self_check_status=failed
+self_check_pattern=LEGACY GREEN: v1 example-derived suite
+self_check_closest_line='LEGACY GREEN: v1 suite'
+== phase 2: same fixture through the delivery gate (fresh process) ==
+{"gate_failed": true, "gate_item": 1, "gate_pattern": "LEGACY GREEN: v1 example-derived suite", "gate_message_excerpt": ["Realistic Validation re-execution failed for 1 item(s) after keda re-ran their commands. Every failure is listed below so they can all be fixed in one pass.", "", "=== Item 1 (failed) ===", "Realistic Validation item 1 exited 0 but its stdout assertion(s) failed (command `printf 'LEGACY GREEN: v1 suite\\n run 3 tests\\n'`). An exit code of 0 is not proof the checkpoint holds — remove `|| true` / `|| echo ok` style fallbacks and make the command actually assert, or correct the declared assertion.", "", "- assertion #1: must contain 'LEGACY GREEN: v1 example-derived suite' in stdout (severity=high)"]}
+gate_item=1
+gate_pattern=LEGACY GREEN: v1 example-derived suite
+consistent_verdict=item-number-and-pattern-identical
+== phase 3: negative control — assertion judgment disabled ==
+{"negative_control_passed": true, "negative_control_status": "passed"}
+negative_control_verdict=exit-0-command-passes-without-assertion-judgment
+RV-1 PASS: self-check and gate agree on the same pattern; assertions are discriminating

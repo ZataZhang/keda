@@ -1,0 +1,16 @@
+== phase 1: missing required field (expected RED, no execution) ==
+Evidence directory: /var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/rv4-0jzzmknq/evidence
+Timeout: 300s (delivery gate limit: 300s)
+
+Manifest errors (no evidence command was executed):
+- Item 1: missing or empty required field `risks` in evidence manifest.
+
+Result: manifest error — no evidence command was executed
+broken_exit=1
+probe_executed=False
+no_execution_verdict=format-error-left-no-execution-trace
+== phase 2: negative control — fix only the missing field (expected GREEN) ==
+fixed_exit=0
+probe_executed_after_fix=True
+fixed_flow_verdict=normal-per-item-execution-resumed
+RV-4 PASS: format errors block execution; a fixed manifest runs normally

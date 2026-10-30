@@ -1,0 +1,26 @@
+== phase 1: local --timeout 1 (expected RED with TIMEOUT) ==
+2026-10-30 17:15:36 - app - ERROR - process_runner.py:857 - Command (rv-reexec-1) timed out after 1s; terminating: bash -lc sleep 5
+Evidence directory: /var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/rv3-dj26cv_b/evidence
+Timeout: 1s (delivery gate limit: 300s)
+Local timeout is shorter than the gate limit; a local timeout is not a gate verdict. Re-run without --timeout before treating it as a failure.
+
+TIMEOUT  item 1 (0.0s): rv-1 probe
+  Realistic Validation item 1 timed out when keda re-ran its command (>1s): `sleep 5`. The reproducible command must be a self-terminating check that probes the real entry point and exits, not a long-running server. This run used the local --timeout 1s; the delivery gate limit is 300s, so this local timeout is not a gate verdict by itself.
+
+PASSED   item 2 (0.0s): rv-2 probe
+
+Result: 1/2 passed, 1 timed out
+local_timeout_exit=1
+timeout_annotation_verdict=marked-TIMEOUT-with-gate-limit-and-rest-still-evaluated
+== phase 2: above the gate limit --timeout 301 (expected usage error) ==
+[stderr]
+usage_error: --timeout must be between 1 and 300 seconds (the delivery gate limit); got 301.
+next: kc evidence check --timeout 300
+above_limit_exit=2
+gate_limit_guard_verdict=timeout-above-gate-limit-rejected-with-usage-error
+== phase 3: negative control — default gate timeout (expected GREEN) ==
+default_timeout_exit=0
+default_timeout_summary={'total': 2, 'passed': 2, 'failed': 0, 'timed_out': 0, 'skipped': 0}
+default_timeout_local_flag=False
+negative_control_verdict=no-timeout-at-gate-limit-so-local-flag-caused-it
+RV-3 PASS: local timeout marked and isolated; other items still evaluated
