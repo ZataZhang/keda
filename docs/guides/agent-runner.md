@@ -762,7 +762,7 @@ Fix Agent 只挂在「提交前验证失败」这一个入口。代码写完、�
 
 **明确不接这三类**，它们保持整轮重跑：
 
-- RV 命令被 keda 复跑后未通过或超时（`ensure_validation_commands_pass`）
+- RV 命令被 keda 复跑后未通过或超时（`ensure_validation_commands_pass`）；门禁一次聚合全部未通过项，不再只报第一条
 - 证据目录为空、证据与清单覆盖不匹配、证据文件交叉污染、缺 negative control、产物健全性不达标
 - RV 辅助脚本放错位置（`ensure_no_misplaced_evidence_helpers`）
 
@@ -3515,6 +3515,27 @@ agent 执行              prompt 强制要求实跑验证计划，证据写入 w
 
 断言未通过时抛 `ValidationEvidenceError`，与 exit code 非零走同一条 recovery 循环，且不会被写进 RV 复跑缓存。旧 manifest（无该字段）行为不变，只校验退出码。
 RV 命令非零退出或 stdout 断言失败时，尝试详情会保留失败命令、退出码及限长后的 stdout/stderr；Backlog 在“失败原因”中先展示摘要，展开可读完整诊断。普通仓库验证命令也沿用同一输出呈现口径。
+
+#### 本地自检：`kc evidence check`（提交前必跑）
+
+`kc evidence check` 是交付门禁的本地前移入口，判定与门禁完全同源（manifest 解析、`bash -lc` 复跑、超时、`stdout_assertions`），只是把反馈从"提交后等门禁、一次一条"变成"本地几秒、一次全量"。声明了 `stdout_assertions` 的证据包必须先自检全部 PASS 再请求提交。
+
+```bash
+# 缺省在 tasks/evidence/ 下寻找唯一含 evidence.json 的子目录
+kc evidence check
+
+# 显式指定证据目录 / worktree / 本地超时
+kc evidence check --evidence tasks/evidence/<prd-stem> --worktree . --timeout 30
+
+# 机器可读：stdout 只含 JSON，退出码 0 全通过、1 有失败、2 用法错误
+kc evidence check --json | python -c 'import json,sys; print(json.load(sys.stdin)["passed"])'
+```
+
+- 所有失败一次列全：单题失败不中断其余题目；断言未命中时同时给出期望子串与实际输出中最接近的一行。
+- `--timeout` 只用于本地快速迭代，不得大于 `validation.reexecute_timeout_seconds`（默认 300 秒）；本地超时的输出会明确标注门禁上限，避免把"等不及"误读成证据错误。
+- manifest 格式错误时不执行任何证据命令，直接逐条报格式错误。
+- 自检通过不等于交付通过：门禁仍会复跑，且环境差异（网络、端口占用、外部服务）可能让门禁失败。自检只读，不会修改证据、代码或断言。
+- 门禁侧 `ensure_validation_commands_pass` 复用同一编排，失败信息改为一次聚合全部未通过项（逐条带命令与失败类别），通过判据不变。
 
 commit 前门禁           要求验证但证据与清单不匹配 → 进入 recovery，
                         重试耗尽后 agent/failed。

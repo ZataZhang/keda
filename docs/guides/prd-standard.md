@@ -53,6 +53,7 @@ keda 的 agent runner 会把 PRD 的 Realistic Validation oracle 物化到 Issue
 - runner **优先确定性解析** skill 产出的 **YAML oracle 块**；无则回退旧式 `### Realistic Validation` 复选框（向后兼容）。YAML 块**存在却不可解析**（顶层非序列、条目缺 `id`/`behavior`）**不静默回退**：物化路径（`kc issue create`）在出 Issue 前大声失败，运行期至少记 ERROR 日志——否则会退化成「无清单」并连带关掉整个证据门禁。注意 failure-triage 注记写在块**下方（fence 外）**，不要塞进同一个 ```yaml 块。
 - 证据缺失 / 不达标会打回 runner 重跑（recovery 循环）。
 - 当 keda 配置 `validation.reexecute_commands = true` 时，runner 会复跑 `evidence.json` 中每个 item 的 `command`。为保证命令可维护、可复跑，agent 应把复杂验证逻辑落到独立脚本并在 `command` 中引用，而不是把多行内联 `python -c "..."` 写进 manifest。**所有 RV 脚本——取证的、临时 setup 的、被 `command` 引用的可复跑 oracle——一律放 `tasks/evidence/<prd-stem>/scripts/`（legacy `.iar/evidence` 配置的仓库则放 `.iar/evidence/scripts/`），不得进入代码 diff，没有例外。** 这些脚本会随证据一起上传到证据分支供审阅，因此同样不得含密钥；复跑缓存键并入其内容摘要，改写脚本必然触发真实重跑。每次复跑覆盖的是证据目录里的证据产物，不是脚本本身。
+- **声明了 `stdout_assertions` 的证据包，提交前必须运行 `kc evidence check` 并确认全部 PASS。** 该命令与交付门禁使用同一份解析、复跑与断言判定，把全部失败一次列出，并给出期望串与实际输出中最接近的一行；单条命令的门禁复跑上限默认 300 秒（`validation.reexecute_timeout_seconds`），`--timeout` 只能在本地调小。门禁失败信息也改为聚合全部未通过项。
 - 进一步的"负控 + keda 复跑命令 + 独立 verifier agent"门禁,见 `tasks/pending/` 中对应的 Realistic Validation 门禁 PRD。
 
 #### 证据形态与"产物健全性"提示（v1.2 跟进）

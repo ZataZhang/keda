@@ -952,11 +952,16 @@ def build_structured_evidence_prompt_suffix(language: str) -> str:
             "每个检查点都要证明'这测试会失败'：先用 negative_control 让它变红、记录 expected_fail，"
             "再展示修复后变绿——只有绿、无法证明会红的证据视为无效。"
             "命令退出码为 0 不等于检查点成立：禁止用 `|| true`、`|| echo ok` 之类兜底把命令刷绿。"
+            "单条命令的门禁复跑上限默认 300 秒（`[agent_runner.validation].reexecute_timeout_seconds`），"
+            "命令必须是自终止的检查，不能是长驻服务。"
             "可选填 `stdout_assertions` 声明输出断言（数组，每项含 `pattern`，以及可选的 "
             "`severity`（默认 high）、`source`（stdout/stderr，默认 stdout）、`must_match`（默认 true，"
             "false 表示不得出现）；用精确子串而非正则，避免 `.*` 之类假阳）："
             '例如 `[{{{{"severity": "high", "pattern": "200 OK", "must_match": true}}}}, '
             '{{{{"pattern": "Traceback", "must_match": false}}}}]`。'
+            "声明了 `stdout_assertions` 就必须先本地自检通过：运行 "
+            "`kc evidence check --evidence {evidence_dir}`，它会用与交付门禁相同的判定复跑命令并核对断言；"
+            "自检全部 PASS 后再请求提交。"
             'manifest 顶层必须声明 `version: 1` 和 `language: "{language}"`。'
             "所有证据文件必须命名为 `rv-<item_number>-<slug>.<ext>` 并放在 `{evidence_dir}/` 下。"
             "重要：每个证据文件必须只包含对应 item 的输出，禁止混入其他 item 的内容；"
@@ -979,12 +984,19 @@ def build_structured_evidence_prompt_suffix(language: str) -> str:
         "is only ever green, with no way to show it failing, is not accepted. "
         "Exit code 0 does not prove the checkpoint: never paper over failures with "
         "`|| true` or `|| echo ok`. "
+        "The delivery gate re-runs each command with a default 300s limit "
+        "(`[agent_runner.validation].reexecute_timeout_seconds`), so every command "
+        "must be a self-terminating check, never a long-running server. "
         "Optionally declare `stdout_assertions` (a list of objects with `pattern` plus "
         "optional `severity` (default `high`), `source` (`stdout`/`stderr`, default "
         "`stdout`) and `must_match` (default `true`; `false` forbids the substring)) — "
         'e.g. `[{{{{"severity": "high", "pattern": "200 OK", "must_match": true}}}}, '
         '{{{{"pattern": "Traceback", "must_match": false}}}}]`. '
         "Prefer exact substrings over regex so `.*` cannot fake a pass. "
+        "If you declare `stdout_assertions`, you must pass the local self-check before "
+        "requesting a commit: run `kc evidence check --evidence {evidence_dir}` — it "
+        "re-runs the commands and checks the assertions with the delivery gate's own "
+        "judgment. "
         'The manifest top level must declare `version: 1` and `language: "{language}"`. '
         "All evidence files must be named `rv-<item_number>-<slug>.<ext>` and placed "
         "under `{evidence_dir}/`. "

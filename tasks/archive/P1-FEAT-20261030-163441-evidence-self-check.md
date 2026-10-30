@@ -5,10 +5,10 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> ⬜ **验收状态**：未开工。
+> 🧍 **验收状态**：待人工验收。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
-Part A 用于核对行为与验收结果；Part B 用于实施。本次只编写 PRD，尚未实施或取得运行证据。
+Part A 用于核对行为与验收结果；Part B 用于实施。执行侧已实施并取得运行证据，两个人审决策仍待在 §2 中确认。
 
 ## Feature Overview (功能一览)
 
@@ -341,37 +341,37 @@ No interactive prototype file changes in this PRD.
 
 #### Behavior Acceptance
 
-- [ ] `kc evidence check` 对断言不匹配的 fixture 报出断言失败并给出期望串与实际最接近输出行（rv-2）
-- [ ] 三处断言错误在一次运行中全部列出，退出码 1（rv-2）
-- [ ] 单题超时被标注且其余题目继续给出结论（rv-3）
-- [ ] manifest 格式错误时不执行任何证据命令，探针无执行痕迹（rv-4）
-- [ ] 正确证据包通过自检，`--json` 输出可被标准 JSON 解析器读取（rv-5）
-- [ ] 旧证据包（无 `stdout_assertions`）自检行为与门禁一致：只校验退出码
+- [x] `kc evidence check` 对断言不匹配的 fixture 报出断言失败并给出期望串与实际最接近输出行（rv-2；证据：`rv-2-collect-all-assertions.txt`）
+- [x] 三处断言错误在一次运行中全部列出，退出码 1（rv-2；证据：`rv-2-collect-all-assertions.txt` 的 `failed_item_count=3`）
+- [x] 单题超时被标注且其余题目继续给出结论（rv-3；证据：`rv-3-timeout-isolation.txt`）
+- [x] manifest 格式错误时不执行任何证据命令，探针无执行痕迹（rv-4；证据：`rv-4-format-error-no-execution.txt` 的 `probe_executed=False`）
+- [x] 正确证据包通过自检，`--json` 输出可被标准 JSON 解析器读取（rv-5；证据：`rv-5-real-package-json.txt` 的 `json_parse=ok`）
+- [x] 旧证据包（无 `stdout_assertions`）自检行为与门禁一致：只校验退出码（证据：`rv-5-real-package-json.txt` 引用的 `legacy_manifest_status=passed`，以及 `tests/test_evidence_check_cli.py::test_check_legacy_manifest_without_assertions_only_checks_exit_code`、`tests/test_agent_runner_validation.py::test_ensure_validation_commands_pass_accepts_legacy_manifest_without_assertions`）
 
 #### Architecture Acceptance
 
-- [ ] 新命令实现位于 `src/backend/api/`，判定与编排位于 `src/backend/core/use_cases/`，依赖方向未被反向引用
-- [ ] 断言判定调用现有函数，仓库内仍只有一处实现（`rg -n "_validate_stdout_assertions\|_is_stdout_assertion_satisfied" src/backend` 只命中定义与其两个调用点）
+- [x] 新命令实现位于 `src/backend/api/`，判定与编排位于 `src/backend/core/use_cases/`，依赖方向未被反向引用（`uv run python hooks/shared/check_architecture.py` 通过；新增 `src/backend/api/cli_typer_evidence.py`、`src/backend/core/use_cases/agent_runner_evidence_check.py`、`src/backend/core/use_cases/agent_runner_evidence_assertions.py`）
+- [x] 断言判定调用现有函数，仓库内仍只有一处实现（`rg -n "_validate_stdout_assertions\|_is_stdout_assertion_satisfied" src/backend` 仅命中 2 个定义与 2 个调用点）
 
 #### Validation Acceptance
 
-- [ ] 自检与门禁对同一 fixture 的失败 pattern 与 item 序号一致（rv-1），负控证明该断言有判别力
-- [ ] 门禁失败信息一次包含全部未通过项（决策二验收）
-- [ ] `--timeout 1` 的本地超时输出标注门禁上限，不传参时行为与门禁一致（决策一验收）
-- [ ] `just test` 通过；既有证据相关测试全绿
+- [x] 自检与门禁对同一 fixture 的失败 pattern 与 item 序号一致（rv-1），负控证明该断言有判别力（证据：`rv-1-self-check-vs-gate.txt` 的 `consistent_verdict` 与 `negative_control_verdict`）
+- [x] 门禁失败信息一次包含全部未通过项（决策二验收；证据：`tests/test_agent_runner_validation.py::test_ensure_validation_commands_pass_aggregates_assertion_and_timeout`（一条断言不匹配 + 一条超时）与 `test_ensure_validation_commands_pass_reports_every_failing_item`，以及 `rv-1-self-check-vs-gate.txt` 中门禁聚合消息）
+- [x] `--timeout 1` 的本地超时输出标注门禁上限，不传参时行为与门禁一致（决策一验收；证据：`rv-3-timeout-isolation.txt`）
+- [x] `just test` 通过；既有证据相关测试全绿（详见证据报告的命令结果）
 
 #### Documentation Acceptance
 
-- [ ] `docs/guides/agent-runner.md` 增加自检命令、collect-all 与超时说明
-- [ ] `docs/guides/prd-standard.md` 的证据写作要求指向自检命令
-- [ ] 随包 `kedacode-operator` skill 同步新子命令与用法
-- [ ] `kc schema --json` 能自省到 `evidence check` 及其参数
+- [x] `docs/guides/agent-runner.md` 增加自检命令、collect-all 与超时说明
+- [x] `docs/guides/prd-standard.md` 的证据写作要求指向自检命令
+- [x] 随包 `kedacode-operator` skill 同步新子命令与用法（`SKILL.md` 与 `references/run-once.md`）
+- [x] `kc schema --json` 能自省到 `evidence check` 及其参数（`kc schema --json` 输出含 `evidence check`，参数含 `--evidence` / `--worktree` / `--timeout` / `--output` / `--json`）
 
 #### Delivery Readiness
 
-- [ ] PRD 已移至 `tasks/archive/`，§9 除 Human-Confirmed 外全部为 `[x]` 或 `[~]`
-- [ ] 独立 verifier 结论为 PASS
-- [ ] 交付说明中给出自检命令的一条可复制用法
+- [~] PRD 已移至 `tasks/archive/`，§9 除 Human-Confirmed 外全部为 `[x]` 或 `[~]` — runner-owned gate: 归档由 runner 在交付时执行
+- [~] 独立 verifier 结论为 PASS — runner-owned gate: 运行器启动的独立 verifier
+- [x] 交付说明中给出自检命令的一条可复制用法（`kc evidence check --evidence tasks/evidence/<prd-stem> --json`）
 
 ### Human-Confirmed (来自 Part A 风险地图)
 
@@ -414,7 +414,14 @@ No interactive prototype file changes in this PRD.
 
 ### Final Reconciliation
 
-待归档时填写：逐项核对 §9 与 §7.6 的对应关系、记录最终验证树与 verifier 结论。
+- Interpretation: confirmed — §1 的解读与行为样例已由 rv-1～rv-5 落地验证；新增 `kc evidence check` 与门禁聚合报错，未改变"只报告、不自动修复"的边界。
+- Public behavior and contracts: confirmed — `kc evidence check` 暴露 `--evidence` / `--worktree` / `--timeout` / `--output` / `--json`，退出码 0/1/2；`kc schema --json` 可自省；门禁通过判据不变，仅失败信息改为聚合。`--timeout` 上限读取仓库级合并后的 `validation.reexecute_timeout_seconds`（默认 300s）。
+- Related PRD status: confirmed — 本 PRD 与 `tasks/pending/` 其它 PRD 无重复或依赖；Issue #334 仅提供动机，不构成序列依赖。
+- Requirements and risks: confirmed — FR-1～FR-7 全部落地；残余风险为自检与门禁的环境差异（自检不替代门禁），已在文档与证据报告中披露；未声明 `stdout_assertions` 的旧 manifest 行为不变。
+- Reconciled differences:
+  - 已修正开头的"尚未实施或取得运行证据"叙述；执行侧已实施并收集证据。
+  - 实现从仓库级合并配置读取门禁超时/证据目录（与 runner 门禁同源），比 PRD 原文更贴近"同源"目标；未改变用户可见契约。
+  - 本仓库存在多个历史 `evidence.json`，缺省解析按 PRD 约定报歧义并列候选；执行 prompt 与示例统一显式传 `--evidence`。
 
 ## Change Log
 
@@ -433,3 +440,11 @@ No interactive prototype file changes in this PRD.
 - Reason: PRD 首轮人工确认，两项均采用推荐项
 - Impact: 实施口径确定，无需再就这两点征求意见
 - Review: 用户已确认（对话记录 2026-10-30）
+
+### 实施与验证落定
+- Type: evidence
+- Before: PRD 仅完成规划，尚未实施，无运行证据
+- After: 落地 `kc evidence check`、门禁聚合报错、prompt 口径与文档/skill 同步；rv-1～rv-5 证据齐备并通过自检与门禁复跑
+- Reason: 完成 Issue #341 的执行与 Realistic Validation
+- Impact: §9 执行侧条目已勾选并附证据；两个 Human-Confirmed 决策仍待人工确认
+- Review: 独立 verifier 由 runner 执行，结论记入 verifier report
