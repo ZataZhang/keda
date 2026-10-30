@@ -23,6 +23,7 @@ from typing import Any
 
 from backend.core.shared.models.model_evaluation import (
     CANCELLABLE_RUN_STATUSES,
+    EvaluationRunCreateRequest,
     EvaluationResultRecord,
     EvaluationRunRecord,
     EvaluationRunStatus,
@@ -199,7 +200,10 @@ def _read_suite_material_files(suite_path: Path) -> dict[str, bytes]:
     return material_files
 
 
-def _suite_calibration(suite: EvaluationSuite) -> dict[str, Any]:
+def _suite_calibration(
+    suite: EvaluationSuite,
+    case_bases: dict[str, dict[str, str]] | None = None,
+) -> dict[str, Any]:
     """从本地评测账本派生 suite 的逐题校准状态。"""
     if not suite.requires_calibration:
         return {
@@ -208,6 +212,7 @@ def _suite_calibration(suite: EvaluationSuite) -> dict[str, Any]:
             "case_count": len(suite.cases),
             "cases": [],
         }
+    resolved_case_bases = case_bases if case_bases is not None else _resolve_suite_case_bases(suite)
     store = _store()
     run_rows = store.list_evaluation_runs()
     calibration_rows = evaluation_rules.derive_case_calibration(
@@ -218,6 +223,7 @@ def _suite_calibration(suite: EvaluationSuite) -> dict[str, Any]:
             for result_row in store.list_evaluation_results(run_row.run_id)
         ],
         suite.content_hash,
+        expected_case_bases=resolved_case_bases,
     )
     calibration_by_case = {row["case_id"]: row for row in calibration_rows}
     cases = [
@@ -233,6 +239,24 @@ def _suite_calibration(suite: EvaluationSuite) -> dict[str, Any]:
         "case_count": len(cases),
         "cases": cases,
     }
+
+
+def _resolve_suite_case_bases(suite: EvaluationSuite) -> dict[str, dict[str, str]]:
+    """解析 suite 当前每题的冻结基线，供校准状态与 run 创建共用。"""
+    repo_path = str(resolve_project_root_path()) if suite.repo_path == "." else suite.repo_path
+    case_bases: dict[str, dict[str, str]] = {}
+    for case in suite.cases:
+        base_ref = case.base_ref or suite.base_ref
+        try:
+            commit, tree = workspace.probe_base(repo_path, base_ref)
+        except ValueError:
+            continue
+        case_bases[case.case_id] = {
+            "base_ref": base_ref,
+            "commit": commit,
+            "tree": tree,
+        }
+    return case_bases
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -296,14 +320,10 @@ def list_preset_options() -> dict[str, Any]:
 
 
 def create_run(
-    *,
-    suite_id: str,
-    execution_presets: list[str],
-    judge_presets: list[str],
-    repeats: int = 1,
-    include_holdout: bool = False,
+    request: EvaluationRunCreateRequest,
 ) -> EvaluationRunRecord:
     """校验并冻结 run 快照（不执行）。评审预设清单为空时只做确定性对照。"""
+    suite_id = request.suite_id
     settings = load_fresh_agent_runner_settings()
     suite = load_suite(suite_id)
     if suite.repo_path == ".":
@@ -323,23 +343,27 @@ def create_run(
         }
     )
     store = _store()
-    current_calibration = _suite_calibration(suite)
+    calibration_case_bases = _resolve_suite_case_bases(suite) if suite.requires_calibration else {}
+    current_calibration = _suite_calibration(suite, calibration_case_bases)
     calibrated_case_ids = [
         case["case_id"] for case in current_calibration["cases"] if case["calibrated"]
     ]
     try:
         run = evaluation_rules.build_run_snapshot(
-            suite=suite,
-            execution_preset_names=execution_presets,
-            judge_preset_names=judge_presets,
-            execution_presets=preset_map,
+            evaluation_rules.BuildRunSnapshotInput(
+                suite=suite,
+                execution_preset_names=request.execution_presets,
+                judge_preset_names=request.judge_presets,
+                execution_presets=preset_map,
+                repeats=request.repeats,
+                include_holdout=request.include_holdout,
+                calibrated_case_ids=calibrated_case_ids,
+                calibrated_case_bases=calibration_case_bases,
+            ),
             judge_availability_probe=lambda name: dataclasses.asdict(
                 judge_client.probe_judge_availability(name, settings)
             ),
             base_probe=workspace.probe_base,
-            repeats=repeats,
-            include_holdout=include_holdout,
-            calibrated_case_ids=calibrated_case_ids,
         )
     except evaluation_rules.EvaluationValidationError as exc:
         raise EvaluationActionError("invalid", str(exc)) from exc

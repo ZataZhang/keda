@@ -22,7 +22,7 @@ type MockRun = {
   run_id: string
   status: string
   manifest_hash: string | null
-  judge_preset_snapshots: { preset_name: string; model?: string }[]
+  judge_preset_snapshots: { preset_name: string; agent?: string; model?: string }[]
   [key: string]: unknown
 }
 
@@ -235,6 +235,7 @@ async function mockEvaluationApi(
     execution_presets: [
       { name: 'alpha', agent: 'codex', model: 'gpt-a', reasoning_effort: null, cost_status: 'unknown', cost_estimate: null },
       { name: 'beta', agent: 'claude', model: 'claude-b', reasoning_effort: 'high', cost_status: 'unknown', cost_estimate: null },
+      { name: '@foo', agent: 'codex', model: 'gpt-a', reasoning_effort: null, cost_status: 'unknown', cost_estimate: null },
       { name: '@noop', agent: null, model: null, reasoning_effort: null, cost_status: 'unknown', cost_estimate: null, kind: 'calibration' },
       { name: '@gold', agent: null, model: null, reasoning_effort: null, cost_status: 'unknown', cost_estimate: null, kind: 'calibration' },
     ],
@@ -379,6 +380,28 @@ async function openEvaluationsPage(page: Page) {
 }
 
 test.describe('Console 模型评测页', () => {
+  test('非保留的 @ 前缀预设不会进入校准模式或自动包含留出集', async ({ page }) => {
+    const state = await mockEvaluationApi(page, { calibration: true })
+    await openEvaluationsPage(page)
+    await page.selectOption('#evaluation-suite-select', 'demo-suite')
+    await page.getByRole('checkbox', { name: '执行预设 @foo' }).click()
+
+    const holdoutCheckbox = page.getByRole('checkbox', { name: '包含留出集' })
+    await expect(holdoutCheckbox).not.toBeChecked()
+    await expect(holdoutCheckbox).toBeEnabled()
+    await expect(page.getByText('校准自动包含开发集与留出集')).toHaveCount(0)
+    await expect(page.locator('#evaluation-repeats')).toHaveValue('1')
+    await expect(page.getByText(/预计候选执行 1 次/)).toBeVisible()
+
+    await page.getByTestId('evaluation-create').click()
+    const createRequest = state.requests.find((item) => item.path === '/runs' && item.method === 'POST')
+    expect(createRequest?.body).toMatchObject({
+      suite_id: 'demo-suite',
+      execution_presets: ['@foo'],
+      include_holdout: false,
+    })
+  })
+
   test('校准候选自动包含留出集并显示完整矩阵', async ({ page }) => {
     const state = await mockEvaluationApi(page, { calibration: true })
     await openEvaluationsPage(page)

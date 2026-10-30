@@ -27,6 +27,7 @@ from backend.core.shared.models.model_evaluation import (
     sha256_text,
 )
 from backend.core.use_cases import model_evaluation as evaluation_rules
+from backend.core.use_cases.model_evaluation import BuildRunSnapshotInput
 
 SUITE_TEXT = """
 id: demo-suite
@@ -318,11 +319,17 @@ def _snapshot_kwargs(**overrides: Any) -> dict[str, Any]:
             "p2": {"agent": "codex", "model": None, "reasoning_effort": None},
             "j1": {"agent": "claude", "model": "judge-m", "reasoning_effort": None},
         },
-        "judge_availability_probe": lambda name: {"available": True, "reason": None},
-        "base_probe": lambda repo, ref: ("commit123", "tree456"),
     }
     kwargs.update(overrides)
-    return kwargs
+    judge_probe = kwargs.pop(
+        "judge_availability_probe", lambda _name: {"available": True, "reason": None}
+    )
+    base_probe = kwargs.pop("base_probe", lambda _repo, _ref: ("commit123", "tree456"))
+    return {
+        "request": BuildRunSnapshotInput(**kwargs),
+        "judge_availability_probe": judge_probe,
+        "base_probe": base_probe,
+    }
 
 
 def test_build_run_snapshot_freezes_matrix_and_base() -> None:

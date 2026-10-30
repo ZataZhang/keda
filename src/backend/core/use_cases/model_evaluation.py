@@ -88,34 +88,32 @@ class EvaluationStability:
     stable: bool | None
 
 
+@dataclass(frozen=True)
+class BuildRunSnapshotInput:
+    """构造 run 快照所需的评测集、预设与门禁状态。"""
+
+    suite: EvaluationSuite
+    execution_preset_names: Sequence[str]
+    judge_preset_names: Sequence[str]
+    execution_presets: Mapping[str, Mapping[str, Any]]
+    repeats: int = 1
+    include_holdout: bool = False
+    calibrated_case_ids: Sequence[str] = ()
+    calibrated_case_bases: Mapping[str, Mapping[str, str]] | None = None
+
+
 def build_run_snapshot(
+    request: BuildRunSnapshotInput,
     *,
-    suite: EvaluationSuite,
-    execution_preset_names: Sequence[str],
-    judge_preset_names: Sequence[str],
-    execution_presets: Mapping[str, Mapping[str, Any]],
     judge_availability_probe: Callable[[str], Mapping[str, Any]],
     base_probe: Callable[[str, str], tuple[str, str]],
-    repeats: int = 1,
-    include_holdout: bool = False,
-    calibrated_case_ids: Sequence[str] = (),
 ) -> EvaluationRunRecord:
     """校验评测矩阵并冻结 run 配置快照（不落库、不执行）。
 
     Args:
-        suite: 已通过 :func:`parse_evaluation_suite` 的评测集。
-        execution_preset_names: 用户选择的执行预设名单（≥2 才有对照意义，
-            但 1 个也允许，页面负责提示）。
-        judge_preset_names: 用户选择的评审预设名单（取自同一份执行预设清单）；
-            为空表示本轮只做确定性检查对照，候选完成后不进入评审授权。
-        execution_presets: 预设名 -> 解析后的 ``(agent, model, reasoning_effort)``
-            快照字典（来自现有 agent_runner 配置，不重新定义模型目录）；评审预设
-            复用它，因此评审快照与执行快照同形。
-        judge_availability_probe: engines 注入的评审可用性探针（agent 是否声明
-            禁用工具的 judge 形态、CLI 是否可执行）；返回
-            ``{"available": bool, "reason": str}``。
-        base_probe: engines 注入的基线探针，``(repo_path, base_ref)`` ->
-            ``(commit, tree_hash)``；repo 不可达或 ref 解析失败抛 ValueError。
+        request: suite、预设、重复次数与校准状态等创建配置。
+        judge_availability_probe: engines 注入的评审可用性探针。
+        base_probe: engines 注入的基线探针。
 
     Returns:
         EvaluationRunRecord: status=created 的快照，含 suite/base/preset 指纹。
@@ -123,9 +121,21 @@ def build_run_snapshot(
     Raises:
         EvaluationValidationError: 任一预检失败（原因逐条汇总，fail-fast）。
     """
+    suite = request.suite
+    execution_preset_names = request.execution_preset_names
+    judge_preset_names = request.judge_preset_names
+    execution_presets = request.execution_presets
+    repeats = request.repeats
+    include_holdout = request.include_holdout
+    calibrated_case_ids = request.calibrated_case_ids
+    calibrated_case_bases = request.calibrated_case_bases
     problems: list[str] = []
     if not execution_preset_names:
         problems.append("至少需要一个 execution preset")
+    if len(set(execution_preset_names)) != len(execution_preset_names):
+        problems.append("执行预设不可重复")
+    if len(set(judge_preset_names)) != len(judge_preset_names):
+        problems.append("评审预设不可重复")
     unknown_execution = [
         name
         for name in execution_preset_names
@@ -158,12 +168,6 @@ def build_run_snapshot(
         for case in suite.cases
         if calibration_run or include_holdout or case.split != "holdout"
     ]
-    if suite.requires_calibration and not calibration_run:
-        missing_calibration = [
-            case.case_id for case in selected_cases if case.case_id not in set(calibrated_case_ids)
-        ]
-        if missing_calibration:
-            problems.append(f"题目尚未校准通过: {', '.join(missing_calibration)}")
     if not selected_cases:
         problems.append("所选评测范围没有可执行题目")
     matrix_cells = len(selected_cases) * len(execution_preset_names) * repeats
@@ -194,6 +198,20 @@ def build_run_snapshot(
             }
         except ValueError as exc:
             problems.append(f"题目 '{case.case_id}' 基线解析失败: {exc}")
+
+    if suite.requires_calibration and not calibration_run:
+        calibrated_ids = set(calibrated_case_ids)
+        missing_calibration = [
+            case.case_id
+            for case in selected_cases
+            if case.case_id not in calibrated_ids
+            or (
+                calibrated_case_bases is not None
+                and case_bases.get(case.case_id) != calibrated_case_bases.get(case.case_id)
+            )
+        ]
+        if missing_calibration:
+            problems.append(f"题目尚未校准通过: {', '.join(missing_calibration)}")
 
     if problems:
         raise EvaluationValidationError("；".join(problems))
@@ -346,8 +364,9 @@ def derive_case_calibration(
     runs: Sequence[EvaluationRunRecord],
     results: Sequence[EvaluationResultRecord],
     suite_hash: str,
+    expected_case_bases: Mapping[str, Mapping[str, str]] | None = None,
 ) -> list[dict[str, Any]]:
-    """从已完成校准 run 与结果明细派生每题校准状态。"""
+    """从匹配 suite 与逐题冻结基线的已完成 run 派生校准状态。"""
     eligible_runs = [
         run
         for run in runs
@@ -370,6 +389,11 @@ def derive_case_calibration(
         results_by_run_and_case.setdefault((result.run_id, result.case_id), []).append(result)
     for run in eligible_runs:
         for case_id in run.case_ids:
+            if expected_case_bases is not None and (
+                case_id not in expected_case_bases
+                or run.case_bases.get(case_id) != expected_case_bases[case_id]
+            ):
+                continue
             case_results = results_by_run_and_case.get((run.run_id, case_id), [])
             noop_results = [
                 result

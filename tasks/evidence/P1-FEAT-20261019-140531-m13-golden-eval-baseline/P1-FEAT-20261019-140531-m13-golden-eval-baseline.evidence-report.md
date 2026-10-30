@@ -4,7 +4,7 @@ Issue：[GitHub #334](https://github.com/ZataZhang/keda/issues/334) · PR：[查
 
 本地人工审阅包：在 worktree 根目录运行 `just prd review tasks/archive/P1-FEAT-20261019-140531-m13-golden-eval-baseline.md`，或打开 `"/Users/zata/code/keda/.kc-worktrees/issue-334/tasks/evidence/P1-FEAT-20261019-140531-m13-golden-eval-baseline/human-review-checklist.html"`。该页面使用相对路径加载本地截图，不需要启动应用。
 
-当前没有创建 PR；runner 在执行独立 verifier 与发布流程。实现源码的已验证 Git tree（排除 PRD、证据目录和 runner 交付记录）为 `c90a803f09b4cae2657d48567c92d70e74c2d91c`。
+当前没有创建 PR；runner 在执行独立 verifier 与发布流程。实现源码的已验证 Git tree（排除 PRD、证据目录和 runner 交付记录）为 `59049dec0d2accd91d8448e1bf25c48711452a0e`。
 
 | # | 对应 §9.1 验收结果 | 呈递物、打开方式与预期值 |
 |---|---|---|
@@ -12,8 +12,8 @@ Issue：[GitHub #334](https://github.com/ZataZhang/keda/issues/334) · PR：[查
 | 2 | 重复运行显示通过次数与稳定性，不稳定题单列，无合成总分或阈值（rv-3）。 | 目标态原型：`/Users/zata/code/keda/.kc-worktrees/issue-334/tasks/evidence/P1-FEAT-20261019-140531-m13-golden-eval-baseline/rv-3-prototype-variance-view.png`。![设计意图：重复结果目标态，非运行时证明](rv-3-prototype-variance-view.png) **本地图片，GitHub 上不显示。** 打开：`open "/Users/zata/code/keda/.kc-worktrees/issue-334/tasks/evidence/P1-FEAT-20261019-140531-m13-golden-eval-baseline/rv-3-prototype-variance-view.png"`。真实 Console：`/Users/zata/code/keda/.kc-worktrees/issue-334/tasks/evidence/P1-FEAT-20261019-140531-m13-golden-eval-baseline/rv-3-stability-console.png`。![真实 FastAPI Console 页面：重复结果与不稳定题](rv-3-stability-console.png) **本地图片，GitHub 上不显示。** 打开：`open "/Users/zata/code/keda/.kc-worktrees/issue-334/tasks/evidence/P1-FEAT-20261019-140531-m13-golden-eval-baseline/rv-3-stability-console.png"`。复核输出：[API 与方差探针](rv-3-stability-api.txt)、[真实页面 Playwright E2E](rv-3-playwright-e2e.txt)。预期：stable-outcome 为 3/3 稳定，repeat-outcome 为 2/3 不稳定并单列；无合成总分或阈值。原型为设计目标，后图为真实页面，数据和桌面视口对应。 |
 | 3 | 12 题来源、描述与留出资格有审计依据（§7.1）。 | 选题和复核：[rv-2-seed-selection.json](rv-2-seed-selection.json)；公开来源映射：[tasks/evaluation-suites/README.md](../../evaluation-suites/README.md)。打开：`open "/Users/zata/code/keda/.kc-worktrees/issue-334/tasks/evidence/P1-FEAT-20261019-140531-m13-golden-eval-baseline/rv-2-seed-selection.json"`。预期：随机抽查三题可追溯 sample id、来源摘要、base/final、输入复核和旧校准记录；prompt 只写问题与期望行为；留出资格有使用依据。 |
 
-**已替你核对过什么：** rv-2 通过真实 API、Git 快照、uv-pytest、账本读取和 Console 截图交叉核对；rv-3 使用相同代表性结果对照目标原型与真实页面，并通过 4 个既有 E2E 用例；rv-2 seed-selection 与公开 README 的映射一致。图片和命令都已逐项检查。这里没有替 reviewer 勾选 §9.1 人工确认项。PR 发布、独立 verifier 与 CI 由 runner 后续处理；上面的 PR/CI 链接可直接查询。
+**已替你核对过什么：** rv-2 通过真实 API、Git 快照、uv-pytest、账本读取和 Console 截图交叉核对；rv-3 使用相同代表性结果对照目标原型与真实页面，并通过 5 个逐项隔离 E2E 用例（含 @foo 普通预设边界回归）；rv-2 seed-selection 与公开 README 的映射一致。图片和命令都已逐项检查。这里没有替 reviewer 勾选 §9.1 人工确认项。PR 发布、独立 verifier 与 CI 由 runner 后续处理；上面的 PR/CI 链接可直接查询。
 
 ## 执行证据索引
 
-六项 Realistic Validation 的逐项复现命令、negative control、expected fail、输出断言和风险见 [`evidence.json`](evidence.json) 及 [verification plan](P1-FEAT-20261019-140531-m13-golden-eval-baseline.verification-plan.md)。每项文本输出末尾均记录上述 source tree。原始截图、脚本及执行日志按仓库约定不进入代码 diff；三个 Markdown 报告与 PRD 是可提交交付记录。
+六项 Realistic Validation 的逐项复现命令、negative control、expected fail、输出断言和风险见 [`evidence.json`](evidence.json) 及 [verification plan](P1-FEAT-20261019-140531-m13-golden-eval-baseline.verification-plan.md)。RV-2 复跑命令输出并断言上述 source tree；其余各项文本只记录对应检查点的输出。原始截图、脚本及执行日志按仓库约定不进入代码 diff；三个 Markdown 报告与 PRD 是可提交交付记录。

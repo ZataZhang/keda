@@ -208,13 +208,15 @@ def harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
 
 def _execute_cell(harness: Any, run: EvaluationRunRecord, snapshot: dict[str, Any]) -> None:
     execution._execute_cell(
-        run,
-        _CASE,
-        snapshot,
-        harness.root,
-        harness.settings,
-        [],
-        threading.Lock(),
+        execution._EvaluationCellContext(
+            run=run,
+            case=_CASE,
+            preset_snapshot=snapshot,
+            root=harness.root,
+            settings=harness.settings,
+            staged_entries=[],
+            lock=threading.Lock(),
+        )
     )
 
 

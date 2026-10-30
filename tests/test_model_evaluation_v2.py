@@ -19,6 +19,7 @@ from backend.core.shared.models.model_evaluation import (
     parse_evaluation_suite,
 )
 from backend.core.use_cases import model_evaluation as evaluation_rules
+from backend.core.use_cases.model_evaluation import BuildRunSnapshotInput
 from backend.engines.model_evaluation import workspace
 
 
@@ -96,17 +97,24 @@ def _record(
 
 def _snapshot_kwargs(**overrides: Any) -> dict[str, Any]:
     """建立 run 创建规则需要的注入参数。"""
-    return {
+    values: dict[str, Any] = {
         "suite": _v2_suite(),
         "execution_preset_names": ["agent-a"],
         "judge_preset_names": [],
         "execution_presets": {
             "agent-a": {"agent": "local-agent", "model": "fixture", "reasoning_effort": None}
         },
-        "judge_availability_probe": lambda _name: {"available": True, "reason": None},
-        "base_probe": lambda _repo, ref: (f"commit-{ref}", f"tree-{ref}"),
         "calibrated_case_ids": ["case-0", "case-1"],
         **overrides,
+    }
+    judge_probe = values.pop(
+        "judge_availability_probe", lambda _name: {"available": True, "reason": None}
+    )
+    base_probe = values.pop("base_probe", lambda _repo, ref: (f"commit-{ref}", f"tree-{ref}"))
+    return {
+        "request": BuildRunSnapshotInput(**values),
+        "judge_availability_probe": judge_probe,
+        "base_probe": base_probe,
     }
 
 
@@ -190,6 +198,29 @@ def test_snapshot_freezes_per_case_bases_and_gates_holdout_and_calibration() -> 
                 repeats=2,
             )
         )
+    with pytest.raises(evaluation_rules.EvaluationValidationError, match="case-0"):
+        evaluation_rules.build_run_snapshot(
+            **_snapshot_kwargs(
+                calibrated_case_bases={
+                    "case-0": {
+                        "base_ref": "base-0",
+                        "commit": "commit-old",
+                        "tree": "tree-old",
+                    }
+                }
+            )
+        )
+
+
+def test_run_snapshot_rejects_duplicate_execution_and_judge_presets() -> None:
+    with pytest.raises(evaluation_rules.EvaluationValidationError, match="执行预设不可重复"):
+        evaluation_rules.build_run_snapshot(
+            **_snapshot_kwargs(execution_preset_names=["agent-a", "agent-a"])
+        )
+    with pytest.raises(evaluation_rules.EvaluationValidationError, match="评审预设不可重复"):
+        evaluation_rules.build_run_snapshot(
+            **_snapshot_kwargs(judge_preset_names=["agent-a", "agent-a"])
+        )
 
 
 def test_run_snapshot_rejects_model_and_calibration_cell_overages() -> None:
@@ -242,6 +273,7 @@ def test_calibration_derivation_requires_complete_noop_and_gold_runs() -> None:
         started_at="2026-10-29T00:00:00+00:00",
         finished_at="2026-10-29T00:00:00+00:00",
         repeats=3,
+        case_bases={"case-0": {"base_ref": "main", "commit": "commit", "tree": "tree"}},
     )
     results = [
         _record(
@@ -260,8 +292,19 @@ def test_calibration_derivation_requires_complete_noop_and_gold_runs() -> None:
         for index in range(3)
     ]
 
-    calibrated = evaluation_rules.derive_case_calibration([run], results, "suite-hash")
+    calibrated = evaluation_rules.derive_case_calibration(
+        [run], results, "suite-hash", expected_case_bases=run.case_bases
+    )
     assert calibrated == [{"case_id": "case-0", "calibrated": True, "noop": 3, "gold": 3}]
+    moved_base = evaluation_rules.derive_case_calibration(
+        [run],
+        results,
+        "suite-hash",
+        expected_case_bases={
+            "case-0": {"base_ref": "main", "commit": "commit-new", "tree": "tree-new"}
+        },
+    )
+    assert moved_base[0]["calibrated"] is False
     incomplete = evaluation_rules.derive_case_calibration([run], results[:-1], "suite-hash")
     assert incomplete[0]["calibrated"] is False
     missing_first_repeat = [result for result in results if result.repeat_index != 0] + [

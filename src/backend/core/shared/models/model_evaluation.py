@@ -463,6 +463,17 @@ class EvaluationRunRecord:
 
 
 @dataclass(frozen=True)
+class EvaluationRunCreateRequest:
+    """创建评测 run 时由调用方提供的配置。"""
+
+    suite_id: str
+    execution_presets: list[str]
+    judge_presets: list[str]
+    repeats: int = 1
+    include_holdout: bool = False
+
+
+@dataclass(frozen=True)
 class EvaluationResultRecord:
     """单个候选（case × execution preset）的执行与确定性检查事实。"""
 

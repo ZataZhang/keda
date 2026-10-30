@@ -51,6 +51,9 @@ const POLLING_STATUSES = new Set([
   "judging",
 ]);
 
+/** 后端保留的校准候选名；其他以 @ 开头的预设仍是普通 Agent 预设。 */
+const CALIBRATION_PRESET_NAMES = new Set(["@noop", "@gold"]);
+
 /** 评测页：suite/预设选择、run 列表与详情、外发授权入口。 */
 export default function EvaluationsPage() {
   const [suites, setSuites] = useState<EvaluationSuiteEntry[] | null>(null);
@@ -180,7 +183,9 @@ export default function EvaluationsPage() {
     [suites]
   );
   const selectedSuite = validSuites.find((entry) => entry.suite_id === suiteId);
-  const isCalibrationRun = executionPresetNames.some((name) => name.startsWith("@"));
+  const isCalibrationRun = executionPresetNames.some((name) =>
+    CALIBRATION_PRESET_NAMES.has(name),
+  );
   const selectedCaseCount = (selectedSuite?.cases ?? []).filter(
     (evaluationCase) => isCalibrationRun || includeHoldout || evaluationCase.split !== "holdout",
   ).length;
@@ -193,8 +198,8 @@ export default function EvaluationsPage() {
 
   /** 更新候选选择；校准模式始终成对选择并排除真实 Agent。 */
   const toggleExecutionPreset = (presetName: string) => {
-    const calibrationPresetNames = ["@noop", "@gold"];
-    const nextPresetNames = calibrationPresetNames.includes(presetName)
+    const calibrationPresetNames = [...CALIBRATION_PRESET_NAMES];
+    const nextPresetNames = CALIBRATION_PRESET_NAMES.has(presetName)
       ? executionPresetNames.includes(presetName)
         ? executionPresetNames.filter((name) => !calibrationPresetNames.includes(name))
         : [...calibrationPresetNames]

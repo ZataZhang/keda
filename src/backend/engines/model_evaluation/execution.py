@@ -66,6 +66,21 @@ _HOST_GATE: threading.BoundedSemaphore | None = None
 _HOST_GATE_LOCK = threading.Lock()
 
 
+@dataclasses.dataclass(frozen=True)
+class _EvaluationCellContext:
+    """一个候选执行单元共享的运行时依赖与输入。"""
+
+    run: EvaluationRunRecord
+    case: EvaluationSuiteCase
+    preset_snapshot: Mapping[str, Any]
+    root: Path
+    settings: Any
+    staged_entries: list[dict[str, Any]]
+    lock: threading.Lock
+    repeat_index: int = 0
+    suite: Any | None = None
+
+
 def _candidate_ceiling(settings: Any) -> int:
     """候选矩阵的单飞上限：评测自身上限与 runner 主机容量取小。"""
     return max(1, min(settings.evaluation.max_concurrency, settings.runner.max_concurrent_issues))
@@ -167,15 +182,17 @@ def run_run_execution(run_id: str) -> None:
         futures = [
             pool.submit(
                 _execute_cell,
-                run,
-                cell_case,
-                preset_snapshot,
-                root,
-                settings,
-                staged_entries,
-                lock,
-                repeat_index,
-                suite,
+                _EvaluationCellContext(
+                    run=run,
+                    case=cell_case,
+                    preset_snapshot=preset_snapshot,
+                    root=root,
+                    settings=settings,
+                    staged_entries=staged_entries,
+                    lock=lock,
+                    repeat_index=repeat_index,
+                    suite=suite,
+                ),
             )
             for cell_case, preset_snapshot, repeat_index in cells
         ]
@@ -212,18 +229,17 @@ def run_run_execution(run_id: str) -> None:
         purge_run_artifacts(run_id)
 
 
-def _execute_cell(
-    run: EvaluationRunRecord,
-    case: EvaluationSuiteCase,
-    preset_snapshot: Mapping[str, Any],
-    root: Path,
-    settings: Any,
-    staged_entries: list[dict[str, Any]],
-    lock: threading.Lock,
-    repeat_index: int = 0,
-    suite: Any | None = None,
-) -> None:
+def _execute_cell(context: _EvaluationCellContext) -> None:
     """执行一个矩阵单元：干净快照仓库 -> 候选 -> diff -> 判分 -> 清理。"""
+    run = context.run
+    case = context.case
+    preset_snapshot = context.preset_snapshot
+    root = context.root
+    settings = context.settings
+    staged_entries = context.staged_entries
+    lock = context.lock
+    repeat_index = context.repeat_index
+    suite = context.suite
     store = _store()
     current = store.get_evaluation_run(run.run_id)
     if current is None or current.status != EvaluationRunStatus.running.value:

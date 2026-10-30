@@ -18,6 +18,7 @@ from typing import Any, NoReturn
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from backend.core.shared.models.model_evaluation import EvaluationRunCreateRequest
 from backend.core.use_cases.model_evaluation_runtime import (
     EvaluationActionError,
     cancel_run,
@@ -110,11 +111,13 @@ def create_evaluation_run(request: CreateRunRequest) -> dict:
     """创建 run：全量 fail-fast 校验并冻结快照，不启动任何执行。"""
     try:
         run = create_run(
-            suite_id=request.suite_id,
-            execution_presets=request.execution_presets,
-            judge_presets=request.judge_presets,
-            repeats=request.repeats,
-            include_holdout=request.include_holdout,
+            EvaluationRunCreateRequest(
+                suite_id=request.suite_id,
+                execution_presets=request.execution_presets,
+                judge_presets=request.judge_presets,
+                repeats=request.repeats,
+                include_holdout=request.include_holdout,
+            )
         )
     except EvaluationActionError as exc:
         _raise_http(exc)
