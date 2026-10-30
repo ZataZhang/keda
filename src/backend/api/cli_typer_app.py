@@ -83,6 +83,7 @@ __all__ = [
     "container_app",
     "console_app",
     "daemon_app",
+    "evidence_app",
     "issue_app",
     "labels_app",
     "loop_app",
@@ -236,6 +237,11 @@ preview_app = typer.Typer(
     no_args_is_help=True,
     context_settings=_HELP_CONTEXT,
 )
+evidence_app = typer.Typer(
+    help="Check Realistic Validation evidence locally with the delivery gate's own judgment.",
+    no_args_is_help=True,
+    context_settings=_HELP_CONTEXT,
+)
 container_app.add_typer(auth_app, name="auth")
 app.add_typer(labels_app, name="labels")
 app.add_typer(issue_app, name="issue")
@@ -256,6 +262,7 @@ app.add_typer(console_app, name="console")
 app.add_typer(agent_app, name="agent")
 app.add_typer(skill_app, name="skill")
 app.add_typer(preview_app, name="preview")
+app.add_typer(evidence_app, name="evidence")
 
 RepoOption = Annotated[str | None, typer.Option("--repo", help="Target repository path.")]
 RepoIdOption = Annotated[
@@ -463,6 +470,7 @@ from backend.api import (  # noqa: E402,F401
     cli_typer_skill,
     cli_typer_preview,
     cli_typer_peers,
+    cli_typer_evidence,
     cli_typer_schema,
 )
 
