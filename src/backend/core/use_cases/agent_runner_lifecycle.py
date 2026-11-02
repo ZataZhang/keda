@@ -44,6 +44,10 @@ from backend.core.shared.models.backlog import (
 from backend.core.use_cases.agent_runner_invocation_token_stats import (
     build_invocation_token_usage_summary,
 )
+from backend.core.use_cases.agent_runner_lifecycle_progress import (
+    emit_lifecycle_progress,
+    has_lifecycle_progress_sink,
+)
 from backend.core.use_cases.prd_invocation_detail import (
     build_prd_invocation_detail,
     with_invocation_run_detail,
@@ -374,7 +378,8 @@ def record_lifecycle_event(
     # 把生命周期事件确定性归组到执行会话；上下文之外（roadmap 侧事件）保持不写。
     event_detail = with_invocation_run_detail(detail)
     lifecycle_store = resolve_lifecycle_store(store)
-    if lifecycle_store is None:
+    progress_enabled = has_lifecycle_progress_sink()
+    if lifecycle_store is None and not progress_enabled:
         return
     timestamp = occurred_at or now_iso()
     run_id = lifecycle_run_id(repo_id=repo_id, issue_number=issue_number, prd_path=prd_path)
@@ -391,12 +396,13 @@ def record_lifecycle_event(
         outcome=None,
         history_complete=True,
     )
-    _safe_store_call(
-        lifecycle_store,
-        run_id,
-        "run upsert",
-        lambda: lifecycle_store.upsert_lifecycle_run(run_record),
-    )
+    if lifecycle_store is not None:
+        _safe_store_call(
+            lifecycle_store,
+            run_id,
+            "run upsert",
+            lambda: lifecycle_store.upsert_lifecycle_run(run_record),
+        )
     event_record = PrdLifecycleEventRecord(
         run_id=run_id,
         event_key=event_key or f"{event_type.value}@{timestamp}",
@@ -407,6 +413,10 @@ def record_lifecycle_event(
         occurred_at=timestamp,
         detail_json=_json_detail(event_detail),
     )
+    if progress_enabled and event_record.phase != LifecyclePhase.NONE.value:
+        emit_lifecycle_progress(event_record)
+    if lifecycle_store is None:
+        return
     _safe_store_call(
         lifecycle_store,
         run_id,

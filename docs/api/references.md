@@ -534,7 +534,9 @@ run 详情：`run`、`results`（逐候选执行）、`scores`（逐评审评分
 
 ### 运行时自省 `backend.api.cli_schema`
 
-`kc schema --json` 从已注册的 Typer/click 命令树派生，不维护第二份命令清单：顶层为 `name` / `help` / `exit_codes` / `command_count` / `commands`；每条命令含 `path`、`help`、`arguments`、`options`；每个参数含名称、类型、是否必填、枚举取值、默认值与示例。`kc ask` 与 `kc deliberate` 的 `--output` 是输出目录（文本型），不在机器格式之列。`kc run --fast-merge` 作为 `run` 的一次性旗标由该自动派生暴露，不另立清单。
+`kc schema --json` 从已注册的 Typer/click 命令树派生，不维护第二份命令清单：顶层为 `name` / `help` / `exit_codes` / `command_count` / `commands`；每条命令含 `path`、`help`、`arguments`、`options`；每个参数含名称、类型、是否必填、枚举取值、默认值与示例。`kc ask` 与 `kc deliberate` 的 `--output` 是输出目录（文本型），不在机器格式之列。`kc run --fast-merge` 与 `--progress` 作为 `run` 的一次性旗标由该自动派生暴露，不另立清单。
+
+`kc run --progress` 是前台执行的增量事件流，不等同于 `--output json`：普通 Agent 输出保留在 stdout；stderr 中每条以 `KC_PROGRESS ` 开头的行，移除此前缀后是一个 JSON 对象，带 `schema_version: 1`。`run.started`、`run.lifecycle`、`run.progress` 与 `run.finished` 分别表示启动、生命周期阶段变化、30 秒心跳和本次命令终态。调用方应保持进程会话打开并实时消费 stderr；最终状态描述 runner 命令本身，不代表 PR 已合并或人工验收完成。
 
 ### PR 正文快速通道 marker `kc:fast-merge`
 

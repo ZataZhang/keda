@@ -19,6 +19,7 @@ from backend.api.cli_helpers import (
 )
 from backend.api.cli_output import OUTPUT_FORMAT_JSON, CliError, emit
 from backend.api.cli_parsed_context import ParsedCommandContext
+from backend.api.cli_run_progress import RunProgressStream
 from backend.api.cli_registry import _run_daemon_status_command
 from backend.api.agent_runner_views.runner_live_view import create_runner_live_view
 from backend.core.shared.interfaces.agent_runner import IGitHubClient
@@ -127,15 +128,23 @@ def run_run_command(ctx: ParsedCommandContext) -> int:
     时默认拒绝（FR-4），``--takeover`` 在强警告 + 确认下优雅停 daemon、
     终止其 agent 子进程树、reclaim 在途 Issue 后接管（FR-5）。
     """
-    # 机器输出只定义在 --dry-run 预览组合下：真实执行的过程输出是流式文本，
-    # 混进 JSON 只会产出不可解析的垃圾。在解析任何仓库目标之前 fail fast。
+    # --json 的 stdout 只定义在 --dry-run 预览组合下；真实执行的结构化进度走
+    # 单独的 stderr 事件流，避免与 Agent 原始 stdout 混合。在解析仓库目标前 fail fast。
     if ctx.output_format == OUTPUT_FORMAT_JSON and not ctx.parsed.dry_run:
         raise CliError(
-            "--json/--output json 只在 --dry-run 预览下有定义；真实执行的过程输出是流式文本。",
+            "--json/--output json 只在 --dry-run 预览下有定义；真实执行请用 --progress "
+            "获取结构化状态事件。",
             code=ExitCode.USAGE,
-            suggestion="kc run --dry-run --json",
+            suggestion="kc run --issue <N> --progress",
         )
     parsed = ctx.parsed
+    progress_events_enabled = bool(getattr(parsed, "progress_events", False))
+    if progress_events_enabled and parsed.dry_run:
+        raise CliError(
+            "--progress 用于真实前台执行，不与 --dry-run 预览合用。",
+            code=ExitCode.USAGE,
+            suggestion="kc run --issue <N> --progress",
+        )
     prd_path = getattr(parsed, "prd_path", None)
     target_issue = getattr(parsed, "issue", None)
     all_ready = getattr(parsed, "all_ready", False)
@@ -292,7 +301,12 @@ def run_run_command(ctx: ParsedCommandContext) -> int:
         return _cli.create_transcript_runner(config=config_by_repo_path.get(repo_path))
 
     heartbeat = None if parsed.dry_run else _start_coordination_heartbeat(ctx, contexts, role="run")
+    progress_stream = (
+        RunProgressStream(target_issue=target_issue) if progress_events_enabled else None
+    )
     try:
+        if progress_stream is not None:
+            progress_stream.start()
         exit_code = _cli.run_agent_repositories_once(
             contexts=contexts,
             dry_run=parsed.dry_run,
@@ -309,7 +323,30 @@ def run_run_command(ctx: ParsedCommandContext) -> int:
             target_issue=target_issue,
             publish_stage=publish_stage,
             aggregate_pr=aggregate_pr,
+            progress_callback=(
+                progress_stream.emit_lifecycle_event if progress_stream is not None else None
+            ),
         )
+    except KeyboardInterrupt:
+        if progress_stream is not None:
+            progress_stream.finish(
+                status="interrupted",
+                exit_code=130,
+            )
+        raise
+    except Exception as exc:  # noqa: BLE001 - 终态事件旁路后保留既有异常处理。
+        if progress_stream is not None:
+            progress_stream.finish(
+                status="failed",
+                exit_code=_cli.translate_exit_code(exc),
+            )
+        raise
+    else:
+        if progress_stream is not None:
+            progress_stream.finish(
+                status="succeeded" if exit_code == 0 else "failed",
+                exit_code=exit_code,
+            )
     finally:
         if heartbeat is not None:
             heartbeat.stop()

@@ -9,7 +9,7 @@ CLI 入口基于 Typer/Rich：`kc --help` 会展示分组命令、参数和别�
 - **init**：在目标 Git 仓库创建仓库本地 `.kedacode.toml` 配置
 - **labels sync**：在目标仓库创建或更新标准 labels（`agent/ready`、`agent/running`、`agent/supervising` 等）
 - **issue create**：从一个或多个 PRD Markdown 文件创建 GitHub Issue，**默认带上 `agent/ready` 直接进队列**（`--no-ready` 可只建 Issue 不排队），并默认在 ready 前发布 PRD（可用 `--no-publish-prd` 关闭，兼容旧命令 `issue-from-prd`）；也可以用 `--from-prompt "<一句话需求>"` 直接开一条**没有 PRD** 的 Issue（与 PRD 路径参数互斥，生成的正文不含 PRD 锚点，验收小节靠 `--require-validation` 显式开启）
-- **run**：单次轮询执行，**目标必填**——`--issue <N>` 定向处理一个 Issue，或传 PRD 路径（解析其回链 Issue），或显式 `--all-ready` 按优先级处理整个 ready 队列（兼容旧命令 `run-once`；不传目标即用法错误）。daemon 的互斥**只挡队列轮询**：同仓 daemon 在跑时 `--all-ready` 拒绝（`--takeover` 显式接管），`kc run --issue <N>` 照常执行——定向不要求 `agent/ready`，只按认领状态把关；租约仍有效的远端认领即使带 `--takeover` 也不能强制接手（见「显式定向的领取准入」）
+- **run**：单次轮询执行，**目标必填**——`--issue <N>` 定向处理一个 Issue，或传 PRD 路径（解析其回链 Issue），或显式 `--all-ready` 按优先级处理整个 ready 队列（兼容旧命令 `run-once`；不传目标即用法错误）。可加 `--progress` 获取前台结构化进度事件。daemon 的互斥**只挡队列轮询**：同仓 daemon 在跑时 `--all-ready` 拒绝（`--takeover` 显式接管），`kc run --issue <N>` 照常执行——定向不要求 `agent/ready`，只按认领状态把关；租约仍有效的远端认领即使带 `--takeover` 也不能强制接手（见「显式定向的领取准入」）
 - **batch aggregate**：`kc run --all-ready --aggregate-pr --max-issues <N>` 显式把本轮至少两个已选 Issue 收为一批；分别运行现有任务流程后，只在全部成功时组合、验证并发布唯一总 Draft PR。跨多次运行时可用 `kc pr aggregate --issue <N> --issue <N>` 显式指定成员或重试聚合阶段。普通 `run`、daemon 和 loop 不自动汇总。**同一条聚合资格门对两个入口都一样**：成员 Issue 必须是 open 且已带 `agent/automated-review-passed`，且每个来源 PR 的必需 checks 必须已是 `SUCCESS`；刚发布完的 Issue 通常还停在 `agent/supervising`、Draft PR 的 checks 还是 PENDING，所以单次夜间 `kc run --all-ready --aggregate-pr` 常会在资格阶段被拒，需要等 checks 与标签落定后再补一次 `kc pr aggregate --issue ...`（见「批次聚合的资格门与两次调用」）。
 - **supervise**：单次处理已有 PR 的 Issue，基于 PR 上下文变化运行 post-PR supervisor cycle（兼容旧命令 `review`；历史命令 `review-once` 已删除）
 - **supervise-daemon**：常驻进程，按指定间隔循环执行 post-PR supervisor 检查
@@ -1288,6 +1288,33 @@ git branch -d issue-<number>
 ## run 与 daemon 的执行语义与控制面
 
 `kc run` 与 `kc daemon` 的职责边界是显式契约：**run = 手动单次、定向执行**（一条命令只处理一个目标，但**多条 `--issue` 命令之间互不阻塞，可并发**，见下节），不调度、不碰合并、不涉及 autopilot；**daemon = 无人值守常驻轮询**，是唯一运行 Backlog 自动推进阶段的地方。
+
+### 前台进度事件（`kc run --progress`）
+
+`--progress` 让调用方在等待前台 `kc run` 时持续收到可解析的状态事件。Agent 原始输出仍流到 stdout；结构化事件写到 stderr，并统一以 `KC_PROGRESS ` 开头，调用方只需过滤该前缀。stderr 还可能包含普通诊断日志。调用方需要保持进程会话打开并实时读取 stderr；命令结束后不会再异步唤醒调用方。
+
+```bash
+kc run --issue 42 --progress
+```
+
+事件采用带版本的 JSON 行，类型包括：
+
+- `run.started`：本次命令开始，含唯一 `task_id` 与可选 `target_issue`。
+- `run.lifecycle`：runner 生命周期事件，含 `repo_id`、`issue_number`、`lifecycle_event`、`phase`、`status` 和 UTC `occurred_at`；不会携带生命周期事件的 detail。
+- `run.progress`：每 30 秒发一次仍在执行的心跳，含 `elapsed_seconds`。
+- `run.finished`：本次命令结束，含 `status`、`exit_code` 与耗时。状态为 `succeeded`、`failed` 或 `interrupted`。
+
+阶段事件跟随 runner 实际记录的生命周期变化；没有新阶段时，30 秒心跳仍会持续报告命令在运行。
+
+例如：
+
+```text
+KC_PROGRESS {"schema_version":1,"event":"run.lifecycle","task_id":"...","repo_id":"keda-main","issue_number":42,"lifecycle_event":"validation_started","phase":"validating","status":"validation_started","occurred_at":"2026-11-02T04:00:00+00:00"}
+KC_PROGRESS {"schema_version":1,"event":"run.progress","task_id":"...","target_issue":42,"status":"running","elapsed_seconds":30,"message":"任务仍在执行","occurred_at":"2026-11-02T04:00:30+00:00"}
+KC_PROGRESS {"schema_version":1,"event":"run.finished","task_id":"...","target_issue":42,"status":"succeeded","exit_code":0,"elapsed_seconds":184,"message":"kc run 已结束","occurred_at":"2026-11-02T04:02:34+00:00"}
+```
+
+`--progress` 不改变进程最终退出码，不与 `--dry-run` 或真实执行的 `--json` 合用。本次 `run` 成功只代表这次 runner 命令正常结束；Issue 是否合并、PRD 是否人工验收仍看各自状态。
 
 ### run 目标必填（breaking change）
 

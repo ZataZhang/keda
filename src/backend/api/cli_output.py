@@ -34,6 +34,7 @@ __all__ = [
     "emit",
     "emit_json",
     "emit_ndjson",
+    "emit_progress_event",
     "error_envelope",
     "json_literal",
     "machine_output_requested",
@@ -144,6 +145,19 @@ def emit_ndjson(rows: Iterable[Any]) -> None:
     """
     for row in rows:
         _print_verbatim(json.dumps(row, ensure_ascii=False, default=str))
+
+
+def emit_progress_event(payload: Any) -> None:
+    """将一条前台任务进度事件写到 stderr，供调用方从普通日志中筛出。
+
+    Args:
+        payload: 可 JSON 序列化的进度事件对象。
+
+    Returns:
+        None: 事件直接写入 stderr。
+    """
+    event_text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=str)
+    _print_verbatim(f"KC_PROGRESS {event_text}", target=error_console)
 
 
 def emit(

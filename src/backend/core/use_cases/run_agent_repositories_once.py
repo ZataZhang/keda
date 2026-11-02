@@ -14,6 +14,7 @@ from backend.core.shared.interfaces.agent_runner import (
 )
 from backend.core.shared.interfaces.runner_console import IRunHistoryStore
 from backend.core.shared.models.agent_runner import RepositoryRunContext
+from backend.core.shared.models.agent_runner_progress import RunProgressEvent
 from backend.core.shared.models.publish_stage import PublishStage
 from backend.core.use_cases.agent_runner_orchestrate import run_once
 
@@ -60,6 +61,7 @@ def run_agent_repositories_once(
     target_issue: int | None = None,
     publish_stage: PublishStage = PublishStage.NORMAL,
     aggregate_pr: bool = False,
+    progress_callback: Callable[[RunProgressEvent], None] | None = None,
 ) -> int:
     """Run one polling pass across all target repositories.
 
@@ -87,6 +89,7 @@ def run_agent_repositories_once(
             运行生效；默认 ``NORMAL`` 与今天完全一致。
         aggregate_pr: 仅在 ``kc run --all-ready --aggregate-pr`` 下启用；全部选中
             Issue 成功后才将本轮冻结集合交给共享批次聚合用例。
+        progress_callback: 可选的前台生命周期阶段通知回调。
 
     Returns:
         Exit code (0 on success, 1 if any repository failed).
@@ -166,6 +169,7 @@ def run_agent_repositories_once(
                 target_issue=target_issue,
                 publish_stage=publish_stage,
                 aggregate_pr=aggregate_pr,
+                progress_callback=progress_callback,
             )
             if repo_exit_code != 0:
                 aggregated_exit_code = 1

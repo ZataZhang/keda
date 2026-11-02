@@ -148,6 +148,13 @@ def run_command(
         bool,
         typer.Option("--yes", help="Skip the takeover confirmation prompt (required with --json)."),
     ] = False,
+    progress_events: Annotated[
+        bool,
+        typer.Option(
+            "--progress",
+            help="Emit structured progress events to stderr while this foreground run executes.",
+        ),
+    ] = False,
     fast_merge: Annotated[
         bool,
         typer.Option(
@@ -205,6 +212,7 @@ def run_command(
         aggregate_pr=aggregate_pr,
         takeover=takeover,
         yes=yes,
+        progress_events=progress_events,
         fast_merge=fast_merge,
         direct_pr=direct_pr,
     )
