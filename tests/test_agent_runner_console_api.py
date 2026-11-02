@@ -51,10 +51,7 @@ def console_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     (repo_dir / ".git").mkdir(parents=True)
     config_path = tmp_path / "config.toml"
     config_path.write_text(
-        "# 保留注释\n"
-        "[agent_runner.repositories.keda-main]\n"
-        f'path = "{repo_dir}"\n'
-        "enabled = true\n",
+        f'# 保留注释\n[agent_runner.repositories.keda-main]\npath = "{repo_dir}"\nenabled = true\n',
         encoding="utf-8",
     )
     contexts = [
@@ -1114,3 +1111,47 @@ def test_recover_publish_action_starts_and_stops_coordination_heartbeat(
     assert response.status_code == 200, response.text
     assert response.json()["result"] == "accepted"
     assert lifecycle == ["start", "stop"]
+
+
+def test_discover_repositories_includes_the_scan_root_itself(
+    console_environment, tmp_path: Path
+) -> None:
+    """把仓库路径当 scan_root 时必须命中它自己，而不是只扫它的子目录。"""
+    solo_repo = tmp_path / "solo"
+    solo_repo.mkdir()
+    (solo_repo / ".git").mkdir()
+    _write_iar_toml(solo_repo, "solo", "Solo Project")
+
+    response = client.get(
+        "/api/v1/agent-runner/repositories/discover",
+        params={"scan_root": str(solo_repo)},
+    )
+    assert response.status_code == 200, response.text
+    discovered = response.json()["repositories"]
+    assert [entry["repo_id"] for entry in discovered] == ["solo"]
+    assert discovered[0]["path"] == str(solo_repo)
+
+
+def test_discover_repositories_skips_runner_state_directories(
+    console_environment, tmp_path: Path
+) -> None:
+    """runner 的 worktree 带着同一份 .kedacode.toml，不能被当成独立仓库。"""
+    workspace = tmp_path / "code"
+    repo_path = workspace / "proj"
+    repo_path.mkdir(parents=True)
+    (repo_path / ".git").mkdir()
+    _write_iar_toml(repo_path, "proj", "Proj")
+
+    worktree = repo_path / ".kc-worktrees" / "issue-1"
+    worktree.mkdir(parents=True)
+    (worktree / ".git").write_text("gitdir: /tmp/elsewhere\n", encoding="utf-8")
+    _write_iar_toml(worktree, "proj", "Proj")
+
+    response = client.get(
+        "/api/v1/agent-runner/repositories/discover",
+        params={"scan_root": str(workspace)},
+    )
+    assert response.status_code == 200, response.text
+    discovered = response.json()["repositories"]
+    assert [entry["repo_id"] for entry in discovered] == ["proj"]
+    assert discovered[0]["path"] == str(repo_path)

@@ -1260,3 +1260,21 @@ def test_iar_init_idempotent_does_not_rewrite_gitignore(
     second = (repo_path / ".gitignore").read_text(encoding="utf-8")
 
     assert first == second
+
+
+def test_iar_init_registers_repository_when_skill_sync_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Skill 同步失败不得吞掉注册表登记：控制台的仓库列表只读注册表。"""
+    repo_path = _init_git_repository(tmp_path, "target")
+    monkeypatch.chdir(repo_path)
+    config_path = _create_isolated_config(tmp_path)
+    monkeypatch.setenv("KEDACODE_CONFIG", str(config_path))
+    monkeypatch.setattr(
+        "backend.api.cli_init._sync_user_skills_or_report_error",
+        lambda **_kwargs: 1,
+    )
+
+    assert main(["init"]) == 1, "Skill 失败仍应以非零退出码可见"
+    assert "[agent_runner.repositories.target]" in config_path.read_text(encoding="utf-8")

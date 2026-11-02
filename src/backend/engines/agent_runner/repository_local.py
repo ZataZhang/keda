@@ -56,6 +56,22 @@ _logger = logging.getLogger(__name__)
 
 _MAX_SCAN_DEPTH = 4
 
+# 不参与仓库发现的目录：runner 自己的运行态与构建产物。
+# 这些目录里的 git worktree 带着同一份 .kedacode.toml，会被误认成独立仓库。
+_INTERNAL_SCAN_DIR_NAMES = frozenset(
+    {
+        ".agent-runner",
+        ".git",
+        ".iar",
+        ".iar-worktrees",
+        ".kc-worktrees",
+        ".kedacode",
+        ".venv",
+        "node_modules",
+        "target",
+    }
+)
+
 
 class RepositoryNotInitializedError(Exception):
     """Raised when a target repository has not run `kc init`."""
@@ -1093,16 +1109,20 @@ def discover_repositories(
 
 
 def _walk_directories(root: Path, max_depth: int):
-    """按广度优先遍历目录，yield 目录路径。"""
+    """按广度优先遍历目录，yield 目录路径，包含 root 自身。
+
+    传入仓库路径时它本身就是候选仓库，所以 root 必须进入遍历；早期版本只 yield
+    子目录，导致 kc registry sync <repo> 扫不到那个仓库自己。
+    """
     queue: list[tuple[Path, int]] = [(root, 0)]
     while queue:
         current, depth = queue.pop(0)
+        yield current
         if depth >= max_depth:
             continue
         for child in current.iterdir():
-            if not child.is_dir():
+            if not child.is_dir() or child.name in _INTERNAL_SCAN_DIR_NAMES:
                 continue
-            yield child
             queue.append((child, depth + 1))
 
 

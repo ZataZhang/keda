@@ -523,6 +523,8 @@ uv run --project /path/to/keda kc init
 
 `kc init` 成功写入本地配置后，还会自动把当前仓库注册（或更新路径）到全局 `config.toml` 的 `[agent_runner.repositories]` 中，使 `kc daemon` 默认即可在当前仓库启动。如果该 `repo_id` 已在 registry 中但指向不同路径，init 会自动更新 registry 路径到当前位置。
 
+用户级 Skill 同步失败不会中断仓库注册与 GitHub 标签同步；`kc init` 会继续完成这些步骤，并在最终退出时仍以非零退出码报告 Skill 同步失败。
+
 ### 机器级 `config.toml` 的认定与托管进程继承
 
 `config.toml` 同时装两类配置：**KedaCode 自己的** `[agent_runner]`（含生命周期矩阵、registry、超时、验证命令等），以及**宿主应用的** `[app]` / `[database]` / `[preview]` 等。两类按不同规则解析：
@@ -4742,6 +4744,10 @@ GET /api/v1/agent-runner/console/stats/prd-lifecycle?repo_id=&days=
 当前所在目录；选定后回填路径，`repo_id` 与显示名为空时按目录名自动补全
 （与 `kc registry` 扫描用的 `normalize_repository_id` 同一规则）。带
 `git 仓库` 标记的目录才能通过「校验并添加」。
+
+仓库发现扫描也会检查扫描根目录本身，并向下最多遍历四层；`.git`、`.kc-worktrees`、
+`.agent-runner`、`.iar`、`.iar-worktrees`、`.kedacode`、`.venv`、`node_modules` 与
+`target` 目录会被跳过，避免 runner 状态、嵌套 worktree 与构建产物重复出现在候选列表中。
 
 ### Console API 一览
 
