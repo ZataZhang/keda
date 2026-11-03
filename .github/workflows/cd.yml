@@ -97,6 +97,15 @@ jobs:
           test -f "$skills_root/prd/scripts/prd_contract.py"
           echo "KEDACODE_PRD_SKILL_PATH=$skills_root/prd/SKILL.md" >> "$GITHUB_ENV"
 
+      # guard 测试通过真实 `just ai pr` 入口运行，ubuntu-latest 不自带 just
+      # （ci.yml run 41559800688 实测 29 个 FileNotFoundError: 'just'）。
+      # 与 ci.yml 同一套调用：两个 workflow 都跑测试套件，改其一必须改另一个。
+      # 版本与 runner_container/Dockerfile.runner 的 JUST_VERSION 对齐。
+      - name: Set up just
+        uses: extractions/setup-just@v4
+        with:
+          just-version: "1.55.1"
+
       # timeout-minutes 是诊断也是防护。基线：2026-07-28 的 eb75be4 用同一条命令
       # 跑完 1773 个测试只要 45 秒；2026-09-11 起同一步骤 25 分钟不结束——因为
       # 此前 max-file-lines 一直先失败、本步一直被 skip，某个在 CI 里会挂住的
