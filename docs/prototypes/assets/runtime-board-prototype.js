@@ -39,6 +39,7 @@
   ];
 
   const state = { selectedTaskId: TASKS[0].id, filter: 'all', query: '' };
+  const baselineState = { mode: 'agent' };
   const taskList = document.querySelector('#runtime-task-list');
   const taskDetail = document.querySelector('#runtime-detail');
   const searchInput = document.querySelector('#runtime-search');
@@ -111,6 +112,32 @@
    */
   function renderRuntimeEvaluation() {
     const feedback = document.querySelector('#evaluation-feedback');
+    if (feedback) feedback.hidden = true;
+  }
+
+  /** 更新 M13 表单的候选执行估算与模式提示。 */
+  function renderEvaluationBaseline() {
+    const repeatSelect = document.querySelector('#baseline-repeats');
+    const holdoutCheckbox = document.querySelector('#baseline-holdout');
+    const estimate = document.querySelector('#baseline-estimate');
+    const limit = document.querySelector('#baseline-limit');
+    const agentPreset = document.querySelector('.baseline-agent-preset');
+    const holdoutLabel = document.querySelector('.baseline-holdout');
+    const calibrationPresets = document.querySelector('.baseline-calibration-presets');
+    const calibrationProof = document.querySelector('.baseline-calibration-proof');
+    const feedback = document.querySelector('.baseline-feedback');
+    if (!repeatSelect || !estimate || !limit) return;
+
+    const repeats = Number(repeatSelect.value);
+    const isCalibration = baselineState.mode === 'calibration';
+    const caseCount = isCalibration || holdoutCheckbox?.checked ? 12 : 8;
+    const presetCount = isCalibration ? 2 : 1;
+    estimate.textContent = String(caseCount * presetCount * repeats);
+    limit.textContent = isCalibration ? '（校准执行上限 144）' : '（模型执行上限 48）';
+    if (agentPreset) agentPreset.hidden = isCalibration;
+    if (holdoutLabel) holdoutLabel.hidden = isCalibration;
+    if (calibrationPresets) calibrationPresets.hidden = !isCalibration;
+    if (calibrationProof) calibrationProof.hidden = !isCalibration;
     if (feedback) feedback.hidden = true;
   }
 
@@ -235,6 +262,26 @@
       button.disabled = true;
       return;
     }
+    const baselineModeButton = event.target.closest('[data-baseline-mode]');
+    if (baselineModeButton) {
+      baselineState.mode = baselineModeButton.dataset.baselineMode;
+      document.querySelectorAll('[data-baseline-mode]').forEach((button) => {
+        const isActive = button === baselineModeButton;
+        button.classList.toggle('is-active', isActive);
+        button.setAttribute('aria-pressed', String(isActive));
+      });
+      renderEvaluationBaseline();
+      return;
+    }
+    if (event.target.closest('[data-baseline-create]')) {
+      const feedback = document.querySelector('.baseline-feedback');
+      const count = document.querySelector('#baseline-estimate')?.textContent ?? '0';
+      if (feedback) {
+        feedback.textContent = `已创建 ${count} 次候选执行的草稿；启动仍需单独操作。原型不会运行候选或调用模型。`;
+        feedback.hidden = false;
+      }
+      return;
+    }
     const pauseButton = event.target.closest('[data-pause-log]');
     if (pauseButton) {
       const paused = pauseButton.getAttribute('aria-pressed') !== 'true';
@@ -262,6 +309,8 @@
     const confirmButton = document.querySelector('[data-confirm-judges]');
     if (confirmButton) confirmButton.disabled = !event.target.checked;
   });
+  document.querySelector('#baseline-repeats')?.addEventListener('change', renderEvaluationBaseline);
+  document.querySelector('#baseline-holdout')?.addEventListener('change', renderEvaluationBaseline);
 
   document.addEventListener('prototype:reset', () => {
     state.selectedTaskId = TASKS[0].id;
@@ -274,9 +323,20 @@
     document.querySelectorAll('.runtime-dialog[open]').forEach((dialog) => dialog.close());
     resetPayloadConsent();
     renderRuntimeEvaluation();
+    baselineState.mode = 'agent';
+    document.querySelectorAll('[data-baseline-mode]').forEach((button) => {
+      const isActive = button.dataset.baselineMode === 'agent';
+      button.classList.toggle('is-active', isActive);
+      button.setAttribute('aria-pressed', String(isActive));
+    });
+    if (document.querySelector('#baseline-repeats')) document.querySelector('#baseline-repeats').value = '3';
+    if (document.querySelector('#baseline-holdout')) document.querySelector('#baseline-holdout').checked = false;
+    renderEvaluationBaseline();
   });
 
   window.renderRuntimeDashboard = renderRuntimeDashboard;
   window.renderRuntimeEvaluation = renderRuntimeEvaluation;
+  window.renderEvaluationBaseline = renderEvaluationBaseline;
+  renderEvaluationBaseline();
   renderRuntimeDashboard();
 })();

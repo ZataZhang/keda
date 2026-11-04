@@ -1,0 +1,32 @@
+diff --git a/src/backend/core/use_cases/worktree_env.py b/src/backend/core/use_cases/worktree_env.py
+index 1a857090..042f0942 100644
+--- a/src/backend/core/use_cases/worktree_env.py
++++ b/src/backend/core/use_cases/worktree_env.py
+@@ -16,0 +17,7 @@ Design decisions:
++- ``.env.run-state`` is never copied (see
++  :data:`ENV_COPY_EXCLUDED_FILE_NAMES`). It records the main checkout's
++  ``just run`` port assignments, so inheriting it would point the worktree
++  at the main repo's ports. The target repo's shared-database guard then
++  sees a listener on that port and refuses to run tests, and ``just run``
++  inside the worktree would clash with the main dev server. The worktree
++  writes its own run-state (or none) instead.
+@@ -35,0 +43,9 @@ ENV_FILE_NAME_PREFIX = ".env"
++# Env files that must never propagate into a worktree even though they match
++# :data:`ENV_FILE_NAME_PREFIX`. ``.env.run-state`` holds the main checkout's
++# ``just run`` backend/frontend port assignments: copying it would make the
++# worktree reuse the main repo's ports, so the target repo's shared-database
++# guard would see a listener there and block ``just test`` (false positive),
++# and ``just run`` inside the worktree would clash with the main dev server.
++# The worktree writes its own run-state (or none) instead.
++ENV_COPY_EXCLUDED_FILE_NAMES = frozenset({".env.run-state"})
++
+@@ -55,0 +72 @@ __all__ = [
++    "ENV_COPY_EXCLUDED_FILE_NAMES",
+@@ -80 +97,3 @@ def copy_missing_env_files(
+-    Existing files in the worktree are never overwritten.
++    Existing files in the worktree are never overwritten, and names in
++    :data:`ENV_COPY_EXCLUDED_FILE_NAMES` (``.env.run-state``) are skipped
++    entirely.
+@@ -107,0 +127,2 @@ def copy_missing_env_files(
++            if child_file_name in ENV_COPY_EXCLUDED_FILE_NAMES:
++                continue

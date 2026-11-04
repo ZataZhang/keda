@@ -1,4 +1,4 @@
-"""Console SQLite 评测三表（v15）的行为测试：迁移、往返、CAS、级联删除与自愈。"""
+"""Console SQLite 评测三表（v16）的行为测试：迁移、往返、CAS、级联删除与自愈。"""
 
 from __future__ import annotations
 
@@ -109,7 +109,7 @@ def _score(
     )
 
 
-def test_fresh_database_migrates_to_v15_with_evaluation_tables(tmp_path: Path) -> None:
+def test_fresh_database_migrates_to_v16_with_repeatable_evaluation_tables(tmp_path: Path) -> None:
     store = SqliteConsoleStore(tmp_path / "console.db")
     store.save_evaluation_run(_run())
     assert store.get_evaluation_run("eval-a") is not None
@@ -119,8 +119,30 @@ def test_fresh_database_migrates_to_v15_with_evaluation_tables(tmp_path: Path) -
             row[0]
             for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
         }
-    assert version == _SCHEMA_VERSION == 15
+    assert version == _SCHEMA_VERSION == 16
     assert {"evaluation_run", "evaluation_result", "evaluation_score"} <= tables
+    with sqlite3.connect(tmp_path / "console.db") as connection:
+        run_columns = {row[1] for row in connection.execute("PRAGMA table_info(evaluation_run)")}
+        result_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(evaluation_result)")
+        }
+    assert {"repeats", "case_bases_json"} <= run_columns
+    assert "repeat_index" in result_columns
+
+
+def test_same_case_and_preset_accepts_distinct_repeats_and_rejects_duplicate_index(
+    tmp_path: Path,
+) -> None:
+    store = SqliteConsoleStore(tmp_path / "console.db")
+    store.save_evaluation_run(_run(repeats=3))
+    for repeat_index in range(3):
+        store.save_evaluation_result(
+            _result(result_id=f"res-{repeat_index}", repeat_index=repeat_index)
+        )
+    saved_results = store.list_evaluation_results("eval-a")
+    assert [result.repeat_index for result in saved_results] == [0, 1, 2]
+    with pytest.raises(sqlite3.IntegrityError):
+        store.save_evaluation_result(_result(result_id="res-duplicate", repeat_index=1))
 
 
 def test_legacy_database_upgrades_and_keeps_history(tmp_path: Path) -> None:
@@ -137,6 +159,94 @@ def test_legacy_database_upgrades_and_keeps_history(tmp_path: Path) -> None:
     assert store.get_evaluation_run("eval-a") is not None
 
 
+def test_v15_database_preserves_run_result_score_and_supports_repeats(tmp_path: Path) -> None:
+    db_path = tmp_path / "console-v15.db"
+    with sqlite3.connect(db_path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE evaluation_run (
+                run_id TEXT PRIMARY KEY, suite_id TEXT NOT NULL,
+                suite_version TEXT NOT NULL, suite_hash TEXT NOT NULL,
+                rubric_version TEXT NOT NULL, repo_path TEXT NOT NULL,
+                base_ref TEXT NOT NULL, base_commit TEXT NOT NULL,
+                base_tree_hash TEXT NOT NULL, execution_preset_snapshots_json TEXT NOT NULL,
+                judge_preset_snapshots_json TEXT NOT NULL, status TEXT NOT NULL,
+                manifest_hash TEXT, case_ids_json TEXT NOT NULL,
+                check_timeout_seconds INTEGER NOT NULL, error TEXT,
+                created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                started_at TEXT, finished_at TEXT
+            );
+            CREATE TABLE evaluation_result (
+                result_id TEXT PRIMARY KEY,
+                run_id TEXT NOT NULL REFERENCES evaluation_run(run_id) ON DELETE CASCADE,
+                case_id TEXT NOT NULL, execution_preset_id TEXT NOT NULL,
+                execution_model_snapshot_json TEXT NOT NULL, base_tree_hash TEXT NOT NULL,
+                worktree_path TEXT, result_status TEXT NOT NULL, check_status TEXT NOT NULL,
+                check_recipe TEXT NOT NULL, check_exit_code INTEGER,
+                check_output_summary TEXT, agent_summary TEXT, duration_seconds REAL,
+                usage_summary_json TEXT, cost_status TEXT NOT NULL DEFAULT 'unknown',
+                diff_hash TEXT, error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                UNIQUE (run_id, case_id, execution_preset_id)
+            );
+            CREATE TABLE evaluation_score (
+                score_id TEXT PRIMARY KEY, run_id TEXT NOT NULL,
+                result_id TEXT NOT NULL REFERENCES evaluation_result(result_id) ON DELETE CASCADE,
+                case_id TEXT NOT NULL, execution_preset_id TEXT NOT NULL,
+                judge_preset_id TEXT NOT NULL, judge_model_snapshot_json TEXT NOT NULL,
+                rubric_version TEXT NOT NULL, score_status TEXT NOT NULL,
+                dimension_scores_json TEXT NOT NULL, rationale_summary TEXT,
+                response_hash TEXT, duration_seconds REAL, usage_summary_json TEXT,
+                error TEXT, created_at TEXT NOT NULL,
+                UNIQUE (result_id, judge_preset_id)
+            );
+            INSERT INTO evaluation_run VALUES (
+                'eval-a', 'demo', '1.0.0', 'sha', 'v1', '/tmp/repo', 'main', 'abc', 'tree',
+                '[{"preset_name":"p1"}]', '[{"preset_name":"j1"}]', 'completed', NULL,
+                '["case-a"]', 60, NULL, '2026-10-13T00:00:00+00:00',
+                '2026-10-13T00:00:01+00:00', '2026-10-13T00:00:00+00:00',
+                '2026-10-13T00:00:01+00:00'
+            );
+            INSERT INTO evaluation_result VALUES (
+                'res-a', 'eval-a', 'case-a', 'p1', '{"preset_name":"p1"}', 'tree', NULL,
+                'succeeded', 'passed', 'pytest', 0, '1 passed', 'done', 1.5,
+                '{"total_tokens":10}', 'unknown', 'diff', NULL,
+                '2026-10-13T00:00:00+00:00', '2026-10-13T00:00:01+00:00'
+            );
+            INSERT INTO evaluation_score VALUES (
+                'score-a', 'eval-a', 'res-a', 'case-a', 'p1', 'j1', '{"preset_name":"j1"}',
+                'v1', 'valid', '{"correctness":4}', 'ok', 'resp', 0.5, NULL, NULL,
+                '2026-10-13T00:00:01+00:00'
+            );
+            PRAGMA user_version = 15;
+            """
+        )
+
+    store = SqliteConsoleStore(db_path)
+    loaded_run = store.get_evaluation_run("eval-a")
+    loaded_result = store.get_evaluation_result("res-a")
+    loaded_scores = store.list_evaluation_scores("eval-a")
+    assert loaded_run is not None and loaded_run.repeats == 1 and loaded_run.case_bases == {}
+    assert loaded_result is not None and loaded_result.repeat_index == 0
+    assert len(loaded_scores) == 1 and loaded_scores[0].dimension_scores == {"correctness": 4}
+
+    for repeat_index in (1, 2):
+        store.save_evaluation_result(
+            _result(result_id=f"res-{repeat_index}", repeat_index=repeat_index)
+        )
+    with pytest.raises(sqlite3.IntegrityError):
+        store.save_evaluation_result(_result(result_id="res-duplicate", repeat_index=1))
+
+    with sqlite3.connect(db_path) as connection:
+        connection.execute("PRAGMA foreign_keys = ON")
+        result_fk = connection.execute("PRAGMA foreign_key_list(evaluation_result)").fetchall()
+        score_fk = connection.execute("PRAGMA foreign_key_list(evaluation_score)").fetchall()
+        connection.execute("DELETE FROM evaluation_run WHERE run_id = 'eval-a'")
+        assert connection.execute("SELECT COUNT(*) FROM evaluation_result").fetchone()[0] == 0
+        assert connection.execute("SELECT COUNT(*) FROM evaluation_score").fetchone()[0] == 0
+    assert any(row[2] == "evaluation_run" and row[6].upper() == "CASCADE" for row in result_fk)
+    assert any(row[2] == "evaluation_result" and row[6].upper() == "CASCADE" for row in score_fk)
+
+
 def test_run_round_trip_preserves_json_columns(tmp_path: Path) -> None:
     store = SqliteConsoleStore(tmp_path / "console.db")
     store.save_evaluation_run(_run())
@@ -144,6 +254,8 @@ def test_run_round_trip_preserves_json_columns(tmp_path: Path) -> None:
     assert loaded is not None
     assert loaded.execution_preset_snapshots == [{"preset_name": "p1"}]
     assert loaded.case_ids == ["case-a"]
+    assert loaded.repeats == 1
+    assert loaded.case_bases == {}
     assert loaded.status == EvaluationRunStatus.created.value
 
 
