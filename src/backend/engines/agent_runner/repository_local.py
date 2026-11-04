@@ -49,6 +49,10 @@ from backend.core.shared.interfaces.runner_console import (
     IRepositoryRegistryEditor,
 )
 from backend.core.shared.models import product_identity
+from backend.core.shared.models.repository_paths import (
+    LEGACY_REPOSITORY_STATE_DIR_NAME,
+    LEGACY_WORKTREE_DIR_NAME,
+)
 from backend.infrastructure.process_runner import CommandResult, SubprocessRunner
 
 
@@ -62,8 +66,8 @@ _INTERNAL_SCAN_DIR_NAMES = frozenset(
     {
         ".agent-runner",
         ".git",
-        ".iar",
-        ".iar-worktrees",
+        LEGACY_REPOSITORY_STATE_DIR_NAME,
+        LEGACY_WORKTREE_DIR_NAME,
         ".kc-worktrees",
         ".kedacode",
         ".venv",

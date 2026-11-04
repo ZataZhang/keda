@@ -367,6 +367,7 @@ _ALLOWED_FLAGS: dict[tuple[str, ...], set[str]] = {
         "--repo-id",
         "--agent",
         "--all",
+        "--progress",
         # 目标必填契约（run-daemon-autopilot-control-surface）：--issue / PRD
         # 路径 / --all-ready 三选一；--takeover 显式接管（--yes 免确认）。
         # --fast-merge 为一次性快速通道旁路（issue-207），单次目标专用。
