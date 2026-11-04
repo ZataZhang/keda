@@ -75,6 +75,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 部分 guard tests 会启动真实 just recipe（如 tests/guards/shared/test_ai_pr.py），
+      # CI 与 CD 都要安装相同版本，避免完整套件在本地可用、在 runner 上因缺少 just 失败。
+      - name: Set up just
+        uses: extractions/setup-just@v4
+        with:
+          just-version: "1.53.0"
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:

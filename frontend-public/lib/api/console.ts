@@ -604,6 +604,8 @@ export function createEvaluationRun(params: {
   suite_id: string;
   execution_presets: string[];
   judge_presets: string[];
+  repeats: number;
+  include_holdout: boolean;
 }): Promise<EvaluationRun> {
   return post<EvaluationRun>(`${BASE_PATH}/console/evaluation/runs`, params);
 }

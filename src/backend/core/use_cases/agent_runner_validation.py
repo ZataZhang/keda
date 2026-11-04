@@ -26,7 +26,6 @@ import hashlib
 import json
 import logging
 import re
-import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -36,7 +35,6 @@ from backend.core.shared.interfaces.agent_runner import (
 from backend.core.shared.models.agent_runner import (
     DEFAULT_VALIDATION_EVIDENCE_DIR,
     AppConfig,
-    CommandResult,
     DeliveryGateFailureKind,
     IssueSummary,
     evidence_dir_uses_task_subdirs,
@@ -60,7 +58,6 @@ from backend.core.use_cases.agent_runner_evidence_format import (
 )
 from backend.core.use_cases.agent_runner_feedback import (
     extract_prd_path,
-    format_result_for_recovery,
 )
 from backend.core.use_cases.agent_runner_git import (
     expand_changed_path,
@@ -69,7 +66,6 @@ from backend.core.use_cases.agent_runner_git import (
 )
 from backend.core.use_cases.agent_runner_structured_evidence import (
     EvidenceBlock,
-    StdoutAssertion,
     ValidationEvidenceError,
     has_structured_evidence_marker,
     load_evidence_manifest,
@@ -753,53 +749,6 @@ def _save_rv_reexec_cache(cache_path: Path, entries: dict[str, str]) -> None:
     )
 
 
-def _assertion_target_text(assertion: StdoutAssertion, command_result: CommandResult) -> str:
-    """Return the stream the assertion must be evaluated against."""
-    return command_result.stderr if assertion.source == "stderr" else command_result.stdout
-
-
-def _is_stdout_assertion_satisfied(
-    assertion: StdoutAssertion, command_result: CommandResult
-) -> bool:
-    """判断一条输出断言是否被满足（``must_match`` 时要求出现，否则要求不出现）。"""
-    target_text = _assertion_target_text(assertion, command_result)
-    pattern_matched = assertion.pattern in target_text
-    return pattern_matched if assertion.must_match else not pattern_matched
-
-
-def _validate_stdout_assertions(block: EvidenceBlock, command_result: CommandResult) -> None:
-    """对已 exit 0 的 RV 命令执行 manifest 声明的输出断言（补丁 1）。
-
-    退出码只是"命令没崩"，不代表检查点成立：``[ -d x ] || true`` 这类兜底会让
-    命令稳定 exit 0 而从未真正验证。这里按 manifest 的 ``stdout_assertions`` 对
-    keda 自己复跑得到的 stdout/stderr 做子串断言，失败即抛
-    ``ValidationEvidenceError`` 进入既有 recovery 循环——与 exit code 失败走同一条路。
-
-    Raises:
-        ValidationEvidenceError: 任一断言未被满足。错误消息指明断言序号、
-            pattern、source，并附带限长后的命令退出码、stdout 与 stderr，便于
-            agent 和 Console 页面直接定位失败输出。
-    """
-    for assertion_index, assertion in enumerate(block.stdout_assertions, start=1):
-        if _is_stdout_assertion_satisfied(assertion, command_result):
-            continue
-        expectation_text = (
-            f"must contain {assertion.pattern!r}"
-            if assertion.must_match
-            else f"must not contain {assertion.pattern!r}"
-        )
-        raise ValidationEvidenceError(
-            f"Realistic Validation item {block.item_number} exited 0 but its stdout "
-            f"assertion #{assertion_index} failed: {expectation_text} in "
-            f"{assertion.source} (severity={assertion.severity}, "
-            f"command `{block.command}`). An exit code of 0 is not proof the "
-            "checkpoint holds — remove `|| true` / `|| echo ok` style fallbacks and "
-            "make the command actually assert, or correct the declared assertion.\n\n"
-            "Captured command result:\n"
-            f"{format_result_for_recovery(command_result)}"
-        )
-
-
 def ensure_validation_commands_pass(
     issue: IssueSummary,
     worktree_path: Path,
@@ -814,6 +763,10 @@ def ensure_validation_commands_pass(
     的 Issue 生效。命令经 ``bash -lc`` 在 worktree 内执行并带超时;非零退出
     或超时即判失败,抛 ``ValidationEvidenceError`` 进入既有 recovery 循环。
 
+    复跑编排与 ``kc evidence check`` 完全同源
+    (:func:`run_evidence_check`):所有 item 跑完后一次性聚合全部失败,而不是
+    遇到第一条就停。通过判据不变——任一项未通过仍然阻断交付。
+
     当 ``reexecute_cache_enabled`` 开启且工作区干净时,按 ``HEAD`` 的 tree SHA
     指纹缓存"该 item 的该命令已通过":同一份已提交代码再次进入(如
     blocked-continue、换 agent、重新 claim)直接跳过复跑,避免重复跑 e2e。
@@ -821,8 +774,9 @@ def ensure_validation_commands_pass(
     仍由 ``ensure_validation_evidence_ready`` 单独把关,缓存命中不绕过它。
 
     Raises:
-        ValidationEvidenceError: 任一命令被 keda 复跑后未通过或超时；非零退出与
-            stdout 断言失败会在错误详情中附带命令、退出码、stdout 和 stderr。
+        ValidationEvidenceError: 任一命令被 keda 复跑后未通过或超时；错误消息
+            一次列出全部未通过项，非零退出与 stdout 断言失败会附带命令、
+            退出码、stdout 和 stderr。
     """
     if not config.validation.reexecute_commands:
         return
@@ -831,11 +785,14 @@ def ensure_validation_commands_pass(
     if not has_structured_evidence_marker(issue.body):
         return
 
-    manifest = load_evidence_manifest(
-        worktree_path,
-        config,
-        evidence_dir=resolve_issue_evidence_dir(worktree_path, config, issue),
+    # 延迟导入：只在真正复跑门禁时才需要整条自检编排（结构化证据解析 +
+    # 断言模块）；放在函数内避免仅导入证据门禁的调用方在加载期拉起全部依赖。
+    from backend.core.use_cases.agent_runner_evidence_check import (
+        STATUS_PASSED,
+        EvidenceCheckRequest,
+        run_evidence_check,
     )
+
     timeout_seconds = config.validation.reexecute_timeout_seconds
 
     tree_fingerprint = (
@@ -850,64 +807,64 @@ def ensure_validation_commands_pass(
     # 中途被改写的脚本产生前后不一致的键。
     oracle_digest = evidence_oracle_digest(worktree_path, config, issue)
 
-    for block in manifest.items:
-        cache_key = (
-            _rv_reexec_cache_key(
-                tree_fingerprint,
-                block.item_number,
-                block.command,
-                oracle_digest,
-            )
-            if tree_fingerprint
-            else None
+    def _cache_key_for_block(block: EvidenceBlock) -> str | None:
+        """该 item 在当前代码树 / 命令 / oracle 上的缓存键；无指纹时为空。"""
+        if tree_fingerprint is None:
+            return None
+        return _rv_reexec_cache_key(
+            tree_fingerprint,
+            block.item_number,
+            block.command,
+            oracle_digest,
         )
-        if cache_key is not None and cache_key in cache_entries:
-            _logger.info(
-                "Realistic Validation item %s: skipping re-execution; command "
-                "already passed at tree %s.",
-                block.item_number,
-                tree_fingerprint,
-            )
+
+    def _skip_cached_block(block: EvidenceBlock) -> bool:
+        """缓存命中时跳过复跑（同一代码树上该命令已真实通过）。"""
+        cache_key = _cache_key_for_block(block)
+        if cache_key is None or cache_key not in cache_entries:
+            return False
+        _logger.info(
+            "Realistic Validation item %s: skipping re-execution; command "
+            "already passed at tree %s.",
+            block.item_number,
+            tree_fingerprint,
+        )
+        return True
+
+    def _record_passed_block(block: EvidenceBlock) -> None:
+        """登记通过项；仅在整轮无失败时统一落盘，假绿灯不得固化。"""
+        cache_key = _cache_key_for_block(block)
+        if cache_key is not None:
+            newly_passed[cache_key] = datetime.now(UTC).isoformat()
+
+    report = run_evidence_check(
+        worktree_path,
+        config,
+        process_runner,
+        EvidenceCheckRequest(
+            evidence_dir=resolve_issue_evidence_dir(worktree_path, config, issue),
+            timeout_seconds=timeout_seconds,
+            gate_timeout_seconds=timeout_seconds,
+            skip_block=_skip_cached_block if tree_fingerprint else None,
+            record_pass=_record_passed_block if tree_fingerprint else None,
+        ),
+    )
+    for item_result in report.item_results:
+        if item_result.status != STATUS_PASSED:
             continue
-        try:
-            result = process_runner.run(
-                ["bash", "-lc", block.command],
-                cwd=worktree_path,
-                check=False,
-                capture_output=True,
-                timeout=timeout_seconds,
-                label=f"rv-reexec-{block.item_number}",
-            )
-        except subprocess.TimeoutExpired as timeout_error:
-            # RV 命令复跑超时 / 失败 = 行为没做对，保持真失败分类（收尾层不得接手）。
-            raise ValidationEvidenceError(
-                f"Realistic Validation item {block.item_number} timed out when keda "
-                f"re-ran its command (>{timeout_seconds}s): `{block.command}`. The "
-                "reproducible command must be a self-terminating check that probes the "
-                "real entry point and exits, not a long-running server. Set "
-                "`validation.reexecute_commands=false` to opt out."
-            ) from timeout_error
-        if result.return_code != 0:
-            raise ValidationEvidenceError(
-                f"Realistic Validation item {block.item_number} failed when keda "
-                "re-ran its command.\n\n"
-                f"{format_result_for_recovery(result)}\n\n"
-                "keda re-executes RV commands to confirm they actually pass — the "
-                "agent's evidence file alone is not trusted. Fix the behavior so the "
-                "command passes (or correct the command). Set "
-                "`validation.reexecute_commands=false` to opt out."
-            )
-        # exit 0 只是"命令没崩"：断言未过时不得写缓存，否则假绿灯会被缓存固化。
-        _validate_stdout_assertions(block, result)
         # 逐条记耗时：attempt 历史里的 ``rv_reexec`` 只有一个合计值，慢在哪一条
         # 只能靠这条日志（例如一条 e2e 吃掉几百秒）。
         _logger.info(
             "Realistic Validation item %s re-executed in %.1fs.",
-            block.item_number,
-            result.duration_seconds,
+            item_result.block.item_number,
+            item_result.duration_seconds,
         )
-        if cache_key is not None:
-            newly_passed[cache_key] = datetime.now(UTC).isoformat()
+    if not report.passed:
+        # 复跑失败 / 超时 / 断言未命中 = 行为没做对，保持真失败分类（收尾层不得接手）。
+        raise ValidationEvidenceError(
+            report.render_gate_failure(),
+            kind=report.gate_failure_kind,
+        )
 
     if newly_passed:
         cache_entries.update(newly_passed)

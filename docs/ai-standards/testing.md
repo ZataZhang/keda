@@ -79,6 +79,8 @@
 这项默认许可只覆盖 `just test` 本地核心档。`just test all` 是显式的本地全量诊断命令，
 仅在用户要求或排查本地/全量测试问题时运行，不作为常规交付的本地门槛。它运行 `tests/`
 中所有标记的测试；CI 使用自己的完整套件命令与 marker 策略，两者范围可能不同。
+CI 的 `ci.yml` 与手动触发的归档 workflow `cd.yml` 都会运行测试，因而应在测试前安装同一版本的 `just`：
+部分 guard test 会启动真实 Justfile recipe，仅有 Python 依赖的 runner 环境无法运行这些用例。
 
 优先使用仓库现有命令：
 

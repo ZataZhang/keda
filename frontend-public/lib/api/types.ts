@@ -1389,6 +1389,17 @@ export type EvaluationSuiteCase = {
   case_id: string;
   prompt: string;
   check_recipe: string;
+  base_ref?: string | null;
+  split?: "dev" | "holdout";
+  check_targets?: string[];
+};
+
+/** 评测集派生的逐题校准状态。 */
+export type EvaluationSuiteCalibration = {
+  required: boolean;
+  calibrated_count: number;
+  case_count: number;
+  cases: { case_id: string; calibrated: boolean; noop: number; gold: number }[];
 };
 
 /** suite 清单项：registry 目录内一个 YAML 文件的校验视图。 */
@@ -1404,6 +1415,8 @@ export type EvaluationSuiteEntry = {
   rubric_version?: string;
   check_timeout_seconds?: number;
   cases?: EvaluationSuiteCase[];
+  requires_calibration?: boolean;
+  calibration?: EvaluationSuiteCalibration;
   errors: string[];
 };
 
@@ -1415,6 +1428,7 @@ export type EvaluationPresetSnapshot = {
   reasoning_effort?: string | null;
   cost_status?: string;
   cost_estimate?: number | null;
+  kind?: "agent" | "calibration";
 };
 
 /** 一个评测 run（快照 + 状态机 + manifest hash）。 */
@@ -1439,6 +1453,9 @@ export type EvaluationRun = {
   updated_at: string;
   started_at: string | null;
   finished_at: string | null;
+  repeats: number;
+  case_bases: Record<string, { base_ref: string; commit: string; tree: string }>;
+  estimated_candidate_executions?: number;
 };
 
 /** 矩阵单元（case × 执行预设）的候选结果。 */
@@ -1463,6 +1480,7 @@ export type EvaluationResult = {
   error: string | null;
   created_at: string;
   updated_at: string;
+  repeat_index: number;
 };
 
 /** 单评审 × 单候选的评分行。 */
@@ -1502,12 +1520,26 @@ export type EvaluationSummary = {
   valid_judge_count: number;
 };
 
+/** 一个题目与执行预设的重复结果摘要。 */
+export type EvaluationStability = {
+  case_id: string;
+  execution_preset_id: string;
+  repeat_count: number;
+  passed_count: number;
+  execution_fault_count: number;
+  check_failure_count: number;
+  stable: boolean | null;
+};
+
 /** run 详情接口的完整载荷。 */
 export type EvaluationRunDetail = {
   run: EvaluationRun;
   results: EvaluationResult[];
   scores: EvaluationScore[];
   summary: EvaluationSummary;
+  stability: EvaluationStability[];
+  unstable_cases: EvaluationStability[];
+  calibration: EvaluationSuiteCalibration;
   payload_state: {
     is_active: boolean;
     awaiting_consent: boolean;
@@ -1519,11 +1551,12 @@ export type EvaluationRunDetail = {
 export type EvaluationPresetOptions = {
   execution_presets: {
     name: string;
-    agent: string;
+    agent: string | null;
     model: string | null;
     reasoning_effort: string | null;
     cost_status: string;
     cost_estimate: number | null;
+    kind?: "agent" | "calibration";
   }[];
   /** 评审预设即执行预设；available=false 表示该 agent 无法保证"只读 payload"。 */
   judge_presets: {

@@ -1,0 +1,24 @@
+diff --git a/src/backend/infrastructure/process_runner.py b/src/backend/infrastructure/process_runner.py
+index 816b236c..be83e0e8 100644
+--- a/src/backend/infrastructure/process_runner.py
++++ b/src/backend/infrastructure/process_runner.py
+@@ -110,0 +111 @@ _COMMAND_HEARTBEAT_SECONDS = 60
++_PROCESS_OUTPUT_JOIN_TIMEOUT_SECONDS = 5.0
+@@ -667 +667,0 @@ def _run_captured_process(
+-            process.wait()
+@@ -696 +696 @@ def _communicate_with_activity_tracking(
+-    """Read stdout/stderr while resetting the inactivity timeout on each chunk."""
++    """并行排空输出并跟踪活动,在子进程退出后有界等待读线程收尾。"""
+@@ -718,2 +718,10 @@ def _communicate_with_activity_tracking(
+-    stdout_thread.join(timeout=5)
+-    stderr_thread.join(timeout=5)
++
++    # 等待期间读线程持续排空管道,避免进程因 pipe 写满而停住。子进程退出后再
++    # 用一个共享时间上限收尾:孙进程若仍持有写端,此处返回目前已读到的内容。
++    process.wait()
++    join_deadline = time.monotonic() + _PROCESS_OUTPUT_JOIN_TIMEOUT_SECONDS
++    for reader_thread in (stdout_thread, stderr_thread):
++        remaining_join_seconds = join_deadline - time.monotonic()
++        if remaining_join_seconds <= 0:
++            break
++        reader_thread.join(timeout=remaining_join_seconds)
