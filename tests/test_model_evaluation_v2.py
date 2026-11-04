@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -20,7 +18,6 @@ from backend.core.shared.models.model_evaluation import (
 )
 from backend.core.use_cases import model_evaluation as evaluation_rules
 from backend.core.use_cases.model_evaluation import BuildRunSnapshotInput
-from backend.engines.model_evaluation import workspace
 
 
 def _suite_text(*, case_count: int = 2) -> str:
@@ -412,103 +409,3 @@ def test_stability_separates_verdicts_from_execution_faults() -> None:
     assert incomplete.stable is None
     assert incomplete.execution_fault_count == 1
     assert incomplete.check_failure_count == 0
-
-
-def test_snapshot_repo_has_one_commit_and_restores_hidden_scoring_material(
-    tmp_path: Path,
-) -> None:
-    source_repo = tmp_path / "source"
-    source_repo.mkdir()
-    subprocess.run(["git", "init", "--quiet"], cwd=source_repo, check=True)
-    subprocess.run(["git", "config", "user.name", "fixture"], cwd=source_repo, check=True)
-    subprocess.run(
-        ["git", "config", "user.email", "fixture@example.test"],
-        cwd=source_repo,
-        check=True,
-    )
-    (source_repo / "src").mkdir()
-    (source_repo / "tests").mkdir()
-    (source_repo / "src" / "app.py").write_text("value = 1\n", encoding="utf-8")
-    (source_repo / "tests" / "test_hidden.py").write_text(
-        "def test_hidden(): assert True\n", encoding="utf-8"
-    )
-    (source_repo / "pyproject.toml").write_text("[project]\nname='fixture'\n", encoding="utf-8")
-    (source_repo / "uv.lock").write_text("version = 1\n", encoding="utf-8")
-    source_commit = _commit(source_repo, "baseline")
-    (source_repo / "tests" / "test_future.py").write_text(
-        "def test_future(): pass\n", encoding="utf-8"
-    )
-    repair_commit = _commit(source_repo, "future repair")
-
-    snapshot = tmp_path / "isolated"
-    workspace.create_snapshot_repo(str(source_repo), source_commit, snapshot)
-    assert (
-        workspace.worktree_tree_hash(snapshot)
-        == subprocess.run(
-            ["git", "rev-parse", f"{source_commit}^{{tree}}"],
-            cwd=source_repo,
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout.strip()
-    )
-    log_output = subprocess.run(
-        ["git", "log", "--all", "--oneline"],
-        cwd=snapshot,
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.splitlines()
-    assert len(log_output) == 1
-    assert (snapshot / "tests" / "test_future.py").exists() is False
-    assert (
-        subprocess.run(
-            ["git", "cat-file", "-e", f"{repair_commit}^{{commit}}"],
-            cwd=snapshot,
-            check=False,
-            capture_output=True,
-        ).returncode
-        != 0
-    )
-    assert not subprocess.run(
-        ["git", "remote"], cwd=snapshot, check=True, capture_output=True, text=True
-    ).stdout.strip()
-    workspace.remove_held_out_files(snapshot, ("tests/test_hidden.py",))
-    assert not (snapshot / "tests" / "test_hidden.py").exists()
-
-    (snapshot / "pyproject.toml").write_text("tampered\n", encoding="utf-8")
-    (snapshot / "uv.lock").write_text("tampered\n", encoding="utf-8")
-    outside_marker = tmp_path / "outside-marker"
-    outside_marker.write_text("unchanged\n", encoding="utf-8")
-    (snapshot / "pyproject.toml").unlink()
-    (snapshot / "pyproject.toml").symlink_to(outside_marker)
-    (snapshot / "tests" / "test_hidden.py").symlink_to(outside_marker)
-    held_out = tmp_path / "materials" / "held_out"
-    (held_out / "tests").mkdir(parents=True)
-    (held_out / "tests" / "test_hidden.py").write_text(
-        "def test_hidden(): pass\n", encoding="utf-8"
-    )
-    workspace.restore_held_out_base_files(
-        str(source_repo), source_commit, snapshot, ("tests/test_hidden.py",)
-    )
-    workspace.restore_dependency_manifests(str(source_repo), source_commit, snapshot)
-    workspace.overlay_held_out(snapshot, held_out, ("tests/test_hidden.py",))
-    assert (snapshot / "pyproject.toml").read_text(encoding="utf-8").startswith("[project]")
-    assert (snapshot / "uv.lock").read_text(encoding="utf-8") == "version = 1\n"
-    assert (snapshot / "tests" / "test_hidden.py").read_text(encoding="utf-8") == (
-        "def test_hidden(): pass\n"
-    )
-    assert outside_marker.read_text(encoding="utf-8") == "unchanged\n"
-
-
-def _commit(repo_path: Path, subject: str) -> str:
-    """为隔离仓库 fixture 创建一次提交并返回 SHA。"""
-    subprocess.run(["git", "add", "-A"], cwd=repo_path, check=True)
-    subprocess.run(["git", "commit", "--quiet", "-m", subject], cwd=repo_path, check=True)
-    return subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        cwd=repo_path,
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()

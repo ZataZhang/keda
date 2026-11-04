@@ -99,3 +99,4 @@ nav:
       - 前端架构: architecture/frontend-architecture.md
   - 开发者:
       - 评测与测试: dev/evaluation.md
+      - 候选快照隔离: dev/evaluation-snapshot-isolation.md

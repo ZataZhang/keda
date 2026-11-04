@@ -61,20 +61,60 @@ def probe_base(repo_path: str, base_ref: str) -> tuple[str, str]:
     return commit, tree
 
 
-def create_snapshot_repo(repo_path: str, commit: str, snapshot_path: Path) -> None:
-    """导出基线文件并在新目录初始化只含一个提交的 Git 仓库。
+def create_snapshot_repo(
+    repo_path: str,
+    commit: str,
+    snapshot_path: Path,
+    *,
+    excluded_paths: tuple[str, ...] = (),
+) -> str:
+    """导出冻结基线，排除指定路径后创建独立的单提交 Git 仓库。
+
+    Args:
+        repo_path (str): 来源仓库路径。
+        commit (str): 冻结基线提交。
+        snapshot_path (Path): 新快照仓库的目标路径。
+        excluded_paths (tuple[str, ...]): 候选运行期间不可见的仓库相对路径。
+
+    Returns:
+        str: 来源提交的完整 tree hash，供执行记录核对冻结基线身份。
 
     Raises:
-        EvaluationWorkspaceError: Git 命令失败、目录冲突或 tree hash 不一致。
+        EvaluationWorkspaceError: Git 命令失败、目录冲突或快照 tree 不一致。
     """
     source_repo_path = Path(repo_path).expanduser()
+    source_tree_hash = _git(source_repo_path, ["rev-parse", "--verify", f"{commit}^{{tree}}"])
     if snapshot_path.exists():
         raise EvaluationWorkspaceError(f"快照目录已存在，拒绝复用: {snapshot_path}")
     snapshot_path.parent.mkdir(parents=True, exist_ok=True)
     snapshot_path.mkdir(parents=True, exist_ok=False)
     with tempfile.TemporaryDirectory(prefix="evaluation-index-") as index_dir:
-        environment = _git_environment(Path(index_dir) / "index")
+        temporary_root = Path(index_dir)
+        temporary_objects_path = temporary_root / "objects"
+        temporary_alternates_path = temporary_objects_path / "info" / "alternates"
+        temporary_alternates_path.parent.mkdir(parents=True, exist_ok=True)
+        source_objects_path = Path(_git(source_repo_path, ["rev-parse", "--git-path", "objects"]))
+        if not source_objects_path.is_absolute():
+            source_objects_path = source_repo_path / source_objects_path
+        temporary_alternates_path.write_text(str(source_objects_path.resolve()), encoding="utf-8")
+        environment = _git_environment(temporary_root / "index")
+        environment["GIT_OBJECT_DIRECTORY"] = str(temporary_objects_path)
         _git_with_env(source_repo_path, ["read-tree", commit], environment)
+        if excluded_paths:
+            _git_with_env(
+                source_repo_path,
+                [
+                    "rm",
+                    "--cached",
+                    "-r",
+                    "-f",
+                    "--ignore-unmatch",
+                    "--",
+                    *excluded_paths,
+                ],
+                environment,
+            )
+        expected_snapshot_tree = _git_with_env(source_repo_path, ["write-tree"], environment)
         _git_with_env(
             source_repo_path,
             ["checkout-index", "--all", "--force", f"--prefix={snapshot_path}{os.sep}"],
@@ -85,14 +125,23 @@ def create_snapshot_repo(repo_path: str, commit: str, snapshot_path: Path) -> No
     _git(snapshot_path, ["config", "user.email", "evaluation@localhost"])
     _git(snapshot_path, ["add", "-f", "-A"])
     _git(snapshot_path, ["commit", "--quiet", "--allow-empty", "-m", "Frozen evaluation baseline"])
-    if _git(snapshot_path, ["rev-parse", "HEAD^{tree}"]) != _git(
-        source_repo_path, ["rev-parse", "--verify", f"{commit}^{{tree}}"]
-    ):
-        raise EvaluationWorkspaceError("快照仓库 tree hash 与冻结基线不一致")
+    if _git(snapshot_path, ["rev-parse", "HEAD^{tree}"]) != expected_snapshot_tree:
+        raise EvaluationWorkspaceError("快照仓库 tree hash 与冻结过滤基线不一致")
+    return source_tree_hash
 
 
 def worktree_tree_hash(worktree_path: Path) -> str:
-    """返回 worktree HEAD 的 tree hash，用于与 run 快照做同基线断言。"""
+    """返回候选仓库 HEAD 的 tree hash。
+
+    Args:
+        worktree_path (Path): 候选仓库路径。
+
+    Returns:
+        str: 候选仓库 HEAD 的 tree hash；过滤隐藏路径后的快照会不同于来源树。
+
+    Raises:
+        EvaluationWorkspaceError: Git 查询失败或输出超过上限。
+    """
     return _git(worktree_path, ["rev-parse", "HEAD^{tree}"])
 
 
@@ -128,7 +177,18 @@ def restore_dependency_manifests(repo_path: str, commit: str, snapshot_path: Pat
 
 
 def remove_held_out_files(snapshot_path: Path, relative_paths: tuple[str, ...]) -> None:
-    """在 Agent 启动前移除基线中同路径的判分文件。"""
+    """从快照工作目录删除指定路径及候选写入的同路径文件。
+
+    Args:
+        snapshot_path (Path): 候选仓库路径。
+        relative_paths (tuple[str, ...]): 要删除的仓库相对路径。
+
+    Returns:
+        None: 无返回值。
+
+    Raises:
+        EvaluationWorkspaceError: 路径非法或快照文件操作失败。
+    """
     for relative_path in relative_paths:
         _remove_snapshot_path(snapshot_path, relative_path)
 

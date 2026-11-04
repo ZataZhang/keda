@@ -318,13 +318,22 @@ def _execute_cell(context: _EvaluationCellContext) -> None:
                         f"执行预设 '{preset_name}' 配置在 run 创建后已变化（{', '.join(drifted)}），"
                         "与冻结快照不一致，为避免不可解释对照已停止执行"
                     )
-            workspace.create_snapshot_repo(run.repo_path, base_commit, worktree_path)
+            excluded_snapshot_paths = (
+                (*case.held_out, *case.candidate_hidden)
+                if suite is not None and suite.requires_calibration
+                else ()
+            )
+            observed_base_tree = workspace.create_snapshot_repo(
+                run.repo_path,
+                base_commit,
+                worktree_path,
+                excluded_paths=excluded_snapshot_paths,
+            )
             result = dataclasses.replace(result, worktree_path=str(worktree_path))
             store.save_evaluation_result(result)
-            observed_tree = workspace.worktree_tree_hash(worktree_path)
-            if observed_tree != base_tree_hash:
+            if observed_base_tree != base_tree_hash:
                 raise ValueError(
-                    f"快照基线 tree 不一致: 期望 {base_tree_hash}，实际 {observed_tree}"
+                    f"快照基线 tree 不一致: 期望 {base_tree_hash}，实际 {observed_base_tree}"
                 )
             material_root = (
                 Path(suite.source_path)
@@ -334,10 +343,6 @@ def _execute_cell(context: _EvaluationCellContext) -> None:
                 if suite is not None
                 else None
             )
-            if suite is not None and suite.requires_calibration:
-                workspace.remove_held_out_files(
-                    worktree_path, (*case.held_out, *case.candidate_hidden)
-                )
             if preset_name == "@gold":
                 if not case.gold_patch or material_root is None:
                     raise ValueError(f"题目 '{case.case_id}' 缺少 gold_patch")
@@ -370,18 +375,20 @@ def _execute_cell(context: _EvaluationCellContext) -> None:
                     timeout_seconds=settings.evaluation.agent_timeout_seconds,
                 )
             if outcome.ok and suite is not None and suite.requires_calibration:
+                workspace.restore_dependency_manifests(run.repo_path, base_commit, worktree_path)
+                workspace.remove_held_out_files(worktree_path, excluded_snapshot_paths)
+                diff_text = workspace.collect_diff(worktree_path, "HEAD")
                 workspace.restore_held_out_base_files(
                     run.repo_path,
                     base_commit,
                     worktree_path,
-                    (*case.held_out, *case.candidate_hidden),
+                    excluded_snapshot_paths,
                 )
-                workspace.restore_dependency_manifests(run.repo_path, base_commit, worktree_path)
-                diff_text = workspace.collect_diff(worktree_path, "HEAD")
                 assert material_root is not None
                 held_out_dir = material_root / "held_out"
                 workspace.overlay_held_out(worktree_path, held_out_dir, case.held_out)
             else:
+                workspace.remove_held_out_files(worktree_path, excluded_snapshot_paths)
                 diff_text = workspace.collect_diff(worktree_path, "HEAD")
         except subprocess.TimeoutExpired:
             result = dataclasses.replace(

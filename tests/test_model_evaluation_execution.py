@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import shutil
 import threading
 import time
@@ -146,13 +147,26 @@ def harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
             default_judge_presets=["judge-1"],
         ),
     )
-    calls: dict[str, list[Any]] = {"candidate": [], "judge": [], "worktree": []}
+    calls: dict[str, list[Any]] = {
+        "candidate": [],
+        "excluded_paths": [],
+        "judge": [],
+        "worktree": [],
+    }
     inflight = {"now": 0, "max": 0}
     inflight_lock = threading.Lock()
 
-    def _fake_create_worktree(repo_path: str, base_commit: str, worktree_path: Path) -> None:
+    def _fake_create_worktree(
+        repo_path: str,
+        base_commit: str,
+        worktree_path: Path,
+        *,
+        excluded_paths: tuple[str, ...] = (),
+    ) -> str:
         calls["worktree"].append(str(worktree_path))
+        calls["excluded_paths"].append(excluded_paths)
         worktree_path.mkdir(parents=True, exist_ok=True)
+        return "tree-hash"
 
     def _fake_run_candidate(**kwargs: Any) -> agent_adapter.CandidateAgentOutcome:
         calls["candidate"].append(kwargs)
@@ -239,6 +253,42 @@ def test_candidate_config_drift_stops_before_worktree_and_agent(harness: Any) ->
     assert "配置在 run 创建后已变化" in (result.error or "")
     assert harness.calls["candidate"] == []
     assert harness.calls["worktree"] == []
+
+
+def test_v2_cell_excludes_hidden_paths_until_candidate_finishes(
+    harness: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """执行编排把 held_out 与 candidate_hidden 传给快照导出。"""
+    run = _run()
+    harness.store.save_evaluation_run(run)
+    hidden_paths = ("tests/test_hidden.py", "tasks/answer.md")
+    suite_case = replace(
+        _CASE,
+        held_out=(hidden_paths[0],),
+        candidate_hidden=(hidden_paths[1],),
+    )
+    suite = replace(
+        _SUITE,
+        source_path="tasks/evaluation-suites/demo.yaml",
+        requires_calibration=True,
+    )
+    monkeypatch.setattr(workspace, "overlay_held_out", lambda *args: None)
+
+    execution._execute_cell(
+        execution._EvaluationCellContext(
+            run=run,
+            case=suite_case,
+            preset_snapshot=dict(_SNAPSHOT),
+            root=harness.root,
+            settings=harness.settings,
+            staged_entries=[],
+            lock=threading.Lock(),
+            suite=suite,
+        )
+    )
+
+    assert harness.calls["excluded_paths"] == [hidden_paths]
+    assert _only_result(harness).result_status == EvaluationResultStatus.succeeded.value
 
 
 def test_cell_drops_queued_work_when_run_cancelled_while_waiting(

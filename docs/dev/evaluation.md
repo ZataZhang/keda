@@ -51,10 +51,18 @@ Agent/模型效果对照）已落地为一条本地 Console 产品路径，下�
   文件，历史 run 的 `suite_hash` 也会失去唯一解释。
 - run 创建时冻结 suite 内容 hash、base commit 与全部预设快照；此后修改
   suite 文件或 config.toml 不影响历史 run 的解释口径。
-- v2 候选 Agent 运行期间看不到判分资料或 suite 声明的已知泄题路径。Agent 结束后，执行器先还原
-  `held_out`、`candidate_hidden` 与基线中的 `pyproject.toml` / `uv.lock`，再整文件覆盖
-  `held_out` 测试材料并运行固定 recipe；
-  `@noop` 与 `@gold` 校准候选不启动模型。任一逐题材料改变都会改变 suite hash，
+
+### 候选快照隔离
+
+- v2 候选 Agent 运行期间看不到判分资料或 suite 声明的已知泄题路径：这些路径会在创建候选仓库前
+  从临时 Git index 剔除，不会进入候选工作树或提交，因此不能从候选 Git 历史还原。Agent 结束后，
+  执行器先恢复依赖清单并收集不含隐藏路径的代码 diff，再从冻结来源提交还原
+  `held_out` / `candidate_hidden` 基线文件，覆盖 `held_out` 测试材料并运行固定 recipe；
+  隐藏材料不会进入评审 diff。完整执行顺序和边界见[候选快照隔离](evaluation-snapshot-isolation.md)。
+
+### 校准执行
+
+- `@noop` 与 `@gold` 校准候选不启动模型。任一逐题材料改变都会改变 suite hash，
   先前的校准不能复用。
 - v2 校准 run 自动覆盖全部 suite 题目（含 holdout），不需要额外勾选；真实模型候选
   仍仅默认选择 dev 题，纳入 holdout 时必须显式勾选。
