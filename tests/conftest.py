@@ -137,6 +137,15 @@ def _isolate_ambient_iar_config() -> Iterator[None]:
                 os.environ[env_name] = previous_value
 
 
+@pytest.fixture(autouse=True)
+def _isolate_runner_console_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """让每个用例的真实 Console SQLite 存储独立于宿主状态目录。"""
+    from backend.engines.agent_runner.factories import get_agent_runner_settings
+
+    console_settings = get_agent_runner_settings().console
+    monkeypatch.setattr(console_settings, "history_db_path", str(tmp_path / "console.db"))
+
+
 class FakeGitHubClient(IGitHubClient):
     """In-memory GitHub client for tests."""
 
