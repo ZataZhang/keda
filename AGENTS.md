@@ -50,6 +50,7 @@
 - 提交信息统一用英文并遵循 Conventional Commits（`type(scope): subject`，标题 ≤ 72 字符，正文解释 why），详见 `docs/ai-standards/tooling.md` 的 Commit Messages 小节
 - 单代码文件非空行不超过 1000 行；`just lint` 会对此发出警告
 - 随手想法先落 `tasks/inbox/`：只在**想法边界**捕获（用户明确要求，或话题收敛到可开 PRD 的状态），条目 = 用户原话逐字**引用** + 标注为 `AI 派生` 的背景块，**只追加**到 `tasks/inbox/ideas.md`（禁止改写已有条目）；AI 维护 `tasks/inbox/summary.md` 做总结；想法成熟后用 PRD 流程升级到 `tasks/pending/`。详见 `docs/guides/idea-inbox.md`
+- 自动验证与自动修复应在请求人工审阅前完成；人工明确接受、合并、关闭或接管后，按其决定收尾，不因旧失败、标签或证据空缺重新启动验证；新改动、具体缺陷或用户明确要求才触发相关验证。详见 `docs/ai-standards/testing.md` 的「自动验证与人工介入的边界」。
 - PRD 正常交付时生成验证计划、收集证据；独立 verifier `PASS` 后勾选有证据的非人工项、完成 Final Reconciliation 并归档。验证确实受阻时允许**阻塞归档**：保留执行侧空框，横幅写 `⏸️ 验证阻塞`，并在 Final Reconciliation 填非空 `Validation blocker` 与 `Validation follow-up`；不得代勾、改写 `[~]` 或称为待人工验收。**归档只代表代码落地**，不等于验证或人工验收完成。阻塞项补验后回到正常 `🧍 待人工验收 / ✅ 已验收` 路径；人工验收若发现 PRD 自身 oracle/范围未达成则重开，需求变化则新开关联 PRD
 - PRD 必须包含 Realistic Validation Plan，验收清单需覆盖最高可行保真度的真实入口验证，或说明无可执行行为变更
 - 前端截图必须标注验证层级；临时预览页、直接渲染组件或手工注入状态仅属于 `component preview`，不得称为真实验证。涉及 Dialog、Portal、父级布局或用户流程时，验收证据必须保留对应生产边界；无法走真实入口时必须披露限制
