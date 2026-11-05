@@ -378,6 +378,7 @@ _ALLOWED_FLAGS: dict[tuple[str, ...], set[str]] = {
         "--aggregate-pr",
         "--takeover",
         "--yes",
+        "--progress",
     },
     ("pr", "aggregate"): {"--issue", "--dry-run"},
     ("daemon", "run"): {
