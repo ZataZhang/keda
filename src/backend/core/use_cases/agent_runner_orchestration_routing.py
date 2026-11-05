@@ -1,14 +1,8 @@
-"""单个 Issue 的输出路由与观测作用域。
-
-从 :mod:`backend.core.use_cases.agent_runner_orchestration_runtime` 拆分而来：
-单文件非空行有 CI 硬上限，而这里只承载每个 Issue 的日志/看板路由、调用观测
-上下文与生命周期进度转发；Issue 本身的处理函数由 runtime 在调用时注入。
-"""
+"""Agent Runner 单 Issue 的输出与执行上下文路由。"""
 
 from __future__ import annotations
 
 import logging
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -31,7 +25,7 @@ from backend.core.use_cases.agent_runner_output_routing import (
     issue_output_routing,
 )
 
-_logger = logging.getLogger(__name__)
+_logger = logging.getLogger("backend.core.use_cases.agent_runner_orchestration_runtime")
 
 
 @dataclass(frozen=True)
@@ -46,21 +40,21 @@ class _IssueRoutingContext:
     run_history_store: IRunHistoryStore | None
     progress_callback: Callable[[RunProgressEvent], None] | None
     process_kwargs: dict[str, Any]
+    process_issue: Callable[..., int]
 
 
 def _mirror_to_console(chunk: str) -> None:
     """把串行执行的 Issue 输出镜像到启动终端。"""
-    print(chunk, end="", flush=True, file=sys.stdout)
+    print(chunk, end="", flush=True)
 
 
 def _process_routed_issue(
-    item: tuple[IssueSummary, str],
+    issue_and_kind: tuple[IssueSummary, str],
     *,
     routing: _IssueRoutingContext,
-    process_issue: Callable[..., int],
 ) -> int:
     """在输出路由与观测上下文里处理一个 Issue；路由自身的异常按失败返回。"""
-    issue, issue_kind = item
+    issue, issue_kind = issue_and_kind
     try:
         with issue_output_routing(
             repo_id=routing.effective_repo_id,
@@ -94,7 +88,7 @@ def _process_routed_issue(
                 )
             ):
                 with lifecycle_progress_scope(progress_sink):
-                    return process_issue(
+                    return routing.process_issue(
                         issue,
                         issue_kind,
                         process_runner=scoped_runner,

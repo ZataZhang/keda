@@ -1,7 +1,7 @@
 """受限 deterministic check recipe 的执行边界。
 
 安全约束（PRD §7.1-3）：命令只允许 core 白名单里的固定 argv + 受限 cwd
-（候选 worktree），禁止 shell 拼接、suite 提供任意解释器脚本或继承完整
+（候选快照仓库），禁止 shell 拼接、suite 提供任意解释器脚本或继承完整
 用户环境；输出与超时都有硬上限。
 """
 
@@ -38,13 +38,19 @@ class CheckRunOutcome:
     output_summary: str | None
 
 
-def run_check_recipe(recipe: str, worktree_path: Path, timeout_seconds: int) -> CheckRunOutcome:
+def run_check_recipe(
+    recipe: str,
+    worktree_path: Path,
+    timeout_seconds: int,
+    check_targets: tuple[str, ...] = (),
+) -> CheckRunOutcome:
     """在 ``worktree_path`` 下执行白名单 check recipe。
 
     Args:
         recipe: suite 声明的 recipe 名；必须属于 ``CHECK_RECIPES``。
-        worktree_path: 候选 worktree（受限 cwd）。
+        worktree_path: 候选快照仓库（受限 cwd）。
         timeout_seconds: 来自 run 快照（已收敛到硬上限内）。
+        check_targets: suite 已校验的 pytest 文件路径或节点 id。
 
     Returns:
         CheckRunOutcome: passed / failed / timeout；未知 recipe 判 not_run。
@@ -55,6 +61,12 @@ def run_check_recipe(recipe: str, worktree_path: Path, timeout_seconds: int) -> 
     argv = CHECK_RECIPES.get(recipe)
     if argv is None:
         raise ValueError(f"check recipe '{recipe}' 不在允许清单: {sorted(CHECK_RECIPES)}")
+    if any(
+        not target or target.startswith("-") or target.startswith("/") or ".." in Path(target).parts
+        for target in check_targets
+    ):
+        raise ValueError("check_targets 含非法路径或参数")
+    argv = (*argv, *check_targets)
     env = {key: value for key in _CHECK_ENV_ALLOWLIST if (value := os.environ.get(key))}
     env["PYTHONUNBUFFERED"] = "1"
     try:

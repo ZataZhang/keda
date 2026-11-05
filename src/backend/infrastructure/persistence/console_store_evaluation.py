@@ -1,4 +1,4 @@
-"""Console SQLite 账本的模型评测 mixin（schema v15）。
+"""Console SQLite 账本的模型评测 mixin（schema v16）。
 
 三张独立表 ``evaluation_run`` / ``evaluation_result`` / ``evaluation_score``
 只承载评测事实与配置快照：不写 API key、不写原始工具 transcript、
@@ -46,11 +46,13 @@ CREATE TABLE IF NOT EXISTS evaluation_run (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     started_at TEXT,
-    finished_at TEXT
+    finished_at TEXT,
+    repeats INTEGER NOT NULL DEFAULT 1,
+    case_bases_json TEXT NOT NULL DEFAULT '{}'
 )
 """
 
-CREATE_EVALUATION_RESULT = """
+CREATE_EVALUATION_RESULT_V16 = """
 CREATE TABLE IF NOT EXISTS evaluation_result (
     result_id TEXT PRIMARY KEY,
     run_id TEXT NOT NULL REFERENCES evaluation_run(run_id) ON DELETE CASCADE,
@@ -72,9 +74,12 @@ CREATE TABLE IF NOT EXISTS evaluation_result (
     error TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    UNIQUE (run_id, case_id, execution_preset_id)
+    repeat_index INTEGER NOT NULL DEFAULT 0,
+    UNIQUE (run_id, case_id, execution_preset_id, repeat_index)
 )
 """
+
+CREATE_EVALUATION_RESULT = CREATE_EVALUATION_RESULT_V16
 
 CREATE_EVALUATION_SCORE = """
 CREATE TABLE IF NOT EXISTS evaluation_score (
@@ -113,6 +118,8 @@ class EvaluationStoreConflictError(RuntimeError):
     """run 状态比较并交换失败：当前状态与调用方预期不符。"""
 
 
+# 基础设施层不能 import core，行模型因此必须镜像 core 记录；字段漂移由测试断言捕获。
+# jscpd:ignore-start
 @dataclass(frozen=True)
 class EvaluationRunRow:
     """``evaluation_run`` 行的镜像 dataclass（字段与 core 记录一致）。"""
@@ -137,6 +144,8 @@ class EvaluationRunRow:
     updated_at: str
     started_at: str | None
     finished_at: str | None
+    repeats: int
+    case_bases: dict[str, dict[str, str]]
 
 
 @dataclass(frozen=True)
@@ -163,8 +172,10 @@ class EvaluationResultRow:
     error: str | None
     created_at: str
     updated_at: str
+    repeat_index: int
 
 
+# jscpd:ignore-end
 @dataclass(frozen=True)
 class EvaluationScoreRow:
     """``evaluation_score`` 行的镜像 dataclass。"""
@@ -199,8 +210,8 @@ class EvaluationStoreMixin:
                 " repo_path, base_ref, base_commit, base_tree_hash,"
                 " execution_preset_snapshots_json, judge_preset_snapshots_json,"
                 " status, manifest_hash, case_ids_json, check_timeout_seconds,"
-                " error, created_at, updated_at, started_at, finished_at)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " error, created_at, updated_at, started_at, finished_at, repeats, case_bases_json)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     run.run_id,
                     run.suite_id,
@@ -222,6 +233,8 @@ class EvaluationStoreMixin:
                     run.updated_at,
                     run.started_at,
                     run.finished_at,
+                    run.repeats,
+                    json.dumps(run.case_bases, ensure_ascii=False),
                 ),
             )
 
@@ -300,15 +313,28 @@ class EvaluationStoreMixin:
         """
         with self._connection() as connection:
             connection.execute(
-                "INSERT OR REPLACE INTO evaluation_result ("
+                "INSERT INTO evaluation_result ("
                 " result_id, run_id, case_id, execution_preset_id,"
                 " execution_model_snapshot_json, base_tree_hash, worktree_path,"
                 " result_status, check_status, check_recipe, check_exit_code,"
                 " check_output_summary, agent_summary, duration_seconds,"
                 " usage_summary_json, cost_status, diff_hash, error,"
-                " created_at, updated_at)"
-                " SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?"
-                " WHERE EXISTS (SELECT 1 FROM evaluation_run WHERE run_id = ?)",
+                " created_at, updated_at, repeat_index)"
+                " SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?"
+                " WHERE EXISTS (SELECT 1 FROM evaluation_run WHERE run_id = ?) "
+                "ON CONFLICT(result_id) DO UPDATE SET "
+                "run_id = excluded.run_id, case_id = excluded.case_id, "
+                "execution_preset_id = excluded.execution_preset_id, "
+                "execution_model_snapshot_json = excluded.execution_model_snapshot_json, "
+                "base_tree_hash = excluded.base_tree_hash, worktree_path = excluded.worktree_path, "
+                "result_status = excluded.result_status, check_status = excluded.check_status, "
+                "check_recipe = excluded.check_recipe, check_exit_code = excluded.check_exit_code, "
+                "check_output_summary = excluded.check_output_summary, "
+                "agent_summary = excluded.agent_summary, duration_seconds = excluded.duration_seconds, "
+                "usage_summary_json = excluded.usage_summary_json, cost_status = excluded.cost_status, "
+                "diff_hash = excluded.diff_hash, error = excluded.error, "
+                "created_at = excluded.created_at, updated_at = excluded.updated_at, "
+                "repeat_index = excluded.repeat_index",
                 (
                     result.result_id,
                     result.run_id,
@@ -332,6 +358,7 @@ class EvaluationStoreMixin:
                     result.error,
                     result.created_at,
                     result.updated_at,
+                    result.repeat_index,
                     result.run_id,
                 ),
             )
@@ -349,7 +376,7 @@ class EvaluationStoreMixin:
         with self._connection() as connection:
             rows = connection.execute(
                 "SELECT * FROM evaluation_result WHERE run_id = ? "
-                "ORDER BY case_id, execution_preset_id",
+                "ORDER BY case_id, execution_preset_id, repeat_index",
                 (run_id,),
             ).fetchall()
         return [self._row_to_result(row) for row in rows]
@@ -457,6 +484,8 @@ class EvaluationStoreMixin:
             updated_at=row["updated_at"],
             started_at=row["started_at"],
             finished_at=row["finished_at"],
+            repeats=int(row["repeats"]),
+            case_bases=json.loads(row["case_bases_json"]),
         )
 
     @staticmethod
@@ -483,6 +512,7 @@ class EvaluationStoreMixin:
             error=row["error"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
+            repeat_index=int(row["repeat_index"]),
         )
 
     @staticmethod

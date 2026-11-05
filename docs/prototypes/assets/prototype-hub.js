@@ -27,10 +27,10 @@
     },
     {
       id: 'prd-lifecycle-observability', title: 'Console 运行时看板与模型评测', project: 'keda', module: 'Agent Runner / Dashboard',
-      system: 'Keda Console', form: 'code-native', version: 'v3.0', updatedAt: '2026-10-12', availability: 'available', validationLevel: '交互原型',
-      primaryFlow: '默认查看运行时任务卡片与详情日志，折叠工具调用；打开四任务桌面悬浮窗预览；进入模型评测配置、查看逐维评分、评审分歧与外发授权流程；也可回到 Backlog 生命周期详情和 Stats',
-      description: '静态 fixture 驱动的 Console 目标态交互原型。Dashboard 卡片用状态颜色与文字呈现 Issue 运行阶段；右侧展示日志和可折叠结构化调用；桌面页用紧凑四任务布局展示改动树触达比例，但不模拟跨应用置顶；评测页展示固定样本对比、多评审模型逐维评分和确切 payload 预览，拒绝与确认都不触发真实网络请求。原型不连接 API、SQLite、Agent 或模型服务。',
-      preview: './assets/runtime-board-preview.png', entry: './prd-lifecycle-observability.html#dashboard', source: './prd-lifecycle-observability.md', provenance: ['./assets/runtime-board-preview.source/', './assets/runtime-widget-preview.source/', './assets/runtime-evaluation-preview.source/', './assets/runtime-consent-preview.source/'],
+      system: 'Keda Console', form: 'code-native', version: 'v3.1', updatedAt: '2026-10-29', availability: 'available', validationLevel: '交互原型',
+      primaryFlow: '查看运行时任务与可折叠调用；进入模型评测基线，切换真实 Agent 与校准候选，调整重复次数和留出集后查看稳定性与执行故障；也可查看既有多评审评分、外发授权、Backlog 生命周期详情和 Stats',
+      description: '静态 fixture 驱动的 Console 交互原型。新增 M13 评测基线页，展示 keda-history-v1 校准摘要、模型与纯校准运行模式、重复次数和留出集候选执行估算，以及逐题稳定/不稳定结果与独立故障计数；旧的多评审模型评分与外发授权视图继续保留。原型不连接 API、SQLite、Agent 或模型服务。',
+      preview: './assets/runtime-board-preview.png', entry: './prd-lifecycle-observability.html#dashboard', source: './prd-lifecycle-observability.md', provenance: ['./assets/runtime-board-preview.source/', './assets/runtime-widget-preview.source/', './assets/runtime-evaluation-preview.source/', './assets/runtime-evaluation-baseline-preview.source/', './assets/runtime-consent-preview.source/'],
       relationships: [
         { id: 'roadmap-cicd-repair', label: '继续查看 CI/CD 检查与自动修复轮次' },
         { id: 'roadmap-controls-evidence', label: '查看同一 Backlog 画布上的控制与验收证据入口' },

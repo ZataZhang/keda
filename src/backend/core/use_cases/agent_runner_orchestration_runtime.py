@@ -37,17 +37,17 @@ from backend.core.use_cases.agent_runner_failure_marking import (
     _mark_issue_blocked,
     _mark_issue_failed,
 )
-from backend.core.use_cases.agent_runner_issue_dispatch import (
-    _IssueRoutingContext,
-    _mirror_to_console,
-    _process_routed_issue,
-)
 from backend.core.use_cases.agent_runner_lifecycle import (
     LifecycleEventType,
     build_attempt_event_detail,
     record_lifecycle_event,
     record_lifecycle_terminal,
     resolve_lifecycle_prd_path,
+)
+from backend.core.use_cases.agent_runner_orchestration_routing import (
+    _IssueRoutingContext,
+    _mirror_to_console,
+    _process_routed_issue,
 )
 from backend.core.use_cases.agent_runner_orchestrate import (
     _READY_DISCOVERY_LIMIT,
@@ -968,12 +968,9 @@ def run_once(request: RunOnceRequest) -> int:
         run_history_store=run_history_store,
         progress_callback=request.progress_callback,
         process_kwargs=process_kwargs,
-    )
-    process_routed = partial(
-        _process_routed_issue,
-        routing=routing,
         process_issue=_process_single_issue,
     )
+    process_routed = partial(_process_routed_issue, routing=routing)
 
     # daemon 补位模式：提交到常驻执行名单后立即返回，下一次轮询再清理与补位。
     # 实时看板随 daemon 进程存活，不在这里关闭。

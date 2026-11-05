@@ -21,6 +21,7 @@
           <span class="nav-static" aria-disabled="true" title="Processes 不在本原型范围内"><span>◉</span>Processes</span>
           <span class="nav-static" aria-disabled="true" title="Repositories 不在本原型范围内"><span>⑂</span>Repositories</span>
           <button type="button" data-view-link="evaluations"><span>✳</span>模型评测</button>
+          <button type="button" data-view-link="evaluation-baseline"><span>↻</span>评测基线</button>
           <button type="button" data-view-link="stats"><span>▥</span>Stats</button>
           <button type="button" data-view-link="roadmap"><span>◇</span>Backlog</button>
           <span class="nav-static" aria-disabled="true" title="Ideas 不在本原型范围内"><span>✦</span>Ideas</span>
@@ -84,6 +85,38 @@
               <tr><td><strong>kimi-work</strong><small>Kimi Code · kimi-k2</small></td><td><span class="result-warn">8 / 12 · 66.7%</span></td><td><strong>3.7 / 5</strong><small>2 位 judge 中位数</small></td><td>3.5 / 5</td><td>3.8 / 5</td><td>3.6 / 5</td><td><span class="agreement-low">1.4 范围</span></td><td>6m 21s</td><td>$0.09</td><td><button class="table-link hotspot-target" type="button" data-open-score-detail>查看样本</button></td></tr>
             </tbody></table></div>
             <p class="evaluation-notice">每维展示独立 judge 分数的中位数与范围；不计算综合总分。评审模型分数用于比较和诊断，不会替代测试、验证器或人工验收结论。6 条未评分结果单独保留，不计入分布。</p>
+          </article>
+        </section>
+
+        <section class="page evaluation-baseline-page" id="evaluation-baseline-view" data-view="evaluation-baseline">
+          <div class="page-heading runtime-heading">
+            <div><span class="eyebrow">REPRODUCIBLE EVALUATION</span><h1>评测基线</h1><p>用校准证明判分有效，再用重复运行观察每题结论是否稳定。</p></div>
+            <div class="evaluation-baseline-status"><span class="baseline-status-dot"></span><strong>keda-history-v1</strong><small>12/12 已校准</small></div>
+          </div>
+
+          <article class="evaluation-baseline-card evaluation-baseline-setup">
+            <div class="baseline-card-heading"><div><strong>创建评测</strong><span>创建只冻结配置；启动执行仍是单独操作。</span></div><div class="baseline-mode" role="group" aria-label="评测运行模式"><button class="is-active" type="button" data-baseline-mode="agent" aria-pressed="true">真实 Agent</button><button type="button" data-baseline-mode="calibration" aria-pressed="false">校准候选</button></div></div>
+            <div class="baseline-form-grid">
+              <label>评测集<select aria-label="选择评测集"><option>keda-history-v1 · 12 道题</option></select></label>
+              <label>重复次数<select id="baseline-repeats" aria-label="重复次数"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select></label>
+              <label class="baseline-agent-preset">执行预设<select aria-label="执行预设"><option>codex-work</option></select></label>
+              <label class="baseline-holdout"><input id="baseline-holdout" type="checkbox" />包含 4 道留出题</label>
+            </div>
+            <fieldset class="baseline-calibration-presets" hidden><legend>无需模型调用的校准候选</legend><label><input type="checkbox" checked disabled />@noop <small>不改动源码</small></label><label><input type="checkbox" checked disabled />@gold <small>应用原始修复</small></label></fieldset>
+            <div class="baseline-calibration-proof" hidden><span>已校准</span><strong>@noop 3/3 判分失败</strong><strong>@gold 3/3 判分通过</strong><small>12 道题 · 不调用模型</small></div>
+            <div class="baseline-create-row"><p>预计候选执行 <strong id="baseline-estimate">24</strong> 次 <small id="baseline-limit">（模型执行上限 48）</small></p><button class="primary-button hotspot-target" type="button" data-baseline-create>创建评测</button></div>
+            <p class="baseline-feedback" role="status" hidden></p>
+          </article>
+
+          <article class="evaluation-baseline-card evaluation-baseline-results">
+            <div class="baseline-card-heading"><div><strong>重复结果</strong></div></div>
+            <div class="baseline-table-wrap"><table aria-label="评测重复结果"><thead><tr><th>题目</th><th>执行预设</th><th>判分通过</th><th>稳定性</th><th>执行故障</th></tr></thead><tbody>
+              <tr><td><code>repeat-outcome</code></td><td>@gold</td><td>2/3 次通过 · 1 次判分失败</td><td><span class="baseline-unstable">不稳定</span></td><td>0</td></tr>
+              <tr><td><code>repeat-outcome</code></td><td>@noop</td><td>2/3 次通过 · 1 次判分失败</td><td><span class="baseline-unstable">不稳定</span></td><td>0</td></tr>
+              <tr><td><code>stable-outcome</code></td><td>@gold</td><td>3/3 次通过</td><td><span class="baseline-stable">稳定</span></td><td>0</td></tr>
+              <tr><td><code>stable-outcome</code></td><td>@noop</td><td>3/3 次通过</td><td><span class="baseline-stable">稳定</span></td><td>0</td></tr>
+            </tbody></table></div>
+            <section class="baseline-unstable-list" aria-labelledby="baseline-unstable-heading"><div><strong id="baseline-unstable-heading">不稳定的题（2）</strong></div><p><code>repeat-outcome</code><span>@gold · 2/3 次通过</span></p><p><code>repeat-outcome</code><span>@noop · 2/3 次通过</span></p></section>
           </article>
         </section>
 

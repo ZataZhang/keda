@@ -50,6 +50,8 @@ from backend.core.shared.interfaces.runner_console import (
 )
 from backend.core.shared.models import product_identity
 from backend.core.shared.models.repository_paths import (
+    DEFAULT_REPOSITORY_STATE_DIR_NAME,
+    DEFAULT_WORKTREE_DIR_NAME,
     LEGACY_REPOSITORY_STATE_DIR_NAME,
     LEGACY_WORKTREE_DIR_NAME,
 )
@@ -66,10 +68,10 @@ _INTERNAL_SCAN_DIR_NAMES = frozenset(
     {
         ".agent-runner",
         ".git",
+        DEFAULT_REPOSITORY_STATE_DIR_NAME,
+        DEFAULT_WORKTREE_DIR_NAME,
         LEGACY_REPOSITORY_STATE_DIR_NAME,
         LEGACY_WORKTREE_DIR_NAME,
-        ".kc-worktrees",
-        ".kedacode",
         ".venv",
         "node_modules",
         "target",
