@@ -2,8 +2,8 @@
 
 本模块只描述「值守时需要看到什么」，不承担任何读取职责：数据由
 :mod:`backend.core.use_cases.runtime_dashboard` 从已有的监控快照、运行账本与
-PRD 生命周期账本组装而成。刻意不引入数据库表，也不复制 Issue 日志、
-invocation ledger 或改动树触达读数的原始内容——摘要只到「一条任务行」的粒度。
+PRD 生命周期账本组装而成。刻意不引入数据库表，也不复制 Issue 原始日志、
+invocation ledger 或改动树触达读数；只透出运行账本已经保存的错误摘要。
 
 触达比例（``touched/judgeable``）**不在本模型里**：它的唯一来源仍是现有
 ``GET /api/v1/agent-runner/backlog/prds/{encoded_path}/progress`` 契约，由
@@ -91,6 +91,7 @@ class RuntimeTask:
         finished_at: 最近一次运行结束时间；仍在运行时为 ``None``。
         duration_seconds: 最近一次运行耗时；无法计算时为 ``None``。
         last_outcome: 运行账本记录的终态（completed / failed / blocked）。
+        last_error_summary: 最近一次已收口失败或阻塞原因；新执行已开始时为空。
         labels: 监控看到的 `agent/*` 标签，供前端保持一致的状态文字。
     """
 
@@ -115,6 +116,7 @@ class RuntimeTask:
     finished_at: str | None = None
     duration_seconds: float | None = None
     last_outcome: str | None = None
+    last_error_summary: str | None = None
     labels: tuple[str, ...] = ()
     anomaly_types: tuple[str, ...] = ()
     waiting_reason: str | None = None

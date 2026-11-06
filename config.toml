@@ -670,6 +670,10 @@ forbidden_path_patterns = [
   "secrets/*",
   "docker-compose.prod.yml",
 ]
+forbidden_path_exceptions = [
+  ".env.example",
+  ".env.*.example",
+]
 
 # =============================================================================
 # Autopilot 快速档（合并队列）

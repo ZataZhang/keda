@@ -375,6 +375,19 @@ export function RuntimeTaskDetail({ task, className }: RuntimeTaskDetailProps) {
           <p data-testid="runtime-task-status-reason">状态来源：{task.status_reason ?? "未提供"}</p>
           <RuntimeTaskPhaseDescription task={task} />
           <RuntimeTaskObservation task={task} />
+          {task.last_error_summary ? (
+            <p
+              className="whitespace-pre-wrap break-words text-amber-800 dark:text-amber-300"
+              data-testid="runtime-task-error-summary"
+            >
+              {task.last_outcome === "blocked"
+                ? "阻塞原因"
+                : task.last_outcome === "failed"
+                  ? "失败原因"
+                  : "最近运行错误"}
+              ：{task.last_error_summary}
+            </p>
+          ) : null}
           <RuntimeTaskAnomalies anomalyTypes={task.anomaly_types ?? []} />
           <div className="flex flex-wrap gap-x-4 gap-y-1">
             <span>

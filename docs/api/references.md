@@ -396,6 +396,7 @@ run 详情：`run`、`results`（逐候选执行）、`scores`（逐评审评分
 - GitHub Issue 为 closed 时优先归入 `closed`，不受残留 `agent/*` 标签影响，也不表示 Agent 已成功完成；open Issue 再按 `agent/*` 标签推导状态，其中 `agent/blocked` 对应 `blocked`、`agent/failed` 对应 `failed`、`agent/review` 与 `agent/ready` 同归 `waiting`。没有可判定标签时依次回落到运行账本终态、`unknown`，未知不折算成零。
 - 分桶顺序为 `running` → `blocked` → `failed` → `waiting` → `completed` → `closed` → `unknown`，同状态内按开始时间新者在前。
 - `status_reason` 说明状态来源（当前监控标签、Issue 关闭状态或运行账本终态）；监控异常只放在独立的 `anomaly_types` 列表中，不覆盖状态来源，也不直接表示失败原因。
+- `last_error_summary` 透传最近一次已收口运行记录中的失败/阻塞摘要；不读取或解析原始 Issue 日志，新执行已开始、无错误或旧记录缺失时为 `null`。
 - `duration_seconds` 对运行中的任务由「attempt 开始时间 → 生成时间」推算，是如实的已耗时，不是任何百分比。
 - `unclosed_invocation_executor` / `unclosed_invocation_model` 仅表示当前会话最近一次实际调用尚无结束事件；账本未收口不能单独证明执行进程仍存活。没有匹配调用、读端不可用或时间无法关联时留空，读取失败会把 `invocation_ledger` 加入 `unavailable_sources`。
 
@@ -425,6 +426,7 @@ run 详情：`run`、`results`（逐候选执行）、`scores`（逐评审评分
       "finished_at": null,
       "duration_seconds": 1800.0,
       "last_outcome": null,
+      "last_error_summary": null,
       "labels": ["agent/running"]
     }
   ],

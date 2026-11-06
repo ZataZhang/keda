@@ -2662,7 +2662,7 @@ agent/running ── forbidden path 拦截 ──→ agent/blocked ── blocke
 
 ## Forbidden Path 阻塞恢复
 
-当 Agent 在 commit 阶段修改的路径匹配 `forbidden_path_patterns`，且没有匹配 `forbidden_path_exceptions` 时，runner 会将 Issue 标记为 `agent/blocked` 而不是 `agent/failed`。例如默认禁止模式 `.env.*` 会拦截 `.env.local`；若配置 `.env.example` 与 `.env.*.example` 例外，则这些模板可提交。
+当 Agent 在 commit 阶段修改的路径匹配 `forbidden_path_patterns`，且没有匹配 `forbidden_path_exceptions` 时，runner 会将 Issue 标记为 `agent/blocked` 而不是 `agent/failed`。默认禁止模式 `.env.*` 会拦截 `.env.local` 等环境文件，同时默认例外 `.env.example` 与 `.env.*.example`，允许提交示例模板；如果某仓库不能信任这些示例文件，可在仓库配置中清空例外列表。
 
 ### 触发条件
 

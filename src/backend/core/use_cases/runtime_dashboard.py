@@ -275,6 +275,7 @@ def _snapshot_task(
         finished_at=run_record.finished_at if run_record else None,
         duration_seconds=run_record.duration_seconds if run_record else None,
         last_outcome=run_record.outcome if run_record else None,
+        last_error_summary=run_record.error_summary if run_record else None,
         prd_path=prd_path,
         labels=labels,
         anomaly_types=anomaly_types,
@@ -301,6 +302,7 @@ def _run_record_task(run_record: RunRecord, prd_path: str | None) -> RuntimeTask
         finished_at=run_record.finished_at,
         duration_seconds=run_record.duration_seconds,
         last_outcome=run_record.outcome,
+        last_error_summary=run_record.error_summary,
         prd_path=prd_path,
     )
 

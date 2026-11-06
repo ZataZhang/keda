@@ -455,7 +455,9 @@ class AgentRunnerSafetySettings(BaseModel):
             "docker-compose.prod.yml",
         ]
     )
-    forbidden_path_exceptions: list[str] = Field(default_factory=list)
+    forbidden_path_exceptions: list[str] = Field(
+        default_factory=lambda: [".env.example", ".env.*.example"]
+    )
 
 
 class AgentRunnerAutopilotSettings(BaseModel):

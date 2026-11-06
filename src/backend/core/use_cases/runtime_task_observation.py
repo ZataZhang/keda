@@ -115,6 +115,7 @@ def reconcile_runtime_task(
             finished_at=None,
             duration_seconds=max(0.0, (context.reference_time - session_start).total_seconds()),
             last_outcome=None,
+            last_error_summary=None,
             agent=None,
             preset=None,
             model=None,

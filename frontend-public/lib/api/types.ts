@@ -1647,6 +1647,8 @@ export type RuntimeTaskEntry = {
   finished_at: string | null;
   duration_seconds: number | null;
   last_outcome: string | null;
+  /** 最近一次失败或阻塞原因；旧后端未提供时为空。 */
+  last_error_summary?: string | null;
   labels: string[];
 };
 
