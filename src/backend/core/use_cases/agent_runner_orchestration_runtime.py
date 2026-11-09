@@ -55,6 +55,7 @@ from backend.core.use_cases.agent_runner_orchestrate import (
     AttemptResult,
     DependencyEnvironmentBlockedError,
     ForbiddenBlockedError,
+    HumanActionRequiredError,
     IssueBlockedDuringNoChangeError,
     IContentGenerator,
     IGitHubClient,
@@ -444,6 +445,7 @@ def _process_single_issue(
 
     except (
         ForbiddenBlockedError,
+        HumanActionRequiredError,
         IssueBlockedDuringNoChangeError,
         DependencyEnvironmentBlockedError,
     ) as exc:

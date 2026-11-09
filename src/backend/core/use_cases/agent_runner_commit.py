@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import stat
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
@@ -57,6 +58,7 @@ __all__ = [
     "remove_commit_request",
     "sanitize_commit_message",
     "unstage_changes",
+    "worktree_change_fingerprint",
 ]
 
 
@@ -254,6 +256,74 @@ def _tracked_change_fingerprint(
         # 逐条摘要而非先拼接：门禁跑在 ``git add -A`` 之后，暂存补丁可能很大。
         fingerprint.update(diff_result.stdout.encode("utf-8"))
         fingerprint.update(b"\0")
+    return fingerprint.hexdigest()
+
+
+def worktree_change_fingerprint(
+    worktree_path: Path,
+    process_runner: IProcessRunner,
+) -> str:
+    """计算已跟踪和未跟踪工作树内容的摘要。
+
+    提交门禁失败后，Runner 用该摘要判断后续恢复是否真正改变了检查输入。
+    提交代理先执行 ``git add -A``，但外部钩子仍可能生成未跟踪文件，因此摘要也会
+    包含未忽略的新文件路径与内容。
+
+    Args:
+        worktree_path: Agent 工作树路径。
+        process_runner: 命令执行器。
+
+    Returns:
+        工作树当前差异内容的 SHA-256 摘要。
+
+    Raises:
+        RuntimeError: 无法读取已跟踪差异或未跟踪文件列表时。
+        OSError: 无法读取未跟踪文件内容时。
+    """
+    fingerprint = hashlib.sha256()
+    head_result = process_runner.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=worktree_path,
+        check=False,
+    )
+    if head_result.return_code != 0:
+        raise RuntimeError(
+            "Unable to inspect worktree HEAD for recovery progress: "
+            f"{head_result.stderr.strip()}"
+        )
+    fingerprint.update(head_result.stdout.strip().encode("utf-8"))
+    fingerprint.update(_tracked_change_fingerprint(worktree_path, process_runner).encode("ascii"))
+    untracked_result = process_runner.run(
+        ["git", "ls-files", "--others", "--exclude-standard", "--full-name", "-z"],
+        cwd=worktree_path,
+        check=False,
+    )
+    if untracked_result.return_code != 0:
+        raise RuntimeError(
+            "Unable to inspect untracked worktree files for recovery progress: "
+            f"{untracked_result.stderr.strip()}"
+        )
+    for relative_path in untracked_result.stdout.split("\0"):
+        if not relative_path:
+            continue
+        fingerprint.update(relative_path.encode("utf-8", errors="surrogateescape"))
+        fingerprint.update(b"\0")
+        untracked_path = worktree_path / relative_path
+        untracked_metadata = untracked_path.lstat()
+        fingerprint.update(stat.S_IFMT(untracked_metadata.st_mode).to_bytes(2, "big"))
+        fingerprint.update(stat.S_IMODE(untracked_metadata.st_mode).to_bytes(2, "big"))
+        if stat.S_ISLNK(untracked_metadata.st_mode):
+            fingerprint.update(b"symlink\0")
+            fingerprint.update(
+                untracked_path.readlink().as_posix().encode("utf-8", errors="surrogateescape")
+            )
+        elif stat.S_ISREG(untracked_metadata.st_mode):
+            fingerprint.update(b"file\0")
+            with untracked_path.open("rb") as untracked_file:
+                while file_chunk := untracked_file.read(64 * 1024):
+                    fingerprint.update(file_chunk)
+        else:
+            fingerprint.update(b"unreadable-or-missing\0")
     return fingerprint.hexdigest()
 
 

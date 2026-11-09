@@ -22,6 +22,7 @@ from backend.core.shared.models.agent_runner import (
     WorktreeConfig,
 )
 from backend.core.use_cases.agent_runner_events import format_event_marker
+from backend.core.use_cases.agent_runner_check_result import CheckActionDirective
 from backend.core.use_cases.agent_runner_failure import (
     AgentExecutionError,
     AgentUnavailableError,
@@ -30,6 +31,7 @@ from backend.core.use_cases.agent_runner_failure import (
     IssueBlockedDuringNoChangeError,
     MaxRetriesExceededError,
     ProviderCapacityError,
+    RecoveryStalledError,
     UnrecoverableError,
 )
 from backend.core.use_cases.agent_runner_orchestrate import (
@@ -1063,6 +1065,34 @@ def test_fallback_switches_on_max_retries_exhausted() -> None:
     process_for_agent, calls = _agent_outcomes(
         {
             "claude": MaxRetriesExceededError([_attempt("no commits", FailureType.NO_COMMITS)]),
+            "codex": None,
+        }
+    )
+
+    used_agent = run_issue_with_agent_fallback(
+        issue=_fallback_issue("agent/claude"),
+        config=config,
+        agent="auto",
+        process_for_agent=process_for_agent,
+    )
+
+    assert used_agent == "codex"
+    assert calls == ["claude", "codex"]
+
+
+def test_fallback_switches_agents_when_recovery_stalls() -> None:
+    """A repeated check failure lets the configured fallback agent try next."""
+    config = AppConfig(runner=RunnerConfig(agent_fallback_order=("claude", "codex")))
+    process_for_agent, calls = _agent_outcomes(
+        {
+            "claude": RecoveryStalledError(
+                CheckActionDirective(
+                    block_type="recovery_stalled",
+                    summary="The same check failed without worktree changes.",
+                    next_action="Try another configured agent.",
+                ),
+                [_attempt("recovery stalled", FailureType.RECOVERY_STALLED)],
+            ),
             "codex": None,
         }
     )

@@ -3815,7 +3815,7 @@ daemon 软门禁与合并队列自动勾选共用同一份 marker 契约，一�
 - runner 会在提交前先运行一次 `verification_commands`；发现未提交变更并执行 `git add -A` 后，会再次运行同一组验证命令，覆盖依赖 staged 状态的 commit hook 或测试标记
 - 如果验证过程结束后工作区还剩下任何 `git add -A` 仍会 stage 的内容，runner 会在安全路径校验后补一次 `git add -A`，避免 `.last_tested_commit` 指向 working tree 而 commit hook 检查到过期 staged tree。探测口径（`_verification_left_unstaged_worktree_changes`）覆盖两类残留：formatter / lint 自动修复的**已跟踪**文件（`git diff --quiet`），以及门禁自己生成、**未跟踪且未被 gitignore** 的新文件（`git ls-files --others --exclude-standard`，如新增快照或 golden 文件）。第二类曾是 `check-test-flag` 硬失败的盲区：`just test` 写标记用的路径集包含未跟踪未 ignore 的文件，而 commit 钩子比对 staged 树，只补 `git add -u` 时这些新文件永远进不了索引，钩子会给出「请运行 `git add -A` 归一」——恰好是 runner 漏做的那一步。判定与首次入索引的 `git add -A` 同口径，被 gitignore 的构建产物两边都看不见，因此不会被卷进提交
 - Agent CLI 非零退出或任一验证失败时，runner 最多按 `max_recovery_attempts` 重新调用同一个 Agent；每次 recovery 前会等待 `recovery_retry_delay_seconds` 秒，并把失败摘要以及失败命令的 exit code、stdout、stderr 放入 Fix Agent / Recovery Agent prompt；首次实现 prompt 也会预先列出完整的 `verification_commands` 并提醒检查项目规范，让 Agent 在写代码阶段就了解交付门禁。Agent 修复后仍只能写 commit request，不能直接提交
-- Runner 通过 `classify_failure` 对每次尝试进行分层失败识别，覆盖 `UNCOMMITTED_CHANGES`、`NO_COMMITS`、`VERIFICATION_FAILED`、`AGENT_ERROR`、`UNRECOVERABLE` 等类型；不可恢复错误（如安全路径拦截）会立即终止 retry loop
+- attempt history 记录 `UNCOMMITTED_CHANGES`、`NO_COMMITS`、`VERIFICATION_FAILED`、`AGENT_ERROR`、`UNRECOVERABLE`、`HUMAN_ACTION_REQUIRED`、`RECOVERY_STALLED` 等失败类别；不可恢复错误与检查明确要求人类决定的阻塞会立即终止 recovery loop
 - 每轮尝试的结果都会记录在 `AttemptResult` 中，包含执行 agent、起止时间、耗时与失败生命周期阶段；runner 会实时把结果写入本地 SQLite `attempt_records` 表，再用 `IRunHistoryStore.list_issue_attempts` 读回该 Issue 的完整轨迹（跨 agent、跨 claim）渲染 GitHub Issue 上带 `<!-- kc:attempt-history -->` marker 的增量评论。内存中的 attempt 列表每次换 agent 或重新 claim 都会从 1 重新计数，只能代表本轮，因此不作为渲染源（仅在没有配置 SQLite 存储时兜底）。最终失败评论中的「Attempt History」表格展示 attempt_number、started_at、agent、failure_type、recovered、duration、detail，便于人工 review 时追踪 Agent 的修复轨迹；由于 attempt_number 只在本轮内递增，整表会混排多轮（例如 `claude 1..6` 后紧跟 `kimi 1..2`），因此表格用 **Started (UTC)** 列给出时间锚点（`YYYY-MM-DD HH:MMZ`；缺失渲染为 `-`，无法解析则原样回显），并在表格下方固定附一行说明"编号在每次换 agent 与每次重新 claim 时从 1 重新开始"，避免被误读成编号错乱；Detail 列取每次失败输出的最后一行有效内容（实际报错几乎总在末尾），而不是从头截断的样板文字
 - 失败评论会识别已知错误签名：命中 Claude API 用量限额（429 / usage limit）时，在评论顶部输出加粗的 Root cause 摘要并带上限额重置时间；`CalledProcessError` 的命令回显只保留命令名（如 `claude`），不会把完整 agent prompt 打进评论
 - 如果 Agent 没有产生任何新 commit 且工作区也没有未提交变更，runner 会 fresh read Issue 状态。无 PRD 的 Issue 确认已关闭时按「无改动完成」结束；若 Issue 在本次执行开始后转为 open / `agent/blocked`，则按人工交接结束，跳过 no-commit recovery、验证和 PR 发布，并保留 `agent/blocked`。普通 open/no-change 仍走原 `no_commits` 失败流程；状态读取失败、执行前已经 blocked、存在 commit 或工作区不干净时都不能借此提前结束。该状态判定由 `tests/test_agent_runner_closed_noop.py` 与 `tests/test_agent_runner_workflow.py` 覆盖。
@@ -3828,6 +3828,18 @@ daemon 软门禁与合并队列自动勾选共用同一份 marker 契约，一�
 - Post-PR supervisor 的 rebase 操作使用 `--force-with-lease` 且仅作用于 PR branch，不会推送 base branch
 - 自动化 rebase 前会校验 HEAD 和 branch 名称，发现不匹配时中止，防止误操作
 - rebase 遇到冲突时，runner 会调用 agent 进入有限次数的冲突解决循环（复用 `max_repair_attempts`）；agent 修改冲突文件并通过 commit proxy 提交后，runner 重新尝试 `git rebase --continue`；耗尽后安全 abort 并转人工
+
+### 外部检查脚本的人工作用协议与无进展恢复
+
+实现阶段的验证命令、配置的 pre-commit 命令与 Git hook 可以用同一行 JSON 声明需要人类介入。脚本应先以非零状态退出，再向 stdout 或 stderr 输出：
+
+```text
+KEDACODE_CHECK_RESULT={"version":1,"disposition":"human_action_required","summary":"需要维护者确认本次策略变更","next_action":"确认后设置本检查要求的授权，再继续 Issue。"}
+```
+
+`version` 必须是 `1`，`disposition` 必须是 `human_action_required`，`summary` 必填，`next_action` 可选。Runner 会记录 `human_action_required` attempt、保留工作树、把 Issue 转为 `agent/blocked`，并停止恢复或换 Agent；人类处理后通过 `kc blocked-continue --issue <number>` 续跑。协议由结果形状表达处置要求，不依赖某个钩子名称或固定错误文案。
+
+尚未输出该标记的旧检查仍按普通失败交给 Agent 修复。若同一命令、退出码和输出再次出现，且已跟踪 / 未跟踪工作树内容与前次失败完全相同，Runner 会记录 `RECOVERY_STALLED`、停止当前 Agent 的重复循环，并尝试配置的下一个备用 Agent；没有备用 Agent 或备用 Agent 也耗尽恢复后，Issue 按执行失败收尾并保留完整 attempt history，不会仅因无进展就标成 `agent/blocked`。读取工作树摘要失败时跳过这项兜底判定，保留原有有限重试行为。
 
 ### PRD-backed Issue 的强制 Closeout
 

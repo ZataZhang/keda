@@ -17,6 +17,7 @@ from backend.core.shared.models.agent_runner import (
     IssueSummary,
     TokenUsage,
 )
+from backend.core.use_cases.agent_runner_check_result import CheckFailureSnapshot
 from backend.core.use_cases.run_agent_once import (
     AttemptPhaseTimer,
     AgentUnavailableError,
@@ -50,6 +51,7 @@ from backend.core.use_cases.agent_runner_attempt_recording import (
     _AttemptRecordContext,
     _classify_and_record_gate_failure,
     _emit_agent_usage,
+    _handle_external_check_failure,
     _record_attempt,
 )
 from backend.core.use_cases.agent_runner_delivery_closeout import (
@@ -256,6 +258,7 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
     final_verification_results: list[CommandResult] = []
     attempt_results: list[AttemptResult] = []
     verifier_verdict = None  # set after the commit proxy fixes the reviewed tree
+    seen_check_failure_snapshots: set[CheckFailureSnapshot] = set()
 
     # Recovery 重试循环：第 0 次是正常执行，后续是 recovery
     for attempt_index in range(max_recovery_attempts + 1):
@@ -498,6 +501,12 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
         try:
             ensure_verification_passed(verification_results)
         except VerificationFailedError as exc:
+            _handle_external_check_failure(
+                attempt_record_context,
+                exc,
+                "verification",
+                seen_check_failure_snapshots,
+            )
             attempt_phases.mark_failure_phase("verification")
             failure_type = _classify_and_record_gate_failure(
                 attempt_record_context,
@@ -646,6 +655,12 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                         publish_stage=publish_stage,
                     )
             except VerificationFailedError as exc:
+                _handle_external_check_failure(
+                    attempt_record_context,
+                    exc,
+                    "commit",
+                    seen_check_failure_snapshots,
+                )
                 # staging 后验证失败：runner autofix 已在 commit_requested_changes
                 # 内部尝试过。先 unstage，再交给 Fix Agent 处理简单局部失败。
                 unstage_changes(worktree_path, process_runner)
@@ -721,6 +736,16 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                         subprocess.CalledProcessError,
                         VerificationFailedError,
                     ) as fix_exc:
+                        if isinstance(
+                            fix_exc,
+                            (VerificationFailedError, subprocess.CalledProcessError),
+                        ):
+                            _handle_external_check_failure(
+                                attempt_record_context,
+                                fix_exc,
+                                "commit",
+                                seen_check_failure_snapshots,
+                            )
                         _logger.warning(
                             "Fix Agent failed for Issue #%d: %s",
                             issue.number,
@@ -761,6 +786,13 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                     )
                     continue
             except (RuntimeError, subprocess.CalledProcessError) as exc:
+                if isinstance(exc, subprocess.CalledProcessError):
+                    _handle_external_check_failure(
+                        attempt_record_context,
+                        exc,
+                        "commit",
+                        seen_check_failure_snapshots,
+                    )
                 after_sha = get_head_sha(worktree_path, process_runner)
                 # 对于不可恢复的 commit 错误（如分支切换、无 commit request），
                 # 或者已耗尽重试次数，直接失败。

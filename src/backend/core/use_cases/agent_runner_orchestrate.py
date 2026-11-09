@@ -85,9 +85,11 @@ from backend.core.use_cases.agent_runner_failure import (
     AgentUnavailableError,
     DependencyEnvironmentBlockedError,
     ForbiddenBlockedError,
+    HumanActionRequiredError,
     IssueBlockedDuringNoChangeError,
     MaxRetriesExceededError,
     ProviderCapacityError,
+    RecoveryStalledError,
     UnrecoverableError,
     format_attempt_history,
 )
@@ -517,6 +519,7 @@ def run_issue_with_agent_fallback(
         except (
             UnrecoverableError,
             ForbiddenBlockedError,
+            HumanActionRequiredError,
             IssueBlockedDuringNoChangeError,
             DependencyEnvironmentBlockedError,
             ClaimArbitrationLost,
@@ -537,7 +540,12 @@ def run_issue_with_agent_fallback(
                 candidate_agent,
             )
             continue
-        except (ProviderCapacityError, MaxRetriesExceededError, AgentExecutionError) as exc:
+        except (
+            ProviderCapacityError,
+            MaxRetriesExceededError,
+            RecoveryStalledError,
+            AgentExecutionError,
+        ) as exc:
             combined_attempts.extend(
                 _stamp_attempts_with_agent(
                     getattr(exc, "attempt_results", None) or [],
