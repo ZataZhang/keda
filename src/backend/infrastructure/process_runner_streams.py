@@ -25,6 +25,8 @@ class ClaudeStreamRenderer:
         self._saw_text_delta = False
         self._printed_text_content = False
         self._last_assistant_text = ""
+        #: 流里出现过 ``is_error`` 的 result 事件，即本次会话以失败收尾。
+        self.saw_error_result = False
 
     def render_line(self, line: str) -> str:
         """Return display text for one stream-json line."""
@@ -89,6 +91,8 @@ class ClaudeStreamRenderer:
         result_text = str(event_payload.get("result") or "").strip()
         result_subtype = str(event_payload.get("subtype") or "")
         is_error = bool(event_payload.get("is_error")) or result_subtype.startswith("error")
+        if is_error:
+            self.saw_error_result = True
         if is_error and not result_text:
             result_text = self._last_assistant_text or result_subtype
         if not result_text or (not is_error and self._printed_text_content):
@@ -267,6 +271,11 @@ def run_filtered_claude_stream(
             if buffered:
                 process_runner_module.logger.info("Agent output: %s", buffered)
         return_code = process.wait(timeout=timeout)
+        if return_code == 0 and line_renderer is None and renderer.saw_error_result:
+            # codebuddy 等执行器撞 429 限流时仍以 0 退出，只在 result 事件里标
+            # is_error；不改写退出码，下游会把失败当成功（审查判成「无法解析」并
+            # 耗掉轮次），拿不到限流 / 换 agent 的既有处理。
+            return_code = 1
         watchdog.raise_if_timed_out(
             partial_stdout="".join(stdout_lines), partial_stderr=_stderr_tail_text()
         )

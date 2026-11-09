@@ -495,6 +495,39 @@ def test_run_filtered_claude_stream_returns_stderr_tail_and_echoes_without_sink(
     assert capsys.readouterr().err == "err-0\nerr-1\nerr-2\n"
 
 
+def test_run_filtered_claude_stream_error_result_with_zero_exit_is_failure(
+    tmp_path: Path,
+) -> None:
+    """result 事件标了 is_error 但进程以 0 退出时，按失败（退出码 1）返回。"""
+    from backend.infrastructure.process_runner import run_filtered_claude_stream
+
+    error_result = json.dumps(
+        {"type": "result", "subtype": "success", "is_error": True, "result": "429 rate limit"}
+    )
+    command = [sys.executable, "-c", f"print({error_result!r})"]
+
+    completed_process = run_filtered_claude_stream(
+        command, cwd=tmp_path, timeout=30, collect_stdout=True, output_sink=lambda _: None
+    )
+
+    assert completed_process.returncode == 1
+    assert "[agent error] 429 rate limit" in completed_process.stdout
+
+
+def test_run_filtered_claude_stream_success_result_keeps_zero_exit(tmp_path: Path) -> None:
+    """正常 result 事件不受影响，退出码保持 0。"""
+    from backend.infrastructure.process_runner import run_filtered_claude_stream
+
+    success_result = json.dumps({"type": "result", "subtype": "success", "result": "done"})
+    command = [sys.executable, "-c", f"print({success_result!r})"]
+
+    completed_process = run_filtered_claude_stream(
+        command, cwd=tmp_path, timeout=30, collect_stdout=True, output_sink=lambda _: None
+    )
+
+    assert completed_process.returncode == 0
+
+
 def test_run_filtered_claude_stream_display_sink_still_receives_stderr_lines(
     tmp_path: Path,
     capsys,
