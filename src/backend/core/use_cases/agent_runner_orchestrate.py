@@ -610,6 +610,7 @@ def run_once(
     pass_activity: PassActivity | None = None,
     execution_slots: DaemonExecutionSlots | None = None,
     progress_callback: Callable[[RunProgressEvent], None] | None = None,
+    log_base: Path | None = None,
 ) -> int:
     """执行一次 Agent Runner 轮询（``execution_slots`` 见 :class:`RunOnceRequest`）。"""
     module = _orchestration_runtime_module()
@@ -635,5 +636,6 @@ def run_once(
             pass_activity=pass_activity,
             execution_slots=execution_slots,
             progress_callback=progress_callback,
+            log_base=log_base,
         )
     )

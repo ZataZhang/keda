@@ -79,6 +79,10 @@ class RepositoryRunContext:
     display_name: str
     repo_path: Path
     config: AppConfig
+    #: Issue 日志根目录；``None`` 时取 ``repo_path / "logs"``。``--repo`` 指向
+    #: 已注册仓库的其他 checkout（如 git worktree）时锚定到登记路径，
+    #: 让 Console 与 ``kc logs --issue`` 能读到。
+    log_base: Path | None = None
 
 
 @dataclass(frozen=True)

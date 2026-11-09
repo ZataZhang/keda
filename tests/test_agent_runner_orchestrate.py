@@ -1878,6 +1878,35 @@ def test_run_once_sequential_default_writes_per_issue_logs(monkeypatch, tmp_path
     assert len(list(issue_log_dir.glob("issue-2-*.log"))) == 1
 
 
+def test_run_once_log_base_overrides_repo_path_logs(monkeypatch, tmp_path) -> None:
+    """显式 ``log_base`` 时 per-Issue 日志落在该目录，而不是 ``repo_path/logs``。"""
+    from backend.core.use_cases import agent_runner_orchestrate as orchestrate
+
+    fake_client = FakeGitHubClient()
+    issues = [_make_ready_issue(1, "I1", "", ("agent/ready",))]
+    fake_client.list_ready_issues = lambda ready_label, limit: list(issues)
+    monkeypatch.setattr(orchestrate, "_process_ready_issue", lambda **_kwargs: None)
+    checkout_path = tmp_path / "checkout"
+    checkout_path.mkdir()
+    registered_logs = tmp_path / "registered" / "logs"
+
+    run_once(
+        repo_path=checkout_path,
+        config=AppConfig(),
+        dry_run=False,
+        agent="auto",
+        max_issues=1,
+        github_client=fake_client,
+        process_runner=_preflight_ok_runner(),
+        repo_id="testrepo",
+        log_base=registered_logs,
+    )
+
+    issue_log_dir = registered_logs / "agent-runner" / "issues" / "testrepo"
+    assert len(list(issue_log_dir.glob("issue-1-*.log"))) == 1
+    assert not (checkout_path / "logs").exists()
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 统一并发上限：run_once 的 ready 认领闸门（PRD P1-FEAT-20261010-011714）
 # ─────────────────────────────────────────────────────────────────────────────

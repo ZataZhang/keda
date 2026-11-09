@@ -1789,7 +1789,9 @@ kc logs --kind supervise_daemon -f
 #### 查看单个 Issue 的实时输出（`kc logs --issue`）
 
 单次 `kc run` 或 daemon 处理某个 Issue 时，Agent 的可见输出会即时落到
-`logs/agent-runner/issues/<repo_id>/issue-<N>-<时间戳>.log`。用 `--issue`
+`logs/agent-runner/issues/<repo_id>/issue-<N>-<时间戳>.log`，根目录始终是
+**登记路径**：即使 `kc run --repo` 指向该仓库的另一个 checkout（如 git
+worktree），日志也写回登记路径下，Console 与 `kc logs --issue` 才读得到。用 `--issue`
 可以在**另一个终端**按 Issue 号查看这条流，无需知道进程 ID 或日志目录：
 
 ```bash

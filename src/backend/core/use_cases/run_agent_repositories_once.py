@@ -170,6 +170,7 @@ def run_agent_repositories_once(
                 publish_stage=publish_stage,
                 aggregate_pr=aggregate_pr,
                 progress_callback=progress_callback,
+                log_base=context.log_base,
             )
             if repo_exit_code != 0:
                 aggregated_exit_code = 1

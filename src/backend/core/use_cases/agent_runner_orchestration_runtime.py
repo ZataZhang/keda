@@ -961,7 +961,7 @@ def run_once(request: RunOnceRequest) -> int:
     active_view = NoOpRunnerLiveView() if is_serial else (output_view or NoOpRunnerLiveView())
     routing = _IssueRoutingContext(
         effective_repo_id=effective_repo_id,
-        log_base=repo_path / "logs",
+        log_base=request.log_base or repo_path / "logs",
         output_view=active_view,
         console_sink=_mirror_to_console if is_serial else None,
         process_runner=process_runner,

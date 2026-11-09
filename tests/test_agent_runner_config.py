@@ -254,6 +254,30 @@ def test_resolve_repository_targets_ad_hoc_repo(tmp_path: Path) -> None:
     assert contexts[0].repo_path == repo_path.resolve()
 
 
+def test_resolve_repository_targets_other_checkout_anchors_log_base_to_registry(
+    tmp_path: Path,
+) -> None:
+    """--repo 指向已注册仓库的其他 checkout 时，Issue 日志根锚定到登记路径。"""
+    registered_path = _init_git_repository(tmp_path, "main")
+    checkout_path = _init_git_repository(tmp_path, "feature-checkout")
+    for repo_path in (registered_path, checkout_path):
+        _write_local_iar_config(repo_path, '[agent_runner.repository]\nid = "shared"\n')
+    settings = _make_settings(
+        repositories={"shared": AgentRunnerRepositorySettings(path=str(registered_path))}
+    )
+
+    checkout_context = resolve_repository_targets(settings, repo_path_override=str(checkout_path))[
+        0
+    ]
+    registered_context = resolve_repository_targets(
+        settings, repo_path_override=str(registered_path)
+    )[0]
+
+    assert checkout_context.repo_path == checkout_path.resolve()
+    assert checkout_context.log_base == registered_path.resolve() / "logs"
+    assert registered_context.log_base is None
+
+
 def test_resolve_repository_targets_repo_path_loads_local_config(
     tmp_path: Path,
 ) -> None:

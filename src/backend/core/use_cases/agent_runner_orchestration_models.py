@@ -73,3 +73,6 @@ class RunOnceRequest:
     execution_slots: DaemonExecutionSlots | None = None
     #: 可选的实时阶段通知；仅由前台 ``kc run --progress`` 注入。
     progress_callback: Callable[[RunProgressEvent], None] | None = None
+    #: per-Issue 日志根目录（见 ``RepositoryRunContext.log_base``）；``None`` 时取
+    #: ``repo_path / "logs"``。
+    log_base: Path | None = None
