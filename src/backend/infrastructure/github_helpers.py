@@ -36,6 +36,8 @@ _RETRYABLE_GH_ERROR_PATTERNS = (
     re.compile(r"TLS handshake timeout", re.IGNORECASE),
     re.compile(r"connection timed out", re.IGNORECASE),
     re.compile(r"i/o timeout", re.IGNORECASE),
+    # 连接已建立但读响应超时（Go net 的 "read tcp ...: read: operation timed out"）。
+    re.compile(r"operation timed out", re.IGNORECASE),
     re.compile(r"no such host", re.IGNORECASE),
     re.compile(r"temporary failure in name resolution", re.IGNORECASE),
     re.compile(r"500\s+Internal Server Error", re.IGNORECASE),

@@ -116,6 +116,9 @@ _MAX_GH_RETRIES = 3
 # Delay between retries in seconds.
 _GH_RETRY_DELAY_SECONDS = 1.0
 
+# 未单独指定超时的 gh 命令默认时限：网络卡死时不能让一条请求无限挂住整个 Issue。
+_DEFAULT_GH_REQUEST_TIMEOUT_SECONDS = 120
+
 # ``gh api rate_limit`` 的资源名与额度类型的对应关系（REST 在 GitHub 那边叫 ``core``）。
 _RATE_LIMIT_RESOURCE_BY_KIND = {API_KIND_GRAPHQL: "graphql", API_KIND_REST: "core"}
 # 读不到重置时间时的保守暂停时长。
@@ -224,13 +227,18 @@ class GitHubCliClient:
             process_runner: Optional process runner to use for gh commands.
             api_budget: 跨进程共享的额度预算；省略时不记账也不受暂停闸门约束。
             bypass_budget_pause: 心跳续期等安全收尾请求继续计费，但忽略共享暂停闸门。
-            request_timeout_seconds: 未单独指定超时的 gh 命令默认时限。
+            request_timeout_seconds: 未单独指定超时的 gh 命令默认时限；省略时用
+                ``_DEFAULT_GH_REQUEST_TIMEOUT_SECONDS``。
         """
         self.repo_path = repo_path
         self._runner = process_runner or SubprocessRunner()
         self._api_budget = api_budget
         self._bypass_budget_pause = bypass_budget_pause
-        self._request_timeout_seconds = request_timeout_seconds
+        self._request_timeout_seconds = (
+            request_timeout_seconds
+            if request_timeout_seconds is not None
+            else _DEFAULT_GH_REQUEST_TIMEOUT_SECONDS
+        )
         self._github_api_rate_limited: set[str] = set()
         self._owner_repo_cache: str | None = None
 
@@ -370,6 +378,26 @@ class GitHubCliClient:
                         command,
                     )
                 return command_result
+            except subprocess.TimeoutExpired as timeout_exc:
+                # 超时视为瞬时网络故障：统一转成 CalledProcessError，走下面同一套
+                # 重试与上层失败处理，避免调用方漏接 TimeoutExpired。
+                exc = subprocess.CalledProcessError(
+                    124,
+                    list(command),
+                    output=timeout_exc.output,
+                    stderr=f"gh command operation timed out after {effective_timeout}s",
+                )
+                last_exc = exc
+                if attempt >= _MAX_GH_RETRIES:
+                    raise exc from timeout_exc
+                _logger.warning(
+                    "GitHub CLI timed out (attempt %d/%d), retrying in %.1fs: %s",
+                    attempt,
+                    _MAX_GH_RETRIES,
+                    _GH_RETRY_DELAY_SECONDS,
+                    _gh_operation_label(command),
+                )
+                time.sleep(_GH_RETRY_DELAY_SECONDS)
             except subprocess.CalledProcessError as exc:
                 last_exc = exc
                 combined_output = (exc.stdout or "") + "\n" + (exc.stderr or "")

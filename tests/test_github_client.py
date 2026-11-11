@@ -992,6 +992,59 @@ def test_create_issue_gives_up_after_max_retries(tmp_path: Path) -> None:
     assert runner.attempts == 3
 
 
+def test_create_issue_retries_on_read_operation_timed_out(tmp_path: Path) -> None:
+    """连接建立后读响应超时（freshai#10 真实报错）应按瞬时错误重试。"""
+    runner = _FlakyProcessRunner(
+        fail_count=1,
+        error_text="read tcp 192.168.0.105:59997->20.205.243.168:443: read: operation timed out",
+    )
+    github_client = GitHubCliClient(tmp_path, runner)
+
+    with patch("backend.infrastructure.github_client.time.sleep"):
+        issue_url = github_client.create_issue(title="title", body="body", labels=[])
+
+    assert issue_url == "https://github.com/org/repo/issues/42"
+    assert runner.attempts == 2
+
+
+class _TimingOutProcessRunner(FakeProcessRunner):
+    """前 ``fail_count`` 次抛 TimeoutExpired，并记录收到的超时参数。"""
+
+    def __init__(self, fail_count: int) -> None:
+        super().__init__()
+        self.fail_count = fail_count
+        self.timeouts: list[int | None] = []
+
+    def run(self, command, *, cwd, check=True, timeout=None, **kwargs):  # type: ignore[override]
+        self.timeouts.append(timeout)
+        if len(self.timeouts) <= self.fail_count:
+            raise subprocess.TimeoutExpired(cmd=list(command), timeout=timeout or 0)
+        return CommandResult(command=tuple(command), return_code=0, stdout="{}", stderr="")
+
+
+def test_gh_command_uses_default_timeout_and_retries_on_timeout(tmp_path: Path) -> None:
+    """未指定超时的 gh 命令带默认时限；超时后重试而不是无限挂住。"""
+    runner = _TimingOutProcessRunner(fail_count=1)
+    github_client = GitHubCliClient(tmp_path, runner)  # type: ignore[arg-type]
+
+    with patch("backend.infrastructure.github_client.time.sleep"):
+        github_client._run_with_retry(["gh", "api", "repos/o/r/issues/10"], cwd=tmp_path)
+
+    assert runner.timeouts == [120, 120]
+
+
+def test_gh_command_timeout_exhaustion_raises_called_process_error(tmp_path: Path) -> None:
+    """超时重试耗尽后以 CalledProcessError 上抛，沿用调用方已有的失败处理。"""
+    runner = _TimingOutProcessRunner(fail_count=10)
+    github_client = GitHubCliClient(tmp_path, runner)  # type: ignore[arg-type]
+
+    with patch("backend.infrastructure.github_client.time.sleep"):
+        with pytest.raises(subprocess.CalledProcessError, match="returned non-zero"):
+            github_client._run_with_retry(["gh", "api", "repos/o/r/issues/10"], cwd=tmp_path)
+
+    assert len(runner.timeouts) == 3
+
+
 def test_create_issue_retries_on_client_closed_request(tmp_path: Path) -> None:
     """create_issue should retry on HTTP 499 (client/edge closed the connection)."""
     runner = _FlakyProcessRunner(
