@@ -881,8 +881,8 @@
     uiState.view = view;
     document.querySelectorAll('[data-view]').forEach((page) => page.classList.toggle('is-visible', page.dataset.view === view));
     document.querySelectorAll('.product-sidebar [data-view-link]').forEach((link) => link.classList.toggle('is-active', link.dataset.viewLink === view));
-    const viewTitles = { dashboard: 'Dashboard', evaluations: '模型评测', 'evaluation-baseline': '评测基线', stats: 'Stats', roadmap: 'Backlog' };
-    elements.pageTitle.textContent = viewTitles[view] ?? 'Dashboard';
+    const viewTitles = { dashboard: '总览', evaluations: '模型评测', 'evaluation-baseline': '评测基线', stats: '统计', roadmap: '待办' };
+    elements.pageTitle.textContent = viewTitles[view] ?? '总览';
     if (view === 'stats') renderStats();
     if (view === 'dashboard') window.renderRuntimeDashboard?.();
     if (view === 'evaluations') window.renderRuntimeEvaluation?.();

@@ -392,6 +392,8 @@ run 详情：`run`、`results`（逐候选执行）、`scores`（逐评审评分
 
 值守看板（`/app/dashboard/` 默认视图）的任务摘要，只读。**不新增任何存储**：任务身份与标签来自监控快照，运行终态来自运行账本，阶段 / preset / 模型来自 attempt 账本，PRD 关联来自生命周期账本。运行中的任务还会读取既有 invocation 账本；只有当前会话最近一条调用没有结束事件时，才返回该调用的实际执行器与请求模型。
 
+周期或手动监控扫描会把近 7 天未收口生命周期记录中的 Issue 一并纳入当前状态补扫，即使它没有对应的运行记录；因此 GitHub 已关闭状态可以覆盖残留的本地运行生命周期。
+
 - 数据范围严格绑定当前 registry 的启用仓库：账本按 `repo_id` 逐仓库读取，已删除或禁用的仓库即使仍有历史运行行也不会回到看板。
 - GitHub Issue 为 closed 时优先归入 `closed`，不受残留 `agent/*` 标签影响，也不表示 Agent 已成功完成；open Issue 再按 `agent/*` 标签推导状态，其中 `agent/blocked` 对应 `blocked`、`agent/failed` 对应 `failed`、`agent/review` 与 `agent/ready` 同归 `waiting`。没有可判定标签时依次回落到运行账本终态、`unknown`，未知不折算成零。
 - 分桶顺序为 `running` → `blocked` → `failed` → `waiting` → `completed` → `closed` → `unknown`，同状态内按开始时间新者在前。

@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Console 运行时看板与模型评测 · 交互原型</title>
+    <title>任务运行看板与模型评测 · 交互原型</title>
     <link rel="stylesheet" href="./assets/prototype-chrome.css" />
     <link rel="stylesheet" href="./assets/prd-lifecycle-observability.css" />
     <link rel="stylesheet" href="./assets/runtime-board.css" />
@@ -17,35 +17,35 @@
       <aside class="product-sidebar" aria-label="产品导航">
         <a class="product-brand" href="#dashboard" data-view-link="dashboard"><span>◈</span><strong>KedaCode</strong></a>
         <nav>
-          <button class="is-active" type="button" data-view-link="dashboard"><span>⌂</span>Dashboard</button>
-          <span class="nav-static" aria-disabled="true" title="Processes 不在本原型范围内"><span>◉</span>Processes</span>
-          <span class="nav-static" aria-disabled="true" title="Repositories 不在本原型范围内"><span>⑂</span>Repositories</span>
+          <button class="is-active" type="button" data-view-link="dashboard"><span>⌂</span>总览</button>
+          <span class="nav-static" aria-disabled="true" title="任务进程不在本原型范围内"><span>◉</span>任务进程</span>
+          <span class="nav-static" aria-disabled="true" title="仓库不在本原型范围内"><span>⑂</span>仓库</span>
           <button type="button" data-view-link="evaluations"><span>✳</span>模型评测</button>
           <button type="button" data-view-link="evaluation-baseline"><span>↻</span>评测基线</button>
-          <button type="button" data-view-link="stats"><span>▥</span>Stats</button>
-          <button type="button" data-view-link="roadmap"><span>◇</span>Backlog</button>
-          <span class="nav-static" aria-disabled="true" title="Ideas 不在本原型范围内"><span>✦</span>Ideas</span>
-          <a class="nav-link" href="./lifecycle-agent-matrix.html?screen=settings" target="_blank" rel="noopener noreferrer"><span>⚙</span>Settings ↗</a>
+          <button type="button" data-view-link="stats"><span>▥</span>统计</button>
+          <button type="button" data-view-link="roadmap"><span>◇</span>待办</button>
+          <span class="nav-static" aria-disabled="true" title="想法不在本原型范围内"><span>✦</span>想法</span>
+          <a class="nav-link" href="./lifecycle-agent-matrix.html?screen=settings" target="_blank" rel="noopener noreferrer"><span>⚙</span>设置 ↗</a>
         </nav>
-        <div class="sidebar-foot"><span class="status-dot"></span>keda-main 已连接</div>
+        <div class="sidebar-foot"><span class="status-dot"></span>示例仓库已连接</div>
       </aside>
 
       <main class="workspace">
         <header class="topbar">
-          <div><span class="breadcrumb">Agent Runner /</span><strong id="page-title">Dashboard</strong></div>
+          <div><span class="breadcrumb">任务运行 /</span><strong id="page-title">总览</strong></div>
           <div class="simulation-label">交互原型 · 模拟数据</div>
         </header>
 
         <section class="page is-visible runtime-page" id="dashboard-view" data-view="dashboard">
           <div class="page-heading runtime-heading">
-            <div><span class="eyebrow">LOCAL AGENT RUNNER</span><h1>统一运行时</h1><p>正在运行、等待与近期完成的任务，都在同一处查看。</p></div>
+            <div><span class="eyebrow">本机任务运行器</span><h1>任务运行看板</h1><p>正在运行、等待与近期完成的任务，都在同一处查看。</p></div>
             <button class="primary-button widget-launch-button hotspot-target" type="button" data-open-widget>◱ 开启桌面悬浮窗</button>
           </div>
           <div class="runtime-summary" aria-label="运行统计">
             <article><span>运行中</span><strong class="tone-running" id="runtime-count-running">2</strong><small>正在推进</small></article>
             <article><span>等待 / 审阅</span><strong class="tone-review" id="runtime-count-waiting">1</strong><small>等待下一步</small></article>
             <article><span>需关注</span><strong class="tone-blocked" id="runtime-count-blocked">1</strong><small>阻塞或失败</small></article>
-            <article><span>本地连接</span><strong class="tone-connected">已连接</strong><small><i class="status-dot"></i>127.0.0.1 Console</small></article>
+            <article><span>本地连接</span><strong class="tone-connected">已连接</strong><small><i class="status-dot"></i>本机控制台</small></article>
           </div>
           <div class="runtime-toolbar">
             <div class="runtime-filters" aria-label="按任务状态筛选">
@@ -55,13 +55,13 @@
               <button type="button" data-task-filter="blocked" aria-pressed="false">需关注</button>
               <button type="button" data-task-filter="completed" aria-pressed="false">已完成</button>
             </div>
-            <label class="runtime-search"><span aria-hidden="true">⌕</span><input id="runtime-search" type="search" placeholder="搜索任务、仓库或 Issue" aria-label="搜索任务、仓库或 Issue" /></label>
+            <label class="runtime-search"><span aria-hidden="true">⌕</span><input id="runtime-search" type="search" placeholder="搜索任务、仓库或问题单" aria-label="搜索任务、仓库或问题单" /></label>
           </div>
           <div class="runtime-layout">
             <section class="runtime-task-list" id="runtime-task-list" aria-label="运行任务卡片"></section>
             <aside class="runtime-detail-panel" id="runtime-detail" aria-live="polite" aria-label="选中任务详情"></aside>
           </div>
-          <p class="runtime-footnote">状态来自本机 Console 的任务生命周期。进度以当前阶段和耗时呈现；没有可信百分比时不估算。</p>
+          <p class="runtime-footnote">状态来自本机任务生命周期记录。进度以当前阶段和耗时呈现；没有可信百分比时不估算。</p>
         </section>
 
         <section class="page evaluation-page" id="evaluations-view" data-view="evaluations">

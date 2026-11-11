@@ -20,7 +20,7 @@ from backend.core.shared.interfaces.agent_runner import (
     IGitHubClient,
     IProcessRunner,
 )
-from backend.core.shared.interfaces.runner_console import IRunHistoryStore
+from backend.core.shared.interfaces.runner_console import IPrdLifecycleStore, IRunHistoryStore
 from backend.core.use_cases.agent_runner_factory import (
     create_console_store,
     create_github_client,
@@ -297,26 +297,58 @@ _TRACKED_ISSUE_SCAN_LIMIT = 20
 
 
 def _recent_tracked_issue_numbers(repositories: Sequence[Any]) -> dict[str, list[int]]:
-    """按仓库收集运行账本里近期出现的 Issue 编号。
+    """按仓库收集近期运行及未收口生命周期记录中的 Issue 编号。
 
     监控快照原本只扫描队列标签下的开放 Issue；已关闭或已移出队列的 Issue
-    没有当前状态，运行看板只能把它们显示成「状态未知」。这里把近 7 天运行
-    账本里出现过的编号一并交给扫描器补状态，并限制每仓库最多 20 个，避免
-    为历史复盘付出无界 GitHub 调用。
+    没有当前状态。这里把近 7 天运行账本或未收口生命周期账本中出现过的
+    编号交给扫描器补状态；优先补扫生命周期记录，避免漏掉它们的当前状态。
+    每仓库最多补扫 20 个，避免为历史复盘付出无界 GitHub 调用。
     """
-    store = cast(IRunHistoryStore, create_console_store())
+    store = create_console_store()
+    run_history_store = cast(IRunHistoryStore, store)
+    lifecycle_store = cast(IPrdLifecycleStore, store)
     cutoff = datetime.now(UTC) - timedelta(seconds=RUNTIME_TASK_WINDOW_SECONDS)
     tracked: dict[str, list[int]] = {}
     for repository in repositories:
         try:
-            runs = store.list_recent_runs(
+            runs = run_history_store.list_recent_runs(
                 repo_id=repository.repo_id, limit=_TRACKED_ISSUE_SCAN_LIMIT
             )
-        except Exception as exc:  # noqa: BLE001 - 账本读失败只放弃补状态，不阻断扫描。
+        except Exception as exc:  # noqa: BLE001 - 读取失败只放弃该来源补状态。
             _logger.info("Tracked issue lookup failed for %s: %s", repository.repo_id, exc)
-            continue
+            runs = []
+        try:
+            lifecycle_runs = lifecycle_store.list_lifecycle_runs(
+                repo_id=repository.repo_id,
+                since=cutoff.isoformat(timespec="seconds"),
+            )
+        except Exception as exc:  # noqa: BLE001 - 生命周期不可用时仍扫描运行记录。
+            _logger.info(
+                "Tracked lifecycle issue lookup failed for %s: %s",
+                repository.repo_id,
+                exc,
+            )
+            lifecycle_runs = []
+
         numbers: list[int] = []
+        for lifecycle_run in reversed(lifecycle_runs):
+            issue_number = lifecycle_run.issue_number
+            started_at = parse_runtime_timestamp(lifecycle_run.started_at)
+            if (
+                lifecycle_run.finished_at
+                or issue_number is None
+                or issue_number <= 0
+                or (started_at is not None and started_at < cutoff)
+                or issue_number in numbers
+            ):
+                continue
+            numbers.append(issue_number)
+            if len(numbers) >= _TRACKED_ISSUE_SCAN_LIMIT:
+                break
+
         for run in runs:
+            if len(numbers) >= _TRACKED_ISSUE_SCAN_LIMIT:
+                break
             if run.issue_number <= 0 or run.issue_number in numbers:
                 continue
             started_at = parse_runtime_timestamp(run.started_at)
