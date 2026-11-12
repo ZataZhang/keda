@@ -151,12 +151,30 @@ class EvidenceBlock:
 
 
 @dataclass(frozen=True)
+class PrimaryDemoStep:
+    """主演示录屏中的一步：画面字幕、看到的结果，以及该步是否用了 mock。"""
+
+    caption: str
+    result: str
+    mock: bool = False
+
+
+@dataclass(frozen=True)
+class PrimaryDemo:
+    """给人看的主演示录屏（可选）：PR 证据评论第一屏展示它，rv 逐项证据折叠。"""
+
+    file: str
+    steps: tuple[PrimaryDemoStep, ...]
+
+
+@dataclass(frozen=True)
 class EvidenceManifest:
     """Top-level structured evidence manifest."""
 
     version: int
     language: str
     items: tuple[EvidenceBlock, ...]
+    primary_demo: PrimaryDemo | None = None
 
 
 @dataclass(frozen=True)
@@ -181,6 +199,7 @@ class StructuredEvidenceReport:
 
     language: str
     items: tuple[StructuredEvidenceItemReport, ...]
+    primary_demo: PrimaryDemo | None = None
 
 
 _LABELS: dict[str, dict[str, str]] = {
@@ -202,6 +221,10 @@ _LABELS: dict[str, dict[str, str]] = {
         "open_file": "打开文件",
         "image_alt": "证据图片",
         "truncated": "[内容已截断；请在证据分支打开完整文件]",
+        "primary_demo": "主演示",
+        "demo_recording": "录屏",
+        "mock_warning": "⚠️ mock，未验证",
+        "rv_details": "逐项验证证据（RV）",
         "unreadable": "[无法读取证据文件]",
     },
     "en-US": {
@@ -222,6 +245,10 @@ _LABELS: dict[str, dict[str, str]] = {
         "open_file": "Open file",
         "image_alt": "Evidence image",
         "truncated": "[evidence truncated; open the file on the evidence branch]",
+        "primary_demo": "Primary demo",
+        "demo_recording": "Recording",
+        "mock_warning": "⚠️ mock, not verified",
+        "rv_details": "Per-item validation evidence (RV)",
         "unreadable": "[unreadable evidence file]",
     },
 }
@@ -573,7 +600,40 @@ def load_evidence_manifest(
         version=1,
         language=language,
         items=tuple(parsed_blocks),
+        primary_demo=_parse_primary_demo(manifest_data.get("primary_demo"), evidence_dir_text),
     )
+
+
+def _parse_primary_demo(raw_demo: object, evidence_dir_text: str) -> PrimaryDemo | None:
+    """解析可选的 ``primary_demo``；缺省返回 ``None``，形状不对时抛格式错误。"""
+    if raw_demo is None:
+        return None
+    field_text = f"`{evidence_dir_text}/evidence.json` field `primary_demo`"
+    if not isinstance(raw_demo, dict):
+        raise _manifest_format_error(f"{field_text} must be an object.")
+    demo_file = raw_demo.get("file")
+    if not isinstance(demo_file, str) or not demo_file.strip():
+        raise _manifest_format_error(f"{field_text} needs a non-empty `file`.")
+    raw_steps = raw_demo.get("steps")
+    if not isinstance(raw_steps, list) or not raw_steps:
+        raise _manifest_format_error(f"{field_text} needs a non-empty `steps` array.")
+    parsed_steps: list[PrimaryDemoStep] = []
+    for raw_step in raw_steps:
+        step_caption = raw_step.get("caption") if isinstance(raw_step, dict) else None
+        step_result = raw_step.get("result") if isinstance(raw_step, dict) else None
+        if not isinstance(step_caption, str) or not step_caption.strip():
+            raise _manifest_format_error(f"{field_text} step needs a non-empty `caption`.")
+        if not isinstance(step_result, str) or not step_result.strip():
+            raise _manifest_format_error(f"{field_text} step needs a non-empty `result`.")
+        parsed_steps.append(
+            PrimaryDemoStep(
+                caption=step_caption.strip(),
+                result=step_result.strip(),
+                mock=raw_step.get("mock") is True,
+            )
+        )
+    # 与 evidence_files 一致：只认纯文件名，去掉 agent 常误加的目录前缀
+    return PrimaryDemo(file=Path(demo_file.strip()).name, steps=tuple(parsed_steps))
 
 
 def _extract_manifest_string(
@@ -822,9 +882,18 @@ def validate_evidence_manifest(
                 "`validation.require_negative_control=false` to opt out."
             )
 
+    if manifest.primary_demo is not None:
+        demo_path = resolved_evidence_dir / manifest.primary_demo.file
+        if not demo_path.is_file():
+            raise ValidationEvidenceError(
+                f"`primary_demo.file` `{manifest.primary_demo.file}` does not exist in "
+                f"`{evidence_dir_text}/`. Put the demo recording there or drop `primary_demo`."
+            )
+
     return StructuredEvidenceReport(
         language=manifest.language,
         items=tuple(item_reports),
+        primary_demo=manifest.primary_demo,
     )
 
 
@@ -966,6 +1035,14 @@ def build_structured_evidence_prompt_suffix(language: str) -> str:
             "所有证据文件必须命名为 `rv-<item_number>-<slug>.<ext>` 并放在 `{evidence_dir}/` 下。"
             "重要：每个证据文件必须只包含对应 item 的输出，禁止混入其他 item 的内容；"
             "不要用 `exec > >(tee -a ...)` 这类全局 stdout 重定向，它会让多个 item 的输出串到同一个文件里。"
+            "主演示录屏（给人看的那一段，可选但有用户可见行为时应提供）："
+            "若 PRD 的人读呈递区有「主演示脚本」，按脚本另录一段 `demo-<slug>.mp4` 放在 `{evidence_dir}/`，"
+            "不要拿回归 e2e 用例顺带录的视频充数；每一步在画面上叠加中文字幕说明在演示什么，"
+            "结果画面停留 3 秒以上让人看清；某步要证明外部系统行为（真实模型、沙箱、第三方 API）时用真实依赖，"
+            "拿不到凭据就照样录但在该步字幕写明「mock，未验证」。"
+            "然后在 manifest 顶层写 `primary_demo`：`file` 为录屏纯文件名，`steps` 为数组，"
+            "每项含 `caption`（该步字幕）、`result`（画面上实际看到的结果）、"
+            "`mock`（该步用了 mock 时为 true）。"
         ).format(language=language, evidence_dir="{evidence_dir}")
     return (
         "Additionally, you must write a structured evidence manifest to "
@@ -1002,7 +1079,18 @@ def build_structured_evidence_prompt_suffix(language: str) -> str:
         "under `{evidence_dir}/`. "
         "Important: each evidence file must contain ONLY the output of its own item; "
         "never mix output from multiple items into one file. Avoid shell-wide stdout "
-        "redirection such as `exec > >(tee -a ...)` which leaks output across files."
+        "redirection such as `exec > >(tee -a ...)` which leaks output across files. "
+        "Primary demo recording (the one video for humans; optional, but provide it when "
+        "there is user-visible behavior): if the PRD's human review surface has a primary "
+        "demo script, record a separate `demo-<slug>.mp4` under `{evidence_dir}/` following "
+        "that script — never reuse the video a regression e2e test recorded as a side "
+        "effect. Overlay an on-screen caption for every step, hold each result on screen "
+        "for at least 3 seconds, and use real dependencies for steps that prove external "
+        "behavior (real model, sandbox, third-party API); when credentials are missing, "
+        "still record the step but caption it `mock, not verified`. Then add a top-level "
+        "`primary_demo` to the manifest: `file` is the bare recording file name and "
+        "`steps` is an array whose entries carry `caption` (the step's caption), `result` "
+        "(what the screen actually shows) and `mock` (true when that step used a mock)."
     ).format(language=language, evidence_dir="{evidence_dir}")
 
 

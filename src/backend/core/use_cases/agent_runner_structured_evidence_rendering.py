@@ -7,9 +7,11 @@ from pathlib import Path
 from backend.core.shared.models.agent_runner import AppConfig
 from backend.core.use_cases.agent_runner_structured_evidence import (
     EvidenceUpload,
+    PrimaryDemo,
     StructuredEvidenceReport,
     _label,
     _render_evidence_file_lines,
+    build_evidence_blob_url,
 )
 from backend.core.use_cases.agent_runner_validation_identity import (
     EvidenceMarker,
@@ -69,6 +71,14 @@ def render_structured_evidence_comment(
         _label(language, "sign_off"),
     ]
 
+    primary_demo = report.primary_demo
+    if primary_demo is not None:
+        # 主演示是给人看的第一屏；rv 逐项证据折叠，留给 verifier 与下钻
+        comment_lines.extend(_render_primary_demo_lines(primary_demo, upload, pr_url, language))
+        comment_lines.extend(
+            ["", "<details>", f"<summary>{_label(language, 'rv_details')}</summary>"]
+        )
+
     for item_report in report.items:
         block = item_report.block
         comment_lines.extend(
@@ -120,4 +130,30 @@ def render_structured_evidence_comment(
                     f"- {_label(language, 'expected_fail')}: {block.expected_fail}"
                 )
 
+    if primary_demo is not None:
+        comment_lines.extend(["", "</details>"])
+
     return "\n".join(comment_lines)
+
+
+def _render_primary_demo_lines(
+    primary_demo: PrimaryDemo, upload: EvidenceUpload, pr_url: str, language: str
+) -> list[str]:
+    """渲染主演示块：录屏链接 + 按顺序的每步结论，mock 步带警示。"""
+    blob_url = build_evidence_blob_url(pr_url, upload.branch, primary_demo.file)
+    recording_text = (
+        f"[`{primary_demo.file}`]({blob_url})" if blob_url else f"`{primary_demo.file}`"
+    )
+    demo_lines = [
+        "",
+        f"### {_label(language, 'primary_demo')}",
+        "",
+        f"**{_label(language, 'demo_recording')}**: {recording_text}",
+        "",
+    ]
+    for step_number, demo_step in enumerate(primary_demo.steps, start=1):
+        mock_suffix = f" — {_label(language, 'mock_warning')}" if demo_step.mock else ""
+        demo_lines.append(
+            f"{step_number}. **{demo_step.caption}**：{demo_step.result}{mock_suffix}"
+        )
+    return demo_lines
