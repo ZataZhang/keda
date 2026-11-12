@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import shutil
 import signal
-import socket
 import subprocess
 import sys
 import threading
@@ -566,7 +565,7 @@ class SubprocessRunner:
         仍存活、实时进程组与登记值一致三项全过才 ``confirmed=True``。未走 ``Popen``
         的调用（例如普通 ``subprocess.run`` 命令）不在册，一律是"归属不可证实"。
         """
-        return probe_attempt_ownership(attempt_key=attempt_key, host_label=socket.gethostname())
+        return probe_attempt_ownership(attempt_key=attempt_key)
 
     def cancel_live_attempt(
         self, attempt_key: str, expected: AttemptOwnership

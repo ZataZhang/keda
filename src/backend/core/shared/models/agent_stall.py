@@ -132,8 +132,10 @@ class AttemptOwnership:
     Attributes:
         confirmed: 全部判据一致时为 ``True``；任何一项不成立都必须交班。
         reason: 未确认时的原因（人读、进 attempt 记录）。
-        host_label: 认领标记里的主机标识（跨主机认领一律不处置）。
-        process_pid: 认领标记里的 runner 进程 pid。
+        host_label: **登记该 attempt 时**由进程登记簿记下的主机标识（不是取消方
+            现读的机名）。取消方拿它比对的是"这份证据是否出自同一本登记簿"，
+            据此拒绝用别处构造的证据动手。
+        process_pid: 在册 writer 的进程 pid。
         child_process_group: 实时读到的 writer 进程组 id；``None`` 表示已不在册。
         process_started_at: 操作系统记录的进程创建时刻；PID/PGID 被复用时用于区分新进程。
     """

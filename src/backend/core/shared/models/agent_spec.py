@@ -149,8 +149,15 @@ class AgentProfileSpec:
         expand: 展开器声明，格式 ``"<expander_name>:<flag>"``，语义是
             "对展开器返回的每个值各追加一次 ``<flag> <value>``
             （如 codex 的 ``git_writable_roots:--add-dir``）。
-        read_only: 该用途是否为可验证的只读调用。只读决策入口
-            （planner / ``kc ask``）以此字段做 fail-fast 门禁。
+        read_only: 该用途**声明**为只读调用（不写工作区、不提交），供只读决策入口
+            （planner / ``kc ask``）做 fail-fast 门禁。这是 provider 配置与提示词层面
+            的约定，**不等于** CLI 强制执行——``--dangerously-skip-permissions`` 这类
+            形态同样可以声明只读，但 CLI 并不会拦住写入。需要"确实写不进"这一级保证
+            的调用方（停滞监督的诊断）必须改读 :attr:`read_only_enforced`。
+        read_only_enforced: :attr:`read_only` 之外还由 provider 自己的沙箱/权限开关
+            **强制**只读（如 codex 的 ``--sandbox read-only``、pi 的 ``--no-tools``）。
+            只有这一档能作为"即使提示词被忽略也写不进工作区"的依据；未声明即
+            ``False``，宁可停用依赖该保证的功能也不把它当成只读。
 
     同一个类型也承载 :data:`INTERACTIVE_PROFILE_ID` 声明（原生交互式 TUI）：
     提示词由人在继承来的 TTY 上输入，输出也直接回到该 TTY；bootstrap 如何投递由
@@ -167,6 +174,7 @@ class AgentProfileSpec:
     resume_tail_args: tuple[str, ...] = ()
     expand: tuple[str, ...] = ()
     read_only: bool = False
+    read_only_enforced: bool = False
 
 
 @dataclass(frozen=True)
@@ -260,7 +268,13 @@ def _tools_disabled_judge_profile() -> AgentProfileSpec:
 
 
 def _permissioned_plain_profiles() -> dict[str, AgentProfileSpec]:
-    """为 provider 的 plain generate / repl 声明共享的非交互命令形态。"""
+    """为 provider 的 plain generate / repl 声明共享的非交互命令形态。
+
+    ``generate`` 的 ``read_only=True`` 是**约定**而非强制：这条 argv 带
+    ``--dangerously-skip-permissions``，CLI 不会拒绝写文件，因此
+    ``read_only_enforced`` 保持默认 ``False``。依赖"写不进去"的功能（停滞监督的
+    诊断）据此停用，而不是拿声明当保证。
+    """
     return {
         AGENT_PROFILE_GENERATE: _plain_noninteractive_profile(read_only=True),
         AGENT_PROFILE_REPL: _plain_noninteractive_profile(read_only=False),
@@ -367,6 +381,7 @@ BUILTIN_AGENT_SPECS: dict[str, AgentSpec] = {
                 prompt_delivery=PROMPT_DELIVERY_STDIN,
                 output_protocol=CODEX_JSON_LINES_PROTOCOL_ID,
                 read_only=True,
+                read_only_enforced=True,
             ),
             AGENT_PROFILE_GENERATE: AgentProfileSpec(
                 args=(
@@ -382,6 +397,7 @@ BUILTIN_AGENT_SPECS: dict[str, AgentSpec] = {
                 prompt_delivery=PROMPT_DELIVERY_ARGV_TAIL,
                 output_protocol=CODEX_JSON_LINES_PROTOCOL_ID,
                 read_only=True,
+                read_only_enforced=True,
             ),
             AGENT_PROFILE_REPL: AgentProfileSpec(
                 args=("--cd", "{cwd}"),
@@ -510,12 +526,14 @@ BUILTIN_AGENT_SPECS: dict[str, AgentSpec] = {
                 prompt_delivery=PROMPT_DELIVERY_STDIN,
                 output_protocol=PLAIN_PROTOCOL_ID,
                 read_only=True,
+                read_only_enforced=True,
             ),
             AGENT_PROFILE_GENERATE: AgentProfileSpec(
                 args=("--no-tools", "--print"),
                 prompt_delivery=PROMPT_DELIVERY_STDIN,
                 output_protocol=PLAIN_PROTOCOL_ID,
                 read_only=True,
+                read_only_enforced=True,
             ),
             AGENT_PROFILE_JUDGE: AgentProfileSpec(
                 args=("--no-tools", "--print"),

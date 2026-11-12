@@ -282,6 +282,16 @@ def _merge_profile_settings(
             f"agents.{agent_name}.profiles.{profile_name}: prompt_delivery='flag' "
             f"requires prompt_flag."
         )
+    # ``read_only_enforced`` 说的是"这串 argv 里有 provider 自己的只读沙箱/禁工具开关"。
+    # 因此它跟着 argv 走：配置覆盖了任何一段命令片段，内置默认的强制声明就失效，必须
+    # 重新显式声明——否则把 codex 的 ``--sandbox read-only`` 换成别的，调用方仍会
+    # 以为这一次写不进工作区。
+    argv_overridden = {"args", "tail_args", "expand"} & declared
+    inherited_enforced = (
+        base_profile.read_only_enforced
+        if base_profile is not None and not argv_overridden
+        else False
+    )
     return AgentProfileSpec(
         args=tuple(
             profile_settings.args
@@ -314,6 +324,11 @@ def _merge_profile_settings(
             profile_settings.read_only
             if profile_settings.read_only is not None
             else (base_profile.read_only if base_profile is not None else False)
+        ),
+        read_only_enforced=(
+            profile_settings.read_only_enforced
+            if "read_only_enforced" in declared
+            else inherited_enforced
         ),
     )
 

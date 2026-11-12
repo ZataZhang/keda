@@ -5,9 +5,11 @@
 
 - **精确 argv**：只按 argv 数组启动，永不经过 shell，因此配置里不可能塞进
   拼接后的 shell 文本。
-- **回环地址**：ready 判定只接受进程自报或配置声明的 loopback 地址；进程打印的
-  局域网地址被忽略（既不作为就绪证据，也绝不回复给终端）。地址不可确认时按
-  超时处理并终止自己刚启动的进程组。
+- **回环地址**：ready 判定只接受进程自报或配置声明的 loopback 地址（按解析出的
+  **主机**判定，不是按字符串前缀，仿冒域名如 ``localhost.evil.com`` 不算）；进程
+  打印的局域网地址被忽略（既不作为就绪证据，也绝不回复给终端）。地址不可确认时按
+  超时处理并终止自己刚启动的进程组。约束的是"回复给终端的那个地址"，服务自身的
+  绑定地址见 :func:`_process_tree_owns_listener`。
 - **身份可证实才动手**：注册表同时记 pid、进程组 id、argv 与启动时刻；stop 前
   重新读取 pid 的实际进程组，任一不符就拒绝发信号。pid 复用（老进程已死、
   新进程占了同一个 pid）因此不会变成误杀。
@@ -68,13 +70,10 @@ _READY_CONNECT_TIMEOUT_SECONDS = 1.0
 _TERMINATE_GRACE_SECONDS = 5.0
 _TERMINATE_POLL_INTERVAL_SECONDS = 0.1
 _LOG_SCAN_TAIL_BYTES = 65536
-#: 自报地址里允许出现的回环主机文本（IPv6 用 URL 里的方括号写法）。
-_LOOPBACK_URL_PATTERN = re.compile(
-    r"https?://(?:"
-    + "|".join(re.escape(host) for host in LOOPBACK_PREVIEW_HOSTS)
-    + r"|\[::1\])(?::\d{1,5})?(?:/[^\s\"'<>]*)?",
-    re.IGNORECASE,
-)
+#: 自报地址先按"URL 形状"整段取出，主机是否回环交给 :func:`parse_preview_url` 判定。
+#: 正则里只写主机名前缀会放行 ``http://localhost.evil.com`` 这类仿冒域名（前缀撞上
+#: 就算匹配），因此这里刻意不做主机判断，只切出候选。
+_URL_TOKEN_PATTERN = re.compile(r"https?://[^\s\"'<>]+", re.IGNORECASE)
 #: URL 结尾常被终端排版字符带住，这些不算路径的标点先剥掉。
 _TRAILING_URL_PUNCTUATION = ".,;:)]}\"'"
 
@@ -223,7 +222,8 @@ class SubprocessPreviewProcessManager(IPreviewProcessManager):
                 record=record,
                 message=(
                     f"Registered preview (pid {record.pid}) is no longer running; the record "
-                    "is stale and no process was signalled. `kc preview stop` clears it."
+                    f"is stale and no process was signalled. `kc preview stop` clears it."
+                    f"{_group_still_running_notice(record)}"
                 ),
             )
         identity_reason = _identity_mismatch_reason(record)
@@ -298,7 +298,7 @@ class SubprocessPreviewProcessManager(IPreviewProcessManager):
                 record=record,
                 message=(
                     f"Preview pid {record.pid} had already exited; the stale record was "
-                    "removed and no signal was sent."
+                    f"removed and no signal was sent.{_group_still_running_notice(record)}"
                 ),
             )
         identity_reason = _identity_mismatch_reason(record)
@@ -337,6 +337,26 @@ class SubprocessPreviewProcessManager(IPreviewProcessManager):
                 f"{termination}."
             ),
         )
+
+
+def _group_still_running_notice(record: PreviewProcessRecord) -> str:
+    """记录的组长已退出、但进程组里仍有成员时，给操作者可执行的核对指引。
+
+    这里刻意不补一发 ``killpg``：pid 与进程组号都会被复用，而登记在册的组长已经
+    不在，"这个组号仍然属于本次预览"就成了无法证实的前提——宁可就留着一个待核对
+    的端口，也不对陌生进程组发信号。代价必须说清楚，否则 ``kc preview stop`` 报
+    "no signal was sent"、``status`` 报 EXITED，而端口实际仍被占着。
+    """
+    if not _process_group_is_running(record.process_group):
+        return ""
+    reported_url_text = f" (recorded url {record.url})" if record.url else ""
+    return (
+        f" Note: process group {record.process_group} still reports running members, so a "
+        f"child of this preview{reported_url_text} may keep holding its port. KedaCode will "
+        "not signal a group whose recorded leader is already gone; list it with "
+        f"`ps -o pid,pgid,command -g {record.process_group}` and stop it yourself if it is "
+        "the leftover dev server."
+    )
 
 
 def _spawn_preview_process(
@@ -518,7 +538,15 @@ def _preview_registry_path(repo_root: Path) -> Path:
 
 @contextmanager
 def _preview_registry_lock(repo_root: Path) -> Iterator[None]:
-    """跨进程串行化同一仓库的预览启动与停止状态转换。"""
+    """跨进程串行化同一仓库的预览启动与停止状态转换。
+
+    **锁的范围包含整个 ready 等待**：启动方从登记记录一直到确认地址可达都握着锁，
+    这样并发启动才不可能各起一个进程组、后写记录的把先写的覆盖掉（代价见下）。
+    因此从另一个进程发起 ``kc preview stop`` 时，它最长要等
+    ``[agent_runner.preview].ready_timeout_seconds`` 才拿到锁——**正在启动的预览无法
+    被别的进程立刻停掉**。中途想收手的正确做法是等启动自己结束（ready 或超时都会
+    把那个进程组停掉并清记录）；``kc preview status`` 不加锁，随时可读。
+    """
     state_dir = preview_state_dir()
     state_dir.mkdir(parents=True, exist_ok=True)
     lock_path = state_dir / f"{preview_repo_slug(repo_root)}.lock"
@@ -634,35 +662,46 @@ def _resolve_ready_url(
     process_pid: int,
     process_group: int,
 ) -> str | None:
-    """给出可回复终端的就绪地址：期望地址与自报地址都要求当前可连通。"""
+    """给出可回复终端的就绪地址：期望地址与自报地址都要求当前可连通。
+
+    自报地址按**出现顺序逐个试**：日志里先出现一个还没起来的地址（或干脆是仿冒
+    域名）不该让后面真正可达的那个永远没机会——只看第一个候选会把就绪判定变成
+    "等到超时"。
+    """
     if expected_url:
         return (
             expected_url
             if _url_is_reachable(expected_url, process_pid=process_pid, process_group=process_group)
             else None
         )
-    reported_url = _scan_reported_loopback_url(log_path)
-    if reported_url is None:
-        return None
-    return (
-        reported_url
-        if _url_is_reachable(reported_url, process_pid=process_pid, process_group=process_group)
-        else None
-    )
+    for reported_url in _loopback_url_candidates(log_path):
+        if _url_is_reachable(reported_url, process_pid=process_pid, process_group=process_group):
+            return reported_url
+    return None
 
 
-def _scan_reported_loopback_url(log_path: Path) -> str | None:
-    """从进程自己的输出里取第一个回环地址；局域网/远程地址一律忽略。"""
+def _loopback_url_candidates(log_path: Path) -> list[str]:
+    """进程自己的输出里所有**主机确实是回环**的地址，按出现顺序去重。
+
+    局域网/远程地址与仿冒域名（``localhost.evil.com``）都在
+    :func:`~backend.core.shared.models.agent_session.require_loopback_preview_url`
+    那一道被滤掉，既不作为就绪证据，也绝不回复给终端。
+    """
     tail_text = _read_log_tail(log_path)
     if not tail_text:
-        return None
-    for match in _LOOPBACK_URL_PATTERN.finditer(tail_text):
-        candidate = match.group(0).rstrip(_TRAILING_URL_PUNCTUATION)
+        return []
+    candidates: list[str] = []
+    for url_match in _URL_TOKEN_PATTERN.finditer(tail_text):
+        candidate = url_match.group(0).rstrip(_TRAILING_URL_PUNCTUATION)
         try:
-            return require_loopback_preview_url(candidate, source="preview process output")
+            normalized_url = require_loopback_preview_url(
+                candidate, source="preview process output"
+            )
         except ValueError:
             continue
-    return None
+        if normalized_url not in candidates:
+            candidates.append(normalized_url)
+    return candidates
 
 
 def _read_log_tail(log_path: Path) -> str:
@@ -693,7 +732,15 @@ def _url_is_reachable(url_text: str, *, process_pid: int, process_group: int) ->
 
 
 def _process_tree_owns_listener(*, process_pid: int, process_group: int, port: int) -> bool:
-    """确认监听 socket 属于本次命令及其仍在同一受管组内的后代进程。"""
+    """确认监听 socket 属于本次命令及其仍在同一受管组内的后代进程。
+
+    匹配只看**端口**，不看 ``laddr.ip``：KC 保证的是"回复给终端的那个回环地址此刻
+    确实由这个进程组在服务"（回环可达在 :func:`_url_is_reachable` 里单独验），
+    不是"这个 dev server 只绑了回环"。白名单里的命令若自行绑到 ``0.0.0.0``，就绪
+    判定仍会通过，而回复给终端的地址依旧是回环 URL——网卡上多开了一份可达性属于
+    该 dev 命令自己的选择，KC 不改它的 argv，也不在这里拦截。要收紧就把它写进
+    预览命令本身（例如 ``-- --host 127.0.0.1``）。
+    """
     try:
         root_process = psutil.Process(process_pid)
     except (psutil.Error, OSError):

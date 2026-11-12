@@ -534,10 +534,12 @@ def run_agent_with_prompt(
                 exc,
             )
             return None
-        if not diagnosis_profile_spec.read_only:
+        if not diagnosis_profile_spec.read_only_enforced:
             _logger.warning(
                 "Issue #%d: stall supervisor disabled because agent '%s' declares a "
-                "non-read-only '%s' profile; no diagnosis will be called.",
+                "'%s' profile whose read-only stance is not enforced by the CLI "
+                "(read_only_enforced is false); diagnosing with it would put a second "
+                "writable executor in this worktree. No diagnosis will be called.",
                 issue.number,
                 supervisor_agent,
                 AGENT_PROFILE_GENERATE,

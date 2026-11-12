@@ -61,6 +61,7 @@ import socket, subprocess, sys, time
 
 port = int(sys.argv[1])
 mode = sys.argv[2] if len(sys.argv) > 2 else "loopback"
+stale_port = int(sys.argv[3]) if len(sys.argv) > 3 else port + 1
 grandchild = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(300)"])
 print(f"grandchild_pid={grandchild.pid}", flush=True)
 
@@ -75,6 +76,14 @@ server.listen(8)
 if mode == "lan":
     # 只报可路由地址（很多真 dev server 会同时打印局域网地址）。
     print(f"Network: http://10.20.30.40:{port}/", flush=True)
+elif mode == "lookalike":
+    # 仿冒域名先出现：主机不是回环就不算候选，后面那条真地址仍必须被读到。
+    print(f"  - Local:   http://localhost.evil.com:{port}/", flush=True)
+    print(f"  - Local:   http://127.0.0.1:{port}/", flush=True)
+elif mode == "stale-first":
+    # 先报一个没人监听的端口，再报真正可达的那个：前者不得把后者挡死。
+    print(f"  - Local:   http://127.0.0.1:{stale_port}/", flush=True)
+    print(f"  - Local:   http://127.0.0.1:{port}/", flush=True)
 else:
     print(f"  - Local:   http://127.0.0.1:{port}/", flush=True)
 while True:
@@ -368,6 +377,67 @@ def test_lan_only_address_is_not_ready_and_group_is_reclaimed(
     grandchild_pid = _grandchild_pid_from_log(log_files[0]) if log_files else None
     assert grandchild_pid is not None
     assert _wait_pid_gone(grandchild_pid), "孙进程必须随整组退出，不能留下孤儿"
+
+
+def test_lookalike_loopback_domain_is_no_candidate_and_the_real_one_still_becomes_ready(
+    isolated_state_home: Path, repo_root: Path, tmp_path: Path
+) -> None:
+    """仿冒域名先出现也不作候选：真正可达的回环地址仍被读到并回复给终端。
+
+    按主机名**前缀**匹配会把 ``http://localhost.evil.com:8000/`` 切成一条
+    "http://localhost" 命中：它撞上的是本机 hosts 开头，实际是个可路由域名。旧写法
+    取"第一个看起来像回环的候选"就返回，于是一条不可达（甚至仿冒）的地址把后面的
+    真地址挡死，预览只能等到超时。
+    """
+    script_path = tmp_path / "lookalike_dev_server.py"
+    script_path.write_text(_FAKE_DEV_SERVER, encoding="utf-8")
+    port = _free_loopback_port()
+    manager = SubprocessPreviewProcessManager()
+    config = _config_with_preview(
+        PreviewProfile(
+            argv=(sys.executable, str(script_path), str(port), "lookalike"),
+            ready_timeout_seconds=30,
+        )
+    )
+
+    outcome = run_preview_start(
+        config=config, repo_root=repo_root, confirmed_argv=None, preview_manager=manager
+    )
+
+    try:
+        assert outcome.exit_ok is True, outcome.message
+        assert outcome.state == PreviewState.READY
+        assert outcome.url == f"http://127.0.0.1:{port}/"
+        assert "evil.com" not in outcome.message
+    finally:
+        manager.stop_preview(repo_root=repo_root)
+
+
+def test_unreachable_self_reported_address_does_not_block_the_next_one(
+    isolated_state_home: Path, repo_root: Path, tmp_path: Path
+) -> None:
+    """自报地址里先出现一个没人监听的端口时，继续往后试而不是判超时。"""
+    script_path = tmp_path / "stale_first_dev_server.py"
+    script_path.write_text(_FAKE_DEV_SERVER, encoding="utf-8")
+    port = _free_loopback_port()
+    stale_port = _free_loopback_port()
+    manager = SubprocessPreviewProcessManager()
+    config = _config_with_preview(
+        PreviewProfile(
+            argv=(sys.executable, str(script_path), str(port), "stale-first", str(stale_port)),
+            ready_timeout_seconds=30,
+        )
+    )
+
+    outcome = run_preview_start(
+        config=config, repo_root=repo_root, confirmed_argv=None, preview_manager=manager
+    )
+
+    try:
+        assert outcome.exit_ok is True, outcome.message
+        assert outcome.url == f"http://127.0.0.1:{port}/"
+    finally:
+        manager.stop_preview(repo_root=repo_root)
 
 
 def test_silent_dev_command_times_out_without_url(
@@ -694,6 +764,61 @@ def test_stop_clears_stale_record_without_signalling(
     assert stopped.killed is False
     assert "no signal was sent" in stopped.message
     assert read_preview_record(repo_root) is None
+
+
+def test_stop_of_dead_leader_with_live_group_members_names_the_leftover_port(
+    isolated_state_home: Path, repo_root: Path, tmp_path: Path
+) -> None:
+    """组长先退出、组里仍有成员：不发信号（前提已不可证实），但要把端口风险说清楚。
+
+    KC 在这里刻意不补一发 ``killpg``——pid/进程组号会被复用，登记在册的组长已经不在，
+    "这个组号仍属于本次预览"就成了猜的。不可发信号是护栏，不是遗漏，因此操作者必须
+    从消息里看到"可能有成员还占着端口"以及怎么自己核对，否则 stop 报成功、status 报
+    EXITED，端口却仍被一个 KC 已经忘掉的服务占着。
+    """
+    leader_script = tmp_path / "spawn_then_exit.py"
+    leader_script.write_text(
+        "import subprocess, sys\n"
+        "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'])\n",
+        encoding="utf-8",
+    )
+    leader = subprocess.Popen([sys.executable, str(leader_script)], start_new_session=True)
+    leader.wait(timeout=30)
+    leftover_group = leader.pid
+    assert preview_process_manager._process_group_is_running(  # noqa: SLF001 - 用例前提
+        leftover_group
+    ), "前提：组里仍有活着的成员"
+
+    write_preview_record(
+        repo_root,
+        PreviewProcessRecord(
+            key="current",
+            pid=leader.pid,
+            process_group=leftover_group,
+            argv=("npm", "run", "dev"),
+            cwd=repo_root,
+            log_path=isolated_state_home / "unrelated.log",
+            url="http://127.0.0.1:5173/",
+            owner_pid=os.getpid(),
+        ),
+    )
+    manager = SubprocessPreviewProcessManager()
+
+    try:
+        status = manager.inspect_preview(repo_root=repo_root)
+        stopped = manager.stop_preview(repo_root=repo_root)
+
+        assert status.state == PreviewState.EXITED
+        assert "still reports running members" in status.message
+        assert stopped.stopped is True
+        assert stopped.killed is False
+        assert f"ps -o pid,pgid,command -g {leftover_group}" in stopped.message
+        assert read_preview_record(repo_root) is None
+    finally:
+        try:
+            os.killpg(leftover_group, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
 
 
 def test_status_without_record_is_read_only_and_ok(

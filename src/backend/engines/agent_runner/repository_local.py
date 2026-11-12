@@ -398,7 +398,8 @@ _AGENT_REGISTRY_EXAMPLE_COMMENT = """\
 # prompt_delivery（argv_tail / flag / stdin）、prompt_flag（flag 投递时的参数名）、
 # output_protocol（plain / claude-stream-json / pi-json-lines / codex-json-lines /
 # opencode-json-lines 或插件协议）、expand（展开器声明，如 "git_writable_roots:--add-dir"）、
-# tail_args / resume_tail_args、read_only；agent 级可声明 supports_resume / resume_args。
+# tail_args / resume_tail_args、read_only、read_only_enforced（argv 含 provider 自己的只读沙箱/禁工具开关时才声明；
+# 覆盖 args / tail_args / expand 后不再继承内置值）；agent 级可声明 supports_resume / resume_args。
 #
 # 下面是 pi 的注册块示例（内置默认已生效，无需复制即可用）：
 #
@@ -424,12 +425,14 @@ _AGENT_REGISTRY_EXAMPLE_COMMENT = """\
 # prompt_delivery = "stdin"
 # output_protocol = "plain"
 # read_only = true
+# read_only_enforced = true
 #
 # [agent_runner.agents.pi.profiles.generate]
 # args = ["--no-tools", "--print"]
 # prompt_delivery = "stdin"
 # output_protocol = "plain"
 # read_only = true
+# read_only_enforced = true
 #
 # [agent_runner.agents.pi.profiles.repl]
 # args = ["--approve", "--print"]
