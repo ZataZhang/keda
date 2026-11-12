@@ -989,11 +989,7 @@ def advance_backlog_queue(
 
     started: list[BacklogActionResult] = []
     queued: list[str] = []
-    skipped: list[str] = (
-        [f"agent/running count failed; skipped promotions this pass: {running_count_error}"]
-        if running_count_error is not None
-        else []
-    )
+    skipped: list[str] = []
 
     for prd in eligible:
         if len(started) < free_slots:
@@ -1083,6 +1079,7 @@ def advance_backlog_queue(
         started=started,
         queued=queued,
         skipped=skipped,
+        running_count_error=running_count_error,
     )
 
 

@@ -296,9 +296,10 @@ def test_advance_fails_closed_when_running_count_fails(
     assert report.free_slots == 0
     assert report.started == []
     assert report.queued == [candidate]
-    assert report.skipped == [
-        "agent/running count failed; skipped promotions this pass: GitHub unavailable"
-    ]
+    # 整轮级别的失败单独成字段：skipped 的元素在任何地方都是 PRD 路径，
+    # 把错误句塞进去会被读成「某个 PRD 被跳过了」。
+    assert report.skipped == []
+    assert report.running_count_error == "GitHub unavailable"
     assert "skipping new promotions this pass" in caplog.text
 
 

@@ -52,6 +52,10 @@ def _print_advance_report(report) -> None:
         f"ceiling={report.ceiling} source={report.ceiling_source} "
         f"running={running_count_label} free_slots={report.free_slots}"
     )
+    if report.running_count_error is not None:
+        # 整轮级别的失败，不是某个 PRD 被跳过——不能混进 skipped 列表。
+        console.print(f"[red]running count failed[/] {report.running_count_error}")
+        console.print("  promotions skipped this pass (reconcile results are kept).")
     if report.reconciled_completed:
         console.print(f"[green]completed[/] {report.reconciled_completed}")
     if report.reconciled_failed:
@@ -73,6 +77,7 @@ def _print_advance_report(report) -> None:
             report.started,
             report.queued,
             report.skipped,
+            report.running_count_error,
         )
     ):
         console.print("[dim]nothing to do[/]")
