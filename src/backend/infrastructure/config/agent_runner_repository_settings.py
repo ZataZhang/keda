@@ -186,12 +186,111 @@ def _warn_deprecated_template_mode_pins(
     )
 
 
+# 已经提示过的个人覆盖文件路径：daemon 每轮都会重新加载，同一路径只提示一次。
+_ANNOUNCED_LOCAL_OVERRIDES: set[str] = set()
+
+
+def _read_repository_toml(config_path: Path) -> dict[str, Any]:
+    """读取并解析一个仓库级 TOML 配置文件。"""
+    try:
+        with open(config_path, "rb") as config_file:
+            return tomllib.load(config_file)
+    except tomllib.TOMLDecodeError as exc:
+        raise ValueError(f"Invalid KedaCode local config at {config_path}: {exc}") from exc
+
+
+def _main_checkout_root(repo_root_path: Path) -> Path | None:
+    """linked worktree 内返回主检出根目录；主检出或无法判断时返回 ``None``。
+
+    只读 ``.git`` 指针文件与 ``commondir``，不起 git 子进程：daemon 每轮轮询都会
+    重新加载配置，这里需要足够便宜。
+    """
+    git_pointer_path = repo_root_path / ".git"
+    if not git_pointer_path.is_file():
+        return None
+    pointer_text = git_pointer_path.read_text(encoding="utf-8").strip()
+    if not pointer_text.startswith("gitdir:"):
+        return None
+    worktree_git_dir = Path(pointer_text.removeprefix("gitdir:").strip())
+    if not worktree_git_dir.is_absolute():
+        worktree_git_dir = repo_root_path / worktree_git_dir
+    commondir_path = worktree_git_dir / "commondir"
+    if not commondir_path.is_file():
+        return None
+    common_git_dir = Path(commondir_path.read_text(encoding="utf-8").strip())
+    if not common_git_dir.is_absolute():
+        common_git_dir = worktree_git_dir / common_git_dir
+    resolved_common_git_dir = common_git_dir.resolve()
+    if resolved_common_git_dir.name != ".git":
+        return None
+    return resolved_common_git_dir.parent
+
+
+def _find_local_override_path(repo_root_path: Path) -> Path | None:
+    """定位个人覆盖文件：先找当前检出，再回落到主检出。
+
+    个人覆盖不进版本库，因此 ``kc`` 创建的 worktree 里不会有副本；回落到主检出
+    让 worktree 内的运行与主检出看到同一份个人配置，而不必复制文件。
+    """
+    candidate_roots = [repo_root_path]
+    main_checkout_root = _main_checkout_root(repo_root_path)
+    if main_checkout_root is not None:
+        candidate_roots.append(main_checkout_root)
+    for candidate_root in candidate_roots:
+        override_path = candidate_root / product_identity.REPOSITORY_LOCAL_OVERRIDE_FILENAME
+        if override_path.is_file():
+            return override_path
+    return None
+
+
+def _deep_merge_toml_tables(
+    base_table: dict[str, Any], override_table: dict[str, Any]
+) -> dict[str, Any]:
+    """表按键递归合并，标量与数组整体替换（与 ``.env.local`` 的直觉一致）。"""
+    merged_table = dict(base_table)
+    for key, override_value in override_table.items():
+        base_value = merged_table.get(key)
+        if isinstance(base_value, dict) and isinstance(override_value, dict):
+            merged_table[key] = _deep_merge_toml_tables(base_value, override_value)
+        else:
+            merged_table[key] = override_value
+    return merged_table
+
+
+def _apply_local_override(
+    repository_toml_data: dict[str, Any], repo_root_path: Path
+) -> dict[str, Any]:
+    """把 ``.kedacode.local.toml`` 叠加到仓库配置上；没有覆盖文件时原样返回。"""
+    override_path = _find_local_override_path(repo_root_path)
+    if override_path is None:
+        return repository_toml_data
+    override_toml_data = _read_repository_toml(override_path)
+    override_agent_runner_section = override_toml_data.get("agent_runner", {})
+    if not isinstance(override_agent_runner_section, dict):
+        raise ValueError(
+            f"Invalid KedaCode local config at {override_path}: [agent_runner] must be a table."
+        )
+    # 仓库身份（id / github_repo 等）决定 Issue 与 registry 的归属，个人覆盖不得改写。
+    if "repository" in override_agent_runner_section:
+        raise ValueError(
+            f"Invalid KedaCode local config at {override_path}: "
+            "[agent_runner.repository] identity cannot be overridden locally; "
+            f"edit {product_identity.REPOSITORY_CONFIG_FILENAME} instead."
+        )
+    if str(override_path) not in _ANNOUNCED_LOCAL_OVERRIDES:
+        _ANNOUNCED_LOCAL_OVERRIDES.add(str(override_path))
+        logger.info("Applying personal KedaCode overrides from %s", override_path)
+    return _deep_merge_toml_tables(repository_toml_data, override_toml_data)
+
+
 def load_agent_runner_local_settings(
     repo_root_path: Path,
 ) -> AgentRunnerRepositorySettings | None:
     """Load repository-local KedaCode settings from the repository config file.
 
-    只从当前命名的 ``.kedacode.toml`` 读取仓库配置。
+    读取 ``.kedacode.toml``，并叠加个人覆盖 ``.kedacode.local.toml``（若存在；
+    linked worktree 内回落到主检出的同名文件）。覆盖文件不得改写
+    ``[agent_runner.repository]`` 身份段。
 
     Args:
         repo_root_path: Target Git repository root path.
@@ -207,11 +306,9 @@ def load_agent_runner_local_settings(
     if not local_config_path.is_file():
         return None
 
-    try:
-        with open(local_config_path, "rb") as local_config_file:
-            local_toml_data: dict[str, Any] = tomllib.load(local_config_file)
-    except tomllib.TOMLDecodeError as exc:
-        raise ValueError(f"Invalid KedaCode local config at {local_config_path}: {exc}") from exc
+    local_toml_data: dict[str, Any] = _apply_local_override(
+        _read_repository_toml(local_config_path), resolved_repo_path
+    )
 
     agent_runner_section = local_toml_data.get("agent_runner")
     if not isinstance(agent_runner_section, dict):

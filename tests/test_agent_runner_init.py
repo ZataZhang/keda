@@ -849,6 +849,7 @@ def test_ensure_gitignore_inserts_block_when_missing(tmp_path: Path) -> None:
         ".kedacode/",
         ".agent-runner/",
         ".kc-worktrees/",
+        ".kedacode.local.toml",
         "tasks/evidence/**",
         "!tasks/evidence/**/",
         "!tasks/evidence/**/*.md",
@@ -888,6 +889,7 @@ def test_ensure_gitignore_skips_patterns_already_outside_block(
     assert result.entries_added == (
         ".kedacode/",
         ".kc-worktrees/",
+        ".kedacode.local.toml",
         "tasks/evidence/**",
         "!tasks/evidence/**/",
         "!tasks/evidence/**/*.md",
@@ -982,7 +984,7 @@ def test_ensure_gitignore_does_not_insert_empty_block_when_all_external(
     repo_path.mkdir()
     gitignore = repo_path / ".gitignore"
     gitignore.write_text(
-        ".kedacode/\n.agent-runner/\n.kc-worktrees/\n"
+        ".kedacode/\n.agent-runner/\n.kc-worktrees/\n.kedacode.local.toml\n"
         "tasks/evidence/**\n!tasks/evidence/**/\n!tasks/evidence/**/*.md\n",
         encoding="utf-8",
     )
@@ -997,6 +999,7 @@ def test_ensure_gitignore_does_not_insert_empty_block_when_all_external(
         ".kedacode/",
         ".agent-runner/",
         ".kc-worktrees/",
+        ".kedacode.local.toml",
         "tasks/evidence/**",
         "!tasks/evidence/**/",
         "!tasks/evidence/**/*.md",
