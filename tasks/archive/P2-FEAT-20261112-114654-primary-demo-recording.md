@@ -185,6 +185,8 @@ flowchart LR
 ~/code/keda/
 ├── src/backend/core/use_cases/agent_runner_structured_evidence.py [修改]
 │   【PrimaryDemo 数据类；manifest/report 字段；解析与文件校验；executor 指令加录制约定】
+├── src/backend/core/use_cases/agent_runner_primary_demo.py [新增]
+│   【PrimaryDemo 数据类、解析与录制约定文本；为守住单文件 1000 非空行硬上限从下方模块拆出】
 ├── src/backend/core/use_cases/agent_runner_structured_evidence_rendering.py [修改]
 │   【主演示块 + rv 折叠；无 primary_demo 时输出不变】
 ├── src/backend/core/use_cases/agent_runner_verdict.py [修改]【verifier 提示词加对照规则】
@@ -346,7 +348,7 @@ flowchart LR
 
 ### Final Reconciliation
 
-- 实现与 PRD 一致，无需改写前文。实现中确认 verifier 提示词实际位于 `agent_runner_verdict.py::build_verifier_prompt`（`run_verifier_agent.py` 只转发），Change Impact Tree 已按此记录。
+- 实现与 PRD 一致。CI 的单文件 1000 非空行硬上限要求把主演示代码拆到新模块 `agent_runner_primary_demo.py`，Change Impact Tree 已补；实现中确认 verifier 提示词实际位于 `agent_runner_verdict.py::build_verifier_prompt`（`run_verifier_agent.py` 只转发），Change Impact Tree 已按此记录。
 - 本次在交互式会话中由实现 agent 自验，未经 keda 独立 verifier；人工验收以 PR 合并为准。
 - `just test` 中 `test_app_config_default_registry_is_builtin` 失败为既有问题：在 `git archive HEAD` 干净副本复现，原因是用户级 `~/.kedacode/config.toml` 的 `codex-nosandbox` 泄漏进默认配置用例，与本改动无关，另行处理；提交时因此跳过 `check-test-flag`。
 - 模板仓库改动经独立 PR 合入 `zata-codes-template` main。
