@@ -121,9 +121,10 @@ def test_console_probe_reaps_background_process(tmp_path: Path) -> None:
     assert "console reachable" in probe_result.stdout
 
     console_pid = int(pid_file.read_text(encoding="utf-8").strip())
-    assert _wait_until_gone(
-        console_pid
-    ), f"后台 console 进程 {console_pid} 在步骤结束后仍然存活：探活步骤缺少 EXIT trap 回收"
-    # 兜底：及时清理，避免测试自身留下孤儿进程。
-    if _process_is_alive(console_pid):
+    console_reaped = _wait_until_gone(console_pid)
+    # 兜底清理必须放在断言之前：断言失败恰恰是子进程还活着的时候，把清理写在
+    # 断言之后会让这条路径永远执行不到，反过来给测试自己留下孤儿进程。
+    if not console_reaped:
         os.kill(console_pid, signal.SIGKILL)
+    orphan_message = f"后台 console 进程 {console_pid} 结束后仍然存活：缺少 EXIT trap 回收"
+    assert console_reaped, orphan_message
