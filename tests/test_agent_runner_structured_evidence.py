@@ -809,3 +809,147 @@ def test_prompt_suffix_documents_stdout_assertions() -> None:
     """Both prompt variants tell the agent how to declare output assertions."""
     assert "stdout_assertions" in build_structured_evidence_prompt_suffix("zh-CN")
     assert "stdout_assertions" in build_structured_evidence_prompt_suffix("en-US")
+
+
+# ---------------------------------------------------------------------------
+# primary_demo：给人看的主演示录屏（可选）
+# ---------------------------------------------------------------------------
+
+_DEMO_STEPS = [
+    {"caption": "选择 .exe 被前端拒绝", "result": "红字提示，未发上传请求"},
+    {"caption": "能看图的模型读出暗号", "result": "回复含 PURPLE-7", "mock": True},
+]
+
+
+def _write_primary_demo_evidence(
+    evidence_dir: Path, primary_demo: object, *, write_video: bool = True
+) -> dict[str, str]:
+    """写入带 ``primary_demo`` 的 manifest 与证据文件，返回 rv 证据文件。"""
+    files = _write_evidence_files(evidence_dir)
+    _write_manifest(evidence_dir)
+    manifest_path = evidence_dir / "evidence.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["primary_demo"] = primary_demo
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+    if write_video:
+        (evidence_dir / "demo-attachments.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42")
+    return files
+
+
+def test_load_evidence_manifest_parses_primary_demo(tmp_path: Path) -> None:
+    """primary_demo 被解析；目录前缀被去掉，mock 只认 true。"""
+    evidence_dir = tmp_path / ".iar" / "evidence"
+    _write_primary_demo_evidence(
+        evidence_dir,
+        {"file": ".iar/evidence/demo-attachments.mp4", "steps": _DEMO_STEPS},
+    )
+
+    manifest = load_evidence_manifest(tmp_path, _legacy_config())
+
+    assert manifest.primary_demo is not None
+    assert manifest.primary_demo.file == "demo-attachments.mp4"
+    assert [step.mock for step in manifest.primary_demo.steps] == [False, True]
+
+
+def test_load_evidence_manifest_without_primary_demo_is_none(tmp_path: Path) -> None:
+    """旧 manifest 没有 primary_demo，解析结果为 None。"""
+    evidence_dir = tmp_path / ".iar" / "evidence"
+    _write_manifest(evidence_dir)
+
+    assert load_evidence_manifest(tmp_path, _legacy_config()).primary_demo is None
+
+
+@pytest.mark.parametrize(
+    "bad_demo",
+    [
+        "demo.mp4",
+        {"file": "", "steps": _DEMO_STEPS},
+        {"file": "demo-attachments.mp4", "steps": []},
+        {"file": "demo-attachments.mp4", "steps": [{"caption": "只有字幕"}]},
+    ],
+)
+def test_load_evidence_manifest_rejects_malformed_primary_demo(
+    tmp_path: Path, bad_demo: object
+) -> None:
+    """primary_demo 形状不对时报 manifest 格式错误。"""
+    evidence_dir = tmp_path / ".iar" / "evidence"
+    _write_primary_demo_evidence(evidence_dir, bad_demo)
+
+    with pytest.raises(ValidationEvidenceError, match="primary_demo"):
+        load_evidence_manifest(tmp_path, _legacy_config())
+
+
+def test_validate_evidence_manifest_rejects_missing_demo_recording(tmp_path: Path) -> None:
+    """primary_demo 指向的录屏不在证据目录时，错误信息带文件名。"""
+    evidence_dir = tmp_path / ".iar" / "evidence"
+    _write_primary_demo_evidence(
+        evidence_dir,
+        {"file": "demo-attachments.mp4", "steps": _DEMO_STEPS},
+        write_video=False,
+    )
+
+    with pytest.raises(ValidationEvidenceError, match="demo-attachments.mp4"):
+        validate_evidence_manifest(
+            issue_body=_ISSUE_BODY + "\n" + format_structured_evidence_marker("zh-CN"),
+            checklist_items=["- [ ] 行为 A", "- [ ] 行为 B"],
+            worktree_path=tmp_path,
+            config=_legacy_config(),
+        )
+
+
+def _build_comment_for(tmp_path: Path, files: dict[str, str]) -> str:
+    return build_evidence_comment(
+        upload=EvidenceUpload(
+            branch="iar-evidence/issue-42",
+            commit_sha="commit1",
+            file_names=(*files.keys(), "demo-attachments.mp4"),
+        ),
+        worktree_path=tmp_path,
+        config=_legacy_config(),
+        pr_url="https://github.com/example/repo/pull/7",
+        head_sha="abc1234",
+        issue_body=_ISSUE_BODY + "\n" + format_structured_evidence_marker("zh-CN"),
+    )
+
+
+def test_build_evidence_comment_puts_primary_demo_first(tmp_path: Path) -> None:
+    """主演示在第一个 RV 小节之前，rv 全部折叠，mock 步带警示。"""
+    evidence_dir = tmp_path / ".iar" / "evidence"
+    files = _write_primary_demo_evidence(
+        evidence_dir, {"file": "demo-attachments.mp4", "steps": _DEMO_STEPS}
+    )
+
+    comment = _build_comment_for(tmp_path, files)
+
+    demo_index = comment.index("### 主演示")
+    details_index = comment.index("<details>")
+    assert demo_index < details_index < comment.index("### RV-1")
+    assert comment.index("### RV-2") < comment.index("</details>")
+    assert (
+        "https://github.com/example/repo/blob/iar-evidence/issue-42/demo-attachments.mp4" in comment
+    )
+    assert "1. **选择 .exe 被前端拒绝**：红字提示，未发上传请求\n" in comment
+    assert "2. **能看图的模型读出暗号**：回复含 PURPLE-7 — ⚠️ mock，未验证" in comment
+
+
+def test_build_evidence_comment_without_primary_demo_is_unchanged(tmp_path: Path) -> None:
+    """没有 primary_demo 时不出现主演示块，也不折叠 rv。"""
+    evidence_dir = tmp_path / ".iar" / "evidence"
+    files = _write_evidence_files(evidence_dir)
+    _write_manifest(evidence_dir)
+
+    comment = _build_comment_for(tmp_path, files)
+
+    assert "主演示" not in comment
+    assert "<details>" not in comment
+    assert "### RV-1 行为 A 真实验证" in comment
+
+
+@pytest.mark.parametrize("language", ["zh-CN", "en-US"])
+def test_prompt_suffix_documents_primary_demo(language: str) -> None:
+    """executor 指令要求按脚本单独录主演示，并如实标注 mock。"""
+    suffix = build_structured_evidence_prompt_suffix(language)
+
+    assert "primary_demo" in suffix
+    assert "demo-<slug>.mp4" in suffix
+    assert ("mock，未验证" if language == "zh-CN" else "mock, not verified") in suffix

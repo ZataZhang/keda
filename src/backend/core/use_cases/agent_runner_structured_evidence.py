@@ -28,6 +28,13 @@ from backend.core.shared.models.agent_runner import (
     DeliveryGateError,
     DeliveryGateFailureKind,
 )
+from backend.core.use_cases.agent_runner_primary_demo import (
+    PRIMARY_DEMO_PROMPT_EN,
+    PRIMARY_DEMO_PROMPT_ZH,
+    PrimaryDemo,
+    PrimaryDemoFormatError,
+    parse_primary_demo,
+)
 from backend.core.use_cases.agent_runner_evidence_format import (
     IMAGE_EVIDENCE_SUFFIXES,
 )
@@ -157,6 +164,7 @@ class EvidenceManifest:
     version: int
     language: str
     items: tuple[EvidenceBlock, ...]
+    primary_demo: PrimaryDemo | None = None
 
 
 @dataclass(frozen=True)
@@ -181,6 +189,7 @@ class StructuredEvidenceReport:
 
     language: str
     items: tuple[StructuredEvidenceItemReport, ...]
+    primary_demo: PrimaryDemo | None = None
 
 
 _LABELS: dict[str, dict[str, str]] = {
@@ -573,7 +582,18 @@ def load_evidence_manifest(
         version=1,
         language=language,
         items=tuple(parsed_blocks),
+        primary_demo=_parse_primary_demo(manifest_data.get("primary_demo"), evidence_dir_text),
     )
+
+
+def _parse_primary_demo(raw_demo: object, evidence_dir_text: str) -> PrimaryDemo | None:
+    """解析可选的 ``primary_demo``，形状错误包装成 manifest 格式错误。"""
+    try:
+        return parse_primary_demo(
+            raw_demo, f"`{evidence_dir_text}/evidence.json` field `primary_demo`"
+        )
+    except PrimaryDemoFormatError as format_error:
+        raise _manifest_format_error(str(format_error)) from format_error
 
 
 def _extract_manifest_string(
@@ -822,9 +842,16 @@ def validate_evidence_manifest(
                 "`validation.require_negative_control=false` to opt out."
             )
 
+    demo = manifest.primary_demo
+    if demo is not None and not (resolved_evidence_dir / demo.file).is_file():
+        raise ValidationEvidenceError(
+            f"`primary_demo.file` `{demo.file}` is missing from `{evidence_dir_text}/`."
+        )
+
     return StructuredEvidenceReport(
         language=manifest.language,
         items=tuple(item_reports),
+        primary_demo=manifest.primary_demo,
     )
 
 
@@ -966,6 +993,7 @@ def build_structured_evidence_prompt_suffix(language: str) -> str:
             "所有证据文件必须命名为 `rv-<item_number>-<slug>.<ext>` 并放在 `{evidence_dir}/` 下。"
             "重要：每个证据文件必须只包含对应 item 的输出，禁止混入其他 item 的内容；"
             "不要用 `exec > >(tee -a ...)` 这类全局 stdout 重定向，它会让多个 item 的输出串到同一个文件里。"
+            + PRIMARY_DEMO_PROMPT_ZH
         ).format(language=language, evidence_dir="{evidence_dir}")
     return (
         "Additionally, you must write a structured evidence manifest to "
@@ -1002,7 +1030,8 @@ def build_structured_evidence_prompt_suffix(language: str) -> str:
         "under `{evidence_dir}/`. "
         "Important: each evidence file must contain ONLY the output of its own item; "
         "never mix output from multiple items into one file. Avoid shell-wide stdout "
-        "redirection such as `exec > >(tee -a ...)` which leaks output across files."
+        "redirection such as `exec > >(tee -a ...)` which leaks output across files. "
+        + PRIMARY_DEMO_PROMPT_EN
     ).format(language=language, evidence_dir="{evidence_dir}")
 
 

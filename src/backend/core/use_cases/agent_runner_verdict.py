@@ -135,6 +135,25 @@ def build_verifier_prompt(
             )
     oracle_block = "\n".join(oracle_lines) or "(no structured oracle items)"
 
+    demo_lines: list[str] = []
+    if manifest.primary_demo is not None:
+        demo_lines = [
+            "Primary demo (the one recording shown to humans first): "
+            f"{manifest.primary_demo.file}",
+            *(
+                f"  {step_number}. {demo_step.caption} -> {demo_step.result}"
+                f"{' [declared mock]' if demo_step.mock else ''}"
+                for step_number, demo_step in enumerate(manifest.primary_demo.steps, start=1)
+            ),
+            "Watch it and compare it with the PRD's primary demo script: does it cover",
+            "every scripted step, and does each step really show what its result claims?",
+            "If a step proves external behavior (real model, sandbox, third-party API)",
+            "but used a mock that is NOT captioned on screen and NOT declared mock above,",
+            "that is a misleading demo: record it as a finding; on its own it makes the",
+            "verdict yellow, never green.",
+            "",
+        ]
+
     return "\n".join(
         [
             f"You are an INDEPENDENT verifier for issue #{issue.number}: "
@@ -150,6 +169,7 @@ def build_verifier_prompt(
             "The acceptance oracle it was meant to satisfy:",
             oracle_block,
             "",
+            *demo_lines,
             "Do this:",
             '1. From the intent above, independently decide what "working" means.',
             "   Do not assume the builder tested the right thing.",
