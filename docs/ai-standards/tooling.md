@@ -42,6 +42,17 @@
 | `just prd release <prd-file> [--force]` | 释放执行锁；归属不符需显式 `--force` |
 | `just prd review <prd-file> [--print]` | 打开该 PRD 的人工审查清单（证据目录分支副本优先，交互 HTML 优先于 Markdown）：未完成 Human-Confirmed 项、9.1 人读呈递区与人工待决事项的集中页；无清单时回退打开证据报告，两者皆无时列出证据目录现状 |
 
+## PR 与 CI 的节奏
+
+CI 只是异步门禁，不要守着它等。三条约定：
+
+- **推完就去做下一件事。** 本地只跑 `just test`，全量交给 CI（见 testing.md 的
+  「CI：PR 轻量档、main 全量档」）。不要为了「推之前更放心」在本地跑全量，那样同样的等待
+  会花两次。CI 结果回来再处理。
+- **已经绿了的 PR 先合，新的改动另开 PR。** 不要在已绿的 PR 上继续叠改动：每次 push 都会
+  让它重跑 CI，前面的绿也作废了。小 PR 各跑各的 CI，互不阻塞。
+- **main 红了先处理它。** 看到「main CI 失败」Issue 时先修复或 revert，再继续合别的 PR。
+
 ## Commit Messages
 
 提交信息统一使用**英文**，并遵循 Conventional Commits：

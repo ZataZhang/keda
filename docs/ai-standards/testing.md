@@ -82,7 +82,7 @@
 
 需要本地验证的普通代码交付或提交场景，Agent 默认可以直接运行 `just test`，无需先询问用户。
 它运行仓库配置的本地核心档，目标是在常驻工作树上保持低于 30 秒；新增或修改的测试及
-映射到本次改动的便宜测试会并入本地档。常规交付无需在本机重复运行全量测试，CI 会在 PR 上运行完整 CI 测试集。
+映射到本次改动的便宜测试会并入本地档。常规交付无需在本机重复运行全量测试：PR 上的 CI 跑轻量档，合入 main 后跑全量档（见下方「CI：PR 轻量档、main 全量档」）。
 
 这项默认许可只覆盖 `just test` 本地核心档。`just test all` 是显式的本地全量诊断命令，
 仅在用户要求或排查本地/全量测试问题时运行，不作为常规交付的本地门槛。它运行 `tests/`
@@ -104,6 +104,24 @@ CI 的 `ci.yml` 与手动触发的归档 workflow `cd.yml` 都会运行测试，
 - `uv run python hooks/shared/check_architecture.py`
 - `uv run python hooks/shared/check_guidelines_consistency.py`
 - `uv run mkdocs build`
+
+### CI：PR 轻量档、main 全量档
+
+PR 上反复跑全量（约 6 分钟）会把每次小改动的反馈拉长、打断心流，所以 PR 只跑受改动影响的
+测试，全量放到合入 main 之后：
+
+- `Choose test tier` 步骤调用 `scripts/shared/testing/test_tiers.py ci-tier`，以
+  `TEST_TIERS_BASE_REF=HEAD^1`（PR 合并提交的第一父提交，即目标分支）为基线收集改动。改动
+  **全部**是 `src/backend/` 或 `tests/` 下的 Python 文件、且不碰全局影响面（`tests/conftest.py`、
+  `pyproject.toml`、`uv.lock`、`src/backend/shared/` 等）时走轻量档，否则走全量档。
+- 轻量档用 testmon 选测试：main 全量档以 `--testmon-noselect` 全跑并记录依赖数据，存进
+  Actions cache（`testmon-main-<sha>`）；PR 恢复最近一份，再以 `--testmon` 只跑受影响的用例。
+  缓存缺失时 testmon 没有基线、会自动全跑，只是慢、不会漏测。轻量档**不能带 `-m`**：带了
+  testmon 会自动关闭选择。
+- 已知盲区：testmon 只追踪测试进程内执行到的 Python 代码。只经子进程（真实 `just` recipe、
+  `kc` CLI）触达的改动，轻量档可能选不到对应测试，要由 main 全量档兜住。
+- push 到 main 一律跑全量档。main 失败时 `report-main-failure` job 开一个「main CI 失败」Issue
+  （已有未关闭的则追加评论）。看到它就修复或 revert 引入问题的 PR，不要在红的 main 上继续叠改动。
 
 ## 验证失败后的修复顺序
 
