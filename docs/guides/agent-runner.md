@@ -5359,7 +5359,7 @@ Supervisor 的 `repair_pr_branch` JSON 决策包含 `repair_scope`：纯代码�
 
 #### 多轮修复与重入去重
 
-Agent 选择 repair 且策略开启时，复用既有 `execute_repair` 修复同一 PR 分支；修复由 Supervisor 生命周期内的配置 repair agent 执行，Issue 不退回 `agent/running`。推送新 head 后等待下一轮 review pass 检查 PR/check 状态；允许跨新 head 多轮，直到 `post_pr_supervisor.max_repair_attempts` 上限。轮次事实源是既有 `post_pr_rework_requested` marker（`action=repair_pr_branch`）与 PR head SHA，不新增数据库表；同一 head SHA 的修复请求幂等，最多触发一次。耗尽、repair 失败或 worktree 不可恢复时停止自动副作用，问题保留在右侧详情中，可显式请求一次手动修复（仍受上限、worktree 与禁止路径门禁约束）。
+Agent 选择 repair 且策略开启时，复用既有 `execute_repair` 修复同一 PR 分支；修复由 Supervisor 生命周期内的配置 repair agent 执行，Issue 不退回 `agent/running`。推送新 head 后等待下一轮 review pass 检查 PR/check 状态；允许跨新 head 多轮，直到 `post_pr_supervisor.max_repair_attempts` 上限。轮次事实源是既有 `post_pr_rework_requested` marker（`action=repair_pr_branch`）与 PR head SHA，不新增数据库表；同一 head SHA 的修复请求幂等，最多触发一次。耗尽、repair 失败或 worktree 不可恢复时停止自动副作用，问题保留在右侧详情中，可显式请求一次手动修复（仍受上限、worktree 与禁止路径门禁约束）。Supervisor 选择 repair 却被策略拒绝（CI 自动修复未开启或轮数耗尽）时，Issue 转入 `agent/blocked` 并评论拒绝原因，不再停在 `agent/supervising`——否则后续 review pass 会因上下文未变永久跳过，看板也会一直显示运行中。
 
 修复 Agent 若写了 commit request、但工作树没有文件变更，runner 将其作为空操作处理并重新运行仓库验证；验证通过后沿用当前 head，继续 supervisor 检查，不创建空提交。验证失败时仍通过现有恢复提示回传输出，并受 `max_repair_attempts` 限制。
 

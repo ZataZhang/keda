@@ -1225,6 +1225,45 @@ def test_code_review_repair_runs_inside_supervising_when_ci_policy_disabled() ->
     assert any("post_pr_rework_requested" in comment for comment in client.list_issue_comments(1))
 
 
+def test_policy_blocked_ci_repair_moves_issue_to_blocked_with_reason() -> None:
+    """CI 修复被策略拒绝时转 blocked 并评论原因，不留在 supervising 被永久跳过。"""
+    config = AppConfig()
+    issue = IssueSummary(
+        number=1, title="T", url="U", body="B", labels=(config.labels.supervising,)
+    )
+    client = FakeGitHubClient()
+    client._issue_labels[1] = issue.labels
+    client._remote_base_sha = "def456"
+    client._issue_comments[1] = [_marker_comment(), "new reviewer finding"]
+    client._pr_contexts["issue-1"] = _make_pr_context(checks_state="FAILURE")
+    with (
+        patch(
+            "backend.core.use_cases.review_once.create_or_reuse_worktree", return_value=Path(".")
+        ),
+        patch("backend.core.use_cases.review_once.resolve_supervisor_agent", return_value="codex"),
+        patch(
+            "backend.core.use_cases.review_once.run_post_pr_supervisor_cycle",
+            return_value=SupervisorActionResult(action="repair_pr_branch", repair_scope="ci"),
+        ),
+        patch("backend.core.use_cases.review_once._process_running_rework") as process_rework,
+    ):
+        outcome = _process_review_candidate(
+            issue=issue,
+            repo_path=Path("."),
+            config=config,
+            agent="auto",
+            github_client=client,
+            process_runner=FakeProcessRunner(),
+        )
+    assert outcome == "blocked_ci_repair_policy"
+    process_rework.assert_not_called()
+    assert config.labels.blocked in client._issue_labels[1]
+    assert config.labels.supervising not in client._issue_labels[1]
+    comments = client.list_issue_comments(1)
+    assert any("Auto Repair Stopped" in comment for comment in comments)
+    assert not any("post_pr_rework_requested" in comment for comment in comments)
+
+
 def test_review_once_resumes_pending_supervisor_rework_without_new_review() -> None:
     """supervising 下的 pending marker 会在中断后续跑，不会重新请求评审。"""
     config = AppConfig()

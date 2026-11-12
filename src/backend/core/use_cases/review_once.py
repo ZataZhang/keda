@@ -582,7 +582,18 @@ def _process_review_candidate(
                     issue.number,
                     gate_reason,
                 )
-                return "ci_repair_policy_blocked"
+                # 留在 supervising 会被"上下文未变"永久跳过且看板一直显示运行中；
+                # 转 blocked 交人处理，显式修复入口不依赖当前标签，仍可直接请求。
+                github_client.comment_issue(
+                    issue.number,
+                    f"## Agent Runner Auto Repair Stopped\n\n- Reason: {gate_reason}\n"
+                    "- Next: 需要人工处理 PR；修复预算未耗尽时也可显式请求一次修复"
+                    "（Backlog 问题卡 / `kc backlog ci repair`）。",
+                )
+                transition_issue_workflow_state(
+                    github_client, issue.number, config, config.labels.blocked
+                )
+                return "blocked_ci_repair_policy"
             enqueued, detail = enqueue_approved_auto_repair(
                 issue=issue,
                 pr_context=pr_context,
