@@ -5,9 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from backend.core.shared.models.agent_runner import AppConfig
+from backend.core.use_cases.agent_runner_primary_demo import PrimaryDemo
 from backend.core.use_cases.agent_runner_structured_evidence import (
     EvidenceUpload,
-    PrimaryDemo,
     StructuredEvidenceReport,
     _label,
     _render_evidence_file_lines,
@@ -18,6 +18,27 @@ from backend.core.use_cases.agent_runner_validation_identity import (
     EvidenceMarkerV2,
     format_validation_evidence_marker,
 )
+
+# 主演示块专用文案；其余固定文案沿用 ``_label`` 的共享表
+_DEMO_LABELS: dict[str, dict[str, str]] = {
+    "zh-CN": {
+        "primary_demo": "主演示",
+        "demo_recording": "录屏",
+        "mock_warning": "⚠️ mock，未验证",
+        "rv_details": "逐项验证证据（RV）",
+    },
+    "en-US": {
+        "primary_demo": "Primary demo",
+        "demo_recording": "Recording",
+        "mock_warning": "⚠️ mock, not verified",
+        "rv_details": "Per-item validation evidence (RV)",
+    },
+}
+
+
+def _demo_label(language: str, key: str) -> str:
+    """返回主演示块的本地化文案，未知语言回退英文。"""
+    return _DEMO_LABELS.get(language, _DEMO_LABELS["en-US"])[key]
 
 
 def render_structured_evidence_comment(
@@ -76,7 +97,7 @@ def render_structured_evidence_comment(
         # 主演示是给人看的第一屏；rv 逐项证据折叠，留给 verifier 与下钻
         comment_lines.extend(_render_primary_demo_lines(primary_demo, upload, pr_url, language))
         comment_lines.extend(
-            ["", "<details>", f"<summary>{_label(language, 'rv_details')}</summary>"]
+            ["", "<details>", f"<summary>{_demo_label(language, 'rv_details')}</summary>"]
         )
 
     for item_report in report.items:
@@ -146,13 +167,13 @@ def _render_primary_demo_lines(
     )
     demo_lines = [
         "",
-        f"### {_label(language, 'primary_demo')}",
+        f"### {_demo_label(language, 'primary_demo')}",
         "",
-        f"**{_label(language, 'demo_recording')}**: {recording_text}",
+        f"**{_demo_label(language, 'demo_recording')}**: {recording_text}",
         "",
     ]
     for step_number, demo_step in enumerate(primary_demo.steps, start=1):
-        mock_suffix = f" — {_label(language, 'mock_warning')}" if demo_step.mock else ""
+        mock_suffix = f" — {_demo_label(language, 'mock_warning')}" if demo_step.mock else ""
         demo_lines.append(
             f"{step_number}. **{demo_step.caption}**：{demo_step.result}{mock_suffix}"
         )

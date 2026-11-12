@@ -16,12 +16,11 @@ from backend.core.shared.models.agent_runner import (
     RunnerConfig,
     ValidationConfig,
 )
+from backend.core.use_cases.agent_runner_primary_demo import PrimaryDemo, PrimaryDemoStep
 from backend.core.use_cases.agent_runner_structured_evidence import (
     ArtifactSpec,
     EvidenceBlock,
     EvidenceManifest,
-    PrimaryDemo,
-    PrimaryDemoStep,
     ValidationEvidenceError,
     format_structured_evidence_marker,
 )
