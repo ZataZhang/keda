@@ -114,6 +114,29 @@ verification_commands = [
 
 未覆盖的字段自动继承全局 `[agent_runner]` 默认值。环境变量仍可对全局段生效，但暂不支持通过环境变量覆盖单个仓库的字段。
 
+### 个人本地覆盖 `.kedacode.local.toml`
+
+仓库根目录的 `.kedacode.local.toml` 是个人覆盖层，结构与 `.kedacode.toml` 相同，叠加在其之上：
+
+```text
+内置默认 < 全局 config.toml < registry [agent_runner.repositories.<id>] < .kedacode.toml < .kedacode.local.toml < PRD 头部覆盖
+```
+
+- 用途：只属于本机或个人账号的选择，例如某个 agent 额度耗尽时把 verifier / review 临时切到别的 agent。团队约定仍写在 `.kedacode.toml`。
+- 合并语义：表按键递归合并（未写的兄弟键保留），标量与数组整体替换。
+- 不进版本库：`kc init` 会把它写进托管的 `.gitignore` 块。
+- worktree：当前检出没有该文件时，回落读取主检出根目录的同名文件，因此 `kc` 创建的 worktree 无需复制。
+- 限制：不得包含 `[agent_runner.repository]` 身份段（会直接报错）；仓库目录没有 `.kedacode.toml` 时该文件不生效；`kc` 的配置写回仍只写全局与 `.kedacode.toml`。
+
+```toml
+# .kedacode.local.toml
+[agent_runner.validation]
+verifier_agent = "claude"
+
+[agent_runner.pre_pr_review]
+review_agent = "claude"
+```
+
 `[agent_runner.runner].timeout_resume_attempts` 控制 agent 进程超时后同一 session 可额外续跑的轮数，默认 `1`；每一轮沿用当前阶段配置的超时时限，设为 `0` 可关闭。该预算按 session 记录，不影响网络瞬时错误重试或验证失败后的普通 recovery。详细配置见 [Agent Runner 使用指南](agent-runner.md)。
 
 <a id="agent-runner-agent-registry"></a>

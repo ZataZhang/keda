@@ -33,6 +33,7 @@ GITIGNORE_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("# KedaCode runner state (worktree-local)", (".kedacode/",)),
     ("# Agent runner state (worktree-local)", (".agent-runner/",)),
     ("# KedaCode-managed git worktrees (host-local)", (".kc-worktrees/",)),
+    ("# KedaCode personal overrides (never committed)", (".kedacode.local.toml",)),
     (
         "# PRD task evidence (commit only *.md reports; manifest and raw artifacts stay local)",
         (
