@@ -1155,7 +1155,11 @@ def _supervised_app_config(**overrides: object) -> AppConfig:
                 label="agent/fake-supervisor",
                 label_color="000000",
                 label_description="Fake read-only supervisor.",
-                profiles={AGENT_PROFILE_GENERATE: AgentProfileSpec(args=(), read_only=True)},
+                profiles={
+                    AGENT_PROFILE_GENERATE: AgentProfileSpec(
+                        args=(), read_only=True, read_only_enforced=True
+                    )
+                },
             ),
         },
         "stall_supervisor": supervisor_config,
@@ -1286,7 +1290,7 @@ def test_non_run_profiles_are_not_supervised(worktree_path: Path) -> None:
 def test_supervisor_without_a_read_only_generate_profile_is_disabled(
     worktree_path: Path,
 ) -> None:
-    """诊断通道必须可验证只读：supervisor 只有非只读 generate 时整体停用，不调模型。"""
+    """诊断通道必须**强制**只读：supervisor 只有非只读 generate 时整体停用，不调模型。"""
     runner = _RecordingRunner()
     config = _supervised_app_config()
     writer_agents = dict(config.agents)
@@ -1313,6 +1317,88 @@ def test_supervisor_without_a_read_only_generate_profile_is_disabled(
     )
 
     assert runner.run_kwargs[0]["attempt_key"] is None
+
+
+def test_supervisor_with_declared_but_unenforced_read_only_profile_is_disabled(
+    worktree_path: Path,
+) -> None:
+    """``read_only=True`` 只是声明：argv 里没有 provider 的只读强制时不得诊断。
+
+    这正是 claude / codebuddy / qoder 的 ``generate`` 形态（``--dangerously-skip-permissions
+    -p``）：拿声明当保证会在**同一个工作区**里再开一个免审批写入 executor，违反
+    "同一 Issue 同时至多一个写入 executor"。
+    """
+    runner = _RecordingRunner()
+    config = _supervised_app_config()
+    writer_agents = dict(config.agents)
+    writer_agents["fake-supervisor"] = AgentSpec(
+        bin="/usr/bin/true",
+        label="agent/fake-supervisor",
+        label_color="000000",
+        label_description="Fake supervisor that only declares read intent.",
+        profiles={
+            AGENT_PROFILE_GENERATE: AgentProfileSpec(
+                args=("--dangerously-skip-permissions", "-p"), read_only=True
+            )
+        },
+    )
+
+    run_agent_with_prompt(
+        "fake-writer",
+        "Implement the issue.",
+        worktree_path,
+        runner,
+        config=AppConfig(
+            agents=writer_agents,
+            stall_supervisor=config.stall_supervisor,
+            agent_session=config.agent_session,
+        ),
+        issue=_ISSUE,
+        invocation_phase="implement",
+    )
+
+    assert runner.run_kwargs[0]["attempt_key"] is None
+
+
+@pytest.mark.parametrize(
+    ("writer_agent", "registers_attempt"),
+    [("claude", False), ("codex", True)],
+)
+def test_builtin_registry_decides_whether_diagnosis_is_allowed(
+    worktree_path: Path,
+    writer_agent: str,
+    registers_attempt: bool,
+) -> None:
+    """真实注册表口径：``supervisor=auto`` 沿用实现者，只有 CLI 强制只读才放行诊断。
+
+    claude 的 ``generate`` 带 ``--dangerously-skip-permissions``（声明只读、不强制）因此
+    停用；codex 的 ``generate`` 带 ``--sandbox read-only``（强制）因此照常登记 attempt。
+    """
+    runner = _RecordingRunner()
+
+    run_agent_with_prompt(
+        writer_agent,
+        "Implement the issue.",
+        worktree_path,
+        runner,
+        config=AppConfig(
+            stall_supervisor=StallSupervisorConfig(
+                enabled=True,
+                check_interval_seconds=_TICK_SECONDS,
+                stalled_after_seconds=0,
+            ),
+        ),
+        issue=_ISSUE,
+        invocation_phase="implement",
+        invocation_attempt=1,
+    )
+
+    attempt_key = _agent_run_kwargs(runner)[0]["attempt_key"]
+    if registers_attempt:
+        assert isinstance(attempt_key, str)
+        assert attempt_key.startswith("issue-77-implement-1-")
+    else:
+        assert attempt_key is None
 
 
 # ---------------------------------------------------------------------------

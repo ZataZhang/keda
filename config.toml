@@ -283,6 +283,7 @@ resume_tail_args = ["exec", "resume", "--json", "{session_id}"]
 prompt_delivery = "stdin"
 output_protocol = "codex-json-lines"
 read_only = true
+read_only_enforced = true
 
 [agent_runner.agents.codex.profiles.generate]
 args = ["--cd", "{cwd}", "--sandbox", "read-only", "--ask-for-approval", "never"]
@@ -291,6 +292,7 @@ resume_tail_args = ["exec", "resume", "--json", "{session_id}"]
 prompt_delivery = "argv_tail"
 output_protocol = "codex-json-lines"
 read_only = true
+read_only_enforced = true
 
 [agent_runner.agents.codex.profiles.repl]
 args = ["--cd", "{cwd}"]
@@ -405,12 +407,14 @@ args = ["--approve", "--no-tools", "--print"]
 prompt_delivery = "stdin"
 output_protocol = "plain"
 read_only = true
+read_only_enforced = true
 
 [agent_runner.agents.pi.profiles.generate]
 args = ["--no-tools", "--print"]
 prompt_delivery = "stdin"
 output_protocol = "plain"
 read_only = true
+read_only_enforced = true
 
 [agent_runner.agents.pi.profiles.judge]
 args = ["--no-tools", "--print"]

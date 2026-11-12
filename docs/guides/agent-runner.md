@@ -4103,11 +4103,15 @@ daemon 里一个 writer 卡住时，现状是"没人知道"：日志还在，进
 | `enabled` | `true` | 总开关 |
 | `check_interval_seconds` | `1800` | 巡检周期，必须为正 |
 | `stalled_after_seconds` | `1800` | 现场指纹冻结多久才算疑似停滞，必须为正 |
-| `agent` | `"auto"` | 诊断用哪个 agent；必须声明**只读** `generate` profile，否则监督器自我禁用 |
+| `agent` | `"auto"` | 诊断用哪个 agent；其 `generate` profile 必须声明 `read_only_enforced = true`（由 CLI 强制只读），否则监督器自我禁用 |
 | `diagnosis_timeout_seconds` | `600` | 单次诊断调用上限 |
 | `diagnosis_inactivity_timeout_seconds` | `300` | 诊断调用的静默上限 |
 
 只监督**带 Issue 身份、且属于 run 类 profile** 的调用；没有 Issue 身份的调用（如 `kc ask`、deliberation）不挂观察线程。
+
+`read_only = true` 只是**声明**，不是保证：`claude -p --dangerously-skip-permissions` 同样可以声明只读，CLI 却不会拦住写文件。诊断与 writer 跑在同一个工作区，所以监督器只认 `read_only_enforced = true`——argv 里带 provider 自己的只读沙箱或禁工具开关（内置值里只有 codex 的 `--sandbox read-only` 和 pi 的 `--no-tools`）。在配置里覆盖了某个 profile 的 `args` / `tail_args` / `expand` 后，内置的强制声明不再继承，需要重新显式声明。claude、kimi、codebuddy 默认没有这一档，`agent = "auto"` 解析到它们时监督器会记一条 warning 并停用，而不是拿声明当保证。
+
+巡检用的 `git status` / `git diff` 都带 `--no-optional-locks`，不会和 writer 自己的 `git add` / `commit` 抢 `index.lock`。
 
 ### "有没有推进"用什么判断
 
@@ -5833,12 +5837,14 @@ args = ["--approve", "--no-tools", "--print"]
 prompt_delivery = "stdin"
 output_protocol = "plain"
 read_only = true
+read_only_enforced = true
 
 [agent_runner.agents.pi.profiles.generate]
 args = ["--no-tools", "--print"]
 prompt_delivery = "stdin"
 output_protocol = "plain"
 read_only = true
+read_only_enforced = true
 
 [agent_runner.agents.pi.profiles.repl]
 args = ["--approve", "--print"]

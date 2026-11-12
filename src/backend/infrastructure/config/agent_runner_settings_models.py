@@ -146,6 +146,7 @@ class AgentRunnerAgentProfileSettings(BaseModel):
     resume_tail_args: list[str] | None = None
     expand: list[str] | None = None
     read_only: bool | None = None
+    read_only_enforced: bool | None = None
 
 
 class AgentRunnerAgentSettings(BaseModel):
