@@ -104,7 +104,7 @@ def _prd_skill_contract_env() -> Iterator[Path | None]:
 
 
 @pytest.fixture(autouse=True, scope="session")
-def _isolate_ambient_iar_config() -> Iterator[None]:
+def _isolate_ambient_iar_config(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
     """在 pytest 会话期间剥离宿主注入的新旧 CONFIG，保证默认配置解析可测。
 
     托管 runner 向子进程注入 ``KEDACODE_CONFIG`` 与 ``KEDACODE_CONFIG``，指向机器级
@@ -118,14 +118,23 @@ def _isolate_ambient_iar_config() -> Iterator[None]:
     按仓库根解析）看到同一份配置。断言仓库根 ``config.toml`` 里某段真实内容的 golden
     用例仍应显式 pin 来源（``tests.support.agent_runner.root_config_app_config()``），
     不依赖本 fixture 的解析结果。
+
+    只剥离变量还不够：未设置 ``KEDACODE_CONFIG`` 时 ``agent_runner`` 段固定读状态目录
+    （``~/.kedacode/config.toml``），开发机上那份真实配置（例如自定义的
+    ``codex-nosandbox`` agent）会漏进默认配置用例。因此会话内把它指向一份临时文件，
+    内容与新机器首次写入的最小骨架一致，本地与 CI 看到的是同一台"全新机器"。
     """
     from backend.infrastructure.config import settings as app_settings_module
     from backend.infrastructure.config.settings import AgentRunnerSettings
+    from backend.infrastructure.config.settings_sources import _GLOBAL_CONFIG_SEED_TEMPLATE
 
     previous_values = {
         env_name: os.environ.pop(env_name, None)
         for env_name in ("KEDACODE_CONFIG", "KEDACODE_CONFIG")
     }
+    isolated_config_path = tmp_path_factory.mktemp("kedacode-machine") / "config.toml"
+    isolated_config_path.write_text(_GLOBAL_CONFIG_SEED_TEMPLATE, encoding="utf-8")
+    os.environ["KEDACODE_CONFIG"] = str(isolated_config_path)
     app_settings_module.config.agent_runner = AgentRunnerSettings()
     try:
         yield

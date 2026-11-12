@@ -126,6 +126,7 @@ def test_registry_config_seeds_state_home_without_source_template(
     fake_home = tmp_path / "home"
     fake_home.mkdir()
     monkeypatch.setenv("HOME", str(fake_home))
+    monkeypatch.delenv("KEDACODE_CONFIG", raising=False)
     monkeypatch.setattr(settings_sources, "_PROJECT_ROOT_PATH", tmp_path / "installed-env")
 
     resolved_path = settings_sources.resolve_registry_config_toml_path()
@@ -145,6 +146,7 @@ def test_registry_config_ignores_legacy_state_home_without_source_template(
     fake_home = tmp_path / "home"
     (fake_home / ".iar").mkdir(parents=True)
     monkeypatch.setenv("HOME", str(fake_home))
+    monkeypatch.delenv("KEDACODE_CONFIG", raising=False)
     monkeypatch.setattr(settings_sources, "_PROJECT_ROOT_PATH", tmp_path / "installed-env")
 
     resolved_path = settings_sources.resolve_registry_config_toml_path()
