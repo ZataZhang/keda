@@ -3,7 +3,7 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> 🧍 **验收状态**：待人工验收 — 执行侧已完成，仅剩 3 项 Human-Confirmed 未确认，证据包见 §9。
+> ✅ **验收状态**：已验收 — 验收清单已全部完成。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 本 PRD 分两层：Part A 给人审（要什么、要拍板什么），Part B 给执行者（怎么改、怎么验）。
@@ -314,9 +314,9 @@ flowchart LR
 
 ### Human-Confirmed (来自 Part A 风险地图)
 
-- [ ] 决定 1：可选字段、不加门禁
-- [ ] 决定 2：未标注 mock 记为 yellow
-- [ ] §9.1 呈递区已看过
+- [x] 决定 1：可选字段、不加门禁 — 人工确认：PR #348 合并（2026-11-12T04:37:55Z）
+- [x] 决定 2：未标注 mock 记为 yellow — 人工确认：PR #348 合并（2026-11-12T04:37:55Z）
+- [x] §9.1 呈递区已看过 — 人工确认：用户审阅 diff 报告与评论样例后要求合并
 
 ## 10. Functional Requirements
 
@@ -370,3 +370,11 @@ flowchart LR
 - Reason: keda 与模板改动完成并通过相关测试
 - Impact: FR-1 至 FR-5 已落地
 - Review: 待 PR 合并作为人工验收
+
+### 人工验收
+- Type: acceptance
+- Before: 🧍 待人工验收，Human-Confirmed 3 项未勾
+- After: ✅ 已验收，Human-Confirmed 全部勾选
+- Reason: 用户明确要求合并 PR #348（squash，合并提交 01bd266，合并人 ZataZhang），PR 正文声明合并即接受决定 1、2
+- Impact: 无行为变更，仅验收记录
+- Review: 用户在对话中同意回填验收记录（2026-11-12）
