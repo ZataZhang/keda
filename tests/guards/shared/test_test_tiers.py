@@ -86,12 +86,14 @@ def _script_git_changes(
     diff_against_head: Sequence[str] = (),
     staged: Sequence[str] = (),
     untracked: Sequence[str] = (),
+    diff_against_base: Sequence[str] = (),
 ) -> None:
-    """让 ``_run_git`` 只回放这三类变更，与 ``changed_working_paths`` 发起的命令一一对应。"""
+    """让 ``_run_git`` 只回放这几类变更，与 ``changed_working_paths`` 发起的命令一一对应。"""
     scripted_outputs = {
         ("diff", "--name-only", "HEAD"): diff_against_head,
         ("diff", "--name-only", "--cached"): staged,
         ("ls-files", "--others", "--exclude-standard"): untracked,
+        ("diff", "--name-only", "HEAD^1", "HEAD"): diff_against_base,
     }
 
     def _replay_git(*git_arguments: str) -> str:
@@ -613,3 +615,37 @@ def test_refresh_aborts_when_pinned_files_alone_exceed_the_budget(
     assert str(durations_report_path) in captured_stderr
     assert not tiers.CORE_SET_PATH.exists()
     assert not tiers.BASELINE_PATH.exists()
+
+
+def test_base_ref_adds_committed_changes_for_a_clean_ci_checkout(
+    fake_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CI 检出的工作区是干净的；设了基线后，已提交的改动也要算进来。"""
+    _write_repo_files(fake_repo, {"src/backend/api/foo_router.py": ""})
+    _script_git_changes(monkeypatch, diff_against_base=["src/backend/api/foo_router.py"])
+    # CI 的轻量档步骤本身就设了这个变量，先清掉才能验证"未设置"的口径。
+    monkeypatch.delenv(tiers.BASE_REF_ENV_VAR, raising=False)
+
+    assert tiers.changed_working_paths() == []
+    monkeypatch.setenv(tiers.BASE_REF_ENV_VAR, "HEAD^1")
+    assert tiers.changed_working_paths() == ["src/backend/api/foo_router.py"]
+
+
+@pytest.mark.parametrize(
+    ("change_paths", "expected_tier"),
+    [
+        ([], "light"),
+        (["src/backend/api/foo_router.py", "tests/backend/test_foo.py"], "light"),
+        (["src/backend/shared/config.py"], "full"),
+        (["uv.lock"], "full"),
+        (["justfile"], "full"),
+        (["scripts/shared/testing/test_tiers.py"], "full"),
+        (["alembic/versions/0001_init.py"], "full"),
+    ],
+)
+def test_ci_tier_falls_back_to_full_unless_every_change_maps_to_tests(
+    change_paths: list[str], expected_tier: str
+) -> None:
+    """只有改动全是 src/backend 或 tests 下的 Python 且不碰全局影响面时才走轻量档。"""
+    tier, _reasons = tiers.ci_test_tier(change_paths)
+    assert tier == expected_tier

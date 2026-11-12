@@ -74,6 +74,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          # PR 检出的是合并提交，HEAD^1 即目标分支；深度 2 才能对它做 diff 判定测试档位。
+          fetch-depth: 2
 
       # 部分 guard tests 会启动真实 just recipe（如 tests/guards/shared/test_ai_pr.py），
       # CI 与 CD 都要安装相同版本，避免完整套件在本地可用、在 runner 上因缺少 just 失败。
@@ -153,17 +156,42 @@ jobs:
         with:
           just-version: "1.55.1"
 
+      # PR 跑轻量档、main 跑全量档：PR 只跑受改动影响的测试，main 兜底全量，红了由
+      # report-main-failure 开 Issue。改动无法可靠映射到测试（非 src/backend、tests
+      # 下的 Python，或命中依赖锁 / conftest 等全局影响面）时 PR 也直接跑全量。
+      - name: Choose test tier
+        id: test_tier
+        env:
+          TEST_TIERS_BASE_REF: HEAD^1
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "非 PR 事件，跑全量档"
+            echo "tier=full" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          uv run python scripts/shared/testing/test_tiers.py ci-tier >> "$GITHUB_OUTPUT"
+
+      # 轻量档用 testmon 选测试，依赖数据来自 main 最近一次全量档。缓存缺失时
+      # testmon 没有基线，会自动全跑，只是慢、不会漏测。
+      - name: Restore testmon data from main
+        if: steps.test_tier.outputs.tier == 'light'
+        uses: actions/cache/restore@v4
+        with:
+          path: .testmondata
+          key: testmon-main-${{ github.sha }}
+          restore-keys: testmon-main-
+
       # timeout-minutes 是诊断也是防护。基线：2026-07-28 的 eb75be4 用同一条命令
       # 跑完 1773 个测试只要 45 秒；2026-09-11 起同一步骤 25 分钟不结束——因为
       # 此前 max-file-lines 一直先失败、本步一直被 skip，某个在 CI 里会挂住的
       # 东西就这样藏了一个多月。挂住的套件应该快速失败并**保留日志**（超时会保留，
       # 取消不会），`-v` 输出里最后一个测试就是嫌疑人。
       #
-      # --no-testmon 与本地 `just test all` 一致：CI 是全新 checkout，testmon 的
-      # 增量选择零收益。注意它不是上面那个慢的原因（45 秒那次 testmon 也开着），
-      # 只是顺手去掉无谓开销。这处是**有意的下游分歧**，不要回流上游：上游
-      # pytest.ini 的 addopts 是 `-m '...' -n auto --dist=loadgroup`，套用会砍掉
-      # 它的 xdist 并行。
+      # testmon 参数按档位选：轻量档 `--testmon` 只跑受影响的测试；main 全量档
+      # `--testmon-noselect` 全跑并记录依赖数据，供后续 PR 复用；PR 上的全量档
+      # `--no-testmon`，与本地 `just test all` 一致。这处是**有意的下游分歧**，不要
+      # 回流上游：上游 pytest.ini 的 addopts 是 `-m '...' -n auto --dist=loadgroup`，
+      # 上游轻量档走 `--core-tier`，keda 没有核心档名单。
       - name: Run local test suite
         timeout-minutes: 12
         # --timeout 是这里唯一真正能拿到证据的机制。前两次尝试都失败了：
@@ -173,10 +201,30 @@ jobs:
         # BlobNotFound）。pytest-timeout 不依赖 GitHub 的任何超时：挂住的用例
         # 以 traceback 失败并点名，整个 run 正常结束，日志自然保留。
         # 120 秒对单个用例极宽松——整套在本地只要 71 秒。
+        env:
+          TEST_TIER: ${{ steps.test_tier.outputs.tier }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -o pipefail
-          uv run pytest tests/ -v -m "not expensive" --no-testmon \
+          # 带 -m 时 testmon 会自动关闭选择（"selection automatically deactivated
+          # because -m was used"），所以轻量档不能带 -m；仓库里也没有 expensive 标记的用例。
+          if [ "$TEST_TIER" = "light" ]; then
+            tier_flags=(--testmon)
+          elif [ "$EVENT_NAME" = "push" ]; then
+            tier_flags=(-m "not expensive" --testmon-noselect)
+          else
+            tier_flags=(-m "not expensive" --no-testmon)
+          fi
+          echo "test tier: $TEST_TIER (${tier_flags[*]})"
+          uv run pytest tests/ -v "${tier_flags[@]}" \
             --durations=25 --timeout=120 2>&1 | tee /tmp/pytest.log
+
+      - name: Save testmon data for PR light tier
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v4
+        with:
+          path: .testmondata
+          key: testmon-main-${{ github.sha }}
 
       # if: always() 在取消时也会执行，而 artifact 的上传不依赖 job 日志是否落盘。
       # 这是四次尝试后唯一还没被证伪的取证路径：step 超时归 runner 管（runner 卡死
@@ -242,3 +290,33 @@ jobs:
             --jq '.artifacts[] | select(.expired==false) | select(.name | startswith("template-release-")) | "\(.created_at)\t\(.id)"' \
             | sort -r | tail -n +4 | cut -f2 \
             | xargs -r -I{} gh api -X DELETE "repos/${{ github.repository }}/actions/artifacts/{}"
+
+  report-main-failure:
+    name: Report main CI failure
+    # PR 只跑轻量档，main 才跑全量；main 红了必须有人看见，否则后续分支与 worktree
+    # 都会建在坏掉的基线上。已有未关闭的同名 Issue 时只追加评论，不重复开。
+    needs: [frontend-build, validate-template]
+    if: failure() && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Open or update the main failure Issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          issue_title="main CI 失败：请修复或回滚"
+          issue_body="main 上提交 ${COMMIT_SHA} 的 CI 失败：${RUN_URL}
+
+          PR 只跑轻量档，全量档在 main 上兜底。请修复，或 revert 引入问题的 PR；修好后关闭本 Issue。"
+          existing_issue_number="$(gh issue list --state open --search "\"${issue_title}\" in:title" \
+            --json number --jq '.[0].number // empty')"
+          if [ -n "$existing_issue_number" ]; then
+            gh issue comment "$existing_issue_number" --body "$issue_body"
+          else
+            gh issue create --title "$issue_title" --body "$issue_body"
+          fi
