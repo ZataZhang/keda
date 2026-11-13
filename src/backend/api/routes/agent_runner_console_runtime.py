@@ -22,17 +22,26 @@
 from __future__ import annotations
 
 import logging
+import mimetypes
 import uuid
-from dataclasses import asdict
+from dataclasses import asdict, replace
+from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi.responses import FileResponse
 
 from backend.core.shared.interfaces.desktop_companion import (
     DesktopCompanionLauncher,
     DesktopCompanionSnapshot,
 )
+from backend.core.use_cases.agent_runner_evidence_branch import (
+    list_evidence_branches,
+    read_branch_file,
+    read_branch_page,
+)
+from backend.core.use_cases.agent_runner_evidence_media import EvidenceMedia, find_evidence_media
 from backend.core.use_cases.agent_runner_factory import (
     create_console_store,
     create_process_supervisor,
@@ -61,6 +70,44 @@ def _enabled_repo_ids() -> list[str]:
     settings = load_fresh_agent_runner_settings()
     contexts, _failures = resolve_repository_targets_with_diagnostics(settings)
     return [context.repo_id for context in contexts]
+
+
+def _repository_paths() -> dict[str, Path]:
+    """取 registry 中仓库标识到本地路径的映射；读失败时返回空映射。"""
+    try:
+        return {
+            entry.repo_id: Path(entry.path)
+            for entry in create_registry_editor().list_repositories()
+            if entry.path_exists
+        }
+    except Exception:  # noqa: BLE001 - 读 registry 失败只影响证据按钮，不影响看板。
+        _logger.warning("读取 registry 路径失败，证据按钮不可用", exc_info=True)
+        return {}
+
+
+def _evidence_media(repository_paths: dict[str, Path], task: Any) -> EvidenceMedia | None:
+    """解析该任务的证据：先看本地，本地没有页面时回退到证据分支。
+
+    分支清单有 TTL 缓存，因此同一轮看板刷新不会为每张卡重复打远端。
+    """
+    repo_path = repository_paths.get(task.repo_id)
+    if repo_path is None:
+        return None
+    try:
+        media = find_evidence_media(repo_path, task.issue_number, task.prd_path)
+    except OSError:
+        return None
+    if media.page_ref is not None:
+        return media
+    # 列表里只判断「有没有证据分支」，不在这里拉取分支内容：一次 ls-remote
+    # 的结果已缓存，真正读页面留到点击时按需进行。
+    try:
+        branch = list_evidence_branches(repo_path).get(task.issue_number)
+    except OSError:
+        return media
+    if branch is None:
+        return media
+    return replace(media, page_ref=branch, source=branch)
 
 
 def _format_loopback_origin(host: str, port: int) -> str:
@@ -189,11 +236,13 @@ def get_runtime_tasks() -> dict[str, Any]:
     store = create_console_store()
     enabled_repo_ids = _enabled_repo_ids()
     snapshot_overview = get_snapshot_overview(store, enabled_repo_ids=enabled_repo_ids)
+    repository_paths = _repository_paths()
     summary = build_runtime_task_summary(
         snapshot_overview=snapshot_overview,
         run_history_store=store,
         prd_lifecycle_store=store,
         enabled_repo_ids=enabled_repo_ids,
+        evidence_media=lambda task: _evidence_media(repository_paths, task),
     )
     try:
         supervisor = create_process_supervisor()
@@ -221,6 +270,155 @@ def get_runtime_tasks() -> dict[str, Any]:
         for task in summary.tasks
     ]
     return payload
+
+
+@router.get("/agent-runner/console/runtime/evidence/video")
+def get_runtime_evidence_video(
+    repo_id: str,
+    issue: int,
+    prd_path: str | None = None,
+) -> FileResponse:
+    """播放某个任务的本地证据视频。
+
+    路径只按 registry 登记的仓库根目录解析，不接受调用方给的路径，因此不构成
+    任意文件读取；解析不到视频时返回 404，前端据此不显示播放按钮。
+
+    Args:
+        repo_id: 注册仓库标识。
+        issue: Issue 编号。
+        prd_path: 该 Issue 关联的 PRD 相对路径；用于定位证据目录。
+
+    Returns:
+        FileResponse: 视频文件流。
+    """
+    repo_path = _repository_paths().get(repo_id)
+    if repo_path is None:
+        raise HTTPException(status_code=404, detail="Repository is not registered.")
+    media = find_evidence_media(repo_path, issue, prd_path)
+    if media.video_path is None:
+        raise HTTPException(status_code=404, detail="No evidence video for this task.")
+    return FileResponse(media.video_path)
+
+
+#: 人审页里允许内联的图片后缀；页面正文只按 Markdown 返回，不执行任何脚本。
+_EVIDENCE_IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp"})
+
+#: 人审页正文上限：超过说明这是数据文件而不是给人看的页面。
+_EVIDENCE_PAGE_MAX_BYTES = 512 * 1024
+
+#: 证据端点前缀，与 router 挂载前缀一致。
+_EVIDENCE_ROUTE_PREFIX = "/api/v1/agent-runner/console/runtime/evidence"
+
+
+def _resolve_evidence_page(repo_id: str, issue: int, prd_path: str | None) -> Path:
+    """解析人审页路径；解析不到直接 404。"""
+    repo_path = _repository_paths().get(repo_id)
+    if repo_path is None:
+        raise HTTPException(status_code=404, detail="Repository is not registered.")
+    media = find_evidence_media(repo_path, issue, prd_path)
+    if media.page_path is None:
+        raise HTTPException(status_code=404, detail="No human review page for this task.")
+    return media.page_path
+
+
+def _image_url_base(repo_id: str, issue: int, prd_path: str | None, source: str) -> str:
+    """拼人审页图片的取图前缀；页面内的相对路径由前端拼在后面。"""
+    params = {"repo_id": repo_id, "issue": str(issue), "source": source}
+    if prd_path:
+        params["prd_path"] = prd_path
+    query = "&".join(f"{key}={quote(value, safe='')}" for key, value in params.items())
+    return f"{_EVIDENCE_ROUTE_PREFIX}/file?{query}&name="
+
+
+@router.get("/agent-runner/console/runtime/evidence/page")
+def get_runtime_evidence_page(
+    repo_id: str,
+    issue: int,
+    prd_path: str | None = None,
+    allow_branch_fallback: bool = True,
+) -> dict[str, Any]:
+    """返回该任务的人审页正文与取图前缀。
+
+    先读本地证据目录；本地没有页面时，若允许回退，就从证据分支读取同一份页面，
+    并在 source 里标明来源，前端据此显示「来自哪个分支」。
+
+    Args:
+        repo_id: 注册仓库标识。
+        issue: Issue 编号。
+        prd_path: 该 Issue 关联的 PRD 相对路径。
+        allow_branch_fallback: 本地没有页面时是否回退到证据分支。
+
+    Returns:
+        dict[str, Any]: 页面路径、Markdown 正文、取图前缀与证据来源。
+    """
+    repo_path = _repository_paths().get(repo_id)
+    if repo_path is None:
+        raise HTTPException(status_code=404, detail="Repository is not registered.")
+    local = find_evidence_media(repo_path, issue, prd_path)
+    if local.page_path is not None:
+        if local.page_path.stat().st_size > _EVIDENCE_PAGE_MAX_BYTES:
+            raise HTTPException(status_code=413, detail="Human review page is too large to render.")
+        return {
+            "path": local.page_path.name,
+            "markdown": local.page_path.read_text(encoding="utf-8"),
+            "image_base": _image_url_base(repo_id, issue, prd_path, source="local"),
+            "source": "local",
+        }
+    if not allow_branch_fallback:
+        raise HTTPException(status_code=404, detail="No human review page for this task.")
+    branch_page = read_branch_page(repo_path, issue)
+    if branch_page is None:
+        raise HTTPException(status_code=404, detail="No human review page for this task.")
+    if len(branch_page.markdown.encode("utf-8")) > _EVIDENCE_PAGE_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="Human review page is too large to render.")
+    return {
+        "path": branch_page.page_name,
+        "markdown": branch_page.markdown,
+        "image_base": _image_url_base(repo_id, issue, prd_path, source=branch_page.branch),
+        "source": branch_page.branch,
+    }
+
+
+@router.get("/agent-runner/console/runtime/evidence/file")
+def get_runtime_evidence_file(
+    repo_id: str,
+    issue: int,
+    name: str,
+    prd_path: str | None = None,
+    source: str = "local",
+) -> Response:
+    """返回人审页内联的图片，本地没有时按 source 从证据分支读取。
+
+    只允许图片后缀、且 name 必须是纯文件名，因此不构成任意文件读取。
+
+    Args:
+        repo_id: 注册仓库标识。
+        issue: Issue 编号。
+        name: 页面里写的相对文件名。
+        prd_path: 该 Issue 关联的 PRD 相对路径。
+        source: 证据来源；local 读本地，其他值视为证据分支名。
+
+    Returns:
+        Response: 图片字节流。
+    """
+    if Path(name).name != name or Path(name).suffix.lower() not in _EVIDENCE_IMAGE_SUFFIXES:
+        raise HTTPException(status_code=400, detail="Unsupported evidence file name.")
+    repo_path = _repository_paths().get(repo_id)
+    if repo_path is None:
+        raise HTTPException(status_code=404, detail="Repository is not registered.")
+    media_type = mimetypes.guess_type(name)[0] or "application/octet-stream"
+    if source == "local":
+        page_path = find_evidence_media(repo_path, issue, prd_path).page_path
+        if page_path is None:
+            raise HTTPException(status_code=404, detail="No human review page for this task.")
+        image_path = page_path.parent / name
+        if not image_path.is_file():
+            raise HTTPException(status_code=404, detail="Evidence image not found.")
+        return FileResponse(image_path)
+    payload = read_branch_file(repo_path, issue, name)
+    if payload is None:
+        raise HTTPException(status_code=404, detail="Evidence image not found.")
+    return Response(content=payload, media_type=media_type)
 
 
 @router.get("/agent-runner/console/desktop-companion/status")

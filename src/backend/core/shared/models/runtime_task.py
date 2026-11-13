@@ -93,6 +93,8 @@ class RuntimeTask:
         last_outcome: 运行账本记录的终态（completed / failed / blocked）。
         last_error_summary: 最近一次已收口失败或阻塞原因；新执行已开始时为空。
         labels: 监控看到的 `agent/*` 标签，供前端保持一致的状态文字。
+        evidence_video_available: 该 Issue 是否有可播放的本地证据视频；没有证据视频时为 False。
+        evidence_page_available: 该 Issue 是否有本地人审页（human-review-checklist.md 等）。
     """
 
     repo_id: str
@@ -118,6 +120,8 @@ class RuntimeTask:
     last_outcome: str | None = None
     last_error_summary: str | None = None
     labels: tuple[str, ...] = ()
+    evidence_video_available: bool = False
+    evidence_page_available: bool = False
     anomaly_types: tuple[str, ...] = ()
     waiting_reason: str | None = None
     review_daemon_running: bool | None = None

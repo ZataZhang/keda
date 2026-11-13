@@ -8,7 +8,7 @@
 // 单独呈现，避免「列表为空」被读成「一切正常」。
 
 import { useMemo, useState } from "react";
-import { Check, Copy } from "lucide-react";
+import { Check, Copy, Play } from "lucide-react";
 
 import { ConsoleToolbar } from "@/components/layout/console-page";
 import { Input } from "@/components/ui/input";
@@ -20,6 +20,7 @@ import type { RuntimeTaskEntry, RuntimeTaskStatus } from "@/lib/api/types";
 import { openExternalUrl } from "@/lib/open-external";
 import { cn, formatLocalDateTime } from "@/lib/utils";
 
+import { RuntimeTaskHumanReviewPage } from "./runtime-task-evidence-page";
 import { RuntimeTaskPhaseDescription, RuntimeTaskPhase } from "./runtime-task-phase";
 
 /** 状态分桶的人读文案与配色（唯一事实源，列表/详情/小窗共用）。 */
@@ -302,6 +303,9 @@ function RuntimeTaskRow({
   const identity = `${task.repo_display_name ?? task.repo_id}#${task.issue_number}`;
   const issueUrl = task.issue_url;
   const prUrl = task.pr_url;
+  const [evidenceOpen, setEvidenceOpen] = useState(false);
+  const [reviewPageOpen, setReviewPageOpen] = useState(false);
+  const evidenceUrl = task.evidence_video_available ? evidenceVideoUrl(task) : null;
   return (
     <li
       className={`rounded-md border text-sm transition-colors ${
@@ -371,8 +375,80 @@ function RuntimeTaskRow({
               description={task.pr_number ? `PR #${task.pr_number}` : "PR"}
             />
           ) : null}
+          {evidenceUrl ? (
+            <button
+              type="button"
+              onClick={() => setEvidenceOpen(true)}
+              className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 leading-4 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-900 dark:bg-emerald-950/50 dark:text-emerald-300 dark:hover:bg-emerald-900/60"
+              title="播放该任务的证据视频"
+              data-testid="runtime-task-evidence-play"
+            >
+              <Play size={11} aria-hidden />
+              Video
+            </button>
+          ) : null}
+          {task.evidence_page_available ? (
+            <button
+              type="button"
+              onClick={() => setReviewPageOpen(true)}
+              className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 leading-4 text-amber-700 hover:bg-amber-100 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-300 dark:hover:bg-amber-900/60"
+              title="打开该任务的人审页"
+              data-testid="runtime-task-evidence-page"
+            >
+              Review
+            </button>
+          ) : null}
         </div>
       </div>
+      {evidenceOpen && evidenceUrl ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-6"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`${identity} 证据视频`}
+          data-testid="runtime-task-evidence-dialog"
+          onClick={() => setEvidenceOpen(false)}
+        >
+          <div
+            className="w-full max-w-4xl rounded-lg bg-white p-3 shadow-xl dark:bg-slate-900"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="mb-2 flex items-center justify-between gap-3 text-sm">
+              <span className="font-medium text-slate-900 dark:text-slate-100">
+                {identity} 证据视频
+              </span>
+              <span className="flex items-center gap-3 text-xs">
+                <a href={evidenceUrl} target="_blank" rel="noreferrer" className="underline">
+                  在新标签页打开
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setEvidenceOpen(false)}
+                  className="rounded-md border border-slate-200 px-2 py-0.5 dark:border-slate-700"
+                >
+                  关闭
+                </button>
+              </span>
+            </div>
+            <video
+              src={evidenceUrl}
+              controls
+              autoPlay
+              className="max-h-[70vh] w-full rounded-md bg-black"
+              data-testid="runtime-task-evidence-video"
+            />
+          </div>
+        </div>
+      ) : null}
+      {reviewPageOpen ? (
+        <RuntimeTaskHumanReviewPage
+          repoId={task.repo_id}
+          issueNumber={task.issue_number}
+          prdPath={task.prd_path}
+          identity={identity}
+          onClose={() => setReviewPageOpen(false)}
+        />
+      ) : null}
     </li>
   );
 }
@@ -392,6 +468,24 @@ const LINK_PILL_TONES = {
     divider: "border-violet-200 dark:border-violet-900",
   },
 } as const;
+
+/**
+ * 本地证据视频的播放地址。
+ *
+ * 路径由后端按 registry 登记的仓库根目录解析，前端只传身份参数，因此不能借这个
+ * 端点读任意文件。
+ *
+ * @param task - 当前任务行。
+ * @returns 可直接交给 <video src> 的同源地址。
+ */
+function evidenceVideoUrl(task: RuntimeTaskEntry): string {
+  const params = new URLSearchParams({
+    repo_id: task.repo_id,
+    issue: String(task.issue_number),
+  });
+  if (task.prd_path) params.set("prd_path", task.prd_path);
+  return `/api/v1/agent-runner/console/runtime/evidence/video?${params.toString()}`;
+}
 
 /**
  * 一分为二的外链胶囊：左半跳转，右半只复制 URL（复制不触发跳转）。

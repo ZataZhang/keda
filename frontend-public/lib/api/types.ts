@@ -1650,6 +1650,10 @@ export type RuntimeTaskEntry = {
   /** 最近一次失败或阻塞原因；旧后端未提供时为空。 */
   last_error_summary?: string | null;
   labels: string[];
+  /** 该任务是否有可播放的本地证据视频；没有证据或旧后端未提供时为 false/缺失。 */
+  evidence_video_available?: boolean;
+  /** 该任务是否有本地人审页（human-review-checklist.md 等）。 */
+  evidence_page_available?: boolean;
 };
 
 /** 看板任务摘要：列表 + 分桶计数 + 数据来源可用性披露。 */

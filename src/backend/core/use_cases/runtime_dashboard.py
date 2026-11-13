@@ -16,7 +16,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -36,6 +36,7 @@ from backend.core.shared.models.runtime_task import (
     RuntimeTaskStatus,
     RuntimeTaskSummary,
 )
+from backend.core.use_cases.agent_runner_evidence_media import EvidenceMedia
 from backend.core.use_cases.agent_invocation_tracing import (
     OUTCOME_UNCLOSED,
     build_invocation_timeline,
@@ -444,6 +445,23 @@ def _task_sort_key(task: RuntimeTask) -> tuple[int, float, str, int]:
     return (task.status.display_order, recency, task.repo_id, task.issue_number)
 
 
+def _with_evidence_flags(task: RuntimeTask, media: EvidenceMedia | None) -> RuntimeTask:
+    """把本地证据解析结果投影成任务行上的两个布尔标记。
+
+    Args:
+        task: 原始任务行。
+        media: 该任务解析到的证据；没有证据时为 None。
+
+    Returns:
+        RuntimeTask: 带证据可用性标记的任务行。
+    """
+    return replace(
+        task,
+        evidence_video_available=bool(media and media.video_path is not None),
+        evidence_page_available=bool(media and media.page_path is not None),
+    )
+
+
 def build_runtime_task_summary(
     *,
     snapshot_overview: SnapshotOverviewResult,
@@ -452,6 +470,7 @@ def build_runtime_task_summary(
     enabled_repo_ids: Sequence[str],
     now: datetime | None = None,
     max_rows: int = RUNTIME_TASK_MAX_ROWS,
+    evidence_media: Callable[[RuntimeTask], EvidenceMedia | None] | None = None,
 ) -> RuntimeTaskSummary:
     """组装运行态任务摘要。
 
@@ -463,6 +482,8 @@ def build_runtime_task_summary(
             因此已注销或停用仓库的历史运行不会带着旧 Issue 身份回到看板上。
         now: 推算耗时与时间窗的参考时间，注入以便单测确定性。
         max_rows: 摘要行数上限，超出时截断并置 ``truncated=True``。
+        evidence_media: 解析某个任务的本地证据（视频与人审页）；未接线时两者都
+            记为没有，按钮自然不出现。
 
     Returns:
         RuntimeTaskSummary: 任务摘要与数据来源可用性披露。改动树触达读数不在其中，
@@ -586,6 +607,9 @@ def build_runtime_task_summary(
         else task
         for task in tasks
     ]
+
+    if evidence_media is not None:
+        tasks = [_with_evidence_flags(task, evidence_media(task)) for task in tasks]
 
     tasks.sort(key=_task_sort_key)
     truncated = len(tasks) > max_rows

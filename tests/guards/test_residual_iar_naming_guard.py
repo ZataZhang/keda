@@ -28,6 +28,16 @@ def _allowance(relative_path: str, line_pattern: str, reason: str) -> LegacyName
 
 LEGACY_NAME_ALLOWANCES = (
     _allowance(
+        "src/backend/core/use_cases/agent_runner_evidence_media.py",
+        r"\.iar",
+        "旧执行 worktree 的证据目录仍叫 .iar/evidence，读取历史交付证据必须认得它。",
+    ),
+    _allowance(
+        "src/backend/core/use_cases/agent_runner_evidence_branch.py",
+        r"iar-evidence",
+        "历史证据分支名沿用 iar-evidence/issue-<N>，按名回退才能读到旧交付的页面。",
+    ),
+    _allowance(
         "src/backend/core/use_cases/github_marker_migration.py",
         r"iar:|IAR_EXEC",
         "显式 GitHub 标记迁移器只把旧标记改写为新名，不参与任何读取判定。",
