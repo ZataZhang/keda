@@ -10,9 +10,9 @@
 
   1) 头部与 <body> 的数据属性：把 &lt;主题&gt; / &lt;N&gt; / &lt;prd-stem&gt; 换成真实值。
   2) <main> 里的卡片：每个决定一张 <section class="card">，最后一张是结果卡。
-     卡片内容可自由增删（h2 / p.lead / div.decide / blockquote / figure / p / div.opts /
+     卡片内容可自由增删（标题元素 / p.lead / div.decide / blockquote / figure / p / div.opts /
      label.field），但每张决定卡必须有：
-       - 一个 <h2>（会被逐字抄进 markdown 结果）
+       - 一个标题元素（会被逐字抄进 markdown 结果）
        - 一组 <div class="opts"> 里的单选（name 在本卡内唯一即可）
        - 一个 <textarea>（补充说明，可留空）
      结果卡结构不要改（它的 id 被脚本引用）。
