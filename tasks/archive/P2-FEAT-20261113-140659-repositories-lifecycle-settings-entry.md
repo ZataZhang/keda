@@ -3,7 +3,7 @@
 > ✅ **交付前置**：无硬依赖，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，那里是唯一事实源。
 
-> 🧍 **验收状态**：待人工验收。实现与本地验证已完成；PR 必需 CI 通过且合并后，按合并记录人工验收。
+> ✅ **验收状态**：已验收。用户授权 PR #370 直接合并；合并接受 §13 的决定与 §9.1 用户可见结果，按下方合并记录回填。
 
 本文分两层：Part A 供人确认需求和可见结果；Part B 供执行器实施、验证和交付。
 
@@ -325,8 +325,8 @@ No external validation required; repository evidence and the user-selected proto
 
 ### Human-Confirmed
 
-- [ ] 人工确认 Repositories 顶层入口位置、两个标签名称和页面层级符合已选方案一；证据为 PR 内原型 / 真实页面截图配对及主演示。
-- [ ] 人工确认范围选择、Backlog 仓库深链与旧 URL 兼容表现符合预期；证据为真实入口画面和地址栏 / 仓库选择器。
+- [x] 人工确认 Repositories 顶层入口位置、两个标签名称和页面层级符合已选方案一；证据为 PR #370 squash merge、配对截图与主演示（用户授权合并即授权接受 PR 正文注明的 §9.1 结果）。
+- [x] 人工确认范围选择、Backlog 仓库深链与旧 URL 兼容表现符合预期；证据为 PR #370 squash merge、真实入口画面、地址栏 / 仓库选择器及合并前稳定验证评论。
 
 ### Architecture Acceptance
 
@@ -356,13 +356,13 @@ No external validation required; repository evidence and the user-selected proto
 - [x] `just e2e tests/workflows/lifecycle-settings.spec.ts` 通过并实际执行 10 条浏览器用例及认证 setup，覆盖 rv-1 / rv-2 / rv-3；以 Playwright 摘要和证据包为准，不能只引用退出码。
 - [x] 核心 suite 的此前完整执行为 5,289 passed、1 skipped；本次为刷新提交标记进行的完整本地执行为 5,288 passed、1 skipped、1 个 runner 启动 marker 超时。该测试单独复跑通过，紧接着的 `just test` 复用 testmon 并执行 0 项；要求的 PR CI 完整 suite 在 Linux 上通过。lint 与 reuse 检查结果见 Evidence Report。
 - [x] 独立 verifier 对实现提交 tree 给出 `PASS`。
-- [x] PR 所需 CI 在当前实现 tree 上通过；PR #370 的 Frontend Build、Validate Template、Install smoke 与 Realistic Validation sign-off 全绿（证据：Evidence Report §Human Review Navigation，Actions run `43387293118`、`43387292955`、`43387293042`）。归档 PRD 的记录提交后会在同一 PR head 重跑，合并前再次核对。
+- [x] PR 所需 CI 在最终归档 PR head `73a71fd40d01520be9f88a21fe78ae592d77a27` 上通过；Frontend Build、Validate Template、Install smoke 与 Realistic Validation sign-off 全绿（证据：[最终 CI run](https://github.com/ZataZhang/keda/actions/runs/43390695429)、[Install smoke](https://github.com/ZataZhang/keda/actions/runs/43390695257)、[Validation Gate](https://github.com/ZataZhang/keda/actions/runs/43390858062)）。
 
 ### Delivery Readiness
 
 - [x] PR 正文唯一关联归档路径 `tasks/archive/P2-FEAT-20261113-140659-repositories-lifecycle-settings-entry.md`，说明 merge 代表接受 Section 2 决策与 §9.1 用户可见结果并授权回填（证据：[PR #370](https://github.com/ZataZhang/keda/pull/370)）。
 - [x] PR evidence comment 呈递 §9.1 概念图 / 真实页面配对、主演示、verifier 与 CI 结果、证据哈希和 verified tree；发布前完成密钥扫描（证据：[稳定验证评论](https://github.com/ZataZhang/keda/pull/370#issuecomment-6847125415)）。
-- [x] 工程侧证据完成后将本 PRD 移入 `tasks/archive/`，横幅设为 `🧍 待人工验收`；未预勾 Human-Confirmed 项。
+- [x] 工程侧证据完成后将本 PRD 移入 `tasks/archive/` 并在合并前设为 `🧍 待人工验收`；合并后按用户授权记录 Human-Confirmed 项和最终状态。
 
 ## 10. Functional Requirements
 
@@ -402,10 +402,10 @@ No external validation required; repository evidence and the user-selected proto
 - Requirements and risks: FR-1 至 FR-6 全部完成；§12 的仓库范围风险由真实入口 E2E、无效 ID 零写入断言与负向验证覆盖。补充 Playwright 包 typecheck 错误来自未改动文件，不属于要求的门禁。
 - Reconciled differences: 实现遵循 §6 推荐方案与 §7 影响树；只增加了用户此前要求的项目级原型规范文档，未改变运行时范围。
 - Validation blocker: none.
-- Validation follow-up: 无实现验证待办。首轮 CI 已通过；PRD 归档记录提交后，等待 PR 必需 CI 在最终 head 重跑通过再合并。
+- Validation follow-up: none. 最终归档 PR head 的必需 CI 已全绿并已合并。
 - Delivered behavior: Repositories 顶层增加“仓库列表 / 执行器与模型”；统一设置复用原组件；Backlog 深链和旧 URL 保留范围参数；Settings 仍管理 Agent 标签；项目新增独立原型规范并保存已选概念图来源。
-- Known evidence gaps: 补充检查 `pnpm --dir tests/playwright-e2e typecheck` 在未改动的 `tests/smoke/idea-inbox.spec.ts:124` 报既有类型错误，不属于该工作流或 CI 的门禁。本地完整 suite 有一个 writer marker 时序失败，孤立复跑通过；required CI 首轮全绿，归档记录提交后的最终 head 仍须完成同一门禁。
-- Acceptance status: `🧍 待人工验收`.
+- Known evidence gaps: 补充检查 `pnpm --dir tests/playwright-e2e typecheck` 在未改动的 `tests/smoke/idea-inbox.spec.ts:124` 报既有类型错误，不属于该工作流或 CI 的门禁。本地完整 suite 的 writer marker 时序失败在孤立复跑通过；PR 最终 head 的完整 CI 全绿。
+- Acceptance status: `✅ 已验收`.
 
 ## Change Log
 
@@ -434,3 +434,12 @@ No external validation required; repository evidence and the user-selected proto
 - Impact: delivery records only; product implementation tree is unchanged.
 - Validation: PR #370; Frontend Build / Validate Template run `43387293118`, Install smoke run `43387292955`, and Realistic Validation sign-off run `43387293042` all passed on implementation head `3a370a79e30c296989c9105e564f91eadcbf9f37`; final PR-head checks will rerun after this archive record commit.
 - Review: merge records acceptance of §13 decisions and §9.1 visible outcomes; post-merge acceptance details will be appended after merge.
+
+### Post-merge human acceptance
+- Type: acceptance
+- Before: PRD banner was `🧍 待人工验收`; the two `Human-Confirmed` items were unchecked pending the authorized merge.
+- After: PRD banner is `✅ 已验收`; both human-confirmed outcomes are recorded as accepted under the merge authorization in PR #370's body.
+- Reason: the user explicitly requested direct PR merge; the PR body states that merging accepts §13 decisions and §9.1 visible outcomes and authorizes this post-merge record.
+- Impact: acceptance record only; no implementation or public behavior changed.
+- Validation: squash merge `60251d9bc2db973d9945fdd0a460c788694690c8` has tree `b121ddc3b13260cd52500435ae248774002a8565`; PR head `73a71fd40d01520be9f88a21fe78ae592d77a27` passed final CI. `verified_head_sha=3a370a79e30c296989c9105e564f91eadcbf9f37`; `verified_tree_sha=1e73c64b5d05a265aaad0432fe8afa572ad24184`; merge record-excluded tree is the same `1e73c64b5d05a265aaad0432fe8afa572ad24184`; `evidence_manifest_sha256=f7d568eb6946ad7943fc9ec771b62c27bb8445d37457bdc95fb97a33136358ea`; verifier PASS; [final CI](https://github.com/ZataZhang/keda/actions/runs/43390695429), [Install smoke](https://github.com/ZataZhang/keda/actions/runs/43390695257), [Validation Gate](https://github.com/ZataZhang/keda/actions/runs/43390858062) all passed.
+- Review: [PR #370](https://github.com/ZataZhang/keda/pull/370) was squash-merged by `ZataZhang` at `2026-11-13T08:16:02Z`; merge explicitly authorized post-merge acceptance recording.
