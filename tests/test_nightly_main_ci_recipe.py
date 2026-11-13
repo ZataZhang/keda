@@ -35,5 +35,5 @@ def test_nightly_main_ci_recipe_renders_ci_status() -> None:
         extra_variables={"last_ci_status": "failure"},
     )
 
-    assert "最近一次 main workflow 的结论是：" in rendered
+    assert "workflow concluded with: `failure`" in rendered
     assert "`failure`" in rendered
