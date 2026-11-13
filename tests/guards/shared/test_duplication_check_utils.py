@@ -65,16 +65,30 @@ def test_parse_new_side_line_ranges_reads_added_hunks_and_skips_deletions() -> N
     assert duplication_utils._parse_new_side_line_ranges(diff_text) == [(1, 1), (11, 13)]
 
 
-def test_changed_line_ranges_returns_modified_new_side(committed_repo: Path) -> None:
-    """修改工作树某一行后，应返回该行对应的新侧区间。"""
-    sample_file = committed_repo / "src" / "sample.py"
-    sample_lines = sample_file.read_text(encoding="utf-8").splitlines()
-    sample_lines[14] = "line_15_modified"
-    sample_file.write_text("\n".join(sample_lines) + "\n", encoding="utf-8")
+def test_merge_counts_only_lines_not_brought_in_from_merge_head(merging_repo: Path) -> None:
+    """合并进行中，原样来自 MERGE_HEAD 的文件与行不算改动；额外写下的行仍算。"""
+    sample_path = Path("src/sample.py")
+    # main 新增文件和第 15 行都不算本次改动，只剩 feature 自己的第 3 行。
+    assert duplication_utils.select_incremental_paths(
+        raw_path_texts=[],
+        repo_root=merging_repo,
+        allowed_suffixes={".py"},
+        allowed_root_paths=[Path("src")],
+    ) == [sample_path]
+    assert duplication_utils.changed_line_ranges(merging_repo, sample_path) == [(3, 3)]
 
-    changed_ranges = duplication_utils.changed_line_ranges(committed_repo, Path("src/sample.py"))
+    sample_file = merging_repo / sample_path
+    lines = sample_file.read_text(encoding="utf-8").splitlines()
+    lines[9] = "line_10_resolution"
+    sample_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-    assert changed_ranges == [(15, 15)]
+    assert duplication_utils.select_incremental_paths(
+        raw_path_texts=[],
+        repo_root=merging_repo,
+        allowed_suffixes={".py"},
+        allowed_root_paths=[Path("src")],
+    ) == [sample_path]
+    assert duplication_utils.changed_line_ranges(merging_repo, sample_path) == [(10, 10)]
 
 
 def test_changed_line_ranges_empty_when_unmodified(committed_repo: Path) -> None:
@@ -124,28 +138,3 @@ def merging_repo(committed_repo: Path) -> Path:
     _run_git(committed_repo, "checkout", "-q", "feature")
     _run_git(committed_repo, "merge", "-q", "--no-commit", "--no-ff", "main")
     return committed_repo
-
-
-def test_merge_counts_only_lines_not_brought_in_from_merge_head(merging_repo: Path) -> None:
-    """合并进行中，原样来自 MERGE_HEAD 的文件与行不算改动；合并时额外写下的行仍算。"""
-
-    def _select_candidates() -> list[Path]:
-        return duplication_utils.select_incremental_paths(
-            raw_path_texts=[],
-            repo_root=merging_repo,
-            allowed_suffixes={".py"},
-            allowed_root_paths=[Path("src")],
-        )
-
-    sample_path = Path("src/sample.py")
-    # from_main.py 与 main 第 15 行都是 main 原样带进来的，只剩 feature 自己的第 3 行
-    assert _select_candidates() == [sample_path]
-    assert duplication_utils.changed_line_ranges(merging_repo, sample_path) == [(3, 3)]
-
-    sample_file = merging_repo / sample_path
-    lines = sample_file.read_text(encoding="utf-8").splitlines()
-    lines[9] = "line_10_resolution"
-    sample_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-    assert _select_candidates() == [sample_path]
-    assert duplication_utils.changed_line_ranges(merging_repo, sample_path) == [(10, 10)]
