@@ -30,6 +30,7 @@ from backend.core.use_cases.agent_runner_events import (
 )
 from backend.core.use_cases.agent_runner_failure import (
     AgentExecutionError,
+    HumanActionRequiredError,
     ProviderCapacityError,
 )
 from backend.infrastructure.process_runner import CommandFailedError
@@ -2010,7 +2011,8 @@ def test_run_pre_pr_review_feeds_commit_failure_to_next_cycle(tmp_path: Path) ->
         ),
     )
 
-    with pytest.raises(RuntimeError, match="Pre-PR review repair failed"):
+    # 轮次用尽仍卡在提交门禁 → 转 blocked 交人判断，而不是 agent/failed
+    with pytest.raises(HumanActionRequiredError) as blocked_info:
         run_pre_pr_review(
             issue=issue,
             worktree_path=worktree_path,
@@ -2022,6 +2024,9 @@ def test_run_pre_pr_review_feeds_commit_failure_to_next_cycle(tmp_path: Path) ->
             expected_branch="issue-1",
             verification_results=[],
         )
+    assert blocked_info.value.directive.block_type == "pre_pr_review_commit_gate"
+    assert "jscpd found duplication" in blocked_info.value.directive.summary
+    assert "kc blocked-continue 1" in blocked_info.value.directive.next_action
 
     # 失败补丁被 unstage（git reset --mixed）
     assert ["git", "reset", "--mixed"] in fake_runner.calls

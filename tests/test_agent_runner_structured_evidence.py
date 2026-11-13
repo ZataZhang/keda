@@ -807,8 +807,13 @@ def test_evidence_block_rejects_malformed_stdout_assertion(tmp_path: Path) -> No
 
 def test_prompt_suffix_documents_stdout_assertions() -> None:
     """Both prompt variants tell the agent how to declare output assertions."""
-    assert "stdout_assertions" in build_structured_evidence_prompt_suffix("zh-CN")
-    assert "stdout_assertions" in build_structured_evidence_prompt_suffix("en-US")
+    zh_suffix = build_structured_evidence_prompt_suffix("zh-CN")
+    en_suffix = build_structured_evidence_prompt_suffix("en-US")
+    assert "stdout_assertions" in zh_suffix
+    assert "stdout_assertions" in en_suffix
+    assert '" passed"' in zh_suffix and '" failed"' in zh_suffix
+    assert '" passed"' in en_suffix and '" failed"' in en_suffix
+    assert "Do not assert counts" in en_suffix
 
 
 # ---------------------------------------------------------------------------

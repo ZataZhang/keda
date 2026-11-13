@@ -98,3 +98,54 @@ def test_changed_line_ranges_falls_back_to_staged_diff(committed_repo: Path) -> 
     changed_ranges = duplication_utils.changed_line_ranges(committed_repo, Path("src/sample.py"))
 
     assert changed_ranges == [(3, 3)]
+
+
+@pytest.fixture
+def merging_repo(committed_repo: Path) -> Path:
+    """构造合并进行中的仓库：feature 改第 3 行，main 改第 15 行并新增一个文件。
+
+    feature 分支 ``git merge --no-commit main`` 后停在 MERGE_HEAD 存在的状态；
+    ``src/sample.py`` 第 15 行与 ``src/from_main.py`` 都是 main 原样带进来的。
+    """
+    _run_git(committed_repo, "branch", "-M", "main")
+    _run_git(committed_repo, "checkout", "-q", "-b", "feature")
+    sample_file = committed_repo / "src" / "sample.py"
+    lines = sample_file.read_text(encoding="utf-8").splitlines()
+    lines[2] = "line_3_feature"
+    sample_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    _run_git(committed_repo, "commit", "-q", "-am", "feature change")
+    _run_git(committed_repo, "checkout", "-q", "main")
+    lines = sample_file.read_text(encoding="utf-8").splitlines()
+    lines[14] = "line_15_main"
+    sample_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    (committed_repo / "src" / "from_main.py").write_text("main_only = 1\n", encoding="utf-8")
+    _run_git(committed_repo, "add", "-A")
+    _run_git(committed_repo, "commit", "-q", "-m", "main change")
+    _run_git(committed_repo, "checkout", "-q", "feature")
+    _run_git(committed_repo, "merge", "-q", "--no-commit", "--no-ff", "main")
+    return committed_repo
+
+
+def test_merge_counts_only_lines_not_brought_in_from_merge_head(merging_repo: Path) -> None:
+    """合并进行中，原样来自 MERGE_HEAD 的文件与行不算改动；合并时额外写下的行仍算。"""
+
+    def _select_candidates() -> list[Path]:
+        return duplication_utils.select_incremental_paths(
+            raw_path_texts=[],
+            repo_root=merging_repo,
+            allowed_suffixes={".py"},
+            allowed_root_paths=[Path("src")],
+        )
+
+    sample_path = Path("src/sample.py")
+    # from_main.py 与 main 第 15 行都是 main 原样带进来的，只剩 feature 自己的第 3 行
+    assert _select_candidates() == [sample_path]
+    assert duplication_utils.changed_line_ranges(merging_repo, sample_path) == [(3, 3)]
+
+    sample_file = merging_repo / sample_path
+    lines = sample_file.read_text(encoding="utf-8").splitlines()
+    lines[9] = "line_10_resolution"
+    sample_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    assert _select_candidates() == [sample_path]
+    assert duplication_utils.changed_line_ranges(merging_repo, sample_path) == [(10, 10)]
