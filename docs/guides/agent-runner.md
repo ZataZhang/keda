@@ -3549,6 +3549,17 @@ agent 执行              prompt 强制要求实跑验证计划，证据写入 w
 断言未通过时抛 `ValidationEvidenceError`，与 exit code 非零走同一条 recovery 循环，且不会被写进 RV 复跑缓存。旧 manifest（无该字段）行为不变，只校验退出码。
 RV 命令非零退出或 stdout 断言失败时，尝试详情会保留失败命令、退出码及限长后的 stdout/stderr；Backlog 在“失败原因”中先展示摘要，展开可读完整诊断。普通仓库验证命令也沿用同一输出呈现口径。
 
+#### 证据分支清理：`kc evidence prune`
+
+证据分支合并后**不立即删除**（看板与验收可能直接从分支读人审页），改为按保留期清理：
+
+```bash
+kc evidence prune --repo-id keda              # dry run：列出可删与保留原因
+kc evidence prune --all --older-than 30d --apply
+```
+
+判定只看关联 PR 的 `mergedAt`：合并时间超过保留期才可删；PR 未合并、查不到、或合并时间为空一律保留。`--older-than` 接受 `30`、`30d`、`2w`，默认 `30d`。**不要**在合并流程里调用它——合并时删会删掉唯一一份截图。
+
 #### 本地自检：`kc evidence check`（提交前必跑）
 
 `kc evidence check` 是交付门禁的本地前移入口，判定与门禁完全同源（manifest 解析、`bash -lc` 复跑、超时、`stdout_assertions`），只是把反馈从"提交后等门禁、一次一条"变成"本地几秒、一次全量"。声明了 `stdout_assertions` 的证据包必须先自检全部 PASS 再请求提交。

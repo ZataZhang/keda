@@ -30,8 +30,17 @@ from backend.core.use_cases.agent_runner_evidence_check import (
     resolve_check_evidence_dir,
     run_evidence_check,
 )
+from backend.core.use_cases.agent_runner_evidence_branch import list_evidence_branches
+from backend.core.use_cases.agent_runner_evidence_prune import (
+    delete_remote_branch,
+    find_github_remote,
+    parse_retention_days,
+    plan_evidence_prune,
+    read_merge_dates,
+)
 from backend.core.use_cases.agent_runner_factory import (
     create_process_runner,
+    create_registry_editor,
     get_agent_runner_settings,
     resolve_repository_targets,
 )
@@ -141,3 +150,131 @@ def evidence_check_command(
 
 
 __all__ = ["evidence_check_command"]
+
+
+@evidence_app.command("prune")
+def evidence_prune_command(
+    repo_id: Annotated[
+        str | None,
+        typer.Option("--repo-id", help="Registered repository to prune evidence branches for."),
+    ] = None,
+    all_repos: Annotated[
+        bool,
+        typer.Option("--all", help="Prune evidence branches for every registered repository."),
+    ] = False,
+    older_than: Annotated[
+        str,
+        typer.Option(
+            "--older-than",
+            help="Retention window after the PR merged; accepts 30, 30d or 2w.",
+        ),
+    ] = "30d",
+    apply: Annotated[
+        bool,
+        typer.Option("--apply", help="Actually delete eligible branches (default: dry run)."),
+    ] = False,
+    output: OutputOption = OutputFormat.table,
+    as_json: JsonOutputOption = False,
+) -> int:
+    """Delete evidence branches whose PR merged longer ago than the retention window."""
+    output_format = output_format_of(output=output, as_json=as_json)
+    if output_format == OUTPUT_FORMAT_JSON:
+        route_logs_to_stderr()
+    if not repo_id and not all_repos:
+        return render_cli_error(
+            CliError(
+                "Either --repo-id or --all is required for kc evidence prune.",
+                code=ExitCode.USAGE,
+                suggestion="kc evidence prune --repo-id <id> --older-than 30d --apply",
+            ),
+            fmt=output_format,
+        )
+    try:
+        older_than_days = parse_retention_days(older_than)
+    except ValueError as retention_error:
+        return render_cli_error(
+            CliError(str(retention_error), code=ExitCode.USAGE), fmt=output_format
+        )
+    selected = [
+        entry
+        for entry in create_registry_editor().list_repositories()
+        if entry.enabled and entry.path_exists and (all_repos or entry.repo_id == repo_id)
+    ]
+    if not selected:
+        return render_cli_error(
+            CliError(
+                f"Repository {repo_id!r} is not registered.",
+                code=ExitCode.NOT_FOUND,
+                suggestion="kc registry list",
+            ),
+            fmt=output_format,
+        )
+    report: list[dict[str, object]] = []
+    for entry in selected:
+        repo_path = Path(entry.path)
+        remote_info = find_github_remote(repo_path)
+        if remote_info is None:
+            report.append({"repo_id": entry.repo_id, "error": "no GitHub remote", "branches": []})
+            continue
+        remote, slug = remote_info
+        branches = list_evidence_branches(repo_path)
+        decisions = plan_evidence_prune(
+            branches,
+            read_merge_dates(slug, branches),
+            older_than_days=older_than_days,
+        )
+        deleted: list[str] = []
+        if apply:
+            for decision in decisions:
+                if decision.eligible and delete_remote_branch(repo_path, remote, decision.branch):
+                    deleted.append(decision.branch)
+        report.append(
+            {
+                "repo_id": entry.repo_id,
+                "remote": remote,
+                "slug": slug,
+                "older_than_days": older_than_days,
+                "applied": apply,
+                "branches": [
+                    {
+                        "branch": decision.branch,
+                        "issue_number": decision.issue_number,
+                        "eligible": decision.eligible,
+                        "reason": decision.reason,
+                        "age_days": decision.age_days,
+                    }
+                    for decision in decisions
+                ],
+                "deleted": deleted,
+            }
+        )
+
+    def render_human() -> None:
+        """按仓库逐行打印判定结果与删除动作。"""
+        for entry in report:
+            console.print(str(entry["repo_id"]), markup=False, highlight=False)
+            error_text = entry.get("error")
+            if error_text:
+                console.print(f"  {error_text}", markup=False, highlight=False)
+                continue
+            branches = entry.get("branches") or []
+            if not branches:
+                console.print("  没有证据分支", markup=False, highlight=False)
+                continue
+            for item in branches:
+                mark = "可删" if item["eligible"] else "保留"
+                console.print(
+                    f"  [{mark}] {item['branch']} — {item['reason']}",
+                    markup=False,
+                    highlight=False,
+                )
+            if entry.get("applied"):
+                deleted_items = entry.get("deleted") or []
+                console.print(
+                    f"  已删除 {len(deleted_items)} 个分支", markup=False, highlight=False
+                )
+            elif any(item["eligible"] for item in branches):
+                console.print("  这是 dry run；加 --apply 才会删除", markup=False, highlight=False)
+
+    emit(report, fmt=output_format, human_renderer=render_human)
+    return int(ExitCode.SUCCESS if apply else ExitCode.DRY_RUN_OK)

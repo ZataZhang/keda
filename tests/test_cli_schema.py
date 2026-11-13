@@ -25,7 +25,9 @@ from backend.api.cli_typer_app import app
 #: ``lifecycle`` 与 ``schema``/``tokens``/``evidence check`` 同类：只读 Typer 原生命令，
 #: 直接调用 core 用例并发射结果，不经过 argparse 门面的执行后端；收录到门面只会
 #: 留下解析得了、执行不了的死条目。
-FACADE_EXEMPT_COMMANDS = frozenset({"schema", "tokens", "lifecycle", "evidence check"})
+FACADE_EXEMPT_COMMANDS = frozenset(
+    {"schema", "tokens", "lifecycle", "evidence check", "evidence prune"}
+)
 
 #: ``--output`` 在这些命令上是**输出目录**，不是格式取值域，必须被排除在机读契约之外。
 DIRECTORY_OUTPUT_COMMANDS = frozenset({"ask", "deliberate"})
