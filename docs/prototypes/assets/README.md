@@ -2,6 +2,10 @@
 
 本目录统一使用通用资源命名，避免业务语义耦合到文件名。
 
+## 功能原型图片
+
+具体功能的图片放在对应原型的资产子目录，例如 lifecycle-agent-matrix/；不要将功能图片散放在本目录根部。AI 生成图片须配同名 .prompt.md，真实页面截图或设计导出须配同名 .source.md。完整的目录、来源记录和验证要求见[原型与 UI 草图项目规范](../../ai-standards/prototyping.md)。
+
 ## 通用入口
 
 - `prototype.css`: 默认原型页面样式入口（可直接在 `docs/prototypes/*.html` 引用）。

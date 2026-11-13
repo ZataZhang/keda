@@ -202,17 +202,16 @@ PRD 覆盖的生效范围是**有 PRD / Issue 上下文的八个阶段**：`impl
 
 | 层 | 写入文件 | 入口 |
 |---|---|---|
-| 全局（机器级） | `config.toml` | **Settings → 「生命周期、模型与推理深度统一设置」→ 范围选「全局」**；命令行 **`kc agent setup`**（只列本机装了的 agent）或 `kc agent lifecycle set --scope global` |
+| 全局（机器级） | `config.toml` | **Repositories →「执行器与模型」→ 范围选「全局」**；命令行 **`kc agent setup`**（只列本机装了的 agent）或 `kc agent lifecycle set --scope global` |
 | 仓库级 | 该仓库 `.kedacode.toml` | **同一设置页 → 范围选「仓库」并选仓库**；或 **Backlog 仓库行齿轮**（直接带仓库进入该页） |
 | PRD 级 | 该 PRD 文件头部 | **PRD 原文页工具栏「Agent 覆盖」** |
 
-生命周期矩阵、模型预设与「执行器回退候选」合并到**一个** Settings 子页
-`/app/settings/lifecycle/`（原先分散在 Settings「生命周期 Agent 设置」Tab 与 Backlog
+生命周期矩阵、模型预设与「执行器回退候选」合并到 Repositories 下的**执行器与模型**页
+`/app/repositories/lifecycle/`，与仓库列表平级（原先分散在 Settings「生命周期 Agent 设置」Tab 与 Backlog
 仓库齿轮抽屉里的两张矩阵、以及独立的「回退顺序卡片」都已被它取代）。页面顶部用**范围
 选择器**在「全局」与「仓库」间切换，仓库范围附一个仓库下拉；页首另有「生命周期矩阵 /
 模型预设 / 执行器回退」三个区块锚点。Settings 主页面保留**「Agent 标签设置」**
-（编辑每个 agent 的 GitHub 路由标签名 / 颜色 / 描述，是 `auto` 解析 Issue 标签的依据）
-与指向统一设置页的入口卡片；Backlog 的仓库齿轮进入同一页面并预选该仓库。矩阵与设置页
+（编辑每个 agent 的 GitHub 路由标签名 / 颜色 / 描述，是 `auto` 解析 Issue 标签的依据）；Backlog 的仓库齿轮进入同一页面并预选该仓库。旧地址 `/app/settings/lifecycle/` 会保留并转到新页面。矩阵与设置页
 逐 agent 显示**本机可用性**（「未安装」/ 解析到的可执行文件路径），事实源与
 `kc agent list` 的 `available` / `bin_path` 是同一份序列化，两边不会各说一套。
 

@@ -1,17 +1,9 @@
 "use client"
 
 import { ConsolePage, ConsolePageHeader, ConsoleSectionTabs, consoleTabClassName } from "@/components/layout/console-page";
-import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useEffect, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
 import { AgentLabelsEditor } from "@/components/agent-runner/agent-labels-editor"
 import { ModelPricingEditor } from "@/components/agent-runner/model-pricing-editor"
 import { logout, getCurrentSession, type UserSession } from "@/lib/api/auth"
@@ -103,23 +95,6 @@ export default function SettingsPage() {
 
         <div className="space-y-6">
           <AgentLabelsEditor />
-
-          <Card data-testid="settings-lifecycle-entry">
-            <CardHeader>
-              <CardTitle>生命周期、模型与推理深度统一设置</CardTitle>
-              <CardDescription>
-                在同一页面切换全局 / 仓库范围，查看九阶段最终生效的
-                Agent、模型、推理深度与来源，
-                编辑命名预设并绑定阶段，或为执行器回退候选选择匹配的预设。原先分散在本页与
-                Backlog 的生命周期矩阵、回退顺序已合并到此页面。
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Button asChild size="sm">
-                <Link href="/app/settings/lifecycle/">打开统一设置页</Link>
-              </Button>
-            </CardContent>
-          </Card>
         </div>
       </section>
 

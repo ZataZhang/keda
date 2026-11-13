@@ -46,6 +46,7 @@
 - [Frontend Design](frontend-design.md)
 - [Testing](testing.md)
 - [Tooling](tooling.md)
+- [原型与 UI 草图](prototyping.md)
 - [时间显示与时区](time-display.md)
 
 ## 讨论与规划的 ROI 原则

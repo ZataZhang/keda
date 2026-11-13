@@ -145,10 +145,9 @@ supervisor / planner / content_generation / deliberate）。
 范围的**统一设置页**和一组**持久化 CLI**，读写同一份 `presets` / `lifecycle_presets` /
 回退候选事实源（不新建第二套配置、不入库）。
 
-### 7.1 Settings 统一设置页
+### 7.1 Repositories 执行器与模型页
 
-路由 `/app/settings/lifecycle/`（入口：Settings「Agent 管理」Tab 内的卡片，或 Backlog 仓库行
-齿轮带仓库直接进入并预选）。Settings 主页面 `/app/settings/` 通过吸顶 Tab 区分 Agent 管理、成本估算和关于与账户；生命周期设置页再通过吸顶 Tab 切换以下三块，每次显示一个区块：
+路由 `/app/repositories/lifecycle/`（Repositories 顶层与「仓库列表」平级；Backlog 仓库行齿轮带仓库直接进入并预选）。旧路由 `/app/settings/lifecycle/` 保留并转到新页面，同时保留查询参数。Settings 主页面 `/app/settings/` 仍管理 Agent 路由标签；生命周期设置页通过吸顶 Tab 切换以下三块，每次显示一个区块：
 
 - **生命周期矩阵**：九阶段各自的最终生效 Agent / 模型 / 推理深度 / 绑定预设与**逐字段来源**
   （预设 / 继承 / Agent 默认 / 未支持，或来自哪一层）。缺省与不支持如实标示，不猜外部 CLI

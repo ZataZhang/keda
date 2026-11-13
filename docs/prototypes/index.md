@@ -13,6 +13,7 @@
 ## 目录与规范
 
 - [Prototype Hub（原型总览）](hub.html)
+- [原型与 UI 草图项目规范](../ai-standards/prototyping.md)
 - [Console 运行时看板与模型评测基线说明](prd-lifecycle-observability.md)
 - [原型资源说明](assets/README.md)
 

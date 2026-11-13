@@ -13,7 +13,14 @@
 // 完整期望数组写回（PUT）。二者目标文件不同，互不牵连。
 
 import { ConsolePage, ConsolePageHeader, ConsoleToolbar, ConsoleSectionTabs, consoleTabClassName } from "@/components/layout/console-page";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { toast } from "sonner";
 
 import {
@@ -85,6 +92,8 @@ interface LifecycleSettingsPageProps {
   initialScope: LifecycleAgentScope;
   /** 初始仓库 id（来自查询参数 repo_id）。 */
   initialRepoId?: string;
+  /** Repositories 顶层导航，由复用页面的路由注入。 */
+  workspaceNavigation?: ReactNode;
 }
 
 const LIFECYCLE_SETTINGS_TABS = [
@@ -104,6 +113,7 @@ type LifecycleSettingsTab = (typeof LIFECYCLE_SETTINGS_TABS)[number]["id"];
 export function LifecycleSettingsPage({
   initialScope,
   initialRepoId,
+  workspaceNavigation,
 }: LifecycleSettingsPageProps) {
   const [scope, setScope] = useState<LifecycleAgentScope>(initialScope);
   const [repoId, setRepoId] = useState<string | undefined>(initialRepoId);
@@ -498,63 +508,64 @@ export function LifecycleSettingsPage({
     return (
       <>
         <ConsolePageHeader title="生命周期与模型设置" description="配置全局或仓库的阶段 Agent、模型预设与执行器回退。" />
-      <ConsoleToolbar>
-        <div className="inline-flex rounded-md border border-border p-0.5">
-          <button
-            type="button"
-            onClick={() => switchScope("global")}
-            data-testid="scope-global"
-            className={cn(
-              "h-8 rounded-md px-3 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              scope === "global"
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            全局
-          </button>
-          <button
-            type="button"
-            onClick={() => switchScope("repository")}
-            data-testid="scope-repository"
-            className={cn(
-              "h-8 rounded-md px-3 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              scope === "repository"
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            仓库
-          </button>
-        </div>
-        {scope === "repository" ? (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button type="button" variant="outline" size="sm" data-testid="scope-repo-select">
-                {repositories.find((repo) => repo.repo_id === repoId)?.display_name ??
-                  repoId ??
-                  "选择仓库"}
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="min-w-56">
-              {repositories.map((repo) => (
-                <DropdownMenuItem
-                  key={repo.repo_id}
-                  onSelect={() => switchRepo(repo.repo_id)}
-                  data-testid={`scope-repo-option-${repo.repo_id}`}
-                >
-                  {repo.display_name ?? repo.repo_id}
-                </DropdownMenuItem>
-              ))}
-              {repositories.length === 0 ? (
-                <DropdownMenuLabel className="text-xs text-slate-500">
-                  暂无启用的仓库
-                </DropdownMenuLabel>
-              ) : null}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        ) : null}
-      </ConsoleToolbar>
+        {workspaceNavigation}
+        <ConsoleToolbar>
+          <div className="inline-flex rounded-md border border-border p-0.5">
+            <button
+              type="button"
+              onClick={() => switchScope("global")}
+              data-testid="scope-global"
+              className={cn(
+                "h-8 rounded-md px-3 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                scope === "global"
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              全局
+            </button>
+            <button
+              type="button"
+              onClick={() => switchScope("repository")}
+              data-testid="scope-repository"
+              className={cn(
+                "h-8 rounded-md px-3 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                scope === "repository"
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              仓库
+            </button>
+          </div>
+          {scope === "repository" ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button type="button" variant="outline" size="sm" data-testid="scope-repo-select">
+                  {repositories.find((repo) => repo.repo_id === repoId)?.display_name ??
+                    repoId ??
+                    "选择仓库"}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="min-w-56">
+                {repositories.map((repo) => (
+                  <DropdownMenuItem
+                    key={repo.repo_id}
+                    onSelect={() => switchRepo(repo.repo_id)}
+                    data-testid={`scope-repo-option-${repo.repo_id}`}
+                  >
+                    {repo.display_name ?? repo.repo_id}
+                  </DropdownMenuItem>
+                ))}
+                {repositories.length === 0 ? (
+                  <DropdownMenuLabel className="text-xs text-slate-500">
+                    暂无启用的仓库
+                  </DropdownMenuLabel>
+                ) : null}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : null}
+        </ConsoleToolbar>
       </>
     );
   }

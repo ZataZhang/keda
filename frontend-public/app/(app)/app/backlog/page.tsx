@@ -765,7 +765,7 @@ export default function BacklogPage() {
                   className="shrink-0"
                   onClick={() =>
                     router.push(
-                      `/app/settings/lifecycle/?scope=repository&repo_id=${encodeURIComponent(repo.repo_id)}`,
+                      `/app/repositories/lifecycle/?scope=repository&repo_id=${encodeURIComponent(repo.repo_id)}`,
                     )
                   }
                   data-testid={`repo-agent-gear-${repo.repo_id}`}
