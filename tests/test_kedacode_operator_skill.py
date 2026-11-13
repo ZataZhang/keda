@@ -380,6 +380,20 @@ _ALLOWED_FLAGS: dict[tuple[str, ...], set[str]] = {
         "--yes",
         "--progress",
     },
+    # references/daemon.md 用 `kc supervise` 说明 daemon 每轮内置的 PR 值守是同一个
+    # 一次性入口；旗标集合取自 `kc schema --json` 的真实命令树。
+    ("supervise",): {
+        "--dry-run",
+        "--agent",
+        "--max-issues",
+        "--preset",
+        "--model",
+        "--reasoning-effort",
+        "--repo",
+        "--repo-id",
+        "--config",
+        "--all",
+    },
     ("pr", "aggregate"): {"--issue", "--dry-run"},
     ("daemon", "run"): {
         "--autopilot",
