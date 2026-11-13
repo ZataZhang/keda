@@ -1969,7 +1969,7 @@ review packet 现在是 **修复-再审查收敛模式**：轮数由 `[agent_run
 
 > **执行事故的换人回退**：reviewer **进程层面**的失败不是「review 未通过」，也不会把 Issue 判死。墙钟或静默期超时（`pre_pr_review.timeout_seconds`，默认 1800s）会先按 `timeout_resume_attempts` 尝试在同一 session 增加执行窗口；没有可续传的 session 或预算耗尽后，才与 agent 进程非零退出、启动 I/O 错误及 provider 容量失败（429/529）一样，升级为可换人错误 `AgentExecutionError`，交由跨 agent fallback 链换下一个候选 agent 重试。只有 `UnrecoverableError`（安全/分支违规）与 `ForbiddenBlockedError`（禁改路径）这类每个 agent 都会撞同一堵墙的失败才直接冒泡，不换人。此前 `subprocess.TimeoutExpired` 等异常会一路冒到顶层 `except Exception` 直接落 `agent/failed`；现在超时优先尝试续跑。
 
-当某一轮 reviewer 补丁在提交门禁上失败（`commit_requested_changes` 抛 `VerificationFailedError`，如 `verification_commands` 或 `pre_commit_verification_command` 复跑失败）时，runner 会做两件事再进入下一轮：(1) 把失败命令与截断后的 stdout/stderr（复用 `format_verification_failure`）写进下一轮 review packet 的 “Previous reviewer patch was REJECTED …” 段落，让 reviewer 针对真正的门禁失败调整做法，而不是蒙眼重复同一补丁；(2) 调用 `unstage_changes`（`git reset --mixed`）把失败补丁 unstage，改动仍留在工作区供下一轮修订，避免残留 staged 内容被 `git add -A` 原样重提、每轮撞同一堵墙。该反馈只投喂给紧接着的一轮；提交成功或首轮时不携带。
+当某一轮 reviewer 补丁在提交门禁上失败（`commit_requested_changes` 抛 `VerificationFailedError`，如 `verification_commands` 或 `pre_commit_verification_command` 复跑失败）时，runner 会做两件事再进入下一轮：(1) 把失败命令与截断后的 stdout/stderr（复用 `format_verification_failure`）写进下一轮 review packet 的 “Previous reviewer patch was REJECTED …” 段落，让 reviewer 针对真正的门禁失败调整做法，而不是蒙眼重复同一补丁；(2) 调用 `unstage_changes`（`git reset --mixed`）把失败补丁 unstage，改动仍留在工作区供下一轮修订，避免残留 staged 内容被 `git add -A` 原样重提、每轮撞同一堵墙。该反馈只投喂给紧接着的一轮；提交成功或首轮时不携带。若**最后一轮**补丁仍被提交门禁拒绝，Issue 转入 `agent/blocked`（`block_type=pre_pr_review_commit_gate`）而不是 `agent/failed`：再自动重跑只会撞同一堵墙，而门禁本身也可能误判（实证：reviewer 把 main 合进分支后，jscpd 把 main 上既有的重复算成本次改动）。人修好门禁失败或门禁本身并推送后，用 `kc blocked-continue <N>` 继续。
 
 #### 审-修分工（`repair_agent`）
 

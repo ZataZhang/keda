@@ -380,6 +380,8 @@ _ALLOWED_FLAGS: dict[tuple[str, ...], set[str]] = {
         "--yes",
         "--progress",
     },
+    # 单次 post-PR 值守入口仍由 CLI 保留，skill 文档以 `kc supervise` 引用。
+    ("supervise",): set(),
     ("pr", "aggregate"): {"--issue", "--dry-run"},
     ("daemon", "run"): {
         "--autopilot",

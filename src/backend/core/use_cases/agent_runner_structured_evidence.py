@@ -983,7 +983,9 @@ def build_structured_evidence_prompt_suffix(language: str) -> str:
             "命令必须是自终止的检查，不能是长驻服务。"
             "可选填 `stdout_assertions` 声明输出断言（数组，每项含 `pattern`，以及可选的 "
             "`severity`（默认 high）、`source`（stdout/stderr，默认 stdout）、`must_match`（默认 true，"
-            "false 表示不得出现）；用精确子串而非正则，避免 `.*` 之类假阳）："
+            "false 表示不得出现）；用精确子串而非正则，避免 `.*` 之类假阳）；"
+            "不要断言会随改动漂移的计数（如 `24 passed`），后续加测试就会误判失败，"
+            '改用 `" passed"` 必须出现 + `" failed"` 不得出现：'
             '例如 `[{{{{"severity": "high", "pattern": "200 OK", "must_match": true}}}}, '
             '{{{{"pattern": "Traceback", "must_match": false}}}}]`。'
             "声明了 `stdout_assertions` 就必须先本地自检通过：运行 "
@@ -1021,6 +1023,9 @@ def build_structured_evidence_prompt_suffix(language: str) -> str:
         'e.g. `[{{{{"severity": "high", "pattern": "200 OK", "must_match": true}}}}, '
         '{{{{"pattern": "Traceback", "must_match": false}}}}]`. '
         "Prefer exact substrings over regex so `.*` cannot fake a pass. "
+        "Do not assert counts that drift as the code changes (e.g. `24 passed`) — adding "
+        'a test later turns the gate red; assert `" passed"` present plus `" failed"` '
+        "absent instead. "
         "If you declare `stdout_assertions`, you must pass the local self-check before "
         "requesting a commit: run `kc evidence check --evidence {evidence_dir}` — it "
         "re-runs the commands and checks the assertions with the delivery gate's own "
