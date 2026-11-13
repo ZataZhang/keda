@@ -14,35 +14,35 @@ skip_when: needs_attention=0
 pre_command: 'blocked="$(gh issue list --repo ZataZhang/keda --state open --label agent/blocked --limit 1000 --json number --jq length 2>/dev/null)" || blocked=unknown; failed="$(gh issue list --repo ZataZhang/keda --state open --label agent/failed --limit 1000 --json number --jq length 2>/dev/null)" || failed=unknown; case "$blocked:$failed" in *[!0-9:]*|:*|*:) printf "blocked_count=unknown\nfailed_count=unknown\nneeds_attention=unknown\n";; *) total=$((blocked + failed)); printf "blocked_count=%s\nfailed_count=%s\nneeds_attention=%s\n" "$blocked" "$failed" "$total";; esac'
 ---
 
-# Keda 阻塞与失败巡查 — {{date}}
+# Keda blocker and failure patrol — {{date}}
 
-这是每 30 分钟触发一次的 Keda 任务恢复巡查。触发前检查到的数量：
+This is the Keda task-recovery patrol that fires every 30 minutes. The counts read before the trigger:
 
-- `agent/blocked`：{{blocked_count}}
-- `agent/failed`：{{failed_count}}
-- 合计：{{needs_attention}}
+- `agent/blocked`: {{blocked_count}}
+- `agent/failed`: {{failed_count}}
+- Total: {{needs_attention}}
 
-若 GitHub 状态读取失败，计数会显示 `unknown`；此时应先诊断访问故障，不得把它当作队列为空。
+If reading the GitHub state fails, the counts show `unknown`; diagnose the access failure first and do not treat it as an empty queue.
 
-## 处理步骤
+## Steps
 
-1. 重新读取当前仓库所有 open 的 `agent/blocked` 和 `agent/failed` Issues，避免按过期计数操作。`gh issue list` 查询必须显式传 `--limit 1000`（默认只返回 30 条）。逐条读取 Issue 正文、最近的 Attempt History、相关 PR 状态，并用 `kc logs --repo-id keda --issue <N>` 查看本次执行日志。
-2. 对 `agent/failed`，先分类根因。发布或状态收尾失败使用 `kc recover --issue <N>`；执行失败先修复已确认的代码、配置或本机环境原因，再按恢复流程重新排队。不要在根因未知时盲目重试。
-3. 对 `agent/blocked`，仓库维护者已授权自动处理范围明确、可验证的技术阻塞。修好根因后才运行 `kc blocked-continue --issue <N>`，并确认该 Issue 已恢复到正确状态。
-4. 不得猜测产品取舍、访问权限、密钥、受保护路径或外部审批。遇到这类需要人决策的阻塞时，保留原 Issue 的 blocked 状态，在 Issue 评论中写明证据、缺少的决定和最小可选项，然后让本巡查 Issue 进入 blocked，等待维护者处理。
-5. 不接管仍处于 `agent/running` 的 Issue，也不因日志暂时安静就杀进程或创建第二个执行进程。运行中的任务由 daemon 的 stall supervisor 和原执行流程负责恢复。
-6. 处理后再次读取目标 Issue 状态及日志，确认恢复动作确实生效。若重新检查时已没有需要处理的 Issue，关闭本巡查 Issue 并说明本轮没有遗留阻塞；若本轮产生了修复 PR 或仍需人工决定，则保留本巡查 Issue 与其关联信息，不要谎报已解决。
+1. Re-read every open `agent/blocked` and `agent/failed` Issue in the current repository so you do not act on stale counts. `gh issue list` queries must pass `--limit 1000` explicitly (the default returns only 30). Read each Issue body, the latest Attempt History and the related PR state one by one, and use `kc logs --repo-id keda --issue <N>` to read this attempt's log.
+2. For `agent/failed`, classify the root cause first. Publishing or status-finalisation failures use `kc recover --issue <N>`; for execution failures, fix the confirmed code, configuration or local-environment cause first, then requeue through the recovery flow. Do not retry blindly while the root cause is unknown.
+3. For `agent/blocked`, the repository maintainer has authorised automatic handling of well-scoped, verifiable technical blockers. Only after the root cause is fixed, run `kc blocked-continue --issue <N>` and confirm the Issue returned to the correct state.
+4. Do not guess product trade-offs, access permissions, secrets, protected paths or external approvals. When a blocker needs a human decision, keep the original Issue blocked, comment the evidence, the missing decision and the minimal options, then put this patrol Issue into blocked and wait for the maintainer.
+5. Do not take over Issues that are still `agent/running`, and do not kill a process or start a second execution just because the log went quiet for a while. Running tasks are recovered by the daemon's stall supervisor and the original execution flow.
+6. After handling, re-read the target Issue state and logs to confirm the recovery actually took effect. If nothing is left to handle on re-check, close this patrol Issue and state that the round left no blockers; if this round produced a fix PR or still needs a human decision, keep this patrol Issue and its links, and never claim it is resolved when it is not.
 
-## 巡查结果与 PR 描述
+## Patrol result and PR description
 
-- 若本轮产生代码修复 PR，在本巡查 Issue 正文末尾追加 `## 本轮处置摘要（供 PR 描述生成）`，逐个列出目标 Issue、相关 PR、问题症状与根因、本轮修复、实际验证命令及结果、目标 Issue 当前状态和剩余人工决定。不要只把这些信息写在 Issue 评论里，因为 PR 描述生成读取 Issue 正文、提交记录和 diff，不读取评论。
-- 追加只能在正文**最末尾**新增内容：写回前先读回当前正文，写回后 `## 处理步骤`、`## 巡查结果与 PR 描述`、`## 约束`、`## Delivery Notes` 等既有章节必须逐字还在。不要按标题文本定位再替换其后的全部内容——本轮就是替换目标匹配到了上面那条指令里写在反引号中的小节标题，把 `## 约束` 之后的正文一起吃掉了；本巡查 Issue 正文是需求的唯一来源，丢一段就没人知道约束是什么。
-- 修复提交标题或正文应包含目标 Issue 编号和具体改动，保证 PR 描述生成回退时，提交记录仍能说明改了什么。
-- Draft PR 正文必须写明目标 Issue、症状/根因、修复内容、验证结果和未完成事项。保留 `Closes #<本巡查 Issue>` 以关闭本轮巡查并允许下一轮调度；目标 Issue 仍有未完成验收或待人决策时，只用 `Addresses #<目标 Issue>` / `Related to #<目标 Issue>`，不要用会自动关闭目标 Issue 的关键词。
-- PR 元数据不会因为生成器修好了就自己变对：`create_draft_pr` 按分支查到已有 open PR 时**直接返回原 URL，不重跑**标题与正文生成（见 `docs/guides/agent-runner.md`）。每个修复 cycle 之后要自己核对并用 `gh pr edit --title` / `--body-file` 刷新：标题是 ≤72 字符的 Conventional Commits 主题；`Closes #<本巡查 Issue>` 是正文**首行的裸文本**——写进 ``` 围栏里 GitHub 不认（`closingIssuesReferences` 为空），本轮 Issue 不会随 PR 合并关闭，`loop/<id>` 的「上一轮未关闭则暂停」会卡住下一轮；正文按**当前提交集与当前验证结果**重写，不要留下上一轮的提交号和「未运行」结论。
+- If this round produces a code-fix PR, append `## Round summary (for PR description generation)` to the end of this patrol Issue body, listing for each target Issue: the related PR, the symptom and root cause, this round's fix, the actual verification commands and results, the target Issue's current state, and the remaining human decisions. Do not put this information only in an Issue comment: PR description generation reads the Issue body, the commits and the diff, not the comments.
+- Only ever append at the very **end** of the body: read the current body back before writing, and after writing `## Steps`, `## Patrol result and PR description`, `## Constraints` and `## Delivery Notes` must all still be present verbatim. Do not locate a section by heading text and replace everything after it — an earlier round matched a section title quoted in backticks inside the instruction above and swallowed the body after `## Constraints`; this patrol Issue body is the single source of the requirement, and losing a section means nobody knows the constraints.
+- The fix commit's title or body should carry the target Issue number and the concrete change, so that if PR description generation falls back, the commit history still explains what changed.
+- The draft PR body must state the target Issue, the symptom/root cause, what was fixed, the verification results and what is left. Keep `Closes #<this patrol Issue>` so merging closes this patrol and lets the next round schedule; when the target Issue still has unfinished acceptance or pending human decisions, use only `Addresses #<target Issue>` / `Related to #<target Issue>` and never a keyword that would close the target Issue automatically.
+- PR metadata does not fix itself just because the generator was fixed: when `create_draft_pr` finds an existing open PR for the branch it **returns that URL without regenerating** the title or body (see `docs/guides/agent-runner.md`). After every fix cycle, verify and refresh it yourself with `gh pr edit --title` / `--body-file`: the title is a Conventional Commits subject of ≤ 72 characters; `Closes #<this patrol Issue>` must be the bare text of the **first line** of the body — inside a ``` fence GitHub does not honour it (empty `closingIssuesReferences`), so this Issue will not close when the PR merges and the loop's "pause when the previous round is still open" rule blocks the next round; rewrite the body from the **current commit set and current verification results**, leaving no previous round's commit SHAs or "not run" conclusions behind.
 
-## 约束
+## Constraints
 
-- 只处理 Keda 仓库的 `agent/blocked` 与 `agent/failed` Issues，不扩大到普通待办或人工审核中的 Issue。
-- 代码修复遵守 `docs/ai-standards/`、使用最高可行的真实入口验证，并按普通 runner 流程提交 Draft PR。
-- 只有完成根因修复与验证后，才能恢复原 Issue；验证失败时保留阻塞并记录失败证据。
+- Only handle `agent/blocked` and `agent/failed` Issues in the Keda repository; do not widen to ordinary todos or Issues awaiting human review.
+- Code fixes follow `docs/ai-standards/`, use the highest-fidelity real entry point available for verification, and submit a draft PR through the normal runner flow.
+- Restore the original Issue only after the root cause is fixed and verified; when verification fails, keep the blocker and record the failure evidence.
