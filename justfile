@@ -34,11 +34,19 @@ reinstall-kc:
 
 # 前端构建 + CLI 重装：改过 frontend-public 后想一步到位时用它
 # （console-sync 要跑完整 Next.js 构建，所以没有塞进 reinstall-kc）
+#
+# 同步只改磁盘产物，不会重启正在跑的 console；改了后端路由时用 restart，
+# 由脚本按 console 是被谁拉起的决定「重开菜单栏 App」还是「原地重启同一端口」。
 # Usage:
-#   just refresh-kc
-refresh-kc: console-sync
+#   just refresh-kc            # 只同步产物
+#   just refresh-kc restart    # 同步后重启 console
+refresh-kc mode="sync": console-sync
     uv tool install --force --reinstall --editable .
-    @echo "✅ 静态产物已同步、CLI 已重装。若改了后端，记得重启 kc console。"
+    @if [ "{{mode}}" = "restart" ]; then \
+        bash scripts/shared/just/restart_console.sh; \
+    else \
+        echo "✅ 静态产物已同步、CLI 已重装。改了后端需重启 console：just refresh-kc restart"; \
+    fi
 
 # 旧名 recipe：`iar` 作为弃用别名长期保留，用法与上面完全一致。  # legacy-alias
 alias reinstall-iar := reinstall-kc
