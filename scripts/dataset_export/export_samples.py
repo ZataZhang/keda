@@ -65,7 +65,7 @@ WEAK_INPUT_PROVENANCES = frozenset(
     {"missing", "pr_description", "session_first_prompt", "commit_message", "curated_agent"}
 )
 ISSUE_BRANCH_PATTERN = re.compile(r"^issue-(\d+)$")
-PATROL_TITLE_PATTERN = re.compile("巡检|巡查")
+PATROL_TITLE_PATTERN = re.compile("巡检|巡查|patrol", re.IGNORECASE)
 # Conventional Commits 的 docs / chore 类型：归档 PRD、同步模板这类维护动作，不是开发任务。
 MAINTENANCE_TITLE_PATTERN = re.compile(r"^(docs|chore)(\([^)]*\))?!?:")
 # (档位, 文件数上限, 增删行数上限)；超出最后一档记为 large。
