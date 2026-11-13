@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "prd": "P2-FEAT-20261113-140659-repositories-lifecycle-settings-entry",
+  "verified_head_sha": "3a370a79e30c296989c9105e564f91eadcbf9f37",
+  "verified_tree_sha": "1e73c64b5d05a265aaad0432fe8afa572ad24184",
+  "files": [
+    {
+      "path": "tasks/evidence/P2-FEAT-20261113-140659-repositories-lifecycle-settings-entry/rv-1-selected-concept.png",
+      "mime_type": "image/png",
+      "size_bytes": 1531762,
+      "sha256": "da78974e92f2dcbad21b4589deb2a1511413441852f7cfc1dfedbc3b4c829330"
+    },
+    {
+      "path": "tasks/evidence/P2-FEAT-20261113-140659-repositories-lifecycle-settings-entry/rv-1-implementation.png",
+      "mime_type": "image/png",
+      "size_bytes": 210079,
+      "sha256": "bc1590f8a44deb38ffc9550911fc0bc5afa1651b45487b322088e062b8e81225"
+    },
+    {
+      "path": "tasks/evidence/P2-FEAT-20261113-140659-repositories-lifecycle-settings-entry/rv-2-repository-scope.png",
+      "mime_type": "image/png",
+      "size_bytes": 232661,
+      "sha256": "b0f14d2e62aaf31bdb0190f36bde7656b26372f09a804a079c391927cb833b71"
+    },
+    {
+      "path": "tasks/evidence/P2-FEAT-20261113-140659-repositories-lifecycle-settings-entry/rv-1-primary-demo.mp4",
+      "mime_type": "video/mp4",
+      "size_bytes": 536312,
+      "sha256": "604ba2e7a52efa4f61c5fa12d2be28a6ee3b3e61b18d91281df988f9c922fd26"
+    }
+  ]
+}
