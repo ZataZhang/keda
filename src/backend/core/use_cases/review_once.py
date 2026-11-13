@@ -667,6 +667,7 @@ def review_once(
     process_runner: IProcessRunner,
     run_history_store: IRunHistoryStore | None = None,
     repo_id: str | None = None,
+    exclude_issue_numbers: frozenset[int] = frozenset(),
 ) -> int:
     """Run one review polling pass.
 
@@ -685,6 +686,8 @@ def review_once(
             **不**跟着回落——控制行按注册表 id 登记，用目录名去查会查不到行、把正在
             被人工接管的 Issue 放回监督与合并队列（FR-5）。调用方没给 repo_id 时，
             闸门按 Issue 编号兜底并 fail closed。
+        exclude_issue_numbers: 本机仍在执行中的 Issue；它们的内联 supervisor
+            由执行线程自己推进，本次值守跳过。
 
     Returns:
         Exit code (0 on success, 1 if any issue failed).
@@ -704,6 +707,8 @@ def review_once(
     exit_code = 0
     github_api_rate_limited = False
     for issue in candidates:
+        if issue.number in exclude_issue_numbers:
+            continue
         if dry_run:
             _logger.info(
                 "DRY RUN: would review Issue #%d: %s",

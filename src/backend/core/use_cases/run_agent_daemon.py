@@ -33,6 +33,7 @@ from backend.core.use_cases.agent_daemon_pacing import (
 from backend.core.use_cases.agent_daemon_loops import (
     _AgentDaemonLoopRequest,
     AgentDaemonLoopPassRequest,
+    DaemonReviewStage,
     run_agent_daemon_loop_pass,
 )
 from backend.core.use_cases import agent_runner_reconcile
@@ -57,8 +58,10 @@ from backend.core.use_cases.daemon_parallel_limit_status import (
     clear_daemon_parallel_limit_status,
     write_daemon_parallel_limit_status,
 )
+from backend.core.use_cases.review_once import review_once
 
 _logger = logging.getLogger(__name__)
+
 
 #: SIGTERM 后等待在途 agent 进程组自行退出的秒数，超时升级 SIGKILL
 #: （与 :class:`PidfileProcessSupervisor` 的停止语义一致，禁止把 SIGKILL
@@ -160,6 +163,7 @@ def run_agent_daemon(
     api_budget: IGitHubApiBudget | None = None,
     idle_backoff_max_factor: int = IDLE_BACKOFF_MAX_FACTOR,
     parallel_limit_status_dir: Path | None = None,
+    review_stage: DaemonReviewStage | None = None,
 ) -> None:
     """Run the queue poller forever across all target repositories.
 
@@ -213,6 +217,9 @@ def run_agent_daemon(
         parallel_limit_status_dir: daemon 单实例锁目录。传入时每次轮询把每个仓库实际
             生效的并行上限写到锁旁边的状态文件，供管理终端与 ``kc daemon status``
             读取（命令行 ``--concurrency`` 只有 daemon 自己知道）；退出时删除。
+        review_stage: daemon 内置的 PR 值守阶段；传入时每轮 Phase 2 之后推进
+            supervising / review 状态的 Issue，本机已有 supervise-daemon 的仓库跳过。
+            省略时不做 PR 值守。
     """
     previous_sigterm_handler: Any = signal.getsignal(signal.SIGTERM)
     reset_agent_daemon_stopping()
@@ -254,6 +261,7 @@ def run_agent_daemon(
                 api_budget=api_budget,
                 idle_backoff_max_factor=idle_backoff_max_factor,
                 parallel_limit_status_dir=parallel_limit_status_dir,
+                review_stage=review_stage,
             )
         )
     finally:
@@ -300,6 +308,61 @@ def _resolve_reconcile_settings(
     return enabled, ttl_seconds
 
 
+def _review_stage_due(
+    review_stage: DaemonReviewStage,
+    repo_id: str,
+    last_review_monotonic_by_repo: dict[str, float],
+) -> bool:
+    """判断本仓库是否到了 PR 值守间隔；到期即记下本次时间。"""
+    now_monotonic = time.monotonic()
+    last_review_monotonic = last_review_monotonic_by_repo.get(repo_id)
+    if (
+        last_review_monotonic is not None
+        and now_monotonic - last_review_monotonic < review_stage.interval_seconds
+    ):
+        return False
+    last_review_monotonic_by_repo[repo_id] = now_monotonic
+    return True
+
+
+def _run_daemon_review_stage(
+    request: _AgentDaemonLoopRequest,
+    *,
+    context: RepositoryRunContext,
+    github_client: IGitHubClient,
+    exclude_issue_numbers: frozenset[int],
+) -> None:
+    """对单个仓库执行一次 PR 值守；异常只记录日志，不终止 daemon。"""
+    review_stage = request.review_stage
+    if review_stage is None:
+        return
+    try:
+        if review_stage.review_daemon_running(context.repo_id):
+            _logger.info(
+                "Skipping daemon review pass for '%s': a supervise-daemon is running.",
+                context.repo_id,
+            )
+            return
+        review_once(
+            repo_path=context.repo_path,
+            config=context.config,
+            dry_run=False,
+            agent=request.agent,
+            max_issues=review_stage.max_issues,
+            github_client=github_client,
+            process_runner=request.process_runner,
+            run_history_store=request.run_history_store,
+            repo_id=context.repo_id,
+            exclude_issue_numbers=exclude_issue_numbers,
+        )
+    except Exception as exc:  # noqa: BLE001 - daemon must survive review faults.
+        _logger.error(
+            "Daemon review pass failed for repository '%s': %s",
+            context.repo_id,
+            exc,
+        )
+
+
 def _run_daemon_loop(request: _AgentDaemonLoopRequest) -> None:
     """daemon 主循环（由 :func:`run_agent_daemon` 包装信号钩子后调用）。"""
     contexts = request.contexts
@@ -326,6 +389,7 @@ def _run_daemon_loop(request: _AgentDaemonLoopRequest) -> None:
     last_usage_log_monotonic = time.monotonic()
     # 每个仓库一份常驻执行名单：领到的 Issue 在后台线程里跑，主循环不等它们结束。
     execution_slots_by_repo: dict[str, DaemonExecutionSlots] = {}
+    last_review_monotonic_by_repo: dict[str, float] = {}
     loop_state_store = (
         loop_state_store_factory()
         if loop_state_store_factory is not None and loop_clock is not None
@@ -583,6 +647,18 @@ def _run_daemon_loop(request: _AgentDaemonLoopRequest) -> None:
                     "Daemon pass failed for repository '%s': %s",
                     context.repo_id,
                     exc,
+                )
+
+            # Phase 3: PR 值守。发 PR 后 Issue 停在 supervising 等 CI，由这里定期回看
+            # 并推进；本机已有 supervise-daemon 时交给它，避免同一 Issue 被两边推进。
+            if request.review_stage is not None and _review_stage_due(
+                request.review_stage, context.repo_id, last_review_monotonic_by_repo
+            ):
+                _run_daemon_review_stage(
+                    request,
+                    context=context,
+                    github_client=github_client,
+                    exclude_issue_numbers=execution_slots.in_flight_issue_numbers(),
                 )
         if (
             api_budget is not None

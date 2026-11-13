@@ -26,8 +26,12 @@ from backend.core.shared.interfaces.agent_runner import IGitHubClient
 from backend.core.shared.models.agent_runner import IssueSummary, RepositoryRunContext
 from backend.core.shared.models.publish_stage import PublishStage
 from backend.api import cli as _cli
+from backend.core.shared.interfaces.runner_console import RunnerProcessKind
+from backend.core.use_cases.agent_daemon_loops import DaemonReviewStage
 from backend.core.use_cases.agent_runner_factory import (
     create_machine_identity_store,
+    create_process_supervisor,
+    create_registry_editor,
     logger,
 )
 
@@ -765,6 +769,27 @@ def _confirm_and_take_over_daemons(
         )
 
 
+def _is_review_daemon_running(repo_id: str) -> bool:
+    """探测本机是否已有该仓库的 supervise-daemon；探测失败按已运行处理。"""
+    try:
+        supervisor = create_process_supervisor()
+        process_records = [
+            *supervisor.list_processes(),
+            *supervisor.list_unmanaged_processes(create_registry_editor().list_repositories()),
+        ]
+    except Exception:  # noqa: BLE001 - 探测失败时宁可跳过，也不与值守进程并发推进。
+        logger.warning(
+            "读取 supervise-daemon 进程失败，本轮跳过 daemon 内置 PR 值守", exc_info=True
+        )
+        return True
+    return any(
+        record.repo_id == repo_id
+        and record.kind == RunnerProcessKind.REVIEW_DAEMON
+        and record.status == "running"
+        for record in process_records
+    )
+
+
 def run_daemon_command(ctx: ParsedCommandContext) -> int:
     """``kc daemon``: run daemon continuously or report status."""
     daemon_command = getattr(ctx.parsed, "daemon_command", "run")
@@ -876,6 +901,13 @@ def run_daemon_command(ctx: ParsedCommandContext) -> int:
             # 实际生效的并行上限写到单实例锁旁，管理终端与 kc daemon status 据此显示
             # 包含 --concurrency 在内的真实值。
             parallel_limit_status_dir=daemon_locks_dir,
+            # daemon 内置 PR 值守：发 PR 后的 supervising Issue 由 daemon 自己推进；
+            # supervise-daemon 降为可选，本机开着它时 daemon 让出该阶段。
+            review_stage=DaemonReviewStage(
+                interval_seconds=ctx.runner_settings.daemon.review_interval_seconds,
+                max_issues=DEFAULT_BATCH_MAX_ISSUES,
+                review_daemon_running=_is_review_daemon_running,
+            ),
         )
     finally:
         if heartbeat is not None:

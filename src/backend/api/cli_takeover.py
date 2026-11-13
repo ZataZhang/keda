@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 
 
 def _start_daemons_for_repo(repo_id: str, _repo_path: Path) -> None:
-    """Start managed daemon and supervise-daemon for a freshly registered repo.
+    """Start the managed daemon (which also runs post-PR supervision) for a new repo.
 
     The daemon is spawned from the directory containing the registry
     ``config.toml`` so the subprocess resolves the same global registry that was
@@ -43,7 +43,7 @@ def _start_daemons_for_repo(repo_id: str, _repo_path: Path) -> None:
     supervisor = create_process_supervisor()
     spawn_cwd = resolve_registry_config_toml_path().parent
     runner_command = settings.console.runner_command
-    for kind in (RunnerProcessKind.DAEMON, RunnerProcessKind.REVIEW_DAEMON):
+    for kind in (RunnerProcessKind.DAEMON,):
         try:
             record = start_runner_process(
                 repo_id=repo_id,
