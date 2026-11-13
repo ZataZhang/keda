@@ -2,7 +2,7 @@
 
 // 生命周期矩阵的共享呈现件：分组标题行、展示名、基线取值与下拉候选构造。
 //
-// 九阶段的编辑 UI 已统一到 /app/settings/lifecycle/（lifecycle-settings-page.tsx）
+// 九阶段的编辑 UI 已统一到 /app/repositories/lifecycle/（lifecycle-settings-page.tsx）
 // 与 PRD 覆盖抽屉（prd-agent-override-sheet.tsx），两处共用本模块的分组与取值口径，
 // 前端不持有第二份生命周期映射。
 

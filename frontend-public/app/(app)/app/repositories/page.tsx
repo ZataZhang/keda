@@ -17,6 +17,7 @@ import {
   DirectoryPickerDialog,
   type DirectorySelection,
 } from "@/components/agent-runner/directory-picker-dialog";
+import { RepositoriesWorkspaceTabs } from "@/components/agent-runner/repositories-workspace-tabs";
 import { ConsolePage, ConsolePageHeader } from "@/components/layout/console-page";
 import { confirmAction } from "@/lib/confirm-action";
 import { formatLocalDateTime } from "@/lib/utils";
@@ -216,6 +217,7 @@ export default function RepositoriesPage() {
     <ConsolePage>
       <ConsolePageHeader title="项目接入" description={<> registry 写回 <code>config.toml</code>，注释与格式保留。添加前会校验
           路径存在、为 git 仓库且未被其他条目占用；移除只删除注册条目，不删除本地仓库。 </>} />
+      <RepositoriesWorkspaceTabs activeTab="list" />
 
       <Card>
         <CardHeader>

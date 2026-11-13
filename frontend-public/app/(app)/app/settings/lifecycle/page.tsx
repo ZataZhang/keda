@@ -1,28 +1,32 @@
 "use client";
 
-// Settings 生命周期统一设置页路由。
-//
-// 静态导出下 `useSearchParams` 会把所在 Client 树退化为客户端渲染，因此用
-// `<Suspense>` 边界包裹读取查询参数的部分：从 Backlog 仓库齿轮带过来的
-// `?scope=repository&repo_id=<id>` 用于预选仓库范围，无参数时默认全局视角。
+import { Suspense, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 
-import { Suspense } from "react";
-import { useSearchParams } from "next/navigation";
+const REPOSITORIES_LIFECYCLE_PATH = "/app/repositories/lifecycle/";
 
-import { LifecycleSettingsPage } from "@/components/agent-runner/lifecycle-settings-page";
-import type { LifecycleAgentScope } from "@/lib/api/types";
-
-/** 读取查询参数并渲染统一设置页。 */
-function LifecycleSettingsRoute() {
+/** 保留旧生命周期地址并将其查询参数带到 Repositories 规范入口。 */
+function LegacyLifecycleSettingsRedirect() {
+  const router = useRouter();
   const searchParams = useSearchParams();
-  const scope: LifecycleAgentScope =
-    searchParams.get("scope") === "repository" ? "repository" : "global";
-  const repoId = searchParams.get("repo_id") ?? undefined;
-  return <LifecycleSettingsPage initialScope={scope} initialRepoId={repoId} />;
+  const queryString = searchParams.toString();
+
+  useEffect(() => {
+    const targetPath = queryString
+      ? `${REPOSITORIES_LIFECYCLE_PATH}?${queryString}`
+      : REPOSITORIES_LIFECYCLE_PATH;
+    router.replace(targetPath);
+  }, [queryString, router]);
+
+  return (
+    <p className="text-sm text-slate-500" data-testid="lifecycle-settings-redirecting">
+      正在打开 Repositories 的执行器与模型设置…
+    </p>
+  );
 }
 
-/** Render the unified lifecycle settings page. */
-export default function LifecycleSettingsPageRoute() {
+/** Redirect saved lifecycle settings links to the Repositories workspace. */
+export default function LegacyLifecycleSettingsPage() {
   return (
     <Suspense
       fallback={
@@ -31,7 +35,7 @@ export default function LifecycleSettingsPageRoute() {
         </p>
       }
     >
-      <LifecycleSettingsRoute />
+      <LegacyLifecycleSettingsRedirect />
     </Suspense>
   );
 }

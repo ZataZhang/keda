@@ -59,6 +59,7 @@ nav:
       - 前端设计、页面骨架与滚动规范: ai-standards/frontend-design.md
       - 注释与 Docstring: ai-standards/comments-docstrings.md
       - 文档规范: ai-standards/documentation.md
+      - 原型与 UI 草图: ai-standards/prototyping.md
       - 测试规范: ai-standards/testing.md
       - 工具与命令: ai-standards/tooling.md
       - 时间显示与时区: ai-standards/time-display.md
@@ -86,6 +87,7 @@ nav:
       - 概览: prototypes/index.md
       - Prototype Hub: prototypes/hub.html
       - Console 运行时看板与模型评测基线: prototypes/prd-lifecycle-observability.md
+      - 生命周期与执行器统一设置: prototypes/lifecycle-agent-matrix.md
       - Assets 命名规范: prototypes/assets/README.md
   - 核心概念:
       - Prompt 工程: core/prompt_engineering.md
