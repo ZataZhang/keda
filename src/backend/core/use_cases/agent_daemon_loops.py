@@ -26,6 +26,22 @@ _logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
+class DaemonReviewStage:
+    """daemon 内置的 PR 值守阶段：推进 supervising / review 状态的 Issue。
+
+    Attributes:
+        interval_seconds: 同一仓库两次 PR 值守之间的最小间隔秒数。
+        max_issues: 每次 PR 值守最多处理的 Issue 数。
+        review_daemon_running: 按仓库 id 探测本机是否已有 supervise-daemon；
+            已有时 daemon 跳过本阶段，避免两个进程同时推进同一 Issue。
+    """
+
+    interval_seconds: int
+    max_issues: int
+    review_daemon_running: Callable[[str], bool]
+
+
+@dataclass(frozen=True)
 class _AgentDaemonLoopRequest:
     """普通 daemon 主循环的内部请求对象。"""
 
@@ -51,6 +67,7 @@ class _AgentDaemonLoopRequest:
     api_budget: IGitHubApiBudget | None
     idle_backoff_max_factor: int
     parallel_limit_status_dir: Path | None = None
+    review_stage: DaemonReviewStage | None = None
 
 
 @dataclass(frozen=True)

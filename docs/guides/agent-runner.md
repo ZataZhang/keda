@@ -12,14 +12,16 @@ CLI 入口基于 Typer/Rich：`kc --help` 会展示分组命令、参数和别�
 - **run**：单次轮询执行，**目标必填**——`--issue <N>` 定向处理一个 Issue，或传 PRD 路径（解析其回链 Issue），或显式 `--all-ready` 按优先级处理整个 ready 队列（兼容旧命令 `run-once`；不传目标即用法错误）。可加 `--progress` 获取前台结构化进度事件。daemon 的互斥**只挡队列轮询**：同仓 daemon 在跑时 `--all-ready` 拒绝（`--takeover` 显式接管），`kc run --issue <N>` 照常执行——定向不要求 `agent/ready`，只按认领状态把关；租约仍有效的远端认领即使带 `--takeover` 也不能强制接手（见「显式定向的领取准入」）
 - **batch aggregate**：`kc run --all-ready --aggregate-pr --max-issues <N>` 显式把本轮至少两个已选 Issue 收为一批；分别运行现有任务流程后，只在全部成功时组合、验证并发布唯一总 Draft PR。跨多次运行时可用 `kc pr aggregate --issue <N> --issue <N>` 显式指定成员或重试聚合阶段。普通 `run`、daemon 和 loop 不自动汇总。**同一条聚合资格门对两个入口都一样**：成员 Issue 必须是 open 且已带 `agent/automated-review-passed`，且每个来源 PR 的必需 checks 必须已是 `SUCCESS`；刚发布完的 Issue 通常还停在 `agent/supervising`、Draft PR 的 checks 还是 PENDING，所以单次夜间 `kc run --all-ready --aggregate-pr` 常会在资格阶段被拒，需要等 checks 与标签落定后再补一次 `kc pr aggregate --issue ...`（见「批次聚合的资格门与两次调用」）。
 - **supervise**：单次处理已有 PR 的 Issue，基于 PR 上下文变化运行 post-PR supervisor cycle（兼容旧命令 `review`；历史命令 `review-once` 已删除）
-- **supervise-daemon**：常驻进程，按指定间隔循环执行 post-PR supervisor 检查
-- **daemon**：常驻进程，按指定间隔循环执行 `run-once`；是**唯一**运行 Backlog 自动推进阶段的地方，可用 `--autopilot` / `--no-autopilot` 按次覆盖配置（只影响调度，不影响自动合并）
+- **supervise-daemon**：常驻进程，按指定间隔循环执行 post-PR supervisor 检查；**可选**——daemon 已内置同一 PR 值守，只在想把值守单独托管时才需要
+- **daemon**：常驻进程，按指定间隔循环执行 `run-once`；是**唯一**运行 Backlog 自动推进阶段的地方，可用 `--autopilot` / `--no-autopilot` 按次覆盖配置（只影响调度，不影响自动合并）。每轮领取 ready 队列后还会按 `daemon.review_interval_seconds` 对本仓库跑一次 PR 值守（与 `kc supervise` 相同），推进发 PR 后停在 `agent/supervising` / `agent/review` 的 Issue；本机正在执行的 Issue 不参与，本机已有该仓库的 supervise-daemon 时 daemon 让出这一阶段
 - **ask**：受限自然语言决策入口，默认只生成计划，确认后执行白名单动作
 - **worktree cleanup**：清理 GitHub Issue 已关闭、远端分支已删除但本地仍残留的 `issue-<number>` 分支和 KedaCode worktree
 
 `kc review` 和 `kc review-daemon` 仍作为兼容别名接受；新脚本与文档请使用
-`kc supervise` 和 `kc supervise-daemon`。`kc registry start/stop` 的旧参数
-`--no-review-daemon` 也保留为 `--no-supervise-daemon` 的兼容别名。
+`kc supervise` 和 `kc supervise-daemon`。`kc registry start` 默认只启动 daemon，
+`kc takeover` 与 `kc registry reinit --start-daemons` 同样只拉起 daemon；需要独立值守进程时用
+`kc registry start --with-supervise-daemon`。`--no-supervise-daemon`（旧名 `--no-review-daemon`）
+仍被接受：对 `start` 已是默认行为，对 `stop` 表示保留 supervise-daemon 不停。
 
 ## 安装
 
@@ -1406,7 +1408,7 @@ kc run --issue 42 --takeover --yes
 | `agent/running` 但本机持有者 PID 已不存在 | 放行，交给 running 通道的恢复路径（rework / 发布恢复） |
 | `agent/blocked` 且没有未消费的解除请求 marker | 退出码 5 `conflict`，提示先 `kc blocked-continue --issue <N>` |
 | 读不到、或不是 open | 退出码 3 `not_found` |
-| `agent/automated-review-passed` / `agent/supervising` 等其他状态 | 准入层放行，但 `kc run` 没有对应通道，本轮静默跳过（返回 0）——这些状态的通道是 `kc supervise` / supervise-daemon |
+| `agent/automated-review-passed` / `agent/supervising` 等其他状态 | 准入层放行，但 `kc run` 没有对应通道，本轮静默跳过（返回 0）——这些状态的通道是 `kc supervise`、daemon 内置的 PR 值守或 supervise-daemon |
 
 带租约的认领按 `machine_id` 区分本机与远端；旧认领没有机器编号时仍按主机名回退。带租约的远端认领在声明 TTL 内按有效处理，过期后先走与 daemon 相同的对账出口；没有租约的远端认领一直按有效处理，避免接手旧版本任务。
 
@@ -1825,13 +1827,13 @@ kc daemon run --repo-id keda-main --interval 300
 对于已经在 registry 中注册且已 init 的本地仓库（例如你手动 `kc init` 过的 `keda-main`），可以直接用 `start` / `stop` 管理 daemon 生命周期，无需 `reinit --start-daemons`（后者会重置 `.kedacode.toml`）：
 
 ```bash
-# 启动单个仓库的 daemon + supervise-daemon
+# 启动单个仓库的 daemon（daemon 已内置 PR 值守）
 kc registry start --repo-id keda-main
 
-# 只启动 daemon（不启动 supervise-daemon）
-kc registry start --repo-id keda-main --no-supervise-daemon
+# 额外启动独立的 supervise-daemon（可选；本机有它时 daemon 让出 PR 值守）
+kc registry start --repo-id keda-main --with-supervise-daemon
 
-# 启动所有 enabled 注册仓的 daemon + supervise-daemon
+# 启动所有 enabled 注册仓的 daemon
 kc registry start --all
 
 # 停止单个仓库的 daemon + supervise-daemon

@@ -104,11 +104,17 @@ def add_registry_commands(subparsers: argparse._SubParsersAction) -> None:
         help="Start daemons for all enabled repositories.",
     )
     registry_start_parser.add_argument(
+        "--with-supervise-daemon",
+        dest="with_review_daemon",
+        action="store_true",
+        help="Also start a standalone supervise-daemon (the daemon already runs post-PR supervision).",
+    )
+    registry_start_parser.add_argument(
         "--no-supervise-daemon",
         "--no-review-daemon",
         dest="no_review_daemon",
         action="store_true",
-        help="Only start the agent daemon, skip post-PR supervision.",
+        help="Compatibility flag; supervise-daemon is no longer started by default.",
     )
 
     registry_stop_parser = registry_subparsers.add_parser(

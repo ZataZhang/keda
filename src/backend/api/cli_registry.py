@@ -320,8 +320,9 @@ def _run_registry_start_command(parsed: argparse.Namespace, process_runner: IPro
                 f"[yellow]Skipping unresolvable repository '{failure.repo_id}': {failure.error}[/]"
             )
 
+    # daemon 已内置 PR 值守；独立 supervise-daemon 只在显式要求时启动。
     kinds = [RunnerProcessKind.DAEMON]
-    if not parsed.no_review_daemon:
+    if getattr(parsed, "with_review_daemon", False) and not parsed.no_review_daemon:
         kinds.append(RunnerProcessKind.REVIEW_DAEMON)
 
     exit_code = 0
@@ -459,7 +460,8 @@ def _restart_daemons(repo_id: str, repo_path: Path, process_runner) -> int:
                 )
 
     spawn_cwd = resolve_registry_config_toml_path().parent
-    for kind in (RunnerProcessKind.DAEMON, RunnerProcessKind.REVIEW_DAEMON):
+    # daemon 已内置 PR 值守，重启时只拉起 daemon。
+    for kind in (RunnerProcessKind.DAEMON,):
         try:
             record = start_runner_process(
                 repo_id=repo_id,
