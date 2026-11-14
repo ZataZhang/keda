@@ -8,6 +8,7 @@ from pathlib import Path
 
 from backend.core.shared.interfaces.agent_runner import (
     GitHubApiRateLimitError,
+    GitHubApiUnavailableError,
     IContentGenerator,
     IGitHubClient,
     IProcessRunner,
@@ -470,7 +471,7 @@ def create_draft_pr(
             base_branch=config.git.base_branch,
             cwd=worktree_path,
         )
-    except GitHubApiRateLimitError:
+    except (GitHubApiRateLimitError, GitHubApiUnavailableError):
         raise
     except Exception as exc:
         raise DraftPRCreationError(str(exc)) from exc

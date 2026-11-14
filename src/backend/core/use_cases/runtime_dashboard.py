@@ -5,7 +5,7 @@
 - **只读复用**：任务身份与标签来自监控快照（:mod:`monitor_snapshots`），运行终态
   来自运行账本（``IRunHistoryStore``），阶段 / preset / 模型来自 attempt 账本，
   PRD 关联来自生命周期账本（``IPrdLifecycleStore``），未收口调用执行器来自既有
-  invocation 账本。本模块不打开 GitHub、不读日志文件、不算改动树，也不新增任何存储。
+  invocation 账本。本模块不打开 GitHub、不读日志文件、不算改动树，也不新增数据库表。
 - **改动树触达读数不在这里**：唯一来源仍是现有
   ``GET /api/v1/agent-runner/backlog/prds/{encoded_path}/progress`` 契约，摘要只带
   ``prd_path``，由展示侧按需取数，避免第二份检测实现漂移。
@@ -42,7 +42,7 @@ from backend.core.use_cases.agent_invocation_tracing import (
     build_invocation_timeline,
     resolve_invocation_store,
 )
-from backend.core.use_cases.monitor_snapshots import SnapshotOverviewResult
+from backend.core.use_cases.monitor_snapshots import MonitorSnapshotOverview, SnapshotOverviewResult
 from backend.core.use_cases.runtime_task_observation import (
     SOURCE_PRD_LIFECYCLE,
     RuntimeObservationContext,
@@ -69,6 +69,7 @@ _LABEL_STATUS_MAP: dict[str, RuntimeTaskStatus] = {
 #: 运行账本只能证明交付结果；历史失败不能证明 Issue 当前仍然阻塞。
 _OUTCOME_STATUS_MAP: dict[str, RuntimeTaskStatus] = {
     "completed": RuntimeTaskStatus.COMPLETED,
+    "deferred": RuntimeTaskStatus.DEFERRED,
 }
 
 #: ``unavailable_sources`` 的取值：前端据此把对应面板标为不可用。
@@ -199,13 +200,19 @@ def _pr_identity(issue_entry: Mapping[str, Any]) -> tuple[str | None, int | None
 
 def _snapshot_task(
     *,
-    repo_id: str,
+    repo_snapshot: MonitorSnapshotOverview,
     repo_display_name: str,
     issue_entry: Mapping[str, Any],
     run_record: RunRecord | None,
     prd_path: str | None,
 ) -> RuntimeTask | None:
     """由监控快照条目 + 运行账本回落组装一条任务摘要。"""
+    repo_id = repo_snapshot.repo_id
+    snapshot_scanned_at = repo_snapshot.scanned_at
+    raw_sync_failure = repo_snapshot.overview.get("sync_failure")
+    sync_error = (
+        str(raw_sync_failure.get("reason") or "") if isinstance(raw_sync_failure, Mapping) else None
+    )
     issue_number = issue_entry.get("number")
     if not isinstance(issue_number, int):
         return None
@@ -256,6 +263,26 @@ def _snapshot_task(
         else:
             waiting_reason = "recheck"
 
+    snapshot_time = parse_runtime_timestamp(snapshot_scanned_at)
+    run_finished_at = parse_runtime_timestamp(run_record.finished_at) if run_record else None
+    run_record_is_unobserved = bool(
+        run_record
+        and run_record.outcome == "deferred"
+        and (snapshot_time is None or run_finished_at is None or snapshot_time <= run_finished_at)
+    )
+    if run_record_is_unobserved:
+        sync_error = run_record.error_summary or "GitHub API 暂时不可用，任务将在后续轮询重试。"
+
+    last_observed_status = status
+    if sync_error:
+        if run_record_is_unobserved or status is RuntimeTaskStatus.UNKNOWN:
+            status = RuntimeTaskStatus.DEFERRED
+            status_reason = "GitHub 状态读取暂缓，恢复后会自动重试。"
+        elif status_reason:
+            status_reason = f"{status_reason}；当前同步失败，状态可能已过期。"
+        else:
+            status_reason = "当前同步失败，任务状态可能已过期。"
+
     title = issue_entry.get("title")
     url = issue_entry.get("url")
     pr_url, pr_number = _pr_identity(issue_entry)
@@ -269,6 +296,13 @@ def _snapshot_task(
         pr_number=pr_number,
         status=status,
         status_reason=status_reason,
+        sync_error=sync_error,
+        last_observed_status=(
+            last_observed_status
+            if sync_error and last_observed_status is not RuntimeTaskStatus.UNKNOWN
+            else None
+        ),
+        last_observed_at=snapshot_scanned_at,
         waiting_reason=waiting_reason,
         phase=_timeline_phase(issue_entry),
         agent=run_record.agent if run_record else None,
@@ -294,10 +328,13 @@ def _run_record_task(run_record: RunRecord, prd_path: str | None) -> RuntimeTask
         issue_url=run_record.issue_url,
         status=status,
         status_reason=(
-            f"运行账本终态：{run_record.outcome}"
+            "GitHub API 暂不可用，任务已暂缓并等待自动重试。"
+            if status is RuntimeTaskStatus.DEFERRED
+            else f"运行账本终态：{run_record.outcome}"
             if status is not RuntimeTaskStatus.UNKNOWN
             else f"缺少当前 Issue 状态；上次运行结果：{run_record.outcome}"
         ),
+        sync_error=(run_record.error_summary if run_record.outcome == "deferred" else None),
         agent=run_record.agent,
         started_at=run_record.started_at,
         finished_at=run_record.finished_at,
@@ -541,7 +578,7 @@ def build_runtime_task_summary(
                 continue
             key = (repo_snapshot.repo_id, issue_number)
             task = _snapshot_task(
-                repo_id=repo_snapshot.repo_id,
+                repo_snapshot=repo_snapshot,
                 repo_display_name=display_name,
                 issue_entry=issue_entry,
                 run_record=runs_by_issue.get(key),

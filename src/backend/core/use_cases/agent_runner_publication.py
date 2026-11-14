@@ -23,6 +23,7 @@ from pathlib import Path
 
 from backend.core.shared.interfaces.agent_runner import (
     GitHubApiRateLimitError,
+    GitHubApiUnavailableError,
     IContentGenerator,
     IGitHubClient,
     IProcessRunner,
@@ -252,7 +253,7 @@ def _push_changes_with_recovery_context(request: _PushChangesRequest) -> str:
     except ClaimLeaseLost:
         raise
     except Exception as exc:  # 标签清理与 push 都是发布边界。
-        if isinstance(exc, GitHubApiRateLimitError):
+        if isinstance(exc, (GitHubApiRateLimitError, GitHubApiUnavailableError)):
             raise
         raise PublishFailureError(
             str(exc),
@@ -290,7 +291,7 @@ def publish_draft_pr_before_verifier(request: PreVerifierDraftPublicationRequest
             content_generator=request.content_generator,
             publish_stage=request.publish_stage,
         )
-    except GitHubApiRateLimitError:
+    except (GitHubApiRateLimitError, GitHubApiUnavailableError):
         raise
     except ClaimLeaseLost:
         raise
@@ -327,7 +328,7 @@ def _create_draft_pr_with_recovery_context(
             publish_stage=publish_stage,
         )
     except DraftPRCreationError as exc:
-        if isinstance(exc.__cause__, GitHubApiRateLimitError):
+        if isinstance(exc.__cause__, (GitHubApiRateLimitError, GitHubApiUnavailableError)):
             raise exc.__cause__ from exc
         raise PublishFailureError(
             str(exc),
@@ -337,7 +338,7 @@ def _create_draft_pr_with_recovery_context(
     except ClaimLeaseLost:
         raise
     except (RuntimeError, OSError, subprocess.CalledProcessError) as exc:
-        if isinstance(exc, GitHubApiRateLimitError):
+        if isinstance(exc, (GitHubApiRateLimitError, GitHubApiUnavailableError)):
             raise
         raise PublishFailureError(
             str(exc),
@@ -375,7 +376,7 @@ def _edit_issue_labels_after_publish(
             remove=remove_labels,
         )
     except Exception as exc:  # surface category for recovery.
-        if isinstance(exc, GitHubApiRateLimitError):
+        if isinstance(exc, (GitHubApiRateLimitError, GitHubApiUnavailableError)):
             raise
         raise PublishFailureError(
             f"Failed to update labels after publish: {exc}",
@@ -395,7 +396,7 @@ def _comment_issue_after_publish(
     try:
         github_client.comment_issue(issue_number, comment_body)
     except Exception as exc:  # surface category for recovery.
-        if isinstance(exc, GitHubApiRateLimitError):
+        if isinstance(exc, (GitHubApiRateLimitError, GitHubApiUnavailableError)):
             raise
         raise PublishFailureError(
             f"Failed to post draft PR comment: {exc}",

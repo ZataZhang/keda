@@ -102,6 +102,7 @@ class LifecycleEventType(str, Enum):
     BLOCKED = "blocked"
     UNBLOCKED = "unblocked"
     FAILED = "failed"
+    DEFERRED = "deferred"
     # 观测事件：只携带旁路指标（token 用量），不推进生命周期阶段。刻意不进
     # _EVENT_PHASE（记为 NONE），并被时长归属与当前阶段推导过滤。
     AGENT_TOKEN_USAGE = "agent_token_usage"
@@ -152,6 +153,7 @@ class LifecycleStatus(str, Enum):
     BLOCKED = "blocked"
     UNBLOCKED = "unblocked"
     FAILED = "failed"
+    DEFERRED = "deferred"
 
 
 @dataclass(frozen=True)
@@ -197,6 +199,7 @@ _EVENT_PHASE: dict[LifecycleEventType, LifecyclePhase] = {
     LifecycleEventType.BLOCKED: LifecyclePhase.BLOCKED,
     LifecycleEventType.UNBLOCKED: LifecyclePhase.EXECUTING,
     LifecycleEventType.FAILED: LifecyclePhase.FAILED,
+    LifecycleEventType.DEFERRED: LifecyclePhase.NONE,
 }
 
 #: 事件种类 -> 事件语义状态（写入时按当时 event_type 冻结，与 phase 一样落库）。
@@ -222,6 +225,7 @@ _EVENT_STATUS: dict[LifecycleEventType, LifecycleStatus] = {
     LifecycleEventType.BLOCKED: LifecycleStatus.BLOCKED,
     LifecycleEventType.UNBLOCKED: LifecycleStatus.UNBLOCKED,
     LifecycleEventType.FAILED: LifecycleStatus.FAILED,
+    LifecycleEventType.DEFERRED: LifecycleStatus.DEFERRED,
 }
 
 #: 终态事件：写入后 run 收口，之后只允许追加不改变阶段的观测事件。
@@ -231,6 +235,7 @@ _TERMINAL_EVENT_TYPES = frozenset(
         LifecycleEventType.ARCHIVED,
         LifecycleEventType.FAILED,
         LifecycleEventType.BLOCKED,
+        LifecycleEventType.DEFERRED,
     }
 )
 

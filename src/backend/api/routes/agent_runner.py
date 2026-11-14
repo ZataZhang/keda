@@ -41,6 +41,7 @@ from backend.core.use_cases.monitor_snapshots import (
     MonitorSyncError,
     get_snapshot_overview,
     persist_monitoring_result,
+    record_monitor_sync_failure,
     snapshot_overview_to_payload,
 )
 from backend.core.use_cases.runtime_dashboard import (
@@ -145,6 +146,22 @@ def _list_enabled_repo_ids() -> list[str]:
     return repo_ids
 
 
+def _record_monitor_sync_failure_best_effort(repo_id: str, reason: str) -> None:
+    """尽力把扫描错误写进本地旧快照，不让诊断写入覆盖原始错误。"""
+    try:
+        record_monitor_sync_failure(
+            create_console_store(),
+            repo_id=repo_id,
+            reason=reason,
+        )
+    except Exception as record_exc:  # noqa: BLE001 - 诊断只作为旁路记录。
+        _logger.warning(
+            "Failed to persist monitor sync diagnosis for %s: %s",
+            repo_id,
+            record_exc,
+        )
+
+
 def _scan_repository_and_persist(repo_id: str) -> None:
     """Scan a single repository and persist the already-built payload.
 
@@ -152,16 +169,28 @@ def _scan_repository_and_persist(repo_id: str) -> None:
     once and hands the **same** payload to :func:`persist_monitoring_result`,
     never re-scanning GitHub just to write to the database.
     """
-    payload = _build_overview_response(repo_ids=[repo_id], include_tracked_issues=True)
+    try:
+        payload = _build_overview_response(repo_ids=[repo_id], include_tracked_issues=True)
+    except Exception as exc:
+        _record_monitor_sync_failure_best_effort(repo_id, str(exc))
+        raise
+    for repository_payload in payload.get("repositories") or []:
+        sync_error = repository_payload.get("sync_error")
+        if sync_error:
+            _record_monitor_sync_failure_best_effort(repo_id, str(sync_error))
+            raise MonitorSyncError(f"Repository '{repo_id}' scan was incomplete: {sync_error}")
     report = persist_monitoring_result(create_console_store(), payload)
     if not report.ok:
         failed_detail = "; ".join(
             f"{failed_repo_id}: {reason}"
             for failed_repo_id, reason in report.failed_repo_ids.items()
         )
+        _record_monitor_sync_failure_best_effort(repo_id, failed_detail)
         raise MonitorSyncError(f"Failed to persist snapshot for {failed_detail}")
     if not report.persisted_repo_ids:
-        raise MonitorSyncError(f"Repository '{repo_id}' produced no overview payload.")
+        failure_reason = f"Repository '{repo_id}' produced no overview payload."
+        _record_monitor_sync_failure_best_effort(repo_id, failure_reason)
+        raise MonitorSyncError(failure_reason)
 
 
 _MONITOR_COORDINATOR: MonitorSyncCoordinator | None = None

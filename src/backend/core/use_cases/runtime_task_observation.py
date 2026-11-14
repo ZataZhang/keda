@@ -100,6 +100,24 @@ def reconcile_runtime_task(
     terminal_events = [event for event in session_events if is_terminal_event(event.event_type)]
     session_terminal = max(terminal_events, key=lambda event: event.occurred_at, default=None)
     if (
+        task.status in {RuntimeTaskStatus.RUNNING, RuntimeTaskStatus.UNKNOWN}
+        and session_terminal is not None
+        and session_terminal.event_type == "deferred"
+    ):
+        return replace(
+            task,
+            status=RuntimeTaskStatus.DEFERRED,
+            status_reason="GitHub API 暂不可用，任务已暂缓并等待自动重试。",
+            sync_error=(
+                task.sync_error
+                or task.last_error_summary
+                or "GitHub API 暂不可用，任务将在后续轮询重试。"
+            ),
+            last_observed_status=(task.last_observed_status or RuntimeTaskStatus.RUNNING),
+            last_observed_at=task.last_observed_at or task.finished_at,
+            last_outcome="deferred",
+        )
+    if (
         lifecycle_run is not None
         and not lifecycle_run.finished_at
         and session_terminal is None
@@ -151,9 +169,34 @@ def reconcile_runtime_task(
                 phase=derive_current_phase(lifecycle_run, session_events).value,
             )
     if task.status is RuntimeTaskStatus.RUNNING and task.finished_at:
+        if task.last_outcome == "deferred":
+            return replace(
+                task,
+                status=RuntimeTaskStatus.DEFERRED,
+                status_reason="GitHub API 暂不可用，任务已暂缓并等待自动重试。",
+                sync_error=(
+                    task.sync_error
+                    or task.last_error_summary
+                    or "GitHub API 暂不可用，任务将在后续轮询重试。"
+                ),
+                last_observed_status=(task.last_observed_status or RuntimeTaskStatus.RUNNING),
+            )
+        if task.sync_error:
+            return replace(
+                task,
+                status=RuntimeTaskStatus.DEFERRED,
+                status_reason="GitHub 同步失败，远端状态无法核实；等待自动重试。",
+                last_observed_status=(task.last_observed_status or RuntimeTaskStatus.RUNNING),
+            )
         return replace(
             task,
             status=RuntimeTaskStatus.UNKNOWN,
             status_reason="监控标签仍标记运行，但最近运行已结束；当前执行状态待核实",
+        )
+    if task.status is RuntimeTaskStatus.UNKNOWN and task.sync_error:
+        return replace(
+            task,
+            status=RuntimeTaskStatus.DEFERRED,
+            status_reason="GitHub 同步失败，远端状态无法核实；等待自动重试。",
         )
     return task

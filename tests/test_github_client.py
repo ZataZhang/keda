@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
+from backend.core.shared.interfaces.agent_runner import GitHubApiUnavailableError
 from backend.core.shared.models.agent_runner import CommandResult, LabelConfig
 from backend.infrastructure.github_client import (
     GitHubCliClient,
@@ -977,8 +978,8 @@ def test_create_issue_does_not_retry_permanent_errors(tmp_path: Path) -> None:
     mock_sleep.assert_not_called()
 
 
-def test_create_issue_gives_up_after_max_retries(tmp_path: Path) -> None:
-    """create_issue should stop retrying after the maximum number of attempts."""
+def test_create_issue_reports_unavailable_after_max_retries(tmp_path: Path) -> None:
+    """create_issue should report a typed outage after retrying the maximum number of times."""
     runner = _FlakyProcessRunner(
         fail_count=10,
         error_text="net/http: TLS handshake timeout",
@@ -986,7 +987,7 @@ def test_create_issue_gives_up_after_max_retries(tmp_path: Path) -> None:
     github_client = GitHubCliClient(tmp_path, runner)
 
     with patch("backend.infrastructure.github_client.time.sleep"):
-        with pytest.raises(subprocess.CalledProcessError):
+        with pytest.raises(GitHubApiUnavailableError, match="TLS handshake timeout"):
             github_client.create_issue(title="title", body="body", labels=[])
 
     assert runner.attempts == 3
@@ -1033,16 +1034,32 @@ def test_gh_command_uses_default_timeout_and_retries_on_timeout(tmp_path: Path) 
     assert runner.timeouts == [120, 120]
 
 
-def test_gh_command_timeout_exhaustion_raises_called_process_error(tmp_path: Path) -> None:
-    """超时重试耗尽后以 CalledProcessError 上抛，沿用调用方已有的失败处理。"""
+def test_gh_command_timeout_exhaustion_raises_unavailable_error(tmp_path: Path) -> None:
+    """超时重试耗尽后以 GitHubApiUnavailableError 上抛，供调用方延期处理。"""
     runner = _TimingOutProcessRunner(fail_count=10)
     github_client = GitHubCliClient(tmp_path, runner)  # type: ignore[arg-type]
 
     with patch("backend.infrastructure.github_client.time.sleep"):
-        with pytest.raises(subprocess.CalledProcessError, match="returned non-zero"):
+        with pytest.raises(GitHubApiUnavailableError, match="timed out after 3 attempts"):
             github_client._run_with_retry(["gh", "api", "repos/o/r/issues/10"], cwd=tmp_path)
 
     assert len(runner.timeouts) == 3
+
+
+def test_gh_command_retries_transient_result_when_check_is_false(tmp_path: Path) -> None:
+    """REST 读取使用 check=False 时也要重试非零结果中的网络错误。"""
+    runner = _FlakyProcessRunner(fail_count=2, error_text="unexpected EOF")
+    github_client = GitHubCliClient(tmp_path, runner)
+
+    with patch("backend.infrastructure.github_client.time.sleep"):
+        result = github_client._run_with_retry(
+            ["gh", "api", "repos/o/r/issues/10"],
+            cwd=tmp_path,
+            check=False,
+        )
+
+    assert result.return_code == 0
+    assert runner.attempts == 3
 
 
 def test_create_issue_retries_on_client_closed_request(tmp_path: Path) -> None:
@@ -1493,8 +1510,8 @@ def test_edit_issue_labels_creates_missing_label_and_retries(tmp_path: Path) -> 
     assert fake_runner.edit_attempts == 2
 
 
-def test_edit_issue_labels_does_not_swallow_unrelated_errors(tmp_path: Path) -> None:
-    """Failures that do not look like missing-label errors must propagate as-is.
+def test_edit_issue_labels_defers_transient_unavailable_error(tmp_path: Path) -> None:
+    """GitHub transport errors should retry and surface as unavailable, without label creation.
 
     We simulate a TLS timeout — transient infrastructure failure. The
     fallback must not attempt ``gh label create`` because that would mask
@@ -1530,12 +1547,13 @@ def test_edit_issue_labels_does_not_swallow_unrelated_errors(tmp_path: Path) -> 
     fake_runner = _TransientErrorRunner()
     github_client = GitHubCliClient(tmp_path, fake_runner)
 
-    with pytest.raises(subprocess.CalledProcessError) as excinfo:
-        github_client.edit_issue_labels(24, add=["validation/verifier-passed"])
-    assert "TLS handshake timeout" in (excinfo.value.stderr or "")
+    with patch("backend.infrastructure.github_client.time.sleep"):
+        with pytest.raises(GitHubApiUnavailableError, match="TLS handshake timeout"):
+            github_client.edit_issue_labels(24, add=["validation/verifier-passed"])
 
     ensure_calls = [call for call in fake_runner.calls if call[:3] == ["gh", "label", "create"]]
     assert ensure_calls == []
+    assert fake_runner.attempts == 3
     # The failed label add is not recorded because the fake raises before delegating.
     add_calls = [call for call in fake_runner.calls if call[:4] == ["gh", "api", "-X", "POST"]]
     assert add_calls == []

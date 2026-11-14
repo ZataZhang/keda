@@ -22,7 +22,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, Sequence
 from urllib.parse import quote
 
-from backend.core.shared.interfaces.agent_runner import GitHubApiRateLimitError
+from backend.core.shared.interfaces.agent_runner import (
+    GitHubApiRateLimitError,
+    GitHubApiUnavailableError,
+)
 from backend.core.shared.models.agent_runner import IssueCommentRecord
 from backend.infrastructure.github_models import IssueSummary
 
@@ -145,6 +148,8 @@ def list_repository_items(client: _ClientProtocol, *, state: str = "open") -> li
     try:
         result = client._run_with_retry(command, cwd=client.repo_path)
         raw_pages = json.loads(result.stdout or "[]")
+    except (GitHubApiRateLimitError, GitHubApiUnavailableError):
+        raise
     except Exception as exc:  # noqa: BLE001 - migration must fail closed on incomplete reads.
         raise RuntimeError(f"Cannot list repository Issues and PRs: {exc}") from exc
     if not isinstance(raw_pages, list) or any(not isinstance(page, list) for page in raw_pages):
@@ -170,7 +175,7 @@ def get_issue(client: _ClientProtocol, issue_number: int) -> IssueSummary:
         )
         if result.return_code != 0:
             raise RuntimeError(result.stderr.strip() or result.stdout)
-    except GitHubApiRateLimitError:
+    except (GitHubApiRateLimitError, GitHubApiUnavailableError):
         raise
     except Exception as exc:  # noqa: BLE001 - add Issue context to adapter failures.
         raise RuntimeError(f"Failed to fetch Issue #{issue_number}: {exc}") from exc
@@ -503,7 +508,7 @@ def _list_issue_comment_payloads(
         )
         if result.return_code != 0:
             raise RuntimeError(result.stderr.strip() or result.stdout)
-    except GitHubApiRateLimitError:
+    except (GitHubApiRateLimitError, GitHubApiUnavailableError):
         raise
     except Exception as exc:  # noqa: BLE001 - preserve best-effort comment reads.
         if trusted_only or require_success:

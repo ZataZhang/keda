@@ -175,6 +175,49 @@ def _is_renderable_overview(overview_payload: Any, repo_id: str) -> bool:
     return isinstance(overview_payload.get("issues"), list)
 
 
+def record_monitor_sync_failure(
+    store: IMonitorSnapshotStore,
+    *,
+    repo_id: str,
+    reason: str,
+    failed_at: str | None = None,
+) -> bool:
+    """把最近一次同步失败原因附加到旧快照，保留原有成功扫描时间。
+
+    Args:
+        store: 本地监控快照存储。
+        repo_id: 同步失败的仓库标识。
+        reason: 扫描失败的诊断摘要。
+        failed_at: 失败发生时间；省略时取当前 UTC 时间。
+
+    Returns:
+        是否找到并更新了该仓库的旧成功快照。
+    """
+    for snapshot_entry in store.list_monitor_snapshots():
+        if snapshot_entry.repo_id != repo_id:
+            continue
+        try:
+            overview_payload = json.loads(snapshot_entry.payload_json)
+        except ValueError:
+            _logger.warning("Cannot attach sync failure to corrupt snapshot for %s", repo_id)
+            return False
+        if not _is_renderable_overview(overview_payload, repo_id):
+            return False
+        overview_payload["sync_failure"] = {
+            "reason": reason,
+            "failed_at": failed_at or _now_iso(),
+        }
+        store.upsert_monitor_snapshot(
+            MonitorSnapshotEntry(
+                repo_id=repo_id,
+                payload_json=json.dumps(overview_payload, ensure_ascii=False),
+                scanned_at=snapshot_entry.scanned_at,
+            )
+        )
+        return True
+    return False
+
+
 def get_snapshot_overview(
     store: IMonitorSnapshotStore,
     *,
@@ -675,6 +718,7 @@ __all__ = [
     "get_monitor_settings",
     "get_snapshot_overview",
     "persist_monitoring_result",
+    "record_monitor_sync_failure",
     "snapshot_overview_to_payload",
     "update_monitor_settings",
 ]

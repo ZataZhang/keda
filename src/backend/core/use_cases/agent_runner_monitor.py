@@ -127,6 +127,7 @@ class RepositoryMonitoringOverview:
     #: 只用于运行看板判定当前状态，不进入队列展示与异常统计。
     tracked_issues: tuple[IssueMonitoringSnapshot, ...] = ()
     scanned_at: str = ""
+    sync_error: str | None = None
 
 
 @dataclass(frozen=True)
@@ -689,6 +690,7 @@ def _collect_queue_issues(
     config: AppConfig,
     github_client: IGitHubClient,
     limit_per_label: int = 30,
+    scan_errors: list[str] | None = None,
 ) -> list[IssueSummary]:
     """Gather all candidate issues across queue labels.
 
@@ -710,6 +712,8 @@ def _collect_queue_issues(
             issues = github_client.list_ready_issues(label, limit_per_label)
         except Exception as exc:  # noqa: BLE001 - keep monitoring resilient.
             _logger.info("Queue scan failed for label %s: %s", label, exc)
+            if scan_errors is not None:
+                scan_errors.append(f"标签 {label}：{exc}")
             continue
         for issue in issues:
             if issue.number in seen_numbers:
@@ -815,6 +819,7 @@ def _collect_tracked_issues(
     tracked_issue_numbers: Sequence[int],
     excluded_numbers: set[int],
     config: AppConfig,
+    scan_errors: list[str] | None = None,
 ) -> list[IssueMonitoringSnapshot]:
     """读取运行账本中出现、但不在队列标签结果里的 Issue 当前状态。"""
     snapshots: list[IssueMonitoringSnapshot] = []
@@ -827,6 +832,8 @@ def _collect_tracked_issues(
             issue = github_client.get_issue(issue_number)
         except Exception as exc:  # noqa: BLE001 - 单个 Issue 读取失败只降级该行。
             _logger.info("Tracked issue #%s read failed: %s", issue_number, exc)
+            if scan_errors is not None:
+                scan_errors.append(f"Issue #{issue_number}：{exc}")
             continue
         snapshots.append(_minimal_issue_snapshot(issue, config=config))
     return snapshots
@@ -844,7 +851,12 @@ def build_repository_overview(
     tracked_issue_numbers: Sequence[int] = (),
 ) -> RepositoryMonitoringOverview:
     """Build a per-repository monitoring overview."""
-    queue_issues = _collect_queue_issues(config=config, github_client=github_client)
+    scan_errors: list[str] = []
+    queue_issues = _collect_queue_issues(
+        config=config,
+        github_client=github_client,
+        scan_errors=scan_errors,
+    )
     issue_snapshots: list[IssueMonitoringSnapshot] = []
     with ThreadPoolExecutor(max_workers=5) as executor:
         future_to_issue = {
@@ -864,6 +876,7 @@ def build_repository_overview(
                 snapshot = future.result()
             except Exception as exc:  # noqa: BLE001 - one bad Issue must not blank the page.
                 _logger.warning("Failed to build snapshot for Issue #%d: %s", issue.number, exc)
+                scan_errors.append(f"Issue #{issue.number}：{exc}")
                 continue
             issue_snapshots.append(snapshot)
 
@@ -872,6 +885,7 @@ def build_repository_overview(
         tracked_issue_numbers=tracked_issue_numbers,
         excluded_numbers={issue.number for issue in queue_issues},
         config=config,
+        scan_errors=scan_errors,
     )
     queue_counts = _compute_queue_counts(queue_issues, config)
     anomaly_count = sum(1 for snap in issue_snapshots if snap.has_anomaly)
@@ -909,6 +923,7 @@ def build_repository_overview(
         anomaly_summary=anomaly_summary,
         tracked_issues=tuple(tracked_snapshots),
         scanned_at=_now_iso(),
+        sync_error="；".join(scan_errors) if scan_errors else None,
     )
 
 

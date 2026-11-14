@@ -416,6 +416,14 @@ class GitHubApiRateLimitError(RuntimeError):
     """
 
 
+class GitHubApiUnavailableError(RuntimeError):
+    """GitHub API 瞬时连接故障在有限重试后仍不可用。
+
+    用例层捕获此异常后应保留 Issue 状态并记录为暂缓重试；不能把 GitHub
+    服务中断记成 Agent 执行失败，也不能在无法读取远端状态时继续写入标签。
+    """
+
+
 class IGitHubClient(ABC):
     """与 GitHub 交互的端口。
 
@@ -424,8 +432,9 @@ class IGitHubClient(ABC):
     工作流，而具体实现（通常基于 GitHub CLI ``gh`` 或 REST API）位于
     下层，可被独立替换与测试。
 
-    实现遇到明确的 API 限流时抛出 :class:`GitHubApiRateLimitError`，调用方保留
-    当前状态并推迟到之后的 daemon 轮询，不应按 Agent 失败处理。
+    实现遇到明确的 API 限流时抛出 :class:`GitHubApiRateLimitError`，遇到已重试耗尽的
+    瞬时连接错误时抛出 :class:`GitHubApiUnavailableError`。调用方保留当前状态并推迟
+    到之后的 daemon 轮询，不应按 Agent 失败处理。
     """
 
     @abstractmethod

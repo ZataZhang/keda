@@ -8,7 +8,10 @@ from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
 
-from backend.core.shared.interfaces.agent_runner import GitHubApiRateLimitError
+from backend.core.shared.interfaces.agent_runner import (
+    GitHubApiRateLimitError,
+    GitHubApiUnavailableError,
+)
 from backend.core.shared.interfaces.runner_live_view import NoOpRunnerLiveView
 from backend.core.shared.models.agent_runner import TokenUsage
 from backend.core.shared.models.publish_stage import PublishStage
@@ -442,6 +445,35 @@ def _process_single_issue(
             return 0
         output_view.update_status(issue.number, "skipped")
         raise
+    except GitHubApiUnavailableError as exc:
+        if _skip_issue_on_daemon_shutdown(issue.number, output_view):
+            return 0
+        error_summary = f"GitHub API 暂不可用，任务已暂缓并等待自动重试：{exc}"
+        _logger.warning("Deferred Issue #%d after GitHub API retries: %s", issue.number, exc)
+        output_view.update_status(issue.number, "deferred")
+        record_lifecycle_terminal(
+            store=run_history_store,
+            repo_id=effective_repo_id,
+            prd_path=lifecycle_prd_path,
+            issue_number=issue.number,
+            trigger=run_trigger,
+            event_type=LifecycleEventType.DEFERRED,
+            outcome="deferred",
+            actor="runner",
+            detail={"error_summary": error_summary},
+        )
+        _append_run_record_locked(
+            run_history_store=run_history_store,
+            repo_id=effective_repo_id,
+            repo_path=repo_path,
+            issue=issue,
+            trigger=run_trigger,
+            agent=selected_agent,
+            outcome="deferred",
+            error_summary=error_summary,
+            started_at=run_started_at,
+        )
+        return 0
 
     except (
         ForbiddenBlockedError,
