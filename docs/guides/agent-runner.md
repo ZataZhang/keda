@@ -4524,7 +4524,8 @@ daemon 进程**即获得多项目并发——不同仓库的 Issue 同时执行�
   failed/blocked label 计为 `completed`；单 label 查询命中 200 上限时
   响应标记 `truncated: true`。
 - **历史口径（本地 SQLite）**：`run_once` 编排在每个 Issue 处理收尾时
-  写入一条运行记录（outcome：completed / failed / blocked），CLI 直跑
+  写入一条运行记录（outcome：completed / failed / blocked / deferred）。`deferred`
+  表示 GitHub API 暂不可用，任务会等待恢复后重试，不计为代码失败。CLI 直跑
   与面板托管共用 `~/.kedacode/console.db`（`history_db_path` 可配）。
   `GET .../console/stats/history` 返回按天聚合趋势。
 - **最近运行记录**：Stats 页将最近 30 条运行按仓库与 Issue 分组，组按最近一次运行时间排序；
@@ -4560,7 +4561,7 @@ GET .../console/stats/agent-performance?repo_id=&days=30
   当前配置不会改变 SQLite 中已保存的历史；没有预设快照的记录显示在“未绑定 / 历史
   未记录”计数中，并在全部仓库视图中按仓库分别显示，不会猜测其当时使用的配置。
 - **整项任务耗时单独统计**：按仓库和最终 `completed` / `failed` / `blocked` 结果
-  分组；不把最终结果归给 `run_records.agent`，也不推导 Agent / 预设完成任务的概率。
+  分组；暂缓重试不计为交付失败。不把最终结果归给 `run_records.agent`，也不推导 Agent / 预设完成任务的概率。
 - **全部仓库视图保留仓库列**：避免同名预设跨仓库合并。Agent 名称缺失时归入“未记录”。
 - **时间窗口按 UTC 日历日计算**：与运行趋势的日期边界一致；`days` 会截断到 1–365。
 - **数据缺失与读取错误分开呈现**：无样本时显示空态或 `—`；新统计端点读取失败时只
@@ -4613,7 +4614,8 @@ console SQLite 另加两张**追加式**账本表，把观测单位从"一次调
 `queued | started | claimed | attempt | retry | recovered | implementation_completed |
 validation_started | validation_passed | validation_failed | review_started |
 review_passed | review_failed | merge_started | merged | archived | blocked |
-unblocked | failed | agent_token_usage`。
+unblocked | failed | deferred | agent_token_usage`。`deferred` 是可恢复的暂缓终态：不表示代码失败，
+也不占用新的 lifecycle phase。
 
 **`status` 闭集（事件语义状态，时间线状态徽章的事实源）**：
 每条事件在**写入时**按当时 `event_type` 冻结一个 `status`，落 `prd_lifecycle_events`
@@ -4624,7 +4626,7 @@ unblocked | failed | agent_token_usage`。
 `none | queued | started | claimed | attempt | retry | recovered |
 implementation_completed | validation_started | validation_passed | validation_failed |
 review_started | review_passed | review_failed | merge_started | completed | archived |
-blocked | unblocked | failed`，其中 `merged` 收成 `completed`（已完成）、`archived`
+blocked | unblocked | failed | deferred`，其中 `merged` 收成 `completed`（已完成）、`archived`
 保留「已归档」、「已进入队列」保持既有的「排队中」显示。观测类 `agent_token_usage`
 记为 `none`，前端据此不渲染误导徽章。v8 之前的历史行 `status` 为空串，序列化时回落
 按 `event_type` 派生（`status_for_event_type`），**绝不取 run 的当前状态**——否则
@@ -5372,7 +5374,7 @@ uv run kc backlog advance --repo <repo-id>
 - **单 PRD 覆盖**：`inherit`（跟随全局，默认）/ `on`（强制开启）/ `off`（强制关闭），事实源是对应 GitHub Issue 最新一条 `<!-- kc:ci-auto-repair-policy value=... -->` marker；无 Issue 的 PRD 只能跟随全局。
 - **最终生效值**由服务端按 `显式 on/off ?? fresh 全局值` 计算（`on → true`、`off → false`、`inherit → 全局值`），API/CLI 只回显，前端不得自行推断。
 
-Supervisor 的 `repair_pr_branch` JSON 决策包含 `repair_scope`：纯代码审查问题使用 `code_review`，CI 失败修复或混合问题使用 `ci`。缺失或无效值保守按 `ci` 处理。`auto_repair_ci` 与单 PRD 覆盖只限制 `ci`；`code_review` 不受 CI 自动修复开关影响。获准的修复都由 Supervisor 生命周期内的配置 repair agent 执行，Issue 保持 `agent/supervising`，不会重新认领 builder。两类修复共享 `max_repair_attempts` 上限及同一 head 的幂等请求，不扩大总重试预算。Supervisor 评论回显范围，便于核对实际政策。
+Supervisor 的 `repair_pr_branch` JSON 决策包含 `repair_scope`：纯代码审查问题使用 `code_review`，CI 失败修复或混合问题使用 `ci`。缺失或无效值保守按 `ci` 处理。`auto_repair_ci` 与单 PRD 覆盖只限制 `ci`；`code_review` 不受 CI 自动修复开关影响。获准的修复都由 Supervisor 生命周期内的配置 repair agent 执行，Issue 保持 `agent/supervising`，不会重新认领 builder。两类修复共享 `max_repair_attempts` 上限及同一 head 的幂等请求，不扩大总重试预算。repair agent 遇到供应商额度耗尽、CLI 不可用、执行器自身的 agent/profile/模型配置不兼容、进程启动失败或可恢复的执行崩溃时，按 `agent_fallback_order` / 生效候选链切换执行器；切换候选时丢弃只适用于原执行器的模型选择。验证失败仍留在同一修复恢复循环，不作为换执行器条件。Supervisor 评论回显范围，便于核对实际政策。
 
 #### 多轮修复与重入去重
 
@@ -5910,7 +5912,7 @@ pi · run
 
 ### 看板等待状态与 PR 值守
 
-值守看板默认显示「活动任务」（运行、阻塞、失败、等待和状态未知），已完成与已关闭
+值守看板默认显示「活动任务」（运行、暂缓重试、阻塞、失败、等待和状态未知），已完成与已关闭
 任务通过「全部」或对应状态筛选查看；搜索在当前筛选内生效。没有活动任务时会提示历史入口。
 状态未知也排在历史任务之前，避免需要核实的任务被行数上限截掉。
 手动全量或单仓库扫描完成后，同时重读仓库快照与任务摘要，再结束刷新状态；
@@ -5927,6 +5929,13 @@ PR 值守状态独立探测本机托管及手动启动的监督进程，失败�
 事件，不使用 Issue 首次开始日期代替本轮开始时间，也不沿用旧结束时间、终态或旧轮次的模型与阶段。
 同一会话已有终态事件时，后续 Token 观测事件不能使它重新显示为执行中。
 运行标签和未收口账本都是观测依据，不证明执行进程此刻存活；卡片直接披露这一限制。
+
+GitHub API 的瞬时连接故障（包括 `unexpected EOF`）会有限重试；重试耗尽后写入 `deferred`
+运行结果，不打 `agent/failed` 标签、不发失败评论。监控扫描若有 API 读取失败，会保留最后一份
+完整快照，并把诊断和失败时间附加到现有快照元数据；看板展示自动重试提示、最后一次确认的
+Issue 状态与本地时间，并明确标注快照已过期。下一次完整同步成功会覆盖诊断元数据。Runner
+释放本机锁后，daemon 的既有僵尸 attempt 对账会按 claim 租约、worktree 与 attempt 证据恢复或
+重新入队；它不会把 GitHub 中断当成 Agent 失败。
 
 阶段徽章标为「最近阶段」，说明只解释记录的环节，不宣称当前仍在执行或预告下一步。
 没有阶段记录时不显示占位徽章；待执行任务提示等待认领，历史终态任务省略缺失阶段说明。

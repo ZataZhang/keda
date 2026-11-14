@@ -26,6 +26,7 @@ import { RuntimeTaskPhaseDescription, RuntimeTaskPhase } from "./runtime-task-ph
 /** 状态分桶的人读文案与配色（唯一事实源，列表/详情/小窗共用）。 */
 const STATUS_PRESENTATION: Record<RuntimeTaskStatus, { label: string; variant: BadgeVariant }> = {
   running: { label: "运行中", variant: "running" },
+  deferred: { label: "暂缓重试", variant: "warning" },
   waiting: { label: "等待处理", variant: "review" },
   blocked: { label: "阻塞", variant: "blocked" },
   failed: { label: "失败", variant: "failed" },
@@ -37,6 +38,7 @@ const STATUS_PRESENTATION: Record<RuntimeTaskStatus, { label: string; variant: B
 /** 状态筛选选项：``all`` 加上后端可能给出的每个分桶。 */
 const STATUS_FILTERS: RuntimeTaskStatus[] = [
   "running",
+  "deferred",
   "blocked",
   "failed",
   "waiting",
@@ -592,12 +594,29 @@ export function isActiveRuntimeTask(task: RuntimeTaskEntry): boolean {
 
 /** 在列表、小窗和详情中直接披露运行依据及历史终态。 */
 export function RuntimeTaskObservation({ task }: { task: RuntimeTaskEntry }) {
-  const outcomeLabels: Record<string, string> = { completed: "成功", failed: "失败", blocked: "阻塞" };
-  const reason = task.status === "running"
-    ? `${task.status_reason ?? "监控标记运行"}；运行标记不代表执行进程已探活。`
-    : task.status === "unknown" || task.status === "closed"
-      ? task.status_reason
-      : null;
+  const outcomeLabels: Record<string, string> = {
+    completed: "成功",
+    failed: "失败",
+    blocked: "阻塞",
+    deferred: "暂缓重试",
+  };
+  const lastObservedStatus = task.last_observed_status
+    ? runtimeStatusPresentation(task.last_observed_status, task.waiting_reason).label
+    : null;
+  const staleObservation = task.sync_error
+    ? task.last_observed_at
+      ? lastObservedStatus
+        ? `最后确认状态：${lastObservedStatus} · ${formatLocalDateTime(task.last_observed_at)}（快照已过期）`
+        : `最后一次同步：${formatLocalDateTime(task.last_observed_at)}（快照已过期；当时状态未能判定）`
+      : "尚无可用的成功快照，GitHub 恢复后会重新确认。"
+    : null;
+  const reason = task.sync_error
+    ? `状态同步失败，正在自动重试：${task.sync_error}。${staleObservation}`
+    : task.status === "running"
+      ? `${task.status_reason ?? "监控标记运行"}；运行标记不代表执行进程已探活。`
+      : task.status === "unknown" || task.status === "closed" || task.status === "deferred"
+        ? task.status_reason
+        : null;
   if (!reason && !task.last_outcome) return null;
   return (
     <span className="mt-1 block text-xs text-slate-500" data-testid="runtime-task-observation">

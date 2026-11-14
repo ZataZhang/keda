@@ -35,6 +35,7 @@ class RuntimeTaskStatus(str, Enum):
     """
 
     RUNNING = "running"
+    DEFERRED = "deferred"
     WAITING = "waiting"
     BLOCKED = "blocked"
     FAILED = "failed"
@@ -50,12 +51,13 @@ class RuntimeTaskStatus(str, Enum):
 
 _STATUS_DISPLAY_ORDER: dict["RuntimeTaskStatus", int] = {
     RuntimeTaskStatus.RUNNING: 0,
-    RuntimeTaskStatus.BLOCKED: 1,
-    RuntimeTaskStatus.FAILED: 2,
-    RuntimeTaskStatus.WAITING: 3,
-    RuntimeTaskStatus.UNKNOWN: 4,
-    RuntimeTaskStatus.COMPLETED: 5,
-    RuntimeTaskStatus.CLOSED: 6,
+    RuntimeTaskStatus.DEFERRED: 1,
+    RuntimeTaskStatus.BLOCKED: 2,
+    RuntimeTaskStatus.FAILED: 3,
+    RuntimeTaskStatus.WAITING: 4,
+    RuntimeTaskStatus.UNKNOWN: 5,
+    RuntimeTaskStatus.COMPLETED: 6,
+    RuntimeTaskStatus.CLOSED: 7,
 }
 
 
@@ -76,6 +78,9 @@ class RuntimeTask:
         pr_number: PR 编号；链接无法解析编号时为 ``None``。
         status: 生命周期分桶。
         status_reason: 当前分桶的直接来源，例如监控标签或 Issue 关闭状态。
+        sync_error: GitHub 快照同步失败原因；非空时同步状态仍在自动重试。
+        last_observed_status: 最近一次成功同步观察到的状态；当前同步失败时保留。
+        last_observed_at: 最近一次成功同步时间；故障时与 ``last_observed_status`` 一起表示过期状态。
         anomaly_types: 监控快照发现的异常类型；异常与任务状态分开记录。
         waiting_reason: 等待原因：queued、human_review 或 recheck；非等待时为空。
         review_daemon_running: 本机 PR 值守进程是否存活；未探测或读取失败时为空。
@@ -90,7 +95,7 @@ class RuntimeTask:
         started_at: 最近一次运行开始时间（ISO-8601 UTC）。
         finished_at: 最近一次运行结束时间；仍在运行时为 ``None``。
         duration_seconds: 最近一次运行耗时；无法计算时为 ``None``。
-        last_outcome: 运行账本记录的终态（completed / failed / blocked）。
+        last_outcome: 运行账本记录的终态（completed / failed / blocked / deferred）。
         last_error_summary: 最近一次已收口失败或阻塞原因；新执行已开始时为空。
         labels: 监控看到的 `agent/*` 标签，供前端保持一致的状态文字。
         evidence_video_available: 该 Issue 是否有可播放的本地证据视频；没有证据视频时为 False。
@@ -106,6 +111,9 @@ class RuntimeTask:
     pr_number: int | None = None
     status: RuntimeTaskStatus = RuntimeTaskStatus.UNKNOWN
     status_reason: str | None = None
+    sync_error: str | None = None
+    last_observed_status: RuntimeTaskStatus | None = None
+    last_observed_at: str | None = None
     phase: str | None = None
     agent: str | None = None
     unclosed_invocation_executor: str | None = None

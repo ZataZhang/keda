@@ -42,6 +42,7 @@ export const EVENT_TYPE_LABELS: Record<string, string> = {
   blocked: "已阻塞",
   unblocked: "已解除阻塞",
   failed: "失败",
+  deferred: "暂缓重试",
   agent_token_usage: "Token 用量",
 }
 
@@ -103,6 +104,7 @@ const STATUS_BADGE_VARIANTS: Record<string, BadgeVariant> = {
   blocked: "blocked",
   unblocked: "running",
   failed: "error",
+  deferred: "warning",
 }
 
 /**

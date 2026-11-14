@@ -19,7 +19,11 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, replace
 
-from backend.core.shared.interfaces.agent_runner import IGitHubClient
+from backend.core.shared.interfaces.agent_runner import (
+    GitHubApiRateLimitError,
+    GitHubApiUnavailableError,
+    IGitHubClient,
+)
 from backend.core.shared.models.agent_runner import AppConfig, IssueSummary
 from backend.core.shared.models.publish_stage import PublishStage
 from backend.core.use_cases.agent_runner_merge_authorization import (
@@ -177,6 +181,8 @@ def resolve_publish_stage(
     pending = read_direct_pr_round(github_client, issue)
     try:
         fresh_issue = github_client.get_issue(issue.number)
+    except (GitHubApiRateLimitError, GitHubApiUnavailableError):
+        raise
     except Exception as exc:
         raise DirectPrFreshReadError(
             f"Issue #{issue.number} could not be re-read after the claim; "

@@ -39,7 +39,10 @@ from pathlib import Path
 from typing import Sequence
 from urllib.parse import urlsplit
 
-from backend.core.shared.interfaces.agent_runner import GitHubApiRateLimitError
+from backend.core.shared.interfaces.agent_runner import (
+    GitHubApiRateLimitError,
+    GitHubApiUnavailableError,
+)
 from backend.core.shared.interfaces.github_api_budget import (
     API_KIND_GRAPHQL,
     API_KIND_REST,
@@ -373,10 +376,36 @@ class GitHubCliClient:
                     input_text=input_text,
                 )
                 if command_result.return_code != 0:
-                    self._raise_if_rate_limited(
-                        (command_result.stdout or "") + "\n" + (command_result.stderr or ""),
-                        command,
+                    combined_output = (
+                        (command_result.stdout or "") + "\n" + (command_result.stderr or "")
                     )
+                    self._raise_if_rate_limited(combined_output, command)
+                    last_exc = subprocess.CalledProcessError(
+                        command_result.return_code,
+                        list(command),
+                        output=command_result.stdout,
+                        stderr=command_result.stderr,
+                    )
+                    if self._is_retryable_gh_error(last_exc):
+                        if attempt >= _MAX_GH_RETRIES:
+                            failure_detail = (
+                                command_result.stderr or command_result.stdout or str(last_exc)
+                            ).strip()
+                            raise GitHubApiUnavailableError(
+                                "GitHub API remained unavailable after "
+                                f"{_MAX_GH_RETRIES} attempts: {failure_detail}"
+                            ) from last_exc
+                        _logger.warning(
+                            "GitHub CLI transient error (attempt %d/%d), retrying in %.1fs: %s",
+                            attempt,
+                            _MAX_GH_RETRIES,
+                            _GH_RETRY_DELAY_SECONDS,
+                            command_result.stderr.strip()
+                            if command_result.stderr
+                            else command_result.stdout.strip(),
+                        )
+                        time.sleep(_GH_RETRY_DELAY_SECONDS)
+                        continue
                 return command_result
             except subprocess.TimeoutExpired as timeout_exc:
                 # 超时视为瞬时网络故障：统一转成 CalledProcessError，走下面同一套
@@ -389,7 +418,10 @@ class GitHubCliClient:
                 )
                 last_exc = exc
                 if attempt >= _MAX_GH_RETRIES:
-                    raise exc from timeout_exc
+                    raise GitHubApiUnavailableError(
+                        "GitHub API connection timed out after "
+                        f"{_MAX_GH_RETRIES} attempts: {exc.stderr}"
+                    ) from timeout_exc
                 _logger.warning(
                     "GitHub CLI timed out (attempt %d/%d), retrying in %.1fs: %s",
                     attempt,
@@ -405,8 +437,15 @@ class GitHubCliClient:
                     self._raise_if_rate_limited(combined_output, command)
                 except GitHubApiRateLimitError as rate_limit_exc:
                     raise rate_limit_exc from exc
-                if not check or attempt >= _MAX_GH_RETRIES or not self._is_retryable_gh_error(exc):
+                is_retryable = self._is_retryable_gh_error(exc)
+                if not is_retryable:
                     raise
+                if attempt >= _MAX_GH_RETRIES:
+                    failure_detail = (exc.stderr or exc.stdout or str(exc)).strip()
+                    raise GitHubApiUnavailableError(
+                        "GitHub API remained unavailable after "
+                        f"{_MAX_GH_RETRIES} attempts: {failure_detail}"
+                    ) from exc
                 _logger.warning(
                     "GitHub CLI transient error (attempt %d/%d), retrying in %.1fs: %s",
                     attempt,

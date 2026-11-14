@@ -56,6 +56,11 @@ interface PrdCiViewProps {
   issueNumber: number | null;
 }
 
+type PrdCiDeliveryState = {
+  requestKey: string;
+  delivery: BacklogCiDelivery;
+};
+
 /**
  * 渲染单个 PRD 的 CI/CD 交付尾段：状态、策略三态与问题卡。
  *
@@ -65,16 +70,18 @@ interface PrdCiViewProps {
  * @returns CI/CD 标签页内容。
  */
 export function PrdCiView({ repoId, prdPath, issueNumber }: PrdCiViewProps) {
-  const [delivery, setDelivery] = useState<BacklogCiDelivery | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loadedDelivery, setLoadedDelivery] = useState<PrdCiDeliveryState | null>(null);
   const [policySaving, setPolicySaving] = useState(false);
   const [repairPending, setRepairPending] = useState(false);
+  const requestKey = JSON.stringify([repoId, prdPath]);
+  const delivery =
+    loadedDelivery?.requestKey === requestKey ? loadedDelivery.delivery : null;
 
   const loadDelivery = useCallback(
     async (signal?: AbortSignal) => {
       try {
         const loaded = await fetchPrdCiDelivery({ repoId, prdPath, signal });
-        setDelivery(loaded);
+        setLoadedDelivery({ requestKey, delivery: loaded });
       } catch (error) {
         if (signal?.aborted) {
           return;
@@ -82,19 +89,18 @@ export function PrdCiView({ repoId, prdPath, issueNumber }: PrdCiViewProps) {
         toast.error(error instanceof Error ? error.message : "加载 CI/CD 状态失败。");
       }
     },
-    [repoId, prdPath],
+    [repoId, prdPath, requestKey],
   );
 
   useEffect(() => {
     const controller = new AbortController();
-    setLoading(true);
-    void loadDelivery(controller.signal).finally(() => {
-      if (!controller.signal.aborted) {
-        setLoading(false);
-      }
-    });
+    const initialLoad = window.setTimeout(
+      () => void loadDelivery(controller.signal),
+      0,
+    );
     const timer = setInterval(() => void loadDelivery(controller.signal), 30000);
     return () => {
+      window.clearTimeout(initialLoad);
       controller.abort();
       clearInterval(timer);
     };
@@ -108,7 +114,7 @@ export function PrdCiView({ repoId, prdPath, issueNumber }: PrdCiViewProps) {
     try {
       // 响应体是写后 fresh 回读（marker + fresh comments），不做乐观覆盖。
       const updated = await updatePrdCiPolicy({ repoId, prdPath, value: next });
-      setDelivery(updated);
+      setLoadedDelivery({ requestKey, delivery: updated });
       toast.success(`已保存：${POLICY_LABELS[next]}`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "保存策略失败。");
@@ -135,7 +141,7 @@ export function PrdCiView({ repoId, prdPath, issueNumber }: PrdCiViewProps) {
     }
   }
 
-  if (loading || !delivery) {
+  if (!delivery) {
     return (
       <div className="space-y-2" data-testid="prd-ci-loading">
         <Skeleton className="h-6 w-48" />

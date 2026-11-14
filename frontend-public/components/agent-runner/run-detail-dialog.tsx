@@ -37,10 +37,18 @@ type RunFailureExplanation = {
   nextStep: string | null;
 };
 
+type RunExecutionDetailsState = {
+  requestKey: string;
+  attempts: RunAttemptDetailEntry[];
+  invocations: RunInvocationDetailEntry[];
+  error: string | null;
+};
+
 const RUN_OUTCOME_LABELS: Record<RunRecordEntry["outcome"], string> = {
   completed: "成功",
   failed: "失败",
   blocked: "被阻塞",
+  deferred: "暂缓重试",
 };
 
 const LIFECYCLE_PHASE_LABELS: Record<string, string> = {
@@ -130,21 +138,26 @@ export function RunDetailDialog({
   open,
   onOpenChange,
 }: RunDetailDialogProps) {
-  const [attemptDetails, setAttemptDetails] = useState<RunAttemptDetailEntry[]>([]);
-  const [invocationDetails, setInvocationDetails] = useState<RunInvocationDetailEntry[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadedRunDetails, setLoadedRunDetails] =
+    useState<RunExecutionDetailsState | null>(null);
+  const requestKey = run
+    ? JSON.stringify([run.repo_id, run.issue_number, run.started_at, run.finished_at])
+    : null;
+  const currentRunDetails =
+    requestKey !== null && loadedRunDetails?.requestKey === requestKey
+      ? loadedRunDetails
+      : null;
+  const attemptDetails = currentRunDetails?.attempts ?? [];
+  const invocationDetails = currentRunDetails?.invocations ?? [];
+  const isLoading = open && run !== null && currentRunDetails === null;
+  const loadError = currentRunDetails?.error ?? null;
 
   useEffect(() => {
-    if (!open || run === null) {
+    if (!open || run === null || requestKey === null) {
       return;
     }
 
     let isCurrentRequest = true;
-    setAttemptDetails([]);
-    setInvocationDetails([]);
-    setLoadError(null);
-    setIsLoading(true);
     fetchRunExecutionDetails({
       repoId: run.repo_id,
       issueNumber: run.issue_number,
@@ -153,27 +166,29 @@ export function RunDetailDialog({
     })
       .then((loadedRunDetails) => {
         if (isCurrentRequest) {
-          setAttemptDetails(loadedRunDetails.attempts);
-          setInvocationDetails(loadedRunDetails.invocations);
+          setLoadedRunDetails({
+            requestKey,
+            attempts: loadedRunDetails.attempts,
+            invocations: loadedRunDetails.invocations,
+            error: null,
+          });
         }
       })
       .catch((error: unknown) => {
         if (isCurrentRequest) {
-          setLoadError(
-            error instanceof Error ? error.message : "无法加载运行详情。",
-          );
+          setLoadedRunDetails({
+            requestKey,
+            attempts: [],
+            invocations: [],
+            error: error instanceof Error ? error.message : "无法加载运行详情。",
+          });
         }
       })
-      .finally(() => {
-        if (isCurrentRequest) {
-          setIsLoading(false);
-        }
-      });
 
     return () => {
       isCurrentRequest = false;
     };
-  }, [open, run]);
+  }, [open, requestKey, run]);
 
   const failureExplanation = run
     ? getRunFailureExplanation(run, attemptDetails, invocationDetails)
@@ -244,7 +259,7 @@ export function RunDetailDialog({
                   variant={
                     run.outcome === "completed"
                       ? "ready"
-                      : run.outcome === "failed"
+                      : run.outcome === "failed" || run.outcome === "deferred"
                         ? "warning"
                         : "default"
                   }
@@ -306,7 +321,9 @@ export function RunDetailDialog({
                     {run.error_summary ||
                       (run.outcome === "completed"
                         ? "本次运行已完成。"
-                        : "本次运行被阻塞。")}
+                        : run.outcome === "deferred"
+                          ? "本次运行已暂缓，等待 GitHub API 恢复后重试。"
+                          : "本次运行被阻塞。")}
                   </p>
                 </div>
               )}

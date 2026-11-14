@@ -20,7 +20,10 @@ from pathlib import Path
 from typing import Protocol, Sequence
 from urllib.parse import urlencode
 
-from backend.core.shared.interfaces.agent_runner import GitHubApiRateLimitError
+from backend.core.shared.interfaces.agent_runner import (
+    GitHubApiRateLimitError,
+    GitHubApiUnavailableError,
+)
 from backend.infrastructure.github_helpers import (
     _STATE_ORDER,
     _aggregate_status_check_rollup,
@@ -121,7 +124,7 @@ def _load_rest_check_rollup(
         commit_statuses = [
             status for status in combined_status["statuses"] if isinstance(status, dict)
         ]
-    except GitHubApiRateLimitError:
+    except (GitHubApiRateLimitError, GitHubApiUnavailableError):
         raise
     except Exception as exc:  # noqa: BLE001 - unknown checks stay unknown outside strict reads.
         if require_success:
@@ -262,7 +265,7 @@ def get_pull_request_context(
             f"repos/{owner_repo}/pulls?{query}",
             per_page=True,
         )
-    except GitHubApiRateLimitError:
+    except (GitHubApiRateLimitError, GitHubApiUnavailableError):
         raise
     except Exception as exc:  # noqa: BLE001 - non-strict callers keep their best-effort behavior.
         if require_success:
@@ -307,7 +310,7 @@ def get_pull_request_context_by_number(
             client,
             f"repos/{client._get_owner_repo()}/pulls/{pr_number}",
         )
-    except GitHubApiRateLimitError:
+    except (GitHubApiRateLimitError, GitHubApiUnavailableError):
         raise
     except Exception as exc:  # noqa: BLE001 - non-strict callers keep their best-effort behavior.
         if require_success:
@@ -478,7 +481,7 @@ def list_pr_comments(client: _ClientProtocol, pr_number: int) -> list[str]:
             paginate=True,
         )
         comments = _flatten_rest_pages(raw_pages)
-    except GitHubApiRateLimitError:
+    except (GitHubApiRateLimitError, GitHubApiUnavailableError):
         raise
     except Exception as exc:  # noqa: BLE001 - preserve best-effort comment reads.
         _logger.warning("Unable to load comments for PR #%d: %s", pr_number, exc)
@@ -518,7 +521,7 @@ def _find_pr_by_head_state(
             f"repos/{owner_repo}/pulls?{query}",
             per_page=True,
         )
-    except GitHubApiRateLimitError:
+    except (GitHubApiRateLimitError, GitHubApiUnavailableError):
         raise
     except Exception as exc:  # noqa: BLE001 - preserve the existing strict/best-effort split.
         if require_success:

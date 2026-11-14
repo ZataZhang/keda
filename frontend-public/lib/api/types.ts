@@ -153,6 +153,10 @@ export type RepositoryMonitoringOverview = {
   anomaly_count: number;
   anomaly_summary: AnomalySummary;
   scanned_at: string;
+  /** 当前全量扫描不完整时的诊断；不完整结果不会覆盖最后一份成功快照。 */
+  sync_error?: string | null;
+  /** 附加在旧快照上的持久化同步失败诊断；成功扫描后消失。 */
+  sync_failure?: { reason: string; failed_at: string } | null;
 };
 
 export type MonitoringOverview = {
@@ -322,7 +326,7 @@ export type RunRecordEntry = {
   issue_url: string | null;
   trigger: string;
   agent: string;
-  outcome: "completed" | "failed" | "blocked";
+  outcome: "completed" | "failed" | "blocked" | "deferred";
   error_summary: string | null;
   started_at: string;
   finished_at: string;
@@ -1600,6 +1604,7 @@ export type EvaluationJudgePreview = {
 /** 任务生命周期分桶，与后端 `RuntimeTaskStatus` 取值一一对应。 */
 export type RuntimeTaskStatus =
   | "running"
+  | "deferred"
   | "waiting"
   | "blocked"
   | "failed"
@@ -1631,6 +1636,12 @@ export type RuntimeTaskEntry = {
   status: RuntimeTaskStatus;
   /** 当前状态的直接来源，例如监控标签或 Issue 关闭状态。 */
   status_reason: string | null;
+  /** GitHub 同步或远端读取失败原因；存在时表示后台正在自动重试。 */
+  sync_error?: string | null;
+  /** 最近一次成功同步观察到的任务状态；当前同步失败时用于展示过期状态。 */
+  last_observed_status?: RuntimeTaskStatus | null;
+  /** 最近一次成功同步时间；故障时与 `last_observed_status` 一起明确标识过期快照。 */
+  last_observed_at?: string | null;
   /** 监控异常类型，与状态来源分开呈现。 */
   anomaly_types: AnomalyType[];
   phase: string | null;
@@ -1647,7 +1658,7 @@ export type RuntimeTaskEntry = {
   finished_at: string | null;
   duration_seconds: number | null;
   last_outcome: string | null;
-  /** 最近一次失败或阻塞原因；旧后端未提供时为空。 */
+  /** 最近一次失败、阻塞或暂缓重试原因；旧后端未提供时为空。 */
   last_error_summary?: string | null;
   labels: string[];
   /** 该任务是否有可播放的本地证据视频；没有证据或旧后端未提供时为 false/缺失。 */

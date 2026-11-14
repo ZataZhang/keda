@@ -384,7 +384,9 @@ export function RuntimeTaskDetail({ task, className }: RuntimeTaskDetailProps) {
                 ? "阻塞原因"
                 : task.last_outcome === "failed"
                   ? "失败原因"
-                  : "最近运行错误"}
+                  : task.last_outcome === "deferred"
+                    ? "暂缓原因"
+                    : "最近运行错误"}
               ：{task.last_error_summary}
             </p>
           ) : null}

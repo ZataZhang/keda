@@ -9,6 +9,7 @@ from pathlib import Path
 
 from backend.core.shared.interfaces.agent_runner import (
     GitHubApiRateLimitError,
+    GitHubApiUnavailableError,
     IGitHubClient,
     IProcessRunner,
 )
@@ -705,7 +706,7 @@ def review_once(
         return 0
 
     exit_code = 0
-    github_api_rate_limited = False
+    github_api_deferred = False
     for issue in candidates:
         if issue.number in exclude_issue_numbers:
             continue
@@ -766,13 +767,13 @@ def review_once(
                 outcome=outcome,
                 actor="review_once",
             )
-        except GitHubApiRateLimitError as exc:
+        except (GitHubApiRateLimitError, GitHubApiUnavailableError) as exc:
             # Supervisor marker 可能已经成功发布；保留当前 label，让下一轮按 marker
             # 对齐状态，避免把已完成的判断改写成失败。
             exit_code = 1
-            github_api_rate_limited = True
+            github_api_deferred = True
             _logger.warning(
-                "Deferring review for Issue #%d after GitHub API rate limit; "
+                "Deferring review for Issue #%d while GitHub API is unavailable; "
                 "keeping its current workflow state for the next poll: %s",
                 issue.number,
                 exc,
@@ -798,7 +799,7 @@ def review_once(
 
     # Autopilot 启用时运行合并队列：全局 auto_merge 开启则沿用原双开关行为；
     # 否则队列只处理带通用 Issue 授权或单 PRD 显式授权标签的 Issue。
-    if config.autopilot.enabled and not dry_run and not github_api_rate_limited:
+    if config.autopilot.enabled and not dry_run and not github_api_deferred:
         try:
             merge_exit_code, merge_outcomes = process_merge_queue(
                 repo_path=repo_path,

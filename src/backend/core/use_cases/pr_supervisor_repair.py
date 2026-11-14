@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import subprocess
 from pathlib import Path
 
 from backend.core.shared.interfaces.agent_runner import IProcessRunner
@@ -12,22 +13,40 @@ from backend.core.shared.models.agent_runner import (
     FindingDetail,
     IssueSummary,
 )
+from backend.core.use_cases.agent_candidate_fallback import build_agent_candidates
+from backend.core.use_cases.agent_invocation import (
+    ModelNotSupportedError,
+    UnknownAgentError,
+    UnknownExpanderError,
+    UnknownProfileError,
+)
+from backend.core.use_cases.agent_invocation_tracing import (
+    PHASE_SUPERVISOR_REPAIR,
+    RETRY_REASON_EXECUTOR_FALLBACK,
+    link_next_invocation,
+)
 from backend.core.use_cases.agent_runner_feedback import (
     VerificationFailedError,
     build_repair_prompt,
     build_recovery_prompt,
     failed_verification_results,
 )
-from backend.core.use_cases.agent_runner_failure import format_recovery_failure_summary
+from backend.core.use_cases.agent_runner_failure import (
+    AgentExecutionError,
+    AgentUnavailableError,
+    ProviderCapacityError,
+    format_recovery_failure_summary,
+    is_provider_capacity_failure,
+)
 from backend.core.use_cases.agent_runner_validation import (
     resolve_issue_evidence_relpath,
 )
 from backend.core.shared.models.agent_model_preset import ModelSelection
-from backend.core.use_cases.agent_invocation_tracing import PHASE_SUPERVISOR_REPAIR
 from backend.core.use_cases.run_agent_once import (
     EmptyCommitRequestError,
     commit_requested_changes,
     ensure_verification_passed,
+    drop_model_selection_for_agent,
     has_changes,
     run_agent_with_prompt,
     run_verification,
@@ -88,18 +107,69 @@ def execute_repair(
 
     max_attempts = max(1, config.post_pr_supervisor.max_repair_attempts)
     verification_results: list[CommandResult] = []
+    repair_candidates = build_agent_candidates(config, repair_agent)
     for attempt in range(1, max_attempts + 1):
-        run_agent_with_prompt(
-            repair_agent,
-            repair_prompt,
-            worktree_path,
-            process_runner,
-            config=config,
-            issue=issue,
-            model_selection=model_selection,
-            invocation_phase=PHASE_SUPERVISOR_REPAIR,
-            invocation_attempt=attempt,
-        )
+        for candidate_index, candidate_agent in enumerate(repair_candidates):
+            if candidate_index > 0:
+                link_next_invocation(RETRY_REASON_EXECUTOR_FALLBACK)
+            try:
+                run_agent_with_prompt(
+                    candidate_agent,
+                    repair_prompt,
+                    worktree_path,
+                    process_runner,
+                    config=config,
+                    issue=issue,
+                    model_selection=drop_model_selection_for_agent(
+                        candidate_agent, model_selection
+                    ),
+                    invocation_phase=PHASE_SUPERVISOR_REPAIR,
+                    invocation_attempt=attempt,
+                )
+                break
+            except (
+                AgentExecutionError,
+                AgentUnavailableError,
+                ProviderCapacityError,
+                ModelNotSupportedError,
+                UnknownAgentError,
+                UnknownExpanderError,
+                UnknownProfileError,
+                OSError,
+                subprocess.CalledProcessError,
+                subprocess.TimeoutExpired,
+            ) as exc:
+                is_executor_specific_failure = isinstance(
+                    exc,
+                    (
+                        AgentExecutionError,
+                        AgentUnavailableError,
+                        ProviderCapacityError,
+                        ModelNotSupportedError,
+                        UnknownAgentError,
+                        UnknownExpanderError,
+                        UnknownProfileError,
+                        OSError,
+                        subprocess.TimeoutExpired,
+                    ),
+                ) or is_provider_capacity_failure(exc)
+                if not is_executor_specific_failure or candidate_index + 1 >= len(
+                    repair_candidates
+                ):
+                    raise
+                stale_commit_request = worktree_path / ".agent-runner" / "commit-request.json"
+                if stale_commit_request.is_file():
+                    stale_commit_request.unlink()
+                _logger.warning(
+                    "Post-PR repair agent '%s' could not execute Issue #%d (%s); "
+                    "switching to '%s'.",
+                    candidate_agent,
+                    issue.number,
+                    exc,
+                    repair_candidates[candidate_index + 1],
+                )
+        else:
+            raise RuntimeError("Post-PR repair executor fallback chain was empty.")
 
         request_path = worktree_path / ".agent-runner" / "commit-request.json"
         if request_path.is_file():
