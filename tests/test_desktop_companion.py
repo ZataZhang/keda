@@ -7,6 +7,9 @@
 
 from __future__ import annotations
 
+import plistlib
+import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -24,6 +27,7 @@ from backend.api.routes.agent_runner_console_runtime import (
 )
 from backend.core.shared.interfaces.desktop_companion import DesktopCompanionStatus
 import backend.engines.desktop_companion.helper as helper_module
+import backend.engines.desktop_companion.installer as installer_module
 from backend.engines.desktop_companion.helper import validate_console_origin
 from backend.engines.desktop_companion.launcher import (
     HELPER_MODULE,
@@ -495,3 +499,61 @@ def test_runtime_routes_are_registered_under_the_console_prefix() -> None:
         "/agent-runner/console/desktop-companion/window",
         "/agent-runner/console/desktop-companion/window/close",
     }
+
+
+def test_install_disk_image_matches_canonical_mount_point(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """hdiutil 回报规范化挂载点后仍能认出卷：macOS 的 /var 是指向 /private/var 的软链。"""
+    real_directory = tmp_path / "private-var"
+    real_directory.mkdir()
+    symlinked_directory = tmp_path / "var"
+    symlinked_directory.symlink_to(real_directory, target_is_directory=True)
+    disk_image_path = symlinked_directory / "app.dmg"
+    disk_image_path.write_bytes(b"disk image")
+    application_directory = tmp_path / "Applications"
+    application_directory.mkdir()
+
+    canonical_mount_path = real_directory / "mounted"
+    executed_commands: list[list[str]] = []
+
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        """替掉 hdiutil 与 ditto：只记录 argv，并按真实语义造出挂载内容。"""
+        executed_commands.append(list(command))
+        if command[1] == "attach":
+            app_contents_path = canonical_mount_path / "KedaCode.app" / "Contents"
+            app_contents_path.mkdir(parents=True)
+            (app_contents_path / "Info.plist").write_bytes(
+                plistlib.dumps(
+                    {
+                        "CFBundleIdentifier": "com.kedacode.desktop",
+                        "CFBundleShortVersionString": "0.6.0",
+                    }
+                )
+            )
+            mount_metadata = {
+                "system-entities": [
+                    {"dev-entry": "/dev/disk9"},
+                    {"dev-entry": "/dev/disk9s1", "mount-point": str(canonical_mount_path)},
+                ]
+            }
+            return subprocess.CompletedProcess(command, 0, plistlib.dumps(mount_metadata), b"")
+        if command[1] == "detach":
+            return subprocess.CompletedProcess(command, 0, b"", b"")
+        shutil.copytree(command[1], command[2])
+        return subprocess.CompletedProcess(command, 0, b"", b"")
+
+    monkeypatch.setattr(installer_module.subprocess, "run", fake_run)
+
+    installed_app_path = installer_module._install_disk_image(
+        disk_image_path=disk_image_path,
+        application_directory=application_directory,
+        expected_version="0.6.0",
+    )
+
+    assert installed_app_path == application_directory / "KedaCode.app"
+    assert (installed_app_path / "Contents" / "Info.plist").is_file()
+    attach_command = executed_commands[0]
+    assert Path(attach_command[attach_command.index("-mountpoint") + 1]) == canonical_mount_path
+    assert executed_commands[-1][1] == "detach"
+    assert executed_commands[-1][-1] == "/dev/disk9s1"

@@ -216,7 +216,10 @@ def _install_disk_image(
     expected_version: str,
 ) -> Path:
     """挂载 DMG、校验 bundle 身份并安全替换用户级 App。"""
-    mount_path = disk_image_path.parent / "mounted"
+    # hdiutil 回报的 mount-point 来自挂载表，是解析软链之后的真实路径；macOS 默认把
+    # TMPDIR 放在 /var/folders 下，而 /var 是指向 /private/var 的软链，直接用请求的
+    # 路径字符串比对会永远不相等。先解析成真实路径，挂载参数与比对统一使用它。
+    mount_path = (disk_image_path.parent / "mounted").resolve()
     mount_path.mkdir()
     mount_result = subprocess.run(
         [
