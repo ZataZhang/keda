@@ -1716,6 +1716,13 @@ kc registry list
 
 这可以帮助你确认哪些仓库当前正在后台跑 agent，以及是否重复启动了 daemon。
 
+#### 扫描与注册本地仓库（`kc registry scan` / `kc registry sync`）
+
+`kc registry scan <目录>` 只发现带 `.kedacode.toml` 的本地 Git 仓库，不写入配置；
+已注册仓库会同时显示仓库本地 ID 和 registry ID，例如本地 ID 为 `freshai`、registry ID
+为 `dewell-ai-assistant-team-freshai` 时，会显示 `(registered as dewell-ai-assistant-team-freshai)`。
+`kc registry sync <目录>` 会把该目录下尚未注册的已初始化仓库加入全局 registry；重复路径会被识别为已注册，不会重复添加。
+
 > **Managed vs Unmanaged**：
 > - 通过 `kc registry start` / console / `kc takeover` 启动的 daemon 是**托管进程**，会写入 `~/.kedacode/processes.json`，状态显示为 `running (<process_id>)`，可用 `kc registry stop` 停止。
 > - 直接在命令行执行 `kc daemon` / `kc supervise-daemon` 启动的进程是**未托管进程**。`kc registry list` 会通过扫描系统进程把它们识别出来，状态显示为 `running (unmanaged)`，但**不会**被 `kc registry stop` 停止，也没有独立的日志文件被 `registry` 命令管理。

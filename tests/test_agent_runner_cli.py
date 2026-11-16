@@ -2960,6 +2960,36 @@ def test_main_registry_scan_lists_discovered_repos(
     assert "(new)" in _strip_ansi(captured.out)
 
 
+def test_main_registry_scan_shows_registered_id_when_it_differs_from_local_id(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """扫描输出应区分仓库本地 ID 与 registry 中的 ID。"""
+    monkeypatch.chdir(tmp_path)
+    scan_root = tmp_path / "code"
+    repo_path = scan_root / "freshai"
+    repo_path.mkdir(parents=True)
+    (repo_path / ".git").mkdir()
+    _write_iar_toml(repo_path, "freshai")
+
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        '[agent_runner.repositories."dewell-ai-assistant-team-freshai"]\n'
+        f'path = "{repo_path}"\n'
+        "enabled = true\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("KEDACODE_CONFIG", str(config_path))
+
+    exit_code = main(["registry", "scan", str(scan_root)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "[freshai]" in _strip_ansi(captured.out)
+    assert "(registered as dewell-ai-assistant-team-freshai)" in _strip_ansi(captured.out)
+
+
 def test_main_registry_sync_dry_run(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
