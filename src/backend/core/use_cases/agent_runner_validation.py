@@ -10,8 +10,9 @@
    发布前拒绝混入代码 diff 的证据产物（双保险）。
 3. **证据强制** — commit 前要求证据目录非空（``ValidationEvidenceError``
    进入既有 recovery 循环）。
-4. **证据呈现** — 用 git plumbing（``hash-object``/``mktree``/``commit-tree``）
-   构造无父提交并 force-push 到 orphan 证据分支，再在 PR 上发证据评论。
+4. **证据呈现** — Draft PR 创建后、verifier 运行期间先用 git plumbing
+   （``hash-object``/``mktree``/``commit-tree``）构造无父提交并 force-push 到
+   orphan 证据分支，供看板人审页预览；最终 verifier 结论发布时再在 PR 上发证据评论。
 5. **软门禁** — daemon 轮询 ``agent/automated-review-passed`` Issue，按 PR body 勾选状态维护
    ``validation/pending`` / ``validation/passed`` label，PR 改动身份变化时重置勾选，
    Issue 关闭后清理证据分支。
@@ -161,6 +162,9 @@ from backend.core.use_cases.agent_runner_validation_publication import (
 )
 from backend.core.use_cases.agent_runner_validation_publication import (
     publish_validation_evidence as publish_validation_evidence,
+)
+from backend.core.use_cases.agent_runner_validation_publication import (
+    publish_validation_evidence_artifacts as publish_validation_evidence_artifacts,
 )
 from backend.core.use_cases.agent_runner_validation_publication import (
     publish_validation_evidence_best_effort as publish_validation_evidence_best_effort,

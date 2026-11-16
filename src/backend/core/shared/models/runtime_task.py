@@ -99,7 +99,7 @@ class RuntimeTask:
         last_error_summary: 最近一次已收口失败或阻塞原因；新执行已开始时为空。
         labels: 监控看到的 `agent/*` 标签，供前端保持一致的状态文字。
         evidence_video_available: 该 Issue 是否有可播放的本地证据视频；没有证据视频时为 False。
-        evidence_page_available: 该 Issue 是否有本地人审页（human-review-checklist.md 等）。
+        evidence_page_available: 该 Issue 是否有本地或证据分支上的人审页（human-review-checklist.md 等）。
     """
 
     repo_id: str

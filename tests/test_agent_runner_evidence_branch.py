@@ -55,6 +55,27 @@ def test_list_evidence_branches_is_cached(monkeypatch: pytest.MonkeyPatch) -> No
     assert len(calls) == 1
 
 
+def test_list_evidence_branches_can_refresh_cached_listing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """看板可绕过旧缓存发现刚推送的 verifier 前证据分支。"""
+    monkeypatch.setattr(branch_module, "_github_remote", _fake_remote)
+    calls: list[tuple[str, ...]] = []
+
+    def fake_git(repo_path: Path, *args: str) -> str:
+        calls.append(args)
+        return "abc\trefs/heads/iar-evidence/issue-9\n" if len(calls) > 1 else ""
+
+    monkeypatch.setattr(branch_module, "_git", fake_git)
+    repo_path = Path("/tmp/repo-a")
+
+    assert branch_module.list_evidence_branches(repo_path) == {}
+    assert branch_module.list_evidence_branches(repo_path, refresh=True) == {
+        9: "iar-evidence/issue-9"
+    }
+    assert len(calls) == 2
+
+
 def test_no_github_remote_returns_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     """没有 github 远端时不尝试网络，直接返回空。"""
     monkeypatch.setattr(branch_module, "_github_remote", lambda repo: None)
