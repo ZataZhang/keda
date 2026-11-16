@@ -3,7 +3,7 @@
 对应 PRD：`tasks/archive/P1-FEAT-20261116-120000-mcode-builtin-agent.md`
 实施日期：2026-11-16 · 实施者：minimax Code（M3.1-Flash）
 
-> rv-3 / rv-4 的原始 CLI 输出按仓库惯例不进版本库；rv-7 的两张截图与摘要文本是本次验收呈递物，已按 PRD 要求显式纳入版本库。
+> 原始 CLI 输出、rv-7 截图和 `rv-7-console-agents.txt` 按 `docs/ai-standards/testing.md` 保持本地证据，不进入 Git diff。截图在本报告内嵌，并附本地图片说明与 `open` 路径。
 
 ---
 
@@ -25,7 +25,7 @@ rv-6  派生 SUPPORTED_AGENT_SPECS → 含 ('mcode','minimax')，顺序在原七
         include_top_level = ('auth', 'config.yaml', 'skills')   # 白名单语义
         exclude_subpaths = ['.builtin-skills', '.internal-skills']
 rv-8  文档 / 原型 / sync_template 适配器清单枚举文本断言                    → 通过
-rv-9  just test all（最终分支）                                       → 5331 passed, 1 skipped；lint 通过
+rv-9  just test all（既有全量记录）                                   → 5331 passed, 1 skipped；交付前 just test → 74 passed, 137 deselected
 ```
 
 > **rv-6 的一处实施期修正**：初稿按"运行时状态目录"直觉给 `auth_exclude` 列了 `background-tasks` / `cache` / `logs` 等，实施期读 `container_auth.py` 才发现**导入是白名单语义**——只复制 `auth_include` 列出的条目，`auth_exclude` 只是"白名单内也排除"的兜底。因此那些运行时目录根本不会被复制，属于无效声明，已收敛为 `.builtin-skills` / `.internal-skills` 两项并在代码与文档里注明白名单语义。
@@ -133,17 +133,32 @@ sandbox/approval flag; the agent runs without local sandboxing.
 | rv-4 真实 CLI 入口 | PASS | `rv-4-agent-doctor.txt` |
 | rv-5 未声明 judge 时 fail-fast | PASS | `test_mcode_has_no_judge_profile` |
 | rv-6 容器认证派生目标目录 | PASS | 派生表含 `('mcode','minimax')`，顺序在原七个之后 |
-| rv-7 console 两层下拉 | PASS | [全局截图](rv-7-console-agents-global.png)、[仓库截图](rv-7-console-agents-repo.png)；候选值与先前写回记录见 `rv-7-console-agents.txt` |
+| rv-7 console 两层下拉与写回 | PASS | 本报告内嵌的全局/仓库截图；HTTP 200、重读响应与 TOML 原文见本地 `rv-7-console-agents.txt` |
 | rv-8 文档/原型/skill 枚举同步 | PASS | 文本断言通过 |
-| rv-9 全量测试与 lint | PASS | 最终分支 `just test all`: 5331 passed, 1 skipped；`just lint --reuse` / `just lint --full` 通过 |
+| rv-9 测试与 lint | PASS | 既有 `just test all`: 5331 passed, 1 skipped；交付前 `just test`: 74 passed, 137 deselected；`just lint --repo` 通过 |
 
 ## 5. rv-7 真实控制台验证
 
 - **真实页面截图已留存**：在源码启动的 console（`http://127.0.0.1:52344`）打开全局与仓库 `keda` 视角的模型预设区，展开 Agent 下拉；两张截图都显示 `mcode`。截图捕获时没有 mock 前后端，也没有写配置。
 
-- 页面展示候选值由真实 API 返回，具体全局/仓库数组见 `rv-7-console-agents.txt`。此前的真实仓库保存操作创建了临时预设 `mcode-ui-smoke`，接口视图返回 `agent=mcode`、`source=repository_only`，并确认 `.kedacode.toml` 写入；其后已恢复测试配置。因当时未保存逐字 TOML 片段，证据文本明确披露这一限制，不伪造文件原文。
+- 页面展示候选值由真实 API 返回，具体全局/仓库数组见 `rv-7-console-agents.txt`。本次通过真实仓库页面保存临时预设 `mcode-rv7-writeback-proof-20261116`，PATCH 返回 HTTP 200，紧接的 GET 仍返回 `agent=mcode`、`source=repository_only`；证据文本保留对应 TOML 原文，并证明解析后的唯一变化是新增该预设。随后恢复原 `.kedacode.toml`，SHA-256 与写入前一致，API 也不再返回临时预设。
 
-- [全局 Agent 下拉](rv-7-console-agents-global.png)
-- [仓库 Agent 下拉](rv-7-console-agents-repo.png)
-- 候选值与写回记录：`rv-7-console-agents.txt`
+**全局视角（本地图片）**
+
+![全局生命周期设置页中展开的 Agent 下拉，候选包含 mcode](rv-7-console-agents-global.png)
+
+```text
+open "/Users/zata/code/keda/tasks/evidence/P1-FEAT-20261116-120000-mcode-builtin-agent/rv-7-console-agents-global.png"
+```
+
+**仓库 keda 视角（本地图片）**
+
+![仓库 keda 生命周期设置页中展开的 Agent 下拉，候选包含 mcode](rv-7-console-agents-repo.png)
+
+```text
+open "/Users/zata/code/keda/tasks/evidence/P1-FEAT-20261116-120000-mcode-builtin-agent/rv-7-console-agents-repo.png"
+```
+
+- 候选值与写回记录：本地 `rv-7-console-agents.txt`
+- `just test` → 74 passed, 137 deselected；`just lint --repo` → PASS（完整 pre-commit、复用检查与 MkDocs 构建通过）。
 - **`mcode` 未进 `agent_fallback_order`**：刻意为之（不改既有回退链），用户可显式在 console 里配置。

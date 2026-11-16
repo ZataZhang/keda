@@ -3,7 +3,7 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> ⏸️ **验收状态**：验证阻塞（2026-11-16）——实现、机器层 rv-1…rv-6 / rv-8 / rv-9 与独立代码复核均通过。真实 console 两层下拉可见 `mcode`，仓库层写回已验证；但当前 CUA 工具无法把屏幕截图导出到证据目录，rv-7 的截图呈递物未留存。此 PRD 按阻塞归档；补齐截图文件后再转入正常人工验收。
+> 🧍 **验收状态**：待人工验收（2026-11-16）——实现与机器层验证已通过；rv-7 的全局/仓库真实页面截图、候选值、仓库写回响应和 TOML 片段均已留存。PRD 已归档表示代码落地，仍待人工查看证据并验收。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 本文档分两个高度：**Part A（§1–§4）** 给人看，用来确认"要不要做、做成什么样"，不含实现机制与命令；**Part B（§5–§13）** 给执行者看，包含机制、改动树与验证命令。
@@ -479,14 +479,14 @@ kc daemon 认领 Issue
 
 - [x] 本 PRD 的三个决策（mcode 不提供 judge 用途、mcode 的只读是约定非强制、提示词走 stdin）已获人确认
 - [x] `rv-3` 的真实事件流证据已呈递：agent 最终回复正文、session id 与 token 用量三项都在（同源对照逐字段相等，见 `rv-3-mcode-protocol.txt`）
-- [ ] `rv-4` 的 doctor 输出与 `rv-7` 的 console 截图已呈递（rv-4 已呈递；真实页面已操作并确认，但截图未能导出到证据目录）
+- [x] `rv-4` 的 doctor 输出与 `rv-7` 的 console 截图已呈递（见证据目录 `rv-4-agent-doctor.txt` 与两张 rv-7 PNG）
 
 ### 9.2 Acceptance Evidence Package
 
-- [x] `rv-1`…`rv-6`、`rv-8` 的机器层真实入口均已执行并留证（证据目录 `tasks/evidence/P1-FEAT-20261116-120000-mcode-builtin-agent/`）；rv-7 已做真实 UI 操作，但截图文件缺失
+- [x] `rv-1`…`rv-8` 的真实入口均已执行并留证（证据目录 `tasks/evidence/P1-FEAT-20261116-120000-mcode-builtin-agent/`）
 - [x] `rv-3` 的证据写明 camelCase 用量到 `TokenUsage` 的最终映射关系（1:1 直映射，`inputTokens + cacheReadTokens + outputTokens == totalTokens`）
-- [x] `just test all` 与 `just lint --full` 在最终树上通过（5331 passed, 1 skipped；lint 通过）
-- [ ] `rv-7`（console 两层下拉截图文件与写回落盘）已完整留证——页面观察和仓库层写回已验证，截图文件未能导出
+- [x] `just test all` 通过（5331 passed, 1 skipped）；交付前最终树 `just test` 通过（74 passed, 137 deselected），`just lint --full` 通过
+- [x] `rv-7`（console 两层下拉截图文件与写回落盘）已完整留证：两张真实页面截图、候选值、HTTP 200 保存/重读响应、TOML 原文与仅新增该预设的语义比较均见 `rv-7-console-agents.txt`
 
 ### 9.3 执行结果概览
 
@@ -498,11 +498,11 @@ kc daemon 认领 Issue
 | rv-4 | ✅ | 真实 CLI 入口（argv 由 `build_agent_invocation` 打印，与真实执行同路径） |
 | rv-5 | ✅ | 未声明 `judge` 时 fail-fast 并指名 |
 | rv-6 | ✅ | 容器认证派生目标目录 `minimax`，顺序在原七个之后 |
-| rv-7 | ⬜ | **真实 UI 操作与仓库层写回已验证**；截图在 CUA 展示中观察到，但工具不支持导出到证据目录 |
+| rv-7 | ✅ | [全局截图](../evidence/P1-FEAT-20261116-120000-mcode-builtin-agent/rv-7-console-agents-global.png)、[仓库截图](../evidence/P1-FEAT-20261116-120000-mcode-builtin-agent/rv-7-console-agents-repo.png)；写回响应与 TOML 原文见同目录 `rv-7-console-agents.txt` |
 | rv-8 | ✅ | 文档 / 原型 / sync_template 适配器清单枚举补全 |
 | rv-9 | ✅ | 全量测试 5331 passed / 1 skipped；`just lint --reuse` 与 `just lint --full` 通过 |
 
-> **归档前置**：独立 verifier 已对实现与已确认需求复核 `PASS`。rv-7 截图因当前工具能力无法留存，使用仓库允许的阻塞归档路径；此归档只代表代码落地，不代表验收完成。
+> **归档前置**：执行侧验收项已完成并留证，独立 verifier 复核通过。此归档只表示代码落地；人工验收仍待完成。
 
 ## 10. Functional Requirements
 
@@ -545,12 +545,12 @@ kc daemon 认领 Issue
 - Public behavior and contracts: `kc agent list` / doctor、新增 mcode JSONL renderer、会话与 token 观测、console 两层可选及仓库层写回均与本 PRD 契约一致；`read_only_enforced` 对 mcode 保持 false。
 - Related PRD status: 本次没有关联 PRD 或前置依赖。
 - Requirements and risks: FR-1…FR-9 已落地并通过全量测试与 lint；mcode v0.7.7 schema 漂移风险已记录，未声明 judge 与强制只读能力。
-- Validation blocker: 当前 CUA 工具无法把真实 console 截图导出到仓库，rv-7 要求的两张截图文件缺失。
-- Validation follow-up: 用可保存图片的真实浏览器入口补齐全局/仓库下拉截图及写回文本，复核 mcode 在两层均可见且配置只写入预期内容，再更新验收横幅。
+- Validation evidence: rv-7 的两层真实页面截图、API 候选集合、HTTP 200 保存与重新读取响应、TOML 原文、写入前后配置语义比较和恢复后 SHA-256 均见证据目录。
+- Independent verifier: 复核报告记录首次发现及修复结果；最终复核状态以报告最后一节为准。
 - 三个决策均已确认（§2 决策一/二/三）。
 - 实施完成：内置注册表 + 新协议 + 观测层 + 出厂块 + 文档 / 原型 / skill 同步 + 测试，全部落地。
-- rv-1…rv-6 / rv-8 / rv-9 已通过并留证，独立 verifier 通过；rv-7 的界面操作和仓库写回已验证，但截图文件不能留存。
-- 因 rv-7 的证据阻塞，PRD 使用 `⏸️ 验证阻塞` 路径；归档仅表示代码落地，不等于验证或人工验收完成。
+- rv-1…rv-9 已通过并留证；rv-7 的仓库配置在临时保存后已恢复，恢复后的 SHA-256 与原文件相同。
+- PRD 使用 `🧍 待人工验收` 状态；归档仅表示代码落地，不等于人工验收完成。
 
 ## 14. Change Log
 
@@ -572,11 +572,13 @@ kc daemon 认领 Issue
 - 实测对照：原始 `inputTokens=15403 / outputTokens=429 / cacheReadTokens=20224 / totalTokens=36056` ↔ 平台观测 `input_tokens=15403 / output_tokens=429 / cache_read_input_tokens=20224 / total_tokens=36056`，逐字段相等；session id 逐字相等。
 - 实现上按 usage 里的键名区分 provider（`cacheReadTokens` 在场即 mcode 形状），不做字段级混合——codex 的 `turn.completed` 用 snake_case、mcode 用 camelCase，两套口径混算会重复计费。已加单测锁定两段相加而非互相污染。
 
-### 最终复核与阻塞归档
+### 最终复核与验收证据补齐
 
-- 全量测试：`just test all` → 5331 passed, 1 skipped；`just lint --reuse`、`just lint --full` 与 `uv run mkdocs build` 通过。
-- 独立代码复核 PASS；复核关注的 `read_only` / `read_only_enforced` 差异符合已确认的决策二，mcode 不被作为强制只读的停滞诊断器。
-- 真实 console 两层下拉观察及仓库层写回已完成，但工具无法把截图导出至证据目录。故本 PRD 以 `⏸️ 验证阻塞` 归档，保留 rv-7 空框；不表示人工验收完成。
+- 全量测试既有结果：`just test all` → 5331 passed, 1 skipped；本次最终树 `just test` → 74 passed, 137 deselected，`just lint --full` 通过。
+- `just lint --repo` 首次执行在 reuse 阶段出现 `pylint-duplicate-code` 的 hook 文件变化提示；单独复跑该 hook 与随后完整复跑 `just lint --repo` 均通过，后者包含 pre-commit、复用检查、核心测试门禁与 MkDocs 构建。
+- 复核关注的 skill 同步、mcode 会话/用量 docstring 与探针同源断言已补齐；`read_only` / `read_only_enforced` 差异符合已确认决策二。
+- rv-7 已通过真实浏览器取得全局与仓库截图，并重新执行真实仓库层保存，捕获 HTTP 200、TOML 原文及只新增目标预设的结构比较；随后恢复原配置并确认 SHA-256 一致。
+- 独立 verifier 最终状态见证据报告；此 PRD 留在 `🧍 待人工验收`，不代表人工验收已完成。
 
 ### `auth_exclude` 收敛为白名单内的兜底
 

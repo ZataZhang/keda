@@ -31,7 +31,7 @@
 | rv-4 | smoke（真实 CLI） | `kc agent list` / `kc agent doctor --protocols` + `build_agent_invocation` 逐用途打印 argv | `mcode` 在注册表末尾；协议已注册；四条 argv 与设计一致 |
 | rv-5 | unit | `uv run pytest ... -k mcode_has_no_judge_profile` | 未声明用途 fail-fast 且指名已声明用途 |
 | rv-6 | integration | `container_auth.SUPPORTED_AGENT_SPECS` 派生断言 | 派生目录名 `minimax` 正确、顺序在原七个之后 |
-| rv-7 | manual（真实 console） | 源码版 console 生产页面操作 | 全局与仓库两层下拉均观察到 `mcode`；真实 API 候选值、截图与先前仓库写回记录见 `rv-7-console-agents.{txt,png}` |
+| rv-7 | manual（真实 console） | 源码版 console 生产页面操作 | 全局/仓库两层下拉、真实 API 候选值、HTTP 200 保存/重读、TOML 原文与仅新增预设的语义比较见 rv-7 截图和 `rv-7-console-agents.txt` |
 | rv-8 | unit | 文本断言 + 独立 `rg` 复核 | 文档/原型/skill 枚举无遗漏 |
 | rv-9 | full suite | `just test all` | 最终树 5331 passed, 1 skipped；lint 通过 |
 
@@ -49,11 +49,10 @@
 
 - rv-3 用**真实 mcode CLI**（本机 v0.7.7），不是 pytest 替身；事件流由真实子进程产出。
 - rv-4 用真实 `kc` CLI 与真实 `build_agent_invocation`（与真实执行完全同一条路径），不是手写 argv 字符串。
-- rv-7 用真实 console 实例：后端为被测 worktree 代码、`HOME` / 配置指向隔离 fixture；前端沿用主仓库已构建的静态产物（本 PRD 未改前端代码）；仅 mock 登录态，`lifecycle-agents` 与写回接口走真实后端。**不 mock 那个 agents 数组**——mock 它等于自己写答案。
+- rv-7 用本地 console 生产页面与真实后端：全局和仓库 `keda` 都读取真实 `lifecycle-agents` API，**不 mock Agent 候选数组**。仓库层保存测试先备份 `.kedacode.toml`，确认写入只增加目标预设后恢复文件，并以 SHA-256 和 API 重读验证恢复。
 
 ## 明确不验证（并说明原因）
 
-- **rv-7 截图与写回**：全局、仓库真实页面截图已保存为 `rv-7-console-agents-global.png` / `rv-7-console-agents-repo.png`；真实 API 候选值与此前 `.kedacode.toml` 写回记录收录在 `rv-7-console-agents.txt`。原写回操作没有保留逐字 TOML 片段，证据文本披露此限制。
 - **mcode 承载完整 Issue 流程的真实执行**：会消耗模型额度并产生真实 PR 副作用。本轮只验证到"真实 mcode 进程 + 生产协议 + 真实事件流"的端到端（rv-3），完整 Issue 流程由后续 runner 运行覆盖。
 - **`mcode` 的 `acp` 子命令接入**：PRD §6 备选 D 明确排除，属独立议题。
 - **runner 容器镜像预装 mcode**：PRD §11 明确排除；本机无法验证镜像构建。
