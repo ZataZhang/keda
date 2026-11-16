@@ -444,16 +444,16 @@ def test_editor_auto_repair_ci_rejects_non_bool(editor_repo: Path) -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 配置默认值：缺省关闭且四开关语义独立
+# 配置默认值：自动合并开启，独立于其它交付开关
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def test_auto_repair_ci_defaults_off_and_independent() -> None:
+def test_auto_merge_defaults_on_and_independent() -> None:
     config = AppConfig()
     assert config.post_pr_supervisor.auto_repair_ci is False
-    assert config.autopilot.enabled is False
-    assert config.safety.auto_merge is False
-    # 语义独立：本 PRD 新开关默认值与既有三开关互不影响（fix_agent 默认开）。
+    assert config.autopilot.enabled is True
+    assert config.safety.auto_merge is True
+    # 语义独立：自动合并默认值不影响其它交付开关（fix_agent 默认开）。
     assert config.runner.fix_agent_enabled is True
 
 

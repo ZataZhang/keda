@@ -349,9 +349,9 @@ class MemoryConfig:
 
 @dataclass(frozen=True)
 class SafetyConfig:
-    """Safety boundaries enforced before publishing."""
+    """发布前安全边界；新配置默认允许全仓自动合并，仍须通过 Autopilot 与队列门禁。"""
 
-    auto_merge: bool = False
+    auto_merge: bool = True
     forbidden_path_patterns: tuple[str, ...] = (
         ".env",
         ".env.*",
@@ -366,18 +366,14 @@ class AutopilotConfig:
     """Autopilot / merge queue configuration.
 
     该字段决定 **review pass 末尾是否启用合并队列消费**。全仓自动合并仍需要
-    ``safety.auto_merge`` 同时为真；该开关关闭时，合并队列可处理带有通用
-    ``auto-merge`` 或单 PRD ``prd-auto-merge`` 显式授权标签的 Issue。两种标签授权
-    都要求通过对应验证门禁；只有 ``prd-auto-merge`` 会跳过独立 verifier 和
-    PRD Human-Confirmed hold。这种"双开关"设计专门为了防止
-    :class:`SafetyConfig.auto_merge` 死开关"突然激活"——历史上
-    ``safety.auto_merge`` 一直是死配置，从未被代码消费；现在它真正生效，
-    任何早前误设 ``true`` 的环境若没同时开启 ``autopilot.enabled`` 新键
-    也不会开始自动合并，提供一层防呆保护。
+    ``safety.auto_merge`` 同时为真；两项在新配置中默认开启。若 ``safety.auto_merge``
+    关闭，合并队列只处理带有通用 ``auto-merge`` 或单 PRD ``prd-auto-merge`` 显式授权
+    标签的 Issue。两种标签授权都要求通过对应验证门禁；只有 ``prd-auto-merge`` 会跳过
+    独立 verifier 和 PRD Human-Confirmed hold。仓库可以显式关闭其中任一开关。
 
     Attributes:
-        enabled: 主开关；为 ``False`` 时合并队列整段 no-op，包括 Issue 级自动合并标签授权。
-            独立于 ``safety.auto_merge`` 是为了"双开关"语义。
+        enabled: 主开关，默认为 ``True``；为 ``False`` 时合并队列整段 no-op，包括 Issue 级自动合并标签授权。
+            独立于 ``safety.auto_merge``，两个开关都开启时才对全仓 PR 自动合并。
         merge_method: 唯一接受的合并方式：``"squash"``。其它值在配置加载期
             由 ``AutopilotConfig`` 校验期拒绝。这是用户锁定的设计决策——
             单提交便于 ``git revert`` 回退。
@@ -391,7 +387,7 @@ class AutopilotConfig:
             默认 1800（30 分钟），超时则放弃本轮合并。
     """
 
-    enabled: bool = False
+    enabled: bool = True
     merge_method: str = "squash"
     require_verifier_pass: bool = True
     auto_sign_off: bool = True
