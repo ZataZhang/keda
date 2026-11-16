@@ -18,6 +18,7 @@ from backend.core.use_cases import agent_runner_evidence_branch as branch_module
 def _clear_caches() -> None:
     """每个用例前清空模块级缓存，避免用例之间互相污染。"""
     branch_module._BRANCH_CACHE.clear()
+    branch_module._BRANCH_REFRESH_ATTEMPTS.clear()
     branch_module._REMOTE_CACHE.clear()
 
 
@@ -58,8 +59,10 @@ def test_list_evidence_branches_is_cached(monkeypatch: pytest.MonkeyPatch) -> No
 def test_list_evidence_branches_can_refresh_cached_listing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """看板可绕过旧缓存发现刚推送的 verifier 前证据分支。"""
+    """看板可在刷新冷却期后发现刚推送的 verifier 前证据分支。"""
     monkeypatch.setattr(branch_module, "_github_remote", _fake_remote)
+    now_monotonic = [0.0]
+    monkeypatch.setattr(branch_module.time, "monotonic", lambda: now_monotonic[0])
     calls: list[tuple[str, ...]] = []
 
     def fake_git(repo_path: Path, *args: str) -> str:
@@ -70,9 +73,40 @@ def test_list_evidence_branches_can_refresh_cached_listing(
     repo_path = Path("/tmp/repo-a")
 
     assert branch_module.list_evidence_branches(repo_path) == {}
+    now_monotonic[0] = branch_module.BRANCH_REFRESH_COOLDOWN_SECONDS
     assert branch_module.list_evidence_branches(repo_path, refresh=True) == {
         9: "iar-evidence/issue-9"
     }
+    assert branch_module.list_evidence_branches(repo_path, refresh=True) == {
+        9: "iar-evidence/issue-9"
+    }
+    assert len(calls) == 2
+
+
+def test_refresh_throttles_remote_failures_and_keeps_last_known_branches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """刷新失败时保留最近成功结果，并在冷却期内复用该结果。"""
+    monkeypatch.setattr(branch_module, "_github_remote", _fake_remote)
+    now_monotonic = [0.0]
+    monkeypatch.setattr(branch_module.time, "monotonic", lambda: now_monotonic[0])
+    calls: list[tuple[str, ...]] = []
+
+    def fake_git(repo_path: Path, *args: str) -> str | None:
+        calls.append(args)
+        if len(calls) == 1:
+            return "abc\trefs/heads/iar-evidence/issue-9\n"
+        return None
+
+    monkeypatch.setattr(branch_module, "_git", fake_git)
+    repo_path = Path("/tmp/repo-a")
+    expected_branches = {9: "iar-evidence/issue-9"}
+
+    assert branch_module.list_evidence_branches(repo_path) == expected_branches
+    now_monotonic[0] += branch_module.BRANCH_REFRESH_COOLDOWN_SECONDS
+    assert branch_module.list_evidence_branches(repo_path, refresh=True) == expected_branches
+    now_monotonic[0] += 1
+    assert branch_module.list_evidence_branches(repo_path, refresh=True) == expected_branches
     assert len(calls) == 2
 
 

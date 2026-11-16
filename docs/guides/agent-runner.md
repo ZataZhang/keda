@@ -1954,7 +1954,7 @@ agent/ready
 新实现路径在实现 agent 完成、PRD 执行侧交付收尾和本地验证通过后，先 `git push` 并创建或复用未签核的 Draft PR。PR 出现后立即把人审材料发布到证据分支，看板即可显示 `Review` 入口；此时 Issue 仍在运行，verifier 继续独立验证。verifier 通过后才执行 pre-PR AI code review。复用已提交本地 commit 的恢复路径也会先发布 Draft PR 和可预览的人审材料，再执行 review 与最终 HEAD 复核：
 
 1. RV 证据和仓库验证命令通过、PRD 执行侧条目完成并归档后，runner 将分支 push 到配置 remote，并创建或复用 Draft PR；此时不添加 `validation/verifier-passed`
-2. Draft PR 创建成功后，runner 尽力把人审材料上传到证据分支。看板按 PR 仓库刷新证据分支索引，因此 `Review` 按钮可在 verifier 运行期间出现；材料发布失败只记录告警，不阻断 verifier。该入口表示可以提前查看材料，不表示验证通过或已经进入待人工评审状态
+2. Draft PR 创建成功后，runner 尽力把人审材料上传到证据分支。看板按 PR 仓库刷新证据分支索引，同一仓库的远端查询至少间隔 30 秒，因此 `Review` 按钮通常可在 verifier 运行期间出现；材料发布失败只记录告警，不阻断 verifier。该入口表示可以提前查看材料，不表示验证通过或已经进入待人工评审状态
 3. 独立 verifier 对已提交工作树进行验证；失败时进入原有修复循环，后续合格提交更新同一个 Draft PR
 4. verifier 通过后，runner 写 Issue comment `Implementation Complete` 并构建 review packet（Issue、PRD、diff、changed paths、verification results、AI standards、review workflow）
 5. **Reviewer 必须通过 Skill 工具调用 `code-reviewer` skill** 并把 skill 输出的 findings 写进响应的 `findings` JSON 数组；review packet 默认模板（`agent_review.DEFAULT_REVIEW_PROMPT_TEMPLATE`）会显式提示 reviewer 这一行为，并提供 findings schema（`category` / `severity` / `file` / `line` / `title` / `description` / `recommendation`）。仓库可在 `[agent_runner.pre_pr_review].review_prompt_template` 覆盖该模板，未配置时回退到代码默认。

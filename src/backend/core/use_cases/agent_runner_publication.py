@@ -299,6 +299,8 @@ def publish_draft_pr_before_verifier(request: PreVerifierDraftPublicationRequest
                 config=request.config,
                 process_runner=request.process_runner,
             )
+        except ClaimLeaseLost:
+            raise
         except Exception as evidence_error:  # noqa: BLE001 - 预览证据不得阻塞 verifier。
             _logger.warning(
                 "Could not publish review evidence for Issue #%d before verifier; "
