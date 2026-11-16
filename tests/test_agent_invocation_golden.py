@@ -475,6 +475,66 @@ def test_opencode_has_no_generate_profile(app_config: AppConfig, plain_worktree:
     assert "run" in message
 
 
+# mcode（MiniMax Code）：exec 子命令 + --permission full + --input - 走 stdin。
+# 提示词不进 argv（--input - 之后由 stdin 投递），因此 argv 末尾没有 PROMPT。
+def _mcode_golden_argv(worktree: Path) -> tuple[str, ...]:
+    """mcode 各用途的命令行：``{cwd}`` 替换为真实 worktree 路径。"""
+    return (
+        "mcode",
+        "exec",
+        "--cwd",
+        str(worktree),
+        "--permission",
+        "full",
+        "--output-format",
+        "stream-json",
+        "--input",
+        "-",
+    )
+
+
+def test_golden_mcode_run(app_config: AppConfig, plain_worktree: Path) -> None:
+    """mcode 主执行：exec 子命令 + yolo 权限档 + JSONL 输出，提示词走 stdin。"""
+    invocation = build_agent_invocation("mcode", "run", PROMPT, plain_worktree, app_config)
+    assert invocation.argv == _mcode_golden_argv(plain_worktree)
+    assert invocation.prompt_delivery == "stdin"
+    assert invocation.output_protocol == "mcode-json-lines"
+    assert invocation.read_only is False
+
+
+def test_golden_mcode_deliberate(app_config: AppConfig, plain_worktree: Path) -> None:
+    """mcode 辩论：同一形态，但声明只读。"""
+    invocation = build_agent_invocation("mcode", "deliberate", PROMPT, plain_worktree, app_config)
+    assert invocation.argv == _mcode_golden_argv(plain_worktree)
+    assert invocation.output_protocol == "mcode-json-lines"
+    assert invocation.read_only is True
+
+
+def test_golden_mcode_generate(app_config: AppConfig, plain_worktree: Path) -> None:
+    """mcode 生成：同一形态，声明只读（约定而非强制，见 PRD 决策二）。"""
+    invocation = build_agent_invocation("mcode", "generate", PROMPT, plain_worktree, app_config)
+    assert invocation.argv == _mcode_golden_argv(plain_worktree)
+    assert invocation.read_only is True
+
+
+def test_golden_mcode_repl(app_config: AppConfig, plain_worktree: Path) -> None:
+    """mcode REPL：可写形态。"""
+    invocation = build_agent_invocation("mcode", "repl", PROMPT, plain_worktree, app_config)
+    assert invocation.argv == _mcode_golden_argv(plain_worktree)
+    assert invocation.read_only is False
+
+
+def test_mcode_has_no_judge_profile(app_config: AppConfig, plain_worktree: Path) -> None:
+    """mcode 刻意不声明 judge：它没有禁用全部内置工具的开关，不放假隔离声明。"""
+    with pytest.raises(UnknownProfileError) as exc_info:
+        build_agent_invocation("mcode", "judge", PROMPT, plain_worktree, app_config)
+    message = str(exc_info.value)
+    assert "mcode" in message
+    assert "judge" in message
+    # 报错必须列出已声明的用途，且不得回落到别的用途
+    assert "run" in message
+
+
 # ---------------------------------------------------------------------------
 # 失败路径：不降级、带上下文
 # ---------------------------------------------------------------------------
@@ -485,7 +545,16 @@ def test_unknown_agent_lists_registered(app_config: AppConfig, plain_worktree: P
     with pytest.raises(UnknownAgentError) as exc_info:
         build_agent_invocation("does-not-exist", "run", PROMPT, plain_worktree, app_config)
     message = str(exc_info.value)
-    for registered_name in ("codex", "claude", "kimi", "pi", "codebuddy", "qoder", "opencode"):
+    for registered_name in (
+        "codex",
+        "claude",
+        "kimi",
+        "pi",
+        "codebuddy",
+        "qoder",
+        "opencode",
+        "mcode",
+    ):
         assert registered_name in message
 
 

@@ -24,6 +24,7 @@ BUILTIN_PROTOCOL_IDS = (
     "pi-json-lines",
     "codex-json-lines",
     "opencode-json-lines",
+    "mcode-json-lines",
 )
 
 

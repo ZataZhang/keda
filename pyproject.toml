@@ -75,6 +75,7 @@ claude-stream-json = "backend.engines.agent_runner.output_protocols.claude_strea
 pi-json-lines = "backend.engines.agent_runner.output_protocols.pi_json_lines:PiJsonLinesOutputProtocol"
 codex-json-lines = "backend.engines.agent_runner.output_protocols.codex_json_lines:CodexJsonLinesOutputProtocol"
 opencode-json-lines = "backend.engines.agent_runner.output_protocols.opencode_json_lines:OpenCodeJsonLinesOutputProtocol"
+mcode-json-lines = "backend.engines.agent_runner.output_protocols.mcode_json_lines:McodeJsonLinesOutputProtocol"
 
 [project.optional-dependencies]
 llm = [

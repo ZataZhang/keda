@@ -87,7 +87,7 @@ def build_token_usage(usage_payload: object) -> TokenUsage | None:
 
 
 def _extract_stream_usage_event(line: str) -> tuple[str, TokenUsage] | None:
-    """提取完整 assistant 消息、result 或 Codex 轮次结束事件中的 usage。"""
+    """提取完整 assistant 消息、result、Codex 或 mcode 轮次结束事件中的 usage。"""
     if '"usage"' not in line or not any(
         event_name in line for event_name in ('"assistant"', '"result"', '"turn.completed"')
     ):
@@ -107,25 +107,41 @@ def _extract_stream_usage_event(line: str) -> tuple[str, TokenUsage] | None:
     elif event_type == "result":
         usage_payload = event_payload.get("usage")
     elif event_type == "turn.completed":
-        # Codex 的 input_tokens 已包含缓存命中，转换为互斥的四类用量，避免重复计费。
-        codex_usage = event_payload.get("usage")
-        if not isinstance(codex_usage, dict):
+        # Codex 与 mcode 都用 turn.completed 报用量，但形状不同：codex 用
+        # snake_case（input_tokens / cached_input_tokens），mcode 用 camelCase
+        # （inputTokens / cacheReadTokens）。因此按 usage 里的键名区分 provider，
+        # 不做字段级混合——两套口径的语义不同，混着算会重复计费。
+        turn_usage = event_payload.get("usage")
+        if not isinstance(turn_usage, dict):
             return None
-        input_tokens = codex_usage.get("input_tokens")
-        cached_tokens = codex_usage.get("cached_input_tokens", 0)
-        if (
-            any(
-                isinstance(token_count, bool) or not isinstance(token_count, int) or token_count < 0
-                for token_count in (input_tokens, cached_tokens)
-            )
-            or cached_tokens > input_tokens
-        ):
-            return None
-        usage_payload = {
-            "input_tokens": input_tokens - cached_tokens,
-            "cache_read_input_tokens": cached_tokens,
-            "output_tokens": codex_usage.get("output_tokens"),
-        }
+        if "cacheReadTokens" in turn_usage:
+            # mcode：inputTokens **不含** cacheReadTokens（实测 inputTokens +
+            # cacheReadTokens + outputTokens == totalTokens），与 Anthropic 口径
+            # 一致，可直接 1:1 映射。
+            usage_payload = {
+                "input_tokens": turn_usage.get("inputTokens"),
+                "output_tokens": turn_usage.get("outputTokens"),
+                "cache_read_input_tokens": turn_usage.get("cacheReadTokens"),
+            }
+        else:
+            # Codex 的 input_tokens 已包含缓存命中，转换为互斥的四类用量，避免重复计费。
+            input_tokens = turn_usage.get("input_tokens")
+            cached_tokens = turn_usage.get("cached_input_tokens", 0)
+            if (
+                any(
+                    isinstance(token_count, bool)
+                    or not isinstance(token_count, int)
+                    or token_count < 0
+                    for token_count in (input_tokens, cached_tokens)
+                )
+                or cached_tokens > input_tokens
+            ):
+                return None
+            usage_payload = {
+                "input_tokens": input_tokens - cached_tokens,
+                "cache_read_input_tokens": cached_tokens,
+                "output_tokens": turn_usage.get("output_tokens"),
+            }
     else:
         return None
     parsed_usage = build_token_usage(usage_payload)
@@ -139,16 +155,22 @@ def extract_session_id_event(line: str) -> str | None:
         line: 子进程的原始单行输出（可能带尾部换行）。
 
     Returns:
-        标准 ``session_id``、Codex ``thread.started.thread_id``、OpenCode
-        ``sessionID``、pi ``session.id`` 或 Kimi resume hint 中的会话 id；
-        非匹配输出返回 ``None``。
+        标准 ``session_id``、Codex ``thread.started.thread_id``、mcode
+        ``sessionId``、OpenCode ``sessionID``、pi ``session.id`` 或 Kimi resume
+        hint 中的会话 id；非匹配输出返回 ``None``。
     """
     hint_match = _KIMI_RESUME_HINT_RE.search(line)
     if hint_match is not None:
         return hint_match.group(1)
     if not any(
         field_name in line
-        for field_name in (_SESSION_ID_FIELD_NAME, '"sessionID"', '"thread_id"', '"id"')
+        for field_name in (
+            _SESSION_ID_FIELD_NAME,
+            '"sessionID"',
+            '"sessionId"',
+            '"thread_id"',
+            '"id"',
+        )
     ):
         return None
     try:
@@ -161,6 +183,8 @@ def extract_session_id_event(line: str) -> str | None:
     raw_session_id = event_payload.get(_SESSION_ID_FIELD_NAME)
     if raw_session_id is None:
         raw_session_id = event_payload.get("sessionID")
+    if raw_session_id is None:
+        raw_session_id = event_payload.get("sessionId")
     if raw_session_id is None and event_type == "thread.started":
         raw_session_id = event_payload.get("thread_id")
     if raw_session_id is None and event_type == "session":

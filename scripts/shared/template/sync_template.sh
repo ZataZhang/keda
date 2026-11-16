@@ -563,7 +563,7 @@ SKILL_INSTALL_TARGET_DIRS=()
 # 可在交互菜单里显式选中）。默认探测只认工具自己读取的技能目录：把 Skill 装进
 # 某个中间层目录（由一个工具统一转发到各工具目录）看似能覆盖多个工具，实际依赖
 # 其转发，转发一停就变成「中间层更新了、工具看不见」——Codex / Claude 因此改为直连。
-SKILL_ADAPTER_NAMES=("Codex" "Claude" "Pi" "Qoder" "Kimi Code" "CodeBuddy" "KedaCode")
+SKILL_ADAPTER_NAMES=("Codex" "Claude" "Pi" "Qoder" "Kimi Code" "CodeBuddy" "MiniMax Code" "KedaCode")
 SKILL_ADAPTER_DIRS=(
     "$HOME/.codex/skills"
     "$HOME/.claude/skills"
@@ -571,6 +571,7 @@ SKILL_ADAPTER_DIRS=(
     "$HOME/.qoder-cn/skills"
     "$HOME/.kimi-code/skills"
     "$HOME/.codebuddy/skills"
+    "$HOME/.minimax/skills"
     "$HOME/.kedacode/skills"
 )
 SKILL_ADAPTER_AUTO_DETECT_DIRS=(
@@ -580,6 +581,7 @@ SKILL_ADAPTER_AUTO_DETECT_DIRS=(
     "$HOME/.qoder-cn"
     ""
     "$HOME/.codebuddy"
+    "$HOME/.minimax"
     "$HOME/.kedacode"
 )
 

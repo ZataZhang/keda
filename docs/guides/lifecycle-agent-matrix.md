@@ -35,7 +35,7 @@ Issue 执行与交付区共享 claim 上下文，但阶段仍按各自触发条�
 取值域：
 
 - **已注册 agent 名**（`codex` / `claude` / `kimi` / `pi` / `codebuddy` / `qoder` /
-  `opencode`，或你在
+  `opencode` / `mcode`，或你在
   `[agent_runner.agents.<name>]` 里注册的 agent）——未注册的名字在**该阶段开始前**
   fail-fast 报错并指名，不会静默回落到别的 agent；
 - **`auto`**——按该阶段**既有**语义路由（含义逐阶段不同，见上表），不做统一。

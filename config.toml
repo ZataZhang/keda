@@ -127,8 +127,8 @@ default_agent = "claude"
 # =============================================================================
 # 把"九个生命周期阶段各用哪个 agent"收敛成一张表。键名是闭集（写错键在配置
 # 加载期报错），取值可以是：
-#   - 已注册 agent 名（codex / claude / kimi / pi / codebuddy / qoder / opencode，
-#     或自定义注册的 agent）；
+#   - 已注册 agent 名（codex / claude / kimi / pi / codebuddy / qoder / opencode /
+#     mcode，或自定义注册的 agent）；
 #   - "auto"：按该阶段既有语义路由。只有实现了 auto 语义的阶段合法——
 #       实现=按 Issue 上的 agent/* 标签路由；校验=从 agent_fallback_order 里
 #       挑第一个 ≠ 实现者；审核=优先 ≠ 实现者（allow_same_agent 时沿用实现者）；
@@ -557,6 +557,54 @@ output_protocol = "opencode-json-lines"
 args = ["run", "--dangerously-skip-permissions", "--format", "json"]
 prompt_delivery = "argv_tail"
 output_protocol = "opencode-json-lines"
+
+# mcode（MiniMax Code）的注册块：内置默认已生效；下面照抄内置值作为"出厂
+# 注册块"参考。
+# 事实依据：非交互入口是 exec 子命令；--output-format stream-json 输出 JSON
+# 事件流，由 mcode-json-lines 协议渲染并提取顶层 sessionId；提示词走
+# --input -（stdin）而非位置参数，避免长提示词（PRD 全文 + 验收计划）撑爆
+# argv 上限；--permission full 是无人值守跑 Issue 的必要档（等价 claude 的
+# --dangerously-skip-permissions）。
+# 注意：mcode 没有任何"禁用全部内置工具"的开关——实测 --permission off 仍会
+# 执行工具并写入文件（它关的是交互式询问，不是工具能力），因此不声明 judge
+# 用途（假只读声明会被只读决策入口的门禁采信）。配置在 ~/.minimax/。
+[agent_runner.agents.mcode]
+bin = "mcode"
+label = "agent/mcode"
+label_color = "1F6FEB"
+label_description = "Use MiniMax Code for local runner execution."
+auth_home = "~/.minimax"
+auth_include = ["auth", "config.yaml", "skills"]
+auth_exclude = [".builtin-skills", ".internal-skills"]
+project_skills_dir = ".minimax/skills"
+supports_resume = true
+resume_args = ["--session", "{session_id}"]
+
+[agent_runner.agents.mcode.profiles.run]
+args = ["exec", "--cwd", "{cwd}", "--permission", "full", "--output-format", "stream-json"]
+tail_args = ["--input", "-"]
+prompt_delivery = "stdin"
+output_protocol = "mcode-json-lines"
+
+[agent_runner.agents.mcode.profiles.deliberate]
+args = ["exec", "--cwd", "{cwd}", "--permission", "full", "--output-format", "stream-json"]
+tail_args = ["--input", "-"]
+prompt_delivery = "stdin"
+output_protocol = "mcode-json-lines"
+read_only = true
+
+[agent_runner.agents.mcode.profiles.generate]
+args = ["exec", "--cwd", "{cwd}", "--permission", "full", "--output-format", "stream-json"]
+tail_args = ["--input", "-"]
+prompt_delivery = "stdin"
+output_protocol = "mcode-json-lines"
+read_only = true
+
+[agent_runner.agents.mcode.profiles.repl]
+args = ["exec", "--cwd", "{cwd}", "--permission", "full", "--output-format", "stream-json"]
+tail_args = ["--input", "-"]
+prompt_delivery = "stdin"
+output_protocol = "mcode-json-lines"
 
 [agent_runner.labels]
 # codex / claude / kimi 是旧版 labels 段的 agent 路由键，作为兼容覆盖来源

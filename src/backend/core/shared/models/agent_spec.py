@@ -38,6 +38,9 @@ CODEX_JSON_LINES_PROTOCOL_ID = "codex-json-lines"
 OPENCODE_JSON_LINES_PROTOCOL_ID = "opencode-json-lines"
 """OpenCode ``run --format json`` 事件流渲染协议 id。"""
 
+MCODE_JSON_LINES_PROTOCOL_ID = "mcode-json-lines"
+"""MiniMax Code ``exec --output-format stream-json`` 事件流渲染协议 id。"""
+
 # ---------------------------------------------------------------------------
 # 提示词投递方式与用途 profile 的闭集
 # ---------------------------------------------------------------------------
@@ -310,7 +313,7 @@ def _claude_compatible_profiles() -> dict[str, AgentProfileSpec]:
 
 # 注意 dict 顺序即注册顺序：choose_agent 按标签匹配时先到先得，
 # 这里保持与旧 LabelConfig.agent_labels 一致的 codex -> claude -> kimi 顺序；
-# 后续新增的 agent（pi、codebuddy、qoder、opencode）一律追加在末尾，绝不插入
+# 后续新增的 agent（pi、codebuddy、qoder、opencode、mcode）一律追加在末尾，绝不插入
 # 既有条目之间——插入会改变既有 agent 的标签匹配优先级。
 BUILTIN_AGENT_SPECS: dict[str, AgentSpec] = {
     "codex": AgentSpec(
@@ -683,6 +686,96 @@ BUILTIN_AGENT_SPECS: dict[str, AgentSpec] = {
             ),
         },
     ),
+    # MiniMax Code。非交互入口是 ``exec`` 子命令，事件流由内置协议渲染并提取
+    # 顶层 sessionId。提示词走 ``--input -``（stdin）而非位置参数：Issue 提示词
+    # 可能很长（含 PRD 全文与验收计划），位置参数有 argv 长度上限风险。
+    # ``--permission full`` 是无人值守跑 Issue 的必要档（等价 claude 的
+    # --dangerously-skip-permissions）；**不声明 judge**：mcode 没有任何"禁用全部
+    # 内置工具"的开关（``--permission off`` 只关掉交互式询问、工具照常执行），
+    # 声明 read_only_enforced 会是无法验证的假声明，故宁可缺用途也不做假声明。
+    # 配置在 ~/.minimax/（容器认证导入会派生为 minimax）。
+    "mcode": AgentSpec(
+        bin="mcode",
+        label="agent/mcode",
+        label_color="1F6FEB",
+        label_description="Use MiniMax Code for local runner execution.",
+        auth_home="~/.minimax",
+        auth_include=("auth", "config.yaml", "skills"),
+        # 导入是**白名单**语义（只复制 auth_include 列出的条目），exclude 只在
+        # 白名单内部做兜底排除。mcode 的真实配置根里，运行时状态（sessions /
+        # cache / logs / background-tasks / sqlite.db 等）都不在白名单内，
+        # 因此这里只列可能被误加进白名单的少数几项。
+        auth_exclude=(
+            # 内置 / 内部 skills：随 CLI 分发，不是用户资产。
+            ".builtin-skills",
+            ".internal-skills",
+        ),
+        project_skills_dir=".minimax/skills",
+        supports_resume=True,
+        resume_args=("--session", "{session_id}"),
+        profiles={
+            AGENT_PROFILE_RUN: AgentProfileSpec(
+                args=(
+                    "exec",
+                    "--cwd",
+                    "{cwd}",
+                    "--permission",
+                    "full",
+                    "--output-format",
+                    "stream-json",
+                ),
+                tail_args=("--input", "-"),
+                prompt_delivery=PROMPT_DELIVERY_STDIN,
+                output_protocol=MCODE_JSON_LINES_PROTOCOL_ID,
+                read_only=False,
+            ),
+            AGENT_PROFILE_DELIBERATE: AgentProfileSpec(
+                args=(
+                    "exec",
+                    "--cwd",
+                    "{cwd}",
+                    "--permission",
+                    "full",
+                    "--output-format",
+                    "stream-json",
+                ),
+                tail_args=("--input", "-"),
+                prompt_delivery=PROMPT_DELIVERY_STDIN,
+                output_protocol=MCODE_JSON_LINES_PROTOCOL_ID,
+                read_only=True,
+            ),
+            AGENT_PROFILE_GENERATE: AgentProfileSpec(
+                args=(
+                    "exec",
+                    "--cwd",
+                    "{cwd}",
+                    "--permission",
+                    "full",
+                    "--output-format",
+                    "stream-json",
+                ),
+                tail_args=("--input", "-"),
+                prompt_delivery=PROMPT_DELIVERY_STDIN,
+                output_protocol=MCODE_JSON_LINES_PROTOCOL_ID,
+                read_only=True,
+            ),
+            AGENT_PROFILE_REPL: AgentProfileSpec(
+                args=(
+                    "exec",
+                    "--cwd",
+                    "{cwd}",
+                    "--permission",
+                    "full",
+                    "--output-format",
+                    "stream-json",
+                ),
+                tail_args=("--input", "-"),
+                prompt_delivery=PROMPT_DELIVERY_STDIN,
+                output_protocol=MCODE_JSON_LINES_PROTOCOL_ID,
+                read_only=False,
+            ),
+        },
+    ),
 }
 
 
@@ -702,6 +795,7 @@ __all__ = [
     "CODEX_JSON_LINES_PROTOCOL_ID",
     "INTERACTIVE_PROFILE_ID",
     "INTERACTIVE_PROMPT_DELIVERIES",
+    "MCODE_JSON_LINES_PROTOCOL_ID",
     "NON_INTERACTIVE_PROMPT_DELIVERIES",
     "OPENCODE_JSON_LINES_PROTOCOL_ID",
     "PI_JSON_LINES_PROTOCOL_ID",
