@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -39,6 +40,20 @@ def test_list_evidence_branches_maps_issue_numbers(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(branch_module, "_git", lambda repo, *args: listing)
     branches = branch_module.list_evidence_branches(Path("/tmp/repo"))
     assert branches == {49: "iar-evidence/issue-49", 55: "iar-evidence/issue-55"}
+
+
+def test_list_evidence_branches_treats_git_timeout_as_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """远端查询超时按无可用证据处理，不把异常抛给看板接口。"""
+    monkeypatch.setattr(branch_module, "_github_remote", _fake_remote)
+
+    def timed_out_git(command: list[str], **_options: object) -> None:
+        raise subprocess.TimeoutExpired(command, timeout=branch_module.GIT_TIMEOUT_SECONDS)
+
+    monkeypatch.setattr(branch_module, "run", timed_out_git)
+
+    assert branch_module.list_evidence_branches(Path("/tmp/repo")) == {}
 
 
 def test_list_evidence_branches_is_cached(monkeypatch: pytest.MonkeyPatch) -> None:
