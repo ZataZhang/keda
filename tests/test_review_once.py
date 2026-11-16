@@ -10,6 +10,7 @@ import pytest
 
 from backend.core.shared.models.agent_runner import (
     AppConfig,
+    AutopilotConfig,
     CommandResult,
     IssueSummary,
     PostPrSupervisorConfig,
@@ -108,7 +109,7 @@ def test_review_once_detects_checks_state_change_and_triggers_supervisor() -> No
         _process_review_candidate(
             issue=issue,
             repo_path=Path("."),
-            config=AppConfig(),
+            config=AppConfig(autopilot=AutopilotConfig(enabled=False)),
             agent="auto",
             github_client=client,
             process_runner=FakeProcessRunner(),
@@ -344,7 +345,7 @@ def test_review_once_defers_when_full_open_pr_context_is_unavailable() -> None:
         outcome = _process_review_candidate(
             issue=issue,
             repo_path=Path("."),
-            config=AppConfig(),
+            config=AppConfig(autopilot=AutopilotConfig(enabled=False)),
             agent="auto",
             github_client=client,
             process_runner=FakeProcessRunner(),
@@ -599,7 +600,7 @@ def test_review_once_reconciles_stale_supervising_label_after_approve() -> None:
         outcome = _process_review_candidate(
             issue=issue,
             repo_path=Path("."),
-            config=AppConfig(),
+            config=AppConfig(autopilot=AutopilotConfig(enabled=False)),
             agent="auto",
             github_client=client,
             process_runner=FakeProcessRunner(),
@@ -1056,7 +1057,7 @@ def test_review_once_auto_stashes_dirty_worktree_and_approves() -> None:
         outcome = _process_review_candidate(
             issue=issue,
             repo_path=Path("."),
-            config=AppConfig(),
+            config=AppConfig(autopilot=AutopilotConfig(enabled=False)),
             agent="auto",
             github_client=client,
             process_runner=fake_runner,

@@ -521,7 +521,7 @@ uv run --project /path/to/keda kc init --dry-run
 uv run --project /path/to/keda kc init
 ```
 
-`kc init --dry-run` 只打印将要写入的内容，不创建文件。新生成的 `.kedacode.toml` 会包含全部**仓库级可覆盖**配置段及其具有默认值的字段，其中 `[agent_runner.backlog].auto_advance` 与 `[agent_runner.autopilot].enabled` 默认关闭；前者控制 Backlog 持续调度，后者只作为合并队列的双重安全门之一。如需启用快速合并，还必须同时把 `[agent_runner.safety].auto_merge` 设为 `true`。这些初始值会固定为当前仓库的显式配置，后续修改全局默认值不会覆盖它们；**`generated_content` 是例外**：脚手架不写它（见下文「`generated_content` 不由 `kc init` 写入」）。`.kedacode.toml` 已存在时，`kc init` 会拒绝覆盖并把用户导向 `kc skill install`；确认需要重建时显式传入 `--force`。
+`kc init --dry-run` 只打印将要写入的内容，不创建文件。新生成的 `.kedacode.toml` 会包含全部**仓库级可覆盖**配置段及其具有默认值的字段；`[agent_runner.backlog].auto_advance` 默认关闭，而 `[agent_runner.autopilot].enabled` 与 `[agent_runner.safety].auto_merge` 默认开启，两者共同启用全仓自动合并队列。合并仍须通过 verifier、仓库验证命令、禁改路径终扫、PR checks 和 GitHub 分支保护等门禁。脚手架会把初始值固定为当前仓库的显式配置，后续修改全局默认值不会覆盖它们；旧配置中显式保存的 `false` 也会继续生效，需在目标仓库手动改为 `true` 才启用；**`generated_content` 是例外**：脚手架不写它（见下文「`generated_content` 不由 `kc init` 写入」）。`.kedacode.toml` 已存在时，`kc init` 会拒绝覆盖并把用户导向 `kc skill install`；确认需要重建时显式传入 `--force`。
 
 `kc init` 成功写入本地配置后，还会自动把当前仓库注册（或更新路径）到全局 `config.toml` 的 `[agent_runner.repositories]` 中，使 `kc daemon` 默认即可在当前仓库启动。如果该 `repo_id` 已在 registry 中但指向不同路径，init 会自动更新 registry 路径到当前位置。
 
@@ -863,9 +863,10 @@ recovery 预算耗尽不是终点，而是**交班点**。此前只有同一个 
 
 # 发布前安全边界：自动合并开关、禁止提交的路径模式
 [agent_runner.safety]
-# 是否允许自动合并 PR（强烈建议保持 false）；
+# 是否允许全仓自动合并 PR（默认 true）；
 # 与 agent_runner.autopilot.enabled 同时为 true 才会真正生效（合并队列）。
-auto_merge = false
+# 设为 false 后，仍可由 Issue 的 auto-merge / prd-auto-merge 标签单独授权。
+auto_merge = true
 # 提交前禁止变更的路径通配模式
 forbidden_path_patterns = [
     ".env",
@@ -885,16 +886,14 @@ forbidden_path_exceptions = [
 # 合并队列消费：verifier 门禁 → 自动签核 → rebase → 全量验证 → 禁改终扫
 # → 等 checks 全绿 → squash 合并。
 #
-# 两个开关同时为真才生效（"双同意"），保证历史上 `safety.auto_merge = true`
-# 不会单独触发自动合并：新仓必须显式在本段开启 ``enabled = true``。
+# 两个开关同时为真才对全仓 PR 自动合并；新配置默认同时开启。
+# 任一设为 false 都会关闭全仓自动合并；保留 autopilot 时，Issue 标签仍可单独授权。
 #
-# 迁移提示：本段首次落地后，任何已设为 ``safety.auto_merge = true`` 的环境
-# 若不同时把下面 ``enabled`` 设为 ``true``，仍然回到"等人工合并"的现状——
-# 自动签核 / 自动合并都不会发生。但 ``enabled`` 本段是全新键，既往配置不会
-# 意外激活快速档。
+# 迁移提示：新配置默认开启全仓自动合并；旧仓库级配置中显式保存的 false
+# 仍然有效。要启用该仓库，请在 .kedacode.toml 中把两个开关都设为 true。
 [agent_runner.autopilot]
-# 主开关。false（默认）时合并队列整段 no-op，严格档行为零变化。
-enabled = false
+# 主开关。默认 true；设为 false 时合并队列整段 no-op，包括 Issue 标签授权。
+enabled = true
 # 仅支持 "squash"。非法值在配置加载期直接拒绝。
 merge_method = "squash"
 # 当 Issue 需要 validation 时，是否要求 validation/verifier-passed 标签先存在；
@@ -3128,7 +3127,8 @@ verification_commands = [
 ]
 
 [agent_runner.safety]
-auto_merge = false
+# 默认开启全仓自动合并；需通过 Autopilot 与合并队列门禁。
+auto_merge = true
 forbidden_path_patterns = [
   ".env",
   ".env.*",
@@ -3818,7 +3818,7 @@ daemon 软门禁与合并队列自动勾选共用同一份 marker 契约，一�
 
 ## 安全边界
 
-- `auto_merge` 固定为 `false`，不会自动合并 PR
+- Realistic Validation 本身不直接合并 PR；是否进入自动合并队列由 `autopilot.enabled` 与 `safety.auto_merge` 控制，且必须通过完整门禁
 - `kc labels sync` 只同步 GitHub labels，不校验发布 remote；`kc run` 在领取 Issue 前会校验 `[agent_runner.git].remote` 必须存在，不存在时直接失败并列出当前可用 remote
 - 发布变更前会检查 `forbidden_path_patterns`，拒绝命中且未被 `forbidden_path_exceptions` 覆盖的文件变更
 - Agent 执行在隔离 worktree 中进行，不影响主工作区
@@ -5066,23 +5066,23 @@ Agent Runner 的代码分布在四层架构中：
 
 ## Autopilot 快速档（合并队列）
 
-默认（严格档）下，supervisor approve 的 Issue 进入 `agent/automated-review-passed`，并带 `human/awaiting-review` 等待人审或人工签核。`autopilot.enabled = true` 时 review pass 会运行合并队列：全局 `safety.auto_merge = true` 时沿用全仓自动合并；否则处理显式带有 `auto-merge` 的任意 Issue，以及带有 `prd-auto-merge` 的 PRD。`auto-merge` 不要求 PRD，也不绕过正常验证或 PRD 人工验收；`prd-auto-merge` 另有 PRD 专用语义。获准自动合并的 Issue 通常不带人工待办标签；若 PRD 仍有未完成的人工验收项，合并队列会加上 `human/awaiting-review` 并等待签核。队列仍要求仓库验证、PR checks 和分支保护通过后才 squash 合并。
+新配置默认开启 `autopilot.enabled` 与 `safety.auto_merge`。supervisor approve 的 Issue 会进入串行合并队列；只有通过 verifier、仓库验证命令、禁改路径终扫、PR checks 和 GitHub 分支保护后才 squash 合并。任一开关关闭时，不会对全仓 PR 自动合并。若 `autopilot.enabled = true` 而 `safety.auto_merge = false`，队列只处理显式带有 `auto-merge` 的任意 Issue，以及带有 `prd-auto-merge` 的 PRD。`auto-merge` 不要求 PRD，也不绕过正常验证或 PRD 人工验收；`prd-auto-merge` 另有 PRD 专用语义。获准自动合并的 Issue 通常不带人工待办标签；关联 PRD 若仍有未完成的人工验收项，队列会加上 `human/awaiting-review` 并等待签核。
 
 ### 双同意开关
 
-全仓自动合并仍要求 **两个开关同时为真**。单个 Issue 的 `auto-merge` 或 `prd-auto-merge` 标签是该 Issue 的明确授权：两者都要求 `autopilot.enabled = true`，但不要求打开全局 `safety.auto_merge`。其中 `auto-merge` 不要求 PRD，`prd-auto-merge` 保留 PRD 专用语义。
+全仓自动合并要求 **两个开关同时为真**，新配置默认如此。单个 Issue 的 `auto-merge` 或 `prd-auto-merge` 标签是该 Issue 的明确授权：两者都要求 `autopilot.enabled = true`，但不要求打开全局 `safety.auto_merge`。其中 `auto-merge` 不要求 PRD，`prd-auto-merge` 保留 PRD 专用语义。
 
 ```toml
 [safety]
-auto_merge = true            # 历史开关：现在真正生效
+auto_merge = true            # 默认开启；关闭后仅接受 Issue 级标签授权
 
 [autopilot]
-enabled = true               # 新键：仓库级显式打开
+enabled = true               # 默认开启；关闭后合并队列 no-op
 ```
 
-`autopilot.enabled = false` 时合并队列整段 **no-op**。当 `autopilot.enabled = true` 且 `safety.auto_merge = false` 时，未带 `auto-merge` 或 `prd-auto-merge` 的 Issue 仍停在 `agent/automated-review-passed`；带 `auto-merge` 的 Issue 按普通门禁进入队列，带 `prd-auto-merge` 的 PRD 才使用 PRD 专属流程。历史上仅误设 `safety.auto_merge = true` 而未启用 autopilot 的环境仍不会自动合并。
+`autopilot.enabled = false` 时合并队列整段 **no-op**。当 `autopilot.enabled = true` 且 `safety.auto_merge = false` 时，未带 `auto-merge` 或 `prd-auto-merge` 的 Issue 仍停在 `agent/automated-review-passed`；带 `auto-merge` 的 Issue 按普通门禁进入队列，带 `prd-auto-merge` 的 PRD 才使用 PRD 专属流程。升级不会覆盖机器级 `config.toml` 或仓库 `.kedacode.toml` 中显式保存的旧值；旧配置若保留 `false`，需手动改为 `true` 才会采用全仓自动合并默认行为。
 
-> 迁移注意：升级时检查所有仓库；如有 `safety.auto_merge = true` 残留，本 PRD 会把它激活。新键 `autopilot.enabled` 是显式的客户确认入口。
+> 迁移注意：检查机器级 `config.toml` 和已有仓库的 `.kedacode.toml`。`kc init` 会把默认值写成显式配置，所以旧文件中的 `false` 会继续关闭对应开关；要采用新默认行为，请把两个开关都改为 `true`。
 
 ### 8 步门禁链
 

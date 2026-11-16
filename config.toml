@@ -667,7 +667,9 @@ auto_promote_threshold = 3
 auto_promote_min_success_rate = 1.0
 
 [agent_runner.safety]
-auto_merge = false
+# 是否允许全仓自动合并 PR；新配置默认开启。
+# 需与 agent_runner.autopilot.enabled 同时为 true；关闭后仍可由 Issue 标签单独授权。
+auto_merge = true
 forbidden_path_patterns = [
   ".env",
   ".env.*",
@@ -684,18 +686,16 @@ forbidden_path_exceptions = [
 # =============================================================================
 # 启用后，supervisor approve 的 PR 不再停在"等人合并"，而是被一条串行
 # 合并队列消费：verifier 门禁 → 自动签核 → rebase → 全量验证 → 禁改终扫 →
-# checks 全绿 → squash 合并。两个开关同时为真才生效（"双同意"），保证
-# 历史上的 `safety.auto_merge = true` 不会单独触发自动合并，需仓库
-# 显式在本段开启 ``enabled = true``。
-# ``enabled = true`` 且 ``safety.auto_merge = false`` 时，也可用 Issue 的
+# checks 全绿 → squash 合并。两个开关同时为真才会对全仓 PR 自动合并；新配置默认同时开启。
+# 任一开关设为 false 都会关闭全仓自动合并；保留 autopilot 时，Issue 标签仍可单独授权。
+# ``enabled = true`` 且 ``safety.auto_merge = false`` 时，可用 Issue 的
 # ``auto-merge``（通用）或 ``prd-auto-merge``（PRD 专用）标签单独授权。
 #
-# 迁移提示：本段首次落地后，任何已设为 ``safety.auto_merge = true`` 的环境
-# 若不同时把下面 ``enabled`` 设为 ``true``，仍然回到"等人工合并"的现状——
-# 自动签核 / 自动合并都不会发生。但 ``enabled`` 本段是全新键，既往配置不会
-# 意外激活快速档。
+# 迁移提示：新配置默认开启全仓自动合并。已有仓库级配置中显式保存的 false
+# 仍然有效；要启用该仓库，请在 ``.kedacode.toml`` 中把两个开关都设为 true。
 [agent_runner.autopilot]
-enabled = false
+# 新配置默认开启；显式设为 false 时，合并队列整段 no-op。
+enabled = true
 # 仅支持 "squash"；非法值在配置加载期直接拒绝。
 merge_method = "squash"
 # 当 Issue 需要 validation 时，是否要求 validation/verifier-passed 标签先存在；

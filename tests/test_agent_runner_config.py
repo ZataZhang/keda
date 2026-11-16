@@ -974,11 +974,30 @@ def test_merge_repository_config_preserves_unrelated_identities() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_build_app_config_from_settings_maps_autopilot_defaults() -> None:
-    """Default ``AutopilotConfig`` (off / squash / verifier-required) flows into AppConfig."""
+def test_build_app_config_from_settings_maps_autopilot_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """默认开启的自动合并配置连同队列门禁流入 AppConfig。"""
+    toml_loader = settings_sources._load_toml_section_data
+
+    def load_without_merge_overrides(section_name: str) -> dict[str, object]:
+        section_data = toml_loader(section_name)
+        if section_name != "agent_runner":
+            return section_data
+        isolated_section = dict(section_data)
+        isolated_section.pop("autopilot", None)
+        isolated_section.pop("safety", None)
+        return isolated_section
+
+    monkeypatch.setattr(
+        settings_sources,
+        "_load_toml_section_data",
+        load_without_merge_overrides,
+    )
     settings = AgentRunnerSettings()
     app_config = build_app_config_from_settings(settings)
-    assert app_config.autopilot.enabled is False
+    assert app_config.autopilot.enabled is True
+    assert app_config.safety.auto_merge is True
     assert app_config.autopilot.merge_method == "squash"
     assert app_config.autopilot.require_verifier_pass is True
     assert app_config.autopilot.auto_sign_off is True
