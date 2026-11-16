@@ -156,6 +156,77 @@ class TestStreamUsageCollector:
         )
         assert collector.usage is None
 
+    def test_mcode_turn_usage_maps_camel_case_fields(self) -> None:
+        """mcode 的 turn.completed 用 camelCase 报用量，按 Anthropic 口径 1:1 映射。"""
+        collector = StreamUsageCollector()
+        collector.observe_line(
+            json.dumps(
+                {
+                    "type": "turn.completed",
+                    "usage": {
+                        "inputTokens": 1000,
+                        "cacheReadTokens": 800,
+                        "outputTokens": 20,
+                        "totalTokens": 1820,
+                    },
+                }
+            )
+        )
+        assert collector.usage == TokenUsage(
+            input_tokens=1000,
+            cache_read_input_tokens=800,
+            output_tokens=20,
+        )
+
+    def test_mcode_and_codex_usage_are_not_mixed(self) -> None:
+        """两种 provider 的 turn.completed 形状不同，用量必须各按各的口径累计。"""
+        collector = StreamUsageCollector()
+        collector.observe_line(
+            json.dumps(
+                {
+                    "type": "turn.completed",
+                    "usage": {
+                        "inputTokens": 500,
+                        "cacheReadTokens": 200,
+                        "outputTokens": 10,
+                    },
+                }
+            )
+        )
+        collector.observe_line(
+            json.dumps(
+                {
+                    "type": "turn.completed",
+                    "usage": {
+                        "input_tokens": 900,
+                        "cached_input_tokens": 100,
+                        "output_tokens": 30,
+                    },
+                }
+            )
+        )
+        # mcode 段直映射（500），codex 段扣除缓存命中（900 - 100 = 800）；
+        # 两段相加而非互相污染。缓存命中合计 200 + 100 = 300。
+        assert collector.usage == TokenUsage(
+            input_tokens=1300,
+            cache_read_input_tokens=300,
+            output_tokens=40,
+        )
+
+    def test_mcode_session_id_is_extracted_from_top_level_field(self) -> None:
+        """mcode 的会话 id 在事件顶层 sessionId（camelCase）。"""
+        collector = StreamUsageCollector()
+        collector.observe_line(
+            json.dumps(
+                {
+                    "type": "exec.started",
+                    "sessionId": "mvs_abc123",
+                    "runId": "exec_turn_x",
+                }
+            )
+        )
+        assert collector.session_id == "mvs_abc123"
+
     def test_codex_protocol_preserves_usage_before_rendering(self, tmp_path: Path) -> None:
         """通过真实子进程与生产协议中继验证，避免渲染丢弃用量。"""
         event_line = json.dumps(

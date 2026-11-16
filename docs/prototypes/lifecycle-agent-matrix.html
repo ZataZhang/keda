@@ -680,7 +680,7 @@
           if (pageParams.get('focus') === 'overview') document.body.classList.add('capture-lifecycle-overview');
         }
         // ── 配置与默认值取自实现；仓库名用中性示例展示 ──
-        const REGISTERED_AGENTS = ['codex', 'claude', 'kimi', 'pi', 'codebuddy', 'qoder', 'opencode'];
+        const REGISTERED_AGENTS = ['codex', 'claude', 'kimi', 'pi', 'codebuddy', 'qoder', 'opencode', 'mcode'];
         const UNREGISTERED_AGENT = 'no-such-agent';
         // 本机已安装可用的 agent（用于执行器回退时跳过未安装项）；'pi' 本机存在，这里按真实情况全部视为可用
         const DEFAULT_FALLBACK_ORDER = ['claude', 'kimi', 'codex'];

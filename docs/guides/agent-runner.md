@@ -2932,7 +2932,7 @@ uv run --project /path/to/keda kc issue create tasks/pending/feature-login.md \
   --ready
 ```
 
-> `--agent` 可选任一已注册 agent（内置 `codex` / `claude` / `kimi` / `pi` / `codebuddy` / `qoder` / `opencode`）以及 `auto` / `none`。`auto` 按 Issue label 自动路由，`none` 不添加 agent 路由 label。推荐在交给 runner 前保持默认 PRD 发布并加 `--ready`，确保 runner 的 base branch 能读取到已回写 Issue URL 的 canonical PRD。
+> `--agent` 可选任一已注册 agent（内置 `codex` / `claude` / `kimi` / `pi` / `codebuddy` / `qoder` / `opencode` / `mcode`）以及 `auto` / `none`。`auto` 按 Issue label 自动路由，`none` 不添加 agent 路由 label。推荐在交给 runner 前保持默认 PRD 发布并加 `--ready`，确保 runner 的 base branch 能读取到已回写 Issue URL 的 canonical PRD。
 
 #### PRD 发布边界（`--publish-prd` / `--no-publish-prd`）
 
@@ -5183,7 +5183,7 @@ uv run kc ask "运行一次 dry-run 看看 ready 队列" --execute --yes
 
 - **白名单动作**：`show_status`、`run_deliberation`、`create_issue_from_prd`、`mark_issue_ready`、`run_once_dry_run`、`run_once`、`review_once_dry_run`、`review_once`、`needs_clarification`、`no_op`
 - **禁止动作**：`git_push`、`git_merge`、`git_reset`、`daemon`、`supervise-daemon`、任意 shell 命令、自动 merge、直接关闭 Issue、删除分支等
-- **Planner 安全**：只读 planner / `kc ask` 的 agent 必须有**已声明的** `generate` 用途且该用途 `read_only = true`——门禁只读这个声明字段，不按 agent 名白名单判断（`factories/content_generators.py`）。当前内置注册表里 `codex`、`claude`、`kimi`、`pi`、`codebuddy`、`qoder` 都声明了 `read_only = true` 的 `generate`，因此都能作为 planner 启动；`opencode` 没有 `generate` 用途，会被拒绝并指名。注意这只校验**声明**：声明本身是否等于运行时真的只读，取决于各 agent 的 argv 是否带沙箱/只读开关（例如 `codex` 用 `--sandbox read-only`，而 `claude` / `codebuddy` / `qoder` 用的是 `--dangerously-skip-permissions`，不是沙箱级只读）。
+- **Planner 安全**：只读 planner / `kc ask` 的 agent 必须有**已声明的** `generate` 用途且该用途 `read_only = true`——门禁只读这个声明字段，不按 agent 名白名单判断（`factories/content_generators.py`）。当前内置注册表里 `codex`、`claude`、`kimi`、`pi`、`codebuddy`、`qoder`、`mcode` 都声明了 `read_only = true` 的 `generate`，因此都能作为 planner 启动；`opencode` 没有 `generate` 用途，会被拒绝并指名。注意这只校验**声明**：声明本身是否等于运行时真的只读，取决于各 agent 的 argv 是否带沙箱/只读开关（例如 `codex` 用 `--sandbox read-only`，而 `claude` / `codebuddy` / `qoder` 用的是 `--dangerously-skip-permissions`、`mcode` 用的是 `--permission full`，都不是沙箱级只读）。
 
 ### 确认策略
 
@@ -5537,7 +5537,7 @@ promoted_skills_dirs = ["~/.kedacode/memory/keda-main/skills"]
 
 ## 容器化运行（Containerized Runner）
 
-kc 默认跑在本机，需要本机预先安装你打算使用的 agent CLI（内置注册表提供 codex / claude / kimi / pi / codebuddy / qoder / opencode 的形态，但只有装了对应 CLI 才能真正跑起来）以及 gh / Node / uv / just / git 等工具链。当本机还同时用于交互式 AI 编程（例如通过 cc-switch 切换多个 claude 账号）时，daemon 进程会与本机共享 `~/.claude`、`~/.codex`、`~/.kimi-code` 配置，账号切换会污染正在跑的任务。
+kc 默认跑在本机，需要本机预先安装你打算使用的 agent CLI（内置注册表提供 codex / claude / kimi / pi / codebuddy / qoder / opencode / mcode 的形态，但只有装了对应 CLI 才能真正跑起来）以及 gh / Node / uv / just / git 等工具链。当本机还同时用于交互式 AI 编程（例如通过 cc-switch 切换多个 claude 账号）时，daemon 进程会与本机共享 `~/.claude`、`~/.codex`、`~/.kimi-code` 配置，账号切换会污染正在跑的任务。
 
 `kc container` 子命令组提供"把 runner 跑进 Docker 容器"的纯 opt-in 能力：
 
@@ -5777,7 +5777,7 @@ not on PATH；装好后用 `kc agent list` 确认可用性，再 `kc agent setup
 
 ## 接入一个新 agent（声明式注册表）
 
-一个 agent 的全部调用差异——可执行文件、认证/skills 路径、各用途的 argv 片段、提示词投递方式、输出协议——都沉淀为**纯数据**的注册块（`[agent_runner.agents.<name>]`），由统一的命令构造器 `core/use_cases/agent_invocation.py` 组装。`src/` 下没有任何 agent 专有的分支代码：接入新 agent **不需要改 Python 代码**，只需写配置（内置 `codex` / `claude` / `kimi` / `pi` / `codebuddy` / `qoder` / `opencode` 的出厂默认已在代码注册表中生效）。
+一个 agent 的全部调用差异——可执行文件、认证/skills 路径、各用途的 argv 片段、提示词投递方式、输出协议——都沉淀为**纯数据**的注册块（`[agent_runner.agents.<name>]`），由统一的命令构造器 `core/use_cases/agent_invocation.py` 组装。`src/` 下没有任何 agent 专有的分支代码：接入新 agent **不需要改 Python 代码**，只需写配置（内置 `codex` / `claude` / `kimi` / `pi` / `codebuddy` / `qoder` / `opencode` / `mcode` 的出厂默认已在代码注册表中生效）。
 
 ### 注册块字段表
 
@@ -5911,6 +5911,24 @@ pi · run
 | `opencode` | `opencode` | 非交互入口是 `run` 子命令（消息为位置参数）。**只声明 `run` / `deliberate` / `repl` 三个用途，刻意没有 `generate`**：它没有任何沙箱或只读开关，而 planner / `kc ask` 依赖 `generate` 用途上的只读声明做 fail-fast 门禁。输出用 `--format json` 走内置 `opencode-json-lines` 并提取 sessionID，续传参数为 `--session <id>`。配置在 `~/.config/opencode/`（XDG 路径）。 |
 
 > 三者的容器支持不在本轮范围内：runner 镜像目前只预装 claude / codex / kimi，容器里选中它们会在启动子进程时报可执行文件不存在。
+
+### 内置 agent 的形态速查（mcode）
+
+`mcode`（MiniMax Code CLI）与上面几个一样是内置默认，注册块见 `config.toml`。它有一处**容易踩的点**，接入或排障前先看这里：
+
+| agent | bin | 形态要点 |
+|---|---|---|
+| `mcode` | `mcode` | 非交互入口是 `exec` 子命令。提示词走 `--input -`（`stdin`）而非位置参数——Issue 提示词可能很长（PRD 全文 + 验收计划），位置参数有 argv 长度上限风险。输出用 `--output-format stream-json` 走内置 `mcode-json-lines` 协议并提取顶层 `sessionId`，续传参数为 `--session <id>`（实测能真正延续上下文）。配置在 `~/.minimax/`。**不声明 `judge`**：mcode 没有任何"禁用全部内置工具"的开关，声明 `read_only_enforced` 会是无法验证的假声明。 |
+
+**关于 mcode 的 `--permission` 三档**：这是接入 mcode 时最容易踩的坑，实测结论（本机 v0.7.7）如下。
+
+| 档位 | 实际行为 |
+|---|---|
+| `smart`（默认） | 非交互（`exec`）模式下工具照常执行，未卡在权限确认上。但不依赖它的自动放行策略更稳。 |
+| `full` | 全自动放行，等价于 claude 的 `--dangerously-skip-permissions`。**无人值守跑 Issue 用这一档。** |
+| `off` | **不关闭工具**。实测让它写文件照样写入、让它删文件照样删除——`off` 关掉的是**交互式权限询问**（`--help` 写明 `ask requires TUI/ACP`），不是工具能力本身。 |
+
+因此 `mcode` 的注册块统一用 `--permission full`；**不要**把 `--permission off` 当成只读保证来用——那会得到一个假保证。
 
 ### 未声明用途的行为
 
