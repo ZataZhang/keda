@@ -12,7 +12,7 @@ import json
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from subprocess import CalledProcessError, run
+from subprocess import CalledProcessError, TimeoutExpired, run
 from threading import Lock
 
 from backend.core.use_cases.agent_runner_evidence_media import (
@@ -61,7 +61,7 @@ def _git(repo_path: Path, *args: str) -> str | None:
             timeout=GIT_TIMEOUT_SECONDS,
             check=True,
         )
-    except (CalledProcessError, OSError):
+    except (CalledProcessError, OSError, TimeoutExpired):
         return None
     return completed.stdout.decode("utf-8", errors="replace")
 
