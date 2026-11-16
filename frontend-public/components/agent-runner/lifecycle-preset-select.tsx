@@ -48,7 +48,9 @@ export function PresetSelect({
   placeholder = "未绑定",
   allowClear = false,
 }: PresetSelectProps) {
-  const currentLabel = options.find((option) => option.value === value)?.label
+  const currentOption = options.find((option) => option.value === value)
+  const currentLabel =
+    currentOption?.label ?? (value ? `预设未定义：${value}` : placeholder)
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
