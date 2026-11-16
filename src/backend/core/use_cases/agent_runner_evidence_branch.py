@@ -13,6 +13,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from subprocess import CalledProcessError, run
+from threading import Lock
 
 from backend.core.use_cases.agent_runner_evidence_media import (
     PAGE_FILENAMES,
@@ -22,10 +23,15 @@ from backend.core.use_cases.agent_runner_evidence_media import (
 #: 证据分支清单的缓存秒数：同一次看板浏览里不该重复打远端。
 BRANCH_LIST_TTL_SECONDS = 600
 
+#: 任务有 PR 时允许提前刷新，但看板轮询不能每轮都访问远端。
+BRANCH_REFRESH_COOLDOWN_SECONDS = 30
+
 #: 单条 git 命令的超时秒数；离线或凭据缺失时快速失败。
 GIT_TIMEOUT_SECONDS = 8
 
 _BRANCH_CACHE: dict[str, tuple[float, dict[int, str]]] = {}
+_BRANCH_REFRESH_ATTEMPTS: dict[str, float] = {}
+_BRANCH_CACHE_LOCK = Lock()
 _REMOTE_CACHE: dict[str, str] = {}
 
 
@@ -82,8 +88,8 @@ def list_evidence_branches(repo_path: Path, *, refresh: bool = False) -> dict[in
     """返回该仓库的证据分支映射：Issue 编号 → 分支名。
 
     只认名字里带 evidence 且以 issue-<N> 结尾的分支；默认缓存 10 分钟，看板连续刷新时
-    不会重复打远端。任务已有 PR 时可在一次看板请求中强制刷新，及时发现刚发布的
-    verifier 前人审材料。
+    不会重复打远端。任务已有 PR 时可请求提前刷新；同一仓库两次远端查询至少间隔
+    30 秒，控制看板轮询产生的网络请求。
 
     Args:
         repo_path: 仓库根目录。
@@ -93,29 +99,42 @@ def list_evidence_branches(repo_path: Path, *, refresh: bool = False) -> dict[in
         dict[int, str]: Issue 编号到分支名的映射；读不到时为空字典。
     """
     key = str(repo_path)
-    cached = _BRANCH_CACHE.get(key)
-    if (
-        not refresh
-        and cached is not None
-        and time.monotonic() - cached[0] < BRANCH_LIST_TTL_SECONDS
-    ):
-        return cached[1]
+    now_monotonic = time.monotonic()
+    with _BRANCH_CACHE_LOCK:
+        cached = _BRANCH_CACHE.get(key)
+        if (
+            not refresh
+            and cached is not None
+            and now_monotonic - cached[0] < BRANCH_LIST_TTL_SECONDS
+        ):
+            return cached[1]
+        last_refresh_attempt = _BRANCH_REFRESH_ATTEMPTS.get(key)
+        if (
+            last_refresh_attempt is not None
+            and now_monotonic - last_refresh_attempt < BRANCH_REFRESH_COOLDOWN_SECONDS
+        ):
+            return cached[1] if cached is not None else {}
+        _BRANCH_REFRESH_ATTEMPTS[key] = now_monotonic
+
     remote = _github_remote(repo_path)
     if remote is None:
-        return {}
+        return cached[1] if cached is not None else {}
     output = _git(repo_path, "ls-remote", "--heads", remote)
+    if output is None:
+        return cached[1] if cached is not None else {}
+
     branches: dict[int, str] = {}
-    if output is not None:
-        for line in output.splitlines():
-            _, _, ref = line.partition("\t")
-            if not ref.startswith("refs/heads/") or "evidence" not in ref:
-                continue
-            name = ref[len("refs/heads/") :]
-            suffix = name.rsplit("issue-", 1)
-            if len(suffix) != 2 or not suffix[1].isdigit():
-                continue
-            branches[int(suffix[1])] = name
-    _BRANCH_CACHE[key] = (time.monotonic(), branches)
+    for line in output.splitlines():
+        _, _, ref = line.partition("\t")
+        if not ref.startswith("refs/heads/") or "evidence" not in ref:
+            continue
+        name = ref[len("refs/heads/") :]
+        suffix = name.rsplit("issue-", 1)
+        if len(suffix) != 2 or not suffix[1].isdigit():
+            continue
+        branches[int(suffix[1])] = name
+    with _BRANCH_CACHE_LOCK:
+        _BRANCH_CACHE[key] = (now_monotonic, branches)
     return branches
 
 
