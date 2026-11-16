@@ -602,7 +602,7 @@ def _lookup_pr_context(
     *,
     require_success: bool = False,
 ) -> PullRequestContext | None:
-    """查找关联 Issue 的开放 PR 上下文（若存在）。"""
+    """查找关联 Issue 的开放 PR；开放 PR 不存在时回退到已合并 PR。"""
     pr_branch = _extract_pr_branch_from_issue(
         issue, github_client, comments, require_success=require_success
     )
@@ -628,7 +628,25 @@ def _lookup_pr_context(
             base_sha="",
             mergeable=None,
         )
-    return None
+    merged_pr_url = github_client.find_merged_pr_by_head(pr_branch, require_success=require_success)
+    if not merged_pr_url:
+        return None
+    merged_pr_number = _extract_pr_number(merged_pr_url)
+    if merged_pr_number is not None:
+        merged_pr_context = github_client.get_pull_request_context_by_number(
+            merged_pr_number, require_success=require_success
+        )
+        if merged_pr_context is not None:
+            return merged_pr_context
+    return PullRequestContext(
+        pr_url=merged_pr_url,
+        branch=pr_branch,
+        head_sha="",
+        base_sha="",
+        mergeable=None,
+        number=merged_pr_number,
+        is_draft=False,
+    )
 
 
 def _extract_pr_branch_from_issue(

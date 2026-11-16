@@ -210,6 +210,40 @@ def test_build_prompt_no_prd_path() -> None:
     assert "If the Issue references a PRD, read it before editing." in prompt
 
 
+def test_plain_issue_human_review_prompt_has_concrete_handoff_contract() -> None:
+    """普通 Issue 要生成人审页，PRD Issue 不重复注入该约定。"""
+    from backend.core.use_cases.agent_runner_feedback import (
+        build_human_review_prompt_line,
+    )
+
+    plain_issue = IssueSummary(
+        number=68,
+        title="Nightly repair",
+        url="https://github.com/example/repo/issues/68",
+        body="Fix a confirmed defect.",
+        labels=(),
+    )
+    prompt_line = build_human_review_prompt_line(
+        plain_issue, evidence_dir="tasks/evidence/issue-68"
+    )
+
+    assert "tasks/evidence/issue-68/human-review-checklist.md" in prompt_line
+    assert "human decision" in prompt_line
+    assert "commands actually run" in prompt_line
+    assert "next human action" in prompt_line
+    assert "Issue closing condition" in prompt_line
+    assert "not an extra acceptance gate" in prompt_line
+
+    prd_issue = IssueSummary(
+        number=69,
+        title="PRD repair",
+        url="https://github.com/example/repo/issues/69",
+        body="PRD path: `tasks/pending/example.md`",
+        labels=(),
+    )
+    assert build_human_review_prompt_line(prd_issue, evidence_dir="tasks/evidence/example") == ""
+
+
 def test_build_recovery_prompt_separates_prd_change_log_from_checklist() -> None:
     """Recovery prompt should preserve the PRD evolution rule."""
     issue = IssueSummary(

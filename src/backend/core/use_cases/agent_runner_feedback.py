@@ -104,6 +104,31 @@ def extract_prd_path(issue_body: str) -> str | None:
     return None
 
 
+def build_human_review_prompt_line(issue: IssueSummary, *, evidence_dir: str) -> str:
+    """为无 PRD 的普通 Issue 构造人审页交付指令。
+
+    Args:
+        issue: 当前 Issue；带 PRD 锚点时沿用 PRD 人审清单约定，不重复注入。
+        evidence_dir: 已解析的证据目录仓库相对路径。
+
+    Returns:
+        str: 普通 Issue 的人审页指令；PRD Issue 返回空字符串。
+    """
+    if extract_prd_path(issue.body) is not None:
+        return ""
+    return (
+        "Human review handoff for this plain Issue: before requesting the final "
+        f"commit, write `{evidence_dir}/human-review-checklist.md`. "
+        "Keep it short and self-contained: state the human decision, Issue URL "
+        "and branch/PR status when known, what changed, key evidence with links "
+        "or relative file names, commands actually run and their results, what "
+        "remains unverified, the next human action, and the Issue closing "
+        "condition. Link to full logs instead of copying them. Do not manufacture "
+        "screenshots or video for backend/CI-only work. This page is a review "
+        "aid, not an extra acceptance gate."
+    )
+
+
 _DEFAULT_EXECUTION_TEMPLATE = "\n".join(
     [
         "Complete GitHub Issue #{issue_number}: {issue_title}",

@@ -537,6 +537,10 @@ def test_build_supervisor_prompt_includes_context() -> None:
     assert "remote-sha" in prompt
     assert "+line" in prompt
     assert "wait_for_checks" in prompt
+    assert "Plain-Issue human review handoff:" in prompt
+    assert "tasks/evidence/issue-1/human-review-checklist.md" in prompt
+    assert "If the page is missing or stale, return `repair_pr_branch`" in prompt
+    assert "not a new acceptance gate" in prompt
 
 
 def test_build_supervisor_prompt_requires_ci_execution_distinction() -> None:

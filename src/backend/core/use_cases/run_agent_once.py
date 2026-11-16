@@ -96,6 +96,7 @@ from backend.core.use_cases.agent_runner_feedback import (
     PrdDeliveryError,
     VerificationFailedError,
     build_fix_prompt,
+    build_human_review_prompt_line,
     build_prd_review_reference,
     build_progress_continuation_prompt,
     build_prompt,
@@ -323,14 +324,17 @@ def run_agent(
 ) -> CommandResult:
     """Run Codex or Claude Code in non-interactive mode."""
     long_term_store, skill_store = _resolve_memory_stores(worktree_path, config.memory)
+    evidence_relpath = resolve_issue_evidence_relpath(config, issue)
+    delivery_prompt_lines = (
+        build_validation_prompt_line(issue, config, evidence_dir=evidence_relpath),
+        build_human_review_prompt_line(issue, evidence_dir=evidence_relpath),
+    )
     prompt = build_prompt(
         issue,
         worktree_path,
         config.prompts,
         phase="execution",
-        validation_line=build_validation_prompt_line(
-            issue, config, evidence_dir=resolve_issue_evidence_relpath(config, issue)
-        ),
+        validation_line="\n\n".join(line for line in delivery_prompt_lines if line),
         verification_commands_summary=_build_verification_commands_summary(config),
         memory_config=config.memory,
         long_term_store=long_term_store,
