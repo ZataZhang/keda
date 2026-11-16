@@ -483,7 +483,7 @@ def _task_sort_key(task: RuntimeTask) -> tuple[int, float, str, int]:
 
 
 def _with_evidence_flags(task: RuntimeTask, media: EvidenceMedia | None) -> RuntimeTask:
-    """把本地证据解析结果投影成任务行上的两个布尔标记。
+    """把本地或证据分支上的证据解析结果投影成任务行标记。
 
     Args:
         task: 原始任务行。
@@ -495,7 +495,7 @@ def _with_evidence_flags(task: RuntimeTask, media: EvidenceMedia | None) -> Runt
     return replace(
         task,
         evidence_video_available=bool(media and media.video_path is not None),
-        evidence_page_available=bool(media and media.page_path is not None),
+        evidence_page_available=bool(media and (media.page_path is not None or media.page_ref)),
     )
 
 

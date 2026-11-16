@@ -65,6 +65,7 @@ from backend.core.use_cases.agent_runner_skill_distillation import (
 )
 from backend.core.use_cases.agent_runner_validation import (
     ensure_validation_evidence_ready,
+    publish_validation_evidence_artifacts,
     publish_validation_evidence_best_effort,
 )
 from backend.core.use_cases.agent_runner_issue_control import (
@@ -291,6 +292,27 @@ def publish_draft_pr_before_verifier(request: PreVerifierDraftPublicationRequest
             content_generator=request.content_generator,
             publish_stage=request.publish_stage,
         )
+        try:
+            evidence_upload = publish_validation_evidence_artifacts(
+                issue=request.issue,
+                worktree_path=request.worktree_path,
+                config=request.config,
+                process_runner=request.process_runner,
+            )
+        except Exception as evidence_error:  # noqa: BLE001 - 预览证据不得阻塞 verifier。
+            _logger.warning(
+                "Could not publish review evidence for Issue #%d before verifier; "
+                "verification will continue: %s",
+                request.issue.number,
+                evidence_error,
+            )
+        else:
+            if evidence_upload is not None:
+                _logger.info(
+                    "Published review evidence for Issue #%d on %s before verifier.",
+                    request.issue.number,
+                    evidence_upload.branch,
+                )
     except (GitHubApiRateLimitError, GitHubApiUnavailableError):
         raise
     except ClaimLeaseLost:

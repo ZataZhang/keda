@@ -78,21 +78,27 @@ def _github_remote(repo_path: Path) -> str | None:
     return None
 
 
-def list_evidence_branches(repo_path: Path) -> dict[int, str]:
+def list_evidence_branches(repo_path: Path, *, refresh: bool = False) -> dict[int, str]:
     """返回该仓库的证据分支映射：Issue 编号 → 分支名。
 
-    只认名字里带 evidence 且以 issue-<N> 结尾的分支；结果缓存一分钟级的
-    十分之一小时，看板连续刷新时不会重复打远端。
+    只认名字里带 evidence 且以 issue-<N> 结尾的分支；默认缓存 10 分钟，看板连续刷新时
+    不会重复打远端。任务已有 PR 时可在一次看板请求中强制刷新，及时发现刚发布的
+    verifier 前人审材料。
 
     Args:
         repo_path: 仓库根目录。
+        refresh: 是否绕过 TTL 并立即重新读取远端分支清单。
 
     Returns:
         dict[int, str]: Issue 编号到分支名的映射；读不到时为空字典。
     """
     key = str(repo_path)
     cached = _BRANCH_CACHE.get(key)
-    if cached is not None and time.monotonic() - cached[0] < BRANCH_LIST_TTL_SECONDS:
+    if (
+        not refresh
+        and cached is not None
+        and time.monotonic() - cached[0] < BRANCH_LIST_TTL_SECONDS
+    ):
         return cached[1]
     remote = _github_remote(repo_path)
     if remote is None:

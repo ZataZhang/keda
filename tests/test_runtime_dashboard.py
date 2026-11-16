@@ -19,13 +19,15 @@ from backend.core.shared.interfaces.runner_console import (
     PrdLifecycleRunRecord,
     RunRecord,
 )
-from backend.core.shared.models.runtime_task import RuntimeTaskStatus
+from backend.core.shared.models.runtime_task import RuntimeTask, RuntimeTaskStatus
+from backend.core.use_cases.agent_runner_evidence_media import EvidenceMedia
 from backend.core.use_cases.monitor_snapshots import get_snapshot_overview
 from backend.core.use_cases.runtime_dashboard import (
     SOURCE_ATTEMPT_LEDGER,
     SOURCE_MONITOR_SNAPSHOT,
     SOURCE_PRD_LIFECYCLE,
     SOURCE_RUN_HISTORY,
+    _with_evidence_flags,
     build_runtime_task_summary,
     parse_runtime_timestamp,
     status_for_labels,
@@ -121,6 +123,19 @@ def test_status_for_labels_picks_the_most_urgent_bucket() -> None:
     assert status_for_labels(["documentation", "agent/failed"]) is RuntimeTaskStatus.FAILED
     assert status_for_labels(["agent/failed", "agent/running"]) is RuntimeTaskStatus.RUNNING
     assert status_for_labels(["bug"]) is None
+
+
+def test_evidence_branch_review_page_enables_dashboard_button() -> None:
+    """证据分支上的人审页也应让看板显示 Review 按钮。"""
+    runtime_task = RuntimeTask(repo_id="keda", issue_number=9)
+    branch_evidence = EvidenceMedia(
+        page_ref="human-review-checklist.md",
+        source="iar-evidence/issue-9",
+    )
+
+    task_with_evidence = _with_evidence_flags(runtime_task, branch_evidence)
+
+    assert task_with_evidence.evidence_page_available is True
 
 
 def test_snapshot_labels_drive_status_and_running_duration(tmp_path) -> None:

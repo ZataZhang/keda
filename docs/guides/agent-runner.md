@@ -166,7 +166,7 @@ kc schema --json | jq '.commands[] | select(.name=="issue list") | .options[] | 
 创建 Issue ─┬─（排队）贴上 agent/ready → daemon 自主挑选并认领（换成 agent/running）
             └─（点名）kc run --issue <N> 直接认领：不要求任何状态标签
                ↓
-        实现收尾 + 本地验证 → Draft PR（未签核）→ verifier → pre-PR review → agent/supervising
+        实现收尾 + 本地验证 → Draft PR（未签核）→ 发布人审材料供预览 → verifier → pre-PR review → agent/supervising
                ↓
         supervisor 通过 → agent/automated-review-passed
                         ├─ 需要人工处理 → 加 human/awaiting-review
@@ -1935,6 +1935,7 @@ agent/ready
     → implementation agent commit
     → RV / 证据 / PRD 执行侧收尾通过
     → push implementation branch + create Draft PR（尚无 verifier label）
+    → publish review evidence branch（dashboard Review 可预览）
     → independent verifier
     → Issue comment: Implementation Complete
     → pre-PR review (仍在 agent/running; reviewer 修复会清旧标签并重新验证)
@@ -1950,17 +1951,20 @@ agent/ready
 
 ### Pre-PR Review
 
-新实现路径在实现 agent 完成、PRD 执行侧交付收尾和本地验证通过后，先 `git push` 并创建或复用未签核的 Draft PR，再启动独立 verifier；verifier 通过后才执行 pre-PR AI code review。复用已提交本地 commit 的恢复路径也会先发布 Draft PR，再执行 review 与最终 HEAD 复核：
+新实现路径在实现 agent 完成、PRD 执行侧交付收尾和本地验证通过后，先 `git push` 并创建或复用未签核的 Draft PR。PR 出现后立即把人审材料发布到证据分支，看板即可显示 `Review` 入口；此时 Issue 仍在运行，verifier 继续独立验证。verifier 通过后才执行 pre-PR AI code review。复用已提交本地 commit 的恢复路径也会先发布 Draft PR 和可预览的人审材料，再执行 review 与最终 HEAD 复核：
 
 1. RV 证据和仓库验证命令通过、PRD 执行侧条目完成并归档后，runner 将分支 push 到配置 remote，并创建或复用 Draft PR；此时不添加 `validation/verifier-passed`
-2. 独立 verifier 对已提交工作树进行验证；失败时进入原有修复循环，后续合格提交更新同一个 Draft PR
-3. verifier 通过后，runner 写 Issue comment `Implementation Complete` 并构建 review packet（Issue、PRD、diff、changed paths、verification results、AI standards、review workflow）
-4. **Reviewer 必须通过 Skill 工具调用 `code-reviewer` skill** 并把 skill 输出的 findings 写进响应的 `findings` JSON 数组；review packet 默认模板（`agent_review.DEFAULT_REVIEW_PROMPT_TEMPLATE`）会显式提示 reviewer 这一行为，并提供 findings schema（`category` / `severity` / `file` / `line` / `title` / `description` / `recommendation`）。仓库可在 `[agent_runner.pre_pr_review].review_prompt_template` 覆盖该模板，未配置时回退到代码默认。
-5. 若 reviewer 在当前 worktree / Issue 下已有可续传 session id，就接着该会话执行 review；没有记录时创建新会话。调用使用 `[agent_runner.pre_pr_review].timeout_seconds` 限制最长运行时间
-6. Reviewer 可直接修改 worktree；修改后写入 `.agent-runner/commit-request.json`
-7. Runner 通过 commit proxy 提交 reviewer 修改、重新运行 `verification_commands` 并 push 修复；更新 PR head 前先移除已有的 `validation/verifier-passed`，最终复核通过后再加回
-8. Runner 写 Issue comment `Pre-PR Review Result`（含 findings 表格）
-9. Review 通过后复用已创建的 Draft PR（或在提前发布失败时补建）；review 未收敛时走软失败路径并写 comment
+2. Draft PR 创建成功后，runner 尽力把人审材料上传到证据分支。看板按 PR 仓库刷新证据分支索引，因此 `Review` 按钮可在 verifier 运行期间出现；材料发布失败只记录告警，不阻断 verifier。该入口表示可以提前查看材料，不表示验证通过或已经进入待人工评审状态
+3. 独立 verifier 对已提交工作树进行验证；失败时进入原有修复循环，后续合格提交更新同一个 Draft PR
+4. verifier 通过后，runner 写 Issue comment `Implementation Complete` 并构建 review packet（Issue、PRD、diff、changed paths、verification results、AI standards、review workflow）
+5. **Reviewer 必须通过 Skill 工具调用 `code-reviewer` skill** 并把 skill 输出的 findings 写进响应的 `findings` JSON 数组；review packet 默认模板（`agent_review.DEFAULT_REVIEW_PROMPT_TEMPLATE`）会显式提示 reviewer 这一行为，并提供 findings schema（`category` / `severity` / `file` / `line` / `title` / `description` / `recommendation`）。仓库可在 `[agent_runner.pre_pr_review].review_prompt_template` 覆盖该模板，未配置时回退到代码默认。
+6. 若 reviewer 在当前 worktree / Issue 下已有可续传 session id，就接着该会话执行 review；没有记录时创建新会话。调用使用 `[agent_runner.pre_pr_review].timeout_seconds` 限制最长运行时间
+7. Reviewer 可直接修改 worktree；修改后写入 `.agent-runner/commit-request.json`
+8. Runner 通过 commit proxy 提交 reviewer 修改、重新运行 `verification_commands` 并 push 修复；更新 PR head 前先移除已有的 `validation/verifier-passed`，最终复核通过后再加回
+9. Runner 写 Issue comment `Pre-PR Review Result`（含 findings 表格）
+10. Review 通过后复用已创建的 Draft PR（或在提前发布失败时补建）；最终 head 的证据分支和 PR 证据评论在 verifier 结论发布阶段刷新；review 未收敛时走软失败路径并写 comment
+
+提前出现的 `Review` 入口只允许预览验证材料：Issue 仍显示运行中，verifier 失败时仍按失败或阻塞状态呈现。PR 证据评论随最终 verifier 结论发布；`human/awaiting-review` 仍等 post-PR supervisor 通过且策略要求人工处理后才添加。
 
 提前创建的 Draft PR 正文是首次发布时的快照；verifier 修复会更新 PR 分支，但复用已有 PR 时不会重写正文。审查时以 PR 当前 head 和 diff 为准。
 

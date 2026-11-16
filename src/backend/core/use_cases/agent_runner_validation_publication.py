@@ -183,6 +183,44 @@ def parse_pr_number(pr_url: str) -> int | None:
     return int(url_match.group("number"))
 
 
+def publish_validation_evidence_artifacts(
+    *,
+    issue: IssueSummary,
+    worktree_path: Path,
+    config: AppConfig,
+    process_runner: IProcessRunner,
+) -> EvidenceUpload | None:
+    """提前发布验证证据分支，供 Draft PR 阶段的人预览。
+
+    Args:
+        issue: 当前 Issue。
+        worktree_path: 执行该 Issue 的 worktree。
+        config: 当前 Agent Runner 配置。
+        process_runner: 运行 Git plumbing 命令的进程适配器。
+
+    Returns:
+        EvidenceUpload: 验证需要且证据已上传时返回证据分支信息；其他情况返回 None。
+    """
+    from backend.core.use_cases.agent_runner_validation import validation_required
+
+    if not validation_required(issue.body, config):
+        return None
+
+    upload = upload_evidence_branch(
+        issue=issue,
+        worktree_path=worktree_path,
+        config=config,
+        process_runner=process_runner,
+    )
+    if upload is None:
+        _logger.warning(
+            "Issue #%d requires validation but no evidence files were found "
+            "when publishing review materials.",
+            issue.number,
+        )
+    return upload
+
+
 def _truncate_inline_evidence(file_text: str) -> str:
     """Limit inline-quoted evidence text in PR comments."""
     if len(file_text) <= _MAX_INLINE_EVIDENCE_CHARS:
@@ -363,25 +401,15 @@ def publish_validation_evidence(
     Returns:
         EvidenceUpload；不要求验证或无证据文件时返回 ``None``。
     """
-    from backend.core.use_cases.agent_runner_validation import (
-        resolve_issue_evidence_dir,
-        validation_required,
-    )
+    from backend.core.use_cases.agent_runner_validation import resolve_issue_evidence_dir
 
-    if not validation_required(issue.body, config):
-        return None
-    upload = upload_evidence_branch(
+    upload = publish_validation_evidence_artifacts(
         issue=issue,
         worktree_path=worktree_path,
         config=config,
         process_runner=process_runner,
     )
     if upload is None:
-        _logger.warning(
-            "Issue #%d requires validation but no evidence files were found "
-            "when publishing evidence.",
-            issue.number,
-        )
         return None
     pr_number = parse_pr_number(pr_url)
     if pr_number is None:

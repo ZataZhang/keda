@@ -85,10 +85,15 @@ def _repository_paths() -> dict[str, Path]:
         return {}
 
 
-def _evidence_media(repository_paths: dict[str, Path], task: Any) -> EvidenceMedia | None:
+def _evidence_media(
+    repository_paths: dict[str, Path],
+    task: Any,
+    refreshed_evidence_repo_ids: set[str] | None = None,
+) -> EvidenceMedia | None:
     """解析该任务的证据：先看本地，本地没有页面时回退到证据分支。
 
-    分支清单有 TTL 缓存，因此同一轮看板刷新不会为每张卡重复打远端。
+    分支清单有 TTL 缓存；本次看板请求遇到带 PR 的任务时，每个仓库最多强制刷新一次，
+    避免新发布的人审材料被旧缓存隐藏。
     """
     repo_path = repository_paths.get(task.repo_id)
     if repo_path is None:
@@ -102,7 +107,14 @@ def _evidence_media(repository_paths: dict[str, Path], task: Any) -> EvidenceMed
     # 列表里只判断「有没有证据分支」，不在这里拉取分支内容：一次 ls-remote
     # 的结果已缓存，真正读页面留到点击时按需进行。
     try:
-        branch = list_evidence_branches(repo_path).get(task.issue_number)
+        refresh_branches = bool(
+            task.pr_url
+            and refreshed_evidence_repo_ids is not None
+            and task.repo_id not in refreshed_evidence_repo_ids
+        )
+        if refresh_branches and refreshed_evidence_repo_ids is not None:
+            refreshed_evidence_repo_ids.add(task.repo_id)
+        branch = list_evidence_branches(repo_path, refresh=refresh_branches).get(task.issue_number)
     except OSError:
         return media
     if branch is None:
@@ -237,12 +249,15 @@ def get_runtime_tasks() -> dict[str, Any]:
     enabled_repo_ids = _enabled_repo_ids()
     snapshot_overview = get_snapshot_overview(store, enabled_repo_ids=enabled_repo_ids)
     repository_paths = _repository_paths()
+    refreshed_evidence_repo_ids: set[str] = set()
     summary = build_runtime_task_summary(
         snapshot_overview=snapshot_overview,
         run_history_store=store,
         prd_lifecycle_store=store,
         enabled_repo_ids=enabled_repo_ids,
-        evidence_media=lambda task: _evidence_media(repository_paths, task),
+        evidence_media=lambda task: _evidence_media(
+            repository_paths, task, refreshed_evidence_repo_ids
+        ),
     )
     try:
         supervisor = create_process_supervisor()
