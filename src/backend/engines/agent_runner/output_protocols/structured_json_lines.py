@@ -69,6 +69,8 @@ def relay_structured_json_lines(
         label=request.label,
         usage_collector=usage_collector,
         line_renderer=line_renderer,
+        attempt_key=request.attempt_key,
+        cancel_check=request.cancel_check,
     )
     return CommandResult(
         command=request.argv,

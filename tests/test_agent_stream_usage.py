@@ -780,3 +780,23 @@ class TestProtocolRoutingRunnerFailureObservations:
             )
         assert not hasattr(failure_error.value, AGENT_REPORTED_MODEL_ATTR_NAME)
         assert not hasattr(failure_error.value, AGENT_SESSION_ID_ATTR_NAME)
+
+
+@pytest.mark.parametrize("output_protocol", ["claude-stream-json", "codex-json-lines"])
+def test_protocol_routed_agent_honors_verifier_takeover_cancel_check(
+    tmp_path: Path,
+    output_protocol: str,
+) -> None:
+    """协议路由层必须把 verifier 接管取消探针交给实际持有子进程的 watchdog。"""
+    script_path = tmp_path / "blocking_agent.py"
+    script_path.write_text(_fake_agent_script([], sleep_seconds=60), encoding="utf-8")
+    runner = ProtocolRoutingProcessRunner(SubprocessRunner(), get_output_protocol_registry())
+
+    with pytest.raises(InterruptedError, match="takeover cancel request"):
+        runner.run(
+            [sys.executable, str(script_path)],
+            cwd=tmp_path,
+            timeout=30,
+            output_protocol=output_protocol,
+            cancel_check=lambda: True,
+        )

@@ -67,6 +67,8 @@ class OutputRelayRequest:
             :meth:`IProcessRunner.run` 的同名参数）；沿用调用方进程组的实现必须
             忽略它——按这个键去终止会打到宿主进程自己身上，监督器因此对这类协议
             只能诊断、不能处置（fail-closed，不是静默假成功）。
+        cancel_check: Issue 级 verifier 接管取消探针（Issue #278），由支持的协议
+            传给拥有子进程的 watchdog；未接入 watchdog 的协议不得声称支持接管取消。
     """
 
     argv: tuple[str, ...]
@@ -80,6 +82,7 @@ class OutputRelayRequest:
     output_sink: Callable[[str], None] | None = None
     display_sink: Callable[[str], None] | None = None
     attempt_key: str | None = None
+    cancel_check: Callable[[], bool] | None = None
 
 
 class IAgentOutputProtocol(ABC):
