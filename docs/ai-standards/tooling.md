@@ -42,6 +42,15 @@
 | `just prd release <prd-file> [--force]` | 释放执行锁；归属不符需显式 `--force` |
 | `just prd review <prd-file> [--print]` | 打开该 PRD 的人工审查清单（证据目录分支副本优先，交互 HTML 优先于 Markdown）：未完成 Human-Confirmed 项、9.1 人读呈递区与人工待决事项的集中页；无清单时回退打开证据报告，两者皆无时列出证据目录现状 |
 
+## 本地分支与 Worktree 清理
+
+完成分支任务或工作收尾时，主动检查并及时清理已合并或过期且不再包含待保留工作的本地分支及关联 worktree。此要求在任务收尾时触发，不设固定日历周期。先刷新权威远端引用，并确认目标默认分支、关联 worktree 和 Issue/PR 状态。
+
+- KedaCode 管理的 `issue-<N>` 分支优先用 `kc worktree cleanup --dry-run` 预览；按[Agent Runner 清理说明](../guides/agent-runner.md#stale-issue-worktree)，仅回收 Issue 已关闭、远端分支已删除、worktree 干净，且分支已进入远端 base 或对应 PR 已合并的候选。确认计划后再运行 `kc worktree cleanup --yes`。
+- 不清理仍开放、正在执行或包含 WIP checkpoint 的 Issue 分支。不要用 `--force` 绕过 worktree 脏状态或合并检查；重跑时须保留 `issue-<N>` 分支上的 checkpoint。
+- 手工创建的普通分支优先用 `just worktree --prune --dry-run --base <默认分支>` 预览已并入 base 的本地分支及 worktree，再检查并执行。upstream 已删除但仍有独有提交的候选要逐个核验权威 PR 状态；未合并或状态不明时保留。
+- squash/rebase merge 若未被提交图识别，先确认 PR 已合并且改动已在默认分支，再检查 worktree 干净后清理本地 worktree 与分支。清理本地工作区时不要额外删除远端分支。
+
 ## PR 与 CI 的节奏
 
 CI 只是异步门禁，不要守着它等。三条约定：

@@ -25,7 +25,7 @@
 | `docs/ai-standards/documentation.md` | 改动公共函数签名、配置项、业务流程；新增长期文档页；更新 `mkdocs.yml` 导航 | 纯内部重构且无对外行为或文档变化 |
 | `docs/ai-standards/frontend-design.md` | 新增/改动 `frontend-public/`、`frontend-admin/` 的界面：调整颜色、圆角、字号、间距、暗色模式、外链与复制类交互 | 只改后端、CLI、测试或纯文档排版时 |
 | `docs/ai-standards/testing.md` | **任何代码变更开始前**；制定验证策略、收集证据或声称完成前必须重新核对；写 PRD 的 Realistic Validation Plan；**遇到测试失败或打算修改 `tests/guards/` 守卫测试时** | 仅改注释、纯文档排版或无可执行行为变化的纯配置 |
-| `docs/ai-standards/tooling.md` | 选择运行命令；改 `justfile` / `pre-commit` / `mkdocs` / Docker 配置；处理 PRD 归档流程；处理 lint flag 或重复检测 hooks；**改动 `kc` CLI 表面（子命令 / 旗标 / 退出码 / 机器输出）或随包 `kedacode-operator` skill**；撰写提交信息 | 在已熟悉常用 `just` 命令、且本次不动工具链配置与 CLI 表面时 |
+| `docs/ai-standards/tooling.md` | 选择运行命令；改 `justfile` / `pre-commit` / `mkdocs` / Docker 配置；处理 PRD 归档流程；清理本地分支或 worktree；处理 lint flag 或重复检测 hooks；**改动 `kc` CLI 表面（子命令 / 旗标 / 退出码 / 机器输出）或随包 `kedacode-operator` skill**；撰写提交信息 | 在已熟悉常用 `just` 命令、且本次不动工具链、分支/worktree 清理或 CLI 表面时 |
 | `docs/ai-standards/alembic.md` | 新增、重命名或修改 Alembic migration；检查迁移链或 `down_revision` | 不涉及 `alembic/versions/` 时 |
 | `docs/ai-standards/time-display.md` | 新增或改动任何时间展示 / 时间戳输出：Web 时间标签、CLI 人读输出、日志行前缀、`*_at` 字段序列化 | 纯文档排版且不动时间显示与序列化时 |
 
@@ -47,6 +47,7 @@
 - 变量命名必须具有来源、类型或状态语义，避免 `data`、`item`、`res`
 - 新增或修改代码前先搜索现有实现；禁止复制粘贴后微调，参数超过 4 个时收敛到对象
 - 除非用户明确要求，否则不要自动执行 `git add`、`git commit`、`git push` 等 Git 变更操作
+- 完成分支任务或工作收尾时检查并及时清理已合并或过期且无待保留工作的本地分支及 worktree；KedaCode 管理的 `issue-*` 分支必须遵循 `kc worktree cleanup` 的关闭、远端删除、干净状态和合并条件，不要删除活动分支或 WIP checkpoint。详见 `docs/ai-standards/tooling.md` 的「本地分支与 Worktree 清理」
 - 发布（改版本号、打 `v*` tag、发布 draft Release、上传 PyPI）前必须先读 `docs/guides/release-process.md`。PyPI 版本号一经上传永久占用、不能重用：推送 tag 只会生成 draft Release，**把 draft 正式发布（触发 PyPI 上传与 Homebrew tap 更新）必须有用户明确同意**，不得顺手执行
 - 提交信息统一用英文并遵循 Conventional Commits（`type(scope): subject`，标题 ≤ 72 字符，正文解释 why），详见 `docs/ai-standards/tooling.md` 的 Commit Messages 小节
 - 单代码文件非空行不超过 1000 行；`just lint` 会对此发出警告
