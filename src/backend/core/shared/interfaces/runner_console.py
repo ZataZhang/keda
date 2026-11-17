@@ -291,6 +291,22 @@ class IRunHistoryStore(ABC):
         ...
 
     @abstractmethod
+    def list_recent_runs_by_issue(
+        self, *, repo_id: str, since_started_at: str, limit: int = 100
+    ) -> list[RunRecord]:
+        """按起始时间筛选，并为每个 Issue 返回最新写入的一条运行记录。
+
+        Args:
+            repo_id: 目标仓库标识。
+            since_started_at: 起始时间下界（ISO-8601 UTC），包含该时刻。
+            limit: 最多返回的不同 Issue 数量。
+
+        Returns:
+            list[RunRecord]: 按最近写入顺序倒排、每个 Issue 至多一条的运行记录。
+        """
+        ...
+
+    @abstractmethod
     def list_issue_attempts(
         self, *, repo_id: str, issue_number: int, limit: int = 100
     ) -> list[AttemptRecord]:
