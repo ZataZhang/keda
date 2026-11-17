@@ -837,9 +837,14 @@ def _collect_tracked_issues(
     tracked_issue_numbers: Sequence[int],
     excluded_numbers: set[int],
     config: AppConfig,
-    scan_errors: list[str] | None = None,
 ) -> list[IssueMonitoringSnapshot]:
-    """读取运行账本中出现、但不在队列标签结果里的 Issue 当前状态。"""
+    """读取运行账本中出现、但不在队列标签结果里的 Issue 当前状态。
+
+    这一路只是给队列外的历史 Issue 补当前状态，属于旁路增强：单条读取失败
+    （例如 Issue 已被删除、转移后 API 永久 404）只丢这一行，不能写进
+    ``sync_error``——那会让整仓快照被判为不完整而停止刷新，一个早已消失的
+    历史 Issue 就能冻住整仓看板。
+    """
     snapshots: list[IssueMonitoringSnapshot] = []
     seen: set[int] = set(excluded_numbers)
     for issue_number in tracked_issue_numbers:
@@ -849,9 +854,7 @@ def _collect_tracked_issues(
         try:
             issue = github_client.get_issue(issue_number)
         except Exception as exc:  # noqa: BLE001 - 单个 Issue 读取失败只降级该行。
-            _logger.info("Tracked issue #%s read failed: %s", issue_number, exc)
-            if scan_errors is not None:
-                scan_errors.append(f"Issue #{issue_number}：{exc}")
+            _logger.warning("Tracked issue #%s read failed: %s", issue_number, exc)
             continue
         snapshots.append(_minimal_issue_snapshot(issue, config=config))
     return snapshots
@@ -903,7 +906,6 @@ def build_repository_overview(
         tracked_issue_numbers=tracked_issue_numbers,
         excluded_numbers={issue.number for issue in queue_issues},
         config=config,
-        scan_errors=scan_errors,
     )
     queue_counts = _compute_queue_counts(queue_issues, config)
     anomaly_count = sum(1 for snap in issue_snapshots if snap.has_anomaly)
