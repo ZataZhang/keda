@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlsplit
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 
 from backend.core.shared.interfaces.desktop_companion import (
@@ -88,12 +88,12 @@ def _repository_paths() -> dict[str, Path]:
 def _evidence_media(
     repository_paths: dict[str, Path],
     task: Any,
-    refreshed_evidence_repo_ids: set[str] | None = None,
+    evidence_branch_refresh_by_repo: dict[str, bool],
 ) -> EvidenceMedia | None:
-    """解析该任务的证据：先看本地，本地没有页面时回退到证据分支。
+    """解析该任务的本地证据与已缓存证据分支索引。
 
-    分支清单有 TTL 缓存；本次看板请求遇到带 PR 的任务时，每个仓库最多强制刷新一次，
-    避免新发布的人审材料被旧缓存隐藏。
+    远端分支清单由调用方在 HTTP 响应后刷新，避免首屏等待网络。任务带 PR 时记录该仓库
+    需要强制刷新；其余仓库使用正常 TTL。一次请求按仓库合并刷新需求。
     """
     repo_path = repository_paths.get(task.repo_id)
     if repo_path is None:
@@ -104,17 +104,12 @@ def _evidence_media(
         return None
     if media.page_ref is not None:
         return media
-    # 列表里只判断「有没有证据分支」，不在这里拉取分支内容：一次 ls-remote
-    # 的结果已缓存，真正读页面留到点击时按需进行。
+    # 首屏只读索引缓存；缺失或过期索引在响应发送后刷新，真正读取页面仍留到点击时进行。
     try:
-        refresh_branches = bool(
-            task.pr_url
-            and refreshed_evidence_repo_ids is not None
-            and task.repo_id not in refreshed_evidence_repo_ids
-        )
-        if refresh_branches and refreshed_evidence_repo_ids is not None:
-            refreshed_evidence_repo_ids.add(task.repo_id)
-        branch = list_evidence_branches(repo_path, refresh=refresh_branches).get(task.issue_number)
+        evidence_branch_refresh_by_repo[task.repo_id] = evidence_branch_refresh_by_repo.get(
+            task.repo_id, False
+        ) or bool(task.pr_url)
+        branch = list_evidence_branches(repo_path, use_cache_only=True).get(task.issue_number)
     except OSError:
         return media
     if branch is None:
@@ -238,27 +233,37 @@ def _companion_payload(snapshot: DesktopCompanionSnapshot, console_origin: str) 
 
 
 @router.get("/agent-runner/console/runtime/tasks")
-def get_runtime_tasks() -> dict[str, Any]:
+def get_runtime_tasks(background_tasks: BackgroundTasks) -> dict[str, Any]:
     """返回统一运行看板任务摘要：状态分桶、身份、阶段、执行者与耗时。
 
     改动树触达读数**不在本响应里**：唯一来源仍是现有
     ``GET /agent-runner/backlog/prds/{encoded_path}/progress`` 契约，前端按
     ``prd_path`` 取数，避免出现第二份影响树检测逻辑。
+
+    Args:
+        background_tasks: 在摘要响应发送后刷新证据分支索引。
+
+    Returns:
+        dict[str, Any]: 可序列化的运行看板摘要。
     """
     store = create_console_store()
     enabled_repo_ids = _enabled_repo_ids()
     snapshot_overview = get_snapshot_overview(store, enabled_repo_ids=enabled_repo_ids)
     repository_paths = _repository_paths()
-    refreshed_evidence_repo_ids: set[str] = set()
+    evidence_branch_refresh_by_repo: dict[str, bool] = {}
     summary = build_runtime_task_summary(
         snapshot_overview=snapshot_overview,
         run_history_store=store,
         prd_lifecycle_store=store,
         enabled_repo_ids=enabled_repo_ids,
         evidence_media=lambda task: _evidence_media(
-            repository_paths, task, refreshed_evidence_repo_ids
+            repository_paths, task, evidence_branch_refresh_by_repo
         ),
     )
+    for repo_id, refresh in evidence_branch_refresh_by_repo.items():
+        repo_path = repository_paths.get(repo_id)
+        if repo_path is not None:
+            background_tasks.add_task(list_evidence_branches, repo_path, refresh=refresh)
     try:
         supervisor = create_process_supervisor()
         process_records = [

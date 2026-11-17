@@ -11,23 +11,28 @@ from backend.core.shared.models.runtime_task import RuntimeTask, RuntimeTaskStat
 from backend.core.use_cases.agent_runner_evidence_media import EvidenceMedia
 
 
-def test_existing_pr_refreshes_evidence_branch_listing_once_per_repository(
+def test_runtime_summary_uses_cached_evidence_listing_and_requests_refresh_for_pr(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """PR 已出现时强制刷新远端证据索引，并复用本次请求结果。"""
-    refresh_arguments: list[bool] = []
+    """任务摘要只查缓存索引，并合并每仓库的后台刷新需求。"""
+    branch_lookup_arguments: list[tuple[bool, bool]] = []
 
     monkeypatch.setattr(runtime_route, "find_evidence_media", lambda *_args: EvidenceMedia())
 
-    def list_branches(_repo_path: Path, *, refresh: bool = False) -> dict[int, str]:
-        refresh_arguments.append(refresh)
+    def list_branches(
+        _repo_path: Path,
+        *,
+        refresh: bool = False,
+        use_cache_only: bool = False,
+    ) -> dict[int, str]:
+        branch_lookup_arguments.append((refresh, use_cache_only))
         return {7: "iar-evidence/issue-7", 8: "iar-evidence/issue-8"}
 
     monkeypatch.setattr(runtime_route, "list_evidence_branches", list_branches)
 
     repository_paths = {"keda": tmp_path}
-    refreshed_evidence_repo_ids: set[str] = set()
+    evidence_branch_refresh_by_repo: dict[str, bool] = {}
     issue_seven = RuntimeTask(
         repo_id="keda",
         issue_number=7,
@@ -42,14 +47,15 @@ def test_existing_pr_refreshes_evidence_branch_listing_once_per_repository(
     )
 
     issue_seven_media = runtime_route._evidence_media(
-        repository_paths, issue_seven, refreshed_evidence_repo_ids
+        repository_paths, issue_seven, evidence_branch_refresh_by_repo
     )
     issue_eight_media = runtime_route._evidence_media(
-        repository_paths, issue_eight, refreshed_evidence_repo_ids
+        repository_paths, issue_eight, evidence_branch_refresh_by_repo
     )
 
     assert issue_seven_media is not None
     assert issue_seven_media.page_ref == "iar-evidence/issue-7"
     assert issue_eight_media is not None
     assert issue_eight_media.page_ref == "iar-evidence/issue-8"
-    assert refresh_arguments == [True, False]
+    assert branch_lookup_arguments == [(False, True), (False, True)]
+    assert evidence_branch_refresh_by_repo == {"keda": True}

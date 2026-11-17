@@ -84,16 +84,23 @@ def _github_remote(repo_path: Path) -> str | None:
     return None
 
 
-def list_evidence_branches(repo_path: Path, *, refresh: bool = False) -> dict[int, str]:
+def list_evidence_branches(
+    repo_path: Path,
+    *,
+    refresh: bool = False,
+    use_cache_only: bool = False,
+) -> dict[int, str]:
     """返回该仓库的证据分支映射：Issue 编号 → 分支名。
 
     只认名字里带 evidence 且以 issue-<N> 结尾的分支；默认缓存 10 分钟，看板连续刷新时
     不会重复打远端。任务已有 PR 时可请求提前刷新；同一仓库两次远端查询至少间隔
-    30 秒，控制看板轮询产生的网络请求。
+    30 秒，控制看板轮询产生的网络请求。`use_cache_only=True` 时只返回最近一次成功
+    的索引（即使过期），不执行任何 Git 命令，供首屏摘要快速读取。
 
     Args:
         repo_path: 仓库根目录。
         refresh: 是否绕过 TTL 并立即重新读取远端分支清单。
+        use_cache_only: 是否仅读取进程内缓存，不访问本地 Git 或远端。
 
     Returns:
         dict[int, str]: Issue 编号到分支名的映射；读不到时为空字典。
@@ -102,6 +109,8 @@ def list_evidence_branches(repo_path: Path, *, refresh: bool = False) -> dict[in
     now_monotonic = time.monotonic()
     with _BRANCH_CACHE_LOCK:
         cached = _BRANCH_CACHE.get(key)
+        if use_cache_only:
+            return cached[1] if cached is not None else {}
         if (
             not refresh
             and cached is not None
