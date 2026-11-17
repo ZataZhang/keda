@@ -48,6 +48,7 @@ def reconcile_runtime_task(
     lifecycle_run: PrdLifecycleRunRecord | None,
     *,
     context: RuntimeObservationContext,
+    latest_supervisor_action: str | None = None,
 ) -> RuntimeTask:
     """用新会话开始事件协调运行窗口，保留无法确认的状态。
 
@@ -55,9 +56,10 @@ def reconcile_runtime_task(
         task: 快照与运行账本组装的任务。
         lifecycle_run: 同一 Issue 最近的生命周期记录；它会跨重试复用。
         context: 生命周期读端、参考时间与读取失败披露。
+        latest_supervisor_action: 时间线最近的 PR 后监督动作。
 
     Returns:
-        运行窗口一致的摘要；标签与历史终态冲突时返回未知状态。
+        运行窗口一致的摘要；已结束的监督运行若最近动作是等待检查，则归为等待。
     """
     if task.status not in {
         RuntimeTaskStatus.RUNNING,
@@ -187,6 +189,18 @@ def reconcile_runtime_task(
                 status=RuntimeTaskStatus.DEFERRED,
                 status_reason="GitHub 同步失败，远端状态无法核实；等待自动重试。",
                 last_observed_status=(task.last_observed_status or RuntimeTaskStatus.RUNNING),
+            )
+        if (
+            latest_supervisor_action == "wait_for_checks"
+            and "agent/supervising" in task.labels
+            and task.last_outcome == "completed"
+            and SOURCE_PRD_LIFECYCLE not in context.unavailable_sources
+        ):
+            return replace(
+                task,
+                status=RuntimeTaskStatus.WAITING,
+                status_reason="最近 PR 监督动作要求等待再次检查",
+                waiting_reason="recheck",
             )
         return replace(
             task,

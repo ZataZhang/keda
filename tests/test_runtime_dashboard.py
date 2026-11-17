@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 import pytest
@@ -36,6 +37,17 @@ from backend.core.use_cases.runtime_dashboard import (
 from backend.infrastructure.persistence.console_store import SqliteConsoleStore
 
 REFERENCE_TIME = datetime(2026, 10, 12, 12, 0, 0, tzinfo=timezone.utc)
+
+
+@dataclass(frozen=True)
+class _FinishedRunScenario:
+    """一组运行窗口、Issue 标签与最近监督动作的测试输入。"""
+
+    lifecycle_offset: int | None
+    status_label: str
+    run_outcome: str
+    latest_action: str | None
+    expected_status: RuntimeTaskStatus
 
 
 def _iso(minutes_offset: int) -> str:
@@ -520,14 +532,51 @@ def test_summary_truncates_and_says_so(tmp_path) -> None:
     assert summary.truncated is True
 
 
-@pytest.mark.parametrize("lifecycle_offset", [None, -180, -30])
-@pytest.mark.parametrize("label", ["agent/running", "agent/supervising"])
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        _FinishedRunScenario(None, "agent/running", "failed", None, RuntimeTaskStatus.UNKNOWN),
+        _FinishedRunScenario(None, "agent/supervising", "failed", None, RuntimeTaskStatus.UNKNOWN),
+        _FinishedRunScenario(
+            None,
+            "agent/supervising",
+            "failed",
+            "wait_for_checks",
+            RuntimeTaskStatus.UNKNOWN,
+        ),
+        _FinishedRunScenario(-180, "agent/running", "failed", None, RuntimeTaskStatus.UNKNOWN),
+        _FinishedRunScenario(-180, "agent/supervising", "failed", None, RuntimeTaskStatus.UNKNOWN),
+        _FinishedRunScenario(-30, "agent/running", "failed", None, RuntimeTaskStatus.RUNNING),
+        _FinishedRunScenario(-30, "agent/supervising", "failed", None, RuntimeTaskStatus.RUNNING),
+        _FinishedRunScenario(
+            None,
+            "agent/supervising",
+            "completed",
+            "wait_for_checks",
+            RuntimeTaskStatus.WAITING,
+        ),
+        _FinishedRunScenario(
+            -30,
+            "agent/supervising",
+            "completed",
+            "wait_for_checks",
+            RuntimeTaskStatus.RUNNING,
+        ),
+    ],
+)
 def test_finished_run_is_not_live_unless_a_new_lifecycle_started(
-    tmp_path, monkeypatch, lifecycle_offset: int | None, label: str
+    tmp_path, monkeypatch, scenario: _FinishedRunScenario
 ) -> None:
-    """残留标签不能把已结束耗时累加到现在；新一轮运行不能沿用旧结束时间。"""
+    """区分已结束的运行、监督器等待检查和新一轮未收口会话。"""
+    lifecycle_offset = scenario.lifecycle_offset
+    run_outcome = scenario.run_outcome
     store = _store(tmp_path)
-    _seed_snapshot(store, "keda", [_issue(7, labels=[label])])
+    timeline = (
+        [{"phase": "post_pr_supervisor", "action": scenario.latest_action}]
+        if scenario.latest_action
+        else []
+    )
+    _seed_snapshot(store, "keda", [_issue(7, labels=[scenario.status_label], timeline=timeline)])
     store.append_run(
         RunRecord(
             repo_id="keda",
@@ -535,8 +584,8 @@ def test_finished_run_is_not_live_unless_a_new_lifecycle_started(
             issue_number=7,
             trigger="console_run",
             agent="old-agent",
-            outcome="failed",
-            error_summary="旧失败",
+            outcome=run_outcome,
+            error_summary="旧失败" if run_outcome == "failed" else None,
             started_at=_iso(-120),
             finished_at=_iso(-100),
             duration_seconds=1200,
@@ -573,7 +622,7 @@ def test_finished_run_is_not_live_unless_a_new_lifecycle_started(
         )
     )
     task = _summary(store, ["keda"]).tasks[0]
-    if lifecycle_offset == -30:
+    if scenario.expected_status is RuntimeTaskStatus.RUNNING:
         assert task.status is RuntimeTaskStatus.RUNNING
         assert task.started_at == _iso(-30)
         assert task.finished_at is None
@@ -582,6 +631,14 @@ def test_finished_run_is_not_live_unless_a_new_lifecycle_started(
         assert task.preset is None
         assert task.phase is None
         assert task.duration_seconds == 1800
+        assert task.waiting_reason is None
+    elif scenario.expected_status is RuntimeTaskStatus.WAITING:
+        assert task.status is RuntimeTaskStatus.WAITING
+        assert task.waiting_reason == "recheck"
+        assert task.status_reason == "最近 PR 监督动作要求等待再次检查"
+        assert task.duration_seconds == 1200
+        assert task.finished_at == _iso(-100)
+        assert task.last_outcome == "completed"
     else:
         assert task.status is RuntimeTaskStatus.UNKNOWN
         assert "最近运行已结束" in task.status_reason
@@ -604,7 +661,8 @@ def test_finished_run_is_not_live_unless_a_new_lifecycle_started(
     payload = response.json()
     assert payload["tasks"][0]["status"] == task.status.value
     assert payload["tasks"][0]["finished_at"] == task.finished_at
-    if lifecycle_offset != -30:
+    assert payload["tasks"][0]["waiting_reason"] == task.waiting_reason
+    if scenario.expected_status is not RuntimeTaskStatus.RUNNING:
         assert payload["tasks"][0]["duration_seconds"] == 1200
 
 

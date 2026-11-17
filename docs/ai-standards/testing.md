@@ -1,6 +1,6 @@
 # Testing Standards
 
-## 自动验证与人工介入的边界
+## 自动验证与人工介入的边界 {#testing-human-intervention-boundary}
 
 自动验证与自动修复应在请求人工审阅前完成。Agent 应主动完成适用的测试、证据收集、独立验证与 CI；需要人工决定时，呈递已有结果、具体阻塞及最小决策项。
 

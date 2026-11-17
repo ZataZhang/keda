@@ -187,6 +187,19 @@ def _timeline_phase(issue_entry: Mapping[str, Any]) -> str | None:
     return None
 
 
+def _latest_timeline_action(issue_entry: Mapping[str, Any]) -> str | None:
+    """取 Issue 时间线里最近一个带动作的事件。"""
+    timeline = issue_entry.get("timeline")
+    if not isinstance(timeline, list):
+        return None
+    for entry in reversed(timeline):
+        if isinstance(entry, dict):
+            action = entry.get("action")
+            if isinstance(action, str) and action:
+                return action
+    return None
+
+
 def _pr_identity(issue_entry: Mapping[str, Any]) -> tuple[str | None, int | None]:
     """从监控快照条目里取 PR 链接与编号；没有 PR 时返回两个 ``None``。"""
     raw_pr = issue_entry.get("pr")
@@ -246,15 +259,7 @@ def _snapshot_task(
 
     waiting_reason = None
     if status is RuntimeTaskStatus.WAITING:
-        timeline = issue_entry.get("timeline") or []
-        latest_action = next(
-            (
-                entry.get("action")
-                for entry in reversed(timeline)
-                if isinstance(entry, dict) and entry.get("action")
-            ),
-            None,
-        )
+        latest_action = _latest_timeline_action(issue_entry)
         if "agent/ready" in labels:
             waiting_reason = "queued"
         elif latest_action == "wait_for_checks":
@@ -619,6 +624,7 @@ def build_runtime_task_summary(
 
     tasks: list[RuntimeTask] = []
     seen_keys: set[tuple[str, int]] = set()
+    latest_actions_by_issue: dict[tuple[str, int], str | None] = {}
 
     for repo_snapshot in snapshot_overview.repositories:
         display_name = str(repo_snapshot.overview.get("display_name") or repo_snapshot.repo_id)
@@ -637,6 +643,7 @@ def build_runtime_task_summary(
             if task is None:
                 continue
             seen_keys.add(key)
+            latest_actions_by_issue[key] = _latest_timeline_action(issue_entry)
             tasks.append(task)
 
     for key, run_record in runs_by_issue.items():
@@ -668,6 +675,7 @@ def build_runtime_task_summary(
             task,
             lifecycle_by_issue.get((task.repo_id, task.issue_number)),
             context=observation_context,
+            latest_supervisor_action=latest_actions_by_issue.get((task.repo_id, task.issue_number)),
         )
         for task in tasks
     ]
