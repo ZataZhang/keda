@@ -662,6 +662,32 @@ export default function DashboardPage() {
     }
   }
 
+  async function handleRuntimeRetryWithExecutor(
+    task: RuntimeTaskEntry,
+    lifecycleStage: string,
+    executor: string,
+  ) {
+    const confirmed = await confirmAction(
+      `确认对 ${task.repo_display_name ?? task.repo_id}#${task.issue_number} 在 ${lifecycleStage} 阶段切换到 ${executor} 并续跑？`,
+    );
+    if (!confirmed) return;
+    setActionPending(true);
+    try {
+      const result = await executeIssueAction(
+        task.repo_id,
+        task.issue_number,
+        "retry_failed_with_executor",
+        { lifecycleStage, executor },
+      );
+      toast.success(result.detail);
+      await loadRuntimeSummary();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "切换执行器续跑失败。");
+    } finally {
+      setActionPending(false);
+    }
+  }
+
   const isRefreshingAll =
     refreshState.kind === "syncing" && refreshState.scope === "all";
   const refreshStartedAt =
@@ -680,7 +706,7 @@ export default function DashboardPage() {
 
   return (
     <ConsolePage>
-      <ConsolePageHeader title="Agent Runner 管理终端" description="默认按任务值守看板列出各仓库 Issue 的真实生命周期；切到「仓库监控」看队列、事件时间线与异常，failed/blocked Issue 可直接重试或继续。" />
+      <ConsolePageHeader title="Agent Runner 管理终端" description="默认按任务值守看板列出各仓库 Issue 的真实生命周期；切到「仓库监控」看队列、事件时间线与异常，failed Issue 可普通重试或切换执行器续跑，blocked Issue 可继续。" />
       <ConsoleToolbar aria-label="看板视图与同步操作">
           <div
             className="flex items-center gap-1 rounded-md border border-slate-200 p-0.5 dark:border-slate-700"
@@ -832,6 +858,10 @@ export default function DashboardPage() {
                     <RuntimeTaskDetail
                       key={selectedTask.task_key}
                       task={selectedTask}
+                      onRetryWithExecutor={(stage, executor) =>
+                        void handleRuntimeRetryWithExecutor(selectedTask, stage, executor)
+                      }
+                      retryPending={actionPending}
                       className="min-h-0 flex-1"
                     />
                   </div>

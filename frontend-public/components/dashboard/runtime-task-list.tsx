@@ -337,6 +337,15 @@ function RuntimeTaskRow({
         </span>
         <RuntimeTaskPhaseDescription task={task} className="mt-1 block text-xs text-slate-500" />
         <RuntimeTaskObservation task={task} />
+        {task.status === "failed" && (task.failure_reason || task.last_error_summary) ? (
+          <span
+            className="mt-1 block max-w-full truncate px-3 text-xs text-red-700 dark:text-red-300"
+            title={task.last_error_summary ?? task.failure_reason ?? undefined}
+            data-testid="runtime-task-failure-reason"
+          >
+            失败原因：{task.failure_reason ?? task.last_error_summary}
+          </span>
+        ) : null}
         <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
           {task.unclosed_invocation_executor ? (
             <span title="调用账本尚未记录该调用的结束事件；此信息不能单独证明执行进程仍存活。">

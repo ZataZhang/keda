@@ -42,6 +42,7 @@ from backend.core.use_cases.agent_invocation_tracing import (
     build_invocation_timeline,
     resolve_invocation_store,
 )
+from backend.core.use_cases.runtime_failure_diagnosis import diagnose_runtime_failure
 from backend.core.use_cases.monitor_snapshots import MonitorSnapshotOverview, SnapshotOverviewResult
 from backend.core.use_cases.runtime_task_observation import (
     SOURCE_PRD_LIFECYCLE,
@@ -474,6 +475,55 @@ def _enrich_from_unclosed_invocation(
     )
 
 
+def _enrich_from_failed_invocation(
+    task: RuntimeTask,
+    *,
+    invocation_store: IInvocationEventStore | None,
+    unavailable_sources: set[str],
+) -> RuntimeTask:
+    """把失败调用账本压缩成失败阶段、执行器与可操作原因。"""
+    if (
+        task.status is not RuntimeTaskStatus.FAILED
+        or task.last_outcome != "failed"
+        or not task.started_at
+        or not task.finished_at
+    ):
+        return task
+    if invocation_store is None:
+        unavailable_sources.add(SOURCE_INVOCATION_LEDGER)
+        return task
+    try:
+        events = invocation_store.list_issue_invocation_events(
+            repo_id=task.repo_id,
+            issue_number=task.issue_number,
+        )
+    except Exception as exc:  # noqa: BLE001 - 调用账本失败只降级失败阶段说明。
+        _logger.warning(
+            "Runtime summary failed to read failed invocation ledger for %s#%d: %s",
+            task.repo_id,
+            task.issue_number,
+            exc,
+        )
+        unavailable_sources.add(SOURCE_INVOCATION_LEDGER)
+        return task
+    diagnosis = diagnose_runtime_failure(
+        started_at=task.started_at,
+        finished_at=task.finished_at,
+        outcome=task.last_outcome,
+        error_summary=task.last_error_summary,
+        run_agent=task.agent,
+        invocation_events=events,
+    )
+    if diagnosis is None:
+        return task
+    return replace(
+        task,
+        failure_stage=diagnosis.stage,
+        failure_reason=diagnosis.reason,
+        failed_executors=diagnosis.failed_executors,
+    )
+
+
 def _task_sort_key(task: RuntimeTask) -> tuple[int, float, str, int]:
     """看板排序键：状态优先级 → 开始时间倒序 → 仓库 → Issue 编号。"""
     parsed_start = parse_runtime_timestamp(task.started_at)
@@ -653,8 +703,12 @@ def build_runtime_task_summary(
     visible_tasks = tuple(tasks[:max_rows])
     invocation_store = resolve_invocation_store(run_history_store)
     visible_tasks = tuple(
-        _enrich_from_unclosed_invocation(
-            task,
+        _enrich_from_failed_invocation(
+            _enrich_from_unclosed_invocation(
+                task,
+                invocation_store=invocation_store,
+                unavailable_sources=unavailable_sources,
+            ),
             invocation_store=invocation_store,
             unavailable_sources=unavailable_sources,
         )

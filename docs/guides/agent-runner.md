@@ -4289,10 +4289,12 @@ PR 的入口，不再把「没有开放 PR」误显示成「从未交付 PR」�
 状态标签分桶，关闭状态优先于残留标签。`agent/blocked` 显示为「阻塞」，`agent/failed` 显示为
 「失败」；前者表示需要人工决策，后者表示本轮执行失败，两者应分别排查。「已完成」仅表示运行账本
 记录了成功终态。状态来源根据 Issue 关闭状态、当前监控标签或运行账本终态显示；监控异常类型单独放在
-`anomaly_types`，不会替换状态来源，也不直接充当失败原因。阶段优先采用最近一次 attempt 记录的失败环节；
-没有时回退到 Issue 时间线最后一条阶段事件。阶段说明描述该环节的职责，例如
+`anomaly_types`，不会替换状态来源，也不直接充当失败原因。失败任务若调用账本确认了失败的 Agent 调用，
+阶段显示该调用所属的生命周期阶段；否则阶段优先采用最近一次 attempt 记录的失败环节，再回退到 Issue 时间线
+最后一条阶段事件。阶段说明描述该环节的职责，例如
 `post_pr_rework_requested` 显示为「PR 后返工请求」，表示 PR 检查后需要继续修改或同步分支；
-具体失败原因仍应查看状态来源和运行详情。
+运行详情展示原始运行错误摘要。只有调用账本确认失败由 Agent 执行器调用导致时，才提供切换执行器续跑；
+验证命令等确定性流程失败仍使用普通重试或现有修复入口。
 快照未收录时，运行账本和未收口的生命周期账本只补充最近 7 天内开始的记录。超出窗口的未收口
 记录不再作为当前运行任务计数，历史复盘仍使用统计页。
 
@@ -4320,7 +4322,7 @@ Overview 还会按 severity 汇总 `anomaly_count` 和 `anomaly_summary`（`warn
 
 ### 建议 CLI 文本
 
-每个 Issue 详情区都会列出当前状态推荐的 `kc` 命令文本（如 `kc supervise`）。命令旁有**复制**按钮，但**不直接执行**——所有恢复动作仍走 CLI，保留操作审计、避免 UI 端任意 shell。
+监控 Issue 详情区会列出当前状态推荐的 `kc` 命令文本（如 `kc supervise`）。命令旁有**复制**按钮，但该详情区**不直接执行**恢复动作；管理终端的白名单操作见下一节。
 
 ### 显式非目标
 
@@ -4341,7 +4343,7 @@ Overview 还会按 severity 汇总 `anomaly_count` 和 `anomaly_summary`（`warn
 | 页面 | 路由 | 能力 |
 |---|---|---|
 | Backlog | `/app/backlog` | **首屏落点**。左侧受管理仓库栏 + 右侧当前仓库的 PRD 队列（依赖图 / 时间轴 / 列表三视图） |
-| 总览 | `/app/dashboard` | 队列监控 + 每仓库完成度摘要 + failed/blocked Issue 的重试/继续按钮 |
+| 总览 | `/app/dashboard` | 队列监控 + 每仓库完成度摘要 + failed Issue 的普通重试或执行器切换续跑、blocked Issue 继续按钮 |
 | 进程 | `/app/processes` | 启停每个仓库的 runner 进程，实时查看进程日志（offset 轮询） |
 | 统计 | `/app/stats` | 实时完成度、运行趋势、Agent / 预设 attempt 表现、整项任务耗时、PRD 生命周期与 Token 用量 |
 | 项目 | `/app/repositories` | 仓库 registry 列表 / 添加 / 启停（写回 `config.toml`）+ 审计日志 |
@@ -4428,6 +4430,7 @@ kc console --api-only --no-browser
 | `run_once` / `review_once` | 启动一次性托管子进程（dashboard 仓库卡片「跑一轮」「复核一轮」即映射到这两个动作，以托管进程形态呈现于「进程」页，可看日志、可停止，**不产生常驻 daemon**） |
 | `stop_process` | SIGTERM 停止托管进程，超时升级 SIGKILL |
 | `retry_failed` | 把 failed Issue 的 label 翻转回 ready（与手工操作等价） |
+| `retry_failed_with_executor` | 仅管理终端提供：最近一次运行的调用账本确认 Agent 执行器调用失败后，按失败阶段选择另一个已安装的 run 执行器续跑；阶段覆盖保存在本机 SQLite，Runner 成功认领 Issue 后消费一次。确定性验证失败和调用账本无法确认执行器失败的情况不提供此动作；CLI 当前没有等价的一次性阶段覆盖入口 |
 | `recover_failed_publish` | 复用 CLI `kc recover` 的既有恢复用例，把发布失败的 Issue 重新推 PR（不可恢复时返回明确失败） |
 | `blocked_continue` | 启动一次性 `kc blocked-continue` 托管子进程 |
 | `enqueue_ready` | backlog「加入就绪」：无关联 Issue 时建 Issue、随后打 `agent/ready`，**绝不启动 runner**（队列资格交给 autopilot） |
@@ -4437,6 +4440,8 @@ kc console --api-only --no-browser
 | `registry_remove` | 停该仓库常驻进程后删除 registry 条目；只删注册，不删本地仓库目录 |
 
 控制台中的启动、停止、仓库变更等确认操作，在 KedaCode 桌面端通过系统对话框呈现，网页端使用浏览器确认框。取消确认不会发送操作请求。
+
+失败 Issue 详情会展示运行摘要与调用账本确认的失败阶段、执行器和错误原因。执行器切换续跑会重新排入 ready 队列，并在 Runner 认领后仅覆盖该阶段一次；任务已有提交或检查点仍由原有续跑流程复用。普通「重试」不设置执行器覆盖，继续沿用仓库默认路由。
 
 故意不支持：任意 shell 命令、任意 label 编辑、PR merge、worktree 删除。
 这些要么风险不可枚举（任意 shell），要么会绕过 workflow 状态机

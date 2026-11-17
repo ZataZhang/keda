@@ -353,6 +353,36 @@ class IRunHistoryStore(ABC):
         ...
 
 
+class IIssueRetryOverrideStore(ABC):
+    """本机管理终端请求的单次生命周期执行器覆盖存储端口。"""
+
+    @abstractmethod
+    def set_issue_retry_override(
+        self, *, repo_id: str, issue_number: int, stage: str, executor: str
+    ) -> None:
+        """保存或替换某个 Issue 下一次续跑的执行器覆盖。"""
+        ...
+
+    @abstractmethod
+    def get_issue_retry_override(
+        self, *, repo_id: str, issue_number: int
+    ) -> tuple[str, str] | None:
+        """读取待消费覆盖；在 GitHub 认领成功前不消费。"""
+        ...
+
+    @abstractmethod
+    def pop_issue_retry_override(
+        self, *, repo_id: str, issue_number: int
+    ) -> tuple[str, str] | None:
+        """原子消费 Issue 覆盖并返回 ``(stage, executor)``。"""
+        ...
+
+    @abstractmethod
+    def clear_issue_retry_override(self, *, repo_id: str, issue_number: int) -> None:
+        """删除待消费覆盖，例如切换回普通重试时。"""
+        ...
+
+
 @dataclass(frozen=True)
 class PrdLifecycleRunRecord:
     """一次 PRD 生命周期的稳定身份与终态（追加账本的 run 行）。

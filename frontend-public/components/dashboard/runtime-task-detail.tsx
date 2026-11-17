@@ -23,17 +23,23 @@ import {
 } from "@/components/backlog/prd-lifecycle-format";
 import { explainImpactStatus } from "@/components/backlog/prd-progress-strip";
 import { fetchRunExecutionDetails } from "@/lib/api/console";
+import { fetchLifecycleSettings } from "@/lib/api/lifecycleSettings";
 import { fetchPrdProgress } from "@/lib/api/backlog";
 import { openExternalUrl } from "@/lib/open-external";
 import type {
   BacklogPrdProgress,
+  AgentAvailabilityEntry,
   AnomalyType,
   RuntimeTaskEntry,
   RunInvocationDetailEntry,
 } from "@/lib/api/types";
 import { cn, formatLocalDateTime } from "@/lib/utils";
 
-import { RuntimeTaskPhaseDescription, RuntimeTaskPhase } from "./runtime-task-phase";
+import {
+  RuntimeTaskPhaseDescription,
+  RuntimeTaskPhase,
+  runtimePhaseLabel,
+} from "./runtime-task-phase";
 import { RuntimeTaskDuration, RuntimeTaskObservation, RuntimeTaskWatch, runtimeStatusPresentation } from "./runtime-task-list";
 
 /** `worktree_status` 独有原因：`impact_status` 里没有对应取值，只能在这里补。 */
@@ -262,6 +268,10 @@ const IMPACT_WEAK_SIGNAL_HINT =
 interface RuntimeTaskDetailProps {
   /** 当前选中任务。 */
   task: RuntimeTaskEntry;
+  /** 用户选择新执行器后请求后端按该生命周期阶段续跑。 */
+  onRetryWithExecutor?: (stage: string, executor: string) => void;
+  /** 阶段执行器续跑请求是否正在提交。 */
+  retryPending?: boolean;
   /** 追加到根容器的布局类；抽屉等受高度约束的宿主用它撑满可用空间。 */
   className?: string;
 }
@@ -272,11 +282,21 @@ interface RuntimeTaskDetailProps {
  * @param props - 选中任务。
  * @returns 详情面板（观测摘要、触达弱信号、实时输出、折叠的结构化调用）。
  */
-export function RuntimeTaskDetail({ task, className }: RuntimeTaskDetailProps) {
+export function RuntimeTaskDetail({
+  task,
+  onRetryWithExecutor,
+  retryPending = false,
+  className,
+}: RuntimeTaskDetailProps) {
   const presentation = runtimeStatusPresentation(task.status, task.waiting_reason);
   const [invocationsOpen, setInvocationsOpen] = useState(true);
   const [invocations, setInvocations] = useState<RunInvocationDetailEntry[] | null>(null);
   const [invocationError, setInvocationError] = useState<string | null>(null);
+  const [executorChooserOpen, setExecutorChooserOpen] = useState(false);
+  const [executorChoices, setExecutorChoices] = useState<AgentAvailabilityEntry[] | null>(null);
+  const [executorChoice, setExecutorChoice] = useState("");
+  const [executorChoiceError, setExecutorChoiceError] = useState<string | null>(null);
+  const [executorChoicesLoading, setExecutorChoicesLoading] = useState(false);
   // 调用账本要有一段收口的运行窗口才能按时间窗查询；没窗口不是读取失败，
   // 而是「现在还没法读」，所以留在渲染层说明，不进状态机。
   const hasRunWindow = Boolean(task.started_at && task.finished_at);
@@ -326,6 +346,32 @@ export function RuntimeTaskDetail({ task, className }: RuntimeTaskDetailProps) {
   const identity = `${task.repo_display_name ?? task.repo_id}#${task.issue_number}`;
   const issueUrl = task.issue_url;
   const prUrl = task.pr_url;
+
+  async function openExecutorChooser() {
+    setExecutorChooserOpen(true);
+    setExecutorChoices(null);
+    setExecutorChoiceError(null);
+    setExecutorChoicesLoading(true);
+    try {
+      const settings = await fetchLifecycleSettings({ scope: "repository", repoId: task.repo_id });
+      const failedExecutors = new Set(task.failed_executors ?? []);
+      const choices = settings.agent_availability.filter(
+        (entry) =>
+          entry.available &&
+          entry.declared_profiles.includes("run") &&
+          !failedExecutors.has(entry.agent) &&
+          !(task.failure_stage === "verifier" && entry.agent === task.agent),
+      );
+      setExecutorChoices(choices);
+      setExecutorChoice(choices[0]?.agent ?? "");
+    } catch (error: unknown) {
+      setExecutorChoiceError(
+        error instanceof Error ? error.message : "无法读取当前仓库的可用执行器。",
+      );
+    } finally {
+      setExecutorChoicesLoading(false);
+    }
+  }
 
   return (
     <div className={cn("flex min-h-0 flex-col gap-3", className)} data-testid="runtime-task-detail">
@@ -389,6 +435,84 @@ export function RuntimeTaskDetail({ task, className }: RuntimeTaskDetailProps) {
                     : "最近运行错误"}
               ：{task.last_error_summary}
             </p>
+          ) : null}
+          {task.failure_reason ? (
+            <p
+              className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200"
+              data-testid="runtime-task-diagnosed-failure"
+            >
+              失败阶段：{task.failure_stage ? runtimePhaseLabel(task.failure_stage) : "未知"}。{task.failure_reason}
+            </p>
+          ) : null}
+          {task.status === "failed" && task.failure_stage && onRetryWithExecutor ? (
+            <div className="rounded-md border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950">
+              <p className="text-sm text-amber-900 dark:text-amber-100">
+                这是执行器调用失败，系统没有收到本阶段可用的完成结果。选择一个本阶段尚未尝试的执行器后，
+                Runner 会重新进入任务流程并复用已有提交或检查点。
+              </p>
+              {!executorChooserOpen ? (
+                <Button
+                  className="mt-2"
+                  variant="outline"
+                  size="sm"
+                  disabled={retryPending}
+                  onClick={() => void openExecutorChooser()}
+                  data-testid="runtime-task-switch-executor"
+                >
+                  切换执行器续跑
+                </Button>
+              ) : (
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  {executorChoicesLoading ? (
+                    <span className="text-sm text-amber-800 dark:text-amber-200">读取可用执行器…</span>
+                  ) : executorChoices && executorChoices.length > 0 ? (
+                    <>
+                      <label className="sr-only" htmlFor="runtime-retry-executor">
+                        选择续跑执行器
+                      </label>
+                      <select
+                        id="runtime-retry-executor"
+                        value={executorChoice}
+                        onChange={(event) => setExecutorChoice(event.target.value)}
+                        className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+                        data-testid="runtime-task-retry-executor-select"
+                      >
+                        {executorChoices.map((entry) => (
+                          <option key={entry.agent} value={entry.agent}>
+                            {entry.agent}
+                          </option>
+                        ))}
+                      </select>
+                      <Button
+                        size="sm"
+                        disabled={retryPending || !executorChoice}
+                        onClick={() => onRetryWithExecutor(task.failure_stage as string, executorChoice)}
+                        data-testid="runtime-task-retry-with-executor"
+                      >
+                        {retryPending ? "排入续跑…" : "使用该执行器续跑"}
+                      </Button>
+                    </>
+                  ) : (
+                    <span className="text-sm text-amber-800 dark:text-amber-200">
+                      没有未尝试且已安装的 run 执行器；请先在执行器设置中注册或安装其他执行器。
+                    </span>
+                  )}
+                  {executorChoiceError ? (
+                    <span className="text-sm text-red-700 dark:text-red-300" role="alert">
+                      {executorChoiceError}
+                    </span>
+                  ) : null}
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={retryPending}
+                    onClick={() => setExecutorChooserOpen(false)}
+                  >
+                    取消
+                  </Button>
+                </div>
+              )}
+            </div>
           ) : null}
           <RuntimeTaskAnomalies anomalyTypes={task.anomaly_types ?? []} />
           <div className="flex flex-wrap gap-x-4 gap-y-1">

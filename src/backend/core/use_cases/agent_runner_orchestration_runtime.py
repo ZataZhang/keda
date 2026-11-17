@@ -89,6 +89,10 @@ from backend.core.use_cases.agent_runner_prd_activity import (
 from backend.core.use_cases.agent_runner_queue import issue_priority, sort_ready_issues
 from backend.core.use_cases.agent_runner_validation_gate import process_validation_gate
 from backend.core.use_cases.agent_runner_workflow import claim_blocked_issue
+from backend.core.use_cases.issue_retry_overrides import (
+    IssueRetryOverrideRequest,
+    prepare_issue_retry_override,
+)
 from backend.core.use_cases.agent_runner_worktree_probe import (
     _has_existing_local_commit_ready_for_publish,
     _worktree_needs_rebase_recovery,
@@ -142,15 +146,24 @@ def _process_single_issue(
     # Issue 引用的 PRD 文件解析头部 lifecycle_agents 块并回填，使实现 / 审核 / 监督
     # 等阶段的解析函数无需额外参数即可读到 PRD 级覆盖（最高优先级）。
     issue = attach_prd_lifecycle_overrides(issue, repo_path)
+    issue, retry_override_claim = prepare_issue_retry_override(
+        IssueRetryOverrideRequest(
+            issue=issue,
+            issue_kind=issue_kind,
+            repo_id=effective_repo_id,
+            config=config,
+            run_history_store=run_history_store,
+        )
+    )
     lifecycle_prd_path = resolve_lifecycle_prd_path(issue)
     selected_agent = choose_agent(issue, config, agent)
+    if retry_override_claim is not None:
+        retry_override_claim.validate_selected_executor(selected_agent)
     output_view.register_issue(issue.number, selected_agent)
     run_started_at = datetime.now(timezone.utc)
     used_agent = selected_agent
 
-    # 生命周期观测（旁路）：本轮 runner 领到该 Issue，记为一次执行开始。
-    # run id 由 repo_id + Issue 编号确定性推导，与 backlog 启动侧写入的 run
-    # 完全一致，因此这里不会新建重复 run。
+    # run id 与 backlog 启动侧一致，避免重复创建生命周期记录。
     record_lifecycle_event(
         store=run_history_store,
         repo_id=effective_repo_id,
@@ -256,6 +269,12 @@ def _process_single_issue(
     prd_activity_lease = PrdActivityLease(
         repo_path, lifecycle_prd_path, issue.number, selected_agent
     )
+
+    def _on_issue_claimed() -> None:
+        if retry_override_claim is not None:
+            retry_override_claim.consume()
+        prd_activity_lease.start()
+
     stage_selection = PublishStageSelection()
     try:
         # Ready Issue 先完成 claim election，再取得 PRD 锁。并发的 daemon 与
@@ -279,7 +298,7 @@ def _process_single_issue(
                         publish_stage=publish_stage,
                         stage_selection=stage_selection,
                         repo_id=effective_repo_id,
-                        on_claimed=prd_activity_lease.start,
+                        on_claimed=_on_issue_claimed,
                     ),
                     on_attempt_recorded=_on_attempt_recorded,
                     on_agent_usage=_emit_agent_usage_event,

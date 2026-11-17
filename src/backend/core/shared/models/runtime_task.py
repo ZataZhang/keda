@@ -97,6 +97,9 @@ class RuntimeTask:
         duration_seconds: 最近一次运行耗时；无法计算时为 ``None``。
         last_outcome: 运行账本记录的终态（completed / failed / blocked / deferred）。
         last_error_summary: 最近一次已收口失败或阻塞原因；新执行已开始时为空。
+        failure_stage: 调用账本确认的失败生命周期阶段；无法确认时为空。
+        failure_reason: 由失败阶段、执行器和调用终态归纳的短原因。
+        failed_executors: 本次运行在失败阶段尝试过且调用未成功的执行器。
         labels: 监控看到的 `agent/*` 标签，供前端保持一致的状态文字。
         evidence_video_available: 该 Issue 是否有可播放的本地证据视频；没有证据视频时为 False。
         evidence_page_available: 该 Issue 是否有本地或证据分支上的人审页（human-review-checklist.md 等）。
@@ -127,6 +130,9 @@ class RuntimeTask:
     duration_seconds: float | None = None
     last_outcome: str | None = None
     last_error_summary: str | None = None
+    failure_stage: str | None = None
+    failure_reason: str | None = None
+    failed_executors: tuple[str, ...] = ()
     labels: tuple[str, ...] = ()
     evidence_video_available: bool = False
     evidence_page_available: bool = False
