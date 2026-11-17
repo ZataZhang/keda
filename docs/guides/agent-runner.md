@@ -4200,7 +4200,7 @@ per-repo overview JSON 与 `scanned_at`），因此即使 `gh` 慢或断网也�
 
 - 循环由 `kc console` 的 FastAPI lifespan 启动与回收（进程内唯一），导入路由模块不会产生任何线程。
 - 每个周期对当前启用仓库做一次全量扫描（仍走 `GET /overview` 的同一套构建逻辑），把**已经构建好的** payload 直接写回快照，不为写库重复扫描。
-- 同一仓库同一时刻只允许一次扫描：周期同步与手动刷新共用一个按仓库协调器，不同仓库可并行。
+- 同一仓库同一时刻只允许一次扫描：周期同步与手动远端同步共用一个按仓库协调器，不同仓库可并行。
 - 全新环境没有快照时，由后端幂等触发一次首扫，前端只显示"尚未同步/正在同步"并轮询结果，不会重复创建扫描任务。
 - 同步或写库失败时保留该仓库的旧快照、其余仓库照常更新，失败进入 job/批次状态并记日志，不伪装成刷新成功。
 - 已从 registry 删除或禁用的仓库即使仍有历史快照行，也不会重新出现在页面上。
@@ -4220,13 +4220,13 @@ PATCH  /api/v1/agent-runner/console/monitor/settings   {sync_enabled, sync_inter
 `sync_interval_seconds` 合法区间为 300–3600 秒（5 分钟下限），两个字段都必填。下限不是
 随手取的：每轮同步包含队列、评论、关联 PR 与检查状态等多次 GitHub REST 查询，实际调用量随
 Issue 数量、关联 PR、分页和重试变化，并与 daemon 和其他 kc 操作共享 API 配额。保存成功后后端立即唤醒
-调度循环，按新间隔重算下一次运行时间；关闭自动同步后不再有任何后台扫描，手动刷新仍可用。
+调度循环，按新间隔重算下一次运行时间；关闭自动同步后不再有任何后台扫描，手动远端同步仍可用。
 这份设置是全局的：它同时约束 Dashboard 概览与 Backlog 列表两条后台同步循环
 （见「Backlog（待办队列）→ 本地快照与后台刷新」），两条循环共享设置但各自独立调度。
 
-### 「刷新全部」的请求链与数据范围
+### 「立即远端同步」的请求链与数据范围
 
-值守看板与仓库监控共用同一个「刷新全部」入口；当前显示哪种视图不改变扫描范围。
+值守看板与仓库监控共用同一个「立即远端同步」入口；当前显示哪种视图不改变扫描范围。
 点击后，前端请求 `GET /api/v1/agent-runner/overview/per-repo`，后端重新读取仓库配置，
 为当前启用且路径可访问的各仓库创建后台 job。同仓库已有扫描时复用正在执行的扫描。
 
@@ -4251,7 +4251,7 @@ Issue 数量、关联 PR、分页和重试变化，并与 daemon 和其他 kc �
 
 前端通过 `GET /api/v1/agent-runner/overview/jobs/{job_id}` 轮询任务状态，每个被轮询的
 job 约每 5 秒查一次，同时最多轮询 3 个 job；这个限制只约束前端轮询，不是后端扫描仓库数的上限。
-刷新期间保留旧数据，所有 job 结束后重新读取 `GET /api/v1/agent-runner/overview/snapshots`，
+同步期间保留旧数据，所有 job 结束后重新读取 `GET /api/v1/agent-runner/overview/snapshots`，
 立即展示已写入的快照。页面原有的每 15 秒本地快照与运行摘要轮询也继续执行。
 
 扫描结束后，前端还会请求 `GET /api/v1/agent-runner/console/stats/overview` 更新完成度统计。
@@ -4261,7 +4261,7 @@ job 约每 5 秒查一次，同时最多轮询 3 个 job；这个限制只约束
 一次刷新不是一次 GitHub 请求：主扫描包含每仓库六类标签查询、每个队列 Issue 的评论、
 按条件查询的 PR 与 CI、队列外近期 Issue 状态补查，以及缓存失效时的完成度统计。
 分页、重试和客户端辅助请求也可能增加实际调用量。刷新只观测数据并保存本地快照，不启动 Agent，
-不修改 GitHub 标签、评论、PR 或工作树。按钮倒计时表示下一次后台同步；手动刷新可提前触发扫描。
+不修改 GitHub 标签、评论、PR 或工作树。按钮倒计时表示下一次后台同步；手动远端同步可提前触发扫描。
 
 源码定位：`frontend-public/app/(app)/app/dashboard/page.tsx` 的 `handleRefreshAll`；
 `src/backend/api/routes/agent_runner.py` 的 `_run_overview_job`、`_scan_repository_and_persist`

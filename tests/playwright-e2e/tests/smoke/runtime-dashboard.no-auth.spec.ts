@@ -247,7 +247,7 @@ test.describe('runtime board (mocked API)', () => {
     await page.goto('/app/dashboard')
     await expect(page.getByTestId('runtime-task-row-keda-main-19')).toBeVisible()
     const readsBeforeRefresh = runtimeReads
-    await page.getByRole('button', { name: /^刷新全部/ }).click()
+    await page.getByRole('button', { name: /^立即远端同步/ }).click()
     await expect(page.getByTestId('runtime-task-row-keda-main-19')).toHaveCount(0)
     await expect(page.getByTestId('runtime-filter-closed')).toContainText('1')
     expect(runtimeReads).toBe(readsBeforeRefresh + 1)
