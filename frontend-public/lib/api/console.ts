@@ -131,11 +131,20 @@ export async function executeRepositoryAction(
 export async function executeIssueAction(
   repoId: string,
   issueNumber: number,
-  action: "retry_failed" | "blocked_continue" | "recover_failed_publish",
+  action:
+    | "retry_failed"
+    | "retry_failed_with_executor"
+    | "blocked_continue"
+    | "recover_failed_publish",
+  retry?: { lifecycleStage: string; executor: string },
 ): Promise<ConsoleActionResult> {
   return post<ConsoleActionResult>(
     `${BASE_PATH}/console/repositories/${encodeURIComponent(repoId)}/issues/${issueNumber}/actions`,
-    { action },
+    {
+      action,
+      lifecycle_stage: retry?.lifecycleStage,
+      executor: retry?.executor,
+    },
   );
 }
 

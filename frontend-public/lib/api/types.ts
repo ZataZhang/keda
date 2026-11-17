@@ -1660,6 +1660,12 @@ export type RuntimeTaskEntry = {
   last_outcome: string | null;
   /** 最近一次失败、阻塞或暂缓重试原因；旧后端未提供时为空。 */
   last_error_summary?: string | null;
+  /** 调用账本确认的失败生命周期阶段；仅执行器调用确实失败时提供。 */
+  failure_stage?: string | null;
+  /** 由失败阶段、执行器和调用终态归纳的简短失败原因。 */
+  failure_reason?: string | null;
+  /** 本次运行在失败阶段尝试过且调用未成功的执行器。 */
+  failed_executors?: string[];
   labels: string[];
   /** 该任务是否有可播放的本地证据视频；没有证据或旧后端未提供时为 false/缺失。 */
   evidence_video_available?: boolean;

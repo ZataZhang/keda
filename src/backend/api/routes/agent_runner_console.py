@@ -293,7 +293,7 @@ class RepositoryActionRequest(BaseModel):
 
 
 class IssueActionRequest(BaseModel):
-    """Issue 级动作请求体（retry_failed / blocked_continue / recover_failed_publish / take_over_verifier）。"""
+    """Issue 级动作请求体（失败重试 / 继续 / 发布恢复 / verifier 接管）。"""
 
     action: str = Field(min_length=1)
     # 绑定长度上限由 handler 校验（见 :func:`_validate_issue_action_bindings`），不写进
@@ -301,6 +301,8 @@ class IssueActionRequest(BaseModel):
     # agent-runner.md 的 take_over_verifier 段），模型层截断会被 FastAPI 变成 422。
     run_id: str | None = None
     head_sha: str | None = None
+    lifecycle_stage: str | None = Field(default=None, max_length=64)
+    executor: str | None = Field(default=None, max_length=64)
 
 
 #: 绑定字段长度上限（与 run id / git SHA 的实际产生格式同级），超出即畸形请求。
@@ -391,6 +393,8 @@ def execute_console_issue_action(
             process_runner=process_runner,
             run_id=request.run_id,
             head_sha=request.head_sha,
+            lifecycle_stage=request.lifecycle_stage,
+            executor=request.executor,
         )
     except ConsoleActionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

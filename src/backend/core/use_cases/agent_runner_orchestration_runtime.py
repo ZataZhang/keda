@@ -89,6 +89,8 @@ from backend.core.use_cases.agent_runner_prd_activity import (
 from backend.core.use_cases.agent_runner_queue import issue_priority, sort_ready_issues
 from backend.core.use_cases.agent_runner_validation_gate import process_validation_gate
 from backend.core.use_cases.agent_runner_workflow import claim_blocked_issue
+from backend.core.use_cases.issue_retry_overrides import resolve_issue_retry_override_store
+from backend.core.use_cases.runtime_failure_diagnosis import RETRYABLE_LIFECYCLE_STAGES
 from backend.core.use_cases.agent_runner_worktree_probe import (
     _has_existing_local_commit_ready_for_publish,
     _worktree_needs_rebase_recovery,
@@ -142,8 +144,39 @@ def _process_single_issue(
     # Issue 引用的 PRD 文件解析头部 lifecycle_agents 块并回填，使实现 / 审核 / 监督
     # 等阶段的解析函数无需额外参数即可读到 PRD 级覆盖（最高优先级）。
     issue = attach_prd_lifecycle_overrides(issue, repo_path)
+    retry_override_store = resolve_issue_retry_override_store(run_history_store)
+    retry_override = (
+        retry_override_store.get_issue_retry_override(
+            repo_id=effective_repo_id,
+            issue_number=issue.number,
+        )
+        if retry_override_store is not None and issue_kind == "ready"
+        else None
+    )
+    if retry_override is not None:
+        override_stage, override_executor = retry_override
+        if override_stage not in RETRYABLE_LIFECYCLE_STAGES:
+            raise ValueError(f"Unsupported one-time retry lifecycle stage '{override_stage}'.")
+        agent_spec = config.agents.get(override_executor)
+        if agent_spec is None or "run" not in agent_spec.profiles:
+            raise ValueError(
+                f"One-time retry executor '{override_executor}' is no longer registered "
+                "with a run profile. Choose a registered executor and retry again."
+            )
+        lifecycle_overrides = dict(issue.lifecycle_overrides)
+        lifecycle_overrides[override_stage] = override_executor
+        issue = replace(issue, lifecycle_overrides=tuple(lifecycle_overrides.items()))
     lifecycle_prd_path = resolve_lifecycle_prd_path(issue)
     selected_agent = choose_agent(issue, config, agent)
+    if (
+        retry_override is not None
+        and override_stage == "verifier"
+        and override_executor == selected_agent
+    ):
+        raise ValueError(
+            f"Verifier executor '{override_executor}' matches the implementation executor; "
+            "choose a different verifier to preserve independent review."
+        )
     output_view.register_issue(issue.number, selected_agent)
     run_started_at = datetime.now(timezone.utc)
     used_agent = selected_agent
@@ -256,6 +289,28 @@ def _process_single_issue(
     prd_activity_lease = PrdActivityLease(
         repo_path, lifecycle_prd_path, issue.number, selected_agent
     )
+    retry_override_consumed = False
+
+    def _on_issue_claimed() -> None:
+        """只在 GitHub claim 成功后消费本次操作的阶段覆盖。"""
+        nonlocal retry_override_consumed
+        if (
+            retry_override is not None
+            and retry_override_store is not None
+            and not retry_override_consumed
+        ):
+            consumed_override = retry_override_store.pop_issue_retry_override(
+                repo_id=effective_repo_id,
+                issue_number=issue.number,
+            )
+            if consumed_override != retry_override:
+                raise RuntimeError(
+                    "The one-time executor override changed before the Issue claim completed; "
+                    "refresh the dashboard and retry."
+                )
+            retry_override_consumed = True
+        prd_activity_lease.start()
+
     stage_selection = PublishStageSelection()
     try:
         # Ready Issue 先完成 claim election，再取得 PRD 锁。并发的 daemon 与
@@ -279,7 +334,7 @@ def _process_single_issue(
                         publish_stage=publish_stage,
                         stage_selection=stage_selection,
                         repo_id=effective_repo_id,
-                        on_claimed=prd_activity_lease.start,
+                        on_claimed=_on_issue_claimed,
                     ),
                     on_attempt_recorded=_on_attempt_recorded,
                     on_agent_usage=_emit_agent_usage_event,

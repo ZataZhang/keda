@@ -109,7 +109,9 @@ def _score(
     )
 
 
-def test_fresh_database_migrates_to_v16_with_repeatable_evaluation_tables(tmp_path: Path) -> None:
+def test_fresh_database_migrates_to_current_schema_with_repeatable_evaluation_tables(
+    tmp_path: Path,
+) -> None:
     store = SqliteConsoleStore(tmp_path / "console.db")
     store.save_evaluation_run(_run())
     assert store.get_evaluation_run("eval-a") is not None
@@ -119,8 +121,9 @@ def test_fresh_database_migrates_to_v16_with_repeatable_evaluation_tables(tmp_pa
             row[0]
             for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
         }
-    assert version == _SCHEMA_VERSION == 16
+    assert version == _SCHEMA_VERSION == 17
     assert {"evaluation_run", "evaluation_result", "evaluation_score"} <= tables
+    assert "issue_retry_overrides" in tables
     with sqlite3.connect(tmp_path / "console.db") as connection:
         run_columns = {row[1] for row in connection.execute("PRAGMA table_info(evaluation_run)")}
         result_columns = {

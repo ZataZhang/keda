@@ -137,7 +137,7 @@ export function runtimePhaseDescription(phase: string | null): string {
 
 /** 在状态旁呈现最近记录的阶段；没有记录时不重复展示占位徽章。 */
 export function RuntimeTaskPhase({ task }: { task: RuntimeTaskEntry }) {
-  const phase = task.phase;
+  const phase = task.status === "failed" ? task.failure_stage ?? task.phase : task.phase;
   if (!phase) return null;
   const phaseDescription = runtimePhaseDescription(phase);
   return (
@@ -155,9 +155,10 @@ export function RuntimeTaskPhase({ task }: { task: RuntimeTaskEntry }) {
 
 /** 阶段解释始终描述记录的环节；历史任务缺少阶段时不铺重复的未知提示。 */
 export function RuntimeTaskPhaseDescription({ task, className }: { task: RuntimeTaskEntry; className?: string }) {
-  if (!task.phase && (task.status === "closed" || task.status === "completed")) return null;
-  const description = task.phase
-    ? `环节说明：${runtimePhaseDescription(task.phase)}`
+  const phase = task.status === "failed" ? task.failure_stage ?? task.phase : task.phase;
+  if (!phase && (task.status === "closed" || task.status === "completed")) return null;
+  const description = phase
+    ? `环节说明：${runtimePhaseDescription(phase)}`
     : task.status === "waiting" && task.waiting_reason === "queued"
       ? "等待 Runner 认领，尚无执行阶段记录。"
       : "暂无阶段记录；可在任务详情中查看运行记录。";

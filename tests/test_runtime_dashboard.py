@@ -14,6 +14,7 @@ import pytest
 
 from backend.core.shared.interfaces.runner_console import (
     AttemptRecord,
+    InvocationEventRecord,
     MonitorSnapshotEntry,
     PrdLifecycleEventRecord,
     PrdLifecycleRunRecord,
@@ -318,6 +319,56 @@ def test_historical_failure_does_not_imply_current_blockage(
     assert runtime_payload["status_counts"]["blocked"] == 0
     assert runtime_payload["tasks"][0]["status"] == expected_status.value
     assert runtime_payload["tasks"][0]["last_outcome"] == outcome
+
+
+def test_failed_executor_run_includes_diagnosis_and_failed_executors(tmp_path) -> None:
+    """失败看板摘要由实际 invocation 事件填充可读原因与阶段执行器。"""
+    store = _store(tmp_path)
+    _seed_snapshot(store, "keda", [_issue(321, labels=["agent/failed"])])
+    started_at = _iso(-30)
+    finished_at = _iso(-20)
+    store.append_run(
+        RunRecord(
+            repo_id="keda",
+            repo_path="/tmp/keda",
+            issue_number=321,
+            trigger="console_run",
+            agent="codex",
+            outcome="failed",
+            error_summary="verifier request rate limit: 429 too many requests",
+            started_at=started_at,
+            finished_at=finished_at,
+            duration_seconds=600,
+        )
+    )
+    invocation_id = "verifier-1"
+    for event_type, occurred_at, detail in (
+        ("invocation_started", started_at, {}),
+        ("invocation_finished", finished_at, {"outcome": "error"}),
+    ):
+        store.append_invocation_event(
+            InvocationEventRecord(
+                run_id="keda#issue-321#run-1",
+                event_key=f"{invocation_id}:{event_type}",
+                event_type=event_type,
+                invocation_id=invocation_id,
+                repo_id="keda",
+                issue_number=321,
+                phase="verification",
+                role="verifier",
+                agent="claude",
+                occurred_at=occurred_at,
+                detail_json=json.dumps(detail),
+            )
+        )
+
+    task = _summary(store, ["keda"]).tasks[0]
+
+    assert task.failure_stage == "verifier"
+    assert task.failed_executors == ("claude",)
+    assert task.failure_reason is not None
+    assert "provider 额度耗尽或请求被限流" in task.failure_reason
+    assert "实现执行器：codex" in task.failure_reason
 
 
 def test_unregistered_repository_history_stays_off_the_board(tmp_path) -> None:

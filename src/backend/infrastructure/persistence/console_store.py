@@ -5,7 +5,7 @@
 - 使用 stdlib ``sqlite3`` 而非 SQLAlchemy/alembic：CLI 直跑 ``kc run``
   也要写运行记录，不能要求 PostgreSQL 常驻；本地单文件零依赖。
 - WAL + busy_timeout 容忍多个 runner 进程并发收尾写库。
-- 通过 ``PRAGMA user_version`` 做就地迁移（当前版本 16：v5 新增
+- 通过 ``PRAGMA user_version`` 做就地迁移（当前版本 17：v5 新增
   ``prd_lifecycle_runs`` 与 ``prd_lifecycle_events`` 两张 PRD 生命周期账本表；
   v6 为 ``attempt_records`` 附加可空 ``preset`` / ``model`` 观测列；
   v7 把队列与设置两张表按新功能名重建；v8 为 ``prd_lifecycle_events`` 附加
@@ -16,7 +16,7 @@
   追加可空的 Issue 标题与 URL 快照；v14 新增单行模型 token 价格设置表；
   v15 新增模型评测三表 ``evaluation_run`` / ``evaluation_result`` /
   ``evaluation_score``；v16 为评测 run 增加重复次数与逐题冻结基线，结果表增加
-  ``repeat_index`` 并按重复序号重建唯一约束）。
+  ``repeat_index`` 并按重复序号重建唯一约束；v17 新增单次重试执行器覆盖表）。
 - 旁路记录（运行历史 / 审计 / attempt）的写入失败不允许向上抛出阻断
   runner 主流程，降级为日志警告；而 dashboard 事实读取路径（监控快照
   与同步设置）的写入失败必须抛给调用方，避免"刷新成功但数据没更新"。
@@ -63,11 +63,15 @@ from backend.infrastructure.persistence.console_store_takeover import (
     CREATE_ISSUE_RUN_CONTROL,
     IssueRunControlMixin,
 )
+from backend.infrastructure.persistence.console_store_retry_override import (
+    CREATE_ISSUE_RETRY_OVERRIDES,
+    IssueRetryOverrideStoreMixin,
+)
 
 _logger = logging.getLogger(__name__)
 
 
-_SCHEMA_VERSION = 16
+_SCHEMA_VERSION = 17
 
 _RUN_V13_ADD_ISSUE_TITLE = "ALTER TABLE run_records ADD COLUMN issue_title TEXT"
 _RUN_V13_ADD_ISSUE_URL = "ALTER TABLE run_records ADD COLUMN issue_url TEXT"
@@ -247,10 +251,12 @@ class SqliteConsoleStore(
     PrdLifecycleStoreMixin,
     InvocationEventStoreMixin,
     IssueRunControlMixin,
+    IssueRetryOverrideStoreMixin,
     EvaluationStoreMixin,
 ):
     """``IRunHistoryStore`` / ``IBacklogStore`` / ``IMonitorSnapshotStore`` /
-    ``IBacklogSnapshotStore`` / ``IConsoleModelPricingStore`` / ``IIssueRunControl``
+    ``IBacklogSnapshotStore`` / ``IConsoleModelPricingStore`` / ``IIssueRunControl`` /
+    ``IIssueRetryOverrideStore``
     的 SQLite 实现。
 
     各端口都以鸭子类型实现：本类不 import core，仅保证方法签名与 core
@@ -305,13 +311,13 @@ class SqliteConsoleStore(
             connection.close()
 
     def _migrate(self, connection: sqlite3.Connection) -> None:
-        # 两张表都带 IF NOT EXISTS，**无条件**幂等建表后再看版本号：机器级共享库
+        # 版本门外的表都带 IF NOT EXISTS，**无条件**幂等建表后再看版本号：机器级共享库
         # （~/.kedacode/console.db）的 user_version 可能被并行分支的同号迁移置满，
-        # 若只挂在 `current_version < 14` 分支上会被整体跳过，对应表的读写随即命中
-        # "no such table"。接管控制表 issue_run_control（Issue #278）不占用版本号，
-        # 建表恒在版本门之外（见 console_store_takeover）。
+        # 若只挂在版本分支上会被整体跳过，对应表读写随即命中 "no such table"。
+        # 接管控制表与单次执行器覆盖表不占用版本号，建表恒在版本门之外。
         connection.execute(_CREATE_MODEL_PRICING_SETTINGS)
         connection.execute(CREATE_ISSUE_RUN_CONTROL)
+        connection.execute(CREATE_ISSUE_RETRY_OVERRIDES)
         current_version_row = connection.execute("PRAGMA user_version").fetchone()
         current_version = int(current_version_row[0])
         if current_version >= _SCHEMA_VERSION:

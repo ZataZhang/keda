@@ -20,6 +20,7 @@ from backend.core.shared.models.agent_runner import (
     AppConfig,
     RepositoryRunContext,
 )
+from backend.core.use_cases.console_actions import ConsoleActionResult
 from backend.infrastructure.config.registry_editor import TomlRegistryEditor
 from backend.infrastructure.console.process_supervisor import (
     PidfileProcessSupervisor,
@@ -292,6 +293,35 @@ def test_issue_action_unknown_rejected_via_api(console_environment) -> None:
     audits = audit_response.json()["audits"]
     assert audits[0]["action"] == "merge_pr"
     assert audits[0]["result"] == "rejected"
+
+
+def test_retry_failed_with_executor_fields_reach_action_use_case(
+    console_environment, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """HTTP API accepts the stage/executor pair and forwards it to the action use case."""
+    captured: dict[str, object] = {}
+
+    def _capture_action(**kwargs):
+        captured.update(kwargs)
+        return ConsoleActionResult(
+            action="retry_failed_with_executor",
+            result="accepted",
+            detail="queued",
+        )
+
+    monkeypatch.setattr(console_routes, "execute_issue_action", _capture_action)
+    response = client.post(
+        "/api/v1/agent-runner/console/repositories/keda-main/issues/119/actions",
+        json={
+            "action": "retry_failed_with_executor",
+            "lifecycle_stage": "implementation",
+            "executor": "codex",
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured["lifecycle_stage"] == "implementation"
+    assert captured["executor"] == "codex"
 
 
 def test_registry_endpoints(console_environment, tmp_path: Path) -> None:
