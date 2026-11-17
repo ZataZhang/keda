@@ -19,13 +19,14 @@ from fastapi.testclient import TestClient
 import backend.api.routes.agent_runner as agent_runner_routes
 import backend.api.routes.agent_runner_console as console_routes
 from backend.api.app import app
-from backend.core.shared.interfaces.runner_console import MonitorSnapshotEntry
+from backend.core.shared.interfaces.runner_console import MonitorSnapshotEntry, RunRecord
 from backend.core.use_cases.monitor_snapshots import MonitorSyncCoordinator
 from backend.infrastructure.config.settings import (
     AgentRunnerConsoleSettings,
     AgentRunnerSettings,
 )
 from backend.infrastructure.persistence.console_store import SqliteConsoleStore
+from tests.support.relative_time import utc_minutes_ago
 
 client = TestClient(app)
 
@@ -101,6 +102,54 @@ def _read_snapshot_scanned_at(db_path: Path, repo_id: str) -> tuple[str] | None:
     finally:
         connection.close()
     return row
+
+
+def test_tracked_issue_scan_deduplicates_run_history_before_issue_cap(
+    monitor_environment: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """重复运行记录不能占满名额并漏掉较早但仍在窗口内的 Issue。"""
+    run_started_at = utc_minutes_ago(5).isoformat()
+    monitor_environment.store.append_run(
+        RunRecord(
+            repo_id="repo-a",
+            repo_path="/tmp/repo-a",
+            issue_number=10,
+            trigger="console_run",
+            agent="qoder",
+            outcome="failed",
+            error_summary=None,
+            started_at=run_started_at,
+            finished_at=run_started_at,
+            duration_seconds=1.0,
+        )
+    )
+    for _ in range(20):
+        monitor_environment.store.append_run(
+            RunRecord(
+                repo_id="repo-a",
+                repo_path="/tmp/repo-a",
+                issue_number=59,
+                trigger="console_run",
+                agent="qoder",
+                outcome="failed",
+                error_summary=None,
+                started_at=run_started_at,
+                finished_at=run_started_at,
+                duration_seconds=1.0,
+            )
+        )
+    monkeypatch.setattr(
+        agent_runner_routes,
+        "create_console_store",
+        lambda: monitor_environment.store,
+    )
+
+    tracked_issue_numbers = agent_runner_routes._recent_tracked_issue_numbers(
+        [SimpleNamespace(repo_id="repo-a")]
+    )
+
+    assert tracked_issue_numbers == {"repo-a": [59, 10]}
 
 
 # ─────────────────────────────────────────────────────────────────────────────

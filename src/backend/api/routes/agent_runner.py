@@ -331,7 +331,8 @@ def _recent_tracked_issue_numbers(repositories: Sequence[Any]) -> dict[str, list
     监控快照原本只扫描队列标签下的开放 Issue；已关闭或已移出队列的 Issue
     没有当前状态。这里把近 7 天运行账本或未收口生命周期账本中出现过的
     编号交给扫描器补状态；优先补扫生命周期记录，避免漏掉它们的当前状态。
-    每仓库最多补扫 20 个，避免为历史复盘付出无界 GitHub 调用。
+    每仓库收集近 7 天运行记录与未收口生命周期记录，按 Issue 编号去重后最多补扫
+    20 个；运行记录由存储端先按 Issue 去重，避免重复重试占满 GitHub 查询名额。
     """
     store = create_console_store()
     run_history_store = cast(IRunHistoryStore, store)
@@ -340,8 +341,10 @@ def _recent_tracked_issue_numbers(repositories: Sequence[Any]) -> dict[str, list
     tracked: dict[str, list[int]] = {}
     for repository in repositories:
         try:
-            runs = run_history_store.list_recent_runs(
-                repo_id=repository.repo_id, limit=_TRACKED_ISSUE_SCAN_LIMIT
+            runs = run_history_store.list_recent_runs_by_issue(
+                repo_id=repository.repo_id,
+                since_started_at=cutoff.isoformat(timespec="seconds"),
+                limit=_TRACKED_ISSUE_SCAN_LIMIT,
             )
         except Exception as exc:  # noqa: BLE001 - 读取失败只放弃该来源补状态。
             _logger.info("Tracked issue lookup failed for %s: %s", repository.repo_id, exc)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sqlite3
 from dataclasses import dataclass
 
 _logger = logging.getLogger(__name__)
@@ -101,6 +102,24 @@ class AgentPerformanceRecords:
     runs: tuple[PerformanceRunRecord, ...]
 
 
+def _run_record_from_row(record_row: sqlite3.Row) -> RunRecord:
+    """把 SQLite 运行记录行转换为接口模型。"""
+    return RunRecord(
+        repo_id=record_row["repo_id"],
+        repo_path=record_row["repo_path"],
+        issue_number=int(record_row["issue_number"]),
+        trigger=record_row["trigger"],
+        agent=record_row["agent"],
+        outcome=record_row["outcome"],
+        error_summary=record_row["error_summary"],
+        started_at=record_row["started_at"],
+        finished_at=record_row["finished_at"],
+        duration_seconds=float(record_row["duration_seconds"]),
+        issue_title=record_row["issue_title"],
+        issue_url=record_row["issue_url"],
+    )
+
+
 class RunHistoryReadMixin:
     """为 SQLite console store 提供只读运行历史查询。"""
 
@@ -119,23 +138,28 @@ class RunHistoryReadMixin:
         query_params.append(limit)
         with self._connection() as connection:
             record_rows = connection.execute(query, query_params).fetchall()
-        return [
-            RunRecord(
-                repo_id=record_row["repo_id"],
-                repo_path=record_row["repo_path"],
-                issue_number=int(record_row["issue_number"]),
-                trigger=record_row["trigger"],
-                agent=record_row["agent"],
-                outcome=record_row["outcome"],
-                error_summary=record_row["error_summary"],
-                started_at=record_row["started_at"],
-                finished_at=record_row["finished_at"],
-                duration_seconds=float(record_row["duration_seconds"]),
-                issue_title=record_row["issue_title"],
-                issue_url=record_row["issue_url"],
-            )
-            for record_row in record_rows
-        ]
+        return [_run_record_from_row(record_row) for record_row in record_rows]
+
+    def list_recent_runs_by_issue(
+        self, *, repo_id: str, since_started_at: str, limit: int = 100
+    ) -> list[RunRecord]:
+        """按起始时间筛选，并为每个 Issue 返回最新写入的一条运行记录。"""
+        query = (
+            "SELECT recent_run.repo_id, recent_run.repo_path, recent_run.issue_number, "
+            "recent_run.trigger, recent_run.agent, recent_run.outcome, "
+            "recent_run.error_summary, recent_run.started_at, recent_run.finished_at, "
+            "recent_run.duration_seconds, recent_run.issue_title, recent_run.issue_url "
+            "FROM run_records AS recent_run "
+            "JOIN ("
+            "SELECT MAX(id) AS latest_id FROM run_records "
+            "WHERE repo_id = ? AND started_at >= ? "
+            "GROUP BY issue_number ORDER BY latest_id DESC LIMIT ?"
+            ") AS latest_issue_run ON latest_issue_run.latest_id = recent_run.id "
+            "ORDER BY recent_run.id DESC"
+        )
+        with self._connection() as connection:
+            record_rows = connection.execute(query, (repo_id, since_started_at, limit)).fetchall()
+        return [_run_record_from_row(record_row) for record_row in record_rows]
 
     def list_issue_attempts(
         self, *, repo_id: str, issue_number: int, limit: int = 100
