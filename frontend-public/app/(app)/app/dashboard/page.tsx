@@ -371,7 +371,7 @@ export default function DashboardPage() {
     };
   }, [selectedIssueNumber, state, selectedEntry, selectedRepoId]);
 
-  /** 全量刷新：起后台 job 重扫并写回快照，期间保留旧数据供继续浏览。 */
+  /** 远端同步：起后台 job 重扫并写回快照，期间保留旧数据供继续浏览。 */
   const handleRefreshAll = useCallback(async () => {
     if (refreshState.kind === "syncing") return;
     if (refreshAbortRef.current) refreshAbortRef.current.abort();
@@ -409,15 +409,15 @@ export default function DashboardPage() {
       await reloadMonitoringViews(controller.signal);
       void loadCompletionStats(controller.signal);
       if (failures.length > 0) {
-        toast.error(`部分仓库刷新失败：${failures.join("；")}`);
+        toast.error(`部分仓库远端同步失败：${failures.join("；")}`);
       } else {
         const seconds = Math.round((Date.now() - startedAt) / 1000);
-        toast.success(`监控数据已刷新（${seconds}s）`);
+        toast.success(`监控数据已同步（${seconds}s）`);
       }
       setRefreshState({ kind: "idle" });
     } catch (error: unknown) {
       if (controller.signal.aborted) return;
-      const message = error instanceof Error ? error.message : "刷新失败";
+      const message = error instanceof Error ? error.message : "远端同步失败";
       toast.error(message);
       setRefreshState({ kind: "idle" });
     }
@@ -465,7 +465,7 @@ export default function DashboardPage() {
         ...prev,
         [repoId]: { kind: "ready" },
       }));
-      toast.success(`${repoId} 已刷新（${seconds}s）`);
+      toast.success(`${repoId} 已同步（${seconds}s）`);
       window.setTimeout(() => {
         setRepoRefresh((prev) => {
           const next = { ...prev };
@@ -476,7 +476,7 @@ export default function DashboardPage() {
     } catch (error: unknown) {
       if (controller.signal.aborted) return;
       const message =
-        error instanceof Error ? error.message : `${repoId} 刷新失败`;
+        error instanceof Error ? error.message : `${repoId} 同步失败`;
       setRepoRefresh((prev) => ({
         ...prev,
         [repoId]: { kind: "error", message },
@@ -872,7 +872,7 @@ export default function DashboardPage() {
               disabled={isRefreshingAll}
               onClick={() => void handleRefreshAll()}
             >
-              立即刷新
+              立即远端同步
             </Button>
           </CardContent>
         </Card>
@@ -978,6 +978,7 @@ export default function DashboardPage() {
   );
 }
 
+/** 渲染单仓库远端同步按钮及其运行状态。 */
 function RepoRefreshButton({
   repoId,
   state,
@@ -996,7 +997,7 @@ function RepoRefreshButton({
         disabled
         data-testid={`dashboard-refresh-repo-${repoId}`}
       >
-        刷新中…
+        同步中…
       </Button>
     );
   }
@@ -1019,7 +1020,7 @@ function RepoRefreshButton({
       onClick={() => onRefresh(repoId)}
       data-testid={`dashboard-refresh-repo-${repoId}`}
     >
-      {kind === "ready" ? "✓ 已刷新" : "刷新"}
+      {kind === "ready" ? "✓ 已同步" : "远端同步"}
     </Button>
   );
 }
@@ -1247,7 +1248,7 @@ function LoadingSkeleton() {
             {remaining > 0
               ? `预计还需 ${remaining} 秒`
               : isStuck
-                ? "用时较长，可点击「刷新全部」切换异步模式"
+                ? "用时较长，可点击「立即远端同步」切换异步模式"
                 : "即将完成，请稍候…"}
           </span>
         </div>

@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Dashboard 表头的合并刷新控件：左侧 3 份是刷新（带自动刷新倒计时），
+ * Dashboard 表头的合并同步控件：左侧 3 份是远端同步（带自动刷新倒计时），
  * 右侧 1 份是齿轮（展开/收起同步设置）。
  *
  * 两块共用一个边框中缝，按 3:1 分列；倒计时只在本组件内每秒重绘，
@@ -27,14 +27,14 @@ function formatCountdown(totalSeconds: number): string {
 }
 
 /**
- * 合并的「刷新 + 同步设置」控件。
+ * 合并的「远端同步 + 同步设置」控件。
  *
  * @param props - 刷新状态与两个动作回调。
  * @param props.nextRefreshAt - 下一次自动同步的毫秒时间戳；null 表示不显示倒计时
  *   （自动同步关闭、设置未加载或还没有可用快照）。
- * @param props.refreshStartedAt - 手动全量刷新的开始时间戳；null 表示当前没在刷新。
+ * @param props.refreshStartedAt - 手动远端同步的开始时间戳；null 表示当前没有同步。
  * @param props.settingsOpen - 同步设置面板是否已展开。
- * @param props.onRefresh - 点击左侧立即刷新。
+ * @param props.onRefresh - 点击左侧立即远端同步。
  * @param props.onToggleSettings - 点击右侧齿轮展开/收起同步设置。
  * @returns 表头右侧的合并控件。
  */
@@ -66,15 +66,15 @@ export function DashboardSyncControl(props: {
       : Math.max(0, Math.floor((nowMillis - refreshStartedAt) / 1000));
 
   const refreshLabel = refreshing
-    ? `刷新中… ${elapsedSeconds}s`
+    ? `远端同步中… ${elapsedSeconds}s`
     : remainingSeconds === null
-      ? "刷新全部"
+      ? "立即远端同步"
       : remainingSeconds === 0
-        ? "刷新全部 · 即将刷新"
-        : `刷新全部 · ${formatCountdown(remainingSeconds)}`;
+        ? "立即远端同步 · 即将开始"
+        : `立即远端同步 · ${formatCountdown(remainingSeconds)}`;
 
   return (
-    <div className="grid w-[196px] grid-cols-[3fr_1fr] items-stretch">
+    <div className="grid w-[240px] grid-cols-[3fr_1fr] items-stretch">
       <Button
         size="sm"
         variant="outline"
@@ -83,8 +83,8 @@ export function DashboardSyncControl(props: {
         onClick={onRefresh}
         title={
           remainingSeconds === null
-            ? "立即全量刷新"
-            : `立即全量刷新（下一次自动同步还剩 ${formatCountdown(remainingSeconds)}）`
+            ? "立即远端同步全部启用仓库"
+            : `立即远端同步全部启用仓库（下一次自动同步还剩 ${formatCountdown(remainingSeconds)}）`
         }
         data-testid="dashboard-refresh-all"
       >
