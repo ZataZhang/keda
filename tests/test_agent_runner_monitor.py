@@ -572,6 +572,38 @@ def test_build_repository_overview_tracks_closed_issue_state(tmp_path: Path) -> 
     assert overview.anomaly_count == 0
 
 
+def test_tracked_issue_read_failure_does_not_block_repository_snapshot(
+    tmp_path: Path,
+) -> None:
+    """补扫单条历史 Issue 失败只丢该行，不能把整仓快照判为不完整。"""
+    config = AppConfig()
+    client = FakeGitHubClient()
+    client.close_issue(42)
+    client.set_issue_labels(42, ("agent/failed",))
+
+    class _GoneIssueClient(FakeGitHubClient):
+        """模拟已删除 Issue 的永久 404。"""
+
+        def get_issue(self, issue_number: int) -> IssueSummary:
+            if issue_number == 141:
+                raise RuntimeError("Failed to fetch Issue #141: gh: Not Found (HTTP 404)")
+            return super().get_issue(issue_number)
+
+    overview = build_repository_overview(
+        repo_id="zata/keda-test",
+        display_name="Keda Test",
+        enabled=True,
+        config=config,
+        github_client=_GoneIssueClient(),
+        process_runner=FakeProcessRunner(),
+        repo_path=tmp_path,
+        tracked_issue_numbers=[141, 42],
+    )
+
+    assert overview.sync_error is None
+    assert [snapshot.number for snapshot in overview.tracked_issues] == [42]
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Scenario: build_overview iterates over configured repositories
 # ─────────────────────────────────────────────────────────────────────────────
