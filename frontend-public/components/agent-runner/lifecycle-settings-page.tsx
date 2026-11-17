@@ -302,6 +302,9 @@ export function LifecycleSettingsPage({
     if (key in bindingDraft) {
       return bindingDraft[key] ?? "";
     }
+    if (scope === "repository" && row.field_sources.preset === "global") {
+      return "";
+    }
     return row.preset_name ?? "";
   }
 
@@ -627,6 +630,7 @@ export function LifecycleSettingsPage({
             <MatrixRow
               key={row.key}
               row={row}
+              scope={scope}
               presetOptions={presetOptions}
               bindingValue={bindingValueFor(row.key, row)}
               bindingChanged={
@@ -635,12 +639,22 @@ export function LifecycleSettingsPage({
               }
               vocabulary={currentView.field_source_vocabulary}
               availability={availabilityFor(row.effective_agent)}
-              onBindingChange={(presetName) =>
+              onBindingChange={(presetName) => {
+                if (
+                  !presetName &&
+                  scope === "repository" &&
+                  row.field_sources.preset === "global"
+                ) {
+                  toast.info(
+                    `仓库 ${repoId} 已继承全局预设 ${row.preset_name}，无需更改。`,
+                  );
+                  return;
+                }
                 setBindingDraft((current) => ({
                   ...current,
                   [row.key]: presetName || null,
-                }))
-              }
+                }));
+              }}
             />
           ))}
 

@@ -15,12 +15,15 @@ import {
 import { Label } from "@/components/ui/label";
 import type {
   AgentAvailabilityEntry,
+  LifecycleAgentScope,
   LifecycleSettingsRow,
 } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
 export interface MatrixRowProps {
   row: LifecycleSettingsRow;
+  /** 当前配置范围；仓库范围清除本层绑定后会继承全局配置。 */
+  scope: LifecycleAgentScope;
   /** 可供绑定的预设（含本次新建）。 */
   presetOptions: PresetOption[];
   /** 当前绑定的预设名（空串=未绑定）。 */
@@ -46,6 +49,7 @@ export interface MatrixRowProps {
  */
 export function MatrixRow({
   row,
+  scope,
   presetOptions,
   bindingValue,
   bindingChanged,
@@ -57,6 +61,10 @@ export function MatrixRow({
   const affected = row.affected_stages.filter((stage) => stage !== row.key);
   const bindingPlaceholder = row.follows_implementation
     ? "未绑定（生效值继承实现阶段）"
+    : scope === "repository" && row.field_sources.preset === "global"
+      ? `继承全局配置（${row.preset_name ?? "已配置"}）`
+      : scope === "repository"
+        ? "继承全局配置（未绑定仓库预设）"
     : "未绑定（跟随既有配置）";
   const agentDisplay =
     row.effective_agent ?? (row.follows_implementation ? "跟随实现阶段" : "—");

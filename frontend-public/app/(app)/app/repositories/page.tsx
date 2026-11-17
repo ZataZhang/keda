@@ -7,11 +7,12 @@
 // 本页只是它的受控编辑器；写回保留文件注释与格式。
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { toast } from "sonner";
 
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
   DirectoryPickerDialog,
@@ -246,7 +247,16 @@ export default function RepositoriesPage() {
                       key={entry.repo_id}
                       className="border-b border-slate-100 dark:border-slate-800"
                     >
-                      <td className="py-2 pr-3 font-medium">{entry.repo_id}</td>
+                      <td className="py-2 pr-3 font-medium">
+                        <Link
+                          href={`/app/repositories/lifecycle/?scope=repository&repo_id=${encodeURIComponent(entry.repo_id)}`}
+                          className="cursor-pointer text-primary underline decoration-primary/50 underline-offset-4 hover:decoration-primary focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          aria-label={`配置仓库 ${entry.display_name ?? entry.repo_id} 的执行器与模型`}
+                          title="配置此仓库的执行器与模型"
+                        >
+                          {entry.repo_id}
+                        </Link>
+                      </td>
                       <td className="py-2 pr-3 font-mono text-xs">
                         {entry.path}
                         {!entry.path_exists ? (
