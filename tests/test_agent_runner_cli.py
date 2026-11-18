@@ -4844,7 +4844,7 @@ def test_agent_fallback_candidate_add_reads_baseline_under_write_lock(
     写入者在那个窗口里 append 的候选会被本次替换原样抹掉，而命令仍返回成功。探针在基线
     读取时抢一次 ``LOCK_EX | LOCK_NB``——抢不到才说明整段操作被同一把锁覆盖。
     """
-    import fcntl
+    fcntl = pytest.importorskip("fcntl")
 
     from backend.api.cli_parsed_commands import agent_lifecycle as agent_lifecycle_commands
 

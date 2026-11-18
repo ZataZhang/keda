@@ -34,8 +34,19 @@ COMMAND_NOT_FOUND_EXIT_CODE = 127
 DEFAULT_GRACE_SECONDS = 10.0
 GROUP_POLL_INTERVAL_SECONDS = 0.1
 # 转发给子进程组的信号：子进程在独立 session 里收不到终端信号，必须由本进程
-# 代为转发，否则 Ctrl-C 和关窗口都打不到被包装的命令。
-FORWARDED_SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
+# 代为转发，否则 Ctrl-C 和关窗口都打不到被包装的命令。Windows 没有 SIGHUP，按可用性取。
+FORWARDED_SIGNALS = tuple(
+    signal_number
+    for signal_number in (
+        getattr(signal, "SIGINT", None),
+        getattr(signal, "SIGTERM", None),
+        getattr(signal, "SIGHUP", None),
+    )
+    if signal_number is not None
+)
+#: Windows 没有进程组原语（os.killpg / os.getpgrp）；此时只回收直接子进程，
+#: 并让本脚本在 Windows 上仍可被 import 与收集。
+SUPPORTS_PROCESS_GROUPS = hasattr(os, "killpg") and hasattr(os, "getpgrp")
 
 
 def log(message: str) -> None:
@@ -63,7 +74,7 @@ def is_signalable_group(process_group_id: int) -> bool:
     Returns:
         bool: True when the group is safe to signal.
     """
-    if process_group_id in (0, 1):
+    if not SUPPORTS_PROCESS_GROUPS or process_group_id in (0, 1):
         return False
     return process_group_id != os.getpgrp()
 
@@ -84,6 +95,8 @@ def group_alive(process_group_id: int) -> bool:
     Returns:
         bool: True when the group still has a member (zombies included).
     """
+    if not SUPPORTS_PROCESS_GROUPS:
+        return False
     try:
         os.killpg(process_group_id, 0)
     except ProcessLookupError:
@@ -104,6 +117,8 @@ def reap_group(process_group_id: int, grace_seconds: float, reason: str) -> None
         reason: Short Chinese phrase describing why the sweep runs; it is
             prefixed to the log line.
     """
+    if not SUPPORTS_PROCESS_GROUPS:
+        return
     if not is_signalable_group(process_group_id):
         log(f"拒绝对进程组 {process_group_id} 发信号（0/1/自身组），跳过回收。")
         return
@@ -149,7 +164,11 @@ def _install_signal_forwarding(process_group_id: int) -> dict[int, object]:
 
     previous_handlers: dict[int, object] = {}
     for signal_number in FORWARDED_SIGNALS:
-        previous_handlers[signal_number] = signal.signal(signal_number, forward)
+        try:
+            previous_handlers[signal_number] = signal.signal(signal_number, forward)
+        except (OSError, ValueError):
+            # Windows / 非主线程上装不了某些处理器：跳过该信号，不影响命令执行。
+            continue
     return previous_handlers
 
 
@@ -192,6 +211,11 @@ def run(timeout_seconds: float, command: list[str], grace_seconds: float) -> int
 
     # 正常退出也要复查：本工具要兜的正是"顶层退出、子树还在"这一种泄漏。
     reap_group(child_group_id, grace_seconds, "命令已退出")
+
+    if not SUPPORTS_PROCESS_GROUPS and child.poll() is None:
+        # Windows：没有进程组可回收，超时后至少确保直接子进程被终止。
+        child.kill()
+        child.wait()
 
     if timed_out:
         return TIMEOUT_EXIT_CODE

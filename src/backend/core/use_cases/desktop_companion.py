@@ -1,30 +1,28 @@
 """桌面 companion 端口的 core 装配入口（薄 facade）。
 
-``api/`` 层不得直接 ``import backend.engines.*``（见
-``hooks/shared/check_architecture.py``），但窗口能力确实属于 engines 子树，
-因此沿用 :mod:`backend.core.use_cases.agent_runner_factory` 的先例：模块加载时
-经 ``importlib.import_module`` 解析 engines 实现并绑定为模块级名字，本模块只做
-层次归位，不新增编排逻辑，也不在这里起进程或碰 ``subprocess``。
-
-窗口启动能力语义以 :mod:`backend.engines.desktop_companion.launcher` 为准；
-安装能力语义以 :mod:`backend.engines.desktop_companion.installer` 为准。窗口端口契约见
-:class:`backend.core.shared.interfaces.desktop_companion.DesktopCompanionLauncher`。
+按四层依赖方向（``api → core → engines → infrastructure``），``api/`` 只依赖
+``core/``，本模块把下层实现转发给上层。``core/`` 静态依赖 ``engines/`` 是
+允许的（见 ``docs/ai-standards/architecture.md``），不再用 ``importlib``
+动态加载：依赖因此对检查器、IDE 与类型检查都可见。本模块只做层次归位，
+不新增编排逻辑；各名字语义以
+:mod:`backend.engines.desktop_companion.launcher` 与
+:mod:`backend.engines.desktop_companion.installer` 为准。
 """
 
 from __future__ import annotations
 
-import importlib
+from backend.engines.desktop_companion.installer import (
+    DesktopCompanionInstallError,
+    install_desktop_companion,
+    is_desktop_companion_installed,
+)
+from backend.engines.desktop_companion.launcher import (
+    create_desktop_companion_launcher,
+    desktop_runtime_available,
+    platform_supported,
+    wait_for_helper_exit,
+)
 
-_launcher_module = importlib.import_module("backend.engines.desktop_companion.launcher")
-_installer_module = importlib.import_module("backend.engines.desktop_companion.installer")
-
-create_desktop_companion_launcher = _launcher_module.create_desktop_companion_launcher
-desktop_runtime_available = _launcher_module.desktop_runtime_available
-platform_supported = _launcher_module.platform_supported
-wait_for_helper_exit = _launcher_module.wait_for_helper_exit
-DesktopCompanionInstallError = _installer_module.DesktopCompanionInstallError
-install_desktop_companion = _installer_module.install_desktop_companion
-is_desktop_companion_installed = _installer_module.is_desktop_companion_installed
 
 __all__ = [
     "create_desktop_companion_launcher",

@@ -79,6 +79,39 @@ jobs:
       - name: Type-check Tauri app
         run: cargo check --manifest-path desktop/src-tauri/Cargo.toml
 
+  windows-platform-smoke:
+    # Windows 的支持范围刻意窄于 POSIX：CLI 基本面 + kc console + 托盘 App。
+    # daemon / preview / container 依赖 os.killpg 等 POSIX 原语，入口会直接抛
+    # UnsupportedPlatformFeatureError，不进入本 job。这里只钉住"支持范围内能跑"：
+    # 所有 backend 模块能 import（顶层 import fcntl / signal.SIGHUP 这类写法只有
+    # Windows runner 会真正暴露），以及跨平台文件锁、TOML 写回与 Console API 契约。
+    name: Windows Platform Smoke
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Sync dependencies from lock file
+        run: uv sync --frozen --group dev
+
+      - name: Import every backend module
+        # importlib 冒烟不做任何断言：import 失败本身就是失败信号。
+        run: |
+          uv run python -c "import importlib, pkgutil, backend; [importlib.import_module(module.name) for module in pkgutil.walk_packages(backend.__path__, 'backend.')]"
+
+      - name: Run Windows-supported test subset
+        run: |
+          uv run pytest --no-testmon -q tests/test_file_lock.py tests/test_toml_section_editor.py tests/test_lifecycle_agents_console_api.py
+
   validate-template:
     # job 级超时，不是步骤级。两者由不同的东西执行：步骤超时归 runner
     # 进程管，runner 自己卡死时它跟着失效——v0.2.0 之后实测步骤超时

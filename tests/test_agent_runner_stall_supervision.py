@@ -60,6 +60,13 @@ from backend.core.use_cases.run_agent_once import run_agent_with_prompt
 from backend.infrastructure import attempt_process_registry
 from backend.infrastructure.process_runner import SubprocessRunner
 
+#: 停滞监督依赖真实进程组与 PTY；Windows 没有 os.killpg，daemon 也不在支持范围内。
+pytestmark = pytest.mark.skipif(
+    os.name == "nt",
+    reason="stall supervision 依赖 POSIX 进程组（os.killpg），Windows 不支持 daemon",
+)
+
+
 # ---------------------------------------------------------------------------
 # 假 writer：真实进程组里的长驻子进程 + 它自己拉起的孙进程
 # ---------------------------------------------------------------------------

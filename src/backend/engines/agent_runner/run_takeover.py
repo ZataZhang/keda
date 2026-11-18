@@ -24,6 +24,7 @@ from typing import Any
 
 from backend.core.shared.interfaces.agent_runner import IGitHubClient
 from backend.core.shared.models.agent_runner import AppConfig
+from backend.core.shared.models.platform_support import require_posix_process_groups
 from backend.core.use_cases.agent_runner_reclaim import (
     reclaim_stale_running_issues,
 )
@@ -134,7 +135,7 @@ def _sweep_orphan_groups(group_ids: set[int]) -> None:
             time.sleep(0.1)
     for group_id in remaining:
         try:
-            os.killpg(group_id, signal.SIGKILL)
+            os.killpg(group_id, getattr(signal, "SIGKILL", signal.SIGTERM))
         except OSError:
             pass
 
@@ -178,7 +179,7 @@ def _stop_unmanaged_daemon(*, daemon_pid: int, stop_timeout_seconds: float) -> s
             return "sigterm"
         time.sleep(0.2)
     try:
-        os.kill(daemon_pid, signal.SIGKILL)
+        os.kill(daemon_pid, getattr(signal, "SIGKILL", signal.SIGTERM))
     except OSError:
         pass
     return "sigkill"
@@ -209,7 +210,11 @@ def take_over_daemon(
 
     Returns:
         :class:`DaemonTakeoverResult`。
+
+    Raises:
+        UnsupportedPlatformFeatureError: 当前宿主没有 POSIX 进程组（Windows）。
     """
+    require_posix_process_groups("kc takeover")
     # 快照 daemon 的后代进程组：agent 子进程整组回收依赖这份停前快照。
     descendant_groups = collect_descendant_group_ids(daemon_pid)
 

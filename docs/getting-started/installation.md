@@ -13,13 +13,16 @@ brew install ZataZhang/tap/kedacode
 kc --version
 ```
 
-**任何平台（uv / pipx，含 Windows PowerShell）：**
+**macOS / Linux / Windows（uv / pipx）：**
 
 ```bash
-uv tool install kedacode      # 推荐：uv 隔离环境，Windows 原生可用
+uv tool install kedacode      # 推荐：uv 隔离环境
 # 或
 pipx install kedacode
 ```
+
+Python 依赖在 Windows 上可直接安装；但**支持范围**与 macOS / Linux 不同，见下方
+[Windows 支持范围](#windows)。
 
 ### Shell 自动补全（一次性启用）
 
@@ -61,6 +64,24 @@ kc desktop install
 命令会下载与当前 CLI 版本匹配的 NSIS 安装包、校验同一 Release 的 SHA-256，然后静默安装到 `%LOCALAPPDATA%\KedaCode`，不需要管理员权限。也可以到 [GitHub Release](https://github.com/ZataZhang/keda/releases) 下载 `kedacode-desktop-windows-x64-setup.exe` 双击安装。安装后从开始菜单启动 KedaCode，系统托盘会出现图标；面板、置顶悬浮窗、登录自启与系统通知的能力与 macOS 菜单栏 App 对齐。
 
 Windows 安装包当前未做代码签名，首次运行时 SmartScreen 可能提示「未知发布者」，选择「更多信息 → 仍要运行」即可。Windows 没有 macOS 那样的首次交互提示：安装桌面 App 需要显式执行上面的命令或手动下载安装包，不会打断脚本、机器输出、帮助或版本调用。详见[桌面 App 指南](../guides/desktop-companion.md)。
+
+## Windows 支持范围
+
+Windows 原生支持**不需要 POSIX 进程组**的那部分能力；依赖进程组或容器 uid/gid 映射的
+常驻功能暂不支持，调用时会在入口直接报错（而不是留下半启动的进程）：
+
+| 能力 | Windows | 说明 |
+|---|---|---|
+| `kc init` / `kc issue` / `kc run` 等 CLI 基本面 | ✅ 支持 | 一次性执行不依赖进程组；`kc run` 的超时回收会退化为只终止直接子进程 |
+| `kc console` 面板 | ✅ 支持 | 固定监听 `127.0.0.1`，本机单用户信任边界不变 |
+| 系统托盘 App（`kc desktop install`） | ✅ 支持 | 与 macOS 菜单栏 App 共用同一份 `kc console` |
+| `kc daemon` / `kc supervise-daemon` | ❌ 暂不支持 | 依赖 `os.killpg` 整组回收 agent 子进程树 |
+| `kc preview` | ❌ 暂不支持 | 依赖独立进程组标识与整组终止 |
+| `kc container`（容器化 runner） | ❌ 暂不支持 | 依赖 POSIX uid/gid 与进程组 |
+
+不支持的入口会抛出 `UnsupportedPlatformFeatureError`，消息会指明需要 Linux / macOS。
+CI 的 `windows-latest` job 只跑支持范围内的子集：全量模块 import 冒烟、跨平台文件锁、
+TOML 写回与 Console API 契约；daemon / preview / container 的 POSIX 专用测试不进入该 job。
 
 **curl 一键脚本（macOS / Linux）：**
 

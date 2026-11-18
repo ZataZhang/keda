@@ -15,6 +15,7 @@ from collections.abc import Iterator
 from backend.core.shared.interfaces.machine_identity import IMachineIdentityStore
 from backend.core.shared.models.machine_identity import MachineIdentity
 from backend.core.shared.models.product_identity import state_home
+from backend.infrastructure.file_lock import file_lock
 
 _logger = logging.getLogger(__name__)
 
@@ -29,20 +30,16 @@ class MachineIdentityStore(IMachineIdentityStore):
         """读取有效身份；缺失或损坏时在文件锁内生成并原子替换。"""
         self._machine_file.parent.mkdir(parents=True, exist_ok=True)
         lock_path = self._machine_file.with_suffix(".lock")
-        with lock_path.open("a+", encoding="utf-8") as lock_handle:
-            self._lock(lock_handle.fileno())
-            try:
-                existing_identity = self._read_identity()
-                if existing_identity is not None:
-                    return existing_identity
-                machine_identity = MachineIdentity(
-                    machine_id=str(uuid.uuid4()),
-                    created_at=datetime.now(timezone.utc),
-                )
-                self._write_identity(machine_identity)
-                return machine_identity
-            finally:
-                self._unlock(lock_handle.fileno())
+        with file_lock(lock_path):
+            existing_identity = self._read_identity()
+            if existing_identity is not None:
+                return existing_identity
+            machine_identity = MachineIdentity(
+                machine_id=str(uuid.uuid4()),
+                created_at=datetime.now(timezone.utc),
+            )
+            self._write_identity(machine_identity)
+            return machine_identity
 
     def _read_identity(self) -> MachineIdentity | None:
         """解析已有身份；损坏时告警并交给调用方重建。"""
@@ -86,31 +83,8 @@ class MachineIdentityStore(IMachineIdentityStore):
     def presence_slot_lock(self) -> Iterator[None]:
         """跨进程串行化本机状态评论槽位的读取与复用。"""
         lock_path = self._machine_file.with_name("presence-slots.lock")
-        lock_path.parent.mkdir(parents=True, exist_ok=True)
-        with lock_path.open("a+", encoding="utf-8") as lock_handle:
-            self._lock(lock_handle.fileno())
-            try:
-                yield
-            finally:
-                self._unlock(lock_handle.fileno())
-
-    @staticmethod
-    def _lock(file_descriptor: int) -> None:
-        """锁定机器身份文件；当前平台使用建议性排它锁。"""
-        try:
-            import fcntl
-        except ImportError:  # pragma: no cover - Unix runner is the supported daemon host.
-            return
-        fcntl.flock(file_descriptor, fcntl.LOCK_EX)
-
-    @staticmethod
-    def _unlock(file_descriptor: int) -> None:
-        """释放机器身份文件锁。"""
-        try:
-            import fcntl
-        except ImportError:  # pragma: no cover - 与 _lock 的平台回退配对。
-            return
-        fcntl.flock(file_descriptor, fcntl.LOCK_UN)
+        with file_lock(lock_path):
+            yield
 
 
 __all__ = ["MachineIdentityStore"]

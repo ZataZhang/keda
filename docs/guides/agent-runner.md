@@ -1288,6 +1288,8 @@ git branch -d issue-<number>
 
 ## run 与 daemon 的执行语义与控制面
 
+> **Windows**：本能力依赖 POSIX 进程组，Windows 原生不支持（入口会直接报错）。支持范围见[安装指南](../getting-started/installation.md#windows)。
+
 `kc run` 与 `kc daemon` 的职责边界是显式契约：**run = 手动单次、定向执行**（一条命令只处理一个目标，但**多条 `--issue` 命令之间互不阻塞，可并发**，见下节），不调度、不碰合并、不涉及 autopilot；**daemon = 无人值守常驻轮询**，是唯一运行 Backlog 自动推进阶段的地方。
 
 ### 前台进度事件（`kc run --progress`）
@@ -4094,6 +4096,8 @@ default_agent = "codex"
 
 ### 按需项目预览：`kc preview start|status|stop`
 
+> **Windows**：本能力依赖 POSIX 进程组，Windows 原生不支持（入口会直接报错）。支持范围见[安装指南](../getting-started/installation.md#windows)。
+
 预览只在用户于执行器对话里明确要求时才启动，由 `kc preview` 承载，启动前不占用任何端口。
 
 | 命令 | 语义 |
@@ -5563,6 +5567,8 @@ promoted_skills_dirs = ["~/.kedacode/memory/keda-main/skills"]
 - **不修改** 外部 agent CLI 协议：所有注入通过 runner 侧 `build_prompt` 完成。
 
 ## 容器化运行（Containerized Runner）
+
+> **Windows**：本能力依赖 POSIX 进程组，Windows 原生不支持（入口会直接报错）。支持范围见[安装指南](../getting-started/installation.md#windows)。
 
 kc 默认跑在本机，需要本机预先安装你打算使用的 agent CLI（内置注册表提供 codex / claude / kimi / pi / codebuddy / qoder / opencode / mcode 的形态，但只有装了对应 CLI 才能真正跑起来）以及 gh / Node / uv / just / git 等工具链。当本机还同时用于交互式 AI 编程（例如通过 cc-switch 切换多个 claude 账号）时，daemon 进程会与本机共享 `~/.claude`、`~/.codex`、`~/.kimi-code` 配置，账号切换会污染正在跑的任务。
 

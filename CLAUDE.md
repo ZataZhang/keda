@@ -41,6 +41,7 @@
 - 后端必须遵守四层依赖方向：
   `src/backend/api/ -> src/backend/core/ -> src/backend/engines/ -> src/backend/infrastructure/`
   （`api/` 只可导入 `core/`，不得直接导入 `engines/` 或 `infrastructure/`；
+  `core/` 的装配 facade 可静态依赖 `engines/`、`infrastructure/`，不得用 `importlib` 规避检查；
   与 `docs/ai-standards/architecture.md`、`docs/architecture/system-design.md` 一致）
 - Python 项目优先使用 `uv` 和 `just`
 - 公共 Python API 使用 Google Style Docstrings；后端启用 Ruff `D100`–`D107`/`D419` 强制检查

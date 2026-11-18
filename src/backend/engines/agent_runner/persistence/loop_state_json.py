@@ -21,12 +21,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-try:
-    import fcntl
-except ImportError:  # pragma: no cover - 非 POSIX 平台退化为无锁
-    fcntl = None  # type: ignore[assignment]
-
 from backend.core.shared.interfaces.loop_scheduler import ILoopStateStore
+from backend.infrastructure.file_lock import file_lock
 from backend.core.shared.models import product_identity
 from backend.core.shared.models.loop import (
     LoopManager,
@@ -138,9 +134,8 @@ class JsonLoopStateStore(ILoopStateStore):
 
     The store keeps an in-memory cache that is lazily populated on first
     access and refreshed by :meth:`load`. 写入（upsert / delete）持有旁路
-    ``.lock`` 文件的 ``flock``，并在持锁后重新读盘再合并，所以 loop-daemon 与
-    普通 daemon 同时推进各自的 loop 也不会互相覆盖对方的更新；没有 ``fcntl``
-    的平台退化为整文件替换。
+    ``.lock`` 文件的跨进程锁，并在持锁后重新读盘再合并，所以 loop-daemon 与
+    普通 daemon 同时推进各自的 loop 也不会互相覆盖对方的更新。
     """
 
     def __init__(self, state_path: Path | None = None) -> None:
@@ -202,18 +197,10 @@ class JsonLoopStateStore(ILoopStateStore):
 
     @contextmanager
     def _write_lock(self) -> Iterator[None]:
-        """持有状态文件的排他锁；平台不支持 ``fcntl`` 时不加锁。"""
-        if fcntl is None:
-            yield
-            return
-        self._state_path.parent.mkdir(parents=True, exist_ok=True)
+        """持有状态文件的跨进程排他锁。"""
         lock_path = self._state_path.with_suffix(self._state_path.suffix + ".lock")
-        with open(lock_path, "a", encoding="utf-8") as lock_file:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+        with file_lock(lock_path):
+            yield
 
     def upsert_task(self, task: LoopTask) -> None:
         """Insert or replace the task entry and persist to disk."""

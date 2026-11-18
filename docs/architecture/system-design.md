@@ -37,10 +37,9 @@
 
 ## 当前目录
 
-- `src/backend/composition/`：后端真实 composition root，按认证、业务运行依赖、
-  启动数据和 FastAPI 应用工厂拆分装配。
-- `src/backend/composition/app_factory.py`：汇总路由、中间件和各领域组件，
-  不承载业务规则。
+- `src/backend/api/app.py`：FastAPI 应用汇总入口（路由、中间件、静态产物）。
+- `src/backend/core/` 的装配 facade（如 `use_cases/agent_runner_factory.py`）：
+  静态导入 `engines/` / `infrastructure/` 实现并转发给 `api/`，只做对象创建与依赖连接。
 - `src/backend/main.py`：兼容导出与进程启动薄入口。
 - `main.py`：根目录兼容启动包装器，转发到 `backend.main`。
 - `src/backend/infrastructure/config/`：承接配置管理；还承接 OpenAI 协议 provider 注册表与 `create_chat_model` 工厂（按 `provider/model_id` 分发）。
@@ -84,16 +83,11 @@ flowchart TD
 
     subgraph Backend["Python 后端"]
         direction TB
-        Composition["src/backend/composition/\n依赖装配边界"]
         Apps["src/backend/api/ 接入层"]
         Core["src/backend/core/ 核心编排层"]
         Platform["src/backend/engines/ 平台能力层"]
         Infra["src/backend/infrastructure/ 基础设施层"]
 
-        Composition --> Apps
-        Composition --> Core
-        Composition --> Platform
-        Composition --> Infra
         Apps --> Core
         Core --> Platform
         Core --> Infra
@@ -182,11 +176,11 @@ src/backend/api/ → src/backend/core/ → src/backend/engines/ → src/backend/
 ## 依赖规则
 
 1. `src/backend/api/` 只能调用 `src/backend/core/` 暴露的用例和 DTO。
-2. `src/backend/core/` 只能依赖抽象接口和纯业务模型。
+2. `src/backend/core/` 的业务规则面向抽象接口和纯业务模型；装配 facade 可以静态依赖 `engines/` / `infrastructure/` 的具体实现。
 3. `src/backend/engines/` 只能实现 `src/backend/core/` 定义的契约。
 4. `src/backend/infrastructure/` 负责具体集成，不包含业务编排。
 5. 配置、日志、数据库和通用辅助函数位于 `src/backend/infrastructure/` 下的正式模块。
-6. `src/backend/composition/` 位于四层之外，只负责创建并连接对象；四层模块不得反向依赖它。
+6. 本仓库没有 `composition/`：装配 facade 留在 `core/` 内，直接依赖下层实现；`src/<module>/composition/` 仍是检查器预留的 composition root 形态。
 7. agent 调用的**命令构造器落 `core/`**（`core/use_cases/agent_invocation.py`）：argv 组装是跨 `api` / `engines` 复用的领域规则（占位符替换、闭集展开器、提示词投递），纯函数实现、不依赖任何运行时能力。**输出协议实现落 `engines/`**（`engines/agent_runner/output_protocols/`）：流式渲染是平台能力，实现 `core/shared/interfaces/agent_output_protocol.py` 定义的注册契约，经 entry point 发现；`core/` 只引用协议 id 常量与接口，不 import 协议实现。
 
 ### Issue 输出与进程日志的职责边界
@@ -236,6 +230,5 @@ Issue 日志不登记为托管进程，也不伪造 `process_id`；两者在 API
 - 抽象端口：`core/shared/interfaces/`（`user_account_repository.py` / `password_hasher.py` / `session_store.py`）
 - 基础设施实现：`infrastructure/auth/`（`redis_session_store.py` / `bcrypt_password_hasher.py` / `redis_client.py`）、`infrastructure/persistence/repos/user_account_repo.py`、`infrastructure/persistence/models/{public_user,admin_user}.py`
 - 接入层：`api/auth_router.py`、`api/admin/`、`api/dependencies.py`
-- 初始管理员：`composition/bootstrap.py` 启动时按
-  `AUTH_ADMIN_BOOTSTRAP_*` 幂等种子创建
+- 初始管理员：启动时按 `AUTH_ADMIN_BOOTSTRAP_*` 幂等种子创建
 - 运行依赖：Redis（`REDIS_URL`）；密码以 bcrypt 哈希持久化

@@ -67,13 +67,17 @@
 brew install ZataZhang/tap/kedacode
 ```
 
-**任何平台（uv / pipx，含 Windows PowerShell）：**
+**macOS / Linux / Windows（uv / pipx）：**
 
 ```bash
-uv tool install kedacode      # 推荐：uv 隔离环境，Windows 原生可用
+uv tool install kedacode      # 推荐：uv 隔离环境
 # 或
 pipx install kedacode
 ```
+
+Windows 的支持范围与 macOS / Linux 不同：CLI 基本面、`kc console` 与系统托盘 App 可用；
+`kc daemon`、`kc preview`、`kc container` 依赖 POSIX 进程组，暂不支持，启动时会直接报错并说明。
+详见[安装指南](docs/getting-started/installation.md#windows)。
 
 `uv tool install` 不会自动配置 shell 补全。在 bash、zsh 或 fish 中，若尚未配置，首次在交互式终端运行 `kc` 时会显示选择菜单，默认选中安装；选择安装后本次命令会先退出，提示重载 shell，再重新运行刚才的 `kc` 命令。macOS 若也尚未安装菜单栏 App，会先显示一个独立的 App 安装菜单。也可以按所用 shell 执行一次 `kc completion install --shell <bash|zsh|fish>`（选择其中一个）。详细步骤见下方「安装 shell 自动补全」。
 
@@ -456,20 +460,11 @@ src/backend/
   infrastructure/ → 基础设施层（模型、存储、HTTP、配置、日志）
 ```
 
-依赖方向严格向下：`api → core → engines → infrastructure`，由 `hooks/shared/check_architecture.py` 在 pre-commit 强制校验。
+依赖方向严格向下：`api → core → engines → infrastructure`，由 `hooks/shared/check_architecture.py` 在 pre-commit 强制校验。具体规则是 `api/` 只能依赖 `core/`，`core/` 可以静态依赖 `engines/` 与 `infrastructure/`（装配 facade 直接导入实现，不再用 `importlib` 绕过检查），`engines/` 与 `infrastructure/` 不得反向依赖外层。
 
 ### 作为工程骨架复用
 
 除 `kc` 本身外，仓库也是一套可整体拿去起新项目的 Python 工程骨架：四层依赖由 pre-commit 强制校验，配套 worktree 脚本、PRD 驱动流程与 `just` 工具链。`scripts/shared/`、`hooks/shared/`、`docs/ai-standards/` 等由上游模板仓 [`zata-codes-template`](https://github.com/ZataZhang/zata-codes-template) 同步维护，下游项目不要手改。只想使用 `kc` 的读者可以跳过本节。
-
-## Docker 部署
-
-```bash
-# Docker Compose 启动
-docker compose up --build
-```
-
-详见 `docker-compose.yml` 和 `docker-compose.dokploy.yml`。
 
 ## 开发规范
 

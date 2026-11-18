@@ -9,6 +9,7 @@ rv-7（agent 标签写注册块且重复被拒）以及 PRD 覆盖读写（rv-4 
 
 from __future__ import annotations
 
+import json
 import subprocess
 import tomllib
 from collections.abc import Iterator
@@ -65,7 +66,7 @@ def console_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[dic
     config_path.write_text(
         "[agent_runner]\n\n"
         "[agent_runner.repositories.testrepo]\n"
-        f'path = "{repo_path.resolve()}"\n'
+        f"path = {json.dumps(str(repo_path.resolve()))}\n"
         "enabled = true\n",
         encoding="utf-8",
     )
@@ -1153,7 +1154,7 @@ def test_fallback_candidates_write_validates_baseline_under_lock(
     探针在校验取基线时抢一次 ``LOCK_EX | LOCK_NB``：抢不到=锁覆盖了"读→校验→写"，
     抢得到=仍有锁外窗口。写后那次复读在锁外做视图返回，因此序列是 ``[True, False]``。
     """
-    import fcntl
+    fcntl = pytest.importorskip("fcntl")
 
     from backend.api.routes import agent_runner_lifecycle_agents as lifecycle_routes
 

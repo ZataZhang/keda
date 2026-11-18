@@ -1,13 +1,12 @@
 """容器命令 core facade —— ``kc container`` 子命令的用例边界。
 
-本模块是容器化 runner 编排的 core 层入口。它**不**直接 import ``engines`` 或
-``infrastructure``（受架构守门约束），而是通过
-:mod:`backend.core.shared.interfaces.container_runner` 定义的端口与具体实现解耦。
-``api`` 层不再 import engines 构造实现：默认实现由本模块的
+本模块是容器化 runner 编排的 core 层入口。它面向
+:mod:`backend.core.shared.interfaces.container_runner` 定义的端口编程；``api``
+层不再 import engines 构造实现，默认实现由本模块的
 :func:`create_default_container_auth_importer` /
-:func:`create_default_container_ops_controller` 经 ``importlib`` 运行时解析
-（遵循 :mod:`backend.core.agent.memory._composition` 先例，engines 模块
-``container_auth`` / ``container_ops`` 仍保持原位）。
+:func:`create_default_container_ops_controller` 装配。``core/`` 静态依赖
+``engines/`` 是允许的（见 ``docs/ai-standards/architecture.md``），装配函数在
+函数体内导入 engines 实现，避免模块加载期把整个容器子树一起拉起来。
 
 同时，启动容器前复用 :mod:`backend.core.use_cases.daemon_single_instance` 的锁
 判断语义，确保本机 ``kc daemon`` 与 ``kc container up`` 不会抢同一仓库（rv-7）。
@@ -22,20 +21,17 @@
   compose down。
 - ``stream_runner_container_logs(controller, compose_file, *, runner=None)`` —— 同步
   streaming 容器日志。
-
-依赖方向：core 只允许依赖自身（含 ``core/shared/interfaces``）；engines
-实现经 ``importlib`` 运行时解析，不产生静态跨层 import。
 """
 
 from __future__ import annotations
 
-import importlib
 import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from backend.core.shared.models import product_identity
+from backend.core.shared.models.platform_support import require_posix_process_groups
 from backend.core.shared.interfaces.container_runner import (
     ContainerCommandPlan,
     ContainerUpRequest,
@@ -147,10 +143,12 @@ def start_runner_container(
         与是否跳过 daemon lock 检查。
 
     Raises:
+        UnsupportedPlatformFeatureError: 当前宿主没有 POSIX 进程组（Windows）。
         DaemonAlreadyRunningError: 当 ``repo_id`` 非空且已有活 PID daemon 时。
         FileNotFoundError: 当 ``repo_path`` 不存在或 docker CLI / compose 资产
             缺失时。
     """
+    require_posix_process_groups("kc container")
     _ensure_repo_path_exists(options.repo_path)
 
     assets = controller.resolve_packaged_runner_assets()
@@ -248,8 +246,9 @@ def create_default_container_auth_importer() -> IContainerAuthImporter:
     Returns:
         实现 :class:`IContainerAuthImporter` 端口的默认实例。
     """
-    container_auth_module = importlib.import_module("backend.engines.agent_runner.container_auth")
-    return container_auth_module.ContainerAuthController()
+    from backend.engines.agent_runner.container_auth import ContainerAuthController
+
+    return ContainerAuthController()
 
 
 def create_default_container_ops_controller() -> IContainerRunnerController:
@@ -258,8 +257,9 @@ def create_default_container_ops_controller() -> IContainerRunnerController:
     Returns:
         实现 :class:`IContainerRunnerController` 端口的默认实例。
     """
-    container_ops_module = importlib.import_module("backend.engines.agent_runner.container_ops")
-    return container_ops_module.ContainerOpsController()
+    from backend.engines.agent_runner.container_ops import ContainerOpsController
+
+    return ContainerOpsController()
 
 
 __all__ = [

@@ -1,46 +1,36 @@
 """``kc config migrate`` 的 core 编排入口（薄 facade）。
 
 转发 :mod:`backend.engines.agent_runner.repository_local_migration`（仓库本地配置的
-钉子清理与新旧名改名）和 :mod:`backend.engines.agent_runner.state_home_migration`
-（本机状态目录搬迁）的能力，使 ``api/`` 层只依赖 core。实现机制（模块加载时经
-``importlib`` 解析 engines 实现）见 :mod:`backend.core.use_cases.agent_runner_factory`
-的模块 docstring。
+钉子清理与新旧名改名）、:mod:`backend.engines.agent_runner.state_home_migration`
+（本机状态目录搬迁）和 :mod:`backend.engines.agent_runner.worktree_directory_migration`
+的能力，使 ``api/`` 层只依赖 core。``core/`` 静态依赖 ``engines/`` 是允许的
+（见 ``docs/ai-standards/architecture.md``），本模块不再用 ``importlib`` 动态加载。
 """
 
 from __future__ import annotations
 
-import importlib
-
-_engines_repository_local_migration_module = importlib.import_module(
-    "backend.engines.agent_runner.repository_local_migration"
+from backend.engines.agent_runner.repository_local_migration import (
+    ConfigMigrationError,
+    ConfigMigrationResult,
+    ConfigRenameResult,
+    PinDecision,
+    migrate_repository_local_config,
+    rename_repository_local_config_file,
 )
-_engines_state_home_migration_module = importlib.import_module(
-    "backend.engines.agent_runner.state_home_migration"
+from backend.engines.agent_runner.state_home_migration import (
+    StateHomeMigrationResult,
+    conflict_outcomes,
+    failure_outcomes,
+    migrate_state_home,
 )
-_engines_worktree_directory_migration_module = importlib.import_module(
-    "backend.engines.agent_runner.worktree_directory_migration"
-)
-
-ConfigMigrationError = _engines_repository_local_migration_module.ConfigMigrationError
-ConfigMigrationResult = _engines_repository_local_migration_module.ConfigMigrationResult
-ConfigRenameResult = _engines_repository_local_migration_module.ConfigRenameResult
-PinDecision = _engines_repository_local_migration_module.PinDecision
-migrate_repository_local_config = (
-    _engines_repository_local_migration_module.migrate_repository_local_config
-)
-rename_repository_local_config_file = (
-    _engines_repository_local_migration_module.rename_repository_local_config_file
+from backend.engines.agent_runner.worktree_directory_migration import (
+    WorktreeDirectoryMigrationResult,
+    migrate_worktree_directory,
 )
 
-StateHomeMigrationResult = _engines_state_home_migration_module.StateHomeMigrationResult
-migrate_state_home = _engines_state_home_migration_module.migrate_state_home
-WorktreeDirectoryMigrationResult = (
-    _engines_worktree_directory_migration_module.WorktreeDirectoryMigrationResult
-)
-migrate_worktree_directory = _engines_worktree_directory_migration_module.migrate_worktree_directory
-#: 结论分类以函数透出：常量身份在 importlib 解析下会被复制，按值比较才是稳定的用法。
-STATE_HOME_CONFLICT_OUTCOMES = _engines_state_home_migration_module.conflict_outcomes()
-STATE_HOME_FAILURE_OUTCOMES = _engines_state_home_migration_module.failure_outcomes()
+#: 结论分类以函数透出：调用方按值比较，不依赖枚举身份。
+STATE_HOME_CONFLICT_OUTCOMES = conflict_outcomes()
+STATE_HOME_FAILURE_OUTCOMES = failure_outcomes()
 
 __all__ = [
     "ConfigMigrationError",

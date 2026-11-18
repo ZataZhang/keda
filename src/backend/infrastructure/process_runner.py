@@ -174,7 +174,7 @@ def _terminate_process_tree(
             killable_group_id = child_group_id
     if killable_group_id is not None:
         try:
-            os.killpg(killable_group_id, signal.SIGKILL)
+            os.killpg(killable_group_id, getattr(signal, "SIGKILL", signal.SIGTERM))
             return True
         except OSError:  # 组已消失，退回直接终止。
             if has_expected_identity:

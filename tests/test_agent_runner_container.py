@@ -4,7 +4,7 @@
 - ``start_runner_container``：daemon lock 互斥、env 注入、目标仓库缺失报错
 - ``start_runner_container --dry-run`` 不调 docker runner
 - ``stop_runner_container`` / ``stream_runner_container_logs`` 透传到 engines
-- core facade 不直接 import engines（架构守门）
+- core facade 的装配依赖静态可见、不用 importlib 绕过检查（架构守门）
 """
 
 from __future__ import annotations
@@ -319,19 +319,23 @@ def test_container_operations_inject_effective_state_home(
     assert captured_envs[0]["KEDACODE_HOST_STATE_HOME"] == str(expected_state_home)
 
 
-def test_core_facade_does_not_import_engines() -> None:
-    """架构守门：core facade 不直接 import ``backend.engines.*``。"""
-    facade_path = (
-        Path(__file__).resolve().parent.parent
-        / "src"
-        / "backend"
-        / "core"
-        / "use_cases"
-        / "agent_runner_container.py"
+def test_core_facades_do_not_use_importlib_for_lower_layers() -> None:
+    """架构守门：core 的装配依赖必须静态可见，不得用 importlib 绕过检查。
+
+    ``core/`` 静态依赖 ``engines/`` / ``infrastructure/`` 是允许的（见
+    ``docs/ai-standards/architecture.md``）；用 ``importlib.import_module`` 动态
+    加载下层实现会让依赖对检查器、IDE 与类型检查都不可见，正是 Issue #393 的问题。
+    """
+    core_root = Path(__file__).resolve().parent.parent / "src" / "backend" / "core"
+    dynamic_import = re.compile(
+        r"import_module\(\s*[\"']backend\.(?:engines|infrastructure)", re.MULTILINE
     )
-    source = facade_path.read_text(encoding="utf-8")
-    forbidden = re.compile(r"^\s*from\s+backend\.engines", flags=re.MULTILINE)
-    assert forbidden.search(source) is None, (
-        "agent_runner_container.py (core) must not directly import backend.engines.* — "
-        "route through IContainerRunnerController / IContainerAuthImporter ports."
+    offenders = [
+        str(python_file.relative_to(core_root))
+        for python_file in core_root.rglob("*.py")
+        if dynamic_import.search(python_file.read_text(encoding="utf-8"))
+    ]
+    assert offenders == [], (
+        "core must import engines/infrastructure statically; importlib bypasses the "
+        f"architecture check and hides the dependency: {offenders}"
     )

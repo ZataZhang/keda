@@ -133,7 +133,6 @@ desktop-install:
 #   just run backend                # start backend only
 #   just run frontend               # start admin frontend only (not part of the default stack)
 #   just run frontend-public        # start public frontend only
-#   just run docker                 # start with Docker Compose (one-click deploy)
 #   just run backend_port=8010 frontend_admin_port=13173 frontend_public_port=3001
 #   just run all frontend_public_cmd="pnpm dev"
 run arg1="" arg2="" arg3="" arg4="" arg5="" arg6="" arg7="" arg8="" arg9="": _check-completion
@@ -216,7 +215,7 @@ run arg1="" arg2="" arg3="" arg4="" arg5="" arg6="" arg7="" arg8="" arg9="": _ch
                         ;;
                     *)
                         echo "ERROR: Unexpected run argument: $cli_arg"
-                        echo "Usage: just run [backend|frontend|frontend-public|all|docker] [backend_port=<port>] [frontend_admin_port=<port>] [frontend_public_port=<port>]"
+                        echo "Usage: just run [backend|frontend|frontend-public|all] [backend_port=<port>] [frontend_admin_port=<port>] [frontend_public_port=<port>]"
                         exit 1
                         ;;
                 esac
@@ -395,32 +394,9 @@ run arg1="" arg2="" arg3="" arg4="" arg5="" arg6="" arg7="" arg8="" arg9="": _ch
             frontend_public_pid=$!
             wait_for_first_exit
             ;;
-        docker)
-            echo "Starting services with Docker Compose..."
-            has_remote="false"
-            if [ -f ".env" ]; then
-                db_url=$(grep "^DATABASE_URL=" .env | head -1 | cut -d'=' -f2- | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//;s/^'"'"'//;s/'"'"'$//')
-                if [ -n "$db_url" ]; then
-                    case "$db_url" in
-                        *@db:*|*@localhost*|*@127.0.0.1*)
-                            has_remote="false"
-                            ;;
-                        *)
-                            has_remote="true"
-                            ;;
-                    esac
-                fi
-            fi
-            if [ "$has_remote" = "true" ]; then
-                echo "Detected remote DATABASE_URL; backend will connect directly to remote database"
-            else
-                echo "Using local PostgreSQL database"
-            fi
-            docker compose up --build
-            ;;
         *)
             echo "❌ Unknown run target: $target"
-            echo "Usage: just run [backend|frontend|frontend-public|all|docker]"
+            echo "Usage: just run [backend|frontend|frontend-public|all]"
             exit 1
             ;;
     esac
@@ -432,7 +408,6 @@ run arg1="" arg2="" arg3="" arg4="" arg5="" arg6="" arg7="" arg8="" arg9="": _ch
 #   just down frontend
 #   just down frontend-public
 #   just down backend_port=8010 frontend_admin_port=13173 frontend_public_port=3001
-#   just down docker
 down arg1="" arg2="" arg3="" arg4="" arg5="": _check-completion
     #!/usr/bin/env bash
     set -euo pipefail
@@ -469,7 +444,7 @@ down arg1="" arg2="" arg3="" arg4="" arg5="": _check-completion
                     positional_index=1
                 else
                     echo "ERROR: Unexpected down argument: $cli_arg"
-                    echo "Usage: just down [backend|frontend|frontend-public|all|docker] [backend_port=<port>] [frontend_admin_port=<port>] [frontend_public_port=<port>]"
+                    echo "Usage: just down [backend|frontend|frontend-public|all] [backend_port=<port>] [frontend_admin_port=<port>] [frontend_public_port=<port>]"
                     exit 1
                 fi
                 ;;
@@ -530,12 +505,9 @@ down arg1="" arg2="" arg3="" arg4="" arg5="": _check-completion
             stop_port "admin frontend" "$frontend_admin_port"
             stop_port "public frontend" "$frontend_public_port"
             ;;
-        docker)
-            docker compose down
-            ;;
         *)
             echo "❌ Unknown down target: $target"
-            echo "Usage: just down [backend|frontend|frontend-public|all|docker]"
+            echo "Usage: just down [backend|frontend|frontend-public|all]"
             exit 1
             ;;
     esac

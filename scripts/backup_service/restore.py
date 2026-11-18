@@ -7,9 +7,9 @@ Standalone usage (local machine):
     uv run python scripts/backup_service/restore.py --date 2026-05-14_020000 \
         --restore-db --restore-logs --restore-resources --yes
 
-Docker usage (no local psql needed, uses backup container):
-    docker compose --profile backup run --rm backup \
-        python -m scripts.backup_service.restore
+The service reads ``DATABASE_URL`` / ``S3_*`` from the environment; the repository
+does not ship a panel deployment Compose stack (see docs/guides/deployment.md), so
+run it directly rather than through ``docker compose run``.
 """
 
 import argparse

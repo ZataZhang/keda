@@ -23,7 +23,6 @@
 
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import json
 import os
@@ -38,6 +37,9 @@ from pathlib import Path
 from typing import Iterator
 
 import psutil
+
+from backend.core.shared.models.platform_support import require_posix_process_groups
+from backend.infrastructure.file_lock import file_lock
 
 from backend.core.shared.interfaces.agent_session import (
     IPreviewProcessManager,
@@ -103,6 +105,7 @@ class SubprocessPreviewProcessManager(IPreviewProcessManager):
             PreviewStartOutcome：已有存活预览、启动即退出、ready 超时都作为结果
             返回；配置地址非回环时在**启动任何进程之前**拒绝。
         """
+        require_posix_process_groups("kc preview")
         if request.ready_url:
             try:
                 require_loopback_preview_url(
@@ -265,6 +268,7 @@ class SubprocessPreviewProcessManager(IPreviewProcessManager):
 
     def stop_preview(self, *, repo_root: Path) -> PreviewStopOutcome:
         """只停止注册表里那个身份可证实的进程组。"""
+        require_posix_process_groups("kc preview")
         with _preview_registry_lock(repo_root):
             return self._stop_preview_locked(repo_root=repo_root)
 
@@ -548,14 +552,9 @@ def _preview_registry_lock(repo_root: Path) -> Iterator[None]:
     把那个进程组停掉并清记录）；``kc preview status`` 不加锁，随时可读。
     """
     state_dir = preview_state_dir()
-    state_dir.mkdir(parents=True, exist_ok=True)
     lock_path = state_dir / f"{preview_repo_slug(repo_root)}.lock"
-    with lock_path.open("a+b") as lock_handle:
-        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+    with file_lock(lock_path):
+        yield
 
 
 def _record_with_url(record: PreviewProcessRecord, url_text: str) -> PreviewProcessRecord:
@@ -797,7 +796,7 @@ def _terminate_process_group(process_group: int) -> str:
             return "SIGTERM drained the group"
         time.sleep(_TERMINATE_POLL_INTERVAL_SECONDS)
     try:
-        os.killpg(process_group, signal.SIGKILL)
+        os.killpg(process_group, getattr(signal, "SIGKILL", signal.SIGTERM))
     except ProcessLookupError:
         return "process group exited during the SIGTERM grace period"
     return "SIGKILL after the SIGTERM grace period"

@@ -34,8 +34,6 @@ from __future__ import annotations
 import os
 import stat
 import tempfile
-import threading
-import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -51,69 +49,15 @@ from backend.core.shared.models.config_edit import (
     ConfigKeyMissingError,
     ConfigLockBusyError,
 )
-
-#: 锁后端：POSIX ``fcntl.flock`` → Windows ``msvcrt.locking`` → 两者皆无时不加跨进程锁。
-_LOCK_BACKEND: str
-try:
-    import fcntl
-
-    def _try_lock(file_descriptor: int) -> bool:
-        """非阻塞尝试独占锁，被别的进程持有则返回 ``False``。"""
-        try:
-            fcntl.flock(file_descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
-            return False
-        return True
-
-    def _unlock(file_descriptor: int) -> None:
-        """释放 :func:`_try_lock` 拿到的锁。"""
-        fcntl.flock(file_descriptor, fcntl.LOCK_UN)
-
-    _LOCK_BACKEND = "fcntl"
-except ImportError:  # pragma: no cover - 仅 Windows 走这一支
-    try:
-        import msvcrt
-
-        def _try_lock(file_descriptor: int) -> bool:
-            """非阻塞锁住首字节；已被占用则返回 ``False``。"""
-            try:
-                os.lseek(file_descriptor, 0, os.SEEK_SET)
-                msvcrt.locking(file_descriptor, msvcrt.LK_NBLCK, 1)
-            except OSError:
-                return False
-            return True
-
-        def _unlock(file_descriptor: int) -> None:
-            """解锁首字节（须与加锁时同一偏移）。"""
-            os.lseek(file_descriptor, 0, os.SEEK_SET)
-            msvcrt.locking(file_descriptor, msvcrt.LK_UNLCK, 1)
-
-        _LOCK_BACKEND = "msvcrt"
-    except ImportError:
-        # 两个后端都没有：跨进程串行化不成立，只剩 os.replace 保证单次写入不撕裂。
-        # 显式命名成 none，让依赖锁的守卫测试在本平台跳过而不是"静默通过"。
-
-        def _try_lock(file_descriptor: int) -> bool:
-            """无锁后端：视为立即拿到锁。"""
-            return True
-
-        def _unlock(file_descriptor: int) -> None:
-            """无锁后端：没有需要释放的东西。"""
-
-        _LOCK_BACKEND = "none"
-
+from backend.infrastructure.file_lock import file_lock
 
 #: 目标文件不存在时新建配置所用的权限位（与 ``mkstemp`` 的 0600 无关）。
 _DEFAULT_NEW_CONFIG_MODE = 0o644
 #: 跨进程锁文件后缀：与目标配置同目录、同前缀，保证同一配置名的写入者排队。
 _LOCK_FILE_SUFFIX = ".lock"
-#: 锁文件权限：rendezvous 点不含数据，只该被属主读写（默认 0666&~umask 太宽）。
-_LOCK_FILE_MODE = 0o600
 #: 抢锁的最长等待：拿不到就失败退出，而不是无限阻塞把 CLI 挂死、
 #: 或在 FastAPI 的 threadpool 里长期占住一个 worker。
 _LOCK_WAIT_TIMEOUT_SECONDS = 10.0
-#: 抢锁重试间隔：写入本身是毫秒级，短间隔足够让并发写者在超时内轮到手。
-_LOCK_RETRY_INTERVAL_SECONDS = 0.05
 
 _PresenceRequirement = Literal["none", "table", "keys"]
 """删除操作对"目标层已存在"的要求：``none`` 允许静默 no-op；``table`` 要求叶子表
@@ -154,60 +98,6 @@ class ArrayTableUpdate:
 
 _TomlUpdate = TableKeyUpdate | ArrayTableUpdate
 
-#: 本线程已持有的锁路径：flock 记在 open file description 上，同进程再开一个 fd 去锁
-#: 同一个文件会等自己，所以重入必须在进入内核之前拦下来。
-_held_lock_paths = threading.local()
-
-
-def _thread_held_locks() -> set[str]:
-    """取本线程当前持有的配置锁集合（首次使用时建）。"""
-    held_paths: set[str] | None = getattr(_held_lock_paths, "paths", None)
-    if held_paths is None:
-        held_paths = set()
-        _held_lock_paths.paths = held_paths
-    return held_paths
-
-
-def _open_lock_file(lock_path: Path) -> int:
-    """打开（必要时以 :data:`_LOCK_FILE_MODE` 新建）锁文件，返回其 fd。
-
-    先 ``O_EXCL`` 再回落 ``O_CREAT``：只有"确实是本进程建出来的"那次才 fchmod，避免
-    把别人建好的锁文件权限改来改去；``O_EXCL`` 分支的 mode 会被 umask 削，所以补一次
-    显式 ``fchmod`` 保证是 0600。
-    """
-    try:
-        created_fd = os.open(
-            str(lock_path),
-            os.O_RDWR | os.O_CREAT | os.O_EXCL,
-            _LOCK_FILE_MODE,
-        )
-    except FileExistsError:
-        return os.open(str(lock_path), os.O_RDWR | os.O_CREAT)
-    os.fchmod(created_fd, _LOCK_FILE_MODE)
-    return created_fd
-
-
-def _acquire_lock_or_fail(file_descriptor: int, resolved_path: Path) -> None:
-    """在有界等待内抢到锁，否则抛 :class:`ConfigLockBusyError`（不无限阻塞）。
-
-    Raises:
-        ConfigLockBusyError: 等待超过 :data:`_LOCK_WAIT_TIMEOUT_SECONDS` 仍被占用。
-    """
-    if _try_lock(file_descriptor):
-        return
-    deadline = time.monotonic() + _LOCK_WAIT_TIMEOUT_SECONDS
-    while True:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise ConfigLockBusyError(
-                f"{resolved_path} 的写锁被另一个写入者持有超过 "
-                f"{_LOCK_WAIT_TIMEOUT_SECONDS:g}s，本次写回未改动任何配置："
-                "请确认没有并发的 kc 写入或 Console 保存，然后重试。"
-            )
-        time.sleep(min(_LOCK_RETRY_INTERVAL_SECONDS, remaining))
-        if _try_lock(file_descriptor):
-            return
-
 
 @contextmanager
 def _config_file_lock(resolved_path: Path) -> Iterator[None]:
@@ -216,31 +106,29 @@ def _config_file_lock(resolved_path: Path) -> Iterator[None]:
     锁文件是零字节的 rendezvous 点，不写内容；``os.replace`` 换掉配置文件的 inode
     也不影响它，因此锁不会被一次成功写入"换手"。进程退出时内核自动释放，崩溃不留死锁。
 
-    两条防护让"有锁"不等于"会挂死"：抢锁走 :func:`_acquire_lock_or_fail` 的**有界**
-    非阻塞重试（超时报 :class:`~backend.core.shared.models.config_edit.ConfigLockBusyError`
-    而不是无限等），并且**同线程重入直接放行**——否则把 :func:`apply_toml_updates`
-    套进 :func:`mutate_toml_document` 的回调里，同一进程会在自己的锁上自死锁。
+    两条防护让"有锁"不等于"会挂死"：抢锁走
+    :func:`~backend.infrastructure.file_lock.file_lock` 的**有界**非阻塞重试
+    （超时报 :class:`~backend.core.shared.models.config_edit.ConfigLockBusyError`
+    而不是无限等），并且**同线程重入直接放行**——否则把
+    :func:`apply_toml_updates` 套进 :func:`mutate_toml_document` 的回调里，
+    同一进程会在自己的锁上自死锁。
 
     Args:
         resolved_path: 目标配置文件路径（其父目录须已存在）。
+
+    Raises:
+        ConfigLockBusyError: 有界等待内没拿到锁（目标文件未被改动）。
     """
-    lock_key = os.path.realpath(str(resolved_path))
-    held_paths = _thread_held_locks()
-    if lock_key in held_paths:
-        yield
-        return
     lock_path = resolved_path.with_name(resolved_path.name + _LOCK_FILE_SUFFIX)
-    file_descriptor = _open_lock_file(lock_path)
     try:
-        _acquire_lock_or_fail(file_descriptor, resolved_path)
-        held_paths.add(lock_key)
-        try:
+        with file_lock(lock_path, timeout_seconds=_LOCK_WAIT_TIMEOUT_SECONDS):
             yield
-        finally:
-            held_paths.discard(lock_key)
-            _unlock(file_descriptor)
-    finally:
-        os.close(file_descriptor)
+    except TimeoutError as lock_timeout_error:
+        raise ConfigLockBusyError(
+            f"{resolved_path} 的写锁被另一个写入者持有超过 "
+            f"{_LOCK_WAIT_TIMEOUT_SECONDS:g}s，本次写回未改动任何配置："
+            "请确认没有并发的 kc 写入或 Console 保存，然后重试。"
+        ) from lock_timeout_error
 
 
 @contextmanager
@@ -388,11 +276,11 @@ def _preserve_file_ownership(temp_path: Path, identity: _FileIdentity) -> None:
     尽力而为：POSIX 只允许特权进程将文件 chown 给别人，非属主的共享写者做不到这一步，
     此时保持"权限位不变、属主随写入进程"并继续完成写入，不把一次本可成功的保存改成失败。
     """
-    if identity.owner_uid is None or identity.owner_gid is None:
+    if identity.owner_uid is None or identity.owner_gid is None or not hasattr(os, "chown"):
         return
     try:
         os.chown(temp_path, identity.owner_uid, identity.owner_gid)
-    except OSError:  # pragma: no cover - 非特权进程改不动属主
+    except (OSError, AttributeError):  # pragma: no cover - 非特权进程改不动属主
         pass
 
 

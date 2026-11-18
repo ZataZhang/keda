@@ -136,10 +136,9 @@ def create_issue_log_reader(
     """创建默认的文件系统 Issue 日志读取器。
 
     Core 只面向 ``IssueLogReader`` 端口编程，但具体的文件系统实现由
-    Infrastructure 提供；为保持 ``core`` 不静态 import ``infrastructure``
-    的架构约束（``hooks/shared/check_architecture.py`` 的 AST 检查），这里
-    用 ``importlib`` 在运行时解析实现，与
-    :mod:`backend.core.use_cases.agent_runner_factory` 的做法一致。
+    Infrastructure 提供。``core/`` 静态依赖 ``infrastructure/`` 是允许的
+    （见 ``docs/ai-standards/architecture.md``），这里用函数内导入避免在
+    模块加载期把 console 子树一起拉起来。
 
     Args:
         repo_path_resolver: 把 ``repo_id`` 解析为已注册仓库根的回调；
@@ -148,10 +147,9 @@ def create_issue_log_reader(
     Returns:
         面向已注册仓库固定日志子树的只读读取器。
     """
-    import importlib
+    from backend.infrastructure.console.issue_log_reader import FilesystemIssueLogReader
 
-    reader_module = importlib.import_module("backend.infrastructure.console.issue_log_reader")
-    return reader_module.FilesystemIssueLogReader(repo_path_resolver)
+    return FilesystemIssueLogReader(repo_path_resolver)
 
 
 __all__ = [

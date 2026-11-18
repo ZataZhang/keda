@@ -23,6 +23,7 @@ from backend.core.shared.interfaces.loop_scheduler import ILoopClock, ILoopState
 from backend.core.shared.interfaces.runner_live_view import IRunnerLiveView
 from backend.core.shared.models.agent_runner import AppConfig, RepositoryRunContext
 from backend.core.shared.models.pass_activity import PassActivity
+from backend.core.shared.models.platform_support import require_posix_process_groups
 from backend.core.use_cases.agent_daemon_pacing import (
     IDLE_BACKOFF_MAX_FACTOR,
     USAGE_LOG_INTERVAL_SECONDS,
@@ -134,7 +135,7 @@ def _terminate_descendant_process_trees() -> None:
         time.sleep(0.1)
     for group_id in group_ids:
         try:
-            os.killpg(group_id, signal.SIGKILL)
+            os.killpg(group_id, getattr(signal, "SIGKILL", signal.SIGTERM))
         except OSError:
             pass
 
@@ -166,6 +167,9 @@ def run_agent_daemon(
     review_stage: DaemonReviewStage | None = None,
 ) -> None:
     """Run the queue poller forever across all target repositories.
+
+    Windows 上没有 POSIX 进程组，daemon 的整组回收无从实现，因此在进入循环前
+    直接拒绝，而不是让 shutdown 路径在半途 ``AttributeError``。
 
     Args:
         contexts: Resolved repository targets with merged configurations.
@@ -221,6 +225,7 @@ def run_agent_daemon(
             supervising / review 状态的 Issue，本机已有 supervise-daemon 的仓库跳过。
             省略时不做 PR 值守。
     """
+    require_posix_process_groups("kc daemon")
     previous_sigterm_handler: Any = signal.getsignal(signal.SIGTERM)
     reset_agent_daemon_stopping()
 

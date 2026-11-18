@@ -29,6 +29,19 @@ from backend.infrastructure.logging.logger import logger
 #: provider 被信号杀死时，退出码按 shell 约定折算的偏移量。
 _SIGNAL_EXIT_CODE_OFFSET = 128
 
+#: 等待期间由 KC 暂时忽略的终端前台信号；Windows 没有 SIGQUIT，按可用性取。
+_IGNORED_TERMINAL_SIGNALS: tuple[int, ...] = tuple(
+    signal_number
+    for signal_number in (getattr(signal, "SIGINT", None), getattr(signal, "SIGQUIT", None))
+    if signal_number is not None
+)
+#: 需要原样转发给 provider 的非前台信号；Windows 没有 SIGHUP。
+_FORWARDED_TERMINAL_SIGNALS: tuple[int, ...] = tuple(
+    signal_number
+    for signal_number in (getattr(signal, "SIGTERM", None), getattr(signal, "SIGHUP", None))
+    if signal_number is not None
+)
+
 
 class SubprocessForegroundSessionLauncher(IForegroundSessionLauncher):
     """以继承当前终端的方式启动 provider 原生界面。"""
@@ -89,10 +102,14 @@ class SubprocessForegroundSessionLauncher(IForegroundSessionLauncher):
             ``128 + signal``，父进程收到转发信号时同样按该约定结束。
         """
         forwarded_signals: list[int] = []
-        original_handlers = {
-            signal.SIGINT: signal.signal(signal.SIGINT, signal.SIG_IGN),
-            signal.SIGQUIT: signal.signal(signal.SIGQUIT, signal.SIG_IGN),
-        }
+        original_handlers: dict[int, object] = {}
+        for ignored_signal in _IGNORED_TERMINAL_SIGNALS:
+            try:
+                original_handlers[ignored_signal] = signal.signal(ignored_signal, signal.SIG_IGN)
+            except (OSError, ValueError):
+                logger.debug(
+                    "cannot ignore signal %s while launching native session", ignored_signal
+                )
 
         def _forward_parent_signal(signal_number: int, _frame: object) -> None:
             forwarded_signals.append(signal_number)
@@ -102,7 +119,7 @@ class SubprocessForegroundSessionLauncher(IForegroundSessionLauncher):
                 # provider 已经没了：不需要再做任何事，等待循环会立刻返回。
                 return
 
-        for terminal_signal in (signal.SIGTERM, signal.SIGHUP):
+        for terminal_signal in _FORWARDED_TERMINAL_SIGNALS:
             try:
                 original_handlers[terminal_signal] = signal.signal(
                     terminal_signal, _forward_parent_signal

@@ -4,7 +4,7 @@ Console 面板本身跑在浏览器里，离开浏览器后没有能留在其他
 本端口只描述「开启 / 聚焦 / 关闭一个紧凑系统窗口」这件事，**不描述窗口里显示
 什么**：窗口内容仍是 Console 自己的精简 route，走同一批本机只读 API。
 
-架构约束（PRD §5、§9 Architecture Acceptance）：core 只定义端口，不
+架构约束（PRD §5、§9 Architecture Acceptance）：本端口模块只定义契约，不
 ``subprocess``、不 import engines；进程与窗口生命周期由
 :mod:`backend.engines.desktop_companion` 实现，api 层只通过本端口调用。
 """
