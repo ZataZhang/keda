@@ -444,6 +444,7 @@ def test_lock_file_is_owner_only(config_path: Path) -> None:
     assert stat.S_IMODE(lock_path.stat().st_mode) == 0o600
 
 
+@requires_posix_permissions
 def test_atomic_replace_carries_target_ownership(config_path: Path, monkeypatch) -> None:
     """原子替换把目标原本的 uid/gid 搬到临时文件，写后属主不被换成写入进程。"""
     chown_calls: list[tuple[int, int]] = []
@@ -459,6 +460,7 @@ def test_atomic_replace_carries_target_ownership(config_path: Path, monkeypatch)
     assert chown_calls == [(target_stat.st_uid, target_stat.st_gid)]
 
 
+@requires_posix_permissions
 def test_unprivileged_chown_does_not_abort_the_write(config_path: Path, monkeypatch) -> None:
     """非特权进程 chown 不动属主时**继续写完**：属主保不住不该把一次合法保存改成失败。"""
 

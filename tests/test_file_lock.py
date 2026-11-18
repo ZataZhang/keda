@@ -35,7 +35,7 @@ def test_file_lock_creates_private_lock_file(tmp_path: Path) -> None:
     lock_path = tmp_path / "state.lock"
     with file_lock(lock_path):
         assert lock_path.is_file()
-        if hasattr(os, "fchmod"):
+        if os.name != "nt" and hasattr(os, "fchmod"):
             assert stat.S_IMODE(lock_path.stat().st_mode) == 0o600
 
 
