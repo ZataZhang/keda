@@ -852,6 +852,7 @@ def test_ensure_gitignore_inserts_block_when_missing(tmp_path: Path) -> None:
         ".agent-runner/",
         ".kc-worktrees/",
         ".kedacode.local.toml",
+        "*.toml.lock",
         "tasks/evidence/**",
         "!tasks/evidence/**/",
         "!tasks/evidence/**/*.md",
@@ -862,6 +863,8 @@ def test_ensure_gitignore_inserts_block_when_missing(tmp_path: Path) -> None:
     assert ".kedacode/" in text
     assert ".agent-runner/" in text
     assert ".kc-worktrees/" in text
+    # TOML 写回锁（`.kedacode.toml.lock` 等）是零字节会合点，不入库。
+    assert "*.toml.lock" in text
     # 已退役的旧 IAR 目录不再写入托管块。
     assert ".iar/" not in text
     assert ".iar-worktrees/" not in text
@@ -892,6 +895,7 @@ def test_ensure_gitignore_skips_patterns_already_outside_block(
         ".kedacode/",
         ".kc-worktrees/",
         ".kedacode.local.toml",
+        "*.toml.lock",
         "tasks/evidence/**",
         "!tasks/evidence/**/",
         "!tasks/evidence/**/*.md",
@@ -986,7 +990,7 @@ def test_ensure_gitignore_does_not_insert_empty_block_when_all_external(
     repo_path.mkdir()
     gitignore = repo_path / ".gitignore"
     gitignore.write_text(
-        ".kedacode/\n.agent-runner/\n.kc-worktrees/\n.kedacode.local.toml\n"
+        ".kedacode/\n.agent-runner/\n.kc-worktrees/\n.kedacode.local.toml\n*.toml.lock\n"
         "tasks/evidence/**\n!tasks/evidence/**/\n!tasks/evidence/**/*.md\n",
         encoding="utf-8",
     )
@@ -1002,6 +1006,7 @@ def test_ensure_gitignore_does_not_insert_empty_block_when_all_external(
         ".agent-runner/",
         ".kc-worktrees/",
         ".kedacode.local.toml",
+        "*.toml.lock",
         "tasks/evidence/**",
         "!tasks/evidence/**/",
         "!tasks/evidence/**/*.md",

@@ -543,7 +543,7 @@ uv run --project /path/to/keda kc init
 
 ### `.gitignore` 托管块与 prd skill 契约
 
-`kc init` 会在目标仓库 `.gitignore` 写入一个 `# >>> kc (managed by kc init) >>>` 托管块（幂等、可重跑；`--no-update-gitignore` 跳过），其中包含 `.kedacode/`、`.agent-runner/`、`.kc-worktrees/`，新工作树只会创建在 `.kc-worktrees/`，还包含 `tasks/evidence` 白名单段：
+`kc init` 会在目标仓库 `.gitignore` 写入一个 `# >>> kc (managed by kc init) >>>` 托管块（幂等、可重跑；`--no-update-gitignore` 跳过），其中包含 `.kedacode/`、`.agent-runner/`、`.kc-worktrees/`、`.kedacode.local.toml` 与 TOML 写锁 `*.toml.lock`（`config.toml` / `.kedacode.toml` 读-改-写时创建的零字节会合点文件），新工作树只会创建在 `.kc-worktrees/`，还包含 `tasks/evidence` 白名单段：
 
 ```gitignore
 tasks/evidence/**
