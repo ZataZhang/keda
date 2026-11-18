@@ -20,6 +20,15 @@ import type {
 } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
+const ISSUE_STAGE_DESCRIPTIONS: Partial<Record<LifecycleSettingsRow["key"], string>> = {
+  implementation: "按 Issue 需求编写代码并提交",
+  fix: "定位并修复执行中检查发现的问题",
+  closeout: "补齐验收清单、变更记录和验证证据",
+  verifier: "独立验证实际行为是否满足验收标准",
+  review: "审查代码改动，找出缺陷和回归风险",
+  supervisor: "跟踪 PR 的 CI、评论和分支状态，决定后续动作",
+};
+
 export interface MatrixRowProps {
   row: LifecycleSettingsRow;
   /** 当前配置范围；仓库范围清除本层绑定后会继承全局配置。 */
@@ -58,6 +67,7 @@ export function MatrixRow({
   onBindingChange,
 }: MatrixRowProps) {
   const vocabularySafe = vocabulary;
+  const stageDescription = ISSUE_STAGE_DESCRIPTIONS[row.key];
   const affected = row.affected_stages.filter((stage) => stage !== row.key);
   const bindingPlaceholder = row.follows_implementation
     ? "未绑定（生效值继承实现阶段）"
@@ -78,6 +88,11 @@ export function MatrixRow({
     >
       <div className="min-w-0">
         <p className="text-sm font-medium">{row.label}</p>
+        {stageDescription ? (
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+            {stageDescription}
+          </p>
+        ) : null}
         {row.preset_name ? (
           <Badge variant="ready" className="mt-1 text-[10px]">
             已绑定 {row.preset_name}
