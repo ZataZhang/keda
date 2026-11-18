@@ -150,6 +150,14 @@ export default function DashboardPage() {
   );
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
   const [selectedTask, setSelectedTask] = useState<RuntimeTaskEntry | null>(null);
+  // 已提交的「切换执行器续跑」（task_key + 阶段 + 执行器）：动作成功后该 Issue
+  // 已回到 ready 队列，但看板在下一次扫描前仍显示旧的失败态；没有这层记录时
+  // 用户会以为没生效而重复点击，第二次必然撞上"只适用于失败 Issue"。
+  const [executorSwitchQueued, setExecutorSwitchQueued] = useState<{
+    taskKey: string;
+    stage: string;
+    executor: string;
+  } | null>(null);
   const [companionState, setCompanionState] = useState<DesktopCompanionState | null>(
     null,
   );
@@ -173,6 +181,15 @@ export default function DashboardPage() {
       setSelectedTask((prev) => {
         if (!prev) return prev;
         return summary.tasks.find((task) => task.task_key === prev.task_key) ?? prev;
+      });
+      // 已排队的续跑在任务离开 failed 后失效：那时它要么已被 Runner 认领，
+      // 要么已经再次失败（可以重新选执行器），继续挡着按钮只会挡住第二次尝试。
+      setExecutorSwitchQueued((prev) => {
+        if (!prev) return prev;
+        const refreshedTask = summary.tasks.find(
+          (task) => task.task_key === prev.taskKey,
+        );
+        return refreshedTask && refreshedTask.status !== "failed" ? null : prev;
       });
       setRuntimeError(null);
     } catch (error: unknown) {
@@ -680,6 +697,11 @@ export default function DashboardPage() {
         { lifecycleStage, executor },
       );
       toast.success(result.detail);
+      setExecutorSwitchQueued({
+        taskKey: task.task_key,
+        stage: lifecycleStage,
+        executor,
+      });
       await loadRuntimeSummary();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "切换执行器续跑失败。");
@@ -862,6 +884,11 @@ export default function DashboardPage() {
                         void handleRuntimeRetryWithExecutor(selectedTask, stage, executor)
                       }
                       retryPending={actionPending}
+                      executorSwitchQueued={
+                        executorSwitchQueued?.taskKey === selectedTask.task_key
+                          ? executorSwitchQueued
+                          : null
+                      }
                       className="min-h-0 flex-1"
                     />
                   </div>

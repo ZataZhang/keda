@@ -375,11 +375,13 @@ def _process_single_issue(
             # 认领后的新鲜快照是「无改动交接」判定的基线（标签已翻成 running），
             # 但它来自 get_issue，不带入口处回填的 PRD 级 lifecycle 覆盖。直接整体
             # 赋值会让 review / supervisor 这类只读 Issue 上覆盖字段的阶段静默丢绑定，
-            # 因此以新鲜快照为底、把两个 lifecycle 覆盖字段带过来。
+            # 因此以新鲜快照为底、把三个覆盖字段带过来（一次性显式执行器覆盖也在内：
+            # 认领后的 fix / verifier / review 阶段仍要用用户选定的执行器）。
             issue = replace(
                 claimed_issue_snapshot,
                 lifecycle_overrides=issue.lifecycle_overrides,
                 lifecycle_preset_overrides=issue.lifecycle_preset_overrides,
+                explicit_executor_overrides=issue.explicit_executor_overrides,
             )
             # 生命周期观测：阻塞 Issue 被重新领取，说明阻塞已解除并进入新一轮执行。
             record_lifecycle_event(

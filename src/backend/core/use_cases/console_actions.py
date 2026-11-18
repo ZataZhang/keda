@@ -277,7 +277,13 @@ def _execute_retry_failed_with_executor(
     lifecycle_stage: str | None,
     executor: str | None,
 ) -> str:
-    """保存一次性阶段覆盖并把失败 Issue 重新放回 ready 队列。"""
+    """保存一次性阶段覆盖并把失败 Issue 重新放回 ready 队列。
+
+    幂等：同一次「换执行器续跑」被重复提交时（用户没看到结果又点一次），
+    第二次不再报错——第一次已经把覆盖写入并把 Issue 放回 ready 队列，标签
+    随之不再是 failed。此时按本次选择更新待消费覆盖并如实回报状态；既没有
+    失败标签、也没有待消费覆盖，才是真正的场景不符。
+    """
     if lifecycle_stage not in RETRYABLE_LIFECYCLE_STAGES or not executor:
         raise ConsoleActionError(
             "retry_failed_with_executor requires a supported lifecycle_stage and executor."
@@ -285,7 +291,16 @@ def _execute_retry_failed_with_executor(
     issue = github_client.get_issue(issue_number)
     failed_label = context.config.labels.failed
     ready_label = context.config.labels.ready
-    if failed_label not in issue.labels:
+    override_store = resolve_issue_retry_override_store(store)
+    if override_store is None:
+        raise ConsoleActionError("This Console store does not support one-time executor overrides.")
+    pending_override = override_store.get_issue_retry_override(
+        repo_id=repo_id,
+        issue_number=issue_number,
+    )
+    # 待消费覆盖仍在 = 上一次点击已把它排进 ready 队列、Runner 尚未认领。
+    already_queued = failed_label not in issue.labels and pending_override is not None
+    if failed_label not in issue.labels and pending_override is None:
         raise ConsoleActionError(
             f"Issue #{issue_number} does not carry label '{failed_label}'; "
             "executor-switch retry only applies to failed Issues."
@@ -317,9 +332,6 @@ def _execute_retry_failed_with_executor(
         raise ConsoleActionError(
             "The verifier executor must differ from the implementation executor."
         )
-    override_store = resolve_issue_retry_override_store(store)
-    if override_store is None:
-        raise ConsoleActionError("This Console store does not support one-time executor overrides.")
 
     override_store.set_issue_retry_override(
         repo_id=repo_id,
@@ -327,6 +339,13 @@ def _execute_retry_failed_with_executor(
         stage=lifecycle_stage,
         executor=executor,
     )
+    if already_queued:
+        # 已经在队列里：不再翻标签（队列状态由上一次点击改好了），只更新覆盖并
+        # 如实回报"已排入"，避免把重复提交说成失败。
+        return (
+            f"Issue #{issue_number} is already queued; the pending executor override was "
+            f"updated to resume at {lifecycle_stage} with executor '{executor}'."
+        )
     try:
         github_client.edit_issue_labels(issue_number, add=[ready_label], remove=[failed_label])
     except Exception:

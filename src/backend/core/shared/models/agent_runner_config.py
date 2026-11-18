@@ -46,6 +46,12 @@ class IssueSummary:
     #: 该 Issue 所引用 PRD 的头部 ``lifecycle_presets`` 块（键值对元组）。
     #: 与 ``lifecycle_overrides`` 同机制：随 Issue 流动，供模型绑定解析。
     lifecycle_preset_overrides: tuple[tuple[str, str], ...] = ()
+    #: 该 Issue 的**一次性显式执行器覆盖**（键值对元组）：Console「换执行器续跑」
+    #: 为单个 Issue、单个阶段选定的执行器（如 ``implementation`` -> ``mcode``）。
+    #: 优先级高于阶段预设绑定与生命周期矩阵声明、低于命令行 ``--agent``——
+    #: 预设绑定整体决定该阶段，用矩阵层投递会让这层一次性选择被静默遮蔽，
+    #: 用户选了 mcode 仍按预设的 codex 跑（换执行器续跑形同虚设）。
+    explicit_executor_overrides: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)

@@ -4300,6 +4300,15 @@ PR 的入口，不再把「没有开放 PR」误显示成「从未交付 PR」�
 快照未收录时，运行账本和未收口的生命周期账本只补充最近 7 天内开始的记录。超出窗口的未收口
 记录不再作为当前运行任务计数，历史复盘仍使用统计页。
 
+「切换执行器续跑」是**一次性选择**：后端把「该 Issue 的该阶段改用哪个执行器」记成
+一次性覆盖并把 Issue 放回 `agent/ready` 队列，Runner 认领时消费掉；覆盖的优先级
+（高于阶段预设绑定，低于命令行 `--agent`）见
+[生命周期 Agent 矩阵](lifecycle-agent-matrix.md#one-time-executor-override)。
+重复提交同一次切换是**幂等**的：第一次已把 Issue 放回队列并写下覆盖，第二次只更新覆盖
+内容、不再翻标签；只有既没有 `agent/failed` 标签、也没有待消费覆盖时才被拒绝（说明这个
+Issue 已经不在"失败待续跑"状态）。界面在动作成功后显示"已排入续跑"并收起重复提交入口——
+看板在下一次扫描前仍显示旧的失败态，没有这层提示时用户会以为没生效而反复点击。
+
 看板上方的「开启独立窗口」入口通过 pywebview 打开一个临时紧凑窗口；该入口不负责菜单栏驻留。
 macOS 菜单栏版需要从 `~/Applications/KedaCode.app` 启动，点击顶部图标展开状态，再用「固定悬浮」
 保持为置顶窗口。构建、平台依赖、Console origin 约束与排查见
@@ -5828,6 +5837,14 @@ profile 级字段（`profiles.<profile>`，用途为 5 种闭集：`run` / `deli
 | `read_only` | bool，默认 `false` | 是否为可验证的只读调用；只读决策入口（planner / `kc ask`）以此做 fail-fast 门禁 |
 
 argv 组装顺序：`[bin] + args(占位符替换) + resume_args(若有) + expanders + tail_args`，再按 `prompt_delivery` 决定提示词落在 argv 尾部、指定 flag 后还是 stdin；当 profile 声明 `resume_tail_args` 且本次确实续传时，它替换 `tail_args`。字段的三层合并语义与 shell 展开边界详见 [配置说明](configuration.md#agent-runner-agent-registry)。
+
+内置输出协议的实现模块在**包导入期**一次性导入
+（`backend.engines.agent_runner.output_protocols` 的 `_import_builtin_protocol_modules`），
+不在运行期懒加载：长驻进程（daemon / `kc run`）跨过一次代码更新后，运行期再从磁盘加载
+实现模块会拿到**新**的实现、配上进程启动时导入的**旧**核心接口类，得到半新半旧的代码
+快照——表现为 `'OutputRelayRequest' object has no attribute 'cancel_check'` 这类难以定位
+的属性错误。启动时统一导入保证整进程同一份快照；因此**改动 runner 自身代码后需要重启
+daemon / 重新起一次 `kc run`** 才会生效，运行中的进程不会热加载新代码。
 
 ### 自检流程（`kc agent doctor`）
 

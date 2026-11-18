@@ -22,17 +22,40 @@ REPAIR_AGENT_EXECUTOR = "executor"
 """``repair_agent`` 取值：把修复交回本次实现者。"""
 
 
-def choose_agent(issue: IssueSummary, config: AppConfig, override_agent: str) -> str:
+def choose_agent(
+    issue: IssueSummary,
+    config: AppConfig,
+    override_agent: str,
+    *,
+    lifecycle: str = "implementation",
+) -> str:
     """Choose an AI agent for the Issue.
 
-    优先级：显式 ``override_agent``（CLI / loop recipe）> 阶段预设绑定
+    优先级：显式 ``override_agent``（CLI / loop recipe）> Issue 的一次性显式执行器
+    覆盖（Console「换执行器续跑」）> 阶段预设绑定
     （``lifecycle_presets``，预设整体决定 agent）> Issue 上的 agent 标签路由
     > 生命周期矩阵 ``implementation`` 显式声明 > ``runner.default_agent`` >
     内置默认（``claude``）。未绑定预设时标签路由与 loop recipe 仍是更高
     优先级——矩阵只替换 ``default_agent`` 这一回落层。
+
+    Args:
+        issue: 正在处理的 Issue。
+        config: Agent Runner 配置。
+        override_agent: ``--agent`` 覆盖（``"auto"`` 走标签路由）。
+        lifecycle: 一次性显式执行器覆盖所属的阶段。默认 ``implementation``；
+            辩论阶段按标签路由时传 ``deliberate``，避免实现阶段的覆盖串味。
     """
     if override_agent != "auto":
         return override_agent
+    # 一次性显式执行器覆盖高于预设绑定：预设绑定整体决定该阶段，若让它遮蔽这层
+    # 选择，用户在 Console 选定的执行器永远不会被真正使用。
+    from backend.core.use_cases.lifecycle_agent_resolution import (
+        explicit_executor_override_agent,
+    )
+
+    explicit_agent = explicit_executor_override_agent(issue, lifecycle, config=config)
+    if explicit_agent is not None:
+        return explicit_agent
     bound_agent = _resolve_bound_lifecycle_agent("implementation", config, issue=issue)
     if bound_agent is not None:
         return bound_agent

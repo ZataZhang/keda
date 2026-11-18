@@ -272,6 +272,8 @@ interface RuntimeTaskDetailProps {
   onRetryWithExecutor?: (stage: string, executor: string) => void;
   /** 阶段执行器续跑请求是否正在提交。 */
   retryPending?: boolean;
+  /** 本任务已提交的「切换执行器续跑」（阶段与执行器）；已排队时不再重复提交。 */
+  executorSwitchQueued?: { stage: string; executor: string } | null;
   /** 追加到根容器的布局类；抽屉等受高度约束的宿主用它撑满可用空间。 */
   className?: string;
 }
@@ -286,6 +288,7 @@ export function RuntimeTaskDetail({
   task,
   onRetryWithExecutor,
   retryPending = false,
+  executorSwitchQueued = null,
   className,
 }: RuntimeTaskDetailProps) {
   const presentation = runtimeStatusPresentation(task.status, task.waiting_reason);
@@ -450,7 +453,15 @@ export function RuntimeTaskDetail({
                 这是执行器调用失败，系统没有收到本阶段可用的完成结果。选择一个本阶段尚未尝试的执行器后，
                 Runner 会重新进入任务流程并复用已有提交或检查点。
               </p>
-              {!executorChooserOpen ? (
+              {executorSwitchQueued ? (
+                <p
+                  className="mt-2 text-sm text-emerald-800 dark:text-emerald-200"
+                  data-testid="runtime-task-executor-switch-queued"
+                >
+                  已排入续跑：{executorSwitchQueued.stage} 阶段改用执行器{" "}
+                  {executorSwitchQueued.executor}，等待 Runner 认领后生效，无需重复提交。
+                </p>
+              ) : !executorChooserOpen ? (
                 <Button
                   className="mt-2"
                   variant="outline"

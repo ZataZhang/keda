@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from dataclasses import replace
 from functools import partial
 from pathlib import Path
 
@@ -110,6 +111,33 @@ from backend.core.use_cases.run_agent_once import (
 )
 
 _logger = logging.getLogger(__name__)
+
+
+def _adopt_fresh_issue_snapshot(
+    fresh_issue: IssueSummary,
+    previous_issue: IssueSummary,
+) -> IssueSummary:
+    """采用认领后的新鲜 Issue 快照，但保留随 Issue 流动的本地覆盖字段。
+
+    fresh 读取的目的是刷新标签 / 状态 / 正文，**不是**丢掉本地附加的覆盖：
+    PRD 级 ``lifecycle_agents`` / ``lifecycle_presets`` 覆盖与一次性显式执行器
+    覆盖（Console「换执行器续跑」）都随 Issue 流动。直接整体赋值会让 review /
+    supervisor / verifier 这类按覆盖字段选执行器的阶段静默丢绑定——一次性覆盖
+    尤其致命：用户选的执行器会被阶段预设绑定遮蔽，等于没选。
+
+    Args:
+        fresh_issue: 认领后从 GitHub fresh 读取的 Issue 快照。
+        previous_issue: 认领前携带本地覆盖字段的 Issue。
+
+    Returns:
+        带新鲜标签 / 状态、且保留本地覆盖字段的 Issue。
+    """
+    return replace(
+        fresh_issue,
+        lifecycle_overrides=previous_issue.lifecycle_overrides,
+        lifecycle_preset_overrides=previous_issue.lifecycle_preset_overrides,
+        explicit_executor_overrides=previous_issue.explicit_executor_overrides,
+    )
 
 
 def _skip_publication_for_closed_no_change(
@@ -272,7 +300,7 @@ def _process_blocked_resolution(
         )
         if stage_decision is None:
             return
-        issue = stage_decision.issue
+        issue = _adopt_fresh_issue_snapshot(stage_decision.issue, issue)
         publish_stage = stage_decision.publish_stage
         pre_verifier_publication = PreVerifierDraftPublicationRequest(
             issue=issue,
@@ -480,7 +508,7 @@ def _process_ready_issue(
         stage_decision,
         claim_bid.comment_id,
     )
-    issue = stage_decision.issue
+    issue = _adopt_fresh_issue_snapshot(stage_decision.issue, issue)
     publish_stage = stage_decision.publish_stage
     pre_verifier_publication = PreVerifierDraftPublicationRequest(
         issue=issue,
@@ -910,7 +938,7 @@ def _process_running_publish_recovery(
         )
         if stage_decision is None:
             return
-        issue = stage_decision.issue
+        issue = _adopt_fresh_issue_snapshot(stage_decision.issue, issue)
         publish_stage = stage_decision.publish_stage
 
         # 检查是否有可复用的本地 commit

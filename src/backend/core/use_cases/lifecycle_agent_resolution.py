@@ -17,6 +17,10 @@
 已注册 agent 名——未注册时抛 :class:`UnknownAgentError`（fail-fast，不静默
 回落）。
 
+矩阵声明之外还有两层更高的显式选择：命令行 ``--agent``（最高）与 Console
+「换执行器续跑」的一次性显式执行器覆盖（:func:`explicit_executor_override_agent`，
+高于阶段预设绑定）——后者的存在理由见该函数 docstring。
+
 本模块刻意不重写各阶段的 ``auto`` 语义：``auto`` 一律按该阶段**既有**语义路由
 （实现走 ``choose_agent`` 的标签路由；校验 / 审核 / 监督先在既有配置键里取具体
 agent、键本身也是 ``auto`` 时才展开成回退链 / 不同人优先 / 沿用实现者；辩论走标签
@@ -375,6 +379,40 @@ def effective_prd_overrides(
     return merged_overrides
 
 
+def explicit_executor_override_agent(
+    issue: IssueSummary | None,
+    lifecycle: str,
+    *,
+    config: AppConfig,
+) -> str | None:
+    """返回该 Issue 携带的**一次性显式执行器覆盖**（Console「换执行器续跑」）。
+
+    这层覆盖是针对单个 Issue、单个阶段的一次性显式选择（用户在 Console 为
+    失败阶段挑的执行器），优先级**高于**阶段预设绑定与生命周期矩阵声明、
+    **低于**命令行 ``--agent``。必须独立成层：阶段预设绑定整体决定该阶段
+    （agent + 模型 + 推理档），若把它投递成矩阵声明，预设绑定会静默遮蔽这层
+    选择——用户选了 mcode，Runner 仍按预设的 codex 跑，"换执行器续跑"形同虚设。
+
+    Args:
+        issue: 当前 Issue；``None`` 表示无上下文。
+        lifecycle: 生命周期键。
+        config: 已按"仓库层 > 全局层"合并好的应用配置（校验 agent 是否注册）。
+
+    Returns:
+        该阶段被显式覆盖的 agent 名；未覆盖时返回 ``None``。
+
+    Raises:
+        UnknownAgentError: 覆盖值不是已注册 agent（fail-fast，不静默回落）。
+    """
+    if issue is None:
+        return None
+    explicit_overrides = dict(getattr(issue, "explicit_executor_overrides", ()) or ())
+    overridden_agent = explicit_overrides.get(lifecycle)
+    if overridden_agent is None:
+        return None
+    return _validate_registered(overridden_agent, lifecycle=lifecycle, config=config)
+
+
 def effective_prd_preset_overrides(
     issue: IssueSummary | None,
     prd_preset_overrides: Mapping[str, str] | None = None,
@@ -533,6 +571,11 @@ def resolve_lifecycle_agent(
 
     # 显式 CLI --agent 最高：绑定让位（模型绑定由调用方按 agent 匹配规则丢弃）。
     if override_agent == LIFECYCLE_AGENT_AUTO:
+        # 一次性显式执行器覆盖次之：高于预设绑定与矩阵声明（否则用户在 Console
+        # 选定的执行器会被预设静默遮蔽）。
+        explicit_agent = explicit_executor_override_agent(issue, lifecycle, config=config)
+        if explicit_agent is not None:
+            return explicit_agent
         bound_preset_name = declared_lifecycle_preset(
             lifecycle, config, issue=issue, prd_preset_overrides=prd_preset_overrides
         )
@@ -788,7 +831,14 @@ def _resolve_auto(
 
     if lifecycle == "deliberate":
         if issue is not None:
-            return choose_agent(issue, config, LIFECYCLE_AGENT_AUTO)
+            # 辩论阶段按标签路由；显式声明 lifecycle="deliberate" 以免
+            # implementation 阶段的一次性执行器覆盖串味到这里。
+            return choose_agent(
+                issue,
+                config,
+                LIFECYCLE_AGENT_AUTO,
+                lifecycle="deliberate",
+            )
         return _validate_registered(
             LIFECYCLE_AGENT_BUILTIN_DEFAULT, lifecycle=lifecycle, config=config
         )

@@ -225,8 +225,22 @@ def _choose_verifier_agent(
     )
     from backend.core.use_cases.lifecycle_agent_resolution import (
         declared_lifecycle_preset,
+        explicit_executor_override_agent,
         resolve_lifecycle_agent,
     )
+
+    # 一次性显式执行器覆盖（Console「换执行器续跑」）优先于预设绑定与既有配置键：
+    # 用户为校验阶段挑定的执行器不能被阶段预设静默遮蔽。
+    explicit_verifier_agent = explicit_executor_override_agent(issue, "verifier", config=config)
+    if explicit_verifier_agent is not None:
+        if explicit_verifier_agent != builder_agent:
+            return explicit_verifier_agent
+        _logger.warning(
+            "One-time verifier override %r matches builder for Issue #%s; selecting a distinct "
+            "fallback agent instead.",
+            explicit_verifier_agent,
+            issue.number if issue is not None else "unknown",
+        )
 
     merged_overrides = dict(prd_overrides or {})
     declared_value = merged_overrides.get("verifier")

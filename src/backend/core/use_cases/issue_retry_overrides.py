@@ -1,4 +1,11 @@
-"""Issue 单次续跑执行器覆盖的可选本地存储能力。"""
+"""Issue 单次续跑执行器覆盖的可选本地存储能力。
+
+覆盖经 :attr:`IssueSummary.explicit_executor_overrides` 随 Issue 流动——这是
+**独立于生命周期矩阵声明**的一层：阶段预设绑定整体决定该阶段（agent + 模型 +
+推理档），若把一次性选择投递成矩阵声明，预设绑定会把它遮蔽，用户在 Console 选
+的执行器永远不生效。解析侧的优先级见
+:func:`backend.core.use_cases.lifecycle_agent_resolution.explicit_executor_override_agent`。
+"""
 
 from __future__ import annotations
 
@@ -74,7 +81,12 @@ def resolve_issue_retry_override_store(store: object | None) -> IIssueRetryOverr
 def prepare_issue_retry_override(
     request: IssueRetryOverrideRequest,
 ) -> tuple[IssueSummary, _IssueRetryOverrideClaim | None]:
-    """验证并应用待处理的单次执行器覆盖。"""
+    """验证并应用待处理的单次执行器覆盖。
+
+    覆盖写入 :attr:`IssueSummary.explicit_executor_overrides`（一次性显式执行器
+    覆盖层），**不**写入 ``lifecycle_overrides``（生命周期矩阵 / PRD 覆盖层）：
+    后者会被阶段预设绑定遮蔽，"换执行器续跑"因此静默失效。
+    """
     override_store = resolve_issue_retry_override_store(request.run_history_store)
     if override_store is None or request.issue_kind != "ready":
         return request.issue, None
@@ -96,11 +108,11 @@ def prepare_issue_retry_override(
             "with a run profile. Choose a registered executor and retry again."
         )
 
-    lifecycle_overrides = dict(request.issue.lifecycle_overrides)
-    lifecycle_overrides[stage] = executor
+    explicit_executor_overrides = dict(request.issue.explicit_executor_overrides)
+    explicit_executor_overrides[stage] = executor
     prepared_issue = replace(
         request.issue,
-        lifecycle_overrides=tuple(lifecycle_overrides.items()),
+        explicit_executor_overrides=tuple(sorted(explicit_executor_overrides.items())),
     )
     claim = _IssueRetryOverrideClaim(
         store=override_store,
