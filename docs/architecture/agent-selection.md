@@ -4,7 +4,7 @@
 
 ## 背景
 
-keda（kedacode / iar）需要一个"启动 agent"来执行 issue。两个候选方案：
+KedaCode 需要一个"启动 agent"来执行 issue。两个候选方案：
 
 - **方案 A：复用现有 agent CLI**（claude / codex / opencode / pi CLI 等），keda 只做编排。
 - **方案 B：自建 agent**——基于 `@earendil-works/pi-agent-core`（zata-shared 的 `Agent/runtimes/pi-task-agent` 骨架）。
