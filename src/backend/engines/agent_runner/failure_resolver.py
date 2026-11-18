@@ -40,6 +40,13 @@ class AgentFailureResolver:
         input_reader: Callable[[str], str] | None = None,
         printer: Callable[[str], None] | None = None,
     ) -> None:
+        """初始化失败处理器的交互通道。
+
+        Args:
+            is_tty: 是否为交互式终端，省略时按 stdin / stdout 探测。
+            input_reader: 读取用户输入的函数，省略时使用 ``input``。
+            printer: 输出提示的函数，省略时使用 ``print``。
+        """
         self._is_tty = (
             is_tty if is_tty is not None else (sys.stdin.isatty() and sys.stdout.isatty())
         )

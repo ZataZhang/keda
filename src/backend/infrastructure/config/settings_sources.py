@@ -260,7 +260,7 @@ def _load_toml_section_data(section_name: str) -> dict[str, Any]:
         with open(toml_path, "rb") as toml_file:
             toml_data: dict[str, Any] = tomllib.load(toml_file)
         return toml_data.get(section_name, {})
-    except Exception:
+    except Exception:  # noqa: BLE001 - 配置缺失或损坏时按空段处理，配置加载必须完成。
         return {}
 
 
@@ -283,7 +283,7 @@ def _load_registry_toml_section_data(section_name: str) -> dict[str, Any]:
         with open(registry_path, "rb") as toml_file:
             toml_data: dict[str, Any] = tomllib.load(toml_file)
         return toml_data.get(section_name, {})
-    except Exception:
+    except Exception:  # noqa: BLE001 - registry 配置缺失或损坏时按空段处理。
         return {}
 
 

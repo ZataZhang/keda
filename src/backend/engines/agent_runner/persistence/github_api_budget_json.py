@@ -87,6 +87,16 @@ class JsonGitHubApiBudget(IGitHubApiBudget):
         flush_every_calls: int = _DEFAULT_FLUSH_EVERY_CALLS,
         flush_interval_seconds: float = _DEFAULT_FLUSH_INTERVAL_SECONDS,
     ) -> None:
+        """初始化额度账本。
+
+        Args:
+            state_path: 账本文件路径，省略时使用默认位置。
+            source: 来源标签（如 ``kc daemon`` / ``kc console``），用于区分多个进程的用量。
+            now: 返回当前 UTC 时间的函数，测试可替换。
+            probe_interval_seconds: 额度探测的最小间隔秒数。
+            flush_every_calls: 累计多少次调用后落盘一次。
+            flush_interval_seconds: 两次落盘之间的最长间隔秒数。
+        """
         self._state_path = (state_path or resolve_github_api_budget_path()).resolve()
         # 来源标签（如 ``kc daemon`` / ``kc console``）：多个进程共用一份账本，靠它回答“谁用的”。
         self._source = source

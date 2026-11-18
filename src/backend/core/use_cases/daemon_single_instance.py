@@ -28,6 +28,12 @@ class DaemonAlreadyRunningError(RuntimeError):
     """Raised when a live daemon already owns a repository's single-instance lock."""
 
     def __init__(self, repo_id: str, owner_pid: int) -> None:
+        """记录已有 daemon 占用该仓库。
+
+        Args:
+            repo_id: 仓库标识。
+            owner_pid: 已在运行的 daemon 进程号。
+        """
         self.repo_id = repo_id
         self.owner_pid = owner_pid
         super().__init__(

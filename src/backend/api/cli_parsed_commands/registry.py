@@ -106,22 +106,27 @@ def run_registry_sync_command(ctx: ParsedCommandContext) -> int:
 
 
 def run_registry_reinit_command(ctx: ParsedCommandContext) -> int:
+    """执行 ``kc registry reinit`` 并返回退出码。"""
     return _run_registry_reinit_command(ctx.parsed, ctx.process_runner)
 
 
 def run_registry_remove_command(ctx: ParsedCommandContext) -> int:
+    """执行 ``kc registry remove`` 并返回退出码。"""
     return _run_registry_remove_command(ctx.parsed, ctx.process_runner)
 
 
 def run_registry_list_command(ctx: ParsedCommandContext) -> int:
+    """执行 ``kc registry list`` 并返回退出码。"""
     return _run_registry_list_command(ctx.process_runner, fmt=ctx.output_format)
 
 
 def run_registry_start_command(ctx: ParsedCommandContext) -> int:
+    """执行 ``kc registry start`` 并返回退出码。"""
     return _run_registry_start_command(ctx.parsed, ctx.process_runner)
 
 
 def run_registry_stop_command(ctx: ParsedCommandContext) -> int:
+    """执行 ``kc registry stop`` 并返回退出码。"""
     return _run_registry_stop_command(ctx.parsed, ctx.process_runner)
 
 

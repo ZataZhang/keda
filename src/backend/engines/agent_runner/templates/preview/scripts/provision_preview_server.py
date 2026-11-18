@@ -594,6 +594,7 @@ fi
 
 
 def parse_args() -> argparse.Namespace:
+    """解析预览服务器初始化脚本的命令行参数。"""
     parser = argparse.ArgumentParser(
         description="Provision a VPS for keda PR preview deployments.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -709,6 +710,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    """脚本入口：初始化预览服务器并返回退出码。"""
     args = parse_args()
     # Runtime check (kept out of parse_args so argument parsing can be exercised
     # in tests and `--help` output without sshpass being installed locally).

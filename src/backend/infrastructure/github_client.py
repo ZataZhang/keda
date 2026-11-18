@@ -566,23 +566,29 @@ class GitHubCliClient:
     # --- issue delegations ---------------------------------------------
 
     def list_ready_issues(self, ready_label: str, limit: int) -> list[IssueSummary]:
+        """列出带就绪标签的未关闭 Issue。"""
         return list_ready_issues(self, ready_label, limit)
 
     def list_rework_prd_issues(self, rework_prd_label: str, limit: int) -> list[IssueSummary]:
+        """列出带 rework-prd 标签的未关闭 Issue。"""
         return list_rework_prd_issues(self, rework_prd_label, limit)
 
     def list_review_candidate_issues(self, labels: Sequence[str], limit: int) -> list[IssueSummary]:
+        """列出带任一给定标签的未关闭 Issue。"""
         return list_review_candidate_issues(self, labels, limit)
 
     def list_issues_by_label(
         self, label: str | None, limit: int, state: str = "all"
     ) -> list[IssueSummary]:
+        """按标签读取指定状态的 Issue。"""
         return list_issues_by_label(self, label, limit, state)
 
     def list_repository_items(self, *, state: str = "open") -> list[IssueSummary]:
+        """完整列出仓库的 Issue 与 PR，保留每个条目的正文和状态。"""
         return list_repository_items(self, state=state)
 
     def get_issue(self, issue_number: int) -> IssueSummary:
+        """读取指定编号的 Issue 摘要。"""
         return get_issue(self, issue_number)
 
     def edit_issue_labels(
@@ -592,18 +598,23 @@ class GitHubCliClient:
         add: Sequence[str] = (),
         remove: Sequence[str] = (),
     ) -> None:
+        """添加或移除 Issue 标签。"""
         edit_issue_labels(self, issue_number, add=add, remove=remove)
 
     def comment_issue(self, issue_number: int, body: str) -> None:
+        """向 Issue 发布 Markdown 评论。"""
         comment_issue(self, issue_number, body)
 
     def edit_issue_body(self, issue_number: int, body: str) -> None:
+        """替换 Issue 正文。"""
         edit_issue_body(self, issue_number, body)
 
     def create_issue(self, *, title: str, body: str, labels: Sequence[str]) -> str:
+        """创建 GitHub Issue 并返回其 URL。"""
         return create_issue(self, title=title, body=body, labels=labels)
 
     def list_issue_comments(self, issue_number: int, *, require_success: bool = False) -> list[str]:
+        """读取 Issue 评论的非空正文，默认按尽力读取处理失败。"""
         return list_issue_comments(self, issue_number, require_success=require_success)
 
     def list_issue_comment_entries(
@@ -653,14 +664,17 @@ class GitHubCliClient:
         )
 
     def edit_issue_comment(self, comment_id: int, body: str) -> None:
+        """修改一条已有的 Issue 评论。"""
         edit_issue_comment(self, comment_id, body)
 
     def delete_issue_comment(self, comment_id: int) -> None:
+        """删除一条 Issue 评论。"""
         delete_issue_comment(self, comment_id)
 
     # --- PR delegations -------------------------------------------------
 
     def create_draft_pr(self, *, title: str, body: str, base_branch: str, cwd: Path) -> str:
+        """基于当前分支创建 Draft PR 并返回其 URL。"""
         return create_draft_pr(self, title=title, body=body, base_branch=base_branch, cwd=cwd)
 
     def get_pull_request_context(
@@ -687,12 +701,15 @@ class GitHubCliClient:
         return get_pull_request_context_by_number(self, pr_number, require_success=require_success)
 
     def comment_pr(self, pr_number: int, body: str) -> None:
+        """向 PR 发布 Markdown 评论。"""
         comment_pr(self, pr_number, body)
 
     def update_pull_request_body(self, pr_number: int, body: str) -> None:
+        """替换 PR 的描述正文。"""
         update_pull_request_body(self, pr_number, body)
 
     def set_pull_request_base(self, pr_number: int, base_branch: str) -> None:
+        """修改 PR 的目标分支。"""
         set_pull_request_base(self, pr_number, base_branch)
 
     def mark_pull_request_ready(self, pr_number: int) -> None:
@@ -700,6 +717,7 @@ class GitHubCliClient:
         mark_pull_request_ready(self, pr_number)
 
     def merge_pull_request(self, pr_number: int, *, method: str = "squash") -> None:
+        """按指定方式（默认 squash）合并 PR。"""
         merge_pull_request(self, pr_number, method=method)
 
     def close_pull_request(self, pr_number: int, *, comment: str | None = None) -> None:
@@ -707,18 +725,23 @@ class GitHubCliClient:
         close_pull_request(self, pr_number, comment=comment)
 
     def list_pr_comments(self, pr_number: int) -> list[str]:
+        """读取 PR 对话区中的评论正文。"""
         return list_pr_comments(self, pr_number)
 
     def find_open_pr_by_head(self, branch: str, *, require_success: bool = False) -> str | None:
+        """若分支存在开放 PR，则返回其 URL。"""
         return find_open_pr_by_head(self, branch, require_success=require_success)
 
     def find_merged_pr_by_head(self, branch: str, *, require_success: bool = False) -> str | None:
+        """若分支存在已合并 PR，则返回其 URL。"""
         return find_merged_pr_by_head(self, branch, require_success=require_success)
 
     def get_remote_base_sha(self, remote: str, base_branch: str) -> str:
+        """返回远端基线分支当前的提交 SHA。"""
         return get_remote_base_sha(self, remote, base_branch)
 
     def list_pull_requests_for_issue(
         self, repo: str, issue_number: int
     ) -> list[PullRequestSummary]:
+        """列出引用或关闭指定 Issue 的 PR。"""
         return list_pull_requests_for_issue(self, repo, issue_number)

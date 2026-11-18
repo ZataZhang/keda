@@ -243,7 +243,7 @@ class StreamUsageCollector:
         """观察一行原始输出；解析失败静默跳过。"""
         try:
             parsed_usage_event = _extract_stream_usage_event(line)
-        except Exception:  # pragma: no cover - 防御性兜底：采集绝不影响主流程
+        except Exception:  # pragma: no cover  # noqa: BLE001 - 防御性兜底：采集绝不影响主流程
             parsed_usage_event = None
         if parsed_usage_event is not None:
             event_type, parsed_usage = parsed_usage_event
@@ -265,13 +265,13 @@ class StreamUsageCollector:
                 self._usage = parsed_usage
         try:
             parsed_session_id = extract_session_id_event(line)
-        except Exception:  # pragma: no cover - 防御性兜底：同上
+        except Exception:  # pragma: no cover  # noqa: BLE001 - 防御性兜底：同上
             parsed_session_id = None
         if parsed_session_id is not None:
             self._session_id = parsed_session_id
         try:
             parsed_model = extract_reported_model_event(line)
-        except Exception:  # pragma: no cover - 防御性兜底：同上
+        except Exception:  # pragma: no cover  # noqa: BLE001 - 防御性兜底：同上
             parsed_model = None
         if parsed_model is not None:
             self._reported_model = parsed_model

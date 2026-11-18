@@ -31,6 +31,12 @@ class PanelState:
     __slots__ = ("panel_id", "provider", "status", "lines")
 
     def __init__(self, panel_id: str, provider: str) -> None:
+        """创建处于 ``pending`` 状态的空面板。
+
+        Args:
+            panel_id: 面板标识。
+            provider: 面板对应的 agent 提供方。
+        """
         self.panel_id = panel_id
         self.provider = provider
         self.status = "pending"

@@ -68,7 +68,7 @@ def get_agent_runner_health() -> dict:
     try:
         runner.run(["gh", "--version"], cwd=Path("."))
         gh_available = True
-    except Exception:
+    except Exception:  # noqa: BLE001 - 探活失败只表示 gh 不可用，健康接口照常返回 degraded。
         pass
 
     return {

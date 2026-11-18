@@ -116,6 +116,7 @@ class DatabaseSettings(BaseSettings):
         dotenv_settings: PydanticBaseSettingsSource,  # noqa: ARG003
         file_secret_settings: PydanticBaseSettingsSource,  # noqa: ARG003
     ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """声明配置来源优先级：环境变量 > config.toml 的 ``[database]`` 段 > 初始化参数。"""
         return _env_toml_init_sources(settings_cls, "database", env_settings, init_settings)
 
 
@@ -137,6 +138,7 @@ class ChatModelSettings(BaseSettings):
         dotenv_settings: PydanticBaseSettingsSource,  # noqa: ARG003
         file_secret_settings: PydanticBaseSettingsSource,  # noqa: ARG003
     ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """声明配置来源优先级：环境变量 > config.toml 的 ``[chat_model]`` 段 > 初始化参数。"""
         return _env_toml_init_sources(settings_cls, "chat_model", env_settings, init_settings)
 
 
@@ -158,6 +160,7 @@ class MinioSettings(BaseSettings):
         dotenv_settings: PydanticBaseSettingsSource,  # noqa: ARG003
         file_secret_settings: PydanticBaseSettingsSource,  # noqa: ARG003
     ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """声明配置来源优先级：环境变量 > config.toml 的 ``[minio]`` 段 > 初始化参数。"""
         return _env_toml_init_sources(settings_cls, "minio", env_settings, init_settings)
 
 
@@ -179,6 +182,7 @@ class QdrantSettings(BaseSettings):
         dotenv_settings: PydanticBaseSettingsSource,  # noqa: ARG003
         file_secret_settings: PydanticBaseSettingsSource,  # noqa: ARG003
     ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """声明配置来源优先级：环境变量 > config.toml 的 ``[qdrant]`` 段 > 初始化参数。"""
         return _env_toml_init_sources(settings_cls, "qdrant", env_settings, init_settings)
 
 
@@ -201,6 +205,7 @@ class EmbeddingSettings(BaseSettings):
         dotenv_settings: PydanticBaseSettingsSource,  # noqa: ARG003
         file_secret_settings: PydanticBaseSettingsSource,  # noqa: ARG003
     ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """声明配置来源优先级：环境变量 > config.toml 的 ``[embedding]`` 段 > 初始化参数。"""
         return _env_toml_init_sources(settings_cls, "embedding", env_settings, init_settings)
 
 
@@ -221,6 +226,7 @@ class ChunkingSettings(BaseSettings):
         dotenv_settings: PydanticBaseSettingsSource,  # noqa: ARG003
         file_secret_settings: PydanticBaseSettingsSource,  # noqa: ARG003
     ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """声明配置来源优先级：环境变量 > config.toml 的 ``[chunking]`` 段 > 初始化参数。"""
         return _env_toml_init_sources(settings_cls, "chunking", env_settings, init_settings)
 
 
@@ -243,6 +249,7 @@ class TimeoutSettings(BaseSettings):
         dotenv_settings: PydanticBaseSettingsSource,  # noqa: ARG003
         file_secret_settings: PydanticBaseSettingsSource,  # noqa: ARG003
     ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """声明配置来源优先级：环境变量 > config.toml 的 ``[timeouts]`` 段 > 初始化参数。"""
         return _env_toml_init_sources(settings_cls, "timeouts", env_settings, init_settings)
 
 
@@ -363,6 +370,10 @@ class AgentRunnerSettings(BaseSettings):
         dotenv_settings: PydanticBaseSettingsSource,  # noqa: ARG003
         file_secret_settings: PydanticBaseSettingsSource,  # noqa: ARG003
     ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """声明 agent runner 配置的来源优先级。
+
+        环境变量 > registry 仓库表 > ``[agent_runner]`` 段 > ``[agent_session]`` 段 > 初始化参数。
+        """
         toml_source = _TomlSectionSource(
             settings_cls,
             "agent_runner",
@@ -407,6 +418,7 @@ class PreviewSettings(BaseSettings):
         dotenv_settings: PydanticBaseSettingsSource,  # noqa: ARG003
         file_secret_settings: PydanticBaseSettingsSource,  # noqa: ARG003
     ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """声明配置来源优先级：环境变量 > config.toml 的 ``[preview]`` 段 > 初始化参数。"""
         return _env_toml_init_sources(settings_cls, "preview", env_settings, init_settings)
 
 
@@ -513,6 +525,7 @@ class AppSettings(BaseSettings):
         dotenv_settings: PydanticBaseSettingsSource,
         file_secret_settings: PydanticBaseSettingsSource,  # noqa: ARG003
     ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """声明配置来源优先级：环境变量 > ``.env`` > config.toml 的 ``[app]`` 段 > 初始化参数。"""
         toml_source: _TomlSectionSource = _TomlSectionSource(settings_cls, "app")
         return (
             env_settings,

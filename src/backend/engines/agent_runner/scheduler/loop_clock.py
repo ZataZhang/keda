@@ -35,6 +35,11 @@ class FixedClock(ILoopClock):
     """
 
     def __init__(self, start: datetime | None = None) -> None:
+        """初始化固定时钟。
+
+        Args:
+            start: 起始时间；省略时为 2026-01-01 UTC，无时区的时间按 UTC 处理。
+        """
         if start is None:
             start = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
         elif start.tzinfo is None:

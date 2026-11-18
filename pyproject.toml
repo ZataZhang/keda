@@ -145,3 +145,18 @@ markers = [
 [tool.ruff]
 target-version = "py311"
 line-length = 100
+
+# docs/ai-standards/comments-docstrings.md 声明后端强制 docstring 规则，配置就在这里。
+# keda 不采用模板的 ruff.toml（见上方 pytest 段落前的说明），这组规则必须在本文件显式启用，
+# 否则文档写着强制、实际只跑 Ruff 默认规则集。BLE001 是代码里
+# `# noqa: BLE001 - 原因` 约定所针对的规则：启用后，新增的宽泛捕获必须写明理由。
+[tool.ruff.lint]
+extend-select = [
+    "D100", "D101", "D102", "D103", "D104", "D105", "D106", "D107",
+    "D419",
+    "BLE001",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# 这组规则只约束后端源码；测试、脚本、hooks 与迁移不在范围内。
+"!src/backend/**/*.py" = ["D100", "D101", "D102", "D103", "D104", "D105", "D106", "D107", "D419", "BLE001"]

@@ -198,7 +198,7 @@ def _observe_model_config_call(
     """在执行前捕获配置，并通过正常结果或失败异常传递同一份快照。"""
     try:
         snapshot = read_agent_model_config_snapshot(command, cwd)
-    except Exception:  # 旁路观测失败不得影响实际进程调用。
+    except Exception:  # noqa: BLE001 - 旁路观测失败不得影响实际进程调用。
         snapshot = None
     try:
         command_result = operation()

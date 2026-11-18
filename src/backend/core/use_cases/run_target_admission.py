@@ -58,6 +58,15 @@ class TargetNotClaimableError(ValueError):
         issue_number: int | None = None,
         holder: tuple[str, int] | None = None,
     ) -> None:
+        """记录目标不可认领的原因与建议。
+
+        Args:
+            message: 失败描述。
+            reason: 原因类别（``not_found`` / ``live_claim`` / ``blocked``）。
+            suggestion: 面向人的下一步命令文本。
+            issue_number: 目标 Issue 编号。
+            holder: 活跃认领者 ``(host, pid)``；仅 ``live_claim`` 时非 ``None``。
+        """
         super().__init__(message)
         self.reason = reason
         self.suggestion = suggestion

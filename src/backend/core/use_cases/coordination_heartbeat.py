@@ -73,6 +73,21 @@ class CoordinationHeartbeat:
         process_started_at: datetime | None = None,
         renew_interval_scale: float = 1.0,
     ) -> None:
+        """初始化心跳所需的仓库上下文、进程身份与客户端工厂。
+
+        Args:
+            contexts: 本进程负责的仓库运行上下文。
+            machine_identity: 持久机器身份。
+            version: 当前 kc 版本。
+            role: 本进程的角色。
+            github_client_factory: 按仓库路径创建状态评论用 GitHub 客户端的工厂。
+            lease_client_factory: 按仓库路径创建租约评论用 GitHub 客户端的工厂。
+            slot_lock_factory: 可选的槽位锁工厂。
+            host: 主机名，省略时取本机主机名。
+            process_id: 进程号，省略时取当前进程。
+            process_started_at: 进程启动时间，省略时取当前时间。
+            renew_interval_scale: 续期间隔的缩放系数，下限 0.01。
+        """
         self._contexts = {context.repo_id: context for context in contexts}
         self._contexts_by_path = {context.repo_path.resolve(): context for context in contexts}
         self._repo_id_by_config_id = {id(context.config): context.repo_id for context in contexts}

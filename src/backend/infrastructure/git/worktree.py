@@ -32,7 +32,8 @@ class WorktreeProcessRunner(Protocol):
         *,
         cwd: Path,
         check: bool = True,
-    ) -> CommandResult: ...
+    ) -> CommandResult:
+        """在给定目录执行命令并返回结果；``check`` 为真时非零退出码视为失败。"""
 
 
 class WorktreeManager:
