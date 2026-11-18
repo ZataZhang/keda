@@ -6,6 +6,7 @@ import os
 import shlex
 import sys
 from collections.abc import Iterator
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -491,6 +492,10 @@ class FakeGitHubClient(IGitHubClient):
             labels=self._issue_labels.get(issue_number, ()),
             state=self._issue_states.get(issue_number, "OPEN"),
         )
+
+    def presence_creation_lock(self) -> AbstractContextManager[None]:
+        """返回测试用的空锁。"""
+        return nullcontext()
 
     def close_issue(self, issue_number: int) -> None:
         """把 Issue 置为 ``CLOSED``，用于布置「执行期间被关闭」这一 GitHub 事实。

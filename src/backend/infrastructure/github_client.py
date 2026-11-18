@@ -34,6 +34,7 @@ import re
 import subprocess
 import time
 import tomllib
+from contextlib import AbstractContextManager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Sequence
@@ -49,6 +50,8 @@ from backend.core.shared.interfaces.github_api_budget import (
     IGitHubApiBudget,
 )
 from backend.core.shared.models.agent_spec import AgentSpec
+from backend.core.shared.models.product_identity import state_home
+from backend.infrastructure.file_lock import file_lock
 from backend.infrastructure.github_helpers import (
     _GITHUB_API_RATE_LIMIT_PATTERN,
     _RETRYABLE_GH_ERROR_PATTERNS,
@@ -343,8 +346,11 @@ class GitHubCliClient:
         timeout: int | None = None,
         capture_output: bool = True,
         input_text: str | None = None,
+        attempts: int = _MAX_GH_RETRIES,
     ) -> CommandResult:
         """执行 ``gh`` 命令，对瞬时网络错误有限重试并按 API 类型隔离限流。
+
+        非幂等写入可通过 attempts=1 将重试交给能回读的调用方。
 
         GitHub 明确返回限流时立即抛出延期信号；GraphQL 配额耗尽不会阻断 REST 恢复请求。
         """
@@ -363,7 +369,7 @@ class GitHubCliClient:
 
         last_exc: subprocess.CalledProcessError | None = None
         effective_timeout = timeout if timeout is not None else self._request_timeout_seconds
-        for attempt in range(1, _MAX_GH_RETRIES + 1):
+        for attempt in range(1, attempts + 1):
             if self._api_budget is not None and api_kind is not None:
                 self._api_budget.record_call(api_kind, _gh_operation_label(command))
             try:
@@ -387,18 +393,18 @@ class GitHubCliClient:
                         stderr=command_result.stderr,
                     )
                     if self._is_retryable_gh_error(last_exc):
-                        if attempt >= _MAX_GH_RETRIES:
+                        if attempt >= attempts:
                             failure_detail = (
                                 command_result.stderr or command_result.stdout or str(last_exc)
                             ).strip()
                             raise GitHubApiUnavailableError(
                                 "GitHub API remained unavailable after "
-                                f"{_MAX_GH_RETRIES} attempts: {failure_detail}"
+                                f"{attempts} attempts: {failure_detail}"
                             ) from last_exc
                         _logger.warning(
                             "GitHub CLI transient error (attempt %d/%d), retrying in %.1fs: %s",
                             attempt,
-                            _MAX_GH_RETRIES,
+                            attempts,
                             _GH_RETRY_DELAY_SECONDS,
                             command_result.stderr.strip()
                             if command_result.stderr
@@ -417,15 +423,14 @@ class GitHubCliClient:
                     stderr=f"gh command operation timed out after {effective_timeout}s",
                 )
                 last_exc = exc
-                if attempt >= _MAX_GH_RETRIES:
+                if attempt >= attempts:
                     raise GitHubApiUnavailableError(
-                        "GitHub API connection timed out after "
-                        f"{_MAX_GH_RETRIES} attempts: {exc.stderr}"
+                        f"GitHub API connection timed out after {attempts} attempts: {exc.stderr}"
                     ) from timeout_exc
                 _logger.warning(
                     "GitHub CLI timed out (attempt %d/%d), retrying in %.1fs: %s",
                     attempt,
-                    _MAX_GH_RETRIES,
+                    attempts,
                     _GH_RETRY_DELAY_SECONDS,
                     _gh_operation_label(command),
                 )
@@ -440,16 +445,16 @@ class GitHubCliClient:
                 is_retryable = self._is_retryable_gh_error(exc)
                 if not is_retryable:
                     raise
-                if attempt >= _MAX_GH_RETRIES:
+                if attempt >= attempts:
                     failure_detail = (exc.stderr or exc.stdout or str(exc)).strip()
                     raise GitHubApiUnavailableError(
                         "GitHub API remained unavailable after "
-                        f"{_MAX_GH_RETRIES} attempts: {failure_detail}"
+                        f"{attempts} attempts: {failure_detail}"
                     ) from exc
                 _logger.warning(
                     "GitHub CLI transient error (attempt %d/%d), retrying in %.1fs: %s",
                     attempt,
-                    _MAX_GH_RETRIES,
+                    attempts,
                     _GH_RETRY_DELAY_SECONDS,
                     exc.stderr.strip() if exc.stderr else str(exc),
                 )
@@ -680,6 +685,26 @@ class GitHubCliClient:
             无返回值。
         """
         edit_issue_body(self, issue_number, body)
+
+    def presence_creation_lock(self) -> AbstractContextManager[None]:
+        """按 GitHub 仓库名锁定本机的状态板初始化。"""
+        repo_slug = self._get_owner_repo().lower()
+        return file_lock(state_home() / "presence-locks" / f"{repo_slug}.lock")
+
+    def close_issue(self, issue_number: int) -> None:
+        """通过 GitHub REST API 关闭指定 Issue。"""
+        self._run_with_retry(
+            [
+                "gh",
+                "api",
+                "-X",
+                "PATCH",
+                f"repos/{self._get_owner_repo()}/issues/{issue_number}",
+                "-f",
+                "state=closed",
+            ],
+            cwd=self.repo_path,
+        )
 
     def create_issue(self, *, title: str, body: str, labels: Sequence[str]) -> str:
         """创建 GitHub Issue 并返回其 URL。

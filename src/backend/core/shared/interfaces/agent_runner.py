@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Sequence
@@ -513,6 +514,14 @@ class IGitHubClient(ABC):
             body: 新的 Issue 描述正文，支持 Markdown。
         """
         ...
+
+    @abstractmethod
+    def presence_creation_lock(self) -> AbstractContextManager[None]:
+        """返回同一 GitHub 仓库在本机共享的状态板创建锁。"""
+
+    @abstractmethod
+    def close_issue(self, issue_number: int) -> None:
+        """关闭指定 Issue。"""
 
     @abstractmethod
     def create_issue(

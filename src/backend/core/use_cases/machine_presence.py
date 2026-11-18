@@ -5,12 +5,13 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Callable, ContextManager
 
-from backend.core.shared.interfaces.agent_runner import IGitHubClient
+from backend.core.shared.interfaces.agent_runner import GitHubApiUnavailableError, IGitHubClient
 from backend.core.shared.models.agent_labels import KEDACODE_PRESENCE_LABEL
 from backend.core.shared.models.agent_runner import AppConfig, IssueCommentRecord, IssueSummary
 
@@ -44,25 +45,14 @@ class PresenceEntry:
         )
 
 
-def ensure_presence_issue(
-    github_client: IGitHubClient,
-    config: AppConfig,
-) -> IssueSummary:
+def ensure_presence_issue(github_client: IGitHubClient) -> IssueSummary:
     """创建或收敛本仓库状态 Issue，保留编号最小的 open 项。"""
     presence_issues = _open_presence_issues(github_client)
     if not presence_issues:
-        github_client.sync_labels(config.labels, config.agents)
-        github_client.create_issue(
-            title="KedaCode 机器状态",
-            body=(
-                "此 Issue 汇总 KedaCode 在本仓库上的机器与执行状态。\n\n"
-                "状态由 kc 自动维护，请勿手动编辑或添加任务标签。"
-            ),
-            labels=(KEDACODE_PRESENCE_LABEL,),
-        )
-        presence_issues = _open_presence_issues(github_client)
-    if not presence_issues:
-        raise RuntimeError("GitHub did not return the KedaCode presence Issue after creation.")
+        with github_client.presence_creation_lock():
+            presence_issues = _open_presence_issues(github_client)
+            if not presence_issues:
+                presence_issues = _create_presence_issue(github_client)
     canonical_issue = min(presence_issues, key=lambda issue_summary: issue_summary.number)
     for duplicate_issue in presence_issues:
         if duplicate_issue.number == canonical_issue.number:
@@ -104,11 +94,34 @@ def ensure_presence_issue(
         for comment_id, _ in duplicate_comment_entries:
             if comment_id != retained_comment_id:
                 github_client.delete_issue_comment(comment_id)
+        github_client.close_issue(duplicate_issue.number)
         github_client.edit_issue_labels(
             duplicate_issue.number,
             remove=(KEDACODE_PRESENCE_LABEL,),
         )
     return canonical_issue
+
+
+def _create_presence_issue(github_client: IGitHubClient) -> list[IssueSummary]:
+    """创建状态板，写入结果不确定时先回读。"""
+    try:
+        github_client.create_issue(
+            title="KedaCode 机器状态",
+            body=(
+                "此 Issue 汇总 KedaCode 在本仓库上的机器与执行状态。\n\n"
+                "状态由 kc 自动维护，请勿手动编辑或添加任务标签。"
+            ),
+            labels=(KEDACODE_PRESENCE_LABEL,),
+        )
+    except (GitHubApiUnavailableError, subprocess.CalledProcessError):
+        presence_issues = _open_presence_issues(github_client)
+        if presence_issues:
+            return presence_issues
+        raise
+    presence_issues = _open_presence_issues(github_client)
+    if not presence_issues:
+        raise RuntimeError("GitHub did not return the KedaCode presence Issue after creation.")
+    return presence_issues
 
 
 def update_presence_comment(
@@ -129,7 +142,7 @@ def update_presence_comment(
     if not config.daemon.presence_enabled:
         return None
     effective_now = _as_aware_utc(now or datetime.now(timezone.utc))
-    presence_issue = ensure_presence_issue(github_client, config)
+    presence_issue = ensure_presence_issue(github_client)
     lock_context = slot_lock() if slot_lock is not None else nullcontext()
     with lock_context:
         comment_records = github_client.list_issue_comment_records(

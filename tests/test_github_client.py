@@ -962,6 +962,17 @@ def test_create_issue_retries_on_transient_tls_timeout(tmp_path: Path) -> None:
     mock_sleep.assert_called_once()
 
 
+def test_presence_issue_create_does_not_retry_ambiguous_write(tmp_path: Path) -> None:
+    """状态板创建超时后交给上层回读，避免直接再发创建请求。"""
+    runner = _FlakyProcessRunner(fail_count=1, error_text="read operation timed out")
+    github_client = GitHubCliClient(tmp_path, runner)
+
+    with pytest.raises(GitHubApiUnavailableError, match="read operation timed out"):
+        github_client.create_issue(title="title", body="body", labels=["kedacode/presence"])
+
+    assert runner.attempts == 1
+
+
 def test_create_issue_does_not_retry_permanent_errors(tmp_path: Path) -> None:
     """create_issue should fail immediately on non-transient errors."""
     runner = _FlakyProcessRunner(

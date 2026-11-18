@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
+from backend.core.shared.interfaces.agent_runner import GitHubApiUnavailableError
 from backend.core.shared.models.agent_runner import (
     AppConfig,
     IssueCommentRecord,
@@ -53,6 +56,43 @@ def test_presence_marker_payload_survives_angle_bracket_hostname() -> None:
     assert entry.machine_id == "machine-a"
 
 
+def test_presence_initialization_rechecks_after_acquiring_lock() -> None:
+    """拿到锁后复用已由另一个进程创建的状态板。"""
+
+    class WaitingClient(FakeGitHubClient):
+        @contextmanager
+        def presence_creation_lock(self) -> Iterator[None]:
+            self.set_list_issues_by_label_result(
+                [IssueSummary(12, "status", "url/12", "", ("kedacode/presence",))]
+            )
+            yield
+
+    client = WaitingClient()
+
+    assert ensure_presence_issue(client).number == 12
+    assert not any(call["method"] == "create_issue" for call in client.calls)
+
+
+def test_presence_initialization_recovers_when_create_response_is_lost() -> None:
+    """创建已落地但响应丢失时，回读并复用该状态板。"""
+
+    class LostResponseClient(FakeGitHubClient):
+        def create_issue(self, *, title: str, body: str, labels: Sequence[str]) -> str:
+            super().create_issue(title=title, body=body, labels=labels)
+            self.set_list_issues_by_label_result(
+                [IssueSummary(12, title, "url/12", body, tuple(labels))]
+            )
+            raise GitHubApiUnavailableError("simulated timeout")
+
+    client = LostResponseClient()
+
+    assert ensure_presence_issue(client).number == 12
+    assert [call["labels"] for call in client.calls if call["method"] == "create_issue"] == [
+        ["kedacode/presence"]
+    ]
+    assert not any(call["method"] == "sync_labels" for call in client.calls)
+
+
 def test_duplicate_presence_issues_converge_to_lowest_number() -> None:
     """状态板只保留编号最小的 open Issue，重复项提示不会无限增长。"""
     client = FakeGitHubClient()
@@ -63,10 +103,11 @@ def test_duplicate_presence_issues_converge_to_lowest_number() -> None:
         ]
     )
 
-    canonical_issue = ensure_presence_issue(client, AppConfig())
-    ensure_presence_issue(client, AppConfig())
+    canonical_issue = ensure_presence_issue(client)
+    ensure_presence_issue(client)
 
     assert canonical_issue.number == 12
+    assert client.get_issue(33).state == "CLOSED"
     assert any(
         call["method"] == "edit_issue_labels"
         and call["issue_number"] == 33
@@ -108,7 +149,7 @@ def test_duplicate_presence_issue_retries_pointer_comment_before_unlabeling() ->
     )
 
     try:
-        ensure_presence_issue(client, AppConfig())
+        ensure_presence_issue(client)
     except RuntimeError as error:
         assert str(error) == "simulated comment failure"
     else:
@@ -118,7 +159,7 @@ def test_duplicate_presence_issue_retries_pointer_comment_before_unlabeling() ->
         call["method"] == "edit_issue_labels" and call["issue_number"] == 33
         for call in client.calls
     )
-    ensure_presence_issue(client, AppConfig())
+    ensure_presence_issue(client)
 
     duplicate_comment = next(
         call
@@ -164,7 +205,7 @@ def test_duplicate_presence_issue_consolidates_racing_pointer_comments() -> None
     )
 
     try:
-        ensure_presence_issue(client, AppConfig())
+        ensure_presence_issue(client)
     except RuntimeError as error:
         assert str(error) == "simulated duplicate-comment deletion failure"
     else:
@@ -175,7 +216,7 @@ def test_duplicate_presence_issue_consolidates_racing_pointer_comments() -> None
         for call in client.calls
     )
 
-    ensure_presence_issue(client, AppConfig())
+    ensure_presence_issue(client)
 
     pointer_entries = client.list_issue_comment_entries(
         33,

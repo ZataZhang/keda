@@ -26,6 +26,7 @@ from backend.core.shared.interfaces.agent_runner import (
     GitHubApiRateLimitError,
     GitHubApiUnavailableError,
 )
+from backend.core.shared.models.agent_labels import KEDACODE_PRESENCE_LABEL
 from backend.core.shared.models.agent_runner import IssueCommentRecord
 from backend.infrastructure.github_models import IssueSummary
 
@@ -45,7 +46,7 @@ class _ClientProtocol(Protocol):
     repo_path: Path
 
     def _run_with_retry(
-        self, command: Sequence[str], *, cwd: Path, check: bool = True
+        self, command: Sequence[str], *, cwd: Path, check: bool = True, attempts: int = ...
     ) -> object: ...
 
     def _write_body_file(self, temp_dir: str, filename: str, body: str) -> Path: ...
@@ -354,8 +355,9 @@ def create_issue(
         ]
         for label in labels:
             command.extend(["--label", label])
+        retry_options = {"attempts": 1} if KEDACODE_PRESENCE_LABEL in labels else {}
         try:
-            result = client._run_with_retry(command, cwd=client.repo_path)
+            result = client._run_with_retry(command, cwd=client.repo_path, **retry_options)
         except subprocess.CalledProcessError as exc:
             if not _is_missing_label_error(exc) or not labels:
                 raise
@@ -368,7 +370,7 @@ def create_issue(
                     _build_ensure_label_command(label),
                     cwd=client.repo_path,
                 )
-            result = client._run_with_retry(command, cwd=client.repo_path)
+            result = client._run_with_retry(command, cwd=client.repo_path, **retry_options)
     return result.stdout.strip().splitlines()[-1]
 
 
