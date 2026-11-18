@@ -48,7 +48,19 @@ kc completion install --shell fish
 
 这个菜单与上面的 shell 补全菜单是两次独立选择；若两者都还未设置，菜单栏 App 菜单先出现，随后才会显示补全菜单。
 
-如果选择暂不安装，之后可手动执行 `kc desktop install`。自动提示只在 macOS 交互式终端出现，不影响脚本、机器输出、帮助或版本调用。安装后从 Finder 打开 `~/Applications/KedaCode.app` 即可显示菜单栏图标。当前公开构建使用 ad-hoc 签名且未公证；首次打开时 macOS 可能要求在「系统设置 → 隐私与安全性」中允许，详见[菜单栏 App 指南](../guides/desktop-companion.md)。
+如果选择暂不安装，之后可手动执行 `kc desktop install`。自动提示只在 macOS 交互式终端出现，不影响脚本、机器输出、帮助或版本调用。安装后从 Finder 打开 `~/Applications/KedaCode.app` 即可显示菜单栏图标。当前公开构建使用 ad-hoc 签名且未公证；首次打开时 macOS 可能要求在「系统设置 → 隐私与安全性」中允许，详见[桌面 App 指南](../guides/desktop-companion.md)。
+
+### Windows 系统托盘 App（可选）
+
+Windows 用户可以在终端执行：
+
+```powershell
+kc desktop install
+```
+
+命令会下载与当前 CLI 版本匹配的 NSIS 安装包、校验同一 Release 的 SHA-256，然后静默安装到 `%LOCALAPPDATA%\KedaCode`，不需要管理员权限。也可以到 [GitHub Release](https://github.com/ZataZhang/keda/releases) 下载 `kedacode-desktop-windows-x64-setup.exe` 双击安装。安装后从开始菜单启动 KedaCode，系统托盘会出现图标；面板、置顶悬浮窗、登录自启与系统通知的能力与 macOS 菜单栏 App 对齐。
+
+Windows 安装包当前未做代码签名，首次运行时 SmartScreen 可能提示「未知发布者」，选择「更多信息 → 仍要运行」即可。Windows 没有 macOS 那样的首次交互提示：安装桌面 App 需要显式执行上面的命令或手动下载安装包，不会打断脚本、机器输出、帮助或版本调用。详见[桌面 App 指南](../guides/desktop-companion.md)。
 
 **curl 一键脚本（macOS / Linux）：**
 

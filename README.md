@@ -77,7 +77,7 @@ pipx install kedacode
 
 `uv tool install` 不会自动配置 shell 补全。在 bash、zsh 或 fish 中，若尚未配置，首次在交互式终端运行 `kc` 时会显示选择菜单，默认选中安装；选择安装后本次命令会先退出，提示重载 shell，再重新运行刚才的 `kc` 命令。macOS 若也尚未安装菜单栏 App，会先显示一个独立的 App 安装菜单。也可以按所用 shell 执行一次 `kc completion install --shell <bash|zsh|fish>`（选择其中一个）。详细步骤见下方「安装 shell 自动补全」。
 
-macOS 用户首次交互运行 `kc` 时，如果尚未安装菜单栏 App，还会看到一次可选的 App 安装菜单；它和补全设置是两次独立选择，安装不会替换 `uv` 管理的 CLI。之后也可执行 `kc desktop install`，完整说明见[安装指南](docs/getting-started/installation.md#macos-菜单栏-app-可选)。
+macOS 用户首次交互运行 `kc` 时，如果尚未安装菜单栏 App，还会看到一次可选的 App 安装菜单；它和补全设置是两次独立选择，安装不会替换 `uv` 管理的 CLI。之后也可执行 `kc desktop install`；Windows 用户同样可以执行该命令安装系统托盘 App。完整说明见[安装指南](docs/getting-started/installation.md#macos-菜单栏-app-可选)。
 
 **install.sh（自动选择 `uv` / `pipx` / `pip --user`，零 sudo，失败有明确提示）：**
 
@@ -431,13 +431,14 @@ uv pip install "kedacode[backup]"   # 云备份：boto3
 ```
 
 `pywebview` 已包含在默认依赖中，Console 看板的「开启独立窗口」会打开一个临时桌面窗口。
-macOS 菜单栏状态面板（点击顶部图标展开，并可固定成悬浮窗）从源码构建：
+桌面 App（macOS 菜单栏 / Windows 系统托盘，点击图标展开状态面板并支持固定悬浮）从源码构建：
 
 ```bash
 just desktop-install
 ```
 
-安装后双击 `~/Applications/KedaCode.app`。该 App 只用于本机自用构建，不签名、不公证、不公开分发。
+macOS 安装后双击 `~/Applications/KedaCode.app`；Windows 会构建 NSIS 安装包并启动交互式安装，
+安装后从开始菜单启动，托盘出现图标。该 App 只用于本机自用构建，不签名、不公证、不公开分发。
 
 ## 架构概览
 

@@ -1,7 +1,7 @@
 [package]
 name = "kedacode-desktop"
 version = "0.1.0"
-description = "KedaCode macOS 菜单栏任务状态面板"
+description = "KedaCode 桌面任务状态面板（macOS 菜单栏 / Windows 系统托盘）"
 authors = ["KedaCode"]
 edition = "2021"
 

@@ -1,8 +1,9 @@
-"""下载并安装与当前 CLI 版本匹配的 macOS 菜单栏 App。"""
+"""下载并安装与当前 CLI 版本匹配的桌面 App（macOS 菜单栏 / Windows 系统托盘）。"""
 
 from __future__ import annotations
 
 import hashlib
+import os
 import plistlib
 import platform
 import re
@@ -17,21 +18,32 @@ from pathlib import Path
 _RELEASE_REPOSITORY = "ZataZhang/keda"
 _APP_BUNDLE_IDENTIFIER = "com.kedacode.desktop"
 _APP_NAME = "KedaCode.app"
+_WINDOWS_EXECUTABLE_NAME = "KedaCode.exe"
+_WINDOWS_APPLICATION_DIRECTORY_NAME = "KedaCode"
 _HTTP_TIMEOUT_SECONDS = 60
 _DOWNLOAD_CHUNK_BYTES = 1024 * 1024
 
 
 class DesktopCompanionInstallError(RuntimeError):
-    """菜单栏 App 下载、校验或安装失败。"""
+    """桌面 App 下载、校验或安装失败。"""
 
 
 def is_desktop_companion_installed() -> bool:
-    """检查用户或系统 Applications 目录中是否已有 KedaCode 菜单栏 App。
+    """检查本机是否已安装 KedaCode 桌面 App。
+
+    macOS 检查用户或系统 Applications 目录里的 bundle identifier；Windows 检查
+    ``kc desktop install`` 的安装目录里是否存在可执行文件。
 
     Returns:
-        已安装且 bundle identifier 匹配时返回 ``True``。
+        已安装时返回 ``True``。
     """
     try:
+        if sys.platform == "win32":
+            return any(
+                executable_path.is_file() for executable_path in _windows_install_candidates()
+            )
+        if sys.platform != "darwin":
+            return False
         application_paths = (
             Path.home() / "Applications" / _APP_NAME,
             Path("/Applications") / _APP_NAME,
@@ -45,24 +57,33 @@ def is_desktop_companion_installed() -> bool:
 
 
 def install_desktop_companion(*, version: str) -> Path:
-    """下载并安装指定 CLI 版本对应的菜单栏 App。
+    """下载并安装指定 CLI 版本对应的桌面 App。
 
     Args:
         version: 当前已安装的 kedacode 发行版本。
 
     Returns:
-        安装后的 App bundle 路径。
+        安装后的可执行路径；macOS 返回 ``KedaCode.app`` bundle，Windows 返回
+        ``KedaCode.exe``。
 
     Raises:
         DesktopCompanionInstallError: 平台不支持、发布资产缺失或安装失败。
     """
-    if sys.platform != "darwin":
-        raise DesktopCompanionInstallError("The KedaCode menu bar app is available on macOS only.")
     if not re.fullmatch(r"\d+\.\d+\.\d+", version):
         raise DesktopCompanionInstallError(
-            f"Cannot find a macOS app release for kedacode version {version!r}."
+            f"Cannot find a desktop app release for kedacode version {version!r}."
         )
+    if sys.platform == "darwin":
+        return _install_macos_app(version=version)
+    if sys.platform == "win32":
+        return _install_windows_app(version=version)
+    raise DesktopCompanionInstallError(
+        "The KedaCode desktop app is available on macOS and Windows only."
+    )
 
+
+def _install_macos_app(*, version: str) -> Path:
+    """下载 DMG、校验并安装到用户级 Applications 目录。"""
     architecture_name = _release_architecture()
     asset_name = f"kedacode-desktop-macos-{architecture_name}.dmg"
     release_tag = f"v{version}"
@@ -99,8 +120,114 @@ def install_desktop_companion(*, version: str) -> Path:
         ValueError,
     ) as error:
         raise DesktopCompanionInstallError(
-            f"Could not install the KedaCode menu bar app: {error}"
+            f"Could not install the KedaCode desktop app: {error}"
         ) from error
+
+
+def _install_windows_app(*, version: str) -> Path:
+    r"""下载 NSIS 安装包并静默安装到当前用户目录。
+
+    不传 ``/D``：Tauri 的 per-user 安装默认落在 ``%LOCALAPPDATA%\KedaCode``，
+    与用户双击安装包时走同一条路径；NSIS 的 ``/D`` 在 Python 参数转义下带空格的
+    用户目录（``C:\Users\John Doe``）会被加引号，而 NSIS 明确要求 ``/D`` 不带引号。
+    安装位置还会被 NSIS 记在注册表里，升级时沿用既有目录。
+    """
+    if _windows_desktop_app_running():
+        raise DesktopCompanionInstallError(
+            "KedaCode is running. Quit it from the tray menu, then retry `kc desktop install`."
+        )
+
+    asset_name = f"kedacode-desktop-windows-{_windows_release_architecture()}-setup.exe"
+    release_tag = f"v{version}"
+    install_directory = _windows_install_directory()
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="kedacode-desktop-") as temporary_directory:
+            installer_path = Path(temporary_directory) / asset_name
+            _download_and_verify_release_asset(
+                release_tag=release_tag,
+                asset_name=asset_name,
+                destination_path=installer_path,
+            )
+            _run_windows_installer(installer_path)
+    except DesktopCompanionInstallError:
+        raise
+    except (OSError, subprocess.SubprocessError, ValueError) as error:
+        raise DesktopCompanionInstallError(
+            f"Could not install the KedaCode desktop app: {error}"
+        ) from error
+
+    installed_executable = next(
+        (candidate for candidate in _windows_install_candidates() if candidate.is_file()),
+        None,
+    )
+    if installed_executable is None:
+        raise DesktopCompanionInstallError(
+            "The Windows installer finished but KedaCode.exe was not found under "
+            f"{install_directory}."
+        )
+    return installed_executable
+
+
+def _windows_local_app_data() -> Path:
+    """当前用户的 ``%LOCALAPPDATA%``，缺失时回落到 ``~/AppData/Local``。"""
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    return Path(local_app_data) if local_app_data else Path.home() / "AppData" / "Local"
+
+
+def _windows_install_directory() -> Path:
+    r"""Tauri per-user 安装的默认目录（``%LOCALAPPDATA%\KedaCode``）。"""
+    return _windows_local_app_data() / _WINDOWS_APPLICATION_DIRECTORY_NAME
+
+
+def _windows_install_candidates() -> tuple[Path, ...]:
+    """已知的 Windows 安装位置，首个元素是 Tauri 的 per-user 默认目录。"""
+    local_app_data = _windows_local_app_data()
+    return (
+        local_app_data / _WINDOWS_APPLICATION_DIRECTORY_NAME / _WINDOWS_EXECUTABLE_NAME,
+        local_app_data
+        / "Programs"
+        / _WINDOWS_APPLICATION_DIRECTORY_NAME
+        / _WINDOWS_EXECUTABLE_NAME,
+    )
+
+
+def _windows_desktop_app_running() -> bool:
+    """桌面 App 是否正在运行。
+
+    NSIS 升级遇到运行中的 App 会弹窗要求先退出；静默安装下这个弹窗会把
+    ``kc desktop install`` 卡住，因此提前检查并给出明确错误。
+    """
+    try:
+        completed_process = subprocess.run(
+            ["tasklist", "/FI", f"IMAGENAME eq {_WINDOWS_EXECUTABLE_NAME}", "/NH"],
+            check=False,
+            capture_output=True,
+        )
+    except OSError:
+        return False
+    return _WINDOWS_EXECUTABLE_NAME.lower().encode() in completed_process.stdout.lower()
+
+
+def _run_windows_installer(installer_path: Path) -> None:
+    """以静默模式运行 NSIS 安装包（``/S``），安装位置交给 Tauri 的默认策略。"""
+    completed_process = subprocess.run(
+        [str(installer_path), "/S"],
+        check=False,
+        capture_output=True,
+    )
+    if completed_process.returncode != 0:
+        error_text = completed_process.stderr.decode("utf-8", errors="replace").strip()
+        error_detail = f": {error_text}" if error_text else "."
+        raise DesktopCompanionInstallError(
+            "The Windows installer failed "
+            f"(exit code {completed_process.returncode}){error_detail}"
+        )
+
+
+def _windows_release_architecture() -> str:
+    """Windows 发布资产只有 x64：ARM64 机器由系统仿真运行。"""
+    return "x64"
 
 
 def _release_architecture() -> str:
@@ -111,7 +238,7 @@ def _release_architecture() -> str:
     if machine_name in {"x86_64", "amd64"}:
         return "x64"
     raise DesktopCompanionInstallError(
-        f"The KedaCode menu bar app does not have a macOS build for {machine_name!r}."
+        f"The KedaCode macOS app does not have a build for {machine_name!r}."
     )
 
 
@@ -138,7 +265,7 @@ def _download_release_bytes(*, release_tag: str, asset_name: str) -> bytes:
         if error.code == 404:
             raise DesktopCompanionInstallError(
                 f"Release {release_tag} does not contain {asset_name}. "
-                "Upgrade kedacode to a version with a published menu bar app."
+                "Upgrade kedacode to a version with a published desktop app."
             ) from error
         raise DesktopCompanionInstallError(
             f"GitHub returned HTTP {error.code} while downloading {asset_name}."
@@ -176,7 +303,7 @@ def _download_and_verify_release_asset(
         if error.code == 404:
             raise DesktopCompanionInstallError(
                 f"Release {release_tag} does not contain {asset_name}. "
-                "Upgrade kedacode to a version with a published menu bar app."
+                "Upgrade kedacode to a version with a published desktop app."
             ) from error
         raise DesktopCompanionInstallError(
             f"GitHub returned HTTP {error.code} while downloading {asset_name}."

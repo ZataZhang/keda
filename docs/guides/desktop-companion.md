@@ -1,19 +1,21 @@
-# macOS 菜单栏状态面板与独立桌面窗口
+# 桌面 App（macOS 菜单栏 / Windows 系统托盘）与独立桌面窗口
 
 macOS 上优先使用 KedaCode 菜单栏 App：顶部常驻图标，点击后展开任务状态；点「固定悬浮」  
-可切换成独立置顶窗口。网页看板里的「开启独立窗口」仍保留 pywebview 路径，适合临时开窗，  
-它本身不会创建菜单栏图标。
+可切换成独立置顶窗口。Windows 上运行同一个 Tauri App：图标常驻系统托盘，点击展开同一块  
+状态面板，同样支持固定悬浮、系统通知与登录自启。网页看板里的「开启独立窗口」仍保留  
+pywebview 路径，适合临时开窗，它本身不会创建菜单栏/托盘图标。
 
 两种窗口都加载 Console 的精简页面 `{console_origin}/app/companion/`，读与 Web 看板完全相同的  
 本机 API；不新增任务数据源，窗口退出也不影响浏览器看板。
 
-## 菜单栏 App
+## 菜单栏 App（macOS）
 
 应用图标采用黑色底与浅灰色的抽象钟表符号：圆角方形表盘在右上方开口，内部保留独立的折角指针。  
 菜单栏使用同一符号的透明底单色模板，随 macOS 深浅主题适配；单独收紧留白并加粗笔画，确保小尺寸可辨认。  
 矢量源位于 `desktop/src-tauri/icons/keda.svg` 和 `menubar.svg`；修改后使用 `pnpm --dir desktop exec tauri icon`  
 在临时目录生成图标，仅将配置引用的 `32x32.png`、`128x128.png`、`128x128@2x.png`、`icon.png`、  
-`icon.icns` 同步回源码目录。菜单栏 PNG 使用 36×36 像素；不保留当前未使用的 Android、iOS 或 Windows 图标。
+`icon.icns`、`icon.ico` 同步回源码目录。菜单栏 PNG 使用 36×36 像素；Windows 打包读取  
+`icon.ico`，托盘图标使用 `128x128@2x.png`。不保留当前未使用的 Android、iOS 图标。
 
 同一份 `keda.svg` 也是项目图标的唯一矢量源：README 顶部 hero、Console favicon（`frontend-admin/public/images`）、  
 文档站 logo（`docs/assets/brand/keda.svg`，由 `mkdocs.yml` 的 `theme.logo`/`theme.favicon` 引用）与  
@@ -60,7 +62,7 @@ App 查找 `kc` 的位置依次包括 `~/.local/bin/kc`、`/opt/homebrew/bin/kc`
 `~/Library/Logs/KedaCode/desktop-console.log`。读取时 shell 的标准输入关闭，输出丢弃，只采集 PATH，
 不会把 shell 中的其它环境变量复制给 Console。
 
-### 数据与行为
+### 数据与行为（两平台一致）
 
 完整控制台在桌面宽度下固定左侧导航，长列表只滚动右侧内容；较矮窗口中的菜单可独立滚动，
 主题和收起按钮仍可见。窄屏继续使用顶部导航布局。
@@ -111,6 +113,71 @@ Cmd+Tab 回来或再次双击 `KedaCode.app`，都会把同一个控制台窗口
 - **单实例**：重复打开 App 只会唤出已有面板，不会再拉起第二个 kc console。
 - **系统通知**：任务从其它状态跃迁到「阻塞」或「失败」时发一条通知（首轮读数只建立基线，  
   不补发历史状态）。首次通知前 macOS 会请求通知权限；未授权时通知静默丢弃，面板显示不受影响。
+
+## 系统托盘 App（Windows）
+
+Windows 与 macOS 共用同一个 Tauri 工程和同一份 `kc console`。App 常驻系统托盘：左键点击  
+图标展开/收起状态面板，右键菜单提供「打开完整控制台」「登录时启动」「退出 KedaCode」。  
+面板与悬浮窗的读法、阶段说明、刷新节奏与 macOS 完全一致，见上面的「数据与行为（两平台一致）」。  
+
+### 构建与安装
+
+公开 Release 按 x64 构建 NSIS 安装包 `kedacode-desktop-windows-x64-setup.exe`，与同版本的  
+Python 包、macOS DMG 一起校验 `SHA256SUMS`。安装方式二选一：  
+
+```powershell
+kc desktop install
+```
+
+下载与当前 CLI 版本匹配的安装包、校验 SHA-256 后静默安装到 Tauri 的 per-user 默认目录  
+`%LOCALAPPDATA%\KedaCode`，不需要管理员权限；也可以直接到 GitHub Release 下载安装包双击安装，  
+默认落在同一目录（安装向导里改了目录则以所选目录为准）。安装完成后从开始菜单启动 KedaCode，  
+托盘出现图标。`kc desktop install` 依靠这个固定目录识别「已安装」并就地升级。  
+
+Windows 构建使用 Tauri 默认的 per-user 安装模式，安装时若缺少 WebView2 运行时，安装程序会  
+按 Tauri 默认策略下载引导程序。安装包当前未做代码签名，首次运行时 SmartScreen 可能提示  
+「未知发布者」，需要选择「更多信息 → 仍要运行」。  
+
+源码开发者也可以在 Windows 本机执行：  
+
+```bash
+just desktop-install
+```
+
+这会构建 NSIS 安装包并启动交互式安装。构建需要 Rust（rustup + MSVC 工具链）、  
+Visual Studio 生成工具（C++ 桌面开发）、pnpm 与 WebView2；`pnpm --dir desktop build`  
+会按 `tauri.windows.conf.json` 只产出 NSIS 安装包。  
+
+### 启动与前台行为
+
+双击开始菜单中的 KedaCode 会启动 `kc console` 并打开完整控制台窗口（1280×860 居中，  
+带原生标题栏、在任务栏占位）；登录自启（`--autostart`）只驻留托盘，不弹窗口。  
+面板失焦后自动收起，关闭按钮只把面板隐藏到托盘；右键「退出 KedaCode」才会退出 App  
+并回收它拉起的 `kc console`（连同 uv 启动器下面的 Python 子进程）。  
+
+与 macOS 的行为差异：  
+
+- 没有 Dock 概念，右键菜单不提供「在 Dock 中显示图标」；  
+- 面板定位到托盘图标上方居中（macOS 是菜单栏下方），多显示器时跟随托盘所在屏幕；  
+- 面板与悬浮窗不在任务栏占位，完整控制台窗口是唯一的任务栏入口；  
+- 日志写到 `%LOCALAPPDATA%\KedaCode\logs\desktop-console.log`；  
+- 启动 Console 时以无控制台窗口方式运行，不会闪出黑色控制台窗口。  
+
+App 查找 `kc` 的顺序是 `%USERPROFILE%\.local\bin\kc.exe`（`uv tool install` 的默认位置）、  
+`%APPDATA%\Python\Scripts\kc.exe`（`pip --user`），最后回落到进程 `PATH`；找到后把  
+Console 与后台 runner 的 PATH 原样传下去，因此经用户目录安装的 agent CLI 也能被启动门禁找到。  
+
+### 托盘菜单、快捷键与系统集成
+
+- **打开完整控制台**：复用面板同一个 Console 地址另开普通窗口，直接进入 /app/dashboard；  
+  面板标题栏的「控制台」按钮做同一件事。关掉这个窗口只关窗口，Console 与面板继续运行。  
+- **全局快捷键** Ctrl+Shift+K：在任意前台程序里开关面板；被占用时注册失败写进日志，  
+  其余功能不受影响。  
+- **登录时启动**：由 autostart 插件写入当前用户的启动项，勾选状态会被持久化，下次启动按  
+  实际状态回显。  
+- **系统通知**：任务从其它状态跃迁到「阻塞」或「失败」时发一条通知（首轮读数只建立基线，  
+  不补发历史状态）。未授权时通知静默丢弃，面板显示不受影响。  
+- **单实例**：重复打开 App 只会唤出已有面板/控制台，不会再拉起第二个 `kc console`。  
 
 ## 独立桌面窗口
 

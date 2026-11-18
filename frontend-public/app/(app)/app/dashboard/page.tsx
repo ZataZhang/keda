@@ -805,7 +805,7 @@ export default function DashboardPage() {
                   : "开启独立窗口"}
             </Button>
             <span className="text-xs text-slate-500" data-testid="dashboard-menubar-hint">
-              macOS 菜单栏模式请启动 ~/Applications/KedaCode.app，再点击顶部图标。
+              macOS 菜单栏 / Windows 托盘模式请先启动 KedaCode，再点击对应图标。
             </span>
             {companionState ? (
               <span

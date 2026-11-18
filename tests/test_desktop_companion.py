@@ -557,3 +557,107 @@ def test_install_disk_image_matches_canonical_mount_point(
     assert Path(attach_command[attach_command.index("-mountpoint") + 1]) == canonical_mount_path
     assert executed_commands[-1][1] == "detach"
     assert executed_commands[-1][-1] == "/dev/disk9s1"
+
+
+def test_windows_install_downloads_setup_and_runs_silent_installer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Windows 安装路径：下载 x64 setup，用 /S 静默装进 Tauri 的 per-user 默认目录。"""
+    monkeypatch.setattr(installer_module.sys, "platform", "win32")
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    install_directory = tmp_path / "KedaCode"
+    downloaded_asset_names: list[str] = []
+    executed_commands: list[list[str]] = []
+
+    def fake_download(*, release_tag: str, asset_name: str, destination_path: Path) -> None:
+        """替掉网络下载：只记录资产名并写出一个占位文件。"""
+        assert release_tag == "v0.7.0"
+        downloaded_asset_names.append(asset_name)
+        destination_path.write_bytes(b"installer")
+
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        """替掉 NSIS 安装：记录 argv，并按默认安装目录造出可执行文件。"""
+        executed_commands.append(list(command))
+        install_directory.mkdir(parents=True, exist_ok=True)
+        (install_directory / "KedaCode.exe").write_bytes(b"executable")
+        return subprocess.CompletedProcess(command, 0, b"", b"")
+
+    monkeypatch.setattr(installer_module, "_download_and_verify_release_asset", fake_download)
+    monkeypatch.setattr(installer_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(installer_module, "_windows_desktop_app_running", lambda: False)
+
+    installed_path = installer_module.install_desktop_companion(version="0.7.0")
+
+    assert installed_path == install_directory / "KedaCode.exe"
+    assert downloaded_asset_names == ["kedacode-desktop-windows-x64-setup.exe"]
+    assert len(executed_commands) == 1
+    installer_arguments = executed_commands[0]
+    assert installer_arguments[0].endswith("kedacode-desktop-windows-x64-setup.exe")
+    assert installer_arguments[1:] == ["/S"]
+
+
+def test_windows_install_reports_installer_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """静默安装非零退出时转成安装错误，不谎报成功。"""
+    monkeypatch.setattr(installer_module.sys, "platform", "win32")
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+
+    def fake_download(*, release_tag: str, asset_name: str, destination_path: Path) -> None:
+        """替掉网络下载。"""
+        destination_path.write_bytes(b"installer")
+
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        """模拟 NSIS 安装失败。"""
+        return subprocess.CompletedProcess(command, 2, b"", b"installer failed")
+
+    monkeypatch.setattr(installer_module, "_download_and_verify_release_asset", fake_download)
+    monkeypatch.setattr(installer_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(installer_module, "_windows_desktop_app_running", lambda: False)
+
+    with pytest.raises(installer_module.DesktopCompanionInstallError, match="exit code 2"):
+        installer_module.install_desktop_companion(version="0.7.0")
+
+
+def test_windows_install_requires_the_running_app_to_exit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """App 还在运行时不启动安装程序，避免静默安装被 NSIS 弹窗卡住。"""
+    monkeypatch.setattr(installer_module.sys, "platform", "win32")
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setattr(installer_module, "_windows_desktop_app_running", lambda: True)
+    download_calls: list[str] = []
+    monkeypatch.setattr(
+        installer_module,
+        "_download_and_verify_release_asset",
+        lambda **kwargs: download_calls.append(kwargs["asset_name"]),
+    )
+
+    with pytest.raises(installer_module.DesktopCompanionInstallError, match="KedaCode is running"):
+        installer_module.install_desktop_companion(version="0.7.0")
+
+    assert download_calls == []
+
+
+def test_install_rejects_unsupported_platform(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Linux 等平台仍明确拒绝，而不是悄悄装错文件。"""
+    monkeypatch.setattr(installer_module.sys, "platform", "linux")
+
+    with pytest.raises(installer_module.DesktopCompanionInstallError, match="macOS and Windows"):
+        installer_module.install_desktop_companion(version="0.7.0")
+
+
+def test_windows_installed_detection_checks_executable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Windows 已安装判定看安装目录里的 KedaCode.exe。"""
+    monkeypatch.setattr(installer_module.sys, "platform", "win32")
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+
+    assert installer_module.is_desktop_companion_installed() is False
+
+    installed_executable = tmp_path / "KedaCode" / "KedaCode.exe"
+    installed_executable.parent.mkdir(parents=True)
+    installed_executable.write_bytes(b"executable")
+
+    assert installer_module.is_desktop_companion_installed() is True

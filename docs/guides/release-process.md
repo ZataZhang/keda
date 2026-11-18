@@ -10,6 +10,7 @@ PyPI 的版本号一旦上传就**永久占用、不能重用**，因此上传�
 1. 推送 v* tag
    ├─ build：uv build → 产物断言（含 console 静态产物、不含 skills）
    ├─ build-desktop：macOS arm64 / x64 构建菜单栏 App DMG
+   ├─ build-desktop-windows：Windows x64 构建托盘 App NSIS 安装包
    └─ draft-release：汇总所有产物 → SHA256SUMS → 创建 DRAFT GitHub Release
       ↳ 此时 PyPI 上什么都没发生（可反悔窗口）
 
@@ -61,11 +62,11 @@ Homebrew tap 侧的一次性配置：`ZataZhang/homebrew-tap` 必须是 public �
    uvx twine check dist/*           # twine 不在 dev 依赖里，用 uvx 拉起；uv run twine 会报 Failed to spawn
    ```
 
-   在 macOS 上还要执行 `pnpm install --frozen-lockfile` 和 `just desktop-build`，确认本机架构的 `.app` / DMG 能构建。CI 会在两个 macOS runner 上分别构建 arm64 与 x64，并从 tag 写入 App 版本；随后校验 tag 与 `pyproject.toml` 版本一致。
+   在 macOS 上还要执行 `pnpm install --frozen-lockfile` 和 `just desktop-build`，确认本机架构的 `.app` / DMG 能构建。CI 会在两个 macOS runner 上分别构建 arm64 与 x64，并从 tag 写入 App 版本；随后校验 tag 与 `pyproject.toml` 版本一致。Windows 安装包只能在 Windows 上构建（`just desktop-install`），CI 由 `windows-latest` 产出 x64 NSIS 安装包。
 
    再把 wheel 装进一个**干净 venv**：`uv venv <dir> && uv pip install --python <dir>/bin/python dist/*.whl`，用它跑 `kc --version`、`kedacode --version`（都应是新版本号），并冒烟 `kc console --no-browser --port <不常用的端口>`：请求首页应返回 200。**冒烟端口要选不常用的（例如 `18765`），收尾只按这个进程的 PID 停**——开发机上常有代理、启动器等占着 3000–9999 区间里的端口，按端口区间或进程名批量 `kill` 会误杀它们。
-3. 推送提交和 `v*` tag（用带说明的 tag：`git tag -a vX.Y.Z -m "Release vX.Y.Z"`），等 `build`、`build-desktop` 和 `draft-release` 全绿，确认 draft release 已带 sdist、wheel、arm64 / x64 DMG 与 `SHA256SUMS`。此时 `publish-pypi` 与 `update-tap` 两个 job 显示 `skipped` 是**预期**的，它们要等第 5 步。
-4. 检查 draft release：确认 Python 包含 console 产物，桌面 DMG 的架构和版本号正确，`SHA256SUMS` 覆盖所有产物。几个看起来像异常、其实正常的现象：draft 的链接形如 `releases/tag/untagged-<hash>`，正式发布后才变成 `vX.Y.Z`；CI 上构建的 wheel 与本地构建的**字节数不同**（构建不是逐字节可复现的），所以不要拿本地哈希去比对 `SHA256SUMS`，以 CI 产物与其校验和互相一致为准。macOS DMG 当前为 ad-hoc 签名、未经公证；如发布策略或凭据改变，需同步调整 workflow 和安装文档。
+3. 推送提交和 `v*` tag（用带说明的 tag：`git tag -a vX.Y.Z -m "Release vX.Y.Z"`），等 `build`、`build-desktop`、`build-desktop-windows` 和 `draft-release` 全绿，确认 draft release 已带 sdist、wheel、arm64 / x64 DMG、Windows x64 `setup.exe` 与 `SHA256SUMS`。此时 `publish-pypi` 与 `update-tap` 两个 job 显示 `skipped` 是**预期**的，它们要等第 5 步。
+4. 检查 draft release：确认 Python 包含 console 产物，桌面 DMG 的架构和版本号正确，Windows 安装包 `kedacode-desktop-windows-x64-setup.exe` 与同版本 DMG 使用同一个 tag 构建，`SHA256SUMS` 覆盖所有产物。几个看起来像异常、其实正常的现象：draft 的链接形如 `releases/tag/untagged-<hash>`，正式发布后才变成 `vX.Y.Z`；CI 上构建的 wheel 与本地构建的**字节数不同**（构建不是逐字节可复现的），所以不要拿本地哈希去比对 `SHA256SUMS`，以 CI 产物与其校验和互相一致为准。macOS DMG 当前为 ad-hoc 签名、未经公证；Windows 安装包未做代码签名，SmartScreen 会提示「未知发布者」。如发布策略或凭据改变，需同步调整 workflow 和安装文档。
 5. 在 GitHub 上把该 draft release 正式发布。**这一步会触发不可逆的 PyPI 上传，必须有负责人明确同意**；agent 不得自行执行（包括 `gh release edit --draft=false`）。
 6. 等 `publish-pypi` 与 `update-tap` 全绿后，**不要只看 workflow 日志**：核对 `https://pypi.org/pypi/kedacode/json` 已返回新版本，`kc console` 从公共索引可装，tap 仓库的 `Formula/kedacode.rb` 已更新。
 

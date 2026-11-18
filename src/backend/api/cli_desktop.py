@@ -1,4 +1,4 @@
-"""macOS 菜单栏 App 的 CLI 命令与首次使用提示。"""
+"""桌面 App（macOS 菜单栏 / Windows 系统托盘）的 CLI 命令与首次使用提示。"""
 
 from __future__ import annotations
 
@@ -24,7 +24,11 @@ _SETUP_PROMPT_SKIP_COMMANDS = {"agent", "completion", "desktop", "schema"}
 
 
 def _should_skip_desktop_setup_prompt(raw_cli_arguments: Sequence[str]) -> bool:
-    """判定本次调用是否不应弹出桌面 App 的首次使用提示。"""
+    """判定本次调用是否不应弹出桌面 App 的首次使用提示。
+
+    首次使用提示只在 macOS 出现：Windows 用户通常经 NSIS 安装包或显式的
+    ``kc desktop install`` 安装桌面 App，不需要在终端里被追问。
+    """
     if sys.platform != "darwin":
         return True
     if not sys.stdin.isatty() or not sys.stderr.isatty():
@@ -41,7 +45,7 @@ def _should_skip_desktop_setup_prompt(raw_cli_arguments: Sequence[str]) -> bool:
 
 
 def _desktop_setup_marker_path() -> Path | None:
-    """返回菜单栏 App 首次提示的本机状态文件路径。"""
+    """返回桌面 App 首次提示的本机状态文件路径。"""
     try:
         return product_identity.state_home() / _DESKTOP_SETUP_MARKER
     except (OSError, RuntimeError):
@@ -59,13 +63,20 @@ def _mark_desktop_setup_prompt_shown(marker_path: Path | None) -> None:
         return
 
 
+def _desktop_app_launch_hint() -> str:
+    """给出安装后如何启动桌面 App 的平台提示。"""
+    if sys.platform == "win32":
+        return "Start it from the Start menu or the KedaCode shortcut to show the tray icon."
+    return "Open it from Finder to show the menu bar icon."
+
+
 def _install_desktop_app_and_report(*, fail_on_error: bool) -> bool:
-    """安装当前版本对应的菜单栏 App，必要时把失败转换成 CLI 错误。"""
+    """安装当前版本对应的桌面 App，必要时把失败转换成 CLI 错误。"""
     try:
         installed_app_path = install_desktop_companion(version=resolve_keda_version())
     except DesktopCompanionInstallError as install_error:
         typer.echo(
-            f"Could not install the KedaCode menu bar app: {install_error}\n"
+            f"Could not install the KedaCode desktop app: {install_error}\n"
             "Retry later with `kc desktop install`.",
             err=True,
         )
@@ -73,14 +84,14 @@ def _install_desktop_app_and_report(*, fail_on_error: bool) -> bool:
             raise typer.Exit(code=1) from install_error
         return False
     typer.echo(
-        f"Installed the KedaCode menu bar app: {installed_app_path}\n"
-        "Open it from Finder to show the menu bar icon."
+        f"Installed the KedaCode desktop app: {installed_app_path}\n"
+        f"{_desktop_app_launch_hint()}"
     )
     return True
 
 
 def maybe_prompt_for_desktop_app_setup(raw_cli_arguments: Sequence[str]) -> None:
-    """首次交互式使用时询问是否安装 macOS 菜单栏 App。
+    """首次交互式使用时询问是否安装 macOS 菜单栏 App（仅 macOS）。
 
     Args:
         raw_cli_arguments: 用户传给 CLI 的原始参数。
@@ -108,13 +119,13 @@ def maybe_prompt_for_desktop_app_setup(raw_cli_arguments: Sequence[str]) -> None
         _install_desktop_app_and_report(fail_on_error=False)
         return
     typer.echo(
-        "Skipped. Run `kc desktop install` later to install the menu bar app.",
+        "Skipped. Run `kc desktop install` later to install the desktop app.",
         err=True,
     )
 
 
 def register_desktop_commands(desktop_app: typer.Typer) -> None:
-    """注册菜单栏 App 管理命令。
+    """注册桌面 App 管理命令。
 
     Args:
         desktop_app: 用于注册命令的 Typer 子应用。
@@ -122,7 +133,7 @@ def register_desktop_commands(desktop_app: typer.Typer) -> None:
 
     @desktop_app.command("install")
     def desktop_install_command() -> None:
-        """安装与当前 kedacode 版本匹配的 macOS 菜单栏 App。"""
+        """安装与当前 kedacode 版本匹配的桌面 App（macOS 菜单栏 / Windows 托盘）。"""
         _install_desktop_app_and_report(fail_on_error=True)
 
 

@@ -1,0 +1,9 @@
+{
+  "bundle": {
+    "targets": ["app", "dmg"],
+    "category": "public.app-category.developer-tools",
+    "macOS": {
+      "minimumSystemVersion": "12.0"
+    }
+  }
+}
