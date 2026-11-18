@@ -4295,7 +4295,9 @@ PR 的入口，不再把「没有开放 PR」误显示成「从未交付 PR」�
 快照中的任务先按 Issue 是否关闭分桶：关闭 Issue 显示「已关闭」，open Issue 再按最近同步到的
 状态标签分桶，关闭状态优先于残留标签。`agent/blocked` 显示为「阻塞」，`agent/failed` 显示为
 「失败」；前者表示需要人工决策，后者表示本轮执行失败，两者应分别排查。「已完成」仅表示运行账本
-记录了成功终态。状态来源根据 Issue 关闭状态、当前监控标签或运行账本终态显示；监控异常类型单独放在
+记录了成功终态。状态来源根据 Issue 关闭状态、当前监控标签或运行账本终态显示；当最近一次
+`post_pr_supervisor` 事件动作为 `request_human_input` 时，看板另显示该事件评论的 `Summary` 作为
+「阻塞原因」。监控异常类型单独放在
 `anomaly_types`，不会替换状态来源，也不直接充当失败原因。失败任务若调用账本确认了失败的 Agent 调用，
 阶段显示该调用所属的生命周期阶段；否则阶段优先采用最近一次 attempt 记录的失败环节，再回退到 Issue 时间线
 最后一条阶段事件。阶段说明描述该环节的职责，例如
@@ -4334,7 +4336,7 @@ Overview 还会按 severity 汇总 `anomaly_count` 和 `anomaly_summary`（`warn
 
 ### 事件时间线
 
-`GET /api/v1/agent-runner/issues/{issue_number}` 返回 `timeline`，按时间顺序列出所有 `<!-- kc:event ... -->` 标记，附带 phase、cycle、head SHA、PR branch、checks_state、mergeable、action 等字段。解析复用 `backend.core.use_cases.agent_runner_events`，不会复制 marker parser。
+`GET /api/v1/agent-runner/issues/{issue_number}` 返回 `timeline`，按时间顺序列出所有 `<!-- kc:event ... -->` 标记，附带 phase、cycle、head SHA、PR branch、checks_state、mergeable、action 等字段；PR 后监督事件还包含人读 `summary`，供阻塞详情呈现人工处理原因。
 
 ### 建议 CLI 文本
 

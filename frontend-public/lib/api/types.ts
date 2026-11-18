@@ -72,6 +72,8 @@ export type EventTimelineEntry = {
   checks_state: string | null;
   mergeable: boolean | null;
   raw_marker: string;
+  /** PR 后监督事件的人读摘要；旧监控快照或其他阶段可能没有。 */
+  summary?: string | null;
 };
 
 export type LatestEventMarker = {
@@ -1636,6 +1638,8 @@ export type RuntimeTaskEntry = {
   status: RuntimeTaskStatus;
   /** 当前状态的直接来源，例如监控标签或 Issue 关闭状态。 */
   status_reason: string | null;
+  /** 最近一次 PR 监督请求人工处理时给出的摘要；未阻塞或无摘要时为空。 */
+  blocking_reason?: string | null;
   /** GitHub 同步或远端读取失败原因；存在时表示后台正在自动重试。 */
   sync_error?: string | null;
   /** 最近一次成功同步观察到的任务状态；当前同步失败时用于展示过期状态。 */

@@ -20,7 +20,15 @@ import { formatLocalDateTime } from "@/lib/utils";
 
 import { RuntimeTaskPhaseDescription, RuntimeTaskPhase } from "./runtime-task-phase";
 import { RuntimeTaskAnomalies, RuntimeTaskImpact } from "./runtime-task-detail";
-import { RuntimeTaskDuration, RuntimeTaskObservation, RuntimeTaskWatch, isActiveRuntimeTask, runtimeStatusPresentation, runtimeTaskKey } from "./runtime-task-list";
+import {
+  RuntimeTaskBlockingReason,
+  RuntimeTaskDuration,
+  RuntimeTaskObservation,
+  RuntimeTaskWatch,
+  isActiveRuntimeTask,
+  runtimeStatusPresentation,
+  runtimeTaskKey,
+} from "./runtime-task-list";
 
 /** 小窗轮询间隔：与网页看板同一节奏（PRD §7.1.5「沿用现有 Dashboard 监控刷新」）。 */
 const COMPANION_POLL_MS = 15_000;
@@ -307,6 +315,7 @@ function CompanionTaskRow({
         className="line-clamp-2 text-[11px] leading-snug text-slate-500 dark:text-slate-400"
       />
       <RuntimeTaskObservation task={task} />
+      <RuntimeTaskBlockingReason task={task} compact />
       <span className="flex flex-wrap gap-x-2 text-[11px] text-slate-500">
         {task.agent ? (
           <span>

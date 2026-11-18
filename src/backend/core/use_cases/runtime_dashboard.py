@@ -200,6 +200,25 @@ def _latest_timeline_action(issue_entry: Mapping[str, Any]) -> str | None:
     return None
 
 
+def _latest_human_input_summary(issue_entry: Mapping[str, Any]) -> str | None:
+    """取最近一次 PR 监督请求人工处理时记录的摘要。"""
+    timeline = issue_entry.get("timeline")
+    if not isinstance(timeline, list):
+        return None
+    for event_entry in reversed(timeline):
+        if not isinstance(event_entry, dict):
+            continue
+        if event_entry.get("phase") != "post_pr_supervisor":
+            continue
+        if event_entry.get("action") != "request_human_input":
+            return None
+        summary = event_entry.get("summary")
+        if isinstance(summary, str) and summary.strip():
+            return summary.strip()
+        return None
+    return None
+
+
 def _pr_identity(issue_entry: Mapping[str, Any]) -> tuple[str | None, int | None]:
     """从监控快照条目里取 PR 链接与编号；没有 PR 时返回两个 ``None``。"""
     raw_pr = issue_entry.get("pr")
@@ -257,6 +276,10 @@ def _snapshot_task(
                 status = RuntimeTaskStatus.UNKNOWN
                 status_reason = "监控快照没有可判定的生命周期标签"
 
+    blocking_reason = (
+        _latest_human_input_summary(issue_entry) if status is RuntimeTaskStatus.BLOCKED else None
+    )
+
     waiting_reason = None
     if status is RuntimeTaskStatus.WAITING:
         latest_action = _latest_timeline_action(issue_entry)
@@ -302,6 +325,7 @@ def _snapshot_task(
         pr_number=pr_number,
         status=status,
         status_reason=status_reason,
+        blocking_reason=blocking_reason,
         sync_error=sync_error,
         last_observed_status=(
             last_observed_status

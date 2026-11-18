@@ -3,7 +3,7 @@
 本模块只描述「值守时需要看到什么」，不承担任何读取职责：数据由
 :mod:`backend.core.use_cases.runtime_dashboard` 从已有的监控快照、运行账本与
 PRD 生命周期账本组装而成。刻意不引入数据库表，也不复制 Issue 原始日志、
-invocation ledger 或改动树触达读数；只透出运行账本已经保存的错误摘要。
+invocation ledger 或改动树触达读数；只透出已保存的运行错误摘要和结构化监督事件摘要。
 
 触达比例（``touched/judgeable``）**不在本模型里**：它的唯一来源仍是现有
 ``GET /api/v1/agent-runner/backlog/prds/{encoded_path}/progress`` 契约，由
@@ -78,6 +78,7 @@ class RuntimeTask:
         pr_number: PR 编号；链接无法解析编号时为 ``None``。
         status: 生命周期分桶。
         status_reason: 当前分桶的直接来源，例如监控标签或 Issue 关闭状态。
+        blocking_reason: 最近一次 PR 监督请求人工处理时给出的摘要；无法确认时为空。
         sync_error: GitHub 快照同步失败原因；非空时同步状态仍在自动重试。
         last_observed_status: 最近一次成功同步观察到的状态；当前同步失败时保留。
         last_observed_at: 最近一次成功同步时间；故障时与 ``last_observed_status`` 一起表示过期状态。
@@ -139,6 +140,7 @@ class RuntimeTask:
     anomaly_types: tuple[str, ...] = ()
     waiting_reason: str | None = None
     review_daemon_running: bool | None = None
+    blocking_reason: str | None = None
 
     @property
     def task_key(self) -> str:

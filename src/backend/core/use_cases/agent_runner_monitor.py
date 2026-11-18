@@ -3,7 +3,7 @@
 本模块是 Agent Runner 监控面板的核心业务逻辑：
 - `build_overview`：按仓库汇总队列状态、最新 event 和异常计数。
 - `build_issue_detail`：单个 Issue 的 label、PR 上下文、worktree 状态、event timeline、anomaly 和建议 CLI。
-- `parse_event_timeline`：从 Issue comments 解析所有 kc:event marker 作为事件时间线。
+- `parse_event_timeline`：从 Issue comments 解析 kc:event marker 与 PR 后监督摘要。
 - 异常检测规则：label_pr_mismatch、pr_dirty_in_review、dirty_worktree_mismatch、event_label_mismatch。
 
 按照四层依赖方向，本模块属于 core/use_cases/，只依赖
@@ -53,7 +53,20 @@ QUEUE_LABELS: tuple[str, ...] = (
 
 @dataclass(frozen=True)
 class EventTimelineEntry:
-    """A single ordered entry in an Issue's event timeline."""
+    """Issue 事件时间线中的一条有序记录。
+
+    Attributes:
+        phase: 事件阶段。
+        cycle: 事件所在阶段的周期编号。
+        comment_index: 事件所在评论的输入顺序编号。
+        action: 事件动作；未记录时为 ``None``。
+        head_sha: 事件对应的 PR head；未记录时为 ``None``。
+        pr_branch: 事件对应的 PR 分支；未记录时为 ``None``。
+        checks_state: 事件记录的检查状态；未记录时为 ``None``。
+        mergeable: PR 是否可合并；未记录时为 ``None``。
+        raw_marker: 原始机器可读事件标记。
+        summary: PR 后监督事件的人读摘要；其他事件为 ``None``。
+    """
 
     phase: str
     cycle: int
@@ -64,6 +77,7 @@ class EventTimelineEntry:
     checks_state: str | None = None
     mergeable: bool | None = None
     raw_marker: str = ""
+    summary: str | None = None
 
 
 @dataclass(frozen=True)
@@ -159,6 +173,10 @@ _EVENT_MARKER_LINE_PATTERN = re.compile(
     r"<!--\s*kc:event\s+([^>]+?)\s*-->",
     re.DOTALL,
 )
+_SUPERVISOR_SUMMARY_PATTERN = re.compile(
+    r"(?ms)^[ \t]*-[ \t]*Summary:[ \t]*(.*?)"
+    r"(?=^[ \t]*-[ \t]*(?:Findings|Verification|Head SHA):|\Z)"
+)
 
 
 def _coerce_int(raw_value: str | None) -> int | None:
@@ -215,6 +233,21 @@ def parse_event_timeline(comments: Iterable[str]) -> list[EventTimelineEntry]:
             cycle = _coerce_int(attributes.get("cycle"))
             if phase is None or cycle is None:
                 continue
+            event_summary = None
+            if phase == "post_pr_supervisor":
+                next_marker_match = _EVENT_MARKER_LINE_PATTERN.search(
+                    comment_body, marker_match.end()
+                )
+                event_body_end = (
+                    next_marker_match.start()
+                    if next_marker_match is not None
+                    else len(comment_body)
+                )
+                event_comment_body = comment_body[marker_match.end() : event_body_end]
+                summary_match = _SUPERVISOR_SUMMARY_PATTERN.search(event_comment_body)
+                if summary_match is not None:
+                    normalized_summary = " ".join(summary_match.group(1).split())
+                    event_summary = normalized_summary or None
             timeline.append(
                 EventTimelineEntry(
                     phase=phase,
@@ -226,6 +259,7 @@ def parse_event_timeline(comments: Iterable[str]) -> list[EventTimelineEntry]:
                     checks_state=attributes.get("checks_state"),
                     mergeable=_coerce_bool(attributes.get("mergeable")),
                     raw_marker=marker_match.group(0),
+                    summary=event_summary,
                 )
             )
     return timeline

@@ -40,7 +40,13 @@ import {
   RuntimeTaskPhase,
   runtimePhaseLabel,
 } from "./runtime-task-phase";
-import { RuntimeTaskDuration, RuntimeTaskObservation, RuntimeTaskWatch, runtimeStatusPresentation } from "./runtime-task-list";
+import {
+  RuntimeTaskBlockingReason,
+  RuntimeTaskDuration,
+  RuntimeTaskObservation,
+  RuntimeTaskWatch,
+  runtimeStatusPresentation,
+} from "./runtime-task-list";
 
 /** `worktree_status` 独有原因：`impact_status` 里没有对应取值，只能在这里补。 */
 const WORKTREE_REASON: Record<string, string> = {
@@ -422,6 +428,7 @@ export function RuntimeTaskDetail({
         </CardHeader>
         <CardContent className="flex flex-col gap-2 text-xs text-slate-600 dark:text-slate-300">
           <p data-testid="runtime-task-status-reason">状态来源：{task.status_reason ?? "未提供"}</p>
+          <RuntimeTaskBlockingReason task={task} />
           <RuntimeTaskPhaseDescription task={task} />
           <RuntimeTaskObservation task={task} />
           {task.last_error_summary ? (

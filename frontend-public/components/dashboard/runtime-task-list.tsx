@@ -337,6 +337,7 @@ function RuntimeTaskRow({
         </span>
         <RuntimeTaskPhaseDescription task={task} className="mt-1 block text-xs text-slate-500" />
         <RuntimeTaskObservation task={task} />
+        <RuntimeTaskBlockingReason task={task} compact />
         {task.status === "failed" && (task.failure_reason || task.last_error_summary) ? (
           <span
             className="mt-1 block max-w-full truncate px-3 text-xs text-red-700 dark:text-red-300"
@@ -594,6 +595,38 @@ export function RuntimeTaskDuration({ task }: { task: RuntimeTaskEntry }) {
   if (task.duration_seconds === null) return null;
   const label = task.finished_at ? "上次运行耗时" : task.status === "running" ? "本轮耗时" : "记录耗时";
   return <span>{label}：{formatLifecycleDuration(task.duration_seconds)}</span>;
+}
+
+/**
+ * 在任务行与详情里呈现最近一次请求人工处理的具体原因。
+ *
+ * @param props.task - 当前任务摘要。
+ * @param props.compact - 是否使用任务行和桌面小窗的紧凑样式。
+ * @returns 阻塞原因；没有对应监督摘要时返回 ``null``。
+ */
+export function RuntimeTaskBlockingReason({
+  task,
+  compact = false,
+}: {
+  task: RuntimeTaskEntry;
+  compact?: boolean;
+}) {
+  const blockingReason = task.blocking_reason?.trim();
+  if (task.status !== "blocked" || !blockingReason) return null;
+
+  return (
+    <span
+      className={
+        compact
+          ? "mt-1 block max-w-full line-clamp-2 break-words text-xs text-amber-800 dark:text-amber-300"
+          : "block whitespace-pre-wrap break-words rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200"
+      }
+      title={blockingReason}
+      data-testid="runtime-task-blocking-reason"
+    >
+      阻塞原因：{blockingReason}
+    </span>
+  );
 }
 
 /** 活动列表包含状态待核实的任务，避免未知状态被历史任务掩盖。 */
