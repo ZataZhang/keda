@@ -24,6 +24,11 @@ class MachineIdentityStore(IMachineIdentityStore):
     """在状态目录的 ``machine.json`` 中持久化 UUID 身份。"""
 
     def __init__(self, machine_file: Path | None = None) -> None:
+        """初始化机器身份存储。
+
+        Args:
+            machine_file: 身份文件路径，省略时为状态目录下的 ``machine.json``。
+        """
         self._machine_file = machine_file or state_home() / "machine.json"
 
     def load_or_create(self) -> MachineIdentity:

@@ -45,15 +45,10 @@ from backend.core.use_cases.worktree_dependency_context import (
 
 _MAX_RECOVERY_OUTPUT_LENGTH = 12000
 
-# Default ceiling for inlining the canonical PRD inside the implementation /
-# recovery / continuation prompts. PRDs longer than this are truncated with a
-# pointer to the full file. Exposed as a parameter so future PRDs (or repos)
-# can raise or lower the ceiling without forking this helper.
+# PRD 内联上限：超出后指向完整文件，并由参数允许调用方调整。
 _DEFAULT_PRD_INLINE_MAX_CHARS = 20000
 
-# 跨 claim 回灌时内联"上一轮交接记录"的上限。交接记录含 attempt 历史，容易很长，
-# 而 prompt 是有限资源；只取头部即可，因为记录的关键字段（快照性质、checkpoint
-# SHA、verifier 结论、证据目录）都排在前面，超限时显式标注截断而非静默丢弃。
+# 跨 claim 的交接记录内联上限；关键字段位于开头，超限时保留头部并标明截断。
 _MAX_FAILURE_CONTEXT_INLINE_CHARS = 8000
 
 
@@ -80,6 +75,11 @@ class VerificationFailedError(RuntimeError):
     """Raised when configured verification commands do not pass."""
 
     def __init__(self, verification_results: list[CommandResult]) -> None:
+        """由验证命令结果生成失败信息。
+
+        Args:
+            verification_results: 各验证命令的执行结果。
+        """
         self.verification_results = verification_results
         super().__init__(format_verification_failure(verification_results))
 

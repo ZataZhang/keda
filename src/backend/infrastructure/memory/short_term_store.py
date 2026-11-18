@@ -111,6 +111,13 @@ class ShortTermMemoryStore:
         repository_identity: str | None = None,
         legacy_base_dirs: Iterable[str | Path] = (),
     ) -> None:
+        """初始化短期记忆存储。
+
+        Args:
+            base_dir: 短期记忆的根目录。
+            repository_identity: 仓库身份，用作分区键。
+            legacy_base_dirs: 读取时兼容的旧版根目录。
+        """
         self._base_dir = Path(base_dir)
         self._repository_identity = repository_identity
         self._legacy_base_dirs = tuple(Path(directory) for directory in legacy_base_dirs)

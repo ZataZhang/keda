@@ -105,6 +105,11 @@ class ExistingFileRefusedError(RuntimeError):
     """Raised when template files exist and ``--force`` was not passed."""
 
     def __init__(self, refused_paths: list[Path]) -> None:
+        """记录拒绝覆盖的文件。
+
+        Args:
+            refused_paths: 已存在而被拒绝覆盖的文件路径。
+        """
         self.refused_paths = refused_paths
         joined = ", ".join(str(path) for path in refused_paths)
         super().__init__(

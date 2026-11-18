@@ -106,22 +106,62 @@ def run_registry_sync_command(ctx: ParsedCommandContext) -> int:
 
 
 def run_registry_reinit_command(ctx: ParsedCommandContext) -> int:
+    """执行 ``kc registry reinit`` 并返回退出码。
+
+    Args:
+        ctx: 已解析命令及进程运行器组成的上下文。
+
+    Returns:
+        ``kc registry reinit`` 的进程退出码。
+    """
     return _run_registry_reinit_command(ctx.parsed, ctx.process_runner)
 
 
 def run_registry_remove_command(ctx: ParsedCommandContext) -> int:
+    """执行 ``kc registry remove`` 并返回退出码。
+
+    Args:
+        ctx: 已解析命令及进程运行器组成的上下文。
+
+    Returns:
+        ``kc registry remove`` 的进程退出码。
+    """
     return _run_registry_remove_command(ctx.parsed, ctx.process_runner)
 
 
 def run_registry_list_command(ctx: ParsedCommandContext) -> int:
+    """执行 ``kc registry list`` 并返回退出码。
+
+    Args:
+        ctx: 进程运行器及输出格式组成的上下文。
+
+    Returns:
+        ``kc registry list`` 的进程退出码。
+    """
     return _run_registry_list_command(ctx.process_runner, fmt=ctx.output_format)
 
 
 def run_registry_start_command(ctx: ParsedCommandContext) -> int:
+    """执行 ``kc registry start`` 并返回退出码。
+
+    Args:
+        ctx: 已解析命令及进程运行器组成的上下文。
+
+    Returns:
+        ``kc registry start`` 的进程退出码。
+    """
     return _run_registry_start_command(ctx.parsed, ctx.process_runner)
 
 
 def run_registry_stop_command(ctx: ParsedCommandContext) -> int:
+    """执行 ``kc registry stop`` 并返回退出码。
+
+    Args:
+        ctx: 已解析命令及进程运行器组成的上下文。
+
+    Returns:
+        ``kc registry stop`` 的进程退出码。
+    """
     return _run_registry_stop_command(ctx.parsed, ctx.process_runner)
 
 

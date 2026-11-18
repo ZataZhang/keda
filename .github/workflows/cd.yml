@@ -45,11 +45,12 @@ jobs:
         uses: actions/checkout@v4
 
       # 部分 guard tests 会启动真实 just recipe（如 tests/guards/shared/test_ai_pr.py），
-      # CI 与 CD 都要安装相同版本，避免完整套件在本地可用、在 runner 上因缺少 just 失败。
+      # ubuntu-latest 不自带 just。ci.yml 与 cd.yml 都跑测试套件，两处版本必须一致，
+      # 并与 runner_container/Dockerfile.runner 的 JUST_VERSION 对齐。
       - name: Set up just
         uses: extractions/setup-just@v4
         with:
-          just-version: "1.53.0"
+          just-version: "1.55.1"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -103,15 +104,6 @@ jobs:
             uv run --project "$GITHUB_WORKSPACE" kc init
           test -f "$skills_root/prd/scripts/prd_contract.py"
           echo "KEDACODE_PRD_SKILL_PATH=$skills_root/prd/SKILL.md" >> "$GITHUB_ENV"
-
-      # guard 测试通过真实 `just ai pr` 入口运行，ubuntu-latest 不自带 just
-      # （ci.yml run 41559800688 实测 29 个 FileNotFoundError: 'just'）。
-      # 与 ci.yml 同一套调用：两个 workflow 都跑测试套件，改其一必须改另一个。
-      # 版本与 runner_container/Dockerfile.runner 的 JUST_VERSION 对齐。
-      - name: Set up just
-        uses: extractions/setup-just@v4
-        with:
-          just-version: "1.55.1"
 
       # timeout-minutes 是诊断也是防护。基线：2026-07-28 的 eb75be4 用同一条命令
       # 跑完 1773 个测试只要 45 秒；2026-09-11 起同一步骤 25 分钟不结束——因为

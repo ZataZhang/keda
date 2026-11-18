@@ -26,9 +26,14 @@ class MemoryStores(Protocol):
         *,
         repository_identity: str | None = None,
         legacy_base_dirs: Iterable[str | Path] = (),
-    ) -> object: ...
-    def long_term(self, base_dir: str | Path) -> object: ...
-    def skill(self, drafts_dir: str | Path) -> object: ...
+    ) -> object:
+        """创建短期记忆存储。"""
+
+    def long_term(self, base_dir: str | Path) -> object:
+        """创建长期记忆存储。"""
+
+    def skill(self, drafts_dir: str | Path) -> object:
+        """创建 skill 草稿存储。"""
 
 
 def build_memory_stores() -> MemoryStores:

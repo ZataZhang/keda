@@ -566,23 +566,76 @@ class GitHubCliClient:
     # --- issue delegations ---------------------------------------------
 
     def list_ready_issues(self, ready_label: str, limit: int) -> list[IssueSummary]:
+        """列出带就绪标签的未关闭 Issue。
+
+        Args:
+            ready_label: 表示就绪状态的标签名。
+            limit: 最多返回的 Issue 数量。
+
+        Returns:
+            匹配标签的 Issue 摘要。
+        """
         return list_ready_issues(self, ready_label, limit)
 
     def list_rework_prd_issues(self, rework_prd_label: str, limit: int) -> list[IssueSummary]:
+        """列出带 rework-prd 标签的未关闭 Issue。
+
+        Args:
+            rework_prd_label: 表示 PRD 需要返工的标签名。
+            limit: 最多返回的 Issue 数量。
+
+        Returns:
+            匹配标签的 Issue 摘要。
+        """
         return list_rework_prd_issues(self, rework_prd_label, limit)
 
     def list_review_candidate_issues(self, labels: Sequence[str], limit: int) -> list[IssueSummary]:
+        """列出带任一给定标签的未关闭 Issue。
+
+        Args:
+            labels: 用于筛选候选 Issue 的标签集合。
+            limit: 最多返回的 Issue 数量。
+
+        Returns:
+            匹配任一标签的 Issue 摘要。
+        """
         return list_review_candidate_issues(self, labels, limit)
 
     def list_issues_by_label(
         self, label: str | None, limit: int, state: str = "all"
     ) -> list[IssueSummary]:
+        """按标签读取指定状态的 Issue。
+
+        Args:
+            label: 筛选用标签；为 ``None`` 时不按标签过滤。
+            limit: 最多返回的 Issue 数量。
+            state: GitHub Issue 状态筛选值。
+
+        Returns:
+            匹配标签和状态的 Issue 摘要。
+        """
         return list_issues_by_label(self, label, limit, state)
 
     def list_repository_items(self, *, state: str = "open") -> list[IssueSummary]:
+        """完整列出仓库的 Issue 与 PR，保留每个条目的正文和状态。
+
+        Args:
+            state: GitHub 项目状态筛选值。
+
+        Returns:
+            仓库中符合状态筛选的 Issue 与 PR 摘要。
+        """
         return list_repository_items(self, state=state)
 
     def get_issue(self, issue_number: int) -> IssueSummary:
+        """读取指定编号的 Issue 摘要。
+
+        Args:
+            issue_number: GitHub Issue 编号。
+
+        Returns:
+            指定 Issue 的摘要。
+        """
         return get_issue(self, issue_number)
 
     def edit_issue_labels(
@@ -592,18 +645,65 @@ class GitHubCliClient:
         add: Sequence[str] = (),
         remove: Sequence[str] = (),
     ) -> None:
+        """添加或移除 Issue 标签。
+
+        Args:
+            issue_number: GitHub Issue 编号。
+            add: 要添加的标签名。
+            remove: 要移除的标签名。
+
+        Returns:
+            无返回值。
+        """
         edit_issue_labels(self, issue_number, add=add, remove=remove)
 
     def comment_issue(self, issue_number: int, body: str) -> None:
+        """向 Issue 发布 Markdown 评论。
+
+        Args:
+            issue_number: GitHub Issue 编号。
+            body: 评论正文。
+
+        Returns:
+            无返回值。
+        """
         comment_issue(self, issue_number, body)
 
     def edit_issue_body(self, issue_number: int, body: str) -> None:
+        """替换 Issue 正文。
+
+        Args:
+            issue_number: GitHub Issue 编号。
+            body: 要设置的完整 Issue 正文。
+
+        Returns:
+            无返回值。
+        """
         edit_issue_body(self, issue_number, body)
 
     def create_issue(self, *, title: str, body: str, labels: Sequence[str]) -> str:
+        """创建 GitHub Issue 并返回其 URL。
+
+        Args:
+            title: Issue 标题。
+            body: Issue 正文。
+            labels: 创建时附加的标签名。
+
+        Returns:
+            新建 Issue 的 URL。
+        """
         return create_issue(self, title=title, body=body, labels=labels)
 
     def list_issue_comments(self, issue_number: int, *, require_success: bool = False) -> list[str]:
+        """读取 Issue 评论的非空正文，默认按尽力读取处理失败。
+
+        Args:
+            issue_number: GitHub Issue 编号。
+            require_success: 是否要求 GitHub 查询成功。
+
+        Returns:
+            Issue 中非空的评论正文。
+        """
         return list_issue_comments(self, issue_number, require_success=require_success)
 
     def list_issue_comment_entries(
@@ -653,14 +753,42 @@ class GitHubCliClient:
         )
 
     def edit_issue_comment(self, comment_id: int, body: str) -> None:
+        """修改一条已有的 Issue 评论。
+
+        Args:
+            comment_id: 要修改的 GitHub 评论编号。
+            body: 要设置的完整评论正文。
+
+        Returns:
+            无返回值。
+        """
         edit_issue_comment(self, comment_id, body)
 
     def delete_issue_comment(self, comment_id: int) -> None:
+        """删除一条 Issue 评论。
+
+        Args:
+            comment_id: 要删除的 GitHub 评论编号。
+
+        Returns:
+            无返回值。
+        """
         delete_issue_comment(self, comment_id)
 
     # --- PR delegations -------------------------------------------------
 
     def create_draft_pr(self, *, title: str, body: str, base_branch: str, cwd: Path) -> str:
+        """基于当前分支创建 Draft PR 并返回其 URL。
+
+        Args:
+            title: PR 标题。
+            body: PR 正文。
+            base_branch: PR 目标分支。
+            cwd: 执行 GitHub CLI 的仓库工作目录。
+
+        Returns:
+            新建 Draft PR 的 URL。
+        """
         return create_draft_pr(self, title=title, body=body, base_branch=base_branch, cwd=cwd)
 
     def get_pull_request_context(
@@ -687,12 +815,39 @@ class GitHubCliClient:
         return get_pull_request_context_by_number(self, pr_number, require_success=require_success)
 
     def comment_pr(self, pr_number: int, body: str) -> None:
+        """向 PR 发布 Markdown 评论。
+
+        Args:
+            pr_number: GitHub PR 编号。
+            body: 评论正文。
+
+        Returns:
+            无返回值。
+        """
         comment_pr(self, pr_number, body)
 
     def update_pull_request_body(self, pr_number: int, body: str) -> None:
+        """替换 PR 的描述正文。
+
+        Args:
+            pr_number: GitHub PR 编号。
+            body: 要设置的完整 PR 正文。
+
+        Returns:
+            无返回值。
+        """
         update_pull_request_body(self, pr_number, body)
 
     def set_pull_request_base(self, pr_number: int, base_branch: str) -> None:
+        """修改 PR 的目标分支。
+
+        Args:
+            pr_number: GitHub PR 编号。
+            base_branch: 新的目标分支名。
+
+        Returns:
+            无返回值。
+        """
         set_pull_request_base(self, pr_number, base_branch)
 
     def mark_pull_request_ready(self, pr_number: int) -> None:
@@ -700,6 +855,15 @@ class GitHubCliClient:
         mark_pull_request_ready(self, pr_number)
 
     def merge_pull_request(self, pr_number: int, *, method: str = "squash") -> None:
+        """按指定方式（默认 squash）合并 PR。
+
+        Args:
+            pr_number: GitHub PR 编号。
+            method: GitHub 支持的合并方式。
+
+        Returns:
+            无返回值。
+        """
         merge_pull_request(self, pr_number, method=method)
 
     def close_pull_request(self, pr_number: int, *, comment: str | None = None) -> None:
@@ -707,18 +871,62 @@ class GitHubCliClient:
         close_pull_request(self, pr_number, comment=comment)
 
     def list_pr_comments(self, pr_number: int) -> list[str]:
+        """读取 PR 对话区中的评论正文。
+
+        Args:
+            pr_number: GitHub PR 编号。
+
+        Returns:
+            PR 中非空的评论正文。
+        """
         return list_pr_comments(self, pr_number)
 
     def find_open_pr_by_head(self, branch: str, *, require_success: bool = False) -> str | None:
+        """若分支存在开放 PR，则返回其 URL。
+
+        Args:
+            branch: 远端 head 分支名。
+            require_success: 是否要求查询成功。
+
+        Returns:
+            开放 PR 的 URL；没有匹配 PR 时返回 ``None``。
+        """
         return find_open_pr_by_head(self, branch, require_success=require_success)
 
     def find_merged_pr_by_head(self, branch: str, *, require_success: bool = False) -> str | None:
+        """若分支存在已合并 PR，则返回其 URL。
+
+        Args:
+            branch: 远端 head 分支名。
+            require_success: 是否要求查询成功。
+
+        Returns:
+            已合并 PR 的 URL；没有匹配 PR 时返回 ``None``。
+        """
         return find_merged_pr_by_head(self, branch, require_success=require_success)
 
     def get_remote_base_sha(self, remote: str, base_branch: str) -> str:
+        """返回远端基线分支当前的提交 SHA。
+
+        Args:
+            remote: Git 远端名称。
+            base_branch: 基线分支名。
+
+        Returns:
+            远端基线分支对应的提交 SHA。
+        """
         return get_remote_base_sha(self, remote, base_branch)
 
     def list_pull_requests_for_issue(
         self, repo: str, issue_number: int
     ) -> list[PullRequestSummary]:
+        """列出引用或关闭指定 Issue 的 PR。
+
+        Args:
+            repo: GitHub 仓库标识，格式为 ``owner/name``。
+            issue_number: GitHub Issue 编号。
+
+        Returns:
+            正文引用或关闭该 Issue 的 PR 摘要。
+        """
         return list_pull_requests_for_issue(self, repo, issue_number)

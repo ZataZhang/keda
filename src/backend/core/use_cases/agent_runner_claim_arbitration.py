@@ -63,6 +63,12 @@ class ClaimArbitrationLost(RuntimeError):
     """
 
     def __init__(self, message: str, *, winner: "ClaimBid | None" = None) -> None:
+        """记录认领仲裁落败及胜出方。
+
+        Args:
+            message: 落败描述。
+            winner: 胜出的认领出价；未知时为 ``None``。
+        """
         super().__init__(message)
         self.winner = winner
 

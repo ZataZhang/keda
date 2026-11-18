@@ -32,7 +32,17 @@ class WorktreeProcessRunner(Protocol):
         *,
         cwd: Path,
         check: bool = True,
-    ) -> CommandResult: ...
+    ) -> CommandResult:
+        """在给定目录执行命令并返回结果；``check`` 为真时非零退出码视为失败。
+
+        Args:
+            command: 要启动的程序及其参数。
+            cwd: 命令的工作目录。
+            check: 是否将非零退出码作为失败处理。
+
+        Returns:
+            命令退出码、标准输出与标准错误组成的结果。
+        """
 
 
 class WorktreeManager:

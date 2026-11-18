@@ -216,6 +216,7 @@ class CommandFailedError(subprocess.CalledProcessError):
     """CalledProcessError with captured stderr/stdout included in the message."""
 
     def __str__(self) -> str:
+        """在父类信息后附上 stderr（没有则 stdout）内容，便于直接看到失败原因。"""
         base = super().__str__()
         detail = self.stderr or self.output or ""
         if not detail:

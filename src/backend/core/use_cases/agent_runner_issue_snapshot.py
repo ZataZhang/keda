@@ -232,7 +232,7 @@ def record_issue_input_snapshot(
             repo_id=request.repo_id, issue_number=request.issue.number, home_path=home_path
         )
         return append_snapshot_if_changed(snapshot_path=snapshot_path, snapshot=snapshot)
-    except Exception:
+    except Exception:  # noqa: BLE001 - 快照记录是旁路观测，失败不得影响认领主流程。
         _logger.warning(
             "failed to record issue input snapshot for %s#%s",
             request.repo_id,

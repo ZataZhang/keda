@@ -223,6 +223,12 @@ class PrimaryAgentNotInstalledError(AgentUnavailableError):
     """
 
     def __init__(self, agent: str, message: str) -> None:
+        """用门禁文案覆盖父类的默认信息。
+
+        Args:
+            agent: 未安装的主 agent 名称。
+            message: 点名阶段、预设、可执行文件与下一步命令的完整文案。
+        """
         super().__init__(agent)
         # 父类文案只点名 agent；门禁要点名阶段、预设、可执行文件与下一步命令。
         self.args = (message,)
@@ -356,6 +362,12 @@ class AgentOnboardingError(ValueError):
     """
 
     def __init__(self, message: str, *, kind: str = "usage") -> None:
+        """记录接入失败信息及其类别。
+
+        Args:
+            message: 失败描述。
+            kind: 失败类别（``usage`` / ``not_found``），供 API 层映射到稳定退出码。
+        """
         super().__init__(message)
         self.kind = kind
 

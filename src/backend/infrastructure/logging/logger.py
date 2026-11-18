@@ -218,11 +218,13 @@ class Logger:
     _logger: logging.Logger | None = None
 
     def __new__(cls) -> Logger:
+        """返回进程内唯一的实例。"""
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
 
     def __init__(self) -> None:
+        """首次构造时完成底层 logger 的配置。"""
         if self._logger is None:
             self._setup_logger()
 
@@ -248,7 +250,7 @@ class Logger:
         if hasattr(console_handler.stream, "reconfigure"):
             try:
                 console_handler.stream.reconfigure(encoding="utf-8", errors="replace")
-            except Exception:
+            except Exception:  # noqa: BLE001 - 流不支持重设编码时沿用原编码，日志照常输出。
                 pass
         setattr(console_handler, _KEDA_HANDLER_ATTR, True)
         root.addHandler(console_handler)
@@ -277,6 +279,7 @@ class Logger:
         return self._logger
 
     def __getattr__(self, name: str) -> Any:
+        """把未定义的属性访问转发给底层 logger，必要时先完成配置。"""
         if self._logger is None:
             self._setup_logger()
         return getattr(self._logger, name)
