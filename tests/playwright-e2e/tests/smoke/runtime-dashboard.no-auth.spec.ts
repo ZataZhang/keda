@@ -350,6 +350,31 @@ test.describe('runtime board (mocked API)', () => {
     await expect(page.getByTestId('dashboard-repo-header')).toHaveCount(0)
   })
 
+  test('long failure details scroll inside the task drawer', async ({ page }) => {
+    await mockBoardApi(page, {
+      tasks: {
+        tasks: [{
+          ...FAILED_TASK,
+          last_error_summary: 'Verifier log line\n'.repeat(160) + 'End of verifier log',
+        }],
+      },
+    })
+    await page.goto('/app/dashboard')
+    await page.getByTestId('runtime-task-row-keda-main-19').click()
+
+    const drawer = page.getByTestId('runtime-task-detail-sheet')
+    const log = drawer.getByTestId('runtime-task-error-summary')
+    const viewportHeight = page.viewportSize()!.height
+    const closeButton = drawer.getByRole('button', { name: 'Close' })
+    await expect(drawer).toBeVisible()
+    await expect.poll(() => log.evaluate((element) => element.getBoundingClientRect().bottom)).toBeGreaterThan(viewportHeight)
+    await drawer.hover({ position: { x: 180, y: 300 } })
+    await page.mouse.wheel(0, 6000)
+    await expect.poll(() => log.evaluate((element) => element.getBoundingClientRect().bottom)).toBeLessThan(viewportHeight)
+    await closeButton.click()
+    await expect(drawer).toBeHidden()
+  })
+
   test('status filter narrows rows to the chosen bucket', async ({ page }) => {
     await mockBoardApi(page)
     await page.goto('/app/dashboard')

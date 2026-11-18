@@ -911,7 +911,7 @@ export default function DashboardPage() {
                   <SheetDescription>任务状态、阶段说明与实时输出</SheetDescription>
                 </SheetHeader>
                 {selectedTask ? (
-                  <div className="flex h-full min-h-0 flex-col p-4">
+                  <div className="min-h-0 flex-1 overflow-y-auto p-4">
                     <RuntimeTaskDetail
                       key={selectedTask.task_key}
                       task={selectedTask}
@@ -924,7 +924,6 @@ export default function DashboardPage() {
                           ? executorSwitchQueued
                           : null
                       }
-                      className="min-h-0 flex-1"
                     />
                   </div>
                 ) : null}
