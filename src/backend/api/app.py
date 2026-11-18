@@ -14,6 +14,7 @@ from backend.api.backlog_sync import (
     start_backlog_scheduler,
     stop_backlog_scheduler,
 )
+from backend.api.loopback_request_guard import LoopbackRequestGuardMiddleware
 from backend.api.monitor_sync import (
     start_monitor_scheduler,
     stop_monitor_scheduler,
@@ -52,6 +53,8 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="keda backend", lifespan=lifespan)
+# API 不做认证：到达回环地址的请求必须过来源守卫，挡住 DNS rebinding 与跨站写请求。
+app.add_middleware(LoopbackRequestGuardMiddleware)
 app.include_router(agent_runner.router, prefix="/api/v1")
 app.include_router(agent_runner_console.router, prefix="/api/v1")
 app.include_router(agent_runner_console_issues.router, prefix="/api/v1")
