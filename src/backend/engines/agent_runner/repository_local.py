@@ -19,6 +19,7 @@ from backend.engines.agent_runner.repository_gitignore import (  # noqa: F401
     GITIGNORE_SECTIONS,
     ensure_gitignore_entries,
 )
+from backend.engines.agent_runner.repository_identity import normalize_repository_id
 from backend.infrastructure.config.settings import (
     AgentRunnerAutopilotSettings,
     AgentRunnerBacklogSettings,
@@ -1021,20 +1022,6 @@ def _repository_name_from_remote_url(remote_url: str) -> str:
     if trimmed_url.endswith(".git"):
         trimmed_url = trimmed_url[:-4]
     return re.split(r"[:/]", trimmed_url)[-1]
-
-
-def normalize_repository_id(raw_repo_name: str) -> str:
-    """把仓库名规范化为可用的仓库标识。
-
-    Args:
-        raw_repo_name: 原始仓库名（通常是目录名）。
-
-    Returns:
-        只含字母、数字与 ``_.-`` 的小写标识；规范化后为空时返回 ``repository``。
-    """
-    normalized_repo_name = re.sub(r"[^A-Za-z0-9_.-]+", "-", raw_repo_name)
-    stripped_repo_name = normalized_repo_name.strip("-_.").lower()
-    return stripped_repo_name or "repository"
 
 
 def _detect_default_base_branch(
