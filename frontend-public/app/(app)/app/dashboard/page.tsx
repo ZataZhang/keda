@@ -19,6 +19,11 @@ import type { IssueScope } from "@/components/agent-runner/repository-overview";
 import { RunnerStatusBar } from "@/components/agent-runner/runner-status-bar";
 import { RuntimeTaskDetail } from "@/components/dashboard/runtime-task-detail";
 import { RuntimeTaskList } from "@/components/dashboard/runtime-task-list";
+import {
+  RuntimeRequestErrorNotice,
+  type RuntimeBoardLoadError,
+} from "@/components/dashboard/runtime-request-error";
+import { ApiRequestError } from "@/lib/api/client";
 import { formatLocalDateTime } from "@/lib/utils";
 import { confirmAction } from "@/lib/confirm-action";
 import {
@@ -105,6 +110,31 @@ function getRepoIdFromSlot(slot: RepoSlot): string {
   return slot.repoId;
 }
 
+/** 把控制台请求错误分成连接失败、HTTP 错误和未分类错误。 */
+function classifyConsoleRequestError(error: unknown): RuntimeBoardLoadError {
+  if (error instanceof ApiRequestError) {
+    return error.status === undefined
+      ? { kind: "connection", detail: error.message }
+      : { kind: "http", status: error.status, detail: error.message };
+  }
+  return {
+    kind: "unknown",
+    detail: error instanceof Error ? error.message : String(error),
+  };
+}
+
+/** 将控制台请求错误转成带操作语境的提示，保留底层错误供排查。 */
+function describeConsoleRequestFailure(error: unknown, operation: string): string {
+  const requestError = classifyConsoleRequestError(error);
+  if (requestError.kind === "connection") {
+    return `${operation}没有收到本机 Console 的响应。请确认 Console 仍在运行后重试。`;
+  }
+  if (requestError.kind === "http") {
+    return `${operation}失败（HTTP ${requestError.status}）：${requestError.detail}`;
+  }
+  return `${operation}失败：${requestError.detail || "未知错误"}`;
+}
+
 export default function DashboardPage() {
   const [state, setState] = useState<LoadState>({ kind: "loading" });
   const [selectedIssueNumber, setSelectedIssueNumber] = useState<number | null>(
@@ -148,7 +178,8 @@ export default function DashboardPage() {
   const [runtimeSummary, setRuntimeSummary] = useState<RuntimeTaskSummary | null>(
     null,
   );
-  const [runtimeError, setRuntimeError] = useState<string | null>(null);
+  const [runtimeError, setRuntimeError] = useState<RuntimeBoardLoadError | null>(null);
+  const [runtimeRetryPending, setRuntimeRetryPending] = useState(false);
   const [selectedTask, setSelectedTask] = useState<RuntimeTaskEntry | null>(null);
   // 已提交的「切换执行器续跑」（task_key + 阶段 + 执行器）：动作成功后该 Issue
   // 已回到 ready 队列，但看板在下一次扫描前仍显示旧的失败态；没有这层记录时
@@ -194,11 +225,19 @@ export default function DashboardPage() {
       setRuntimeError(null);
     } catch (error: unknown) {
       if (signal?.aborted) return;
-      setRuntimeError(
-        error instanceof Error ? error.message : "无法加载运行看板任务。",
-      );
+      setRuntimeError(classifyConsoleRequestError(error));
     }
   }, []);
+
+  /** 用户主动重试摘要读取；后台轮询仍按自己的节奏继续。 */
+  const handleRetryRuntimeSummary = useCallback(async () => {
+    setRuntimeRetryPending(true);
+    try {
+      await loadRuntimeSummary();
+    } finally {
+      setRuntimeRetryPending(false);
+    }
+  }, [loadRuntimeSummary]);
 
   /** 开启或聚焦桌面小窗：动作结果由后端快照决定，前端不猜测窗口状态。 */
   const handleOpenCompanion = useCallback(async () => {
@@ -434,8 +473,7 @@ export default function DashboardPage() {
       setRefreshState({ kind: "idle" });
     } catch (error: unknown) {
       if (controller.signal.aborted) return;
-      const message = error instanceof Error ? error.message : "远端同步失败";
-      toast.error(message);
+      toast.error(describeConsoleRequestFailure(error, "远端同步"));
       setRefreshState({ kind: "idle" });
     }
   }, [refreshState, loadCompletionStats, reloadMonitoringViews]);
@@ -492,8 +530,7 @@ export default function DashboardPage() {
       }, 1500);
     } catch (error: unknown) {
       if (controller.signal.aborted) return;
-      const message =
-        error instanceof Error ? error.message : `${repoId} 同步失败`;
+      const message = describeConsoleRequestFailure(error, `${repoId} 同步`);
       setRepoRefresh((prev) => ({
         ...prev,
         [repoId]: { kind: "error", message },
@@ -513,9 +550,7 @@ export default function DashboardPage() {
       } catch (error: unknown) {
         // 拉取失败退回「监控中」并提示，避免「全部」页签停在空列表说谎。
         setRepoScope((prev) => ({ ...prev, [repoId]: "monitoring" }));
-        toast.error(
-          error instanceof Error ? error.message : "加载全量 Issue 失败。",
-        );
+        toast.error(describeConsoleRequestFailure(error, "加载全量 Issue"));
       }
     },
     [allIssuesByRepo],
@@ -837,12 +872,12 @@ export default function DashboardPage() {
           </div>
 
           {runtimeError ? (
-            <p
-              className="text-sm text-red-700 dark:text-red-300"
-              data-testid="runtime-board-error"
-            >
-              运行看板加载失败：{runtimeError}
-            </p>
+            <RuntimeRequestErrorNotice
+              error={runtimeError}
+              generatedAt={runtimeSummary?.generated_at ?? null}
+              retryPending={runtimeRetryPending}
+              onRetry={handleRetryRuntimeSummary}
+            />
           ) : null}
 
           {runtimeSummary ? (

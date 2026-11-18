@@ -47,6 +47,15 @@ const STATUS_FILTERS: RuntimeTaskStatus[] = [
   "unknown",
 ];
 
+/** 后端运行摘要降级来源的人读说明，避免把内部来源 ID 当成错误信息。 */
+const UNAVAILABLE_SOURCE_MESSAGES: Record<string, string> = {
+  monitor_snapshot:
+    "仓库监控快照不可用，任务状态可能缺失或过期；请到「仓库监控」查看同步状态。",
+  run_history: "运行历史不可用，任务结果与耗时信息可能不完整。",
+  attempt_ledger: "执行尝试记录不可用，阶段、执行器与重试信息可能不完整。",
+  invocation_ledger: "模型调用记录不可用，当前执行器与失败诊断可能不完整。",
+};
+
 /**
  * 取得生命周期分桶的展示定义。
  *
@@ -145,6 +154,16 @@ export function RuntimeTaskList({
       return haystack.includes(needle);
     });
   }, [tasks, statusFilter, query]);
+  const unavailableSourceMessages = unavailableSources
+    .filter(
+      (source) =>
+        source !== "monitor_snapshot" || syncStatus !== "pending_first_sync",
+    )
+    .map(
+      (source) =>
+        UNAVAILABLE_SOURCE_MESSAGES[source] ??
+        `数据来源「${source}」不可用，相关字段可能不完整。`,
+    );
 
   return (
     <div className="flex min-h-0 flex-col gap-3" data-testid="runtime-task-list">
@@ -190,16 +209,15 @@ export function RuntimeTaskList({
 
       {syncStatus === "pending_first_sync" ? (
         <p className="text-xs text-amber-700 dark:text-amber-300" data-testid="runtime-degraded">
-          尚未完成首次同步，任务列表还不能反映真实运行；后台扫描完成后自动跟上。
+          尚未获得可用的首次监控快照，任务列表还不能反映真实运行；请到「仓库监控」查看同步状态。
         </p>
       ) : null}
-      {unavailableSources.filter((source) => source !== "monitor_snapshot").length > 0 ? (
+      {unavailableSourceMessages.length > 0 ? (
         <p
           className="text-xs text-amber-700 dark:text-amber-300"
           data-testid="runtime-source-partial"
         >
-          部分来源本轮不可读：{unavailableSources.join("、")}
-          。受影响字段留空，不会折算成零。
+          看板数据不完整：{unavailableSourceMessages.join("；")}
         </p>
       ) : null}
       {missingRepoIds.length > 0 ? (

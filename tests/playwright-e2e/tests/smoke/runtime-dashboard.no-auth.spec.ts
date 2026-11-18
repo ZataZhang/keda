@@ -421,7 +421,7 @@ test.describe('runtime board (mocked API)', () => {
     await page.goto('/app/dashboard')
 
     await expect(page.getByTestId('runtime-degraded')).toBeVisible()
-    await expect(page.getByTestId('runtime-source-partial')).toContainText('run_history')
+    await expect(page.getByTestId('runtime-source-partial')).toContainText('运行历史不可用')
     await expect(page.getByTestId('runtime-task-empty')).toBeVisible()
   })
 
