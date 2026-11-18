@@ -72,6 +72,11 @@ class EmptyCommitRequestError(RuntimeError):
     """
 
     def __init__(self, message: str = EMPTY_COMMIT_REQUEST_MESSAGE) -> None:
+        """记录空的提交请求。
+
+        Args:
+            message: 失败描述，默认使用统一文案。
+        """
         super().__init__(message)
 
 

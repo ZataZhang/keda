@@ -131,6 +131,12 @@ class PywebviewCompanionLauncher(DesktopCompanionLauncher):
     """
 
     def __init__(self, *, pidfile_path: Path | None = None, console_session: str = "") -> None:
+        """初始化小窗 launcher。
+
+        Args:
+            pidfile_path: pidfile 路径，省略时位于本机状态目录。
+            console_session: 当前 Console 进程的会话标识。
+        """
         self._pidfile_path = pidfile_path or (state_home() / PIDFILE_NAME)
         self._console_session = console_session
         self._lock = threading.Lock()

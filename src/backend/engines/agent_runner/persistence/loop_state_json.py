@@ -139,6 +139,11 @@ class JsonLoopStateStore(ILoopStateStore):
     """
 
     def __init__(self, state_path: Path | None = None) -> None:
+        """初始化 loop 状态存储。
+
+        Args:
+            state_path: 状态文件路径，省略时使用默认位置。
+        """
         self._state_path: Path = (state_path or resolve_loop_state_path()).resolve()
         self._tasks_by_id: dict[str, LoopTask] = {}
         self._loaded: bool = False

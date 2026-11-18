@@ -80,6 +80,11 @@ class VerificationFailedError(RuntimeError):
     """Raised when configured verification commands do not pass."""
 
     def __init__(self, verification_results: list[CommandResult]) -> None:
+        """由验证命令结果生成失败信息。
+
+        Args:
+            verification_results: 各验证命令的执行结果。
+        """
         self.verification_results = verification_results
         super().__init__(format_verification_failure(verification_results))
 

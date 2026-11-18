@@ -49,6 +49,11 @@ class RelevantMemory:
 
     @property
     def is_empty(self) -> bool:
+        """是否既没有长期事实也没有已晋升的 skill。
+
+        Returns:
+            没有长期事实且没有已晋升 skill 时为 ``True``。
+        """
         return not self.long_term_facts and not self.promoted_skills
 
 

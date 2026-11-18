@@ -99,6 +99,14 @@ class ReplCommandExecutor(IReplCommandExecutor):
         input_fn=None,
         prompt_output_fn=None,
     ) -> None:
+        """初始化 REPL 命令执行器。
+
+        Args:
+            process_runner: 用于执行子命令的 runner。
+            config: REPL 配置。
+            input_fn: 读取用户确认的函数，省略时使用 ``input``。
+            prompt_output_fn: 输出提示的函数，省略时使用 ``print``。
+        """
         self._process_runner = process_runner
         self._config = config
         self._input_fn = input_fn if input_fn is not None else input
@@ -110,6 +118,15 @@ class ReplCommandExecutor(IReplCommandExecutor):
         *,
         repo_path: Path,
     ) -> ReplExecOutcome:
+        """校验并执行一条来自 REPL 的 KedaCode 子命令请求。
+
+        Args:
+            request: 解析后的命令请求，包含 argv 与原始文本。
+            repo_path: 命令应在其下执行的目标仓库路径。
+
+        Returns:
+            执行结果；被拒绝的命令带拒绝原因而不执行。
+        """
         argv = list(request.argv)
         if not argv:
             return ReplExecOutcome(

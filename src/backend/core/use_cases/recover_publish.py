@@ -60,6 +60,13 @@ class PublishRecoveryError(RuntimeError):
         worktree_path: Path | None = None,
         failure_category: str = "unknown",
     ) -> None:
+        """记录发布恢复失败及其分类。
+
+        Args:
+            message: 失败描述。
+            worktree_path: 恢复所针对的 worktree 路径。
+            failure_category: 失败分类，默认 ``unknown``。
+        """
         super().__init__(message)
         self.worktree_path = worktree_path
         self.failure_category = failure_category

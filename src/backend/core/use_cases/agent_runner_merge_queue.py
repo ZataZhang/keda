@@ -397,7 +397,7 @@ def _process_one(
     if scoped_prd_auto_merge or not config.safety.auto_merge:
         try:
             issue = github_client.get_issue(issue.number)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - 刷新 Issue 失败时跳过本条，不中断合并队列。
             _logger.warning("Merge queue could not refresh Issue #%d: %s", issue.number, exc)
             return MergeQueueOutcome(
                 issue_number=issue.number, action="skipped_issue_refresh_failed"

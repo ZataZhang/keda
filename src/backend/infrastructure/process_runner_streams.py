@@ -21,6 +21,7 @@ class ClaudeStreamRenderer:
     """Render Claude stream-json output into concise terminal messages."""
 
     def __init__(self) -> None:
+        """初始化流式渲染状态。"""
         self._tool_use_ids: set[str] = set()
         self._saw_text_delta = False
         self._printed_text_content = False

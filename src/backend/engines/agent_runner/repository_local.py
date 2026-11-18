@@ -83,6 +83,12 @@ class RepositoryNotInitializedError(Exception):
     """Raised when a target repository has not run `kc init`."""
 
     def __init__(self, repo_root_path: Path, config_path: Path) -> None:
+        """记录未初始化的仓库。
+
+        Args:
+            repo_root_path: 仓库根目录。
+            config_path: 期望存在的本地配置路径。
+        """
         self.repo_root_path = repo_root_path
         self.config_path = config_path
         super().__init__(
@@ -99,6 +105,11 @@ class RepositoryLocalConfigExistsError(ValueError):
     """
 
     def __init__(self, config_path: Path) -> None:
+        """记录已存在的本地配置。
+
+        Args:
+            config_path: 已存在的本地配置路径。
+        """
         self.config_path = config_path
         super().__init__(
             f"KedaCode local config already exists at {config_path}. Use --force to overwrite it."
@@ -1013,6 +1024,14 @@ def _repository_name_from_remote_url(remote_url: str) -> str:
 
 
 def normalize_repository_id(raw_repo_name: str) -> str:
+    """把仓库名规范化为可用的仓库标识。
+
+    Args:
+        raw_repo_name: 原始仓库名（通常是目录名）。
+
+    Returns:
+        只含字母、数字与 ``_.-`` 的小写标识；规范化后为空时返回 ``repository``。
+    """
     normalized_repo_name = re.sub(r"[^A-Za-z0-9_.-]+", "-", raw_repo_name)
     stripped_repo_name = normalized_repo_name.strip("-_.").lower()
     return stripped_repo_name or "repository"

@@ -48,6 +48,14 @@ class SubprocessContentGenerator(IContentGenerator):
         config: AppConfig | None = None,
         protocol_registry: IAgentOutputProtocolRegistry | None = None,
     ) -> None:
+        """初始化内容生成器。
+
+        Args:
+            process_runner: 用于启动 agent 子进程的 runner。
+            read_only: 是否以只读方式运行 agent。
+            config: 应用配置，省略时使用默认配置。
+            protocol_registry: agent 输出协议注册表，省略时使用全局注册表。
+        """
         self._process_runner = process_runner
         self._read_only = read_only
         self._config = config or AppConfig()
@@ -122,6 +130,13 @@ class SafePlannerContentGenerator(IContentGenerator):
         config: AppConfig | None = None,
         protocol_registry: IAgentOutputProtocolRegistry | None = None,
     ) -> None:
+        """初始化 planner 内容生成器。
+
+        Args:
+            process_runner: 用于启动 agent 子进程的 runner。
+            config: 应用配置，省略时使用默认配置。
+            protocol_registry: agent 输出协议注册表，省略时使用全局注册表。
+        """
         self._process_runner = process_runner
         self._config = config or AppConfig()
         if protocol_registry is None:
