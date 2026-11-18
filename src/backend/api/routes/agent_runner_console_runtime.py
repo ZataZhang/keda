@@ -32,6 +32,7 @@ from urllib.parse import quote, urlsplit
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 
+from backend.api.loopback_request_guard import LOOPBACK_HOSTS
 from backend.core.shared.interfaces.desktop_companion import (
     DesktopCompanionLauncher,
     DesktopCompanionSnapshot,
@@ -60,9 +61,6 @@ router = APIRouter(tags=["agent-runner-console-runtime"])
 #: 本 Console 进程的身份：helper 用它识别「上一个 Console 留下的孤儿窗口」。
 #: 每次进程启动重新生成，因此重启 Console 一定会让旧窗口自行退出。
 CONSOLE_SESSION = uuid.uuid4().hex
-
-#: 允许的 loopback 主机名：``localhost`` 与 ``127.0.0.1`` 指向同一个 Console。
-_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 
 def _enabled_repo_ids() -> list[str]:
@@ -140,7 +138,7 @@ def _bound_loopback_server(request: Request) -> tuple[str, int]:
     if not server or len(server) != 2:
         raise HTTPException(status_code=503, detail="无法确定 Console 的绑定地址。")
     bound_host, bound_port = str(server[0]), int(server[1])
-    if bound_host not in _LOOPBACK_HOSTS:
+    if bound_host not in LOOPBACK_HOSTS:
         raise HTTPException(status_code=403, detail="桌面窗口仅允许本机回环 Console 启动。")
     return bound_host, bound_port
 
@@ -191,7 +189,7 @@ def _trusted_console_origin(request: Request) -> str:
     path_is_origin_shaped = (not from_origin_header) or parsed.path in {"", "/"}
     if (
         parsed.scheme != "http"
-        or (parsed.hostname or "") not in _LOOPBACK_HOSTS
+        or (parsed.hostname or "") not in LOOPBACK_HOSTS
         or request_port != bound_port
         or not path_is_origin_shaped
         or parsed.query
@@ -210,7 +208,7 @@ def _trusted_bound_origin(request: Request) -> str:
     if not server or len(server) != 2:
         return ""
     bound_host, bound_port = str(server[0]), int(server[1])
-    if bound_host not in _LOOPBACK_HOSTS:
+    if bound_host not in LOOPBACK_HOSTS:
         return ""
     return _format_loopback_origin(bound_host, bound_port)
 
