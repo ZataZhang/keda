@@ -2,8 +2,8 @@
 
 ## 人审导航 / Human Review Navigation
 
-- **先看人工审查清单**：[`human-review-checklist.md`](human-review-checklist.md)（交互版：[`human-review-checklist.html`](human-review-checklist.html)；或 `just prd review tasks/pending/P1-FEAT-20261118-113234-dsh-builtin-agent.md`）
-- **PRD**：[`tasks/pending/P1-FEAT-20261118-113234-dsh-builtin-agent.md`](../../../tasks/pending/P1-FEAT-20261118-113234-dsh-builtin-agent.md)
+- **先看人工审查清单**：[`human-review-checklist.md`](human-review-checklist.md)（交互版：[`human-review-checklist.html`](human-review-checklist.html)；或 `just prd review tasks/archive/P1-FEAT-20261118-113234-dsh-builtin-agent.md`）
+- **PRD**：[`tasks/archive/P1-FEAT-20261118-113234-dsh-builtin-agent.md`](../../../tasks/archive/P1-FEAT-20261118-113234-dsh-builtin-agent.md)
 - **PR / CI**：无（本地交付，未创建 PR、未跑远端 CI）
 - **本轮结论**：实现与执行侧证据已完成，独立 verifier 最终 **PASS**（[`verifier-report.md`](verifier-report.md)）。人审已于 2026-11-18 12:39 确认：决策一 A（环境继承）、决策二 B（乐观档：强制只读 + 声明续传）、呈递面确认。
 

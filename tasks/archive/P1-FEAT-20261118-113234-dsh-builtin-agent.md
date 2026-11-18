@@ -67,9 +67,7 @@
 
 **可证伪的读法**：本 PRD 理解为"把 dsh 作为**第九个内置 agent**接入，新增一种输出协议与用量识别，其余一切默认值保持逐字节不变"，而不是"改造注册表结构/引入按用途环境变量注入/接入 dsh 的全部表层"。
 
-- [ ] 我确认上述解读与 7 行行为样例符合预期（请勾选；可先直接修改表格再勾）
-
-> 2026-11-18 12:39 的聊天回复确认了 §2 两项决策与 §9.1 呈递面，未对 §1 解读表提出修改；该签署框保留给用户补勾。
+- [x] 我确认上述解读与 7 行行为样例符合预期（2026-11-18 聊天确认；Agent 仅转录，未改动表格）
 
 ### What The User Gets
 
@@ -96,11 +94,11 @@ dsh 的 `headless` profile 在凭据缺失时会在模型调用前失败，并�
 **决策二（已确认：乐观档）：dsh 按 provider 沙箱声明强制只读，并声明续传。**
 两个能力点的取舍：
 
-- **只读**：`generate` 用 dsh 的 `--permission-mode read-only` 沙箱预设，并声明 `read_only_enforced = true`——与 `codex` 的 `--sandbox read-only` 同类，依据是 provider 自己的沙箱开关，而不是提示词约定。真机证据：CLI 接受该预设，会话日志记录 `sandbox/mode = read-only`（rv-12）；「让 agent 实际写文件并被拒绝」仍需有模型凭据时补验（§12）。
+- **只读**：`generate` 用 dsh 的 `--permission-mode read-only` 沙箱预设，并声明 `read_only_enforced = true`——与 `codex` 的 `--sandbox read-only` 同类，依据是 provider 自己的沙箱开关，而不是提示词约定。真机证据：CLI 接受该预设，会话日志记录 `sandbox/mode = read-only`；「让 agent 实际写文件并被拒绝」仍需有模型凭据时补验（§12）。
 - **judge**：dsh 没有任何"禁用全部内置工具"的开关，`read-only` 仍然允许读工具，因此**不声明 `judge`**，宁缺勿假（该项与档位无关）。
-- **续传**：声明 `supports_resume = true` 与 `--session-id`。真机证据：对既有会话续传时 `sessionId` 保持不变、`turn_start.turn = 2`（rv-11）。约束是同 cwd / 同 agent preset / 无存活 owner；跨 worktree 或换 preset 的恢复会在任务运行前 fail-fast。
+- **续传**：声明 `supports_resume = true` 与 `--session-id`。真机证据：对既有会话续传时 `sessionId` 保持不变、`turn_start.turn = 2`。约束是同 cwd / 同 agent preset / 无存活 owner；跨 worktree 或换 preset 的恢复会在任务运行前 fail-fast。
 
-**可选方案**：A 保守档（`read_only_enforced=false`、不声明续传）本轮未采用；B 乐观档已在 2026-11-18 12:39 的聊天回复中确认。**验收：** `rv-11` 会话接管成立、`rv-12` 的 `sandbox/mode=read-only` 被真实应用；`generate` 的 `read_only_enforced=true`；`judge` 仍 fail-fast。
+**可选方案**：A 保守档（`read_only_enforced=false`、不声明续传）本轮未采用；B 乐观档已在 2026-11-18 12:39 的聊天回复中确认。**验收：** 续传接管成立、`sandbox/mode=read-only` 被真实应用；`generate` 的 `read_only_enforced=true`；`judge` 仍 fail-fast。
 
 - [ ] A 保守档（未采用）
 - [x] B 乐观档——2026-11-18 12:39 聊天确认，Agent 仅转录
@@ -430,7 +428,7 @@ flowchart TD
   tier: R1
   test_layer: integration
   required_for_acceptance: false
-  note: "需要模型凭据，本轮执行环境不具备；无凭据时该 oracle 记为 skipped（不是 PASS）。rv-3 已在无凭据下覆盖真实进程、事件解析与失败语义；rv-7 的 fixture 直接取自 dsh 产出侧源码。缺口与补验条件写入 §12。"
+  note: "需要模型凭据，本轮执行环境不具备；无凭据时该 oracle 记为 skipped（不是 PASS）。用户已于 2026-11-18 决定跳过该项补验；rv-3 已在无凭据下覆盖真实进程、事件解析与失败语义，rv-11/rv-12 补齐续传与只读沙箱证据。"
 - id: rv-11
   behavior: dsh 的 --session-id 能沿用既有持久化会话（续传声明有真实行为支撑）
   reviewer: verifier
@@ -530,7 +528,7 @@ flowchart TD
 | rv-7 | ✅ | 19 passed；渲染映射与截断容错 |
 | rv-8 | ✅ | 35 条逐处枚举断言全 PASS |
 | rv-9 | ✅ | 隔离 worktree `just test all` 5400 passed / 1 skipped + lint --full + mkdocs strict |
-| rv-10 | ⏭️ | 无 DEEPSEEK_API_KEY，按 PRD 记 skipped，不冒充 PASS |
+| rv-10 | ⏭️ | 按用户 2026-11-18 决定跳过（本机无 DEEPSEEK_API_KEY），不冒充 PASS |
 | rv-11 | ✅ | 对既有会话续传：sessionId 不变、turn_start.turn=2 |
 | rv-12 | ✅ | 会话日志 sandbox/mode=read-only、approval=never；写入拦截待凭据补验 |
 
@@ -561,7 +559,7 @@ flowchart TD
 
 ## 12. Risks And Follow-Ups
 
-- **凭据前置未闭环**：本轮执行环境没有模型凭据，rv-10 只能是可选/skipped。后果是"dsh 真正完成一次任务"未被端到端观察。补验条件：在 `DEEPSEEK_API_KEY` 可用的环境里跑 rv-10 的探针并留存 transcript；在此之前文档必须写明该前置条件，不得宣称端到端已验证。
+- **凭据前置（已知限制，按用户决定不再补验）**：本轮执行环境没有模型凭据，rv-10 记 skipped；用户 2026-11-18 决定跳过该项补验。后果是"dsh 真正完成一次任务"未被端到端观察——文档与 PRD 必须保留这条限制，不得宣称端到端已验证；若日后在有 `DEEPSEEK_API_KEY` 的环境使用，可直接跑 rv-10 探针补证。
 - **事件 schema 随 dsh 版本漂移**：渲染器对未知事件宽容跳过；文档记录本轮锁定的版本 `0.2.2-rc.1` 与复核方法（重跑 rv-3 探针，对照事件类型清单）。
 - **read-only 的实际写入拦截尚未用模型真机验证**：已有证据是 CLI 接受 `read-only` 预设、会话日志记录 `sandbox/mode=read-only`（rv-12）；补验条件：在有 `DEEPSEEK_API_KEY` 的环境让 agent 尝试写文件并断言被拒绝。
 - **续传的 cwd/preset 约束**：真实接管已验证（同 id、turn=2，rv-11），但跨 worktree 或换 preset 会在任务运行前失败；kc 的续传记录按 worktree+阶段隔离，属于 fail-fast 而非静默串会话。
@@ -584,7 +582,7 @@ flowchart TD
 - Interpretation: 实现按 §1 的解读落地；§2 两项决策按用户 2026-11-18 12:39 的聊天回复记录为决策一 A（环境继承）、决策二 B（乐观档），Agent 仅转录人工确认，未代替判断。
 - Public behavior and contracts: `kc agent list` / `kc agent doctor` / `kc ask --agent` 与 console 生命周期矩阵均可见 dsh；新协议 `dsh-json-lines` 经 entry point 注册；既有 8 个 agent 的 spec、argv 与默认值零 diff。
 - Related PRD status: 先例 `P1-FEAT-20261116-120000-mcode-builtin-agent` 已归档，其排除 dsh 的前提（无 headless / 无权限开关）已被 `0.2.2-rc.1` 推翻；本 PRD 与其无依赖。
-- Requirements and risks: FR-1..FR-9 已落地；rv-10（真实模型端到端）因本机无凭据 skipped，缺口与补验条件见 §12；按人工确认采用乐观档：`read_only_enforced=true`（rv-12 证明沙箱模式被应用）、声明续传（rv-11 证明会话接管）。
+- Requirements and risks: FR-1..FR-9 已落地；rv-10（真实模型端到端）因本机无凭据 skipped，且用户已决定跳过补验（已知限制见 §12）；按人工确认采用乐观档：`read_only_enforced=true`（rv-12 证明沙箱模式被应用）、声明续传（rv-11 证明会话接管）。
 - Reconciled differences: rv-3 原写"渲染输出含 `[agent error]`"与无凭据路径不符，已改为"退出码/final.reason 自洽 + 非法权限档验证 error 事件"；doctor 对 dsh 仍有沙箱提示，属检测器只认 `--sandbox`/`--ask-for-approval` 的既有口径，已在文档注明；容器认证白名单只带 `skills`。
 - Independent verifier: PASS（第三/四轮发现的 PRD 一致性与计数问题已修复；最终报告见 `tasks/evidence/P1-FEAT-20261118-113234-dsh-builtin-agent/verifier-report.md`）。
 
@@ -609,6 +607,15 @@ flowchart TD
 - Reason: 落地 PRD FR-1..FR-9
 - Impact: console 与 CLI 多一个 dsh 选项；既有 8 个 agent 的 spec、argv、默认值零改动
 - Review: 独立 verifier PASS（首轮 FAIL 的两项已修复）
+
+### 签署解读、跳过 rv-10 与归档
+
+- Type: Acceptance record
+- Before: §1 解读签署框为空；rv-10 记为待凭据补验；PRD 位于 tasks/pending
+- After: §1 已按用户确认勾选；rv-10 按用户决定跳过（保留为已知限制）；PRD 归档到 tasks/archive
+- Reason: 用户 13:09 明确\“我确认勾选\”，并指示 rv-10 跳过
+- Impact: PRD 状态与仓库生命周期一致；无代码变更
+- Review: 用户聊天确认；归档检查器通过
 
 ### 人审选择乐观档（B）：强制只读 + 声明续传
 
