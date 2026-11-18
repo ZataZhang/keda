@@ -281,7 +281,7 @@ _CONFIG_FIELD_COMMENTS: dict[str, str] = {
         "kc daemon run --concurrency > Backlog 页面设置 > 本值；daemon 执行期间按轮询间隔补位，"
         "显式 kc run 不受约束"
     ),
-    "runner.default_agent": "默认使用的 AI agent：auto / claude / codex / kimi",
+    "runner.default_agent": "默认使用的 AI agent：auto / 任意已注册 agent 名（内置 codex / claude / kimi / pi / codebuddy / qoder / opencode / mcode / dsh）",
     "runner.max_recovery_attempts": "Agent 失败后的最大重试次数",
     "runner.recovery_retry_delay_seconds": "每次重试前等待的秒数",
     "runner.agent_fallback_order": (
@@ -343,7 +343,7 @@ _CONFIG_FIELD_COMMENTS: dict[str, str] = {
     "prompts.default_phase": "默认使用的 prompt 阶段",
     "prompts.phases": "自定义阶段模板，值为字符串或字符串列表",
     "pre_pr_review.enabled": "是否启用 Draft PR 创建前的 AI review",
-    "pre_pr_review.review_agent": "执行 review 的 agent：auto / claude / codex / kimi",
+    "pre_pr_review.review_agent": "执行 review 的 agent：auto / 任意已注册 agent 名（内置 codex / claude / kimi / pi / codebuddy / qoder / opencode / mcode / dsh）",
     "pre_pr_review.repair_agent": "谁修复 review 报出的问题：self（审核者自己修，默认）/ executor（交回实现者）/ 任意已注册 agent 名",
     "pre_pr_review.allow_same_agent": "是否允许实现 agent 与 reviewer 为同一个",
     "pre_pr_review.max_attempts": "review 不通过时的最大修复轮数",
@@ -362,7 +362,7 @@ _CONFIG_FIELD_COMMENTS: dict[str, str] = {
     "daemon.reconcile_stale_attempts": "是否在每轮开头对账崩溃遗留的 agent/running 僵尸 attempt（续传 / 重新入队 / 判失败三出口留痕）；关闭后僵尸不被触碰",
     "daemon.reclaim_ttl_seconds": "对账的 claim 老化阈值(秒):claim 含 started_at 且距 now 超过此值即便 PID 仍活也视为 stale",
     "interactive_decision.enabled": "是否启用 kc ask 交互式决策",
-    "interactive_decision.default_agent": "kc ask 默认使用的 agent：auto / claude / codex / kimi",
+    "interactive_decision.default_agent": "kc ask 默认使用的 agent：auto / 任意已注册 agent 名（内置 codex / claude / kimi / pi / codebuddy / qoder / opencode / mcode / dsh）",
     "interactive_decision.default_output_dir": "决策日志与审计文件的默认输出目录",
     "interactive_decision.planner_timeout_seconds": "规划 agent 的最长运行秒数",
     "interactive_decision.max_context_chars": "输入 prompt 的最大字符数",

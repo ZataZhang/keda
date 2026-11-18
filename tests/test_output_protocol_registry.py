@@ -27,6 +27,7 @@ BUILTIN_PROTOCOL_IDS = (
     "codex-json-lines",
     "opencode-json-lines",
     "mcode-json-lines",
+    "dsh-json-lines",
 )
 
 

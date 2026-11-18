@@ -213,6 +213,86 @@ class TestStreamUsageCollector:
             output_tokens=40,
         )
 
+    def test_dsh_step_end_usage_maps_camel_case_fields(self) -> None:
+        """dsh 的用量在 status + step_end 的 camelCase usage，按互斥口径 1:1 映射。"""
+        collector = StreamUsageCollector()
+        collector.observe_line(
+            json.dumps(
+                {
+                    "type": "status",
+                    "phase": "step_end",
+                    "turn": 1,
+                    "step": 1,
+                    "usage": {
+                        "inputTokens": 11,
+                        "outputTokens": 7,
+                        "cacheReadTokens": 5,
+                        "cacheWriteTokens": 3,
+                    },
+                }
+            )
+        )
+        assert collector.usage == TokenUsage(
+            input_tokens=11,
+            output_tokens=7,
+            cache_read_input_tokens=5,
+            cache_creation_input_tokens=3,
+        )
+
+    def test_dsh_step_end_without_usage_is_ignored(self) -> None:
+        """dsh 在任一次尝试漏报 usage 时会整个 step 省略它，解析器不得报错。"""
+        collector = StreamUsageCollector()
+        collector.observe_line(json.dumps({"type": "status", "phase": "step_end", "turn": 1}))
+        assert collector.usage is None
+
+    def test_dsh_and_codex_usage_accumulate_without_mixing(self) -> None:
+        """dsh 的 step_end 与 codex 的 turn.completed 形状不同，两段用量相加而不互相污染。"""
+        collector = StreamUsageCollector()
+        collector.observe_line(
+            json.dumps(
+                {
+                    "type": "status",
+                    "phase": "step_end",
+                    "usage": {
+                        "inputTokens": 500,
+                        "cacheReadTokens": 200,
+                        "outputTokens": 10,
+                    },
+                }
+            )
+        )
+        collector.observe_line(
+            json.dumps(
+                {
+                    "type": "turn.completed",
+                    "usage": {
+                        "input_tokens": 900,
+                        "cached_input_tokens": 100,
+                        "output_tokens": 30,
+                    },
+                }
+            )
+        )
+        assert collector.usage == TokenUsage(
+            input_tokens=1300,
+            cache_read_input_tokens=300,
+            output_tokens=40,
+        )
+
+    def test_dsh_session_id_is_extracted_from_session_event(self) -> None:
+        """dsh 的会话 id 在开头 session 事件的顶层 sessionId（camelCase）。"""
+        collector = StreamUsageCollector()
+        collector.observe_line(
+            json.dumps(
+                {
+                    "type": "session",
+                    "sessionId": "session-abc123",
+                    "cwd": "/tmp/worktree",
+                }
+            )
+        )
+        assert collector.session_id == "session-abc123"
+
     def test_mcode_session_id_is_extracted_from_top_level_field(self) -> None:
         """mcode 的会话 id 在事件顶层 sessionId（camelCase）。"""
         collector = StreamUsageCollector()

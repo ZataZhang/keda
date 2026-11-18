@@ -149,7 +149,7 @@ review_agent = "claude"
 
 agent 注册表按**三层**合并，后一层逐字段覆盖前一层：
 
-1. **内置默认**：代码内 `BUILTIN_AGENT_SPECS`（`codex` / `claude` / `kimi` / `pi` / `codebuddy` / `qoder` / `opencode` / `mcode`），是注册表唯一的代码内默认来源；
+1. **内置默认**：代码内 `BUILTIN_AGENT_SPECS`（`codex` / `claude` / `kimi` / `pi` / `codebuddy` / `qoder` / `opencode` / `mcode` / `dsh`），是注册表唯一的代码内默认来源；
 2. **全局覆盖**：`config.toml` 顶层 `[agent_runner.agents.*]`；
 3. **仓库级覆盖**：`[agent_runner.repositories.<repo_id>.agents.*]`。
 
@@ -195,7 +195,7 @@ judge_timeout_seconds = 120
 - 评审预设**就是**既有的 `[agent_runner.presets.<name>]`：不新增模型目录，也不需要 API
   key——认证沿用各 agent CLI 自己的配置。评审以该 agent 的 `judge` 形态运行（空目录 +
   禁用全部内置工具，见 [评测与测试](../dev/evaluation.md)）；没有该形态的 agent
-  （codex、kimi、opencode）页面标记不可用，创建 run 时 fail-fast，不写入 0 分。
+  （codex、kimi、opencode、mcode、dsh）页面标记不可用，创建 run 时 fail-fast，不写入 0 分。
 - 执行侧同样不新增配置：候选执行复用同一份预设。
 - suite YAML、rubric v1、授权流程与结果口径见 [评测与测试](../dev/evaluation.md)，
   HTTP 契约见 [API 参考](../api/references.md)。
@@ -246,7 +246,7 @@ allow_execute_yes = true
 ```
 
 - `enabled`：是否启用 `kc ask`。
-- `default_agent`：默认 planner agent（支持 `claude`、`codex`、`kimi`）。
+- `default_agent`：默认 planner agent（支持任一声明了 `generate` 用途的 agent：`codex` / `claude` / `kimi` / `pi` / `codebuddy` / `qoder` / `mcode` / `dsh`；`opencode` 未声明 `generate`）。
 - `default_output_dir`：决策审计文件默认输出目录。
 - `planner_timeout_seconds`：planner agent 超时时间（秒）。
 - `max_context_chars`：传入 planner 的上下文最大字符数。
@@ -290,7 +290,7 @@ confirm_commands = [
 ```
 
 - `enabled`：是否启用 REPL；设为 `false` 时 `kc repl` 直接报 `REPL is disabled in configuration.` 并以 1 退出。
-- `default_agent`：默认 REPL agent（支持 `claude`、`codex`、`kimi`）。
+- `default_agent`：默认 REPL agent（支持任一声明了 `repl` 用途的 agent；九个内置 agent 都声明了）。
   `auto` 不被接受为 REPL 默认 agent（`kc run` 才用 auto）。
 - `default_output_dir`：REPL 会话审计目录前缀；每次会话创建
   `<default_output_dir>/<session-id>/`，包含 `session.json`、

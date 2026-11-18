@@ -76,6 +76,7 @@ pi-json-lines = "backend.engines.agent_runner.output_protocols.pi_json_lines:PiJ
 codex-json-lines = "backend.engines.agent_runner.output_protocols.codex_json_lines:CodexJsonLinesOutputProtocol"
 opencode-json-lines = "backend.engines.agent_runner.output_protocols.opencode_json_lines:OpenCodeJsonLinesOutputProtocol"
 mcode-json-lines = "backend.engines.agent_runner.output_protocols.mcode_json_lines:McodeJsonLinesOutputProtocol"
+dsh-json-lines = "backend.engines.agent_runner.output_protocols.dsh_json_lines:DshJsonLinesOutputProtocol"
 
 [project.optional-dependencies]
 llm = [

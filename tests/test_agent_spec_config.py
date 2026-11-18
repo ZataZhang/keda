@@ -284,7 +284,7 @@ def _config_toml_agent_blocks() -> dict[str, dict[str, object]]:
 
 
 def test_config_toml_agent_blocks_match_builtin_specs() -> None:
-    """config.toml 的七个注册块与 BUILTIN_AGENT_SPECS 语义一致（缺省键视同默认值）。
+    """config.toml 的九个注册块与 BUILTIN_AGENT_SPECS 语义一致（缺省键视同默认值）。
 
     config.toml 写出的是"出厂注册块"：与代码默认等价、便于发现与覆盖。
     本守卫防止两处数据漂移——改内置 spec 必须同步 config.toml，反之亦然。

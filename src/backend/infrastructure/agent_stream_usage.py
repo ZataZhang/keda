@@ -1,7 +1,7 @@
 """agent 输出流中的旁路观测：token 用量与会话 id。
 
 从 agent CLI 的原始输出流解析官方自报的 usage 统计。支持 ``result.usage``、
-``assistant.message.usage`` 与 Codex ``turn.completed.usage``，字段均须与 input / output / cache_read /
+``assistant.message.usage``、Codex/mcode ``turn.completed.usage`` 与 dsh ``status(step_end).usage``，字段均须与 input / output / cache_read /
 cache_creation 的语义一致；完整 assistant 消息按单次模型请求累计，最终结果用量作为
 兼容回退。形状不同或拿不到时宽容降级为"无数据"（``None``），绝不估算、绝不抛异常
 影响主流程。
@@ -87,9 +87,10 @@ def build_token_usage(usage_payload: object) -> TokenUsage | None:
 
 
 def _extract_stream_usage_event(line: str) -> tuple[str, TokenUsage] | None:
-    """提取完整 assistant 消息、result、Codex 或 mcode 轮次结束事件中的 usage。"""
+    """提取 assistant 消息、result、Codex/mcode 轮次结束或 dsh step 结束的 usage。"""
     if '"usage"' not in line or not any(
-        event_name in line for event_name in ('"assistant"', '"result"', '"turn.completed"')
+        event_name in line
+        for event_name in ('"assistant"', '"result"', '"turn.completed"', '"status"')
     ):
         return None
     try:
@@ -142,6 +143,19 @@ def _extract_stream_usage_event(line: str) -> tuple[str, TokenUsage] | None:
                 "cache_read_input_tokens": cached_tokens,
                 "output_tokens": turn_usage.get("output_tokens"),
             }
+    elif event_type == "status" and event_payload.get("phase") == "step_end":
+        # dsh：用量在 ``status`` + ``phase=step_end`` 的 camelCase usage 里，三类
+        # 口径互斥（inputTokens 不含缓存命中），与 kc 的 Anthropic 口径一致，
+        # 因此直接 1:1 映射；任一次尝试漏报 usage 时 dsh 会整个 step 省略它。
+        step_usage = event_payload.get("usage")
+        if not isinstance(step_usage, dict):
+            return None
+        usage_payload = {
+            "input_tokens": step_usage.get("inputTokens"),
+            "output_tokens": step_usage.get("outputTokens"),
+            "cache_read_input_tokens": step_usage.get("cacheReadTokens"),
+            "cache_creation_input_tokens": step_usage.get("cacheWriteTokens"),
+        }
     else:
         return None
     parsed_usage = build_token_usage(usage_payload)
@@ -155,7 +169,7 @@ def extract_session_id_event(line: str) -> str | None:
         line: 子进程的原始单行输出（可能带尾部换行）。
 
     Returns:
-        标准 ``session_id``、Codex ``thread.started.thread_id``、mcode
+        标准 ``session_id``、Codex ``thread.started.thread_id``、mcode / dsh
         ``sessionId``、OpenCode ``sessionID``、pi ``session.id`` 或 Kimi resume
         hint 中的会话 id；非匹配输出返回 ``None``。
     """
@@ -227,8 +241,9 @@ def extract_reported_model_event(line: str) -> str | None:
 class StreamUsageCollector:
     """流式采集器：逐行观察原始 stdout，收集用量、会话 id 与模型名。
 
-    完整 assistant 消息及 Codex 轮次结束里的 usage 按调用累计；若流里没有可用的
-    assistant 用量，则回退到最后一条 result usage。两种来源不相加，避免重复统计。
+    完整 assistant 消息、Codex/mcode 轮次结束与 dsh step 结束里的 usage 按调用
+    累计；若流里没有可用的累计用量，则回退到最后一条 result usage。两种来源不
+    相加，避免重复统计。
     所有方法都不抛异常——用量采集是旁路，任何解析问题都静默降级为"无数据"。
     """
 
@@ -247,7 +262,7 @@ class StreamUsageCollector:
             parsed_usage_event = None
         if parsed_usage_event is not None:
             event_type, parsed_usage = parsed_usage_event
-            if event_type in ("assistant", "turn.completed"):
+            if event_type in ("assistant", "turn.completed", "status"):
                 previous_usage = self._assistant_usage or TokenUsage()
                 self._assistant_usage = TokenUsage(
                     input_tokens=previous_usage.input_tokens + parsed_usage.input_tokens,
@@ -283,7 +298,7 @@ class StreamUsageCollector:
 
     @property
     def usage(self) -> TokenUsage | None:
-        """返回 assistant / Codex 用量累计值，或缺少时回退到最终 result usage。"""
+        """返回 assistant / Codex / dsh 用量累计值，或缺少时回退到最终 result usage。"""
         if self._assistant_usage is not None and self._assistant_usage.total_tokens > 0:
             return self._assistant_usage
         if self._usage is not None:

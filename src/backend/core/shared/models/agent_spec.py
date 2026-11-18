@@ -41,6 +41,9 @@ OPENCODE_JSON_LINES_PROTOCOL_ID = "opencode-json-lines"
 MCODE_JSON_LINES_PROTOCOL_ID = "mcode-json-lines"
 """MiniMax Code ``exec --output-format stream-json`` 事件流渲染协议 id。"""
 
+DSH_JSON_LINES_PROTOCOL_ID = "dsh-json-lines"
+"""DeepSeek Harness ``--profile headless --json`` 事件流渲染协议 id。"""
+
 # ---------------------------------------------------------------------------
 # 提示词投递方式与用途 profile 的闭集
 # ---------------------------------------------------------------------------
@@ -313,7 +316,7 @@ def _claude_compatible_profiles() -> dict[str, AgentProfileSpec]:
 
 # 注意 dict 顺序即注册顺序：choose_agent 按标签匹配时先到先得，
 # 这里保持与旧 LabelConfig.agent_labels 一致的 codex -> claude -> kimi 顺序；
-# 后续新增的 agent（pi、codebuddy、qoder、opencode、mcode）一律追加在末尾，绝不插入
+# 后续新增的 agent（pi、codebuddy、qoder、opencode、mcode、dsh）一律追加在末尾，绝不插入
 # 既有条目之间——插入会改变既有 agent 的标签匹配优先级。
 BUILTIN_AGENT_SPECS: dict[str, AgentSpec] = {
     "codex": AgentSpec(
@@ -776,6 +779,96 @@ BUILTIN_AGENT_SPECS: dict[str, AgentSpec] = {
             ),
         },
     ),
+    # DeepSeek Harness（dsh）。非交互入口是 headless 表层：
+    # ``dsh --profile headless --json`` 输出按行事件（session / status / text /
+    # thinking / tool_call / tool_result / final / error），由内置
+    # ``dsh-json-lines`` 协议渲染并把顶层 ``sessionId`` 交给观测层。提示词走
+    # stdin（``-`` 必须是唯一任务参数）而不是位置参数：Issue 提示词可能很长
+    # （PRD 全文 + 验收计划），位置参数有 argv 长度上限风险。
+    # 权限档：run / deliberate / repl 用 ``danger-full-access`` +
+    # ``--approval-policy never`` 才能无人值守跑 Issue；generate 用 dsh 的
+    # ``read-only`` 沙箱预设，并按该预设声明 ``read_only_enforced``——这是
+    # dsh 自身的权限/沙箱开关，不是提示词约定。
+    # **不声明 judge**：dsh 没有"禁用全部内置工具"的开关，read-only 仍然允许
+    # 读工具。**声明续传**（用户 2026-11-18 选择乐观档）：``--session-id`` 会
+    # 沿用该 id 的持久化会话，但要求同 cwd / 同 agent preset 且无存活 owner；
+    # kc 的续传记录按 worktree + 阶段隔离，正常重试满足约束，跨 worktree 或
+    # 换 preset 的恢复会在任务运行前失败（fail-fast，不静默串会话）。
+    # 配置在 ~/.dsh/；容器认证导入只带用户级 skills（CLI 不在 runner 镜像里，
+    # profiles 与凭据都是机器本地资产，不随镜像分发）。
+    "dsh": AgentSpec(
+        bin="dsh",
+        label="agent/dsh",
+        label_color="4D6BFE",
+        label_description="Use DeepSeek Harness for local runner execution.",
+        auth_home="~/.dsh",
+        auth_include=("skills",),
+        supports_resume=True,
+        resume_args=("--session-id", "{session_id}"),
+        profiles={
+            AGENT_PROFILE_RUN: AgentProfileSpec(
+                args=(
+                    "--profile",
+                    "headless",
+                    "--json",
+                    "--permission-mode",
+                    "danger-full-access",
+                    "--approval-policy",
+                    "never",
+                ),
+                tail_args=("-",),
+                prompt_delivery=PROMPT_DELIVERY_STDIN,
+                output_protocol=DSH_JSON_LINES_PROTOCOL_ID,
+                read_only=False,
+            ),
+            AGENT_PROFILE_DELIBERATE: AgentProfileSpec(
+                args=(
+                    "--profile",
+                    "headless",
+                    "--json",
+                    "--permission-mode",
+                    "danger-full-access",
+                    "--approval-policy",
+                    "never",
+                ),
+                tail_args=("-",),
+                prompt_delivery=PROMPT_DELIVERY_STDIN,
+                output_protocol=DSH_JSON_LINES_PROTOCOL_ID,
+                read_only=True,
+            ),
+            AGENT_PROFILE_GENERATE: AgentProfileSpec(
+                args=(
+                    "--profile",
+                    "headless",
+                    "--json",
+                    "--permission-mode",
+                    "read-only",
+                    "--approval-policy",
+                    "never",
+                ),
+                tail_args=("-",),
+                prompt_delivery=PROMPT_DELIVERY_STDIN,
+                output_protocol=DSH_JSON_LINES_PROTOCOL_ID,
+                read_only=True,
+                read_only_enforced=True,
+            ),
+            AGENT_PROFILE_REPL: AgentProfileSpec(
+                args=(
+                    "--profile",
+                    "headless",
+                    "--json",
+                    "--permission-mode",
+                    "danger-full-access",
+                    "--approval-policy",
+                    "never",
+                ),
+                tail_args=("-",),
+                prompt_delivery=PROMPT_DELIVERY_STDIN,
+                output_protocol=DSH_JSON_LINES_PROTOCOL_ID,
+                read_only=False,
+            ),
+        },
+    ),
 }
 
 
@@ -793,6 +886,7 @@ __all__ = [
     "BUILTIN_AGENT_SPECS",
     "CLAUDE_STREAM_JSON_PROTOCOL_ID",
     "CODEX_JSON_LINES_PROTOCOL_ID",
+    "DSH_JSON_LINES_PROTOCOL_ID",
     "INTERACTIVE_PROFILE_ID",
     "INTERACTIVE_PROMPT_DELIVERIES",
     "MCODE_JSON_LINES_PROTOCOL_ID",

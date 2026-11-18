@@ -128,7 +128,7 @@ default_agent = "claude"
 # 把"九个生命周期阶段各用哪个 agent"收敛成一张表。键名是闭集（写错键在配置
 # 加载期报错），取值可以是：
 #   - 已注册 agent 名（codex / claude / kimi / pi / codebuddy / qoder / opencode /
-#     mcode，或自定义注册的 agent）；
+#     mcode / dsh，或自定义注册的 agent）；
 #   - "auto"：按该阶段既有语义路由。只有实现了 auto 语义的阶段合法——
 #       实现=按 Issue 上的 agent/* 标签路由；校验=从 agent_fallback_order 里
 #       挑第一个 ≠ 实现者；审核=优先 ≠ 实现者（allow_same_agent 时沿用实现者）；
@@ -201,7 +201,7 @@ default_agent = "claude"
 # 评审由该预设的 agent CLI 以其 `judge` 形态运行——进程 cwd 是空临时目录，且
 # agent 声明了"禁用全部内置工具"的开关（claude/codebuddy/qoder 的 --tools ""、
 # pi 的 --no-tools），所以评审只能读到授权预览过的 payload。没有这类开关的 agent
-# （codex、kimi、opencode）不能当评审，页面会把它们标为"不可用"。
+# （codex、kimi、opencode、mcode、dsh）不能当评审，页面会把它们标为"不可用"。
 # default_judge_presets 是页面预选的预设名单，单次 run 可覆盖；不可用的默认项
 # 页面不会预选（勾选框本身是禁用的，预选会留下无法提交也无法取消的选项）。
 # 并发刻意收敛（1–4）：评测是手动离线批量任务，尊重与 runner 相同的主机 capacity。
@@ -248,7 +248,8 @@ default_agent = "claude"
 # 命中模型绑定时 fail-fast。claude（--model）与 codebuddy（--model +
 # --settings reasoningEffort）已核实并以内置默认播种；下方注册块写出仅为示例。
 # 续传参数：supports_resume / resume_args 声明按会话 id 续传；Codex 需要切换子命令，
-# 使用各 profile 的 resume_tail_args 替换正常 tail_args。七个内置 agent 均已声明续传入口。
+# 使用各 profile 的 resume_tail_args 替换正常 tail_args。九个内置 agent 均声明了续传入口；
+# dsh 用 --session-id，要求同 cwd / 同 agent preset 且无会话占用。
 #
 # 接入全新 agent 的最小步骤：写一段注册块（bin 与 label 必填，四种用途
 # 至少声明一种；某个用途两侧都不声明即视为该 agent 不提供该用途），
@@ -605,6 +606,48 @@ args = ["exec", "--cwd", "{cwd}", "--permission", "full", "--output-format", "st
 tail_args = ["--input", "-"]
 prompt_delivery = "stdin"
 output_protocol = "mcode-json-lines"
+
+# DeepSeek Harness（dsh）：headless 表层 + 按行 JSON 事件流。
+# run/deliberate/repl 用 danger-full-access + approval-policy never 才能无人值守；
+# generate 用 read-only 沙箱预设并声明 read_only_enforced。
+# 提示词走 stdin（"-" 必须是唯一任务参数）；声明 --session-id 续传；不声明 judge。
+[agent_runner.agents.dsh]
+bin = "dsh"
+label = "agent/dsh"
+label_color = "4D6BFE"
+label_description = "Use DeepSeek Harness for local runner execution."
+auth_home = "~/.dsh"
+auth_include = ["skills"]
+auth_exclude = []
+supports_resume = true
+resume_args = ["--session-id", "{session_id}"]
+
+[agent_runner.agents.dsh.profiles.run]
+args = ["--profile", "headless", "--json", "--permission-mode", "danger-full-access", "--approval-policy", "never"]
+tail_args = ["-"]
+prompt_delivery = "stdin"
+output_protocol = "dsh-json-lines"
+
+[agent_runner.agents.dsh.profiles.deliberate]
+args = ["--profile", "headless", "--json", "--permission-mode", "danger-full-access", "--approval-policy", "never"]
+tail_args = ["-"]
+prompt_delivery = "stdin"
+output_protocol = "dsh-json-lines"
+read_only = true
+
+[agent_runner.agents.dsh.profiles.generate]
+args = ["--profile", "headless", "--json", "--permission-mode", "read-only", "--approval-policy", "never"]
+tail_args = ["-"]
+prompt_delivery = "stdin"
+output_protocol = "dsh-json-lines"
+read_only = true
+read_only_enforced = true
+
+[agent_runner.agents.dsh.profiles.repl]
+args = ["--profile", "headless", "--json", "--permission-mode", "danger-full-access", "--approval-policy", "never"]
+tail_args = ["-"]
+prompt_delivery = "stdin"
+output_protocol = "dsh-json-lines"
 
 [agent_runner.labels]
 # codex / claude / kimi 是旧版 labels 段的 agent 路由键，作为兼容覆盖来源

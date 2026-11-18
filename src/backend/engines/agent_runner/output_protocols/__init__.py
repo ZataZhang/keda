@@ -1,7 +1,8 @@
 """输出协议注册表：经 entry point group 发现协议实现。
 
 内置协议（``plain`` / ``claude-stream-json`` / ``pi-json-lines`` /
-``codex-json-lines`` / ``opencode-json-lines`` / ``mcode-json-lines``）
+``codex-json-lines`` / ``opencode-json-lines`` / ``mcode-json-lines`` /
+``dsh-json-lines``）
 与第三方插件走**同一条** entry point 注册路径（group
 ``kedacode.agent_output_protocols``），避免出现零消费者的平行抽象。
 
@@ -42,6 +43,7 @@ BUILTIN_PROTOCOL_MODULE_NAMES: tuple[str, ...] = (
     "opencode_json_lines",
     "pi_json_lines",
     "mcode_json_lines",
+    "dsh_json_lines",
 )
 """内置协议实现模块名（与 :mod:`backend.engines.agent_runner.output_protocols` 同包）。"""
 

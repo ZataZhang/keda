@@ -59,7 +59,7 @@
 ## 下拉语义（三层共用）
 
 - 矩阵按**触发入口分组**呈现（2026-09-28 起）：九行分成「实现流水线」（实现/修复/收尾/校验/审核/监督）、「讨论与内容生成」（辩论/内容生成）、「独立入口」（决策）三组，组标题 + 一行组说明插在段首，每行生命周期名下再带一行触发时机；分组事实的唯一来源是后端 `LIFECYCLE_AGENT_ENTRY_GROUPS`，三层共用同一分组。分组只是呈现：下拉取值、来源列、写回载荷与分组前完全一致。PRD 覆盖抽屉沿用同一分组，但**不含决策行**（planner 没有 PRD 消费点，与真实 UI 一致不下发）。**副本同步**：本目录的自包含原型不能 import 后端常量，`lifecycle-agent-matrix.html` 里的 `ENTRY_GROUPS` 是 core 常量的副本，且 `docs/` 不在"单一份键→组映射"的 `rg` 门禁范围内——但漂移不会漏过去：这份副本连同 `tests/playwright-e2e/tests/workflows/lifecycle-agent-matrix.spec.ts` 里的同名副本，由守卫测试 `tests/guards/test_lifecycle_entry_group_copies.py` 逐组比对组顺序 / 组 id / 组名 / 组内键序 / 组说明，改动 core 分组常量而忘了同步会直接 CI 转红。
-- 下拉里**只有真实取值**：已注册 agent（codex / claude / kimi / pi / codebuddy / qoder / opencode / mcode）、该阶段的 `auto`、fix 与 closeout 的 `跟随实现（executor）`。没有"未设置""跟随全局"之类的伪选项。
+- 下拉里**只有真实取值**：已注册 agent（codex / claude / kimi / pi / codebuddy / qoder / opencode / mcode / dsh）、该阶段的 `auto`、fix 与 closeout 的 `跟随实现（executor）`。没有"未设置""跟随全局"之类的伪选项。
 - **`auto` 的文案按阶段如实描述**（各阶段语义本来就不同，见下表）；没有实现 `auto` 的阶段（决策 / 内容生成）不给这个选项。
 - 下拉中**选中的就是当前生效值**，即优先级链上第一个被声明的值（本层声明 > 上一层声明 > 既有配置键 / 内置默认）；`executor` 不做二次解析，只在下方补一行"当前实现阶段：claude"。
 - 右侧「当前值来源」列说明这个值来自哪一层（本机 `config.toml` / 本仓库 `.kedacode.toml` / 既有配置键 / 内置默认），并在本层已显式设置时给出「不写本键（跟随既有配置）」或「跟随全局（删除本键）」的恢复入口。
@@ -148,9 +148,9 @@ PRD 原文 · 覆盖抽屉
 
 ## 演示数据说明
 
-- 九个生命周期键名、中文名、取值来自 PRD §1 与 §10 的闭集；已注册 agent 取自 `config.toml` 的八个注册块（codex / claude / kimi / pi / codebuddy / qoder / opencode / mcode）。
+- 九个生命周期键名、中文名、取值来自 PRD §1 与 §10 的闭集；已注册 agent 取自 `config.toml` 的九个注册块（codex / claude / kimi / pi / codebuddy / qoder / opencode / mcode / dsh）。
 - 回退预设演示包含 `fallback-claude`（`sonnet-5.5 / max`）与 `fallback-claude-high`（`sonnet-5.5 / high`），用于展示同一执行器以两组参数顺序重试；另有 `fallback-kimi`（`kimi-k2.6 / high`）与 `fallback-codex`（`gpt-5.4 / xhigh`）。这些是评审样例，不代表当前仓库已配置对应参数模板或账号可用性。实际已有的 codebuddy / qoder 示例预设仍保留。
-- **Agent 标签设置**的八个标签取自真实 `config.toml`：`agent/codex`（#5319E7）、`agent/claude`（#BFDADC）、`agent/kimi`（#FF6B6B）、`agent/pi`（#7C3AED）、`agent/codebuddy`（#0052D9）、`agent/qoder`（#FF8C42）、`agent/opencode`（#0EA5E9）、`agent/mcode`（#1F6FEB），描述也逐字来自各自的 `label_description`。
+- **Agent 标签设置**的九个标签取自真实 `config.toml`：`agent/codex`（#5319E7）、`agent/claude`（#BFDADC）、`agent/kimi`（#FF6B6B）、`agent/pi`（#7C3AED）、`agent/codebuddy`（#0052D9）、`agent/qoder`（#FF8C42）、`agent/opencode`（#0EA5E9）、`agent/mcode`（#1F6FEB）、`agent/dsh`（#4D6BFE），描述也逐字来自各自的 `label_description`。
 - 三个层级的初始值都是本机真实取值，来源列标注它来自哪一层：实现 `claude`（`runner.default_agent`）、校验 `auto`（`validation.verifier_agent` 缺省值）、审核 `auto`（`pre_pr_review.review_agent`）、监督 `auto`（`post_pr_supervisor.supervisor_agent`）、决策 `claude`（`interactive_decision.default_agent`）、内容生成 `claude`（`generated_content.default_agent`）、辩论 `auto`（`agent/deliberate` 标签路由）；fix / closeout 为内置默认 `executor`。
 - 受管理仓库列表与真实 registry 一致（`repo_id` / `display_name`），行位坐标实测自真实页面。
 - 保存与写回都是前端模拟，没有落到真实文件；PRD 原文与头部预览取自真实的 `tasks/pending/P1-FEAT-20260918-110027-lifecycle-agent-matrix.md`。

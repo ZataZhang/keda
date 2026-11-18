@@ -31,7 +31,7 @@ Agent/模型效果对照）已落地为一条本地 Console 产品路径，下�
   CLI 自己的配置（如 `~/.claude`）。
 - 评审隔离：agent 的 `judge` profile 声明**禁用全部内置工具**（claude / codebuddy /
   qoder 为 `--tools ""`，pi 为 `--no-tools`），且进程 cwd 是每次新建的空临时目录，
-  评审只能读到授权预览过的 payload。没有该开关的 agent（codex、kimi、opencode）
+  评审只能读到授权预览过的 payload。没有该开关的 agent（codex、kimi、opencode、mcode、dsh）
   不声明 `judge` 形态，评测页把它们标为"不可用"并给出原因，创建 run 时直接拒绝，
   不假装隔离。注意：agent CLI 仍会联系其自己的模型服务，这正是外发授权要覆盖的范围。
 

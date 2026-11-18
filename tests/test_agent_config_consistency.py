@@ -545,7 +545,16 @@ def test_planner_command_builders_for_supported_agents() -> None:
     are tracked separately by ``read_only_enforced``.
     """
     config = CoreAppConfig()
-    for agent_name in ("claude", "codex", "kimi", "pi", "codebuddy", "qoder", "mcode"):
+    for agent_name in (
+        "claude",
+        "codex",
+        "kimi",
+        "pi",
+        "codebuddy",
+        "qoder",
+        "mcode",
+        "dsh",
+    ):
         invocation = build_agent_invocation(
             agent_name, "generate", "test prompt", Path("/tmp/worktree"), config
         )
@@ -556,6 +565,9 @@ def test_planner_command_builders_for_supported_agents() -> None:
     mcode_generate_profile = config.agents["mcode"].profiles["generate"]
     assert mcode_generate_profile.read_only is True
     assert mcode_generate_profile.read_only_enforced is False
+    dsh_generate_profile = config.agents["dsh"].profiles["generate"]
+    assert dsh_generate_profile.read_only is True
+    assert dsh_generate_profile.read_only_enforced is True
 
 
 def test_unknown_planner_agent_fails_fast() -> None:

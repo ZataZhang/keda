@@ -535,6 +535,85 @@ def test_mcode_has_no_judge_profile(app_config: AppConfig, plain_worktree: Path)
     assert "run" in message
 
 
+# dsh（DeepSeek Harness）：headless 表层 + --json 事件流 + stdin 提示词。
+# 提示词不进 argv（``-`` 之后由 stdin 投递），因此 argv 末尾没有 PROMPT。
+def _dsh_golden_argv(worktree: Path, *, permission_mode: str) -> tuple[str, ...]:
+    """dsh 各用途的命令行；worktree 由进程 cwd 提供，不占 argv。"""
+    return (
+        "dsh",
+        "--profile",
+        "headless",
+        "--json",
+        "--permission-mode",
+        permission_mode,
+        "--approval-policy",
+        "never",
+        "-",
+    )
+
+
+def test_golden_dsh_run(app_config: AppConfig, plain_worktree: Path) -> None:
+    """dsh 主执行：headless + yolo 权限档 + JSONL 输出，提示词走 stdin。"""
+    invocation = build_agent_invocation("dsh", "run", PROMPT, plain_worktree, app_config)
+    assert invocation.argv == _dsh_golden_argv(plain_worktree, permission_mode="danger-full-access")
+    assert invocation.prompt_delivery == "stdin"
+    assert invocation.output_protocol == "dsh-json-lines"
+    assert invocation.read_only is False
+
+
+def test_golden_dsh_deliberate(app_config: AppConfig, plain_worktree: Path) -> None:
+    """dsh 辩论：同一形态，但声明只读。"""
+    invocation = build_agent_invocation("dsh", "deliberate", PROMPT, plain_worktree, app_config)
+    assert invocation.argv == _dsh_golden_argv(plain_worktree, permission_mode="danger-full-access")
+    assert invocation.output_protocol == "dsh-json-lines"
+    assert invocation.read_only is True
+
+
+def test_golden_dsh_generate(app_config: AppConfig, plain_worktree: Path) -> None:
+    """dsh 生成：read-only 权限预设，并声明由该沙箱强制只读。"""
+    invocation = build_agent_invocation("dsh", "generate", PROMPT, plain_worktree, app_config)
+    assert invocation.argv == _dsh_golden_argv(plain_worktree, permission_mode="read-only")
+    assert invocation.read_only is True
+    generate_profile = app_config.agents["dsh"].profiles["generate"]
+    assert generate_profile.read_only_enforced is True
+
+
+def test_golden_dsh_run_resumes_with_session_id(
+    app_config: AppConfig, plain_worktree: Path
+) -> None:
+    """dsh 续传：``--session-id`` 在 ``-`` 之前注入，提示词仍走 stdin。"""
+    invocation = build_agent_invocation(
+        "dsh",
+        "run",
+        PROMPT,
+        plain_worktree,
+        app_config,
+        resume_session_id="session-abc123",
+    )
+    expected = _dsh_golden_argv(plain_worktree, permission_mode="danger-full-access")
+    assert invocation.argv == expected[:-1] + ("--session-id", "session-abc123", "-")
+    assert invocation.prompt_delivery == "stdin"
+    assert app_config.agents["dsh"].supports_resume is True
+
+
+def test_golden_dsh_repl(app_config: AppConfig, plain_worktree: Path) -> None:
+    """dsh REPL：可写形态。"""
+    invocation = build_agent_invocation("dsh", "repl", PROMPT, plain_worktree, app_config)
+    assert invocation.argv == _dsh_golden_argv(plain_worktree, permission_mode="danger-full-access")
+    assert invocation.read_only is False
+
+
+def test_dsh_has_no_judge_profile(app_config: AppConfig, plain_worktree: Path) -> None:
+    """dsh 刻意不声明 judge：它没有禁用全部内置工具的开关，不放假隔离声明。"""
+    with pytest.raises(UnknownProfileError) as exc_info:
+        build_agent_invocation("dsh", "judge", PROMPT, plain_worktree, app_config)
+    message = str(exc_info.value)
+    assert "dsh" in message
+    assert "judge" in message
+    # 报错必须列出已声明的用途，且不得回落到别的用途
+    assert "run" in message
+
+
 # ---------------------------------------------------------------------------
 # 失败路径：不降级、带上下文
 # ---------------------------------------------------------------------------
@@ -554,6 +633,7 @@ def test_unknown_agent_lists_registered(app_config: AppConfig, plain_worktree: P
         "qoder",
         "opencode",
         "mcode",
+        "dsh",
     ):
         assert registered_name in message
 

@@ -405,7 +405,8 @@ recovery 上下文；缺少阶段记录时会回退读取旧版未分阶段记�
 记录缺失或 agent 未声明能力时**静默降级为全新会话**，降级发生在同一次 attempt 内，不额外消耗
 recovery 轮次。
 
-七个内置 agent 都声明了 CLI 续传参数：Codex、Claude、Kimi、pi、CodeBuddy、Qoder 与 OpenCode。
+九个内置 agent 都声明了 CLI 续传参数：Codex、Claude、Kimi、pi、CodeBuddy、Qoder、OpenCode、mcode 与 dsh。
+dsh 用 `--session-id <id>` 续传，但要求同 cwd / 同 agent preset 且无存活 owner；kc 的续传记录按 worktree 与阶段隔离，跨 worktree 或换 preset 的恢复会在任务运行前 fail-fast。
 会话 id 仍取决于 CLI 是否在被 runner 中断前输出了可解析的 id；尤其 Kimi 当前通过退出提示提供 id，
 因此被强制终止的超时轮次可能没有可续传记录，届时按既有策略重新开新会话。
 
@@ -658,7 +659,7 @@ provision_database = true
 # 并行上限：该仓库最多同时运行几个自动领取的 Issue（默认 1 = 串行）。
 # 优先级：kc daemon run --concurrency > Backlog 页面设置 > 本值。daemon 执行期间按轮询间隔补位。
 max_concurrent_issues = 1
-# 默认使用的 AI agent：auto / claude / codex / kimi
+# 默认使用的 AI agent：auto / 任意已注册 agent 名（内置 codex / claude / kimi / pi / codebuddy / qoder / opencode / mcode / dsh）
 default_agent = "auto"
 # Agent 失败后的最大重试次数
 max_recovery_attempts = 5
@@ -940,7 +941,7 @@ default_phase = "execution"
 [agent_runner.pre_pr_review]
 # 是否启用 Draft PR 创建前的 AI review
 enabled = true
-# 执行 review 的 agent：auto / claude / codex / kimi
+# 执行 review 的 agent：auto / 任意已注册 agent 名（内置 codex / claude / kimi / pi / codebuddy / qoder / opencode / mcode / dsh）
 review_agent = "auto"
 # 谁修复 review 报出的问题：self（审核者自己修，默认，与历史行为一致）/
 # executor（交回本次实现者）/ 任意已注册 agent 名。注意与
@@ -2945,7 +2946,7 @@ uv run --project /path/to/keda kc issue create tasks/pending/feature-login.md \
   --ready
 ```
 
-> `--agent` 可选任一已注册 agent（内置 `codex` / `claude` / `kimi` / `pi` / `codebuddy` / `qoder` / `opencode` / `mcode`）以及 `auto` / `none`。`auto` 按 Issue label 自动路由，`none` 不添加 agent 路由 label。推荐在交给 runner 前保持默认 PRD 发布并加 `--ready`，确保 runner 的 base branch 能读取到已回写 Issue URL 的 canonical PRD。
+> `--agent` 可选任一已注册 agent（内置 `codex` / `claude` / `kimi` / `pi` / `codebuddy` / `qoder` / `opencode` / `mcode` / `dsh`）以及 `auto` / `none`。`auto` 按 Issue label 自动路由，`none` 不添加 agent 路由 label。推荐在交给 runner 前保持默认 PRD 发布并加 `--ready`，确保 runner 的 base branch 能读取到已回写 Issue URL 的 canonical PRD。
 
 #### PRD 发布边界（`--publish-prd` / `--no-publish-prd`）
 
@@ -4137,7 +4138,7 @@ daemon 里一个 writer 卡住时，现状是"没人知道"：日志还在，进
 
 只监督**带 Issue 身份、且属于 run 类 profile** 的调用；没有 Issue 身份的调用（如 `kc ask`、deliberation）不挂观察线程。
 
-`read_only = true` 只是**声明**，不是保证：`claude -p --dangerously-skip-permissions` 同样可以声明只读，CLI 却不会拦住写文件。诊断与 writer 跑在同一个工作区，所以监督器只认 `read_only_enforced = true`——argv 里带 provider 自己的只读沙箱或禁工具开关（内置值里只有 codex 的 `--sandbox read-only` 和 pi 的 `--no-tools`）。在配置里覆盖了某个 profile 的 `args` / `tail_args` / `expand` 后，内置的强制声明不再继承，需要重新显式声明。claude、kimi、codebuddy 默认没有这一档，`agent = "auto"` 解析到它们时监督器会记一条 warning 并停用，而不是拿声明当保证。
+`read_only = true` 只是**声明**，不是保证：`claude -p --dangerously-skip-permissions` 同样可以声明只读，CLI 却不会拦住写文件。诊断与 writer 跑在同一个工作区，所以监督器只认 `read_only_enforced = true`——argv 里带 provider 自己的只读沙箱或禁工具开关（内置值里只有 codex 的 `--sandbox read-only`、pi 的 `--no-tools` 与 dsh 的 `--permission-mode read-only`）。在配置里覆盖了某个 profile 的 `args` / `tail_args` / `expand` 后，内置的强制声明不再继承，需要重新显式声明。claude、kimi、codebuddy 默认没有这一档，`agent = "auto"` 解析到它们时监督器会记一条 warning 并停用，而不是拿声明当保证。
 
 巡检用的 `git status` / `git diff` 都带 `--no-optional-locks`，不会和 writer 自己的 `git add` / `commit` 抢 `index.lock`。
 
@@ -5214,7 +5215,7 @@ uv run kc ask "运行一次 dry-run 看看 ready 队列" --execute --yes
 
 - **白名单动作**：`show_status`、`run_deliberation`、`create_issue_from_prd`、`mark_issue_ready`、`run_once_dry_run`、`run_once`、`review_once_dry_run`、`review_once`、`needs_clarification`、`no_op`
 - **禁止动作**：`git_push`、`git_merge`、`git_reset`、`daemon`、`supervise-daemon`、任意 shell 命令、自动 merge、直接关闭 Issue、删除分支等
-- **Planner 安全**：只读 planner / `kc ask` 的 agent 必须有**已声明的** `generate` 用途且该用途 `read_only = true`——门禁只读这个声明字段，不按 agent 名白名单判断（`factories/content_generators.py`）。当前内置注册表里 `codex`、`claude`、`kimi`、`pi`、`codebuddy`、`qoder`、`mcode` 都声明了 `read_only = true` 的 `generate`，因此都能作为 planner 启动；`opencode` 没有 `generate` 用途，会被拒绝并指名。注意这只校验**声明**：声明本身是否等于运行时真的只读，取决于各 agent 的 argv 是否带沙箱/只读开关（例如 `codex` 用 `--sandbox read-only`，而 `claude` / `codebuddy` / `qoder` 用的是 `--dangerously-skip-permissions`、`mcode` 用的是 `--permission full`，都不是沙箱级只读）。
+- **Planner 安全**：只读 planner / `kc ask` 的 agent 必须有**已声明的** `generate` 用途且该用途 `read_only = true`——门禁只读这个声明字段，不按 agent 名白名单判断（`factories/content_generators.py`）。当前内置注册表里 `codex`、`claude`、`kimi`、`pi`、`codebuddy`、`qoder`、`mcode`、`dsh` 都声明了 `read_only = true` 的 `generate`，因此都能作为 planner 启动；`opencode` 没有 `generate` 用途，会被拒绝并指名。注意这只校验**声明**：声明本身是否等于运行时真的只读，取决于各 agent 的 argv 是否带沙箱/只读开关（例如 `codex` 用 `--sandbox read-only`，而 `claude` / `codebuddy` / `qoder` 用的是 `--dangerously-skip-permissions`、`mcode` 用的是 `--permission full`，都不是沙箱级只读；`dsh` 用 `--permission-mode read-only` 沙箱预设，并声明 `read_only_enforced = true`）。
 
 ### 确认策略
 
@@ -5570,7 +5571,7 @@ promoted_skills_dirs = ["~/.kedacode/memory/keda-main/skills"]
 
 > **Windows**：本能力依赖 POSIX 进程组，Windows 原生不支持（入口会直接报错）。支持范围见[安装指南](../getting-started/installation.md#windows)。
 
-kc 默认跑在本机，需要本机预先安装你打算使用的 agent CLI（内置注册表提供 codex / claude / kimi / pi / codebuddy / qoder / opencode / mcode 的形态，但只有装了对应 CLI 才能真正跑起来）以及 gh / Node / uv / just / git 等工具链。当本机还同时用于交互式 AI 编程（例如通过 cc-switch 切换多个 claude 账号）时，daemon 进程会与本机共享 `~/.claude`、`~/.codex`、`~/.kimi-code` 配置，账号切换会污染正在跑的任务。
+kc 默认跑在本机，需要本机预先安装你打算使用的 agent CLI（内置注册表提供 codex / claude / kimi / pi / codebuddy / qoder / opencode / mcode / dsh 的形态，但只有装了对应 CLI 才能真正跑起来）以及 gh / Node / uv / just / git 等工具链。当本机还同时用于交互式 AI 编程（例如通过 cc-switch 切换多个 claude 账号）时，daemon 进程会与本机共享 `~/.claude`、`~/.codex`、`~/.kimi-code` 配置，账号切换会污染正在跑的任务。
 
 `kc container` 子命令组提供"把 runner 跑进 Docker 容器"的纯 opt-in 能力：
 
@@ -5587,7 +5588,7 @@ kc 默认跑在本机，需要本机预先安装你打算使用的 agent CLI（�
 kc container auth import
 ```
 
-产出 `~/.kedacode/container-auth/<派生目录>/`，派生规则是去掉 `~` 与各段引导点：`claude`、`codex`、`kimi-code`、`pi/agent`（pi 的 `auth_home` 是 `~/.pi/agent`），以及内置注册表里其它声明了 `auth_home` 的 agent——`codebuddy`、`qoder-cn`、`config/opencode`（opencode 的 `auth_home` 是 XDG 路径 `~/.config/opencode`，所以派生结果有两段）。每个子目录含：
+产出 `~/.kedacode/container-auth/<派生目录>/`，派生规则是去掉 `~` 与各段引导点：`claude`、`codex`、`kimi-code`、`pi/agent`（pi 的 `auth_home` 是 `~/.pi/agent`），以及内置注册表里其它声明了 `auth_home` 的 agent——`codebuddy`、`qoder-cn`、`config/opencode`、`dsh`（opencode 的 `auth_home` 是 XDG 路径 `~/.config/opencode`，所以派生结果有两段）。每个子目录含：
 
 - claude: `settings.json`（含 `ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_BASE_URL`）+ `skills/`
 - codex: `auth.json`（`OPENAI_API_KEY`）+ `skills/`
@@ -5810,7 +5811,7 @@ not on PATH；装好后用 `kc agent list` 确认可用性，再 `kc agent setup
 
 ## 接入一个新 agent（声明式注册表）
 
-一个 agent 的全部调用差异——可执行文件、认证/skills 路径、各用途的 argv 片段、提示词投递方式、输出协议——都沉淀为**纯数据**的注册块（`[agent_runner.agents.<name>]`），由统一的命令构造器 `core/use_cases/agent_invocation.py` 组装。`src/` 下没有任何 agent 专有的分支代码：接入新 agent **不需要改 Python 代码**，只需写配置（内置 `codex` / `claude` / `kimi` / `pi` / `codebuddy` / `qoder` / `opencode` / `mcode` 的出厂默认已在代码注册表中生效）。
+一个 agent 的全部调用差异——可执行文件、认证/skills 路径、各用途的 argv 片段、提示词投递方式、输出协议——都沉淀为**纯数据**的注册块（`[agent_runner.agents.<name>]`），由统一的命令构造器 `core/use_cases/agent_invocation.py` 组装。`src/` 下没有任何 agent 专有的分支代码：接入新 agent **不需要改 Python 代码**，只需写配置（内置 `codex` / `claude` / `kimi` / `pi` / `codebuddy` / `qoder` / `opencode` / `mcode` / `dsh` 的出厂默认已在代码注册表中生效）。
 
 ### 注册块字段表
 
@@ -5836,7 +5837,7 @@ profile 级字段（`profiles.<profile>`，用途为 5 种闭集：`run` / `deli
 | `args` | 字面量 argv 片段 | 支持 `{cwd}` / `{worktree}` / `{prompt}` 占位符；**不做 shell 展开** |
 | `prompt_flag` | 参数名 | 仅 `prompt_delivery = "flag"` 时使用（如 kimi 的 `--prompt`） |
 | `prompt_delivery` | `argv_tail` / `flag` / `stdin` | 提示词投递方式 |
-| `output_protocol` | 已注册协议 id（默认 `plain`） | 经 `kedacode.agent_output_protocols` entry point 注册表解析；内置 `plain` / `claude-stream-json` / `pi-json-lines` / `codex-json-lines` / `opencode-json-lines` |
+| `output_protocol` | 已注册协议 id（默认 `plain`） | 经 `kedacode.agent_output_protocols` entry point 注册表解析；内置 `plain` / `claude-stream-json` / `pi-json-lines` / `codex-json-lines` / `opencode-json-lines` / `mcode-json-lines` / `dsh-json-lines` |
 | `tail_args` | 字面量 argv 片段 | 追加在展开器之后、提示词之前（如 codex 的 `["exec", "--json"]`） |
 | `resume_tail_args` | 字面量 argv 模板 | 有续传 id 时替换 `tail_args`；适用于 Codex 这类需要切换续传子命令的 CLI，支持 `{session_id}` |
 | `expand` | `"<展开器>:<flag>"` | 运行期参数注入；展开器为**闭集**（当前仅 `git_writable_roots`），如 codex 的 `"git_writable_roots:--add-dir"` |
@@ -5941,7 +5942,7 @@ pi · run
 
 ### 内置 agent 的形态速查（codebuddy / qoder / opencode）
 
-`judge` 用途（模型评测的评审调用）与 `generate` 的区别：`generate` 的 `read_only` 只承诺"不写文件"，工具仍能读取任意路径；`judge` 要求 agent 声明**禁用全部内置工具**的开关（`claude` / `codebuddy` / `qoder` 为 `--tools ""`，`pi` 为 `--no-tools`），调用时进程 cwd 是新建的空临时目录。没有这类开关的 agent（`codex`、`kimi`、`opencode`）**不声明** `judge`，评测页把它们标为"不可用"，宁可缺用途也不做无法验证的隔离声明。
+`judge` 用途（模型评测的评审调用）与 `generate` 的区别：`generate` 的 `read_only` 只承诺"不写文件"，工具仍能读取任意路径；`judge` 要求 agent 声明**禁用全部内置工具**的开关（`claude` / `codebuddy` / `qoder` 为 `--tools ""`，`pi` 为 `--no-tools`），调用时进程 cwd 是新建的空临时目录。没有这类开关的 agent（`codex`、`kimi`、`opencode`、`mcode`、`dsh`）**不声明** `judge`，评测页把它们标为"不可用"，宁可缺用途也不做无法验证的隔离声明。
 
 这三个 agent 与前面四个一样是内置默认，注册块见 `config.toml`。它们各自有一处**容易踩的点**，接入或排障前先看这里：
 
@@ -5970,6 +5971,16 @@ pi · run
 | `off` | **不关闭工具**。实测让它写文件照样写入、让它删文件照样删除——`off` 关掉的是**交互式权限询问**（`--help` 写明 `ask requires TUI/ACP`），不是工具能力本身。 |
 
 因此 `mcode` 的注册块统一用 `--permission full`；**不要**把 `--permission off` 当成只读保证来用——那会得到一个假保证。
+
+### 内置 agent 的形态速查（dsh）
+
+`dsh`（DeepSeek Harness CLI）与上面几个一样是内置默认，注册块见 `config.toml`。它有几处**容易踩的点**，接入或排障前先看这里：
+
+| agent | bin | 形态要点 |
+|---|---|---|
+| `dsh` | `dsh` | 非交互入口是 headless 表层：`dsh --profile headless --json`。提示词走 stdin（`-` 必须是唯一任务参数），避免长 prompt 撑爆 argv。事件流是 `session` / `status` / `text` / `thinking` / `tool_call` / `tool_result` / `final` / `error`，由内置 `dsh-json-lines` 协议渲染并提取顶层 `sessionId`。配置在 `~/.dsh/`。**不声明 `judge`**（没有禁用全部内置工具的开关）；**声明续传**：`--session-id` 沿用该 id 的持久化会话，要求同 cwd / 同 agent preset 且无存活 owner，跨 worktree 或换 preset 的恢复会在任务运行前 fail-fast。 |
+
+**权限档与凭据前置**：`--permission-mode` 的合法值只有 `read-only` / `workspace-write` / `danger-full-access`。注意 `kc agent doctor` 的沙箱提示只认 `--sandbox` / `--ask-for-approval` 这类旗标，它不认识 `--permission-mode`，所以对 dsh 仍会打印 "writable but declares no sandbox/approval flag"——这是检测器口径，不代表注册块漏了权限档。`run` / `deliberate` / `repl` 用 `danger-full-access` + `--approval-policy never` 才能无人值守；`generate` 用 `read-only` 沙箱预设，并按该预设声明 `read_only_enforced = true`。dsh 的模型凭据不给 kc 读取：它要求 `DEEPSEEK_API_KEY` 存在于 **kc 进程环境**里（kc 的子进程环境是 denylist 净化档，凭据变量原样透传），缺失时会在模型调用前以 `MISSING_CREDENTIAL` 失败并退出 1，不会挂起。
 
 ### 未声明用途的行为
 
