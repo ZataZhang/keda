@@ -815,12 +815,14 @@ test.describe('backlog PRD issue live output (mocked API)', () => {
     await mockConsoleApi(page)
 
     const seenRequests: string[] = []
-    let pollCount = 0
+    let incrementalPollCount = 0
     await page.route(ISSUE_LOG_URL_PATTERN, (route) => {
       const url = route.request().url()
       seenRequests.push(url)
-      pollCount += 1
       const isFirst = !url.includes('attempt_id=')
+      if (!isFirst) {
+        incrementalPollCount += 1
+      }
       const payload = isFirst
         ? {
             repo_id: 'keda-main',
@@ -838,7 +840,7 @@ test.describe('backlog PRD issue live output (mocked API)', () => {
             status: 'ok',
             attempt_id: 'issue-42-20260929-100000.log',
             latest_attempt_id: 'issue-42-20260929-100000.log',
-            content: pollCount === 2 ? 'agent finished\n' : '',
+            content: incrementalPollCount === 1 ? 'agent finished\n' : '',
             next_offset: 200,
             eof: true,
           }
@@ -861,6 +863,24 @@ test.describe('backlog PRD issue live output (mocked API)', () => {
     await expect(
       page.getByTestId('prd-issue-output-content'),
     ).toContainText('agent finished', { timeout: 15_000 })
+    await expect(
+      page.getByTestId('prd-issue-output-latest-tab'),
+    ).toHaveAttribute('aria-pressed', 'true')
+    const latestOutputText = await page
+      .getByTestId('prd-issue-output-content')
+      .innerText()
+    expect(latestOutputText.indexOf('agent finished')).toBeLessThan(
+      latestOutputText.indexOf('agent started'),
+    )
+
+    await page.getByTestId('prd-issue-output-full-log-tab').click()
+    const fullLogText = await page
+      .getByTestId('prd-issue-output-content')
+      .innerText()
+    expect(fullLogText.indexOf('agent started')).toBeLessThan(
+      fullLogText.indexOf('agent finished'),
+    )
+
     const followUp = seenRequests.find((url) => url.includes('attempt_id='))
     expect(followUp).toBeTruthy()
     expect(followUp).toContain('attempt_id=issue-42-20260929-100000.log')

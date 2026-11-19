@@ -38,6 +38,7 @@
 ## 当前目录
 
 - `src/backend/api/app.py`：FastAPI 应用汇总入口（路由、中间件、静态产物）。
+- `src/backend/api/cli_parsed_commands/runner.py`：运行、恢复与 daemon CLI 入口编排；发布旁路的 Issue 前置检查集中在同目录的 `runner_publish_guards.py`。
 - `src/backend/core/` 的装配 facade（如 `use_cases/agent_runner_factory.py`）：
   静态导入 `engines/` / `infrastructure/` 实现并转发给 `api/`，只做对象创建与依赖连接。
 - `src/backend/main.py`：兼容导出与进程启动薄入口。
