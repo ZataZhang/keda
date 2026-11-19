@@ -223,9 +223,9 @@ No frontend impact：改动只涉及 CLI、runner 后端和文字操作指南，
 - Public behavior and contracts: 新选项显式启用；默认 main 发布与 `--no-publish-prd` 保持原语义；冲突拒绝覆盖；失败 Issue 不会被提前 ready。
 - Related PRD status: #398/#399 未被读取或修改；#398 保留为后续人工验收与恢复流程。
 - Requirements and risks: 四项实现要求均由对应 rv 证据覆盖；RV-3 的 Agent fixture 在观察实际 worktree 后退出，因此不宣称已验证付费 Agent 实现或 Draft PR 发布。
-- Validation blocker: 四项 PRD 行为验收在当前源代码 head `a914f022` 上均有通过的最终代码树证据；PR 集成仍被 `agent_runner_orchestration_runtime.py` 的 main 分支冲突阻塞，Round 4 verifier 不将此树视为 integration-ready。
-- Validation follow-up: 集成冲突按获准的分支工作流解决后，需在新 head 重跑四项 RV 与独立 verifier 并刷新 PR 元数据；随后由人工按 9.1 检查真实 #398，Human-Confirmed 项保持未勾选，归档由 runner 处理。
-- 自动验证结果：当前源代码 head `a914f022` 上 `kc evidence check` 4/4；定向 pytest 176 passed；全文件 lint（除 `check-test-flag` 外）通过；MkDocs build 通过。独立 verifier Round 4 对实现与 RV 证据判为 `PASS`，但单独记录了集成阻塞。
+- Validation blocker: PRD 行为验证没有未通过项；仍未解决的是 PR 集成状态。当前代码 head `e2ac3012e589adef357c6e605e2dbea4d91c63ec` 与本地 `main` (`51461449cb1069113b3d6a827297f92c16bcff2f`) 的三方内容合并检查无冲突（`git merge-tree --write-tree main HEAD` 返回树 `f49ac9ffc89af8eae3b97aa0bdc0a2c6cd2750e2`），先前报告的 runtime 文件内容冲突已解决。但提交历史仍分叉 10 ahead / 15 behind，merge base 为 `f56f2d1fd1e7b3ee6f1367c84bd7ec8487b37dde`；PR #405 的远端 base SHA 仍是旧值 `6dceaa0ba94c285776e76109a324051d1dd04d79`。因此不能把旧 base 上的 `mergeable=true` 或本地内容合并检查表述成已经同步到当前 `main` 或完成 GitHub 集成验证。
+- Validation follow-up: 在允许的分支工作流中将 PR 分支历史同步到当前 `main`，更新 PR #405 正文与验证评论到当前 head/base 和最新证据，再检查 GitHub 对新 base 的集成状态；随后由人工按 9.1 检查真实 #398，Human-Confirmed 项保持未勾选。当前任务的 worktree-only / no-merge / no-push 限制下未执行这些远端或历史操作。
+- 自动验证结果：当前代码 head `e2ac3012e589adef357c6e605e2dbea4d91c63ec` 上最新 `kc evidence check` 4/4；五个相关测试文件关闭 testmon 后 203 passed；Round 5 独立 verifier 对当前源代码和测试树判为 `PASS`，其文件哈希与此 head 相同。`just lint --reuse` 通过；本次 `just lint --full` 与 `just test` 分别因无未提交代码变更及已有 head/tree 成功标记而跳过相应全量检查，RV-4 的兼容性门禁仍通过并包含 lint 与 MkDocs build 结果。远端 PR 正文/评论仍是旧快照，详见证据报告。
 
 ## 14. Change Log
 
@@ -270,3 +270,11 @@ No frontend impact：改动只涉及 CLI、runner 后端和文字操作指南，
 - Reason: tie the review response to the current code snapshot and refresh the evidence that had drifted after later source repairs.
 - Impact: no product source changed; all four behavior oracles still pass. The branch remains 7 commits ahead / 15 behind main with one real orchestration-runtime merge conflict; this evidence does not claim that the conflict is resolved or the PR integration-ready.
 - Review: independent verifier Round 4 `PASS` for current implementation/RV evidence; integration remains blocked pending an allowed branch integration and a new validation snapshot.
+
+### Reconcile current main and review metadata
+- Type: validation / evidence / documentation
+- Before: Final Reconciliation still described the old runtime conflict and `a914f022` validation snapshot; PR #405 and its validation comment still referenced older head/base and test evidence.
+- After: Final Reconciliation points to current head `e2ac3012`, records a clean content-level three-way merge check against `main` `51461449`, and separately discloses the remaining 10-ahead / 15-behind history divergence and stale remote PR base metadata. Latest local evidence reports four RV items passed and 203 targeted tests passed.
+- Reason: distinguish the resolved file-content conflict from the still-unsynchronized branch history, and keep local validation claims tied to the current tree.
+- Impact: source behavior and human acceptance scope are unchanged; Git history and GitHub metadata remain untouched under the worktree-only/no-merge/no-push constraints. The real #398 human check remains open.
+- Review: Round 5 independent verifier `PASS` covers the unchanged current source/test hashes; the fresh local `git merge-tree` check is not a history sync or GitHub integration verdict.
