@@ -489,7 +489,8 @@ def attach_prd_lifecycle_overrides(
         git_remote: runner 配置的 Git remote 名称。
 
     Returns:
-        回填了覆盖字段的 Issue；无覆盖或读取失败时返回原对象。
+        回填了覆盖字段的 Issue；主检出 PRD 无覆盖、读取失败或覆盖块解析失败时返回原对象。
+        已发布任务分支 PRD 的获取或读取失败会抛出异常；其覆盖块解析失败仍返回原对象。
     """
     if repo_path is None:
         return issue

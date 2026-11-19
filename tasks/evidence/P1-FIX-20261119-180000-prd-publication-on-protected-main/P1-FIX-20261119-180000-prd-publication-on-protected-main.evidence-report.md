@@ -6,7 +6,7 @@
 
 - PRD：[`tasks/archive/P1-FIX-20261119-180000-prd-publication-on-protected-main.md`](../../archive/P1-FIX-20261119-180000-prd-publication-on-protected-main.md)。
 - GitHub Issue：[#400](https://github.com/ZataZhang/keda/issues/400)。
-- PR / CI：[Draft PR #405](https://github.com/ZataZhang/keda/pull/405)。已发布 head `74ba5cb248dcf8ae73f5106ba4c46df4f2cc9afd` 的 `Validate Template` 因单文件非空行数超限失败；本轮已在修复工作树通过同一硬行数检查。GitHub 必需检查需在修复提交发布后重跑；本轮按要求不推送。
+- PR / CI：[Draft PR #405](https://github.com/ZataZhang/keda/pull/405)。原始发布 head `74ba5cb248dcf8ae73f5106ba4c46df4f2cc9afd` 的 `Validate Template` 曾因单文件非空行数超限失败；后续拆出 handoff predicate 后，本地硬行数检查通过，文件为 998 个非空行。GitHub 必需检查仍需在最终提交发布后重跑；本任务不推送。
 - 清单入口：`just prd review P1-FIX-20261119-180000-prd-publication-on-protected-main.md`。
 - 执行侧已交叉核对临时 Issue #42 的创建、分支发布、恢复、幂等和 ready 顺序；没有读取或修改真实 #398/#399。上表仍需维护者按真实 #398 状态验收。
 
@@ -57,10 +57,13 @@ All Git operations used temporary repositories and real Git processes. GitHub Is
 
 ## Review repair snapshot — 2026-11-20
 
-- Rebased worktree head before this review patch: `434f9977b2a3e7387b6d7c74fa4f19f9dc7e2c4e` (`fix(issue): keep orchestration runtime under line limit`). The lifecycle-resolution source patch validated here has SHA-256 `38b6770010fc827a70e982f9c71dbe9dba58692921f9bfaadfdd8d0e749603cd`.
-- `src/backend/core/use_cases/agent_runner_orchestration_runtime.py` remains at **998 non-empty lines**; the line-limit hook passed in both lint runs.
-- `UV_CACHE_DIR=/private/tmp/kc-issue-400-uv-cache just lint --reuse`: passed.
-- `UV_CACHE_DIR=/private/tmp/kc-issue-400-uv-cache SKIP=check-test-flag just lint --full`: passed; only `check-test-flag` was skipped because this worktree is unstaged and pre-commit hides unstaged files.
-- `UV_CACHE_DIR=/private/tmp/kc-issue-400-uv-cache just test`: **78 passed, 340 deselected** in 33.34 seconds. `git diff --check` passed.
-- The existing RV-1 through RV-4 evidence and Round 3 independent verifier remain the feature-level validation record; those four RV scripts were not replayed for this docstring-only correction. This snapshot does not claim a new independent verifier pass.
-- The GitHub PR #405 description and validation comment are outside this worktree. They remain pending refresh by the runner after it commits and publishes this snapshot; no GitHub state was changed here.
+- Review input identifies PR #405 head `3177b598` while its description still names verified head `a856cf8` and its evidence comment is pinned to `74ba5cb`. This worktree starts at `3177b598d19c72e927908522e59fc1711e4f4274`; the final local source/evidence diff is pending the runner-assigned commit SHA.
+- The branch still diverges from local `main` (`51461449`): merge base `f56f2d1`, with 5 branch-only and 15 main-only commits. The reported conflict is valid. Rebase/merge and PR metadata edits are not performed under this task's worktree-only, no-merge, no-staging/commit, and no-push constraints; do not treat this snapshot as an updated GitHub PR description/comment or as conflict-resolved.
+- Corrected `attach_prd_lifecycle_overrides()`'s `Returns` contract: main-checkout read failures return the original Issue; failures fetching or reading a published task-branch PRD raise; parse failures return the original Issue.
+- `src/backend/core/use_cases/agent_runner_orchestration_runtime.py` has **998 non-empty lines**; the previous extraction finding is already resolved and remains within the hard limit.
+- `UV_CACHE_DIR=/private/tmp/kc-issue-400-uv-cache just lint --reuse`: passed, including copy detection, duplicate-code, architecture, guideline consistency, and max-file-lines checks.
+- `UV_CACHE_DIR=/private/tmp/kc-issue-400-uv-cache SKIP=check-test-flag just lint --full`: passed; only `check-test-flag` was skipped because pre-commit hides unstaged files and changes its marker tree.
+- `UV_CACHE_DIR=/private/tmp/kc-issue-400-uv-cache just test`: **78 passed, 340 deselected** in 33.99 seconds.
+- `git diff --check`: passed on the final worktree diff. Corrected `lifecycle_agent_resolution.py` SHA-256: `4bf17a9af070c8340b666155fefc91ddfd1e74e78e6d51a14eadffea27a2feaf`. The source correction and these local checks are tied to the runner-assigned commit; no post-repair commit SHA is claimed.
+- The RV-1 through RV-4 scenarios and Round 3 verifier remain historical feature-level evidence; they were not re-described as newly run for this docstring correction, and this snapshot does not claim a new independent verifier pass.
+- PR #405's description and evidence comment require refresh by the runner after the branch conflict is resolved and a new snapshot is published. This task does not alter GitHub state.
