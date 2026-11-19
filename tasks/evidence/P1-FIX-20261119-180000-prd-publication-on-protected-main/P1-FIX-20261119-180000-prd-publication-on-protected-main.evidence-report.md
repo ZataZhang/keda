@@ -54,3 +54,13 @@ All Git operations used temporary repositories and real Git processes. GitHub Is
 - `just test`: **239 passed, 562 deselected**.
 - `just lint --reuse` and `SKIP=check-test-flag just lint --full` passed; the latter skipped only the unstaged-tree marker hook. `git diff --check` passed.
 - This repair validation ran on a worktree based on the published PR head `74ba5cb248dcf8ae73f5106ba4c46df4f2cc9afd`. The issue runner assigns the repair commit SHA after this request; no post-repair commit hash is claimed here. The archived RV-1 through RV-4 feature evidence above remains intact.
+
+## Review repair snapshot — 2026-11-20
+
+- Rebased worktree head before this review patch: `434f9977b2a3e7387b6d7c74fa4f19f9dc7e2c4e` (`fix(issue): keep orchestration runtime under line limit`). The lifecycle-resolution source patch validated here has SHA-256 `38b6770010fc827a70e982f9c71dbe9dba58692921f9bfaadfdd8d0e749603cd`.
+- `src/backend/core/use_cases/agent_runner_orchestration_runtime.py` remains at **998 non-empty lines**; the line-limit hook passed in both lint runs.
+- `UV_CACHE_DIR=/private/tmp/kc-issue-400-uv-cache just lint --reuse`: passed.
+- `UV_CACHE_DIR=/private/tmp/kc-issue-400-uv-cache SKIP=check-test-flag just lint --full`: passed; only `check-test-flag` was skipped because this worktree is unstaged and pre-commit hides unstaged files.
+- `UV_CACHE_DIR=/private/tmp/kc-issue-400-uv-cache just test`: **78 passed, 340 deselected** in 33.34 seconds. `git diff --check` passed.
+- The existing RV-1 through RV-4 evidence and Round 3 independent verifier remain the feature-level validation record; those four RV scripts were not replayed for this docstring-only correction. This snapshot does not claim a new independent verifier pass.
+- The GitHub PR #405 description and validation comment are outside this worktree. They remain pending refresh by the runner after it commits and publishes this snapshot; no GitHub state was changed here.

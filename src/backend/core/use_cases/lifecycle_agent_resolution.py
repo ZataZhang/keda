@@ -476,10 +476,11 @@ def attach_prd_lifecycle_overrides(
 ) -> IssueSummary:
     """从该 Issue 引用的 PRD 文件解析头部覆盖，回填到 ``IssueSummary``。
 
-    最佳努力：PRD 路径缺失、文件不存在或解析失败时原样返回该 Issue（记一条 warning），
-    绝不让"读 PRD 头部"这一步打断流水线。同时解析 ``lifecycle_agents`` 与
-    ``lifecycle_presets`` 两个块，分别回填到 ``lifecycle_overrides`` 与
-    ``lifecycle_preset_overrides``。
+    主检出 PRD 缺失或读取失败、PRD 覆盖块解析失败时，记录 warning 并原样返回该 Issue。
+    如果 Issue 已发布到任务分支，则该分支是执行输入的权威来源；获取或读取分支 PRD
+    失败会重新抛出，阻止流水线继续，不能静默回退到主检出文件。成功读取后，同时解析
+    ``lifecycle_agents`` 与 ``lifecycle_presets`` 两个块，分别回填到
+    ``lifecycle_overrides`` 与 ``lifecycle_preset_overrides``。
 
     Args:
         issue: 待处理的 Issue。
