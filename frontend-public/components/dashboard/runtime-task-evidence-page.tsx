@@ -10,6 +10,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { handleExternalLinkClick } from "@/lib/open-external";
 
 type HumanReviewPageState =
   | { status: "loading" }
@@ -213,6 +214,20 @@ export function RuntimeTaskHumanReviewPage({
             <Markdown
               remarkPlugins={[remarkGfm]}
               components={{
+                a: ({ href, title, children }) => {
+                  const isExternal = /^(?:https?:|\/\/)/i.test(href ?? "");
+                  return (
+                    <a
+                      href={href}
+                      title={title}
+                      target={isExternal ? "_blank" : undefined}
+                      rel={isExternal ? "noreferrer" : undefined}
+                      onClick={isExternal ? handleExternalLinkClick : undefined}
+                    >
+                      {children}
+                    </a>
+                  );
+                },
                 img: ({ src, alt }) => {
                   const resolved = resolveImageSrc(src, state.imageBase);
                   const index = images.indexOf(resolved);

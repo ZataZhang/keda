@@ -1,4 +1,5 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
+import type { MouseEvent } from "react";
 
 /**
  * 在系统默认浏览器中打开外链。
@@ -19,4 +20,17 @@ export async function openExternalUrl(url: string): Promise<void> {
     }
   }
   window.open(url, "_blank", "noopener,noreferrer");
+}
+
+/**
+ * 打开外链，同时保留修饰键点击的原生行为。
+ *
+ * @param event - 外链的点击事件。
+ */
+export function handleExternalLinkClick(event: MouseEvent<HTMLAnchorElement>): void {
+  if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+    return;
+  }
+  event.preventDefault();
+  void openExternalUrl(event.currentTarget.href);
 }

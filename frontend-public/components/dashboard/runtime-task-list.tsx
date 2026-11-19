@@ -17,7 +17,7 @@ import type { BadgeVariant } from "@/components/ui/badge";
 import { formatLifecycleDuration } from "@/components/backlog/prd-lifecycle-format";
 import { prettyLabel } from "@/components/agent-runner/label-variant";
 import type { RuntimeTaskEntry, RuntimeTaskStatus } from "@/lib/api/types";
-import { openExternalUrl } from "@/lib/open-external";
+import { handleExternalLinkClick } from "@/lib/open-external";
 import { cn, formatLocalDateTime } from "@/lib/utils";
 
 import { RuntimeTaskHumanReviewPage } from "./runtime-task-evidence-page";
@@ -563,13 +563,7 @@ function ExternalLinkPill({
         href={href}
         target="_blank"
         rel="noreferrer"
-        onClick={(event) => {
-          if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
-            return;
-          }
-          event.preventDefault();
-          void openExternalUrl(href);
-        }}
+        onClick={handleExternalLinkClick}
         className={cn("inline-flex items-center px-2 py-0.5", toneClass.segment)}
         data-testid={linkTestId}
       >
