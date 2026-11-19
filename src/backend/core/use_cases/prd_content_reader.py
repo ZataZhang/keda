@@ -37,6 +37,51 @@ def resolve_prd_content_path(repo_path: Path, relative_prd_path: str) -> Path:
         PrdContentError: 传入绝对路径、后缀不是 ``.md``、解析后落在白名单目录
             之外，或目标文件不存在。
     """
+    resolved_path = _resolve_allowed_prd_content_path(repo_path, relative_prd_path)
+    if not resolved_path.is_file():
+        raise PrdContentError("PRD 文件不存在。")
+    return resolved_path
+
+
+def resolve_prd_content_reference_path(repo_path: Path, relative_prd_path: str) -> str:
+    """解析可能因归档而过期的 PRD 引用，并返回用于读取的仓库相对路径。
+
+    Issue 与生命周期账本会保留 PRD 创建时的 ``tasks/pending/`` 路径；文件归档后，
+    该引用不会自动改写。主仓库归档副本存在时返回 archive 路径；主仓库中两处都没有时，
+    保留合法的 pending 引用，让上层继续在匹配的执行工作区查找副本。
+
+    Args:
+        repo_path: 仓库根目录。
+        relative_prd_path: 相对仓库根目录的 PRD 路径。
+
+    Returns:
+        PRD 仓库相对路径；可能是原引用，以供上层继续检查执行工作区。
+
+    Raises:
+        PrdContentError: 路径不在允许目录或后缀非法。
+    """
+    requested_path = Path(relative_prd_path)
+    resolved_path = _resolve_allowed_prd_content_path(repo_path, relative_prd_path)
+    if resolved_path.is_file():
+        return requested_path.as_posix()
+    if resolved_path.exists():
+        raise PrdContentError("PRD 文件不存在。")
+
+    path_parts = requested_path.parts
+    if len(path_parts) < 3 or path_parts[:2] != ("tasks", "pending") or ".." in path_parts:
+        raise PrdContentError("PRD 文件不存在。")
+
+    archive_relative_path = Path("tasks", "archive", *path_parts[2:])
+    archive_path = _resolve_allowed_prd_content_path(repo_path, archive_relative_path.as_posix())
+    if archive_path.is_file():
+        return archive_relative_path.as_posix()
+    if archive_path.exists():
+        raise PrdContentError("PRD 文件不存在。")
+    return requested_path.as_posix()
+
+
+def _resolve_allowed_prd_content_path(repo_path: Path, relative_prd_path: str | Path) -> Path:
+    """校验并解析位于 PRD 白名单目录中的相对路径，不检查文件是否存在。"""
     requested_path = Path(relative_prd_path)
     if requested_path.is_absolute():
         raise PrdContentError("PRD 路径必须是相对仓库根目录的相对路径。")
@@ -50,8 +95,6 @@ def resolve_prd_content_path(repo_path: Path, relative_prd_path: str) -> Path:
     resolved_path = (repo_path / requested_path).resolve()
     if not any(resolved_path.is_relative_to(allowed) for allowed in allowed_directories):
         raise PrdContentError("PRD 路径必须位于 tasks/pending/ 或 tasks/archive/ 内。")
-    if not resolved_path.is_file():
-        raise PrdContentError("PRD 文件不存在。")
     return resolved_path
 
 

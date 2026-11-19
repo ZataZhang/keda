@@ -4,8 +4,9 @@
 
 - **只读复用**：任务身份与标签来自监控快照（:mod:`monitor_snapshots`），运行终态
   来自运行账本（``IRunHistoryStore``），阶段 / preset / 模型来自 attempt 账本，
-  PRD 关联来自生命周期账本（``IPrdLifecycleStore``），未收口调用执行器来自既有
-  invocation 账本。本模块不打开 GitHub、不读日志文件、不算改动树，也不新增数据库表。
+  PRD 关联来自生命周期账本（``IPrdLifecycleStore``），最近流水线节点与未收口调用
+  执行器来自既有 invocation 账本。本模块不打开 GitHub、不读日志文件、不算改动树，
+  也不新增数据库表。
 - **改动树触达读数不在这里**：唯一来源仍是现有
   ``GET /api/v1/agent-runner/backlog/prds/{encoded_path}/progress`` 契约，摘要只带
   ``prd_path``，由展示侧按需取数，避免第二份检测实现漂移。
@@ -26,6 +27,7 @@ from backend.core.shared.interfaces.runner_console import (
     IInvocationEventStore,
     IPrdLifecycleStore,
     IRunHistoryStore,
+    InvocationEventRecord,
     PrdLifecycleRunRecord,
     RunRecord,
 )
@@ -42,7 +44,10 @@ from backend.core.use_cases.agent_invocation_tracing import (
     build_invocation_timeline,
     resolve_invocation_store,
 )
-from backend.core.use_cases.runtime_failure_diagnosis import diagnose_runtime_failure
+from backend.core.use_cases.runtime_failure_diagnosis import (
+    diagnose_runtime_failure,
+    lifecycle_stage_for_invocation_phase,
+)
 from backend.core.use_cases.monitor_snapshots import MonitorSnapshotOverview, SnapshotOverviewResult
 from backend.core.use_cases.runtime_task_observation import (
     SOURCE_PRD_LIFECYCLE,
@@ -220,16 +225,17 @@ def _latest_human_input_summary(issue_entry: Mapping[str, Any]) -> str | None:
     return None
 
 
-def _pr_identity(issue_entry: Mapping[str, Any]) -> tuple[str | None, int | None]:
-    """从监控快照条目里取 PR 链接与编号；没有 PR 时返回两个 ``None``。"""
+def _pr_observation(issue_entry: Mapping[str, Any]) -> tuple[str | None, int | None, bool | None]:
+    """读取监控快照中的 PR 链接、编号和草稿状态。"""
     raw_pr = issue_entry.get("pr")
     if not isinstance(raw_pr, Mapping):
-        return None, None
+        return None, None, None
     raw_url = raw_pr.get("url")
     raw_number = raw_pr.get("number")
     pr_url = raw_url if isinstance(raw_url, str) and raw_url else None
     pr_number = raw_number if isinstance(raw_number, int) else None
-    return pr_url, pr_number
+    raw_draft = raw_pr.get("is_draft")
+    return pr_url, pr_number, raw_draft if isinstance(raw_draft, bool) else None
 
 
 def _snapshot_task(
@@ -251,12 +257,29 @@ def _snapshot_task(
     if not isinstance(issue_number, int):
         return None
     labels = tuple(label for label in (issue_entry.get("labels") or ()) if isinstance(label, str))
+    pr_url, pr_number, pr_is_draft = _pr_observation(issue_entry)
     raw_anomaly_types = issue_entry.get("anomaly_types")
     anomaly_types = (
-        tuple(anomaly_type for anomaly_type in raw_anomaly_types if isinstance(anomaly_type, str))
+        tuple(
+            anomaly_type
+            for anomaly_type in raw_anomaly_types
+            if isinstance(anomaly_type, str)
+            and (anomaly_type != "label_pr_mismatch" or pr_is_draft is False)
+        )
         if isinstance(raw_anomaly_types, (list, tuple))
         else ()
     )
+    pr_label_warning = None
+    if "label_pr_mismatch" in anomaly_types:
+        for anomaly_entry in issue_entry.get("anomalies") or ():
+            if (
+                isinstance(anomaly_entry, Mapping)
+                and anomaly_entry.get("type") == "label_pr_mismatch"
+            ):
+                warning_message = anomaly_entry.get("message")
+                if isinstance(warning_message, str) and warning_message:
+                    pr_label_warning = warning_message
+                    break
     issue_is_closed = str(issue_entry.get("state") or "").lower() == "closed"
     if issue_is_closed:
         status = RuntimeTaskStatus.CLOSED
@@ -315,7 +338,6 @@ def _snapshot_task(
 
     title = issue_entry.get("title")
     url = issue_entry.get("url")
-    pr_url, pr_number = _pr_identity(issue_entry)
     return RuntimeTask(
         repo_id=repo_id,
         issue_number=issue_number,
@@ -324,6 +346,8 @@ def _snapshot_task(
         issue_url=url if isinstance(url, str) and url else None,
         pr_url=pr_url,
         pr_number=pr_number,
+        pr_is_draft=pr_is_draft,
+        pr_label_warning=pr_label_warning,
         status=status,
         status_reason=status_reason,
         blocking_reason=blocking_reason,
@@ -456,14 +480,14 @@ def _enrich_from_attempt(
     )
 
 
-def _enrich_from_unclosed_invocation(
+def _enrich_from_latest_invocation(
     task: RuntimeTask,
     *,
     invocation_store: IInvocationEventStore | None,
     unavailable_sources: set[str],
 ) -> RuntimeTask:
-    """用当前会话中最近一条未收口调用补出实际执行器，不推测进程存活。"""
-    if task.status is not RuntimeTaskStatus.RUNNING:
+    """从最近调用补出六阶段节点；未收口调用只补执行器信息，不推测进程存活。"""
+    if not task.started_at:
         return task
     session_started_at = parse_runtime_timestamp(task.started_at)
     if session_started_at is None:
@@ -477,7 +501,7 @@ def _enrich_from_unclosed_invocation(
             repo_id=task.repo_id,
             issue_number=task.issue_number,
         )
-    except Exception as exc:  # noqa: BLE001 - 调用账本读失败只降级当前执行器字段。
+    except Exception as exc:  # noqa: BLE001 - 调用账本读失败只降级阶段与执行器字段。
         _logger.warning(
             "Runtime summary failed to read invocation ledger for %s#%d: %s",
             task.repo_id,
@@ -487,22 +511,29 @@ def _enrich_from_unclosed_invocation(
         unavailable_sources.add(SOURCE_INVOCATION_LEDGER)
         return task
 
-    session_events = [
-        event
-        for event in invocation_events
-        if (event_time := parse_runtime_timestamp(event.occurred_at)) is not None
-        and event_time >= session_started_at
-    ]
+    session_finished_at = parse_runtime_timestamp(task.finished_at)
+    session_events: list[InvocationEventRecord] = []
+    for event in invocation_events:
+        event_time = parse_runtime_timestamp(event.occurred_at)
+        if event_time is None or event_time < session_started_at:
+            continue
+        if session_finished_at is not None and event_time > session_finished_at:
+            continue
+        session_events.append(event)
     invocation_rows = build_invocation_timeline(session_events)
     latest_invocation = invocation_rows[-1] if invocation_rows else None
-    if latest_invocation is None or latest_invocation.outcome != OUTCOME_UNCLOSED:
+    if latest_invocation is None:
         return task
 
-    return replace(
-        task,
-        unclosed_invocation_executor=latest_invocation.executor,
-        unclosed_invocation_model=latest_invocation.requested_model,
-    )
+    task_updates: dict[str, str | None] = {
+        "pipeline_stage": lifecycle_stage_for_invocation_phase(latest_invocation.phase)
+    }
+    if task.status is RuntimeTaskStatus.RUNNING and latest_invocation.outcome == OUTCOME_UNCLOSED:
+        task_updates.update(
+            unclosed_invocation_executor=latest_invocation.executor,
+            unclosed_invocation_model=latest_invocation.requested_model,
+        )
+    return replace(task, **task_updates)
 
 
 def _enrich_from_failed_invocation(
@@ -548,6 +579,7 @@ def _enrich_from_failed_invocation(
         return task
     return replace(
         task,
+        pipeline_stage=diagnosis.stage,
         failure_stage=diagnosis.stage,
         failure_reason=diagnosis.reason,
         failed_executors=diagnosis.failed_executors,
@@ -737,7 +769,7 @@ def build_runtime_task_summary(
     invocation_store = resolve_invocation_store(run_history_store)
     visible_tasks = tuple(
         _enrich_from_failed_invocation(
-            _enrich_from_unclosed_invocation(
+            _enrich_from_latest_invocation(
                 task,
                 invocation_store=invocation_store,
                 unavailable_sources=unavailable_sources,

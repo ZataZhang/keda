@@ -4362,12 +4362,16 @@ macOS 菜单栏版需要从 `~/Applications/KedaCode.app` 启动，点击顶部�
 
 | 异常类型 | 触发条件 | severity | 推荐 CLI |
 |---|---|---|---|
-| `label_pr_mismatch` | PR 已创建但 Issue label 不在 `agent/supervising` / `agent/automated-review-passed` / `agent/blocked` / `agent/failed` 中 | warning | `kc labels sync`、`kc supervise --dry-run` |
+| `label_pr_mismatch` | 确认关联 PR 已是非草稿，Issue 标签仍不属于该仓库的监督、审核通过、阻塞或失败状态 | warning | — |
 | `pr_dirty_in_review` | PR `mergeable_state` 为 dirty/conflicted 且 label 是 `agent/automated-review-passed` | error | `kc supervise`、`kc run --max-issues 1` |
 | `dirty_worktree_mismatch` | worktree 有未提交变更但 label 不是 `agent/running` | warning | `kc run --dry-run`、`git status` |
 | `event_label_mismatch` | 最新 `kc:event` phase 隐含的状态与当前 label 不一致 | warning | `kc labels sync` |
 
 Overview 还会按 severity 汇总 `anomaly_count` 和 `anomaly_summary`（`warning` / `error`），并把 `has_anomaly` 标在对应 Issue 行上。
+
+Runner 可以在独立校验和审核前创建 Draft PR。值守看板在链接旁显示「草稿」，草稿或草稿状态未知时不触发 `label_pr_mismatch`。
+Runner 完成发布交接后切换到监督，GitHub 的 PR 可以在等待合并队列期间继续保持草稿。
+确认 PR 已转为 Ready 后若仍有标签不一致，告警会写明 PR 编号和当前 Issue 标签。
 
 ### 事件时间线
 
@@ -6236,6 +6240,7 @@ Issue 状态与本地时间，并明确标注快照已过期。下一次完整�
 释放本机锁后，daemon 的既有僵尸 attempt 对账会按 claim 租约、worktree 与 attempt 证据恢复或
 重新入队；它不会把 GitHub 中断当成 Agent 失败。
 
-阶段徽章标为「最近阶段」，说明只解释记录的环节，不宣称当前仍在执行或预告下一步。
+运行看板与桌面小窗的阶段徽章只显示生命周期矩阵中的六个流水线节点：实现、修复、收尾、校验、审核、监督。节点来自最近一次实际 Agent 调用的阶段映射；粗粒度的「执行中」等生命周期状态不当作节点展示。调用阶段缺失或不属于这六项时，不显示阶段徽章，也不猜测下一步。
+PRD 归档只说明代码已落地，不会自动把当前节点改成「校验」；只有最近调用进入独立 verifier 阶段时才显示「校验」。运行状态徽章仍单独呈现任务状态，节点只说明最近调用属于哪个环节，不证明进程此刻仍存活。
 没有阶段记录时不显示占位徽章；待执行任务提示等待认领，历史终态任务省略缺失阶段说明。
 历史卡片展示上次运行结果；Issue 已关闭不等于 PR 已合并，缺少关闭原因时明确标注「关闭原因未记录」。

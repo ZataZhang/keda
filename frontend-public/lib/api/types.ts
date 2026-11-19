@@ -54,6 +54,7 @@ export type WorktreeStatus = {
 export type PullRequestContext = {
   number: number | null;
   url: string;
+  is_draft?: boolean | null;
   branch: string;
   head_sha: string;
   base_sha: string;
@@ -1614,6 +1615,15 @@ export type RuntimeTaskStatus =
   | "closed"
   | "unknown";
 
+/** Issue 运行流水线中的六个 Agent 节点。 */
+export type RuntimePipelineStage =
+  | "implementation"
+  | "fix"
+  | "closeout"
+  | "verifier"
+  | "review"
+  | "supervisor";
+
 /**
  * 看板上的一个 Issue 运行任务。
  *
@@ -1635,6 +1645,10 @@ export type RuntimeTaskEntry = {
   pr_url?: string | null;
   /** PR 编号；链接无法解析编号时为 null。 */
   pr_number?: number | null;
+  /** GitHub 的 PR 草稿状态；旧快照或未观测时为空。 */
+  pr_is_draft?: boolean | null;
+  /** 已确认 PR 与 Issue 标签不一致时的人读说明。 */
+  pr_label_warning?: string | null;
   status: RuntimeTaskStatus;
   /** 当前状态的直接来源，例如监控标签或 Issue 关闭状态。 */
   status_reason: string | null;
@@ -1648,6 +1662,8 @@ export type RuntimeTaskEntry = {
   last_observed_at?: string | null;
   /** 监控异常类型，与状态来源分开呈现。 */
   anomaly_types: AnomalyType[];
+  /** 最近一次 Agent 调用对应的主流水线节点；只取六个配置节点，无法映射时为空。 */
+  pipeline_stage: RuntimePipelineStage | null;
   phase: string | null;
   agent: string | null;
   /** 当前会话最近一条尚无结束事件的实际调用执行器；缺少调用记录时为空。 */

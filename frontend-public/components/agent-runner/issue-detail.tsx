@@ -169,7 +169,7 @@ function PrBlock({ issue }: { issue: IssueMonitoringSnapshot }) {
   return (
     <div className="rounded-md border border-slate-200 p-3 text-sm dark:border-slate-800">
       <div className="flex items-center justify-between font-medium text-slate-700 dark:text-slate-200">
-        <span>PR #{pr.number ?? "?"}</span>
+        <span>PR #{pr.number ?? "?"}{pr.is_draft === true ? " · 草稿" : ""}</span>
         <Badge
           variant={
             pr.mergeable === false

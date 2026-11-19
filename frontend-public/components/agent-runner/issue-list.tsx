@@ -82,7 +82,7 @@ function PrSummary({ issue }: { issue: IssueMonitoringSnapshot }) {
       )}
       title={state.tooltip}
     >
-      PR #{issue.pr.number ?? "?"} {state.label}
+      PR #{issue.pr.number ?? "?"}{issue.pr.is_draft === true ? " · 草稿" : ""} {state.label}
     </span>
   );
 }

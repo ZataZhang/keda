@@ -33,6 +33,20 @@ _LIFECYCLE_STAGE_BY_PHASE: dict[str, str] = {
 RETRYABLE_LIFECYCLE_STAGES = frozenset(_LIFECYCLE_STAGE_BY_PHASE.values())
 
 
+def lifecycle_stage_for_invocation_phase(invocation_phase: str | None) -> str | None:
+    """把实际调用阶段映射到六个实现流水线节点。
+
+    Args:
+        invocation_phase: 调用账本记录的阶段；内容生成和未知阶段不可映射。
+
+    Returns:
+        生命周期矩阵中的流水线节点键；无法映射时为 ``None``。
+    """
+    if invocation_phase is None:
+        return None
+    return _LIFECYCLE_STAGE_BY_PHASE.get(invocation_phase)
+
+
 @dataclass(frozen=True)
 class RuntimeFailureDiagnosis:
     """一次失败运行中最后一个失败执行器调用的摘要。"""
@@ -80,7 +94,7 @@ def diagnose_runtime_failure(
     if not rows:
         return None
     last_row = rows[-1]
-    stage = _LIFECYCLE_STAGE_BY_PHASE.get(last_row.phase)
+    stage = lifecycle_stage_for_invocation_phase(last_row.phase)
     if stage is None or last_row.outcome not in _FAILED_INVOCATION_OUTCOMES:
         return None
 
@@ -88,7 +102,7 @@ def diagnose_runtime_failure(
         dict.fromkeys(
             row.executor
             for row in rows
-            if _LIFECYCLE_STAGE_BY_PHASE.get(row.phase) == stage
+            if lifecycle_stage_for_invocation_phase(row.phase) == stage
             and row.outcome in _FAILED_INVOCATION_OUTCOMES
             and row.executor
         )
