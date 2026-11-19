@@ -106,7 +106,7 @@ All Git operations used temporary repositories and real Git processes. GitHub Is
 
 ## Reviewer repair audit — current snapshot (`e87337f5`)
 
-This section supersedes the older PR-head and remote-status values above. It records all five findings against the current worktree and the read-only GitHub snapshot; it does not claim that the two integration findings were repaired.
+This section records the findings against the `e87337f5` snapshot and the then-current read-only GitHub view. The later worktree repair and its final disposition are recorded in the final section below.
 
 | Finding | Disposition | Evidence |
 |---|---|---|
@@ -126,3 +126,33 @@ This section supersedes the older PR-head and remote-status values above. It rec
 - `git diff --check`: passed for the final tracked evidence-report change. `.agent-runner/commit-request.json` parses as JSON and remains ignored/local for the runner.
 - Current code snapshot: commit `e87337f5ca8479632f8433b7d01109b2f859ad68`, commit tree `25622cf6e178f4840aa44f0adde868e09f470d07`; `agent_runner_orchestration_runtime.py` SHA-256 `3936925d581ac34c84787f2006221a06bcb1932ea51776581de894fec8b4364c`.
 - GitHub reads and merge-tree inspection were read-only. No source edits, GitHub writes, branch changes, staging, commits, or pushes were made in this pass.
+
+## Final local repair snapshot — 2026-11-20 (`1153018e` + worktree changes)
+
+The local source now incorporates the runner admission wrapper already present on `main` and keeps the Issue #400 task-branch PRD lookup before worktree creation. The worktree has not been staged or committed, and no remote ref or PR metadata was changed.
+
+| Finding | Final disposition | Evidence |
+|---|---|---|
+| Runtime conflict with `main` | **Fixed in the worktree; remote PR still awaits commit/push.** | The final `agent_runner_orchestration_runtime.py` was checked with `git merge-file -p` against merge base `f56f2d1f` and local `main`; exit 0. The runtime imports the shared admission module and routes each Issue through `_process_issue_if_admitted` while retaining the task-branch PRD resolution call. GitHub still reports PR head `1153018ec124f6318c4a9d9a1702054cb9f17a4c` / base `6dceaa0ba94c285776e76109a324051d1dd04d79` as `CONFLICTING`; local edits are not published. The local `main` ref is `51461449cb1069113b3d6a827297f92c16bcff2f`. |
+| Stale PR body and validation comment | **Valid; cannot update under the worktree-only/no-push constraint.** | PR #405 body still names Round 2, `a856cf8`, and `174 passed`; comment #7016416947 remains tied to head `74ba5cb` / base `6dceaa0`. The current verification snapshot is recorded locally below and in verifier Round 5. |
+| Lifecycle function summary | **Already fixed; retained.** | The function summary says published task-branch fetch/read failures re-raise and stop the pipeline (`lifecycle_agent_resolution.py:479–483`). |
+| Lifecycle Returns contract | **Already fixed; retained.** | Returns distinguishes main-checkout read failures from task-branch fetch/read failures and parser failures (`lifecycle_agent_resolution.py:491–493`). |
+| Independent verifier conclusion for final source | **Fixed with verifier Round 5.** | A separate read-only verifier reviewed the modified worktree and passed the code/local conflict resolution. Round 4 remains historical for `a914f022`; it does not cover this newer source/test tree. |
+
+### Final worktree checks
+
+- `UV_CACHE_DIR=/private/tmp/kc-issue-400-uv-cache just lint --reuse`: passed, including duplicate-code, architecture, guideline consistency, and max-file-lines checks.
+- `UV_CACHE_DIR=/private/tmp/kc-issue-400-uv-cache SKIP=check-test-flag just lint --full`: passed; only `check-test-flag` was skipped because the worktree is unstaged.
+- `UV_CACHE_DIR=/private/tmp/kc-issue-400-uv-cache just test`: **77 passed, 266 deselected**.
+- Final targeted tests: **99 passed** across admission, orchestration, Direct PR discovery, branch-source, and lifecycle routing tests.
+- Final `kc evidence check --evidence tasks/evidence/P1-FIX-20261119-180000-prd-publication-on-protected-main`: **4/4 passed**. RV-4 reports **176 passed** and a successful MkDocs build.
+- `git merge-file -p` for `agent_runner_orchestration_runtime.py` against merge base `f56f2d1f` and `main`: exit 0. No branch merge, rebase, stage, commit, or push was run.
+- `git diff --check`: passed after the evidence append.
+- `jq -e . .agent-runner/commit-request.json`: passed; the ignored local commit request is ready for the runner.
+- Current modified source/test/docs fingerprints:
+  - runtime: `c01e0c4502470a4685974b003b3649737a0209bc09128567c9633eb88bc1903a`
+  - admission model: `38b3fe05a2d889ca533fb8b7b9135faddd5fe72a540b4448045029c74ffa1b54`
+  - shared admission module: `f41491ccb86615f3cd30c894aa156f943038b6c96d30d8c20f62fe9b4b40c376`
+  - new admission tests: `f697e127e603c1b64e218809ceb88602a8e67e16b24c46b54911f69176fc38a5`
+  - runner guide: `602d7466f5e73e9e194b1ffe71ea0cedcd149a8ef4ab845c4868edd9c05e55fa`
+- Final raw RV output SHA-256: RV-1 `c2dd017caa414a3c1f2265a0f8e11ded0bde752b37ac95dae32453dc86761495`; RV-2 `2112b3c2d8efaab2433772f3257c1bfeccc2108a4877b19b7f4cf76930fbaa21`; RV-3 `4396a061e04dc37dde0509ea130a5fed0e8eba2ab44d2c090f77d3d1faca9744`; RV-4 `1198715a312cedee6612920af2367fa03dd6ebdd8e472c91f682f2f75eb0225f`.

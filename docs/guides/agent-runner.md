@@ -2566,6 +2566,7 @@ kc daemon --concurrency 3
 - **只有一个数字**：每个仓库只有一个生效并行上限，按优先级取第一个给出的值：`kc daemon run --concurrency` > Backlog 页面保存的并行上限 > 配置文件 `[agent_runner.runner].max_concurrent_issues` > `1`。页面设置覆盖配置文件，不再与之取较小值。旧配置项 `max_issues` 已退役：读到时只告警，不参与任何计算，`kc config migrate` 会删除它；daemon 也不再接受 `--max-issues`（传入即报用法错误并提示改用 `--concurrency`）。
 - **执行期间持续补位**：daemon 不再等一轮里的 Issue 全部跑完才看队列。领到的 Issue 在后台线程里执行，主循环照常按轮询间隔运行：每次先清理已结束的任务，再按空位补领新的就绪 Issue。所以长任务执行期间新进入就绪队列的 Issue，会在出现空位后的下一次轮询被领取。对账、审议、PRD 返工、Backlog 推进等阶段在执行期间也照常运行；有 Issue 在执行时 daemon 不进入空闲退避，始终按基础间隔轮询。
 - **空位怎么算**：本轮可新领取数 = `max(0, 上限 − max(本机在执行数, 仓库内 open agent/running 标签数))`，取两者较大值是因为本机刚提交的 Issue 可能还没带上 running 标签。计数查询最多取到上限 + 1，超出时日志标为「至少 上限 + 1」；计数失败按 fail-closed 处理，本次不领新 Issue，已在执行的不受影响。running / blocked 恢复及 `direct_pr_cleanup` 收尾不受这个上限压低，但同样占用本机执行名额。
+- **资源准入**：daemon 可在处理前使用可选资源检查暂停新任务。检查拒绝时 Issue 保持排队，不创建 claim 或 worktree；已在执行的任务不受影响。
 - **不重复执行**：daemon 维护一份"本机正在执行"的名单，就绪、返工、发布恢复、blocked 恢复、`direct_pr_cleanup` 各通道与崩溃对账都会跳过名单里的 Issue；同一个 Issue 只由一个线程推进。
 - **日志**：每次轮询打印 `Parallel limit for '<repo>': limit=N source=<cli_override|policy|config> in_flight=M`，Issue 结束时打印 `Issue #N finished ... slot released`。
 - **在哪里看实际生效的值**：daemon 每次轮询把它对每个仓库实际使用的上限、来源和本机在执行数写到单实例锁旁边（`~/.kedacode/daemon-locks/<repo_id>.parallel-limit.json`），退出时删除。以下入口都读它，因此包含只有 daemon 进程知道的 `--concurrency`：
