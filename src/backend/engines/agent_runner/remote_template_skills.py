@@ -38,8 +38,8 @@ REMOTE_TEMPLATE_SKILLS_REPOSITORY_URL = "https://github.com/ZataZhang/zata-codes
 结果当作 agent 指令安装进每个用户的 skills 目录。这是供应链路径，不是文案问题。
 """
 
-REMOTE_TEMPLATE_SKILLS_REF = "main"
-"""每次 ``kc init`` 要获取的模板分支。"""
+REMOTE_TEMPLATE_SKILLS_REF = "cdf37ca81604d860bea6b9fba59aab01d84ca530"
+"""由发行包固定的模板提交。"""
 
 REMOTE_TEMPLATE_SKILL_NAMES: tuple[str, ...] = ("prd", "code-reviewer")
 """KedaCode 安装且仅安装的远程模板 Skills。"""
@@ -452,30 +452,36 @@ def install_remote_template_skills(
         temporary_root_path = Path(temporary_directory)
         checkout_path = temporary_root_path / "template"
         options.process_runner.run(
+            ("git", "init", str(checkout_path)),
+            cwd=temporary_root_path,
+            timeout=60,
+            label="KedaCode remote template skill repository",
+        )
+        options.process_runner.run(
             (
                 "git",
-                "clone",
+                "fetch",
                 "--depth=1",
-                "--branch",
-                REMOTE_TEMPLATE_SKILLS_REF,
-                "--filter=blob:none",
-                "--sparse",
                 REMOTE_TEMPLATE_SKILLS_REPOSITORY_URL,
-                str(checkout_path),
+                REMOTE_TEMPLATE_SKILLS_REF,
             ),
-            cwd=temporary_root_path,
+            cwd=checkout_path,
             timeout=120,
             label="KedaCode remote template skill download",
         )
         options.process_runner.run(
             (
                 "git",
-                "-C",
-                str(checkout_path),
                 "sparse-checkout",
                 "set",
                 *(f"skills/{skill_name}" for skill_name in REMOTE_TEMPLATE_SKILL_NAMES),
             ),
+            cwd=checkout_path,
+            timeout=60,
+            label="KedaCode remote template skill paths",
+        )
+        options.process_runner.run(
+            ("git", "checkout", "--detach", REMOTE_TEMPLATE_SKILLS_REF),
             cwd=checkout_path,
             timeout=60,
             label="KedaCode remote template skill checkout",

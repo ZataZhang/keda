@@ -130,10 +130,9 @@ Python 包、macOS DMG 一起校验 `SHA256SUMS`。安装方式二选一：
 kc desktop install
 ```
 
-下载与当前 CLI 版本匹配的安装包、校验 SHA-256 后静默安装到 Tauri 的 per-user 默认目录  
-`%LOCALAPPDATA%\KedaCode`，不需要管理员权限；也可以直接到 GitHub Release 下载安装包双击安装，  
-默认落在同一目录（安装向导里改了目录则以所选目录为准）。安装完成后从开始菜单启动 KedaCode，  
-托盘出现图标。`kc desktop install` 依靠这个固定目录识别「已安装」并就地升级。  
+命令需要新版 GitHub CLI（`gh`）。它下载与当前 CLI 版本匹配的安装包，校验 SHA-256 和 Sigstore 来源证明，确认来自 `ZataZhang/keda` 的发布工作流和对应版本标签，再静默安装到 `%LOCALAPPDATA%\KedaCode`。安装无需管理员权限，后续运行同一命令可就地升级。
+
+也可以从 GitHub Release 下载安装包，并在运行前 [用 GitHub CLI 验证来源](https://cli.github.com/manual/gh_attestation_verify)。同时下载对应的 `.sigstore.json`，以 `--bundle` 指定该文件，并传入 `--repo ZataZhang/keda`、`--signer-workflow ZataZhang/keda/.github/workflows/release.yml` 和对应标签的 `--source-ref refs/tags/vX.Y.Z`。安装后从开始菜单启动 KedaCode，托盘会显示图标。
 
 Windows 构建使用 Tauri 默认的 per-user 安装模式，安装时若缺少 WebView2 运行时，安装程序会  
 按 Tauri 默认策略下载引导程序。安装包当前未做代码签名，首次运行时 SmartScreen 可能提示  

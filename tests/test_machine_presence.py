@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from backend.core.shared.interfaces.agent_runner import GitHubApiUnavailableError
 from backend.core.shared.models.agent_runner import (
     AppConfig,
+    DaemonConfig,
     IssueCommentRecord,
     IssueSummary,
 )
@@ -249,11 +250,10 @@ def test_presence_comment_updates_in_place_and_expires_after_five_minutes() -> N
     client.set_list_issues_by_label_result(
         [IssueSummary(12, "status", "url/12", "", ("kedacode/presence",))]
     )
-    config = AppConfig()
     reported_at = datetime(2026, 10, 26, 8, 0, tzinfo=timezone.utc)
     render_args = {
         "github_client": client,
-        "config": config,
+        "config": AppConfig(daemon=DaemonConfig(presence_enabled=True)),
         "machine_id": "machine-a",
         "slot": "121@1.0",
         "hostname": "macbook",
@@ -271,6 +271,7 @@ def test_presence_comment_updates_in_place_and_expires_after_five_minutes() -> N
         "now": reported_at,
     }
 
+    assert update_presence_comment(**(render_args | {"config": AppConfig()})) is None
     first_comment_id = update_presence_comment(**render_args)
     second_comment_id = update_presence_comment(**render_args)
     presence_records = client.list_issue_comment_records(12, body_contains="<!-- kc:presence ")
@@ -300,7 +301,7 @@ def test_peers_merge_tasks_from_multiple_process_slots_on_one_machine() -> None:
     now = datetime.now(timezone.utc)
     shared_args = {
         "github_client": client,
-        "config": AppConfig(),
+        "config": AppConfig(daemon=DaemonConfig(presence_enabled=True)),
         "machine_id": "machine-a",
         "hostname": "macbook",
         "version": "1.2.3",

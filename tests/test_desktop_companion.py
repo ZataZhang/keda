@@ -575,9 +575,14 @@ def test_windows_install_downloads_setup_and_runs_silent_installer(
         downloaded_asset_names.append(asset_name)
         destination_path.write_bytes(b"installer")
 
+    monkeypatch.setattr(installer_module.shutil, "which", lambda name: "/fake/gh")
+    monkeypatch.setattr(installer_module, "_download_release_bytes", lambda **kwargs: b"bundle")
+
     def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
         """替掉 NSIS 安装：记录 argv，并按默认安装目录造出可执行文件。"""
         executed_commands.append(list(command))
+        if command[0] == "/fake/gh":
+            return subprocess.CompletedProcess(command, 0, "", "")
         install_directory.mkdir(parents=True, exist_ok=True)
         (install_directory / "KedaCode.exe").write_bytes(b"executable")
         return subprocess.CompletedProcess(command, 0, b"", b"")
@@ -590,8 +595,14 @@ def test_windows_install_downloads_setup_and_runs_silent_installer(
 
     assert installed_path == install_directory / "KedaCode.exe"
     assert downloaded_asset_names == ["kedacode-desktop-windows-x64-setup.exe"]
-    assert len(executed_commands) == 1
-    installer_arguments = executed_commands[0]
+    verification_arguments, installer_arguments = executed_commands
+    assert verification_arguments[:3] == ["/fake/gh", "attestation", "verify"]
+    assert verification_arguments[verification_arguments.index("--source-ref") + 1] == (
+        "refs/tags/v0.7.0"
+    )
+    assert verification_arguments[verification_arguments.index("--signer-workflow") + 1] == (
+        "ZataZhang/keda/.github/workflows/release.yml"
+    )
     assert installer_arguments[0].endswith("kedacode-desktop-windows-x64-setup.exe")
     assert installer_arguments[1:] == ["/S"]
 
@@ -607,8 +618,13 @@ def test_windows_install_reports_installer_failure(
         """替掉网络下载。"""
         destination_path.write_bytes(b"installer")
 
+    monkeypatch.setattr(installer_module.shutil, "which", lambda name: "/fake/gh")
+    monkeypatch.setattr(installer_module, "_download_release_bytes", lambda **kwargs: b"bundle")
+
     def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
         """模拟 NSIS 安装失败。"""
+        if command[0] == "/fake/gh":
+            return subprocess.CompletedProcess(command, 0, "", "")
         return subprocess.CompletedProcess(command, 2, b"", b"installer failed")
 
     monkeypatch.setattr(installer_module, "_download_and_verify_release_asset", fake_download)
@@ -617,6 +633,29 @@ def test_windows_install_reports_installer_failure(
 
     with pytest.raises(installer_module.DesktopCompanionInstallError, match="exit code 2"):
         installer_module.install_desktop_companion(version="0.7.0")
+
+
+def test_windows_install_aborts_on_failed_provenance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """无效的来源证明不能触发 NSIS 执行。"""
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setattr(installer_module, "_windows_desktop_app_running", lambda: False)
+    monkeypatch.setattr(installer_module.shutil, "which", lambda name: "/fake/gh")
+    monkeypatch.setattr(installer_module, "_download_release_bytes", lambda **kwargs: b"bundle")
+    monkeypatch.setattr(
+        installer_module, "_download_and_verify_release_asset", lambda **kwargs: None
+    )
+
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        """仅允许证明验证命令执行。"""
+        assert command[:3] == ["/fake/gh", "attestation", "verify"]
+        return subprocess.CompletedProcess(command, 1, "", "invalid provenance")
+
+    monkeypatch.setattr(installer_module.subprocess, "run", fake_run)
+
+    with pytest.raises(installer_module.DesktopCompanionInstallError, match="invalid provenance"):
+        installer_module._install_windows_app(version="0.7.1")
 
 
 def test_windows_install_requires_the_running_app_to_exit(

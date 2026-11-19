@@ -212,6 +212,10 @@ jobs:
     name: Build Windows tray app
     if: github.event_name == 'push'
     runs-on: windows-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -268,11 +272,25 @@ jobs:
           fi
           cp "$installer_path" "dist/kedacode-desktop-windows-x64-setup.exe"
 
+      - name: Attest Windows installer provenance
+        id: windows-provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-path: dist/kedacode-desktop-windows-x64-setup.exe
+
+      - name: Stage Windows provenance bundle
+        shell: pwsh
+        env:
+          BUNDLE_PATH: ${{ steps.windows-provenance.outputs.bundle-path }}
+        run: Copy-Item -LiteralPath $env:BUNDLE_PATH -Destination dist/kedacode-desktop-windows-x64-setup.exe.sigstore.json
+
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:
           name: kedacode-desktop-windows-x64
-          path: dist/kedacode-desktop-windows-x64-setup.exe
+          path: |
+            dist/kedacode-desktop-windows-x64-setup.exe
+            dist/kedacode-desktop-windows-x64-setup.exe.sigstore.json
           if-no-files-found: error
 
   draft-release:
@@ -294,9 +312,21 @@ jobs:
           path: dist
           merge-multiple: true
 
+      - name: Verify Windows installer provenance
+        working-directory: dist
+        env:
+          RELEASE_REPOSITORY: ${{ github.repository }}
+        run: |
+          gh attestation verify kedacode-desktop-windows-x64-setup.exe \
+            --bundle kedacode-desktop-windows-x64-setup.exe.sigstore.json \
+            --repo "$RELEASE_REPOSITORY" \
+            --signer-workflow "$RELEASE_REPOSITORY/.github/workflows/release.yml" \
+            --source-ref "$GITHUB_REF" \
+            --deny-self-hosted-runners
+
       - name: Compute SHA256SUMS
         working-directory: dist
-        run: sha256sum kedacode-*.tar.gz kedacode-*.whl kedacode-desktop-macos-*.dmg kedacode-desktop-windows-*.exe > SHA256SUMS
+        run: sha256sum kedacode-*.tar.gz kedacode-*.whl kedacode-desktop-macos-*.dmg kedacode-desktop-windows-*.exe kedacode-desktop-windows-*.sigstore.json > SHA256SUMS
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
@@ -308,6 +338,7 @@ jobs:
             dist/kedacode-*.whl
             dist/kedacode-desktop-macos-*.dmg
             dist/kedacode-desktop-windows-*.exe
+            dist/kedacode-desktop-windows-*.sigstore.json
             dist/SHA256SUMS
 
   publish-pypi:

@@ -18,7 +18,7 @@ The default `kc console` startup requires complete bundled dashboard assets: the
 
 ## macOS menu bar app
 
-On the first interactive macOS `kc` invocation, the CLI may ask once whether to install the matching menu bar app. Accepting downloads the DMG for the installed CLI version and CPU architecture, checks its Release SHA-256, and copies `KedaCode.app` to `~/Applications`; it does not replace or reinstall the `uv`-managed CLI. A declined prompt can be revisited with `kc desktop install`. The command is macOS-only. The public DMG is ad-hoc signed and not notarized, so macOS may require the user to approve the first launch in Privacy & Security settings. See the repository's `docs/guides/desktop-companion.md` for more.
+On the first interactive macOS `kc` invocation, the CLI may ask once whether to install the matching menu bar app. Accepting downloads the DMG for the installed CLI version and CPU architecture, checks its Release SHA-256, and copies `KedaCode.app` to `~/Applications`; it does not replace or reinstall the `uv`-managed CLI. A declined prompt can be revisited with `kc desktop install`. On Windows, the same command requires GitHub CLI to verify the NSIS installer provenance against the release workflow and version tag before silently installing it. The public DMG is ad-hoc signed and not notarized, so macOS may require the user to approve the first launch in Privacy & Security settings. See the repository's `docs/guides/desktop-companion.md` for more.
 
 ## The native executor entry (`kc session`)
 

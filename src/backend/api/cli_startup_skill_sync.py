@@ -3,7 +3,7 @@
 动机：``kc`` 经 pip / uv / pipx 安装或升级后，随包的 ``kedacode-operator`` Skill 只落在
 wheel 里，用户级安装根（``~/.claude`` 等）中的副本仍是旧版，过去只能靠手动跑
 ``kc skill install`` 同步。本钩子在 CLI 启动时按**已安装包版本**与上次同步记录比对，
-版本变化才把随包 operator Skill 刷新到全部安装根，之后同一版本不再重复触碰文件系统。
+用户通过 ``KEDACODE_AUTO_SKILL_SYNC=1`` 启用后，版本变化才把随包 operator Skill 刷新到全部安装根，之后同一版本不再重复触碰文件系统。
 
 行为边界（与 :mod:`backend.api.cli_update_check` 的启动检查保持一致）：
 
@@ -76,9 +76,9 @@ def _write_cached_synced_version(*, synced_version: str) -> None:
         return
 
 
-def _truthy_disable_flag(environ: Mapping[str, str] | None = None) -> bool:
-    """``NO_SKILL_SYNC`` 是否被显式打开（值 ``1`` 视为关闭自动同步）。"""
-    value = product_identity.read_product_env_value(_DISABLE_ENV_SUFFIX, environ)
+def _skill_sync_flag(suffix: str, environ: Mapping[str, str]) -> bool:
+    """读取 Skill 同步的布尔环境开关。"""
+    value = product_identity.read_product_env_value(suffix, environ)
     return value is not None and value.strip().lower() in {"1", "true", "yes", "on"}
 
 
@@ -101,7 +101,9 @@ def _needs_sync(
         return False
     if "--dry-run" in argv:
         return False
-    if _truthy_disable_flag(source_environ):
+    if not _skill_sync_flag("AUTO_SKILL_SYNC", source_environ) or _skill_sync_flag(
+        _DISABLE_ENV_SUFFIX, source_environ
+    ):
         return False
     if current_version == _UNKNOWN_VERSION:
         return False

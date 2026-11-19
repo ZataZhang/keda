@@ -12,6 +12,7 @@ from backend.core.shared.models.agent_spec import BUILTIN_AGENT_SPECS
 from backend.core.shared.prd_skill_location import keda_owned_skills_root
 from backend.engines.agent_runner.remote_template_skills import (
     REMOTE_TEMPLATE_SKILL_NAMES,
+    REMOTE_TEMPLATE_SKILLS_REF,
     REMOTE_TEMPLATE_SKILLS_REPOSITORY_URL,
     RemoteTemplateSkillInstallError,
     RemoteTemplateSkillInstallOptions,
@@ -38,8 +39,10 @@ class FakeRemoteTemplateProcessRunner:
     ) -> CommandResult:
         command_tuple = tuple(command)
         self.command_tuples.append(command_tuple)
-        if command_tuple[:2] == ("git", "clone"):
-            checkout_path = Path(command_tuple[-1])
+        if command_tuple[:2] == ("git", "init"):
+            Path(command_tuple[-1]).mkdir()
+        if command_tuple[:2] == ("git", "checkout"):
+            checkout_path = cwd
             for skill_name in self.include_skill_names:
                 source_skill_path = checkout_path / "skills" / skill_name
                 source_skill_path.mkdir(parents=True)
@@ -150,16 +153,20 @@ def test_install_remote_template_skills_downloads_only_required_user_skills(tmp_
             f"remote {skill_name}"
         )
     assert not (target_skills_root / "unrelated-skill").exists()
-    assert fake_process_runner.command_tuples[0][-2] == REMOTE_TEMPLATE_SKILLS_REPOSITORY_URL
-    assert fake_process_runner.command_tuples[1][-2:] == (
-        "skills/prd",
-        "skills/code-reviewer",
+    assert fake_process_runner.command_tuples[1] == (
+        "git",
+        "fetch",
+        "--depth=1",
+        REMOTE_TEMPLATE_SKILLS_REPOSITORY_URL,
+        REMOTE_TEMPLATE_SKILLS_REF,
     )
-    assert not (target_skills_root / "unrelated-skill").exists()
-    assert fake_process_runner.command_tuples[0][-2] == REMOTE_TEMPLATE_SKILLS_REPOSITORY_URL
-    assert fake_process_runner.command_tuples[1][-2:] == (
-        "skills/prd",
-        "skills/code-reviewer",
+    assert len(REMOTE_TEMPLATE_SKILLS_REF) == 40
+    assert fake_process_runner.command_tuples[2][-2:] == ("skills/prd", "skills/code-reviewer")
+    assert fake_process_runner.command_tuples[3] == (
+        "git",
+        "checkout",
+        "--detach",
+        REMOTE_TEMPLATE_SKILLS_REF,
     )
     stale_skill_file = target_skills_root / "prd" / "stale.md"
     stale_skill_file.write_text("stale", encoding="utf-8")
@@ -216,11 +223,11 @@ def test_install_remote_template_skills_writes_into_every_detected_agent(
         codex_skills_root,
         claude_skills_root,
     )
-    # 远程仓库只克隆一次，随后写入全部目标目录。
-    clone_command_count = sum(
-        1 for command in fake_process_runner.command_tuples if command[:2] == ("git", "clone")
+    # 远程模板只拉取一次，随后写入全部目标目录。
+    fetch_command_count = sum(
+        1 for command in fake_process_runner.command_tuples if command[:2] == ("git", "fetch")
     )
-    assert clone_command_count == 1
+    assert fetch_command_count == 1
     for skills_root in (
         keda_owned_skills_root(user_home_path),
         codex_skills_root,
@@ -248,8 +255,10 @@ def _build_process_runner_for_remote_skill_payload(
             **_command_options: object,
         ) -> CommandResult:
             self.command_tuples.append(tuple(command))
-            if tuple(command)[:2] == ("git", "clone"):
-                checkout_path = Path(command[-1])
+            if tuple(command)[:2] == ("git", "init"):
+                Path(command[-1]).mkdir()
+            if tuple(command)[:2] == ("git", "checkout"):
+                checkout_path = cwd
                 for skill_name in include_skill_names:
                     source_skill_path = checkout_path / "skills" / skill_name
                     source_skill_path.mkdir(parents=True)

@@ -39,7 +39,12 @@ def _result(action: str) -> PackagedSkillInstallResult:
 def _isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """把 HOME 指向空目录，让 ``<state_home>/skill-sync.json`` 落在可丢弃的 tmp 里。"""
     monkeypatch.setenv("HOME", str(tmp_path))
-    for env_name in ("KEDACODE_SKILLS_DIR", "KEDACODE_NO_UPDATE_CHECK", "KEDACODE_NO_SKILL_SYNC"):
+    for env_name in (
+        "KEDACODE_SKILLS_DIR",
+        "KEDACODE_NO_UPDATE_CHECK",
+        "KEDACODE_NO_SKILL_SYNC",
+        "KEDACODE_AUTO_SKILL_SYNC",
+    ):
         monkeypatch.delenv(env_name, raising=False)
     return tmp_path
 
@@ -47,6 +52,7 @@ def _isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 @pytest.fixture()
 def _gate_open(monkeypatch: pytest.MonkeyPatch) -> None:
     """放行同步闸门（视为交互式、非机器路径），隔离版本门控与呈现逻辑。"""
+    monkeypatch.setenv("KEDACODE_AUTO_SKILL_SYNC", "1")
     monkeypatch.setattr(
         cli_startup_skill_sync, "_should_skip_startup_update_check", lambda *a, **k: False
     )
@@ -99,6 +105,16 @@ def test_no_skill_sync_env_disables(_spy_sync: SimpleNamespace, _gate_open: None
     finally:
         os.environ.pop("KEDACODE_NO_SKILL_SYNC", None)
     assert _spy_sync.calls == 0
+
+
+def test_startup_does_not_sync_without_opt_in(
+    _spy_sync: SimpleNamespace, _gate_open: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """普通交互命令默认不触碰用户级 Skill 目录。"""
+    monkeypatch.delenv("KEDACODE_AUTO_SKILL_SYNC")
+    startup_skill_sync(["logs"])
+    assert _spy_sync.calls == 0
+    assert not cli_startup_skill_sync._cache_path().exists()
 
 
 def test_sync_records_version_and_prints_notice(

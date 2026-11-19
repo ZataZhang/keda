@@ -7,6 +7,7 @@ import os
 import plistlib
 import platform
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -149,6 +150,7 @@ def _install_windows_app(*, version: str) -> Path:
                 asset_name=asset_name,
                 destination_path=installer_path,
             )
+            _verify_windows_installer_provenance(installer_path, release_tag=release_tag)
             _run_windows_installer(installer_path)
     except DesktopCompanionInstallError:
         raise
@@ -207,6 +209,48 @@ def _windows_desktop_app_running() -> bool:
     except OSError:
         return False
     return _WINDOWS_EXECUTABLE_NAME.lower().encode() in completed_process.stdout.lower()
+
+
+def _verify_windows_installer_provenance(installer_path: Path, *, release_tag: str) -> None:
+    """验证安装包由本仓库的发布工作流在对应 tag 上构建。"""
+    github_cli_path = shutil.which("gh")
+    if github_cli_path is None:
+        raise DesktopCompanionInstallError(
+            "Install or update GitHub CLI (gh) to verify the Windows installer provenance."
+        )
+    bundle_asset_name = f"{installer_path.name}.sigstore.json"
+    bundle_path = installer_path.with_name(bundle_asset_name)
+    bundle_path.write_bytes(
+        _download_release_bytes(release_tag=release_tag, asset_name=bundle_asset_name)
+    )
+    verification = subprocess.run(
+        [
+            github_cli_path,
+            "attestation",
+            "verify",
+            str(installer_path),
+            "--bundle",
+            str(bundle_path),
+            "--repo",
+            _RELEASE_REPOSITORY,
+            "--signer-workflow",
+            f"{_RELEASE_REPOSITORY}/.github/workflows/release.yml",
+            "--source-ref",
+            f"refs/tags/{release_tag}",
+            "--deny-self-hosted-runners",
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+        timeout=_HTTP_TIMEOUT_SECONDS,
+    )
+    if verification.returncode != 0:
+        raise DesktopCompanionInstallError(
+            f"Provenance verification failed for {installer_path.name}: "
+            f"{verification.stderr.strip()}"
+        )
 
 
 def _run_windows_installer(installer_path: Path) -> None:

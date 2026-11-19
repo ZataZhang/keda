@@ -420,7 +420,7 @@ dsh 用 `--session-id <id>` 续传，但要求同 cwd / 同 agent preset 且无�
 [agent_runner.daemon]
 reconcile_stale_attempts = true   # 崩溃对账主开关
 reclaim_ttl_seconds = 18000       # 本机 claim 老化阈值
-presence_enabled = true           # 是否维护本仓库的机器状态 Issue
+presence_enabled = false          # 是否维护本仓库的机器状态 Issue
 lease_ttl_seconds = 1200          # 新认领的租约时长，最小 120 秒
 ```
 
@@ -435,7 +435,7 @@ lease_ttl_seconds = 1200          # 新认领的租约时长，最小 120 秒
 
 首次创建时，同一台机器对同一 GitHub 仓库的进程串行初始化，拿到锁后再次查找现有状态板。创建只补齐状态板所需标签。若多台机器同时首次上报产生重复状态板，KedaCode 保留编号最小的一条，确认重复项中的指向评论后关闭重复项。
 
-状态上报默认开启，按仓库设置 `[agent_runner.daemon].presence_enabled = false` 可关闭状态 Issue 的创建与更新；认领租约仍会照常续期。`lease_ttl_seconds` 默认 1200，最小 120；持有者约每 TTL 的十分之一（默认 2 分钟）编辑认领评论。租约客户端的**单次请求尝试**有 5 秒上限，瞬时失败最多重试到 3 次、每次间隔 1 秒，因此一条认领的一轮续期最坏占用约 17 秒（3×5 秒加两次间隔）；续期线程按认领逐条串行处理，一条卡住的认领会推迟同进程其它认领的续期与自停判定。自停判定按单调时钟累计「距上次成功续期」的时长，拖长的重试窗口不会被当成续期成功。带租约的远端认领超过持有者声明时长后，daemon 下一轮对账会写入 `remote_lease_expired` 并按恢复预算放回 `agent/ready` 或标记失败；待处理返工会继续保持 `agent/running`。没有 `kc:lease` 的旧远端认领永远不因本功能被接手。
+状态上报默认关闭。需要时在目标仓库显式设置 `[agent_runner.daemon].presence_enabled = true`。开启后，仓库读者能看到机器状态评论中的主机名和机器 ID。原有显式配置仍生效，旧评论需在 GitHub 上单独处理。认领租约独立续期。`lease_ttl_seconds` 默认 1200，最小 120；持有者约每 TTL 的十分之一（默认 2 分钟）编辑认领评论。租约客户端的**单次请求尝试**有 5 秒上限，瞬时失败最多重试到 3 次、每次间隔 1 秒，因此一条认领的一轮续期最坏占用约 17 秒（3×5 秒加两次间隔）；续期线程按认领逐条串行处理，一条卡住的认领会推迟同进程其它认领的续期与自停判定。自停判定按单调时钟累计「距上次成功续期」的时长，拖长的重试窗口不会被当成续期成功。带租约的远端认领超过持有者声明时长后，daemon 下一轮对账会写入 `remote_lease_expired` 并按恢复预算放回 `agent/ready` 或标记失败；待处理返工会继续保持 `agent/running`。没有 `kc:lease` 的旧远端认领永远不因本功能被接手。
 
 持有者连续半个 TTL 没有成功续期时会终止自己的 agent attempt，并在推送与开 PR 前再次检查认领归属：本进程登记过这条认领时按评论编号精确确认，未登记时（例如短时发布恢复）回读最近一条可信认领并确认它归属本机，确认不了就放弃交付。机器身份保存在状态目录的 `machine.json`；带租约的认领按机器编号判断本机，旧认领仍按主机名回退；入口没有运行状态心跳时，对账与仲裁仍按这份持久机器编号判断，同名主机不会再被当成本机。GitHub 状态 Issue 的时间字段按 UTC 标注；`kc peers` 的人读时间按执行机器本地时区显示，评论里带来的主机名、版本与 agent 名在终端表格里按纯文本展示。机器可见性仅限当前仓库，不会汇总调用账本、运行历史或日志。
 
@@ -557,7 +557,7 @@ tasks/evidence/**
 
 这段白名单是 daemon 流证据目录约定的 git 语义基础：执行 agent 把证据写进 `tasks/evidence/<prd-stem>/`（无 PRD 的 Issue 兜底 `tasks/evidence/issue-<N>/`），gitignore 让 Markdown 报告与 `evidence.json` manifest 可被本地证据流程发现；代码发布前拦截（`ensure_no_evidence_paths_in_changes`）只允许 Markdown 报告进入代码 diff，manifest、截图、录屏、oracle 脚本等证据由独立证据分支交付。显式配置 `validation.evidence_dir = ".iar/evidence"` 的仓库不受此影响，保持整目录排除的旧行为。手工配置 `evidence_dir = "tasks/evidence"` 而绕过 init 的仓库必须自行保证上述白名单规则在场。
 
-同时 `kc init` 会从远程模板仓库安装 prd / code-reviewer skill（`--force` 会传递给 skill 安装，允许覆盖本地改过的同名 skill）。PRD 格式约定（Change Log 条目结构、验收复选框语法、分组标题、rv-id 证据命名、证据目录布局）的唯一出处是 prd skill 的 `## Machine Contract (vN)` 章节，而且**解析实现也只有一份**——skill 自带的 `scripts/prd_contract.py`：kc 各 prompt 只注入一行指向该契约的指针、不复述教学，验收清单与 Change Log 也不再由 kc 自己解析，而是把 PRD 文本交给该脚本、取回 JSON 结构。**daemon 在每轮执行循环前预检**三件事：prd skill 可解析、契约主版本落在受支持集合内（当前 v3/v4/v5/v6；集合语义让"skill 先 bump、keda 后跟进"的发版错峰不会卡住）、以及兄弟 `scripts/prd_contract.py` 与 `SKILL.md` 成套存在（只装半套会在启动时就点名缺哪个文件，而不是拖到交付门禁）。错误给出安全修复方式（重装 skill 用 `kc skill install`、重建仓库配置才用 `kc init --force`，或设置 `KEDACODE_PRD_SKILL_PATH` 指向完整 skill），不建议盲目运行可能覆盖用户级 Skill 的 `--force` 形式。**安装目标首位是 keda 自有目录 `~/.kedacode/skills`**：解析时优先取这份，因此用户删掉 agent 目录里的 prd 副本不影响 `kc` 的正常解析；其后才是各 agent 用户级目录。CI / 测试可用 `KEDACODE_SKILLS_DIR` 把安装根覆盖到临时目录。
+同时 `kc init` 会从当前发行包固定的模板仓库提交安装 prd / code-reviewer skill（`--force` 会传递给 skill 安装，允许覆盖本地改过的同名 skill）。PRD 格式约定（Change Log 条目结构、验收复选框语法、分组标题、rv-id 证据命名、证据目录布局）的唯一出处是 prd skill 的 `## Machine Contract (vN)` 章节，而且**解析实现也只有一份**——skill 自带的 `scripts/prd_contract.py`：kc 各 prompt 只注入一行指向该契约的指针、不复述教学，验收清单与 Change Log 也不再由 kc 自己解析，而是把 PRD 文本交给该脚本、取回 JSON 结构。**daemon 在每轮执行循环前预检**三件事：prd skill 可解析、契约主版本落在受支持集合内（当前 v3/v4/v5/v6；集合语义让"skill 先 bump、keda 后跟进"的发版错峰不会卡住）、以及兄弟 `scripts/prd_contract.py` 与 `SKILL.md` 成套存在（只装半套会在启动时就点名缺哪个文件，而不是拖到交付门禁）。错误给出安全修复方式（重装 skill 用 `kc skill install`、重建仓库配置才用 `kc init --force`，或设置 `KEDACODE_PRD_SKILL_PATH` 指向完整 skill），不建议盲目运行可能覆盖用户级 Skill 的 `--force` 形式。**安装目标首位是 keda 自有目录 `~/.kedacode/skills`**：解析时优先取这份，因此用户删掉 agent 目录里的 prd 副本不影响 `kc` 的正常解析；其后才是各 agent 用户级目录。CI / 测试可用 `KEDACODE_SKILLS_DIR` 把安装根覆盖到临时目录。
 
 KedaCode 自带的 `kedacode-operator` Skill 随 Python 发行包安装，无需联网下载。它是 hub + references 结构：主文件 `SKILL.md` 只有路由表、共享基线（只读请求不启动执行、`kc run` 必须带目标、机器输出用 `kc schema --json` 自检）与 Safety 不变量，各子命令的流程步骤拆在同目录 `references/*.md`（建 issue / 查 issue / 查生命周期 / 跑一次 / 看进度 / 卡住了 / 后台跑 / CI 交付 / 装环境与查 Agent 配置共 9 份）。命令语义与参数以本文档和真实命令树（`kc --help` / `kc schema --json`）为权威，references 只写"什么时候用、按什么顺序用、别做什么"的流程分工。每次启动原生会话时，`kc` 会检查当前 Agent 的 Skill 目录：安装包能证明为未编辑的旧发行版会自动刷新，因此安装新 `kc` 后首次启动会同步该 Agent 的 operator Skill。`kc init` / `kc skill install` 仍可用于刷新所有检测到的 Skill 根。安装元数据记录已安装文件摘要；首次升级时也能识别与历史发行包完全一致的旧副本。
 
@@ -3214,7 +3214,7 @@ run_interval_seconds = 120
 reconcile_stale_attempts = true
 # claim 老化阈值(秒):claim 含 started_at 且距 now 超过此值,即便 PID 仍活也视为 stale
 reclaim_ttl_seconds = 18000
-presence_enabled = true           # 关闭本仓库机器状态 Issue 的创建与更新
+presence_enabled = false          # 关闭本仓库机器状态 Issue 的创建与更新
 lease_ttl_seconds = 1200          # 新认领租约时长，最小 120 秒
 ```
 
