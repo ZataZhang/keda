@@ -16,6 +16,7 @@ import json
 import logging
 import re
 import socket
+import sys
 import threading
 import urllib.request
 import webbrowser
@@ -84,6 +85,9 @@ def _port_is_available(host: str, port: int) -> bool:
     """探测 ``host:port`` 当前是否可以绑定监听。"""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe_socket:
         try:
+            # 与 Uvicorn 在 POSIX 上的监听行为一致，允许重用仍有 TIME_WAIT 连接的端口。
+            if sys.platform != "win32":
+                probe_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             probe_socket.bind((host, port))
         except OSError:
             return False

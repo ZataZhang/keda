@@ -40,6 +40,7 @@
   （`api/` 只可导入 `core/`；`core/` 可静态依赖 `engines/`、`infrastructure/` 的装配 facade，
   不得用 `importlib` 规避架构检查）
 - Python 项目优先使用 `uv` 和 `just`
+- 修改 CLI、Console、桌面 App 或安装流程时，先核对[平台支持范围](docs/getting-started/installation.md#windows)和[桌面端指南](docs/guides/desktop-companion.md)，保留 macOS 和 Windows 已支持的行为。新增平台专用功能或开发脚本时，在对应文档中标明适用平台。
 - 需要本地验证的普通代码交付或提交场景，默认直接运行 `just test`，无需询问用户（本地核心档，目标 <30 秒）；无需为普通交付在本机运行 `just test all`。全量交给 CI：PR 上跑轻量档（改动无法映射到测试时自动跑全量），合入 main 后跑全量；只有用户明确要求或排查全量相关问题时，才本地运行 `just test all`。详见 `docs/ai-standards/testing.md`
 - 新增 Alembic migration **必须**通过 `just new-migration <slug>`（或其底层 `scripts/shared/alembic/new_migration.sh`）生成；禁止手工创建、命名或伪造秒级时间戳。生成后再仅用补丁填写 `upgrade()` / `downgrade()`，并执行 `uv run alembic heads` 确认唯一 head。
 - 公共 Python API 使用 Google Style Docstrings；后端启用 Ruff `D100`–`D107`/`D419` 强制检查

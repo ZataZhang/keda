@@ -115,6 +115,9 @@ Cmd+Tab 回来或再次双击 `KedaCode.app`，都会把同一个控制台窗口
 - **系统通知**：任务从其它状态跃迁到「阻塞」或「失败」时发一条通知（首轮读数只建立基线，  
   不补发历史状态）。首次通知前 macOS 会请求通知权限；未授权时通知静默丢弃，面板显示不受影响。
 
+源码开发时，macOS 可用 `just refresh-kc restart` 同步前端产物、重装 CLI 并重启 Console。
+独立启动的 Console 会尝试重用原端口。若启动失败，脚本会打印启动日志的路径。
+
 ## 系统托盘 App（Windows）
 
 Windows 与 macOS 共用同一个 Tauri 工程和同一份 `kc console`。App 常驻系统托盘：左键点击  

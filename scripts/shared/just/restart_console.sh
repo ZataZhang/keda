@@ -50,22 +50,33 @@ if [[ "$parent_command" == *"kedacode-desktop"* ]]; then
     exit 0
 fi
 
-port="$(ps -o command= -p "$console_pid" | sed -n 's/.*--port \([0-9]\{1,\}\).*/\1/p')"
+port="$(printf '%s\n' "$command_line" | sed -n 's/.*--port[ =]\([0-9]\{1,\}\).*/\1/p')"
 if [ -z "$port" ]; then
     port=54545
 fi
-command_prefix="$(ps -o command= -p "$console_pid" | sed 's/ --port [0-9]*.*//')"
-echo "🔄 重启独立 Console（pid $console_pid，端口 $port）…"
+console_executable="$(command -v kc)"
+console_args=(console --no-browser --port "$port")
+if [[ " $command_line " == *" --api-only "* ]]; then
+    console_args+=(--api-only)
+fi
+startup_log="$(mktemp)"
+echo "🔄 重启独立 Console（pid ${console_pid}，端口 ${port}）…"
 kill "$console_pid" 2>/dev/null || true
 for _ in $(seq 1 20); do
     kill -0 "$console_pid" 2>/dev/null || break
     sleep 0.5
 done
-nohup $command_prefix --no-browser --port "$port" >/dev/null 2>&1 &
-sleep 2
-if curl -sf -o /dev/null "http://127.0.0.1:$port/api/v1/agent-runner/console/runtime/tasks"; then
-    echo "✅ Console 已在端口 $port 重新拉起。"
-else
-    echo "⚠️  Console 启动后未就绪，请检查端口 $port 是否被占用。" >&2
-    exit 1
-fi
+nohup "$console_executable" "${console_args[@]}" </dev/null >"$startup_log" 2>&1 &
+new_console_pid=$!
+for _ in $(seq 1 20); do
+    kill -0 "$new_console_pid" 2>/dev/null || break
+    if curl -sf --max-time 1 -o /dev/null "http://127.0.0.1:$port/api/v1/agent-runner/console/version" &&
+        kill -0 "$new_console_pid" 2>/dev/null; then
+        rm -f "$startup_log"
+        echo "✅ Console 已在端口 $port 重新拉起。"
+        exit 0
+    fi
+    sleep 0.5
+done
+echo "⚠️  Console 未在端口 $port 就绪。启动日志：$startup_log" >&2
+exit 1
