@@ -223,9 +223,9 @@ No frontend impact：改动只涉及 CLI、runner 后端和文字操作指南，
 - Public behavior and contracts: 新选项显式启用；默认 main 发布与 `--no-publish-prd` 保持原语义；冲突拒绝覆盖；失败 Issue 不会被提前 ready。
 - Related PRD status: #398/#399 未被读取或修改；#398 保留为后续人工验收与恢复流程。
 - Requirements and risks: 四项实现要求均由对应 rv 证据覆盖；RV-3 的 Agent fixture 在观察实际 worktree 后退出，因此不宣称已验证付费 Agent 实现或 Draft PR 发布。
-- Validation blocker: PRD 行为验证没有未通过项；仍未解决的是 PR 集成状态。当前代码 head `e2ac3012e589adef357c6e605e2dbea4d91c63ec` 与本地 `main` (`51461449cb1069113b3d6a827297f92c16bcff2f`) 的三方内容合并检查无冲突（`git merge-tree --write-tree main HEAD` 返回树 `f49ac9ffc89af8eae3b97aa0bdc0a2c6cd2750e2`），先前报告的 runtime 文件内容冲突已解决。但提交历史仍分叉 10 ahead / 15 behind，merge base 为 `f56f2d1fd1e7b3ee6f1367c84bd7ec8487b37dde`；PR #405 的远端 base SHA 仍是旧值 `6dceaa0ba94c285776e76109a324051d1dd04d79`。因此不能把旧 base 上的 `mergeable=true` 或本地内容合并检查表述成已经同步到当前 `main` 或完成 GitHub 集成验证。
-- Validation follow-up: 在允许的分支工作流中将 PR 分支历史同步到当前 `main`，更新 PR #405 正文与验证评论到当前 head/base 和最新证据，再检查 GitHub 对新 base 的集成状态；随后由人工按 9.1 检查真实 #398，Human-Confirmed 项保持未勾选。当前任务的 worktree-only / no-merge / no-push 限制下未执行这些远端或历史操作。
-- 自动验证结果：当前代码 head `e2ac3012e589adef357c6e605e2dbea4d91c63ec` 上最新 `kc evidence check` 4/4；五个相关测试文件关闭 testmon 后 203 passed；Round 5 独立 verifier 对当前源代码和测试树判为 `PASS`，其文件哈希与此 head 相同。`just lint --reuse` 通过；本次 `just lint --full` 与 `just test` 分别因无未提交代码变更及已有 head/tree 成功标记而跳过相应全量检查，RV-4 的兼容性门禁仍通过并包含 lint 与 MkDocs build 结果。远端 PR 正文/评论仍是旧快照，详见证据报告。
+- Validation blocker: PRD 行为验证没有未通过项；PR 集成状态仍未解决。验证代码快照 HEAD 为 `6045419d9815b061e3db875b0f2665c1607af8c2`，本地 `main` 为 `51461449cb1069113b3d6a827297f92c16bcff2f`；`git rev-list --left-right --count main...HEAD` 返回 `15 11`，merge base 为 `f56f2d1fd1e7b3ee6f1367c84bd7ec8487b37dde`，且 `main` 不是 HEAD 的祖先。`git merge-tree --write-tree main HEAD` 返回树 `fa95256aa2abed978185fab290dae8a3641375be` 且没有冲突路径，只能证明当前文件内容可合并，不代表历史已同步。GitHub PR #405 的只读快照显示 head 已是 `6045419d`，但 base SHA 仍为 `6dceaa0ba94c285776e76109a324051d1dd04d79`；其 `mergeable=true` 仍针对这个旧 base，不能视为已对当前 main 完成集成验证。按本次明确限制，没有切换/合并分支或修改远端元数据；也未只在本地重写历史，因为禁止推送会使 GitHub PR 仍停留在旧 head。
+- Validation follow-up: 在允许的分支工作流中将 PR 分支历史同步到当前 `main`，在同步后的新 head 上重跑所需验证，更新 PR #405 正文与验证评论到最终 head/base 及对应证据，再检查 GitHub 对新 base 的集成状态；随后由人工按 9.1 检查真实 #398，Human-Confirmed 项保持未勾选。本次只允许修改 worktree 文件且禁止切换/合并/推送，因此这些历史与远端操作仍待后续完成。
+- 自动验证结果：当前源码/测试树为 `src=2e8ef0c3d07fb8fbabd398989002835a228f0ab1`、`tests=202f5caa5939456e07d1755fa053baa2f502b82b`，与 Round 5 独立 verifier 的源码和测试快照一致（PASS）；相对该快照后续只增加 PRD 与证据文档记录。当前 worktree 上五个相关测试文件关闭 testmon 后 203 passed；最新 `kc evidence check` 4/4，RV-4 内含 176 passed、lint 与 MkDocs build 通过。Round 5 结论不覆盖 main 历史同步。PR 正文和评论仍引用旧快照，详见证据报告；本地修订记录已刷新到当前 head 与验证结果。
 
 ## 14. Change Log
 
@@ -278,3 +278,11 @@ No frontend impact：改动只涉及 CLI、runner 后端和文字操作指南，
 - Reason: distinguish the resolved file-content conflict from the still-unsynchronized branch history, and keep local validation claims tied to the current tree.
 - Impact: source behavior and human acceptance scope are unchanged; Git history and GitHub metadata remain untouched under the worktree-only/no-merge/no-push constraints. The real #398 human check remains open.
 - Review: Round 5 independent verifier `PASS` covers the unchanged current source/test hashes; the fresh local `git merge-tree` check is not a history sync or GitHub integration verdict.
+
+### Refresh reviewer audit for the current worktree snapshot
+- Type: validation / evidence / documentation
+- Before: Final Reconciliation and its local evidence audit still named `e2ac3012` and the previous content-merge tree; GitHub PR #405 still carried an old base, PR-body validation snapshot, and evidence-comment anchor.
+- After: Final Reconciliation names worktree HEAD `6045419d`, current local `main` `51461449`, the 15/11 history divergence, and the fresh content-merge tree while explicitly preserving history sync as pending. The local audit records the current PR head/base, current source/test tree IDs, the Round 5 verifier fingerprints, 203 direct targeted tests, and 4/4 RV rerun. The PR body and comment remain unchanged remotely under the worktree-only constraint.
+- Reason: separate current source/test validation from branch integration state and keep every recorded claim tied to the snapshot it actually covers.
+- Impact: no product source or test file changed; the verified source/test trees are unchanged. No branch history, PR metadata, or Issue state was modified. #398 human acceptance remains open.
+- Review: Round 5 `PASS` still covers the exact current source/test tree; current reruns pass. The branch-history finding remains confirmed and pending because this repair forbids merging and publishing an updated branch; a local-only rebase would leave the remote PR unchanged.
