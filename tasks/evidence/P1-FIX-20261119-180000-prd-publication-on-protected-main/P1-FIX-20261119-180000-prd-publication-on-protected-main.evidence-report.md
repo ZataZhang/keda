@@ -67,3 +67,25 @@ All Git operations used temporary repositories and real Git processes. GitHub Is
 - `git diff --check`: passed on the final worktree diff. Corrected `lifecycle_agent_resolution.py` SHA-256: `4bf17a9af070c8340b666155fefc91ddfd1e74e78e6d51a14eadffea27a2feaf`. The source correction and these local checks are tied to the runner-assigned commit; no post-repair commit SHA is claimed.
 - The RV-1 through RV-4 scenarios and Round 3 verifier remain historical feature-level evidence; they were not re-described as newly run for this docstring correction, and this snapshot does not claim a new independent verifier pass.
 - PR #405's description and evidence comment require refresh by the runner after the branch conflict is resolved and a new snapshot is published. This task does not alter GitHub state.
+
+## Current finding audit and local validation — 2026-11-20
+
+- Audited PR #405 and the listed lifecycle docstrings again. The remote PR is still open at head `5676be1f90dc931ffe616b7b369d58daad0dcf4f`, based on `6dceaa0ba94c285776e76109a324051d1dd04d79`; GitHub reports `mergeable=false`. The current local `main` is `51461449`.
+- `git merge-tree --write-tree main issue-400` reports one content conflict in `src/backend/core/use_cases/agent_runner_orchestration_runtime.py` (merge base `f56f2d1`). The conflict is valid. It remains unresolved because this repair explicitly forbids merging/syncing `main`; no branch ref was changed.
+- The remote PR description still records verified head `a856cf84008cb2261325844d678c46bd869bf9a5`, tree `d21fb64e29b9e2dec4a209e36ab89ca0f25e11af`, and `174 passed`. The existing [validation comment](https://github.com/ZataZhang/keda/pull/405#issuecomment-7016416947) is still anchored to head `74ba5cb248dcf8ae73f5106ba4c46df4f2cc9afd` and base `6dceaa0ba94c285776e76109a324051d1dd04d79`. This worktree-only task did not edit GitHub metadata; the local evidence below is refreshed for the runner to publish after the branch conflict is resolved.
+- The two lifecycle docstring findings are already corrected at head `5676be1`: main-checkout read failures return the original Issue, task-branch fetch/read failures raise, and parse failures return the original Issue. See `lifecycle_agent_resolution.py` lines 479–493. Source SHA-256: `4bf17a9af070c8340b666155fefc91ddfd1e74e78e6d51a14eadffea27a2feaf`.
+- Final source commit/tree for these checks: `5676be1f90dc931ffe616b7b369d58daad0dcf4f` / `9c7a9065ff9d19a405792ebf8f0b249527584241`. No source files were changed during this repair; the tracked diff is this evidence update, and the runner commit request is a local ignored file.
+
+### Checks rerun against the current source tree
+
+- `UV_CACHE_DIR=/private/tmp/kc-issue-400-uv-cache just lint --reuse`: passed.
+- `UV_CACHE_DIR=/private/tmp/kc-issue-400-uv-cache SKIP=check-test-flag just lint --full`: passed; only `check-test-flag` was skipped because pre-commit hides unstaged files and changes its marker tree.
+- `UV_CACHE_DIR=/private/tmp/kc-issue-400-uv-cache just test`: **81 passed, 296 deselected** in 31.32 seconds.
+- `UV_CACHE_DIR=/private/tmp/kc-issue-400-uv-cache uv run --no-sync --project . pytest --no-testmon -q tests/test_issue_prd_branch_source.py tests/test_lifecycle_agent_routing.py tests/test_agent_runner_direct_pr_discovery.py`: **36 passed**.
+- RV-1 through RV-4 were rerun successfully with their commands in the verification plan. RV-4 also reran full lint, the related publication/branch-source/CLI tests (**176 passed**) and `uv run mkdocs build`.
+- Refreshed raw evidence SHA-256:
+  - `rv-1-protected-main-publish.txt`: `9d1c8a499a0ce69e7657335aea8c1e3e8e266cd0f38885f161e6eaf0255c0c41`
+  - `rv-2-recovery-idempotent-conflict.txt`: `42b6a7aaa1b860ba7f640c17a03af10f8510b5108a19f611b1857f1668835a6a`
+  - `rv-3-runner-branch-prd.txt`: `14042bea4a4eb2bcd974281015061a8d059796cd0815c43b6c6b6ff69759ebb3`
+  - `rv-4-compatibility-gates.txt`: `8c9354a712c8fbf1363637c3bc4fd338b2833e4361a4b07b27202ef215f07b3c`
+- All RV runs used temporary local Git remotes and a fail-loud local `gh` fixture. No real Issue #398/#399 or GitHub branch was changed; no independent verifier was rerun.
