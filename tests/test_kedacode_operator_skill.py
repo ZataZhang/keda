@@ -489,6 +489,7 @@ _ALLOWED_FLAGS: dict[tuple[str, ...], set[str]] = {
     # 旗标集合照抄 ``kc schema --json`` 的真实命令树，不凭记忆放行。
     ("agent", "list"): {"--json", "--output"},
     ("agent", "setup"): {
+        "--local",
         "--stage",
         "--agent",
         "--preset",

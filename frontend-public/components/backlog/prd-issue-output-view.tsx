@@ -15,6 +15,9 @@ import type { IssueLogChunk } from "@/lib/api/types";
 const LOG_POLL_INTERVAL_MS = 2500;
 // 防止超长日志拖垮页面，只保留尾部 ~200KB。
 const MAX_LOG_CHARS = 200_000;
+const LATEST_OUTPUT_LINE_LIMIT = 20;
+
+type IssueLogViewMode = "latest" | "full";
 
 interface PrdIssueOutputViewProps {
   repoId: string;
@@ -29,13 +32,27 @@ interface PrdIssueOutputViewProps {
  * @returns Issue 实时输出面板。
  */
 export function PrdIssueOutputView({ repoId, issueNumber }: PrdIssueOutputViewProps) {
+  const logIdentity = `${repoId}:${issueNumber}`;
   const [logContent, setLogContent] = useState("");
+  const [logViewSelection, setLogViewSelection] = useState<{
+    identity: string;
+    mode: IssueLogViewMode;
+  }>(() => ({ identity: logIdentity, mode: "latest" }));
   const [paused, setPaused] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [attemptId, setAttemptId] = useState<string | null>(null);
   const offsetRef = useRef(0);
   const attemptIdRef = useRef<string | null>(null);
   const containerRef = useRef<HTMLPreElement | null>(null);
+  const fullLogFollowRef = useRef(true);
+  const logViewMode =
+    logViewSelection.identity === logIdentity ? logViewSelection.mode : "latest";
+  const latestOutput = logContent
+    .split("\n")
+    .filter((line) => line.length > 0)
+    .slice(-LATEST_OUTPUT_LINE_LIMIT)
+    .reverse()
+    .join("\n");
 
   useEffect(() => {
     // 切换 PRD / Issue 时重置状态，避免把上一个 Issue 的偏移拼到当前内容。
@@ -43,6 +60,7 @@ export function PrdIssueOutputView({ repoId, issueNumber }: PrdIssueOutputViewPr
     // setState，会把渲染级联放大）。
     offsetRef.current = 0;
     attemptIdRef.current = null;
+    fullLogFollowRef.current = true;
     let cancelled = false;
 
     /**
@@ -149,10 +167,16 @@ export function PrdIssueOutputView({ repoId, issueNumber }: PrdIssueOutputViewPr
 
   useEffect(() => {
     const container = containerRef.current;
-    if (container) {
+    if (container && logViewMode === "latest") {
+      container.scrollTop = 0;
+    } else if (container && fullLogFollowRef.current) {
       container.scrollTop = container.scrollHeight;
     }
-  }, [logContent]);
+  }, [logContent, logViewMode]);
+
+  const selectLogView = (mode: IssueLogViewMode) => {
+    setLogViewSelection({ identity: logIdentity, mode });
+  };
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2" data-testid="prd-issue-output">
@@ -181,12 +205,52 @@ export function PrdIssueOutputView({ repoId, issueNumber }: PrdIssueOutputViewPr
       <p className="text-xs text-slate-400" data-testid="prd-issue-output-tz-note">
         行首时间 [HH:MM:SS] 为 runner 机器的本地墙钟，不含时区，未做浏览器时区换算。
       </p>
+      <div className="flex w-fit border-b border-border" role="group" aria-label="日志视图">
+        <Button
+          size="sm"
+          variant="ghost"
+          className={`h-auto rounded-t-md rounded-b-none border-b-2 px-3 py-2 ${
+            logViewMode === "latest"
+              ? "border-b-primary text-primary"
+              : "border-b-transparent text-muted-foreground"
+          }`}
+          aria-pressed={logViewMode === "latest"}
+          title={`显示最近 ${LATEST_OUTPUT_LINE_LIMIT} 行，最新输出置顶`}
+          onClick={() => selectLogView("latest")}
+          data-testid="prd-issue-output-latest-tab"
+        >
+          最新输出
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          className={`h-auto rounded-t-md rounded-b-none border-b-2 px-3 py-2 ${
+            logViewMode === "full"
+              ? "border-b-primary text-primary"
+              : "border-b-transparent text-muted-foreground"
+          }`}
+          aria-pressed={logViewMode === "full"}
+          onClick={() => selectLogView("full")}
+          data-testid="prd-issue-output-full-log-tab"
+        >
+          完整日志
+        </Button>
+      </div>
       <pre
         ref={containerRef}
         className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-all rounded-md border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-800 dark:bg-slate-950"
+        aria-label={logViewMode === "latest" ? "Issue 最新输出" : "Issue 完整日志"}
+        onScroll={(event) => {
+          if (logViewMode !== "full") {
+            return;
+          }
+          const container = event.currentTarget;
+          fullLogFollowRef.current =
+            container.scrollHeight - container.scrollTop - container.clientHeight <= 24;
+        }}
         data-testid="prd-issue-output-content"
       >
-        {logContent || "（暂无输出）"}
+        {(logViewMode === "latest" ? latestOutput : logContent) || "（暂无输出）"}
       </pre>
     </div>
   );
