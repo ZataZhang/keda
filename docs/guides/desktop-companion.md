@@ -132,6 +132,8 @@ kc desktop install
 
 命令需要新版 GitHub CLI（`gh`）。它下载与当前 CLI 版本匹配的安装包，校验 SHA-256 和 Sigstore 来源证明，确认来自 `ZataZhang/keda` 的发布工作流和对应版本标签，再静默安装到 `%LOCALAPPDATA%\KedaCode`。安装无需管理员权限，后续运行同一命令可就地升级。
 
+自动安装优先通过 `gh release download` 获取同一版本的 Windows 安装包、`SHA256SUMS` 和 Sigstore bundle。下载失败时会尝试使用 Windows 自带的 `curl.exe` 访问公开 Release。无论走哪条下载路径，均会在运行安装包前检查 SHA256 和发布来源。
+
 也可以从 GitHub Release 下载安装包，并在运行前 [用 GitHub CLI 验证来源](https://cli.github.com/manual/gh_attestation_verify)。同时下载对应的 `.sigstore.json`，以 `--bundle` 指定该文件，并传入 `--repo ZataZhang/keda`、`--signer-workflow ZataZhang/keda/.github/workflows/release.yml` 和对应标签的 `--source-ref refs/tags/vX.Y.Z`。安装后从开始菜单启动 KedaCode，托盘会显示图标。
 
 Windows 构建使用 Tauri 默认的 per-user 安装模式，安装时若缺少 WebView2 运行时，安装程序会  

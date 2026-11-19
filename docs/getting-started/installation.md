@@ -63,7 +63,7 @@ kc desktop install
 
 命令会下载与当前 CLI 版本匹配的 NSIS 安装包、校验同一 Release 的 SHA-256，然后静默安装到 `%LOCALAPPDATA%\KedaCode`，不需要管理员权限。也可以到 [GitHub Release](https://github.com/ZataZhang/keda/releases) 下载 `kedacode-desktop-windows-x64-setup.exe` 双击安装。安装后从开始菜单启动 KedaCode，系统托盘会出现图标；面板、置顶悬浮窗、登录自启与系统通知的能力与 macOS 菜单栏 App 对齐。
 
-`kc desktop install` 需要新版 GitHub CLI（`gh`），会验证发布工作流的签名证明后再执行安装包。Windows 安装包当前未做代码签名，首次运行时 SmartScreen 可能提示「未知发布者」，选择「更多信息 → 仍要运行」即可。Windows 没有 macOS 那样的首次交互提示：安装桌面 App 需要显式执行上面的命令或手动下载安装包，不会打断脚本、机器输出、帮助或版本调用。详见[桌面 App 指南](../guides/desktop-companion.md)。
+`kc desktop install` 需要新版 GitHub CLI（`gh`）。命令优先通过 `gh` 下载，失败时尝试 Windows 自带的 `curl.exe` 下载公开发布资产，再验证 SHA256 和发布工作流来源证明，验证通过后才执行安装包。也可从 GitHub Release 手动下载安装包，手动安装无需 `gh`。Windows 安装包当前未做代码签名，首次运行时 SmartScreen 可能提示「未知发布者」，选择「更多信息 → 仍要运行」即可。Windows 没有 macOS 那样的首次交互提示：安装桌面 App 需要显式执行上面的命令或手动下载安装包，不会打断脚本、机器输出、帮助或版本调用。详见[桌面 App 指南](../guides/desktop-companion.md)。
 
 ## Windows 支持范围
 
