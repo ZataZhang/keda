@@ -106,7 +106,7 @@ The current CLI command tree defines the valid options. The packaged-skill test 
 .
 ├── tests/test_kedacode_operator_skill.py [修改]
 │   【总结】把真实 CLI 已支持的 --local 纳入测试允许旗标集合。
-├── tasks/pending/P1-FEAT-20261113-121113-nightly-cleanup-keda.md [修改]
+├── tasks/archive/P1-FEAT-20261113-121113-nightly-cleanup-keda.md [修改]
 │   【总结】补齐当前 PRD 格式并记录本轮 scope、验证和未确认的 docs checkpoint。
 └── tasks/evidence/P1-FEAT-20261113-121113-nightly-cleanup-keda/ [新增]
     ├── P1-FEAT-20261113-121113-nightly-cleanup-keda.verification-plan.md
@@ -114,7 +114,7 @@ The current CLI command tree defines the valid options. The packaged-skill test 
     ├── P1-FEAT-20261113-121113-nightly-cleanup-keda.evidence-report.md
     │   【总结】汇总固定 SHA、失败根因、真实验证结果和 docs 范围状态。
     ├── P1-FEAT-20261113-121113-nightly-cleanup-keda.verifier-report.md
-    │   【总结】明确独立 verifier 尚未运行且不预填结论。
+    │   【总结】记录独立 rv-1 与关联 runtime-schema 检查均 PASS。
     └── human-review-checklist.md
         【总结】集中呈递留给人审阅的单项确认。
 ```
@@ -157,7 +157,7 @@ No frontend impact: this change only updates a Python test allowlist; neither `f
   required_for_acceptance: true
 ```
 
-Failure triage: inspect the reported packaged-skill file and option first, then compare the test allowlist with `agent_setup_command` and the runtime-schema assertion. The raw post-fix focused test output is `tasks/evidence/P1-FEAT-20261113-121113-nightly-cleanup-keda/rv-1-cli-skill-flag-check.txt` (local-only, ignored by Git).
+Failure triage: inspect the reported packaged-skill file and option first, then compare the test allowlist with `agent_setup_command` and the runtime-schema assertion. Raw post-fix outputs are `tasks/evidence/P1-FEAT-20261113-121113-nightly-cleanup-keda/rv-1-cli-skill-flag-check.txt` and `rv-1-cli-schema-check.txt`. They remain local and ignored by Git; the runner must publish them to `kc-evidence/issue-366` and present them in the PR evidence comment before human review.
 
 ## 8. Delivery Dependencies
 
@@ -196,7 +196,8 @@ Verifier-only result: `rv-1` and all test/lint/build results stay in §9.2 and a
 #### Delivery Readiness
 
 - [x] Independent verifier returned `PASS` for rv-1 on implementation SHA `525a3549ead8a4ada725b7916c694ba215fb8fa8`; see the verifier report.
-- [~] Issue round comment, `scope/ci` label, and draft PR publication — runner-owned gates. The executor did not mutate GitHub Issue or PR state.
+- [~] Refresh draft PR #404 title/description and publish the raw rv-1 outputs to `kc-evidence/issue-366` plus a PR evidence comment. GitHub connector writes were blocked because they require approval and the active approval policy is `never`; the no-push instruction also prevents evidence-branch publication in this worktree.
+- [~] Issue round comment and `scope/ci` label — runner-owned Issue metadata; the executor did not mutate the Issue.
 
 #### Human-Confirmed
 
@@ -233,7 +234,7 @@ The previous closed nightly-cleanup Issue #325 contains no doc-check record or v
 - Requirements and risks: confirmed — all four original trigger definitions and the one-scope priority remain in Appendix A; docs work is explicitly unexecuted and its range remains unconfirmed.
 - Reconciled differences: the original PRD's `Last CI status: success` and `Outdated dependency count: 78` are retained as 2026-11-13 trigger-time snapshots; the current round is governed by the later fixed base SHA and failed run.
 - Verification reconciliation: independent rv-1 verification passed against implementation SHA `525a3549ead8a4ada725b7916c694ba215fb8fa8`. The verifier re-opened the diff, confirmed the test change is limited to the supported `--local` allowlist entry, reran the required focused test with testmon disabled (`1 passed`), and passed the related runtime-schema check (`1 passed`). Evidence-backed non-human checklist items are checked; Human-Confirmed remains unchecked.
-- Remaining delivery follow-up: runner-owned Issue comment, `scope/ci` label, and draft PR publication remain pending. They do not block presenting the completed evidence for human acceptance.
+- Remaining delivery follow-up: refresh PR #404 metadata, publish the raw outputs to `kc-evidence/issue-366` and present them in a PR evidence comment, then add the runner-owned Issue comment and `scope/ci` label. GitHub metadata/comment writes were rejected by the approval gate; evidence-branch publication is also outside the no-push scope. Human acceptance remains pending.
 
 ## Round Record — 2026-11-19
 

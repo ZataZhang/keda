@@ -1,6 +1,6 @@
 # Human Review Checklist
 
-本清单供 runner 独立 verifier `PASS` 后进行人工复核；当前 PRD 为 `⏸️ 验证阻塞`，暂不请求接受。复核时请确认是否接受 CI 失败修复的范围和记录。若判断错误，后续 nightly 可能重复处理已解决工作，或丢失尚未审阅的文档范围。
+独立 verifier 已对实现 SHA `525a3549ead8a4ada725b7916c694ba215fb8fa8` 完成 rv-1 并返回 `PASS`；归档 PRD 状态为 `🧍 待人工验收`。PR #404 是当前审阅入口，但其标题仍缺少 `cleanup(ci):` 前缀，描述仍固定到旧 SHA 并列出旧的 99 文件统计。rv-1 与 runtime-schema 原始输出仍待发布到 `kc-evidence/issue-366` 并写入 PR evidence comment，因此本清单暂不请求人工接受。GitHub comment 与 PR 元数据写入被连接器审批门拒绝（需要审批，但当前策略为 `never`）；证据分支发布又受本任务 no-push 约束限制。复核时请确认是否接受 CI 失败修复的范围和记录。若判断错误，后续 nightly 可能重复处理已解决工作，或丢失尚未审阅的文档范围。
 
 ## 1. CI 修复范围与文档检查进度
 
@@ -17,6 +17,8 @@
 - [CI 运行 44548773786](https://github.com/ZataZhang/keda/actions/runs/44548773786)：固定 head `4c58ad0df1b1437ea2336303a64d486ada00ea89` 上的 `test_packaged_skill_command_examples_match_cli_help` 报告 `--local` 未登记。
 - [代码差异](../../../tests/test_kedacode_operator_skill.py)：只在 `("agent", "setup")` 白名单增加 `--local`。
 - [本轮证据报告](P1-FEAT-20261113-121113-nightly-cleanup-keda.evidence-report.md)：记录 focused test、`just test`、lint、文档构建结果及未执行的 scope。
+- [归档 PRD](../../archive/P1-FEAT-20261113-121113-nightly-cleanup-keda.md)：状态为 `🧍 待人工验收`，rv-1 独立验证为 `PASS`。
+- 原始 rv-1 与 runtime-schema 输出仍在本地忽略文件中；`kc-evidence/issue-366` 归档和 PR evidence comment 均待 runner 发布。
 
 **请回复：** “同意”，或指出具体差异及需要补充的验证 / 后续 Issue。
 

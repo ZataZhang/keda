@@ -7,7 +7,7 @@
 | 检查代码差异和证据 | [测试文件](../../../tests/test_kedacode_operator_skill.py)；[人审清单](human-review-checklist.md)（`/Users/zata/code/keda/.kc-worktrees/issue-366/tasks/evidence/P1-FEAT-20261113-121113-nightly-cleanup-keda/human-review-checklist.md`）；[验收记录](P1-FEAT-20261113-121113-nightly-cleanup-keda.evidence-report.md)；命令：`open "/Users/zata/code/keda/.kc-worktrees/issue-366/tasks/evidence/P1-FEAT-20261113-121113-nightly-cleanup-keda/human-review-checklist.md"` | 只新增 CLI 已支持的 `--local`；不改 CLI 实现或文档行为描述；文档范围仍明确未确认。执行方已交叉核对 CI 原始失败、CLI 参数定义和前后测试结果。 |
 
 - CI 失败记录：[GitHub Actions run 44548773786](https://github.com/ZataZhang/keda/actions/runs/44548773786)。
-- Draft PR：runner 尚未发布。
+- Draft PR: [#404](https://github.com/ZataZhang/keda/pull/404), head branch `issue-366` at `6379a08c9d03e809b047e8255cd11a7aadebadfc`. Its current title lacks the required `cleanup(ci):` prefix, and its body still links the older report SHA and 99-file listing. The proposed title is `cleanup(ci): align skill flag allowlist with CLI`; title/body refresh is pending because the GitHub connector rejected the write (approval required, active approval policy `never`).
 - 执行方已核对：真实 CLI 命令定义含 `--local`，修改前测试因该旗标失败，修改后目标测试和核心测试通过。
 
 ## 本轮选择
@@ -35,8 +35,8 @@
 |---|---|
 | `uv run pytest tests/test_kedacode_operator_skill.py::test_packaged_skill_command_examples_match_cli_help -v` before the fix | Failed as expected: unknown flag `--local`. |
 | Same focused test after the fix | Passed (`1 passed`); captured in local ignored `rv-1-cli-skill-flag-check.txt`. |
-| Independent rv-1 rerun on implementation SHA `525a3549ead8a4ada725b7916c694ba215fb8fa8`: `UV_CACHE_DIR=/private/tmp/issue-366-uv-cache uv run pytest tests/test_kedacode_operator_skill.py::test_packaged_skill_command_examples_match_cli_help -v --no-testmon` | Passed (`1 passed`); testmon was disabled so the selected test executed. Raw output is local and ignored. |
-| Runtime schema confirmation: `UV_CACHE_DIR=/private/tmp/issue-366-uv-cache uv run pytest tests/test_kedacode_operator_skill.py::test_packaged_skill_whitelist_matches_runtime_schema -v --no-testmon` | Passed (`1 passed`); confirms the allowlist entry matches the real CLI schema. Raw output is local and ignored. |
+| Independent rv-1 rerun on implementation SHA `525a3549ead8a4ada725b7916c694ba215fb8`: `UV_CACHE_DIR=/private/tmp/issue-366-uv-cache uv run pytest tests/test_kedacode_operator_skill.py::test_packaged_skill_command_examples_match_cli_help -v --no-testmon` | Passed (`1 passed`); testmon was disabled so the selected test executed. Complete output remains in the ignored local raw file; evidence-branch publication and PR comment are pending. |
+| Runtime schema confirmation: `UV_CACHE_DIR=/private/tmp/issue-366-uv-cache uv run pytest tests/test_kedacode_operator_skill.py::test_packaged_skill_whitelist_matches_runtime_schema -v --no-testmon` | Passed (`1 passed`); confirms the allowlist entry matches the real CLI schema. Complete output remains in the ignored local raw file; evidence-branch publication and PR comment are pending. |
 | `just lint --reuse` | Passed: jscpd, pylint duplicate-code, architecture, guidelines consistency, and file-line checks. |
 | First `just lint --full` attempt | All lint hooks passed except `check-test-flag`, which correctly required `just test` first. |
 | `just test` | Passed: `5517 passed, 1 skipped, 1 deselected in 681.99s`. No testmon selection baseline was available in this worktree. |
@@ -47,11 +47,13 @@
 
 The initial `uv` command could not open the default cache outside the allowed filesystem. Re-running with `UV_CACHE_DIR=/private/tmp/issue-366-uv-cache` completed successfully.
 
+Raw-output SHA-256 for runner publication checks: `rv-1-cli-skill-flag-check.txt` = `4c9c5431474c34c0e859c537382fd6d8e2098ff269081b3fba218367bca76b2e`; `rv-1-cli-schema-check.txt` = `6a2afb1586216c3a7fe3d04cbb2a629d1f3ab7605032bea82c37d4ce335f278b`.
+
 ## Final tree and remaining gates
 
 - The verified source diff is limited to `tests/test_kedacode_operator_skill.py` plus the current-format PRD and its evidence reports / human review checklist.
 - No CLI, API, configuration, persistence, or user-visible behavior changed.
-- The local raw pytest output is ignored by Git as required; the three Markdown reports are committed with the PRD.
+- The two raw pytest outputs are local and ignored by Git. They must be published to `kc-evidence/issue-366` and presented in a PR evidence comment before human acceptance. GitHub comment/metadata writes were blocked by the connector's approval gate (`approval policy: never`); the explicit no-push instruction also prevents publishing the evidence branch here. The Markdown reports are tracked with the archived PRD.
 - Independent verifier verdict: **PASS** against implementation SHA `525a3549ead8a4ada725b7916c694ba215fb8fa8`; see the verifier report for the diff review and both focused checks.
-- PRD status: `🧍 待人工验收`; all evidence-backed executor items are checked in the PRD, while human acceptance remains unchecked. Issue comment, scope label, and draft PR publication remain runner-owned.
+- PRD status: `🧍 待人工验收`; all evidence-backed executor items are checked in the PRD, while human acceptance remains unchecked. Draft PR #404 exists; its requested title/description refresh, PR evidence comment, Issue round comment, `scope/ci` label, and raw evidence-branch publication remain pending.
 - Time spent: approximately 25 minutes wall-clock from the runner claim, including the 11m21s `just test` run.
