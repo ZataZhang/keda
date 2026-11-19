@@ -118,6 +118,32 @@ wheel 分发。`kc init` 会仅下载这两个 Skill 并安装到用户级目录
 根目录（CI / 测试把安装落到临时目录时用），用 `KEDACODE_PRD_SKILL_PATH` 直接指定某一份
 `SKILL.md`。
 
+### 让 AI Agent 帮你安装和配置 KedaCode
+
+如果你希望自己的 AI Agent 代为安装 `kc` 并完成配置，可以把下面这段提示词发给它。Agent 会先询问要接入的仓库和偏好的执行 Agent，再按你的回答继续。
+
+```text
+请在这台电脑上安装并配置 KedaCode。它的源码仓库是 https://github.com/ZataZhang/keda，Python 安装包名为 `kedacode`，安装后的命令是 `kc`。
+
+请先在线阅读安装指南 https://github.com/ZataZhang/keda/blob/main/docs/getting-started/installation.md 和 Agent Runner 指南 https://github.com/ZataZhang/keda/blob/main/docs/guides/agent-runner.md。安装 CLI 无需克隆 KedaCode 源码。然后检查操作系统、架构、Python、`uv`、`kc`、GitHub CLI (`gh`) 和已安装的 Agent CLI。以上只做只读检查，凭据和认证文件内容无需读取。
+
+检查完成后，先向我确认两件事；在我回答前不要安装软件或写入配置：
+1. 这次只安装 CLI，还是也要初始化仓库？如果要初始化，请问我仓库的绝对路径。
+2. 我希望 KedaCode 使用哪个执行 Agent？如果我不确定，请列出检查到的可用选项让我选；也允许我选择暂不设置。
+
+收到回答后按以下步骤执行：
+1. 如果 `kc` 尚未可用，使用适合本机的官方安装方式安装 `kedacode`；若已有可用版本，先报告版本并保留现有安装。不要使用 `sudo`，也不要未经确认修改 shell 启动文件。完成后运行 `kc --version` 和 `kc --help` 验证；以官方文档和本机帮助为准，不猜测命令参数。
+2. 用 `gh auth status` 检查 GitHub CLI 登录状态。若未登录，告诉我需要完成 `gh auth login -h github.com`；不要索取或代为保存 token。GitHub labels 同步受登录状态影响时，说明结果和后续步骤。
+3. 如果我选择初始化仓库，先检查仓库路径、Git 状态和现有 `.kedacode.toml`。尚未初始化时，在该仓库运行 `kc init --dry-run`，把将修改的仓库配置、`.gitignore`、用户级 Skills 和 GitHub labels 汇总给我；得到我确认后再运行 `kc init`。如果仓库已经初始化，不要覆盖配置，也不要运行 `kc init --force`。
+4. 如果我选择了执行 Agent，运行 `kc agent list` 确认它已安装，并用 `kc agent setup --dry-run` 预览生命周期配置。把将写入全局 `~/.kedacode/config.toml` 的内容告诉我；得到确认后才应用。不要替我安装或切换 Agent、账号、模型，也不要静默选择其他 Agent。
+5. 不要启动 daemon、执行任务队列、创建 Issue/PR，或做上述安装和配置之外的改动。shell 补全和桌面 App 属于可选项，先询问我。
+6. 最后汇报安装版本与方式、初始化的仓库、配置结果、验证结果，以及仍需我亲自完成的步骤。
+
+遇到需要管理员权限、目标不明确或文档与本机不一致时，先说明具体原因和计划，再等我决定；不要猜测或绕过限制。
+```
+
+详细步骤见[安装指南](docs/getting-started/installation.md)和[Agent Runner 使用指南](docs/guides/agent-runner.md)。
+
 ## 前置要求
 
 - Python >= 3.11
