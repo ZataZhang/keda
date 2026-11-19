@@ -12,7 +12,7 @@
 - Entry point: `uv run pytest tests/test_kedacode_operator_skill.py::test_packaged_skill_command_examples_match_cli_help -v`; the test traverses the real packaged skill files and compares examples with the curated allowlist. The sibling runtime-schema test keeps allowlisted values tied to the real CLI.
 - Discriminating assertion: the pre-fix test must fail on `--local`; after adding that already-supported flag, it must pass while still rejecting unknown options.
 - External services or credentials: none.
-- Evidence: `rv-1-cli-skill-flag-check.txt` and `rv-1-cli-schema-check.txt` (complete local raw outputs, ignored by Git). The runner must publish both to `kc-evidence/issue-366` and present them in the PR evidence comment before human review. GitHub comment creation was blocked by the connector's approval requirement under the active `never` approval policy; this worktree also cannot push the evidence branch.
+- Evidence: `rv-1-cli-skill-flag-check.txt` and `rv-1-cli-schema-check.txt` are complete 12-line raw outputs in this worktree (ignored by Git). Their SHA-256 values are respectively `4c9c5431474c34c0e859c537382fd6d8e2098ff269081b3fba218367bca76b2e` and `6a2afb1586216c3a7fe3d04cbb2a629d1f3ab7605032bea82c37d4ce335f278b`. The runner must publish both to `kc-evidence/issue-366` and present them in the PR evidence comment before human review. This repair is limited to worktree files and prohibits push, so remote publication and PR writes remain pending.
 
 ## Regression and repository gates
 

@@ -196,7 +196,7 @@ Verifier-only result: `rv-1` and all test/lint/build results stay in §9.2 and a
 #### Delivery Readiness
 
 - [x] Independent verifier returned `PASS` for rv-1 on implementation SHA `525a3549ead8a4ada725b7916c694ba215fb8fa8`; see the verifier report.
-- [~] Refresh draft PR #404 title/description and publish the raw rv-1 outputs to `kc-evidence/issue-366` plus a PR evidence comment. GitHub connector writes were blocked because they require approval and the active approval policy is `never`; the no-push instruction also prevents evidence-branch publication in this worktree.
+- [~] Refresh draft PR #404 title/description and publish the raw rv-1 outputs to `kc-evidence/issue-366` plus a PR evidence comment. A read-only check on 2026-11-20 confirmed the draft head was `8043db827fd985be40df76ab1a604df9d97fb614`, the title lacked `cleanup(ci):`, the body still used the old `525a3549ead8a4ada725b7916c694ba215fb8fa8` publication SHA and 99-file list, and no PR comment existed; the current comparison was 7 files (495 additions, 105 deletions). This local-only repair cannot make the required remote changes or push the raw outputs.
 - [~] Issue round comment and `scope/ci` label — runner-owned Issue metadata; the executor did not mutate the Issue.
 
 #### Human-Confirmed
@@ -234,7 +234,7 @@ The previous closed nightly-cleanup Issue #325 contains no doc-check record or v
 - Requirements and risks: confirmed — all four original trigger definitions and the one-scope priority remain in Appendix A; docs work is explicitly unexecuted and its range remains unconfirmed.
 - Reconciled differences: the original PRD's `Last CI status: success` and `Outdated dependency count: 78` are retained as 2026-11-13 trigger-time snapshots; the current round is governed by the later fixed base SHA and failed run.
 - Verification reconciliation: independent rv-1 verification passed against implementation SHA `525a3549ead8a4ada725b7916c694ba215fb8fa8`. The verifier re-opened the diff, confirmed the test change is limited to the supported `--local` allowlist entry, reran the required focused test with testmon disabled (`1 passed`), and passed the related runtime-schema check (`1 passed`). Evidence-backed non-human checklist items are checked; Human-Confirmed remains unchecked.
-- Remaining delivery follow-up: refresh PR #404 metadata, publish the raw outputs to `kc-evidence/issue-366` and present them in a PR evidence comment, then add the runner-owned Issue comment and `scope/ci` label. GitHub metadata/comment writes were rejected by the approval gate; evidence-branch publication is also outside the no-push scope. Human acceptance remains pending.
+- Remaining delivery follow-up: refresh PR #404 metadata using the runner's resulting commit SHA, publish the raw outputs to `kc-evidence/issue-366` and present them in a PR evidence comment, then add the runner-owned Issue comment and `scope/ci` label. The 2026-11-20 read-only snapshot and verified output hashes are in the evidence report. This repair only changes worktree files and forbids push, so the remote publication and metadata remain pending. Human acceptance remains pending.
 
 ## Round Record — 2026-11-19
 

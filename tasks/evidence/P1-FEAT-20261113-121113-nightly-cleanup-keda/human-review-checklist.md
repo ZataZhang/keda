@@ -1,6 +1,6 @@
 # Human Review Checklist
 
-独立 verifier 已对实现 SHA `525a3549ead8a4ada725b7916c694ba215fb8fa8` 完成 rv-1 并返回 `PASS`；归档 PRD 状态为 `🧍 待人工验收`。PR #404 是当前审阅入口，但其标题仍缺少 `cleanup(ci):` 前缀，描述仍固定到旧 SHA 并列出旧的 99 文件统计。rv-1 与 runtime-schema 原始输出仍待发布到 `kc-evidence/issue-366` 并写入 PR evidence comment，因此本清单暂不请求人工接受。GitHub comment 与 PR 元数据写入被连接器审批门拒绝（需要审批，但当前策略为 `never`）；证据分支发布又受本任务 no-push 约束限制。复核时请确认是否接受 CI 失败修复的范围和记录。若判断错误，后续 nightly 可能重复处理已解决工作，或丢失尚未审阅的文档范围。
+独立 verifier 已对实现 SHA `525a3549ead8a4ada725b7916c694ba215fb8fa8` 完成 rv-1 并返回 `PASS`；归档 PRD 状态为 `🧍 待人工验收`。只读核对确认 PR #404 仍为 draft，远端 head（核对时）是 `8043db827fd985be40df76ab1a604df9d97fb614`，当前比较为 7 个文件、495 additions / 105 deletions；现有标题仍缺少 `cleanup(ci):` 前缀，描述引用旧发布 SHA `525a3549ead8a4ada725b7916c694ba215fb8` 并列出旧 99 文件清单，PR 评论时间线为空。建议标题为 `cleanup(ci): align skill flag allowlist with CLI`。两份完整原始输出仍在本 worktree 的忽略文件中，哈希见证据报告；必须先发布到 `kc-evidence/issue-366` 并写入 PR evidence comment，之后再请求人工接受。本轮约束只允许修改 worktree 文件并禁止 push，因此以上远端更新仍待 runner 执行。
 
 ## 1. CI 修复范围与文档检查进度
 
@@ -18,7 +18,7 @@
 - [代码差异](../../../tests/test_kedacode_operator_skill.py)：只在 `("agent", "setup")` 白名单增加 `--local`。
 - [本轮证据报告](P1-FEAT-20261113-121113-nightly-cleanup-keda.evidence-report.md)：记录 focused test、`just test`、lint、文档构建结果及未执行的 scope。
 - [归档 PRD](../../archive/P1-FEAT-20261113-121113-nightly-cleanup-keda.md)：状态为 `🧍 待人工验收`，rv-1 独立验证为 `PASS`。
-- 原始 rv-1 与 runtime-schema 输出仍在本地忽略文件中；`kc-evidence/issue-366` 归档和 PR evidence comment 均待 runner 发布。
+- 原始 rv-1 与 runtime-schema 输出仍在本地忽略文件中；`kc-evidence/issue-366` 归档和 PR evidence comment 均待 runner 发布。报告中的远端 PR 元数据为 2026-11-20 本轮本地修复前的只读快照，runner 提交后应把 PR 描述的 head 更新为新提交。
 
 **请回复：** “同意”，或指出具体差异及需要补充的验证 / 后续 Issue。
 
