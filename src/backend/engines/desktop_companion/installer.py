@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import os
-import plistlib
 import platform
+import plistlib
 import re
 import shutil
 import subprocess
@@ -142,15 +142,27 @@ def _install_windows_app(*, version: str) -> Path:
     release_tag = f"v{version}"
     install_directory = _windows_install_directory()
 
+    github_cli_path = shutil.which("gh")
+    if github_cli_path is None:
+        raise DesktopCompanionInstallError(
+            "Install or update GitHub CLI (gh) to verify the Windows installer provenance."
+        )
+
     try:
         with tempfile.TemporaryDirectory(prefix="kedacode-desktop-") as temporary_directory:
-            installer_path = Path(temporary_directory) / asset_name
-            _download_and_verify_release_asset(
-                release_tag=release_tag,
-                asset_name=asset_name,
-                destination_path=installer_path,
+            asset_directory = Path(temporary_directory)
+            installer_path = asset_directory / asset_name
+            _download_windows_release_assets(github_cli_path, release_tag, installer_path)
+            checksum_text = (asset_directory / "SHA256SUMS").read_text(encoding="utf-8")
+            with installer_path.open("rb") as installer_file:
+                actual_digest = hashlib.file_digest(installer_file, "sha256").hexdigest()
+            if actual_digest != _expected_asset_digest(checksum_text, asset_name):
+                raise DesktopCompanionInstallError(
+                    f"Checksum verification failed for {asset_name}; the app was not installed."
+                )
+            _verify_windows_installer_provenance(
+                installer_path, release_tag=release_tag, github_cli_path=github_cli_path
             )
-            _verify_windows_installer_provenance(installer_path, release_tag=release_tag)
             _run_windows_installer(installer_path)
     except DesktopCompanionInstallError:
         raise
@@ -211,18 +223,74 @@ def _windows_desktop_app_running() -> bool:
     return _WINDOWS_EXECUTABLE_NAME.lower().encode() in completed_process.stdout.lower()
 
 
-def _verify_windows_installer_provenance(installer_path: Path, *, release_tag: str) -> None:
-    """验证安装包由本仓库的发布工作流在对应 tag 上构建。"""
-    github_cli_path = shutil.which("gh")
-    if github_cli_path is None:
-        raise DesktopCompanionInstallError(
-            "Install or update GitHub CLI (gh) to verify the Windows installer provenance."
-        )
-    bundle_asset_name = f"{installer_path.name}.sigstore.json"
-    bundle_path = installer_path.with_name(bundle_asset_name)
-    bundle_path.write_bytes(
-        _download_release_bytes(release_tag=release_tag, asset_name=bundle_asset_name)
+def _download_windows_release_assets(
+    github_cli_path: str, release_tag: str, installer_path: Path
+) -> None:
+    """优先用 gh 下载，失败时用 Windows 系统 curl 下载公开资产。"""
+    asset_names = ("SHA256SUMS", installer_path.name, f"{installer_path.name}.sigstore.json")
+    download = subprocess.run(
+        [
+            github_cli_path,
+            "release",
+            "download",
+            release_tag,
+            "--repo",
+            _RELEASE_REPOSITORY,
+            "--dir",
+            str(installer_path.parent),
+            *[argument for name in asset_names for argument in ("--pattern", name)],
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+        timeout=_HTTP_TIMEOUT_SECONDS,
     )
+    if download.returncode == 0:
+        return
+
+    system_directory = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32"
+    curl_path = system_directory / "curl.exe"
+    if not curl_path.is_file():
+        raise DesktopCompanionInstallError(
+            f"Could not download Windows release {release_tag} with gh: {download.stderr.strip()}"
+        )
+    for asset_name in asset_names:
+        fallback = subprocess.run(
+            [
+                str(curl_path),
+                "--disable",
+                "--fail",
+                "--location",
+                "--silent",
+                "--show-error",
+                "--proto",
+                "=https",
+                "--proto-redir",
+                "=https",
+                "--output",
+                str(installer_path.with_name(asset_name)),
+                _release_asset_url(release_tag=release_tag, asset_name=asset_name),
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+            timeout=_HTTP_TIMEOUT_SECONDS,
+        )
+        if fallback.returncode != 0:
+            raise DesktopCompanionInstallError(
+                f"Could not download {asset_name} from GitHub: {fallback.stderr.strip()}"
+            )
+
+
+def _verify_windows_installer_provenance(
+    installer_path: Path, *, release_tag: str, github_cli_path: str
+) -> None:
+    """验证安装包由本仓库的发布工作流在对应 tag 上构建。"""
+    bundle_path = installer_path.with_name(f"{installer_path.name}.sigstore.json")
     verification = subprocess.run(
         [
             github_cli_path,
@@ -264,8 +332,7 @@ def _run_windows_installer(installer_path: Path) -> None:
         error_text = completed_process.stderr.decode("utf-8", errors="replace").strip()
         error_detail = f": {error_text}" if error_text else "."
         raise DesktopCompanionInstallError(
-            "The Windows installer failed "
-            f"(exit code {completed_process.returncode}){error_detail}"
+            f"The Windows installer failed (exit code {completed_process.returncode}){error_detail}"
         )
 
 
@@ -291,8 +358,7 @@ def _release_asset_url(*, release_tag: str, asset_name: str) -> str:
     safe_tag = urllib.parse.quote(release_tag, safe="")
     safe_asset_name = urllib.parse.quote(asset_name, safe="")
     return (
-        f"https://github.com/{_RELEASE_REPOSITORY}/releases/download/"
-        f"{safe_tag}/{safe_asset_name}"
+        f"https://github.com/{_RELEASE_REPOSITORY}/releases/download/{safe_tag}/{safe_asset_name}"
     )
 
 
@@ -338,11 +404,13 @@ def _download_and_verify_release_asset(
     )
     actual_digest = hashlib.sha256()
     try:
-        with urllib.request.urlopen(request, timeout=_HTTP_TIMEOUT_SECONDS) as response:
-            with destination_path.open("wb") as destination_file:
-                while downloaded_chunk := response.read(_DOWNLOAD_CHUNK_BYTES):
-                    destination_file.write(downloaded_chunk)
-                    actual_digest.update(downloaded_chunk)
+        with (
+            urllib.request.urlopen(request, timeout=_HTTP_TIMEOUT_SECONDS) as response,
+            destination_path.open("wb") as destination_file,
+        ):
+            while downloaded_chunk := response.read(_DOWNLOAD_CHUNK_BYTES):
+                destination_file.write(downloaded_chunk)
+                actual_digest.update(downloaded_chunk)
     except urllib.error.HTTPError as error:
         if error.code == 404:
             raise DesktopCompanionInstallError(

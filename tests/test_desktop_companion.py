@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import plistlib
 import shutil
 import subprocess
@@ -20,14 +21,14 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 import backend.api.routes.agent_runner_console_runtime as runtime_routes
+import backend.engines.desktop_companion.helper as helper_module
+import backend.engines.desktop_companion.installer as installer_module
 import backend.engines.desktop_companion.launcher as launcher_module
 from backend.api.routes.agent_runner_console_runtime import (
     _trusted_bound_origin,
     _trusted_console_origin,
 )
 from backend.core.shared.interfaces.desktop_companion import DesktopCompanionStatus
-import backend.engines.desktop_companion.helper as helper_module
-import backend.engines.desktop_companion.installer as installer_module
 from backend.engines.desktop_companion.helper import validate_console_origin
 from backend.engines.desktop_companion.launcher import (
     HELPER_MODULE,
@@ -62,7 +63,7 @@ def _launcher(
 ):
     """构造指向临时 pidfile、运行时可用的 launcher。"""
 
-    def _fake_popen(args, **kwargs):  # noqa: ANN001, ANN003 - 替身只关心 argv
+    def _fake_popen(args, **kwargs):
         process.args = list(args)
         return process
 
@@ -560,6 +561,17 @@ def test_install_disk_image_matches_canonical_mount_point(
     assert executed_commands[-1][-1] == "/dev/disk9s1"
 
 
+def _write_windows_release_assets(installer_path: Path) -> None:
+    """写入测试用的安装包、校验和与证明。"""
+    installer_bytes = b"installer"
+    installer_path.write_bytes(installer_bytes)
+    installer_path.with_name("SHA256SUMS").write_text(
+        f"{hashlib.sha256(installer_bytes).hexdigest()}  {installer_path.name}\n",
+        encoding="utf-8",
+    )
+    installer_path.with_suffix(".exe.sigstore.json").write_bytes(b"bundle")
+
+
 def test_windows_install_downloads_setup_and_runs_silent_installer(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -567,36 +579,45 @@ def test_windows_install_downloads_setup_and_runs_silent_installer(
     monkeypatch.setattr(installer_module.sys, "platform", "win32")
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     install_directory = tmp_path / "KedaCode"
-    downloaded_asset_names: list[str] = []
     executed_commands: list[list[str]] = []
 
-    def fake_download(*, release_tag: str, asset_name: str, destination_path: Path) -> None:
-        """替掉网络下载：只记录资产名并写出一个占位文件。"""
-        assert release_tag == "v0.7.0"
-        downloaded_asset_names.append(asset_name)
-        destination_path.write_bytes(b"installer")
-
     monkeypatch.setattr(installer_module.shutil, "which", lambda name: "/fake/gh")
-    monkeypatch.setattr(installer_module, "_download_release_bytes", lambda **kwargs: b"bundle")
 
     def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
         """替掉 NSIS 安装：记录 argv，并按默认安装目录造出可执行文件。"""
         executed_commands.append(list(command))
+        if command[1:3] == ["release", "download"]:
+            asset_directory = Path(command[command.index("--dir") + 1])
+            installer_path = asset_directory / "kedacode-desktop-windows-x64-setup.exe"
+            _write_windows_release_assets(installer_path)
+            return subprocess.CompletedProcess(command, 0, "", "")
         if command[0] == "/fake/gh":
             return subprocess.CompletedProcess(command, 0, "", "")
         install_directory.mkdir(parents=True, exist_ok=True)
         (install_directory / "KedaCode.exe").write_bytes(b"executable")
         return subprocess.CompletedProcess(command, 0, b"", b"")
 
-    monkeypatch.setattr(installer_module, "_download_and_verify_release_asset", fake_download)
     monkeypatch.setattr(installer_module.subprocess, "run", fake_run)
     monkeypatch.setattr(installer_module, "_windows_desktop_app_running", lambda: False)
 
     installed_path = installer_module.install_desktop_companion(version="0.7.0")
 
     assert installed_path == install_directory / "KedaCode.exe"
-    assert downloaded_asset_names == ["kedacode-desktop-windows-x64-setup.exe"]
-    verification_arguments, installer_arguments = executed_commands
+    download_arguments, verification_arguments, installer_arguments = executed_commands
+    assert download_arguments[:6] == [
+        "/fake/gh",
+        "release",
+        "download",
+        "v0.7.0",
+        "--repo",
+        "ZataZhang/keda",
+    ]
+    assert download_arguments[8::2] == ["--pattern"] * 3
+    assert download_arguments[9::2] == [
+        "SHA256SUMS",
+        "kedacode-desktop-windows-x64-setup.exe",
+        "kedacode-desktop-windows-x64-setup.exe.sigstore.json",
+    ]
     assert verification_arguments[:3] == ["/fake/gh", "attestation", "verify"]
     assert verification_arguments[verification_arguments.index("--source-ref") + 1] == (
         "refs/tags/v0.7.0"
@@ -608,6 +629,41 @@ def test_windows_install_downloads_setup_and_runs_silent_installer(
     assert installer_arguments[1:] == ["/S"]
 
 
+def test_windows_download_falls_back_to_system_curl(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """gh 未登录时，系统 curl 仍能下载同一 tag 的公开资产。"""
+    system_directory = tmp_path / "System32"
+    system_directory.mkdir()
+    curl_path = system_directory / "curl.exe"
+    curl_path.touch()
+    monkeypatch.setenv("SystemRoot", str(tmp_path))
+    installer_path = tmp_path / "kedacode-desktop-windows-x64-setup.exe"
+    downloaded_names: list[str] = []
+
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if command[0] == "/fake/gh":
+            return subprocess.CompletedProcess(command, 1, "", "gh auth login")
+        assert command[:2] == [str(curl_path), "--disable"]
+        output_path = Path(command[command.index("--output") + 1])
+        assert output_path.parent == tmp_path
+        assert command[-1] == (
+            f"https://github.com/ZataZhang/keda/releases/download/v0.8.0/{output_path.name}"
+        )
+        downloaded_names.append(output_path.name)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(installer_module.subprocess, "run", fake_run)
+
+    installer_module._download_windows_release_assets("/fake/gh", "v0.8.0", installer_path)
+
+    assert downloaded_names == [
+        "SHA256SUMS",
+        installer_path.name,
+        f"{installer_path.name}.sigstore.json",
+    ]
+
+
 def test_windows_install_reports_installer_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -615,12 +671,12 @@ def test_windows_install_reports_installer_failure(
     monkeypatch.setattr(installer_module.sys, "platform", "win32")
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
 
-    def fake_download(*, release_tag: str, asset_name: str, destination_path: Path) -> None:
-        """替掉网络下载。"""
-        destination_path.write_bytes(b"installer")
-
     monkeypatch.setattr(installer_module.shutil, "which", lambda name: "/fake/gh")
-    monkeypatch.setattr(installer_module, "_download_release_bytes", lambda **kwargs: b"bundle")
+    monkeypatch.setattr(
+        installer_module,
+        "_download_windows_release_assets",
+        lambda gh, tag, path: _write_windows_release_assets(path),
+    )
 
     def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
         """模拟 NSIS 安装失败。"""
@@ -628,7 +684,6 @@ def test_windows_install_reports_installer_failure(
             return subprocess.CompletedProcess(command, 0, "", "")
         return subprocess.CompletedProcess(command, 2, b"", b"installer failed")
 
-    monkeypatch.setattr(installer_module, "_download_and_verify_release_asset", fake_download)
     monkeypatch.setattr(installer_module.subprocess, "run", fake_run)
     monkeypatch.setattr(installer_module, "_windows_desktop_app_running", lambda: False)
 
@@ -643,9 +698,10 @@ def test_windows_install_aborts_on_failed_provenance(
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     monkeypatch.setattr(installer_module, "_windows_desktop_app_running", lambda: False)
     monkeypatch.setattr(installer_module.shutil, "which", lambda name: "/fake/gh")
-    monkeypatch.setattr(installer_module, "_download_release_bytes", lambda **kwargs: b"bundle")
     monkeypatch.setattr(
-        installer_module, "_download_and_verify_release_asset", lambda **kwargs: None
+        installer_module,
+        "_download_windows_release_assets",
+        lambda gh, tag, path: _write_windows_release_assets(path),
     )
 
     def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
@@ -669,8 +725,8 @@ def test_windows_install_requires_the_running_app_to_exit(
     download_calls: list[str] = []
     monkeypatch.setattr(
         installer_module,
-        "_download_and_verify_release_asset",
-        lambda **kwargs: download_calls.append(kwargs["asset_name"]),
+        "_download_windows_release_assets",
+        lambda gh, tag, path: download_calls.append(path.name),
     )
 
     with pytest.raises(installer_module.DesktopCompanionInstallError, match="KedaCode is running"):
