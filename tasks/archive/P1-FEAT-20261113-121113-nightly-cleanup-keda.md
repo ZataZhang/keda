@@ -2,7 +2,7 @@
 
 > ✅ **交付前置 / Delivery Gate**：无依赖（见 §8）。
 > 本行是 §8 Delivery Dependencies 的投影，**那里是唯一事实源**。
-> ⏸️ **验收状态 / Acceptance Status**：验证阻塞 — 独立 verifier 尚未完成；执行侧验收项保持未勾选，阻塞原因与后续任务见 Final Reconciliation。
+> 🧍 **验收状态 / Acceptance Status**：待人工验收 — 独立 verifier 已对最终实现 SHA `525a3549ead8a4ada725b7916c694ba215fb8fa8` 完成 `rv-1` 并通过；人工确认仍未完成。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 This PRD records one nightly cleanup round for repository maintainers. The complete scope trigger and priority rules are preserved in Appendix A.
@@ -185,17 +185,18 @@ Verifier-only result: `rv-1` and all test/lint/build results stay in §9.2 and a
 
 #### Behavior Acceptance
 
-- [ ] CI run `44548773786` at fixed base SHA `4c58ad0df1b1437ea2336303a64d486ada00ea89` failed on `test_packaged_skill_command_examples_match_cli_help` because the real CLI `--local` option was absent from the allowlist; the source and exact failure are in the evidence report. Evidence is collected; defer ticking until independent verifier `PASS`.
-- [ ] `tests/test_kedacode_operator_skill.py` now registers `--local` for `("agent", "setup")`; the pre-fix red and post-fix green outputs are captured in `rv-1-cli-skill-flag-check.txt` and the runtime-schema check remains intact. Evidence is collected; defer ticking until independent verifier `PASS`.
+- [x] CI run `44548773786` at fixed base SHA `4c58ad0df1b1437ea2336303a64d486ada00ea89` failed on `test_packaged_skill_command_examples_match_cli_help` because the real CLI `--local` option was absent from the allowlist; the source and exact failure are in the evidence report.
+- [x] `tests/test_kedacode_operator_skill.py` now registers `--local` for `("agent", "setup")`; pre-fix red and post-fix green outputs are recorded, the independent rv-1 rerun passed on implementation SHA `525a3549ead8a4ada725b7916c694ba215fb8fa8`, and the runtime-schema test independently passed.
 
 #### Validation Acceptance
 
-- [ ] Required validation passed: `just lint --reuse`, `just test` (5517 passed, 1 skipped, 1 deselected), final `just lint --full`, `git diff --check`, and `uv run mkdocs build --strict`; see the evidence report. Evidence is collected; defer ticking until independent verifier `PASS`.
-- [ ] Lower-priority scopes are recorded as not executed, and the docs checkpoint is unconfirmed with no `checked_through_sha` advancement; see the evidence report and this round record. Evidence is collected; defer ticking until independent verifier `PASS`.
+- [x] Required validation passed: `just lint --reuse`, `just test` (5517 passed, 1 skipped, 1 deselected), final `just lint --full`, `git diff --check`, and `uv run mkdocs build --strict`; see the evidence report.
+- [x] Lower-priority scopes are recorded as not executed, and the docs checkpoint is unconfirmed with no `checked_through_sha` advancement; see the evidence report and this round record.
 
 #### Delivery Readiness
 
-- [~] Independent verifier, Issue round comment, `scope/ci` label, and draft PR publication — runner-owned gates. The executor did not mutate GitHub Issue or PR state.
+- [x] Independent verifier returned `PASS` for rv-1 on implementation SHA `525a3549ead8a4ada725b7916c694ba215fb8fa8`; see the verifier report.
+- [~] Issue round comment, `scope/ci` label, and draft PR publication — runner-owned gates. The executor did not mutate GitHub Issue or PR state.
 
 #### Human-Confirmed
 
@@ -231,8 +232,8 @@ The previous closed nightly-cleanup Issue #325 contains no doc-check record or v
 - Related PRD status: confirmed — no linked PRD was modified; the latest closed nightly-cleanup Issue #325 had no usable docs checkpoint record.
 - Requirements and risks: confirmed — all four original trigger definitions and the one-scope priority remain in Appendix A; docs work is explicitly unexecuted and its range remains unconfirmed.
 - Reconciled differences: the original PRD's `Last CI status: success` and `Outdated dependency count: 78` are retained as 2026-11-13 trigger-time snapshots; the current round is governed by the later fixed base SHA and failed run.
-- Validation blocker: The independent verifier has not issued a verdict. Per repository PRD workflow, executor-owned acceptance items remain unchecked until verifier `PASS`, despite executor evidence being collected.
-- Validation follow-up: Runner-owned independent verification for Issue #366 / this PRD. On `PASS`, attach the verifier report, tick only the executor-owned items whose evidence it confirms, reconcile the banner to `🧍 待人工验收`, and proceed with runner publication/archive; keep Human-Confirmed unchecked.
+- Verification reconciliation: independent rv-1 verification passed against implementation SHA `525a3549ead8a4ada725b7916c694ba215fb8fa8`. The verifier re-opened the diff, confirmed the test change is limited to the supported `--local` allowlist entry, reran the required focused test with testmon disabled (`1 passed`), and passed the related runtime-schema check (`1 passed`). Evidence-backed non-human checklist items are checked; Human-Confirmed remains unchecked.
+- Remaining delivery follow-up: runner-owned Issue comment, `scope/ci` label, and draft PR publication remain pending. They do not block presenting the completed evidence for human acceptance.
 
 ## Round Record — 2026-11-19
 
@@ -354,3 +355,11 @@ Distinguish "checked, no difference", "found, pending fix", "partially checked" 
 - Reason: Repository PRD workflow requires an independent verifier `PASS` before executor-owned checklist items are ticked.
 - Impact: The implementation and collected evidence are unchanged; archive readiness is explicitly blocked until the runner completes verification.
 - Review: Executor state corrected; runner verifier must resolve the blocker.
+
+### Complete independent rv-1 verification
+- Type: evidence / acceptance
+- Before: The verifier report was `PENDING`, the acceptance banner said `⏸️ 验证阻塞`, and evidence-backed executor items remained unchecked.
+- After: The verifier report records `PASS` against implementation SHA `525a3549ead8a4ada725b7916c694ba215fb8fa8`; rv-1 and the runtime-schema check each passed independently, evidence-backed non-human checklist items are checked, and the banner is `🧍 待人工验收`.
+- Reason: Reviewer finding required a fresh focused rerun on the final implementation tree before human acceptance.
+- Impact: No implementation code changed in this repair. Human acceptance remains unchecked; runner-owned GitHub publication gates remain pending.
+- Review: Independent diff review and focused tests passed; see the verifier report and evidence report.

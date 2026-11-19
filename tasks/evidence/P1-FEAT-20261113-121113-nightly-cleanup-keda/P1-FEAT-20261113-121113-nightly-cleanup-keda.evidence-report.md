@@ -35,6 +35,8 @@
 |---|---|
 | `uv run pytest tests/test_kedacode_operator_skill.py::test_packaged_skill_command_examples_match_cli_help -v` before the fix | Failed as expected: unknown flag `--local`. |
 | Same focused test after the fix | Passed (`1 passed`); captured in local ignored `rv-1-cli-skill-flag-check.txt`. |
+| Independent rv-1 rerun on implementation SHA `525a3549ead8a4ada725b7916c694ba215fb8fa8`: `UV_CACHE_DIR=/private/tmp/issue-366-uv-cache uv run pytest tests/test_kedacode_operator_skill.py::test_packaged_skill_command_examples_match_cli_help -v --no-testmon` | Passed (`1 passed`); testmon was disabled so the selected test executed. Raw output is local and ignored. |
+| Runtime schema confirmation: `UV_CACHE_DIR=/private/tmp/issue-366-uv-cache uv run pytest tests/test_kedacode_operator_skill.py::test_packaged_skill_whitelist_matches_runtime_schema -v --no-testmon` | Passed (`1 passed`); confirms the allowlist entry matches the real CLI schema. Raw output is local and ignored. |
 | `just lint --reuse` | Passed: jscpd, pylint duplicate-code, architecture, guidelines consistency, and file-line checks. |
 | First `just lint --full` attempt | All lint hooks passed except `check-test-flag`, which correctly required `just test` first. |
 | `just test` | Passed: `5517 passed, 1 skipped, 1 deselected in 681.99s`. No testmon selection baseline was available in this worktree. |
@@ -50,6 +52,6 @@ The initial `uv` command could not open the default cache outside the allowed fi
 - The verified source diff is limited to `tests/test_kedacode_operator_skill.py` plus the current-format PRD and its evidence reports / human review checklist.
 - No CLI, API, configuration, persistence, or user-visible behavior changed.
 - The local raw pytest output is ignored by Git as required; the three Markdown reports are committed with the PRD.
-- Independent verifier verdict: pending runner-owned verification; no PASS is claimed here.
-- PRD status: `⏸️ 验证阻塞`; human acceptance is not requested until the runner-owned independent verifier returns `PASS`.
+- Independent verifier verdict: **PASS** against implementation SHA `525a3549ead8a4ada725b7916c694ba215fb8fa8`; see the verifier report for the diff review and both focused checks.
+- PRD status: `🧍 待人工验收`; all evidence-backed executor items are checked in the PRD, while human acceptance remains unchecked. Issue comment, scope label, and draft PR publication remain runner-owned.
 - Time spent: approximately 25 minutes wall-clock from the runner claim, including the 11m21s `just test` run.
