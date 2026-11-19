@@ -92,6 +92,9 @@ from backend.engines.agent_runner.lifecycle_editor import (
     TomlLifecycleSettingsEditor,
     create_lifecycle_settings_editor,
 )
+from backend.infrastructure.config.agent_runner_repository_settings import (
+    load_local_override_lifecycle_preset_stages,
+)
 from backend.infrastructure.config.settings import (
     resolve_project_root_path,
     resolve_registry_config_toml_path,
@@ -151,6 +154,7 @@ __all__ = [
     "get_agent_runner_settings",
     "get_agent_runner_status_data",
     "load_fresh_agent_runner_settings",
+    "load_local_override_lifecycle_preset_stages",
     "logger",
     "merge_repository_config",
     "prepare_native_session_plan",

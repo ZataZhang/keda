@@ -283,6 +283,33 @@ def _apply_local_override(
     return _deep_merge_toml_tables(repository_toml_data, override_toml_data)
 
 
+def load_local_override_lifecycle_preset_stages(repo_root_path: Path) -> frozenset[str]:
+    """返回个人覆盖 ``.kedacode.local.toml`` 里声明了预设绑定的阶段键。
+
+    仓库视角的设置页只能写 ``.kedacode.toml``；这些阶段的生效绑定来自个人覆盖，
+    页面需要据此标注来源，而不是让用户对一个写不到的层"解绑"。
+
+    Args:
+        repo_root_path: 目标 Git 仓库根目录。
+
+    Returns:
+        ``[agent_runner.lifecycle_presets]`` 中声明的阶段键；无覆盖文件或无该表时为空集。
+
+    Raises:
+        ValueError: 覆盖文件不是合法 TOML。
+    """
+    override_path = _find_local_override_path(repo_root_path.resolve())
+    if override_path is None:
+        return frozenset()
+    agent_runner_section = _read_repository_toml(override_path).get("agent_runner")
+    if not isinstance(agent_runner_section, dict):
+        return frozenset()
+    lifecycle_presets_table = agent_runner_section.get("lifecycle_presets")
+    if not isinstance(lifecycle_presets_table, dict):
+        return frozenset()
+    return frozenset(lifecycle_presets_table)
+
+
 def load_agent_runner_local_settings(
     repo_root_path: Path,
 ) -> AgentRunnerRepositorySettings | None:
@@ -376,4 +403,5 @@ __all__ = (
     "AgentRunnerRepositorySettings",
     "AgentRunnerLocalSettings",
     "load_agent_runner_local_settings",
+    "load_local_override_lifecycle_preset_stages",
 )

@@ -24,6 +24,8 @@ from backend.core.shared.models.lifecycle_agent import (
     LIFECYCLE_AGENT_KEYS,
     LIFECYCLE_AGENT_STAGE_LABELS,
     LIFECYCLE_SOURCE_GLOBAL,
+    LIFECYCLE_SOURCE_LOCAL_OVERRIDE,
+    LIFECYCLE_SOURCE_REPOSITORY,
     normalize_lifecycle_agent_value,
 )
 from backend.core.use_cases.agent_candidate_fallback import (
@@ -343,6 +345,7 @@ def build_lifecycle_settings_view(
     scope: str,
     repo_id: str | None = None,
     global_config: AppConfig | None = None,
+    local_override_stages: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
     """构建"生命周期矩阵 + 模型预设 + 执行器回退"的聚合读写视图。
 
@@ -357,6 +360,8 @@ def build_lifecycle_settings_view(
         scope: ``global`` 或 ``repository``。
         repo_id: 仓库级视图的仓库 id；全局视图为 ``None``。
         global_config: ``scope=repository`` 时独立加载的全局配置，用于区分预设来源层。
+        local_override_stages: 绑定声明在个人覆盖 ``.kedacode.local.toml`` 的阶段键；
+            这些行的绑定来源标为 ``local_override``，而不是可写的 ``repository``。
 
     Returns:
         含 ``lifecycles`` / ``presets`` / ``fallback`` 三段、``agent_availability``
@@ -379,6 +384,13 @@ def build_lifecycle_settings_view(
         lifecycle_row["affected_stages"] = (
             list(stages_by_preset.get(bound_preset, [])) if bound_preset is not None else []
         )
+        # 个人覆盖与 .kedacode.toml 在加载时已合并成同一"仓库层"；这里按文件事实拆出来，
+        # 否则页面会对一个写不到的层提供"解绑"。
+        if (
+            lifecycle_row["key"] in local_override_stages
+            and lifecycle_row["field_sources"]["preset"] == LIFECYCLE_SOURCE_REPOSITORY
+        ):
+            lifecycle_row["field_sources"]["preset"] = LIFECYCLE_SOURCE_LOCAL_OVERRIDE
 
     presets: list[dict[str, Any]] = []
     for preset_name, preset in config.agent_presets.items():

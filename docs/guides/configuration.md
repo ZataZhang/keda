@@ -126,7 +126,7 @@ verification_commands = [
 - 合并语义：表按键递归合并（未写的兄弟键保留），标量与数组整体替换。
 - 不进版本库：`kc init` 会把它写进托管的 `.gitignore` 块。
 - worktree：当前检出没有该文件时，回落读取主检出根目录的同名文件，因此 `kc` 创建的 worktree 无需复制。
-- 限制：不得包含 `[agent_runner.repository]` 身份段（会直接报错）；仓库目录没有 `.kedacode.toml` 时该文件不生效；`kc` 的配置写回仍只写全局与 `.kedacode.toml`。
+- 限制：不得包含 `[agent_runner.repository]` 身份段（会直接报错）；仓库目录没有 `.kedacode.toml` 时该文件不生效；`kc` 的配置写回仍只写全局与 `.kedacode.toml`；Web 生命周期设置页把其中声明的阶段绑定标为个人覆盖并只读呈现。
 
 ```toml
 # .kedacode.local.toml

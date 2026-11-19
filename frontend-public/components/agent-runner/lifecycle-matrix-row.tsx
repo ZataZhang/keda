@@ -69,6 +69,9 @@ export function MatrixRow({
   const vocabularySafe = vocabulary;
   const stageDescription = ISSUE_STAGE_DESCRIPTIONS[row.key];
   const affected = row.affected_stages.filter((stage) => stage !== row.key);
+  // 个人覆盖层的绑定本页写不到（只写 .kedacode.toml），只读呈现并指明该改哪个文件。
+  const isLocalOverrideBinding =
+    scope === "repository" && row.field_sources.preset === "local_override";
   const bindingPlaceholder = row.follows_implementation
     ? "未绑定（生效值继承实现阶段）"
     : scope === "repository" && row.field_sources.preset === "global"
@@ -199,10 +202,19 @@ export function MatrixRow({
           value={bindingValue}
           options={presetOptions}
           allowClear
+          disabled={isLocalOverrideBinding}
           placeholder={bindingPlaceholder}
           onChange={onBindingChange}
           testId={`matrix-binding-${row.key}`}
         />
+        {isLocalOverrideBinding ? (
+          <p
+            className="mt-1 text-[11px] text-amber-700 dark:text-amber-400"
+            data-testid={`matrix-binding-local-${row.key}`}
+          >
+            由个人覆盖 .kedacode.local.toml 决定，请直接编辑该文件
+          </p>
+        ) : null}
         {affected.length > 0 ? (
           <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
             该预设同时用于：

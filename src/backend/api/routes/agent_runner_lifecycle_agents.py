@@ -17,6 +17,7 @@ from __future__ import annotations
 import base64
 import dataclasses
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -30,11 +31,13 @@ from backend.core.shared.models.config_edit import (
     ConfigLockBusyError,
 )
 from backend.core.shared.models.lifecycle_agent import LIFECYCLE_AGENT_PRD_OVERRIDE_KEYS
+from backend.core.shared.models.product_identity import REPOSITORY_LOCAL_OVERRIDE_FILENAME
 from backend.core.use_cases.agent_runner_factory import (
     build_app_config_from_settings,
     collect_repository_own_presets,
     create_lifecycle_settings_editor,
     load_fresh_agent_runner_settings,
+    load_local_override_lifecycle_preset_stages,
     resolve_repository_targets_with_diagnostics,
 )
 from backend.core.use_cases.lifecycle_agent_resolution import (
@@ -198,12 +201,42 @@ def update_lifecycle_agents(request: UpdateLifecycleAgentsRequest) -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+def _local_override_stages(scope: str, repo_id: str | None) -> frozenset[str]:
+    """仓库视角下，绑定声明在个人覆盖 ``.kedacode.local.toml`` 的阶段键（其余视角为空）。"""
+    if scope != SCOPE_REPOSITORY or not repo_id:
+        return frozenset()
+    return load_local_override_lifecycle_preset_stages(Path(_context_for(repo_id).repo_path))
+
+
 def _aggregate_view(config: AppConfig, scope: str, repo_id: str | None) -> dict:
-    """构建聚合视图；``scope=repository`` 时带上独立加载的全局配置以区分预设来源层。"""
+    """构建聚合视图；``scope=repository`` 时带上全局配置与个人覆盖阶段以区分来源层。"""
     global_config = _global_config() if scope == SCOPE_REPOSITORY else None
     return build_lifecycle_settings_view(
-        config, scope=scope, repo_id=repo_id, global_config=global_config
+        config,
+        scope=scope,
+        repo_id=repo_id,
+        global_config=global_config,
+        local_override_stages=_local_override_stages(scope, repo_id),
     )
+
+
+def _reject_local_override_bindings(request: UpdateLifecycleSettingsRequest) -> None:
+    """拒绝改写由个人覆盖决定的阶段绑定：写进 ``.kedacode.toml`` 也不会生效。
+
+    Raises:
+        HTTPException: 422，请求里含有绑定声明在 ``.kedacode.local.toml`` 的阶段。
+    """
+    local_stages = _local_override_stages(request.scope, request.repo_id)
+    blocked_stages = sorted(stage for stage in request.bindings if stage in local_stages)
+    if blocked_stages:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"阶段 {', '.join(blocked_stages)} 的绑定声明在个人覆盖 "
+                f"{REPOSITORY_LOCAL_OVERRIDE_FILENAME} 里，优先级高于 .kedacode.toml，"
+                "本页修改不会生效：请直接编辑该文件。"
+            ),
+        )
 
 
 @router.get("/agent-runner/lifecycle-settings")
@@ -243,6 +276,8 @@ def update_lifecycle_settings(request: UpdateLifecycleSettingsRequest) -> dict:
     清单、各仓库绑定）若在锁外读，并发写入者就能在"校验通过"与"落盘"之间塞进一次改动，
     让这次自认安全的删除真的留下悬空引用。
     """
+
+    _reject_local_override_bindings(request)
 
     def _validate_and_write() -> None:
         config, editor = _select_scope_config(request.scope, request.repo_id)
