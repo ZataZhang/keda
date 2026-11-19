@@ -2,7 +2,7 @@
 
 > ✅ **交付前置 / Delivery Gate**：无依赖（见 §8）。
 > 本行是 §8 Delivery Dependencies 的投影，**那里是唯一事实源**。
-> 🧍 **验收状态 / Acceptance Status**：待人工验收 — 独立 verifier 已对最终实现 SHA `525a3549ead8a4ada725b7916c694ba215fb8fa8` 完成 `rv-1` 并通过；人工确认仍未完成。
+> 🧍 **验收状态 / Acceptance Status**：待人工验收 — 原始独立 rv-1 已通过，重基后的 rv-1 与 runtime-schema 重跑通过；慢主机测试超时调整也通过定向验证。证据发布和人工确认仍未完成。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 This PRD records one nightly cleanup round for repository maintainers. The complete scope trigger and priority rules are preserved in Appendix A.
@@ -12,6 +12,7 @@ This PRD records one nightly cleanup round for repository maintainers. The compl
 本节是 §10 Functional Requirements 的简要投影；验收以 §1 行为样例与 §10 为准。
 
 - **修正 CI 对受支持命令示例的误报**（FR-1）
+- **避免慢主机上 process-runner 输出捕获测试因墙钟上限过短而失败**（FR-3）
 - **准确记录本轮只执行最高优先级 scope**（FR-2）
 - **保留未确认的文档检查范围，不丢弃待查历史**（FR-2）
 
@@ -106,6 +107,8 @@ The current CLI command tree defines the valid options. The packaged-skill test 
 .
 ├── tests/test_kedacode_operator_skill.py [修改]
 │   【总结】把真实 CLI 已支持的 --local 纳入测试允许旗标集合。
+├── tests/test_process_runner.py [修改]
+│   【总结】在保留 3 秒 inactivity timeout 的同时，将慢主机下的总测试墙钟上限从 20 秒提高到 60 秒。
 ├── tasks/archive/P1-FEAT-20261113-121113-nightly-cleanup-keda.md [修改]
 │   【总结】补齐当前 PRD 格式并记录本轮 scope、验证和未确认的 docs checkpoint。
 └── tasks/evidence/P1-FEAT-20261113-121113-nightly-cleanup-keda/ [新增]
@@ -124,6 +127,7 @@ The current CLI command tree defines the valid options. The packaged-skill test 
 | Change point | Tier | Decisive dimension | Intervention | Failure-discriminating oracle/gate |
 |---|---|---|---|---|
 | Test allowlist entry | R1 | Internal CI test expectation; no public behavior change | Executor + automated gate | `rv-1` focused test fails before and passes after the supported option is registered. |
+| Process-runner test wall-clock ceiling | R1 | Test reliability on a slow or loaded host; no production behavior change | Executor + automated gate | `rv-2` reproduces a 20-second timeout and passes at 60 seconds while keeping the 3-second inactivity timeout. |
 | Nightly round record | R1 | Scope/progress record for later maintenance | Executor + human review | Compare the recorded SHA/run and unconfirmed checkpoint against the linked source evidence. |
 
 ### Executor Drift Guard
@@ -155,9 +159,18 @@ No frontend impact: this change only updates a Python test allowlist; neither `f
   tier: R1
   test_layer: integration
   required_for_acceptance: true
+- id: rv-2
+  behavior: "The process-runner output-capture test collects FINAL VERDICT when a child emits progress for about 11 seconds under a slow or loaded host."
+  reviewer: verifier
+  real_entry: "uv run pytest tests/test_process_runner.py::test_captured_output_includes_stdout_written_when_process_exits -v --no-testmon"
+  expected: "The original 20-second ceiling times out in the post-rebase core run; the 60-second wall-clock ceiling passes while inactivity_timeout remains 3 seconds."
+  mock_boundary: "No external service is used; the test launches its real child process and checks captured stdout."
+  tier: R1
+  test_layer: integration
+  required_for_acceptance: true
 ```
 
-Failure triage: inspect the reported packaged-skill file and option first, then compare the test allowlist with `agent_setup_command` and the runtime-schema assertion. Raw post-fix outputs are `tasks/evidence/P1-FEAT-20261113-121113-nightly-cleanup-keda/rv-1-cli-skill-flag-check.txt` and `rv-1-cli-schema-check.txt`. They remain local and ignored by Git; the runner must publish them to `kc-evidence/issue-366` and present them in the PR evidence comment before human review.
+Failure triage: inspect the reported packaged-skill file and option first, then compare the test allowlist with `agent_setup_command` and the runtime-schema assertion. For rv-2, distinguish the total wall-clock timeout from the existing inactivity timeout; retain the final-output assertion. Raw post-fix outputs are `tasks/evidence/P1-FEAT-20261113-121113-nightly-cleanup-keda/rv-1-cli-skill-flag-check.txt`, `rv-1-cli-schema-check.txt`, and `rv-2-process-runner-timeout-check.txt`. They remain local and ignored by Git; the runner must publish them to `kc-evidence/issue-366` and present them in the PR evidence comment before human review.
 
 ## 8. Delivery Dependencies
 
@@ -173,11 +186,11 @@ Failure triage: inspect the reported packaged-skill file and option first, then 
 
 ### 9.1 人读呈递区（Human Review Surface）
 
-无主演示：本轮只修正测试对现有 CLI 选项的白名单，不改变产品行为或界面。
+无主演示：本轮只涉及 CI 测试预期和测试超时，不改变产品行为或界面。
 
 | 审阅内容 | 呈递入口 | 预期结果 |
 |---|---|---|
-| 检查修复范围和本轮记录 | [代码差异](../../tests/test_kedacode_operator_skill.py)、[证据报告](../evidence/P1-FEAT-20261113-121113-nightly-cleanup-keda/P1-FEAT-20261113-121113-nightly-cleanup-keda.evidence-report.md)、[CI run](https://github.com/ZataZhang/keda/actions/runs/44548773786)；命令：`open tasks/evidence/P1-FEAT-20261113-121113-nightly-cleanup-keda/human-review-checklist.md` | 差异只加上 CLI 已支持的 `--local`；记录将本轮选为 CI，且明确 docs 未执行、checkpoint 未推进。 |
+| 检查修复范围和本轮记录 | [测试差异](../../tests/test_process_runner.py)、[证据报告](../evidence/P1-FEAT-20261113-121113-nightly-cleanup-keda/P1-FEAT-20261113-121113-nightly-cleanup-keda.evidence-report.md)、[CI run](https://github.com/ZataZhang/keda/actions/runs/44548773786)；命令：`open tasks/evidence/P1-FEAT-20261113-121113-nightly-cleanup-keda/human-review-checklist.md` | `--local` allowlist 修复已在重基 base 中；当前差异增加慢主机下的测试墙钟上限并保留 inactivity timeout；docs 未执行、checkpoint 未推进。 |
 
 Verifier-only result: `rv-1` and all test/lint/build results stay in §9.2 and are deliberately not presented as human decisions.
 
@@ -187,26 +200,30 @@ Verifier-only result: `rv-1` and all test/lint/build results stay in §9.2 and a
 
 - [x] CI run `44548773786` at fixed base SHA `4c58ad0df1b1437ea2336303a64d486ada00ea89` failed on `test_packaged_skill_command_examples_match_cli_help` because the real CLI `--local` option was absent from the allowlist; the source and exact failure are in the evidence report.
 - [x] `tests/test_kedacode_operator_skill.py` now registers `--local` for `("agent", "setup")`; pre-fix red and post-fix green outputs are recorded, the independent rv-1 rerun passed on implementation SHA `525a3549ead8a4ada725b7916c694ba215fb8fa8`, and the runtime-schema test independently passed.
+- [x] Post-rebase rv-1 and runtime-schema reruns each passed. After rebase, `--local` is already in base `51461449`; it no longer appears in this branch's diff.
+- [x] `tests/test_process_runner.py` retains a 60-second overall timeout with the existing 3-second inactivity timeout. At 20 seconds, the post-rebase core run timed out after 20 seconds; at 60 seconds, the focused test passed in 22.89 seconds. See rv-2 and the failure summary in the evidence report.
 
 #### Validation Acceptance
 
-- [x] Required validation passed: `just lint --reuse`, `just test` (5517 passed, 1 skipped, 1 deselected), final `just lint --full`, `git diff --check`, and `uv run mkdocs build --strict`; see the evidence report.
+- [x] `just lint --reuse` passed. The post-rebase full selected `just test` initially reported `1 failed, 5523 passed, 1 skipped` because the 20-second process-runner timeout fired; after retaining 60 seconds, the affected focused test passed and the rerun of `just test` passed (`1 passed, 68 deselected`) with full lint. Strict MkDocs and PRD-checker results are recorded in the evidence report.
 - [x] Lower-priority scopes are recorded as not executed, and the docs checkpoint is unconfirmed with no `checked_through_sha` advancement; see the evidence report and this round record.
 
 #### Delivery Readiness
 
-- [x] Independent verifier returned `PASS` for rv-1 on implementation SHA `525a3549ead8a4ada725b7916c694ba215fb8fa8`; see the verifier report.
-- [~] Refresh draft PR #404 title/description and publish the raw rv-1 outputs to `kc-evidence/issue-366` plus a PR evidence comment. A read-only check on 2026-11-20 confirmed the current draft head was `e1b242d1f349905004cac3ab44af0e2d5b665a47`, the title lacked `cleanup(ci):`, the body still used the old publication SHA and 99-file list, and no PR comment existed; the actual comparison was 7 files (500 additions, 105 deletions). Local review materials now reflect this snapshot. Remote metadata and orphan-branch publication remain runner-owned under PRD §11 and this worktree-only/no-push task.
-- [~] Issue round comment and `scope/ci` label — runner-owned Issue metadata; the executor did not mutate the Issue.
+- [x] Original independent verifier returned `PASS` for rv-1; both rv-1 checks were rerun on the rebased tree and passed. See the verifier report.
+- [~] Publish all three raw outputs to `kc-evidence/issue-366` and present them in a PR evidence comment. The files and hashes are locally preserved, but the user prohibits push.
+- [~] Refresh PR #404 title and description after branch publication. The remote PR still points at the old head; the title edit attempt was blocked by the GitHub connector approval gate, and the body remains stale.
+- [~] Issue round comment and `scope/ci` label remain incomplete. GitHub connector requests to add the label and comment were rejected with `MCP tool call requires approval, but approval policy is never`; no Issue mutation was made.
 
 #### Human-Confirmed
 
-- [ ] Review the §9.1 code/evidence presentation and accept that this round fixes only the CI test allowlist while preserving the docs backlog as unconfirmed.
+- [ ] Review the §9.1 code/evidence presentation and accept the CI test allowlist correction already present in base plus the slow-host timeout adjustment, while preserving the docs backlog as unconfirmed.
 
 ## 10. Functional Requirements
 
 - **FR-1:** The packaged-skill command example test accepts the CLI's existing `--local` option for `kc agent setup` and continues to reject options absent from the supported allowlist/runtime schema.
 - **FR-2:** Each round records the fixed base SHA, selected single scope, lower-priority skipped scopes, docs checkpoint status, and actual validation. A missing checkpoint stays unconfirmed and is never advanced by an unchecked range.
+- **FR-3:** The process-runner output-capture test allows enough total wall-clock time for a slow or loaded host while preserving its inactivity timeout and final-output assertion.
 
 ## 11. Non-Goals
 
@@ -228,13 +245,13 @@ The previous closed nightly-cleanup Issue #325 contains no doc-check record or v
 
 ### Final Reconciliation
 
-- Interpretation: confirmed — the final change only repairs a stale test allowlist and records the selected CI round; no product behavior changed.
+- Interpretation: confirmed with a verification-driven addition — the original allowlist fix remains valid and is now already in the rebased base; the post-rebase core test exposed a slow-host timeout in the process-runner test, so this repair keeps a wider test-only ceiling. No product behavior changed.
 - Public behavior and contracts: confirmed — the CLI already exposed `--local`; no public API, CLI, configuration, UI, or persistence contract changed.
 - Related PRD status: confirmed — no linked PRD was modified; the latest closed nightly-cleanup Issue #325 had no usable docs checkpoint record.
 - Requirements and risks: confirmed — all four original trigger definitions and the one-scope priority remain in Appendix A; docs work is explicitly unexecuted and its range remains unconfirmed.
 - Reconciled differences: the original PRD's `Last CI status: success` and `Outdated dependency count: 78` are retained as 2026-11-13 trigger-time snapshots; the current round is governed by the later fixed base SHA and failed run.
-- Verification reconciliation: independent rv-1 verification passed against implementation SHA `525a3549ead8a4ada725b7916c694ba215fb8fa8`. The verifier re-opened the diff, confirmed the test change is limited to the supported `--local` allowlist entry, reran the required focused test with testmon disabled (`1 passed`), and passed the related runtime-schema check (`1 passed`). Evidence-backed non-human checklist items are checked; Human-Confirmed remains unchecked.
-- Remaining delivery follow-up: refresh PR #404 metadata using the runner's resulting commit SHA, publish the raw outputs to `kc-evidence/issue-366` and present them in a PR evidence comment, then add the runner-owned Issue comment and `scope/ci` label. The 2026-11-20 read-only snapshot and verified output hashes are in the evidence report. This repair changes worktree files only and does not push, so remote publication and metadata remain pending. Human acceptance remains pending.
+- Verification reconciliation: the original independent rv-1 verification passed against implementation SHA `525a3549ead8a4ada725b7916c694ba215fb8fa8`; the rebase target `51461449cb1069113b3d6a827297f92c16bcff2f` already contains the allowlist entry. Fresh rv-1 and runtime-schema reruns each passed. With `timeout=20`, the post-rebase local core suite failed only the process-runner output-capture test (`TimeoutExpired after 20s`, 5523 passed, 1 skipped); with `timeout=60`, the focused test passed in 22.89s and the final testmon-selected `just test` run passed. Evidence-backed non-human checklist items are checked; Human-Confirmed remains unchecked.
+- Remaining delivery follow-up: publish all three raw outputs to `kc-evidence/issue-366` and present them in the PR evidence comment; refresh PR #404 title/body after the rebased branch is published; add the runner-owned Issue comment and `scope/ci` label. The user prohibits push, and the GitHub connector approval gate rejected the title mutation, so all external delivery items remain pending. Human acceptance remains pending.
 
 ## Round Record — 2026-11-19
 
@@ -243,8 +260,16 @@ The previous closed nightly-cleanup Issue #325 contains no doc-check record or v
 - Selected scope: `CI`, the highest-priority actionable scope. The code change adds the already-supported `--local` option to the test's curated allowed-flag set; it does not change CLI behavior.
 - Duplicated-code scan and dependency review: not executed because the CI trigger selected the single scope for this round.
 - Docs sync: not executed because CI took priority. The most recently closed nightly-cleanup Issue, [#325](https://github.com/ZataZhang/keda/issues/325), has no doc-check record or `checked_through_sha` in its comment. Therefore the range is **unconfirmed**, not a first run: `checked_through_sha` was not advanced, no commits are claimed checked, and the remaining range is unconfirmed through `head_sha`. The issue comment is not written from this worktree under the execution rule to modify only worktree files; this record is included here for the runner to publish.
-- Scope label: `scope/ci` was not added from this worktree because that would modify GitHub Issue metadata outside the allowed worktree. The runner owns publication.
+- Scope label: `scope/ci` was not added during the original round because Issue metadata was runner-owned. The review-repair attempt was also rejected by the GitHub connector approval gate; publication remains pending.
 - Time spent: approximately 25 minutes wall-clock from the runner claim to this record; `just test` took 11m21s because this worktree had no testmon selection baseline.
+
+## Reviewer repair record — 2026-11-20
+
+- The local branch was rebased onto remote `main` SHA `51461449cb1069113b3d6a827297f92c16bcff2f`; no branch switch, merge, push, or commit was performed. The rebased base already contains the `--local` allowlist correction, so that file is no longer part of the local comparison.
+- The process-runner test's 60-second ceiling was retained after reverting to 20 seconds reproduced a `TimeoutExpired` failure in the post-rebase core suite. The 60-second focused rerun passed in 22.89 seconds; `inactivity_timeout=3` and the final stdout assertion are unchanged. This is local verification evidence for an added CI reliability case, not evidence of an original GitHub CI failure for that test.
+- Fresh rv-1 and runtime-schema tests each passed on the rebased tree. Their full raw outputs and SHA-256 values, plus the rv-2 output, are recorded in the evidence report; all remain local ignored files.
+- The local PRD, verification plan, verifier report, evidence report, and human-review checklist now describe the rebased diff, the additional test failure/fix, and the exact remaining gates. GitHub connector requests to update the PR title, add the Issue label, and create the Issue comment were rejected by the `approval policy is never` gate; the remote PR body is left unchanged because its branch has not been published. Raw evidence publication is blocked by the explicit no-push rule.
+- Human acceptance remains unchecked until raw outputs are published and presented in the PR evidence comment.
 
 ## Appendix A — Nightly Scope Decision Tree
 
@@ -372,3 +397,11 @@ Distinguish "checked, no difference", "found, pending fix", "partially checked" 
 - Reason: Correct the review record against current repository and PR evidence without misrepresenting the completed verifier run.
 - Impact: No executable code or test changed. Remote PR metadata, evidence-branch publication, and evidence comment remain pending for the runner under PRD §11 and the worktree-only/no-push constraint.
 - Review: `git diff --check` passed and `UV_CACHE_DIR=/private/tmp/issue-366-uv-cache uv run mkdocs build --strict` passed; results are recorded in the evidence report.
+
+### Rebase and address post-PR reviewer findings
+- Type: test / evidence / review
+- Before: The local branch was based on an outdated commit, the review materials referenced an old PR snapshot, the 20-second process-runner test ceiling failed during post-rebase verification, and the verifier/publication status was unclear.
+- After: The worktree is rebased on `51461449cb1069113b3d6a827297f92c16bcff2f`; the `--local` correction is confirmed in that base; the process-runner test uses a 60-second ceiling and passes in 22.89 seconds after a 20-second reproduction; rv-1 and runtime-schema checks were freshly rerun; reports distinguish local evidence from uncompleted remote publication.
+- Reason: Review requested a current-base comparison, source-scope correction, current verification, and accurate delivery records.
+- Impact: No production behavior changed. The branch contains an additional test-only timeout adjustment supported by the reproduced slow-host failure. No remote branch push or PR creation occurred; raw evidence publication and GitHub metadata remain pending.
+- Review: `just lint --reuse` and the post-adjustment `just test` lint/selected-test gates passed. `git diff --check`, strict MkDocs, and the PRD checker results are recorded in the evidence report; Human-Confirmed remains unchecked.

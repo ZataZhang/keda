@@ -1,36 +1,34 @@
 # Human Review Checklist
 
-独立 verifier 已对实现 SHA `525a3549ead8a4ada725b7916c694ba215fb8fa8` 完成 rv-1 并返回 `PASS`；归档 PRD 状态为 `🧍 待人工验收`。只读核对确认 PR #404 仍为 draft，当前远端 head 为 `e1b242d1f349905004cac3ab44af0e2d5b665a47`，GitHub 显示 7 个文件、500 additions / 105 deletions。远端标题仍缺少 `cleanup(ci):` 前缀，描述仍显示旧发布 SHA 和 99 文件清单，PR 评论时间线为空。建议标题为 `cleanup(ci): align skill flag allowlist with CLI`。两份完整原始输出仍在本 worktree 的忽略文件中，哈希见证据报告；必须先发布到 `kc-evidence/issue-366` 并呈递到 PR evidence comment，之后再请求人工接受。PRD §11 将 GitHub 元数据和证据发布交给 runner；本轮仅允许工作树文件且禁止 push，因此远端更新仍待 runner 执行。
+当前状态：PRD 为 `🧍 待人工验收`，人审勾选仍留空。请在原始输出发布到 `kc-evidence/issue-366` 并附入 PR 评论、PR 分支同步后，再依据下方最终差异确认是否接受本轮 CI 修复及额外的慢主机测试上限。
 
-## 1. CI 修复范围与文档检查进度
+## 1. 当前分支和实际差异
 
-**PRD 锚点：** §9.2 Human-Confirmed 第 1 项。
+- 本地 `issue-366` 已 rebase 到远端 `main`：`51461449cb1069113b3d6a827297f92c16bcff2f`。本地 HEAD 为 `1bfc64e25efbe1edb393bc722ff935c8d9f380e3`。
+- 重基后的 base 已含 `tests/test_kedacode_operator_skill.py` 中的 `--local` 白名单修正；该文件不再是当前 PR 差异的一部分。
+- 当前对比 base 的 7 个文件：新增归档 PRD、四个 Markdown evidence/review 文件、删除旧 pending PRD，以及 `tests/test_process_runner.py` 的测试超时调整。
+- 唯一测试代码差异将总墙钟上限从 20 秒提高到 60 秒；`inactivity_timeout=3`、子进程进度输出及 `FINAL VERDICT` 断言保持不变。
 
-**PRD 原文：**
+## 2. 验证证据
 
-> Review the §9.1 code/evidence presentation and accept that this round fixes only the CI test allowlist while preserving the docs backlog as unconfirmed.
+- 原始 CI 触发：[run 44548773786](https://github.com/ZataZhang/keda/actions/runs/44548773786) 在固定触发 SHA `4c58ad0df1b1437ea2336303a64d486ada00ea89` 因 `--local` 未登记而失败。该修正现在已在重基 base `51461449` 中。
+- rv-1：`test_packaged_skill_command_examples_match_cli_help` 与 runtime-schema 测试在重基后各 `1 passed`。本地原始输出分别为 `rv-1-cli-skill-flag-check.txt`（SHA-256 `ce2bf1437f64ba9f0ea55993b55e4243022f4d84b05f68f562630fac33dd1b8e`）和 `rv-1-cli-schema-check.txt`（SHA-256 `86cdb73759396920fcafec463b6f0bccbba4798ad2bdca6a738a9d7870b3083d`）。
+- rv-2：20 秒版本在重基后的本地核心测试运行中以 `TimeoutExpired after 20s` 失败；该全量选择运行有 `5523 passed, 1 skipped, 1 failed`。60 秒版本的直接复跑 `1 passed in 22.89s`；之后 testmon 选择的 `just test` 通过（`1 passed, 68 deselected`），且 full-lint 阶段通过。原始通过输出 `rv-2-process-runner-timeout-check.txt` 的 SHA-256 为 `2dee2645d4a4fdd027fdf38bc33c194fca9c634fd1061ae2c8a2e8cb03d4ecd8`。
+- `just lint --reuse` 与 `git diff --check 51461449` 已通过；严格 MkDocs 构建和 PRD checker 的最终结果见证据报告。
 
-**白话说明：** 本轮只在测试白名单中登记 CLI 已支持的 `--local` 选项；没有改 CLI 行为。最新 CI 的失败来自测试白名单漏登记该选项。Docs sync 因 CI 优先而未执行；上一轮关闭 Issue #325 的评论没有 `checked_through_sha`，所以文档范围仍是“未确认”，不能算成首次运行或已检查无差异。
+三个 raw output 目前都只在本地忽略目录中，未发布到 `kc-evidence/issue-366`。用户要求不得 push，因此它们还没有达到人审前的远端呈递条件。
 
-**已交叉核对的证据：**
+## 3. Reviewer findings 状态
 
-- [CI 运行 44548773786](https://github.com/ZataZhang/keda/actions/runs/44548773786)：固定 head `4c58ad0df1b1437ea2336303a64d486ada00ea89` 上的 `test_packaged_skill_command_examples_match_cli_help` 报告 `--local` 未登记。
-- [代码差异](../../../tests/test_kedacode_operator_skill.py)：只在 `("agent", "setup")` 白名单增加 `--local`。
-- [本轮证据报告](P1-FEAT-20261113-121113-nightly-cleanup-keda.evidence-report.md)：记录 focused test、`just test`、lint、文档构建结果及未执行的 scope。
-- [归档 PRD](../../archive/P1-FEAT-20261113-121113-nightly-cleanup-keda.md)：状态为 `🧍 待人工验收`，rv-1 独立验证为 `PASS`。
-- 原始 rv-1 与 runtime-schema 输出仍在本地忽略文件中（各 12 行）；SHA-256 分别为 `4c9c5431474c34c0e859c537382fd6d8e2098ff269081b3fba218367bca76b2e` 和 `6a2afb1586216c3a7fe3d04cbb2a629d1f3ab7605032bea82c37d4ce335f278b`。`kc-evidence/issue-366` 归档及 PR evidence comment 均待 runner 发布。
+- **Rebase：本地已完成。** 远端 `issue-366` ref 仍在旧 SHA `2c1042485b0980cfc33a2ab315ea0fd8969737a4`，因为禁止 push。
+- **rv-1 原始输出：未发布。** 两份新输出和哈希已保留；需要 runner 发布并附 PR evidence comment。
+- **PR 标题：未更新。** 将标题改为 `cleanup(ci): stabilize slow-host process runner test` 的 GitHub connector 请求被自动审批门禁拒绝，提示 `approval policy is never`。
+- **PR body：本地材料已刷新，远端仍旧。** PR body 仍引用旧 SHA `525a3549` 与 99-file 列表。应在重基分支发布后按真实最终差异更新。
+- **process-runner timeout finding：争议。** 按 20 秒恢复后，重基验证实际复现超时；60 秒修复后的定向测试通过。这个额外 CI 可靠性改动已同步写入 PRD 和验证记录，供人工确认范围。
+- **Issue comment 与 `scope/ci` label：未完成。** Issue #366 当前缺少该 label 和本轮 comment，仍需 runner 处理。
+- **独立 rv-1：已解决 / 旧 finding 过期。** 原 verifier report 已有独立 PASS；重基后两项相关测试也已重新通过。
 
-## 2. 本轮 reviewer findings 处理状态
+## 4. 人工确认
 
-- **rv-1 待执行：争议 / 已过期。** verifier 报告第 3 行已有 `PASS`；独立 rv-1 和 runtime-schema 均各 `1 passed`，原始输出及哈希存在本地。自已验证实现 SHA `525a3549` 后，PR 当前 head `e1b242d1` 的后续提交均为 PRD/evidence 文档变更，没有修改可执行代码。
-- **原始输出未发布：本地证据保留，远端发布待办。** 远端评论时间线为空。分支发布与评论由 runner 执行，本轮不得 push。
-- **PR 元数据过期：本地材料已刷新，远端修改待办。** 当前快照为 head `e1b242d1f349905004cac3ab44af0e2d5b665a47`、7 files、500 additions / 105 deletions；真实差异文件是归档 PRD、四份 evidence/review Markdown、删除的 pending PRD，以及 `tests/test_kedacode_operator_skill.py`。远端 PR 标题/body 仍待 runner 更新；建议标题为 `cleanup(ci): align skill flag allowlist with CLI`。PR body 应基于 runner 最终提交并移除旧 99-file 清单。
-
-**请回复：** “同意”，或指出具体差异及需要补充的验证 / 后续 Issue。
-
-可选复核命令（放在最后，供需要时深入检查）：
-
-```bash
-git diff -- tests/test_kedacode_operator_skill.py
-open tasks/evidence/P1-FEAT-20261113-121113-nightly-cleanup-keda/P1-FEAT-20261113-121113-nightly-cleanup-keda.evidence-report.md
-```
+- [ ] 我接受当前 CI 修复记录、`timeout=60` 的测试可靠性调整，以及 docs checkpoint 继续保持未确认。
+- [ ] 我确认没有将本地测试结果描述为远端 CI 结果；所有未发布输出和远端 PR/Issue 更新均明确保留为待办。
