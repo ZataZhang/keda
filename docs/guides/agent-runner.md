@@ -4424,6 +4424,7 @@ kc console --api-only --no-browser
   uvicorn）不走强校验，只在 import 时记一条 warning。
   前后端并行开发仍可沿用 `just run` / `pnpm --filter frontend-public dev`。
 - 面板与 API 同源，开发代理仅在 `frontend-public dev` 模式生效。
+- 自 0.7.1 起，回环面板校验请求的 Host，写请求还会校验浏览器提供的 Origin 或 Referer。
 - 改后端路由后必须**重启** `kc console` 才生效；`just console-sync` 只替换
   静态前端产物，不重载后端代码。注意复用逻辑发生在这次重启之前——旧版本进程
   仍在监听时，新装的 `kc console` 只会重开浏览器而不会把它换成新代码，需要先
