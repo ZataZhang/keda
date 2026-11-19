@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import asdict, dataclass, replace
 from uuid import uuid4
@@ -16,6 +17,9 @@ from backend.core.shared.models.agent_runner import IssueSummary
 from backend.core.use_cases.agent_runner_dependencies import parse_direct_pr_marker
 
 _ROUND_MARKER = re.compile(r"<!-- kc:direct-pr-round (\{[^\n]*\}) -->")
+_ORCHESTRATION_LOGGER = logging.getLogger(
+    "backend.core.use_cases.agent_runner_orchestration_runtime"
+)
 
 
 class DirectPrRoundError(RuntimeError):
@@ -295,6 +299,17 @@ def has_readonly_direct_pr_cleanup(github_client: IGitHubClient, issue: IssueSum
         )
         is not None
     )
+
+
+def _has_published_direct_pr_handoff(github_client: IGitHubClient, issue: IssueSummary) -> bool:
+    """只读证明待交接 PR，让发现过滤器不把已发布轮次误当新工作拦截。"""
+    try:
+        return has_readonly_direct_pr_cleanup(github_client, issue)
+    except Exception as exc:  # noqa: BLE001 - 关联读失败不允许旁路发现门禁。
+        _ORCHESTRATION_LOGGER.warning(
+            "Cannot establish pending Direct PR handoff for Issue #%d: %s", issue.number, exc
+        )
+        return False
 
 
 def prepare_direct_pr_publication(

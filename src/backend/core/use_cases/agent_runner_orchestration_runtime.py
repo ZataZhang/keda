@@ -36,6 +36,9 @@ from backend.core.use_cases.agent_runner_dependencies import (
     parse_dependency_marker,
 )
 from backend.core.use_cases.agent_runner_direct_pr_label import PublishStageSelection
+from backend.core.use_cases.agent_runner_direct_pr_round import (
+    _has_published_direct_pr_handoff,
+)
 from backend.core.use_cases.agent_runner_failure_marking import (
     _mark_issue_blocked,
     _mark_issue_failed,
@@ -608,19 +611,6 @@ def _process_single_issue(
         heartbeat = active_coordination_heartbeat()
         if heartbeat is not None:
             heartbeat.release_claim(github_client=github_client, issue_number=issue.number)
-
-
-def _has_published_direct_pr_handoff(github_client: IGitHubClient, issue: IssueSummary) -> bool:
-    """只读证明待交接 PR，让发现过滤器不把已发布轮次误当新工作拦截。"""
-    from backend.core.use_cases.agent_runner_direct_pr_round import has_readonly_direct_pr_cleanup
-
-    try:
-        return has_readonly_direct_pr_cleanup(github_client, issue)
-    except Exception as exc:  # noqa: BLE001 - 关联读失败不允许旁路发现门禁。
-        _logger.warning(
-            "Cannot establish pending Direct PR handoff for Issue #%d: %s", issue.number, exc
-        )
-        return False
 
 
 def run_once(request: RunOnceRequest) -> int:

@@ -6,7 +6,7 @@
 
 - PRD：[`tasks/archive/P1-FIX-20261119-180000-prd-publication-on-protected-main.md`](../../archive/P1-FIX-20261119-180000-prd-publication-on-protected-main.md)。
 - GitHub Issue：[#400](https://github.com/ZataZhang/keda/issues/400)。
-- PR / CI：实现尚未由 runner 发布；PR 与必需 CI 链接由后续发布流程补入。
+- PR / CI：[Draft PR #405](https://github.com/ZataZhang/keda/pull/405)。已发布 head `74ba5cb248dcf8ae73f5106ba4c46df4f2cc9afd` 的 `Validate Template` 因单文件非空行数超限失败；本轮已在修复工作树通过同一硬行数检查。GitHub 必需检查需在修复提交发布后重跑；本轮按要求不推送。
 - 清单入口：`just prd review P1-FIX-20261119-180000-prd-publication-on-protected-main.md`。
 - 执行侧已交叉核对临时 Issue #42 的创建、分支发布、恢复、幂等和 ready 顺序；没有读取或修改真实 #398/#399。上表仍需维护者按真实 #398 状态验收。
 
@@ -45,3 +45,12 @@
 - PRD archive-readiness check passed after final reconciliation; the runner owns the actual PRD archive move.
 
 All Git operations used temporary repositories and real Git processes. GitHub Issue API traffic was handled by a fail-loud local `gh` fixture; no real account, Issue, branch, or business data was contacted. The evidence files and scripts contain no credentials. Raw evidence and scripts are ignored by Git; only the three Markdown reports and PRD belong in the code change.
+
+## Post-PR hard-line repair validation
+
+- The read-only Direct PR handoff predicate now lives beside its round-state rule in `agent_runner_direct_pr_round.py`; `agent_runner_orchestration_runtime.py` still imports and exposes the same name for its discovery call sites and existing monkeypatch seam.
+- `uv run python hooks/shared/check_max_file_lines.py --max-lines 1000 src/backend/core/use_cases/agent_runner_orchestration_runtime.py src/backend/core/use_cases/agent_runner_direct_pr_round.py` passed. The orchestration runtime is now **998 non-empty lines**.
+- Targeted publication, branch-source, CLI, and Direct PR discovery tests: **187 passed** with testmon disabled.
+- `just test`: **239 passed, 562 deselected**.
+- `just lint --reuse` and `SKIP=check-test-flag just lint --full` passed; the latter skipped only the unstaged-tree marker hook. `git diff --check` passed.
+- This repair validation ran on a worktree based on the published PR head `74ba5cb248dcf8ae73f5106ba4c46df4f2cc9afd`. The issue runner assigns the repair commit SHA after this request; no post-repair commit hash is claimed here. The archived RV-1 through RV-4 feature evidence above remains intact.
