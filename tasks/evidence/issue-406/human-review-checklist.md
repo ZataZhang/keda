@@ -2,49 +2,75 @@
 
 ## Decision
 
-Keep patrol #406 open. Do not start a second recovery while the live runner leases remain on Issues #366 and #400. In the 2026-11-20 03:05 Asia/Shanghai `kc peers --repo-id keda` read, #366, #400, and this patrol #406 were all reported as `agent/running`.
+Keep patrol #406 open. Issues #366 and #400 still have active runner leases, so do not start duplicate recovery. GitHub labels #406 agent/failed, while kc peers still reports its runner as agent/running; preserve this mismatch for the next patrol.
 
-Issue #366 still needs a maintainer decision for publishing the required raw `rv-1` outputs and PR evidence comment. The GitHub connector rejected this patrol's attempt to post the evidence and decision request on #366 with `MCP tool call requires approval, but approval policy is never`. No alternate write path was attempted. Consequently, that comment was not posted, #406 still has `agent/running` rather than `agent/blocked`, and PR #409's summary remains stale. The decision options are: authorize the GitHub connector write for the evidence publication/comment, or identify an approved alternate publication path. Do not bypass the approval gate or requeue #366 while its runner lease is live.
+The #366 publication decision remains unresolved. The required raw rv-1 outputs and PR evidence comment have not been published. A prior GitHub connector write was rejected with MCP tool call requires approval, but approval policy is never. A maintainer must authorize connector publication or identify an approved alternate route. Do not bypass the approval gate or requeue #366 while its runner lease remains active.
 
-## Issue and PR status
+## Current issue and PR state
 
-Snapshot checked at 2026-11-19 19:04 UTC (2026-11-20 03:04 Asia/Shanghai):
+Snapshot checked at 2026-11-20 03:34 Asia/Shanghai (2026-11-19 19:34 UTC).
 
-- Patrol [Issue #406](https://github.com/ZataZhang/keda/issues/406) is open on branch `issue-406` at `51ce2be` and still labeled `agent/running`. [PR #409](https://github.com/ZataZhang/keda/pull/409) is open and draft at the same head; its first body line is `Closes #406`, `closingIssuesReferences` contains #406, and the reported CI, Validation Gate, and install checks passed. Its body still cites #366 PR head `6379a08` and #400 PR head `74ba5cb`, so its target summary is stale.
-- Target [Issue #366](https://github.com/ZataZhang/keda/issues/366) is open and labeled `agent/failed`; `kc peers` reports `agent/running`. Its Attempt History shows one successful executor attempt. The latest supervisor rework request is at 2026-11-19 19:04 UTC on head `e1b242d`. The latest local log shows the active run executing `just lint --reuse` and `just lint --full`; the raw outputs and remote PR title/body/comment remain unpublished.
-- [PR #404](https://github.com/ZataZhang/keda/pull/404) is open and draft at head `e1b242d1f349905004cac3ab44af0e2d5b665a47`, with merge state `CLEAN`. The reported CI, Validation Gate, and Linux/macOS/Windows install checks passed on this head. The remote #366 PRD records `rv-1` as independently passing on implementation SHA `525a3549`; its delivery checklist still marks remote evidence publication/PR refresh pending, and its human-confirmed item remains unchecked.
-- Target [Issue #400](https://github.com/ZataZhang/keda/issues/400) is open and labeled `agent/failed`; `kc peers` reports `agent/running`. Its Attempt History shows one successful executor attempt. The latest supervisor rework request is at 2026-11-19 19:04 UTC for conflict resolution on head `3177b59`; the latest local log shows the active run executing full lint, with no completed remote repair or CI result yet.
-- [PR #405](https://github.com/ZataZhang/keda/pull/405) is open and non-draft at head `3177b598d19c72e927908522e59fc1711e4f4274`, with merge state `DIRTY` and no status checks reported. The current head is unverified by PR checks. The #400 PRD records all four implementation checks complete and its human confirmation of #398 remains pending.
+- Patrol Issue #406 is open and labeled agent/failed in GitHub. kc peers --repo-id keda reported an active agent/running lease. PR #409 is open draft at 7d6a701e6f9ae3fdeb3b60e88b4fab4abe2cb3ee, merge state CLEAN. Current CI, Validation Gate, and Install smoke checks passed; the optional public-PyPI install probe was skipped. Its first body line is Closes #406, and its closing reference includes #406.
+- Target Issue #366 is open and labeled agent/failed; kc peers reports its lease as active/agent/running. PR #404 is open draft at 2c1042485b0980cfc33a2ab315ea0fd8969737a4, merge state CLEAN; current CI, Validation Gate, and Install smoke checks passed. Its PR comment timeline is empty. The latest supervisor note still says raw rv-1 outputs are unpublished and requests publication before human review.
+- Target Issue #400 is open and labeled agent/failed; kc peers reports its lease as active/agent/running. PR #405 is open and non-draft at 5676be1f90dc931ffe616b7b369d58daad0dcf4f, merge state DIRTY, with no checks in its current status rollup. Human confirmation of #398 remains pending.
 
-## What changed and evidence
+## PR #409 metadata refresh
 
-This patrol changed only its evidence record and the wall-clock allowance in one subprocess test; no product behavior or target Issue/PR state changed. The #366 PRD requires raw evidence publication and a PR comment before human review. The GitHub connector rejected this patrol's decision-request write with the approval error above, and no alternate write path was attempted. #366's active runner has since updated local review materials, but the remote outputs and PR metadata remain pending. #400 has an active conflict-resolution cycle on PR head `3177b59` with no remote checks yet.
+Prepared title: test(issue-406): widen active-output test timeout
 
-Commands and results:
+The GitHub connector rejected the requested title/body update with MCP tool call requires approval, but approval policy is never. The remote PR metadata therefore remains unchanged. No CLI or alternate write path was attempted. This is the exact proposed body, prepared for review:
 
-- `gh issue list --state open --label agent/blocked --limit 1000 --json number,title,url` — no Issues.
-- `gh issue list --state open --label agent/failed --limit 1000 --json number,title,url` — #400 and #366.
-- `gh issue view 366 --json number,title,state,labels,updatedAt,body,comments` — open, labeled `agent/failed`; body and Attempt History read; the latest supervisor rework request is on head `e1b242d`.
-- `kc peers --repo-id keda` — #366, #400, and #406 reported `agent/running`.
-- `kc logs --repo-id keda --issue 366 --lines 8` — latest lines show the live runner executing `just lint --reuse` and `just lint --full`; remote evidence publication remains absent.
-- `gh pr view 404 --json number,title,state,isDraft,url,headRefName,headRefOid,mergeStateStatus,closingIssuesReferences,statusCheckRollup` — open draft at `e1b242d`; merge state `CLEAN`; reported CI, Validation Gate, and install checks passed.
-- `gh issue view 400 --json number,title,state,labels,updatedAt,body,comments` — open, labeled `agent/failed`; body, latest Attempt History, and current supervisor rework request read.
-- `kc logs --repo-id keda --issue 400 --lines 8` — latest lines show the live runner executing full lint; no current repair completion is recorded.
-- `gh pr view 405 --json number,title,state,isDraft,url,headRefName,headRefOid,mergeStateStatus,closingIssuesReferences,statusCheckRollup` — open non-draft at `3177b59`; `DIRTY`; no status checks reported.
-- `gh api -H 'Accept: application/vnd.github.raw' 'repos/ZataZhang/keda/contents/tasks/archive/P1-FEAT-20261113-121113-nightly-cleanup-keda.md?ref=e1b242d1f349905004cac3ab44af0e2d5b665a47'` — current remote PRD read; `rv-1` verifier result is PASS on implementation SHA `525a3549`, while remote output publication and human confirmation remain pending.
-- `gh api -H 'Accept: application/vnd.github.raw' 'repos/ZataZhang/keda/contents/tasks/archive/P1-FIX-20261119-180000-prd-publication-on-protected-main.md?ref=3177b598d19c72e927908522e59fc1711e4f4274'` — current remote PRD read; all four implementation checks are complete and the #398 human item remains unchecked.
-- `gh pr list --state all --head issue-406 --limit 1000 --json number,title,state,url` — PR #409 exists.
-- `gh pr view 409 --json number,title,body,state,isDraft,url,headRefName,headRefOid,baseRefName,mergeStateStatus,closingIssuesReferences,statusCheckRollup` — open draft at `51ce2be`; `Closes #406` is the first body line and `closingIssuesReferences` contains #406; reported checks passed. Its target-state summary remains stale.
-- GitHub connector comment attempt on #366 — rejected: `MCP tool call requires approval, but approval policy is never`; no comment was posted.
-- Before the test fix, `just test all` failed twice at `test_captured_output_includes_stdout_written_when_process_exits` with the 20-second wall timeout. The isolated test passed, but the preceding inactivity-timeout test reproduced the failure; a probe measured the active child at 26.17s. The test allowance is now 60s, preserving its output and 3-second inactivity assertions.
-- `UV_CACHE_DIR=/private/tmp/kc-review-issue-406-uv-cache uv run pytest -q tests/test_process_runner.py::test_subprocess_runner_kills_silent_process_on_inactivity_timeout tests/test_process_runner.py::test_captured_output_includes_stdout_written_when_process_exits` — passed after the adjustment (2 passed in 27.60s).
-- `UV_CACHE_DIR=/private/tmp/kc-review-issue-406-uv-cache just test all` — passed after the test adjustment; full lint passed, 5,520 passed, 1 skipped in 412.90s. The test result applies to the source tree with the 60-second allowance; this evidence record was then refreshed with the latest read-only GitHub snapshot.
-- Final checks after this evidence edit: `git diff --check` — exit 0; `UV_CACHE_DIR=/private/tmp/kc-review-issue-406-mkdocs-cache uv run mkdocs build --strict` — exit 0 in 4.21s; `UV_CACHE_DIR=/private/tmp/kc-review-issue-406-precommit-cache SKIP=check-test-flag uv run pre-commit run --all-files --show-diff-on-failure` — exit 0 (the test-flag hook was explicitly skipped).
+> Closes #406
+>
+> ## Patrol round summary
+>
+> This PR contains the handoff record and a subprocess test timeout fix in two commits:
+>
+> - docs(issue-406): record #366 and #400 handoff records patrol evidence and target decisions.
+> - test(issue-406): widen active-output test timeout raises the wall timeout for test_captured_output_includes_stdout_written_when_process_exits from 20 to 60 seconds. The old limit could expire while the child was still producing output; the test still checks captured output and retains its 3-second inactivity timeout. This changes the test allowance, not product behavior.
+>
+> ## Current snapshot — 2026-11-20 03:34 Asia/Shanghai
+>
+> - #366 is open and labeled agent/failed; kc peers reports its lease as active/agent/running. PR #404 is open draft at 2c1042485b0980cfc33a2ab315ea0fd8969737a4, merge state CLEAN; CI, Validation Gate, and Install smoke checks passed. The required PR evidence comment is absent (PR #404 has no comments). Its latest supervisor note says raw rv-1 outputs remain unpublished. The #366 publication permission decision is unresolved: a maintainer must authorize connector publication or identify an approved alternate path. A prior connector comment write was rejected for approval, and no bypass was used.
+> - #400 is open and labeled agent/failed; kc peers reports its lease as active/agent/running. PR #405 is open and non-draft at 5676be1f90dc931ffe616b7b369d58daad0dcf4f, merge state DIRTY, with no checks reported. Human confirmation of #398 remains pending.
+> - #406 is open and labeled agent/failed in GitHub, while kc peers still reports an active/agent/running lease. PR #409 is open draft at 7d6a701e6f9ae3fdeb3b60e88b4fab4abe2cb3ee, merge state CLEAN; current CI, Validation Gate, and Install smoke checks passed. The optional public-PyPI install probe was skipped, and the closing reference still points to #406.
+>
+> ## Verification
+>
+> At source head 7d6a701e6f9ae3fdeb3b60e88b4fab4abe2cb3ee: targeted subprocess tests passed (2 passed in 27.60s); just test all passed with full lint, 5,520 passed, and 1 skipped in 412.90s. Final source-evidence checks passed: git diff --check, uv run mkdocs build --strict, and all-file pre-commit with check-test-flag explicitly skipped. No independent verifier ran; Issue #406 has no PRD.
+>
+> ## Remaining human decision
+>
+> The #366 raw-output publication decision remains with the maintainer. Merging this PR does not authorize that publication or resolve the decision.
+>
+> <!-- kc:merge-acceptance version=1 -->
+> Merging this PR accepts the recorded patrol outcome and subprocess test timeout adjustment, and authorizes post-merge acceptance recording on Issue #406. No PRD file exists for this patrol; the #366 publication permission decision remains unresolved and outside this PR acceptance.
+>
+> - PRD: none — Issue #406 has no PRD file; the review surface is tasks/evidence/issue-406/human-review-checklist.md.
 
-## Remaining work and next action
+## Verification and source evidence
 
-Do not close #406 or requeue either target. #366 still needs an authorized path to publish the raw outputs and PR evidence comment; #400's live runner is resolving a merge conflict and refreshing stale PR evidence. The explicit GitHub comment write was rejected by automatic approval review, so the required #366 decision comment and transition of #406 to `agent/blocked` remain outstanding. Do not use an alternate path that bypasses the approval gate. After the maintainer provides an authorized write path and the live target runs settle, post the evidence/options on #366, mark #406 blocked, refresh PR #409 from the current target heads and verification results, then re-read both target Issues, logs, and PRs. No screenshots or video apply.
+The reviewed branch HEAD is 7d6a701e6f9ae3fdeb3b60e88b4fab4abe2cb3ee. The PR has two commits: docs(issue-406): record #366 and #400 handoff and test(issue-406): widen active-output test timeout. The test change raises the subprocess wall timeout from 20 to 60 seconds while keeping the 3-second inactivity timeout and stdout assertion.
 
-## Patrol closing condition
+Recorded verification at this source head:
 
-Keep #406 open while either target remains in the blocked/failed queue, either PR needs automated repair, or #366's publication approval remains unresolved. Close #406 only after a fresh recheck finds no unresolved targets and no pending human decisions.
+- Targeted subprocess tests passed: 2 passed in 27.60s.
+- just test all passed with full lint, 5,520 passed, and 1 skipped in 412.90s.
+- Prior final source-evidence checks passed: git diff --check; uv run mkdocs build --strict; all-file pre-commit with check-test-flag explicitly skipped. These will be rerun against this refreshed checklist.
+- GitHub check rollups: PR #409 and #404 CI, Validation Gate, and Install smoke passed. PR #405 had no checks reported.
+
+Read-only commands and evidence:
+
+- git rev-parse HEAD, git log -5 --oneline --decorate, and git show HEAD:tests/test_process_runner.py confirmed source head and 60-second timeout.
+- gh pr view 409 --json number,title,body,state,isDraft,url,headRefName,headRefOid,baseRefName,mergeStateStatus,closingIssuesReferences,statusCheckRollup returned PR #409 metadata and checks.
+- gh pr view 404 and gh pr view 405 returned target PR heads and checks.
+- GitHub connector issue snapshots for #366, #400, and #406; current #366 issue comments and #404 PR comments read. PR #404 has no comments; latest #366 activity records the rebase repair completion and the preceding supervisor note still requires raw outputs and a PR evidence comment.
+- kc peers --repo-id keda reported #366, #400, and #406 active/agent/running leases. It returned a snapshot with warnings that local logs and the API budget ledger outside this worktree could not be written.
+- GitHub connector update request for PR #409 title/body was rejected with MCP tool call requires approval, but approval policy is never; no alternate write path was attempted.
+- Final local checks for this handoff refresh: git diff --check, uv run mkdocs build --strict, and all-file pre-commit with check-test-flag skipped — passed.
+
+## Finding disposition
+
+- Fixed locally: the checklist reflects current commit, verification, and fresh Issue/PR states, including the #406 label/lease mismatch and unresolved #366 permission decision.
+- Blocked externally: PR #409 title/body refresh was prepared but the GitHub connector rejected the write under the configured approval policy. The remote metadata remains stale.
+- No independent verifier or visual evidence applies to this patrol record.
