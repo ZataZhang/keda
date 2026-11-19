@@ -50,17 +50,27 @@ from backend.engines.agent_runner.factory import (
     resolve_repository_targets_with_diagnostics,
     write_deliberation_outputs,
 )
+from backend.engines.agent_runner.hosted_console_composition import (
+    build_hosted_console_service,
+    create_hosted_console_service,
+    hosted_console_enabled,
+    issue_hosted_bootstrap_code,
+)
 
 
 __all__ = [
     "build_app_config",
     "build_app_config_from_settings",
     "collect_repository_own_presets",
+    "build_hosted_console_service",
     "create_console_store",
     "create_content_generator",
     "create_event_sink",
     "create_foreground_session_launcher",
     "create_github_client",
+    "create_hosted_console_service",
+    "hosted_console_enabled",
+    "issue_hosted_bootstrap_code",
     "create_machine_identity_store",
     "create_lifecycle_settings_editor",
     "create_github_api_budget",

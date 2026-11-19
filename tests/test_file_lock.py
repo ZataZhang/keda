@@ -22,7 +22,7 @@ from backend.core.shared.models.platform_support import (
     require_posix_process_groups,
     supports_posix_process_groups,
 )
-from backend.infrastructure.file_lock import file_lock, lock_backend_name
+from backend.infrastructure.file_lock import file_lock, lock_backend_name, open_lock_file
 
 
 def test_lock_backend_is_one_of_the_known_backends() -> None:
@@ -37,6 +37,23 @@ def test_file_lock_creates_private_lock_file(tmp_path: Path) -> None:
         assert lock_path.is_file()
         if os.name != "nt" and hasattr(os, "fchmod"):
             assert stat.S_IMODE(lock_path.stat().st_mode) == 0o600
+
+
+def test_new_lock_file_without_fchmod_support(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """没有 ``os.fchmod`` 的平台仍能打开共享配置锁文件。"""
+    if hasattr(os, "fchmod"):
+        monkeypatch.delattr(os, "fchmod")
+
+    lock_path = tmp_path / "config.toml.lock"
+    file_descriptor = open_lock_file(lock_path)
+    try:
+        os.write(file_descriptor, b"lock")
+    finally:
+        os.close(file_descriptor)
+
+    assert lock_path.read_bytes() == b"lock"
 
 
 def test_file_lock_is_reentrant_within_one_thread(tmp_path: Path) -> None:

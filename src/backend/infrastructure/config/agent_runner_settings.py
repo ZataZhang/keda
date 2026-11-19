@@ -6,6 +6,9 @@
 import sys as sys
 
 from backend.core.shared.models import product_identity as product_identity
+from backend.infrastructure.config.agent_runner_hosted_settings import (
+    AgentRunnerHostedSettings as AgentRunnerHostedSettings,
+)
 from backend.infrastructure.config.agent_runner_generated_content_settings import (
     GENERATED_CONTENT_TARGET_NAMES as GENERATED_CONTENT_TARGET_NAMES,
     AgentRunnerGeneratedContentSettings as AgentRunnerGeneratedContentSettings,
@@ -71,6 +74,7 @@ __all__ = (
     "AgentRunnerGeneratedContentSettings",
     "AgentRunnerGeneratedContentTargetSettings",
     "AgentRunnerGitSettings",
+    "AgentRunnerHostedSettings",
     "AgentRunnerInteractiveDecisionSettings",
     "AgentRunnerLabelSettings",
     "AgentRunnerLifecycleAgentsSettings",

@@ -59,6 +59,7 @@ from backend.infrastructure.persistence.console_store_invocations import (
 from backend.infrastructure.persistence.console_store_lifecycle import (
     PrdLifecycleStoreMixin,
 )
+from backend.infrastructure.persistence.console_store_retention import RunSummaryRetentionMixin
 from backend.infrastructure.persistence.console_store_takeover import (
     CREATE_ISSUE_RUN_CONTROL,
     IssueRunControlMixin,
@@ -253,6 +254,7 @@ class SqliteConsoleStore(
     IssueRunControlMixin,
     IssueRetryOverrideStoreMixin,
     EvaluationStoreMixin,
+    RunSummaryRetentionMixin,
 ):
     """``IRunHistoryStore`` / ``IBacklogStore`` / ``IMonitorSnapshotStore`` /
     ``IBacklogSnapshotStore`` / ``IConsoleModelPricingStore`` / ``IIssueRunControl`` /

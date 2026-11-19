@@ -23,11 +23,8 @@ TARGET_UID="${RUNNER_UID:-1000}"
 TARGET_GID="${RUNNER_GID:-1000}"
 RUNNER_HOME="/home/runner"
 
-# 一次性把 /home/runner 的属主改成 runtime UID/GID(递归覆盖子目录与隐藏文
-# 件)。如果宿主 UID 就是 1000,chown 是 no-op,零成本。
-# ``/home/runner/.kedacode`` 可能是宿主 bind-mount,其下 ``repos/<...>/.git/objects``
-# 含 read-only 文件,chown 会刷大量 ``Permission denied``。这些是预期噪声
-# (宿主那侧的 git objects 不需要改属主),用 ``2>/dev/null`` 抑制。
+# 一次性把容器私有的 /home/runner 内容改成 runtime UID/GID。托管 Compose 不挂载
+# 宿主状态目录，因此这个递归操作不会触及其它仓库的持久凭据或 Console 状态。
 if [ -d "${RUNNER_HOME}" ]; then
     chown -R "${TARGET_UID}:${TARGET_GID}" "${RUNNER_HOME}" 2>/dev/null || true
 fi
@@ -44,5 +41,19 @@ export KEDACODE_HOME="${KEDACODE_HOME:-${RUNNER_HOME}/.kedacode}"
 # 用 gosu 切到目标 UID/GID 跑 CMD(默认 ``kedacode daemon``)。
 # gosu 接受 ``UID:GID`` 数字形式直接走 syscall,无需 passwd 记录。
 # HOME 必须在 env 显式列出,否则 gosu 改回 /。
-# 只向容器进程传递当前版本使用的 KedaCode 环境变量。
-exec gosu "${TARGET_UID}:${TARGET_GID}" env HOME="${HOME}" KEDACODE_HOME="${KEDACODE_HOME}" KEDACODE_REPO_ID="${KEDACODE_REPO_ID:-}" REPO_PATH="${REPO_PATH:-}" GH_TOKEN="${GH_TOKEN:-}" PATH="${PATH}" "$@"
+# 仓库 id 同时透传新旧两个名字,便于 ``KEDA_VERSION`` 钉到旧版本时旧包也能读到;IAR_REPO_ID 为 legacy-alias。
+if [ "${KEDACODE_DESKTOP_ENABLED:-false}" = "true" ]; then
+    exec gosu "${TARGET_UID}:${TARGET_GID}" env \
+        HOME="${HOME}" \
+        KEDACODE_HOME="${KEDACODE_HOME}" \
+        KEDACODE_REPO_ID="${KEDACODE_REPO_ID:-}" \
+        IAR_REPO_ID="${IAR_REPO_ID:-}" \
+        REPO_PATH="${REPO_PATH:-}" \
+        GH_TOKEN="${GH_TOKEN:-}" \
+        PATH="${PATH}" \
+        DISPLAY=":99" \
+        KEDACODE_DESKTOP_ENABLED=true \
+        /usr/local/bin/kedacode-runner-desktop-entrypoint.sh "$@" # legacy-alias
+fi
+
+exec gosu "${TARGET_UID}:${TARGET_GID}" env HOME="${HOME}" KEDACODE_HOME="${KEDACODE_HOME}" KEDACODE_REPO_ID="${KEDACODE_REPO_ID:-}" IAR_REPO_ID="${IAR_REPO_ID:-}" REPO_PATH="${REPO_PATH:-}" GH_TOKEN="${GH_TOKEN:-}" PATH="${PATH}" KEDACODE_DESKTOP_ENABLED="${KEDACODE_DESKTOP_ENABLED:-false}" "$@" # legacy-alias

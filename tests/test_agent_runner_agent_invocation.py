@@ -16,6 +16,7 @@ from backend.core.shared.models.agent_runner import (
     AppConfig,
     CommandResult,
     IssueSummary,
+    StallSupervisorConfig,
 )
 from backend.core.shared.models.agent_spec import (
     AGENT_PROFILE_DELIBERATE,
@@ -201,7 +202,14 @@ def test_run_agent_with_prompt_logs_issue_context(
     fake_runner = FakeProcessRunner()
 
     with caplog.at_level(logging.INFO, logger="backend.core.use_cases.run_agent_once"):
-        result = run_agent_with_prompt("claude", "Implement.", tmp_path, fake_runner, issue=issue)
+        result = run_agent_with_prompt(
+            "claude",
+            "Implement.",
+            tmp_path,
+            fake_runner,
+            config=AppConfig(stall_supervisor=StallSupervisorConfig(enabled=False)),
+            issue=issue,
+        )
 
     assert result.return_code == 0
     # 停滞监督默认开启后，observer 的进展采样会经由同一个 runner 发无标签的

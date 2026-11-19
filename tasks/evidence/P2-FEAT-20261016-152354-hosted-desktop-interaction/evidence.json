@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "language": "zh-CN",
+  "items": [
+    {
+      "item_number": 1,
+      "item_name": "rv-1 Hosted 桌面开关默认关闭与 fail-closed",
+      "command": "KEDACODE_DESKTOP_ENABLED=false/true docker compose -p keda-desktop-smoke -f src/backend/engines/agent_runner/templates/runner_container/docker-compose.runner.hosted.yml config --format json；另以 `docker compose run --pull never ... -e KEDACODE_DESKTOP_ENABLED=false iar-runner sh -c '<kc-computer record start; kc-computer screenshot>'` 执行关闭态负控",
+      "evidence_files": [
+        "rv-1-hosted-desktop-config.txt",
+        "rv-1-disabled-control.txt"
+      ],
+      "output_summary": "关闭态 Compose 为 image=iar-runner:latest、build_arg=false、runtime_enabled=false；启用态为 image=iar-runner:desktop、build_arg=true、runtime_enabled=true。关闭态 record start 与 screenshot 都返回退出码 1。",
+      "explanation": "Compose JSON 是插值后的真实 service 配置；关闭态负控使用同一 Linux Runner 镜像但在容器 runtime env 显式关闭能力，确认 CLI 在检查 X11 前 fail closed。",
+      "risks": "本轮没有运行自动化测试，也未对 Hosted Settings Python 对象单独运行集成测试；默认值由模型字段和 config.toml 静态定义，Compose 展开与关闭态运行命令已实测。",
+      "negative_control": "把 KEDACODE_DESKTOP_ENABLED=false 传给真实 Hosted Compose one-off Runner，然后运行 kc-computer record start 与 screenshot。",
+      "expected_fail": "两条 GUI 操作分别退出 1，stderr 提示 Hosted desktop is disabled，且没有创建录屏/截图产物。",
+      "stdout_assertions": [
+        { "pattern": "image=iar-runner:latest", "must_match": true },
+        { "pattern": "build_arg=false", "must_match": true },
+        { "pattern": "negative_control=PASS", "must_match": true }
+      ]
+    },
+    {
+      "item_number": 2,
+      "item_name": "rv-2 Runner 内实际点击、录屏与动作轨迹脱敏",
+      "command": "在 Hosted Compose 桌面 Runner 内运行 kc-computer record start / click / screenshot / key / type / record stop；随后从新进程调用 ffprobe 与 Python JSONL parser。",
+      "evidence_files": [
+        "rv-2-desktop-menu-selection.webm",
+        "rv-2-desktop-menu-selection.actions.jsonl",
+        "rv-2-desktop-operation.webm",
+        "rv-2-desktop-operation.actions.jsonl",
+        "rv-2-desktop-menu.png",
+        "rv-2-desktop-after-action.png",
+        "rv-2-hosted-desktop-cli.txt",
+        "rv-2-desktop-menu-selection-cli.txt",
+        "rv-2-media-probe.txt",
+        "rv-2-source-runtime-identity.txt"
+      ],
+      "output_summary": "真实 X11 菜单录像为 VP9 1440x900、10 fps、5.6 秒；菜单关闭/打开及点击后截图通过视觉检查；动作轨迹含实际右键、菜单项点击和 UTC 时间。`trace-secret-sentinel` 输入仅记录 character_count=21，原文未写入轨迹。",
+      "explanation": "录像由真实 Hosted Compose Runner 内的 ffmpeg x11grab 生成，输入由 kc-computer/xdotool 发给同一 X11 server；没有浏览器、Playwright、合成截图或宿主录屏。",
+      "risks": "操作对象是 Runner 内 Openbox 菜单而非客户业务应用；这证明 Linux X11 输入/录屏链路，不证明任一特定业务应用流程。视频是用户可见原始证据，通过本地 HTML review bundle 呈递；PR WIP comment 提供直接 open 命令，没有上传 GitHub 附件。",
+      "negative_control": "在受控 X11 会话把 trace-secret-sentinel 经 stdin 输入，再对 adjacent actions JSONL 搜索该字符串。",
+      "expected_fail": "若轨迹写入输入文本，哨兵搜索应命中；实际记录为未命中，且 type 事件只含 character_count。",
+      "stdout_assertions": [
+        { "pattern": "codec_name.*vp9", "must_match": true },
+        { "pattern": "duration.*5.600000", "must_match": true },
+        { "pattern": "sentinel_present=False", "must_match": true },
+        { "pattern": "kc_computer_ast_equal=True", "must_match": true }
+      ]
+    },
+    {
+      "item_number": 3,
+      "item_name": "rv-3 Hosted 桌面没有公开端口或 Docker 权限",
+      "command": "对启用态 Hosted Runner 执行 docker inspect，并由新容器进程读取 /proc/net/tcp{,6}、Xvfb cmdline 与 /tmp/.X11-unix/X99。",
+      "evidence_files": [
+        "rv-3-hosted-isolation.txt"
+      ],
+      "output_summary": "ports={}、port_bindings={}、mounts 中不含 /var/run/docker.sock；Xvfb 使用 -nolisten tcp；X11 Unix socket 存在。唯一 TCP LISTEN 行是无容器内 owner 的 127.0.0.11:44907 loopback 网络 socket。",
+      "explanation": "证据来自实际启用态 Compose 容器的 Docker inspect 与 procfs 网络/进程状态，不以配置文件文本代替运行态检查。",
+      "risks": "使用 Docker Desktop Linux VM；内部 resolver loopback socket 仍由 Docker network namespace 提供。没有运行对 VNC ports 或允许 X11 TCP 的变异配置负控。",
+      "negative_control": "未执行 VNC/TCP 配置变异负控；此项仍需独立 verifier 复核。",
+      "expected_fail": "若 Compose 公布 ports 或挂载 Docker socket，inspect 应返回相应映射/挂载；若 Xvfb 开放 TCP，其运行参数应不再包含 -nolisten tcp。",
+      "stdout_assertions": [
+        { "pattern": "port_bindings", "must_match": true },
+        { "pattern": "-nolisten tcp", "must_match": true },
+        { "pattern": "x11_unix_socket=True", "must_match": true }
+      ]
+    }
+  ]
+}

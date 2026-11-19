@@ -842,6 +842,9 @@ def build_app_config_from_settings(
         agent_session=agent_session,
         stall_supervisor=stall_supervisor,
         daemon=DaemonConfig(
+            hosted_maintenance_enabled=(agent_runner_settings.daemon.hosted_maintenance_enabled),
+            disk_low_watermark_bytes=(agent_runner_settings.daemon.disk_low_watermark_bytes),
+            disk_resume_watermark_bytes=(agent_runner_settings.daemon.disk_resume_watermark_bytes),
             presence_enabled=agent_runner_settings.daemon.presence_enabled,
             lease_ttl_seconds=agent_runner_settings.daemon.lease_ttl_seconds,
         ),

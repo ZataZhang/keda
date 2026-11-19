@@ -32,6 +32,7 @@ classifiers = [
 # 云 SDK 与数据库驱动仍按使用场景收进 extras，README「安装」一节说明各自何时需要。
 dependencies = [
     "croniter>=3.0.0",
+    "cryptography>=50.0.2",
     "fastapi>=0.115.0",
     # 启动更新检查（cli_update_check）需要在所有 CLI 主路径上比较 PEP 440 版本，
     # 纯 Python 小包，不重造版本解析轮子。
@@ -56,6 +57,7 @@ dependencies = [
     # 性能 extra，对本机单用户面板没有意义。它们的代价很实：Homebrew formula
     # 一律从 sdist 源码构建，多这 4 个就多 4 个要在用户机器上编译的扩展。
     "uvicorn>=0.30.0",
+    "requests>=2.32.5",
 ]
 
 [project.scripts]
