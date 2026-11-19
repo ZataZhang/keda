@@ -84,6 +84,7 @@ def _seed_snapshot(
     issues: list[dict],
     *,
     tracked_issues: list[dict] | None = None,
+    scanned_offset: int = -5,
 ) -> None:
     """把一份 per-repo overview 写入真实快照表。"""
     payload = {
@@ -98,7 +99,7 @@ def _seed_snapshot(
         MonitorSnapshotEntry(
             repo_id=repo_id,
             payload_json=json.dumps(payload),
-            scanned_at=_iso(-5),
+            scanned_at=_iso(scanned_offset),
         )
     )
 
@@ -282,10 +283,10 @@ def test_tracked_issue_state_marks_closed_task(tmp_path) -> None:
 
 @pytest.mark.parametrize("outcome", ["failed", "blocked"])
 @pytest.mark.parametrize("snapshot_labels", [None, [], ["agent/automated-review-passed"]])
-def test_historical_failure_does_not_imply_current_blockage(
+def test_local_failure_fills_missing_snapshot_status(
     tmp_path, monkeypatch: pytest.MonkeyPatch, outcome: str, snapshot_labels: list[str] | None
 ) -> None:
-    """历史失败不冒充当前阻塞；真实队列状态仍由快照标签决定。"""
+    """缺少监控状态时呈现本地失败；当前队列状态优先，历史阻塞不推断当前阻塞。"""
     store = _store(tmp_path)
     _seed_snapshot(
         store, "keda", [] if snapshot_labels is None else [_issue(278, labels=snapshot_labels)]
@@ -308,10 +309,15 @@ def test_historical_failure_does_not_imply_current_blockage(
     summary = _summary(store, ["keda"])
     historical_task = summary.tasks[0]
     expected_status = RuntimeTaskStatus.WAITING if snapshot_labels else RuntimeTaskStatus.UNKNOWN
+    if not snapshot_labels and outcome == "failed":
+        expected_status = RuntimeTaskStatus.FAILED
     assert historical_task.status is expected_status
     assert historical_task.last_outcome == outcome
     assert summary.status_counts["blocked"] == 0
-    if snapshot_labels is None:
+    if expected_status is RuntimeTaskStatus.FAILED:
+        assert historical_task.status_reason == "运行账本终态：failed"
+        assert summary.status_counts["failed"] == 1
+    elif snapshot_labels is None:
         assert historical_task.status_reason == f"缺少当前 Issue 状态；上次运行结果：{outcome}"
 
     # 穿过生产 HTTP 路由与 JSON 序列化；仅替换 registry 和存储工厂，SQLite 重新打开读取。
@@ -547,6 +553,7 @@ def test_summary_truncates_and_says_so(tmp_path) -> None:
         _FinishedRunScenario(-180, "agent/running", "failed", None, RuntimeTaskStatus.UNKNOWN),
         _FinishedRunScenario(-180, "agent/supervising", "failed", None, RuntimeTaskStatus.UNKNOWN),
         _FinishedRunScenario(-30, "agent/running", "failed", None, RuntimeTaskStatus.RUNNING),
+        _FinishedRunScenario(-30, "agent/failed", "failed", None, RuntimeTaskStatus.RUNNING),
         _FinishedRunScenario(-30, "agent/supervising", "failed", None, RuntimeTaskStatus.RUNNING),
         _FinishedRunScenario(
             None,
@@ -576,7 +583,12 @@ def test_finished_run_is_not_live_unless_a_new_lifecycle_started(
         if scenario.latest_action
         else []
     )
-    _seed_snapshot(store, "keda", [_issue(7, labels=[scenario.status_label], timeline=timeline)])
+    _seed_snapshot(
+        store,
+        "keda",
+        [_issue(7, labels=[scenario.status_label], timeline=timeline)],
+        scanned_offset=-60 if scenario.status_label == "agent/failed" else -5,
+    )
     store.append_run(
         RunRecord(
             repo_id="keda",

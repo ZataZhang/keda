@@ -70,6 +70,7 @@ _LABEL_STATUS_MAP: dict[str, RuntimeTaskStatus] = {
 #: 运行账本只能证明交付结果；历史失败不能证明 Issue 当前仍然阻塞。
 _OUTCOME_STATUS_MAP: dict[str, RuntimeTaskStatus] = {
     "completed": RuntimeTaskStatus.COMPLETED,
+    "failed": RuntimeTaskStatus.FAILED,
     "deferred": RuntimeTaskStatus.DEFERRED,
 }
 

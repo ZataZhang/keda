@@ -498,6 +498,7 @@ def test_runtime_routes_are_registered_under_the_console_prefix() -> None:
         "/agent-runner/console/desktop-companion/status",
         "/agent-runner/console/desktop-companion/window",
         "/agent-runner/console/desktop-companion/window/close",
+        "/agent-runner/console/upgrade",
     }
 
 
