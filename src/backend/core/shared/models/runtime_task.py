@@ -76,6 +76,8 @@ class RuntimeTask:
         issue_url: Issue 网页链接；来源缺失时为 ``None``。
         pr_url: 该 Issue 关联 PR 的网页链接；尚无 PR 时为 ``None``。
         pr_number: PR 编号；链接无法解析编号时为 ``None``。
+        pr_is_draft: PR 草稿状态；未观测到时为 ``None``。
+        pr_label_warning: PR 与 Issue 标签不一致的原因；未确认时为空。
         status: 生命周期分桶。
         status_reason: 当前分桶的直接来源，例如监控标签或 Issue 关闭状态。
         blocking_reason: 最近一次 PR 监督请求人工处理时给出的摘要；无法确认时为空。
@@ -86,6 +88,7 @@ class RuntimeTask:
         waiting_reason: 等待原因：queued、human_review 或 recheck；非等待时为空。
         review_daemon_running: 本机 PR 值守进程是否存活；未探测或读取失败时为空。
         phase: 最近一次观测到的生命周期阶段名。
+        pipeline_stage: 最近一次 Agent 调用映射到的六个流水线节点之一；无法映射时为空。
         agent: 最近一次运行选择的 Agent 名称。
         unclosed_invocation_executor: 当前运行会话里最近一次尚无结束事件的调用执行器。
         unclosed_invocation_model: 该未收口调用实际请求的模型；未请求模型时为空。
@@ -141,6 +144,9 @@ class RuntimeTask:
     waiting_reason: str | None = None
     review_daemon_running: bool | None = None
     blocking_reason: str | None = None
+    pipeline_stage: str | None = None
+    pr_is_draft: bool | None = None
+    pr_label_warning: str | None = None
 
     @property
     def task_key(self) -> str:

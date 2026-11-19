@@ -32,7 +32,6 @@ from backend.core.use_cases.backlog_prd_evidence import (
     BacklogPrdEvidenceError,
     build_evidence_manifest,
     resolve_evidence_dir_for_root,
-    resolve_prd_evidence_dir,
 )
 from backend.core.use_cases.backlog_prd_impact import (
     ImpactMeasureStatus,
@@ -43,12 +42,17 @@ from backend.core.use_cases.backlog_prd_impact import (
 from backend.core.use_cases.backlog_prd_worktree import (
     WorktreeMatchStatus,
     WorktreeEntry,
+    WorktreeMatchResult,
     extract_unique_issue_number,
     list_worktrees,
     match_prd_worktree,
     parse_prd_slug,
 )
-from backend.core.use_cases.prd_content_reader import resolve_prd_content_path
+from backend.core.use_cases.prd_content_reader import (
+    PrdContentError,
+    resolve_prd_content_path,
+    resolve_prd_content_reference_path,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -156,6 +160,7 @@ class _ResolvedSource:
     source_usable: bool
     archived: bool
     candidates: Sequence[tuple[Path, str]]
+    worktree_prd_path: str | None = None
 
 
 def _strip_quotes(value_text: str) -> str:
@@ -325,7 +330,7 @@ def resolve_prd_source(
 
     if _is_main_repo_archived(prd_path):
         archived_text, _archived_error = _resolve_main_prd_text(repo_path, prd_path)
-        main_dir = resolve_prd_evidence_dir(repo_path, config, prd_path)[0]
+        main_dir = resolve_evidence_dir_for_root(repo_path, config, prd_stem)
         return _ResolvedSource(
             prd_stem=prd_stem,
             prd_source=_SOURCE_MAIN,
@@ -349,7 +354,28 @@ def resolve_prd_source(
         issue_number=issue_number,
         query_available=worktree_list.available,
     )
-    main_dir = resolve_prd_evidence_dir(repo_path, config, prd_path)[0]
+    if match_result.status is WorktreeMatchStatus.NONE and main_text is None:
+        # 主仓库还没有该 PRD 时，Issue 锚点只存在于执行工作区的副本里；用完全相同
+        # 的文件名收窄候选，唯一命中才继续读取，多个副本仍按歧义处理。
+        exact_prd_entries = [
+            worktree_entry
+            for worktree_entry in worktree_list.entries
+            if any(
+                candidate_path.is_file()
+                for candidate_path in _worktree_prd_candidates(worktree_entry, prd_file_name)
+            )
+        ]
+        if len(exact_prd_entries) == 1:
+            match_result = WorktreeMatchResult(
+                status=WorktreeMatchStatus.MATCHED,
+                entry=exact_prd_entries[0],
+            )
+        elif len(exact_prd_entries) > 1:
+            match_result = WorktreeMatchResult(
+                status=WorktreeMatchStatus.AMBIGUOUS,
+                entry=None,
+            )
+    main_dir = resolve_evidence_dir_for_root(repo_path, config, prd_stem)
 
     if match_result.status in {WorktreeMatchStatus.UNAVAILABLE, WorktreeMatchStatus.AMBIGUOUS}:
         # 不以主仓库内容冒充最终来源：来源相关读数标不可用，证据候选为空。
@@ -366,6 +392,8 @@ def resolve_prd_source(
 
     if match_result.status is WorktreeMatchStatus.NONE:
         pending_text, pending_error = _resolve_main_prd_text(repo_path, prd_path)
+        if pending_text is None and not pending_error:
+            raise PrdContentError("PRD 文件不存在。")
         return _ResolvedSource(
             prd_stem=prd_stem,
             prd_source=_SOURCE_MAIN,
@@ -380,9 +408,11 @@ def resolve_prd_source(
     worktree_entry = match_result.entry
     assert worktree_entry is not None  # matched 时必有条目
     archive_copy, pending_copy = _worktree_prd_candidates(worktree_entry, prd_file_name)
-    worktree_text, worktree_read_state = _read_text_if_present(archive_copy)
+    worktree_prd_file = archive_copy
+    worktree_text, worktree_read_state = _read_text_if_present(worktree_prd_file)
     if worktree_read_state == "missing":
-        worktree_text, worktree_read_state = _read_text_if_present(pending_copy)
+        worktree_prd_file = pending_copy
+        worktree_text, worktree_read_state = _read_text_if_present(worktree_prd_file)
 
     if worktree_read_state == "found" and worktree_text is not None:
         prd_source = _SOURCE_WORKTREE
@@ -390,6 +420,8 @@ def resolve_prd_source(
     elif worktree_read_state == "missing":
         # 工作区两处都没有副本：回落到主仓库 pending 副本（仅「确实不存在」才回落）。
         pending_text, pending_error = _resolve_main_prd_text(repo_path, prd_path)
+        if pending_text is None and not pending_error:
+            raise PrdContentError("PRD 文件不存在。")
         prd_source = _SOURCE_MAIN
         resolved_text = None if pending_error else pending_text
     else:
@@ -416,6 +448,11 @@ def resolve_prd_source(
         source_usable=True,
         archived=False,
         candidates=candidate_dirs,
+        worktree_prd_path=(
+            worktree_prd_file.relative_to(worktree_entry.path).as_posix()
+            if prd_source == _SOURCE_WORKTREE
+            else None
+        ),
     )
 
 
@@ -444,9 +481,13 @@ def resolve_evidence_lookup(
     Raises:
         BacklogPrdEvidenceError: PRD 路径非法或证据目录越界（由路由映射 400）。
     """
-    source = resolve_prd_source(
-        repo_path=repo_path, config=config, prd_path=prd_path, process_runner=process_runner
-    )
+    try:
+        prd_path = resolve_prd_content_reference_path(repo_path, prd_path)
+        source = resolve_prd_source(
+            repo_path=repo_path, config=config, prd_path=prd_path, process_runner=process_runner
+        )
+    except PrdContentError as exc:
+        raise BacklogPrdEvidenceError(str(exc)) from exc
     if source.worktree_status in {
         WorktreeMatchStatus.UNAVAILABLE.value,
         WorktreeMatchStatus.AMBIGUOUS.value,
@@ -666,7 +707,7 @@ def build_prd_progress(
     Raises:
         backend.core.use_cases.prd_content_reader.PrdContentError: PRD 路径非法或不存在。
     """
-    resolve_prd_content_path(repo_path, prd_path)
+    prd_path = resolve_prd_content_reference_path(repo_path, prd_path)
     source = resolve_prd_source(
         repo_path=repo_path, config=config, prd_path=prd_path, process_runner=process_runner
     )
@@ -685,7 +726,7 @@ def build_prd_progress(
         worktree_reading = WorktreeReading(branch=source.worktree_entry.branch)
 
     return PrdProgress(
-        prd_path=prd_path,
+        prd_path=source.worktree_prd_path or prd_path,
         prd_stem=source.prd_stem,
         prd_source=source.prd_source,
         worktree_status=source.worktree_status,

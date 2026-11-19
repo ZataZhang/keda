@@ -200,25 +200,28 @@ def _ctx(
     )
 
 
-def test_detect_anomalies_label_pr_mismatch() -> None:
-    """PR exists but label is not a post-PR label."""
+@pytest.mark.parametrize("is_draft", [True, None, False])
+def test_detect_anomalies_label_pr_mismatch(is_draft: bool | None) -> None:
+    """同一运行标签下，只有明确的非草稿 PR 才触发标签不一致。"""
     anomalies = detect_anomalies(
         _ctx(
-            primary_label="agent/ready",
+            primary_label="agent/running",
             pr_context=PullRequestContext(
                 pr_url="https://github.com/example/repo/pull/22",
                 branch="issue-1",
                 head_sha="x",
                 base_sha="y",
                 mergeable=True,
+                is_draft=is_draft,
             ),
         )
     )
-    types = [a.type for a in anomalies]
-    assert "label_pr_mismatch" in types
+    if is_draft is not False:
+        assert not anomalies
+        return
     warning = next(a for a in anomalies if a.type == "label_pr_mismatch")
     assert warning.severity == "warning"
-    assert "kc labels sync" in warning.suggested_cli
+    assert warning.message == "PR #22 已转为 Ready，Issue 当前标签仍为「运行中」（agent/running）。"
 
 
 def test_detect_anomalies_pr_dirty_in_review() -> None:

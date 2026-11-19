@@ -431,35 +431,25 @@ def _derive_suggested_cli(
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-_POST_PR_LABELS: frozenset[str] = frozenset(
-    {
-        "agent/supervising",
-        "agent/automated-review-passed",
-        "agent/blocked",
-        "agent/failed",
-    }
-)
-
-
-def _phase_implies_label(phase: str) -> str | None:
+def _phase_implies_label(phase: str, label_config: LabelConfig) -> str | None:
     """Map an kc:event phase to the label it implies.
 
     Returns ``None`` when the phase does not pin a label decision.
     """
     if phase == "claimed":
-        return "agent/running"
+        return label_config.running
     if phase == "implementation_complete":
-        return "agent/running"
+        return label_config.running
     if phase == "pre_pr_review":
-        return "agent/running"
+        return label_config.running
     if phase == "draft_pr_created":
-        return "agent/supervising"
+        return label_config.supervising
     if phase == "post_pr_supervisor":
-        return "agent/supervising"
+        return label_config.supervising
     if phase == "post_pr_rework_requested":
-        return "agent/running"
+        return label_config.running
     if phase == "rebase_repair_complete":
-        return "agent/supervising"
+        return label_config.supervising
     return None
 
 
@@ -474,17 +464,34 @@ def detect_anomalies(context: AnomalyDetectionContext) -> tuple[Anomaly, ...]:
     """
     anomalies: list[Anomaly] = []
 
-    has_pr = context.pr_context is not None
-    pr_dirty = bool(context.pr_context is not None and context.pr_context.mergeable is False)
+    pr_context = context.pr_context
+    label_config = context.config.labels
+    post_pr_labels = (
+        label_config.supervising,
+        label_config.review,
+        label_config.blocked,
+        label_config.failed,
+    )
+    pr_dirty = bool(pr_context is not None and pr_context.mergeable is False)
     worktree_dirty = bool(context.worktree.exists and not context.worktree.is_clean)
 
-    if has_pr and context.primary_label not in _POST_PR_LABELS:
+    if (
+        pr_context is not None
+        and pr_context.is_draft is False
+        and context.primary_label not in post_pr_labels
+    ):
+        pr_number = pr_context.number or _extract_pr_number(pr_context.pr_url)
+        pr_name = f"PR #{pr_number}" if pr_number else "关联 PR"
+        issue_label = (
+            f"「运行中」（{label_config.running}）"
+            if context.primary_label == label_config.running
+            else f"「{context.primary_label or '无标签'}」"
+        )
         anomalies.append(
             Anomaly(
                 type="label_pr_mismatch",
                 severity="warning",
-                message=("PR exists but Issue label does not reflect post-PR state."),
-                suggested_cli=("kc labels sync", "kc supervise --dry-run"),
+                message=f"{pr_name} 已转为 Ready，Issue 当前标签仍为{issue_label}。",
             )
         )
 
@@ -509,11 +516,11 @@ def detect_anomalies(context: AnomalyDetectionContext) -> tuple[Anomaly, ...]:
         )
 
     if context.latest_event is not None and context.latest_event.phase:
-        implied = _phase_implies_label(context.latest_event.phase)
+        implied = _phase_implies_label(context.latest_event.phase, label_config)
         if (
             implied is not None
             and implied != context.primary_label
-            and context.primary_label in _POST_PR_LABELS
+            and context.primary_label in post_pr_labels
         ):
             anomalies.append(
                 Anomaly(
@@ -537,8 +544,9 @@ def _pr_context_to_dict(pr_context: PullRequestContext | None) -> dict | None:
     if pr_context is None:
         return None
     return {
-        "number": _extract_pr_number(pr_context.pr_url),
+        "number": pr_context.number or _extract_pr_number(pr_context.pr_url),
         "url": pr_context.pr_url,
+        "is_draft": pr_context.is_draft,
         "branch": pr_context.branch,
         "head_sha": pr_context.head_sha,
         "base_sha": pr_context.base_sha,
@@ -653,8 +661,7 @@ def _lookup_pr_context(
     else:
         has_open_pr = github_client.find_open_pr_by_head(pr_branch)
     if has_open_pr:
-        # Fall back to a synthetic minimal context so anomalies can still
-        # report a PR exists even when full context lookup fails.
+        # 只记录 PR 存在，草稿状态保持未知。
         return PullRequestContext(
             pr_url="",
             branch=pr_branch,

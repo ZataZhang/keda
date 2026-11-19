@@ -53,7 +53,7 @@ const UNAVAILABLE_SOURCE_MESSAGES: Record<string, string> = {
     "仓库监控快照不可用，任务状态可能缺失或过期；请到「仓库监控」查看同步状态。",
   run_history: "运行历史不可用，任务结果与耗时信息可能不完整。",
   attempt_ledger: "执行尝试记录不可用，阶段、执行器与重试信息可能不完整。",
-  invocation_ledger: "模型调用记录不可用，当前执行器与失败诊断可能不完整。",
+  invocation_ledger: "模型调用记录不可用，流水线节点、当前执行器与失败诊断可能不完整。",
 };
 
 /**
@@ -84,6 +84,12 @@ export function runtimeStatusPresentation(
 /** 任务身份文案：``keda#283``，前端选路与展示共用。 */
 export function runtimeTaskKey(task: RuntimeTaskEntry): string {
   return `${task.repo_id}#${task.issue_number}`;
+}
+
+/** PR 链接文案，只有确认是草稿时才加上「草稿」标记。 */
+export function runtimeTaskPrLabel(task: RuntimeTaskEntry): string {
+  const prName = task.pr_number ? `PR #${task.pr_number}` : "PR";
+  return task.pr_is_draft === true ? `${prName} · 草稿` : prName;
 }
 
 interface RuntimeTaskListProps {
@@ -398,7 +404,7 @@ function RuntimeTaskRow({
           {prUrl ? (
             <ExternalLinkPill
               href={prUrl}
-              label={task.pr_number ? `PR #${task.pr_number}` : "PR 链接"}
+              label={runtimeTaskPrLabel(task)}
               tone="pr"
               linkTestId="runtime-task-pr-link"
               copyTestId="runtime-task-pr-copy"

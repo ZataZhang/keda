@@ -93,6 +93,25 @@
       relationships: [{ id: 'prd-lifecycle-observability', label: '从配置页转到 PRD 执行过程与仓库统计' }],
     },
     {
+      id: 'live-concept-workbench', title: '构想工作台：对话与实时产物', project: 'keda', module: 'Idea Inbox / 构想阶段', system: 'Keda Console',
+      form: 'image-state', version: 'v1.0', updatedAt: '2026-11-19', availability: 'available', validationLevel: '设计概念（ImageGen 静态图片）',
+      primaryFlow: '用一条 kc 命令打开构想工作台，右侧对话、左侧产物随讨论演进；比较网页预览、概念关系图、结构化说明、故事板、多方向和版本轨迹六种呈现方向',
+      description: '六张静态概念图探索想法尚未成形时的对话与可视化工作台。示例内容为虚构场景；图片不代表功能已实现，不连接模型、会话存储或预览服务。',
+      preview: './live-concept-workbench/assets/01-live-web-preview.png', entry: './live-concept-workbench/index.html', source: './live-concept-workbench/prototype.md',
+      provenance: [
+        './live-concept-workbench/assets/01-live-web-preview.prompt.md',
+        './live-concept-workbench/assets/02-concept-map.prompt.md',
+        './live-concept-workbench/assets/03-concept-brief.prompt.md',
+        './live-concept-workbench/assets/04-storyboard.prompt.md',
+        './live-concept-workbench/assets/05-three-directions.prompt.md',
+        './live-concept-workbench/assets/06-artifact-tabs-history.prompt.md',
+      ],
+      relationships: [
+        { id: 'kc-terminal-agent-preview', label: 'CLI 入口与本机项目预览的概念参考' },
+        { id: 'prd-lifecycle-observability', label: '复用 KedaCode Console 的应用外壳参考' },
+      ],
+    },
+    {
       id: 'kc-terminal-agent-preview', title: 'KC 终端执行器与按需项目预览', project: 'keda', module: 'Developer Experience / CLI',
       form: 'image-state', version: 'v1.0', updatedAt: '2026-10-09', availability: 'available', validationLevel: '概念原型',
       primaryFlow: '输入 kc 启动设置中选定的 Codex / Claude 原生终端执行器；对话请求打开项目页面后，终端打印本机预览 URL',

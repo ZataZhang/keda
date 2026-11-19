@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>构想工作台 · 六种视觉方向</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: #201d2b;
+        background: #f7f6fa;
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; }
+      main { width: min(1440px, calc(100% - 40px)); margin: 0 auto; padding: 36px 0 64px; }
+      header { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 28px; }
+      h1 { margin: 0 0 8px; font-size: clamp(26px, 3vw, 38px); letter-spacing: -0.04em; }
+      header p { margin: 0; color: #6e687c; line-height: 1.6; }
+      .eyebrow { margin-bottom: 8px; color: #7150d8; font-size: 12px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
+      .back-link { flex: 0 0 auto; color: #5f40c7; font-weight: 650; text-decoration: none; }
+      .notice { margin: 0 0 24px; padding: 12px 16px; border: 1px solid #e5def7; border-radius: 12px; color: #51476c; background: #f0ebfc; font-size: 14px; }
+      .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+      article { overflow: hidden; border: 1px solid #e7e4ed; border-radius: 16px; background: white; box-shadow: 0 6px 24px #24194d0a; }
+      article a { display: block; color: inherit; text-decoration: none; }
+      article img { display: block; width: 100%; height: auto; border-bottom: 1px solid #eeeaf3; }
+      .caption { display: flex; align-items: start; gap: 14px; padding: 16px 18px 18px; }
+      .number { display: grid; width: 30px; height: 30px; flex: 0 0 auto; place-items: center; border-radius: 9px; color: #5f40c7; background: #f0ebfc; font-size: 13px; font-weight: 750; }
+      h2 { margin: 0 0 5px; font-size: 17px; }
+      .caption p { margin: 0; color: #777183; font-size: 14px; line-height: 1.5; }
+      @media (max-width: 760px) {
+        main { width: min(100% - 24px, 680px); padding-top: 24px; }
+        header { align-items: start; flex-direction: column; }
+        .grid { grid-template-columns: 1fr; gap: 14px; }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <p class="eyebrow">KedaCode · Design concepts</p>
+          <h1>构想工作台：六种视觉方向</h1>
+          <p>围绕“对话时同步生成、修改可见产物”的六张静态概念图。</p>
+        </div>
+        <a class="back-link" href="../hub.html">返回 Prototype Hub ↗</a>
+      </header>
+      <p class="notice">设计概念 · ImageGen 静态图片，不可点击，不代表生产功能已实现。示例“邻里工具共享”仅用于说明画布内容。</p>
+      <section class="grid" aria-label="六种构想工作台视觉方向">
+        <article><a href="assets/01-live-web-preview.png" target="_blank" rel="noreferrer"><img src="assets/01-live-web-preview.png" alt="方向一：对话旁实时网页预览" /></a><div class="caption"><span class="number">01</span><div><h2>网页实时预览</h2><p>左侧直接呈现 Agent 生成的网页，最容易感受到“边聊边看到结果”。</p></div></div></article>
+        <article><a href="assets/02-concept-map.png" target="_blank" rel="noreferrer"><img src="assets/02-concept-map.png" alt="方向二：围绕核心想法展开的关系画布" /></a><div class="caption"><span class="number">02</span><div><h2>概念关系画布</h2><p>把用户、价值、流程和待确认项连起来，帮助发现想法中的缺口。</p></div></div></article>
+        <article><a href="assets/03-concept-brief.png" target="_blank" rel="noreferrer"><img src="assets/03-concept-brief.png" alt="方向三：结构化概念说明与对话" /></a><div class="caption"><span class="number">03</span><div><h2>结构化概念说明</h2><p>以接近 PRD 的方式持续整理内容，同时保留“未确认”状态。</p></div></div></article>
+        <article><a href="assets/04-storyboard.png" target="_blank" rel="noreferrer"><img src="assets/04-storyboard.png" alt="方向四：四格故事板呈现用户流程" /></a><div class="caption"><span class="number">04</span><div><h2>用户故事板</h2><p>用连续场景呈现用户体验，适合还没有明确界面或流程的想法。</p></div></div></article>
+        <article><a href="assets/05-three-directions.png" target="_blank" rel="noreferrer"><img src="assets/05-three-directions.png" alt="方向五：网页、流程图和故事板三种初步方案" /></a><div class="caption"><span class="number">05</span><div><h2>多方向对比</h2><p>一次给出几种表达方式，让用户选择更接近自己想法的一种继续打磨。</p></div></div></article>
+        <article><a href="assets/06-artifact-tabs-history.png" target="_blank" rel="noreferrer"><img src="assets/06-artifact-tabs-history.png" alt="方向六：页面、流程、概念说明标签和修订记录" /></a><div class="caption"><span class="number">06</span><div><h2>多产物与修订轨迹</h2><p>在页面、流程、说明之间切换，并回看对话推动的修改。</p></div></div></article>
+      </section>
+    </main>
+  </body>
+</html>

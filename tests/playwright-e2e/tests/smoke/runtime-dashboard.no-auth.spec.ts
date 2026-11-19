@@ -28,9 +28,11 @@ const RUNNING_TASK = {
   issue_url: 'https://example.test/21',
   pr_url: 'https://example.test/pr/21',
   pr_number: 21,
+  pr_is_draft: true,
   status: 'running',
   status_reason: '当前监控标签：agent/running',
   anomaly_types: [],
+  pipeline_stage: 'implementation',
   phase: 'implement',
   agent: 'codex',
   preset: 'default',
@@ -53,7 +55,8 @@ const FAILED_TASK = {
   issue_url: 'https://example.test/19',
   status: 'failed',
   status_reason: '当前监控标签：agent/failed',
-  anomaly_types: ['label_pr_mismatch'],
+  anomaly_types: [],
+  pipeline_stage: null,
   phase: 'publish',
   agent: 'claude',
   preset: null,
@@ -304,15 +307,23 @@ test.describe('runtime board (mocked API)', () => {
     await expect(page.getByTestId('runtime-task-empty')).toContainText('没有符合筛选条件')
   })
 
-  test('long recent phase and status remain readable on a narrow dark board', async ({ page }) => {
+  test('long pipeline stage and status remain readable on a narrow dark board', async ({ page }) => {
     await page.setViewportSize({ width: 440, height: 900 })
     await page.addInitScript(() => localStorage.setItem('theme', 'dark'))
-    await mockBoardApi(page, { tasks: { tasks: [{ ...FAILED_TASK, phase: 'implementation_complete',
-      issue_title: '很长的任务标题，用于验证窄屏布局中的阶段说明、状态来源与外链布局' }] } })
+    await mockBoardApi(page, {
+      tasks: {
+        tasks: [{
+          ...FAILED_TASK,
+          pipeline_stage: 'implementation',
+          phase: 'implementation_complete',
+          issue_title: '很长的任务标题，用于验证窄屏布局中的阶段说明、状态来源与外链布局',
+        }],
+      },
+    })
     await page.goto('/app/dashboard')
     const row = page.getByTestId('runtime-task-row-keda-main-19')
     await expect(page.locator('html')).toHaveClass(/dark/)
-    await expect(row.getByTestId('runtime-task-phase')).toContainText('最近阶段：实现完成')
+    await expect(row.getByTestId('runtime-task-phase')).toContainText('最近阶段：实现')
     await expect(row).not.toContainText('接下来进入')
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy()
     const pillHeight = await page.getByTestId('runtime-task-issue-link').evaluate((link) => link.getBoundingClientRect().height)
@@ -334,6 +345,7 @@ test.describe('runtime board (mocked API)', () => {
     // 行内直接给出 Issue / PR 入口：有 PR 时两个都在，无 PR 时只有 Issue。
     await expect(page.getByTestId('runtime-task-issue-link')).toHaveCount(2)
     await expect(page.getByTestId('runtime-task-pr-link')).toHaveCount(1)
+    await expect(page.getByTestId('runtime-task-pr-link')).toContainText('PR #21 · 草稿')
     await expect(page.getByTestId('runtime-task-pr-link')).toHaveAttribute(
       'href',
       'https://example.test/pr/21',
@@ -348,6 +360,40 @@ test.describe('runtime board (mocked API)', () => {
     expect(issueStyle.border).not.toBe('')
     // 默认视图不再铺仓库卡片：仓库级动作收在「仓库监控」一侧。
     await expect(page.getByTestId('dashboard-repo-header')).toHaveCount(0)
+  })
+
+  test('task detail distinguishes a draft from a Ready PR with a stale label', async ({ page }) => {
+    const warning = 'PR #22 已转为 Ready，Issue 当前标签仍为「运行中」（agent/running）。'
+    await mockBoardApi(page, {
+      tasks: {
+        tasks: [
+          RUNNING_TASK,
+          {
+            ...RUNNING_TASK,
+            issue_number: 22,
+            task_key: 'keda-main#22',
+            issue_url: 'https://example.test/22',
+            pr_url: 'https://example.test/pr/22',
+            pr_number: 22,
+            pr_is_draft: false,
+            pr_label_warning: warning,
+            anomaly_types: ['label_pr_mismatch'],
+          },
+        ],
+      },
+    })
+    await page.goto('/app/dashboard')
+
+    await page.getByTestId('runtime-task-row-keda-main-21').click()
+    await expect(page.getByTestId('runtime-detail-pr-link')).toHaveText('PR #21 · 草稿')
+    await expect(page.getByTestId('runtime-task-anomalies')).toHaveCount(0)
+    await page.keyboard.press('Escape')
+    await expect(page.getByTestId('runtime-task-detail-sheet')).toBeHidden()
+
+    await page.getByTestId('runtime-task-row-keda-main-22').click()
+    await expect(page.getByTestId('runtime-detail-pr-link')).toHaveText('PR #22')
+    await expect(page.getByTestId('runtime-task-anomalies')).toContainText(warning)
+    await expect(page.getByTestId('runtime-task-anomalies')).not.toContainText('label_pr_mismatch')
   })
 
   test('long failure details scroll inside the task drawer', async ({ page }) => {
@@ -485,12 +531,12 @@ test.describe('desktop companion page (mocked API)', () => {
     await expect(page.getByTestId('desktop-companion-row-keda-main-19')).toContainText('当前执行状态待核实')
   })
 
-  test('shows readable stages beside blocked status in a narrow window', async ({ page }) => {
+  test('shows only six pipeline nodes beside blocked status in a narrow window', async ({ page }) => {
     await page.setViewportSize({ width: 380, height: 760 })
-    const phases = ['rv_reexec', 'implementation_complete', 'pre_pr_review', null, 'future_phase']
+    const pipelineStages = ['verifier', 'implementation', 'review', null, 'future_phase']
     await mockBoardApi(page, {
       tasks: {
-        tasks: phases.map((phase, index) => ({
+        tasks: pipelineStages.map((pipelineStage, index) => ({
           ...RUNNING_TASK,
           issue_number: 294 + index,
           task_key: `keda-main#${294 + index}`,
@@ -498,13 +544,14 @@ test.describe('desktop companion page (mocked API)', () => {
           status_reason: '当前监控标签：agent/blocked',
           anomaly_types: [],
           labels: ['agent/blocked'],
-          phase,
+          pipeline_stage: pipelineStage,
+          phase: null,
           prd_path: null,
         })),
         status_counts: {
           running: 0,
           waiting: 0,
-          blocked: phases.length,
+          blocked: pipelineStages.length,
           failed: 0,
           completed: 0,
           closed: 0,
@@ -513,8 +560,8 @@ test.describe('desktop companion page (mocked API)', () => {
       },
     })
     await page.goto('/app/companion')
-    const labels = ['提交后验收重跑', '实现完成', 'PR 前审查', null, 'future_phase']
-    for (const [index, label] of labels.entries()) {
+    const stageLabels = ['校验', '实现', '审核', null, null]
+    for (const [index, label] of stageLabels.entries()) {
       const row = page.getByTestId(`desktop-companion-row-keda-main-${294 + index}`)
       if (label) {
         await expect(row.getByTestId('runtime-task-phase')).toHaveText(`最近阶段：${label}`)

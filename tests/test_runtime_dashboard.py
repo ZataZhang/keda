@@ -233,13 +233,24 @@ def test_run_ledger_fills_issues_the_snapshot_no_longer_lists(tmp_path) -> None:
 
 
 def test_snapshot_pr_identity_is_exposed_for_row_links(tmp_path) -> None:
-    """有 PR 的任务带上 PR 链接与编号；无 PR 的保持 None，供前端决定按钮组合。"""
+    """草稿与旧快照不传播标签误报，Ready PR 告警保留人读原因。"""
     store = _store(tmp_path)
-    with_pr = {
-        **_issue(9, labels=["agent/review"]),
-        "pr": {"url": "https://github.com/example/repo/pull/42", "number": 42},
+    warning_message = "PR #42 已转为 Ready，Issue 当前标签仍为「运行中」（agent/running）。"
+    legacy_issue = {
+        **_issue(9, labels=["agent/running"], anomaly_types=["label_pr_mismatch"]),
+        "anomalies": [{"type": "label_pr_mismatch", "message": warning_message}],
     }
-    _seed_snapshot(store, "keda", [with_pr, _issue(10, labels=["agent/running"])])
+    pr_identity = {"url": "https://github.com/example/repo/pull/42", "number": 42}
+    _seed_snapshot(
+        store,
+        "keda",
+        [
+            {**legacy_issue, "pr": pr_identity},
+            _issue(10, labels=["agent/running"]),
+            {**legacy_issue, "number": 11, "pr": {**pr_identity, "is_draft": True}},
+            {**legacy_issue, "number": 12, "pr": {**pr_identity, "is_draft": False}},
+        ],
+    )
 
     summary = _summary(store, ["keda"])
     tasks = {task.issue_number: task for task in summary.tasks}
@@ -247,6 +258,12 @@ def test_snapshot_pr_identity_is_exposed_for_row_links(tmp_path) -> None:
     assert tasks[9].pr_number == 42
     assert tasks[10].pr_url is None
     assert tasks[10].pr_number is None
+    assert tasks[9].pr_is_draft is None
+    assert not tasks[9].anomaly_types
+    assert tasks[11].pr_is_draft is True
+    assert not tasks[11].anomaly_types
+    assert tasks[12].pr_is_draft is False
+    assert tasks[12].pr_label_warning == warning_message
 
 
 def test_tracked_issue_state_marks_closed_task(tmp_path) -> None:

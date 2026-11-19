@@ -46,6 +46,7 @@ import {
   RuntimeTaskObservation,
   RuntimeTaskWatch,
   runtimeStatusPresentation,
+  runtimeTaskPrLabel,
 } from "./runtime-task-list";
 
 /** `worktree_status` 独有原因：`impact_status` 里没有对应取值，只能在这里补。 */
@@ -72,21 +73,33 @@ function describeImpactUnavailability(progress: BacklogPrdProgress): string | un
   );
 }
 
+const ANOMALY_DESCRIPTIONS: Record<AnomalyType, string> = {
+  label_pr_mismatch: "关联 PR 已转为 Ready，Issue 标签尚未切到对应阶段",
+  pr_dirty_in_review: "Issue 正在等待审核，但关联 PR 存在合并冲突",
+  dirty_worktree_mismatch: "执行工作区有未提交改动，Issue 标签显示未在运行",
+  event_label_mismatch: "最近一次流程记录与 Issue 当前标签不一致",
+};
+
 interface RuntimeTaskAnomaliesProps {
-  /** 当前监控快照检测到的异常类型。 */
-  anomalyTypes: AnomalyType[];
-  /** 紧凑布局（桌面小窗）使用更小字号并允许长标识换行。 */
+  /** 当前监控快照中的任务摘要。 */
+  task: RuntimeTaskEntry;
+  /** 紧凑布局（桌面小窗）使用更小字号并允许换行。 */
   compact?: boolean;
 }
 
 /**
  * 独立呈现监控异常，避免把状态不一致告警显示成任务失败原因。
  *
- * @param props - 监控快照提供的异常类型与展示密度。
+ * @param props - 任务摘要与展示密度。
  * @returns 有异常时返回告警说明，否则返回 ``null``。
  */
-export function RuntimeTaskAnomalies({ anomalyTypes, compact = false }: RuntimeTaskAnomaliesProps) {
-  if (anomalyTypes.length === 0) {
+export function RuntimeTaskAnomalies({ task, compact = false }: RuntimeTaskAnomaliesProps) {
+  const descriptions = (task.anomaly_types ?? []).map((anomalyType) =>
+    anomalyType === "label_pr_mismatch"
+      ? task.pr_label_warning ?? ANOMALY_DESCRIPTIONS[anomalyType]
+      : ANOMALY_DESCRIPTIONS[anomalyType] ?? "监控发现状态不一致，请查看仓库监控",
+  );
+  if (descriptions.length === 0) {
     return null;
   }
   return (
@@ -98,7 +111,7 @@ export function RuntimeTaskAnomalies({ anomalyTypes, compact = false }: RuntimeT
       }
       data-testid="runtime-task-anomalies"
     >
-      监控告警（与任务状态分开）：{anomalyTypes.join("、")}
+      监控告警：{descriptions.join(" ")}
     </p>
   );
 }
@@ -218,6 +231,12 @@ export function RuntimeTaskImpact({
   const progress = current.progress;
   const reason = describeImpactUnavailability(progress);
   const impact = progress.impact;
+  const archiveInfo = !compact && progress.prd_source && progress.prd_path.startsWith("tasks/archive/") ? (
+    <p className="break-words text-xs text-slate-500">
+      PRD 已归档（{progress.prd_source === "worktree" ? "执行工作区" : "主仓库"}）：
+      <code>{progress.prd_path}</code>
+    </p>
+  ) : null;
   // 可比且分母非零才画条：judgeable=0 属于「无法判定」，画成 0% 会被读成「没改对」。
   if (!reason && impact && impact.judgeable > 0) {
     const percent = Math.min(100, Math.round((impact.touched / impact.judgeable) * 100));
@@ -230,6 +249,7 @@ export function RuntimeTaskImpact({
         title={IMPACT_WEAK_SIGNAL_HINT}
         data-testid="runtime-impact-bar"
       >
+        {archiveInfo}
         <span
           className={`text-xs text-slate-600 dark:text-slate-300 ${compact ? "" : "font-medium"}`}
         >
@@ -256,14 +276,17 @@ export function RuntimeTaskImpact({
     );
   }
   return (
-    <p
-      className="text-xs text-slate-500"
-      data-testid="runtime-impact-reason"
-      title={IMPACT_WEAK_SIGNAL_HINT}
-    >
-      改动树触达：{reason ?? `无可比节点（${progress.impact_status}）`}
-      {progress.impact_status === "available" ? "，judgeable=0 不计为 0%" : ""}
-    </p>
+    <>
+      {archiveInfo}
+      <p
+        className="text-xs text-slate-500"
+        data-testid="runtime-impact-reason"
+        title={IMPACT_WEAK_SIGNAL_HINT}
+      >
+        改动树触达：{reason ?? `无可比节点（${progress.impact_status}）`}
+        {progress.impact_status === "available" ? "，judgeable=0 不计为 0%" : ""}
+      </p>
+    </>
   );
 }
 
@@ -418,7 +441,7 @@ export function RuntimeTaskDetail({
                 className="text-xs font-normal text-sky-700 underline dark:text-sky-300"
                 data-testid="runtime-detail-pr-link"
               >
-                PR {task.pr_number ? `#${task.pr_number}` : "原文"}
+                {runtimeTaskPrLabel(task)}
               </a>
             ) : null}
           </CardTitle>
@@ -532,7 +555,7 @@ export function RuntimeTaskDetail({
               )}
             </div>
           ) : null}
-          <RuntimeTaskAnomalies anomalyTypes={task.anomaly_types ?? []} />
+          <RuntimeTaskAnomalies task={task} />
           <div className="flex flex-wrap gap-x-4 gap-y-1">
             <span>
               最近执行：{task.agent ?? "未知"}
@@ -553,7 +576,7 @@ export function RuntimeTaskDetail({
           </div>
           {task.prd_path ? (
             <p className="text-slate-500">
-              PRD：<code>{task.prd_path}</code>
+              PRD 原始路径：<code>{task.prd_path}</code>
             </p>
           ) : null}
           <RuntimeTaskImpact repoId={task.repo_id} prdPath={task.prd_path} />

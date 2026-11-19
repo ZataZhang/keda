@@ -32,6 +32,7 @@ from pathlib import Path
 IMPACT_TREE_HEADING_PATTERN = re.compile(
     r"^#{2,4}\s+(?:[^\n]*?[/／]\s*)?(?:\d+(?:\.\d+)*[.、]?\s*)?"
     r"(?:Change Impact Tree|变更影响树)\s*$"
+    r"|^\s*\*\*(?:Change Impact Tree|变更影响树)\*\*\s*$"
 )
 
 # 树枝节点：``├── name`` / ``└── name``。缩进层级按分支符号出现的列号推算。

@@ -1,5 +1,5 @@
 import { Badge } from "@/components/ui/badge";
-import type { RuntimeTaskEntry } from "@/lib/api/types";
+import type { RuntimeTaskEntry, RuntimePipelineStage } from "@/lib/api/types";
 import {
   EVENT_TYPE_LABELS,
   INVOCATION_PHASE_LABELS,
@@ -8,12 +8,17 @@ import {
 
 /** 运行阶段补充词汇；通用阶段复用生命周期视图的中文口径。 */
 const RUNTIME_PHASE_LABELS: Record<string, string> = {
+  implementation: "实现",
+  fix: "修复",
+  closeout: "收尾",
+  verifier: "校验",
+  review: "审核",
+  supervisor: "监督",
   implement: "编写代码",
   agent: "Agent 执行",
   implementation_complete: "实现完成",
   pre_pr_review: "PR 前审查",
   rv_reexec: "提交后验收重跑",
-  verifier: "独立复核",
   prd_delivery: "PRD 交付检查",
   evidence: "交付证据检查",
   commit: "提交与推送",
@@ -34,13 +39,18 @@ const RUNTIME_PHASE_LABELS: Record<string, string> = {
 
 /** 运行阶段说明；让紧凑任务卡也能说明当前环节在做什么。 */
 const RUNTIME_PHASE_DESCRIPTIONS: Record<string, string> = {
+  implementation: "按 Issue 需求编写代码并提交。",
+  fix: "定位并修复执行检查或验证发现的问题。",
+  closeout: "补齐验收清单、变更记录和验证证据。",
+  verifier: "独立验证实际行为是否满足验收标准。",
+  review: "审查代码改动，找出缺陷和回归风险。",
+  supervisor: "跟踪 PR 的 CI、评论和分支状态，决定后续处理。",
   implement: "按 Issue 和 PRD 要求修改代码。",
   agent: "Agent 执行任务的环节；具体调用可在任务详情中查看。",
   implementation_complete:
     "记录了实现、PRD 交付检查、本地验证和独立复核通过；PR 审查与合并结果需另行确认。",
   pre_pr_review: "Reviewer 检查代码变更与修复后的验证结果的环节。",
   rv_reexec: "代码提交后重跑验收证据和仓库验证命令。",
-  verifier: "独立核对已提交的代码树、需求符合度和验收证据。",
   prd_delivery: "检查 PRD 执行侧验收项、证据引用和归档状态。",
   evidence: "检查验收证据是否齐全、取证脚本是否放在正确位置。",
   commit: "Runner 处理提交请求并运行提交门禁。",
@@ -105,7 +115,22 @@ const FALLBACK_PHASE_DESCRIPTIONS: Record<string, string> = {
 };
 
 const PHASE_CONTEXT_HINT =
-  "阶段优先取最近失败环节；没有记录时回退到最后进度事件。它说明处理到了哪里，不一定是失败原因；当前状态以状态徽章为准。";
+  "流水线节点只取实现、修复、收尾、校验、审核、监督六项；它说明最近调用属于哪个环节，不代表进程仍在运行；当前状态以状态徽章为准。";
+
+const PIPELINE_STAGE_KEYS = new Set<string>([
+  "implementation",
+  "fix",
+  "closeout",
+  "verifier",
+  "review",
+  "supervisor",
+]);
+
+function runtimeTaskPhaseValue(task: RuntimeTaskEntry): RuntimePipelineStage | null {
+  const stage = task.pipeline_stage ?? (task.status === "failed" ? task.failure_stage : null);
+  if (!stage || !PIPELINE_STAGE_KEYS.has(stage)) return null;
+  return stage as RuntimePipelineStage;
+}
 
 /** 将真实阶段翻译为中文；未知值保留原文，缺失时明确说明。 */
 export function runtimePhaseLabel(phase: string | null): string {
@@ -135,9 +160,9 @@ export function runtimePhaseDescription(phase: string | null): string {
   );
 }
 
-/** 在状态旁呈现最近记录的阶段；没有记录时不重复展示占位徽章。 */
+/** 在状态旁只呈现六个主流水线节点；没有可映射的调用时不显示占位徽章。 */
 export function RuntimeTaskPhase({ task }: { task: RuntimeTaskEntry }) {
-  const phase = task.status === "failed" ? task.failure_stage ?? task.phase : task.phase;
+  const phase = runtimeTaskPhaseValue(task);
   if (!phase) return null;
   const phaseDescription = runtimePhaseDescription(phase);
   return (
@@ -155,7 +180,7 @@ export function RuntimeTaskPhase({ task }: { task: RuntimeTaskEntry }) {
 
 /** 阶段解释始终描述记录的环节；历史任务缺少阶段时不铺重复的未知提示。 */
 export function RuntimeTaskPhaseDescription({ task, className }: { task: RuntimeTaskEntry; className?: string }) {
-  const phase = task.status === "failed" ? task.failure_stage ?? task.phase : task.phase;
+  const phase = runtimeTaskPhaseValue(task);
   if (!phase && (task.status === "closed" || task.status === "completed")) return null;
   const description = phase
     ? `环节说明：${runtimePhaseDescription(phase)}`

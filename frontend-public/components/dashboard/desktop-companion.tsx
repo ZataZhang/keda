@@ -337,7 +337,7 @@ function CompanionTaskRow({
           状态来源：{task.status_reason ?? "未提供，请查看任务详情"}
         </p>
       ) : null}
-      <RuntimeTaskAnomalies anomalyTypes={task.anomaly_types ?? []} compact />
+      <RuntimeTaskAnomalies task={task} compact />
       <RuntimeTaskImpact
         repoId={task.repo_id}
         prdPath={task.prd_path}

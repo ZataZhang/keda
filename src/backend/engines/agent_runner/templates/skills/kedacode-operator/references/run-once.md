@@ -26,6 +26,27 @@ The user says 「跑一下」「跑一次」「执行这个 Issue」「把 197 �
 - **Positive examples:** pure comments/docstrings with no executable change can use a bypass after checking the diff for accidental behavior changes and running applicable existing documentation/lint checks. A local text correction may qualify after observing the corrected text through its real production entry (for example the actual `kc <subcommand> --help`, or the production page with its normal layout and providers); a scratch preview or hardcoded injected state cannot substitute for that entry. These are judgments about scope and evidence, never an automatic file-count rule.
 - **Authorization continues from the session.** Confirm the target, tier and side effects against existing explicit authorization under the hub rule; setting the label is a GitHub write, not a new approval service. No reason parameter, signature, authorization subcommand, FAST label or extra confirmation round is required.
 
+## Opt one Issue into auto-merge while the global switch stays off
+
+`safety.auto_merge` and the per-Issue labels are independent switches. With
+`[agent_runner.safety].auto_merge = false`, the merge queue processes only Issues that carry an explicit
+authorization label; `[agent_runner.autopilot].enabled = true` is still required (it is the default, and
+turning it off makes every label a no-op). No `run` flag and no config edit is needed for the per-Issue path.
+
+1. Create or refresh the configurable labels: `kc labels sync`.
+2. Authorize one Issue: `gh issue edit <N> --add-label auto-merge`.
+3. Leave the Issue to the normal flow — claim, verification and the merge queue handle the rest.
+
+- **`auto-merge`** applies to any Issue, including one with no `PRD path:` anchor and no PRD file. It grants
+  merge-queue entry only: the configured verifier policy, `runner.verification_commands`, the forbidden-path
+  scan, PR checks, GitHub branch protection and any PRD `Human-Confirmed` hold still apply, and a PRD with
+  pending human sign-off still waits for the human.
+- **`prd-auto-merge`** is the PRD-specific variant: it needs a PRD-anchored Issue (refused otherwise), skips
+  only the independent verifier, and may pass that PRD's `Human-Confirmed` hold. It never fabricates human
+  confirmation — after merge, leave the PRD's `Human-Confirmed` items unticked.
+- Both labels are a **user** decision. Never add either because a task feels urgent or an agent is confident,
+  and never flip `safety.auto_merge` to push one stalled run through a gate.
+
 ## Carry DIRECT across machines and recover its handoff
 
 Checkpoint reads trust the authenticated author or a fresh GitHub repository permission check for another author who can manage Issues. Public comments cannot grant DIRECT by imitating the checkpoint marker. Read/permission errors block the pass rather than masquerading as an absent round; unrelated comments do not require permission lookups. Prior-PR absence and same-round association require a successful full-context query; failed, empty or malformed responses are unknown, and only a successful empty list means no open PR.

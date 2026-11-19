@@ -23,6 +23,7 @@ from backend.core.shared.interfaces.agent_runner import IProcessRunner
 IMPACT_TREE_HEADING_PATTERN = re.compile(
     r"^#{2,4}\s+(?:[^\n]*?[/／]\s*)?(?:\d+(?:\.\d+)*[.、]?\s*)?"
     r"(?:Change Impact Tree|变更影响树)\s*$"
+    r"|^\s*\*\*(?:Change Impact Tree|变更影响树)\*\*\s*$"
 )
 TREE_NODE_PATTERN = re.compile(r"(?:├──|└──)\s*(?P<name>.+?)\s*$")
 TREE_NODE_INDENT_WIDTH = 4

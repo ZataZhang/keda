@@ -30,7 +30,7 @@ const IMPACT_STATUS_NOTES: Record<string, string> = {
   terminal_archive: "归档终态，不参与分支比较",
   no_worktree: "未发现执行工作区",
   no_tree: "PRD 未声明影响树",
-  no_nodes: "影响树无可测节点",
+  no_nodes: "已读取 PRD，影响树中没有标记为新增、修改或删除的文件或目录，无法计算触达比例",
   no_base: "无有效比较基准，无法比较",
   unavailable: "查询或计算失败",
 };
