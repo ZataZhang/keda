@@ -605,7 +605,7 @@ kc skill install             # 安装/刷新全部用户级 Skill
 
 ### 提交前验证命令自动探测
 
-`kc init` 不会写死验证命令，而是按目标仓库实际情况探测 `[agent_runner.runner].verification_commands` 与 `pre_commit_verification_command`（实现见 `src/backend/engines/agent_runner/repository_local.py`）。探测只生成纯 shell 字符串条目；浏览器 E2E 结构化条目（`kind = "browser_e2e"`）需运营者手工添加，形态与执行语义见下文"浏览器 E2E 验证命令形态"一节：
+`kc init` 不会写死验证命令，而是按目标仓库实际情况探测 `[agent_runner.runner].verification_commands` 与 `pre_commit_verification_command`（配置装配见 `src/backend/engines/agent_runner/repository_local.py`，命令探测见 `src/backend/engines/agent_runner/repository_local_verification.py`）。探测只生成纯 shell 字符串条目；浏览器 E2E 结构化条目（`kind = "browser_e2e"`）需运营者手工添加，形态与执行语义见下文"浏览器 E2E 验证命令形态"一节：
 
 - `verification_commands` 在 agent 请求 commit 后、staging 完成时运行；
   - 基线始终包含 `git diff --check`；

@@ -7,7 +7,6 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
-from typing import Any
 
 from backend.core.shared.interfaces.agent_runner import (
     GitHubApiRateLimitError,
@@ -37,6 +36,10 @@ from backend.core.use_cases.agent_runner_dependencies import (
     parse_dependency_marker,
 )
 from backend.core.use_cases.agent_runner_direct_pr_label import PublishStageSelection
+from backend.core.use_cases.agent_runner_issue_admission import (
+    _has_published_direct_pr_handoff,
+    _process_issue_if_admitted,
+)
 from backend.core.use_cases.agent_runner_failure_marking import (
     _mark_issue_blocked,
     _mark_issue_failed,
@@ -606,43 +609,6 @@ def _process_single_issue(
             heartbeat.release_claim(github_client=github_client, issue_number=issue.number)
 
 
-def _has_published_direct_pr_handoff(github_client: IGitHubClient, issue: IssueSummary) -> bool:
-    """只读证明待交接 PR，让发现过滤器不把已发布轮次误当新工作拦截。"""
-    from backend.core.use_cases.agent_runner_direct_pr_round import has_readonly_direct_pr_cleanup
-
-    try:
-        return has_readonly_direct_pr_cleanup(github_client, issue)
-    except Exception as exc:  # noqa: BLE001 - 关联读失败不允许旁路发现门禁。
-        _logger.warning(
-            "Cannot establish pending Direct PR handoff for Issue #%d: %s", issue.number, exc
-        )
-        return False
-
-
-def _is_issue_admitted(request: RunOnceRequest, issue: IssueSummary) -> bool:
-    """在启动 worker 前检查可选资源准入门。"""
-    if request.issue_admission_check is None or request.issue_admission_check():
-        return True
-    _logger.warning(
-        "Disk admission paused before claiming Issue #%d; the Issue remains queued.",
-        issue.number,
-    )
-    return False
-
-
-def _process_issue_if_admitted(
-    issue: IssueSummary,
-    issue_kind: str,
-    *,
-    request: RunOnceRequest,
-    **process_kwargs: Any,
-) -> int:
-    """在 Issue 执行前检查资源准入门，再委托给实际处理流程。"""
-    if not _is_issue_admitted(request, issue):
-        return 0
-    return _process_single_issue(issue, issue_kind, **process_kwargs)
-
-
 def run_once(request: RunOnceRequest) -> int:
     """执行一次轮询处理。
 
@@ -1047,7 +1013,11 @@ def run_once(request: RunOnceRequest) -> int:
         run_history_store=run_history_store,
         progress_callback=request.progress_callback,
         process_kwargs=process_kwargs,
-        process_issue=partial(_process_issue_if_admitted, request=request),
+        process_issue=partial(
+            _process_issue_if_admitted,
+            request=request,
+            process_issue=_process_single_issue,
+        ),
     )
     process_routed = partial(_process_routed_issue, routing=routing)
 
