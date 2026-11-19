@@ -216,8 +216,14 @@ def test_app_config_from_settings_carries_registry() -> None:
     assert set(BUILTIN_AGENT_SPECS) < set(config.agents)
 
 
-def test_app_config_default_registry_is_builtin() -> None:
+def test_app_config_default_registry_is_builtin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """未声明 agents 段的既有配置维持当前行为：注册表即内置四个 agent。"""
+    # 显式指向空配置：否则会读到开发机 ~/.kedacode/config.toml 里自定义的 agents
+    empty_config_path = tmp_path / "config.toml"
+    empty_config_path.write_text("", encoding="utf-8")
+    monkeypatch.setenv("KEDACODE_CONFIG", str(empty_config_path))
     config = build_app_config_from_settings(AgentRunnerSettings())
     assert list(config.agents) == list(BUILTIN_AGENT_SPECS)
 
@@ -278,7 +284,7 @@ def _config_toml_agent_blocks() -> dict[str, dict[str, object]]:
 
 
 def test_config_toml_agent_blocks_match_builtin_specs() -> None:
-    """config.toml 的七个注册块与 BUILTIN_AGENT_SPECS 语义一致（缺省键视同默认值）。
+    """config.toml 的九个注册块与 BUILTIN_AGENT_SPECS 语义一致（缺省键视同默认值）。
 
     config.toml 写出的是"出厂注册块"：与代码默认等价、便于发现与覆盖。
     本守卫防止两处数据漂移——改内置 spec 必须同步 config.toml，反之亦然。

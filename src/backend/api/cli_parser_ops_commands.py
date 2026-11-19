@@ -20,6 +20,14 @@ def add_ops_commands(subparsers: argparse._SubParsersAction) -> None:
     Args:
         subparsers: 顶层 parser 的 subparsers action（就地注册，不返回）。
     """
+    peers_parser = subparsers.add_parser(
+        "peers",
+        help="Show KedaCode machines active in one repository.",
+    )
+    peers_parser.set_defaults(command="peers")
+    add_machine_output_options(peers_parser)
+    add_common_options(peers_parser)
+
     workflow_parser = subparsers.add_parser(
         "workflow",
         help="Install and manage bundled workflow templates.",

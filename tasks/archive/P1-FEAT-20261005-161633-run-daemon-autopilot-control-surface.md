@@ -3,8 +3,7 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> 🧍 **验收状态**：待人工验收（执行侧交付完成，已随交付 PR 归档；Human-Confirmed 空框待人工勾选）。
-> 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
+> ✅ **验收状态**：已验收 — 2026-10-28 按合并态追认（交付 PR #204 于 2026-10-05 合并）。本次未逐项人工复核；遗留与未闭环项见文末 Change Log。
 
 本文档分两个高度：**Part A（§1–§4）** 给人看，用来确认"要不要做、做成什么样"，不含实现机制、文件路径、命令与排期信息；**Part B（§5–§13）** 给执行者看，包含机制、改动树与验证命令。人只在 Part A 点名处下钻。
 
@@ -473,12 +472,13 @@ flowchart TD
 - [x] 交付信息（或 PR 呈递）逐字携带 §9.1 人读内容，并附 migration 说明（旧 `iar run` → `iar run --all-ready`）（证据：交付 PR 正文 Human-Visible Outcomes + Breaking Change & Migration 节）。
 
 ### Human-Confirmed (来自 Part A 风险地图)
+> 2026-10-28 按合并态追认：以下各项由用户一次性确认，未逐项人工复核；遗留与未闭环项见文末 Change Log。
 
-- [ ] 决策一：接受"目标必填 + `--all-ready` 迁移"这一有意 breaking change。
-- [ ] 决策二：接受"默认拒绝 + 显式 `--takeover`（强警告 + 二次确认，会中断在途 Issue）"。
-- [ ] 决策三：接受 run 保持串行、并行归 daemon。
-- [ ] 决策四：接受 daemon `--autopilot` 只覆盖调度、不 arm 合并（合并仍归配置双开关）。
-- [ ] 确认 §9.1 人读呈递区已审阅。
+- [x] 决策一：接受"目标必填 + `--all-ready` 迁移"这一有意 breaking change。
+- [x] 决策二：接受"默认拒绝 + 显式 `--takeover`（强警告 + 二次确认，会中断在途 Issue）"。
+- [x] 决策三：接受 run 保持串行、并行归 daemon。
+- [x] 决策四：接受 daemon `--autopilot` 只覆盖调度、不 arm 合并（合并仍归配置双开关）。
+- [x] 确认 §9.1 人读呈递区已审阅。
 
 ## 10. Functional Requirements
 
@@ -587,3 +587,11 @@ flowchart TD
 - After: 新增"iar run / daemon 执行语义与控制面"PRD
 - Impact: 新增 FR-1..FR-7 与 oracle rv-1..rv-7
 - Review: 待人工确认（Human-Confirmed 部分开启）
+
+### 2026-10-28 · 按合并态批量追认验收
+- Type: human acceptance
+- Before: 横幅为待人工验收，§9 Human-Confirmed 尚有 5 项空框；交付 PR #204 已于 2026-10-05 合并，但未记录人工验收。
+- After: 2026-10-28 按合并态追认，全部 Human-Confirmed 项勾选，横幅改为已验收。本次未逐项人工复核；勾选不表示未执行项已验证。遗留与未闭环：独立 verifier 报告位于 tasks/evidence/run-daemon-autopilot-control-surface/，结论 PASS（本次未重跑）。
+- Reason: 交付代码已在主干运行 23 天，逐项补审无法改变既成事实；按用户 2026-10-28 的决定以合并态追认关闭验收账本，原有风险披露全部保留。
+- Impact: 仅验收记录变化，无实现、契约、证据或门禁变化。
+- Review: 用户 2026-10-28 在对话中明确批准批量追认；本条目未声称逐项复核。

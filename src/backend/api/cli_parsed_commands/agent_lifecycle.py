@@ -18,11 +18,15 @@ from backend.core.shared.models.config_edit import (
     ConfigKeyMissingError,
     ConfigLockBusyError,
 )
-from backend.core.shared.models.lifecycle_agent import LIFECYCLE_AGENT_KEYS
+from backend.core.shared.models.lifecycle_agent import (
+    LIFECYCLE_AGENT_KEYS,
+    LIFECYCLE_SOURCE_LOCAL_OVERRIDE,
+)
 from backend.core.use_cases.agent_runner_factory import (
     build_app_config_from_settings,
     create_lifecycle_settings_editor,
     load_fresh_agent_runner_settings,
+    load_local_override_lifecycle_preset_stages,
     resolve_repository_targets,
 )
 from backend.core.use_cases.lifecycle_agents_console import (
@@ -34,6 +38,7 @@ from backend.core.use_cases.lifecycle_agents_console import (
 from backend.core.use_cases.lifecycle_settings_console import (
     build_fallback_candidates_view,
     build_lifecycle_settings_view,
+    local_override_binding_conflict,
     validate_fallback_candidates_update,
     validate_lifecycle_preset_binding_update,
     validate_preset_update,
@@ -63,6 +68,19 @@ class _LifecycleScopeTarget:
         if self.scope == SCOPE_REPOSITORY:
             return create_lifecycle_settings_editor(SCOPE_REPOSITORY, self.repo_path)
         return create_lifecycle_settings_editor(SCOPE_GLOBAL)
+
+    def local_override_stages(self) -> frozenset[str]:
+        """仓库目标下绑定声明在个人覆盖 ``.kedacode.local.toml`` 的阶段键（全局为空）。"""
+        if self.scope != SCOPE_REPOSITORY or self.repo_path is None:
+            return frozenset()
+        return load_local_override_lifecycle_preset_stages(Path(self.repo_path))
+
+
+def _reject_local_override_stage(target: _LifecycleScopeTarget, stage: str) -> None:
+    """改写由个人覆盖决定的阶段绑定时以 ``USAGE(2)`` 拒绝，文件不动。"""
+    conflict_message = local_override_binding_conflict([stage], target.local_override_stages())
+    if conflict_message is not None:
+        raise CliError(conflict_message, code=ExitCode.USAGE, suggestion="kc agent lifecycle list")
 
 
 def _resolve_repo_context(fresh_settings, repo_id: str | None, repo_override: str | None):
@@ -168,6 +186,8 @@ def _render_lifecycle_settings(view: dict[str, Any]) -> None:
         flags: list[str] = []
         if row["follows_implementation"]:
             flags.append("follows-implementation")
+        if row["field_sources"]["preset"] == LIFECYCLE_SOURCE_LOCAL_OVERRIDE:
+            flags.append("binding:local-override")
         if not row["model_supported"]:
             flags.append("model:unsupported")
         if not row["reasoning_effort_supported"]:
@@ -198,6 +218,7 @@ def _emit_lifecycle_view(ctx: ParsedCommandContext, *, allow_effective: bool) ->
         scope=target.scope,
         repo_id=target.repo_id,
         global_config=target.global_config if target.scope == SCOPE_REPOSITORY else None,
+        local_override_stages=target.local_override_stages(),
     )
     emit(
         view if ctx.output_format == OUTPUT_FORMAT_JSON else None,
@@ -346,6 +367,7 @@ def run_agent_lifecycle_set_command(ctx: ParsedCommandContext) -> int:
     target = _resolve_lifecycle_scope(ctx, allow_effective=False)
     stage = ctx.parsed.stage
     _validate_lifecycle_stage(stage)
+    _reject_local_override_stage(target, stage)
     try:
         normalized = validate_lifecycle_preset_binding_update(
             {stage: ctx.parsed.preset}, target.config
@@ -362,6 +384,7 @@ def run_agent_lifecycle_unset_command(ctx: ParsedCommandContext) -> int:
     target = _resolve_lifecycle_scope(ctx, allow_effective=False)
     stage = ctx.parsed.stage
     _validate_lifecycle_stage(stage)
+    _reject_local_override_stage(target, stage)
     editor = target.editor()
     _write_or_fail(lambda: editor.update_lifecycle_presets({stage: None}))
     return _emit_lifecycle_view(ctx, allow_effective=False)

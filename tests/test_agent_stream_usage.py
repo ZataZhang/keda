@@ -156,6 +156,157 @@ class TestStreamUsageCollector:
         )
         assert collector.usage is None
 
+    def test_mcode_turn_usage_maps_camel_case_fields(self) -> None:
+        """mcode 的 turn.completed 用 camelCase 报用量，按 Anthropic 口径 1:1 映射。"""
+        collector = StreamUsageCollector()
+        collector.observe_line(
+            json.dumps(
+                {
+                    "type": "turn.completed",
+                    "usage": {
+                        "inputTokens": 1000,
+                        "cacheReadTokens": 800,
+                        "outputTokens": 20,
+                        "totalTokens": 1820,
+                    },
+                }
+            )
+        )
+        assert collector.usage == TokenUsage(
+            input_tokens=1000,
+            cache_read_input_tokens=800,
+            output_tokens=20,
+        )
+
+    def test_mcode_and_codex_usage_are_not_mixed(self) -> None:
+        """两种 provider 的 turn.completed 形状不同，用量必须各按各的口径累计。"""
+        collector = StreamUsageCollector()
+        collector.observe_line(
+            json.dumps(
+                {
+                    "type": "turn.completed",
+                    "usage": {
+                        "inputTokens": 500,
+                        "cacheReadTokens": 200,
+                        "outputTokens": 10,
+                    },
+                }
+            )
+        )
+        collector.observe_line(
+            json.dumps(
+                {
+                    "type": "turn.completed",
+                    "usage": {
+                        "input_tokens": 900,
+                        "cached_input_tokens": 100,
+                        "output_tokens": 30,
+                    },
+                }
+            )
+        )
+        # mcode 段直映射（500），codex 段扣除缓存命中（900 - 100 = 800）；
+        # 两段相加而非互相污染。缓存命中合计 200 + 100 = 300。
+        assert collector.usage == TokenUsage(
+            input_tokens=1300,
+            cache_read_input_tokens=300,
+            output_tokens=40,
+        )
+
+    def test_dsh_step_end_usage_maps_camel_case_fields(self) -> None:
+        """dsh 的用量在 status + step_end 的 camelCase usage，按互斥口径 1:1 映射。"""
+        collector = StreamUsageCollector()
+        collector.observe_line(
+            json.dumps(
+                {
+                    "type": "status",
+                    "phase": "step_end",
+                    "turn": 1,
+                    "step": 1,
+                    "usage": {
+                        "inputTokens": 11,
+                        "outputTokens": 7,
+                        "cacheReadTokens": 5,
+                        "cacheWriteTokens": 3,
+                    },
+                }
+            )
+        )
+        assert collector.usage == TokenUsage(
+            input_tokens=11,
+            output_tokens=7,
+            cache_read_input_tokens=5,
+            cache_creation_input_tokens=3,
+        )
+
+    def test_dsh_step_end_without_usage_is_ignored(self) -> None:
+        """dsh 在任一次尝试漏报 usage 时会整个 step 省略它，解析器不得报错。"""
+        collector = StreamUsageCollector()
+        collector.observe_line(json.dumps({"type": "status", "phase": "step_end", "turn": 1}))
+        assert collector.usage is None
+
+    def test_dsh_and_codex_usage_accumulate_without_mixing(self) -> None:
+        """dsh 的 step_end 与 codex 的 turn.completed 形状不同，两段用量相加而不互相污染。"""
+        collector = StreamUsageCollector()
+        collector.observe_line(
+            json.dumps(
+                {
+                    "type": "status",
+                    "phase": "step_end",
+                    "usage": {
+                        "inputTokens": 500,
+                        "cacheReadTokens": 200,
+                        "outputTokens": 10,
+                    },
+                }
+            )
+        )
+        collector.observe_line(
+            json.dumps(
+                {
+                    "type": "turn.completed",
+                    "usage": {
+                        "input_tokens": 900,
+                        "cached_input_tokens": 100,
+                        "output_tokens": 30,
+                    },
+                }
+            )
+        )
+        assert collector.usage == TokenUsage(
+            input_tokens=1300,
+            cache_read_input_tokens=300,
+            output_tokens=40,
+        )
+
+    def test_dsh_session_id_is_extracted_from_session_event(self) -> None:
+        """dsh 的会话 id 在开头 session 事件的顶层 sessionId（camelCase）。"""
+        collector = StreamUsageCollector()
+        collector.observe_line(
+            json.dumps(
+                {
+                    "type": "session",
+                    "sessionId": "session-abc123",
+                    "cwd": "/tmp/worktree",
+                }
+            )
+        )
+        assert collector.session_id == "session-abc123"
+
+    def test_mcode_session_id_is_extracted_from_top_level_field(self) -> None:
+        """mcode 的会话 id 在事件顶层 sessionId（camelCase）。"""
+        collector = StreamUsageCollector()
+        collector.observe_line(
+            json.dumps(
+                {
+                    "type": "exec.started",
+                    "sessionId": "mvs_abc123",
+                    "runId": "exec_turn_x",
+                }
+            )
+        )
+        assert collector.session_id == "mvs_abc123"
+
     def test_codex_protocol_preserves_usage_before_rendering(self, tmp_path: Path) -> None:
         """通过真实子进程与生产协议中继验证，避免渲染丢弃用量。"""
         event_line = json.dumps(
@@ -709,3 +860,23 @@ class TestProtocolRoutingRunnerFailureObservations:
             )
         assert not hasattr(failure_error.value, AGENT_REPORTED_MODEL_ATTR_NAME)
         assert not hasattr(failure_error.value, AGENT_SESSION_ID_ATTR_NAME)
+
+
+@pytest.mark.parametrize("output_protocol", ["claude-stream-json", "codex-json-lines"])
+def test_protocol_routed_agent_honors_verifier_takeover_cancel_check(
+    tmp_path: Path,
+    output_protocol: str,
+) -> None:
+    """协议路由层必须把 verifier 接管取消探针交给实际持有子进程的 watchdog。"""
+    script_path = tmp_path / "blocking_agent.py"
+    script_path.write_text(_fake_agent_script([], sleep_seconds=60), encoding="utf-8")
+    runner = ProtocolRoutingProcessRunner(SubprocessRunner(), get_output_protocol_registry())
+
+    with pytest.raises(InterruptedError, match="takeover cancel request"):
+        runner.run(
+            [sys.executable, str(script_path)],
+            cwd=tmp_path,
+            timeout=30,
+            output_protocol=output_protocol,
+            cancel_check=lambda: True,
+        )

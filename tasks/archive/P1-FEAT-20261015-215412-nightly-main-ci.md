@@ -3,8 +3,7 @@
 
 - GitHub Issue: https://github.com/ZataZhang/keda/issues/288
 
-> 🧍 **验收状态**：待人工验收 — 执行侧已完成，仅剩 1 项 Human-Confirmed 未确认，证据见下方 Acceptance Checklist。
-> 本行是 Acceptance Checklist 的投影，**那里是唯一事实源**。
+> ✅ **验收状态**：已验收 — 2026-10-28 按合并态追认（交付 PR #289 于 2026-10-15 合并）。本次未逐项人工复核；遗留与未闭环项见文末 Change Log。
 
 这是 `keda` 仓库的每日 main CI 巡检任务。最近一次 main workflow 的结论是：
 `failure`。
@@ -52,8 +51,9 @@
 - [~] main 分支 CI workflow 复跑转 green（真实失败入口）。 — runner-owned gate: main CI scheduled/rerun。
 
 ### Human-Confirmed
+> 2026-10-28 按合并态追认：以下各项由用户一次性确认，未逐项人工复核；遗留与未闭环项见文末 Change Log。
 
-- [ ] 人工确认：本 PR 合并后 main 分支下一次 CI（或复跑）为 green、夜间巡检闭环成立——即确认「按 PRD 规则 3 拆分两个超限文件 + 修复被门禁掩盖的存量 skill 预算守卫」这一最小修复口径可接受，无需回退或改走 allowlist。
+- [x] 人工确认：本 PR 合并后 main 分支下一次 CI（或复跑）为 green、夜间巡检闭环成立——即确认「按 PRD 规则 3 拆分两个超限文件 + 修复被门禁掩盖的存量 skill 预算守卫」这一最小修复口径可接受，无需回退或改走 allowlist。
 
 ## Change Log
 
@@ -107,3 +107,11 @@
   无法在此满足，按 runner 指示改写为后置门禁而非勾上或留空。
 - Impact: 仅文档结构变化；runner 交付检查通过，真实入口确认仍由 PR CI / main CI 复跑承担。
 - Review: 执行侧交付完成，待 runner PR CI 复跑 + 人工验收（横幅如实为 `🧍 待人工验收`）。
+
+### 2026-10-28 · 按合并态批量追认验收
+- Type: human acceptance
+- Before: 横幅为待人工验收，§9 Human-Confirmed 尚有 1 项空框；交付 PR #289 已于 2026-10-15 合并，但未记录人工验收。
+- After: 2026-10-28 按合并态追认，全部 Human-Confirmed 项勾选，横幅改为已验收。本次未逐项人工复核；勾选不表示未执行项已验证。遗留与未闭环：§9 独立 verifier 仍未闭合，证据目录无 verifier 报告文件。
+- Reason: 交付代码已在主干运行 13 天，逐项补审无法改变既成事实；按用户 2026-10-28 的决定以合并态追认关闭验收账本，原有风险披露全部保留。
+- Impact: 仅验收记录变化，无实现、契约、证据或门禁变化。
+- Review: 用户 2026-10-28 在对话中明确批准批量追认；本条目未声称逐项复核。

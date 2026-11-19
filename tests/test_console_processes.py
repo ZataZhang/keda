@@ -490,6 +490,21 @@ def test_resolve_repo_id_from_cwd(tmp_path: Path) -> None:
     assert _resolve_repo_id_from_cwd(None, entries) is None
 
 
+def test_probe_pid_never_signals_on_windows(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Windows 上 ``os.kill(pid, 0)`` 会真的 TerminateProcess，探活必须走 psutil。"""
+    from backend.infrastructure.console import process_supervisor
+
+    monkeypatch.setattr(process_supervisor.os, "name", "nt")
+    monkeypatch.setattr(process_supervisor.psutil, "pid_exists", lambda _pid: True)
+
+    def _explode(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("liveness probe must not call os.kill on Windows")
+
+    monkeypatch.setattr(process_supervisor.os, "kill", _explode)
+
+    assert process_supervisor._probe_pid(424242) == (True, None)
+
+
 def test_list_unmanaged_processes_skips_managed_pids(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -498,12 +513,16 @@ def test_list_unmanaged_processes_skips_managed_pids(
     fake_cmdline = ["kc", "daemon", "--repo-id", "keda-main"]
 
     class _FakeProc:
-        info = {
-            "pid": 12345,
-            "username": "testuser",
-            "cmdline": fake_cmdline,
-            "create_time": 1_700_000_000.0,
-        }
+        pid = 12345
+
+        def cmdline(self) -> list[str]:
+            return fake_cmdline
+
+        def username(self) -> str:
+            return "testuser"
+
+        def create_time(self) -> float:
+            return 1_700_000_000.0
 
         def cwd(self) -> str:
             return str(tmp_path)
@@ -549,12 +568,19 @@ def test_list_unmanaged_processes_discards_partial_scan_on_permission_error(
     class _FakeProcess:
         """扫描中先成功读取到的未托管 runner 进程。"""
 
-        info: dict[str, object] = {
-            "pid": 12345,
-            "username": "testuser",
-            "cmdline": ["kc", "daemon", "--repo-id", "keda-main"],
-            "create_time": 1_700_000_000.0,
-        }
+        pid = 12345
+
+        def cmdline(self) -> list[str]:
+            """返回可识别的 runner 命令行。"""
+            return ["kc", "daemon", "--repo-id", "keda-main"]
+
+        def username(self) -> str:
+            """返回固定的测试用户名。"""
+            return "testuser"
+
+        def create_time(self) -> float:
+            """返回固定的创建时间。"""
+            return 1_700_000_000.0
 
     class _FakeCurrentProcess:
         """返回测试用户，避免依赖宿主进程权限。"""
@@ -585,6 +611,54 @@ def test_list_unmanaged_processes_discards_partial_scan_on_permission_error(
     assert "系统进程表扫描失败" in caplog.text
 
 
+def test_list_unmanaged_processes_only_reads_extra_attributes_for_candidates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """无关进程只读 cmdline；username / create_time 不得对全表读取。
+
+    这两个属性在 Windows 上的单次读取要打开进程句柄，macOS 上要额外 sysctl；
+    全表读取曾把一次 Console 请求拖到 8–20 秒。
+    """
+    supervisor = _make_supervisor(tmp_path)
+    requested_attributes: list[list[str]] = []
+
+    class _IrrelevantProcess:
+        """一个命令行与 kc runner 无关的普通进程。"""
+
+        pid = 23456
+
+        def cmdline(self) -> list[str]:
+            """返回与 runner 无关的命令行。"""
+            return ["python", "-c", "print(1)"]
+
+        def username(self) -> str:
+            """无关进程不应走到这里。"""
+            raise AssertionError("username() must not be read for an irrelevant process")
+
+        def create_time(self) -> float:
+            """无关进程不应走到这里。"""
+            raise AssertionError("create_time() must not be read for an irrelevant process")
+
+    def _fake_process_iter(attributes: list[str]) -> list[_IrrelevantProcess]:
+        """记录 process_iter 请求的属性集合并返回无关进程。"""
+        requested_attributes.append(list(attributes))
+        return [_IrrelevantProcess()]
+
+    monkeypatch.setattr(
+        "backend.infrastructure.console.process_supervisor.psutil.Process",
+        lambda: type("_FakeCurrent", (), {"username": lambda self: "testuser"})(),
+    )
+    monkeypatch.setattr(
+        "backend.infrastructure.console.process_supervisor.psutil.process_iter",
+        _fake_process_iter,
+    )
+
+    unmanaged = supervisor.list_unmanaged_processes([])
+
+    assert unmanaged == []
+    assert requested_attributes == [["pid"]]
+
+
 def test_list_unmanaged_processes_reports_unmanaged_by_repo_id(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -592,12 +666,16 @@ def test_list_unmanaged_processes_reports_unmanaged_by_repo_id(
     supervisor = _make_supervisor(tmp_path)
 
     class _FakeProc:
-        info = {
-            "pid": 12345,
-            "username": "testuser",
-            "cmdline": ["kc", "daemon", "--repo-id", "keda-main"],
-            "create_time": 1_700_000_000.0,
-        }
+        pid = 12345
+
+        def cmdline(self) -> list[str]:
+            return ["kc", "daemon", "--repo-id", "keda-main"]
+
+        def username(self) -> str:
+            return "testuser"
+
+        def create_time(self) -> float:
+            return 1_700_000_000.0
 
         def cwd(self) -> str:
             return str(tmp_path)

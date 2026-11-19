@@ -61,7 +61,7 @@ _PR_CONTRACT_MARKER_PATTERN = re.compile(
 
 # 确定性正文补锚点时写入的"合并即接受"声明：形态取自 skill 参考文档的 PR body
 # 模板，但只指向 PRD、不内联决策与可见结果清单（那是 agent 撰写正文的职责）。
-# PRD 已在本 PR 里归档（Machine Contract v5），合并授权的是事后补记验收结论，
+# PRD 已在本 PR 里归档（Machine Contract v6），合并授权的是事后补记验收结论，
 # 不是归档。小节标题被合并队列消费方与测试钉住，沿用旧名不改。
 _DETERMINISTIC_ACCEPTANCE_HEADING = "## Human Acceptance And PRD Archive"
 _DETERMINISTIC_ACCEPTANCE_STATEMENT = (

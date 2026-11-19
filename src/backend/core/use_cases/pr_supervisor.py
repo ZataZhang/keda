@@ -208,6 +208,21 @@ def build_supervisor_prompt(
         if prd_path_match
         else "If the Issue references a PRD, read it before reviewing."
     )
+    human_review_prompt_lines = (
+        []
+        if prd_path_match
+        else [
+            "Plain-Issue human review handoff:",
+            "- Before `approve_for_human_review`, verify that "
+            f"`{resolve_issue_evidence_relpath(config, issue)}/human-review-checklist.md` "
+            "exists and matches the final PR. It must give the human decision, PR "
+            "URL/status, key evidence, actual verification results, unverified "
+            "limits, next human action, and Issue closing condition.",
+            "- If the page is missing or stale, return `repair_pr_branch` with "
+            "`repair_scope=code_review` so the repair agent creates or updates it. "
+            "This is a presentation repair, not a new acceptance gate.",
+        ]
+    )
     scoped_prd_auto_merge_enabled = issue_carries_prd_auto_merge_label(issue, config)
     automation_context_lines = [
         "Automation authorization:",
@@ -279,6 +294,7 @@ def build_supervisor_prompt(
             "Review workflow context:",
             "- Review scope: docs/guides/review-workflow.md",
             "- Check requirement alignment, code safety, validation evidence, and docs sync.",
+            *human_review_prompt_lines,
             "",
             "Checks decision rules:",
             "- `Checks state` and `Checks summary` above are raw observations, not "

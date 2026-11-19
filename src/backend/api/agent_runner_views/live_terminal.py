@@ -82,6 +82,7 @@ class RichLiveOutputView(IAgentOutputView):
     """
 
     def __init__(self) -> None:
+        """初始化 Rich 实时视图的面板与并发锁。"""
         self._lock = threading.RLock()
         self._console = Console()
         self._panels: dict[str, PanelState] = {}
@@ -191,6 +192,7 @@ class PlainOutputView(IAgentOutputView):
     """
 
     def __init__(self) -> None:
+        """初始化纯文本视图的状态表与并发锁。"""
         self._lock = threading.Lock()
         self._agent_status: dict[str, str] = {}
         self._current_round = 0

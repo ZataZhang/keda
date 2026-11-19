@@ -46,19 +46,15 @@
 - 补充错误告警策略。
 - 针对关键任务建立成功率与耗时监控。
 
-## 容器化部署模板
+## 面板部署边界
 
-项目提供两种容器化部署路径：
+`kc` 是**本机 CLI + 本机面板**：`kc console` 固定监听 `127.0.0.1`，`/api/auth/login`
+按本机单用户信任边界设计，不校验凭据。因此仓库**不提供**可部署到公网的面板
+Compose / Dockerfile / Dokploy 模板——把无认证的管理面板挂到公网会直接暴露
+启停 runner、增删仓库、改 Issue 标签等写操作。托管部署的认证、凭据隔离与运维
+边界由独立的托管 Runner PRD 跟踪，在取得真实认证之前不交付公网部署路径。
 
-### 生产部署（Dokploy）
-
-使用仓库根目录的 `docker-compose.dokploy.yml`，通过 Dokploy UI 指向该文件进行部署：
-
-1. 在 Dokploy 中设置 `DOMAIN`。
-2. 配置生产数据库 `DATABASE_URL`。
-3. 确认 `dokploy-network` 已存在。
-
-### PR 预览部署（每 PR 临时 Docker + Traefik）
+## PR 预览部署（每 PR 临时 Docker + Traefik）
 
 > ⚠️ **keda 自身不再跑预览部署。** 这是 KedaCode 提供给**目标仓库**的能力，通过
 > `uv run kc workflow install preview` 装进去（见

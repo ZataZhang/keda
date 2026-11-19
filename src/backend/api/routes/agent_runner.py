@@ -20,7 +20,7 @@ from backend.core.shared.interfaces.agent_runner import (
     IGitHubClient,
     IProcessRunner,
 )
-from backend.core.shared.interfaces.runner_console import IRunHistoryStore
+from backend.core.shared.interfaces.runner_console import IPrdLifecycleStore, IRunHistoryStore
 from backend.core.use_cases.agent_runner_factory import (
     create_console_store,
     create_github_client,
@@ -41,6 +41,7 @@ from backend.core.use_cases.monitor_snapshots import (
     MonitorSyncError,
     get_snapshot_overview,
     persist_monitoring_result,
+    record_monitor_sync_failure,
     snapshot_overview_to_payload,
 )
 from backend.core.use_cases.runtime_dashboard import (
@@ -67,7 +68,7 @@ def get_agent_runner_health() -> dict:
     try:
         runner.run(["gh", "--version"], cwd=Path("."))
         gh_available = True
-    except Exception:
+    except Exception:  # noqa: BLE001 - 探活失败只表示 gh 不可用，健康接口照常返回 degraded。
         pass
 
     return {
@@ -145,6 +146,22 @@ def _list_enabled_repo_ids() -> list[str]:
     return repo_ids
 
 
+def _record_monitor_sync_failure_best_effort(repo_id: str, reason: str) -> None:
+    """尽力把扫描错误写进本地旧快照，不让诊断写入覆盖原始错误。"""
+    try:
+        record_monitor_sync_failure(
+            create_console_store(),
+            repo_id=repo_id,
+            reason=reason,
+        )
+    except Exception as record_exc:  # noqa: BLE001 - 诊断只作为旁路记录。
+        _logger.warning(
+            "Failed to persist monitor sync diagnosis for %s: %s",
+            repo_id,
+            record_exc,
+        )
+
+
 def _scan_repository_and_persist(repo_id: str) -> None:
     """Scan a single repository and persist the already-built payload.
 
@@ -152,16 +169,28 @@ def _scan_repository_and_persist(repo_id: str) -> None:
     once and hands the **same** payload to :func:`persist_monitoring_result`,
     never re-scanning GitHub just to write to the database.
     """
-    payload = _build_overview_response(repo_ids=[repo_id], include_tracked_issues=True)
+    try:
+        payload = _build_overview_response(repo_ids=[repo_id], include_tracked_issues=True)
+    except Exception as exc:
+        _record_monitor_sync_failure_best_effort(repo_id, str(exc))
+        raise
+    for repository_payload in payload.get("repositories") or []:
+        sync_error = repository_payload.get("sync_error")
+        if sync_error:
+            _record_monitor_sync_failure_best_effort(repo_id, str(sync_error))
+            raise MonitorSyncError(f"Repository '{repo_id}' scan was incomplete: {sync_error}")
     report = persist_monitoring_result(create_console_store(), payload)
     if not report.ok:
         failed_detail = "; ".join(
             f"{failed_repo_id}: {reason}"
             for failed_repo_id, reason in report.failed_repo_ids.items()
         )
+        _record_monitor_sync_failure_best_effort(repo_id, failed_detail)
         raise MonitorSyncError(f"Failed to persist snapshot for {failed_detail}")
     if not report.persisted_repo_ids:
-        raise MonitorSyncError(f"Repository '{repo_id}' produced no overview payload.")
+        failure_reason = f"Repository '{repo_id}' produced no overview payload."
+        _record_monitor_sync_failure_best_effort(repo_id, failure_reason)
+        raise MonitorSyncError(failure_reason)
 
 
 _MONITOR_COORDINATOR: MonitorSyncCoordinator | None = None
@@ -297,26 +326,61 @@ _TRACKED_ISSUE_SCAN_LIMIT = 20
 
 
 def _recent_tracked_issue_numbers(repositories: Sequence[Any]) -> dict[str, list[int]]:
-    """按仓库收集运行账本里近期出现的 Issue 编号。
+    """按仓库收集近期运行及未收口生命周期记录中的 Issue 编号。
 
     监控快照原本只扫描队列标签下的开放 Issue；已关闭或已移出队列的 Issue
-    没有当前状态，运行看板只能把它们显示成「状态未知」。这里把近 7 天运行
-    账本里出现过的编号一并交给扫描器补状态，并限制每仓库最多 20 个，避免
-    为历史复盘付出无界 GitHub 调用。
+    没有当前状态。这里把近 7 天运行账本或未收口生命周期账本中出现过的
+    编号交给扫描器补状态；优先补扫生命周期记录，避免漏掉它们的当前状态。
+    每仓库收集近 7 天运行记录与未收口生命周期记录，按 Issue 编号去重后最多补扫
+    20 个；运行记录由存储端先按 Issue 去重，避免重复重试占满 GitHub 查询名额。
     """
-    store = cast(IRunHistoryStore, create_console_store())
+    store = create_console_store()
+    run_history_store = cast(IRunHistoryStore, store)
+    lifecycle_store = cast(IPrdLifecycleStore, store)
     cutoff = datetime.now(UTC) - timedelta(seconds=RUNTIME_TASK_WINDOW_SECONDS)
     tracked: dict[str, list[int]] = {}
     for repository in repositories:
         try:
-            runs = store.list_recent_runs(
-                repo_id=repository.repo_id, limit=_TRACKED_ISSUE_SCAN_LIMIT
+            runs = run_history_store.list_recent_runs_by_issue(
+                repo_id=repository.repo_id,
+                since_started_at=cutoff.isoformat(timespec="seconds"),
+                limit=_TRACKED_ISSUE_SCAN_LIMIT,
             )
-        except Exception as exc:  # noqa: BLE001 - 账本读失败只放弃补状态，不阻断扫描。
+        except Exception as exc:  # noqa: BLE001 - 读取失败只放弃该来源补状态。
             _logger.info("Tracked issue lookup failed for %s: %s", repository.repo_id, exc)
-            continue
+            runs = []
+        try:
+            lifecycle_runs = lifecycle_store.list_lifecycle_runs(
+                repo_id=repository.repo_id,
+                since=cutoff.isoformat(timespec="seconds"),
+            )
+        except Exception as exc:  # noqa: BLE001 - 生命周期不可用时仍扫描运行记录。
+            _logger.info(
+                "Tracked lifecycle issue lookup failed for %s: %s",
+                repository.repo_id,
+                exc,
+            )
+            lifecycle_runs = []
+
         numbers: list[int] = []
+        for lifecycle_run in reversed(lifecycle_runs):
+            issue_number = lifecycle_run.issue_number
+            started_at = parse_runtime_timestamp(lifecycle_run.started_at)
+            if (
+                lifecycle_run.finished_at
+                or issue_number is None
+                or issue_number <= 0
+                or (started_at is not None and started_at < cutoff)
+                or issue_number in numbers
+            ):
+                continue
+            numbers.append(issue_number)
+            if len(numbers) >= _TRACKED_ISSUE_SCAN_LIMIT:
+                break
+
         for run in runs:
+            if len(numbers) >= _TRACKED_ISSUE_SCAN_LIMIT:
+                break
             if run.issue_number <= 0 or run.issue_number in numbers:
                 continue
             started_at = parse_runtime_timestamp(run.started_at)

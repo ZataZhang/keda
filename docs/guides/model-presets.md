@@ -145,10 +145,9 @@ supervisor / planner / content_generation / deliberate）。
 范围的**统一设置页**和一组**持久化 CLI**，读写同一份 `presets` / `lifecycle_presets` /
 回退候选事实源（不新建第二套配置、不入库）。
 
-### 7.1 Settings 统一设置页
+### 7.1 Repositories 执行器与模型页
 
-路由 `/app/settings/lifecycle/`（入口：Settings「Agent 管理」Tab 内的卡片，或 Backlog 仓库行
-齿轮带仓库直接进入并预选）。Settings 主页面 `/app/settings/` 通过吸顶 Tab 区分 Agent 管理、成本估算和关于与账户；生命周期设置页再通过吸顶 Tab 切换以下三块，每次显示一个区块：
+路由 `/app/repositories/lifecycle/`（Repositories 顶层与「仓库列表」平级；点击「仓库列表」中的 `repo_id` 直接进入该仓库的配置并预选仓库，Backlog 仓库行齿轮也沿用此入口）。旧路由 `/app/settings/lifecycle/` 保留并转到新页面，同时保留查询参数。Settings 主页面 `/app/settings/` 仍管理 Agent 路由标签；生命周期设置页通过吸顶 Tab 切换以下三块，每次显示一个区块：
 
 - **生命周期矩阵**：九阶段各自的最终生效 Agent / 模型 / 推理深度 / 绑定预设与**逐字段来源**
   （预设 / 继承 / Agent 默认 / 未支持，或来自哪一层）。缺省与不支持如实标示，不猜外部 CLI
@@ -165,10 +164,13 @@ supervisor / planner / content_generation / deliberate）。
   仓库整体接管机器级链，此时在仓库范围保存只会改到机器级文件、对该仓库不生效；要动这个仓库
   的链，用 CLI 往该仓库写，或删掉仓库里那一段让它回到继承。
 
-范围选择器在「全局」（`config.toml`）与「仓库」（该仓库 `.kedacode.toml`）间切换；页面展示
+范围选择器在「全局」（`config.toml`）与「仓库」（该仓库 `.kedacode.toml`）间切换；仓库范围选择预设只写当前仓库。无仓库级预设绑定时，选择器显示「继承全局配置」及当前全局预设名；若阶段绑定继承自全局，清除本层绑定是无操作并提示已经继承、无需更改；需要仓库使用不同配置时，选择仓库预设覆盖。若阶段绑定声明在个人覆盖 `.kedacode.local.toml`，绑定来源标为「个人覆盖 .kedacode.local.toml」、选择器只读，直接修改该文件即可（页面只写 `.kedacode.toml`，API 对这类阶段的改写返回 422）。页面展示
 的是所选**基线**，PRD 头部覆盖与单次 `--preset/--model/--reasoning-effort` 仍可在其上进一步
 覆写（页面会提示，不把基线冒充成某个 PRD 的最终值）。保存只提交改动过的键，写前完整校验、
 写后从磁盘重载返回新视图。
+
+若已有配置中的阶段绑定指向未定义的预设，矩阵会保留绑定名并标明来源和未解析状态；绑定下拉也会显示
+「预设未定义：名称」，不会把悬空引用伪装成未绑定。打开下拉后可选择清除该层绑定，或先重建同名预设。
 
 ### 7.2 持久化 CLI
 
@@ -197,6 +199,10 @@ kc agent fallback candidate move   <position> --to <n>  --scope … [--repo-id <
 - **删不掉的东西不能报成功**：`lifecycle unset` 要求该阶段在**目标层**确有绑定，删除预设要求
   该预设由**目标层**声明。在仓库范围解绑一个只由全局层绑定的阶段、或删除一个只有全局层声明的
   预设，都不会改动任何配置文件——这类请求以用法错误（2）退出并指出该改哪一层，文件字节不变。
+- **个人覆盖的绑定只读**：阶段绑定声明在 `.kedacode.local.toml` 时，`lifecycle list` 的仓库视图把
+  该行 `field_sources.preset` 标为 `local_override`（人读输出带 `binding:local-override`）；在仓库
+  范围对它 `lifecycle set` / `unset` 以用法错误（2）退出并指明该文件，`.kedacode.toml` 不变——
+  个人覆盖同键优先，写进 `.kedacode.toml` 也不会生效。
 - 未知 stage、未注册 agent、未知预设、预设 agent 与候选执行器不一致、给缺 `reasoning_effort_args`
   模板的 agent 设非空 effort——都在**写文件或调用 agent 前**返回可诊断的非零退出，目标文件字节不变。
 - 目标配置文件本身不是合法 TOML 时，写命令以一般错误（1）退出并提示先修复该文件；原文件一字

@@ -55,7 +55,7 @@ AI 代理默认不会设置该变量，因此会被 hook 拦下——这是"指�
 |---|---|
 | `shared/test_archive_tasks.py` | PRD 归档 hook（`hooks/shared/archive_tasks.py`） |
 | `shared/test_check_max_file_lines.py` | 单文件行数上限 hook（`hooks/shared/check_max_file_lines.py`） |
-| `shared/test_check_prd_acceptance_checklist.py` | PRD 验收清单 pre-commit hook（`hooks/shared/check_prd_acceptance_checklist.py`）：归档只代表执行侧交付完成，`Human-Confirmed` 分组内的空框不拦提交、其余空框照旧拦截；分组作用范围（嵌套子标题不脱离、同级或更高级关闭、前缀匹配且大小写不敏感、整行加粗标签、围栏代码块、`[~]`）逐形态钉死；缺清单章节要点名；检查范围只含根目录活跃 PRD 与本次暂存的新入归档（`tasks/pending/` 与未暂存的归档不查） |
+| `shared/test_check_prd_acceptance_checklist.py` | PRD 验收清单 pre-commit hook（`hooks/shared/check_prd_acceptance_checklist.py`）：归档只代表代码落地，`Human-Confirmed` 与显式 `⏸️ 验证阻塞` 空框不拦提交、其余执行侧空框照旧拦截；分组作用范围（嵌套子标题不脱离、同级或更高级关闭、前缀匹配且大小写不敏感、整行加粗标签、围栏代码块、`[~]`）逐形态钉死；缺清单章节要点名；检查范围只含根目录活跃 PRD 与本次暂存的新入归档（`tasks/pending/` 与未暂存的归档不查） |
 | `shared/prd_checklist_scope_cases.py` | **测试辅助数据，非测试文件**（pytest 不收集）：清单作用域的用例表，上一行的 hook 守卫测试与 模板仓库的 `test_prd_skill_checker.py` 共用这一份，保证 hook 与 skill 契约解析按同一张表读 |
 | `shared/test_check_prd_evidence.py` | PRD 证据门禁（`scripts/shared/just/check_prd_evidence.sh`）：证据目录里的静态图必须在证据报告里用 `![](…)` 就地嵌入（`open` 命令不算呈递），失败要点名漏嵌文件；无报告、无图片、录屏均不得误伤 |
 | `shared/test_check_schema_conventions.py` | schema convention hook（`hooks/shared/check_schema_conventions.py`）：迁移脚本命名校验、分隔符与 revision 一致性 |

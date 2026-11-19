@@ -1,5 +1,13 @@
 # Testing Standards
 
+## 自动验证与人工介入的边界 {#testing-human-intervention-boundary}
+
+自动验证与自动修复应在请求人工审阅前完成。Agent 应主动完成适用的测试、证据收集、独立验证与 CI；需要人工决定时，呈递已有结果、具体阻塞及最小决策项。
+
+人工明确接受、合并、关闭或接管任务后，按人工决定完成收尾；不得仅因历史验证失败、旧状态标签或证据清单未补齐而重新启动自动验证。人工作出的收尾决定优先于默认的验证重试与补验流程。自动阶段未完成的验证应如实保留为历史记录，不伪造通过结论，也不把它重新变成人工决定后的阻塞。
+
+只有出现新改动、具体缺陷或用户明确要求时，才启动与其相关的验证。普通询问、进度查看或讨论不等于人工接受或接管；人工介入前仍应完成自动闭环。人工明确接管后，依照其指令协作，不擅自恢复自动验证循环。
+
 ## Validation Is Mandatory
 
 完成实现前，必须运行与改动范围相匹配的验证。
@@ -72,13 +80,15 @@
 
 ## Python Test Workflow
 
-本地日常验证使用 `just test`。它运行仓库配置的本地核心档，目标是在常驻工作树上
-保持低于 30 秒；新增或修改的测试及映射到本次改动的便宜测试会并入本地档。常规交付
-无需在本机重复运行全量测试，CI 会在 PR 上运行完整 CI 测试集。
+需要本地验证的普通代码交付或提交场景，Agent 默认可以直接运行 `just test`，无需先询问用户。
+它运行仓库配置的本地核心档，目标是在常驻工作树上保持低于 30 秒；新增或修改的测试及
+映射到本次改动的便宜测试会并入本地档。常规交付无需在本机重复运行全量测试：PR 上的 CI 跑轻量档，合入 main 后跑全量档（见下方「CI：PR 轻量档、main 全量档」）。
 
-`just test all` 是显式的本地全量诊断命令，仅在用户要求或排查本地/全量测试问题时运行，
-不作为常规交付的本地门槛。它运行 `tests/` 中所有标记的测试；CI 使用自己的完整套件
-命令与 marker 策略，两者范围可能不同。
+这项默认许可只覆盖 `just test` 本地核心档。`just test all` 是显式的本地全量诊断命令，
+仅在用户要求或排查本地/全量测试问题时运行，不作为常规交付的本地门槛。它运行 `tests/`
+中所有标记的测试；CI 使用自己的完整套件命令与 marker 策略，两者范围可能不同。
+CI 的 `ci.yml` 与手动触发的归档 workflow `cd.yml` 都会运行测试，因而应在测试前安装同一版本的 `just`：
+部分 guard test 会启动真实 Justfile recipe，仅有 Python 依赖的 runner 环境无法运行这些用例。
 
 优先使用仓库现有命令：
 
@@ -94,6 +104,24 @@
 - `uv run python hooks/shared/check_architecture.py`
 - `uv run python hooks/shared/check_guidelines_consistency.py`
 - `uv run mkdocs build`
+
+### CI：PR 轻量档、main 全量档
+
+PR 上反复跑全量（约 6 分钟）会把每次小改动的反馈拉长、打断心流，所以 PR 只跑受改动影响的
+测试，全量放到合入 main 之后：
+
+- `Choose test tier` 步骤调用 `scripts/shared/testing/test_tiers.py ci-tier`，以
+  `TEST_TIERS_BASE_REF=HEAD^1`（PR 合并提交的第一父提交，即目标分支）为基线收集改动。改动
+  **全部**是 `src/backend/` 或 `tests/` 下的 Python 文件、且不碰全局影响面（`tests/conftest.py`、
+  `pyproject.toml`、`uv.lock`、`src/backend/shared/` 等）时走轻量档，否则走全量档。
+- 轻量档用 testmon 选测试：main 全量档以 `--testmon-noselect` 全跑并记录依赖数据，存进
+  Actions cache（`testmon-main-<sha>`）；PR 恢复最近一份，再以 `--testmon` 只跑受影响的用例。
+  缓存缺失时 testmon 没有基线、会自动全跑，只是慢、不会漏测。轻量档**不能带 `-m`**：带了
+  testmon 会自动关闭选择。
+- 已知盲区：testmon 只追踪测试进程内执行到的 Python 代码。只经子进程（真实 `just` recipe、
+  `kc` CLI）触达的改动，轻量档可能选不到对应测试，要由 main 全量档兜住。
+- push 到 main 一律跑全量档。main 失败时 `report-main-failure` job 开一个「main CI 失败」Issue
+  （已有未关闭的则追加评论）。看到它就修复或 revert 引入问题的 PR，不要在红的 main 上继续叠改动。
 
 ## 验证失败后的修复顺序
 
@@ -242,7 +270,7 @@ HTML 报告仍固定在 `tests/playwright-e2e/playwright-report/`，可用 `just
 
 ## AI 实现后的验证证据
 
-使用 `just ai implement` 实现 PRD 时，Agent 必须生成可审查的证据包，而不是直接勾选 Acceptance Checklist。
+使用 `just ai implement` 实现 PRD 时，Agent 必须生成可审查的证据包，而不是直接勾选 Acceptance Checklist。验证确实受阻时不得伪造证据或验收：只能以 `⏸️ 验证阻塞` 保留未勾执行侧条目，并在 Final Reconciliation 记录 `Validation blocker` 与 `Validation follow-up` 后归档；这不等于待人工验收，后续仍须补验证并回到正常门禁。
 
 > **证据留存策略**：`tasks/evidence/` 的 Markdown 报告（`*.verification-plan.md`、`*.evidence-report.md`、`*.verifier-report.md`）可以进入代码变更；`evidence.json` manifest 保持本地可读，由证据发布流程单独上传；原始证据产物（截图、录屏、命令输出、大日志、脚本）不进代码 diff，避免二进制膨胀与密钥泄漏永久化。verifier 与 `check_prd_evidence.sh` 在实现期仍针对本地文件运行。**本地 `just ai implement` 流与 kc daemon 的 Issue→PR 流使用同一约定**：daemon 流同样写入 `tasks/evidence/<prd-stem>/`（无 PRD 的 Issue 兜底 `tasks/evidence/issue-<N>/`），三份 `.md` 报告随 PR 进版本库，其余证据文件额外发布到 PR 评论与 orphan 证据分支，见 `docs/guides/agent-runner.md`。显式配置 `validation.evidence_dir = ".iar/evidence"` 的 legacy 仓库保持整目录排除的旧行为。
 

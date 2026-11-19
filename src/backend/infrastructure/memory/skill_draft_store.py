@@ -60,6 +60,11 @@ class SkillDraftStore:
     """Skill draft and promoted-skill persistence."""
 
     def __init__(self, drafts_dir: str | Path) -> None:
+        """初始化 skill 草稿存储。
+
+        Args:
+            drafts_dir: 草稿目录。
+        """
         self._drafts_dir = Path(drafts_dir)
 
     @property

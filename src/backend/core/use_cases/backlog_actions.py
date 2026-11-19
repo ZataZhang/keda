@@ -523,8 +523,9 @@ def start_global_backlog(
     Args:
         repo_id: Target repository ID.
         execution_ceiling: The single resolved concurrency ceiling for this
-            batch (``min(policy, runner capacity)``), computed by the caller
-            through :func:`resolve_execution_ceiling`. This path never
+            batch (page setting, else runner capacity — never ``min`` of the
+            two), computed by the caller through
+            :func:`resolve_execution_ceiling`. This path never
             persists Backlog settings — the console button is a one-shot burst
             bounded by the same ceiling the daemon gates use.
         contexts: Resolved enabled repository contexts.
@@ -988,11 +989,7 @@ def advance_backlog_queue(
 
     started: list[BacklogActionResult] = []
     queued: list[str] = []
-    skipped: list[str] = (
-        [f"agent/running count failed; skipped promotions this pass: {running_count_error}"]
-        if running_count_error is not None
-        else []
-    )
+    skipped: list[str] = []
 
     for prd in eligible:
         if len(started) < free_slots:
@@ -1082,6 +1079,7 @@ def advance_backlog_queue(
         started=started,
         queued=queued,
         skipped=skipped,
+        running_count_error=running_count_error,
     )
 
 

@@ -2960,6 +2960,36 @@ def test_main_registry_scan_lists_discovered_repos(
     assert "(new)" in _strip_ansi(captured.out)
 
 
+def test_main_registry_scan_shows_registered_id_when_it_differs_from_local_id(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """扫描输出应区分仓库本地 ID 与 registry 中的 ID。"""
+    monkeypatch.chdir(tmp_path)
+    scan_root = tmp_path / "code"
+    repo_path = scan_root / "freshai"
+    repo_path.mkdir(parents=True)
+    (repo_path / ".git").mkdir()
+    _write_iar_toml(repo_path, "freshai")
+
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        '[agent_runner.repositories."dewell-ai-assistant-team-freshai"]\n'
+        f'path = "{repo_path}"\n'
+        "enabled = true\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("KEDACODE_CONFIG", str(config_path))
+
+    exit_code = main(["registry", "scan", str(scan_root)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "[freshai]" in _strip_ansi(captured.out)
+    assert "(registered as dewell-ai-assistant-team-freshai)" in _strip_ansi(captured.out)
+
+
 def test_main_registry_sync_dry_run(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -3144,14 +3174,14 @@ def test_main_registry_reinit_start_daemons_uses_config_directory_cwd(
     assert exit_code == 0, captured.err
     assert "Reinitialized" in _strip_ansi(captured.out)
     assert "Started daemon" in _strip_ansi(captured.out)
-    assert "Started supervise-daemon" in _strip_ansi(captured.out)
+    assert "Started supervise-daemon" not in _strip_ansi(captured.out)
 
     # The local config initializer was invoked as part of reinit.
     mock_init.assert_called_once()
 
     # spawn_cwd must come from the registry config.toml directory, not the repository path.
     mock_resolve_registry_config.assert_called_once()
-    assert mock_start.call_count == 2
+    assert mock_start.call_count == 1
     for call in mock_start.call_args_list:
         assert call.kwargs["spawn_cwd"] == config_path.parent
         assert call.kwargs["spawn_cwd"] != repo_path
@@ -3340,7 +3370,7 @@ def test_main_registry_start_single_repo(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`kc registry start --repo-id` should start daemon + review-daemon."""
+    """`kc registry start --repo-id --with-supervise-daemon` starts daemon + supervise-daemon."""
     monkeypatch.chdir(tmp_path)
     repo_path = _init_bare_git_repository(tmp_path, "keda")
     config_path = tmp_path / "config.toml"
@@ -3409,7 +3439,7 @@ def test_main_registry_start_single_repo(
             side_effect=_fake_start,
         ) as mock_start,
     ):
-        exit_code = main(["registry", "start", "--repo-id", "keda-main"])
+        exit_code = main(["registry", "start", "--repo-id", "keda-main", "--with-supervise-daemon"])
         captured = capsys.readouterr()
 
     assert exit_code == 0, captured.err
@@ -3578,7 +3608,9 @@ def test_main_registry_start_all(
         captured = capsys.readouterr()
 
     assert exit_code == 0, captured.err
-    assert mock_start.call_count == 4
+    # 默认只启动 daemon：PR 值守已内置在 daemon 里。
+    assert mock_start.call_count == 2
+    assert {call.kwargs["kind"] for call in mock_start.call_args_list} == {RunnerProcessKind.DAEMON}
     started_repo_ids = {call.kwargs["repo_id"] for call in mock_start.call_args_list}
     assert started_repo_ids == {"repo-a", "repo-b"}
 
@@ -4812,7 +4844,7 @@ def test_agent_fallback_candidate_add_reads_baseline_under_write_lock(
     写入者在那个窗口里 append 的候选会被本次替换原样抹掉，而命令仍返回成功。探针在基线
     读取时抢一次 ``LOCK_EX | LOCK_NB``——抢不到才说明整段操作被同一把锁覆盖。
     """
-    import fcntl
+    fcntl = pytest.importorskip("fcntl")
 
     from backend.api.cli_parsed_commands import agent_lifecycle as agent_lifecycle_commands
 

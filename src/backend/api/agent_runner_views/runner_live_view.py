@@ -57,6 +57,7 @@ class RichRunnerLiveView(IRunnerLiveView):
     """
 
     def __init__(self) -> None:
+        """初始化 Rich runner 视图的面板与并发锁。"""
         self._lock = threading.RLock()
         self._console = Console()
         self._panels: dict[int, PanelState] = {}
@@ -134,6 +135,7 @@ class PlainRunnerLiveView(IRunnerLiveView):
     """
 
     def __init__(self) -> None:
+        """初始化纯文本 runner 视图的状态表与并发锁。"""
         self._lock = threading.Lock()
         self._issue_status: dict[int, str] = {}
 

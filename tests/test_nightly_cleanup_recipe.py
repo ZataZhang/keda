@@ -9,7 +9,7 @@ The two recipes (keda and product) are content-only additions to
   ``labels=[loop/cleanup]`` / ``slug``);
 * render the built-in variables (``{{date}}`` / ``{{timestamp}}`` /
   ``{{loop_id}}`` / ``{{repo_id}}``) when fired;
-* carry the four scope H2 sections plus the ``Triage 优先级`` section in
+* carry the four scope H2 sections plus the ``Triage priority`` section in
   the body — the body is the spec the agent reads at fire time.
 
 These tests run against the real recipe files in ``tasks/loops/`` and
@@ -37,11 +37,11 @@ KEDA_RECIPE = REPO_ROOT / "tasks" / "loops" / "nightly-cleanup-keda.md"
 PRODUCT_RECIPE = REPO_ROOT / "tasks" / "loops" / "nightly-cleanup-product.md"
 
 EXPECTED_SCOPE_HEADINGS: tuple[str, ...] = (
-    "## 1. CI 失败",
-    "## 2. 重复代码",
-    "## 3. 文档",
-    "## 4. 依赖",
-    "## Triage 优先级",
+    "## 1. CI failure",
+    "## 2. Duplicated code",
+    "## 3. Docs sync",
+    "## 4. Dependency upgrades",
+    "## Triage priority",
 )
 
 EXPECTED_SCOPE_LABELS: tuple[str, ...] = (
@@ -158,7 +158,7 @@ def test_render_product_recipe_pre_command_variables() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Body shape — 4 scope sections + Triage 优先级
+# Body shape — 4 scope sections + Triage priority
 # ---------------------------------------------------------------------------
 
 
@@ -221,7 +221,7 @@ def test_render_keda_recipe_title() -> None:
         fire_at=datetime(2026, 7, 2, 2, 0, 0),
         extra_variables=_extra_vars(),
     )
-    assert "夜间清理" in title
+    assert "Nightly cleanup" in title
     assert "2026-07-02" in title
 
 
@@ -232,7 +232,7 @@ def test_render_product_recipe_title() -> None:
         fire_at=datetime(2026, 7, 2, 2, 30, 0),
         extra_variables=_extra_vars(),
     )
-    assert "夜间清理" in title
+    assert "Nightly cleanup" in title
     assert "2026-07-02" in title
 
 

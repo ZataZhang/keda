@@ -5,40 +5,41 @@
 (() => {
   const TASKS = [
     {
-      id: 'issue-428', issue: 428, repo: 'keda-main', title: '可折叠工具调用与实时输出',
-      status: 'running', statusLabel: '执行中', stage: '实现阶段', agent: 'Codex · gpt-5.1-codex',
-      elapsed: '12 分钟', updated: '刚刚更新', attempt: '尝试 2 · 上次验证失败后恢复',
-      output: '[10:41:52] 正在实现运行时卡片与调用明细折叠。\n[10:42:03] 已更新 runtime-task-card.tsx\n[10:42:16] 正在补充生命周期状态映射。',
+      id: 'issue-428', issue: 428, repo: '示例仓库', title: '可折叠调用明细与实时输出',
+      status: 'running', statusLabel: '执行中', stage: '实现阶段', agent: '编程助手一',
+      elapsed: '12 分钟', updated: '刚刚更新', attempt: '第 2 轮尝试 · 最近检查失败后恢复',
+      output: '[10:41:52] 正在更新运行看板与调用明细。\n[10:42:03] 已更新任务状态展示。\n[10:42:16] 正在补充阶段映射。',
       tools: [
-        { time: '10:41:54', name: '读取 dashboard 页面', detail: 'frontend-public/app/(app)/app/dashboard/page.tsx' },
-        { time: '10:42:07', name: '搜索调用账本接口', detail: 'rg -n "list_issue_invocation_events" src/backend' },
-        { time: '10:42:14', name: '编辑运行时卡片', detail: 'runtime-task-card.tsx' },
+        { time: '10:41:54', name: '读取任务看板', detail: '查看任务状态和运行阶段' },
+        { time: '10:42:07', name: '检查调用记录', detail: '核对任务调用明细' },
+        { time: '10:42:14', name: '更新任务卡片', detail: '新增可折叠明细展示' },
       ],
     },
     {
-      id: 'issue-422', issue: 422, repo: 'keda-main', title: '统一调用观测 API',
-      status: 'waiting', statusLabel: '审阅中', stage: '等待 verifier', agent: 'Claude Code · sonnet-4.5',
-      elapsed: '4 分钟', updated: '1 分钟前更新', attempt: '尝试 1 · 验证通过',
-      output: '[10:40:08] 实现已提交，等待独立 verifier。\n[10:40:22] 所有必需检查通过。',
-      tools: [{ time: '10:39:51', name: '运行核心测试', detail: 'just test · 27 passed' }],
+      id: 'issue-422', issue: 422, repo: '示例仓库', title: '统一调用观测接口',
+      status: 'waiting', statusLabel: '等待检查', stage: '等待独立检查', agent: '编程助手二',
+      elapsed: '4 分钟', updated: '1 分钟前更新', attempt: '第 1 轮尝试 · 验证通过',
+      output: '[10:40:08] 实现已提交，等待独立检查。\n[10:40:22] 所有必要检查均已通过。',
+      tools: [{ time: '10:39:51', name: '运行核心测试', detail: '27 项检查已通过' }],
     },
     {
-      id: 'issue-418', issue: 418, repo: 'keda-main', title: '修复执行上下文丢失',
-      status: 'blocked', statusLabel: '阻塞中', stage: '等待上游 CI', agent: 'Codex · gpt-5.1-codex',
-      elapsed: '28 分钟', updated: '9 分钟前更新', attempt: '尝试 3 · 上游服务暂不可用',
-      output: '[10:33:17] CI 服务没有返回状态。\n[10:33:18] 任务已标记为阻塞，等待人工处理。',
-      tools: [{ time: '10:33:17', name: '检查 CI 状态', detail: 'GitHub Checks API · 503' }],
+      id: 'issue-418', issue: 418, repo: '示例仓库', title: '修复执行上下文丢失',
+      status: 'blocked', statusLabel: '阻塞中', stage: '等待仓库检查', agent: '编程助手一',
+      elapsed: '28 分钟', updated: '9 分钟前更新', attempt: '第 3 轮尝试 · 上游服务暂不可用',
+      output: '[10:33:17] 仓库检查服务没有返回状态。\n[10:33:18] 任务已标记为阻塞，等待人工处理。',
+      tools: [{ time: '10:33:17', name: '检查仓库状态', detail: '代码托管平台暂时无响应' }],
     },
     {
-      id: 'issue-414', issue: 414, repo: 'keda-main', title: '增加模型基准集成',
-      status: 'completed', statusLabel: '已完成', stage: '已归档', agent: 'Claude Code · sonnet-4.5',
-      elapsed: '31 分钟', updated: '今天 10:17 完成', attempt: '尝试 2 · 通过验证与审阅', score: '4.5 / 5',
-      output: '[10:16:42] 验证通过。\n[10:17:01] PR 已合并，任务已归档。',
-      tools: [{ time: '10:15:23', name: '运行真实入口验证', detail: 'Console 浏览器流程 · 通过' }],
+      id: 'issue-414', issue: 414, repo: '示例仓库', title: '增加基准评测功能',
+      status: 'completed', statusLabel: '已完成', stage: '已归档', agent: '编程助手二',
+      elapsed: '31 分钟', updated: '今天 10:17 完成', attempt: '第 2 轮尝试 · 通过验证与审阅', score: '4.5 / 5',
+      output: '[10:16:42] 验证通过。\n[10:17:01] 变更已合并，任务已归档。',
+      tools: [{ time: '10:15:23', name: '检查入口流程', detail: '控制台页面检查 · 通过' }],
     },
   ];
 
   const state = { selectedTaskId: TASKS[0].id, filter: 'all', query: '' };
+  const baselineState = { mode: 'agent' };
   const taskList = document.querySelector('#runtime-task-list');
   const taskDetail = document.querySelector('#runtime-detail');
   const searchInput = document.querySelector('#runtime-search');
@@ -86,9 +87,9 @@
     }
     const toolsMarkup = task.tools.map((tool) => `<li><time>${tool.time}</time><span><strong>${tool.name}</strong><small>${tool.detail}</small></span></li>`).join('');
     taskDetail.innerHTML = `
-      <div class="runtime-detail-head"><div><span class="runtime-status runtime-status--${task.status}"><i></i>${task.statusLabel}</span><h2>${task.title}</h2><p>${task.repo} · Issue #${task.issue}</p></div><button class="detail-more hotspot-target" type="button" aria-label="更多任务详情" title="只读观察视图">•••</button></div>
+      <div class="runtime-detail-head"><div><span class="runtime-status runtime-status--${task.status}"><i></i>${task.statusLabel}</span><h2>${task.title}</h2><p>示例问题单 #${task.issue}</p></div><button class="detail-more hotspot-target" type="button" aria-label="更多任务详情" title="只读观察视图">•••</button></div>
       <div class="detail-progress"><div><span>当前阶段</span><strong>${task.stage}</strong></div><div><span>已运行</span><strong>${task.elapsed}</strong></div></div>
-      <div class="detail-agent"><span class="agent-avatar">${task.agent.startsWith('Claude') ? 'C' : '⌘'}</span><span><strong>${task.agent}</strong><small>${task.attempt}</small></span></div>
+      <div class="detail-agent"><span class="agent-avatar">${task.agent === '编程助手二' ? '二' : '一'}</span><span><strong>${task.agent}</strong><small>${task.attempt}</small></span></div>
       <div class="log-heading"><div><strong>实时输出</strong><span class="live-label"><i></i>跟随中</span></div><button class="log-pause hotspot-target" type="button" data-pause-log aria-pressed="false">Ⅱ 暂停</button></div>
       <pre class="runtime-log" aria-label="任务输出日志">${task.output}</pre>
       <details class="tool-call-fold hotspot-target"><summary><span>工具调用</span><b>${task.tools.length} 条已折叠</b><span class="chevron">⌄</span></summary><ol>${toolsMarkup}</ol></details>
@@ -111,6 +112,32 @@
    */
   function renderRuntimeEvaluation() {
     const feedback = document.querySelector('#evaluation-feedback');
+    if (feedback) feedback.hidden = true;
+  }
+
+  /** 更新 M13 表单的候选执行估算与模式提示。 */
+  function renderEvaluationBaseline() {
+    const repeatSelect = document.querySelector('#baseline-repeats');
+    const holdoutCheckbox = document.querySelector('#baseline-holdout');
+    const estimate = document.querySelector('#baseline-estimate');
+    const limit = document.querySelector('#baseline-limit');
+    const agentPreset = document.querySelector('.baseline-agent-preset');
+    const holdoutLabel = document.querySelector('.baseline-holdout');
+    const calibrationPresets = document.querySelector('.baseline-calibration-presets');
+    const calibrationProof = document.querySelector('.baseline-calibration-proof');
+    const feedback = document.querySelector('.baseline-feedback');
+    if (!repeatSelect || !estimate || !limit) return;
+
+    const repeats = Number(repeatSelect.value);
+    const isCalibration = baselineState.mode === 'calibration';
+    const caseCount = isCalibration || holdoutCheckbox?.checked ? 12 : 8;
+    const presetCount = isCalibration ? 2 : 1;
+    estimate.textContent = String(caseCount * presetCount * repeats);
+    limit.textContent = isCalibration ? '（校准执行上限 144）' : '（模型执行上限 48）';
+    if (agentPreset) agentPreset.hidden = isCalibration;
+    if (holdoutLabel) holdoutLabel.hidden = isCalibration;
+    if (calibrationPresets) calibrationPresets.hidden = !isCalibration;
+    if (calibrationProof) calibrationProof.hidden = !isCalibration;
     if (feedback) feedback.hidden = true;
   }
 
@@ -235,6 +262,26 @@
       button.disabled = true;
       return;
     }
+    const baselineModeButton = event.target.closest('[data-baseline-mode]');
+    if (baselineModeButton) {
+      baselineState.mode = baselineModeButton.dataset.baselineMode;
+      document.querySelectorAll('[data-baseline-mode]').forEach((button) => {
+        const isActive = button === baselineModeButton;
+        button.classList.toggle('is-active', isActive);
+        button.setAttribute('aria-pressed', String(isActive));
+      });
+      renderEvaluationBaseline();
+      return;
+    }
+    if (event.target.closest('[data-baseline-create]')) {
+      const feedback = document.querySelector('.baseline-feedback');
+      const count = document.querySelector('#baseline-estimate')?.textContent ?? '0';
+      if (feedback) {
+        feedback.textContent = `已创建 ${count} 次候选执行的草稿；启动仍需单独操作。原型不会运行候选或调用模型。`;
+        feedback.hidden = false;
+      }
+      return;
+    }
     const pauseButton = event.target.closest('[data-pause-log]');
     if (pauseButton) {
       const paused = pauseButton.getAttribute('aria-pressed') !== 'true';
@@ -262,6 +309,8 @@
     const confirmButton = document.querySelector('[data-confirm-judges]');
     if (confirmButton) confirmButton.disabled = !event.target.checked;
   });
+  document.querySelector('#baseline-repeats')?.addEventListener('change', renderEvaluationBaseline);
+  document.querySelector('#baseline-holdout')?.addEventListener('change', renderEvaluationBaseline);
 
   document.addEventListener('prototype:reset', () => {
     state.selectedTaskId = TASKS[0].id;
@@ -274,9 +323,20 @@
     document.querySelectorAll('.runtime-dialog[open]').forEach((dialog) => dialog.close());
     resetPayloadConsent();
     renderRuntimeEvaluation();
+    baselineState.mode = 'agent';
+    document.querySelectorAll('[data-baseline-mode]').forEach((button) => {
+      const isActive = button.dataset.baselineMode === 'agent';
+      button.classList.toggle('is-active', isActive);
+      button.setAttribute('aria-pressed', String(isActive));
+    });
+    if (document.querySelector('#baseline-repeats')) document.querySelector('#baseline-repeats').value = '3';
+    if (document.querySelector('#baseline-holdout')) document.querySelector('#baseline-holdout').checked = false;
+    renderEvaluationBaseline();
   });
 
   window.renderRuntimeDashboard = renderRuntimeDashboard;
   window.renderRuntimeEvaluation = renderRuntimeEvaluation;
+  window.renderEvaluationBaseline = renderEvaluationBaseline;
+  renderEvaluationBaseline();
   renderRuntimeDashboard();
 })();

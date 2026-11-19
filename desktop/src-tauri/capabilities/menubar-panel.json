@@ -10,6 +10,7 @@
     "core:default",
     "allow-open-console-window",
     "allow-open-external-url",
+    "dialog:allow-message",
     "allow-notify-task",
     "allow-set-panel-pinned",
     "allow-hide-panel"

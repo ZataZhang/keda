@@ -20,6 +20,7 @@ from backend.core.shared.models.agent_runner import (
     AppConfig,
     RepositoryRunContext,
 )
+from backend.core.use_cases.console_actions import ConsoleActionResult
 from backend.infrastructure.config.registry_editor import TomlRegistryEditor
 from backend.infrastructure.console.process_supervisor import (
     PidfileProcessSupervisor,
@@ -51,10 +52,7 @@ def console_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     (repo_dir / ".git").mkdir(parents=True)
     config_path = tmp_path / "config.toml"
     config_path.write_text(
-        "# 保留注释\n"
-        "[agent_runner.repositories.keda-main]\n"
-        f'path = "{repo_dir}"\n'
-        "enabled = true\n",
+        f'# 保留注释\n[agent_runner.repositories.keda-main]\npath = "{repo_dir}"\nenabled = true\n',
         encoding="utf-8",
     )
     contexts = [
@@ -295,6 +293,35 @@ def test_issue_action_unknown_rejected_via_api(console_environment) -> None:
     audits = audit_response.json()["audits"]
     assert audits[0]["action"] == "merge_pr"
     assert audits[0]["result"] == "rejected"
+
+
+def test_retry_failed_with_executor_fields_reach_action_use_case(
+    console_environment, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """HTTP API accepts the stage/executor pair and forwards it to the action use case."""
+    captured: dict[str, object] = {}
+
+    def _capture_action(**kwargs):
+        captured.update(kwargs)
+        return ConsoleActionResult(
+            action="retry_failed_with_executor",
+            result="accepted",
+            detail="queued",
+        )
+
+    monkeypatch.setattr(console_routes, "execute_issue_action", _capture_action)
+    response = client.post(
+        "/api/v1/agent-runner/console/repositories/keda-main/issues/119/actions",
+        json={
+            "action": "retry_failed_with_executor",
+            "lifecycle_stage": "implementation",
+            "executor": "codex",
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured["lifecycle_stage"] == "implementation"
+    assert captured["executor"] == "codex"
 
 
 def test_registry_endpoints(console_environment, tmp_path: Path) -> None:
@@ -1075,3 +1102,86 @@ def test_take_over_verifier_oversized_identity_returns_400(console_environment) 
         console_environment["store"].get_issue_run(repo_id="keda-main", issue_number=7).state
         == "running"
     )
+
+
+def test_recover_publish_action_starts_and_stops_coordination_heartbeat(
+    console_environment, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Console 的发布恢复动作在执行期间持有并释放状态/租约服务。"""
+    import backend.api.cli_coordination as cli_coordination
+    from backend.core.use_cases.console_actions import ConsoleActionResult
+
+    lifecycle: list[str] = []
+
+    class FakeHeartbeat:
+        def stop(self) -> None:
+            lifecycle.append("stop")
+
+    def start_heartbeat(**kwargs):
+        assert kwargs["role"] == "recover"
+        assert [context.repo_id for context in kwargs["contexts"]] == ["keda-main"]
+        lifecycle.append("start")
+        return FakeHeartbeat()
+
+    monkeypatch.setattr(cli_coordination, "start_coordination_heartbeat", start_heartbeat)
+    monkeypatch.setattr(console_routes, "create_process_runner", lambda: object())
+    monkeypatch.setattr(
+        console_routes,
+        "execute_issue_action",
+        lambda **kwargs: ConsoleActionResult(
+            action="recover_failed_publish", result="accepted", detail="recovered"
+        ),
+    )
+
+    response = client.post(
+        "/api/v1/agent-runner/console/repositories/keda-main/issues/73/actions",
+        json={"action": "recover_failed_publish"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["result"] == "accepted"
+    assert lifecycle == ["start", "stop"]
+
+
+def test_discover_repositories_includes_the_scan_root_itself(
+    console_environment, tmp_path: Path
+) -> None:
+    """把仓库路径当 scan_root 时必须命中它自己，而不是只扫它的子目录。"""
+    solo_repo = tmp_path / "solo"
+    solo_repo.mkdir()
+    (solo_repo / ".git").mkdir()
+    _write_iar_toml(solo_repo, "solo", "Solo Project")
+
+    response = client.get(
+        "/api/v1/agent-runner/repositories/discover",
+        params={"scan_root": str(solo_repo)},
+    )
+    assert response.status_code == 200, response.text
+    discovered = response.json()["repositories"]
+    assert [entry["repo_id"] for entry in discovered] == ["solo"]
+    assert discovered[0]["path"] == str(solo_repo)
+
+
+def test_discover_repositories_skips_runner_state_directories(
+    console_environment, tmp_path: Path
+) -> None:
+    """runner 的 worktree 带着同一份 .kedacode.toml，不能被当成独立仓库。"""
+    workspace = tmp_path / "code"
+    repo_path = workspace / "proj"
+    repo_path.mkdir(parents=True)
+    (repo_path / ".git").mkdir()
+    _write_iar_toml(repo_path, "proj", "Proj")
+
+    worktree = repo_path / ".kc-worktrees" / "issue-1"
+    worktree.mkdir(parents=True)
+    (worktree / ".git").write_text("gitdir: /tmp/elsewhere\n", encoding="utf-8")
+    _write_iar_toml(worktree, "proj", "Proj")
+
+    response = client.get(
+        "/api/v1/agent-runner/repositories/discover",
+        params={"scan_root": str(workspace)},
+    )
+    assert response.status_code == 200, response.text
+    discovered = response.json()["repositories"]
+    assert [entry["repo_id"] for entry in discovered] == ["proj"]
+    assert discovered[0]["path"] == str(repo_path)

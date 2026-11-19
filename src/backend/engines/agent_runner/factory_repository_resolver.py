@@ -192,14 +192,13 @@ def resolve_repository_targets(
 
     if repo_path_override is not None:
         repo_root_path = detect_git_repository_root(Path(repo_path_override))
-        return [
-            _build_repository_context_from_settings(
-                global_config,
-                _repository_settings_for_path(repo_root_path),
-                fallback_repo_id="ad-hoc",
-                prefer_settings_id=True,
-            )
-        ]
+        context = _build_repository_context_from_settings(
+            global_config,
+            _repository_settings_for_path(repo_root_path),
+            fallback_repo_id="ad-hoc",
+            prefer_settings_id=True,
+        )
+        return [_anchor_log_base_to_registered_path(settings, context)]
 
     if repo_id is not None:
         if repo_id not in settings.repositories:
@@ -245,14 +244,13 @@ def resolve_repository_targets(
         return contexts
 
     repo_root_path = detect_git_repository_root(Path(fallback_path))
-    return [
-        _build_repository_context_from_settings(
-            global_config,
-            _repository_settings_for_path(repo_root_path),
-            fallback_repo_id=repo_root_path.name,
-            prefer_settings_id=True,
-        )
-    ]
+    context = _build_repository_context_from_settings(
+        global_config,
+        _repository_settings_for_path(repo_root_path),
+        fallback_repo_id=repo_root_path.name,
+        prefer_settings_id=True,
+    )
+    return [_anchor_log_base_to_registered_path(settings, context)]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -474,6 +472,24 @@ def _resolve_anchor_path(raw_path: str, repo_root_path: Path) -> str:
     if expanded.is_absolute():
         return str(expanded)
     return str(repo_root_path / expanded)
+
+
+def _anchor_log_base_to_registered_path(
+    settings: AgentRunnerSettings,
+    context: RepositoryRunContext,
+) -> RepositoryRunContext:
+    """``--repo`` 或 cwd 指向已注册仓库的其他 checkout 时，把 Issue 日志锚定到登记路径。
+
+    Console 与 ``kc logs --issue`` 只从登记路径读取 Issue 日志；若按 ``--repo``
+    路径落盘（如在某个 git worktree 里跑 ``kc run``），运行中的输出会读不到。
+    """
+    registered = settings.repositories.get(context.repo_id)
+    if registered is None or not registered.enabled:
+        return context
+    registered_path = Path(registered.path).expanduser().resolve()
+    if registered_path == context.repo_path or not registered_path.is_dir():
+        return context
+    return dataclasses.replace(context, log_base=registered_path / "logs")
 
 
 def _build_repository_context_from_settings(

@@ -9,7 +9,7 @@
 
 签名 secret 来自环境变量 ``KEDACODE_IDEA_INBOX_INBOUND_SECRET``，不写入
 ``config.toml`` / ``.kedacode.toml``。所有 DTO 转换、HTTP 状态码与签名校
-验在本模块完成；append-only 约束、状态机与命名规范在 core use case。
+验在本模块完成；原话追加约束、状态标记与命名规范在 core use case。
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ import logging
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -32,12 +32,15 @@ from backend.core.shared.models.idea_inbox import (
     ApproveDraftResult,
     CreateDraftResult,
     IdeaInboxSource,
+    IdeaStatus,
+    IdeaStatusUpdate,
 )
 from backend.core.use_cases import idea_prd_drafts as idea_prd_drafts_module
 from backend.core.use_cases.idea_inbox import (
     append_idea,
     read_idea_inbox,
     refresh_idea_summary,
+    update_idea_status as persist_idea_status,
 )
 from backend.core.use_cases.agent_runner_factory import (
     create_content_generator,
@@ -111,6 +114,12 @@ class AppendIdeaRequest(BaseModel):
     occurred_at: str | None = Field(default=None)
 
 
+class UpdateIdeaStatusRequest(BaseModel):
+    """人工完成、放弃或恢复想法的请求体。"""
+
+    status: Literal["pending", "completed", "abandoned"]
+
+
 class RefreshSummaryRequest(BaseModel):
     """刷新 summary 的请求体。"""
 
@@ -156,7 +165,7 @@ class InboundMessage(BaseModel):
 
 @router.get("/agent-runner/idea-inbox/repositories/{repo_id}")
 def get_idea_inbox(repo_id: str) -> dict:
-    """读取目标仓库的 Idea Inbox 完整快照。"""
+    """读取完整快照，并同步关联 PRD 推导出的标题状态元数据。"""
     context = _resolve_context(repo_id)
     snapshot = read_idea_inbox(context.repo_path)
     return _serialize(snapshot)
@@ -176,6 +185,38 @@ def append_idea_to_repo(repo_id: str, request: AppendIdeaRequest) -> dict:
             author=request.author,
             text=request.text,
             occurred_at=request.occurred_at,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _serialize(result)
+
+
+@router.post(
+    "/agent-runner/idea-inbox/repositories/{repo_id}/ideas/{entry_id}/status",
+)
+def update_repo_idea_status(
+    repo_id: str,
+    entry_id: str,
+    request: UpdateIdeaStatusRequest,
+) -> dict:
+    """更新想法的人工处理状态。
+
+    Args:
+        repo_id (str): 目标仓库 ID。
+        entry_id (str): 想法条目 ID。
+        request (UpdateIdeaStatusRequest): 请求的人工状态。
+
+    Returns:
+        dict: 更新后的想法条目。
+
+    Raises:
+        HTTPException: 仓库或条目不存在，或请求状态无效时抛出。
+    """
+    context = _resolve_context(repo_id)
+    try:
+        result = persist_idea_status(
+            context.repo_path,
+            IdeaStatusUpdate(entry_id=entry_id, status=IdeaStatus(request.status)),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

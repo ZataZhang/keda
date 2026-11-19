@@ -5,6 +5,7 @@
 - ``run_once`` / ``review_once``：为目标仓库启动一次性托管子进程。
 - ``retry_failed``：将 failed Issue 的 label 翻转回 ready（与手工
   ``gh`` 操作等价，不绕过 workflow 状态机）。
+- ``retry_failed_with_executor``：确认失败调用账本后，保存一次性阶段执行器覆盖并重新排队。
 - ``blocked_continue``：启动一次性 ``kc blocked-continue`` 托管子进程
   （agent 执行耗时长，必须进程隔离，不能在 API 进程内跑）。
 - ``recover_failed_publish``：复用 CLI ``kc recover`` 的既有恢复用例，把已提交
@@ -28,6 +29,7 @@ from backend.core.shared.interfaces.runner_console import (
     AuditEntry,
     IRunHistoryStore,
     IRunnerProcessSupervisor,
+    RunRecord,
     RunnerProcessKind,
     RunnerProcessRecord,
 )
@@ -42,6 +44,13 @@ from backend.core.use_cases.agent_runner_issue_control import (
 from backend.core.use_cases.console_processes import (
     ConsoleProcessError,
     start_runner_process,
+)
+from backend.core.use_cases.agent_invocation_tracing import resolve_invocation_store
+from backend.core.use_cases.issue_retry_overrides import resolve_issue_retry_override_store
+from backend.core.use_cases.runtime_failure_diagnosis import (
+    RETRYABLE_LIFECYCLE_STAGES,
+    RuntimeFailureDiagnosis,
+    diagnose_runtime_failure,
 )
 from backend.core.use_cases.recover_publish import (
     PublishRecoveryError,
@@ -61,6 +70,7 @@ REPOSITORY_ACTIONS: dict[str, RunnerProcessKind] = {
 #: Issue 级动作白名单。
 ISSUE_ACTIONS = (
     "retry_failed",
+    "retry_failed_with_executor",
     "blocked_continue",
     "recover_failed_publish",
     "take_over_verifier",
@@ -199,6 +209,7 @@ def _execute_retry_failed(
     issue_number: int,
     context: RepositoryRunContext,
     github_client: IGitHubClient,
+    store: IRunHistoryStore,
 ) -> str:
     issue = github_client.get_issue(issue_number)
     failed_label = context.config.labels.failed
@@ -208,8 +219,141 @@ def _execute_retry_failed(
             f"Issue #{issue_number} does not carry label '{failed_label}'; "
             "retry_failed only applies to failed Issues."
         )
+    retry_override_store = resolve_issue_retry_override_store(store)
+    if retry_override_store is not None:
+        retry_override_store.clear_issue_retry_override(
+            repo_id=context.repo_id,
+            issue_number=issue_number,
+        )
     github_client.edit_issue_labels(issue_number, add=[ready_label], remove=[failed_label])
     return f"Issue #{issue_number}: '{failed_label}' -> '{ready_label}'."
+
+
+def _latest_failed_run_diagnosis(
+    *, store: IRunHistoryStore, repo_id: str, issue_number: int
+) -> tuple[RunRecord | None, RuntimeFailureDiagnosis | None]:
+    """从最近一次失败运行及其调用事件确认可切换的阶段。"""
+    runs = store.list_recent_runs(repo_id=repo_id, limit=500)
+    latest_run = next(
+        (run for run in runs if run.issue_number == issue_number),
+        None,
+    )
+    if latest_run is None or latest_run.outcome != "failed":
+        return None, None
+    invocation_store = resolve_invocation_store(store)
+    if invocation_store is None:
+        return latest_run, None
+    try:
+        invocation_events = invocation_store.list_issue_invocation_events(
+            repo_id=repo_id,
+            issue_number=issue_number,
+        )
+    except Exception:  # noqa: BLE001 - action fails closed if diagnosis is unavailable.
+        _logger.warning(
+            "Could not read invocation details for retry override %s#%d.",
+            repo_id,
+            issue_number,
+            exc_info=True,
+        )
+        return latest_run, None
+    diagnosis = diagnose_runtime_failure(
+        started_at=latest_run.started_at,
+        finished_at=latest_run.finished_at,
+        outcome=latest_run.outcome,
+        error_summary=latest_run.error_summary,
+        run_agent=latest_run.agent,
+        invocation_events=invocation_events,
+    )
+    return latest_run, diagnosis
+
+
+def _execute_retry_failed_with_executor(
+    *,
+    issue_number: int,
+    repo_id: str,
+    context: RepositoryRunContext,
+    github_client: IGitHubClient,
+    store: IRunHistoryStore,
+    lifecycle_stage: str | None,
+    executor: str | None,
+) -> str:
+    """保存一次性阶段覆盖并把失败 Issue 重新放回 ready 队列。
+
+    幂等：同一次「换执行器续跑」被重复提交时（用户没看到结果又点一次），
+    第二次不再报错——第一次已经把覆盖写入并把 Issue 放回 ready 队列，标签
+    随之不再是 failed。此时按本次选择更新待消费覆盖并如实回报状态；既没有
+    失败标签、也没有待消费覆盖，才是真正的场景不符。
+    """
+    if lifecycle_stage not in RETRYABLE_LIFECYCLE_STAGES or not executor:
+        raise ConsoleActionError(
+            "retry_failed_with_executor requires a supported lifecycle_stage and executor."
+        )
+    issue = github_client.get_issue(issue_number)
+    failed_label = context.config.labels.failed
+    ready_label = context.config.labels.ready
+    override_store = resolve_issue_retry_override_store(store)
+    if override_store is None:
+        raise ConsoleActionError("This Console store does not support one-time executor overrides.")
+    pending_override = override_store.get_issue_retry_override(
+        repo_id=repo_id,
+        issue_number=issue_number,
+    )
+    # 待消费覆盖仍在 = 上一次点击已把它排进 ready 队列、Runner 尚未认领。
+    already_queued = failed_label not in issue.labels and pending_override is not None
+    if failed_label not in issue.labels and pending_override is None:
+        raise ConsoleActionError(
+            f"Issue #{issue_number} does not carry label '{failed_label}'; "
+            "executor-switch retry only applies to failed Issues."
+        )
+    latest_run, diagnosis = _latest_failed_run_diagnosis(
+        store=store,
+        repo_id=repo_id,
+        issue_number=issue_number,
+    )
+    if diagnosis is None or latest_run is None:
+        raise ConsoleActionError(
+            "The latest failure has no confirmed failed executor call. Use the regular retry "
+            "action or inspect the run details."
+        )
+    if diagnosis.stage != lifecycle_stage:
+        raise ConsoleActionError(
+            f"The failed executor stage changed to '{diagnosis.stage}'; refresh the task and retry."
+        )
+    agent_spec = context.config.agents.get(executor)
+    if agent_spec is None or "run" not in agent_spec.profiles:
+        raise ConsoleActionError(
+            f"Executor '{executor}' is not registered with a run profile for this repository."
+        )
+    if executor in diagnosis.failed_executors:
+        raise ConsoleActionError(
+            f"Executor '{executor}' already failed during this stage; choose another executor."
+        )
+    if lifecycle_stage == "verifier" and executor == latest_run.agent:
+        raise ConsoleActionError(
+            "The verifier executor must differ from the implementation executor."
+        )
+
+    override_store.set_issue_retry_override(
+        repo_id=repo_id,
+        issue_number=issue_number,
+        stage=lifecycle_stage,
+        executor=executor,
+    )
+    if already_queued:
+        # 已经在队列里：不再翻标签（队列状态由上一次点击改好了），只更新覆盖并
+        # 如实回报"已排入"，避免把重复提交说成失败。
+        return (
+            f"Issue #{issue_number} is already queued; the pending executor override was "
+            f"updated to resume at {lifecycle_stage} with executor '{executor}'."
+        )
+    try:
+        github_client.edit_issue_labels(issue_number, add=[ready_label], remove=[failed_label])
+    except Exception:
+        override_store.clear_issue_retry_override(repo_id=repo_id, issue_number=issue_number)
+        raise
+    return (
+        f"Issue #{issue_number} queued to resume at {lifecycle_stage} with executor '{executor}'."
+    )
 
 
 def _execute_recover_failed_publish(
@@ -342,6 +486,8 @@ def execute_issue_action(
     process_runner: IProcessRunner,
     run_id: str | None = None,
     head_sha: str | None = None,
+    lifecycle_stage: str | None = None,
+    executor: str | None = None,
 ) -> ConsoleActionResult:
     """执行一个 Issue 级动作（retry_failed / blocked_continue / recover_failed_publish / take_over_verifier）。"""
     params_payload: dict[str, object] = {
@@ -353,6 +499,10 @@ def execute_issue_action(
         params_payload["run_id"] = run_id
     if head_sha is not None:
         params_payload["head_sha"] = head_sha
+    if lifecycle_stage is not None:
+        params_payload["lifecycle_stage"] = lifecycle_stage
+    if executor is not None:
+        params_payload["executor"] = executor
     params_json = json.dumps(params_payload)
 
     def _reject(detail: str) -> ConsoleActionError:
@@ -394,6 +544,19 @@ def execute_issue_action(
                 issue_number=issue_number,
                 context=context,
                 github_client=github_client,
+                store=store,
+            )
+            process_record = None
+        elif action == "retry_failed_with_executor":
+            github_client = github_client_factory(context.repo_path)
+            detail = _execute_retry_failed_with_executor(
+                issue_number=issue_number,
+                repo_id=repo_id,
+                context=context,
+                github_client=github_client,
+                store=store,
+                lifecycle_stage=lifecycle_stage,
+                executor=executor,
             )
             process_record = None
         elif action == "recover_failed_publish":

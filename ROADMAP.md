@@ -25,6 +25,27 @@
 - **验证策略由仓库用户定义，KedaCode 负责生命周期**：检查哪些内容、使用哪些命令或 CI checks、哪些结果属于必需门禁，应由仓库配置决定。KedaCode 负责运行或观察这些门禁，并编排 pending、修复、等待、阻塞与通过等状态；不把某种 provider 的 SHA、tree、diff 指纹或证据格式固化为通用有效性规则。Supervisor 自己能够完成的状态对账、结果发布和 PR repair/rebase 留在 `agent/supervising`；需要代码修改时可调用配置的 repair agent，但不把 Issue 交回 `agent/running` builder 队列。
 - 当前实现优先支持 GitHub Issues / Labels / Pull Requests；其他代码托管平台暂不在当前交付边界内。
 
+## Cross-Project Candidate: FreshAI Workbench
+
+该候选方向用于评估把 Keda 的本机执行能力扩展到普通文件夹和 FreshAI 通用工作项；**不改变当前 Keda 以 Agent 评测（M13）和受控自进化（M14）为主的路线顺序，也不替换 GitHub Issue/PR 主流程**。FreshAI 与 Keda 的边界草图如下：
+
+```mermaid
+flowchart LR
+    U[User] --> W[FreshAI Web Workbench]
+    W --> C[FreshAI Work Item API / versioned Contract]
+    C --> D[(Work Items, Runs, Reviews, Artifacts)]
+    K[Keda CLI / Local Worker] -->|outbound HTTPS| C
+    K --> X[Local isolation]
+    X --> F[Ordinary folder or Git worktree]
+    K --> A[Existing Keda Agent Runner]
+```
+
+- FreshAI 候选 PRD：`../freshai/tasks/pending/P2-FEAT-20261107-162227-freshai-workbench-control-plane.md`。Keda 执行器 PRD：`tasks/pending/P2-FEAT-20261107-162227-freshai-local-executor-connector.md`。
+- 候选职责：FreshAI 持有通用工作项和用户评审状态；Keda 管理本机凭证引用、普通文件夹/Git 隔离、Agent 子进程和本地 Apply 回执。绝对路径留在 Keda，云端不能变成本机远程 shell。
+- 投入顺序：先由 FreshAI PRD 定义并实现稳定 Worker Contract，再评审 Keda 连接器；Keda backlog 目前不能机器解析 FreshAI 仓库依赖，因此要把这条跨仓库前置作为人工硬门禁，在开工审查和 PR 中核对。
+- ROI：复用 Keda Runner、验证和进程生命周期，能服务不使用 GitHub Issue/PR 的文档/研究/普通文件夹工作；维护成本集中在跨仓库契约、凭证撤销、工作区隔离、差异上传和 Apply 冲突。首版建议只验证个人单机 CLI Worker；不同时建设新桌面壳、团队协作或通用多协议框架。若真实使用没有反复状态搬运与文件评审需求，就保持候选状态。
+- 当前仓库仍以 Issue/PR 生命周期和 M13/M14 为主要产品路径；FreshAI Worker 只作为新的外部任务入口，不自动创建 GitHub Issue、label、PR 或 commit。
+
 ## Current Status
 
 截至 2026-09-17，仓库已经形成"CLI/daemon + 多 agent runner + post-PR supervisor + independent verifier"的稳定闭环；进展集中在三个方向——一是把已经闭环的能力进一步钉死（Agent Runner 记忆持久化的跨 worktree 锚点修复、`api→engines` 直连迁移回 `core` 编排层、`pre-commit` 验证命令与独立 verifier gate 落地）；二是为产品仓引入的 autopilot fast-lane 能力族已交付两项——**合并队列**（`P1-FEAT-20260703-105322`）与 **roadmap 持续调度**（`P1-FEAT-20260703-105330`），连同独立 verifier gate 构成"打开开关即无人值守"的最小闭环；三是原计划的第三项"执行前 re-grounding 与触碰面避让"经评估**整体收缩**为默认 `execution` 提示模板内的"PRD map check"核验指令（`P1-FEAT-20260703-105340`）——不引入独立流水线阶段、不预测触碰面、不做并行撞车避让。当前状态依据来自 `src/backend/` 实现、`docs/guides/agent-runner.md`、`tasks/archive/` 已归档 PRD 与 `tasks/pending/` 待完成 PRD。
@@ -145,6 +166,7 @@
 - **Daemon 崩溃对账与 Agent 会话续传**（`P1-FEAT-20260930-225000`，PR #210 已合并 `c4792fba`）：Phase -1 对账 + 三出口处置 + 声明式会话续传。
 - **`kc run --fast-merge` 快速通道**（`P1-FEAT-20261005-215933`，PR #208 已合并 `2b7cae4c`）：per-run 旗标，builder 提交后旁路 Phase 4.5 的 rv_reexec 与独立 verifier。
 - **行数红线清零**（PR #212 已合并 `866ddabc`）：4 个超 1000 非空行的源文件拆分完毕，`main` 的 CI 恢复绿色。
+- **macOS 菜单栏状态面板**（`P1-FEAT-20260913-204531` 已归档，2026-10-28）：菜单栏图标 + 锚定 popover + 固定悬浮窗；真实入口验收通过，sidecar 并存与退出回收（含负向对照）、Finder 最小 PATH 定位均已实跑。
 
 ### 当前 pending / hold
 
@@ -152,7 +174,6 @@
 
 1. `P1-FEAT-20261006-122336`（**任意 Issue 可执行**）：执行侧已随本 PR 交付——首次真实端到端实证（Issue #216 → Draft PR #217）、文档边界撤销、`kc issue create --from-prompt` 与 `--direct-pr` 档位、daemon 互斥收窄与首次领取 CAS 全部落地；待人工验收与合并后从本清单移除。归入 M1 与 M8。
 2. `P1-FEAT-20261006-013227`（Stats 页 Token 用量补按 PRD 维度汇总）：执行侧已交付为 Draft PR #211，待人工验收与合并后从本清单移除。
-3. `P1-FEAT-20260913-204531`（Tauri 菜单栏状态面板）：菜单栏 App 与固定悬浮窗已实现，待真实 UI 交互验收。
 
 **hold（已成形但暂缓，不参与排期）**
 
@@ -356,9 +377,10 @@ Status: Partially implemented (2026-10-15：Supervisor repair/rebase 留在 supe
 
 ### M13: Agent Evaluation And Regression Baseline
 
-Status: Partially implemented（度量与单次评测已交付；评测集、harness 与回归基线未开始）。这是 2026-10-16 起的主线。
+Status: 首个基线里程碑实现中（Issue #334 / `P1-FEAT-20261019-140531-m13-golden-eval-baseline`）：逐题黄金判分、隔离快照、校准与重复账本正在交付验证；后续对比视图与核心指标仍未开始。这是 2026-10-16 起的主线。
 
 - **已有**：Token 与按 Agent/预设的 attempt 表现统计；多评审模型评测（`P1-FEAT-20261012-103909`）。
+- **首个基线里程碑（Issue #334）**：在已有评测入口上增加逐题冻结起点、单提交隔离快照、延后判分材料、无模型校准、重复次数与稳定性展示。此 PRD 只提供“不用 Keda”的 Agent 基线；“用 Keda”对比组和核心指标数据入账各由独立 PRD 负责。
 - **前置：度量数据的完整性**（2026-10-16 实测发现的缺口，先于评测集）：
   1. 合并结果入账：让合并 / 归档真正写入 `merged` / `archived` 事件，使"是否合并、是否一次通过"可从台账直接读出，不必每次回 GitHub 拉取。
   2. 人工事件入账：把人工审阅等待、人工接管、人工评论等记为台账事件（或可由 GitHub 标签时间线可靠派生），否则"人工介入时长"无从计量。
@@ -398,7 +420,7 @@ Status: Not started；记忆持久化与 skill 草稿晋升是已有的起点，
 > - **GitHub API 额度**：跨进程共享的额度账本与暂停闸门已交付（`kc` 的用量按进程来源归因）。待账本积累一天以上的数据后，用数据判断 Monitor 的逐 Issue 扫描等是否仍是大头，再决定是否做合并查询、条件请求（ETag）或为 daemon 单独配置身份。
 > - **常驻 daemon 的版本可见性**：`kc daemon status` 目前只给出 `pid` 与 `started_at`，看不出它加载的是哪一版代码，也不会提示"比已安装版本旧"。2026-10-15 的持续限流，根因正是一直没重启、仍跑旧代码的 daemon。需要在状态输出里暴露所加载的版本，并在落后于已安装版本时提示重启。
 
-1. **Agent 评测基线（M13 首个里程碑）**：先定评测集的格式、版本与隔离规则，再做可复现的 harness（含人工介入时长），拆成 PRD。
+1. **Agent 评测基线（M13 首个里程碑）**：Issue #334（`P1-FEAT-20261019-140531-m13-golden-eval-baseline`）交付逐题隔离与校准 harness；后续对比视图、Keda 流水线对比组及核心指标入账分别规划，不包含在该基线里程碑内。
 2. **回归基线与对比视图（M13）**：在评测集上对比 prompt / skill / 预设 / 模型变更前后的表现，并接入现有 Stats 页的度量口径。
 3. **自进化的最小闭环（M14，须先通过 M13 试点后的 go / no-go 检查点）**：从 skill 草稿晋升切入——把晋升判据从"使用次数与成功率"升级为"经评测验证 + 人工批准 + 可回滚"，再扩展到模板与路由提案。
 

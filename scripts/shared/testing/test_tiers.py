@@ -6,6 +6,7 @@
     uv run python scripts/shared/testing/test_tiers.py refresh --durations-output /tmp/dur.txt
     uv run python scripts/shared/testing/test_tiers.py changed
     uv run python scripts/shared/testing/test_tiers.py report --top 15
+    TEST_TIERS_BASE_REF=HEAD^1 uv run python scripts/shared/testing/test_tiers.py ci-tier
 
 设计要点：
 - 本地档必须恒定 <30s，而全量档 1300+ 条串行约 700s，靠人手挑名单一定会腐烂，
@@ -73,6 +74,12 @@ GLOBAL_IMPACT_PATHS = (
     ".pre-commit-config.yaml",
 )
 GLOBAL_IMPACT_PREFIXES = ("src/backend/shared/", "tests/fixtures/")
+
+# 设置后 ``changed_working_paths`` 额外采集 ``git diff <基线> HEAD``，供 CI 的 PR 轻量档使用。
+BASE_REF_ENV_VAR = "TEST_TIERS_BASE_REF"
+# PR 轻量档只在改动全部落在这两处 Python 代码时成立：其余文件（justfile、模板、迁移、
+# 脚本、workflow 等）没有可靠的"改动 → 测试"映射，宁可跑全量也不给假绿。
+CI_LIGHT_TIER_PREFIXES = ("src/backend/", "tests/")
 
 STOPWORD_TOKENS = frozenset(
     {
@@ -447,11 +454,17 @@ def changed_working_paths() -> list[str]:
     Returns:
         相对仓库根的路径列表，已剔除纯文档/图片类文件与不存在的文件。
     """
-    raw_paths = set()
-    for diff_args in (
+    diff_commands = [
         ("diff", "--name-only", "HEAD"),
         ("diff", "--name-only", "--cached"),
-    ):
+    ]
+    # CI 的 PR 检出是干净的工作区，改动只存在于"基线提交 → HEAD"之间；设了基线就把
+    # 这段也算进来，PR 轻量档与本地档因此共用同一份"什么算改动"。
+    base_ref = os.environ.get(BASE_REF_ENV_VAR, "").strip()
+    if base_ref:
+        diff_commands.append(("diff", "--name-only", base_ref, "HEAD"))
+    raw_paths = set()
+    for diff_args in diff_commands:
         raw_paths.update(filter(None, _run_git(*diff_args).splitlines()))
     raw_paths.update(
         filter(None, _run_git("ls-files", "--others", "--exclude-standard").splitlines())
@@ -548,6 +561,31 @@ def select_changed_tests(change_paths: list[str]) -> tuple[list[str], bool, list
         reasons.append(f"{change_path} -> {'/'.join(test_dirs)} 同名词根")
 
     return sorted(selected), needs_full_run, reasons
+
+
+def ci_test_tier(change_paths: list[str]) -> tuple[str, list[str]]:
+    """决定 CI 的 PR 检查跑轻量档还是全量档。
+
+    轻量档 = 本地核心档口径（名单 ∪ 改动测试 ∪ src 映射测试），全量档由合入 main 后的
+    CI 兜底。只要有一个改动无法可靠映射到测试，就整体回退全量档。
+
+    Args:
+        change_paths: 相对仓库根的变更文件列表（已剔除文档类文件）。
+
+    Returns:
+        ``(档位, 原因列表)``，档位为 ``"light"`` 或 ``"full"``。
+    """
+    _selected, needs_full_run, _reasons = select_changed_tests(change_paths)
+    if needs_full_run:
+        return "full", ["变更命中全局影响面（conftest / pytest.ini / shared / 依赖锁）"]
+    unmapped_paths = [
+        change_path
+        for change_path in change_paths
+        if not (change_path.endswith(".py") and change_path.startswith(CI_LIGHT_TIER_PREFIXES))
+    ]
+    if unmapped_paths:
+        return "full", [f"{change_path} 无法映射到测试" for change_path in unmapped_paths]
+    return "light", [f"{len(change_paths)} 个改动均可映射到测试"]
 
 
 def split_by_budget(
@@ -783,6 +821,21 @@ def _handle_changed(args: argparse.Namespace) -> int:
     return 2 if prefer_full else 0
 
 
+def _handle_ci_tier(_args: argparse.Namespace) -> int:
+    """处理 ``ci-tier``：向 stdout 打印 ``tier=light|full``，原因写 stderr。
+
+    输出格式可直接追加进 ``$GITHUB_OUTPUT``。
+
+    Returns:
+        进程退出码。
+    """
+    tier, reasons = ci_test_tier(changed_working_paths())
+    for reason in reasons[:12]:
+        print(f"  · {reason}", file=sys.stderr)
+    print(f"tier={tier}")
+    return 0
+
+
 def _handle_report(args: argparse.Namespace) -> int:
     """处理 ``report``：打印最慢文件与本地档成员，辅助淘汰决策。
 
@@ -835,6 +888,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="影响面无法收窄时回退核心档而非退出",
     )
     changed_parser.set_defaults(handler=_handle_changed)
+
+    ci_tier_parser = subparsers.add_parser("ci-tier", help="判定 CI 的 PR 检查跑轻量档还是全量档")
+    ci_tier_parser.set_defaults(handler=_handle_ci_tier)
 
     report_parser = subparsers.add_parser("report", help="打印最慢文件与本地档成员")
     report_parser.add_argument("--top", type=int, default=15)

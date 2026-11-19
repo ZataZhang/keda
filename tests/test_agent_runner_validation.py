@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import subprocess
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -2803,6 +2804,213 @@ def _write_manifest_with_assertion(
     (evidence_dir / "evidence.json").write_text(
         json.dumps(manifest, ensure_ascii=False), encoding="utf-8"
     )
+
+
+def test_ensure_validation_commands_pass_reports_every_failing_item(
+    tmp_path: Path,
+) -> None:
+    """门禁聚合全部失败：两条不相干失败一次报出，而不是只报第一条（决策二）。"""
+    _write_manifest(tmp_path / ".iar" / "evidence")
+    failing_responses = {
+        ("bash", "-lc", "demo run"): CommandResult(
+            command=("bash", "-lc", "demo run"),
+            return_code=1,
+            stdout="",
+            stderr="run boom",
+        ),
+        ("bash", "-lc", "demo serve"): CommandResult(
+            command=("bash", "-lc", "demo serve"),
+            return_code=2,
+            stdout="",
+            stderr="serve boom",
+        ),
+    }
+    runner = FakeProcessRunner(responses=failing_responses)
+
+    with pytest.raises(ValidationEvidenceError) as exc_info:
+        ensure_validation_commands_pass(
+            _issue(body=_STRUCTURED_ISSUE_BODY), tmp_path, _legacy_config(), runner
+        )
+
+    failure_text = str(exc_info.value)
+    assert "failed for 2 item(s)" in failure_text
+    assert "Item 1" in failure_text
+    assert "Item 2" in failure_text
+    assert "demo run" in failure_text
+    assert "demo serve" in failure_text
+    # 两条命令都被真实复跑过，而不是在第一条失败后短路。
+    assert ["bash", "-lc", "demo run"] in runner.raw_calls
+    assert ["bash", "-lc", "demo serve"] in runner.raw_calls
+
+
+def test_ensure_validation_commands_pass_timeout_does_not_stop_remaining_items(
+    tmp_path: Path,
+) -> None:
+    """单题超时后其余题目照常复跑，并在聚合错误中标注超时（决策二）。"""
+    _write_manifest(tmp_path / ".iar" / "evidence")
+
+    class _TimeoutOnFirstRunner(FakeProcessRunner):
+        def run(self, command, **kwargs):  # type: ignore[override]
+            command_tuple = tuple(command)
+            self.calls.append(list(command))
+            self.raw_calls.append(list(command))
+            if command_tuple == ("bash", "-lc", "demo run"):
+                raise subprocess.TimeoutExpired(cmd=list(command), timeout=kwargs.get("timeout"))
+            return CommandResult(command_tuple, 0, "", "")
+
+    runner = _TimeoutOnFirstRunner()
+
+    with pytest.raises(ValidationEvidenceError) as exc_info:
+        ensure_validation_commands_pass(
+            _issue(body=_STRUCTURED_ISSUE_BODY), tmp_path, _legacy_config(), runner
+        )
+
+    failure_text = str(exc_info.value)
+    assert "timed out" in failure_text
+    assert "Item 1" in failure_text
+    assert "failed for 1 item(s)" in failure_text
+    assert ["bash", "-lc", "demo serve"] in runner.raw_calls
+
+
+def test_ensure_validation_commands_pass_aggregates_assertion_and_timeout(
+    tmp_path: Path,
+) -> None:
+    """一条断言不匹配 + 一条超时：门禁一次报出两条（决策二验收）。"""
+    import json
+
+    evidence_dir = tmp_path / ".iar" / "evidence"
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    (evidence_dir / "rv-1-fake.txt").write_text("placeholder", encoding="utf-8")
+    (evidence_dir / "rv-2-fake.txt").write_text("placeholder", encoding="utf-8")
+    manifest = {
+        "version": 1,
+        "language": "zh-CN",
+        "items": [
+            {
+                "item_number": 1,
+                "item_name": "断言不匹配检查点",
+                "command": "demo run",
+                "evidence_files": ["rv-1-fake.txt"],
+                "output_summary": "命令 exit 0。",
+                "explanation": "说明。",
+                "risks": "无",
+                "negative_control": "改坏断言",
+                "expected_fail": "断言不命中",
+                "stdout_assertions": [{"pattern": "EXPECTED-ASSERTION"}],
+            },
+            {
+                "item_number": 2,
+                "item_name": "超时检查点",
+                "command": "demo serve",
+                "evidence_files": ["rv-2-fake.txt"],
+                "output_summary": "命令超时。",
+                "explanation": "说明。",
+                "risks": "无",
+                "negative_control": "让命令睡过头",
+                "expected_fail": "超时",
+            },
+        ],
+    }
+    (evidence_dir / "evidence.json").write_text(
+        json.dumps(manifest, ensure_ascii=False), encoding="utf-8"
+    )
+
+    class _AssertionAndTimeoutRunner(FakeProcessRunner):
+        def run(self, command, **kwargs):  # type: ignore[override]
+            command_tuple = tuple(command)
+            self.calls.append(list(command))
+            self.raw_calls.append(list(command))
+            if command_tuple == ("bash", "-lc", "demo run"):
+                return CommandResult(command_tuple, 0, "ACTUAL-OUTPUT", "")
+            if command_tuple == ("bash", "-lc", "demo serve"):
+                raise subprocess.TimeoutExpired(cmd=list(command), timeout=kwargs.get("timeout"))
+            return CommandResult(command_tuple, 0, "", "")
+
+    runner = _AssertionAndTimeoutRunner()
+
+    with pytest.raises(ValidationEvidenceError) as exc_info:
+        ensure_validation_commands_pass(
+            _issue(body=_STRUCTURED_ISSUE_BODY), tmp_path, _legacy_config(), runner
+        )
+
+    failure_text = str(exc_info.value)
+    assert "failed for 2 item(s)" in failure_text
+    assert "EXPECTED-ASSERTION" in failure_text
+    assert "timed out" in failure_text
+    assert "Item 1" in failure_text
+    assert "Item 2" in failure_text
+
+
+def test_ensure_validation_commands_pass_aggregates_assertion_failures(
+    tmp_path: Path,
+) -> None:
+    """两条 item 的断言各自不命中时，门禁一次列出两处的期望 pattern。"""
+    import json
+
+    evidence_dir = tmp_path / ".iar" / "evidence"
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    (evidence_dir / "rv-1-fake.txt").write_text("placeholder", encoding="utf-8")
+    (evidence_dir / "rv-2-fake.txt").write_text("placeholder", encoding="utf-8")
+    manifest = {
+        "version": 1,
+        "language": "zh-CN",
+        "items": [
+            {
+                "item_number": 1,
+                "item_name": "假绿灯检查点 A",
+                "command": "demo run",
+                "evidence_files": ["rv-1-fake.txt"],
+                "output_summary": "命令 exit 0。",
+                "explanation": "说明。",
+                "risks": "无",
+                "negative_control": "改坏命令",
+                "expected_fail": "断言不命中",
+                "stdout_assertions": [{"pattern": "EXPECTED-ONE"}],
+            },
+            {
+                "item_number": 2,
+                "item_name": "假绿灯检查点 B",
+                "command": "demo serve",
+                "evidence_files": ["rv-2-fake.txt"],
+                "output_summary": "命令 exit 0。",
+                "explanation": "说明。",
+                "risks": "无",
+                "negative_control": "改坏命令",
+                "expected_fail": "断言不命中",
+                "stdout_assertions": [{"pattern": "EXPECTED-TWO"}],
+            },
+        ],
+    }
+    (evidence_dir / "evidence.json").write_text(
+        json.dumps(manifest, ensure_ascii=False), encoding="utf-8"
+    )
+    runner = FakeProcessRunner(
+        responses={
+            ("bash", "-lc", "demo run"): CommandResult(
+                command=("bash", "-lc", "demo run"),
+                return_code=0,
+                stdout="ACTUAL-ONE",
+                stderr="",
+            ),
+            ("bash", "-lc", "demo serve"): CommandResult(
+                command=("bash", "-lc", "demo serve"),
+                return_code=0,
+                stdout="ACTUAL-TWO",
+                stderr="",
+            ),
+        }
+    )
+
+    with pytest.raises(ValidationEvidenceError) as exc_info:
+        ensure_validation_commands_pass(
+            _issue(body=_STRUCTURED_ISSUE_BODY), tmp_path, _legacy_config(), runner
+        )
+
+    failure_text = str(exc_info.value)
+    assert "EXPECTED-ONE" in failure_text
+    assert "EXPECTED-TWO" in failure_text
+    assert "ACTUAL-ONE" in failure_text
+    assert "ACTUAL-TWO" in failure_text
 
 
 def test_ensure_validation_commands_pass_enforces_stdout_substring(

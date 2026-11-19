@@ -67,6 +67,13 @@ def add_runner_commands(subparsers: argparse._SubParsersAction) -> None:
         help="Skip the takeover confirmation prompt (required with --json).",
     )
     run_parser.add_argument(
+        "--progress",
+        dest="progress_events",
+        action="store_true",
+        default=False,
+        help="Emit structured progress events to stderr while this foreground run executes.",
+    )
+    run_parser.add_argument(
         "--fast-merge",
         action="store_true",
         default=False,

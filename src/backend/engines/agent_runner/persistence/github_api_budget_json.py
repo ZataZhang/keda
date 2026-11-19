@@ -32,10 +32,7 @@ from backend.core.shared.interfaces.agent_runner import GitHubApiRateLimitError
 from backend.core.shared.interfaces.github_api_budget import IGitHubApiBudget
 from backend.core.shared.models import product_identity
 
-try:
-    import fcntl
-except ImportError:  # pragma: no cover - 非 POSIX 平台退化为无锁
-    fcntl = None  # type: ignore[assignment]
+from backend.infrastructure.file_lock import file_lock
 
 _logger = logging.getLogger(__name__)
 
@@ -87,6 +84,16 @@ class JsonGitHubApiBudget(IGitHubApiBudget):
         flush_every_calls: int = _DEFAULT_FLUSH_EVERY_CALLS,
         flush_interval_seconds: float = _DEFAULT_FLUSH_INTERVAL_SECONDS,
     ) -> None:
+        """初始化额度账本。
+
+        Args:
+            state_path: 账本文件路径，省略时使用默认位置。
+            source: 来源标签（如 ``kc daemon`` / ``kc console``），用于区分多个进程的用量。
+            now: 返回当前 UTC 时间的函数，测试可替换。
+            probe_interval_seconds: 额度探测的最小间隔秒数。
+            flush_every_calls: 累计多少次调用后落盘一次。
+            flush_interval_seconds: 两次落盘之间的最长间隔秒数。
+        """
         self._state_path = (state_path or resolve_github_api_budget_path()).resolve()
         # 来源标签（如 ``kc daemon`` / ``kc console``）：多个进程共用一份账本，靠它回答“谁用的”。
         self._source = source
@@ -177,18 +184,10 @@ class JsonGitHubApiBudget(IGitHubApiBudget):
 
     @contextmanager
     def _write_lock(self) -> Iterator[None]:
-        """持有账本的排他锁；平台不支持 ``fcntl`` 时不加锁。"""
-        if fcntl is None:
-            yield
-            return
-        self._state_path.parent.mkdir(parents=True, exist_ok=True)
+        """持有账本的跨进程排他锁。"""
         lock_path = self._state_path.with_suffix(self._state_path.suffix + ".lock")
-        with open(lock_path, "a", encoding="utf-8") as lock_file:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+        with file_lock(lock_path):
+            yield
 
     def _update(self, mutate: Callable[[dict[str, Any]], None]) -> None:
         """持锁重读账本、合并待落盘的用量、应用修改后原子写回。

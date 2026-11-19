@@ -1,7 +1,8 @@
 name: Release
 
 # 发布两步走（见 docs/guides/release-process.md）：
-#   1. 推送 v* tag → 构建 Python 包和 macOS DMG，汇总后创建 DRAFT release（此时 PyPI 无任何变化，可反悔）
+#   1. 推送 v* tag → 构建 Python 包、macOS DMG 与 Windows NSIS 安装包，汇总后创建 DRAFT release
+#      （此时 PyPI 无任何变化，可反悔）
 #   2. 人工检查 draft release 产物后正式发布 → release published 事件触发
 #      publish-pypi（Trusted Publishing 上传）与 update-tap（tap formula 自动更新）
 # PyPI 版本号一旦上传就永久占用，因此上传绝不能挂在 tag 事件上。
@@ -207,10 +208,95 @@ jobs:
           path: dist/kedacode-desktop-macos-${{ matrix.arch }}.dmg
           if-no-files-found: error
 
+  build-desktop-windows:
+    name: Build Windows tray app
+    if: github.event_name == 'push'
+    runs-on: windows-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.3.0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install JavaScript dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Set desktop version from release tag
+        shell: bash
+        run: |
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release tag must have the form vX.Y.Z: $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+          node -e 'const fs = require("node:fs"); const path = "desktop/package.json"; const pkg = JSON.parse(fs.readFileSync(path, "utf8")); pkg.version = process.env.GITHUB_REF_NAME.slice(1); fs.writeFileSync(path, `${JSON.stringify(pkg, null, 2)}\n`);'
+
+      # 与 `just console-sync` 等价：Windows runner 没有 just，直接调用 pnpm。
+      - name: Build Console assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm --filter frontend-public build
+          rm -rf src/backend/api/static/console
+          mkdir -p src/backend/api/static/console
+          cp -R frontend-public/out/. src/backend/api/static/console/
+          touch src/backend/api/static/console/.gitkeep
+
+      - name: Build NSIS installer
+        run: pnpm --dir desktop exec tauri build --bundles nsis
+
+      - name: Name Windows installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          installer_path="$(find "desktop/src-tauri/target/release/bundle/nsis" -maxdepth 1 -type f -name '*.exe' -print -quit)"
+          if [ -z "$installer_path" ]; then
+            echo "Tauri did not produce an NSIS installer" >&2
+            exit 1
+          fi
+          cp "$installer_path" "dist/kedacode-desktop-windows-x64-setup.exe"
+
+      - name: Attest Windows installer provenance
+        id: windows-provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-path: dist/kedacode-desktop-windows-x64-setup.exe
+
+      - name: Stage Windows provenance bundle
+        shell: pwsh
+        env:
+          BUNDLE_PATH: ${{ steps.windows-provenance.outputs.bundle-path }}
+        run: Copy-Item -LiteralPath $env:BUNDLE_PATH -Destination dist/kedacode-desktop-windows-x64-setup.exe.sigstore.json
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: kedacode-desktop-windows-x64
+          path: |
+            dist/kedacode-desktop-windows-x64-setup.exe
+            dist/kedacode-desktop-windows-x64-setup.exe.sigstore.json
+          if-no-files-found: error
+
   draft-release:
     name: Create draft GitHub release
     if: github.event_name == 'push'
-    needs: [build, build-desktop]
+    needs: [build, build-desktop, build-desktop-windows]
     runs-on: ubuntu-latest
     steps:
       - name: Download Python distributions
@@ -219,16 +305,28 @@ jobs:
           name: kedacode-python-dist
           path: dist
 
-      - name: Download macOS disk images
+      - name: Download desktop installers
         uses: actions/download-artifact@v4
         with:
           pattern: kedacode-desktop-*
           path: dist
           merge-multiple: true
 
+      - name: Verify Windows installer provenance
+        working-directory: dist
+        env:
+          RELEASE_REPOSITORY: ${{ github.repository }}
+        run: |
+          gh attestation verify kedacode-desktop-windows-x64-setup.exe \
+            --bundle kedacode-desktop-windows-x64-setup.exe.sigstore.json \
+            --repo "$RELEASE_REPOSITORY" \
+            --signer-workflow "$RELEASE_REPOSITORY/.github/workflows/release.yml" \
+            --source-ref "$GITHUB_REF" \
+            --deny-self-hosted-runners
+
       - name: Compute SHA256SUMS
         working-directory: dist
-        run: sha256sum kedacode-*.tar.gz kedacode-*.whl kedacode-desktop-macos-*.dmg > SHA256SUMS
+        run: sha256sum kedacode-*.tar.gz kedacode-*.whl kedacode-desktop-macos-*.dmg kedacode-desktop-windows-*.exe kedacode-desktop-windows-*.sigstore.json > SHA256SUMS
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
@@ -239,6 +337,8 @@ jobs:
             dist/kedacode-*.tar.gz
             dist/kedacode-*.whl
             dist/kedacode-desktop-macos-*.dmg
+            dist/kedacode-desktop-windows-*.exe
+            dist/kedacode-desktop-windows-*.sigstore.json
             dist/SHA256SUMS
 
   publish-pypi:

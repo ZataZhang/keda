@@ -13,13 +13,16 @@ brew install ZataZhang/tap/kedacode
 kc --version
 ```
 
-**任何平台（uv / pipx，含 Windows PowerShell）：**
+**macOS / Linux / Windows（uv / pipx）：**
 
 ```bash
-uv tool install kedacode      # 推荐：uv 隔离环境，Windows 原生可用
+uv tool install kedacode      # 推荐：uv 隔离环境
 # 或
 pipx install kedacode
 ```
+
+Python 依赖在 Windows 上可直接安装；但**支持范围**与 macOS / Linux 不同，见下方
+[Windows 支持范围](#windows)。
 
 ### Shell 自动补全（一次性启用）
 
@@ -48,7 +51,37 @@ kc completion install --shell fish
 
 这个菜单与上面的 shell 补全菜单是两次独立选择；若两者都还未设置，菜单栏 App 菜单先出现，随后才会显示补全菜单。
 
-如果选择暂不安装，之后可手动执行 `kc desktop install`。自动提示只在 macOS 交互式终端出现，不影响脚本、机器输出、帮助或版本调用。安装后从 Finder 打开 `~/Applications/KedaCode.app` 即可显示菜单栏图标。当前公开构建使用 ad-hoc 签名且未公证；首次打开时 macOS 可能要求在「系统设置 → 隐私与安全性」中允许，详见[菜单栏 App 指南](../guides/desktop-companion.md)。
+如果选择暂不安装，之后可手动执行 `kc desktop install`。自动提示只在 macOS 交互式终端出现，不影响脚本、机器输出、帮助或版本调用。安装后从 Finder 打开 `~/Applications/KedaCode.app` 即可显示菜单栏图标。当前公开构建使用 ad-hoc 签名且未公证；首次打开时 macOS 可能要求在「系统设置 → 隐私与安全性」中允许，详见[桌面 App 指南](../guides/desktop-companion.md)。
+
+### Windows 系统托盘 App（可选）
+
+Windows 用户可以在终端执行：
+
+```powershell
+kc desktop install
+```
+
+命令会下载与当前 CLI 版本匹配的 NSIS 安装包、校验同一 Release 的 SHA-256，然后静默安装到 `%LOCALAPPDATA%\KedaCode`，不需要管理员权限。也可以到 [GitHub Release](https://github.com/ZataZhang/keda/releases) 下载 `kedacode-desktop-windows-x64-setup.exe` 双击安装。安装后从开始菜单启动 KedaCode，系统托盘会出现图标；面板、置顶悬浮窗、登录自启与系统通知的能力与 macOS 菜单栏 App 对齐。
+
+`kc desktop install` 需要新版 GitHub CLI（`gh`），会验证发布工作流的签名证明后再执行安装包。Windows 安装包当前未做代码签名，首次运行时 SmartScreen 可能提示「未知发布者」，选择「更多信息 → 仍要运行」即可。Windows 没有 macOS 那样的首次交互提示：安装桌面 App 需要显式执行上面的命令或手动下载安装包，不会打断脚本、机器输出、帮助或版本调用。详见[桌面 App 指南](../guides/desktop-companion.md)。
+
+## Windows 支持范围
+
+Windows 原生支持**不需要 POSIX 进程组**的那部分能力；依赖进程组或容器 uid/gid 映射的
+常驻功能暂不支持，调用时会在入口直接报错（而不是留下半启动的进程）：
+
+| 能力 | Windows | 说明 |
+|---|---|---|
+| `kc init` / `kc issue` / `kc run` 等 CLI 基本面 | ✅ 支持 | 一次性执行不依赖进程组；`kc run` 的超时回收会退化为只终止直接子进程 |
+| `kc console` 面板 | ✅ 支持 | 固定监听 `127.0.0.1`，本机单用户信任边界不变 |
+| 系统托盘 App（`kc desktop install`） | ✅ 支持 | 与 macOS 菜单栏 App 共用同一份 `kc console` |
+| `kc daemon` / `kc supervise-daemon` | ❌ 暂不支持 | 依赖 `os.killpg` 整组回收 agent 子进程树 |
+| `kc preview` | ❌ 暂不支持 | 依赖独立进程组标识与整组终止 |
+| `kc container`（容器化 runner） | ❌ 暂不支持 | 依赖 POSIX uid/gid 与进程组 |
+
+不支持的入口会抛出 `UnsupportedPlatformFeatureError`，消息会指明需要 Linux / macOS。
+CI 的 `windows-latest` job 只跑支持范围内的子集：全量模块 import 冒烟、跨平台文件锁、
+TOML 写回与 Console API 契约；daemon / preview / container 的 POSIX 专用测试不进入该 job。
 
 **curl 一键脚本（macOS / Linux）：**
 
@@ -126,6 +159,12 @@ kc container down
 
 完整说明见 `docs/guides/agent-runner.md` 的「容器化运行」章节。Docker 未安装时该子命令返回明确错误，不影响本机 `kc daemon` 用法。
 
+## 在管理终端升级
+
+本机管理终端发现新版并识别出安装方式时，点击「立即升级」即可调用对应的安装器。
+看到安装成功提示后，重新打开管理终端。如果正在运行常驻 Runner，也要重启 Runner 才会加载新版本。
+如果没有「立即升级」按钮，请按实际安装方式手动升级。
+
 ## 启动时版本更新检查
 
 每次启动 `kc` 时（`kc --version`、`--help` 等只读入口除外）会对照 PyPI 上的最新发布版本，发现新版后**仅在交互式终端**（stdin 与 stderr 都是 TTY）提示并询问是否升级；确认后用与你实际安装方式匹配的命令执行升级（`uv tool upgrade kedacode` / `pipx upgrade kedacode` / `brew upgrade kedacode` / `python -m pip install --upgrade kedacode`），并在执行后复核已安装版本，只有确实换到新版才报升级成功。`brew upgrade` 只给真正由 Homebrew formula 安装的副本（安装路径位于 `Cellar/kedacode/…`），跑在 Homebrew Python 里的 pip 安装不会被误当成 brew 托管。识别不出安装方式（如源码 editable、tarball 直链安装）或你拒绝自动执行时，只打印对应安装器的可复制命令，不会猜测执行。
@@ -157,7 +196,7 @@ Hosted Runner 也可选择启用 Linux 虚拟桌面：`[agent_runner.hosted].des
 归属与撤销：**口令/会话属客户；GitHub PAT 属其 GitHub 账户；provider key 属其计费账户；GitHub Actions secrets、项目 DB 凭据、SSH 私钥、反向代理 TLS 私钥都不由该 Console 收集**（由客户/运营者在自有基础设施管理）。**Console 删除只停该仓库 runner 并清本地密文/tmpfs 副本，不代替你撤销上游 key/PAT**——上游仍有效，需你主动到 provider/GitHub revoke。信任边界：同一 runner 内的 agent/代码可读取该 runner 自己收到的 key，隔离发生在「按仓库 + 单租户 VM」层。运维侧：项目级 DB 检查仍由 PR CI 把关；daemon 可用磁盘低于 10 GiB 暂停领取、越过 15 GiB 恢复、不杀在跑任务；`hosted_maintenance_enabled` 默认关。退订：删本地凭据 → 撤销上游 key/PAT → 停 runner 与代理 → 数据保留期按确认值执行。
 ## 随包 operator Skill 自动同步
 
-随发行包发行的 `kedacode-operator` Skill 会安装进 wheel，但用户级安装根（`~/.claude/skills`、`~/.codex/skills` 等）里的副本需要单独刷新，过去只能手动跑 `kc skill install`。现在 `kc` 启动时会**按已安装包版本比对**：版本相对上次同步记录发生变化时，自动把随包 operator Skill 刷新到全部安装根，之后同一版本不再重复触碰文件系统——升级 `kedacode` 后无需再手动同步。
+随包 `kedacode-operator` Skill 可用 `kc skill install` 显式安装到用户级目录（如 `~/.claude/skills`）。普通命令启动时默认关闭自动同步。设置 `KEDACODE_AUTO_SKILL_SYNC=1` 后，交互启动会按安装包版本刷新全部安装根，同一版本只同步一次。
 
 要点：
 

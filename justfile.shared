@@ -679,9 +679,9 @@ implement prd_file ai_tool prompt="":
     #!/usr/bin/env bash
     set -euo pipefail
 
-    prd_file="{{prd_file}}"
-    ai_tool="{{ai_tool}}"
-    prompt_text="{{prompt}}"
+    prd_file={{quote(prd_file)}}
+    ai_tool={{quote(ai_tool)}}
+    prompt_text={{quote(prompt)}}
     repo_root="$(git rev-parse --show-toplevel)"
 
     # Validate PRD file exists
@@ -937,28 +937,37 @@ implement prd_file ai_tool prompt="":
 #   just ai tag                               # auto-bump patch of latest tag (v0.1.2 -> v0.1.3), tag, then push
 #   just ai tag <name>                        # write tag message, create annotated tag with claude, then push
 #   just ai tag <name> kimi "custom prompt"   # use kimi with a custom prompt, then push
-# Shortcuts: check, fix, commit, push, implement, tag — all delegate to scripts/shared/just/ai_run.sh
+# pr 由当前会话准备上下文，确定性脚本负责 Git/GitHub 操作。
+#   just ai pr <context.json> [auto|only|confirm] [wait-seconds]
 ai subcommand arg1="" arg2="" arg3="" :
     #!/usr/bin/env bash
     set -euo pipefail
-    case "{{subcommand}}" in
+    case {{quote(subcommand)}} in
+        pr)
+            if [ -z {{quote(arg1)}} ]; then
+                echo "Usage: just ai pr <context.json> [auto|only|confirm] [wait-seconds]"
+                echo "context.json requires: schema_version, title, user_messages, task, summary, files, validation{status,details}; optional: issue, human_validation."
+                exit 1
+            fi
+            python3 -B ./scripts/shared/just/ai_pr.py {{quote(arg1)}} {{quote(if arg2 == "" { "auto" } else { arg2 })}} {{quote(if arg3 == "" { "180" } else { arg3 })}}
+            ;;
         check)
-            just _ai_check "{{arg1}}" "{{arg2}}" "{{arg3}}"
+            just _ai_check {{quote(arg1)}} {{quote(arg2)}} {{quote(arg3)}}
             ;;
         fix)
-            just _ai_fix "{{arg1}}" "{{arg2}}"
+            just _ai_fix {{quote(arg1)}} {{quote(arg2)}}
             ;;
         commit)
-            just _ai_commit "{{arg1}}" "{{arg2}}"
+            just _ai_commit {{quote(arg1)}} {{quote(arg2)}}
             ;;
         push)
-            just _ai_push "{{arg1}}" "{{arg2}}"
+            just _ai_push {{quote(arg1)}} {{quote(arg2)}}
             ;;
         implement)
-            just implement "{{arg1}}" "{{arg2}}" "{{arg3}}"
+            just implement {{quote(arg1)}} {{quote(arg2)}} {{quote(arg3)}}
             ;;
         tag)
-            just _ai_tag "{{arg1}}" "{{arg2}}" "{{arg3}}"
+            just _ai_tag {{quote(arg1)}} {{quote(arg2)}} {{quote(arg3)}}
             ;;
         *)
             echo "Usage:"
@@ -967,6 +976,7 @@ ai subcommand arg1="" arg2="" arg3="" :
             echo "  just ai commit                  # run just test, then commit"
             echo "  just ai push                    # run just test, then commit and push"
             echo "  just ai implement <prd-file>    # implement a PRD"
+            echo "  just ai pr <context.json>       # publish task/PR, detect merge readiness, return to default after merge"
             echo "  just ai tag [name]              # tag & push (no name = auto-bump patch, e.g. v0.1.2 -> v0.1.3; default: claude)"
             exit 1
             ;;
@@ -1067,34 +1077,35 @@ _ai_check file_path ai_tool="claude" prompt="":
     #!/usr/bin/env bash
     set -euo pipefail
 
-    if [ -z "{{file_path}}" ]; then
+    file_path={{quote(file_path)}}
+    if [ -z "$file_path" ]; then
         echo "Usage: just ai check <file_path> [claude|kimi] [prompt]"
         exit 1
     fi
 
-    if [ ! -e "{{file_path}}" ]; then
-        echo "ERROR: file not found: {{file_path}}"
+    if [ ! -e {{quote(file_path)}} ]; then
+        echo "ERROR: file not found: $file_path"
         exit 1
     fi
 
-    if [ -z "{{prompt}}" ]; then
+    if [ -z {{quote(prompt)}} ]; then
         # Default prompt lives in a sibling file so this recipe body
         # stays short (just's recipe parser is indent-sensitive and
         # multi-line string literals are awkward inside a recipe).
         prompt_text="$(cat ./scripts/shared/just/ai_check_prompt.txt)"
-        prompt_text="${prompt_text//<FILE_PATH>/{{file_path}}}"
+        prompt_text="${prompt_text//<FILE_PATH>/"$file_path"}"
     else
-        prompt_text="{{prompt}}"
+        prompt_text={{quote(prompt)}}
     fi
 
-    ./scripts/shared/just/ai_run.sh "{{ai_tool}}" "$prompt_text" --interactive
+    ./scripts/shared/just/ai_run.sh {{quote(ai_tool)}} "$prompt_text" --interactive
 
 # Internal: fix git rebase/merge conflicts with an AI tool.
 _ai_fix ai_tool="claude" prompt="" :
     #!/usr/bin/env bash
     set -euo pipefail
 
-    prompt_text="{{prompt}}"
+    prompt_text={{quote(prompt)}}
 
     # Detect any unresolved conflicts (works for rebase, merge, cherry-pick, revert, stash pop)
     unmerged_files="$(git diff --name-only --diff-filter=U 2>/dev/null || true)"
@@ -1138,7 +1149,7 @@ _ai_fix ai_tool="claude" prompt="" :
         prompt_text="Resolve all git conflicts from $conflict_source. For each conflict file, read it, merge correctly preserving the intent of both sides where possible, remove all conflict markers, then git add the resolved file. Do NOT commit and do NOT run any 'git * --continue' command — only stage the resolved files. After all files are done, run 'just test' and ensure it passes."
     fi
 
-    ./scripts/shared/just/ai_run.sh "{{ai_tool}}" "$prompt_text"
+    ./scripts/shared/just/ai_run.sh {{quote(ai_tool)}} "$prompt_text"
 
     # If the AI resolved everything, continue the interrupted git operation.
     # If conflicts remain, print the matching continue command so the user
@@ -1157,6 +1168,9 @@ _ai_fix ai_tool="claude" prompt="" :
         [ "$stash_in_progress" = "true" ]         && echo "  git add . && git commit   (stash pop has no --continue)"
         exit 1
     fi
+
+    # 冲突标记消失不代表测试通过；继续 Git 操作前独立验证。
+    just test
 
     if [ "$rebase_in_progress" = "true" ]; then
         echo ""
@@ -1187,7 +1201,7 @@ _ai_commit ai_tool="claude" prompt="" :
     #!/usr/bin/env bash
     set -euo pipefail
 
-    prompt_text="{{prompt}}"
+    prompt_text={{quote(prompt)}}
 
     # Fail fast if there is nothing to commit
     if [ -z "$(git status --porcelain)" ]; then
@@ -1197,17 +1211,17 @@ _ai_commit ai_tool="claude" prompt="" :
 
     # Auto-generate default prompt
     if [ -z "$prompt_text" ]; then
-        prompt_text="First, run \`just test\` in the repository root to verify all tests pass. If tests fail, fix the underlying issues and re-run until \`just test\` is green. Once tests pass, review the current git changes (git status, git diff, and git diff --cached) and create a commit. Stage relevant files with git add, then write a clear commit message in English following conventional commit style (e.g. 'feat(scope): ...', 'fix(scope): ...', 'refactor(scope): ...'). Keep the subject line under 72 characters and use the body to explain the 'why' rather than the 'what'. Do NOT push. Do NOT amend existing commits. If pre-commit hooks fail, fix the underlying issues and create a new commit (never amend). Proceed autonomously without asking for confirmation at any step — commit directly once \`just test\` is green."
+        prompt_text="First, run \`just test\` in the repository root to verify all tests pass. If tests fail, fix only failures directly caused by the changes being committed, then re-run. If a failure is unrelated or its cause is uncertain, stop and report it without committing. Do not expand the task to unrelated repairs. Once tests pass, review the current git changes (git status, git diff, and git diff --cached) and create a commit. Stage relevant files with git add, then write a clear commit message in English following conventional commit style (e.g. 'feat(scope): ...', 'fix(scope): ...', 'refactor(scope): ...'). Keep the subject line under 72 characters and use the body to explain the 'why' rather than the 'what'. Do NOT push. Do NOT amend existing commits. If pre-commit hooks fail, fix the underlying issues and create a new commit (never amend). Proceed autonomously without asking for confirmation at any step — commit directly once \`just test\` is green."
     fi
 
-    ./scripts/shared/just/ai_run.sh "{{ai_tool}}" "$prompt_text"
+    ./scripts/shared/just/ai_run.sh {{quote(ai_tool)}} "$prompt_text"
 
 # Internal: ask an AI tool to run `just test` and commit, then push the result.
 _ai_push ai_tool="claude" prompt="" :
     #!/usr/bin/env bash
     set -euo pipefail
 
-    prompt_text="{{prompt}}"
+    prompt_text={{quote(prompt)}}
 
     # Fail fast if there is nothing to commit
     if [ -z "$(git status --porcelain)" ]; then
@@ -1217,10 +1231,16 @@ _ai_push ai_tool="claude" prompt="" :
 
     # Auto-generate default prompt
     if [ -z "$prompt_text" ]; then
-        prompt_text="First, run \`just test\` in the repository root to verify all tests pass. If tests fail, fix the underlying issues and re-run until \`just test\` is green. Once tests pass, review the current git changes (git status, git diff, and git diff --cached) and create a commit. Stage relevant files with git add, then write a clear commit message in English following conventional commit style (e.g. 'feat(scope): ...', 'fix(scope): ...', 'refactor(scope): ...'). Keep the subject line under 72 characters and use the body to explain the 'why' rather than the 'what'. Do NOT amend existing commits. If pre-commit hooks fail, fix the underlying issues and create a new commit (never amend). Proceed autonomously without asking for confirmation at any step — commit directly once \`just test\` is green. After you finish, the script will handle the push, so you do NOT need to push."
+        prompt_text="First, run \`just test\` in the repository root to verify all tests pass. If tests fail, fix only failures directly caused by the changes being committed, then re-run. If a failure is unrelated or its cause is uncertain, stop and report it without committing. Do not expand the task to unrelated repairs. Once tests pass, review the current git changes (git status, git diff, and git diff --cached) and create a commit. Stage relevant files with git add, then write a clear commit message in English following conventional commit style (e.g. 'feat(scope): ...', 'fix(scope): ...', 'refactor(scope): ...'). Keep the subject line under 72 characters and use the body to explain the 'why' rather than the 'what'. Do NOT amend existing commits. If pre-commit hooks fail, fix the underlying issues and create a new commit (never amend). Proceed autonomously without asking for confirmation at any step — commit directly once \`just test\` is green. After you finish, the script will handle the push, so you do NOT need to push."
     fi
 
-    ./scripts/shared/just/ai_run.sh "{{ai_tool}}" "$prompt_text"
+    previous_head="$(git rev-parse HEAD)"
+    ./scripts/shared/just/ai_run.sh {{quote(ai_tool)}} "$prompt_text"
+
+    if [ "$(git rev-parse HEAD)" = "$previous_head" ]; then
+        echo "No new commit was created. Push stopped." >&2
+        exit 1
+    fi
 
     # AI finished - now handle push with safety checks and user confirmation.
     echo ""
@@ -1272,9 +1292,9 @@ _ai_tag tag_name ai_tool="claude" prompt="" :
 
     # Capture recipe params into shell vars so downstream defaults and
     # validation all read from the same place.
-    tag_name="{{tag_name}}"
-    ai_tool="{{ai_tool}}"
-    prompt_text="{{prompt}}"
+    tag_name={{quote(tag_name)}}
+    ai_tool={{quote(ai_tool)}}
+    prompt_text={{quote(prompt)}}
 
     # When no tag name is given, default to bumping the patch (最后一位) of the
     # most recent semver tag, e.g. v0.1.2 -> v0.1.3. This keeps `just ai tag`

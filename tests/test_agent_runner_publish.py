@@ -20,6 +20,8 @@ from backend.core.shared.models.agent_runner import (
     PullRequestContext,
     WorktreeConfig,
 )
+from backend.core.shared.models.publish_stage import PublishStage
+from backend.core.use_cases.agent_runner_claim_lease import ClaimLeaseLost
 from backend.core.use_cases.agent_runner_publish import create_draft_pr, push_changes
 from backend.core.use_cases.run_agent_once import (
     PrdDeliveryError,
@@ -35,6 +37,116 @@ from tests.support.agent_runner import (
     git_remote_result,
     make_prd_issue,
 )
+
+
+def test_pre_verifier_draft_pr_publishes_review_artifacts_after_pr_creation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Draft PR 创建后立即发布人审材料分支，且不等待 verifier。"""
+    from backend.core.use_cases import agent_runner_publication as publication
+
+    events: list[str] = []
+    monkeypatch.setattr(
+        publication,
+        "_push_changes_with_recovery_context",
+        lambda _request: events.append("push"),
+    )
+
+    def create_draft_pr(**_kwargs: object) -> tuple[str, str]:
+        events.append("draft-pr")
+        return "issue-1", "https://github.com/example/repo/pull/1"
+
+    monkeypatch.setattr(
+        publication,
+        "_create_draft_pr_with_recovery_context",
+        create_draft_pr,
+    )
+
+    def publish_artifacts(**_kwargs: object) -> None:
+        events.append("review-materials")
+
+    monkeypatch.setattr(publication, "publish_validation_evidence_artifacts", publish_artifacts)
+
+    publication.publish_draft_pr_before_verifier(
+        publication.PreVerifierDraftPublicationRequest(
+            issue=IssueSummary(
+                number=1,
+                title="Review evidence timing",
+                url="https://github.com/example/repo/issues/1",
+                body="Realistic Validation required.",
+                labels=(),
+            ),
+            worktree_path=tmp_path,
+            config=AppConfig(),
+            github_client=FakeGitHubClient(),
+            process_runner=FakeProcessRunner(),
+            expected_branch="issue-1",
+            publish_stage=PublishStage.NORMAL,
+        )
+    )
+
+    assert events == ["push", "draft-pr", "review-materials"]
+
+
+@pytest.mark.parametrize(
+    ("evidence_error_type", "should_propagate"),
+    [(OSError, False), (ClaimLeaseLost, True)],
+)
+def test_pre_verifier_draft_pr_handles_evidence_publish_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    evidence_error_type: type[Exception],
+    should_propagate: bool,
+) -> None:
+    """普通证据发布失败可继续；claim lease 丢失必须停止当前 Issue。"""
+    from backend.core.use_cases import agent_runner_publication as publication
+
+    events: list[str] = []
+
+    def push_changes(_request: object) -> None:
+        events.append("push")
+
+    monkeypatch.setattr(publication, "_push_changes_with_recovery_context", push_changes)
+
+    def create_draft_pr(**_kwargs: object) -> tuple[str, str]:
+        events.append("draft-pr")
+        return "issue-1", "https://github.com/example/repo/pull/1"
+
+    monkeypatch.setattr(publication, "_create_draft_pr_with_recovery_context", create_draft_pr)
+
+    def raise_evidence_error(**_kwargs: object) -> None:
+        events.append("review-materials")
+        raise evidence_error_type("evidence publication failed")
+
+    monkeypatch.setattr(
+        publication,
+        "publish_validation_evidence_artifacts",
+        raise_evidence_error,
+    )
+
+    draft_publication = publication.PreVerifierDraftPublicationRequest(
+        issue=IssueSummary(
+            number=1,
+            title="Review evidence timing",
+            url="https://github.com/example/repo/issues/1",
+            body="Realistic Validation required.",
+            labels=(),
+        ),
+        worktree_path=tmp_path,
+        config=AppConfig(),
+        github_client=FakeGitHubClient(),
+        process_runner=FakeProcessRunner(),
+        expected_branch="issue-1",
+        publish_stage=PublishStage.NORMAL,
+    )
+    if should_propagate:
+        with pytest.raises(evidence_error_type):
+            publication.publish_draft_pr_before_verifier(draft_publication)
+    else:
+        publication.publish_draft_pr_before_verifier(draft_publication)
+
+    assert events == ["push", "draft-pr", "review-materials"]
 
 
 def test_get_head_sha() -> None:

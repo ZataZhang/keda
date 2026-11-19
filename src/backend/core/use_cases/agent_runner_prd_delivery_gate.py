@@ -5,9 +5,9 @@ module under the repository's 1000-non-empty-line hard limit. The helpers are
 imported back into ``agent_runner_feedback`` so the existing call sites and the
 public ``PrdDeliveryError`` re-export keep working.
 
-归档语义遵循 prd skill Machine Contract v5：归档只代表执行侧交付完成。
-Human-Confirmed 组的空框归人回答，既不阻止归档也不阻止发布；它们是否还开着，
-由验收状态横幅如实呈现——横幅与清单对不上，就不归档、不发布。
+归档语义遵循 prd skill Machine Contract v6：归档只代表代码落地。
+正常路径要求执行侧验证完成；显式 ``validation_blocked`` 可带执行侧空框归档，
+但不进入人工验收。横幅与清单对不上时仍不归档、不发布。
 """
 
 from __future__ import annotations
@@ -91,15 +91,20 @@ def _validate_acceptance_banner(
     current_status = checklist_result.acceptance_status
     if current_status is None:
         return
+    open_execution_item_count = len(checklist_result.execution_unchecked_items)
     open_human_item_count = len(checklist_result.human_unchecked_items)
-    expected_status = "awaiting_human" if open_human_item_count else "accepted"
+    if open_execution_item_count:
+        expected_status = "validation_blocked"
+    else:
+        expected_status = "awaiting_human" if open_human_item_count else "accepted"
     if current_status == expected_status:
         return
     raise PrdDeliveryError(
         "Acceptance status banner does not match the Acceptance Checklist in "
         f"{prd_relative_path}: the banner state is "
         f"`{current_status or 'missing or unrecognized'}` but must be `{expected_status}`, "
-        f"because {open_human_item_count} Human-Confirmed item(s) are still `- [ ]`. "
+        f"because {open_execution_item_count} executor-owned item(s) and "
+        f"{open_human_item_count} Human-Confirmed item(s) are still `- [ ]`. "
         "Change only the banner line; never tick or rewrite a checklist item to make "
         "the two agree.",
         kind=DeliveryGateFailureKind.ACCEPTANCE_BANNER_MISMATCH,
@@ -128,13 +133,36 @@ def _validate_prd_checklist(
     if not checklist_result.section_found:
         # 章节整体缺失说明 PRD 结构有问题，不是"漏勾了几个框"——保持真失败类。
         raise PrdDeliveryError(f"Acceptance Checklist section missing in {prd_relative_path}")
-    if checklist_result.execution_unchecked_items:
+    if (
+        checklist_result.execution_unchecked_items
+        and checklist_result.acceptance_status != "validation_blocked"
+    ):
         unchecked_summary = _format_unchecked_items(checklist_result.execution_unchecked_items)
         raise PrdDeliveryError(
             f"Acceptance Checklist has unchecked items in {prd_relative_path}:\n"
             f"{unchecked_summary}{_human_group_missing_hint(checklist_result)}",
             kind=DeliveryGateFailureKind.CHECKLIST_UNCHECKED,
         )
+    if (
+        checklist_result.acceptance_status == "validation_blocked"
+        and checklist_result.execution_unchecked_items
+    ):
+        blocked_fields = {
+            "Validation blocker": checklist_result.validation_blocker,
+            "Validation follow-up": checklist_result.validation_follow_up,
+        }
+        missing_field_names = [
+            field_name
+            for field_name, field_value in blocked_fields.items()
+            if not field_value or ("[" in field_value and "]" in field_value)
+        ]
+        if missing_field_names:
+            raise PrdDeliveryError(
+                f"Validation-blocked PRD {prd_relative_path} is missing required "
+                f"Final Reconciliation field(s): {', '.join(missing_field_names)}. "
+                "Keep executor-owned items open and record a concrete blocker and "
+                "tracked follow-up instead of archiving an untracked validation debt."
+            )
     _validate_acceptance_banner(checklist_result, prd_relative_path)
 
 

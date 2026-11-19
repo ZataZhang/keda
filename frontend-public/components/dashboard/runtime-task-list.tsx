@@ -8,7 +8,7 @@
 // 单独呈现，避免「列表为空」被读成「一切正常」。
 
 import { useMemo, useState } from "react";
-import { Check, Copy } from "lucide-react";
+import { Check, Copy, Play } from "lucide-react";
 
 import { ConsoleToolbar } from "@/components/layout/console-page";
 import { Input } from "@/components/ui/input";
@@ -20,11 +20,13 @@ import type { RuntimeTaskEntry, RuntimeTaskStatus } from "@/lib/api/types";
 import { openExternalUrl } from "@/lib/open-external";
 import { cn, formatLocalDateTime } from "@/lib/utils";
 
+import { RuntimeTaskHumanReviewPage } from "./runtime-task-evidence-page";
 import { RuntimeTaskPhaseDescription, RuntimeTaskPhase } from "./runtime-task-phase";
 
 /** 状态分桶的人读文案与配色（唯一事实源，列表/详情/小窗共用）。 */
 const STATUS_PRESENTATION: Record<RuntimeTaskStatus, { label: string; variant: BadgeVariant }> = {
   running: { label: "运行中", variant: "running" },
+  deferred: { label: "暂缓重试", variant: "warning" },
   waiting: { label: "等待处理", variant: "review" },
   blocked: { label: "阻塞", variant: "blocked" },
   failed: { label: "失败", variant: "failed" },
@@ -36,6 +38,7 @@ const STATUS_PRESENTATION: Record<RuntimeTaskStatus, { label: string; variant: B
 /** 状态筛选选项：``all`` 加上后端可能给出的每个分桶。 */
 const STATUS_FILTERS: RuntimeTaskStatus[] = [
   "running",
+  "deferred",
   "blocked",
   "failed",
   "waiting",
@@ -43,6 +46,15 @@ const STATUS_FILTERS: RuntimeTaskStatus[] = [
   "closed",
   "unknown",
 ];
+
+/** 后端运行摘要降级来源的人读说明，避免把内部来源 ID 当成错误信息。 */
+const UNAVAILABLE_SOURCE_MESSAGES: Record<string, string> = {
+  monitor_snapshot:
+    "仓库监控快照不可用，任务状态可能缺失或过期；请到「仓库监控」查看同步状态。",
+  run_history: "运行历史不可用，任务结果与耗时信息可能不完整。",
+  attempt_ledger: "执行尝试记录不可用，阶段、执行器与重试信息可能不完整。",
+  invocation_ledger: "模型调用记录不可用，当前执行器与失败诊断可能不完整。",
+};
 
 /**
  * 取得生命周期分桶的展示定义。
@@ -142,6 +154,16 @@ export function RuntimeTaskList({
       return haystack.includes(needle);
     });
   }, [tasks, statusFilter, query]);
+  const unavailableSourceMessages = unavailableSources
+    .filter(
+      (source) =>
+        source !== "monitor_snapshot" || syncStatus !== "pending_first_sync",
+    )
+    .map(
+      (source) =>
+        UNAVAILABLE_SOURCE_MESSAGES[source] ??
+        `数据来源「${source}」不可用，相关字段可能不完整。`,
+    );
 
   return (
     <div className="flex min-h-0 flex-col gap-3" data-testid="runtime-task-list">
@@ -187,16 +209,15 @@ export function RuntimeTaskList({
 
       {syncStatus === "pending_first_sync" ? (
         <p className="text-xs text-amber-700 dark:text-amber-300" data-testid="runtime-degraded">
-          尚未完成首次同步，任务列表还不能反映真实运行；后台扫描完成后自动跟上。
+          尚未获得可用的首次监控快照，任务列表还不能反映真实运行；请到「仓库监控」查看同步状态。
         </p>
       ) : null}
-      {unavailableSources.filter((source) => source !== "monitor_snapshot").length > 0 ? (
+      {unavailableSourceMessages.length > 0 ? (
         <p
           className="text-xs text-amber-700 dark:text-amber-300"
           data-testid="runtime-source-partial"
         >
-          部分来源本轮不可读：{unavailableSources.join("、")}
-          。受影响字段留空，不会折算成零。
+          看板数据不完整：{unavailableSourceMessages.join("；")}
         </p>
       ) : null}
       {missingRepoIds.length > 0 ? (
@@ -302,6 +323,9 @@ function RuntimeTaskRow({
   const identity = `${task.repo_display_name ?? task.repo_id}#${task.issue_number}`;
   const issueUrl = task.issue_url;
   const prUrl = task.pr_url;
+  const [evidenceOpen, setEvidenceOpen] = useState(false);
+  const [reviewPageOpen, setReviewPageOpen] = useState(false);
+  const evidenceUrl = task.evidence_video_available ? evidenceVideoUrl(task) : null;
   return (
     <li
       className={`rounded-md border text-sm transition-colors ${
@@ -331,8 +355,23 @@ function RuntimeTaskRow({
         </span>
         <RuntimeTaskPhaseDescription task={task} className="mt-1 block text-xs text-slate-500" />
         <RuntimeTaskObservation task={task} />
+        <RuntimeTaskBlockingReason task={task} compact />
+        {task.status === "failed" && (task.failure_reason || task.last_error_summary) ? (
+          <span
+            className="mt-1 block max-w-full truncate px-3 text-xs text-red-700 dark:text-red-300"
+            title={task.last_error_summary ?? task.failure_reason ?? undefined}
+            data-testid="runtime-task-failure-reason"
+          >
+            失败原因：{task.failure_reason ?? task.last_error_summary}
+          </span>
+        ) : null}
         <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
-          {task.agent ? (
+          {task.unclosed_invocation_executor ? (
+            <span title="调用账本尚未记录该调用的结束事件；此信息不能单独证明执行进程仍存活。">
+              未结束调用：{task.unclosed_invocation_executor}
+              {task.unclosed_invocation_model ? ` · ${task.unclosed_invocation_model}` : ""}
+            </span>
+          ) : task.agent ? (
             <span>
               最近执行：{task.agent}
               {task.preset ? ` · ${task.preset}` : ""}
@@ -366,8 +405,80 @@ function RuntimeTaskRow({
               description={task.pr_number ? `PR #${task.pr_number}` : "PR"}
             />
           ) : null}
+          {evidenceUrl ? (
+            <button
+              type="button"
+              onClick={() => setEvidenceOpen(true)}
+              className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 leading-4 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-900 dark:bg-emerald-950/50 dark:text-emerald-300 dark:hover:bg-emerald-900/60"
+              title="播放该任务的证据视频"
+              data-testid="runtime-task-evidence-play"
+            >
+              <Play size={11} aria-hidden />
+              Video
+            </button>
+          ) : null}
+          {task.evidence_page_available ? (
+            <button
+              type="button"
+              onClick={() => setReviewPageOpen(true)}
+              className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 leading-4 text-amber-700 hover:bg-amber-100 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-300 dark:hover:bg-amber-900/60"
+              title="打开该任务的人审页"
+              data-testid="runtime-task-evidence-page"
+            >
+              Review
+            </button>
+          ) : null}
         </div>
       </div>
+      {evidenceOpen && evidenceUrl ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-6"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`${identity} 证据视频`}
+          data-testid="runtime-task-evidence-dialog"
+          onClick={() => setEvidenceOpen(false)}
+        >
+          <div
+            className="w-full max-w-4xl rounded-lg bg-white p-3 shadow-xl dark:bg-slate-900"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="mb-2 flex items-center justify-between gap-3 text-sm">
+              <span className="font-medium text-slate-900 dark:text-slate-100">
+                {identity} 证据视频
+              </span>
+              <span className="flex items-center gap-3 text-xs">
+                <a href={evidenceUrl} target="_blank" rel="noreferrer" className="underline">
+                  在新标签页打开
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setEvidenceOpen(false)}
+                  className="rounded-md border border-slate-200 px-2 py-0.5 dark:border-slate-700"
+                >
+                  关闭
+                </button>
+              </span>
+            </div>
+            <video
+              src={evidenceUrl}
+              controls
+              autoPlay
+              className="max-h-[70vh] w-full rounded-md bg-black"
+              data-testid="runtime-task-evidence-video"
+            />
+          </div>
+        </div>
+      ) : null}
+      {reviewPageOpen ? (
+        <RuntimeTaskHumanReviewPage
+          repoId={task.repo_id}
+          issueNumber={task.issue_number}
+          prdPath={task.prd_path}
+          identity={identity}
+          onClose={() => setReviewPageOpen(false)}
+        />
+      ) : null}
     </li>
   );
 }
@@ -387,6 +498,24 @@ const LINK_PILL_TONES = {
     divider: "border-violet-200 dark:border-violet-900",
   },
 } as const;
+
+/**
+ * 本地证据视频的播放地址。
+ *
+ * 路径由后端按 registry 登记的仓库根目录解析，前端只传身份参数，因此不能借这个
+ * 端点读任意文件。
+ *
+ * @param task - 当前任务行。
+ * @returns 可直接交给 <video src> 的同源地址。
+ */
+function evidenceVideoUrl(task: RuntimeTaskEntry): string {
+  const params = new URLSearchParams({
+    repo_id: task.repo_id,
+    issue: String(task.issue_number),
+  });
+  if (task.prd_path) params.set("prd_path", task.prd_path);
+  return `/api/v1/agent-runner/console/runtime/evidence/video?${params.toString()}`;
+}
 
 /**
  * 一分为二的外链胶囊：左半跳转，右半只复制 URL（复制不触发跳转）。
@@ -486,6 +615,38 @@ export function RuntimeTaskDuration({ task }: { task: RuntimeTaskEntry }) {
   return <span>{label}：{formatLifecycleDuration(task.duration_seconds)}</span>;
 }
 
+/**
+ * 在任务行与详情里呈现最近一次请求人工处理的具体原因。
+ *
+ * @param props.task - 当前任务摘要。
+ * @param props.compact - 是否使用任务行和桌面小窗的紧凑样式。
+ * @returns 阻塞原因；没有对应监督摘要时返回 ``null``。
+ */
+export function RuntimeTaskBlockingReason({
+  task,
+  compact = false,
+}: {
+  task: RuntimeTaskEntry;
+  compact?: boolean;
+}) {
+  const blockingReason = task.blocking_reason?.trim();
+  if (task.status !== "blocked" || !blockingReason) return null;
+
+  return (
+    <span
+      className={
+        compact
+          ? "mt-1 block max-w-full line-clamp-2 break-words text-xs text-amber-800 dark:text-amber-300"
+          : "block whitespace-pre-wrap break-words rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200"
+      }
+      title={blockingReason}
+      data-testid="runtime-task-blocking-reason"
+    >
+      阻塞原因：{blockingReason}
+    </span>
+  );
+}
+
 /** 活动列表包含状态待核实的任务，避免未知状态被历史任务掩盖。 */
 export function isActiveRuntimeTask(task: RuntimeTaskEntry): boolean {
   return task.status !== "completed" && task.status !== "closed";
@@ -493,12 +654,29 @@ export function isActiveRuntimeTask(task: RuntimeTaskEntry): boolean {
 
 /** 在列表、小窗和详情中直接披露运行依据及历史终态。 */
 export function RuntimeTaskObservation({ task }: { task: RuntimeTaskEntry }) {
-  const outcomeLabels: Record<string, string> = { completed: "成功", failed: "失败", blocked: "阻塞" };
-  const reason = task.status === "running"
-    ? `${task.status_reason ?? "监控标记运行"}；运行标记不代表执行进程已探活。`
-    : task.status === "unknown" || task.status === "closed"
-      ? task.status_reason
-      : null;
+  const outcomeLabels: Record<string, string> = {
+    completed: "成功",
+    failed: "失败",
+    blocked: "阻塞",
+    deferred: "暂缓重试",
+  };
+  const lastObservedStatus = task.last_observed_status
+    ? runtimeStatusPresentation(task.last_observed_status, task.waiting_reason).label
+    : null;
+  const staleObservation = task.sync_error
+    ? task.last_observed_at
+      ? lastObservedStatus
+        ? `最后确认状态：${lastObservedStatus} · ${formatLocalDateTime(task.last_observed_at)}（快照已过期）`
+        : `最后一次同步：${formatLocalDateTime(task.last_observed_at)}（快照已过期；当时状态未能判定）`
+      : "尚无可用的成功快照，GitHub 恢复后会重新确认。"
+    : null;
+  const reason = task.sync_error
+    ? `状态同步失败，正在自动重试：${task.sync_error}。${staleObservation}`
+    : task.status === "running"
+      ? `${task.status_reason ?? "监控标记运行"}；运行标记不代表执行进程已探活。`
+      : task.status === "unknown" || task.status === "closed" || task.status === "deferred"
+        ? task.status_reason
+        : null;
   if (!reason && !task.last_outcome) return null;
   return (
     <span className="mt-1 block text-xs text-slate-500" data-testid="runtime-task-observation">

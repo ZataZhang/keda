@@ -127,7 +127,7 @@ def _read_prd_title(prd_path: Path) -> str:
             match = re.match(r"^#\s+(.+)", line)
             if match:
                 return match.group(1).strip()
-    except Exception:
+    except Exception:  # noqa: BLE001 - 标题读取失败时退回文件名。
         pass
     return prd_path.name
 
@@ -170,7 +170,7 @@ def _build_issue_summary(
                 lines.append(f"{label}:")
                 for issue in issues:
                     lines.append(f"  #{issue.number}: {issue.title}")
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - 单个标签查询失败不影响其余标签的摘要。
             _logger.warning("Failed to list issues for label %s: %s", label, exc)
     if not lines:
         return "No relevant open issues found."
@@ -844,7 +844,7 @@ def execute_decision_plan(
                     "status": "failed",
                     "error": f"Unhandled action type: {action.action_type.value}",
                 }
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - 任何动作失败都记入结果，不中断后续动作。
             result = {
                 "action_id": action.action_id,
                 "status": "failed",
@@ -920,7 +920,7 @@ def run_interactive_decision(
     # 3. Parse plan
     try:
         plan = parse_decision_plan(user_prompt, planner_result.stdout)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - planner 输出不可解析时以退出码 1 结束。
         _logger.error("Failed to parse planner output: %s", exc)
         return 1
 

@@ -138,6 +138,11 @@ class BacklogAdvanceReport:
             in dry-run mode these are the promotions that *would* happen.
         queued: PRD paths that were (or would be) enqueued as ``queued``.
         skipped: Promotion attempts rejected by the action layer, with reasons.
+            Every element is a PRD-path prefixed string — never a pass-level
+            error, which would read as if a PRD had been skipped.
+        running_count_error: Reason the repository-wide ``agent/running`` count
+            query failed (promotions were skipped for the pass), or ``None``
+            when the count succeeded.
     """
 
     repo_id: str
@@ -152,6 +157,7 @@ class BacklogAdvanceReport:
     started: list[BacklogActionResult]
     queued: list[str]
     skipped: list[str]
+    running_count_error: str | None = None
 
 
 @dataclass(frozen=True)

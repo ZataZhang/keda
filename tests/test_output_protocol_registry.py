@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
 from typing import Any
 
 import pytest
@@ -24,6 +26,8 @@ BUILTIN_PROTOCOL_IDS = (
     "pi-json-lines",
     "codex-json-lines",
     "opencode-json-lines",
+    "mcode-json-lines",
+    "dsh-json-lines",
 )
 
 
@@ -233,6 +237,41 @@ def test_failed_load_is_not_cached(monkeypatch: pytest.MonkeyPatch) -> None:
     protocol = registry.resolve("flaky")
     assert callable(protocol.relay)
     assert len(load_calls) == 2
+
+
+# ---------------------------------------------------------------------------
+# 内置协议实现的导入时机
+# ---------------------------------------------------------------------------
+
+
+def test_builtin_protocol_modules_import_with_the_package() -> None:
+    """内置协议实现必须在**包导入期**一次性导入完（整进程同一份代码快照）。
+
+    长驻进程（daemon / ``kc run``）跨过一次代码更新后，运行期再从磁盘懒加载
+    实现模块就会拿到新版本实现、配上进程启动时导入的旧核心接口类，得到半新半旧
+    的代码快照——表现为 ``'OutputRelayRequest' object has no attribute
+    'cancel_check'`` 这类难以定位的属性错误。用全新解释器验证：导入包即导入
+    全部内置实现。
+    """
+    probe_script = (
+        "import sys\n"
+        "import backend.engines.agent_runner.output_protocols as package\n"
+        "missing = [\n"
+        "    name\n"
+        "    for name in package.BUILTIN_PROTOCOL_MODULE_NAMES\n"
+        "    if f'backend.engines.agent_runner.output_protocols.{name}' not in sys.modules\n"
+        "]\n"
+        "print(','.join(missing))\n"
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", probe_script],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+
+    assert completed.stdout.strip() == ""
 
 
 # ---------------------------------------------------------------------------

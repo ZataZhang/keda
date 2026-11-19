@@ -31,11 +31,13 @@ from tests.support.agent_runner import (
     ACCEPTED_BANNER,
     AWAITING_HUMAN_BANNER,
     NOT_STARTED_BANNER,
+    VALIDATION_BLOCKED_BANNER,
     build_acceptance_prd,
     create_commit,
     init_git_repo,
     make_prd_issue,
     require_banner_aware_prd_skill,
+    require_validation_blocked_prd_skill,
     run_git,
 )
 
@@ -587,6 +589,72 @@ def test_delivery_keeps_prd_pending_while_an_executor_item_is_open_real_git(
     assert "- [ ] rv-2: executor-owned item 2" in str(exc_info.value)
     # 人审空框不算执行侧未勾，不能被点名成"漏勾"。
     assert "decision 1" not in str(exc_info.value)
+    _assert_prd_not_moved(tmp_path)
+
+
+def test_delivery_archives_explicitly_blocked_validation_real_git(tmp_path: Path) -> None:
+    """显式阻塞可带执行侧空框归档，原空框与阻塞横幅原样保留。"""
+    from backend.infrastructure.process_runner import SubprocessRunner
+
+    require_validation_blocked_prd_skill()
+
+    blocked_prd_text = build_acceptance_prd(
+        VALIDATION_BLOCKED_BANNER, execution_marks=("x", " "), human_marks=(" ",)
+    ) + (
+        "\n### Final Reconciliation\n"
+        "- Validation blocker: 真实栈缺少启动配置\n"
+        "- Validation follow-up: tasks/pending/resume-validation.md\n"
+    )
+    _commit_pending_prd(tmp_path, blocked_prd_text)
+
+    ensure_prd_delivery_ready(make_prd_issue(), tmp_path, SubprocessRunner())
+    assert_prd_archived_for_publish(make_prd_issue(), tmp_path)
+
+    assert run_git(tmp_path, "status", "--porcelain").splitlines() == [_ARCHIVE_RENAME_STATUS]
+    archived_prd_text = (tmp_path / _ARCHIVE_RELATIVE_PATH).read_text(encoding="utf-8")
+    assert VALIDATION_BLOCKED_BANNER in archived_prd_text
+    assert "- [ ] rv-2: executor-owned item 2" in archived_prd_text
+
+
+@pytest.mark.parametrize("missing_field", ["Validation blocker", "Validation follow-up"])
+def test_blocked_archive_requires_follow_up_fields_real_git(
+    tmp_path: Path, missing_field: str
+) -> None:
+    """runner 不能把只有阻塞横幅、没有原因或后续任务的 PRD 归档。"""
+    from backend.infrastructure.process_runner import SubprocessRunner
+
+    require_validation_blocked_prd_skill()
+    blocked_prd_text = (
+        build_acceptance_prd(VALIDATION_BLOCKED_BANNER, execution_marks=(" ",), human_marks=(" ",))
+        + "\n### Final Reconciliation\n"
+    )
+    if missing_field != "Validation blocker":
+        blocked_prd_text += "- Validation blocker: 真实栈缺少启动配置\n"
+    if missing_field != "Validation follow-up":
+        blocked_prd_text += "- Validation follow-up: tasks/pending/resume-validation.md\n"
+    _commit_pending_prd(tmp_path, blocked_prd_text)
+
+    with pytest.raises(PrdDeliveryError, match=missing_field):
+        ensure_prd_delivery_ready(make_prd_issue(), tmp_path, SubprocessRunner())
+
+    _assert_prd_not_moved(tmp_path)
+
+
+def test_blocked_banner_without_open_execution_items_is_rejected_real_git(tmp_path: Path) -> None:
+    """执行侧完成后仍写阻塞属于横幅错位，不能绕过正常人工验收状态。"""
+    from backend.infrastructure.process_runner import SubprocessRunner
+
+    require_validation_blocked_prd_skill()
+    _commit_pending_prd(
+        tmp_path,
+        build_acceptance_prd(VALIDATION_BLOCKED_BANNER, human_marks=(" ",)),
+    )
+
+    with pytest.raises(PrdDeliveryError) as exc_info:
+        ensure_prd_delivery_ready(make_prd_issue(), tmp_path, SubprocessRunner())
+
+    assert exc_info.value.kind is DeliveryGateFailureKind.ACCEPTANCE_BANNER_MISMATCH
+    assert "must be `awaiting_human`" in str(exc_info.value)
     _assert_prd_not_moved(tmp_path)
 
 

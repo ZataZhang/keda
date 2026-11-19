@@ -44,6 +44,10 @@ from backend.core.shared.models.backlog import (
 from backend.core.use_cases.agent_runner_invocation_token_stats import (
     build_invocation_token_usage_summary,
 )
+from backend.core.use_cases.agent_runner_lifecycle_progress import (
+    emit_lifecycle_progress,
+    has_lifecycle_progress_sink,
+)
 from backend.core.use_cases.prd_invocation_detail import (
     build_prd_invocation_detail,
     with_invocation_run_detail,
@@ -98,6 +102,7 @@ class LifecycleEventType(str, Enum):
     BLOCKED = "blocked"
     UNBLOCKED = "unblocked"
     FAILED = "failed"
+    DEFERRED = "deferred"
     # 观测事件：只携带旁路指标（token 用量），不推进生命周期阶段。刻意不进
     # _EVENT_PHASE（记为 NONE），并被时长归属与当前阶段推导过滤。
     AGENT_TOKEN_USAGE = "agent_token_usage"
@@ -148,6 +153,7 @@ class LifecycleStatus(str, Enum):
     BLOCKED = "blocked"
     UNBLOCKED = "unblocked"
     FAILED = "failed"
+    DEFERRED = "deferred"
 
 
 @dataclass(frozen=True)
@@ -193,6 +199,7 @@ _EVENT_PHASE: dict[LifecycleEventType, LifecyclePhase] = {
     LifecycleEventType.BLOCKED: LifecyclePhase.BLOCKED,
     LifecycleEventType.UNBLOCKED: LifecyclePhase.EXECUTING,
     LifecycleEventType.FAILED: LifecyclePhase.FAILED,
+    LifecycleEventType.DEFERRED: LifecyclePhase.NONE,
 }
 
 #: 事件种类 -> 事件语义状态（写入时按当时 event_type 冻结，与 phase 一样落库）。
@@ -218,6 +225,7 @@ _EVENT_STATUS: dict[LifecycleEventType, LifecycleStatus] = {
     LifecycleEventType.BLOCKED: LifecycleStatus.BLOCKED,
     LifecycleEventType.UNBLOCKED: LifecycleStatus.UNBLOCKED,
     LifecycleEventType.FAILED: LifecycleStatus.FAILED,
+    LifecycleEventType.DEFERRED: LifecycleStatus.DEFERRED,
 }
 
 #: 终态事件：写入后 run 收口，之后只允许追加不改变阶段的观测事件。
@@ -227,6 +235,7 @@ _TERMINAL_EVENT_TYPES = frozenset(
         LifecycleEventType.ARCHIVED,
         LifecycleEventType.FAILED,
         LifecycleEventType.BLOCKED,
+        LifecycleEventType.DEFERRED,
     }
 )
 
@@ -374,7 +383,8 @@ def record_lifecycle_event(
     # 把生命周期事件确定性归组到执行会话；上下文之外（roadmap 侧事件）保持不写。
     event_detail = with_invocation_run_detail(detail)
     lifecycle_store = resolve_lifecycle_store(store)
-    if lifecycle_store is None:
+    progress_enabled = has_lifecycle_progress_sink()
+    if lifecycle_store is None and not progress_enabled:
         return
     timestamp = occurred_at or now_iso()
     run_id = lifecycle_run_id(repo_id=repo_id, issue_number=issue_number, prd_path=prd_path)
@@ -391,12 +401,13 @@ def record_lifecycle_event(
         outcome=None,
         history_complete=True,
     )
-    _safe_store_call(
-        lifecycle_store,
-        run_id,
-        "run upsert",
-        lambda: lifecycle_store.upsert_lifecycle_run(run_record),
-    )
+    if lifecycle_store is not None:
+        _safe_store_call(
+            lifecycle_store,
+            run_id,
+            "run upsert",
+            lambda: lifecycle_store.upsert_lifecycle_run(run_record),
+        )
     event_record = PrdLifecycleEventRecord(
         run_id=run_id,
         event_key=event_key or f"{event_type.value}@{timestamp}",
@@ -407,6 +418,10 @@ def record_lifecycle_event(
         occurred_at=timestamp,
         detail_json=_json_detail(event_detail),
     )
+    if progress_enabled and event_record.phase != LifecyclePhase.NONE.value:
+        emit_lifecycle_progress(event_record)
+    if lifecycle_store is None:
+        return
     _safe_store_call(
         lifecycle_store,
         run_id,

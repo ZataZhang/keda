@@ -680,7 +680,7 @@
           if (pageParams.get('focus') === 'overview') document.body.classList.add('capture-lifecycle-overview');
         }
         // ── 配置与默认值取自实现；仓库名用中性示例展示 ──
-        const REGISTERED_AGENTS = ['codex', 'claude', 'kimi', 'pi', 'codebuddy', 'qoder', 'opencode'];
+        const REGISTERED_AGENTS = ['codex', 'claude', 'kimi', 'pi', 'codebuddy', 'qoder', 'opencode', 'mcode', 'dsh'];
         const UNREGISTERED_AGENT = 'no-such-agent';
         // 本机已安装可用的 agent（用于执行器回退时跳过未安装项）；'pi' 本机存在，这里按真实情况全部视为可用
         const DEFAULT_FALLBACK_ORDER = ['claude', 'kimi', 'codex'];
@@ -694,6 +694,8 @@
           { agent: 'codebuddy', label: 'agent/codebuddy', color: '0052D9', description: 'Use CodeBuddy Code for local runner execution.' },
           { agent: 'qoder', label: 'agent/qoder', color: 'FF8C42', description: 'Use Qoder for local runner execution.' },
           { agent: 'opencode', label: 'agent/opencode', color: '0EA5E9', description: 'Use OpenCode for local runner execution.' },
+          { agent: 'mcode', label: 'agent/mcode', color: '1F6FEB', description: 'Use MiniMax Code for local runner execution.' },
+          { agent: 'dsh', label: 'agent/dsh', color: '4D6BFE', description: 'Use DeepSeek Harness for local runner execution.' },
         ];
         // 仓库展示数据为中性示例，实际项目列表来自用户机器上的 registry
         const REPOS = [

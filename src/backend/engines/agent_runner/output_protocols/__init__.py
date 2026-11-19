@@ -1,7 +1,8 @@
 """输出协议注册表：经 entry point group 发现协议实现。
 
 内置协议（``plain`` / ``claude-stream-json`` / ``pi-json-lines`` /
-``codex-json-lines`` / ``opencode-json-lines``）
+``codex-json-lines`` / ``opencode-json-lines`` / ``mcode-json-lines`` /
+``dsh-json-lines``）
 与第三方插件走**同一条** entry point 注册路径（group
 ``kedacode.agent_output_protocols``），避免出现零消费者的平行抽象。
 
@@ -11,10 +12,18 @@
 加载失败（import 抛错、加载对象不满足协议接口）直接抛
 :class:`OutputProtocolLoadError`，绝不静默回落到 ``plain``——
 回退会把结构化事件流当纯文本中继，错误只在运行期才现形。
+
+内置协议实现在**包导入期**一次性导入（见
+:func:`_import_builtin_protocol_modules`）：长驻进程（daemon / ``kc run``）
+可能跨越一次代码更新，运行期再从磁盘懒加载实现模块就会拿到**新**的实现、
+配上进程启动时导入的**旧**核心接口类，得到半新半旧的代码快照，表现为
+``'OutputRelayRequest' object has no attribute 'cancel_check'`` 这类难以
+定位的属性错误。启动时统一导入保证整进程同一份快照。
 """
 
 from __future__ import annotations
 
+import importlib
 import threading
 from importlib.metadata import EntryPoint, entry_points
 
@@ -26,6 +35,17 @@ from backend.core.shared.models import product_identity
 
 ENTRY_POINT_GROUP = product_identity.OUTPUT_PROTOCOL_ENTRY_POINT_GROUP
 """entry point group 名：第三方包与内置协议都在此组注册输出协议。"""
+
+BUILTIN_PROTOCOL_MODULE_NAMES: tuple[str, ...] = (
+    "plain",
+    "claude_stream_json",
+    "codex_json_lines",
+    "opencode_json_lines",
+    "pi_json_lines",
+    "mcode_json_lines",
+    "dsh_json_lines",
+)
+"""内置协议实现模块名（与 :mod:`backend.engines.agent_runner.output_protocols` 同包）。"""
 
 
 class OutputProtocolLoadError(RuntimeError):
@@ -114,7 +134,33 @@ def get_output_protocol_registry() -> EntryPointProtocolRegistry:
         return _registry_instance
 
 
+def _import_builtin_protocol_modules() -> None:
+    """在包导入期导入全部内置协议实现模块（fail-fast，不降级）。
+
+    为什么必须提前导入：协议实现模块若在运行期才从磁盘加载，长驻进程
+    （daemon / ``kc run``）跨过一次代码更新后就会混用两份代码——实现模块是
+    更新后的**新**版本，核心中继请求类却是进程启动时导入的**旧**版本，
+    属性对不上时报 ``'OutputRelayRequest' object has no attribute
+    'cancel_check'`` 这类难以定位的错误。启动时统一导入，整进程同一份快照。
+
+    Raises:
+        OutputProtocolLoadError: 某个内置协议模块导入失败（绝不静默回落到
+            ``plain``——那会把结构化事件流当纯文本中继）。
+    """
+    for module_name in BUILTIN_PROTOCOL_MODULE_NAMES:
+        try:
+            importlib.import_module(f"{__name__}.{module_name}")
+        except Exception as exc:  # noqa: BLE001 - 任何加载失败都不降级
+            raise OutputProtocolLoadError(
+                f"Built-in output protocol module '{module_name}' failed to import: {exc}"
+            ) from exc
+
+
+_import_builtin_protocol_modules()
+
+
 __all__ = [
+    "BUILTIN_PROTOCOL_MODULE_NAMES",
     "ENTRY_POINT_GROUP",
     "EntryPointProtocolRegistry",
     "OutputProtocolLoadError",

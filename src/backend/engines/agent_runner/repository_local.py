@@ -19,6 +19,7 @@ from backend.engines.agent_runner.repository_gitignore import (  # noqa: F401
     GITIGNORE_SECTIONS,
     ensure_gitignore_entries,
 )
+from backend.engines.agent_runner.repository_identity import normalize_repository_id
 from backend.infrastructure.config.settings import (
     AgentRunnerAutopilotSettings,
     AgentRunnerBacklogSettings,
@@ -49,6 +50,12 @@ from backend.core.shared.interfaces.runner_console import (
     IRepositoryRegistryEditor,
 )
 from backend.core.shared.models import product_identity
+from backend.core.shared.models.repository_paths import (
+    DEFAULT_REPOSITORY_STATE_DIR_NAME,
+    DEFAULT_WORKTREE_DIR_NAME,
+    LEGACY_REPOSITORY_STATE_DIR_NAME,
+    LEGACY_WORKTREE_DIR_NAME,
+)
 from backend.infrastructure.process_runner import CommandResult, SubprocessRunner
 
 
@@ -56,11 +63,33 @@ _logger = logging.getLogger(__name__)
 
 _MAX_SCAN_DEPTH = 4
 
+# 不参与仓库发现的目录：runner 自己的运行态与构建产物。
+# 这些目录里的 git worktree 带着同一份 .kedacode.toml，会被误认成独立仓库。
+_INTERNAL_SCAN_DIR_NAMES = frozenset(
+    {
+        ".agent-runner",
+        ".git",
+        DEFAULT_REPOSITORY_STATE_DIR_NAME,
+        DEFAULT_WORKTREE_DIR_NAME,
+        LEGACY_REPOSITORY_STATE_DIR_NAME,
+        LEGACY_WORKTREE_DIR_NAME,
+        ".venv",
+        "node_modules",
+        "target",
+    }
+)
+
 
 class RepositoryNotInitializedError(Exception):
     """Raised when a target repository has not run `kc init`."""
 
     def __init__(self, repo_root_path: Path, config_path: Path) -> None:
+        """记录未初始化的仓库。
+
+        Args:
+            repo_root_path: 仓库根目录。
+            config_path: 期望存在的本地配置路径。
+        """
         self.repo_root_path = repo_root_path
         self.config_path = config_path
         super().__init__(
@@ -77,6 +106,11 @@ class RepositoryLocalConfigExistsError(ValueError):
     """
 
     def __init__(self, config_path: Path) -> None:
+        """记录已存在的本地配置。
+
+        Args:
+            config_path: 已存在的本地配置路径。
+        """
         self.config_path = config_path
         super().__init__(
             f"KedaCode local config already exists at {config_path}. Use --force to overwrite it."
@@ -213,7 +247,7 @@ _CONFIG_SECTION_COMMENTS: dict[str, str] = {
     "runner": "Runner 行为配置：每轮处理 Issue 数量、默认 agent、提交前验证命令",
     "memory": "KedaCode 任务记忆与 Skill 草稿存储配置",
     "safety": "发布前安全边界：自动合并开关、禁止提交的路径模式",
-    "autopilot": "Autopilot 快速档（合并队列）：supervisor 之后串行合并；需配合 safety.auto_merge = true 同时启用",
+    "autopilot": "Autopilot 合并队列：supervisor 之后串行处理 PR；默认启用，配合 safety.auto_merge = true 后对全仓自动合并",
     "backlog": "Backlog 持续调度：控制 daemon 是否自动发现并推进 pending PRD，与自动合并独立",
     "validation": "Realistic Validation 证据门禁配置",
     "prompts": "实现 Agent 的 prompt 模板；默认 phase 与自定义阶段模板",
@@ -259,7 +293,7 @@ _CONFIG_FIELD_COMMENTS: dict[str, str] = {
         "kc daemon run --concurrency > Backlog 页面设置 > 本值；daemon 执行期间按轮询间隔补位，"
         "显式 kc run 不受约束"
     ),
-    "runner.default_agent": "默认使用的 AI agent：auto / claude / codex / kimi",
+    "runner.default_agent": "默认使用的 AI agent：auto / 任意已注册 agent 名（内置 codex / claude / kimi / pi / codebuddy / qoder / opencode / mcode / dsh）",
     "runner.max_recovery_attempts": "Agent 失败后的最大重试次数",
     "runner.recovery_retry_delay_seconds": "每次重试前等待的秒数",
     "runner.agent_fallback_order": (
@@ -288,10 +322,10 @@ _CONFIG_FIELD_COMMENTS: dict[str, str] = {
     ),
     "runner.verification_commands": "提交前自动运行的验证命令；任一命令失败会进入 recovery",
     "runner.pre_commit_verification_command": "git add 后、git commit 前额外运行的 pre-commit 命令；失败转 Fix Agent",
-    "safety.auto_merge": "是否允许自动合并 PR（强烈建议保持 false；与 agent_runner.autopilot.enabled 同时为 true 才会真正生效）",
+    "safety.auto_merge": "是否允许全仓自动合并 PR（默认 true；与 agent_runner.autopilot.enabled 同时为 true 才会生效，设 false 后仍可由 Issue 标签单独授权）",
     "safety.forbidden_path_patterns": "提交前禁止变更的路径通配模式",
     "safety.forbidden_path_exceptions": "匹配后可覆盖 forbidden_path_patterns 的路径通配例外；应保持范围狭窄",
-    "autopilot.enabled": "是否运行合并队列；全仓自动合并还需 safety.auto_merge=true，单 PRD 可用 prd-auto-merge 标签显式授权",
+    "autopilot.enabled": "是否运行合并队列（默认 true）；全仓自动合并还需 safety.auto_merge=true，单个 Issue 可用 auto-merge 或 prd-auto-merge 标签显式授权",
     "autopilot.merge_method": "合并方式；当前唯一支持 'squash'（非法值在加载期拒绝）",
     "autopilot.require_verifier_pass": "Issue 需要 validation 时是否要求 validation/verifier-passed 标签先存在",
     "autopilot.auto_sign_off": "verifier 绿灯后自动替人工勾选 PR body 的 sign-off 清单（幂等）",
@@ -321,7 +355,7 @@ _CONFIG_FIELD_COMMENTS: dict[str, str] = {
     "prompts.default_phase": "默认使用的 prompt 阶段",
     "prompts.phases": "自定义阶段模板，值为字符串或字符串列表",
     "pre_pr_review.enabled": "是否启用 Draft PR 创建前的 AI review",
-    "pre_pr_review.review_agent": "执行 review 的 agent：auto / claude / codex / kimi",
+    "pre_pr_review.review_agent": "执行 review 的 agent：auto / 任意已注册 agent 名（内置 codex / claude / kimi / pi / codebuddy / qoder / opencode / mcode / dsh）",
     "pre_pr_review.repair_agent": "谁修复 review 报出的问题：self（审核者自己修，默认）/ executor（交回实现者）/ 任意已注册 agent 名",
     "pre_pr_review.allow_same_agent": "是否允许实现 agent 与 reviewer 为同一个",
     "pre_pr_review.max_attempts": "review 不通过时的最大修复轮数",
@@ -343,7 +377,7 @@ _CONFIG_FIELD_COMMENTS: dict[str, str] = {
     "daemon.disk_resume_watermark_bytes": "可用磁盘空间恢复到此字节数时恢复领取；必须高于低水位",
     "daemon.reclaim_ttl_seconds": "对账的 claim 老化阈值(秒):claim 含 started_at 且距 now 超过此值即便 PID 仍活也视为 stale",
     "interactive_decision.enabled": "是否启用 kc ask 交互式决策",
-    "interactive_decision.default_agent": "kc ask 默认使用的 agent：auto / claude / codex / kimi",
+    "interactive_decision.default_agent": "kc ask 默认使用的 agent：auto / 任意已注册 agent 名（内置 codex / claude / kimi / pi / codebuddy / qoder / opencode / mcode / dsh）",
     "interactive_decision.default_output_dir": "决策日志与审计文件的默认输出目录",
     "interactive_decision.planner_timeout_seconds": "规划 agent 的最长运行秒数",
     "interactive_decision.max_context_chars": "输入 prompt 的最大字符数",
@@ -379,7 +413,8 @@ _AGENT_REGISTRY_EXAMPLE_COMMENT = """\
 # prompt_delivery（argv_tail / flag / stdin）、prompt_flag（flag 投递时的参数名）、
 # output_protocol（plain / claude-stream-json / pi-json-lines / codex-json-lines /
 # opencode-json-lines 或插件协议）、expand（展开器声明，如 "git_writable_roots:--add-dir"）、
-# tail_args / resume_tail_args、read_only；agent 级可声明 supports_resume / resume_args。
+# tail_args / resume_tail_args、read_only、read_only_enforced（argv 含 provider 自己的只读沙箱/禁工具开关时才声明；
+# 覆盖 args / tail_args / expand 后不再继承内置值）；agent 级可声明 supports_resume / resume_args。
 #
 # 下面是 pi 的注册块示例（内置默认已生效，无需复制即可用）：
 #
@@ -405,12 +440,14 @@ _AGENT_REGISTRY_EXAMPLE_COMMENT = """\
 # prompt_delivery = "stdin"
 # output_protocol = "plain"
 # read_only = true
+# read_only_enforced = true
 #
 # [agent_runner.agents.pi.profiles.generate]
 # args = ["--no-tools", "--print"]
 # prompt_delivery = "stdin"
 # output_protocol = "plain"
 # read_only = true
+# read_only_enforced = true
 #
 # [agent_runner.agents.pi.profiles.repl]
 # args = ["--approve", "--print"]
@@ -990,12 +1027,6 @@ def _repository_name_from_remote_url(remote_url: str) -> str:
     return re.split(r"[:/]", trimmed_url)[-1]
 
 
-def normalize_repository_id(raw_repo_name: str) -> str:
-    normalized_repo_name = re.sub(r"[^A-Za-z0-9_.-]+", "-", raw_repo_name)
-    stripped_repo_name = normalized_repo_name.strip("-_.").lower()
-    return stripped_repo_name or "repository"
-
-
 def _detect_default_base_branch(
     repo_root_path: Path,
     remote_name: str,
@@ -1096,16 +1127,20 @@ def discover_repositories(
 
 
 def _walk_directories(root: Path, max_depth: int):
-    """按广度优先遍历目录，yield 目录路径。"""
+    """按广度优先遍历目录，yield 目录路径，包含 root 自身。
+
+    传入仓库路径时它本身就是候选仓库，所以 root 必须进入遍历；早期版本只 yield
+    子目录，导致 kc registry sync <repo> 扫不到那个仓库自己。
+    """
     queue: list[tuple[Path, int]] = [(root, 0)]
     while queue:
         current, depth = queue.pop(0)
+        yield current
         if depth >= max_depth:
             continue
         for child in current.iterdir():
-            if not child.is_dir():
+            if not child.is_dir() or child.name in _INTERNAL_SCAN_DIR_NAMES:
                 continue
-            yield child
             queue.append((child, depth + 1))
 
 

@@ -44,7 +44,9 @@ class _LiveAttempt:
         process: 实际 ``Popen``（用于确认存活与终止后等待回收）。
         pid: 登记时的子进程 pid。
         process_group: 登记时读到的进程组 id（``os.getpgid``）。
+        process_started_at: 登记时读到的进程创建时刻（区分 pid 复用）。
         started_at_mono: 登记时刻（单调时钟）。
+        host_label: 登记动作发生在哪台主机（登记时刻读一次，供取消前复核与审计）。
         label: 命令摘要（只含命令名，不含参数，避免把提示词写进日志）。
         terminator: 收到已复核的组与创建时刻后尝试终止该进程组的回调。
     """
@@ -54,6 +56,7 @@ class _LiveAttempt:
     process_group: int
     process_started_at: float
     started_at_mono: float
+    host_label: str
     label: str
     terminator: Callable[[int, float], bool]
 
@@ -109,6 +112,7 @@ def register_live_attempt(
             process_group=process_group,
             process_started_at=process_started_at,
             started_at_mono=time.monotonic(),
+            host_label=socket.gethostname(),
             label=label,
             terminator=terminator,
         )
@@ -146,7 +150,7 @@ def _as_view(attempt_key: str, live_attempt: _LiveAttempt) -> LiveAttemptProcess
     )
 
 
-def probe_attempt_ownership(*, attempt_key: str, host_label: str) -> AttemptOwnership:
+def probe_attempt_ownership(*, attempt_key: str) -> AttemptOwnership:
     """把"这个 attempt 的 writer 是否还在、归属是否可证实"读成一份证据。
 
     复核口径：在册 + 仍存活 + 实时 ``getpgid`` 与登记值一致。任一条不成立都返回
@@ -154,10 +158,10 @@ def probe_attempt_ownership(*, attempt_key: str, host_label: str) -> AttemptOwne
 
     Args:
         attempt_key: 一次 agent attempt 的身份键。
-        host_label: 本机标识（进证据，供跨主机误处置的审计辨认）。
 
     Returns:
-        :class:`AttemptOwnership`：不在册时 ``child_process_group`` 为 ``None``。
+        :class:`AttemptOwnership`：不在册时 ``child_process_group`` 与
+        ``host_label`` 都为空（无从知道这个键属于谁）。
     """
     with _LOCK:
         live_attempt = _LIVE_ATTEMPTS.get(attempt_key)
@@ -165,8 +169,8 @@ def probe_attempt_ownership(*, attempt_key: str, host_label: str) -> AttemptOwne
             return AttemptOwnership(
                 confirmed=False,
                 reason=f"no live process registered for attempt {attempt_key!r}",
-                host_label=host_label,
             )
+        host_label = live_attempt.host_label
         if live_attempt.process.poll() is not None:
             return AttemptOwnership(
                 confirmed=False,
@@ -217,9 +221,13 @@ def terminate_attempt(
 ) -> StallCancelOutcome:
     """按登记身份精确终止一个活跃 attempt 的进程组。
 
-    任何身份不符（键不在册、pid 变了、进程组变了）都拒绝发信号；这与
-    ``_terminate_process_tree`` 自身的"0/1 号组与调用者所在组一律不碰"叠加，
-    构成本特性的两道击杀护栏。
+    任何身份不符（键不在册、pid 变了、进程组变了、证据不是在本模块登记的那台主机
+    上读到的）都拒绝发信号；这与 ``_terminate_process_tree`` 自身的"0/1 号组与调用者
+    所在组一律不碰"叠加，构成本特性的两道击杀护栏。
+
+    登记簿是**进程内**的：能在这里被取消的进程，只可能是本进程自己 ``Popen``
+    出来的那个。因此本函数保证的是"证据与在册条目相互吻合"，不是"跨主机认领
+    冲突可被化解"——后者压根没有可达路径，把它写成护栏只会读成虚假的保证。
 
     Args:
         attempt_key: 待终止的 attempt 键。
@@ -237,11 +245,12 @@ def terminate_attempt(
             return StallCancelOutcome(
                 reason="ownership evidence is not confirmed; refusing to signal"
             )
-        if expected.host_label != socket.gethostname():
+        if expected.host_label != live_attempt.host_label:
             return StallCancelOutcome(
                 reason=(
-                    f"ownership evidence belongs to host {expected.host_label!r}, not this host; "
-                    "refusing to signal"
+                    f"ownership evidence was read on host {expected.host_label!r} but this "
+                    f"attempt is registered by {live_attempt.host_label!r}; the evidence did "
+                    "not come from this registry, refusing to signal"
                 )
             )
         if (

@@ -5,8 +5,7 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> 🧍 **验收状态**：待人工验收——执行侧交付已完成（§9 除 `Human-Confirmed` 外全部勾选或标注残留），三项决策与 9.1 呈递物等待人工回复。
-> 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
+> ✅ **验收状态**：已验收 — 2026-10-28 按合并态追认（交付 PR #296 于 2026-10-20 合并）。本次未逐项人工复核；遗留与未闭环项见文末 Change Log。
 
 > 本 PRD 分两个 altitude，分别服务不同读者，自上而下阅读：
 >
@@ -493,11 +492,12 @@ No external validation required; repository evidence was sufficient.
 ### 9.2 Acceptance Evidence Package
 
 #### Human-Confirmed
+> 2026-10-28 按合并态追认：以下各项由用户一次性确认，未逐项人工复核；遗留与未闭环项见文末 Change Log。
 
-- [ ] **决策一 — 默认配置归属：** Section 2 决策一得到用户回复；确认默认模板不携带个人预设与绑定、历史配置只提示不自动改写。对应 §2 决策一 / rv-1。
-- [ ] **决策二 — 缺失时阻断：** Section 2 决策二得到用户回复；确认主 Agent 不可用时在 claim 前阻断，即使配置了回退候选也不在缺失时换人；运行时失败仍走回退。对应 §2 决策二 / rv-2。
-- [ ] **决策三 — 自定义 Agent 开放范围：** Section 2 决策三得到用户回复；确认显式注册、不猜参数、不承诺无代码新增输出协议。对应 §2 决策三 / rv-3。
-- [ ] **Human Review Surface：** 查看 9.1 的全部呈递物，确认 CLI 记录与真实设置页截图对应当前实现。
+- [x] **决策一 — 默认配置归属：** Section 2 决策一得到用户回复；确认默认模板不携带个人预设与绑定、历史配置只提示不自动改写。对应 §2 决策一 / rv-1。
+- [x] **决策二 — 缺失时阻断：** Section 2 决策二得到用户回复；确认主 Agent 不可用时在 claim 前阻断，即使配置了回退候选也不在缺失时换人；运行时失败仍走回退。对应 §2 决策二 / rv-2。
+- [x] **决策三 — 自定义 Agent 开放范围：** Section 2 决策三得到用户回复；确认显式注册、不猜参数、不承诺无代码新增输出协议。对应 §2 决策三 / rv-3。
+- [x] **Human Review Surface：** 查看 9.1 的全部呈递物，确认 CLI 记录与真实设置页截图对应当前实现。
 
 #### Architecture Acceptance
 
@@ -725,3 +725,11 @@ No external validation required; repository evidence was sufficient.
 - Reason: 这是**证据脚本自身的可移植性缺陷**，不是产品行为回退，也不能靠「本机 PATH 恰好有 3.13」当作通过；runner 明确复跑 RV 命令，脚本必须与验收执行环境（登录 shell、系统 python3）无耦合。项目解释器同时是被测 CLI 的运行环境，钉过去比依赖 PATH 更符合 §9「断言值由被测路径自己产生」的口径。
 - Impact: 只改 `tasks/evidence/**/scripts/` 下的取证脚本（该目录按仓库 `.gitignore` 约定不进代码历史），生产代码、测试用例、门禁与 `evidence.json` 的断言模式均未改动；被验证的事实没移动——骨架 `842049520cf3…`、setup 后 `2aafa48b67f3…`、rv-2 bound `e55e730530fc…`、rv-3 注册块 `c292ae43b9e0…` 与上一轮逐字节相同。manifest item 1 的 `risks` 补记这条环境约束，验证计划在「口径」里补记解释器钉定规则。
 - Review: 红→绿两侧都有实证——红：`bash -lc` 复跑时 tomllib 缺失导致 exit 1（runner 回执原文）；绿：同一条命令在最终树 exit 0 且 10 条 stdout 断言逐条命中。未新增 `|| true`、未降低任何断言。
+
+### 2026-10-28 · 按合并态批量追认验收
+- Type: human acceptance
+- Before: 横幅为待人工验收，§9 Human-Confirmed 尚有 4 项空框；交付 PR #296 已于 2026-10-20 合并，但未记录人工验收。
+- After: 2026-10-28 按合并态追认，全部 Human-Confirmed 项勾选，横幅改为已验收。本次未逐项人工复核；勾选不表示未执行项已验证。遗留与未闭环：verifier 实际结论为 8 PASS + 1 部分披露 + 1 INCONCLUSIVE，非无条件 PASS。
+- Reason: 交付代码已在主干运行 8 天，逐项补审无法改变既成事实；按用户 2026-10-28 的决定以合并态追认关闭验收账本，原有风险披露全部保留。
+- Impact: 仅验收记录变化，无实现、契约、证据或门禁变化。
+- Review: 用户 2026-10-28 在对话中明确批准批量追认；本条目未声称逐项复核。

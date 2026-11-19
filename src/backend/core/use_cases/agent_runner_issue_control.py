@@ -101,9 +101,8 @@ class VerifierCancelledByHumanError(RuntimeError):
 def resolve_issue_run_control() -> object | None:
     """解析跨进程共享的 Issue 运行控制存储；不可用时返回 ``None``。
 
-    core 不得静态 import engines（架构门禁），经工厂 shim 的
-    ``create_console_store`` 惰性解析——实现端为旁路 SQLite 存储，
-    与控制面表同库同文件。
+    经工厂 facade 的 ``create_console_store`` 解析——实现端为旁路 SQLite
+    存储，与控制面表同库同文件；函数内导入让存储失败只影响接管观测面。
     """
     try:
         from backend.core.use_cases.agent_runner_factory import create_console_store

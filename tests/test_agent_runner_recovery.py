@@ -461,15 +461,14 @@ def test_scenario_b_precommit_lint_failure_recovery(tmp_path: Path) -> None:
     assert "success" in body
 
 
-def test_scenario_e_lint_exhausted_max_retries(tmp_path: Path) -> None:
-    """Scene E: staged verification fails on all 3 attempts, MaxRetriesExceededError.
+def test_scenario_e_repeated_lint_failure_stops_without_progress(tmp_path: Path) -> None:
+    """Scene E: identical verification failures stop the current agent early.
 
     Steps:
     1. Attempt 0: Agent writes commit-request, runner stages, ``just lint`` fails.
-    2. Attempt 1 (recovery): Agent fixes, runner re-stages, ``just lint`` still fails.
-    3. Attempt 2 (recovery): Agent fixes again, runner re-stages, ``just lint`` still fails.
-    4. All attempts exhausted → runner marks issue as failed.
-    5. Issue comment contains Attempt History with 3 rows of ``verification_failed``.
+    2. Attempt 1 (recovery): the same failure repeats with an unchanged worktree.
+    3. Recovery stops, no checkpoint commit is made, and the issue is marked failed.
+    4. Issue comment contains the two attempts and the ``recovery_stalled`` result.
     """
     fake_client = FakeGitHubClient()
     issue = make_ready_issue()
@@ -558,18 +557,17 @@ def test_scenario_e_lint_exhausted_max_retries(tmp_path: Path) -> None:
         index for index, command in enumerate(commands) if command == ("git", "reset", "--mixed")
     ]
 
-    # just lint 在 3 次尝试的预 staging 验证都失败，正常流程从不进入 commit proxy。
-    # 重试耗尽后，runner 把在途改动 checkpoint 成一个 WIP commit（只 stage 非禁改
-    # 路径 git add -- file.txt + git commit --no-verify），供下次 claim 续作。
-    assert len(lint_indices) == 3
-    assert len(add_indices) == 1
+    # 相同验证失败且 worktree 未变化时，Runner 停止当前 Agent 的 recovery loop。
+    # 失败路径不会继续 checkpoint 或 stage 这些在途改动。
+    assert len(lint_indices) == 2
+    assert len(add_indices) == 0
     assert len(reset_indices) == 0
     checkpoint_commits = [
         command
         for command in commands
         if command[:2] == ("git", "commit") and "--no-verify" in command
     ]
-    assert len(checkpoint_commits) == 1
+    assert len(checkpoint_commits) == 0
 
     failed_calls = [
         c
@@ -580,11 +578,11 @@ def test_scenario_e_lint_exhausted_max_retries(tmp_path: Path) -> None:
     comment_calls = [c for c in fake_client.calls if c["method"] == "comment_issue"]
     failure_comment = comment_calls[-1]
     assert "Attempt History" in failure_comment["body"]
-    assert "Failed after 3 attempts" in failure_comment["body"]
+    assert "Failed after 2 attempts" in failure_comment["body"]
     assert "verification_failed" in failure_comment["body"]
+    assert "recovery_stalled" in failure_comment["body"]
     assert "| 1 |" in failure_comment["body"]
     assert "| 2 |" in failure_comment["body"]
-    assert "| 3 |" in failure_comment["body"]
 
 
 def test_keyboard_interrupt_checkpoints_in_flight_work_before_exit(

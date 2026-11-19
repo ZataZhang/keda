@@ -23,6 +23,8 @@ from dataclasses import dataclass
 from backend.core.shared.models.agent_spec import BUILTIN_AGENT_SPECS, AgentSpec
 from backend.core.shared.models.agent_runner import LabelConfig
 
+KEDACODE_PRESENCE_LABEL = "kedacode/presence"
+
 #: 静态标准标签：``(标准名, 颜色, 描述)``。顺序即 ``labels sync`` 的创建顺序。
 STANDARD_LABEL_SPECS: tuple[tuple[str, str, str], ...] = (
     ("agent/ready", "0E8A16", "Issue is ready for a local AI runner to claim."),
@@ -102,6 +104,7 @@ STANDARD_LABEL_SPECS: tuple[tuple[str, str, str], ...] = (
     ("type/refactor", "5319E7", "Internal refactor or structural improvement."),
     ("type/bug", "D73A4A", "Broken behavior or regression fix."),
     ("status/backlog", "BFDADC", "Tracked work that is not in progress yet."),
+    (KEDACODE_PRESENCE_LABEL, "5319E7", "KedaCode machine presence status; do not edit manually."),
 )
 
 #: 可被配置覆盖生效名的标准名 → :class:`LabelConfig` 字段名。
@@ -249,6 +252,7 @@ def standard_label_names(
 
 __all__ = [
     "CONFIGURABLE_LABEL_FIELDS",
+    "KEDACODE_PRESENCE_LABEL",
     "STANDARD_LABEL_SPECS",
     "LabelSpec",
     "agent_label_meta",

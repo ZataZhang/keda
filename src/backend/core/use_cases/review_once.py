@@ -9,6 +9,7 @@ from pathlib import Path
 
 from backend.core.shared.interfaces.agent_runner import (
     GitHubApiRateLimitError,
+    GitHubApiUnavailableError,
     IGitHubClient,
     IProcessRunner,
 )
@@ -582,7 +583,18 @@ def _process_review_candidate(
                     issue.number,
                     gate_reason,
                 )
-                return "ci_repair_policy_blocked"
+                # 留在 supervising 会被"上下文未变"永久跳过且看板一直显示运行中；
+                # 转 blocked 交人处理，显式修复入口不依赖当前标签，仍可直接请求。
+                github_client.comment_issue(
+                    issue.number,
+                    f"## Agent Runner Auto Repair Stopped\n\n- Reason: {gate_reason}\n"
+                    "- Next: 需要人工处理 PR；修复预算未耗尽时也可显式请求一次修复"
+                    "（Backlog 问题卡 / `kc backlog ci repair`）。",
+                )
+                transition_issue_workflow_state(
+                    github_client, issue.number, config, config.labels.blocked
+                )
+                return "blocked_ci_repair_policy"
             enqueued, detail = enqueue_approved_auto_repair(
                 issue=issue,
                 pr_context=pr_context,
@@ -656,6 +668,7 @@ def review_once(
     process_runner: IProcessRunner,
     run_history_store: IRunHistoryStore | None = None,
     repo_id: str | None = None,
+    exclude_issue_numbers: frozenset[int] = frozenset(),
 ) -> int:
     """Run one review polling pass.
 
@@ -674,6 +687,8 @@ def review_once(
             **不**跟着回落——控制行按注册表 id 登记，用目录名去查会查不到行、把正在
             被人工接管的 Issue 放回监督与合并队列（FR-5）。调用方没给 repo_id 时，
             闸门按 Issue 编号兜底并 fail closed。
+        exclude_issue_numbers: 本机仍在执行中的 Issue；它们的内联 supervisor
+            由执行线程自己推进，本次值守跳过。
 
     Returns:
         Exit code (0 on success, 1 if any issue failed).
@@ -691,8 +706,10 @@ def review_once(
         return 0
 
     exit_code = 0
-    github_api_rate_limited = False
+    github_api_deferred = False
     for issue in candidates:
+        if issue.number in exclude_issue_numbers:
+            continue
         if dry_run:
             _logger.info(
                 "DRY RUN: would review Issue #%d: %s",
@@ -750,13 +767,13 @@ def review_once(
                 outcome=outcome,
                 actor="review_once",
             )
-        except GitHubApiRateLimitError as exc:
+        except (GitHubApiRateLimitError, GitHubApiUnavailableError) as exc:
             # Supervisor marker 可能已经成功发布；保留当前 label，让下一轮按 marker
             # 对齐状态，避免把已完成的判断改写成失败。
             exit_code = 1
-            github_api_rate_limited = True
+            github_api_deferred = True
             _logger.warning(
-                "Deferring review for Issue #%d after GitHub API rate limit; "
+                "Deferring review for Issue #%d while GitHub API is unavailable; "
                 "keeping its current workflow state for the next poll: %s",
                 issue.number,
                 exc,
@@ -782,7 +799,7 @@ def review_once(
 
     # Autopilot 启用时运行合并队列：全局 auto_merge 开启则沿用原双开关行为；
     # 否则队列只处理带通用 Issue 授权或单 PRD 显式授权标签的 Issue。
-    if config.autopilot.enabled and not dry_run and not github_api_rate_limited:
+    if config.autopilot.enabled and not dry_run and not github_api_deferred:
         try:
             merge_exit_code, merge_outcomes = process_merge_queue(
                 repo_path=repo_path,

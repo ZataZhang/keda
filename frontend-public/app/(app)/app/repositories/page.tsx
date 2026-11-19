@@ -7,17 +7,20 @@
 // 本页只是它的受控编辑器；写回保留文件注释与格式。
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { toast } from "sonner";
 
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
   DirectoryPickerDialog,
   type DirectorySelection,
 } from "@/components/agent-runner/directory-picker-dialog";
+import { RepositoriesWorkspaceTabs } from "@/components/agent-runner/repositories-workspace-tabs";
 import { ConsolePage, ConsolePageHeader } from "@/components/layout/console-page";
+import { confirmAction } from "@/lib/confirm-action";
 import { formatLocalDateTime } from "@/lib/utils";
 import {
   addRegistryRepository,
@@ -168,7 +171,7 @@ export default function RepositoriesPage() {
 
   async function handleToggle(entry: RegistryRepositoryEntry) {
     const verb = entry.enabled ? "停用" : "启用";
-    const confirmed = window.confirm(`确认${verb}仓库 ${entry.repo_id}？`);
+    const confirmed = await confirmAction(`确认${verb}仓库 ${entry.repo_id}？`);
     if (!confirmed) {
       return;
     }
@@ -182,7 +185,7 @@ export default function RepositoriesPage() {
   }
 
   async function handleRemove(entry: RegistryRepositoryEntry) {
-    const confirmed = window.confirm(
+    const confirmed = await confirmAction(
       `确认移除仓库 ${entry.repo_id} 的注册？\n\n` +
         "只会停止它的 daemon 并从 config.toml 删除注册条目；" +
         "本地仓库目录不会被删除，需要时请自行在外部处理。",
@@ -215,6 +218,7 @@ export default function RepositoriesPage() {
     <ConsolePage>
       <ConsolePageHeader title="项目接入" description={<> registry 写回 <code>config.toml</code>，注释与格式保留。添加前会校验
           路径存在、为 git 仓库且未被其他条目占用；移除只删除注册条目，不删除本地仓库。 </>} />
+      <RepositoriesWorkspaceTabs activeTab="list" />
 
       <Card>
         <CardHeader>
@@ -243,7 +247,16 @@ export default function RepositoriesPage() {
                       key={entry.repo_id}
                       className="border-b border-slate-100 dark:border-slate-800"
                     >
-                      <td className="py-2 pr-3 font-medium">{entry.repo_id}</td>
+                      <td className="py-2 pr-3 font-medium">
+                        <Link
+                          href={`/app/repositories/lifecycle/?scope=repository&repo_id=${encodeURIComponent(entry.repo_id)}`}
+                          className="cursor-pointer text-primary underline decoration-primary/50 underline-offset-4 hover:decoration-primary focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          aria-label={`配置仓库 ${entry.display_name ?? entry.repo_id} 的执行器与模型`}
+                          title="配置此仓库的执行器与模型"
+                        >
+                          {entry.repo_id}
+                        </Link>
+                      </td>
                       <td className="py-2 pr-3 font-mono text-xs">
                         {entry.path}
                         {!entry.path_exists ? (

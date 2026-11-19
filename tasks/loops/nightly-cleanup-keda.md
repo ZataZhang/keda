@@ -20,12 +20,13 @@ slug: nightly-cleanup-keda
 pre_command: "gh run list --limit 1 --json conclusion -q '.[0].conclusion // \"none\"' | awk '{ print \"last_ci_status=\" $0 }'; uv pip list --outdated --format json 2>/dev/null | jq 'length' | awk '{ print \"outdated_count=\" $0 }'"
 ---
 
-# 夜间清理（CI / 重复代码 / 文档 / 依赖）— {{date}}
+# Nightly cleanup (CI / duplicated code / docs / dependencies) — {{date}}
 
-> 每晚 02:00 触发 keda 仓的整理 loop。本次 PRD body 用 triage 决策树给出
-> 4 类 scope（CI 失败 / 重复代码合并 / 文档同步 / 依赖升级）的优先级与判定
-> 指引。Agent 当晚选 1 个最高 ROI 的做；若 4 类都无事可做，关 Issue + comment
-> 收尾，不出 PR。
+> Fires at 02:00 every night for the keda repository. This PRD body gives the
+> priority order and decision guidance for four scopes (CI failure / duplicated
+> code merge / docs sync / dependency upgrades) as a triage tree. The agent picks
+> the single highest-ROI scope for the night; if all four are not actionable, it
+> closes the Issue with a comment and does not open a PR.
 
 - Loop id: `{{loop_id}}`
 - Target repository: `{{repo_id}}`
@@ -33,99 +34,91 @@ pre_command: "gh run list --limit 1 --json conclusion -q '.[0].conclusion // \"n
 - Last CI status: `{{last_ci_status}}`
 - Outdated dependency count: `{{outdated_count}}`
 
-## 1. CI 失败
+## 1. CI failure
 
-- **触发条件**：`last_ci_status` 解析为 `failure` / `timed_out` / `cancelled` / `action_required` 任意非 `success` / `none`。
-- **行动指引**：
-  1. `gh run view <id> --log-failed` 抓失败日志；
-  2. 在 worktree 内复现失败（`uv run pytest <path> -v`）；
-  3. 修代码 / 测试 / 配置后 `just test` 全绿；
-  4. 出 draft PR，标题前缀 `cleanup(ci):`。
-- **无事可做判定**：`last_ci_status` 为 `success` / `none`，或修复尝试一次后回归测试不通过且与失败无关。
+- **Trigger**: `last_ci_status` parses to `failure` / `timed_out` / `cancelled` / `action_required` — any value other than `success` / `none`.
+- **Steps**:
+  1. Pull the failing log with `gh run view <id> --log-failed`;
+  2. Reproduce the failure inside the worktree (`uv run pytest <path> -v`);
+  3. Fix the code / tests / configuration, then get `just test` fully green;
+  4. Open a draft PR with the `cleanup(ci):` title prefix.
+- **Not actionable when**: `last_ci_status` is `success` / `none`, or one fix attempt still fails regression tests for reasons unrelated to the failure.
 
-## 2. 重复代码合并
+## 2. Duplicated code
 
-- **触发条件**：在 `src/backend/` 内对 helper 类函数做相似度扫描（`pylint --disable=all --enable=duplicate-code` 或 `jscpd` 之类），发现 ≥ 2 处重复块 / 近似函数。
-- **行动指引**：
-  1. 选 ROI 最高的一处重复（被调用次数多 + 维护者最近修改频繁的优先）；
-  2. 抽取公共 helper / 合并到单一函数，调用方全量替换；
-  3. `just test` 确认无回归；
-  4. 出 draft PR，标题前缀 `cleanup(refactor):`。
-- **无事可做判定**：扫描结果为空，或所有重复块的 ROI 都很低（< 5 行 / 1–2 处调用方）。
+- **Trigger**: a similarity scan of helper-style functions under `src/backend/` (`pylint --disable=all --enable=duplicate-code` or `jscpd`) finds ≥ 2 duplicated blocks / near-identical functions.
+- **Steps**:
+  1. Pick the highest-ROI duplicate (prefer many call sites plus recent maintainer churn);
+  2. Extract a shared helper / merge into a single function and replace every call site;
+  3. Run `just test` to confirm no regression;
+  4. Open a draft PR with the `cleanup(refactor):` title prefix.
+- **Not actionable when**: the scan is empty, or every duplicate has low ROI (< 5 lines / 1–2 call sites).
 
-## 3. 文档同步
+## 3. Docs sync
 
-目标是补漏：功能修改时仍须同步文档，夜间只沿近期 diff 检查受影响说明，不做全库重写。
-构建通过只能证明构建层面的有效性，不能证明行为描述符合代码。
+The goal is filling gaps: feature changes must still update docs, so the night only follows recent diffs to check affected explanations and does not rewrite the whole docs tree.
+A passing build only proves the build layer works; it does not prove the described behaviour matches the code.
 
-### 检查范围与进度
+### Scope and progress
 
-1. 在本轮 Issue 评论记录检查开始时目标 base 分支的完整提交 SHA，作为固定上界 `head_sha`。
-   读取该 loop 最近已关闭 Issue 的文档检查记录，找最近有效的 `checked_through_sha`；
-   必须确认它是 `head_sha` 的祖先。不要把 Issue 的关闭或 PR 合并本身当作文档检查完成。
-2. 有有效检查点时，从它之后按 base 分支 first-parent 顺序检查，到固定上界为止；
-   使用包含合并结果的提交 diff（相对 first parent），避免漏掉合并提交引入的变更。
-   首次运行没有检查点时，以最近 7 天作为初始范围，并披露更早历史未覆盖。
-   记录读取失败或检查点不再是祖先时，标记范围未确认，不悄悄当作首次运行重置进度。
-3. 每轮最多检查最早的 20 个待查提交。逐提交查看 diff，再沿变更符号、入口、配置键与
-   直接调用方定位相关文档；单提交过大可分功能检查，未查完前不得越过该提交推进检查点。
-   不因代码和文档同一次提交就推定已同步，也不因没有同名文档就判定无需更新。
-4. `checked_through_sha` 只推进到连续完整核对的最后一个提交；记录剩余范围，下轮接续。
-   有发现但尚未修复时可记录已检查进度，但必须携带未解决项及对应 Issue/PR，后续轮次先
-   核对是否已修复或由开放任务承接，避免既丢问题又重复开修复 PR。
+1. At the start of this round, record the full commit SHA of the target base branch in this Issue's comment as the fixed upper bound `head_sha`.
+   Read the doc-check record of the loop's most recently closed Issue to find the latest valid `checked_through_sha`;
+   it must be an ancestor of `head_sha`. Do not treat closing the Issue or merging the PR as completing the doc check.
+2. With a valid checkpoint, check forward from it in the base branch's first-parent order up to the fixed upper bound;
+   use commit diffs that include merge results (relative to the first parent) so changes brought in by merge commits are not missed.
+   On the first run with no checkpoint, use the last 7 days as the initial range and disclose that older history is not covered.
+   If the record cannot be read or the checkpoint is no longer an ancestor, mark the range as unconfirmed instead of silently resetting progress as a first run.
+3. Check at most the earliest 20 pending commits per round. Inspect each diff, then follow the changed symbols, entry points, config keys and direct callers to the relevant docs; a large commit may be checked feature by feature, but the checkpoint must not advance past it before it is finished.
+   Do not assume the docs are in sync just because code and docs landed in the same commit, and do not decide no update is needed just because no doc shares the name.
+4. Advance `checked_through_sha` only to the last consecutively fully checked commit; record the remaining range and continue next round.
+   When findings exist but are not fixed yet, you may record the checked progress, but must carry the unresolved items and their Issues/PRs, and verify first next round whether they were fixed or are tracked by an open task, so problems are neither lost nor fixed twice in duplicate PRs.
 
-### 核对与修复
+### Checking and fixing
 
-- **触发条件**：发现有源码依据的行为遗漏或矛盾，例如入口、参数及默认值、配置来源、
-  状态转换、持久化、请求范围、缓存与刷新节奏、权限和失败处理描述不符；或者发现相关
-  文档的失效路径、符号、链接及应纳入导航的正式页面缺项。
-- **行动指引**：
-  1. 从生产入口追踪当前实现。按 feature-docs 的方法维护已有指南或功能地图；技能不可用时
-     仍按本节执行，不将历史 PRD、旧文档或测试替身当成实现事实。
-  2. 每个发现写明“提交/变更符号 → 文档位置 → 当前描述或遗漏 → 实现依据 → 影响”，
-     优先修正会误导使用、运维或代码修改的问题，不为措辞偏好制造改动。
-  3. 修正相关权威文档和引用；仅新增、移动正式页面或导航确有缺项时更新 `mkdocs.yml`。
-     不修改生产代码来迎合旧文档，也不扩成无关文档整理。
-  4. 跑 `git diff --check` 和 `uv run mkdocs build --strict`，并回看修改后的行为描述与
-     源码是否一致；纯文档改动不声称完成产品行为验证。出 draft PR，标题前缀 `cleanup(docs):`。
-- **无事可做判定**：已完成所声明范围的行为核对，没有成立且未被其他任务承接的文档差异，
-  并完成适用的链接、导航与构建检查。仅构建通过、检查被跳过或依赖不可用均不代表无差异。
+- **Trigger**: a source-backed behavioural omission or contradiction is found — for example entry points, parameters and defaults, config sources, state transitions, persistence, request scope, cache and refresh cadence, permissions or failure handling are described incorrectly; or the related docs have dead paths, symbols, links, or a formal page missing from navigation.
+- **Steps**:
+  1. Trace the current implementation from the production entry point. Maintain existing guides or feature maps the way feature-docs does; when the skill is unavailable, still follow this section and never treat historical PRDs, old docs or test doubles as implementation facts.
+  2. For each finding, write "commit/changed symbol → doc location → current description or gap → implementation evidence → impact", prioritising issues that mislead usage, operations or code changes; do not manufacture edits for wording preference.
+  3. Fix the authoritative docs and references; update `mkdocs.yml` only when a formal page is added, moved, or genuinely missing from navigation.
+     Do not change production code to match old docs, and do not expand into unrelated doc tidying.
+  4. Run `git diff --check` and `uv run mkdocs build --strict`, then re-read the changed behaviour descriptions against the source; a docs-only change does not claim product-behaviour verification. Open a draft PR with the `cleanup(docs):` title prefix.
+- **Not actionable when**: the declared range has been behaviourally checked, no doc difference holds that is not already tracked by another task, and the applicable link, navigation and build checks are done. A passing build alone, a skipped check or unavailable dependencies do not mean there is no difference.
 
-### 每轮记录
+### Per-round record
 
-无论发现与否，均在本轮 Issue 留下文档检查记录：`head_sha`、起点及首次覆盖限制、
-`checked_through_sha`（未检查则不推进）、已查提交与相关文档、发现及源码证据、未解决项及
-承接链接、剩余范围、实际验证结果，以及检查耗时。没有适用文档也需简述判断依据。
-区分“已核对无差异”“发现待修复”“部分检查”“未执行”，不编造覆盖率。
+Whether or not anything is found, leave a doc-check record on this Issue: `head_sha`, the starting point and first-run coverage limits,
+`checked_through_sha` (not advanced when unchecked), commits checked and related docs, findings with source evidence, unresolved items and
+tracking links, remaining range, actual verification results, and time spent. If no doc applies, still summarise the basis for that judgement.
+Distinguish "checked, no difference", "found, pending fix", "partially checked" and "not executed"; never fabricate coverage.
 
-## 4. 依赖升级
+## 4. Dependency upgrades
 
-- **触发条件**：`outdated_count` > 5（含 5），或 0.0 ≤ X < 1.0 的小版本（patch）累积 ≥ 10。
-- **行动指引**：
-  1. `uv lock --upgrade` 一把锁，或手工选高 ROI 的几个直接依赖（被本仓 `import` 的多、安全公告紧的）；
-  2. `just test` 确认兼容性；
-  3. 若失败，缩小到安全范围（patch only）重试；
-  4. 出 draft PR，标题前缀 `cleanup(deps):`。
-- **无事可做判定**：`outdated_count` 阈值未触发；或上次升级在 7 天内（避免每晚刷 PR）。
+- **Trigger**: `outdated_count` > 5 (inclusive), or minor (patch) versions in 0.0 ≤ X < 1.0 accumulate to ≥ 10.
+- **Steps**:
+  1. Upgrade the whole lockfile with `uv lock --upgrade`, or hand-pick a few high-ROI direct dependencies (heavily imported here, tight security advisories);
+  2. Run `just test` to confirm compatibility;
+  3. On failure, narrow to a safe range (patch only) and retry;
+  4. Open a draft PR with the `cleanup(deps):` title prefix.
+- **Not actionable when**: the `outdated_count` threshold is not met; or the last upgrade was within 7 days (avoid nightly PR churn).
 
-## Triage 优先级
+## Triage priority
 
-- **当晚只做 1 个 scope**，优先级：`CI > refactor > docs > deps`。
-- **判定流程**：
-  1. 先按上节触发条件逐个判定（CI 看 `last_ci_status` → refactor 看扫描 → docs 看近期 diff 的行为核对及构建 → deps 看 `outdated_count`）。
-  2. 命中最高优先级的 scope 即为当晚目标；跳过更低优先级。文档被跳过时仍记录“未执行”及原因，
-     不推进文档检查点；下轮继续累计范围，不按当天时间窗口丢弃积压。
-  3. 4 类都未命中 → `gh issue close <N> --comment "no actionable cleanup tonight"`，**不**出 PR。
-- **scope 标注**：选定 scope 后，在 worktree 内执行：
+- **Only one scope per night**, priority: `CI > refactor > docs > deps`.
+- **Decision flow**:
+  1. Judge each trigger above in order (CI via `last_ci_status` → refactor via the scan → docs via the recent-diff behaviour check and build → deps via `outdated_count`).
+  2. The highest-priority hit is the night's target; skip the lower ones. When docs is skipped, still record "not executed" and why,
+     do not advance the doc checkpoint, and keep accumulating the range next round instead of dropping backlog by a date window.
+  3. No hit in any of the four → `gh issue close <N> --comment "no actionable cleanup tonight"` and **do not** open a PR.
+- **Scope label**: once a scope is chosen, run inside the worktree:
   ```bash
   gh issue edit <N> --add-label scope/<x>
   ```
-  其中 `x ∈ {ci, refactor, docs, deps}`。`scope/<x>` 4 个 label 需先通过
-  `kc labels sync` 在仓库创建（详见 `docs/guides/loop.md`）。
+  where `x ∈ {ci, refactor, docs, deps}`. The four `scope/<x>` labels must first be created in the repository with
+  `kc labels sync` (see `docs/guides/loop.md`).
 
 ## Delivery Notes
 
 - Recommended branch: `task/<issue-number>-prd-nightly-cleanup-keda-{{date}}`
 - Worktree command: `iar worktree create --branch issue-<issue-number> --base-branch main`
 - PR should include: `Closes #<issue-number>`
-- Draft PR 标题前缀：`cleanup(<scope>): <一句话描述>`
+- Draft PR title prefix: `cleanup(<scope>): <one-line description>`

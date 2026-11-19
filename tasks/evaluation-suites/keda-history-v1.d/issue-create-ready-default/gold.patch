@@ -1,0 +1,28 @@
+diff --git a/src/backend/api/cli_parser_setup_commands.py b/src/backend/api/cli_parser_setup_commands.py
+index 4423c3c2..127cd70a 100644
+--- a/src/backend/api/cli_parser_setup_commands.py
++++ b/src/backend/api/cli_parser_setup_commands.py
+@@ -88,2 +88,2 @@ def add_setup_commands(subparsers: argparse._SubParsersAction) -> None:
+-        default=False,
+-        help="Add the ready label so a runner can pick the Issue up.",
++        default=True,
++        help="Add the ready label so a runner can pick the Issue up (default: on).",
+diff --git a/src/backend/api/cli_typer_issue.py b/src/backend/api/cli_typer_issue.py
+index e32aa42b..0fd57ff3 100644
+--- a/src/backend/api/cli_typer_issue.py
++++ b/src/backend/api/cli_typer_issue.py
+@@ -116,2 +116,2 @@ def issue_create_command(
+-        typer.Option("--ready/--no-ready", help="Queue the Issue for a runner."),
+-    ] = False,
++        typer.Option("--ready/--no-ready", help="Queue the Issue for a runner (default: on)."),
++    ] = True,
+diff --git a/src/backend/engines/agent_runner/templates/skills/kedacode-operator/references/create-issue.md b/src/backend/engines/agent_runner/templates/skills/kedacode-operator/references/create-issue.md
+index b394d419..0357e61c 100644
+--- a/src/backend/engines/agent_runner/templates/skills/kedacode-operator/references/create-issue.md
++++ b/src/backend/engines/agent_runner/templates/skills/kedacode-operator/references/create-issue.md
+@@ -12 +12 @@ The user says 「把 tasks/pending/xxx.md 建成 issue」「建个 issue」「
+-4. **Whether the user wants the Issue to enter the queue now** — creating an Issue and enqueuing it (a daemon may pick it up) are different intents. PRD-path creation also back-writes the local PRD link and, by default, stages, commits, and pushes that PRD; only `--from-prompt` creation leaves local files untouched. `--ready` enqueues; by default a human runs it explicitly. Conflating them is unintended execution.
++4. **Whether the user wants the Issue to enter the queue now** — creating an Issue and enqueuing it (a daemon may pick it up) are different intents. PRD-path creation also back-writes the local PRD link and, by default, stages, commits, and pushes that PRD; only `--from-prompt` creation leaves local files untouched. Creation **enqueues by default**, so pass `--no-ready` when the user asked only to create the Issue and will run it explicitly later. Since enqueueing is the default, ask first when the user's wording does not make the intent clear.
+@@ -17 +17 @@ The user says 「把 tasks/pending/xxx.md 建成 issue」「建个 issue」「
+-- `kc issue create tasks/pending/<file>.md` creates and publishes the GitHub Issue and back-writes the link to the PRD; add `--ready` only when the user asked to enqueue: `kc issue create tasks/pending/<file>.md --ready --repo <path>`.
++- `kc issue create tasks/pending/<file>.md` creates and publishes the GitHub Issue, back-writes the link to the PRD, and **enqueues it by default**; add `--no-ready` when the user asked only to create it: `kc issue create tasks/pending/<file>.md --no-ready --repo <path>`.

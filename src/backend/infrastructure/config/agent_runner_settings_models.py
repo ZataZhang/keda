@@ -146,6 +146,7 @@ class AgentRunnerAgentProfileSettings(BaseModel):
     resume_tail_args: list[str] | None = None
     expand: list[str] | None = None
     read_only: bool | None = None
+    read_only_enforced: bool | None = None
 
 
 class AgentRunnerAgentSettings(BaseModel):
@@ -444,9 +445,9 @@ class AgentRunnerMemorySettings(BaseModel):
 
 
 class AgentRunnerSafetySettings(BaseModel):
-    """Safety boundaries enforced before publishing."""
+    """发布前安全边界；新配置默认允许全仓自动合并，仍须通过 Autopilot 与队列门禁。"""
 
-    auto_merge: bool = False
+    auto_merge: bool = True
     forbidden_path_patterns: list[str] = Field(
         default_factory=lambda: [
             ".env",
@@ -455,21 +456,22 @@ class AgentRunnerSafetySettings(BaseModel):
             "docker-compose.prod.yml",
         ]
     )
-    forbidden_path_exceptions: list[str] = Field(default_factory=list)
+    forbidden_path_exceptions: list[str] = Field(
+        default_factory=lambda: [".env.example", ".env.*.example"]
+    )
 
 
 class AgentRunnerAutopilotSettings(BaseModel):
     """Autopilot / merge queue configuration.
 
-    全仓自动合并仍要求本段 ``enabled`` 与
-    ``AgentRunnerSafetySettings.auto_merge`` 同时为真。若 ``auto_merge`` 关闭，
-    合并队列只处理显式带 ``auto-merge`` 或 ``prd-auto-merge`` 标签的 Issue；本段
-    ``enabled`` 对全局与两种 Issue 级路径都是必要条件。这保留了对早前误设
-    ``safety.auto_merge = true``
-    的防呆保险。
+    新配置默认同时启用本段 ``enabled`` 与
+    ``AgentRunnerSafetySettings.auto_merge``，以便全仓 PR 在通过合并队列门禁后自动合并。
+    若 ``auto_merge`` 关闭，合并队列只处理显式带 ``auto-merge`` 或 ``prd-auto-merge``
+    标签的 Issue；本段 ``enabled`` 对全局与两种 Issue 级路径都是必要条件。仓库可以
+    显式把任一开关设为 ``False``。
 
     Attributes:
-        enabled: 主开关；为 ``False`` 时合并队列整段 no-op，包括 Issue 级标签授权。
+        enabled: 主开关，默认为 ``True``；为 ``False`` 时合并队列整段 no-op，包括 Issue 级标签授权。
         merge_method: 唯一接受的合并方式：``"squash"``；其它值在配置加载期
             由 :class:`AgentRunnerAutopilotSettings` 的 field_validator 拒
             绝。这是用户锁定的设计决策——单提交便于 ``git revert`` 回退。
@@ -483,7 +485,7 @@ class AgentRunnerAutopilotSettings(BaseModel):
             放弃本轮合并（不阻塞后续 PR）。
     """
 
-    enabled: bool = False
+    enabled: bool = True
     # 仅接受 "squash"；非法值在加载期直接报错，避免下游用错方法调用 gh。
     merge_method: Literal["squash"] = "squash"
     require_verifier_pass: bool = True
@@ -634,6 +636,8 @@ class AgentRunnerDaemonSettings(BaseModel):
     # 默认 5 小时：必须大于 ``runner.timeout_seconds``（默认 4 小时），否则仍在正常运行
     # 的 attempt 会被误判 ttl_expired。仅在 ``reconcile_stale_attempts=True`` 时生效。
     reclaim_ttl_seconds: int = 18000
+    presence_enabled: bool = False
+    lease_ttl_seconds: int = 1200
 
     @model_validator(mode="after")
     def _validate_disk_watermarks(self) -> "AgentRunnerDaemonSettings":

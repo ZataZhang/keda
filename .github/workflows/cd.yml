@@ -44,6 +44,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 部分 guard tests 会启动真实 just recipe（如 tests/guards/shared/test_ai_pr.py），
+      # ubuntu-latest 不自带 just。ci.yml 与 cd.yml 都跑测试套件，两处版本必须一致，
+      # 并与 runner_container/Dockerfile.runner 的 JUST_VERSION 对齐。
+      - name: Set up just
+        uses: extractions/setup-just@v4
+        with:
+          just-version: "1.55.1"
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:

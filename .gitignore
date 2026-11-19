@@ -95,7 +95,6 @@ tasks/evidence/**
 # >>> kc (managed by `kc init`) >>>
 # KedaCode-managed git worktrees (host-local)
 .kc-worktrees/
-.iar-worktrees/
 # <<< kc <<<
 
 # KedaCode runner local state (memory / skills / decisions / state)

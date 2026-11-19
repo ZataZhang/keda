@@ -20,6 +20,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { formatLocalDateTime } from "@/lib/utils";
+import { confirmAction } from "@/lib/confirm-action";
 import { useRepositorySelection } from "@/lib/console-repository-selection";
 import {
   fetchProcessLog,
@@ -90,7 +91,7 @@ export default function ProcessesPage() {
       toast.warning("请先选择目标仓库。");
       return;
     }
-    const confirmed = window.confirm(
+    const confirmed = await confirmAction(
       `确认为仓库 ${selectedRepoId} 启动 ${KIND_LABELS[selectedKind]} 进程？`,
     );
     if (!confirmed) {
@@ -124,7 +125,7 @@ export default function ProcessesPage() {
       toast.info("所有启用仓库都已有运行中的 daemon。");
       return;
     }
-    const confirmed = window.confirm(
+    const confirmed = await confirmAction(
       `确认给 ${targets.length} 个仓库启动 daemon？已在运行的 ${daemonRepoIds.size} 个仓库会跳过。`,
     );
     if (!confirmed) {
@@ -161,7 +162,7 @@ export default function ProcessesPage() {
   }
 
   async function handleStop(record: RunnerProcessRecord) {
-    const confirmed = window.confirm(
+    const confirmed = await confirmAction(
       `确认停止进程 ${record.process_id}（${record.repo_id} / ${KIND_LABELS[record.kind]}）？`,
     );
     if (!confirmed) {

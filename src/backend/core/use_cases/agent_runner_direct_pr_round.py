@@ -7,7 +7,11 @@ import re
 from dataclasses import asdict, dataclass, replace
 from uuid import uuid4
 
-from backend.core.shared.interfaces.agent_runner import IGitHubClient
+from backend.core.shared.interfaces.agent_runner import (
+    GitHubApiRateLimitError,
+    GitHubApiUnavailableError,
+    IGitHubClient,
+)
 from backend.core.shared.models.agent_runner import IssueSummary
 from backend.core.use_cases.agent_runner_dependencies import parse_direct_pr_marker
 
@@ -131,6 +135,8 @@ def read_direct_pr_round(github_client: IGitHubClient, issue: IssueSummary) -> D
             ):
                 raise ValueError("publication checkpoint has invalid identity or checkpoint fields")
             return record
+    except (GitHubApiRateLimitError, GitHubApiUnavailableError):
+        raise
     except Exception as exc:
         raise DirectPrRoundError(
             f"Cannot read Direct PR checkpoint for Issue #{issue.number}: {exc}"

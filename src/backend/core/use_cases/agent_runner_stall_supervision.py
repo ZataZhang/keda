@@ -11,7 +11,11 @@
 2. **只读**——诊断走 agent 自己声明的只读 profile，输入只有进展签名与人读摘要，
    不含提示词、环境变量或凭据。
 3. **精确取消**——只有 ``stalled`` 结论、且取消前**当场**再读一次现场与进程归属
-   全部一致时才终止那个进程组；任何一项对不上都只记录原因并交班。
+   全部一致时才终止那个进程组；任何一项对不上都只记录原因并交班。归属证据来自
+   本进程的活跃 attempt 登记簿（:mod:`backend.infrastructure.attempt_process_registry`），
+   因此可取消的范围就是"本进程自己 ``Popen`` 起来的那个进程组"——跨主机的 writer
+   从不在这条路径上（死进程与失联 owner 由既有崩溃对账处理），本特性不假装能
+   处置它。
 
 线程与日志归属：observer 跑在独立守护线程里，而 per-Issue 日志的 handler 按线程
 id 过滤（见 ``agent_runner_output_routing._ThreadLogFilter``），所以监督线程的
@@ -213,6 +217,11 @@ def _digest(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()[:16]
 
 
+def _git_read_command(*subcommand_arguments: str) -> list[str]:
+    """拼一条**绝不写索引**的只读 git 命令（``--no-optional-locks`` 是顶层旗标）。"""
+    return ["git", "--no-optional-locks", *subcommand_arguments]
+
+
 def _run_sample_command(
     process_runner: IProcessRunner,
     worktree_path: Path,
@@ -253,6 +262,12 @@ def build_progress_snapshot(request: StallSupervisionRequest) -> ProgressSnapsho
     地方，把输出活动算作进展会让监督器永远看不见停滞。可采到的进展信号是
     HEAD sha、当前分支、工作区状态指纹、未提交 diff 指纹，以及既有调用账本里的
     终态数与最近事件时刻。
+
+    两条工作区读命令都带 ``--no-optional-locks``：observer 与 writer 跑在**同一个
+    工作区**，而 ``git status`` / ``git diff`` 默认会写一个可选的 ``index.lock`` 来
+    刷新索引。没有这个旗标，每 30 分钟一次的只读巡检就可能撞上 writer 自己的
+    ``git add/commit`` 报 "Unable to create index.lock: File exists"——监督者把别人的
+    任务盯死了，代价却是任务本身失败，这是不可接受的副作用。
     """
     try:
         head_sha = get_head_sha(request.worktree_path, request.process_runner)
@@ -261,14 +276,14 @@ def build_progress_snapshot(request: StallSupervisionRequest) -> ProgressSnapsho
             _run_sample_command(
                 request.process_runner,
                 request.worktree_path,
-                ["git", "status", "--porcelain", "-z"],
+                _git_read_command("status", "--porcelain", "-z"),
             )
         )
         diff_fingerprint = _digest(
             _run_sample_command(
                 request.process_runner,
                 request.worktree_path,
-                ["git", "diff", "--stat"],
+                _git_read_command("diff", "--stat"),
             )
         )
     except Exception as exc:  # noqa: BLE001 - 现场读不到一律交回，不做任何处置。
@@ -721,9 +736,10 @@ class _StallObserver:
             return
         self._audit(
             f"{STALL_CANCEL_MARKER} attempt={request.attempt_key} "
-            f"issue={request.issue_number} host={ownership.host_label or '-'} "
+            f"issue={request.issue_number} registered_by={ownership.host_label or '-'} "
             f"pid={ownership.process_pid} process_group={outcome.process_group} "
-            f"verdict={verdict.kind.value} detail=目标进程组已退出，诊断摘要交给既有 recovery"
+            f"verdict={verdict.kind.value} detail=本进程登记的 attempt 进程组已退出，"
+            "诊断摘要交给既有 recovery"
         )
         self._state.cancel_error = AgentStallCancelledError(
             "\n".join(

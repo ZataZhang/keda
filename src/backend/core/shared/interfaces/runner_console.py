@@ -291,6 +291,22 @@ class IRunHistoryStore(ABC):
         ...
 
     @abstractmethod
+    def list_recent_runs_by_issue(
+        self, *, repo_id: str, since_started_at: str, limit: int = 100
+    ) -> list[RunRecord]:
+        """按起始时间筛选，并为每个 Issue 返回最新写入的一条运行记录。
+
+        Args:
+            repo_id: 目标仓库标识。
+            since_started_at: 起始时间下界（ISO-8601 UTC），包含该时刻。
+            limit: 最多返回的不同 Issue 数量。
+
+        Returns:
+            list[RunRecord]: 按最近写入顺序倒排、每个 Issue 至多一条的运行记录。
+        """
+        ...
+
+    @abstractmethod
     def list_issue_attempts(
         self, *, repo_id: str, issue_number: int, limit: int = 100
     ) -> list[AttemptRecord]:
@@ -343,6 +359,36 @@ class IRunHistoryStore(ABC):
         实现必须保留审计、队列、设置与其他持久状态；每次调用使用一个事务，
         并以有界批次删除，避免旧数据库一次性产生过大的写锁。
         """
+        ...
+
+
+class IIssueRetryOverrideStore(ABC):
+    """本机管理终端请求的单次生命周期执行器覆盖存储端口。"""
+
+    @abstractmethod
+    def set_issue_retry_override(
+        self, *, repo_id: str, issue_number: int, stage: str, executor: str
+    ) -> None:
+        """保存或替换某个 Issue 下一次续跑的执行器覆盖。"""
+        ...
+
+    @abstractmethod
+    def get_issue_retry_override(
+        self, *, repo_id: str, issue_number: int
+    ) -> tuple[str, str] | None:
+        """读取待消费覆盖；在 GitHub 认领成功前不消费。"""
+        ...
+
+    @abstractmethod
+    def pop_issue_retry_override(
+        self, *, repo_id: str, issue_number: int
+    ) -> tuple[str, str] | None:
+        """原子消费 Issue 覆盖并返回 ``(stage, executor)``。"""
+        ...
+
+    @abstractmethod
+    def clear_issue_retry_override(self, *, repo_id: str, issue_number: int) -> None:
+        """删除待消费覆盖，例如切换回普通重试时。"""
         ...
 
 

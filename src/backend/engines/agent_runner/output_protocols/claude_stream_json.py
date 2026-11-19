@@ -48,6 +48,7 @@ class ClaudeStreamJsonOutputProtocol:
             label=request.label,
             usage_collector=usage_collector,
             attempt_key=request.attempt_key,
+            cancel_check=request.cancel_check,
         )
         return CommandResult(
             command=tuple(argv),

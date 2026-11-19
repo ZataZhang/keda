@@ -78,6 +78,7 @@ class ProtocolRoutingProcessRunner(IProcessRunner):
         output_sink: Callable[[str], None] | None = None,
         output_protocol: str | None = None,
         attempt_key: str | None = None,
+        cancel_check: Callable[[], bool] | None = None,
     ) -> CommandResult:
         # jscpd:ignore-end
         """执行一条命令；非 plain 输出协议交由注册表解析出的实现中继。"""
@@ -96,6 +97,7 @@ class ProtocolRoutingProcessRunner(IProcessRunner):
                 # 与"普通命令"，只有前者才做 token 用量的事后解析。
                 output_protocol=output_protocol,
                 attempt_key=attempt_key,
+                cancel_check=cancel_check,
             )
         protocol = self._protocol_registry.resolve(output_protocol)
         started_mono = time.monotonic()
@@ -115,6 +117,7 @@ class ProtocolRoutingProcessRunner(IProcessRunner):
                 collect_stdout=True,
                 output_sink=output_sink,
                 attempt_key=attempt_key,
+                cancel_check=cancel_check,
             )
         )
         result = dataclasses.replace(

@@ -34,19 +34,38 @@ def _scan_root_error(command: str, exc: ValueError) -> CliError:
 
 def run_registry_scan_command(ctx: ParsedCommandContext) -> int:
     """``kc registry scan``: discover KedaCode-initialized repos under a path."""
+    registry_editor = create_registry_editor()
     try:
-        entries = discover_repositories(
+        discovered_repositories = discover_repositories(
             scan_root=Path(ctx.parsed.scan_root),
-            editor=create_registry_editor(),
+            editor=registry_editor,
         )
     except ValueError as exc:
         raise _scan_root_error("scan", exc) from exc
-    if not entries:
+    if not discovered_repositories:
         console.print("[yellow]No KedaCode repositories found.[/]")
         return 0
-    for entry in entries:
-        status = "registered" if entry.already_registered else "new"
-        print(f"[{entry.repo_id}] {entry.path} ({status})")
+    registered_repositories_by_path = {
+        str(Path(registry_entry.path).expanduser().resolve()): registry_entry
+        for registry_entry in registry_editor.list_repositories()
+    }
+    for discovered_repository_entry in discovered_repositories:
+        registered_repository_entry = registered_repositories_by_path.get(
+            str(Path(discovered_repository_entry.path).resolve())
+        )
+        if not discovered_repository_entry.already_registered:
+            registration_status = "new"
+        elif (
+            registered_repository_entry is not None
+            and registered_repository_entry.repo_id != discovered_repository_entry.repo_id
+        ):
+            registration_status = f"registered as {registered_repository_entry.repo_id}"
+        else:
+            registration_status = "registered"
+        print(
+            f"[{discovered_repository_entry.repo_id}] {discovered_repository_entry.path} "
+            f"({registration_status})"
+        )
     return 0
 
 
@@ -87,22 +106,62 @@ def run_registry_sync_command(ctx: ParsedCommandContext) -> int:
 
 
 def run_registry_reinit_command(ctx: ParsedCommandContext) -> int:
+    """执行 ``kc registry reinit`` 并返回退出码。
+
+    Args:
+        ctx: 已解析命令及进程运行器组成的上下文。
+
+    Returns:
+        ``kc registry reinit`` 的进程退出码。
+    """
     return _run_registry_reinit_command(ctx.parsed, ctx.process_runner)
 
 
 def run_registry_remove_command(ctx: ParsedCommandContext) -> int:
+    """执行 ``kc registry remove`` 并返回退出码。
+
+    Args:
+        ctx: 已解析命令及进程运行器组成的上下文。
+
+    Returns:
+        ``kc registry remove`` 的进程退出码。
+    """
     return _run_registry_remove_command(ctx.parsed, ctx.process_runner)
 
 
 def run_registry_list_command(ctx: ParsedCommandContext) -> int:
+    """执行 ``kc registry list`` 并返回退出码。
+
+    Args:
+        ctx: 进程运行器及输出格式组成的上下文。
+
+    Returns:
+        ``kc registry list`` 的进程退出码。
+    """
     return _run_registry_list_command(ctx.process_runner, fmt=ctx.output_format)
 
 
 def run_registry_start_command(ctx: ParsedCommandContext) -> int:
+    """执行 ``kc registry start`` 并返回退出码。
+
+    Args:
+        ctx: 已解析命令及进程运行器组成的上下文。
+
+    Returns:
+        ``kc registry start`` 的进程退出码。
+    """
     return _run_registry_start_command(ctx.parsed, ctx.process_runner)
 
 
 def run_registry_stop_command(ctx: ParsedCommandContext) -> int:
+    """执行 ``kc registry stop`` 并返回退出码。
+
+    Args:
+        ctx: 已解析命令及进程运行器组成的上下文。
+
+    Returns:
+        ``kc registry stop`` 的进程退出码。
+    """
     return _run_registry_stop_command(ctx.parsed, ctx.process_runner)
 
 

@@ -182,8 +182,41 @@ def changed_line_ranges(repo_root: Path, relative_path: Path) -> list[tuple[int,
     ):
         new_side_ranges = _parse_new_side_line_ranges(_run_git_capture(repo_root, diff_args))
         if new_side_ranges:
+            if _merge_in_progress(repo_root):
+                return _exclude_merged_in_lines(repo_root, relative_path, new_side_ranges)
             return new_side_ranges
     return []
+
+
+def _merge_in_progress(repo_root: Path) -> bool:
+    """判断仓库是否处于合并进行中（存在 ``MERGE_HEAD``）。"""
+
+    return bool(_run_git_capture(repo_root, ["rev-parse", "-q", "--verify", "MERGE_HEAD"]).strip())
+
+
+def _exclude_merged_in_lines(
+    repo_root: Path,
+    relative_path: Path,
+    head_side_ranges: list[tuple[int, int]],
+) -> list[tuple[int, int]]:
+    """合并进行中时，剔除原样来自被合并分支（``MERGE_HEAD``）的行。
+
+    只有相对 HEAD 和 MERGE_HEAD 都不同的行才是本次合并真正写下的内容（冲突解决或
+    额外修改）；与 MERGE_HEAD 一致的行是对方分支带进来的既有代码，不应让它的历史
+    重复拦住合并提交。交集为空时退回相对 MERGE_HEAD 的差异（本分支自己的行），
+    保持“空列表 = 整文件视为改动”的调用约定不被误触发。
+    """
+
+    merge_side_ranges = _parse_new_side_line_ranges(
+        _run_git_capture(repo_root, ["diff", "-U0", "MERGE_HEAD", "--", relative_path.as_posix()])
+    )
+    own_ranges = [
+        (max(head_start, merge_start), min(head_end, merge_end))
+        for head_start, head_end in head_side_ranges
+        for merge_start, merge_end in merge_side_ranges
+        if max(head_start, merge_start) <= min(head_end, merge_end)
+    ]
+    return own_ranges or merge_side_ranges
 
 
 def _collect_changed_paths(
@@ -215,6 +248,22 @@ def _collect_changed_paths(
                 *[root.as_posix() for root in allowed_root_paths],
             ],
         )
+
+    if changed_paths and _merge_in_progress(repo_root):
+        # 合并进行中：与 MERGE_HEAD 完全一致的文件是对方分支原样带进来的，不算本次改动
+        merge_differing_paths = set(
+            _git_relative_paths(
+                repo_root,
+                [
+                    "diff",
+                    "--name-only",
+                    "MERGE_HEAD",
+                    "--",
+                    *[root.as_posix() for root in allowed_root_paths],
+                ],
+            )
+        )
+        changed_paths = [path for path in changed_paths if path in merge_differing_paths]
 
     selected_changed_paths: list[Path] = []
     seen_relative_paths: set[Path] = set()

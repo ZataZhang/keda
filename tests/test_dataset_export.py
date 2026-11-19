@@ -272,6 +272,7 @@ def test_classify_size_band(size: dict[str, int] | None, expected: str | None) -
 
 def test_classify_task_kind() -> None:
     assert classify_task_kind("Keda 阻塞与失败巡查 — 2026-10-20") == "patrol"
+    assert classify_task_kind("Keda blocker and failure patrol — 2026-11-13") == "patrol"
     assert classify_task_kind("Stats 页面增加顶部 Tab") == "development"
     assert classify_task_kind(None) == "development"
 

@@ -7,9 +7,9 @@
 - 进程登记表是一个 JSON pidfile（默认落在本机状态目录下，见 ``[agent_runner.console]``），
   写入采用「临时文件 + ``os.replace``」原子替换；后端重启后据此复活
   记录并重新探活。
-- 探活使用 ``os.kill(pid, 0)``；进程不存在（``ProcessLookupError``）
-  视为已退出。pid 复用的误判窗口由 started_at 记录辅助人工判断，
-  极端情况下的精确防护见 PRD Risks。
+- 探活：POSIX 用 ``os.kill(pid, 0)``，Windows 用 ``psutil.pid_exists``——
+  Windows 的 ``os.kill`` 没有信号 0 语义，传 0 会真的 TerminateProcess。
+  pid 复用的误判窗口由 started_at 记录辅助人工判断，极端情况下的精确防护见 PRD Risks。
 - 停止流程：SIGTERM → 等待 ``timeout_seconds`` → 仍存活则 SIGKILL。
 """
 
@@ -96,6 +96,15 @@ def _probe_pid(pid: int) -> tuple[bool, int | None]:
             _CHILD_PROCESSES.pop(pid, None)
             return False, exit_code
         return True, None
+    if os.name == "nt":
+        if psutil is None:
+            # 不能退回 os.kill(pid, 0)：Windows 会把它当成 TerminateProcess。
+            _logger.warning("psutil is unavailable; treating pid %s as alive.", pid)
+            return True, None
+        try:
+            return bool(psutil.pid_exists(pid)), None
+        except Exception:  # noqa: BLE001 - 探活失败不应让状态查询崩溃。
+            return False, None
     try:
         os.kill(pid, 0)
         return True, None
@@ -415,28 +424,29 @@ class PidfileProcessSupervisor:
 
         unmanaged_records: list[RunnerProcessRecord] = []
         try:
-            for proc in psutil.process_iter(["pid", "name", "cmdline", "username", "create_time"]):
+            # 只预读 pid；cmdline 是唯一必须对全表读取的字段。username /
+            # create_time 的读取在 Windows 上要打开进程句柄、在 macOS 上要额外
+            # sysctl，对几百个无关进程逐个读会把单次请求拖到 8–20 秒。
+            for proc in psutil.process_iter(["pid"]):
                 try:
-                    proc_info = proc.info
-                    if not isinstance(proc_info, dict):
+                    pid = proc.pid
+                    if pid <= 0 or pid == current_pid:
                         continue
-                    pid = proc_info.get("pid")
-                    username = proc_info.get("username")
-                    cmdline = proc_info.get("cmdline")
-                    if not isinstance(pid, int) or pid <= 0:
+                    if pid in managed_pids:
                         continue
-                    if pid == current_pid:
-                        continue
-                    if current_username is not None and username != current_username:
-                        continue
+                    cmdline = proc.cmdline()
                     if not isinstance(cmdline, (list, tuple)) or not cmdline:
                         continue
                     cmdline_tuple = tuple(str(arg) for arg in cmdline)
                     kind = _parse_unmanaged_kind(cmdline_tuple)
                     if kind is None:
                         continue
-                    if pid in managed_pids:
-                        continue
+                    if current_username is not None:
+                        try:
+                            if proc.username() != current_username:
+                                continue
+                        except Exception:  # noqa: BLE001 - 权限不足的进程不属于本用户。
+                            continue
                     repo_id = _parse_repo_id_from_argv(cmdline_tuple)
                     if repo_id is None:
                         try:
@@ -446,6 +456,10 @@ class PidfileProcessSupervisor:
                         repo_id = _resolve_repo_id_from_cwd(cwd, registry_entries)
                     if repo_id is None:
                         continue
+                    try:
+                        started_at = _format_create_time(proc.create_time())
+                    except Exception:  # noqa: BLE001 - 取不到创建时间不影响观测。
+                        started_at = ""
                     unmanaged_records.append(
                         RunnerProcessRecord(
                             process_id=f"unmanaged-{pid}",
@@ -456,7 +470,7 @@ class PidfileProcessSupervisor:
                             exit_code=None,
                             log_path="",
                             command=cmdline_tuple,
-                            started_at=_format_create_time(proc_info.get("create_time")),
+                            started_at=started_at,
                             stopped_at=None,
                         )
                     )
@@ -508,7 +522,8 @@ class PidfileProcessSupervisor:
             else:
                 alive, final_exit_code = _probe_pid(record.pid)
             if alive:
-                os.kill(record.pid, signal.SIGKILL)
+                kill_signal = getattr(signal, "SIGKILL", signal.SIGTERM)
+                os.kill(record.pid, kill_signal)
                 final_status = "killed"
                 child_handle = _CHILD_PROCESSES.pop(record.pid, None)
                 if child_handle is not None:

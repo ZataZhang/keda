@@ -14,6 +14,7 @@ from backend.core.shared.interfaces.agent_runner import (
 from backend.core.shared.interfaces.runner_console import IRunHistoryStore
 from backend.core.shared.interfaces.runner_live_view import IRunnerLiveView
 from backend.core.shared.models.agent_runner import AppConfig
+from backend.core.shared.models.agent_runner_progress import RunProgressEvent
 from backend.core.shared.models.pass_activity import PassActivity
 from backend.core.shared.models.publish_stage import PublishStage
 from backend.core.use_cases.daemon_execution_slots import DaemonExecutionSlots
@@ -72,3 +73,8 @@ class RunOnceRequest:
     #: ``concurrency − 本机在执行数`` 个 Issue，所有通道跳过名单里的 Issue，领到的
     #: Issue 提交到名单后立即返回、不等待完成。``None`` 保持一次性运行的语义。
     execution_slots: DaemonExecutionSlots | None = None
+    #: 可选的实时阶段通知；仅由前台 ``kc run --progress`` 注入。
+    progress_callback: Callable[[RunProgressEvent], None] | None = None
+    #: per-Issue 日志根目录（见 ``RepositoryRunContext.log_base``）；``None`` 时取
+    #: ``repo_path / "logs"``。
+    log_base: Path | None = None

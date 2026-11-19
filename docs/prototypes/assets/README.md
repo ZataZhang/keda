@@ -2,6 +2,10 @@
 
 本目录统一使用通用资源命名，避免业务语义耦合到文件名。
 
+## 功能原型图片
+
+具体功能的图片放在对应原型的资产子目录，例如 lifecycle-agent-matrix/；不要将功能图片散放在本目录根部。AI 生成图片须配同名 .prompt.md，真实页面截图或设计导出须配同名 .source.md。完整的目录、来源记录和验证要求见[原型与 UI 草图项目规范](../../ai-standards/prototyping.md)。
+
 ## 通用入口
 
 - `prototype.css`: 默认原型页面样式入口（可直接在 `docs/prototypes/*.html` 引用）。
@@ -11,7 +15,7 @@
 - `prototype-hub.js`: Prototype Hub 唯一原型 registry、关系边、搜索筛选与详情渲染；原型关系只在 registry 中维护。
 - `runtime-board.css` / `runtime-board-prototype.js`: Console 运行时看板、桌面悬浮窗预览、模型评测交互原型的页面样式和固定 fixture 状态。
 - `capture-runtime-prototype.mjs`: 通过原型真实浏览器入口采集运行时看板、桌面悬浮窗、评测结果与外发预览目标图，并检查评测视图窄屏是否横向溢出。
-- `runtime-board-preview.png` / `runtime-widget-preview.png` / `runtime-evaluation-preview.png` / `runtime-consent-preview.png` 及各自的 `.source.md`：运行时看板、桌面悬浮窗、模型评测结果和外发授权的浏览器目标态截图与来源记录。
+- `runtime-board-preview.png` / `runtime-widget-preview.png` / `runtime-evaluation-preview.png` / `runtime-evaluation-baseline-preview.png` / `runtime-consent-preview.png` 及各自的 `.source.md`：运行时看板、桌面悬浮窗、既有模型评测、M13 重复结果基线和外发授权的浏览器目标态截图与来源记录。
 - `prototype-chrome.css` / `prototype-chrome.js`: 原型评审 Dock 与共享交互。
 - `roadmap-prd-cicd-flow.css` / `roadmap-prd-cicd-flow.js`: CI/CD 多轮监控与自动修复状态播放器。
 - `component-library.css` / `component-library.js`: 原型组件库的展示布局与交互示例。

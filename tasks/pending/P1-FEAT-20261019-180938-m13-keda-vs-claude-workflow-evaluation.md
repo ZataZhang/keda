@@ -39,9 +39,10 @@ M13 的黄金评测基线能回答“直接运行 Claude 时，同一道题是�
 | 验证方式 | 输入 / 操作 | 期望观察到的结果 |
 |---|---|---|
 | 👀 人审 + 自动验证 | 在 Evaluations 选择已校准的 keda-history-v1 开发集、一个 Claude 预设、3 次重复，并启动“Keda 工作流 vs Claude 单次执行”对照。 | 每道题出现 Keda 与 Claude 两组配对结果；两组使用同一冻结起点和隐藏判分测试；详情显示各自通过次数、稳定性、运行时间与 Agent 调用次数。 |
-| 👀 人审 + 自动验证 | 对同一题运行 3 次，其中 Keda 组有一次 review / 修复后测试通过，另外两次未通过；Claude 组三次均通过。 | 页面逐题展示 Keda 1/3、Claude 3/3 以及各自稳定性；Keda 的流程阶段状态单独显示；页面不标“胜者”、不计算合成总分，也不把该结果称为费用对比。 |
+| 👀 人审 + 自动验证（受控 Agent 替身） | 测试替身按候选类型和重复序号产生可判分代码：Keda 组一次经 review / 修复后通过、两次判分失败，直接组三次通过；实际 Keda 编排、判分、API 和账本均真实运行。 | 页面展示 Keda 1/3（不稳定）、直接组 3/3（稳定），阶段状态来自实际编排；证据标注“受控 Agent 替身，验证统计与展示”，不据此比较真实模型能力。页面不标胜者、不算总分或费用。 |
+| 👀 人审（真实 Claude，可选实验） | 显式选择真实运行且凭据可用后，同一题两组各运行 3 次，使用相同冻结配置与判分材料。 | 逐次记录实际判分、阶段、调用数和耗时，页面统计与记录一致；成败分布、是否发生修复及哪组更好均如实观察。全通过、全失败或两组一致都不使产品验收失败，不反复重跑凑指定分布。 |
 | 🤖 自动验证 | 创建 run 时选中未校准题、漏选 Claude 预设、Keda 的 Claude 阶段配置不一致，或最坏情况调用次数超过上限。 | 创建被拒绝并说明具体原因；没有候选运行、Agent 调用或外部写入。 |
-| 🤖 自动验证 | 任一候选尝试读取判分测试、修复后提交、其他评测候选的工作目录或历史对象。 | 候选看不到隐藏测试和后续提交；每个候选使用独立快照；隔离探针记录结果并使违规运行失败。 |
+| 🤖 自动验证 | 探针检查候选仓库本身的文件、Git 对象与 remote。 | 各候选为独立快照、不共享 Git 对象，无 remote；候选运行期间目录内没有隐藏判分材料和后续修复对象。该验证不证明同用户跨目录读取或网络访问已被阻止。 |
 | 🤖 自动验证 | Keda 达到流程调用上限、超时、需要人工处理或遇到本地 GitHub 替身故障。 | 流程状态分别记录为预算耗尽、超时、需人工或执行故障；它们不被伪装成测试失败，另一组和同题其他重复继续保留结果。 |
 
 ### Decisions taken silently (我默默定了这些)
@@ -69,7 +70,7 @@ M13 的黄金评测基线能回答“直接运行 Claude 时，同一道题是�
 ### Measurable Objectives
 
 - 在 keda-history-v1 的开发集上，创建 3 次重复的配对 run 后，每道题均有同起点的 Keda 与 Claude 结果，且每组各有 3 条重复记录。
-- 任一候选均无法读取后续提交、隐藏测试和其他候选目录；判分材料只在两组候选结束后注入。
+- 各候选快照内无后续提交和隐藏判分材料、不共享 Git 对象；判分材料只在两组候选结束后注入。同用户跨目录读取不在本次系统隔离承诺内。
 - 页面逐题展示两组通过数、稳定性、Keda 流程状态、耗时和 Agent 调用次数；不显示费用、合成总分或自动胜负结论。
 - 未校准、预设漂移、配置不匹配、留出集未明确选择及执行预算超限均在零候选执行时被拒绝。
 - 从 v16 账本迁移后，既有 run / result / score 继续可读；同一题、同一组、同一重复序号只能有一条结果。
@@ -91,6 +92,8 @@ M13 的黄金评测基线能回答“直接运行 Claude 时，同一道题是�
 **请确认：** 是否接受“真实 Keda 本地工作流 + 本机 GitHub 替身 + 停在待发布结果”的范围？
 
 **验收：** 探针证据显示实现、验证、review / 修复阶段来自现有 Keda 编排路径；GitHub 请求只到临时替身，不创建真实 Issue、PR 或远程分支。
+
+这里的 GitHub 请求限定为 Keda 编排管理的操作。独立目录和替身不构成对任意 Agent 自行调用 gh、git push 或网络 API 的系统级阻断。受控验证使用无真实凭据且禁止外网的运行环境，并预备依赖缓存；真实 Claude 可选实验需要模型网络通道，不能直接复用“全面断网”的证明，执行前须另行说明凭据及 GitHub 写入防护条件。不能满足时记为未执行，不用 fixture 冒充 live。本次不新增产品级网络或文件系统沙箱。
 
 ### 决策三：是否接受为配对结果升级本地账本
 
@@ -327,12 +330,18 @@ v16 → v17 的 ER 图见 Part A §2「决策三」。旧结果没有 candidate_
 
 ### 7.6 Realistic Validation Plan (Oracle 块)
 
+固定成败分布只用于受控 fixture 的统计、展示和分支验证。替身在 Agent CLI 边界按候选类型和重复序号修改代码或返回 review 结果；Keda 的真实编排决定是否进入修复，最终状态由真实隐藏测试产生，禁止直接写 check_status 或 mock 编排来凑结果。rv-1 的 fixture 须受控触发 review / 修复路径；真实 Claude 不保证出现该路径。
+
+探针按 `(case_id, candidate_kind, repeat_index)` 固定行为，不用全局计数或进程启动顺序分配结果。受控验证在无真实凭据、禁止外网且已预备依赖的环境运行，证据记录凭据隔离和实际网络限制；仅清空一个 token 或仅有 GitHub 替身不算完成这些环境条件。环境限制用于防止验证外部写入，不作为产品具备沙箱能力的证据。
+
+真实模型运行是可选效果实验，不要求某组赢、恰好失败两次、必须修复后成功或必须出现不稳定。按实际结果核对判分、阶段、调用记录、API 与页面；执行故障单列。三次只是初步观察，不能保证观察到波动或证明优劣；不以改 prompt、改判分或反复重跑凑结果。模型解题成败不影响统计正确性的验收，但真实运行暴露的编排、判分或记录缺陷仍须修复。
+
 ~~~yaml
 - id: rv-1
   behavior: Keda 与 Claude 两组在隔离的同起点快照中运行，隐藏判分材料在候选结束后才注入；Keda 阶段通过本机替身运行，不产生公共 GitHub 写入。
   reviewer: human
   real_entry: "启动本机 Console，通过 /app/evaluations 创建并启动一个仅含 fixture case 的配对 run；fixture agent 记录每个 CLI 调用的 cwd、Git 状态和可见文件，并检查本机 GitHub 替身收到的动作。"
-  expected: "直接组只有一次 Claude 调用；Keda 组经过实现、确定性验证、review / 修复且总调用不超过 6；两组都看不到 held-out 文件和后续修复对象；替身记录所有 GitHub 交互且真实网络没有 Issue / PR 写入；候选完成后相同隐藏测试才被注入。"
+  expected: "直接组只有一次 fixture Agent 调用；Keda 组经真实实现、确定性验证、受控触发的 review / 修复且调用不超过 6；各候选快照内无 held-out 和后续修复对象、不共享 Git 对象、无 remote；Keda 编排管理的 GitHub 操作全部进入本机替身。无凭据且禁止外网的验证环境不发生真实 GitHub 写入；不据此宣称产品能阻止同用户跨目录访问或任意 CLI 外部写入。两组候选结束后才注入判分材料。"
   mock_boundary: "允许替换 Claude CLI 为可记录的 fixture executable，并以本机 GitHub adapter 代替外网 API；真实 Console 页面、Evaluation API、suite 加载、快照 Git 操作、Keda core orchestration、候选状态持久化和判分命令必须真实。"
   tier: R3
   test_layer: e2e
@@ -350,12 +359,12 @@ v16 → v17 的 ER 图见 Part A §2「决策三」。旧结果没有 candidate_
   behavior: Console 展示按题配对的重复结果、稳定性、Keda 阶段状态、耗时和 Agent 调用次数，不展示费用、总分或自动胜者。
   reviewer: human
   real_entry: "本机启动真实 Console 栈后，从 /app/evaluations 运行 fixture-backed 配对评测；执行新增的 tests/playwright-e2e/tests/workflows/console-evaluations-paired.no-auth.spec.ts：cd tests/playwright-e2e && npm run test:no-auth -- tests/workflows/console-evaluations-paired.no-auth.spec.ts。"
-  expected: "真实页面中每题有 direct_agent 与 keda_workflow 两组、通过次数和稳定状态；Keda 阶段摘要与调用次数来自详情 API；页面不存在成本数值、总分或胜者徽标。"
+  expected: "受控 Agent CLI fixture 经真实编排与判分产生 Keda [通过,失败,失败]、direct [通过,通过,通过]，页面显示 1/3 不稳定与 3/3 稳定；阶段摘要与调用次数来自详情 API；无成本数值、总分或胜者。真实 Claude opt-in 时按实际结果核对统计，不断言固定分布或修复必然发生。"
   mock_boundary: "默认 E2E 允许通过现有 agent registry 的 bin 配置把 claude CLI 指向本机 fixture executable，并使用本机 GitHub 替身；真实 Claude CLI 是凭据可用时的 opt-in。页面路由、后端 API、SQLite、result DTO 与真实布局不得 mock。"
   tier: R2
   test_layer: e2e
   required_for_acceptance: true
-  presentation: "tasks/evidence/P1-FEAT-20261019-180938-m13-keda-vs-claude-workflow-evaluation/rv-2-paired-results.png，与 docs/prototypes/assets/keda-vs-claude-paired-evaluation.svg 成对呈现；自验：详情页同一道题可见 direct / Keda 两行及各自 1/3 或 3/3 状态。"
+  presentation: "tasks/evidence/P1-FEAT-20261019-180938-m13-keda-vs-claude-workflow-evaluation/rv-2-paired-results.png，与 docs/prototypes/assets/keda-vs-claude-paired-evaluation.svg 成对呈现，标注 real user flow、Agent CLI 为受控替身；自验：fixture run 同题显示 Keda 1/3、direct 3/3，与判分明细一致。真实 Claude 实验另标 live，展示实际计数，不要求匹配原型数值，不作为必需证据。"
   critical_value_source: "展示值必须从本次真实详情 API 响应和页面 DOM 读取；截图取自 /app/evaluations 真实页面路径。"
   must_cross: "浏览器真实页面 → 页面创建请求 → canonical Evaluation API → 结果 SQLite → 新详情请求 → 页面渲染"
   forbidden_bypasses: "直接渲染 RunDetailPanel；手工注入 result props；仅用组件预览截图；以 fixture API 替代真实后端请求。"
@@ -392,8 +401,8 @@ v16 → v17 的 ER 图见 Part A §2「决策三」。旧结果没有 candidate_
 - id: rv-5
   behavior: Keda 达到 Agent 调用上限、候选超时、需要人工处理或本机 GitHub 替身故障时，流程状态与判分失败分开记录，并保留同题另一组和其他重复结果。
   reviewer: verifier
-  real_entry: "通过 Console Evaluation API 启动 fixture-backed paired run；由 fixture CLI 与本机 GitHub 替身分别产生 budget_exhausted、timeout、needs_human 和 infrastructure_failure 场景，然后使用详情 API 读取结果。"
-  expected: "每种场景具有对应的非测试失败终态；未完成的 Keda 候选不运行隐藏判分；direct 组和其他重复行仍存在且状态未被覆盖。"
+  real_entry: "通过 API 分别启动受控 paired run：预算场景让 fixture review 持续返回生产解码器接受的可修复问题，fix 返回仍需修复的代码，由真实编排到达调用上限；超时场景让指定 fixture CLI 阻塞到真实总超时；需人工场景通过现有编排识别的人工介入条件触发，实施前在测试中注明真实入口和协议，若现有接缝无法触发则披露缺口并更新计划；基础设施场景让本机 GitHub 替身在指定动作返回受控错误。按 case/candidate/repeat 选定故障格，读取详情与独立 CLI 记录。"
+  expected: "真实编排分别派生预算耗尽、超时、需人工和基础设施故障，不把替身直接返回的终态当证据；预算到顶后无第 7 次调用，超时后进程收敛，未完成候选不运行隐藏判分；direct 与其他重复记录不被覆盖。无法触发的场景标未验证，不伪造通过。"
   mock_boundary: "Evaluation API、候选状态机、配对账本和结果查询必须真实；只允许 fixture CLI 与本机 GitHub 替身控制外部执行结果。"
   tier: R1
   test_layer: integration
@@ -475,7 +484,7 @@ R2 / R3 oracles 共 3 条。无新增独立服务、无新的外部 API / CLI �
 1. **R3 / 人工决策证据：** rv-1 隔离 / 外部写入边界；包含最终 tree hash、suite hash 与两个候选配置 hash。
 2. **R2：** rv-2 真实页面与 API 字段证据；rv-3 真实 v16 数据库副本、迁移前后行摘要、新连接查询与级联删除结果。
 3. **R1：** rv-4 配对创建请求响应、run / result 行数与 fixture CLI 零调用记录；rv-5 各类 Keda 终态以及配对结果保留。
-4. **隔离反方检查：** 两组 canonical case-task payload hash 与 base tree hash 一致；Keda 生命周期 prompt 分别由冻结的 workflow fingerprint 证明；direct 组无 Keda skill / 控制入口；Keda 组不接触隐藏测试；agent probe 尝试读取后续 commit、held-out 路径和其他候选目录均失败。
+4. **隔离反方检查：** 两组 canonical case-task payload hash 与 base tree hash 一致；生命周期 prompt 由冻结的 workflow fingerprint 证明；direct 候选目录不预置 Keda skill / 控制入口；候选仓库内无后续对象、remote 和判分材料。跨目录读取不作为必须失败的断言；Keda 编排的 GitHub 动作均有替身记录，另核对验证环境的无凭据与禁外网条件。
 5. **常规回归：** 架构依赖方向、后端评测回归、前端类型 / lint、Playwright Evaluations 用户流程与文档一致性结果。
 
 ### Human-Confirmed (来自 Part A 风险地图)
@@ -539,8 +548,8 @@ R2 / R3 oracles 共 3 条。无新增独立服务、无新的外部 API / CLI �
 - **FR-2 — 控制 Claude 配置：** 两组都冻结同一 Claude agent、model、reasoning preset 和候选总超时；Keda 各 Agent 阶段使用该 preset。Keda 阶段提示与编排保留为实验变量。
 - **FR-3 — 复用已校准 suite：** 只从前置 PRD 的 suite registry 读取 case；每题使用同一 prompt、冻结 base commit/tree、判分配方及 held-out；开发集和留出集分开呈现，留出集需显式选择。
 - **FR-4 — 运行 Keda 本地工作流：** Keda 候选经过现有 issue orchestration 的实现、确定性验证、review 与修复；最多 6 次 Agent CLI invocation；达到预算上限或总超时即收敛，不继续发起调用。
-- **FR-5 — 无外部 GitHub 写入：** Keda candidate 只能访问 run 隔离的本机 Issue / GitHub 替身；禁止真实 Issue / PR / comment / label / push / merge / CI 写入。
-- **FR-6 — 隔离与判分时序：** 两组分别在互不共享文件和 Git 对象的单提交快照里执行，Agent 结束后才恢复依赖并放入隐藏判分文件；之后按同一白名单 check recipe 判分。
+- **FR-5 — Keda 编排的 GitHub 操作进入替身：** 评测中的 Keda 编排将 Issue / PR / comment / label / push / merge / CI 操作限定为 run 本机替身，不调用真实写入端点；不承诺能阻断 Agent 自行启动的任意 CLI 或网络请求。受控验证另以无真实凭据、禁外网的环境防止外部写入，不新增产品级沙箱。
+- **FR-6 — 隔离与判分时序：** 两组各用独立文件副本和不共享 Git 对象的单提交快照，无 remote，运行期间目录内无隐藏判分材料和后续修复对象；两组候选结束后才恢复依赖、注入隐藏判分文件，按同一白名单 recipe 判分。独立目录不等于同用户跨目录访问已被阻止。
 - **FR-7 — 调用预算与运行状态：** 创建时校验校准、split、候选成对、profile 一致、最多 48 候选单元及最坏 168 Agent CLI 调用；预算超限请求返回逐项原因，且零候选执行。
 - **FR-8 — 配对结果与兼容迁移：** 每个结果持久化 candidate kind、repeat index、check、workflow trace、耗时和 invocation count；v16 → v17 增量迁移保留旧 run / result / score，并将旧结果归为 direct_agent。
 - **FR-9 — Console 呈现与文档：** 现有 Evaluations 页面展示配对创建和逐题结果；同步 docs/dev/evaluation.md、tasks/evaluation-suites/README.md 与 M13 Roadmap；不新增 CLI 和外部依赖。
@@ -558,6 +567,8 @@ R2 / R3 oracles 共 3 条。无新增独立服务、无新的外部 API / CLI �
 
 ## 12. Risks And Follow-Ups
 
+- **隔离能力有限：** 独立目录与单提交仓库不阻止同用户读取主仓库、其他候选目录或本机凭据；本机 GitHub adapter 只约束 Keda 编排管理的调用。受控验证的无凭据、禁外网环境用于防止验证副作用，不能据此声称产品提供系统级沙箱；真实 Agent 实验须披露实际环境与未覆盖边界。
+
 - **公开任务可能泄漏：** keda-history-v1 来自公开仓库，虽然隔离能阻止读取本地后续 Git 历史和隐藏判分文件，但不能消除模型记忆或联网获取公开修复的可能。结果仅适用于这批题的相对比较；将来若要对外宣称泛化能力，需要独立授权并准备未公开任务。
 - **本机替身不覆盖远程发布：** 本 PRD 测 Keda 的本地 issue 编排、实现、验证、review 和修复，不测真实 GitHub API、CI 或 merge queue。后者应单独建立带沙箱凭据与外部副作用审批的验证方案。
 - **调用数不是成本：** CLI invocation count 与 wall-clock 可以观察，但 Token / 金额信号覆盖不足；不要用调用数等价为费用，也不要对两组成本作结论。
@@ -572,6 +583,12 @@ R2 / R3 oracles 共 3 条。无新增独立服务、无新的外部 API / CLI �
 | D-02 | Keda 候选应运行到哪里 | 真实本地编排到验证 / review / 修复完成；GitHub 交互只进本机替身，不创建真实 Issue / PR | 每个重复都创建真实 GitHub 任务和 PR | 防止评测产生持久外部写入，并避免 GitHub / CI 波动掩盖工作流差异。 |
 | D-03 | 是否另建 Keda 评测实现 | 在现有 Evaluation 执行矩阵中添加固定候选类型，复用现有 Issue orchestrator | 复制一套评测专用 Keda 阶段序列或新服务 | 只有真实主编排路径才能回答 Keda 工作流是否产生差异；复制会造成行为漂移。 |
 | D-04 | 是否将对照结果转成“胜负” | 展示逐题配对结果、重复稳定性、耗时与调用数，不设胜者或阈值 | 单一总分 / 自动排名 / 合并门槛 | 当前样本量和成本遥测不足以支持稳健排名或自动决策。 |
+
+### Change Log
+
+- **2026-10-28**：按用户确认将隔离承诺限定为候选快照内容与 Git 对象，区分 Keda 编排的 GitHub 替身与验证环境的外部写入防护；探针按候选和重复标识固定行为，预算、超时、需人工及基础设施故障通过依赖行为触发，由真实编排派生终态，不直接注入结果。
+
+- **2026-10-28**：用户确认将固定 1/3、3/3 与 review / 修复分支限定为受控 Agent fixture；真实 Claude 重复运行作可选效果实验，按实际结果验记录与统计，不要求指定失败次数、修复成功或组间胜负。
 
 ### Final Reconciliation
 

@@ -83,18 +83,22 @@ def test_worktree_create_creates_directory(tmp_path: Path) -> None:
     assert rev_parse.stdout.strip() == head_in_worktree.stdout.strip()
 
 
-def test_worktree_create_reuses_existing_legacy_directory(tmp_path: Path) -> None:
-    """已有旧容器目录时，新工作树仍建在该目录中。"""
+def test_worktree_create_uses_default_directory_when_legacy_directory_exists(
+    tmp_path: Path,
+) -> None:
+    """旧容器目录存在时，新工作树仍使用默认目录并保留旧目录。"""
     repo_path = _init_git_repository(tmp_path, "target")
     legacy_worktree_root_path = repo_path / ".iar-worktrees"
     legacy_worktree_root_path.mkdir()
+    legacy_marker_path = legacy_worktree_root_path / "keep-me.txt"
+    legacy_marker_path.write_text("legacy data", encoding="utf-8")
     manager = WorktreeManager(repo_path, SubprocessRunner())
 
     created_worktree_path = manager.create(branch="issue-legacy", base_branch="main")
 
-    assert created_worktree_path == legacy_worktree_root_path / "issue-legacy"
+    assert created_worktree_path == repo_path / WORKTREE_DIR_NAME / "issue-legacy"
     assert created_worktree_path.is_dir()
-    assert not (repo_path / ".kc-worktrees").exists()
+    assert legacy_marker_path.read_text(encoding="utf-8") == "legacy data"
 
 
 def test_worktree_create_excludes_worktree_dir_from_index(tmp_path: Path) -> None:
@@ -148,20 +152,22 @@ def test_iar_worktree_create_cli_real_entry(
     assert str(worktree_path) in list_result.stdout
 
 
-def test_worktree_create_cli_reuses_existing_legacy_directory(
+def test_worktree_create_cli_uses_default_directory_when_legacy_directory_exists(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """真实 CLI 在旧目录存在时不创建新的平行容器目录。"""
+    """真实 CLI 在旧目录存在时仍使用默认容器并保留旧目录。"""
     repo_path = _init_git_repository(tmp_path, "legacy-target")
     legacy_worktree_root_path = repo_path / ".iar-worktrees"
     legacy_worktree_root_path.mkdir()
+    legacy_marker_path = legacy_worktree_root_path / "keep-me.txt"
+    legacy_marker_path.write_text("legacy data", encoding="utf-8")
     monkeypatch.chdir(repo_path)
 
     assert main(["worktree", "create", "--branch", "cli-legacy", "--base-branch", "main"]) == 0
 
-    expected_worktree_path = legacy_worktree_root_path / "cli-legacy"
+    expected_worktree_path = repo_path / WORKTREE_DIR_NAME / "cli-legacy"
     assert expected_worktree_path.is_dir()
-    assert not (repo_path / ".kc-worktrees").exists()
+    assert legacy_marker_path.read_text(encoding="utf-8") == "legacy data"
     assert str(expected_worktree_path) in _run_git(repo_path, "worktree", "list").stdout
 
 

@@ -139,6 +139,14 @@ class CompanionController:
         window: object,
         companion_url: str,
     ) -> None:
+        """初始化桌面小窗控制器。
+
+        Args:
+            origin: 已校验的 Console origin。
+            expected_session: 期望的 Console 会话标识。
+            window: pywebview 窗口对象。
+            companion_url: 小窗加载的页面地址。
+        """
         self.origin = origin
         self.expected_session = expected_session
         self.window = window

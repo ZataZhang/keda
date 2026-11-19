@@ -23,9 +23,13 @@ from typing import Any
 from backend.core.shared.interfaces.evaluation_store import IEvaluationStore
 from backend.core.shared.models.model_evaluation import (
     ACTIVE_RUN_STATUSES,
+    CALIBRATION_PRESET_GOLD,
+    CALIBRATION_PRESET_NAMES,
+    CALIBRATION_PRESET_NOOP,
     CONSENT_ELIGIBLE_RUN_STATUSES,
     EVALUATION_RUBRIC_DIMENSIONS,
     SCORING_STATUSES,
+    EvaluationCheckStatus,
     EvaluationResultRecord,
     EvaluationRunRecord,
     EvaluationRunStatus,
@@ -36,8 +40,9 @@ from backend.core.shared.models.model_evaluation import (
 
 _logger = logging.getLogger(__name__)
 
-#: run 创建时矩阵规模上限（case 数 × 执行预设数），防呆而不是计费门禁。
-MAX_EVALUATION_MATRIX_CELLS = 32
+#: 模型候选与不调用模型的校准候选分别限量，避免额度与运行时失控。
+MAX_MODEL_EVALUATION_CELLS = 48
+MAX_CALIBRATION_EVALUATION_CELLS = 144
 
 
 class EvaluationValidationError(ValueError):
@@ -70,31 +75,45 @@ class EvaluationSummary:
     valid_judge_count: int
 
 
+@dataclass(frozen=True)
+class EvaluationStability:
+    """一个题目与预设组合的重复结果汇总。"""
+
+    case_id: str
+    execution_preset_id: str
+    repeat_count: int
+    passed_count: int
+    execution_fault_count: int
+    check_failure_count: int
+    stable: bool | None
+
+
+@dataclass(frozen=True)
+class BuildRunSnapshotInput:
+    """构造 run 快照所需的评测集、预设与门禁状态。"""
+
+    suite: EvaluationSuite
+    execution_preset_names: Sequence[str]
+    judge_preset_names: Sequence[str]
+    execution_presets: Mapping[str, Mapping[str, Any]]
+    repeats: int = 1
+    include_holdout: bool = False
+    calibrated_case_ids: Sequence[str] = ()
+    calibrated_case_bases: Mapping[str, Mapping[str, str]] | None = None
+
+
 def build_run_snapshot(
+    request: BuildRunSnapshotInput,
     *,
-    suite: EvaluationSuite,
-    execution_preset_names: Sequence[str],
-    judge_preset_names: Sequence[str],
-    execution_presets: Mapping[str, Mapping[str, Any]],
     judge_availability_probe: Callable[[str], Mapping[str, Any]],
     base_probe: Callable[[str, str], tuple[str, str]],
 ) -> EvaluationRunRecord:
     """校验评测矩阵并冻结 run 配置快照（不落库、不执行）。
 
     Args:
-        suite: 已通过 :func:`parse_evaluation_suite` 的评测集。
-        execution_preset_names: 用户选择的执行预设名单（≥2 才有对照意义，
-            但 1 个也允许，页面负责提示）。
-        judge_preset_names: 用户选择的评审预设名单（取自同一份执行预设清单）；
-            为空表示本轮只做确定性检查对照，候选完成后不进入评审授权。
-        execution_presets: 预设名 -> 解析后的 ``(agent, model, reasoning_effort)``
-            快照字典（来自现有 agent_runner 配置，不重新定义模型目录）；评审预设
-            复用它，因此评审快照与执行快照同形。
-        judge_availability_probe: engines 注入的评审可用性探针（agent 是否声明
-            禁用工具的 judge 形态、CLI 是否可执行）；返回
-            ``{"available": bool, "reason": str}``。
-        base_probe: engines 注入的基线探针，``(repo_path, base_ref)`` ->
-            ``(commit, tree_hash)``；repo 不可达或 ref 解析失败抛 ValueError。
+        request: suite、预设、重复次数与校准状态等创建配置。
+        judge_availability_probe: engines 注入的评审可用性探针。
+        base_probe: engines 注入的基线探针。
 
     Returns:
         EvaluationRunRecord: status=created 的快照，含 suite/base/preset 指纹。
@@ -102,20 +121,67 @@ def build_run_snapshot(
     Raises:
         EvaluationValidationError: 任一预检失败（原因逐条汇总，fail-fast）。
     """
+    suite = request.suite
+    execution_preset_names = request.execution_preset_names
+    judge_preset_names = request.judge_preset_names
+    execution_presets = request.execution_presets
+    repeats = request.repeats
+    include_holdout = request.include_holdout
+    calibrated_case_ids = request.calibrated_case_ids
+    calibrated_case_bases = request.calibrated_case_bases
     problems: list[str] = []
     if not execution_preset_names:
         problems.append("至少需要一个 execution preset")
-    unknown_execution = [name for name in execution_preset_names if name not in execution_presets]
+    if len(set(execution_preset_names)) != len(execution_preset_names):
+        problems.append("执行预设不可重复")
+    if len(set(judge_preset_names)) != len(judge_preset_names):
+        problems.append("评审预设不可重复")
+    unknown_execution = [
+        name
+        for name in execution_preset_names
+        if name not in execution_presets and name not in CALIBRATION_PRESET_NAMES
+    ]
     if unknown_execution:
         problems.append(f"执行预设不存在: {', '.join(unknown_execution)}")
-    unknown_judge = [name for name in judge_preset_names if name not in execution_presets]
+    unknown_judge = [
+        name
+        for name in judge_preset_names
+        if name not in execution_presets or name in CALIBRATION_PRESET_NAMES
+    ]
     if unknown_judge:
         problems.append(f"评审预设不存在: {', '.join(unknown_judge)}")
-    matrix_cells = len(suite.cases) * len(execution_preset_names)
-    if matrix_cells > MAX_EVALUATION_MATRIX_CELLS:
-        problems.append(
-            f"矩阵规模 {matrix_cells} 超过上限 {MAX_EVALUATION_MATRIX_CELLS}（cases × presets）"
-        )
+    if not 1 <= repeats <= 5:
+        problems.append("repeats 必须在 1–5 之间")
+    calibration_names = set(execution_preset_names) & CALIBRATION_PRESET_NAMES
+    calibration_run = bool(calibration_names)
+    if calibration_run and calibration_names != CALIBRATION_PRESET_NAMES:
+        problems.append("校准 run 必须同时选择 @noop 与 @gold")
+    if calibration_run and judge_preset_names:
+        problems.append("校准候选不可选择为评审，校准 run 不接受 judge presets")
+    if calibration_run and repeats < 3:
+        problems.append("校准 run 的 repeats 必须至少为 3")
+    model_preset_names = set(execution_preset_names) - CALIBRATION_PRESET_NAMES
+    if calibration_run and model_preset_names:
+        problems.append("校准候选不能与真实模型预设混合")
+    selected_cases = [
+        case
+        for case in suite.cases
+        if calibration_run or include_holdout or case.split != "holdout"
+    ]
+    if not selected_cases:
+        problems.append("所选评测范围没有可执行题目")
+    if calibration_run and not suite.requires_calibration:
+        problems.append("校准候选仅适用于带 v2 判分材料的评测集")
+    if calibration_run:
+        missing_gold_patch = [case.case_id for case in selected_cases if not case.gold_patch]
+        if missing_gold_patch:
+            problems.append(f"题目缺少 gold_patch，无法校准: {', '.join(missing_gold_patch)}")
+    matrix_cells = len(selected_cases) * len(execution_preset_names) * repeats
+    matrix_limit = (
+        MAX_CALIBRATION_EVALUATION_CELLS if calibration_run else MAX_MODEL_EVALUATION_CELLS
+    )
+    if matrix_cells > matrix_limit:
+        problems.append(f"预计候选执行 {matrix_cells} 次，超过上限 {matrix_limit}")
 
     for judge_name in judge_preset_names:
         if judge_name in unknown_judge:
@@ -126,11 +192,32 @@ def build_run_snapshot(
                 f"评审预设 '{judge_name}' 不可用: {probe.get('reason') or '无法作为评审'}"
             )
 
-    try:
-        base_commit, base_tree_hash = base_probe(suite.repo_path, suite.base_ref)
-    except ValueError as exc:
-        problems.append(f"基线解析失败: {exc}")
-        base_commit, base_tree_hash = "", ""
+    case_bases: dict[str, dict[str, str]] = {}
+    for case in selected_cases:
+        selected_base_ref = case.base_ref or suite.base_ref
+        try:
+            case_commit, case_tree = base_probe(suite.repo_path, selected_base_ref)
+            case_bases[case.case_id] = {
+                "base_ref": selected_base_ref,
+                "commit": case_commit,
+                "tree": case_tree,
+            }
+        except ValueError as exc:
+            problems.append(f"题目 '{case.case_id}' 基线解析失败: {exc}")
+
+    if suite.requires_calibration and not calibration_run:
+        calibrated_ids = set(calibrated_case_ids)
+        missing_calibration = [
+            case.case_id
+            for case in selected_cases
+            if case.case_id not in calibrated_ids
+            or (
+                calibrated_case_bases is not None
+                and case_bases.get(case.case_id) != calibrated_case_bases.get(case.case_id)
+            )
+        ]
+        if missing_calibration:
+            problems.append(f"题目尚未校准通过: {', '.join(missing_calibration)}")
 
     if problems:
         raise EvaluationValidationError("；".join(problems))
@@ -139,16 +226,17 @@ def build_run_snapshot(
     execution_snapshots = [
         {
             "preset_name": name,
-            **dict(execution_presets[name]),
+            **dict(execution_presets.get(name, {})),
             "cost_status": "unknown",
             "cost_estimate": None,
+            "kind": "calibration" if name in CALIBRATION_PRESET_NAMES else "agent",
         }
         for name in execution_preset_names
     ]
     judge_snapshots = [
         {
             "preset_name": name,
-            **dict(execution_presets[name]),
+            **dict(execution_presets.get(name, {})),
             "cost_status": "unknown",
         }
         for name in judge_preset_names
@@ -161,19 +249,21 @@ def build_run_snapshot(
         rubric_version=suite.rubric_version,
         repo_path=suite.repo_path,
         base_ref=suite.base_ref,
-        base_commit=base_commit,
-        base_tree_hash=base_tree_hash,
+        base_commit=next(iter(case_bases.values()))["commit"],
+        base_tree_hash=next(iter(case_bases.values()))["tree"],
         execution_preset_snapshots=execution_snapshots,
         judge_preset_snapshots=judge_snapshots,
         status=EvaluationRunStatus.created.value,
         manifest_hash=None,
-        case_ids=list(suite.case_ids),
+        case_ids=[case.case_id for case in selected_cases],
         check_timeout_seconds=suite.check_timeout_seconds,
         error=None,
         created_at=created_at,
         updated_at=created_at,
         started_at=None,
         finished_at=None,
+        repeats=repeats,
+        case_bases=case_bases,
     )
 
 
@@ -274,6 +364,134 @@ def build_evaluation_summary(
         status_counts=status_counts,
         valid_judge_count=len(all_valid_judges),
     )
+
+
+def derive_case_calibration(
+    runs: Sequence[EvaluationRunRecord],
+    results: Sequence[EvaluationResultRecord],
+    suite_hash: str,
+    expected_case_bases: Mapping[str, Mapping[str, str]] | None = None,
+) -> list[dict[str, Any]]:
+    """从匹配 suite 与逐题冻结基线的已完成 run 派生校准状态。"""
+    eligible_runs = [
+        run
+        for run in runs
+        if run.suite_hash == suite_hash
+        and run.status == EvaluationRunStatus.completed.value
+        and run.repeats >= 3
+        and {str(snapshot.get("preset_name")) for snapshot in run.execution_preset_snapshots}
+        == CALIBRATION_PRESET_NAMES
+        and not run.judge_preset_snapshots
+    ]
+    suite_case_ids = list(
+        dict.fromkeys(case_id for run in eligible_runs for case_id in run.case_ids)
+    )
+    calibration_by_case: dict[str, dict[str, Any]] = {
+        case_id: {"case_id": case_id, "calibrated": False, "noop": 0, "gold": 0}
+        for case_id in suite_case_ids
+    }
+    results_by_run_and_case: dict[tuple[str, str], list[EvaluationResultRecord]] = {}
+    for result in results:
+        results_by_run_and_case.setdefault((result.run_id, result.case_id), []).append(result)
+    for run in eligible_runs:
+        for case_id in run.case_ids:
+            if expected_case_bases is not None and (
+                case_id not in expected_case_bases
+                or run.case_bases.get(case_id) != expected_case_bases[case_id]
+            ):
+                continue
+            case_results = results_by_run_and_case.get((run.run_id, case_id), [])
+            noop_results = [
+                result
+                for result in case_results
+                if result.execution_preset_id == CALIBRATION_PRESET_NOOP
+            ]
+            gold_results = [
+                result
+                for result in case_results
+                if result.execution_preset_id == CALIBRATION_PRESET_GOLD
+            ]
+            expected_count = run.repeats
+            expected_repeat_indexes = list(range(expected_count))
+            noop_valid = sorted(
+                result.repeat_index for result in noop_results
+            ) == expected_repeat_indexes and all(
+                result.result_status == "succeeded"
+                and result.check_status == EvaluationCheckStatus.failed.value
+                for result in noop_results
+            )
+            gold_valid = sorted(
+                result.repeat_index for result in gold_results
+            ) == expected_repeat_indexes and all(
+                result.result_status == "succeeded"
+                and result.check_status == EvaluationCheckStatus.passed.value
+                for result in gold_results
+            )
+            case_state = calibration_by_case.setdefault(
+                case_id, {"case_id": case_id, "calibrated": False, "noop": 0, "gold": 0}
+            )
+            case_state["noop"] = max(case_state["noop"], len(noop_results))
+            case_state["gold"] = max(case_state["gold"], len(gold_results))
+            case_state["calibrated"] = case_state["calibrated"] or (noop_valid and gold_valid)
+    return [calibration_by_case[case_id] for case_id in sorted(calibration_by_case)]
+
+
+def build_stability_summary(
+    results: Sequence[EvaluationResultRecord],
+    expected_repeats: int | None = None,
+) -> list[EvaluationStability]:
+    """按题目与预设汇总重复结论，并独立统计执行故障。
+
+    ``expected_repeats`` 用 run 快照里的重复数约束结论完整度；旧调用方不
+    提供时，仅凭当前结果行数量判断。
+    """
+    grouped_results: dict[tuple[str, str], list[EvaluationResultRecord]] = {}
+    for result in results:
+        grouped_results.setdefault((result.case_id, result.execution_preset_id), []).append(result)
+    summaries: list[EvaluationStability] = []
+    execution_fault_statuses = {"failed", "timeout", "cancelled"}
+    for (case_id, preset_id), repeated_results in sorted(grouped_results.items()):
+        ordered_results = sorted(repeated_results, key=lambda result: result.repeat_index)
+        graded_checks = [
+            result.check_status
+            for result in ordered_results
+            if result.result_status == "succeeded"
+            and result.check_status
+            in {EvaluationCheckStatus.passed.value, EvaluationCheckStatus.failed.value}
+        ]
+        stable: bool | None
+        if len(set(graded_checks)) > 1:
+            stable = False
+        elif (
+            graded_checks
+            and len(graded_checks) == len(ordered_results)
+            and (expected_repeats is None or len(ordered_results) == expected_repeats)
+        ):
+            stable = True
+        else:
+            stable = None
+        summaries.append(
+            EvaluationStability(
+                case_id=case_id,
+                execution_preset_id=preset_id,
+                repeat_count=len(ordered_results),
+                passed_count=sum(
+                    result.check_status == EvaluationCheckStatus.passed.value
+                    and result.result_status == "succeeded"
+                    for result in ordered_results
+                ),
+                execution_fault_count=sum(
+                    result.result_status in execution_fault_statuses for result in ordered_results
+                ),
+                check_failure_count=sum(
+                    result.result_status == "succeeded"
+                    and result.check_status == EvaluationCheckStatus.failed.value
+                    for result in ordered_results
+                ),
+                stable=stable,
+            )
+        )
+    return summaries
 
 
 def _aggregate_dimensions(

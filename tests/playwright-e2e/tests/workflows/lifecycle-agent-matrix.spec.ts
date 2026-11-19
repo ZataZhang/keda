@@ -14,7 +14,7 @@
  *
  * 注：原先分散在 Settings「生命周期 Agent 设置」Tab、Backlog 仓库齿轮抽屉里的九行矩阵与
  * 回退顺序卡片，已合并进统一的「生命周期、模型与推理深度设置」页
- * (`/app/settings/lifecycle/`)，对应新入口的 e2e 见
+ * (`/app/repositories/lifecycle/`)，对应新入口的 e2e 见
  * `tests/playwright-e2e/tests/workflows/lifecycle-settings.spec.ts`。本文件仅保留仍然独立
  * 存在的 PRD 覆盖抽屉用例。
  */

@@ -42,6 +42,7 @@ from backend.core.shared.models.agent_runner import (
     ReviewEventMarker,
     TokenUsage,
 )
+from backend.core.shared.models.agent_runner_progress import RunProgressEvent
 from backend.core.shared.models.pass_activity import PassActivity
 from backend.core.use_cases.daemon_execution_slots import DaemonExecutionSlots
 from backend.core.shared.models.publish_stage import (
@@ -84,9 +85,11 @@ from backend.core.use_cases.agent_runner_failure import (
     AgentUnavailableError,
     DependencyEnvironmentBlockedError,
     ForbiddenBlockedError,
+    HumanActionRequiredError,
     IssueBlockedDuringNoChangeError,
     MaxRetriesExceededError,
     ProviderCapacityError,
+    RecoveryStalledError,
     UnrecoverableError,
     format_attempt_history,
 )
@@ -516,6 +519,7 @@ def run_issue_with_agent_fallback(
         except (
             UnrecoverableError,
             ForbiddenBlockedError,
+            HumanActionRequiredError,
             IssueBlockedDuringNoChangeError,
             DependencyEnvironmentBlockedError,
             ClaimArbitrationLost,
@@ -536,7 +540,12 @@ def run_issue_with_agent_fallback(
                 candidate_agent,
             )
             continue
-        except (ProviderCapacityError, MaxRetriesExceededError, AgentExecutionError) as exc:
+        except (
+            ProviderCapacityError,
+            MaxRetriesExceededError,
+            RecoveryStalledError,
+            AgentExecutionError,
+        ) as exc:
             combined_attempts.extend(
                 _stamp_attempts_with_agent(
                     getattr(exc, "attempt_results", None) or [],
@@ -609,6 +618,8 @@ def run_once(
     issue_admission_check: Callable[[], bool] | None = None,
     pass_activity: PassActivity | None = None,
     execution_slots: DaemonExecutionSlots | None = None,
+    progress_callback: Callable[[RunProgressEvent], None] | None = None,
+    log_base: Path | None = None,
 ) -> int:
     """执行一次 Agent Runner 轮询（``execution_slots`` 见 :class:`RunOnceRequest`）。"""
     module = _orchestration_runtime_module()
@@ -634,5 +645,7 @@ def run_once(
             issue_admission_check=issue_admission_check,
             pass_activity=pass_activity,
             execution_slots=execution_slots,
+            progress_callback=progress_callback,
+            log_base=log_base,
         )
     )

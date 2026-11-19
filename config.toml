@@ -132,8 +132,8 @@ default_agent = "claude"
 # =============================================================================
 # 把"九个生命周期阶段各用哪个 agent"收敛成一张表。键名是闭集（写错键在配置
 # 加载期报错），取值可以是：
-#   - 已注册 agent 名（codex / claude / kimi / pi / codebuddy / qoder / opencode，
-#     或自定义注册的 agent）；
+#   - 已注册 agent 名（codex / claude / kimi / pi / codebuddy / qoder / opencode /
+#     mcode / dsh，或自定义注册的 agent）；
 #   - "auto"：按该阶段既有语义路由。只有实现了 auto 语义的阶段合法——
 #       实现=按 Issue 上的 agent/* 标签路由；校验=从 agent_fallback_order 里
 #       挑第一个 ≠ 实现者；审核=优先 ≠ 实现者（allow_same_agent 时沿用实现者）；
@@ -206,7 +206,7 @@ default_agent = "claude"
 # 评审由该预设的 agent CLI 以其 `judge` 形态运行——进程 cwd 是空临时目录，且
 # agent 声明了"禁用全部内置工具"的开关（claude/codebuddy/qoder 的 --tools ""、
 # pi 的 --no-tools），所以评审只能读到授权预览过的 payload。没有这类开关的 agent
-# （codex、kimi、opencode）不能当评审，页面会把它们标为"不可用"。
+# （codex、kimi、opencode、mcode、dsh）不能当评审，页面会把它们标为"不可用"。
 # default_judge_presets 是页面预选的预设名单，单次 run 可覆盖；不可用的默认项
 # 页面不会预选（勾选框本身是禁用的，预选会留下无法提交也无法取消的选项）。
 # 并发刻意收敛（1–4）：评测是手动离线批量任务，尊重与 runner 相同的主机 capacity。
@@ -253,7 +253,8 @@ default_agent = "claude"
 # 命中模型绑定时 fail-fast。claude（--model）与 codebuddy（--model +
 # --settings reasoningEffort）已核实并以内置默认播种；下方注册块写出仅为示例。
 # 续传参数：supports_resume / resume_args 声明按会话 id 续传；Codex 需要切换子命令，
-# 使用各 profile 的 resume_tail_args 替换正常 tail_args。七个内置 agent 均已声明续传入口。
+# 使用各 profile 的 resume_tail_args 替换正常 tail_args。九个内置 agent 均声明了续传入口；
+# dsh 用 --session-id，要求同 cwd / 同 agent preset 且无会话占用。
 #
 # 接入全新 agent 的最小步骤：写一段注册块（bin 与 label 必填，四种用途
 # 至少声明一种；某个用途两侧都不声明即视为该 agent 不提供该用途），
@@ -288,6 +289,7 @@ resume_tail_args = ["exec", "resume", "--json", "{session_id}"]
 prompt_delivery = "stdin"
 output_protocol = "codex-json-lines"
 read_only = true
+read_only_enforced = true
 
 [agent_runner.agents.codex.profiles.generate]
 args = ["--cd", "{cwd}", "--sandbox", "read-only", "--ask-for-approval", "never"]
@@ -296,6 +298,7 @@ resume_tail_args = ["exec", "resume", "--json", "{session_id}"]
 prompt_delivery = "argv_tail"
 output_protocol = "codex-json-lines"
 read_only = true
+read_only_enforced = true
 
 [agent_runner.agents.codex.profiles.repl]
 args = ["--cd", "{cwd}"]
@@ -410,12 +413,14 @@ args = ["--approve", "--no-tools", "--print"]
 prompt_delivery = "stdin"
 output_protocol = "plain"
 read_only = true
+read_only_enforced = true
 
 [agent_runner.agents.pi.profiles.generate]
 args = ["--no-tools", "--print"]
 prompt_delivery = "stdin"
 output_protocol = "plain"
 read_only = true
+read_only_enforced = true
 
 [agent_runner.agents.pi.profiles.judge]
 args = ["--no-tools", "--print"]
@@ -559,6 +564,96 @@ args = ["run", "--dangerously-skip-permissions", "--format", "json"]
 prompt_delivery = "argv_tail"
 output_protocol = "opencode-json-lines"
 
+# mcode（MiniMax Code）的注册块：内置默认已生效；下面照抄内置值作为"出厂
+# 注册块"参考。
+# 事实依据：非交互入口是 exec 子命令；--output-format stream-json 输出 JSON
+# 事件流，由 mcode-json-lines 协议渲染并提取顶层 sessionId；提示词走
+# --input -（stdin）而非位置参数，避免长提示词（PRD 全文 + 验收计划）撑爆
+# argv 上限；--permission full 是无人值守跑 Issue 的必要档（等价 claude 的
+# --dangerously-skip-permissions）。
+# 注意：mcode 没有任何"禁用全部内置工具"的开关——实测 --permission off 仍会
+# 执行工具并写入文件（它关的是交互式询问，不是工具能力），因此不声明 judge
+# 用途（假只读声明会被只读决策入口的门禁采信）。配置在 ~/.minimax/。
+[agent_runner.agents.mcode]
+bin = "mcode"
+label = "agent/mcode"
+label_color = "1F6FEB"
+label_description = "Use MiniMax Code for local runner execution."
+auth_home = "~/.minimax"
+auth_include = ["auth", "config.yaml", "skills"]
+auth_exclude = [".builtin-skills", ".internal-skills"]
+project_skills_dir = ".minimax/skills"
+supports_resume = true
+resume_args = ["--session", "{session_id}"]
+
+[agent_runner.agents.mcode.profiles.run]
+args = ["exec", "--cwd", "{cwd}", "--permission", "full", "--output-format", "stream-json"]
+tail_args = ["--input", "-"]
+prompt_delivery = "stdin"
+output_protocol = "mcode-json-lines"
+
+[agent_runner.agents.mcode.profiles.deliberate]
+args = ["exec", "--cwd", "{cwd}", "--permission", "full", "--output-format", "stream-json"]
+tail_args = ["--input", "-"]
+prompt_delivery = "stdin"
+output_protocol = "mcode-json-lines"
+read_only = true
+
+[agent_runner.agents.mcode.profiles.generate]
+args = ["exec", "--cwd", "{cwd}", "--permission", "full", "--output-format", "stream-json"]
+tail_args = ["--input", "-"]
+prompt_delivery = "stdin"
+output_protocol = "mcode-json-lines"
+read_only = true
+
+[agent_runner.agents.mcode.profiles.repl]
+args = ["exec", "--cwd", "{cwd}", "--permission", "full", "--output-format", "stream-json"]
+tail_args = ["--input", "-"]
+prompt_delivery = "stdin"
+output_protocol = "mcode-json-lines"
+
+# DeepSeek Harness（dsh）：headless 表层 + 按行 JSON 事件流。
+# run/deliberate/repl 用 danger-full-access + approval-policy never 才能无人值守；
+# generate 用 read-only 沙箱预设并声明 read_only_enforced。
+# 提示词走 stdin（"-" 必须是唯一任务参数）；声明 --session-id 续传；不声明 judge。
+[agent_runner.agents.dsh]
+bin = "dsh"
+label = "agent/dsh"
+label_color = "4D6BFE"
+label_description = "Use DeepSeek Harness for local runner execution."
+auth_home = "~/.dsh"
+auth_include = ["skills"]
+auth_exclude = []
+supports_resume = true
+resume_args = ["--session-id", "{session_id}"]
+
+[agent_runner.agents.dsh.profiles.run]
+args = ["--profile", "headless", "--json", "--permission-mode", "danger-full-access", "--approval-policy", "never"]
+tail_args = ["-"]
+prompt_delivery = "stdin"
+output_protocol = "dsh-json-lines"
+
+[agent_runner.agents.dsh.profiles.deliberate]
+args = ["--profile", "headless", "--json", "--permission-mode", "danger-full-access", "--approval-policy", "never"]
+tail_args = ["-"]
+prompt_delivery = "stdin"
+output_protocol = "dsh-json-lines"
+read_only = true
+
+[agent_runner.agents.dsh.profiles.generate]
+args = ["--profile", "headless", "--json", "--permission-mode", "read-only", "--approval-policy", "never"]
+tail_args = ["-"]
+prompt_delivery = "stdin"
+output_protocol = "dsh-json-lines"
+read_only = true
+read_only_enforced = true
+
+[agent_runner.agents.dsh.profiles.repl]
+args = ["--profile", "headless", "--json", "--permission-mode", "danger-full-access", "--approval-policy", "never"]
+tail_args = ["-"]
+prompt_delivery = "stdin"
+output_protocol = "dsh-json-lines"
+
 [agent_runner.labels]
 # codex / claude / kimi 是旧版 labels 段的 agent 路由键，作为兼容覆盖来源
 # 保留；新 agent 的路由标签请写在其注册块的 label 字段。
@@ -668,12 +763,18 @@ auto_promote_threshold = 3
 auto_promote_min_success_rate = 1.0
 
 [agent_runner.safety]
-auto_merge = false
+# 是否允许全仓自动合并 PR；新配置默认开启。
+# 需与 agent_runner.autopilot.enabled 同时为 true；关闭后仍可由 Issue 标签单独授权。
+auto_merge = true
 forbidden_path_patterns = [
   ".env",
   ".env.*",
   "secrets/*",
   "docker-compose.prod.yml",
+]
+forbidden_path_exceptions = [
+  ".env.example",
+  ".env.*.example",
 ]
 
 # =============================================================================
@@ -681,18 +782,16 @@ forbidden_path_patterns = [
 # =============================================================================
 # 启用后，supervisor approve 的 PR 不再停在"等人合并"，而是被一条串行
 # 合并队列消费：verifier 门禁 → 自动签核 → rebase → 全量验证 → 禁改终扫 →
-# checks 全绿 → squash 合并。两个开关同时为真才生效（"双同意"），保证
-# 历史上的 `safety.auto_merge = true` 不会单独触发自动合并，需仓库
-# 显式在本段开启 ``enabled = true``。
-# ``enabled = true`` 且 ``safety.auto_merge = false`` 时，也可用 Issue 的
+# checks 全绿 → squash 合并。两个开关同时为真才会对全仓 PR 自动合并；新配置默认同时开启。
+# 任一开关设为 false 都会关闭全仓自动合并；保留 autopilot 时，Issue 标签仍可单独授权。
+# ``enabled = true`` 且 ``safety.auto_merge = false`` 时，可用 Issue 的
 # ``auto-merge``（通用）或 ``prd-auto-merge``（PRD 专用）标签单独授权。
 #
-# 迁移提示：本段首次落地后，任何已设为 ``safety.auto_merge = true`` 的环境
-# 若不同时把下面 ``enabled`` 设为 ``true``，仍然回到"等人工合并"的现状——
-# 自动签核 / 自动合并都不会发生。但 ``enabled`` 本段是全新键，既往配置不会
-# 意外激活快速档。
+# 迁移提示：新配置默认开启全仓自动合并。已有仓库级配置中显式保存的 false
+# 仍然有效；要启用该仓库，请在 ``.kedacode.toml`` 中把两个开关都设为 true。
 [agent_runner.autopilot]
-enabled = false
+# 新配置默认开启；显式设为 false 时，合并队列整段 no-op。
+enabled = true
 # 仅支持 "squash"；非法值在配置加载期直接拒绝。
 merge_method = "squash"
 # 当 Issue 需要 validation 时，是否要求 validation/verifier-passed 标签先存在；
@@ -1155,6 +1254,10 @@ max_deliberation_issues = 1
 reconcile_stale_attempts = true
 # claim 老化阈值(秒)：claim 带 started_at 且超过该时长，即便 PID 仍活也判为 stale。
 reclaim_ttl_seconds = 18000
+# 每仓库状态 Issue 默认关闭；启用会将主机名和机器 ID 写入仓库。认领租约独立运行。
+presence_enabled = false
+# 新认领声明的租约时长（秒），最小 120。
+lease_ttl_seconds = 1200
 
 [agent_runner.lifecycle_agents]
 implementation = "codebuddy"

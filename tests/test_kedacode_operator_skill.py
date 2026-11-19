@@ -43,7 +43,7 @@ _PACKAGED_SKILL = _PACKAGED_SKILL_DIR / "SKILL.md"
 _PACKAGED_REFERENCES_DIR = _PACKAGED_SKILL_DIR / "references"
 
 #: 子命令说明的当前份数；新增路由时须同步受管集合与此契约。
-_EXPECTED_REFERENCE_COUNT = 11
+_EXPECTED_REFERENCE_COUNT = 12
 
 #: 改名前随包发行的旧名 skill 目录（安装根里遗留的副本，只用于清理判定）。
 _LEGACY_SKILL_NAME = "iar-operator"
@@ -359,6 +359,7 @@ def _flags_of(tokens: list[str]) -> set[str]:
 #: ``test_packaged_skill_whitelist_matches_runtime_schema`` 对 ``kc schema --json``
 #: 的运行时派生结果断言），CLI 删掉 Skill 仍在用的旗标必须让守卫红。
 _ALLOWED_FLAGS: dict[tuple[str, ...], set[str]] = {
+    ("peers",): {"--json", "--output", "--repo", "--repo-id", "--config"},
     ("run",): {
         "--dry-run",
         "--max-issues",
@@ -377,7 +378,10 @@ _ALLOWED_FLAGS: dict[tuple[str, ...], set[str]] = {
         "--aggregate-pr",
         "--takeover",
         "--yes",
+        "--progress",
     },
+    # 单次 post-PR 值守入口仍由 CLI 保留，skill 文档以 `kc supervise` 引用。
+    ("supervise",): set(),
     ("pr", "aggregate"): {"--issue", "--dry-run"},
     ("daemon", "run"): {
         "--autopilot",
@@ -455,6 +459,17 @@ _ALLOWED_FLAGS: dict[tuple[str, ...], set[str]] = {
     ("preview", "start"): {"--repo", "--repo-id", "--config", "--json", "--output", "--confirm"},
     ("preview", "status"): {"--repo", "--repo-id", "--config", "--json", "--output"},
     ("preview", "stop"): {"--repo", "--repo-id", "--config", "--json", "--output"},
+    # 本地证据自检入口（Issue #341）：与交付门禁同源复跑 evidence.json 命令。
+    # 旗标集合取自 ``kc schema --json`` 的真实命令树。
+    ("evidence", "check"): {"--evidence", "--worktree", "--timeout", "--json", "--output"},
+    ("evidence", "prune"): {
+        "--all",
+        "--apply",
+        "--json",
+        "--older-than",
+        "--output",
+        "--repo-id",
+    },
     ("registry", "stop"): {"--repo-id", "--all"},
     ("backlog", "advance"): {"--dry-run", "--repo", "--repo-id", "--config"},
     ("registry", "list"): set(),
@@ -755,6 +770,7 @@ def test_packaged_skill_whitelist_matches_runtime_schema() -> None:
 _ROUTE_KEYWORDS_BY_REFERENCE: dict[str, tuple[str, ...]] = {
     "create-issue.md": ("建 issue", "create an Issue"),
     "issue-inspect.md": ("查 issue", "inspect Issues"),
+    "peers.md": ("看其他机器", "machine presence", "kc peers"),
     "lifecycle.md": ("查生命周期", "lifecycle", "Issue lifecycle", "lifecycle phases"),
     "run-once.md": ("跑一次", "run one execution pass"),
     "watch.md": ("看进度", "live agent output"),

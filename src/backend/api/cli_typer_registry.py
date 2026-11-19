@@ -109,16 +109,26 @@ def registry_start_command(
         bool,
         typer.Option("--all", help="Start daemons for all enabled repositories."),
     ] = False,
+    with_review_daemon: Annotated[
+        bool,
+        typer.Option(
+            "--with-supervise-daemon",
+            help=(
+                "Also start a standalone supervise-daemon "
+                "(the daemon already runs post-PR supervision)."
+            ),
+        ),
+    ] = False,
     no_review_daemon: Annotated[
         bool,
         typer.Option(
             "--no-supervise-daemon",
             "--no-review-daemon",
-            help="Only start the agent daemon, skip post-PR supervision.",
+            help="Compatibility flag; supervise-daemon is no longer started by default.",
         ),
     ] = False,
 ) -> int:
-    """Start daemon and supervise-daemon for registered repositories."""
+    """Start the daemon (and optionally a supervise-daemon) for registered repositories."""
     if not repo_id and not all:
         return _registry_selector_error(
             "Either --repo-id or --all is required for kc registry start.",
@@ -133,6 +143,7 @@ def registry_start_command(
         "registry start",
         repo_id=repo_id,
         all=all,
+        with_review_daemon=with_review_daemon,
         no_review_daemon=no_review_daemon,
     )
 

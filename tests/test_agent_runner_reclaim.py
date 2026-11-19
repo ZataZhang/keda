@@ -7,6 +7,8 @@ import os
 from datetime import datetime, timedelta, timezone
 
 from backend.core.shared.models.agent_runner import AppConfig
+from backend.core.use_cases.agent_runner_claim_arbitration import ClaimBid, format_claim_comment
+from backend.core.use_cases.agent_runner_claim_lease import with_claim_lease
 from backend.core.use_cases.agent_runner_reclaim import (
     format_claim_marker,
     is_pid_alive,
@@ -112,6 +114,60 @@ def test_reclaim_skips_other_host() -> None:
 
     assert reclaimed == []
     assert config.labels.running in github.get_issue(5).labels
+
+
+def test_reclaim_skips_same_hostname_claim_from_different_machine() -> None:
+    """租约存在时，机器编号优先于相同主机名和碰巧相同的 PID。"""
+    config = AppConfig()
+    github = FakeGitHubClient()
+    _seed_running_issue(github, config, issue_number=5, marker=None)
+    claim_body = with_claim_lease(
+        format_claim_comment(ClaimBid(0, "macbook", 4242, datetime.now(timezone.utc), "claude")),
+        machine_id="machine-remote",
+        ttl_seconds=600,
+        renewed_at=datetime.now(timezone.utc),
+    )
+    github.comment_issue(5, claim_body)
+
+    reclaimed = reclaim_stale_running_issues(
+        config=config,
+        github_client=github,
+        host="macbook",
+        machine_id="machine-local",
+        pid_alive=lambda _pid: False,
+    )
+
+    assert reclaimed == []
+    assert config.labels.running in github.get_issue(5).labels
+
+
+def test_reclaim_uses_machine_id_for_same_hostname_local_claim() -> None:
+    """同名主机上的本机租约按相同机器编号继续回收死进程。"""
+    config = AppConfig()
+    github = FakeGitHubClient()
+    _seed_running_issue(github, config, issue_number=5, marker=None)
+    github.comment_issue(
+        5,
+        with_claim_lease(
+            format_claim_comment(
+                ClaimBid(0, "macbook", 4242, datetime.now(timezone.utc), "claude")
+            ),
+            machine_id="machine-local",
+            ttl_seconds=600,
+            renewed_at=datetime.now(timezone.utc),
+        ),
+    )
+
+    reclaimed = reclaim_stale_running_issues(
+        config=config,
+        github_client=github,
+        host="macbook",
+        machine_id="machine-local",
+        pid_alive=lambda _pid: False,
+    )
+
+    assert reclaimed == [5]
+    assert config.labels.running not in github.get_issue(5).labels
 
 
 def test_reclaim_skips_issue_without_claim_marker() -> None:

@@ -5,33 +5,11 @@
 本身需要变更时才改本文件，并同步更新相关约定文档。详见
 ``docs/ai-standards/testing.md`` 的 Guard Tests 小节。
 
-被测对象：验收状态横幅的读法（``prd_acceptance.py``）、``prd_status.py`` 的 AWAITING HUMAN
-分区与 ARCHIVE 月视图，以及 ``prd_activity.py`` 对待人工记录的 ACTIVITY 渲染。目录轴
-（pending / archive）与验收轴（横幅）相互正交，worktree / 依赖 / 证据信号见
-``test_prd_status.py``。核心不变量：
-
-1. **AWAITING HUMAN 分区只认"已归档的副本 + 🧍 横幅"，且一个 PRD 只出现一次。**
-   归档只代表执行侧交付完成，人工验收是另一条轴线：看板读到的那份副本已在
-   ``tasks/archive``（主仓库里，或分支 worktree 里已归档、只差合并），且横幅为
-   ``🧍 待人工验收``，才算"机器证据齐备、只等人确认"，并从目录分区里摘出，任何 scope
-   下非空时都要露出。**落在 ``tasks/pending`` 的副本即使横幅写着 🧍 也留在 PENDING**——
-   归档与翻横幅在同一次交付里完成，pending 里的 🧍 只可能是重开后忘了复位、或翻了
-   横幅还没归档，执行侧的活可能还没做完，不能让陈旧的横幅把它从待办里摘走。同名 PRD
-   在 pending 与 archive 并存时以 pending 副本为准，archive 那份不入该段、留在 ARCHIVE
-   里被月视图报 ⚠。横幅是 §9 验收清单的唯一投影，看板读它同样走分支副本（执行方在
-   worktree 里翻的状态才算数）。只接受引用块行（``>`` 开头）里带 ``验收状态`` /
-   ``Acceptance Status`` 的声明，并取标记之后**最先出现**的状态词——模板括号里的提示文字
-   不得抢占行首的 ``⬜ 未开工``；旧称 ``✅ 可归档`` 按 ``已验收`` 读。没有横幅或认不出
-   状态词时按未开工处理、留在 PENDING：按 §9 未勾项结构反推会漏判真实的人工项（常挂在
-   ``Human-Confirmed`` 之外的小节下），也会把尚未完工的 PRD 误报成"等你验收"。分区只做
-   呈现，不搬文件。
-2. **ARCHIVE 月视图的 ``⚠ 有未勾完的清单`` 只表示异常。** 待人工记录已被摘到
-   AWAITING HUMAN，剩在 ARCHIVE 里的记录清单没勾完就是真异常（横幅写着已验收却仍有
-   空框、历史记录缺横幅、与 pending 副本并存的残留等），不能被"等人验收"的空框稀释。
-3. **已归档且待人工的记录，ACTIVITY 显示 ``🧍 waiting <时长>``。** 从归档落地的
-   提交时间起算（工作树里未被 git 追踪时退回 mtime），让验收积压多久一眼可见；有活跃
-   锁时仍显示锁状态——有人正在重开或回填，比"在等"更要紧；过期锁（无活性佐证）不盖住
-   "在等"，渲染成 ``🧍 waiting <时长> · stale lock``，已验收的记录则照旧显示 STALE。
+被测对象：四态横幅读取、VALIDATION BLOCKED / AWAITING HUMAN 分区、ARCHIVE 月视图与
+ACTIVITY。核心不变量：只有已归档副本才进入两个待办分区，pending 副本不冒充已交付；
+阻塞与待人工记录只出现一次且不被月视图误报为清单异常；横幅取标记后首个状态词，旧称
+``✅ 可归档`` 仍按已验收读；阻塞显示 ``⏸️ blocked <时长>``，待人工显示 ``🧍 waiting
+<时长>``，活跃锁信号不被吞掉。worktree / 依赖 / 证据信号见 ``test_prd_status.py``。
 """
 
 from __future__ import annotations
@@ -63,6 +41,7 @@ from prd_status_fixtures import (  # noqa: E402
     FIXTURE_PRD_RELATIVE_PATH,
     LANDED_THREE_DAYS_AGO_SECONDS,
     NOT_STARTED_BANNER_LINE,
+    VALIDATION_BLOCKED_BANNER_LINE,
     add_linked_worktree,
     collect_fixture_record,
     commit_with_backdated_time,
@@ -263,6 +242,27 @@ def test_pending_and_archive_copies_of_one_prd_are_claimed_once_with_pending_pre
     assert "PENDING (2)" in raw_output_text
     assert "ARCHIVE (1)" in raw_output_text
     assert "⚠ 有未勾完的清单" in raw_output_text
+
+
+def test_archived_validation_blocked_prd_moves_into_blocked_section(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    """验证阻塞的归档副本单独成段，不冒充待人工验收，也不报清单异常。"""
+    blocked_prd_text = prd_text_with_acceptance_banner(VALIDATION_BLOCKED_BANNER_LINE)
+    assert (
+        prd_acceptance.parse_acceptance_status(blocked_prd_text)
+        == prd_acceptance.ACCEPTANCE_STATUS_VALIDATION_BLOCKED
+    )
+    main_repo_path = init_main_repo(tmp_path / "repo")
+    write_main_archived_prd(main_repo_path, blocked_prd_text, prd_name=AWAITING_PRD_NAME)
+
+    raw_output_text = run_status_main(main_repo_path, "status", capsys, monkeypatch)
+
+    assert "VALIDATION BLOCKED (1)" in raw_output_text
+    assert "AWAITING HUMAN" not in raw_output_text
+    assert "ARCHIVE (0)" in raw_output_text
+    assert "⚠ 有未勾完的清单" not in raw_output_text
+    assert raw_output_text.count(AWAITING_PRD_SLUG) == 1
 
 
 def test_archived_awaiting_human_prd_moves_into_awaiting_section(
@@ -468,6 +468,41 @@ def test_archived_accepted_prd_activity_has_no_waiting_marker(tmp_path: Path) ->
 
     assert "🧍" not in raw_cell_text
     assert "waiting" not in raw_cell_text
+
+
+def test_archived_validation_blocked_activity_shows_blocked_time(tmp_path: Path) -> None:
+    """主线阻塞归档显示 blocked 时长，而不是 waiting 人工验收。"""
+    main_repo_path = init_main_repo(tmp_path / "repo")
+    write_main_archived_prd(
+        main_repo_path, prd_text_with_acceptance_banner(VALIDATION_BLOCKED_BANNER_LINE)
+    )
+    commit_with_backdated_time(main_repo_path, "archive blocked prd", LANDED_THREE_DAYS_AGO_SECONDS)
+
+    assert render_activity_cell(main_repo_path, FIXTURE_PRD_ARCHIVE_RELATIVE_PATH) == (
+        "⏸️ blocked 3d0h"
+    )
+
+
+def test_branch_archived_validation_blocked_record_is_listed_before_merge(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    """分支阻塞归档在合并前进入 VALIDATION BLOCKED，并显示阻塞分支状态。"""
+    main_repo_path = init_main_repo(tmp_path / "repo")
+    linked_worktree_path = add_linked_worktree(main_repo_path, "feat/avatar-upload", "wt-blocked")
+    branch_archived_prd_path = linked_worktree_path / FIXTURE_PRD_ARCHIVE_RELATIVE_PATH
+    branch_archived_prd_path.parent.mkdir(parents=True, exist_ok=True)
+    branch_archived_prd_path.write_text(
+        prd_text_with_acceptance_banner(VALIDATION_BLOCKED_BANNER_LINE), encoding="utf-8"
+    )
+
+    assert collect_fixture_record(main_repo_path).validation_blocked
+    assert render_activity_cell(main_repo_path).startswith(
+        "⏸️ validation-blocked @feat/avatar-upload · awaiting merge"
+    )
+    raw_output_text = run_status_main(main_repo_path, "status", capsys, monkeypatch)
+    assert "VALIDATION BLOCKED (1)" in raw_output_text
+    assert "AWAITING HUMAN" not in raw_output_text
+    assert "PENDING (0)" in raw_output_text
 
 
 def test_branch_archived_awaiting_human_record_is_listed_before_merge(

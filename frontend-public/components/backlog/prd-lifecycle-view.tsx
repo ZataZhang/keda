@@ -47,6 +47,7 @@ const OUTCOME_LABELS: Record<string, string> = {
   completed: "已完成",
   failed: "失败",
   blocked: "阻塞",
+  deferred: "暂缓重试",
 };
 
 type LifecycleState =

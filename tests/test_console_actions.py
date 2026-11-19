@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
 import pytest
 
-from backend.core.shared.interfaces.runner_console import RunnerProcessKind
+from backend.core.shared.interfaces.runner_console import (
+    InvocationEventRecord,
+    RunRecord,
+    RunnerProcessKind,
+)
 from backend.core.shared.models.agent_runner import (
     AppConfig,
     IssueSummary,
@@ -80,6 +85,9 @@ def test_retry_failed_flips_labels_and_audits(tmp_path: Path) -> None:
     )
     github_client = FakeGitHubClient(issue)
     store = _make_store(tmp_path)
+    store.set_issue_retry_override(
+        repo_id="keda-main", issue_number=19, stage="implementation", executor="claude"
+    )
 
     action_result = execute_issue_action(
         action="retry_failed",
@@ -96,9 +104,276 @@ def test_retry_failed_flips_labels_and_audits(tmp_path: Path) -> None:
 
     assert action_result.result == "accepted"
     assert github_client.label_edits == [(19, (config.labels.ready,), (config.labels.failed,))]
+    assert store.get_issue_retry_override(repo_id="keda-main", issue_number=19) is None
     audits = store.list_recent_audits(limit=10)
     assert audits[0].action == "retry_failed"
     assert audits[0].result == "accepted"
+
+
+def _seed_failed_executor_run(
+    store: SqliteConsoleStore, *, issue_number: int, executor: str = "claude"
+) -> None:
+    """写入一条失败运行及实现调用事实，供切换执行器动作核验。"""
+    started_at = "2026-11-17T10:00:00+00:00"
+    finished_at = "2026-11-17T10:05:00+00:00"
+    store.append_run(
+        RunRecord(
+            repo_id="keda-main",
+            repo_path="/tmp/repo",
+            issue_number=issue_number,
+            trigger="console_run",
+            agent="codex",
+            outcome="failed",
+            error_summary="provider rate limit: too many requests",
+            started_at=started_at,
+            finished_at=finished_at,
+            duration_seconds=300,
+        )
+    )
+    for event_type, occurred_at, detail in (
+        ("invocation_started", started_at, {}),
+        ("invocation_finished", "2026-11-17T10:04:00+00:00", {"outcome": "error"}),
+    ):
+        store.append_invocation_event(
+            InvocationEventRecord(
+                run_id=f"keda-main#issue-{issue_number}#run-1",
+                event_key=f"impl:{event_type}",
+                event_type=event_type,
+                invocation_id="impl",
+                repo_id="keda-main",
+                issue_number=issue_number,
+                phase="implementation",
+                role="implementer",
+                agent=executor,
+                occurred_at=occurred_at,
+                detail_json=json.dumps(detail),
+            )
+        )
+
+
+def test_retry_failed_with_executor_saves_one_shot_override(tmp_path: Path) -> None:
+    """执行器切换需确认失败调用，并将覆盖与 ready label 翻转一并排队。"""
+    config = AppConfig()
+    issue = IssueSummary(
+        number=119,
+        title="Broken",
+        url="https://example.test/119",
+        body="",
+        labels=(config.labels.failed,),
+    )
+    github_client = FakeGitHubClient(issue)
+    store = _make_store(tmp_path)
+    _seed_failed_executor_run(store, issue_number=119)
+
+    action_result = execute_issue_action(
+        action="retry_failed_with_executor",
+        repo_id="keda-main",
+        issue_number=119,
+        contexts=[_make_context()],
+        github_client_factory=lambda _path: github_client,
+        supervisor=_make_supervisor(tmp_path),
+        store=store,
+        runner_command=_fake_runner_command(),
+        spawn_cwd=tmp_path,
+        process_runner=FakeProcessRunner(),
+        lifecycle_stage="implementation",
+        executor="codex",
+    )
+
+    assert action_result.result == "accepted"
+    assert github_client.label_edits == [(119, (config.labels.ready,), (config.labels.failed,))]
+    assert store.get_issue_retry_override(repo_id="keda-main", issue_number=119) == (
+        "implementation",
+        "codex",
+    )
+    assert store.list_recent_audits(limit=10)[0].action == "retry_failed_with_executor"
+
+
+def test_retry_failed_with_executor_rejects_same_failed_executor(tmp_path: Path) -> None:
+    """不能把同一阶段已失败的执行器重新选作切换目标。"""
+    config = AppConfig()
+    issue = IssueSummary(
+        number=120,
+        title="Broken",
+        url="https://example.test/120",
+        body="",
+        labels=(config.labels.failed,),
+    )
+    github_client = FakeGitHubClient(issue)
+    store = _make_store(tmp_path)
+    _seed_failed_executor_run(store, issue_number=120)
+
+    with pytest.raises(ConsoleActionError, match="already failed"):
+        execute_issue_action(
+            action="retry_failed_with_executor",
+            repo_id="keda-main",
+            issue_number=120,
+            contexts=[_make_context()],
+            github_client_factory=lambda _path: github_client,
+            supervisor=_make_supervisor(tmp_path),
+            store=store,
+            runner_command=_fake_runner_command(),
+            spawn_cwd=tmp_path,
+            process_runner=FakeProcessRunner(),
+            lifecycle_stage="implementation",
+            executor="claude",
+        )
+
+    assert github_client.label_edits == []
+    assert store.get_issue_retry_override(repo_id="keda-main", issue_number=120) is None
+    assert store.list_recent_audits(limit=10)[0].result == "rejected"
+
+
+def test_retry_failed_with_executor_is_idempotent_on_repeat_submit(tmp_path: Path) -> None:
+    """重复点击同一次「换执行器续跑」不再报错：第一次已排入，第二次如实回报。
+
+    用户在界面上看不到结果又点一次是常见操作；此时标签已不是 failed
+    （第一次点击把它翻回 ready 了），再报"只适用于失败 Issue"会把重复提交
+    说成失败。
+    """
+    config = AppConfig()
+    issue = IssueSummary(
+        number=121,
+        title="Broken",
+        url="https://example.test/121",
+        body="",
+        labels=(config.labels.ready,),
+    )
+    github_client = FakeGitHubClient(issue)
+    store = _make_store(tmp_path)
+    _seed_failed_executor_run(store, issue_number=121)
+    store.set_issue_retry_override(
+        repo_id="keda-main", issue_number=121, stage="implementation", executor="codex"
+    )
+
+    action_result = execute_issue_action(
+        action="retry_failed_with_executor",
+        repo_id="keda-main",
+        issue_number=121,
+        contexts=[_make_context()],
+        github_client_factory=lambda _path: github_client,
+        supervisor=_make_supervisor(tmp_path),
+        store=store,
+        runner_command=_fake_runner_command(),
+        spawn_cwd=tmp_path,
+        process_runner=FakeProcessRunner(),
+        lifecycle_stage="implementation",
+        executor="mcode",
+    )
+
+    assert action_result.result == "accepted"
+    assert "already queued" in action_result.detail
+    # 已在队列里：不再翻标签（队列状态由第一次点击改好了）。
+    assert github_client.label_edits == []
+    assert store.get_issue_retry_override(repo_id="keda-main", issue_number=121) == (
+        "implementation",
+        "mcode",
+    )
+
+
+def test_retry_failed_with_executor_rejects_issue_without_failed_label(tmp_path: Path) -> None:
+    """既没有失败标签、也没有待消费覆盖时才是真正的场景不符，必须拒绝。"""
+    config = AppConfig()
+    issue = IssueSummary(
+        number=122,
+        title="Running",
+        url="https://example.test/122",
+        body="",
+        labels=(config.labels.running,),
+    )
+    store = _make_store(tmp_path)
+    _seed_failed_executor_run(store, issue_number=122)
+
+    with pytest.raises(ConsoleActionError, match="only applies to failed Issues"):
+        execute_issue_action(
+            action="retry_failed_with_executor",
+            repo_id="keda-main",
+            issue_number=122,
+            contexts=[_make_context()],
+            github_client_factory=lambda _path: FakeGitHubClient(issue),
+            supervisor=_make_supervisor(tmp_path),
+            store=store,
+            runner_command=_fake_runner_command(),
+            spawn_cwd=tmp_path,
+            process_runner=FakeProcessRunner(),
+            lifecycle_stage="implementation",
+            executor="mcode",
+        )
+
+    assert store.get_issue_retry_override(repo_id="keda-main", issue_number=122) is None
+    assert store.list_recent_audits(limit=10)[0].result == "rejected"
+
+
+def test_console_executor_choice_reaches_runner_agent_selection(tmp_path: Path) -> None:
+    """Console 选定的执行器一路传到 runner 选 agent，且不被阶段预设遮蔽。
+
+    这条链路的原始 bug：Console 回「已排入」，runner 仍按阶段预设绑定的执行器
+    跑——用户选的一次性执行器从未真正生效。覆盖经同一个 SQLite 文件跨进程可见。
+    """
+    from backend.core.shared.models.agent_model_preset import AgentModelPreset
+    from backend.core.shared.models.lifecycle_agent import LifecyclePresetsConfig
+    from backend.core.use_cases.agent_runner_agent_selection import choose_agent
+    from backend.core.use_cases.issue_retry_overrides import (
+        IssueRetryOverrideRequest,
+        prepare_issue_retry_override,
+    )
+
+    config = AppConfig(
+        agent_presets={"codex-luna-max": AgentModelPreset(agent="codex", model="gpt-6-luna")},
+        lifecycle_presets=LifecyclePresetsConfig(
+            repository_layer={"implementation": "codex-luna-max"}
+        ),
+    )
+    issue = IssueSummary(
+        number=123,
+        title="Broken",
+        url="https://example.test/123",
+        body="",
+        labels=(config.labels.failed,),
+    )
+    github_client = FakeGitHubClient(issue)
+    store = _make_store(tmp_path)
+    _seed_failed_executor_run(store, issue_number=123)
+
+    action_result = execute_issue_action(
+        action="retry_failed_with_executor",
+        repo_id="keda-main",
+        issue_number=123,
+        contexts=[
+            RepositoryRunContext(
+                repo_id="keda-main",
+                display_name="keda-main",
+                repo_path=Path("/tmp/repo"),
+                config=config,
+            )
+        ],
+        github_client_factory=lambda _path: github_client,
+        supervisor=_make_supervisor(tmp_path),
+        store=store,
+        runner_command=_fake_runner_command(),
+        spawn_cwd=tmp_path,
+        process_runner=FakeProcessRunner(),
+        lifecycle_stage="implementation",
+        executor="mcode",
+    )
+    assert action_result.result == "accepted"
+
+    # runner 侧另开一个 store 实例（同一个 SQLite 文件），模拟另一个进程读到覆盖。
+    runner_store = SqliteConsoleStore(tmp_path / "console.db")
+    prepared_issue, claim = prepare_issue_retry_override(
+        IssueRetryOverrideRequest(
+            issue=issue,
+            issue_kind="ready",
+            repo_id="keda-main",
+            config=config,
+            run_history_store=runner_store,
+        )
+    )
+
+    assert claim is not None
+    # 无覆盖时按阶段预设绑定的执行器跑；有覆盖时用用户选定的那个。
+    assert choose_agent(issue, config, "auto") == "codex"
+    assert choose_agent(prepared_issue, config, "auto") == "mcode"
 
 
 def test_retry_failed_rejected_when_not_failed(tmp_path: Path) -> None:

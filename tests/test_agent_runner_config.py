@@ -297,6 +297,30 @@ def test_resolve_repository_targets_ad_hoc_repo(tmp_path: Path) -> None:
     assert contexts[0].repo_path == repo_path.resolve()
 
 
+def test_resolve_repository_targets_other_checkout_anchors_log_base_to_registry(
+    tmp_path: Path,
+) -> None:
+    """--repo 指向已注册仓库的其他 checkout 时，Issue 日志根锚定到登记路径。"""
+    registered_path = _init_git_repository(tmp_path, "main")
+    checkout_path = _init_git_repository(tmp_path, "feature-checkout")
+    for repo_path in (registered_path, checkout_path):
+        _write_local_iar_config(repo_path, '[agent_runner.repository]\nid = "shared"\n')
+    settings = _make_settings(
+        repositories={"shared": AgentRunnerRepositorySettings(path=str(registered_path))}
+    )
+
+    checkout_context = resolve_repository_targets(settings, repo_path_override=str(checkout_path))[
+        0
+    ]
+    registered_context = resolve_repository_targets(
+        settings, repo_path_override=str(registered_path)
+    )[0]
+
+    assert checkout_context.repo_path == checkout_path.resolve()
+    assert checkout_context.log_base == registered_path.resolve() / "logs"
+    assert registered_context.log_base is None
+
+
 def test_resolve_repository_targets_repo_path_loads_local_config(
     tmp_path: Path,
 ) -> None:
@@ -993,11 +1017,30 @@ def test_merge_repository_config_preserves_unrelated_identities() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_build_app_config_from_settings_maps_autopilot_defaults() -> None:
-    """Default ``AutopilotConfig`` (off / squash / verifier-required) flows into AppConfig."""
+def test_build_app_config_from_settings_maps_autopilot_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """默认开启的自动合并配置连同队列门禁流入 AppConfig。"""
+    toml_loader = settings_sources._load_toml_section_data
+
+    def load_without_merge_overrides(section_name: str) -> dict[str, object]:
+        section_data = toml_loader(section_name)
+        if section_name != "agent_runner":
+            return section_data
+        isolated_section = dict(section_data)
+        isolated_section.pop("autopilot", None)
+        isolated_section.pop("safety", None)
+        return isolated_section
+
+    monkeypatch.setattr(
+        settings_sources,
+        "_load_toml_section_data",
+        load_without_merge_overrides,
+    )
     settings = AgentRunnerSettings()
     app_config = build_app_config_from_settings(settings)
-    assert app_config.autopilot.enabled is False
+    assert app_config.autopilot.enabled is True
+    assert app_config.safety.auto_merge is True
     assert app_config.autopilot.merge_method == "squash"
     assert app_config.autopilot.require_verifier_pass is True
     assert app_config.autopilot.auto_sign_off is True
@@ -1106,8 +1149,16 @@ auto_advance = true
     assert contexts[0].config.backlog.auto_advance is True
 
 
-def test_retired_max_issues_is_ignored_with_a_warning(caplog: pytest.LogCaptureFixture) -> None:
+def _reset_retired_max_issues_warning(monkeypatch: pytest.MonkeyPatch) -> None:
+    """让弃用警告的进程内去重从干净状态开始，测试彼此不互相吞掉警告。"""
+    monkeypatch.setattr(settings_module, "_retired_max_issues_warned", False)
+
+
+def test_retired_max_issues_is_ignored_with_a_warning(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """旧配置里的 ``max_issues`` 只告警、不参与计算；并行上限只看 max_concurrent_issues。"""
+    _reset_retired_max_issues_warning(monkeypatch)
     with caplog.at_level(logging.WARNING):
         settings = AgentRunnerSettings.model_validate(
             {"max_issues": 4, "runner": {"max_issues": 5, "max_concurrent_issues": 2}}
@@ -1116,3 +1167,15 @@ def test_retired_max_issues_is_ignored_with_a_warning(caplog: pytest.LogCaptureF
     app_config = build_app_config_from_settings(settings)
     assert app_config.runner.max_concurrent_issues == 2
     assert "max_issues 已退役" in caplog.text
+
+
+def test_retired_max_issues_warns_only_once_per_process(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """同一进程里重复构造设置（多仓库/多命令）只提示一次，避免启动日志被同一行刷屏。"""
+    _reset_retired_max_issues_warning(monkeypatch)
+    with caplog.at_level(logging.WARNING):
+        for _ in range(3):
+            AgentRunnerSettings.model_validate({"runner": {"max_issues": 5}})
+
+    assert caplog.text.count("max_issues 已退役") == 1

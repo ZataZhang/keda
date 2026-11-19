@@ -1,7 +1,7 @@
 /**
  * Realistic validation for the unified lifecycle / model / reasoning settings page (rv-2).
  *
- * 验证层级：**真实入口**。直接访问 `/app/settings/lifecycle/`，走真实后端只读视图与真实
+ * 验证层级：**真实入口**。直接访问 `/app/repositories/lifecycle/`，走真实后端只读视图与真实
  * 配置（全局 `config.toml` / 仓库 `.kedacode.toml`），不做任何 stub。
  *
  * 覆盖范围与边界（刻意不写盘）：本 spec 只做**只读交互**——从 Settings 进入统一页、切换
@@ -51,6 +51,7 @@ interface LifecycleSettingsFacts {
 interface RegistryRepositoryEntry {
   repo_id: string
   enabled: boolean
+  display_name?: string | null
 }
 
 interface RegistryRepositories {
@@ -58,24 +59,92 @@ interface RegistryRepositories {
 }
 
 test.describe('生命周期统一设置页 (lifecycle-settings)', () => {
-  test('Settings「Agent 管理」入口可进入统一设置页', async ({ page }) => {
+  test('Repositories 顶层入口可进入统一设置，Settings 仍管理 Agent 标签', async ({ page }) => {
+    await page.goto('/app/repositories/')
+
+    const workspaceTabs = page.getByTestId('repositories-workspace-tabs')
+    await expect(workspaceTabs).toBeVisible()
+    await expect(page.getByTestId('repositories-tab-list')).toBeVisible()
+    await expect(page.getByTestId('repositories-tab-lifecycle')).toBeVisible()
+    await expect(page.getByTestId('repositories-tab-list')).toHaveAttribute('aria-current', 'page')
+
     await page.goto('/app/settings/')
-
-    const entry = page.getByTestId('settings-lifecycle-entry')
-    await expect(entry).toBeVisible()
-    // 回归守护：入口页仍渲染 Agent 标签设置编辑器（原 lifecycle-agent-matrix spec 的首条用例）。
+    // Agent 路由标签仍可编辑，但生命周期入口已迁到 Repositories。
     await expect(page.getByTestId('agent-labels-editor')).toBeVisible()
-    await entry.getByRole('link', { name: '打开统一设置页' }).click()
+    await expect(page.getByTestId('settings-lifecycle-entry')).toHaveCount(0)
 
-    await expect(page).toHaveURL(/\/app\/settings\/lifecycle\/?/)
+    await page.goto('/app/repositories/')
+    await page.getByTestId('repositories-tab-lifecycle').click()
+    await expect(page).toHaveURL(/\/app\/repositories\/lifecycle\/?/)
     await expect(page.getByTestId('lifecycle-settings-page')).toBeVisible()
     await expect(page.getByTestId('block-nav')).toBeVisible()
+    await expect(page.getByTestId('repositories-tab-lifecycle')).toHaveAttribute('aria-current', 'page')
+  })
+
+  test('旧 Settings 地址转向新路由并保留仓库范围参数', async ({ page }) => {
+    const reposResponse = await page.request.get('/api/v1/agent-runner/repositories')
+    expect(reposResponse.ok(), `repositories 端点非 200：${await reposResponse.text()}`).toBe(true)
+    const registry = (await reposResponse.json()) as RegistryRepositories
+    const enabledRepo = (registry.repositories ?? []).find((entry) => entry.enabled)
+    test.skip(!enabledRepo, '当前 registry 没有启用中的受管理仓库，无法验证旧链接参数保留。')
+
+    await page.goto(
+      `/app/settings/lifecycle/?scope=repository&repo_id=${encodeURIComponent(enabledRepo!.repo_id)}`,
+    )
+
+    await expect(page).toHaveURL(/\/app\/repositories\/lifecycle\/\?scope=repository&repo_id=/)
+    await expect(page.getByTestId('lifecycle-settings-page')).toBeVisible()
+    await expect(page.getByTestId('scope-repo-select')).toContainText(
+      enabledRepo!.display_name ?? enabledRepo!.repo_id,
+    )
+
+    await page.goto('/app/settings/lifecycle/?scope=repository')
+    await expect(page).toHaveURL(/\/app\/repositories\/lifecycle\/\?scope=repository$/)
+    await expect(page.getByTestId('lifecycle-settings-pick-repo')).toBeVisible()
+  })
+
+  test('无效仓库深链保留仓库范围且不会回退到全局写入', async ({ page }) => {
+    const lifecycleRequests: { method: string; url: string }[] = []
+    page.on('request', (request) => {
+      if (request.url().includes('/api/v1/agent-runner/lifecycle-settings')) {
+        lifecycleRequests.push({ method: request.method(), url: request.url() })
+      }
+    })
+
+    await page.goto(
+      '/app/settings/lifecycle/?scope=repository&repo_id=missing-repository-for-e2e',
+    )
+
+    await expect(page).toHaveURL(
+      /\/app\/repositories\/lifecycle\/\?scope=repository&repo_id=missing-repository-for-e2e$/,
+    )
+    await expect(page.getByTestId('lifecycle-settings-error')).toBeVisible()
+    await expect(page.getByTestId('scope-repository')).toHaveClass(/bg-primary/)
+    await expect(page.getByTestId('scope-global')).not.toHaveClass(/bg-primary/)
+
+    const lifecycleRead = lifecycleRequests.filter(({ method }) => method === 'GET')
+    expect(lifecycleRead.length).toBeGreaterThan(0)
+    for (const { url } of lifecycleRead) {
+      const requestUrl = new URL(url)
+      expect(requestUrl.searchParams.get('scope')).toBe('repository')
+      expect(requestUrl.searchParams.get('repo_id')).toBe('missing-repository-for-e2e')
+    }
+    expect(lifecycleRequests.filter(({ method }) => method !== 'GET')).toHaveLength(0)
+  })
+
+  test('新规范地址没有 scope 时默认全局范围', async ({ page }) => {
+    await page.goto('/app/repositories/lifecycle/')
+    await expect(page.getByTestId('lifecycle-settings-page')).toBeVisible()
+    await expect(page.getByTestId('scope-global')).toBeVisible()
+    await expect(page.getByTestId('scope-repository')).toBeVisible()
+    await expect(page.getByTestId('scope-global')).toHaveClass(/bg-primary/)
+    await expect(page.getByTestId('scope-repository')).not.toHaveClass(/bg-primary/)
   })
 
   test('全局范围：九阶段矩阵齐全，每行展示生效 Agent / 模型 / 推理深度与来源，并附绑定预设下拉', async ({
     page,
   }) => {
-    await page.goto('/app/settings/lifecycle/')
+    await page.goto('/app/repositories/lifecycle/')
 
     const pageRoot = page.getByTestId('lifecycle-settings-page')
     await expect(pageRoot).toBeVisible()
@@ -99,7 +168,7 @@ test.describe('生命周期统一设置页 (lifecycle-settings)', () => {
   })
 
   test('模型预设区块与新建表单、执行器回退区块控件齐备（只读，不保存）', async ({ page }) => {
-    await page.goto('/app/settings/lifecycle/')
+    await page.goto('/app/repositories/lifecycle/')
     await expect(page.getByTestId('lifecycle-settings-page')).toBeVisible()
     // 预设卡片是客户端拉取聚合视图后才渲染的：不等网络静默就 count，会稳定拿到 0，
     // 把"其实有预设"的环境误判成空态分支（该分支断言的是空态提示，于是必然超时）。
@@ -126,7 +195,7 @@ test.describe('生命周期统一设置页 (lifecycle-settings)', () => {
   })
 
   test('切到仓库范围但未选仓库时，提示先选择仓库', async ({ page }) => {
-    await page.goto('/app/settings/lifecycle/')
+    await page.goto('/app/repositories/lifecycle/')
     await expect(page.getByTestId('lifecycle-settings-page')).toBeVisible()
 
     await page.getByTestId('scope-repository').click()
@@ -145,14 +214,18 @@ test.describe('生命周期统一设置页 (lifecycle-settings)', () => {
     const reposResponse = await page.request.get('/api/v1/agent-runner/repositories')
     expect(reposResponse.ok(), `repositories 端点非 200：${await reposResponse.text()}`).toBe(true)
     const registry = (await reposResponse.json()) as RegistryRepositories
-    const enabledRepoId = (registry.repositories ?? []).find((entry) => entry.enabled)?.repo_id
-    test.skip(!enabledRepoId, '当前 registry 没有启用中的受管理仓库，跳转过录用例。')
+    const enabledRepo = (registry.repositories ?? []).find((entry) => entry.enabled)
+    test.skip(!enabledRepo, '当前 registry 没有启用中的受管理仓库，跳转过录用例。')
 
-    const gear = page.getByTestId(`repo-agent-gear-${enabledRepoId}`)
+    const gear = page.getByTestId(`repo-agent-gear-${enabledRepo!.repo_id}`)
     await expect(gear).toBeVisible()
     await gear.click()
-    await expect(page).toHaveURL(/\/app\/settings\/lifecycle\/\?scope=repository&repo_id=/)
+    await expect(page).toHaveURL(/\/app\/repositories\/lifecycle\/\?scope=repository&repo_id=/)
     await expect(page.getByTestId('lifecycle-settings-page')).toBeVisible()
+    await expect(page.getByTestId('repositories-tab-lifecycle')).toHaveAttribute('aria-current', 'page')
+    await expect(page.getByTestId('scope-repo-select')).toContainText(
+      enabledRepo!.display_name ?? enabledRepo!.repo_id,
+    )
     for (const lifecycleKey of LIFECYCLE_KEYS) {
       await expect(page.getByTestId(`matrix-row-${lifecycleKey}`)).toBeVisible()
     }
@@ -169,7 +242,7 @@ test.describe('生命周期统一设置页 (lifecycle-settings)', () => {
 
   test('窄屏（400px）矩阵仍可读：九行可见且未被裁剪', async ({ page }) => {
     await page.setViewportSize({ width: 400, height: 800 })
-    await page.goto('/app/settings/lifecycle/')
+    await page.goto('/app/repositories/lifecycle/')
     await expect(page.getByTestId('lifecycle-settings-page')).toBeVisible()
 
     for (const lifecycleKey of LIFECYCLE_KEYS) {
@@ -185,7 +258,7 @@ test.describe('生命周期统一设置页 (lifecycle-settings)', () => {
   test('矩阵按后端下发的可用性事实标注每个生效 Agent：未安装点名可执行文件，已安装给路径', async ({
     page,
   }) => {
-    await page.goto('/app/settings/lifecycle/')
+    await page.goto('/app/repositories/lifecycle/')
     await expect(page.getByTestId('lifecycle-settings-page')).toBeVisible()
     await page.waitForLoadState('networkidle')
 

@@ -21,6 +21,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, FiniteFloat
 
 from backend.api.backlog_sync import wake_backlog_scheduler
+from backend.api.cli_update_check import detect_upgrade_command
 from backend.api.monitor_sync import wake_monitor_scheduler
 from backend.api.response_cache import TTLResponseCache
 from backend.api.routes.agent_runner_console_takeover import build_issue_action_response
@@ -293,7 +294,7 @@ class RepositoryActionRequest(BaseModel):
 
 
 class IssueActionRequest(BaseModel):
-    """Issue 级动作请求体（retry_failed / blocked_continue / recover_failed_publish / take_over_verifier）。"""
+    """Issue 级动作请求体（失败重试 / 继续 / 发布恢复 / verifier 接管）。"""
 
     action: str = Field(min_length=1)
     # 绑定长度上限由 handler 校验（见 :func:`_validate_issue_action_bindings`），不写进
@@ -301,6 +302,8 @@ class IssueActionRequest(BaseModel):
     # agent-runner.md 的 take_over_verifier 段），模型层截断会被 FastAPI 变成 422。
     run_id: str | None = None
     head_sha: str | None = None
+    lifecycle_stage: str | None = Field(default=None, max_length=64)
+    executor: str | None = Field(default=None, max_length=64)
 
 
 #: 绑定字段长度上限（与 run id / git SHA 的实际产生格式同级），超出即畸形请求。
@@ -366,6 +369,17 @@ def execute_console_issue_action(
         spawn_cwd = resolve_console_spawn_cwd(repo_id, contexts)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    process_runner = create_process_runner()
+    heartbeat = None
+    if request.action == "recover_failed_publish":
+        from backend.api.cli_coordination import start_coordination_heartbeat
+
+        heartbeat = start_coordination_heartbeat(
+            contexts=contexts,
+            github_client_factory=create_github_client,
+            process_runner=process_runner,
+            role="recover",
+        )
     try:
         action_result = execute_issue_action(
             action=request.action,
@@ -377,12 +391,17 @@ def execute_console_issue_action(
             store=create_console_store(),
             runner_command=settings.console.runner_command,
             spawn_cwd=spawn_cwd,
-            process_runner=create_process_runner(),
+            process_runner=process_runner,
             run_id=request.run_id,
             head_sha=request.head_sha,
+            lifecycle_stage=request.lifecycle_stage,
+            executor=request.executor,
         )
     except ConsoleActionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        if heartbeat is not None:
+            heartbeat.stop()
     return build_issue_action_response(
         _serialize(action_result), action_result.takeover_http_status
     )
@@ -562,7 +581,8 @@ def get_console_version() -> dict:
     而**当前**版本必须来自后端运行时——构建期注入会与实际安装的包漂移
     （``just console-sync`` 本地构建与已安装 wheel 未必同版本）。
     """
-    return {"version": resolve_keda_version()}
+    plan = detect_upgrade_command()
+    return {"version": resolve_keda_version(), "upgrade_command": plan.display if plan else None}
 
 
 @router.get("/agent-runner/repositories")

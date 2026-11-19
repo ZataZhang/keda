@@ -47,9 +47,11 @@ class PrdChecklistResult:
         human_unchecked_items: ``Human-Confirmed`` 分组里仍是 ``[ ]`` 的空框（不含
             ``[~]``），与 skill 检查器决定横幅应有状态时的口径一致。v3/v4 skill 不报告
             该字段，此时为空。
-        acceptance_status: 验收状态横幅的状态（``not_started`` / ``awaiting_human`` /
-            ``accepted``；横幅缺失或认不出时为 ``""``），由 skill 解析。``None`` 表示
+        acceptance_status: 验收状态横幅的状态（``not_started`` / ``validation_blocked`` /
+            ``awaiting_human`` / ``accepted``；横幅缺失或认不出时为 ``""``），由 skill 解析。``None`` 表示
             本机 skill 是 v3/v4、根本不报告横幅，调用方应跳过横幅检查。
+        validation_blocker: 阻塞归档的 ``Validation blocker`` 字段值；未声明时为空串。
+        validation_follow_up: 阻塞归档的 ``Validation follow-up`` 字段值；未声明时为空串。
     """
 
     section_found: bool
@@ -60,6 +62,8 @@ class PrdChecklistResult:
     human_confirmed_mentioned: bool = False
     human_unchecked_items: list[tuple[int, str]] = field(default_factory=list)
     acceptance_status: str | None = None
+    validation_blocker: str = ""
+    validation_follow_up: str = ""
 
     @property
     def execution_unchecked_items(self) -> list[tuple[int, str]]:
@@ -96,6 +100,7 @@ def parse_prd_checklist(file_content: str) -> PrdChecklistResult:
     """
     contract = parse_prd_contract(file_content)
     checklist = contract["checklist"]
+    reconciliation_fields = contract.get("final_reconciliation", {}).get("fields", {})
     items: list[dict[str, Any]] = checklist.get("items", [])
 
     unchecked_items = [
@@ -119,4 +124,10 @@ def parse_prd_checklist(file_content: str) -> PrdChecklistResult:
             _item_line_text(item) for item in checklist.get("human_unchecked", [])
         ],
         acceptance_status=contract.get("acceptance_status"),
+        validation_blocker=str(
+            reconciliation_fields.get("Validation blocker", {}).get("value", "")
+        ),
+        validation_follow_up=str(
+            reconciliation_fields.get("Validation follow-up", {}).get("value", "")
+        ),
     )

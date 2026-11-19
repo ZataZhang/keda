@@ -386,6 +386,59 @@ def test_build_issue_snapshot_collects_timeline_pr_and_worktree() -> None:
     assert "kc supervise" in snapshot.suggested_cli_commands
 
 
+def test_build_issue_snapshot_falls_back_to_merged_pr() -> None:
+    """开放 Issue 的 PR 已合并时，监控仍保留 PR 身份与链接。"""
+    from backend.core.shared.models.agent_runner import WorktreeConfig
+
+    missing_worktree = "/missing/issue-122"
+    config = AppConfig(worktree=WorktreeConfig(path_command=f"echo {missing_worktree}"))
+    client = FakeGitHubClient()
+    client._issue_comments[122] = [
+        _marker(
+            phase="post_pr_supervisor",
+            pr_branch="issue-122",
+            action="approve_for_human_review",
+        )
+    ]
+    merged_pr_url = "https://github.com/example/repo/pull/123"
+    client._merged_prs["issue-122"] = merged_pr_url
+    client._pr_contexts["merged-fixture"] = PullRequestContext(
+        pr_url=merged_pr_url,
+        branch="issue-122",
+        head_sha="abc123",
+        base_sha="def456",
+        mergeable=None,
+        number=123,
+        is_draft=False,
+    )
+    runner = FakeProcessRunner(
+        responses={
+            ("echo", missing_worktree): CommandResult(
+                command=("echo", missing_worktree),
+                return_code=0,
+                stdout=f"{missing_worktree}\n",
+                stderr="",
+            ),
+        }
+    )
+
+    snapshot = build_issue_snapshot(
+        issue=_make_issue(122, labels=("agent/automated-review-passed",)),
+        config=config,
+        github_client=client,
+        process_runner=runner,
+        repo_path=Path("/tmp/does-not-matter"),
+    )
+
+    assert snapshot.pr is not None
+    assert snapshot.pr["number"] == 123
+    assert snapshot.pr["url"] == merged_pr_url
+    assert snapshot.pr["head_sha"] == "abc123"
+    called_methods = [call["method"] for call in client.calls]
+    assert "find_merged_pr_by_head" in called_methods
+    assert "get_pull_request_context_by_number" in called_methods
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Scenario: build_repository_overview aggregates anomaly counts
 # ─────────────────────────────────────────────────────────────────────────────
@@ -517,6 +570,38 @@ def test_build_repository_overview_tracks_closed_issue_state(tmp_path: Path) -> 
     assert tracked.state == "CLOSED"
     assert tracked.anomaly_types == ()
     assert overview.anomaly_count == 0
+
+
+def test_tracked_issue_read_failure_does_not_block_repository_snapshot(
+    tmp_path: Path,
+) -> None:
+    """补扫单条历史 Issue 失败只丢该行，不能把整仓快照判为不完整。"""
+    config = AppConfig()
+    client = FakeGitHubClient()
+    client.close_issue(42)
+    client.set_issue_labels(42, ("agent/failed",))
+
+    class _GoneIssueClient(FakeGitHubClient):
+        """模拟已删除 Issue 的永久 404。"""
+
+        def get_issue(self, issue_number: int) -> IssueSummary:
+            if issue_number == 141:
+                raise RuntimeError("Failed to fetch Issue #141: gh: Not Found (HTTP 404)")
+            return super().get_issue(issue_number)
+
+    overview = build_repository_overview(
+        repo_id="zata/keda-test",
+        display_name="Keda Test",
+        enabled=True,
+        config=config,
+        github_client=_GoneIssueClient(),
+        process_runner=FakeProcessRunner(),
+        repo_path=tmp_path,
+        tracked_issue_numbers=[141, 42],
+    )
+
+    assert overview.sync_error is None
+    assert [snapshot.number for snapshot in overview.tracked_issues] == [42]
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import shutil
 import signal
-import socket
 import subprocess
 import sys
 import threading
@@ -175,7 +174,7 @@ def _terminate_process_tree(
             killable_group_id = child_group_id
     if killable_group_id is not None:
         try:
-            os.killpg(killable_group_id, signal.SIGKILL)
+            os.killpg(killable_group_id, getattr(signal, "SIGKILL", signal.SIGTERM))
             return True
         except OSError:  # 组已消失，退回直接终止。
             if has_expected_identity:
@@ -217,6 +216,7 @@ class CommandFailedError(subprocess.CalledProcessError):
     """CalledProcessError with captured stderr/stdout included in the message."""
 
     def __str__(self) -> str:
+        """在父类信息后附上 stderr（没有则 stdout）内容，便于直接看到失败原因。"""
         base = super().__str__()
         detail = self.stderr or self.output or ""
         if not detail:
@@ -566,7 +566,7 @@ class SubprocessRunner:
         仍存活、实时进程组与登记值一致三项全过才 ``confirmed=True``。未走 ``Popen``
         的调用（例如普通 ``subprocess.run`` 命令）不在册，一律是"归属不可证实"。
         """
-        return probe_attempt_ownership(attempt_key=attempt_key, host_label=socket.gethostname())
+        return probe_attempt_ownership(attempt_key=attempt_key)
 
     def cancel_live_attempt(
         self, attempt_key: str, expected: AttemptOwnership

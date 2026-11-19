@@ -30,10 +30,12 @@ Issue 执行与交付区共享 claim 上下文，但阶段仍按各自触发条�
 | `content_generation` | 内容生成 | ❌ | ❌ | `generated_content.default_agent` |
 | `deliberate` | 辩论 | ✅ 按 Issue 上的 `agent/deliberate` 标签路由 | ❌ | `deliberation.default_synthesizer` |
 
+`verifier` 必须与本次 builder 使用不同的 agent。即使生命周期 agent 或模型预设显式绑定到了 builder，runner 也会跳过该绑定并从回退链选择首个不同的 agent；没有可用候选时，校验会失败并阻止交付。
+
 取值域：
 
 - **已注册 agent 名**（`codex` / `claude` / `kimi` / `pi` / `codebuddy` / `qoder` /
-  `opencode`，或你在
+  `opencode` / `mcode` / `dsh`，或你在
   `[agent_runner.agents.<name>]` 里注册的 agent）——未注册的名字在**该阶段开始前**
   fail-fast 报错并指名，不会静默回落到别的 agent；
 - **`auto`**——按该阶段**既有**语义路由（含义逐阶段不同，见上表），不做统一。
@@ -49,9 +51,8 @@ Issue 执行与交付区共享 claim 上下文，但阶段仍按各自触发条�
 上一张表回答"这个键能配什么"，这一张回答"配了之后什么时候被读"。控制台为方便查找
 会把生命周期放在导航分组下；这些分组只用于呈现，不代表阶段顺序或必须一起运行。
 
-console 的三处生命周期入口（统一设置页的全局 / 仓库范围、Backlog 仓库行齿轮、PRD
-覆盖抽屉）**按同一导航分组呈现**：仓库行齿轮进入统一设置页并预选该仓库；组标题与每行
-触发时机来自只读视图下发，分组事实的唯一代码定义是
+仓库行齿轮进入统一设置页并预选该仓库。PRD 覆盖抽屉按导航分组呈现，
+组标题和行内触发时机来自后端只读视图。分组事实的唯一代码定义是
 `src/backend/core/shared/models/lifecycle_agent.py` 的
 `LIFECYCLE_AGENT_ENTRY_GROUPS`（前端不持有第二份映射），与本表的三组一一对应：
 
@@ -159,6 +160,22 @@ Issue 单独跑一轮），因此 `supervisor` 是唯一跨 A / B 两个入口�
 同键时仓库层赢过全局层；仓库层未声明的键回落全局层。**既有配置键不迁移、
 不删除**——`legacy` 层继续生效，所以不写矩阵时所有阶段行为与今天完全一致。
 
+### 一次性显式执行器覆盖（Console「换执行器续跑」） {#one-time-executor-override}
+
+声明层之上还有一层**一次性**选择：任务值守看板上某个 Issue 的失败阶段可以直接
+指定换用哪个执行器续跑（管理终端 → 任务详情 → 「切换执行器续跑」）。这份选择
+只对**该 Issue 的该阶段**生效一次，被 Runner 认领时消费掉。
+
+它的优先级**高于阶段预设绑定与上面全部声明层**，只低于命令行显式 `--agent`：
+预设绑定是"整个阶段由预设决定（agent + 模型 + 推理档）"，若这层选择排在它后面
+就永远不会生效——用户选了 mcode，Runner 仍按预设的 codex 跑，"换执行器续跑"
+形同虚设。
+
+换人后该阶段的模型绑定随之丢弃（不同 CLI 的模型命名空间不同，绝不把 A CLI 的
+模型参数塞给 B CLI）；`verifier` 阶段仍要求与实现者不同人。重复提交同一次
+「换执行器续跑」是幂等的：第一次已把 Issue 放回 `agent/ready` 队列并写下覆盖，
+第二次只更新覆盖内容，不会再翻标签。
+
 ### 全局 / 仓库层：`[agent_runner.lifecycle_agents]`
 
 ```toml
@@ -200,22 +217,22 @@ PRD 覆盖的生效范围是**有 PRD / Issue 上下文的八个阶段**：`impl
 
 | 层 | 写入文件 | 入口 |
 |---|---|---|
-| 全局（机器级） | `config.toml` | **Settings → 「生命周期、模型与推理深度统一设置」→ 范围选「全局」**；命令行 **`kc agent setup`**（只列本机装了的 agent）或 `kc agent lifecycle set --scope global` |
+| 全局（机器级） | `config.toml` | **Repositories →「执行器与模型」→ 范围选「全局」**；命令行 **`kc agent setup`**（只列本机装了的 agent）或 `kc agent lifecycle set --scope global` |
 | 仓库级 | 该仓库 `.kedacode.toml` | **同一设置页 → 范围选「仓库」并选仓库**；或 **Backlog 仓库行齿轮**（直接带仓库进入该页） |
 | PRD 级 | 该 PRD 文件头部 | **PRD 原文页工具栏「Agent 覆盖」** |
 
-生命周期矩阵、模型预设与「执行器回退候选」合并到**一个** Settings 子页
-`/app/settings/lifecycle/`（原先分散在 Settings「生命周期 Agent 设置」Tab 与 Backlog
+生命周期矩阵、模型预设与「执行器回退候选」合并到 Repositories 下的**执行器与模型**页
+`/app/repositories/lifecycle/`，与仓库列表平级（原先分散在 Settings「生命周期 Agent 设置」Tab 与 Backlog
 仓库齿轮抽屉里的两张矩阵、以及独立的「回退顺序卡片」都已被它取代）。页面顶部用**范围
 选择器**在「全局」与「仓库」间切换，仓库范围附一个仓库下拉；页首另有「生命周期矩阵 /
 模型预设 / 执行器回退」三个区块锚点。Settings 主页面保留**「Agent 标签设置」**
-（编辑每个 agent 的 GitHub 路由标签名 / 颜色 / 描述，是 `auto` 解析 Issue 标签的依据）
-与指向统一设置页的入口卡片；Backlog 的仓库齿轮进入同一页面并预选该仓库。矩阵与设置页
+（编辑每个 agent 的 GitHub 路由标签名 / 颜色 / 描述，是 `auto` 解析 Issue 标签的依据）；Backlog 的仓库齿轮进入同一页面并预选该仓库。旧地址 `/app/settings/lifecycle/` 会保留并转到新页面。矩阵与设置页
 逐 agent 显示**本机可用性**（「未安装」/ 解析到的可执行文件路径），事实源与
 `kc agent list` 的 `available` / `bin_path` 是同一份序列化，两边不会各说一套。
 
-矩阵区是**九阶段有效配置表**：各阶段按上表三组**导航分组**呈现，组标题旁有组说明，
-每行生命周期名下再带一行触发时机。每行同时呈递绑定预设、最终生效 Agent、模型 ID、推理
+矩阵区是**九阶段有效配置表**。Issue 执行与交付的六个阶段名下各有一条职责说明，
+便于配置预设时区分校验、审核和监督。
+每行同时呈递绑定预设、最终生效 Agent、模型 ID、推理
 深度及**逐字段来源**（预设 / 继承 / Agent 默认 / 未支持，或来自哪一层），数据来自聚合只读
 视图，前端不硬编码映射。阶段通过**绑定命名预设**设定显式值；未绑定时如实展示 Agent 默认
 或 `fix` / `closeout` 的继承，不替用户猜外部 CLI 默认。矩阵行只有**真实取值**（已注册

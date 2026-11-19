@@ -15,12 +15,24 @@ import {
 import { Label } from "@/components/ui/label";
 import type {
   AgentAvailabilityEntry,
+  LifecycleAgentScope,
   LifecycleSettingsRow,
 } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
+const ISSUE_STAGE_DESCRIPTIONS: Partial<Record<LifecycleSettingsRow["key"], string>> = {
+  implementation: "按 Issue 需求编写代码并提交",
+  fix: "定位并修复执行中检查发现的问题",
+  closeout: "补齐验收清单、变更记录和验证证据",
+  verifier: "独立验证实际行为是否满足验收标准",
+  review: "审查代码改动，找出缺陷和回归风险",
+  supervisor: "跟踪 PR 的 CI、评论和分支状态，决定后续动作",
+};
+
 export interface MatrixRowProps {
   row: LifecycleSettingsRow;
+  /** 当前配置范围；仓库范围清除本层绑定后会继承全局配置。 */
+  scope: LifecycleAgentScope;
   /** 可供绑定的预设（含本次新建）。 */
   presetOptions: PresetOption[];
   /** 当前绑定的预设名（空串=未绑定）。 */
@@ -46,6 +58,7 @@ export interface MatrixRowProps {
  */
 export function MatrixRow({
   row,
+  scope,
   presetOptions,
   bindingValue,
   bindingChanged,
@@ -54,9 +67,17 @@ export function MatrixRow({
   onBindingChange,
 }: MatrixRowProps) {
   const vocabularySafe = vocabulary;
+  const stageDescription = ISSUE_STAGE_DESCRIPTIONS[row.key];
   const affected = row.affected_stages.filter((stage) => stage !== row.key);
+  // 个人覆盖层的绑定本页写不到（只写 .kedacode.toml），只读呈现并指明该改哪个文件。
+  const isLocalOverrideBinding =
+    scope === "repository" && row.field_sources.preset === "local_override";
   const bindingPlaceholder = row.follows_implementation
     ? "未绑定（生效值继承实现阶段）"
+    : scope === "repository" && row.field_sources.preset === "global"
+      ? `继承全局配置（${row.preset_name ?? "已配置"}）`
+      : scope === "repository"
+        ? "继承全局配置（未绑定仓库预设）"
     : "未绑定（跟随既有配置）";
   const agentDisplay =
     row.effective_agent ?? (row.follows_implementation ? "跟随实现阶段" : "—");
@@ -70,6 +91,11 @@ export function MatrixRow({
     >
       <div className="min-w-0">
         <p className="text-sm font-medium">{row.label}</p>
+        {stageDescription ? (
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+            {stageDescription}
+          </p>
+        ) : null}
         {row.preset_name ? (
           <Badge variant="ready" className="mt-1 text-[10px]">
             已绑定 {row.preset_name}
@@ -176,10 +202,19 @@ export function MatrixRow({
           value={bindingValue}
           options={presetOptions}
           allowClear
+          disabled={isLocalOverrideBinding}
           placeholder={bindingPlaceholder}
           onChange={onBindingChange}
           testId={`matrix-binding-${row.key}`}
         />
+        {isLocalOverrideBinding ? (
+          <p
+            className="mt-1 text-[11px] text-amber-700 dark:text-amber-400"
+            data-testid={`matrix-binding-local-${row.key}`}
+          >
+            由个人覆盖 .kedacode.local.toml 决定，请直接编辑该文件
+          </p>
+        ) : null}
         {affected.length > 0 ? (
           <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
             该预设同时用于：

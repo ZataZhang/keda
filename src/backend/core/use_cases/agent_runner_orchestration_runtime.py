@@ -2,22 +2,20 @@
 
 from __future__ import annotations
 
-import sys
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
-from backend.core.shared.interfaces.agent_runner import GitHubApiRateLimitError
+from backend.core.shared.interfaces.agent_runner import (
+    GitHubApiRateLimitError,
+    GitHubApiUnavailableError,
+)
 from backend.core.shared.interfaces.runner_live_view import NoOpRunnerLiveView
 from backend.core.shared.models.agent_runner import TokenUsage
 from backend.core.shared.models.publish_stage import PublishStage
-from backend.core.use_cases.agent_invocation_tracing import (
-    bound_invocation_trace_context,
-    build_invocation_trace_context,
-)
 from backend.core.use_cases.agent_runner_batch_aggregate_queue import (
     AggregateQueueCompletionRequest,
     check_aggregate_candidate_shortfall,
@@ -30,6 +28,8 @@ from backend.core.use_cases.agent_daemon_shutdown import (
 )
 from backend.core.use_cases.agent_runner_blocked_claim import BlockedWorktreeClaimedError
 from backend.core.use_cases.agent_runner_claim_arbitration import ClaimArbitrationLost
+from backend.core.use_cases.agent_runner_claim_lease import ClaimLeaseLost
+from backend.core.use_cases.coordination_heartbeat import active_coordination_heartbeat
 from backend.core.use_cases.agent_runner_dependencies import (
     clear_dependency_waiting,
     evaluate_dependencies,
@@ -48,12 +48,18 @@ from backend.core.use_cases.agent_runner_lifecycle import (
     record_lifecycle_terminal,
     resolve_lifecycle_prd_path,
 )
+from backend.core.use_cases.agent_runner_orchestration_routing import (
+    _IssueRoutingContext,
+    _mirror_to_console,
+    _process_routed_issue,
+)
 from backend.core.use_cases.agent_runner_orchestrate import (
     _READY_DISCOVERY_LIMIT,
     AppConfig,
     AttemptResult,
     DependencyEnvironmentBlockedError,
     ForbiddenBlockedError,
+    HumanActionRequiredError,
     IssueBlockedDuringNoChangeError,
     IContentGenerator,
     IGitHubClient,
@@ -77,10 +83,6 @@ from backend.core.use_cases.agent_runner_orchestrate import (
 from backend.core.use_cases.agent_runner_orchestration_models import (
     RunOnceRequest,
 )
-from backend.core.use_cases.agent_runner_output_routing import (
-    _OutputRoutedProcessRunner,
-    issue_output_routing,
-)
 from backend.core.use_cases.agent_runner_prd_activity import (
     PrdActivityConflictError,
     PrdActivityLease,
@@ -88,6 +90,10 @@ from backend.core.use_cases.agent_runner_prd_activity import (
 from backend.core.use_cases.agent_runner_queue import issue_priority, sort_ready_issues
 from backend.core.use_cases.agent_runner_validation_gate import process_validation_gate
 from backend.core.use_cases.agent_runner_workflow import claim_blocked_issue
+from backend.core.use_cases.issue_retry_overrides import (
+    IssueRetryOverrideRequest,
+    prepare_issue_retry_override,
+)
 from backend.core.use_cases.agent_runner_worktree_probe import (
     _has_existing_local_commit_ready_for_publish,
     _worktree_needs_rebase_recovery,
@@ -141,15 +147,24 @@ def _process_single_issue(
     # Issue 引用的 PRD 文件解析头部 lifecycle_agents 块并回填，使实现 / 审核 / 监督
     # 等阶段的解析函数无需额外参数即可读到 PRD 级覆盖（最高优先级）。
     issue = attach_prd_lifecycle_overrides(issue, repo_path)
+    issue, retry_override_claim = prepare_issue_retry_override(
+        IssueRetryOverrideRequest(
+            issue=issue,
+            issue_kind=issue_kind,
+            repo_id=effective_repo_id,
+            config=config,
+            run_history_store=run_history_store,
+        )
+    )
     lifecycle_prd_path = resolve_lifecycle_prd_path(issue)
     selected_agent = choose_agent(issue, config, agent)
+    if retry_override_claim is not None:
+        retry_override_claim.validate_selected_executor(selected_agent)
     output_view.register_issue(issue.number, selected_agent)
     run_started_at = datetime.now(timezone.utc)
     used_agent = selected_agent
 
-    # 生命周期观测（旁路）：本轮 runner 领到该 Issue，记为一次执行开始。
-    # run id 由 repo_id + Issue 编号确定性推导，与 backlog 启动侧写入的 run
-    # 完全一致，因此这里不会新建重复 run。
+    # run id 与 backlog 启动侧一致，避免重复创建生命周期记录。
     record_lifecycle_event(
         store=run_history_store,
         repo_id=effective_repo_id,
@@ -255,6 +270,12 @@ def _process_single_issue(
     prd_activity_lease = PrdActivityLease(
         repo_path, lifecycle_prd_path, issue.number, selected_agent
     )
+
+    def _on_issue_claimed() -> None:
+        if retry_override_claim is not None:
+            retry_override_claim.consume()
+        prd_activity_lease.start()
+
     stage_selection = PublishStageSelection()
     try:
         # Ready Issue 先完成 claim election，再取得 PRD 锁。并发的 daemon 与
@@ -278,7 +299,7 @@ def _process_single_issue(
                         publish_stage=publish_stage,
                         stage_selection=stage_selection,
                         repo_id=effective_repo_id,
-                        on_claimed=prd_activity_lease.start,
+                        on_claimed=_on_issue_claimed,
                     ),
                     on_attempt_recorded=_on_attempt_recorded,
                     on_agent_usage=_emit_agent_usage_event,
@@ -355,11 +376,12 @@ def _process_single_issue(
             # 认领后的新鲜快照是「无改动交接」判定的基线（标签已翻成 running），
             # 但它来自 get_issue，不带入口处回填的 PRD 级 lifecycle 覆盖。直接整体
             # 赋值会让 review / supervisor 这类只读 Issue 上覆盖字段的阶段静默丢绑定，
-            # 因此以新鲜快照为底、把两个 lifecycle 覆盖字段带过来。
+            # 因此以新鲜快照为底、把三个覆盖字段带过来（含一次性执行器覆盖，后续阶段仍要生效）。
             issue = replace(
                 claimed_issue_snapshot,
                 lifecycle_overrides=issue.lifecycle_overrides,
                 lifecycle_preset_overrides=issue.lifecycle_preset_overrides,
+                explicit_executor_overrides=issue.explicit_executor_overrides,
             )
             # 生命周期观测：阻塞 Issue 被重新领取，说明阻塞已解除并进入新一轮执行。
             record_lifecycle_event(
@@ -444,9 +466,39 @@ def _process_single_issue(
             return 0
         output_view.update_status(issue.number, "skipped")
         raise
+    except GitHubApiUnavailableError as exc:
+        if _skip_issue_on_daemon_shutdown(issue.number, output_view):
+            return 0
+        error_summary = f"GitHub API 暂不可用，任务已暂缓并等待自动重试：{exc}"
+        _logger.warning("Deferred Issue #%d after GitHub API retries: %s", issue.number, exc)
+        output_view.update_status(issue.number, "deferred")
+        record_lifecycle_terminal(
+            store=run_history_store,
+            repo_id=effective_repo_id,
+            prd_path=lifecycle_prd_path,
+            issue_number=issue.number,
+            trigger=run_trigger,
+            event_type=LifecycleEventType.DEFERRED,
+            outcome="deferred",
+            actor="runner",
+            detail={"error_summary": error_summary},
+        )
+        _append_run_record_locked(
+            run_history_store=run_history_store,
+            repo_id=effective_repo_id,
+            repo_path=repo_path,
+            issue=issue,
+            trigger=run_trigger,
+            agent=selected_agent,
+            outcome="deferred",
+            error_summary=error_summary,
+            started_at=run_started_at,
+        )
+        return 0
 
     except (
         ForbiddenBlockedError,
+        HumanActionRequiredError,
         IssueBlockedDuringNoChangeError,
         DependencyEnvironmentBlockedError,
     ) as exc:
@@ -498,6 +550,12 @@ def _process_single_issue(
         output_view.update_status(issue.number, "skipped")
         return 0
 
+    except ClaimLeaseLost as exc:
+        # 租约失效时标签归新持有者；只交班，不写失败评论或工作流标签。
+        _logger.warning("Issue #%d claim lease lost; abandoning delivery: %s", issue.number, exc)
+        output_view.update_status(issue.number, "skipped")
+        return 0
+
     except BlockedWorktreeClaimedError as exc:
         _logger.info(
             "Issue #%d worktree already claimed by another runner, skipping: %s",
@@ -543,6 +601,9 @@ def _process_single_issue(
 
     finally:
         prd_activity_lease.close()
+        heartbeat = active_coordination_heartbeat()
+        if heartbeat is not None:
+            heartbeat.release_claim(github_client=github_client, issue_number=issue.number)
 
 
 def _has_published_direct_pr_handoff(github_client: IGitHubClient, issue: IssueSummary) -> bool:
@@ -569,60 +630,17 @@ def _is_issue_admitted(request: RunOnceRequest, issue: IssueSummary) -> bool:
     return False
 
 
-@dataclass(frozen=True)
-class _IssueRoutingContext:
-    """单个 Issue 执行时的输出路由与观测上下文（同一轮内所有 Issue 共用）。"""
-
-    effective_repo_id: str
-    log_base: Path
-    output_view: IRunnerLiveView
-    console_sink: Callable[[str], None] | None
-    process_runner: IProcessRunner
-    run_history_store: IRunHistoryStore | None
-    process_kwargs: dict[str, Any]
-    run_request: RunOnceRequest
-
-
-def _mirror_to_console(chunk: str) -> None:
-    """把串行执行的 Issue 输出镜像到启动终端。"""
-    print(chunk, end="", flush=True, file=sys.stdout)
-
-
-def _process_routed_issue(
-    item: tuple[IssueSummary, str],
+def _process_issue_if_admitted(
+    issue: IssueSummary,
+    issue_kind: str,
     *,
-    routing: _IssueRoutingContext,
+    request: RunOnceRequest,
+    **process_kwargs: Any,
 ) -> int:
-    """在输出路由与观测上下文里处理一个 Issue；路由自身的异常按失败返回。"""
-    issue, issue_kind = item
-    if not _is_issue_admitted(routing.run_request, issue):
+    """在 Issue 执行前检查资源准入门，再委托给实际处理流程。"""
+    if not _is_issue_admitted(request, issue):
         return 0
-    try:
-        with issue_output_routing(
-            repo_id=routing.effective_repo_id,
-            issue_number=issue.number,
-            log_base=routing.log_base,
-            output_view=routing.output_view,
-            console_sink=routing.console_sink,
-        ) as sink:
-            scoped_runner = _OutputRoutedProcessRunner(routing.process_runner, sink)
-            with bound_invocation_trace_context(
-                build_invocation_trace_context(
-                    repo_id=routing.effective_repo_id,
-                    issue_number=issue.number,
-                    run_history_store=routing.run_history_store,
-                )
-            ):
-                return _process_single_issue(
-                    issue,
-                    issue_kind,
-                    process_runner=scoped_runner,
-                    output_view=routing.output_view,
-                    **routing.process_kwargs,
-                )
-    except Exception as exc:  # noqa: BLE001 - 单个 Issue 的 I/O 不应中断本轮。
-        _logger.error("Output routing failed for Issue #%d: %s", issue.number, exc)
-        return 1
+    return _process_single_issue(issue, issue_kind, **process_kwargs)
 
 
 def run_once(request: RunOnceRequest) -> int:
@@ -1022,13 +1040,14 @@ def run_once(request: RunOnceRequest) -> int:
     active_view = NoOpRunnerLiveView() if is_serial else (output_view or NoOpRunnerLiveView())
     routing = _IssueRoutingContext(
         effective_repo_id=effective_repo_id,
-        log_base=repo_path / "logs",
+        log_base=request.log_base or repo_path / "logs",
         output_view=active_view,
         console_sink=_mirror_to_console if is_serial else None,
         process_runner=process_runner,
         run_history_store=run_history_store,
+        progress_callback=request.progress_callback,
         process_kwargs=process_kwargs,
-        run_request=request,
+        process_issue=partial(_process_issue_if_admitted, request=request),
     )
     process_routed = partial(_process_routed_issue, routing=routing)
 

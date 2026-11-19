@@ -36,6 +36,11 @@ class LongTermMemoryStore:
     """Long-term memory persisted as markdown files with YAML-like front matter."""
 
     def __init__(self, base_dir: str | Path) -> None:
+        """初始化长期记忆存储。
+
+        Args:
+            base_dir: 事实文件的根目录。
+        """
         self._base_dir = Path(base_dir)
 
     @property

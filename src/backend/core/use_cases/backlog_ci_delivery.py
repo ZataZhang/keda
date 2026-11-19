@@ -302,8 +302,8 @@ def gate_auto_repair_decision(
     按「Agent 决定 + 策略约束」执行：``checks_state`` 不触发动作，这里只在
     Agent 已选择 ``repair_pr_branch`` 后判断生效策略与剩余预算。
     ``repair_scope=code_review`` 不受 CI 开关限制，但仍共享修复轮数上限。返回
-    ``(allowed, reason)``；不允许时调用方必须零副作用（不评论修复意图、
-    不改 label、不 push）。
+    ``(allowed, reason)``；本函数零副作用。不允许时调用方不得评论修复意图或
+    push，review_once 会把 Issue 转入 ``agent/blocked`` 并评论原因交人处理。
 
     Args:
         config: 仓库运行配置。

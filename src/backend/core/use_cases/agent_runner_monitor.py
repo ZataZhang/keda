@@ -3,7 +3,7 @@
 本模块是 Agent Runner 监控面板的核心业务逻辑：
 - `build_overview`：按仓库汇总队列状态、最新 event 和异常计数。
 - `build_issue_detail`：单个 Issue 的 label、PR 上下文、worktree 状态、event timeline、anomaly 和建议 CLI。
-- `parse_event_timeline`：从 Issue comments 解析所有 kc:event marker 作为事件时间线。
+- `parse_event_timeline`：从 Issue comments 解析 kc:event marker 与 PR 后监督摘要。
 - 异常检测规则：label_pr_mismatch、pr_dirty_in_review、dirty_worktree_mismatch、event_label_mismatch。
 
 按照四层依赖方向，本模块属于 core/use_cases/，只依赖
@@ -53,7 +53,20 @@ QUEUE_LABELS: tuple[str, ...] = (
 
 @dataclass(frozen=True)
 class EventTimelineEntry:
-    """A single ordered entry in an Issue's event timeline."""
+    """Issue 事件时间线中的一条有序记录。
+
+    Attributes:
+        phase: 事件阶段。
+        cycle: 事件所在阶段的周期编号。
+        comment_index: 事件所在评论的输入顺序编号。
+        action: 事件动作；未记录时为 ``None``。
+        head_sha: 事件对应的 PR head；未记录时为 ``None``。
+        pr_branch: 事件对应的 PR 分支；未记录时为 ``None``。
+        checks_state: 事件记录的检查状态；未记录时为 ``None``。
+        mergeable: PR 是否可合并；未记录时为 ``None``。
+        raw_marker: 原始机器可读事件标记。
+        summary: PR 后监督事件的人读摘要；其他事件为 ``None``。
+    """
 
     phase: str
     cycle: int
@@ -64,6 +77,7 @@ class EventTimelineEntry:
     checks_state: str | None = None
     mergeable: bool | None = None
     raw_marker: str = ""
+    summary: str | None = None
 
 
 @dataclass(frozen=True)
@@ -127,6 +141,7 @@ class RepositoryMonitoringOverview:
     #: 只用于运行看板判定当前状态，不进入队列展示与异常统计。
     tracked_issues: tuple[IssueMonitoringSnapshot, ...] = ()
     scanned_at: str = ""
+    sync_error: str | None = None
 
 
 @dataclass(frozen=True)
@@ -157,6 +172,10 @@ class AnomalyDetectionContext:
 _EVENT_MARKER_LINE_PATTERN = re.compile(
     r"<!--\s*kc:event\s+([^>]+?)\s*-->",
     re.DOTALL,
+)
+_SUPERVISOR_SUMMARY_PATTERN = re.compile(
+    r"(?ms)^[ \t]*-[ \t]*Summary:[ \t]*(.*?)"
+    r"(?=^[ \t]*-[ \t]*(?:Findings|Verification|Head SHA):|\Z)"
 )
 
 
@@ -214,6 +233,21 @@ def parse_event_timeline(comments: Iterable[str]) -> list[EventTimelineEntry]:
             cycle = _coerce_int(attributes.get("cycle"))
             if phase is None or cycle is None:
                 continue
+            event_summary = None
+            if phase == "post_pr_supervisor":
+                next_marker_match = _EVENT_MARKER_LINE_PATTERN.search(
+                    comment_body, marker_match.end()
+                )
+                event_body_end = (
+                    next_marker_match.start()
+                    if next_marker_match is not None
+                    else len(comment_body)
+                )
+                event_comment_body = comment_body[marker_match.end() : event_body_end]
+                summary_match = _SUPERVISOR_SUMMARY_PATTERN.search(event_comment_body)
+                if summary_match is not None:
+                    normalized_summary = " ".join(summary_match.group(1).split())
+                    event_summary = normalized_summary or None
             timeline.append(
                 EventTimelineEntry(
                     phase=phase,
@@ -225,6 +259,7 @@ def parse_event_timeline(comments: Iterable[str]) -> list[EventTimelineEntry]:
                     checks_state=attributes.get("checks_state"),
                     mergeable=_coerce_bool(attributes.get("mergeable")),
                     raw_marker=marker_match.group(0),
+                    summary=event_summary,
                 )
             )
     return timeline
@@ -601,7 +636,7 @@ def _lookup_pr_context(
     *,
     require_success: bool = False,
 ) -> PullRequestContext | None:
-    """查找关联 Issue 的开放 PR 上下文（若存在）。"""
+    """查找关联 Issue 的开放 PR；开放 PR 不存在时回退到已合并 PR。"""
     pr_branch = _extract_pr_branch_from_issue(
         issue, github_client, comments, require_success=require_success
     )
@@ -627,7 +662,25 @@ def _lookup_pr_context(
             base_sha="",
             mergeable=None,
         )
-    return None
+    merged_pr_url = github_client.find_merged_pr_by_head(pr_branch, require_success=require_success)
+    if not merged_pr_url:
+        return None
+    merged_pr_number = _extract_pr_number(merged_pr_url)
+    if merged_pr_number is not None:
+        merged_pr_context = github_client.get_pull_request_context_by_number(
+            merged_pr_number, require_success=require_success
+        )
+        if merged_pr_context is not None:
+            return merged_pr_context
+    return PullRequestContext(
+        pr_url=merged_pr_url,
+        branch=pr_branch,
+        head_sha="",
+        base_sha="",
+        mergeable=None,
+        number=merged_pr_number,
+        is_draft=False,
+    )
 
 
 def _extract_pr_branch_from_issue(
@@ -689,6 +742,7 @@ def _collect_queue_issues(
     config: AppConfig,
     github_client: IGitHubClient,
     limit_per_label: int = 30,
+    scan_errors: list[str] | None = None,
 ) -> list[IssueSummary]:
     """Gather all candidate issues across queue labels.
 
@@ -710,6 +764,8 @@ def _collect_queue_issues(
             issues = github_client.list_ready_issues(label, limit_per_label)
         except Exception as exc:  # noqa: BLE001 - keep monitoring resilient.
             _logger.info("Queue scan failed for label %s: %s", label, exc)
+            if scan_errors is not None:
+                scan_errors.append(f"标签 {label}：{exc}")
             continue
         for issue in issues:
             if issue.number in seen_numbers:
@@ -816,7 +872,13 @@ def _collect_tracked_issues(
     excluded_numbers: set[int],
     config: AppConfig,
 ) -> list[IssueMonitoringSnapshot]:
-    """读取运行账本中出现、但不在队列标签结果里的 Issue 当前状态。"""
+    """读取运行账本中出现、但不在队列标签结果里的 Issue 当前状态。
+
+    这一路只是给队列外的历史 Issue 补当前状态，属于旁路增强：单条读取失败
+    （例如 Issue 已被删除、转移后 API 永久 404）只丢这一行，不能写进
+    ``sync_error``——那会让整仓快照被判为不完整而停止刷新，一个早已消失的
+    历史 Issue 就能冻住整仓看板。
+    """
     snapshots: list[IssueMonitoringSnapshot] = []
     seen: set[int] = set(excluded_numbers)
     for issue_number in tracked_issue_numbers:
@@ -826,7 +888,7 @@ def _collect_tracked_issues(
         try:
             issue = github_client.get_issue(issue_number)
         except Exception as exc:  # noqa: BLE001 - 单个 Issue 读取失败只降级该行。
-            _logger.info("Tracked issue #%s read failed: %s", issue_number, exc)
+            _logger.warning("Tracked issue #%s read failed: %s", issue_number, exc)
             continue
         snapshots.append(_minimal_issue_snapshot(issue, config=config))
     return snapshots
@@ -844,7 +906,12 @@ def build_repository_overview(
     tracked_issue_numbers: Sequence[int] = (),
 ) -> RepositoryMonitoringOverview:
     """Build a per-repository monitoring overview."""
-    queue_issues = _collect_queue_issues(config=config, github_client=github_client)
+    scan_errors: list[str] = []
+    queue_issues = _collect_queue_issues(
+        config=config,
+        github_client=github_client,
+        scan_errors=scan_errors,
+    )
     issue_snapshots: list[IssueMonitoringSnapshot] = []
     with ThreadPoolExecutor(max_workers=5) as executor:
         future_to_issue = {
@@ -864,6 +931,7 @@ def build_repository_overview(
                 snapshot = future.result()
             except Exception as exc:  # noqa: BLE001 - one bad Issue must not blank the page.
                 _logger.warning("Failed to build snapshot for Issue #%d: %s", issue.number, exc)
+                scan_errors.append(f"Issue #{issue.number}：{exc}")
                 continue
             issue_snapshots.append(snapshot)
 
@@ -909,6 +977,7 @@ def build_repository_overview(
         anomaly_summary=anomaly_summary,
         tracked_issues=tuple(tracked_snapshots),
         scanned_at=_now_iso(),
+        sync_error="；".join(scan_errors) if scan_errors else None,
     )
 
 

@@ -191,7 +191,7 @@ def build_lifecycle_agents_view(
         # 只列矩阵视图真会返回的来源层：``prd_override`` 只存在于 PRD 覆盖抽屉的
         # 语义里（矩阵视图只读 config 层），放进来只会让图例与数据对不上。
         "source_layers": {
-            "repository": "仓库 .kedacode.toml",
+            "repository": "仓库 .kedacode.toml（含 .kedacode.local.toml 本地覆盖）",
             "global": "全局 config.toml",
             "legacy": "既有配置键",
             "builtin": "内置默认",

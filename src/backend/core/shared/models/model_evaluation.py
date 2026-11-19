@@ -153,9 +153,14 @@ RUBRIC_SCORE_MAX = 5
 #: cwd（候选 worktree）下，禁止 shell 拼接与任意解释器脚本。
 CHECK_RECIPES: dict[str, tuple[str, ...]] = {
     "pytest": ("python3", "-m", "pytest", "-q"),
+    "uv-pytest": ("uv", "run", "--frozen", "pytest", "-q", "-o", "addopts="),
     "unittest": ("python3", "-m", "unittest", "discover", "-s", "tests"),
     "node-test": ("npm", "test", "--silent"),
 }
+
+CALIBRATION_PRESET_NOOP = "@noop"
+CALIBRATION_PRESET_GOLD = "@gold"
+CALIBRATION_PRESET_NAMES = frozenset({CALIBRATION_PRESET_NOOP, CALIBRATION_PRESET_GOLD})
 
 #: check 超时的硬上限（秒）；suite 声明值只会向更小收敛，不会突破。
 CHECK_TIMEOUT_CEILING_SECONDS = 300
@@ -178,6 +183,12 @@ class EvaluationSuiteCase:
     case_id: str
     prompt: str
     check_recipe: str
+    base_ref: str | None = None
+    split: str = "dev"
+    check_targets: tuple[str, ...] = ()
+    held_out: tuple[str, ...] = ()
+    candidate_hidden: tuple[str, ...] = ()
+    gold_patch: str | None = None
 
 
 @dataclass(frozen=True)
@@ -195,6 +206,7 @@ class EvaluationSuite:
     cases: tuple[EvaluationSuiteCase, ...]
     source_path: str
     content_hash: str
+    requires_calibration: bool = False
 
     @property
     def case_ids(self) -> tuple[str, ...]:
@@ -206,12 +218,32 @@ _SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+$")
 _CASE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,79}$")
 
 
-def compute_suite_content_hash(raw_text: str) -> str:
-    """返回 suite 文件内容的 sha256 十六进制摘要（run 快照的可追溯锚点）。"""
-    return hashlib.sha256(raw_text.encode("utf-8")).hexdigest()
+def compute_suite_content_hash(
+    raw_text: str, material_files: Mapping[str, bytes] | None = None
+) -> str:
+    """返回 suite YAML 与资料文件的 sha256 摘要。
+
+    Args:
+        raw_text: suite 文件的原始 UTF-8 文本。
+        material_files: suite 资料目录中的相对路径与原始文件内容。
+
+    Returns:
+        str: 绑定 YAML、文件路径和内容的 sha256 十六进制摘要。
+    """
+    digest = hashlib.sha256(raw_text.encode("utf-8"))
+    for material_path, material_content in sorted((material_files or {}).items()):
+        digest.update(b"\0")
+        digest.update(material_path.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(material_content)
+    return digest.hexdigest()
 
 
-def parse_evaluation_suite(raw_text: str, source_path: str) -> EvaluationSuite:
+def parse_evaluation_suite(
+    raw_text: str,
+    source_path: str,
+    material_files: Mapping[str, bytes] | None = None,
+) -> EvaluationSuite:
     """把 suite YAML 文本解析为校验过的 :class:`EvaluationSuite`。
 
     只接受 PRD 规定的显式结构；任何缺字段、格式错误、未知 check recipe 或
@@ -266,6 +298,7 @@ def parse_evaluation_suite(raw_text: str, source_path: str) -> EvaluationSuite:
         raise ValueError(f"suite '{source_path}': cases 必须是非空列表")
     cases: list[EvaluationSuiteCase] = []
     seen_case_ids: set[str] = set()
+    suite_requires_calibration = False
     for index, raw_case in enumerate(raw_cases):
         location = f"suite '{source_path}' cases[{index}]"
         if not isinstance(raw_case, dict):
@@ -284,7 +317,65 @@ def parse_evaluation_suite(raw_text: str, source_path: str) -> EvaluationSuite:
             raise ValueError(
                 f"{location} '{case_id}': check_recipe 必须是 {sorted(CHECK_RECIPES)} 之一"
             )
-        cases.append(EvaluationSuiteCase(case_id=case_id, prompt=prompt, check_recipe=check_recipe))
+        case_base_ref = raw_case.get("base_ref")
+        if case_base_ref is not None and (
+            not isinstance(case_base_ref, str) or not case_base_ref.strip()
+        ):
+            raise ValueError(f"{location} '{case_id}': base_ref 必须是非空字符串")
+        split = str(raw_case.get("split") or "dev").strip()
+        if split not in {"dev", "holdout"}:
+            raise ValueError(f"{location} '{case_id}': split 必须是 dev 或 holdout")
+        check_targets = _validated_relative_targets(
+            raw_case.get("check_targets", []), location, case_id, "check_targets"
+        )
+        held_out_targets = _validated_relative_targets(
+            raw_case.get("held_out", []), location, case_id, "held_out"
+        )
+        candidate_hidden_targets = _validated_relative_targets(
+            raw_case.get("candidate_hidden", []), location, case_id, "candidate_hidden"
+        )
+        gold_patch = raw_case.get("gold_patch")
+        if gold_patch is not None and (
+            not isinstance(gold_patch, str) or not _is_safe_relative_path(gold_patch)
+        ):
+            raise ValueError(f"{location} '{case_id}': gold_patch 必须是安全的相对路径")
+        case_material_prefix = f"{case_id}/"
+        suite_requires_calibration = suite_requires_calibration or any(
+            key in raw_case
+            for key in (
+                "base_ref",
+                "split",
+                "check_targets",
+                "held_out",
+                "candidate_hidden",
+                "gold_patch",
+            )
+        )
+        if material_files is not None:
+            for relative_path in held_out_targets:
+                expected_material_path = f"{case_material_prefix}held_out/{relative_path}"
+                if expected_material_path not in material_files:
+                    raise ValueError(
+                        f"{location} '{case_id}': 缺少判分材料 {expected_material_path}"
+                    )
+            if (
+                gold_patch is not None
+                and f"{case_material_prefix}{gold_patch}" not in material_files
+            ):
+                raise ValueError(f"{location} '{case_id}': 缺少 gold patch {gold_patch}")
+        cases.append(
+            EvaluationSuiteCase(
+                case_id=case_id,
+                prompt=prompt,
+                check_recipe=check_recipe,
+                base_ref=case_base_ref.strip() if isinstance(case_base_ref, str) else None,
+                split=split,
+                check_targets=check_targets,
+                held_out=held_out_targets,
+                candidate_hidden=candidate_hidden_targets,
+                gold_patch=gold_patch,
+            )
+        )
 
     return EvaluationSuite(
         suite_id=suite_id,
@@ -297,7 +388,36 @@ def parse_evaluation_suite(raw_text: str, source_path: str) -> EvaluationSuite:
         check_timeout_seconds=timeout_seconds,
         cases=tuple(cases),
         source_path=source_path,
-        content_hash=compute_suite_content_hash(raw_text),
+        content_hash=compute_suite_content_hash(raw_text, material_files),
+        requires_calibration=suite_requires_calibration,
+    )
+
+
+def _validated_relative_targets(
+    raw_targets: Any, location: str, case_id: str, field_name: str
+) -> tuple[str, ...]:
+    """校验 suite 中只允许安全的相对路径或 pytest 节点 id。"""
+    if raw_targets is None:
+        return ()
+    if not isinstance(raw_targets, list) or any(
+        not isinstance(value, str) for value in raw_targets
+    ):
+        raise ValueError(f"{location} '{case_id}': {field_name} 必须是字符串列表")
+    targets = tuple(value.strip() for value in raw_targets)
+    if any(not target or not _is_safe_relative_path(target) for target in targets):
+        raise ValueError(f"{location} '{case_id}': {field_name} 含非法相对路径或测试节点")
+    return targets
+
+
+def _is_safe_relative_path(relative_path: str) -> bool:
+    """拒绝绝对路径、选项前缀、空段与目录穿越。"""
+    normalized_path = relative_path.replace("\\", "/")
+    path_parts = normalized_path.split("/")
+    return (
+        not normalized_path.startswith("/")
+        and not normalized_path.startswith("-")
+        and all(part not in {"", ".", ".."} for part in path_parts)
+        and bool(re.fullmatch(r"[A-Za-z0-9_./:#-]+", normalized_path))
     )
 
 
@@ -338,6 +458,19 @@ class EvaluationRunRecord:
     updated_at: str
     started_at: str | None
     finished_at: str | None
+    repeats: int = 1
+    case_bases: dict[str, dict[str, str]] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class EvaluationRunCreateRequest:
+    """创建评测 run 时由调用方提供的配置。"""
+
+    suite_id: str
+    execution_presets: list[str]
+    judge_presets: list[str]
+    repeats: int = 1
+    include_holdout: bool = False
 
 
 @dataclass(frozen=True)
@@ -364,6 +497,7 @@ class EvaluationResultRecord:
     error: str | None
     created_at: str
     updated_at: str
+    repeat_index: int = 0
 
 
 @dataclass(frozen=True)

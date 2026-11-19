@@ -213,6 +213,8 @@ class FailureType(Enum):
     PROVIDER_CAPACITY = "provider_capacity"
     UNRECOVERABLE = "unrecoverable"
     FORBIDDEN_BLOCKED = "forbidden_blocked"
+    HUMAN_ACTION_REQUIRED = "human_action_required"
+    RECOVERY_STALLED = "recovery_stalled"
     DELIVERY_CLOSEOUT = "delivery_closeout"
     # 跨进程对账（daemon 崩溃 / 硬击杀后遗留的 ``agent/running`` 僵尸 attempt）。
     # 该分类由 ``agent_runner_failure.py`` 的 ``StaleAttemptDisposition`` 渲染，

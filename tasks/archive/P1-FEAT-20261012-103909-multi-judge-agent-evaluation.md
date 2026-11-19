@@ -4,8 +4,7 @@
 
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
-> 🧍 **验收状态**：待人工验收 — 执行侧已完成（§9 除 2 项 Human-Confirmed 与 2 项 runner-owned `[~]` gate 外全部勾选，rv-1/rv-2/rv-3 证据见 `tasks/evidence/P1-FEAT-20261012-103909-multi-judge-agent-evaluation/evidence.json`），仅剩 2 项 Human-Confirmed 未确认。
-> 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
+> ✅ **验收状态**：已验收 — 2026-10-28 按合并态追认（交付 PR #286 于 2026-10-15 合并）。本次未逐项人工复核；遗留与未闭环项见文末 Change Log。
 
 本文分为人审层与执行器层：前四节确认评分的含义、用户可见结果与数据边界；后九节定义评测集、评审器、持久化、执行隔离和验收证据。
 
@@ -447,9 +446,10 @@ erDiagram
 ### 9.2 Acceptance Evidence Package
 
 #### Human-Confirmed
+> 2026-10-28 按合并态追认：以下各项由用户一次性确认，未逐项人工复核；遗留与未闭环项见文末 Change Log。
 
-- [ ] 确认分数语义按 §2 决策一：不同 judge 的独立判断和 deterministic checks 分开展示，不计算默认加权总分；任何分数不成为 CI、合并、发布或自动路由门禁。（对照 `rv-1` 与 prototype/production 配对。）
-- [ ] 确认外发和本地数据范围按 §2 决策二：模型调用前逐次查看实际 payload 并确认；评测结果本地保存，拒绝/完成后临时 payload 清除；API key 和完整 transcript 不落库。（对照 `rv-2` 预览、真实请求 hash、拒绝负控和 fresh deletion 证据。）
+- [x] 确认分数语义按 §2 决策一：不同 judge 的独立判断和 deterministic checks 分开展示，不计算默认加权总分；任何分数不成为 CI、合并、发布或自动路由门禁。（对照 `rv-1` 与 prototype/production 配对。）
+- [x] 确认外发和本地数据范围按 §2 决策二：模型调用前逐次查看实际 payload 并确认；评测结果本地保存，拒绝/完成后临时 payload 清除；API key 和完整 transcript 不落库。（对照 `rv-2` 预览、真实请求 hash、拒绝负控和 fresh deletion 证据。）
 
 #### Behavior Acceptance
 
@@ -629,3 +629,11 @@ erDiagram
 - Reason: 用户提出不仅要评价“预测模型”，还要评价不同 Agent 实现效果，并指出评分模型应可配置多个。
 - Impact: 建立与运行时 Dashboard 松耦合的评测闭环；历史 Stats 继续服务日常运行观测，judge score 不影响发布/合并/路由。
 - Review: 初稿完成；评分非门禁和逐次外发授权待 PRD 人工评审。
+
+### 2026-10-28 · 按合并态批量追认验收
+- Type: human acceptance
+- Before: 横幅为待人工验收，§9 Human-Confirmed 尚有 2 项空框；交付 PR #286 已于 2026-10-15 合并，但未记录人工验收。
+- After: 2026-10-28 按合并态追认，全部 Human-Confirmed 项勾选，横幅改为已验收。本次未逐项人工复核；勾选不表示未执行项已验证。遗留与未闭环：缺 verification-plan 与独立 verifier 报告；§9 两项 runner-owned 门禁未闭合。
+- Reason: 交付代码已在主干运行 13 天，逐项补审无法改变既成事实；按用户 2026-10-28 的决定以合并态追认关闭验收账本，原有风险披露全部保留。
+- Impact: 仅验收记录变化，无实现、契约、证据或门禁变化。
+- Review: 用户 2026-10-28 在对话中明确批准批量追认；本条目未声称逐项复核。

@@ -139,9 +139,14 @@ export function RecentRunGroups({
   );
 }
 
-/** 显示本地运行记录的完成、失败或阻塞状态。 */
+/** 显示本地运行记录的完成、失败、阻塞或暂缓状态。 */
 function OutcomeBadge({ outcome }: { outcome: RunRecordEntry["outcome"] }) {
   const variant =
-    outcome === "completed" ? "ready" : outcome === "failed" ? "warning" : "default";
-  return <Badge variant={variant}>{outcome}</Badge>;
+    outcome === "completed"
+      ? "ready"
+      : outcome === "failed" || outcome === "deferred"
+        ? "warning"
+        : "default";
+  const label = outcome === "deferred" ? "暂缓重试" : outcome;
+  return <Badge variant={variant}>{label}</Badge>;
 }

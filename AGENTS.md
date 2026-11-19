@@ -16,6 +16,7 @@
 | 标准页 | 何时必须读 | 何时可以跳过 |
 |---|---|---|
 | `docs/ai-standards/index.md` | 任何任务开始时；需求、方案与任务规划讨论时核对其中的 ROI 原则 | 永远不跳过 |
+| `docs/ai-standards/prototyping.md` | 创建或修改 UI 原型、视觉概念图、图片状态、交互草图或 Prototype Hub 条目 | 只查看已有原型且不改原型资产或说明时 |
 | `docs/ai-standards/architecture.md` | 新增/修改 `src/backend/` 下的模块、调整跨层依赖、新增 engine 或 infrastructure 实现、新增对外 HTTP/CLI 入口 | 只改 `frontend-admin/`、文档、测试、构建脚本时 |
 | `docs/architecture/system-design.md` | 开始**任何**新的后端功能、新增四层之间的契约、改动 composition root、新增独立服务边界 | 已经只是小范围 bugfix 或参数调整，不动层间契约时 |
 | `docs/ai-standards/code-reuse.md` | **任何**新增或修改代码前；考虑提取 helper、判断是否复制粘贴、函数参数 ≥4 个、文件接近 500 行、运行 `just lint --reuse` 之前；交付前必须完成其中的 **AI 编码自检清单** | 纯文档排版或纯配置改动且无任何代码逻辑变更 |
@@ -24,7 +25,7 @@
 | `docs/ai-standards/documentation.md` | 改动公共函数签名、配置项、业务流程；新增长期文档页；更新 `mkdocs.yml` 导航 | 纯内部重构且无对外行为或文档变化 |
 | `docs/ai-standards/frontend-design.md` | 新增/改动 `frontend-public/`、`frontend-admin/` 的界面：调整颜色、圆角、字号、间距、暗色模式、外链与复制类交互 | 只改后端、CLI、测试或纯文档排版时 |
 | `docs/ai-standards/testing.md` | **任何代码变更开始前**；制定验证策略、收集证据或声称完成前必须重新核对；写 PRD 的 Realistic Validation Plan；**遇到测试失败或打算修改 `tests/guards/` 守卫测试时** | 仅改注释、纯文档排版或无可执行行为变化的纯配置 |
-| `docs/ai-standards/tooling.md` | 选择运行命令；改 `justfile` / `pre-commit` / `mkdocs` / Docker 配置；处理 PRD 归档流程；处理 lint flag 或重复检测 hooks；**改动 `kc` CLI 表面（子命令 / 旗标 / 退出码 / 机器输出）或随包 `kedacode-operator` skill**；撰写提交信息 | 在已熟悉常用 `just` 命令、且本次不动工具链配置与 CLI 表面时 |
+| `docs/ai-standards/tooling.md` | 选择运行命令；改 `justfile` / `pre-commit` / `mkdocs` / Docker 配置；处理 PRD 归档流程；清理本地分支或 worktree；处理 lint flag 或重复检测 hooks；**改动 `kc` CLI 表面（子命令 / 旗标 / 退出码 / 机器输出）或随包 `kedacode-operator` skill**；撰写提交信息 | 在已熟悉常用 `just` 命令、且本次不动工具链、分支/worktree 清理或 CLI 表面时 |
 | `docs/ai-standards/alembic.md` | 新增、重命名或修改 Alembic migration；检查迁移链或 `down_revision` | 不涉及 `alembic/versions/` 时 |
 | `docs/ai-standards/time-display.md` | 新增或改动任何时间展示 / 时间戳输出：Web 时间标签、CLI 人读输出、日志行前缀、`*_at` 字段序列化 | 纯文档排版且不动时间显示与序列化时 |
 
@@ -36,8 +37,10 @@
 - 项目以 AI Agent 理解并执行指令为核心；不为追求 100% 规范遵守率而逐条增加程序校验或硬门禁。指令执行偏差先修正执行结果、指令与上下文，不默认转成校验器开发；详见 `docs/ai-standards/index.md` 的「Agent 指令与程序边界」。
 - 后端必须遵守四层依赖方向：
   `src/backend/api/ -> src/backend/core/ -> src/backend/engines/ -> src/backend/infrastructure/`
+  （`api/` 只可导入 `core/`；`core/` 可静态依赖 `engines/`、`infrastructure/` 的装配 facade，
+  不得用 `importlib` 规避架构检查）
 - Python 项目优先使用 `uv` 和 `just`
-- 本地日常验证使用 `just test`（本地核心档，目标 <30 秒）；无需为普通交付在本机运行 `just test all`。CI 负责运行完整 CI 测试集；只有用户明确要求或排查全量相关问题时，才本地运行 `just test all`。详见 `docs/ai-standards/testing.md`
+- 需要本地验证的普通代码交付或提交场景，默认直接运行 `just test`，无需询问用户（本地核心档，目标 <30 秒）；无需为普通交付在本机运行 `just test all`。全量交给 CI：PR 上跑轻量档（改动无法映射到测试时自动跑全量），合入 main 后跑全量；只有用户明确要求或排查全量相关问题时，才本地运行 `just test all`。详见 `docs/ai-standards/testing.md`
 - 新增 Alembic migration **必须**通过 `just new-migration <slug>`（或其底层 `scripts/shared/alembic/new_migration.sh`）生成；禁止手工创建、命名或伪造秒级时间戳。生成后再仅用补丁填写 `upgrade()` / `downgrade()`，并执行 `uv run alembic heads` 确认唯一 head。
 - 公共 Python API 使用 Google Style Docstrings；后端启用 Ruff `D100`–`D107`/`D419` 强制检查
 - 内部注释、docstring、JSDoc/TSDoc 统一使用中文（专有名词除外）
@@ -46,11 +49,13 @@
 - 变量命名必须具有来源、类型或状态语义，避免 `data`、`item`、`res`
 - 新增或修改代码前先搜索现有实现；禁止复制粘贴后微调，参数超过 4 个时收敛到对象
 - 除非用户明确要求，否则不要自动执行 `git add`、`git commit`、`git push` 等 Git 变更操作
+- 完成分支任务或工作收尾时检查并及时清理已合并或过期且无待保留工作的本地分支及 worktree；KedaCode 管理的 `issue-*` 分支必须遵循 `kc worktree cleanup` 的关闭、远端删除、干净状态和合并条件，不要删除活动分支或 WIP checkpoint。详见 `docs/ai-standards/tooling.md` 的「本地分支与 Worktree 清理」
 - 发布（改版本号、打 `v*` tag、发布 draft Release、上传 PyPI）前必须先读 `docs/guides/release-process.md`。PyPI 版本号一经上传永久占用、不能重用：推送 tag 只会生成 draft Release，**把 draft 正式发布（触发 PyPI 上传与 Homebrew tap 更新）必须有用户明确同意**，不得顺手执行
 - 提交信息统一用英文并遵循 Conventional Commits（`type(scope): subject`，标题 ≤ 72 字符，正文解释 why），详见 `docs/ai-standards/tooling.md` 的 Commit Messages 小节
 - 单代码文件非空行不超过 1000 行；`just lint` 会对此发出警告
 - 随手想法先落 `tasks/inbox/`：只在**想法边界**捕获（用户明确要求，或话题收敛到可开 PRD 的状态），条目 = 用户原话逐字**引用** + 标注为 `AI 派生` 的背景块，**只追加**到 `tasks/inbox/ideas.md`（禁止改写已有条目）；AI 维护 `tasks/inbox/summary.md` 做总结；想法成熟后用 PRD 流程升级到 `tasks/pending/`。详见 `docs/guides/idea-inbox.md`
-- PRD 对应任务全部完成后：生成验证计划、收集证据；独立 verifier `PASS` 后，executor 必须勾选证据充分支持的非人工 Acceptance Checklist 项并标注证据、完成 Final Reconciliation、让验收状态横幅与 §9 对齐，随交付改动一并将 PRD 从 `tasks/pending/` 归档到 `tasks/archive/`。**归档只代表执行侧交付完成**，不等人工验收：`Human-Confirmed` 空框带着 `🧍 待人工验收` 归档，人确认后（对话/审查清单，或明确声明“合并即验收”的 PR merge——普通 PR 必须唯一关联该 PRD；聚合 PR 必须使用 v2 契约完整列出该 PRD 集并为每份 PRD 发布证据；含 squash 均须核对最终 Git tree）只回填验收记录（勾选 `Human-Confirmed`、横幅改 `✅ 已验收`、追加 Change Log）；人工验收若发现 PRD 自身 oracle/范围未达成，把 PRD 移回 `tasks/pending/` 重开，需求本身变了则新开关联 PRD
+- 自动验证与自动修复应在请求人工审阅前完成；人工明确接受、合并、关闭或接管后，按其决定收尾，不因旧失败、标签或证据空缺重新启动验证；新改动、具体缺陷或用户明确要求才触发相关验证。详见 `docs/ai-standards/testing.md` 的「自动验证与人工介入的边界」。
+- PRD 正常交付时生成验证计划、收集证据；独立 verifier `PASS` 后勾选有证据的非人工项、完成 Final Reconciliation 并归档。验证确实受阻时允许**阻塞归档**：保留执行侧空框，横幅写 `⏸️ 验证阻塞`，并在 Final Reconciliation 填非空 `Validation blocker` 与 `Validation follow-up`；不得代勾、改写 `[~]` 或称为待人工验收。**归档只代表代码落地**，不等于验证或人工验收完成。阻塞项补验后回到正常 `🧍 待人工验收 / ✅ 已验收` 路径；人工验收若发现 PRD 自身 oracle/范围未达成则重开，需求变化则新开关联 PRD
 - PRD 必须包含 Realistic Validation Plan，验收清单需覆盖最高可行保真度的真实入口验证，或说明无可执行行为变更
 - 前端截图必须标注验证层级；临时预览页、直接渲染组件或手工注入状态仅属于 `component preview`，不得称为真实验证。涉及 Dialog、Portal、父级布局或用户流程时，验收证据必须保留对应生产边界；无法走真实入口时必须披露限制
 - 变更代码时同步更新 `docs/` 与 `mkdocs.yml`

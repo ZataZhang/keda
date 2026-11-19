@@ -395,7 +395,7 @@ def test_takeover_start_daemons_uses_config_directory_as_spawn_cwd(
     ):
         _start_daemons_for_repo("zata-zhangtao-keda", repo_path)
 
-    assert start_mock.call_count == 2
+    assert start_mock.call_count == 1
     for call in start_mock.call_args_list:
         assert call.kwargs["spawn_cwd"] == config_dir
         assert call.kwargs["spawn_cwd"] != repo_path

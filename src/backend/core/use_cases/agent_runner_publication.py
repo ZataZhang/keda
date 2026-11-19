@@ -23,6 +23,7 @@ from pathlib import Path
 
 from backend.core.shared.interfaces.agent_runner import (
     GitHubApiRateLimitError,
+    GitHubApiUnavailableError,
     IContentGenerator,
     IGitHubClient,
     IProcessRunner,
@@ -48,6 +49,7 @@ from backend.core.use_cases.agent_runner_direct_pr_round import (
 )
 from backend.core.use_cases.agent_runner_events import format_event_marker
 from backend.core.use_cases.agent_runner_failure import PublishFailureError
+from backend.core.use_cases.agent_runner_claim_lease import ClaimLeaseLost
 from backend.core.use_cases.agent_runner_final_verification import (
     FinalVerificationRequest,
     ensure_final_verifier_verdict,
@@ -63,6 +65,7 @@ from backend.core.use_cases.agent_runner_skill_distillation import (
 )
 from backend.core.use_cases.agent_runner_validation import (
     ensure_validation_evidence_ready,
+    publish_validation_evidence_artifacts,
     publish_validation_evidence_best_effort,
 )
 from backend.core.use_cases.agent_runner_issue_control import (
@@ -245,10 +248,13 @@ def _push_changes_with_recovery_context(request: _PushChangesRequest) -> str:
             request.worktree_path,
             request.config,
             request.process_runner,
+            github_client=request.github_client,
             expected_branch=request.expected_branch,
         )
+    except ClaimLeaseLost:
+        raise
     except Exception as exc:  # 标签清理与 push 都是发布边界。
-        if isinstance(exc, GitHubApiRateLimitError):
+        if isinstance(exc, (GitHubApiRateLimitError, GitHubApiUnavailableError)):
             raise
         raise PublishFailureError(
             str(exc),
@@ -286,7 +292,32 @@ def publish_draft_pr_before_verifier(request: PreVerifierDraftPublicationRequest
             content_generator=request.content_generator,
             publish_stage=request.publish_stage,
         )
-    except GitHubApiRateLimitError:
+        try:
+            evidence_upload = publish_validation_evidence_artifacts(
+                issue=request.issue,
+                worktree_path=request.worktree_path,
+                config=request.config,
+                process_runner=request.process_runner,
+            )
+        except ClaimLeaseLost:
+            raise
+        except Exception as evidence_error:  # noqa: BLE001 - 预览证据不得阻塞 verifier。
+            _logger.warning(
+                "Could not publish review evidence for Issue #%d before verifier; "
+                "verification will continue: %s",
+                request.issue.number,
+                evidence_error,
+            )
+        else:
+            if evidence_upload is not None:
+                _logger.info(
+                    "Published review evidence for Issue #%d on %s before verifier.",
+                    request.issue.number,
+                    evidence_upload.branch,
+                )
+    except (GitHubApiRateLimitError, GitHubApiUnavailableError):
+        raise
+    except ClaimLeaseLost:
         raise
     except Exception as exc:  # noqa: BLE001 - 提前发布失败不应改变 verifier 结论。
         _logger.warning(
@@ -321,15 +352,17 @@ def _create_draft_pr_with_recovery_context(
             publish_stage=publish_stage,
         )
     except DraftPRCreationError as exc:
-        if isinstance(exc.__cause__, GitHubApiRateLimitError):
+        if isinstance(exc.__cause__, (GitHubApiRateLimitError, GitHubApiUnavailableError)):
             raise exc.__cause__ from exc
         raise PublishFailureError(
             str(exc),
             worktree_path=worktree_path,
             failure_category=PublishFailureCategory.PR_CREATE,
         ) from exc
+    except ClaimLeaseLost:
+        raise
     except (RuntimeError, OSError, subprocess.CalledProcessError) as exc:
-        if isinstance(exc, GitHubApiRateLimitError):
+        if isinstance(exc, (GitHubApiRateLimitError, GitHubApiUnavailableError)):
             raise
         raise PublishFailureError(
             str(exc),
@@ -367,7 +400,7 @@ def _edit_issue_labels_after_publish(
             remove=remove_labels,
         )
     except Exception as exc:  # surface category for recovery.
-        if isinstance(exc, GitHubApiRateLimitError):
+        if isinstance(exc, (GitHubApiRateLimitError, GitHubApiUnavailableError)):
             raise
         raise PublishFailureError(
             f"Failed to update labels after publish: {exc}",
@@ -387,7 +420,7 @@ def _comment_issue_after_publish(
     try:
         github_client.comment_issue(issue_number, comment_body)
     except Exception as exc:  # surface category for recovery.
-        if isinstance(exc, GitHubApiRateLimitError):
+        if isinstance(exc, (GitHubApiRateLimitError, GitHubApiUnavailableError)):
             raise
         raise PublishFailureError(
             f"Failed to post draft PR comment: {exc}",

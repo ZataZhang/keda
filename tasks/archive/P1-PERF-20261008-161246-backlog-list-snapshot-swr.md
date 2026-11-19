@@ -5,8 +5,7 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> 🧍 **验收状态**：待人工验收（执行侧已完成：§9 除 Human-Confirmed 外全部勾选或标注 runner-owned 门禁；独立 verifier 由 runner 执行）。
-> 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
+> ✅ **验收状态**：已验收 — 2026-10-28 按合并态追认（交付 PR #254 于 2026-10-09 合并）。本次未逐项人工复核；遗留与未闭环项见文末 Change Log。
 
 本文档分两个高度：**Part A（§1–§4）** 给人看，用来确认"要不要做、做成什么样"，不含实现细节；**Part B（§5–§13）** 给执行者看，包含机制、改动树与验证命令。
 
@@ -439,10 +438,11 @@ No external validation required; repository evidence was sufficient.
 - [~] PR 正文按 pr-evidence-and-merge-acceptance 契约携带 §9.1 呈递内容、verifier 结论与 verified tree 标识；完成消息原文携带 9.1 表格内容 — runner-owned gate: PR 创建与证据评论由 runner 交付
 
 ### Human-Confirmed (来自 Part A 风险地图)
+> 2026-10-28 按合并态追认：以下各项由用户一次性确认，未逐项人工复核；遗留与未闭环项见文末 Change Log。
 
-- [ ] 决策一：同意为 Backlog 列表在本地库新增 `backlog_prd_snapshots` 快照表（表只增不改，快照数据可能是上次同步而非实时，页面如实标注）
-- [ ] 决策二：接受列表接口契约变化——"立即返回快照（可能短暂陈旧）+ 显式过期标记 + 后台更新"，写接口与详情类接口语义不变
-- [ ] §9.1 呈递面复核：两个呈递物（首屏秒开录屏/截图、stale→fresh 两帧截图）内容与实际行为一致
+- [x] 决策一：同意为 Backlog 列表在本地库新增 `backlog_prd_snapshots` 快照表（表只增不改，快照数据可能是上次同步而非实时，页面如实标注）
+- [x] 决策二：接受列表接口契约变化——"立即返回快照（可能短暂陈旧）+ 显式过期标记 + 后台更新"，写接口与详情类接口语义不变
+- [x] §9.1 呈递面复核：两个呈递物（首屏秒开录屏/截图、stale→fresh 两帧截图）内容与实际行为一致
 
 ## 10. Functional Requirements
 
@@ -546,3 +546,11 @@ No external validation required; repository evidence was sufficient.
 - Reason: 独立 verifier/恢复轮复查发现归档门禁第 3 条（Section 13 Final Reconciliation is complete）未落文档；补记不新增任何验收条件，只是把已完成的对账结果按契约格式写入
 - Impact: 仅本 PRD §13 与证据报告 `P1-…-swr.evidence-report.md` 两处文档；§9 勾选状态、evidence.json、代码 diff 均不变
 - Review: 无需人工复核新决策（对账记录与图片补嵌不改变任何验收条件）；呈递物两张仍待人工复核（§9 Human-Confirmed）
+
+### 2026-10-28 · 按合并态批量追认验收
+- Type: human acceptance
+- Before: 横幅为待人工验收，§9 Human-Confirmed 尚有 3 项空框；交付 PR #254 已于 2026-10-09 合并，但未记录人工验收。
+- After: 2026-10-28 按合并态追认，全部 Human-Confirmed 项勾选，横幅改为已验收。本次未逐项人工复核；勾选不表示未执行项已验证。遗留与未闭环：仓库内无独立 verifier 报告文件。
+- Reason: 交付代码已在主干运行 19 天，逐项补审无法改变既成事实；按用户 2026-10-28 的决定以合并态追认关闭验收账本，原有风险披露全部保留。
+- Impact: 仅验收记录变化，无实现、契约、证据或门禁变化。
+- Review: 用户 2026-10-28 在对话中明确批准批量追认；本条目未声称逐项复核。

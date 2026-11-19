@@ -22,6 +22,7 @@ from backend.core.shared.models.agent_runner import (
     WorktreeConfig,
 )
 from backend.core.use_cases.agent_runner_events import format_event_marker
+from backend.core.use_cases.agent_runner_check_result import CheckActionDirective
 from backend.core.use_cases.agent_runner_failure import (
     AgentExecutionError,
     AgentUnavailableError,
@@ -30,6 +31,7 @@ from backend.core.use_cases.agent_runner_failure import (
     IssueBlockedDuringNoChangeError,
     MaxRetriesExceededError,
     ProviderCapacityError,
+    RecoveryStalledError,
     UnrecoverableError,
 )
 from backend.core.use_cases.agent_runner_orchestrate import (
@@ -1078,6 +1080,34 @@ def test_fallback_switches_on_max_retries_exhausted() -> None:
     assert calls == ["claude", "codex"]
 
 
+def test_fallback_switches_agents_when_recovery_stalls() -> None:
+    """A repeated check failure lets the configured fallback agent try next."""
+    config = AppConfig(runner=RunnerConfig(agent_fallback_order=("claude", "codex")))
+    process_for_agent, calls = _agent_outcomes(
+        {
+            "claude": RecoveryStalledError(
+                CheckActionDirective(
+                    block_type="recovery_stalled",
+                    summary="The same check failed without worktree changes.",
+                    next_action="Try another configured agent.",
+                ),
+                [_attempt("recovery stalled", FailureType.RECOVERY_STALLED)],
+            ),
+            "codex": None,
+        }
+    )
+
+    used_agent = run_issue_with_agent_fallback(
+        issue=_fallback_issue("agent/claude"),
+        config=config,
+        agent="auto",
+        process_for_agent=process_for_agent,
+    )
+
+    assert used_agent == "codex"
+    assert calls == ["claude", "codex"]
+
+
 def test_fallback_switches_on_agent_execution_error() -> None:
     """An unclassified execution accident (e.g. a timeout) switches agents.
 
@@ -1876,6 +1906,35 @@ def test_run_once_sequential_default_writes_per_issue_logs(monkeypatch, tmp_path
     # 每个 Issue 各自一份尝试日志（文件名含 Issue 编号与时间戳）。
     assert len(list(issue_log_dir.glob("issue-1-*.log"))) == 1
     assert len(list(issue_log_dir.glob("issue-2-*.log"))) == 1
+
+
+def test_run_once_log_base_overrides_repo_path_logs(monkeypatch, tmp_path) -> None:
+    """显式 ``log_base`` 时 per-Issue 日志落在该目录，而不是 ``repo_path/logs``。"""
+    from backend.core.use_cases import agent_runner_orchestrate as orchestrate
+
+    fake_client = FakeGitHubClient()
+    issues = [_make_ready_issue(1, "I1", "", ("agent/ready",))]
+    fake_client.list_ready_issues = lambda ready_label, limit: list(issues)
+    monkeypatch.setattr(orchestrate, "_process_ready_issue", lambda **_kwargs: None)
+    checkout_path = tmp_path / "checkout"
+    checkout_path.mkdir()
+    registered_logs = tmp_path / "registered" / "logs"
+
+    run_once(
+        repo_path=checkout_path,
+        config=AppConfig(),
+        dry_run=False,
+        agent="auto",
+        max_issues=1,
+        github_client=fake_client,
+        process_runner=_preflight_ok_runner(),
+        repo_id="testrepo",
+        log_base=registered_logs,
+    )
+
+    issue_log_dir = registered_logs / "agent-runner" / "issues" / "testrepo"
+    assert len(list(issue_log_dir.glob("issue-1-*.log"))) == 1
+    assert not (checkout_path / "logs").exists()
 
 
 # ─────────────────────────────────────────────────────────────────────────────

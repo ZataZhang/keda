@@ -19,7 +19,13 @@ import type { IssueScope } from "@/components/agent-runner/repository-overview";
 import { RunnerStatusBar } from "@/components/agent-runner/runner-status-bar";
 import { RuntimeTaskDetail } from "@/components/dashboard/runtime-task-detail";
 import { RuntimeTaskList } from "@/components/dashboard/runtime-task-list";
+import {
+  RuntimeRequestErrorNotice,
+  type RuntimeBoardLoadError,
+} from "@/components/dashboard/runtime-request-error";
+import { ApiRequestError } from "@/lib/api/client";
 import { formatLocalDateTime } from "@/lib/utils";
+import { confirmAction } from "@/lib/confirm-action";
 import {
   fetchIssueDetail,
   fetchOverviewJobsByRepo,
@@ -104,6 +110,31 @@ function getRepoIdFromSlot(slot: RepoSlot): string {
   return slot.repoId;
 }
 
+/** 把控制台请求错误分成连接失败、HTTP 错误和未分类错误。 */
+function classifyConsoleRequestError(error: unknown): RuntimeBoardLoadError {
+  if (error instanceof ApiRequestError) {
+    return error.status === undefined
+      ? { kind: "connection", detail: error.message }
+      : { kind: "http", status: error.status, detail: error.message };
+  }
+  return {
+    kind: "unknown",
+    detail: error instanceof Error ? error.message : String(error),
+  };
+}
+
+/** 将控制台请求错误转成带操作语境的提示，保留底层错误供排查。 */
+function describeConsoleRequestFailure(error: unknown, operation: string): string {
+  const requestError = classifyConsoleRequestError(error);
+  if (requestError.kind === "connection") {
+    return `${operation}没有收到本机 Console 的响应。请确认 Console 仍在运行后重试。`;
+  }
+  if (requestError.kind === "http") {
+    return `${operation}失败（HTTP ${requestError.status}）：${requestError.detail}`;
+  }
+  return `${operation}失败：${requestError.detail || "未知错误"}`;
+}
+
 export default function DashboardPage() {
   const [state, setState] = useState<LoadState>({ kind: "loading" });
   const [selectedIssueNumber, setSelectedIssueNumber] = useState<number | null>(
@@ -147,8 +178,17 @@ export default function DashboardPage() {
   const [runtimeSummary, setRuntimeSummary] = useState<RuntimeTaskSummary | null>(
     null,
   );
-  const [runtimeError, setRuntimeError] = useState<string | null>(null);
+  const [runtimeError, setRuntimeError] = useState<RuntimeBoardLoadError | null>(null);
+  const [runtimeRetryPending, setRuntimeRetryPending] = useState(false);
   const [selectedTask, setSelectedTask] = useState<RuntimeTaskEntry | null>(null);
+  // 已提交的「切换执行器续跑」（task_key + 阶段 + 执行器）：动作成功后该 Issue
+  // 已回到 ready 队列，但看板在下一次扫描前仍显示旧的失败态；没有这层记录时
+  // 用户会以为没生效而重复点击，第二次必然撞上"只适用于失败 Issue"。
+  const [executorSwitchQueued, setExecutorSwitchQueued] = useState<{
+    taskKey: string;
+    stage: string;
+    executor: string;
+  } | null>(null);
   const [companionState, setCompanionState] = useState<DesktopCompanionState | null>(
     null,
   );
@@ -173,14 +213,31 @@ export default function DashboardPage() {
         if (!prev) return prev;
         return summary.tasks.find((task) => task.task_key === prev.task_key) ?? prev;
       });
+      // 已排队的续跑在任务离开 failed 后失效：那时它要么已被 Runner 认领，
+      // 要么已经再次失败（可以重新选执行器），继续挡着按钮只会挡住第二次尝试。
+      setExecutorSwitchQueued((prev) => {
+        if (!prev) return prev;
+        const refreshedTask = summary.tasks.find(
+          (task) => task.task_key === prev.taskKey,
+        );
+        return refreshedTask && refreshedTask.status !== "failed" ? null : prev;
+      });
       setRuntimeError(null);
     } catch (error: unknown) {
       if (signal?.aborted) return;
-      setRuntimeError(
-        error instanceof Error ? error.message : "无法加载运行看板任务。",
-      );
+      setRuntimeError(classifyConsoleRequestError(error));
     }
   }, []);
+
+  /** 用户主动重试摘要读取；后台轮询仍按自己的节奏继续。 */
+  const handleRetryRuntimeSummary = useCallback(async () => {
+    setRuntimeRetryPending(true);
+    try {
+      await loadRuntimeSummary();
+    } finally {
+      setRuntimeRetryPending(false);
+    }
+  }, [loadRuntimeSummary]);
 
   /** 开启或聚焦桌面小窗：动作结果由后端快照决定，前端不猜测窗口状态。 */
   const handleOpenCompanion = useCallback(async () => {
@@ -370,7 +427,7 @@ export default function DashboardPage() {
     };
   }, [selectedIssueNumber, state, selectedEntry, selectedRepoId]);
 
-  /** 全量刷新：起后台 job 重扫并写回快照，期间保留旧数据供继续浏览。 */
+  /** 远端同步：起后台 job 重扫并写回快照，期间保留旧数据供继续浏览。 */
   const handleRefreshAll = useCallback(async () => {
     if (refreshState.kind === "syncing") return;
     if (refreshAbortRef.current) refreshAbortRef.current.abort();
@@ -408,16 +465,15 @@ export default function DashboardPage() {
       await reloadMonitoringViews(controller.signal);
       void loadCompletionStats(controller.signal);
       if (failures.length > 0) {
-        toast.error(`部分仓库刷新失败：${failures.join("；")}`);
+        toast.error(`部分仓库远端同步失败：${failures.join("；")}`);
       } else {
         const seconds = Math.round((Date.now() - startedAt) / 1000);
-        toast.success(`监控数据已刷新（${seconds}s）`);
+        toast.success(`监控数据已同步（${seconds}s）`);
       }
       setRefreshState({ kind: "idle" });
     } catch (error: unknown) {
       if (controller.signal.aborted) return;
-      const message = error instanceof Error ? error.message : "刷新失败";
-      toast.error(message);
+      toast.error(describeConsoleRequestFailure(error, "远端同步"));
       setRefreshState({ kind: "idle" });
     }
   }, [refreshState, loadCompletionStats, reloadMonitoringViews]);
@@ -464,7 +520,7 @@ export default function DashboardPage() {
         ...prev,
         [repoId]: { kind: "ready" },
       }));
-      toast.success(`${repoId} 已刷新（${seconds}s）`);
+      toast.success(`${repoId} 已同步（${seconds}s）`);
       window.setTimeout(() => {
         setRepoRefresh((prev) => {
           const next = { ...prev };
@@ -474,8 +530,7 @@ export default function DashboardPage() {
       }, 1500);
     } catch (error: unknown) {
       if (controller.signal.aborted) return;
-      const message =
-        error instanceof Error ? error.message : `${repoId} 刷新失败`;
+      const message = describeConsoleRequestFailure(error, `${repoId} 同步`);
       setRepoRefresh((prev) => ({
         ...prev,
         [repoId]: { kind: "error", message },
@@ -495,9 +550,7 @@ export default function DashboardPage() {
       } catch (error: unknown) {
         // 拉取失败退回「监控中」并提示，避免「全部」页签停在空列表说谎。
         setRepoScope((prev) => ({ ...prev, [repoId]: "monitoring" }));
-        toast.error(
-          error instanceof Error ? error.message : "加载全量 Issue 失败。",
-        );
+        toast.error(describeConsoleRequestFailure(error, "加载全量 Issue"));
       }
     },
     [allIssuesByRepo],
@@ -568,7 +621,7 @@ export default function DashboardPage() {
   const handleRepoAction = useCallback(
     async (repoId: string, action: "run_once" | "review_once") => {
       const verb = action === "run_once" ? "跑一轮" : "复核一轮";
-      const confirmed = window.confirm(
+      const confirmed = await confirmAction(
         `确认对 ${repoId}「${verb}」？将启动一个一次性托管进程。`,
       );
       if (!confirmed) return;
@@ -642,7 +695,7 @@ export default function DashboardPage() {
         : action === "blocked_continue"
           ? "继续"
           : "恢复发布";
-    const confirmed = window.confirm(
+    const confirmed = await confirmAction(
       `确认对 Issue #${selectedIssue.number} 执行「${verb}」？`,
     );
     if (!confirmed) return;
@@ -656,6 +709,37 @@ export default function DashboardPage() {
       toast.success(result.detail);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : `${verb}失败。`);
+    } finally {
+      setActionPending(false);
+    }
+  }
+
+  async function handleRuntimeRetryWithExecutor(
+    task: RuntimeTaskEntry,
+    lifecycleStage: string,
+    executor: string,
+  ) {
+    const confirmed = await confirmAction(
+      `确认对 ${task.repo_display_name ?? task.repo_id}#${task.issue_number} 在 ${lifecycleStage} 阶段切换到 ${executor} 并续跑？`,
+    );
+    if (!confirmed) return;
+    setActionPending(true);
+    try {
+      const result = await executeIssueAction(
+        task.repo_id,
+        task.issue_number,
+        "retry_failed_with_executor",
+        { lifecycleStage, executor },
+      );
+      toast.success(result.detail);
+      setExecutorSwitchQueued({
+        taskKey: task.task_key,
+        stage: lifecycleStage,
+        executor,
+      });
+      await loadRuntimeSummary();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "切换执行器续跑失败。");
     } finally {
       setActionPending(false);
     }
@@ -679,7 +763,7 @@ export default function DashboardPage() {
 
   return (
     <ConsolePage>
-      <ConsolePageHeader title="Agent Runner 管理终端" description="默认按任务值守看板列出各仓库 Issue 的真实生命周期；切到「仓库监控」看队列、事件时间线与异常，failed/blocked Issue 可直接重试或继续。" />
+      <ConsolePageHeader title="Agent Runner 管理终端" description="默认按任务值守看板列出各仓库 Issue 的真实生命周期；切到「仓库监控」看队列、事件时间线与异常，failed Issue 可普通重试或切换执行器续跑，blocked Issue 可继续。" />
       <ConsoleToolbar aria-label="看板视图与同步操作">
           <div
             className="flex items-center gap-1 rounded-md border border-slate-200 p-0.5 dark:border-slate-700"
@@ -756,7 +840,7 @@ export default function DashboardPage() {
                   : "开启独立窗口"}
             </Button>
             <span className="text-xs text-slate-500" data-testid="dashboard-menubar-hint">
-              macOS 菜单栏模式请启动 ~/Applications/KedaCode.app，再点击顶部图标。
+              macOS 菜单栏 / Windows 托盘模式请先启动 KedaCode，再点击对应图标。
             </span>
             {companionState ? (
               <span
@@ -788,12 +872,12 @@ export default function DashboardPage() {
           </div>
 
           {runtimeError ? (
-            <p
-              className="text-sm text-red-700 dark:text-red-300"
-              data-testid="runtime-board-error"
-            >
-              运行看板加载失败：{runtimeError}
-            </p>
+            <RuntimeRequestErrorNotice
+              error={runtimeError}
+              generatedAt={runtimeSummary?.generated_at ?? null}
+              retryPending={runtimeRetryPending}
+              onRetry={handleRetryRuntimeSummary}
+            />
           ) : null}
 
           {runtimeSummary ? (
@@ -827,11 +911,19 @@ export default function DashboardPage() {
                   <SheetDescription>任务状态、阶段说明与实时输出</SheetDescription>
                 </SheetHeader>
                 {selectedTask ? (
-                  <div className="flex h-full min-h-0 flex-col p-4">
+                  <div className="min-h-0 flex-1 overflow-y-auto p-4">
                     <RuntimeTaskDetail
                       key={selectedTask.task_key}
                       task={selectedTask}
-                      className="min-h-0 flex-1"
+                      onRetryWithExecutor={(stage, executor) =>
+                        void handleRuntimeRetryWithExecutor(selectedTask, stage, executor)
+                      }
+                      retryPending={actionPending}
+                      executorSwitchQueued={
+                        executorSwitchQueued?.taskKey === selectedTask.task_key
+                          ? executorSwitchQueued
+                          : null
+                      }
                     />
                   </div>
                 ) : null}
@@ -871,7 +963,7 @@ export default function DashboardPage() {
               disabled={isRefreshingAll}
               onClick={() => void handleRefreshAll()}
             >
-              立即刷新
+              立即远端同步
             </Button>
           </CardContent>
         </Card>
@@ -977,6 +1069,7 @@ export default function DashboardPage() {
   );
 }
 
+/** 渲染单仓库远端同步按钮及其运行状态。 */
 function RepoRefreshButton({
   repoId,
   state,
@@ -995,7 +1088,7 @@ function RepoRefreshButton({
         disabled
         data-testid={`dashboard-refresh-repo-${repoId}`}
       >
-        刷新中…
+        同步中…
       </Button>
     );
   }
@@ -1018,7 +1111,7 @@ function RepoRefreshButton({
       onClick={() => onRefresh(repoId)}
       data-testid={`dashboard-refresh-repo-${repoId}`}
     >
-      {kind === "ready" ? "✓ 已刷新" : "刷新"}
+      {kind === "ready" ? "✓ 已同步" : "远端同步"}
     </Button>
   );
 }
@@ -1246,7 +1339,7 @@ function LoadingSkeleton() {
             {remaining > 0
               ? `预计还需 ${remaining} 秒`
               : isStuck
-                ? "用时较长，可点击「刷新全部」切换异步模式"
+                ? "用时较长，可点击「立即远端同步」切换异步模式"
                 : "即将完成，请稍候…"}
           </span>
         </div>

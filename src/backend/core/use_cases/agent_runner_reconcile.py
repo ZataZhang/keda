@@ -16,6 +16,10 @@ label、Issue comment 的 attempt 历史、worktree 文件状态。**不引入�
 评论；label 变更走"读-检查-写"CAS，Issue 已被别的通路推进时本轮空转。跨机认领、
 无 claim marker、进程仍存活且未过 TTL 的 Issue 一律保守不触碰（与既有 reclaim
 同源同规则）。
+
+残余窗口：评论写入没有 CAS，去重本身是"读-检查-写"。写前再读一次线程把窗口压到
+"这一读与那一写"之间；两台机器的 Phase -1 恰好在此重叠时仍可能各留一条同 hash 的
+对账评论——标签侧由 CAS 保证只有一边推进，多出的评论只是审计噪声。
 """
 
 from __future__ import annotations
@@ -48,6 +52,11 @@ from backend.core.use_cases.agent_runner_stale_attempt import (
     parse_reconcile_marker,
 )
 from backend.core.use_cases.agent_runner_session_store import load_agent_session_record
+from backend.core.use_cases.agent_runner_claim_lease import (
+    classify_remote_lease,
+    is_local_claim,
+    latest_claim_record,
+)
 from backend.core.use_cases.agent_runner_worktree_probe import _find_worktree_path_for_issue
 from backend.core.use_cases.agent_runner_workflow import transition_issue_workflow_state
 
@@ -86,6 +95,7 @@ class _ReconcilePass:
     now: datetime
     pid_alive: Callable[[int], bool]
     ttl_seconds: int | None
+    machine_id: str | None
 
 
 def reconcile_stale_attempts(
@@ -100,6 +110,8 @@ def reconcile_stale_attempts(
     ttl_seconds: int | None = None,
     now: datetime | None = None,
     exclude_issue_numbers: frozenset[int] = frozenset(),
+    machine_id: str | None = None,
+    issue_number: int | None = None,
 ) -> list[ReconcileOutcome]:
     """对账本仓库 ``agent/running`` 僵尸 attempt，逐个给出明确终态。
 
@@ -128,9 +140,17 @@ def reconcile_stale_attempts(
         now=now if now is not None else datetime.now(timezone.utc),
         pid_alive=pid_alive,
         ttl_seconds=ttl_seconds,
+        machine_id=machine_id,
     )
     outcomes: list[ReconcileOutcome] = []
-    for issue in github_client.list_issues_by_label(config.labels.running, limit):
+    issue_candidates = (
+        [github_client.get_issue(issue_number)]
+        if issue_number is not None
+        else github_client.list_issues_by_label(config.labels.running, limit)
+    )
+    for issue in issue_candidates:
+        if issue_number is not None and config.labels.running not in issue.labels:
+            continue
         if issue.state.upper() != "OPEN" or issue.number in exclude_issue_numbers:
             continue
         try:
@@ -154,28 +174,68 @@ def _reconcile_one_issue(
         时返回 ``None``，调用方据此不记录任何动作。
     """
     comments = list(pass_context.github_client.list_issue_comments(issue.number))
-    claim = _latest_claim_detail(comments)
+    comment_records = pass_context.github_client.list_issue_comment_records(
+        issue.number,
+        trusted_only=True,
+        body_contains="<!-- kc:claim ",
+        require_success=True,
+    )
+    latest_record = latest_claim_record(comment_records)
+    claim = latest_record[1] if latest_record is not None else _latest_claim_detail(comments)
     if claim is None:
         # 拿不到归属信息就无法证明它死了，保守跳过（与既有 reclaim 同一护栏）。
         return None
-    if claim.host != pass_context.host:
-        return None
-    stale_reason = classify_claim_staleness(
-        claim_pid=claim.pid,
-        claim_started_at=claim.started_at,
-        effective_now=pass_context.now,
-        ttl_seconds=pass_context.ttl_seconds,
-        pid_alive=pass_context.pid_alive,
+    claim_record = latest_record[0] if latest_record is not None else None
+    lease = latest_record[2] if latest_record is not None else None
+    remote_machine_id: str | None = None
+    remote_last_renewed_at: str | None = None
+    remote_lease_ttl_seconds: int | None = None
+    local_claim = is_local_claim(
+        claim_host=claim.host,
+        lease=lease,
+        machine_id=pass_context.machine_id,
+        host=pass_context.host,
     )
-    if stale_reason is None:
-        return None
+    if local_claim:
+        stale_reason = classify_claim_staleness(
+            claim_pid=claim.pid,
+            claim_started_at=claim.started_at,
+            effective_now=pass_context.now,
+            ttl_seconds=pass_context.ttl_seconds,
+            pid_alive=pass_context.pid_alive,
+        )
+        if stale_reason is None:
+            return None
+        remote_lease_expired = False
+    else:
+        if claim_record is None or lease is None:
+            return None
+        lease_status = classify_remote_lease(
+            updated_at=claim_record.updated_at,
+            lease=lease,
+            now=pass_context.now,
+        )
+        if lease_status.state != "expired":
+            return None
+        stale_reason = "remote_lease_expired"
+        remote_lease_expired = True
+        remote_machine_id = lease.machine_id
+        remote_last_renewed_at = lease.renewed_at.astimezone(timezone.utc).isoformat()
+        remote_lease_ttl_seconds = lease.ttl_seconds
 
-    evidence = _collect_stale_attempt_evidence(pass_context, issue, claim, comments)
+    evidence = _collect_stale_attempt_evidence(
+        pass_context,
+        issue,
+        claim,
+        comments,
+        remote_lease_expired=remote_lease_expired,
+    )
     decision = decide_stale_attempt_disposition(evidence)
     dedupe_hash = _reconcile_content_hash(
         issue_number=issue.number,
         claim=claim,
         decision=decision,
+        machine_id=remote_machine_id,
     )
     if _marker_hash_present(comments, dedupe_hash):
         # 这个结论已经写过 comment：不再重复留痕，但**仍然**走一次落账，因为上一轮
@@ -198,6 +258,9 @@ def _reconcile_one_issue(
             stale_attempt_seq=evidence.stale_attempt_count,
             attempt_history_excerpt=None,
             skip_comment=True,
+            remote_machine_id=remote_machine_id,
+            remote_last_renewed_at=remote_last_renewed_at,
+            remote_lease_ttl_seconds=remote_lease_ttl_seconds,
         )
 
     outcome = _apply_disposition(
@@ -209,6 +272,9 @@ def _reconcile_one_issue(
         dedupe_hash=dedupe_hash,
         stale_attempt_seq=evidence.stale_attempt_count + 1,
         attempt_history_excerpt=_latest_attempt_history_excerpt(comments),
+        remote_machine_id=remote_machine_id,
+        remote_last_renewed_at=remote_last_renewed_at,
+        remote_lease_ttl_seconds=remote_lease_ttl_seconds,
     )
     if outcome.applied:
         _logger.info(
@@ -236,8 +302,22 @@ def _collect_stale_attempt_evidence(
     issue: IssueSummary,
     claim: ClaimMarkerDetail,
     comments: list[str],
+    *,
+    remote_lease_expired: bool = False,
 ) -> StaleAttemptEvidence:
     """把四类证据源汇成判定输入快照（取证侧只做读取，不做决策）。"""
+    if remote_lease_expired:
+        return StaleAttemptEvidence(
+            worktree_resolvable=True,
+            worktree_detail="remote attempt state is unavailable on this machine",
+            claim_agent=claim.agent,
+            resume_capable=False,
+            session_id=None,
+            stale_attempt_count=_count_reconcile_dispositions(comments),
+            max_recovery_attempts=max(0, pass_context.config.runner.max_recovery_attempts),
+            pending_rework=parse_latest_pending_rework_marker(comments) is not None,
+            remote_lease_expired=True,
+        )
     worktree_resolvable, worktree_detail, worktree_path = _probe_worktree(pass_context, issue)
     resume_capable, session_id = _probe_session_resume(
         pass_context,
@@ -349,6 +429,7 @@ def _reconcile_content_hash(
     issue_number: int,
     claim: ClaimMarkerDetail,
     decision: StaleAttemptDecision,
+    machine_id: str | None = None,
 ) -> str:
     """把本次判定的输入折成一个 16 位 content hash（FR-5 去重键）。
 
@@ -364,6 +445,7 @@ def _reconcile_content_hash(
             str(claim.pid),
             claim.started_at.isoformat() if claim.started_at is not None else "",
             claim.agent or "",
+            machine_id or "",
             decision.disposition.value,
             str(decision.pending_rework),
         )
@@ -390,6 +472,9 @@ def _apply_disposition(
     stale_attempt_seq: int,
     attempt_history_excerpt: str | None,
     skip_comment: bool = False,
+    remote_machine_id: str | None = None,
+    remote_last_renewed_at: str | None = None,
+    remote_lease_ttl_seconds: int | None = None,
 ) -> ReconcileOutcome:
     """执行处置出口：先写对账 comment，再改 label（PRD §6.4 顺序）。
 
@@ -424,6 +509,18 @@ def _apply_disposition(
         )
 
     if not skip_comment:
+        # 取证用的评论快照可能已经过时：GitHub 评论没有 CAS，两台 daemon 的 Phase -1
+        # 轮询重叠时都会判成同一条结论。写之前再读一次，别人已经留痕就只补 label。
+        if _marker_hash_present(list(github_client.list_issue_comments(issue.number)), dedupe_hash):
+            _logger.info(
+                "Issue #%d reconcile comment landed during this pass (hash=%s); "
+                "applying the label transition only.",
+                issue.number,
+                dedupe_hash,
+            )
+            skip_comment = True
+
+    if not skip_comment:
         comment_body = format_stale_attempt_comment(
             StaleAttemptReport(
                 issue_number=issue.number,
@@ -433,6 +530,9 @@ def _apply_disposition(
                 stale_attempt_seq=stale_attempt_seq,
                 stale_reason=stale_reason,
                 attempt_history_excerpt=attempt_history_excerpt,
+                remote_machine_id=remote_machine_id,
+                remote_last_renewed_at=remote_last_renewed_at,
+                remote_lease_ttl_seconds=remote_lease_ttl_seconds,
             )
         )
         github_client.comment_issue(issue.number, comment_body)

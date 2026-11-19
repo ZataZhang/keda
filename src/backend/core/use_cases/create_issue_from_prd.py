@@ -469,7 +469,7 @@ def _parse_evidence_format_with_agent(
                 cwd=cwd,
                 timeout=30,
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 - 单条生成失败只跳过该条，不中断整批。
             _logger.warning("Agent call failed for item %d, skipping", item_number)
             continue
 

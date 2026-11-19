@@ -1,0 +1,19 @@
+## 人审导航 / Human Review Navigation
+
+Issue：[GitHub #334](https://github.com/ZataZhang/keda/issues/334) · PR：[查询 #334 相关 PR](https://github.com/ZataZhang/keda/pulls?q=is%3Apr+is%3Aopen+is%3Aall+334) · CI：[GitHub Actions](https://github.com/ZataZhang/keda/actions)
+
+本地人工审阅包：在 worktree 根目录运行 `just prd review tasks/archive/P1-FEAT-20261019-140531-m13-golden-eval-baseline.md`，或打开 `"/Users/zata/code/keda/.kc-worktrees/issue-334/tasks/evidence/P1-FEAT-20261019-140531-m13-golden-eval-baseline/human-review-checklist.html"`。该页面使用相对路径加载本地截图，不需要启动应用。
+
+当前没有创建 PR；runner 在执行独立 verifier 与发布流程。实现源码的已验证 Git tree（排除 PRD、证据目录和 runner 交付记录）为 `257da6a287b2ffc4df327186bcad66022a0fb4e3`。最终 pre-PR review 补入了 FR-8 要求的 12 题来源映射（[tasks/evaluation-suites/README.md](../../evaluation-suites/README.md)），并新增"校准 run 仅适用于带 v2 判分材料且每题有 `gold_patch` 的 suite"创建门禁；RV-2 与 RV-5 已在最终 tree 上复跑并通过，RV-1/3/4/6 的输出采集于前次源码 tree `fb21a75247599f6d64d1162c9c6e113b0ead80be`（其采集基线为 `59049dec0d2accd91d8448e1bf25c48711452a0e`），差异为 README 来源映射与该创建门禁；workspace/execution/checks 与 suite 材料未变。
+
+| # | 对应 §9.1 验收结果 | 呈递物、打开方式与预期值 |
+|---|---|---|
+| 1 | 12 道任务全部校准通过，校准期间没有模型调用（rv-2）。 | 文件：`/Users/zata/code/keda/.kc-worktrees/issue-334/tasks/evidence/P1-FEAT-20261019-140531-m13-golden-eval-baseline/rv-2-calibration-console.png`。![rv-2 keda-history-v1 真实 Console 校准页](rv-2-calibration-console.png) **本地图片，GitHub 上不显示。** 打开：`open "/Users/zata/code/keda/.kc-worktrees/issue-334/tasks/evidence/P1-FEAT-20261019-140531-m13-golden-eval-baseline/rv-2-calibration-console.png"`。输出：[rv-2-calibration-12of12.txt](rv-2-calibration-12of12.txt)，选题：[rv-2-seed-selection.json](rv-2-seed-selection.json)，原始账本：[rv-2-calibration-ledger.sqlite](rv-2-calibration-ledger.sqlite)。预期：页头为“12/12 已校准”；详情逐题为 @noop 3 次判分失败、@gold 3 次判分通过；运行 72 格、usage rows=0、provider probe=0。短时复现命令每次重跑真实红控并经新 API 核验已完成的 72 格账本，不会重新执行全部绿控候选格；限制见 manifest `risks`。 |
+| 2 | 重复运行显示通过次数与稳定性，不稳定题单列，无合成总分或阈值（rv-3）。 | 目标态原型：`/Users/zata/code/keda/.kc-worktrees/issue-334/tasks/evidence/P1-FEAT-20261019-140531-m13-golden-eval-baseline/rv-3-prototype-variance-view.png`。![设计意图：重复结果目标态，非运行时证明](rv-3-prototype-variance-view.png) **本地图片，GitHub 上不显示。** 打开：`open "/Users/zata/code/keda/.kc-worktrees/issue-334/tasks/evidence/P1-FEAT-20261019-140531-m13-golden-eval-baseline/rv-3-prototype-variance-view.png"`。真实 Console：`/Users/zata/code/keda/.kc-worktrees/issue-334/tasks/evidence/P1-FEAT-20261019-140531-m13-golden-eval-baseline/rv-3-stability-console.png`。![真实 FastAPI Console 页面：重复结果与不稳定题](rv-3-stability-console.png) **本地图片，GitHub 上不显示。** 打开：`open "/Users/zata/code/keda/.kc-worktrees/issue-334/tasks/evidence/P1-FEAT-20261019-140531-m13-golden-eval-baseline/rv-3-stability-console.png"`。复核输出：[API 与方差探针](rv-3-stability-api.txt)、[真实页面 Playwright E2E](rv-3-playwright-e2e.txt)。预期：stable-outcome 为 3/3 稳定，repeat-outcome 为 2/3 不稳定并单列；无合成总分或阈值。原型为设计目标，后图为真实页面，数据和桌面视口对应。 |
+| 3 | 12 题来源、描述与留出资格有审计依据（§7.1）。 | 选题和复核：[rv-2-seed-selection.json](rv-2-seed-selection.json)；公开来源映射：[tasks/evaluation-suites/README.md](../../evaluation-suites/README.md)。打开：`open "/Users/zata/code/keda/.kc-worktrees/issue-334/tasks/evidence/P1-FEAT-20261019-140531-m13-golden-eval-baseline/rv-2-seed-selection.json"`。预期：随机抽查三题可追溯 sample id、来源摘要、base/final、输入复核和旧校准记录；prompt 只写问题与期望行为；留出资格有使用依据。 |
+
+**已替你核对过什么：** rv-2 通过真实 API、Git 快照、uv-pytest、账本读取和 Console 截图交叉核对；rv-3 使用相同代表性结果对照目标原型与真实页面，并通过 5 个逐项隔离 E2E 用例（含 @foo 普通预设边界回归）；rv-2 seed-selection 与公开 README 的映射一致。图片和命令都已逐项检查。这里没有替 reviewer 勾选 §9.1 人工确认项。PR 发布、独立 verifier 与 CI 由 runner 后续处理；上面的 PR/CI 链接可直接查询。
+
+## 执行证据索引
+
+六项 Realistic Validation 的逐项复现命令、negative control、expected fail、输出断言和风险见 [`evidence.json`](evidence.json) 及 [verification plan](P1-FEAT-20261019-140531-m13-golden-eval-baseline.verification-plan.md)。RV-2 复跑命令输出并断言上述 source tree；其余各项文本只记录对应检查点的输出。原始截图、脚本及执行日志按仓库约定不进入代码 diff；三个 Markdown 报告与 PRD 是可提交交付记录。

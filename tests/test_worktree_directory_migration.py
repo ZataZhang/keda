@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 from backend.engines.agent_runner.worktree_directory_migration import migrate_worktree_directory
 from backend.infrastructure.process_runner import SubprocessRunner
-from backend.infrastructure.git.worktree import WorktreeManager
 from tests.support.agent_runner import create_commit, init_git_repo
 
 
@@ -46,8 +46,15 @@ def test_worktree_directory_migration_refuses_active_linked_worktrees(
     create_commit(repository_root_path, "Initial commit")
     legacy_worktree_root_path = repository_root_path / ".iar-worktrees"
     legacy_worktree_root_path.mkdir()
-    worktree_manager = WorktreeManager(repository_root_path, SubprocessRunner())
-    worktree_manager.create(branch="active-issue", base_branch="HEAD")
+    active_worktree_path = legacy_worktree_root_path / "active-issue"
+    subprocess.run(
+        ["git", "worktree", "add", "-b", "active-issue", str(active_worktree_path), "HEAD"],
+        cwd=repository_root_path,
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
 
     migration_result = migrate_worktree_directory(
         repository_root_path,
@@ -57,4 +64,5 @@ def test_worktree_directory_migration_refuses_active_linked_worktrees(
 
     assert migration_result.outcome == "conflict"
     assert legacy_worktree_root_path.is_dir()
+    assert active_worktree_path.is_dir()
     assert not (repository_root_path / ".kc-worktrees").exists()

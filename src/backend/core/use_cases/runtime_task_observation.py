@@ -48,6 +48,7 @@ def reconcile_runtime_task(
     lifecycle_run: PrdLifecycleRunRecord | None,
     *,
     context: RuntimeObservationContext,
+    latest_supervisor_action: str | None = None,
 ) -> RuntimeTask:
     """用新会话开始事件协调运行窗口，保留无法确认的状态。
 
@@ -55,9 +56,10 @@ def reconcile_runtime_task(
         task: 快照与运行账本组装的任务。
         lifecycle_run: 同一 Issue 最近的生命周期记录；它会跨重试复用。
         context: 生命周期读端、参考时间与读取失败披露。
+        latest_supervisor_action: 时间线最近的 PR 后监督动作。
 
     Returns:
-        运行窗口一致的摘要；标签与历史终态冲突时返回未知状态。
+        运行窗口一致的摘要；已结束的监督运行若最近动作是等待检查，则归为等待。
     """
     if task.status not in {
         RuntimeTaskStatus.RUNNING,
@@ -100,6 +102,24 @@ def reconcile_runtime_task(
     terminal_events = [event for event in session_events if is_terminal_event(event.event_type)]
     session_terminal = max(terminal_events, key=lambda event: event.occurred_at, default=None)
     if (
+        task.status in {RuntimeTaskStatus.RUNNING, RuntimeTaskStatus.UNKNOWN}
+        and session_terminal is not None
+        and session_terminal.event_type == "deferred"
+    ):
+        return replace(
+            task,
+            status=RuntimeTaskStatus.DEFERRED,
+            status_reason="GitHub API 暂不可用，任务已暂缓并等待自动重试。",
+            sync_error=(
+                task.sync_error
+                or task.last_error_summary
+                or "GitHub API 暂不可用，任务将在后续轮询重试。"
+            ),
+            last_observed_status=(task.last_observed_status or RuntimeTaskStatus.RUNNING),
+            last_observed_at=task.last_observed_at or task.finished_at,
+            last_outcome="deferred",
+        )
+    if (
         lifecycle_run is not None
         and not lifecycle_run.finished_at
         and session_terminal is None
@@ -115,6 +135,7 @@ def reconcile_runtime_task(
             finished_at=None,
             duration_seconds=max(0.0, (context.reference_time - session_start).total_seconds()),
             last_outcome=None,
+            last_error_summary=None,
             agent=None,
             preset=None,
             model=None,
@@ -150,9 +171,46 @@ def reconcile_runtime_task(
                 phase=derive_current_phase(lifecycle_run, session_events).value,
             )
     if task.status is RuntimeTaskStatus.RUNNING and task.finished_at:
+        if task.last_outcome == "deferred":
+            return replace(
+                task,
+                status=RuntimeTaskStatus.DEFERRED,
+                status_reason="GitHub API 暂不可用，任务已暂缓并等待自动重试。",
+                sync_error=(
+                    task.sync_error
+                    or task.last_error_summary
+                    or "GitHub API 暂不可用，任务将在后续轮询重试。"
+                ),
+                last_observed_status=(task.last_observed_status or RuntimeTaskStatus.RUNNING),
+            )
+        if task.sync_error:
+            return replace(
+                task,
+                status=RuntimeTaskStatus.DEFERRED,
+                status_reason="GitHub 同步失败，远端状态无法核实；等待自动重试。",
+                last_observed_status=(task.last_observed_status or RuntimeTaskStatus.RUNNING),
+            )
+        if (
+            latest_supervisor_action == "wait_for_checks"
+            and "agent/supervising" in task.labels
+            and task.last_outcome == "completed"
+            and SOURCE_PRD_LIFECYCLE not in context.unavailable_sources
+        ):
+            return replace(
+                task,
+                status=RuntimeTaskStatus.WAITING,
+                status_reason="最近 PR 监督动作要求等待再次检查",
+                waiting_reason="recheck",
+            )
         return replace(
             task,
             status=RuntimeTaskStatus.UNKNOWN,
             status_reason="监控标签仍标记运行，但最近运行已结束；当前执行状态待核实",
+        )
+    if task.status is RuntimeTaskStatus.UNKNOWN and task.sync_error:
+        return replace(
+            task,
+            status=RuntimeTaskStatus.DEFERRED,
+            status_reason="GitHub 同步失败，远端状态无法核实；等待自动重试。",
         )
     return task

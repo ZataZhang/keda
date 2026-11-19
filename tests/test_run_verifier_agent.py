@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,7 @@ from backend.core.shared.models.agent_runner import (
     RunnerConfig,
     ValidationConfig,
 )
+from backend.core.use_cases.agent_runner_primary_demo import PrimaryDemo, PrimaryDemoStep
 from backend.core.use_cases.agent_runner_structured_evidence import (
     ArtifactSpec,
     EvidenceBlock,
@@ -1074,3 +1076,32 @@ def test_split_publication_module_keeps_the_publication_logger_identity() -> Non
         == publication._logger.name
         == "backend.core.use_cases.agent_runner_publication"
     )
+
+
+def test_build_verifier_prompt_lists_primary_demo_and_mock_rule() -> None:
+    """有 primary_demo 时提示词列出各步，并要求未标注 mock 记 finding。"""
+    manifest = replace(
+        _manifest(),
+        primary_demo=PrimaryDemo(
+            file="demo-dedupe.mp4",
+            steps=(
+                PrimaryDemoStep(caption="导入两个大小写不同的邮箱", result="只剩一个用户"),
+                PrimaryDemoStep(caption="调用真实模型", result="模型回复", mock=True),
+            ),
+        ),
+    )
+
+    prompt = build_verifier_prompt(_issue(), "abc1234", manifest)
+
+    assert "Primary demo" in prompt
+    assert "demo-dedupe.mp4" in prompt
+    assert "1. 导入两个大小写不同的邮箱 -> 只剩一个用户" in prompt
+    assert "2. 调用真实模型 -> 模型回复 [declared mock]" in prompt
+    assert "verdict yellow, never green" in prompt
+
+
+def test_build_verifier_prompt_without_primary_demo_omits_demo_section() -> None:
+    """没有 primary_demo 时不出现主演示段落。"""
+    prompt = build_verifier_prompt(_issue(), "abc1234", _manifest())
+
+    assert "Primary demo" not in prompt

@@ -66,6 +66,7 @@ class StaleAttemptEvidence:
     stale_attempt_count: int = 0
     max_recovery_attempts: int = 0
     pending_rework: bool = False
+    remote_lease_expired: bool = False
 
 
 @dataclass(frozen=True)
@@ -117,6 +118,29 @@ def decide_stale_attempt_disposition(evidence: StaleAttemptEvidence) -> StaleAtt
         ),
         f"pending post-PR rework: {'yes' if evidence.pending_rework else 'no'}",
     )
+    if evidence.remote_lease_expired:
+        if evidence.pending_rework:
+            return StaleAttemptDecision(
+                StaleAttemptDisposition.REENQUEUE,
+                "The remote claim lease expired while post-PR rework is pending, so the Issue "
+                "stays running for the existing repair flow.",
+                basis,
+                pending_rework=True,
+            )
+        if evidence.stale_attempt_count >= evidence.max_recovery_attempts:
+            return StaleAttemptDecision(
+                StaleAttemptDisposition.FAIL,
+                "The remote claim lease expired and the recovery budget is exhausted.",
+                basis,
+                pending_rework=False,
+            )
+        return StaleAttemptDecision(
+            StaleAttemptDisposition.REENQUEUE,
+            "The remote claim lease expired; the Issue returns to ready for a fresh attempt "
+            "from the latest pushed branch state.",
+            basis,
+            pending_rework=False,
+        )
     if not evidence.worktree_resolvable:
         return StaleAttemptDecision(
             StaleAttemptDisposition.FAIL,
@@ -214,6 +238,9 @@ class StaleAttemptReport:
         stale_reason: 僵尸检出原因（``dead_pid`` / ``ttl_expired``），即"中断原因
             分类"——运营者靠它区分"进程确实没了"和"claim 卡死超龄"。
         attempt_history_excerpt: 既有 Attempt History 表格摘录；无则为 ``None``。
+        remote_machine_id: 远端租约持有机器编号；本机对账时为 ``None``。
+        remote_last_renewed_at: 认领标记记录的最近续期时间（UTC）；本机对账时为 ``None``。
+        remote_lease_ttl_seconds: 持有者声明的租约时长；本机对账时为 ``None``。
     """
 
     issue_number: int
@@ -223,6 +250,9 @@ class StaleAttemptReport:
     stale_attempt_seq: int
     stale_reason: str = ""
     attempt_history_excerpt: str | None = None
+    remote_machine_id: str | None = None
+    remote_last_renewed_at: str | None = None
+    remote_lease_ttl_seconds: int | None = None
 
 
 def format_stale_attempt_comment(report: StaleAttemptReport) -> str:
@@ -262,6 +292,12 @@ def format_stale_attempt_comment(report: StaleAttemptReport) -> str:
         "### Basis",
         "",
     ]
+    if report.remote_machine_id is not None:
+        lines[11:11] = [
+            f"| Machine ID | `{report.remote_machine_id}` |",
+            f"| Last lease renewal (UTC) | {report.remote_last_renewed_at or '-'} |",
+            f"| Declared lease TTL (seconds) | {report.remote_lease_ttl_seconds or '-'} |",
+        ]
     lines.extend(f"- {basis_entry}" for basis_entry in decision.basis)
     if report.attempt_history_excerpt:
         lines.extend(["", "### Attempt History (last recorded)", ""])

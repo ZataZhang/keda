@@ -72,6 +72,8 @@ export type EventTimelineEntry = {
   checks_state: string | null;
   mergeable: boolean | null;
   raw_marker: string;
+  /** PR 后监督事件的人读摘要；旧监控快照或其他阶段可能没有。 */
+  summary?: string | null;
 };
 
 export type LatestEventMarker = {
@@ -153,6 +155,10 @@ export type RepositoryMonitoringOverview = {
   anomaly_count: number;
   anomaly_summary: AnomalySummary;
   scanned_at: string;
+  /** 当前全量扫描不完整时的诊断；不完整结果不会覆盖最后一份成功快照。 */
+  sync_error?: string | null;
+  /** 附加在旧快照上的持久化同步失败诊断；成功扫描后消失。 */
+  sync_failure?: { reason: string; failed_at: string } | null;
 };
 
 export type MonitoringOverview = {
@@ -322,7 +328,7 @@ export type RunRecordEntry = {
   issue_url: string | null;
   trigger: string;
   agent: string;
-  outcome: "completed" | "failed" | "blocked";
+  outcome: "completed" | "failed" | "blocked" | "deferred";
   error_summary: string | null;
   started_at: string;
   finished_at: string;
@@ -947,6 +953,8 @@ export type PrdModelTokenUsageEntry = {
 
 export type IdeaInboxSource = "frontend" | "inbound" | "feishu" | "manual";
 
+export type IdeaStatus = "pending" | "in_progress" | "completed" | "abandoned";
+
 export type PrdDraftStatus = "pending-review" | "approved" | "rejected";
 
 export type IdeaEntry = {
@@ -955,6 +963,7 @@ export type IdeaEntry = {
   source: IdeaInboxSource;
   author: string;
   text: string;
+  status: IdeaStatus;
 };
 
 export type PrdDraftMetadata = {
@@ -1386,6 +1395,17 @@ export type EvaluationSuiteCase = {
   case_id: string;
   prompt: string;
   check_recipe: string;
+  base_ref?: string | null;
+  split?: "dev" | "holdout";
+  check_targets?: string[];
+};
+
+/** 评测集派生的逐题校准状态。 */
+export type EvaluationSuiteCalibration = {
+  required: boolean;
+  calibrated_count: number;
+  case_count: number;
+  cases: { case_id: string; calibrated: boolean; noop: number; gold: number }[];
 };
 
 /** suite 清单项：registry 目录内一个 YAML 文件的校验视图。 */
@@ -1401,6 +1421,8 @@ export type EvaluationSuiteEntry = {
   rubric_version?: string;
   check_timeout_seconds?: number;
   cases?: EvaluationSuiteCase[];
+  requires_calibration?: boolean;
+  calibration?: EvaluationSuiteCalibration;
   errors: string[];
 };
 
@@ -1412,6 +1434,7 @@ export type EvaluationPresetSnapshot = {
   reasoning_effort?: string | null;
   cost_status?: string;
   cost_estimate?: number | null;
+  kind?: "agent" | "calibration";
 };
 
 /** 一个评测 run（快照 + 状态机 + manifest hash）。 */
@@ -1436,6 +1459,9 @@ export type EvaluationRun = {
   updated_at: string;
   started_at: string | null;
   finished_at: string | null;
+  repeats: number;
+  case_bases: Record<string, { base_ref: string; commit: string; tree: string }>;
+  estimated_candidate_executions?: number;
 };
 
 /** 矩阵单元（case × 执行预设）的候选结果。 */
@@ -1460,6 +1486,7 @@ export type EvaluationResult = {
   error: string | null;
   created_at: string;
   updated_at: string;
+  repeat_index: number;
 };
 
 /** 单评审 × 单候选的评分行。 */
@@ -1499,12 +1526,26 @@ export type EvaluationSummary = {
   valid_judge_count: number;
 };
 
+/** 一个题目与执行预设的重复结果摘要。 */
+export type EvaluationStability = {
+  case_id: string;
+  execution_preset_id: string;
+  repeat_count: number;
+  passed_count: number;
+  execution_fault_count: number;
+  check_failure_count: number;
+  stable: boolean | null;
+};
+
 /** run 详情接口的完整载荷。 */
 export type EvaluationRunDetail = {
   run: EvaluationRun;
   results: EvaluationResult[];
   scores: EvaluationScore[];
   summary: EvaluationSummary;
+  stability: EvaluationStability[];
+  unstable_cases: EvaluationStability[];
+  calibration: EvaluationSuiteCalibration;
   payload_state: {
     is_active: boolean;
     awaiting_consent: boolean;
@@ -1516,11 +1557,12 @@ export type EvaluationRunDetail = {
 export type EvaluationPresetOptions = {
   execution_presets: {
     name: string;
-    agent: string;
+    agent: string | null;
     model: string | null;
     reasoning_effort: string | null;
     cost_status: string;
     cost_estimate: number | null;
+    kind?: "agent" | "calibration";
   }[];
   /** 评审预设即执行预设；available=false 表示该 agent 无法保证"只读 payload"。 */
   judge_presets: {
@@ -1564,6 +1606,7 @@ export type EvaluationJudgePreview = {
 /** 任务生命周期分桶，与后端 `RuntimeTaskStatus` 取值一一对应。 */
 export type RuntimeTaskStatus =
   | "running"
+  | "deferred"
   | "waiting"
   | "blocked"
   | "failed"
@@ -1595,10 +1638,22 @@ export type RuntimeTaskEntry = {
   status: RuntimeTaskStatus;
   /** 当前状态的直接来源，例如监控标签或 Issue 关闭状态。 */
   status_reason: string | null;
+  /** 最近一次 PR 监督请求人工处理时给出的摘要；未阻塞或无摘要时为空。 */
+  blocking_reason?: string | null;
+  /** GitHub 同步或远端读取失败原因；存在时表示后台正在自动重试。 */
+  sync_error?: string | null;
+  /** 最近一次成功同步观察到的任务状态；当前同步失败时用于展示过期状态。 */
+  last_observed_status?: RuntimeTaskStatus | null;
+  /** 最近一次成功同步时间；故障时与 `last_observed_status` 一起明确标识过期快照。 */
+  last_observed_at?: string | null;
   /** 监控异常类型，与状态来源分开呈现。 */
   anomaly_types: AnomalyType[];
   phase: string | null;
   agent: string | null;
+  /** 当前会话最近一条尚无结束事件的实际调用执行器；缺少调用记录时为空。 */
+  unclosed_invocation_executor?: string | null;
+  /** 未收口调用实际请求的模型；未请求模型或旧后端未提供时为空。 */
+  unclosed_invocation_model?: string | null;
   preset: string | null;
   model: string | null;
   attempt_number: number | null;
@@ -1607,7 +1662,19 @@ export type RuntimeTaskEntry = {
   finished_at: string | null;
   duration_seconds: number | null;
   last_outcome: string | null;
+  /** 最近一次失败、阻塞或暂缓重试原因；旧后端未提供时为空。 */
+  last_error_summary?: string | null;
+  /** 调用账本确认的失败生命周期阶段；仅执行器调用确实失败时提供。 */
+  failure_stage?: string | null;
+  /** 由失败阶段、执行器和调用终态归纳的简短失败原因。 */
+  failure_reason?: string | null;
+  /** 本次运行在失败阶段尝试过且调用未成功的执行器。 */
+  failed_executors?: string[];
   labels: string[];
+  /** 该任务是否有可播放的本地证据视频；没有证据或旧后端未提供时为 false/缺失。 */
+  evidence_video_available?: boolean;
+  /** 该任务是否有本地人审页（human-review-checklist.md 等）。 */
+  evidence_page_available?: boolean;
 };
 
 /** 看板任务摘要：列表 + 分桶计数 + 数据来源可用性披露。 */

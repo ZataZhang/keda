@@ -4,8 +4,8 @@
 
 - **只读复用**：任务身份与标签来自监控快照（:mod:`monitor_snapshots`），运行终态
   来自运行账本（``IRunHistoryStore``），阶段 / preset / 模型来自 attempt 账本，
-  PRD 关联来自生命周期账本（``IPrdLifecycleStore``）。本模块不打开 GitHub、
-  不读日志文件、不算改动树，也不新增任何存储。
+  PRD 关联来自生命周期账本（``IPrdLifecycleStore``），未收口调用执行器来自既有
+  invocation 账本。本模块不打开 GitHub、不读日志文件、不算改动树，也不新增数据库表。
 - **改动树触达读数不在这里**：唯一来源仍是现有
   ``GET /api/v1/agent-runner/backlog/prds/{encoded_path}/progress`` 契约，摘要只带
   ``prd_path``，由展示侧按需取数，避免第二份检测实现漂移。
@@ -16,13 +16,14 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from backend.core.shared.interfaces.runner_console import (
     AttemptRecord,
+    IInvocationEventStore,
     IPrdLifecycleStore,
     IRunHistoryStore,
     PrdLifecycleRunRecord,
@@ -35,7 +36,14 @@ from backend.core.shared.models.runtime_task import (
     RuntimeTaskStatus,
     RuntimeTaskSummary,
 )
-from backend.core.use_cases.monitor_snapshots import SnapshotOverviewResult
+from backend.core.use_cases.agent_runner_evidence_media import EvidenceMedia
+from backend.core.use_cases.agent_invocation_tracing import (
+    OUTCOME_UNCLOSED,
+    build_invocation_timeline,
+    resolve_invocation_store,
+)
+from backend.core.use_cases.runtime_failure_diagnosis import diagnose_runtime_failure
+from backend.core.use_cases.monitor_snapshots import MonitorSnapshotOverview, SnapshotOverviewResult
 from backend.core.use_cases.runtime_task_observation import (
     SOURCE_PRD_LIFECYCLE,
     RuntimeObservationContext,
@@ -62,12 +70,14 @@ _LABEL_STATUS_MAP: dict[str, RuntimeTaskStatus] = {
 #: 运行账本只能证明交付结果；历史失败不能证明 Issue 当前仍然阻塞。
 _OUTCOME_STATUS_MAP: dict[str, RuntimeTaskStatus] = {
     "completed": RuntimeTaskStatus.COMPLETED,
+    "deferred": RuntimeTaskStatus.DEFERRED,
 }
 
 #: ``unavailable_sources`` 的取值：前端据此把对应面板标为不可用。
 SOURCE_MONITOR_SNAPSHOT = "monitor_snapshot"
 SOURCE_RUN_HISTORY = "run_history"
 SOURCE_ATTEMPT_LEDGER = "attempt_ledger"
+SOURCE_INVOCATION_LEDGER = "invocation_ledger"
 
 #: 快照同步状态里，「整体还不可信」的取值。``partial`` 仍可用（缺的仓库单独披露）。
 _UNTRUSTED_SYNC_STATUSES = frozenset({"pending_first_sync"})
@@ -177,6 +187,38 @@ def _timeline_phase(issue_entry: Mapping[str, Any]) -> str | None:
     return None
 
 
+def _latest_timeline_action(issue_entry: Mapping[str, Any]) -> str | None:
+    """取 Issue 时间线里最近一个带动作的事件。"""
+    timeline = issue_entry.get("timeline")
+    if not isinstance(timeline, list):
+        return None
+    for entry in reversed(timeline):
+        if isinstance(entry, dict):
+            action = entry.get("action")
+            if isinstance(action, str) and action:
+                return action
+    return None
+
+
+def _latest_human_input_summary(issue_entry: Mapping[str, Any]) -> str | None:
+    """取最近一次 PR 监督请求人工处理时记录的摘要。"""
+    timeline = issue_entry.get("timeline")
+    if not isinstance(timeline, list):
+        return None
+    for event_entry in reversed(timeline):
+        if not isinstance(event_entry, dict):
+            continue
+        if event_entry.get("phase") != "post_pr_supervisor":
+            continue
+        if event_entry.get("action") != "request_human_input":
+            return None
+        summary = event_entry.get("summary")
+        if isinstance(summary, str) and summary.strip():
+            return summary.strip()
+        return None
+    return None
+
+
 def _pr_identity(issue_entry: Mapping[str, Any]) -> tuple[str | None, int | None]:
     """从监控快照条目里取 PR 链接与编号；没有 PR 时返回两个 ``None``。"""
     raw_pr = issue_entry.get("pr")
@@ -191,13 +233,19 @@ def _pr_identity(issue_entry: Mapping[str, Any]) -> tuple[str | None, int | None
 
 def _snapshot_task(
     *,
-    repo_id: str,
+    repo_snapshot: MonitorSnapshotOverview,
     repo_display_name: str,
     issue_entry: Mapping[str, Any],
     run_record: RunRecord | None,
     prd_path: str | None,
 ) -> RuntimeTask | None:
     """由监控快照条目 + 运行账本回落组装一条任务摘要。"""
+    repo_id = repo_snapshot.repo_id
+    snapshot_scanned_at = repo_snapshot.scanned_at
+    raw_sync_failure = repo_snapshot.overview.get("sync_failure")
+    sync_error = (
+        str(raw_sync_failure.get("reason") or "") if isinstance(raw_sync_failure, Mapping) else None
+    )
     issue_number = issue_entry.get("number")
     if not isinstance(issue_number, int):
         return None
@@ -228,17 +276,13 @@ def _snapshot_task(
                 status = RuntimeTaskStatus.UNKNOWN
                 status_reason = "监控快照没有可判定的生命周期标签"
 
+    blocking_reason = (
+        _latest_human_input_summary(issue_entry) if status is RuntimeTaskStatus.BLOCKED else None
+    )
+
     waiting_reason = None
     if status is RuntimeTaskStatus.WAITING:
-        timeline = issue_entry.get("timeline") or []
-        latest_action = next(
-            (
-                entry.get("action")
-                for entry in reversed(timeline)
-                if isinstance(entry, dict) and entry.get("action")
-            ),
-            None,
-        )
+        latest_action = _latest_timeline_action(issue_entry)
         if "agent/ready" in labels:
             waiting_reason = "queued"
         elif latest_action == "wait_for_checks":
@@ -247,6 +291,26 @@ def _snapshot_task(
             waiting_reason = "human_review"
         else:
             waiting_reason = "recheck"
+
+    snapshot_time = parse_runtime_timestamp(snapshot_scanned_at)
+    run_finished_at = parse_runtime_timestamp(run_record.finished_at) if run_record else None
+    run_record_is_unobserved = bool(
+        run_record
+        and run_record.outcome == "deferred"
+        and (snapshot_time is None or run_finished_at is None or snapshot_time <= run_finished_at)
+    )
+    if run_record_is_unobserved:
+        sync_error = run_record.error_summary or "GitHub API 暂时不可用，任务将在后续轮询重试。"
+
+    last_observed_status = status
+    if sync_error:
+        if run_record_is_unobserved or status is RuntimeTaskStatus.UNKNOWN:
+            status = RuntimeTaskStatus.DEFERRED
+            status_reason = "GitHub 状态读取暂缓，恢复后会自动重试。"
+        elif status_reason:
+            status_reason = f"{status_reason}；当前同步失败，状态可能已过期。"
+        else:
+            status_reason = "当前同步失败，任务状态可能已过期。"
 
     title = issue_entry.get("title")
     url = issue_entry.get("url")
@@ -261,6 +325,14 @@ def _snapshot_task(
         pr_number=pr_number,
         status=status,
         status_reason=status_reason,
+        blocking_reason=blocking_reason,
+        sync_error=sync_error,
+        last_observed_status=(
+            last_observed_status
+            if sync_error and last_observed_status is not RuntimeTaskStatus.UNKNOWN
+            else None
+        ),
+        last_observed_at=snapshot_scanned_at,
         waiting_reason=waiting_reason,
         phase=_timeline_phase(issue_entry),
         agent=run_record.agent if run_record else None,
@@ -268,6 +340,7 @@ def _snapshot_task(
         finished_at=run_record.finished_at if run_record else None,
         duration_seconds=run_record.duration_seconds if run_record else None,
         last_outcome=run_record.outcome if run_record else None,
+        last_error_summary=run_record.error_summary if run_record else None,
         prd_path=prd_path,
         labels=labels,
         anomaly_types=anomaly_types,
@@ -285,15 +358,19 @@ def _run_record_task(run_record: RunRecord, prd_path: str | None) -> RuntimeTask
         issue_url=run_record.issue_url,
         status=status,
         status_reason=(
-            f"运行账本终态：{run_record.outcome}"
+            "GitHub API 暂不可用，任务已暂缓并等待自动重试。"
+            if status is RuntimeTaskStatus.DEFERRED
+            else f"运行账本终态：{run_record.outcome}"
             if status is not RuntimeTaskStatus.UNKNOWN
             else f"缺少当前 Issue 状态；上次运行结果：{run_record.outcome}"
         ),
+        sync_error=(run_record.error_summary if run_record.outcome == "deferred" else None),
         agent=run_record.agent,
         started_at=run_record.started_at,
         finished_at=run_record.finished_at,
         duration_seconds=run_record.duration_seconds,
         last_outcome=run_record.outcome,
+        last_error_summary=run_record.error_summary,
         prd_path=prd_path,
     )
 
@@ -378,12 +455,127 @@ def _enrich_from_attempt(
     )
 
 
+def _enrich_from_unclosed_invocation(
+    task: RuntimeTask,
+    *,
+    invocation_store: IInvocationEventStore | None,
+    unavailable_sources: set[str],
+) -> RuntimeTask:
+    """用当前会话中最近一条未收口调用补出实际执行器，不推测进程存活。"""
+    if task.status is not RuntimeTaskStatus.RUNNING:
+        return task
+    session_started_at = parse_runtime_timestamp(task.started_at)
+    if session_started_at is None:
+        return task
+    if invocation_store is None:
+        unavailable_sources.add(SOURCE_INVOCATION_LEDGER)
+        return task
+
+    try:
+        invocation_events = invocation_store.list_issue_invocation_events(
+            repo_id=task.repo_id,
+            issue_number=task.issue_number,
+        )
+    except Exception as exc:  # noqa: BLE001 - 调用账本读失败只降级当前执行器字段。
+        _logger.warning(
+            "Runtime summary failed to read invocation ledger for %s#%d: %s",
+            task.repo_id,
+            task.issue_number,
+            exc,
+        )
+        unavailable_sources.add(SOURCE_INVOCATION_LEDGER)
+        return task
+
+    session_events = [
+        event
+        for event in invocation_events
+        if (event_time := parse_runtime_timestamp(event.occurred_at)) is not None
+        and event_time >= session_started_at
+    ]
+    invocation_rows = build_invocation_timeline(session_events)
+    latest_invocation = invocation_rows[-1] if invocation_rows else None
+    if latest_invocation is None or latest_invocation.outcome != OUTCOME_UNCLOSED:
+        return task
+
+    return replace(
+        task,
+        unclosed_invocation_executor=latest_invocation.executor,
+        unclosed_invocation_model=latest_invocation.requested_model,
+    )
+
+
+def _enrich_from_failed_invocation(
+    task: RuntimeTask,
+    *,
+    invocation_store: IInvocationEventStore | None,
+    unavailable_sources: set[str],
+) -> RuntimeTask:
+    """把失败调用账本压缩成失败阶段、执行器与可操作原因。"""
+    if (
+        task.status is not RuntimeTaskStatus.FAILED
+        or task.last_outcome != "failed"
+        or not task.started_at
+        or not task.finished_at
+    ):
+        return task
+    if invocation_store is None:
+        unavailable_sources.add(SOURCE_INVOCATION_LEDGER)
+        return task
+    try:
+        events = invocation_store.list_issue_invocation_events(
+            repo_id=task.repo_id,
+            issue_number=task.issue_number,
+        )
+    except Exception as exc:  # noqa: BLE001 - 调用账本失败只降级失败阶段说明。
+        _logger.warning(
+            "Runtime summary failed to read failed invocation ledger for %s#%d: %s",
+            task.repo_id,
+            task.issue_number,
+            exc,
+        )
+        unavailable_sources.add(SOURCE_INVOCATION_LEDGER)
+        return task
+    diagnosis = diagnose_runtime_failure(
+        started_at=task.started_at,
+        finished_at=task.finished_at,
+        outcome=task.last_outcome,
+        error_summary=task.last_error_summary,
+        run_agent=task.agent,
+        invocation_events=events,
+    )
+    if diagnosis is None:
+        return task
+    return replace(
+        task,
+        failure_stage=diagnosis.stage,
+        failure_reason=diagnosis.reason,
+        failed_executors=diagnosis.failed_executors,
+    )
+
+
 def _task_sort_key(task: RuntimeTask) -> tuple[int, float, str, int]:
     """看板排序键：状态优先级 → 开始时间倒序 → 仓库 → Issue 编号。"""
     parsed_start = parse_runtime_timestamp(task.started_at)
     # 越新的运行越靠前；无时间戳的任务排在同状态末尾。
     recency = -parsed_start.timestamp() if parsed_start else float("inf")
     return (task.status.display_order, recency, task.repo_id, task.issue_number)
+
+
+def _with_evidence_flags(task: RuntimeTask, media: EvidenceMedia | None) -> RuntimeTask:
+    """把本地或证据分支上的证据解析结果投影成任务行标记。
+
+    Args:
+        task: 原始任务行。
+        media: 该任务解析到的证据；没有证据时为 None。
+
+    Returns:
+        RuntimeTask: 带证据可用性标记的任务行。
+    """
+    return replace(
+        task,
+        evidence_video_available=bool(media and media.video_path is not None),
+        evidence_page_available=bool(media and (media.page_path is not None or media.page_ref)),
+    )
 
 
 def build_runtime_task_summary(
@@ -394,17 +586,20 @@ def build_runtime_task_summary(
     enabled_repo_ids: Sequence[str],
     now: datetime | None = None,
     max_rows: int = RUNTIME_TASK_MAX_ROWS,
+    evidence_media: Callable[[RuntimeTask], EvidenceMedia | None] | None = None,
 ) -> RuntimeTaskSummary:
     """组装运行态任务摘要。
 
     Args:
         snapshot_overview: 按当前 registry 过滤后的监控快照读路径结果。
-        run_history_store: 运行与 attempt 账本端口；``None`` 记为不可用来源。
+        run_history_store: 运行 / attempt 账本端口及可选 invocation 读能力；``None`` 记为不可用来源。
         prd_lifecycle_store: PRD 生命周期账本端口；``None`` 记为不可用来源。
         enabled_repo_ids: 当前注册且启用的仓库标识。**账本按仓库逐个读取**，
             因此已注销或停用仓库的历史运行不会带着旧 Issue 身份回到看板上。
         now: 推算耗时与时间窗的参考时间，注入以便单测确定性。
         max_rows: 摘要行数上限，超出时截断并置 ``truncated=True``。
+        evidence_media: 解析某个任务的本地证据（视频与人审页）；未接线时两者都
+            记为没有，按钮自然不出现。
 
     Returns:
         RuntimeTaskSummary: 任务摘要与数据来源可用性披露。改动树触达读数不在其中，
@@ -453,6 +648,7 @@ def build_runtime_task_summary(
 
     tasks: list[RuntimeTask] = []
     seen_keys: set[tuple[str, int]] = set()
+    latest_actions_by_issue: dict[tuple[str, int], str | None] = {}
 
     for repo_snapshot in snapshot_overview.repositories:
         display_name = str(repo_snapshot.overview.get("display_name") or repo_snapshot.repo_id)
@@ -462,7 +658,7 @@ def build_runtime_task_summary(
                 continue
             key = (repo_snapshot.repo_id, issue_number)
             task = _snapshot_task(
-                repo_id=repo_snapshot.repo_id,
+                repo_snapshot=repo_snapshot,
                 repo_display_name=display_name,
                 issue_entry=issue_entry,
                 run_record=runs_by_issue.get(key),
@@ -471,6 +667,7 @@ def build_runtime_task_summary(
             if task is None:
                 continue
             seen_keys.add(key)
+            latest_actions_by_issue[key] = _latest_timeline_action(issue_entry)
             tasks.append(task)
 
     for key, run_record in runs_by_issue.items():
@@ -502,6 +699,7 @@ def build_runtime_task_summary(
             task,
             lifecycle_by_issue.get((task.repo_id, task.issue_number)),
             context=observation_context,
+            latest_supervisor_action=latest_actions_by_issue.get((task.repo_id, task.issue_number)),
         )
         for task in tasks
     ]
@@ -529,9 +727,25 @@ def build_runtime_task_summary(
         for task in tasks
     ]
 
+    if evidence_media is not None:
+        tasks = [_with_evidence_flags(task, evidence_media(task)) for task in tasks]
+
     tasks.sort(key=_task_sort_key)
     truncated = len(tasks) > max_rows
     visible_tasks = tuple(tasks[:max_rows])
+    invocation_store = resolve_invocation_store(run_history_store)
+    visible_tasks = tuple(
+        _enrich_from_failed_invocation(
+            _enrich_from_unclosed_invocation(
+                task,
+                invocation_store=invocation_store,
+                unavailable_sources=unavailable_sources,
+            ),
+            invocation_store=invocation_store,
+            unavailable_sources=unavailable_sources,
+        )
+        for task in visible_tasks
+    )
 
     status_counts = {status.value: 0 for status in RuntimeTaskStatus}
     for task in visible_tasks:
@@ -551,6 +765,7 @@ def build_runtime_task_summary(
 
 __all__ = [
     "SOURCE_ATTEMPT_LEDGER",
+    "SOURCE_INVOCATION_LEDGER",
     "SOURCE_MONITOR_SNAPSHOT",
     "SOURCE_PRD_LIFECYCLE",
     "SOURCE_RUN_HISTORY",

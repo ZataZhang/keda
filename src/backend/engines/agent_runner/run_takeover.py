@@ -24,6 +24,7 @@ from typing import Any
 
 from backend.core.shared.interfaces.agent_runner import IGitHubClient
 from backend.core.shared.models.agent_runner import AppConfig
+from backend.core.shared.models.platform_support import require_posix_process_groups
 from backend.core.use_cases.agent_runner_reclaim import (
     reclaim_stale_running_issues,
 )
@@ -134,7 +135,7 @@ def _sweep_orphan_groups(group_ids: set[int]) -> None:
             time.sleep(0.1)
     for group_id in remaining:
         try:
-            os.killpg(group_id, signal.SIGKILL)
+            os.killpg(group_id, getattr(signal, "SIGKILL", signal.SIGTERM))
         except OSError:
             pass
 
@@ -178,7 +179,7 @@ def _stop_unmanaged_daemon(*, daemon_pid: int, stop_timeout_seconds: float) -> s
             return "sigterm"
         time.sleep(0.2)
     try:
-        os.kill(daemon_pid, signal.SIGKILL)
+        os.kill(daemon_pid, getattr(signal, "SIGKILL", signal.SIGTERM))
     except OSError:
         pass
     return "sigkill"
@@ -192,6 +193,7 @@ def take_over_daemon(
     github_client: IGitHubClient,
     process_registry_path: str | Path,
     process_log_dir: str | Path,
+    machine_id: str | None = None,
     stop_timeout_seconds: float = DEFAULT_STOP_TIMEOUT_SECONDS,
 ) -> DaemonTakeoverResult:
     """优雅停同仓 daemon、清理其 agent 子进程树并 reclaim 在途 Issue。
@@ -203,11 +205,16 @@ def take_over_daemon(
         github_client: 目标仓库的 GitHub 客户端。
         process_registry_path: 托管进程注册表路径（pidfile registry）。
         process_log_dir: 托管进程日志目录。
+        machine_id: 当前机器编号；供 reclaim 识别本机租约认领。
         stop_timeout_seconds: SIGTERM 后等待退出的秒数，超时升级 SIGKILL。
 
     Returns:
         :class:`DaemonTakeoverResult`。
+
+    Raises:
+        UnsupportedPlatformFeatureError: 当前宿主没有 POSIX 进程组（Windows）。
     """
+    require_posix_process_groups("kc takeover")
     # 快照 daemon 的后代进程组：agent 子进程整组回收依赖这份停前快照。
     descendant_groups = collect_descendant_group_ids(daemon_pid)
 
@@ -237,7 +244,11 @@ def take_over_daemon(
     # SIGKILL 兜底会留下 daemon 来不及清理的 agent 子进程树，按停前快照补扫。
     _sweep_orphan_groups(descendant_groups)
 
-    reclaimed = reclaim_stale_running_issues(config=config, github_client=github_client)
+    reclaimed = reclaim_stale_running_issues(
+        config=config,
+        github_client=github_client,
+        machine_id=machine_id,
+    )
     if reclaimed:
         _logger.info(
             "Takeover reclaimed %d in-flight Issue(s) for '%s': %s",

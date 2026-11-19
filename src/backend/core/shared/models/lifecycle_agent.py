@@ -242,6 +242,9 @@ LIFECYCLE_AGENT_BUILTIN_DEFAULT = "claude"
 #: 来源层标注取值（供 console API 呈递）。
 LIFECYCLE_SOURCE_PRD_OVERRIDE = "prd_override"
 LIFECYCLE_SOURCE_REPOSITORY = "repository"
+#: 仓库层中由个人覆盖 ``.kedacode.local.toml`` 声明的部分（设置页只写 ``.kedacode.toml``，
+#: 这一层只读呈现）。
+LIFECYCLE_SOURCE_LOCAL_OVERRIDE = "local_override"
 LIFECYCLE_SOURCE_GLOBAL = "global"
 LIFECYCLE_SOURCE_LEGACY = "legacy"
 LIFECYCLE_SOURCE_BUILTIN = "builtin"
@@ -350,6 +353,7 @@ __all__ = [
     "LIFECYCLE_SOURCE_BUILTIN",
     "LIFECYCLE_SOURCE_GLOBAL",
     "LIFECYCLE_SOURCE_LEGACY",
+    "LIFECYCLE_SOURCE_LOCAL_OVERRIDE",
     "LIFECYCLE_SOURCE_PRD_OVERRIDE",
     "LIFECYCLE_SOURCE_REPOSITORY",
     "LifecycleAgentEntryGroup",

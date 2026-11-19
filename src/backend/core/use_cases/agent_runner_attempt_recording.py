@@ -7,8 +7,9 @@ attempt + 通知增量持久化 + 写短期记忆"样板搬到这里集中承载
 
 from __future__ import annotations
 
+import subprocess
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NoReturn
 
 from backend.core.shared.models.agent_model_preset import ModelSelection
 from backend.core.shared.models.agent_runner import (
@@ -16,6 +17,17 @@ from backend.core.shared.models.agent_runner import (
     CommandResult,
     FailureType,
     TokenUsage,
+)
+from backend.core.use_cases.agent_runner_check_result import (
+    CheckActionDirective,
+    CheckFailureInput,
+    CheckFailureSnapshot,
+    assess_check_failure,
+)
+from backend.core.use_cases.agent_runner_commit import worktree_change_fingerprint
+from backend.core.use_cases.agent_runner_failure import (
+    HumanActionRequiredError,
+    RecoveryStalledError,
 )
 from backend.core.use_cases.agent_runner_memory import _persist_short_term_memory
 from backend.core.use_cases.run_agent_once import (
@@ -25,6 +37,7 @@ from backend.core.use_cases.run_agent_once import (
     _make_attempt_result,
     classify_failure,
     get_head_sha,
+    VerificationFailedError,
 )
 
 if TYPE_CHECKING:
@@ -152,3 +165,89 @@ def _classify_and_record_gate_failure(
     )
     _record_attempt(context, failure_type=failure_type, detail=detail)
     return failure_type
+
+
+def _record_human_action_required(
+    context: _AttemptRecordContext,
+    directive: CheckActionDirective,
+    failure_phase: str,
+) -> NoReturn:
+    """记录需要人工介入的尝试，并终止自动恢复。
+
+    Args:
+        context: 当前 attempt 的记录上下文。
+        directive: 检查协议或无进展判定给出的阻塞说明。
+        failure_phase: 发生阻塞的生命周期阶段。
+    """
+    context.attempt_phases.mark_failure_phase(failure_phase)
+    _record_attempt(
+        context,
+        failure_type=FailureType.HUMAN_ACTION_REQUIRED,
+        detail=f"Human action required ({directive.block_type}): {directive.summary}",
+    )
+    raise HumanActionRequiredError(
+        context.request.issue.number,
+        directive,
+        context.attempt_results,
+    )
+
+
+def _handle_external_check_failure(
+    context: _AttemptRecordContext,
+    failure: subprocess.CalledProcessError | VerificationFailedError,
+    failure_phase: str,
+    seen_snapshots: set[CheckFailureSnapshot],
+) -> None:
+    """处理检查异常，并在相同失败且工作树无变化时转人工。
+
+    Args:
+        context: 当前 attempt 的记录上下文。
+        failure: 验证结果异常或子进程命令异常。
+        failure_phase: 当前检查所在的生命周期阶段。
+        seen_snapshots: 本轮执行中已观察到的失败快照集合。
+    """
+    failure_input: CheckFailureInput = (
+        failure.verification_results if isinstance(failure, VerificationFailedError) else failure
+    )
+    try:
+        current_worktree_fingerprint = worktree_change_fingerprint(
+            context.request.worktree_path,
+            context.request.process_runner,
+        )
+    except Exception as fingerprint_exc:  # noqa: BLE001 - 诊断降级不能替代门禁结果。
+        _logger.warning(
+            "Unable to fingerprint the worktree after an external check failure: %s",
+            fingerprint_exc,
+        )
+        current_worktree_fingerprint = None
+    assessment = assess_check_failure(
+        failure_input,
+        worktree_fingerprint=current_worktree_fingerprint,
+        previous_snapshots=seen_snapshots,
+    )
+    seen_snapshots.add(assessment.snapshot)
+    if assessment.directive is not None:
+        if assessment.directive.block_type == "recovery_stalled":
+            _record_recovery_stalled(context, assessment.directive, failure_phase)
+        _record_human_action_required(context, assessment.directive, failure_phase)
+
+
+def _record_recovery_stalled(
+    context: _AttemptRecordContext,
+    directive: CheckActionDirective,
+    failure_phase: str,
+) -> NoReturn:
+    """记录当前 Agent 无进展并交给编排层尝试备用 Agent。
+
+    Args:
+        context: 当前 attempt 的记录上下文。
+        directive: 相同检查失败的停滞说明。
+        failure_phase: 发生停滞的生命周期阶段。
+    """
+    context.attempt_phases.mark_failure_phase(failure_phase)
+    _record_attempt(
+        context,
+        failure_type=FailureType.RECOVERY_STALLED,
+        detail=f"Recovery stalled ({directive.block_type}): {directive.summary}",
+    )
+    raise RecoveryStalledError(directive, context.attempt_results)

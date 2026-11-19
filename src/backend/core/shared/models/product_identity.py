@@ -23,6 +23,7 @@ __all__ = [
     "PRIMARY_COMMAND_NAME",
     "PRODUCT_DISPLAY_NAME",
     "REPOSITORY_CONFIG_FILENAME",
+    "REPOSITORY_LOCAL_OVERRIDE_FILENAME",
     "STATE_DIR_NAME",
     "build_child_env",
     "effective_repository_config_path",
@@ -52,6 +53,9 @@ STATE_DIR_NAME = ".kedacode"
 
 REPOSITORY_CONFIG_FILENAME = ".kedacode.toml"
 """仓库本地配置文件名。"""
+
+REPOSITORY_LOCAL_OVERRIDE_FILENAME = ".kedacode.local.toml"
+"""个人本地覆盖配置文件名（不进版本库，叠加在 ``.kedacode.toml`` 之上）。"""
 
 ENV_PREFIX = "KEDACODE_"
 """产品环境变量前缀。"""

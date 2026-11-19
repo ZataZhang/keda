@@ -39,9 +39,11 @@ from backend.core.use_cases.agent_runner_session_store import (
     mark_agent_session_complete,
     resolve_resumable_session_id,
 )
+from backend.core.use_cases.agent_runner_check_result import CheckActionDirective
 from backend.core.use_cases.agent_runner_failure import (
     AgentExecutionError,
     AgentUnavailableError,
+    HumanActionRequiredError,
     ProviderCapacityError,
     format_agent_execution_failure,
     is_provider_capacity_failure,
@@ -647,6 +649,25 @@ def run_pre_pr_review(
                     ),
                 )
                 if cycle >= max_attempts:
+                    if isinstance(exc, VerificationFailedError):
+                        # 修复轮次用尽仍卡在提交门禁：再重跑也撞同一堵墙（门禁可能误判，
+                        # 如把合并进来的 main 代码算作本次改动），转 blocked 交人判断。
+                        raise HumanActionRequiredError(
+                            issue.number,
+                            CheckActionDirective(
+                                block_type="pre_pr_review_commit_gate",
+                                summary=(
+                                    f"Pre-PR review patch failed the commit gate in the last "
+                                    f"of {max_attempts} cycle(s): {pending_commit_failure}"
+                                ),
+                                next_action=(
+                                    "Fix the gate failure (or the gate itself if it misfires), "
+                                    "commit and push the branch, then run "
+                                    f"`kc blocked-continue {issue.number}`."
+                                ),
+                            ),
+                            [],
+                        ) from exc
                     raise RuntimeError(f"Pre-PR review repair failed: {exc}") from exc
                 continue
         else:

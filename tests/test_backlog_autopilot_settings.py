@@ -59,6 +59,9 @@ require_verifier_pass = true
 auto_sign_off = false
 merge_check_timeout_seconds = 1800
 
+[agent_runner.safety]
+auto_merge = false
+
 [agent_runner.backlog]
 auto_advance = false
 """
@@ -248,21 +251,36 @@ def _real_config_for(repo_root: Path) -> AppConfig:
     """用产品自身的 loader 从临时仓真实 .kedacode.toml 读出生效配置片段。"""
     settings = load_agent_runner_local_settings(repo_root)
     assert settings is not None
-    # local 配置里未写的段为 None：此时沿用 AppConfig 默认值（auto_merge=False）。
+    # local 配置里未写的段为 None：此时沿用 AppConfig 的开启默认值。
     local_autopilot = settings.autopilot
     local_backlog = settings.backlog
     local_safety = settings.safety
     return replace(
         AppConfig(),
         autopilot=replace(
-            AutopilotConfig(), enabled=bool(local_autopilot.enabled) if local_autopilot else False
+            AutopilotConfig(), enabled=bool(local_autopilot.enabled) if local_autopilot else True
         ),
         backlog=replace(
             BacklogConfig(),
             auto_advance=bool(local_backlog.auto_advance) if local_backlog else False,
         ),
-        safety=SafetyConfig(auto_merge=bool(local_safety.auto_merge) if local_safety else False),
+        safety=SafetyConfig(auto_merge=bool(local_safety.auto_merge) if local_safety else True),
     )
+
+
+def test_missing_local_merge_settings_use_enabled_defaults(tmp_path: Path) -> None:
+    """仓库配置省略两个开关时会继承全局自动合并默认值。"""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / ".kedacode.toml").write_text(
+        "[agent_runner.backlog]\nauto_advance = false\n",
+        encoding="utf-8",
+    )
+
+    config = _real_config_for(repo_root)
+
+    assert config.autopilot.enabled is True
+    assert config.safety.auto_merge is True
 
 
 def test_upstream_merged_promotes_downstream_when_auto_advance_enabled(tmp_path: Path) -> None:

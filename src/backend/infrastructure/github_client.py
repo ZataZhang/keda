@@ -34,18 +34,24 @@ import re
 import subprocess
 import time
 import tomllib
+from contextlib import AbstractContextManager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Sequence
 from urllib.parse import urlsplit
 
-from backend.core.shared.interfaces.agent_runner import GitHubApiRateLimitError
+from backend.core.shared.interfaces.agent_runner import (
+    GitHubApiRateLimitError,
+    GitHubApiUnavailableError,
+)
 from backend.core.shared.interfaces.github_api_budget import (
     API_KIND_GRAPHQL,
     API_KIND_REST,
     IGitHubApiBudget,
 )
 from backend.core.shared.models.agent_spec import AgentSpec
+from backend.core.shared.models.product_identity import state_home
+from backend.infrastructure.file_lock import file_lock
 from backend.infrastructure.github_helpers import (
     _GITHUB_API_RATE_LIMIT_PATTERN,
     _RETRYABLE_GH_ERROR_PATTERNS,
@@ -54,11 +60,13 @@ from backend.infrastructure.github_helpers import (
 from backend.infrastructure.github_issue_ops import (
     comment_issue,
     create_issue,
+    delete_issue_comment,
     edit_issue_body,
     edit_issue_comment,
     edit_issue_labels,
     get_issue,
     list_issue_comment_entries,
+    list_issue_comment_records,
     list_issue_comments,
     list_issue_label_names,
     list_issues_by_label,
@@ -113,6 +121,9 @@ _MAX_GH_RETRIES = 3
 
 # Delay between retries in seconds.
 _GH_RETRY_DELAY_SECONDS = 1.0
+
+# 未单独指定超时的 gh 命令默认时限：网络卡死时不能让一条请求无限挂住整个 Issue。
+_DEFAULT_GH_REQUEST_TIMEOUT_SECONDS = 120
 
 # ``gh api rate_limit`` 的资源名与额度类型的对应关系（REST 在 GitHub 那边叫 ``core``）。
 _RATE_LIMIT_RESOURCE_BY_KIND = {API_KIND_GRAPHQL: "graphql", API_KIND_REST: "core"}
@@ -211,6 +222,9 @@ class GitHubCliClient:
         repo_path: Path,
         process_runner: SubprocessRunner | None = None,
         api_budget: IGitHubApiBudget | None = None,
+        *,
+        bypass_budget_pause: bool = False,
+        request_timeout_seconds: int | None = None,
     ) -> None:
         """Create the client.
 
@@ -218,10 +232,19 @@ class GitHubCliClient:
             repo_path: Target repository path.
             process_runner: Optional process runner to use for gh commands.
             api_budget: 跨进程共享的额度预算；省略时不记账也不受暂停闸门约束。
+            bypass_budget_pause: 心跳续期等安全收尾请求继续计费，但忽略共享暂停闸门。
+            request_timeout_seconds: 未单独指定超时的 gh 命令默认时限；省略时用
+                ``_DEFAULT_GH_REQUEST_TIMEOUT_SECONDS``。
         """
         self.repo_path = repo_path
         self._runner = process_runner or SubprocessRunner()
         self._api_budget = api_budget
+        self._bypass_budget_pause = bypass_budget_pause
+        self._request_timeout_seconds = (
+            request_timeout_seconds
+            if request_timeout_seconds is not None
+            else _DEFAULT_GH_REQUEST_TIMEOUT_SECONDS
+        )
         self._github_api_rate_limited: set[str] = set()
         self._owner_repo_cache: str | None = None
 
@@ -323,26 +346,30 @@ class GitHubCliClient:
         timeout: int | None = None,
         capture_output: bool = True,
         input_text: str | None = None,
+        attempts: int = _MAX_GH_RETRIES,
     ) -> CommandResult:
         """执行 ``gh`` 命令，对瞬时网络错误有限重试并按 API 类型隔离限流。
+
+        非幂等写入可通过 attempts=1 将重试交给能回读的调用方。
 
         GitHub 明确返回限流时立即抛出延期信号；GraphQL 配额耗尽不会阻断 REST 恢复请求。
         """
 
         api_kind = self._github_api_kind(command)
-        if api_kind in self._github_api_rate_limited:
+        if api_kind in self._github_api_rate_limited and not self._bypass_budget_pause:
             raise GitHubApiRateLimitError(
                 "GitHub API rate limit was reached earlier in this pass; "
                 f"remaining {api_kind} operations were deferred."
             )
 
-        if self._api_budget is not None and api_kind is not None:
+        if self._api_budget is not None and api_kind is not None and not self._bypass_budget_pause:
             # 先探测再判断：探测免费，且能撤销已经过期的暂停标记。
             self._probe_budget_if_due()
             self._api_budget.ensure_available(api_kind)
 
         last_exc: subprocess.CalledProcessError | None = None
-        for attempt in range(1, _MAX_GH_RETRIES + 1):
+        effective_timeout = timeout if timeout is not None else self._request_timeout_seconds
+        for attempt in range(1, attempts + 1):
             if self._api_budget is not None and api_kind is not None:
                 self._api_budget.record_call(api_kind, _gh_operation_label(command))
             try:
@@ -350,16 +377,64 @@ class GitHubCliClient:
                     command,
                     cwd=cwd,
                     check=check,
-                    timeout=timeout,
+                    timeout=effective_timeout,
                     capture_output=capture_output,
                     input_text=input_text,
                 )
                 if command_result.return_code != 0:
-                    self._raise_if_rate_limited(
-                        (command_result.stdout or "") + "\n" + (command_result.stderr or ""),
-                        command,
+                    combined_output = (
+                        (command_result.stdout or "") + "\n" + (command_result.stderr or "")
                     )
+                    self._raise_if_rate_limited(combined_output, command)
+                    last_exc = subprocess.CalledProcessError(
+                        command_result.return_code,
+                        list(command),
+                        output=command_result.stdout,
+                        stderr=command_result.stderr,
+                    )
+                    if self._is_retryable_gh_error(last_exc):
+                        if attempt >= attempts:
+                            failure_detail = (
+                                command_result.stderr or command_result.stdout or str(last_exc)
+                            ).strip()
+                            raise GitHubApiUnavailableError(
+                                "GitHub API remained unavailable after "
+                                f"{attempts} attempts: {failure_detail}"
+                            ) from last_exc
+                        _logger.warning(
+                            "GitHub CLI transient error (attempt %d/%d), retrying in %.1fs: %s",
+                            attempt,
+                            attempts,
+                            _GH_RETRY_DELAY_SECONDS,
+                            command_result.stderr.strip()
+                            if command_result.stderr
+                            else command_result.stdout.strip(),
+                        )
+                        time.sleep(_GH_RETRY_DELAY_SECONDS)
+                        continue
                 return command_result
+            except subprocess.TimeoutExpired as timeout_exc:
+                # 超时视为瞬时网络故障：统一转成 CalledProcessError，走下面同一套
+                # 重试与上层失败处理，避免调用方漏接 TimeoutExpired。
+                exc = subprocess.CalledProcessError(
+                    124,
+                    list(command),
+                    output=timeout_exc.output,
+                    stderr=f"gh command operation timed out after {effective_timeout}s",
+                )
+                last_exc = exc
+                if attempt >= attempts:
+                    raise GitHubApiUnavailableError(
+                        f"GitHub API connection timed out after {attempts} attempts: {exc.stderr}"
+                    ) from timeout_exc
+                _logger.warning(
+                    "GitHub CLI timed out (attempt %d/%d), retrying in %.1fs: %s",
+                    attempt,
+                    attempts,
+                    _GH_RETRY_DELAY_SECONDS,
+                    _gh_operation_label(command),
+                )
+                time.sleep(_GH_RETRY_DELAY_SECONDS)
             except subprocess.CalledProcessError as exc:
                 last_exc = exc
                 combined_output = (exc.stdout or "") + "\n" + (exc.stderr or "")
@@ -367,12 +442,19 @@ class GitHubCliClient:
                     self._raise_if_rate_limited(combined_output, command)
                 except GitHubApiRateLimitError as rate_limit_exc:
                     raise rate_limit_exc from exc
-                if not check or attempt >= _MAX_GH_RETRIES or not self._is_retryable_gh_error(exc):
+                is_retryable = self._is_retryable_gh_error(exc)
+                if not is_retryable:
                     raise
+                if attempt >= attempts:
+                    failure_detail = (exc.stderr or exc.stdout or str(exc)).strip()
+                    raise GitHubApiUnavailableError(
+                        "GitHub API remained unavailable after "
+                        f"{attempts} attempts: {failure_detail}"
+                    ) from exc
                 _logger.warning(
                     "GitHub CLI transient error (attempt %d/%d), retrying in %.1fs: %s",
                     attempt,
-                    _MAX_GH_RETRIES,
+                    attempts,
                     _GH_RETRY_DELAY_SECONDS,
                     exc.stderr.strip() if exc.stderr else str(exc),
                 )
@@ -489,23 +571,76 @@ class GitHubCliClient:
     # --- issue delegations ---------------------------------------------
 
     def list_ready_issues(self, ready_label: str, limit: int) -> list[IssueSummary]:
+        """列出带就绪标签的未关闭 Issue。
+
+        Args:
+            ready_label: 表示就绪状态的标签名。
+            limit: 最多返回的 Issue 数量。
+
+        Returns:
+            匹配标签的 Issue 摘要。
+        """
         return list_ready_issues(self, ready_label, limit)
 
     def list_rework_prd_issues(self, rework_prd_label: str, limit: int) -> list[IssueSummary]:
+        """列出带 rework-prd 标签的未关闭 Issue。
+
+        Args:
+            rework_prd_label: 表示 PRD 需要返工的标签名。
+            limit: 最多返回的 Issue 数量。
+
+        Returns:
+            匹配标签的 Issue 摘要。
+        """
         return list_rework_prd_issues(self, rework_prd_label, limit)
 
     def list_review_candidate_issues(self, labels: Sequence[str], limit: int) -> list[IssueSummary]:
+        """列出带任一给定标签的未关闭 Issue。
+
+        Args:
+            labels: 用于筛选候选 Issue 的标签集合。
+            limit: 最多返回的 Issue 数量。
+
+        Returns:
+            匹配任一标签的 Issue 摘要。
+        """
         return list_review_candidate_issues(self, labels, limit)
 
     def list_issues_by_label(
         self, label: str | None, limit: int, state: str = "all"
     ) -> list[IssueSummary]:
+        """按标签读取指定状态的 Issue。
+
+        Args:
+            label: 筛选用标签；为 ``None`` 时不按标签过滤。
+            limit: 最多返回的 Issue 数量。
+            state: GitHub Issue 状态筛选值。
+
+        Returns:
+            匹配标签和状态的 Issue 摘要。
+        """
         return list_issues_by_label(self, label, limit, state)
 
     def list_repository_items(self, *, state: str = "open") -> list[IssueSummary]:
+        """完整列出仓库的 Issue 与 PR，保留每个条目的正文和状态。
+
+        Args:
+            state: GitHub 项目状态筛选值。
+
+        Returns:
+            仓库中符合状态筛选的 Issue 与 PR 摘要。
+        """
         return list_repository_items(self, state=state)
 
     def get_issue(self, issue_number: int) -> IssueSummary:
+        """读取指定编号的 Issue 摘要。
+
+        Args:
+            issue_number: GitHub Issue 编号。
+
+        Returns:
+            指定 Issue 的摘要。
+        """
         return get_issue(self, issue_number)
 
     def edit_issue_labels(
@@ -515,18 +650,85 @@ class GitHubCliClient:
         add: Sequence[str] = (),
         remove: Sequence[str] = (),
     ) -> None:
+        """添加或移除 Issue 标签。
+
+        Args:
+            issue_number: GitHub Issue 编号。
+            add: 要添加的标签名。
+            remove: 要移除的标签名。
+
+        Returns:
+            无返回值。
+        """
         edit_issue_labels(self, issue_number, add=add, remove=remove)
 
     def comment_issue(self, issue_number: int, body: str) -> None:
+        """向 Issue 发布 Markdown 评论。
+
+        Args:
+            issue_number: GitHub Issue 编号。
+            body: 评论正文。
+
+        Returns:
+            无返回值。
+        """
         comment_issue(self, issue_number, body)
 
     def edit_issue_body(self, issue_number: int, body: str) -> None:
+        """替换 Issue 正文。
+
+        Args:
+            issue_number: GitHub Issue 编号。
+            body: 要设置的完整 Issue 正文。
+
+        Returns:
+            无返回值。
+        """
         edit_issue_body(self, issue_number, body)
 
+    def presence_creation_lock(self) -> AbstractContextManager[None]:
+        """按 GitHub 仓库名锁定本机的状态板初始化。"""
+        repo_slug = self._get_owner_repo().lower()
+        return file_lock(state_home() / "presence-locks" / f"{repo_slug}.lock")
+
+    def close_issue(self, issue_number: int) -> None:
+        """通过 GitHub REST API 关闭指定 Issue。"""
+        self._run_with_retry(
+            [
+                "gh",
+                "api",
+                "-X",
+                "PATCH",
+                f"repos/{self._get_owner_repo()}/issues/{issue_number}",
+                "-f",
+                "state=closed",
+            ],
+            cwd=self.repo_path,
+        )
+
     def create_issue(self, *, title: str, body: str, labels: Sequence[str]) -> str:
+        """创建 GitHub Issue 并返回其 URL。
+
+        Args:
+            title: Issue 标题。
+            body: Issue 正文。
+            labels: 创建时附加的标签名。
+
+        Returns:
+            新建 Issue 的 URL。
+        """
         return create_issue(self, title=title, body=body, labels=labels)
 
     def list_issue_comments(self, issue_number: int, *, require_success: bool = False) -> list[str]:
+        """读取 Issue 评论的非空正文，默认按尽力读取处理失败。
+
+        Args:
+            issue_number: GitHub Issue 编号。
+            require_success: 是否要求 GitHub 查询成功。
+
+        Returns:
+            Issue 中非空的评论正文。
+        """
         return list_issue_comments(self, issue_number, require_success=require_success)
 
     def list_issue_comment_entries(
@@ -558,12 +760,60 @@ class GitHubCliClient:
             require_success=require_success,
         )
 
+    def list_issue_comment_records(
+        self,
+        issue_number: int,
+        *,
+        trusted_only: bool = False,
+        body_contains: str | None = None,
+        require_success: bool = False,
+    ):
+        """读取评论及服务端更新时间和作者。"""
+        return list_issue_comment_records(
+            self,
+            issue_number,
+            trusted_only=trusted_only,
+            body_contains=body_contains,
+            require_success=require_success,
+        )
+
     def edit_issue_comment(self, comment_id: int, body: str) -> None:
+        """修改一条已有的 Issue 评论。
+
+        Args:
+            comment_id: 要修改的 GitHub 评论编号。
+            body: 要设置的完整评论正文。
+
+        Returns:
+            无返回值。
+        """
         edit_issue_comment(self, comment_id, body)
+
+    def delete_issue_comment(self, comment_id: int) -> None:
+        """删除一条 Issue 评论。
+
+        Args:
+            comment_id: 要删除的 GitHub 评论编号。
+
+        Returns:
+            无返回值。
+        """
+        delete_issue_comment(self, comment_id)
 
     # --- PR delegations -------------------------------------------------
 
     def create_draft_pr(self, *, title: str, body: str, base_branch: str, cwd: Path) -> str:
+        """基于当前分支创建 Draft PR 并返回其 URL。
+
+        Args:
+            title: PR 标题。
+            body: PR 正文。
+            base_branch: PR 目标分支。
+            cwd: 执行 GitHub CLI 的仓库工作目录。
+
+        Returns:
+            新建 Draft PR 的 URL。
+        """
         return create_draft_pr(self, title=title, body=body, base_branch=base_branch, cwd=cwd)
 
     def get_pull_request_context(
@@ -590,12 +840,39 @@ class GitHubCliClient:
         return get_pull_request_context_by_number(self, pr_number, require_success=require_success)
 
     def comment_pr(self, pr_number: int, body: str) -> None:
+        """向 PR 发布 Markdown 评论。
+
+        Args:
+            pr_number: GitHub PR 编号。
+            body: 评论正文。
+
+        Returns:
+            无返回值。
+        """
         comment_pr(self, pr_number, body)
 
     def update_pull_request_body(self, pr_number: int, body: str) -> None:
+        """替换 PR 的描述正文。
+
+        Args:
+            pr_number: GitHub PR 编号。
+            body: 要设置的完整 PR 正文。
+
+        Returns:
+            无返回值。
+        """
         update_pull_request_body(self, pr_number, body)
 
     def set_pull_request_base(self, pr_number: int, base_branch: str) -> None:
+        """修改 PR 的目标分支。
+
+        Args:
+            pr_number: GitHub PR 编号。
+            base_branch: 新的目标分支名。
+
+        Returns:
+            无返回值。
+        """
         set_pull_request_base(self, pr_number, base_branch)
 
     def mark_pull_request_ready(self, pr_number: int) -> None:
@@ -603,6 +880,15 @@ class GitHubCliClient:
         mark_pull_request_ready(self, pr_number)
 
     def merge_pull_request(self, pr_number: int, *, method: str = "squash") -> None:
+        """按指定方式（默认 squash）合并 PR。
+
+        Args:
+            pr_number: GitHub PR 编号。
+            method: GitHub 支持的合并方式。
+
+        Returns:
+            无返回值。
+        """
         merge_pull_request(self, pr_number, method=method)
 
     def close_pull_request(self, pr_number: int, *, comment: str | None = None) -> None:
@@ -610,18 +896,62 @@ class GitHubCliClient:
         close_pull_request(self, pr_number, comment=comment)
 
     def list_pr_comments(self, pr_number: int) -> list[str]:
+        """读取 PR 对话区中的评论正文。
+
+        Args:
+            pr_number: GitHub PR 编号。
+
+        Returns:
+            PR 中非空的评论正文。
+        """
         return list_pr_comments(self, pr_number)
 
     def find_open_pr_by_head(self, branch: str, *, require_success: bool = False) -> str | None:
+        """若分支存在开放 PR，则返回其 URL。
+
+        Args:
+            branch: 远端 head 分支名。
+            require_success: 是否要求查询成功。
+
+        Returns:
+            开放 PR 的 URL；没有匹配 PR 时返回 ``None``。
+        """
         return find_open_pr_by_head(self, branch, require_success=require_success)
 
     def find_merged_pr_by_head(self, branch: str, *, require_success: bool = False) -> str | None:
+        """若分支存在已合并 PR，则返回其 URL。
+
+        Args:
+            branch: 远端 head 分支名。
+            require_success: 是否要求查询成功。
+
+        Returns:
+            已合并 PR 的 URL；没有匹配 PR 时返回 ``None``。
+        """
         return find_merged_pr_by_head(self, branch, require_success=require_success)
 
     def get_remote_base_sha(self, remote: str, base_branch: str) -> str:
+        """返回远端基线分支当前的提交 SHA。
+
+        Args:
+            remote: Git 远端名称。
+            base_branch: 基线分支名。
+
+        Returns:
+            远端基线分支对应的提交 SHA。
+        """
         return get_remote_base_sha(self, remote, base_branch)
 
     def list_pull_requests_for_issue(
         self, repo: str, issue_number: int
     ) -> list[PullRequestSummary]:
+        """列出引用或关闭指定 Issue 的 PR。
+
+        Args:
+            repo: GitHub 仓库标识，格式为 ``owner/name``。
+            issue_number: GitHub Issue 编号。
+
+        Returns:
+            正文引用或关闭该 Issue 的 PR 摘要。
+        """
         return list_pull_requests_for_issue(self, repo, issue_number)

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """PRD 验收状态的读取：验收状态横幅与验收清单勾选计数。
 
-PRD 头部的验收状态横幅（⬜ 未开工 / 🧍 待人工验收 / ✅ 已验收）与 §9 验收清单的勾选
+PRD 头部的验收状态横幅（⬜ 未开工 / ⏸️ 验证阻塞 / 🧍 待人工验收 / ✅ 已验收）与 §9 验收清单的勾选
 进度，是看板判断"这条 PRD 现在欠谁的活"的两个原始信号；执行锁的进度提示也读同一份计数。
 
 本模块是 prd skill 契约解析（``skills/prd/scripts/prd_contract.py``）的**随模板同步副本**：
@@ -31,16 +31,18 @@ CHECKBOX_PATTERN = re.compile(r"^\s*[-*+]\s+\[(?P<mark>[ xX])\]")
 CODE_FENCE_PATTERN = re.compile(r"^\s*(?:```|~~~)")
 
 # 验收状态横幅（Acceptance Status Banner）：PRD 头部紧接交付前置横幅的引用块，
-# 是 §9 验收清单的投影，只有 ⬜ 未开工 / 🧍 待人工验收 / ✅ 已验收 三个状态。
+# 是 §9 验收清单的投影，只有 ⬜ 未开工 / ⏸️ 验证阻塞 / 🧍 待人工验收 / ✅ 已验收 四个状态。
 # ``可归档`` 是 ``已验收`` 的旧称（归档曾经要等人工验收完成），存量 PRD 一律按已验收读。
 ACCEPTANCE_STATUS_BANNER_PATTERN = re.compile(
     r"^\s*>\s*.*?(?:验收状态|Acceptance Status)", re.IGNORECASE
 )
 ACCEPTANCE_STATUS_NOT_STARTED = "not_started"
+ACCEPTANCE_STATUS_VALIDATION_BLOCKED = "validation_blocked"
 ACCEPTANCE_STATUS_AWAITING_HUMAN = "awaiting_human"
 ACCEPTANCE_STATUS_ACCEPTED = "accepted"
 ACCEPTANCE_STATUS_TOKENS = (
     (ACCEPTANCE_STATUS_NOT_STARTED, "未开工"),
+    (ACCEPTANCE_STATUS_VALIDATION_BLOCKED, "验证阻塞"),
     (ACCEPTANCE_STATUS_AWAITING_HUMAN, "待人工验收"),
     (ACCEPTANCE_STATUS_ACCEPTED, "已验收"),
     (ACCEPTANCE_STATUS_ACCEPTED, "可归档"),
@@ -100,10 +102,11 @@ def count_checklist_items(prd_text: str) -> tuple[int, int]:
 
 
 def parse_acceptance_status(prd_text: str) -> str:
-    """解析 PRD 头部验收状态横幅的三态。
+    """解析 PRD 头部验收状态横幅的四态。
 
-    横幅是 §9 验收清单的投影，只有 ``⬜ 未开工`` / ``🧍 待人工验收`` /
-    ``✅ 已验收`` 三个状态（旧称 ``✅ 可归档`` 按 ``已验收`` 读），且带可 grep 的
+    横幅是 §9 验收清单的投影，只有 ``⬜ 未开工`` / ``⏸️ 验证阻塞`` /
+    ``🧍 待人工验收`` / ``✅ 已验收`` 四个状态（旧称 ``✅ 可归档`` 按 ``已验收`` 读），
+    且带可 grep 的
     字面量 ``验收状态``（或 ``Acceptance Status``）。只在引用块行（``>`` 开头）里
     查找，避免把正文或决策日志里对该横幅的讨论误当成状态声明；命中首行横幅后取
     标记之后**最先出现**的状态词，模板自带的括号说明（``未开工（…改为 🧍 待人工

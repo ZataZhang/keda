@@ -28,6 +28,13 @@ from backend.core.shared.models.agent_runner import (
     DeliveryGateError,
     DeliveryGateFailureKind,
 )
+from backend.core.use_cases.agent_runner_primary_demo import (
+    PRIMARY_DEMO_PROMPT_EN,
+    PRIMARY_DEMO_PROMPT_ZH,
+    PrimaryDemo,
+    PrimaryDemoFormatError,
+    parse_primary_demo,
+)
 from backend.core.use_cases.agent_runner_evidence_format import (
     IMAGE_EVIDENCE_SUFFIXES,
 )
@@ -157,6 +164,7 @@ class EvidenceManifest:
     version: int
     language: str
     items: tuple[EvidenceBlock, ...]
+    primary_demo: PrimaryDemo | None = None
 
 
 @dataclass(frozen=True)
@@ -181,6 +189,7 @@ class StructuredEvidenceReport:
 
     language: str
     items: tuple[StructuredEvidenceItemReport, ...]
+    primary_demo: PrimaryDemo | None = None
 
 
 _LABELS: dict[str, dict[str, str]] = {
@@ -573,7 +582,18 @@ def load_evidence_manifest(
         version=1,
         language=language,
         items=tuple(parsed_blocks),
+        primary_demo=_parse_primary_demo(manifest_data.get("primary_demo"), evidence_dir_text),
     )
+
+
+def _parse_primary_demo(raw_demo: object, evidence_dir_text: str) -> PrimaryDemo | None:
+    """解析可选的 ``primary_demo``，形状错误包装成 manifest 格式错误。"""
+    try:
+        return parse_primary_demo(
+            raw_demo, f"`{evidence_dir_text}/evidence.json` field `primary_demo`"
+        )
+    except PrimaryDemoFormatError as format_error:
+        raise _manifest_format_error(str(format_error)) from format_error
 
 
 def _extract_manifest_string(
@@ -822,9 +842,16 @@ def validate_evidence_manifest(
                 "`validation.require_negative_control=false` to opt out."
             )
 
+    demo = manifest.primary_demo
+    if demo is not None and not (resolved_evidence_dir / demo.file).is_file():
+        raise ValidationEvidenceError(
+            f"`primary_demo.file` `{demo.file}` is missing from `{evidence_dir_text}/`."
+        )
+
     return StructuredEvidenceReport(
         language=manifest.language,
         items=tuple(item_reports),
+        primary_demo=manifest.primary_demo,
     )
 
 
@@ -952,15 +979,23 @@ def build_structured_evidence_prompt_suffix(language: str) -> str:
             "每个检查点都要证明'这测试会失败'：先用 negative_control 让它变红、记录 expected_fail，"
             "再展示修复后变绿——只有绿、无法证明会红的证据视为无效。"
             "命令退出码为 0 不等于检查点成立：禁止用 `|| true`、`|| echo ok` 之类兜底把命令刷绿。"
+            "单条命令的门禁复跑上限默认 300 秒（`[agent_runner.validation].reexecute_timeout_seconds`），"
+            "命令必须是自终止的检查，不能是长驻服务。"
             "可选填 `stdout_assertions` 声明输出断言（数组，每项含 `pattern`，以及可选的 "
             "`severity`（默认 high）、`source`（stdout/stderr，默认 stdout）、`must_match`（默认 true，"
-            "false 表示不得出现）；用精确子串而非正则，避免 `.*` 之类假阳）："
+            "false 表示不得出现）；用精确子串而非正则，避免 `.*` 之类假阳）；"
+            "不要断言会随改动漂移的计数（如 `24 passed`），后续加测试就会误判失败，"
+            '改用 `" passed"` 必须出现 + `" failed"` 不得出现：'
             '例如 `[{{{{"severity": "high", "pattern": "200 OK", "must_match": true}}}}, '
             '{{{{"pattern": "Traceback", "must_match": false}}}}]`。'
+            "声明了 `stdout_assertions` 就必须先本地自检通过：运行 "
+            "`kc evidence check --evidence {evidence_dir}`，它会用与交付门禁相同的判定复跑命令并核对断言；"
+            "自检全部 PASS 后再请求提交。"
             'manifest 顶层必须声明 `version: 1` 和 `language: "{language}"`。'
             "所有证据文件必须命名为 `rv-<item_number>-<slug>.<ext>` 并放在 `{evidence_dir}/` 下。"
             "重要：每个证据文件必须只包含对应 item 的输出，禁止混入其他 item 的内容；"
             "不要用 `exec > >(tee -a ...)` 这类全局 stdout 重定向，它会让多个 item 的输出串到同一个文件里。"
+            + PRIMARY_DEMO_PROMPT_ZH
         ).format(language=language, evidence_dir="{evidence_dir}")
     return (
         "Additionally, you must write a structured evidence manifest to "
@@ -979,18 +1014,29 @@ def build_structured_evidence_prompt_suffix(language: str) -> str:
         "is only ever green, with no way to show it failing, is not accepted. "
         "Exit code 0 does not prove the checkpoint: never paper over failures with "
         "`|| true` or `|| echo ok`. "
+        "The delivery gate re-runs each command with a default 300s limit "
+        "(`[agent_runner.validation].reexecute_timeout_seconds`), so every command "
+        "must be a self-terminating check, never a long-running server. "
         "Optionally declare `stdout_assertions` (a list of objects with `pattern` plus "
         "optional `severity` (default `high`), `source` (`stdout`/`stderr`, default "
         "`stdout`) and `must_match` (default `true`; `false` forbids the substring)) — "
         'e.g. `[{{{{"severity": "high", "pattern": "200 OK", "must_match": true}}}}, '
         '{{{{"pattern": "Traceback", "must_match": false}}}}]`. '
         "Prefer exact substrings over regex so `.*` cannot fake a pass. "
+        "Do not assert counts that drift as the code changes (e.g. `24 passed`) — adding "
+        'a test later turns the gate red; assert `" passed"` present plus `" failed"` '
+        "absent instead. "
+        "If you declare `stdout_assertions`, you must pass the local self-check before "
+        "requesting a commit: run `kc evidence check --evidence {evidence_dir}` — it "
+        "re-runs the commands and checks the assertions with the delivery gate's own "
+        "judgment. "
         'The manifest top level must declare `version: 1` and `language: "{language}"`. '
         "All evidence files must be named `rv-<item_number>-<slug>.<ext>` and placed "
         "under `{evidence_dir}/`. "
         "Important: each evidence file must contain ONLY the output of its own item; "
         "never mix output from multiple items into one file. Avoid shell-wide stdout "
-        "redirection such as `exec > >(tee -a ...)` which leaks output across files."
+        "redirection such as `exec > >(tee -a ...)` which leaks output across files. "
+        + PRIMARY_DEMO_PROMPT_EN
     ).format(language=language, evidence_dir="{evidence_dir}")
 
 

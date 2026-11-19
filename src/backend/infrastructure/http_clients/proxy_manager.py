@@ -122,7 +122,7 @@ class ClashProxyManager:
                 logger.error("No select-type proxy group found")
                 return []
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - 代理列表读取失败时返回空列表。
             logger.error(f"Failed to get proxies: {e}")
             return []
 
@@ -212,7 +212,7 @@ class ClashProxyManager:
                     )
                     continue
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - 单次切换失败继续尝试下一个节点。
                 logger.error(f"Exception during proxy switch attempt {attempts}: {e}")
                 continue
 
@@ -239,7 +239,7 @@ class ClashProxyManager:
             resp.raise_for_status()
             data = resp.json()
             return data.get("now")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - 读取当前节点失败时返回 None。
             logger.error(f"Failed to get current proxy: {e}")
             return None
 
@@ -275,7 +275,7 @@ class ClashProxyManager:
             resp.raise_for_status()
             logger.info(f"Proxy test successful. IP: {resp.json().get('origin', 'unknown')}")
             return True
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - 连通性测试失败即视为不可用。
             logger.error(f"Proxy test failed: {e}")
             return False
 
@@ -328,7 +328,7 @@ class HttpProxyManager:
         try:
             proxy_url = f"http://{self.username}:{self.password}@{self.tunnel}/"
             return {"http": proxy_url, "https": proxy_url}
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - 代理配置构建失败时返回空配置。
             logger.error(f"构建代理配置失败: {e}")
             return {}
 
@@ -368,7 +368,7 @@ class HttpProxyManager:
             resp.raise_for_status()
             logger.info(f"HTTP代理测试成功. IP: {resp.json().get('origin', 'unknown')}")
             return True
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - 连通性测试失败即视为不可用。
             logger.error(f"HTTP代理测试失败: {e}")
             return False
 

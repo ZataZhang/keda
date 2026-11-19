@@ -38,6 +38,7 @@ def function_name(param1: str, param2: int) -> bool:
   - `D100`–`D104`：模块、公共类、公共函数、包 `__init__` 必须有 docstring。
   - `D105`–`D107`：magic method、嵌套类、`__init__` 必须有 docstring。
   - `D419`：禁止空 docstring。
+  - `BLE001`：优先捕获具体异常；确需捕获 `Exception` 时，用 `# noqa: BLE001 - 原因` 说明宽泛捕获的边界。
   - 配置位于 `pyproject.toml` 的 `[tool.ruff.lint]`。
   - 运行 `uv run ruff check src/backend tests hooks` 或 `just lint --full` 进行检查。
 - **前端**：`frontend-admin` 与 `frontend-public` 均启用 `eslint-plugin-jsdoc`。

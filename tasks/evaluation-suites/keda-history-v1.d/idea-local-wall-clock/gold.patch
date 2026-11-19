@@ -1,0 +1,92 @@
+diff --git a/src/backend/api/cli_loop.py b/src/backend/api/cli_loop.py
+index ad8c7e72..b3e4d91d 100644
+--- a/src/backend/api/cli_loop.py
++++ b/src/backend/api/cli_loop.py
+@@ -20,0 +21 @@ from backend.api.cli_exit_codes import ExitCode
++from backend.api.cli_utils import format_local_display_time
+@@ -80 +81 @@ def _format_task_row(task: LoopTask) -> str:
+-    next_fire = task.next_fire_at or "—"
++    next_fire = format_local_display_time(task.next_fire_at) or "—"
+@@ -213 +214 @@ def run_loop_create_command(
+-        f"next_fire={task.next_fire_at})."
++        f"next_fire={format_local_display_time(task.next_fire_at) or '—'})."
+@@ -361 +362,2 @@ def run_loop_run_now_command(
+-            f"issue={result.issue_url}, next_fire={result.next_fire_at}."
++            f"issue={result.issue_url}, "
++            f"next_fire={format_local_display_time(result.next_fire_at) or '—'}."
+@@ -366 +368,2 @@ def run_loop_run_now_command(
+-            f"PRD={result.relative_prd_path}, next_fire={result.next_fire_at}."
++            f"PRD={result.relative_prd_path}, "
++            f"next_fire={format_local_display_time(result.next_fire_at) or '—'}."
+diff --git a/src/backend/api/cli_registry.py b/src/backend/api/cli_registry.py
+index 3521a80c..3954e7d5 100644
+--- a/src/backend/api/cli_registry.py
++++ b/src/backend/api/cli_registry.py
+@@ -18,0 +19 @@ from backend.api.cli_helpers import repository_selector_error
++from backend.api.cli_utils import format_local_display_time
+@@ -573 +574 @@ def _run_daemon_status_command(
+-                record.started_at,
++                format_local_display_time(record.started_at),
+diff --git a/src/backend/api/cli_typer_lifecycle.py b/src/backend/api/cli_typer_lifecycle.py
+index 3587eaec..78644c67 100644
+--- a/src/backend/api/cli_typer_lifecycle.py
++++ b/src/backend/api/cli_typer_lifecycle.py
+@@ -4,0 +5,3 @@ from __future__ import annotations
++# 两个只读 CLI 子命令模块的 typer 样板导入逐字一致，属结构性重复（同
++# core/shared/interfaces/agent_runner.py 的先例），不为此新增抽象层。
++# jscpd:ignore-start
+@@ -24,0 +28,3 @@ from backend.api.cli_typer_app import OutputFormat, OutputOption, _enum_value, a
++from backend.api.cli_utils import format_local_display_time
++
++# jscpd:ignore-end
+@@ -62,0 +69,2 @@ def _render_lifecycle_table(lifecycle_details: Sequence[PrdLifecycleDetail]) ->
++        # 有事件时展示最新事件时间，否则回落到账本 started_at；两者共用同一占位符规则。
++        updated_moment = last_event.occurred_at if last_event else lifecycle_detail.started_at
+@@ -69 +77 @@ def _render_lifecycle_table(lifecycle_details: Sequence[PrdLifecycleDetail]) ->
+-            last_event.occurred_at if last_event else (lifecycle_detail.started_at or "—"),
++            format_local_display_time(updated_moment) or "—",
+@@ -103 +111 @@ def _render_lifecycle_detail(lifecycle_details: Sequence[PrdLifecycleDetail]) ->
+-                lifecycle_event.occurred_at,
++                format_local_display_time(lifecycle_event.occurred_at) or "—",
+diff --git a/src/backend/api/cli_utils.py b/src/backend/api/cli_utils.py
+index 21cf1d2c..dcbf55ed 100644
+--- a/src/backend/api/cli_utils.py
++++ b/src/backend/api/cli_utils.py
+@@ -10,0 +11 @@ import subprocess
++from datetime import datetime
+@@ -14,0 +16,25 @@ _MAX_CLI_ERROR_STREAM_CHARS = 12000
++def format_local_display_time(timestamp: str | None) -> str:
++    """把带时区的 ISO-8601 时间戳换算成执行机器本地时区的人读文本。
++
++    CLI 人读输出按本机时区展示时间；JSON 机器输出不经过本函数，账本里的
++    UTC 原文保持不变。
++
++    Args:
++        timestamp (str | None): ISO-8601 时间戳。带时区（``Z`` 或 ``±HH:MM``
++            偏移）的值换算到机器本地时区并保留偏移；无时区的墙钟标签与无法
++            解析的值原样返回，不做时区猜测；空值返回空串。
++
++    Returns:
++        str: 本地时区的 ``YYYY-MM-DDTHH:MM:SS±HH:MM`` 文本，或原样输入。
++    """
++    if not timestamp:
++        return ""
++    try:
++        parsed_timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
++    except ValueError:
++        return timestamp
++    if parsed_timestamp.tzinfo is None:
++        return timestamp
++    return parsed_timestamp.astimezone().isoformat(timespec="seconds")
++
++
+diff --git a/src/backend/core/use_cases/idea_inbox.py b/src/backend/core/use_cases/idea_inbox.py
+index 8d70a49d..e5ab40d8 100644
+--- a/src/backend/core/use_cases/idea_inbox.py
++++ b/src/backend/core/use_cases/idea_inbox.py
+@@ -267 +267,4 @@ def append_idea(
+-    stamp = occurred_at or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
++    # ideas.md 头部时间戳按 docs/guides/idea-inbox.md 约定是**捕获机器本地墙钟**
++    # （agent 用 `date "+%Y-%m-%d %H:%M"` 写入），展示侧原样读取、不做时区换算；
++    # 产品写入的默认值必须遵循同一约定，否则页面会把 UTC 墙钟当本地时间显示。
++    stamp = occurred_at or datetime.now().strftime("%Y-%m-%d %H:%M")

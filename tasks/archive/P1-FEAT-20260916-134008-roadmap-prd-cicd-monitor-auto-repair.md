@@ -5,8 +5,7 @@
 > ⛔ **交付前置**：`hard` — 本 PRD 按 Roadmap→Backlog 改名后的目标态书写（`iar backlog ci`、`agent_runner_backlog.py`、`/app/backlog` 等），硬依赖改名 PRD `P1-REFACTOR-20261005-144335-roadmap-feature-rename-to-backlog.md` 先交付。物化该依赖要求被依赖 PRD 先带 `- GitHub Issue: .../issues/N` 链接，故须**先对改名 PRD 执行 `iar issue-from-prd` 建 Issue**，再创建本 PRD 的 Issue。历史硬依赖的 Agent-led Post-PR CI Decision PRD `P1-BUG-20260924-100212-agent-led-post-pr-ci-decision.md` 已归档交付（`tasks/archive/`）。结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> 🧍 **验收状态**：待人工验收 — 执行侧交付完成：rv-2/3/4/5/6 全部通过并附证据（rv-3 e2e 4 passed + 真实 Backlog UI 截图、rv-4 定向 17 passed、rv-5 全量 2975 passed + lint/mkdocs/前端构建全绿、rv-6 真实 CLI 进程演练通过）；rv-1 的 live sandbox 演练按用户 2026-10-05 决定移入 Human-Confirmed 由人工验收时确认（fake GitHub 状态机已覆盖同一序列）；独立 verifier VERDICT: PASS。
-> 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
+> ✅ **验收状态**：已验收 — 2026-10-28 按合并态追认（交付 PR #203 于 2026-10-05 合并）。本次未逐项人工复核；遗留与未闭环项见文末 Change Log。
 
 本文档分两个高度：**Part A（§1–§4）** 给人确认行为与风险，**Part B（§5–§13）** 给执行器实现和验证。
 
@@ -551,13 +550,14 @@ No external validation required; repository code and existing PRDs were sufficie
 - [x] PRD 归档至 tasks/archive/ — runner-owned gate: archive（随交付 PR 携带归档，🧍 待人工验收）
 
 #### Human-Confirmed
+> 2026-10-28 按合并态追认：以下各项由用户一次性确认，未逐项人工复核；遗留与未闭环项见文末 Change Log。
 
-- [ ] rv-1 live 演练确认（用户 2026-10-05 决定由人工验收时确认）：Agent 选择的两轮 repair 在两个新 head 上各执行一次；同一 action/head 重入与 daemon 重启零重复；零 job/账单问题不因 FAILURE 自动 repair —— 本机无 GitHub sandbox，fake GitHub 状态机已在 `tests/test_backlog_ci_delivery.py` 覆盖同一序列，live webm/演练待用户在有凭据环境确认
-- [ ] 决策一确认：自动修复默认关闭，且不与 Autopilot、auto merge 或 pre-commit Fix Agent 联动
-- [ ] 决策二确认：多轮自动修复复用既有 repair attempts 上限，耗尽后停止自动动作并持续显错
-- [ ] 决策三确认：单 PRD 使用 inherit/on/off 三态并保存在 Issue marker；无 Issue 时只能跟随全局
-- [ ] 决策四确认：CLI（`iar backlog ci`）与 Console 并列为一等入口，CLI 不引入独立状态或存储、机器输出复用 Console DTO
-- [ ] §9.1 三项人读呈递物均已查看并接受
+- [x] rv-1 live 演练确认（用户 2026-10-05 决定由人工验收时确认）：Agent 选择的两轮 repair 在两个新 head 上各执行一次；同一 action/head 重入与 daemon 重启零重复；零 job/账单问题不因 FAILURE 自动 repair —— 本机无 GitHub sandbox，fake GitHub 状态机已在 `tests/test_backlog_ci_delivery.py` 覆盖同一序列，live webm/演练待用户在有凭据环境确认
+- [x] 决策一确认：自动修复默认关闭，且不与 Autopilot、auto merge 或 pre-commit Fix Agent 联动
+- [x] 决策二确认：多轮自动修复复用既有 repair attempts 上限，耗尽后停止自动动作并持续显错
+- [x] 决策三确认：单 PRD 使用 inherit/on/off 三态并保存在 Issue marker；无 Issue 时只能跟随全局
+- [x] 决策四确认：CLI（`iar backlog ci`）与 Console 并列为一等入口，CLI 不引入独立状态或存储、机器输出复用 Console DTO
+- [x] §9.1 三项人读呈递物均已查看并接受
 
 ## 10. Functional Requirements
 
@@ -729,3 +729,11 @@ decision-board 就本轮 4 项开工前待决收口，结论（Q1/Q2/Q4 采纳�
 - Reason: 按 PRD 推荐目标态交付；rv-1/rv-2 的 live sandbox 演练与 rv-6 真实 CLI 演练在无凭据环境按 mock_boundary 以 fake 状态机覆盖并如实披露，待 opt-in 补齐。
 - Impact: 交付 PR 携带本归档；Human-Confirmed 四项决策留待 merge-as-acceptance 或对话确认后回填。
 - Review: `CI=true just test all` 2975 passed；`just lint --full`（SKIP=check-test-flag）、`uv run mkdocs build --strict`、前端 typecheck/build、e2e 4 passed；独立 verifier 结论见 evidence 目录 verifier-report。
+
+### 2026-10-28 · 按合并态批量追认验收
+- Type: human acceptance
+- Before: 横幅为待人工验收，§9 Human-Confirmed 尚有 6 项空框；交付 PR #203 已于 2026-10-05 合并，但未记录人工验收。
+- After: 2026-10-28 按合并态追认，全部 Human-Confirmed 项勾选，横幅改为已验收。本次未逐项人工复核；勾选不表示未执行项已验证。遗留与未闭环：rv-1 live 演练按用户 2026-10-05 的决定留给人工验收，本次按 fake GitHub 状态机已覆盖同一序列接受。
+- Reason: 交付代码已在主干运行 23 天，逐项补审无法改变既成事实；按用户 2026-10-28 的决定以合并态追认关闭验收账本，原有风险披露全部保留。
+- Impact: 仅验收记录变化，无实现、契约、证据或门禁变化。
+- Review: 用户 2026-10-28 在对话中明确批准批量追认；本条目未声称逐项复核。

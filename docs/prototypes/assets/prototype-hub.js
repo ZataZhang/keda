@@ -27,10 +27,10 @@
     },
     {
       id: 'prd-lifecycle-observability', title: 'Console 运行时看板与模型评测', project: 'keda', module: 'Agent Runner / Dashboard',
-      system: 'Keda Console', form: 'code-native', version: 'v3.0', updatedAt: '2026-10-12', availability: 'available', validationLevel: '交互原型',
-      primaryFlow: '默认查看运行时任务卡片与详情日志，折叠工具调用；打开四任务桌面悬浮窗预览；进入模型评测配置、查看逐维评分、评审分歧与外发授权流程；也可回到 Backlog 生命周期详情和 Stats',
-      description: '静态 fixture 驱动的 Console 目标态交互原型。Dashboard 卡片用状态颜色与文字呈现 Issue 运行阶段；右侧展示日志和可折叠结构化调用；桌面页用紧凑四任务布局展示改动树触达比例，但不模拟跨应用置顶；评测页展示固定样本对比、多评审模型逐维评分和确切 payload 预览，拒绝与确认都不触发真实网络请求。原型不连接 API、SQLite、Agent 或模型服务。',
-      preview: './assets/runtime-board-preview.png', entry: './prd-lifecycle-observability.html#dashboard', source: './prd-lifecycle-observability.md', provenance: ['./assets/runtime-board-preview.source/', './assets/runtime-widget-preview.source/', './assets/runtime-evaluation-preview.source/', './assets/runtime-consent-preview.source/'],
+      system: 'Keda Console', form: 'code-native', version: 'v3.1', updatedAt: '2026-10-29', availability: 'available', validationLevel: '交互原型',
+      primaryFlow: '查看运行时任务与可折叠调用；进入模型评测基线，切换真实 Agent 与校准候选，调整重复次数和留出集后查看稳定性与执行故障；也可查看既有多评审评分、外发授权、Backlog 生命周期详情和 Stats',
+      description: '静态 fixture 驱动的 Console 交互原型。新增 M13 评测基线页，展示 keda-history-v1 校准摘要、模型与纯校准运行模式、重复次数和留出集候选执行估算，以及逐题稳定/不稳定结果与独立故障计数；旧的多评审模型评分与外发授权视图继续保留。原型不连接 API、SQLite、Agent 或模型服务。',
+      preview: './assets/runtime-board-preview.png', entry: './prd-lifecycle-observability.html#dashboard', source: './prd-lifecycle-observability.md', provenance: ['./assets/runtime-board-preview.source/', './assets/runtime-widget-preview.source/', './assets/runtime-evaluation-preview.source/', './assets/runtime-evaluation-baseline-preview.source/', './assets/runtime-consent-preview.source/'],
       relationships: [
         { id: 'roadmap-cicd-repair', label: '继续查看 CI/CD 检查与自动修复轮次' },
         { id: 'roadmap-controls-evidence', label: '查看同一 Backlog 画布上的控制与验收证据入口' },
@@ -85,11 +85,11 @@
     },
     {
       id: 'lifecycle-agent-matrix', title: '生命周期与执行器统一设置', project: 'keda', module: 'Console 设置', system: 'Keda Console',
-      form: 'code-native', version: 'v3.1', updatedAt: '2026-10-09', availability: 'available', validationLevel: '交互原型',
-      primaryFlow: '从 Settings 的统一设置入口或 Backlog 仓库齿轮进入同一页面；定义模型预设、查看九阶段 Agent / 模型 / 推理深度和来源，并配置执行器回退候选队列与写入预览',
-      description: '在既有 lifecycle-agent-matrix 原型内将生命周期矩阵、模型预设和执行器回退顺序放进同一设置页，并用区块导航定位三类设置。矩阵调整为四列，放大字段并将预设改为双列卡片；Settings 仅保留 Agent 标签与页面入口。复用真实 frontend-public 截图作产品外壳，交互覆盖全局/仓库范围、阶段绑定、预设编辑、新建预设、可重复执行器的候选排序（不同预设分别成行）和写入预览；保存分别预览生命周期范围配置与全局 Runner 的 TOML 写入；Backlog 仓库齿轮进入同一设置页并预选仓库，PRD 覆盖流程仍保留。',
-      preview: './assets/lifecycle-agent-matrix/preview-lifecycle-settings.png', entry: './lifecycle-agent-matrix.html', source: './lifecycle-agent-matrix/',
-      provenance: ['./assets/lifecycle-agent-matrix/preview-lifecycle-settings.source/'],
+      form: 'code-native', version: 'v3.2', updatedAt: '2026-11-13', availability: 'available', validationLevel: '交互原型（设置细节）+ 设计概念（入口）',
+      primaryFlow: '生产入口位于 Repositories 顶层“执行器与模型”，与仓库列表平级；查看选中的入口概念图，并从历史交互原型演示生命周期、模型和执行器回退设置细节',
+      description: '生产页面已将生命周期矩阵、模型预设和执行器回退顺序放到 Repositories 顶层，与仓库列表平级；全局/仓库范围与 Backlog 仓库预选入口均保留。选中的 Repositories 入口布局见设计概念图。关联 HTML 交互原型沿用旧 Settings 外壳，只演示设置细节和状态交互，不代表当前产品导航；设置保存仍是概念性的 TOML 写入预览。',
+      preview: './assets/lifecycle-agent-matrix/repositories-lifecycle-settings-concept.png', entry: './lifecycle-agent-matrix.html', source: './lifecycle-agent-matrix/',
+      provenance: ['./assets/lifecycle-agent-matrix/repositories-lifecycle-settings-concept.prompt.md'],
       relationships: [{ id: 'prd-lifecycle-observability', label: '从配置页转到 PRD 执行过程与仓库统计' }],
     },
     {

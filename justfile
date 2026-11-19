@@ -34,30 +34,50 @@ reinstall-kc:
 
 # 前端构建 + CLI 重装：改过 frontend-public 后想一步到位时用它
 # （console-sync 要跑完整 Next.js 构建，所以没有塞进 reinstall-kc）
+#
+# 同步只改磁盘产物，不会重启正在跑的 console；改了后端路由时用 restart，
+# 由脚本按 console 是被谁拉起的决定「重开菜单栏 App」还是「原地重启同一端口」。
 # Usage:
-#   just refresh-kc
-refresh-kc: console-sync
+#   just refresh-kc            # 只同步产物
+#   just refresh-kc restart    # 同步后重启 console
+refresh-kc mode="sync": console-sync
     uv tool install --force --reinstall --editable .
-    @echo "✅ 静态产物已同步、CLI 已重装。若改了后端，记得重启 kc console。"
+    @if [ "{{mode}}" = "restart" ]; then \
+        bash scripts/shared/just/restart_console.sh; \
+    else \
+        echo "✅ 静态产物已同步、CLI 已重装。改了后端需重启 console：just refresh-kc restart"; \
+    fi
 
 # 旧名 recipe：`iar` 作为弃用别名长期保留，用法与上面完全一致。  # legacy-alias
 alias reinstall-iar := reinstall-kc
 
-# Build and install the macOS menu-bar app locally (unsigned, for this machine only)
+# Build and install the desktop app locally (unsigned, for this machine only)
 desktop-check:
     #!/usr/bin/env bash
     set -euo pipefail
-    if [ "$(uname -s)" != "Darwin" ]; then
-        echo "KedaCode 菜单栏 App 目前只支持 macOS。" >&2
-        exit 1
-    fi
+    platform="$(uname -s)"
+    case "$platform" in
+        Darwin) ;;
+        # Git Bash / MSYS2 在 Windows 上的 uname 形如 MINGW64_NT-10.0-19045。
+        MINGW*|MSYS*|CYGWIN*) ;;
+        *)
+            echo "KedaCode 桌面 App 目前只支持 macOS 与 Windows（当前：$platform）。" >&2
+            exit 1
+            ;;
+    esac
     if ! command -v cargo >/dev/null 2>&1; then
         echo "缺少 Rust 工具链；请先安装 rustup。" >&2
         exit 1
     fi
-    if ! xcode-select -p >/dev/null 2>&1; then
+    if [ "$platform" = "Darwin" ] && ! xcode-select -p >/dev/null 2>&1; then
         echo "缺少 Xcode Command Line Tools；请运行 xcode-select --install。" >&2
         exit 1
+    fi
+    if [ "$platform" != "Darwin" ]; then
+        # cl.exe 通常不在 Git Bash 的 PATH 里，改用 vswhere 判断是否装了 VS 生成工具。
+        if [ ! -f "/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe" ]; then
+            echo "提示：Windows 构建需要 Visual Studio 生成工具（C++ 桌面开发）；若链接阶段报错请先安装。" >&2
+        fi
     fi
 
 desktop-build: desktop-check
@@ -74,23 +94,38 @@ desktop-install:
     #!/usr/bin/env bash
     set -euo pipefail
     just desktop-build
-    source_app="{{justfile_directory()}}/desktop/src-tauri/target/release/bundle/macos/KedaCode.app"
-    destination_app="$HOME/Applications/KedaCode.app"
-    if [ ! -d "$source_app" ]; then
-        echo "构建产物不存在：$source_app" >&2
-        exit 1
-    fi
-    if [ -e "$destination_app" ]; then
-        existing_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$destination_app/Contents/Info.plist" 2>/dev/null || true)"
-        if [ "$existing_id" != "com.kedacode.desktop" ]; then
-            echo "目标位置已有其他 KedaCode.app，已保留原文件：$destination_app" >&2
-            exit 1
-        fi
-        rm -rf "$destination_app"
-    fi
-    mkdir -p "$HOME/Applications"
-    ditto "$source_app" "$destination_app"
-    echo "已安装：$destination_app"
+    case "$(uname -s)" in
+        Darwin)
+            source_app="{{justfile_directory()}}/desktop/src-tauri/target/release/bundle/macos/KedaCode.app"
+            destination_app="$HOME/Applications/KedaCode.app"
+            if [ ! -d "$source_app" ]; then
+                echo "构建产物不存在：$source_app" >&2
+                exit 1
+            fi
+            if [ -e "$destination_app" ]; then
+                existing_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$destination_app/Contents/Info.plist" 2>/dev/null || true)"
+                if [ "$existing_id" != "com.kedacode.desktop" ]; then
+                    echo "目标位置已有其他 KedaCode.app，已保留原文件：$destination_app" >&2
+                    exit 1
+                fi
+                rm -rf "$destination_app"
+            fi
+            mkdir -p "$HOME/Applications"
+            ditto "$source_app" "$destination_app"
+            echo "已安装：$destination_app"
+            ;;
+        MINGW*|MSYS*|CYGWIN*)
+            bundle_dir="{{justfile_directory()}}/desktop/src-tauri/target/release/bundle/nsis"
+            installer_path="$(find "$bundle_dir" -maxdepth 1 -type f -name '*.exe' -print -quit 2>/dev/null || true)"
+            if [ -z "$installer_path" ]; then
+                echo "构建产物不存在：$bundle_dir/*.exe" >&2
+                exit 1
+            fi
+            # 本机开发用交互式安装（不传 /S），便于选择安装位置与看到进度。
+            powershell -NoProfile -Command "Start-Process -FilePath '${installer_path}' -Wait"
+            echo "安装完成。从开始菜单启动 KedaCode 即可看到托盘图标。"
+            ;;
+    esac
 
 # Run the development entrypoint
 # Usage:
@@ -98,7 +133,6 @@ desktop-install:
 #   just run backend                # start backend only
 #   just run frontend               # start admin frontend only (not part of the default stack)
 #   just run frontend-public        # start public frontend only
-#   just run docker                 # start with Docker Compose (one-click deploy)
 #   just run backend_port=8010 frontend_admin_port=13173 frontend_public_port=3001
 #   just run all frontend_public_cmd="pnpm dev"
 run arg1="" arg2="" arg3="" arg4="" arg5="" arg6="" arg7="" arg8="" arg9="": _check-completion
@@ -181,7 +215,7 @@ run arg1="" arg2="" arg3="" arg4="" arg5="" arg6="" arg7="" arg8="" arg9="": _ch
                         ;;
                     *)
                         echo "ERROR: Unexpected run argument: $cli_arg"
-                        echo "Usage: just run [backend|frontend|frontend-public|all|docker] [backend_port=<port>] [frontend_admin_port=<port>] [frontend_public_port=<port>]"
+                        echo "Usage: just run [backend|frontend|frontend-public|all] [backend_port=<port>] [frontend_admin_port=<port>] [frontend_public_port=<port>]"
                         exit 1
                         ;;
                 esac
@@ -360,32 +394,9 @@ run arg1="" arg2="" arg3="" arg4="" arg5="" arg6="" arg7="" arg8="" arg9="": _ch
             frontend_public_pid=$!
             wait_for_first_exit
             ;;
-        docker)
-            echo "Starting services with Docker Compose..."
-            has_remote="false"
-            if [ -f ".env" ]; then
-                db_url=$(grep "^DATABASE_URL=" .env | head -1 | cut -d'=' -f2- | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//;s/^'"'"'//;s/'"'"'$//')
-                if [ -n "$db_url" ]; then
-                    case "$db_url" in
-                        *@db:*|*@localhost*|*@127.0.0.1*)
-                            has_remote="false"
-                            ;;
-                        *)
-                            has_remote="true"
-                            ;;
-                    esac
-                fi
-            fi
-            if [ "$has_remote" = "true" ]; then
-                echo "Detected remote DATABASE_URL; backend will connect directly to remote database"
-            else
-                echo "Using local PostgreSQL database"
-            fi
-            docker compose up --build
-            ;;
         *)
             echo "❌ Unknown run target: $target"
-            echo "Usage: just run [backend|frontend|frontend-public|all|docker]"
+            echo "Usage: just run [backend|frontend|frontend-public|all]"
             exit 1
             ;;
     esac
@@ -397,7 +408,6 @@ run arg1="" arg2="" arg3="" arg4="" arg5="" arg6="" arg7="" arg8="" arg9="": _ch
 #   just down frontend
 #   just down frontend-public
 #   just down backend_port=8010 frontend_admin_port=13173 frontend_public_port=3001
-#   just down docker
 down arg1="" arg2="" arg3="" arg4="" arg5="": _check-completion
     #!/usr/bin/env bash
     set -euo pipefail
@@ -434,7 +444,7 @@ down arg1="" arg2="" arg3="" arg4="" arg5="": _check-completion
                     positional_index=1
                 else
                     echo "ERROR: Unexpected down argument: $cli_arg"
-                    echo "Usage: just down [backend|frontend|frontend-public|all|docker] [backend_port=<port>] [frontend_admin_port=<port>] [frontend_public_port=<port>]"
+                    echo "Usage: just down [backend|frontend|frontend-public|all] [backend_port=<port>] [frontend_admin_port=<port>] [frontend_public_port=<port>]"
                     exit 1
                 fi
                 ;;
@@ -495,12 +505,9 @@ down arg1="" arg2="" arg3="" arg4="" arg5="": _check-completion
             stop_port "admin frontend" "$frontend_admin_port"
             stop_port "public frontend" "$frontend_public_port"
             ;;
-        docker)
-            docker compose down
-            ;;
         *)
             echo "❌ Unknown down target: $target"
-            echo "Usage: just down [backend|frontend|frontend-public|all|docker]"
+            echo "Usage: just down [backend|frontend|frontend-public|all]"
             exit 1
             ;;
     esac

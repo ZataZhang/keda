@@ -32,6 +32,8 @@ export interface PresetSelectProps {
   placeholder?: string
   /** 是否允许清空（绑定选择器用）。 */
   allowClear?: boolean
+  /** 只读（如绑定来自本页写不到的个人覆盖层）。 */
+  disabled?: boolean
 }
 
 /**
@@ -47,8 +49,11 @@ export function PresetSelect({
   testId,
   placeholder = "未绑定",
   allowClear = false,
+  disabled = false,
 }: PresetSelectProps) {
-  const currentLabel = options.find((option) => option.value === value)?.label
+  const currentOption = options.find((option) => option.value === value)
+  const currentLabel =
+    currentOption?.label ?? (value ? `预设未定义：${value}` : placeholder)
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -57,6 +62,7 @@ export function PresetSelect({
           variant="outline"
           size="sm"
           className="w-full justify-between"
+          disabled={disabled}
           data-testid={testId}
         >
           <span className="truncate">{currentLabel || placeholder}</span>

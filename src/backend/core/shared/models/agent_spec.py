@@ -38,6 +38,12 @@ CODEX_JSON_LINES_PROTOCOL_ID = "codex-json-lines"
 OPENCODE_JSON_LINES_PROTOCOL_ID = "opencode-json-lines"
 """OpenCode ``run --format json`` 事件流渲染协议 id。"""
 
+MCODE_JSON_LINES_PROTOCOL_ID = "mcode-json-lines"
+"""MiniMax Code ``exec --output-format stream-json`` 事件流渲染协议 id。"""
+
+DSH_JSON_LINES_PROTOCOL_ID = "dsh-json-lines"
+"""DeepSeek Harness ``--profile headless --json`` 事件流渲染协议 id。"""
+
 # ---------------------------------------------------------------------------
 # 提示词投递方式与用途 profile 的闭集
 # ---------------------------------------------------------------------------
@@ -149,8 +155,15 @@ class AgentProfileSpec:
         expand: 展开器声明，格式 ``"<expander_name>:<flag>"``，语义是
             "对展开器返回的每个值各追加一次 ``<flag> <value>``
             （如 codex 的 ``git_writable_roots:--add-dir``）。
-        read_only: 该用途是否为可验证的只读调用。只读决策入口
-            （planner / ``kc ask``）以此字段做 fail-fast 门禁。
+        read_only: 该用途**声明**为只读调用（不写工作区、不提交），供只读决策入口
+            （planner / ``kc ask``）做 fail-fast 门禁。这是 provider 配置与提示词层面
+            的约定，**不等于** CLI 强制执行——``--dangerously-skip-permissions`` 这类
+            形态同样可以声明只读，但 CLI 并不会拦住写入。需要"确实写不进"这一级保证
+            的调用方（停滞监督的诊断）必须改读 :attr:`read_only_enforced`。
+        read_only_enforced: :attr:`read_only` 之外还由 provider 自己的沙箱/权限开关
+            **强制**只读（如 codex 的 ``--sandbox read-only``、pi 的 ``--no-tools``）。
+            只有这一档能作为"即使提示词被忽略也写不进工作区"的依据；未声明即
+            ``False``，宁可停用依赖该保证的功能也不把它当成只读。
 
     同一个类型也承载 :data:`INTERACTIVE_PROFILE_ID` 声明（原生交互式 TUI）：
     提示词由人在继承来的 TTY 上输入，输出也直接回到该 TTY；bootstrap 如何投递由
@@ -167,6 +180,7 @@ class AgentProfileSpec:
     resume_tail_args: tuple[str, ...] = ()
     expand: tuple[str, ...] = ()
     read_only: bool = False
+    read_only_enforced: bool = False
 
 
 @dataclass(frozen=True)
@@ -260,7 +274,13 @@ def _tools_disabled_judge_profile() -> AgentProfileSpec:
 
 
 def _permissioned_plain_profiles() -> dict[str, AgentProfileSpec]:
-    """为 provider 的 plain generate / repl 声明共享的非交互命令形态。"""
+    """为 provider 的 plain generate / repl 声明共享的非交互命令形态。
+
+    ``generate`` 的 ``read_only=True`` 是**约定**而非强制：这条 argv 带
+    ``--dangerously-skip-permissions``，CLI 不会拒绝写文件，因此
+    ``read_only_enforced`` 保持默认 ``False``。依赖"写不进去"的功能（停滞监督的
+    诊断）据此停用，而不是拿声明当保证。
+    """
     return {
         AGENT_PROFILE_GENERATE: _plain_noninteractive_profile(read_only=True),
         AGENT_PROFILE_REPL: _plain_noninteractive_profile(read_only=False),
@@ -296,7 +316,7 @@ def _claude_compatible_profiles() -> dict[str, AgentProfileSpec]:
 
 # 注意 dict 顺序即注册顺序：choose_agent 按标签匹配时先到先得，
 # 这里保持与旧 LabelConfig.agent_labels 一致的 codex -> claude -> kimi 顺序；
-# 后续新增的 agent（pi、codebuddy、qoder、opencode）一律追加在末尾，绝不插入
+# 后续新增的 agent（pi、codebuddy、qoder、opencode、mcode、dsh）一律追加在末尾，绝不插入
 # 既有条目之间——插入会改变既有 agent 的标签匹配优先级。
 BUILTIN_AGENT_SPECS: dict[str, AgentSpec] = {
     "codex": AgentSpec(
@@ -367,6 +387,7 @@ BUILTIN_AGENT_SPECS: dict[str, AgentSpec] = {
                 prompt_delivery=PROMPT_DELIVERY_STDIN,
                 output_protocol=CODEX_JSON_LINES_PROTOCOL_ID,
                 read_only=True,
+                read_only_enforced=True,
             ),
             AGENT_PROFILE_GENERATE: AgentProfileSpec(
                 args=(
@@ -382,6 +403,7 @@ BUILTIN_AGENT_SPECS: dict[str, AgentSpec] = {
                 prompt_delivery=PROMPT_DELIVERY_ARGV_TAIL,
                 output_protocol=CODEX_JSON_LINES_PROTOCOL_ID,
                 read_only=True,
+                read_only_enforced=True,
             ),
             AGENT_PROFILE_REPL: AgentProfileSpec(
                 args=("--cd", "{cwd}"),
@@ -510,12 +532,14 @@ BUILTIN_AGENT_SPECS: dict[str, AgentSpec] = {
                 prompt_delivery=PROMPT_DELIVERY_STDIN,
                 output_protocol=PLAIN_PROTOCOL_ID,
                 read_only=True,
+                read_only_enforced=True,
             ),
             AGENT_PROFILE_GENERATE: AgentProfileSpec(
                 args=("--no-tools", "--print"),
                 prompt_delivery=PROMPT_DELIVERY_STDIN,
                 output_protocol=PLAIN_PROTOCOL_ID,
                 read_only=True,
+                read_only_enforced=True,
             ),
             AGENT_PROFILE_JUDGE: AgentProfileSpec(
                 args=("--no-tools", "--print"),
@@ -665,6 +689,186 @@ BUILTIN_AGENT_SPECS: dict[str, AgentSpec] = {
             ),
         },
     ),
+    # MiniMax Code。非交互入口是 ``exec`` 子命令，事件流由内置协议渲染并提取
+    # 顶层 sessionId。提示词走 ``--input -``（stdin）而非位置参数：Issue 提示词
+    # 可能很长（含 PRD 全文与验收计划），位置参数有 argv 长度上限风险。
+    # ``--permission full`` 是无人值守跑 Issue 的必要档（等价 claude 的
+    # --dangerously-skip-permissions）；**不声明 judge**：mcode 没有任何"禁用全部
+    # 内置工具"的开关（``--permission off`` 只关掉交互式询问、工具照常执行），
+    # 声明 read_only_enforced 会是无法验证的假声明，故宁可缺用途也不做假声明。
+    # 配置在 ~/.minimax/（容器认证导入会派生为 minimax）。
+    "mcode": AgentSpec(
+        bin="mcode",
+        label="agent/mcode",
+        label_color="1F6FEB",
+        label_description="Use MiniMax Code for local runner execution.",
+        auth_home="~/.minimax",
+        auth_include=("auth", "config.yaml", "skills"),
+        # 导入是**白名单**语义（只复制 auth_include 列出的条目），exclude 只在
+        # 白名单内部做兜底排除。mcode 的真实配置根里，运行时状态（sessions /
+        # cache / logs / background-tasks / sqlite.db 等）都不在白名单内，
+        # 因此这里只列可能被误加进白名单的少数几项。
+        auth_exclude=(
+            # 内置 / 内部 skills：随 CLI 分发，不是用户资产。
+            ".builtin-skills",
+            ".internal-skills",
+        ),
+        project_skills_dir=".minimax/skills",
+        supports_resume=True,
+        resume_args=("--session", "{session_id}"),
+        profiles={
+            AGENT_PROFILE_RUN: AgentProfileSpec(
+                args=(
+                    "exec",
+                    "--cwd",
+                    "{cwd}",
+                    "--permission",
+                    "full",
+                    "--output-format",
+                    "stream-json",
+                ),
+                tail_args=("--input", "-"),
+                prompt_delivery=PROMPT_DELIVERY_STDIN,
+                output_protocol=MCODE_JSON_LINES_PROTOCOL_ID,
+                read_only=False,
+            ),
+            AGENT_PROFILE_DELIBERATE: AgentProfileSpec(
+                args=(
+                    "exec",
+                    "--cwd",
+                    "{cwd}",
+                    "--permission",
+                    "full",
+                    "--output-format",
+                    "stream-json",
+                ),
+                tail_args=("--input", "-"),
+                prompt_delivery=PROMPT_DELIVERY_STDIN,
+                output_protocol=MCODE_JSON_LINES_PROTOCOL_ID,
+                read_only=True,
+            ),
+            AGENT_PROFILE_GENERATE: AgentProfileSpec(
+                args=(
+                    "exec",
+                    "--cwd",
+                    "{cwd}",
+                    "--permission",
+                    "full",
+                    "--output-format",
+                    "stream-json",
+                ),
+                tail_args=("--input", "-"),
+                prompt_delivery=PROMPT_DELIVERY_STDIN,
+                output_protocol=MCODE_JSON_LINES_PROTOCOL_ID,
+                read_only=True,
+            ),
+            AGENT_PROFILE_REPL: AgentProfileSpec(
+                args=(
+                    "exec",
+                    "--cwd",
+                    "{cwd}",
+                    "--permission",
+                    "full",
+                    "--output-format",
+                    "stream-json",
+                ),
+                tail_args=("--input", "-"),
+                prompt_delivery=PROMPT_DELIVERY_STDIN,
+                output_protocol=MCODE_JSON_LINES_PROTOCOL_ID,
+                read_only=False,
+            ),
+        },
+    ),
+    # DeepSeek Harness（dsh）。非交互入口是 headless 表层：
+    # ``dsh --profile headless --json`` 输出按行事件（session / status / text /
+    # thinking / tool_call / tool_result / final / error），由内置
+    # ``dsh-json-lines`` 协议渲染并把顶层 ``sessionId`` 交给观测层。提示词走
+    # stdin（``-`` 必须是唯一任务参数）而不是位置参数：Issue 提示词可能很长
+    # （PRD 全文 + 验收计划），位置参数有 argv 长度上限风险。
+    # 权限档：run / deliberate / repl 用 ``danger-full-access`` +
+    # ``--approval-policy never`` 才能无人值守跑 Issue；generate 用 dsh 的
+    # ``read-only`` 沙箱预设，并按该预设声明 ``read_only_enforced``——这是
+    # dsh 自身的权限/沙箱开关，不是提示词约定。
+    # **不声明 judge**：dsh 没有"禁用全部内置工具"的开关，read-only 仍然允许
+    # 读工具。**声明续传**（用户 2026-11-18 选择乐观档）：``--session-id`` 会
+    # 沿用该 id 的持久化会话，但要求同 cwd / 同 agent preset 且无存活 owner；
+    # kc 的续传记录按 worktree + 阶段隔离，正常重试满足约束，跨 worktree 或
+    # 换 preset 的恢复会在任务运行前失败（fail-fast，不静默串会话）。
+    # 配置在 ~/.dsh/；容器认证导入只带用户级 skills（CLI 不在 runner 镜像里，
+    # profiles 与凭据都是机器本地资产，不随镜像分发）。
+    "dsh": AgentSpec(
+        bin="dsh",
+        label="agent/dsh",
+        label_color="4D6BFE",
+        label_description="Use DeepSeek Harness for local runner execution.",
+        auth_home="~/.dsh",
+        auth_include=("skills",),
+        supports_resume=True,
+        resume_args=("--session-id", "{session_id}"),
+        profiles={
+            AGENT_PROFILE_RUN: AgentProfileSpec(
+                args=(
+                    "--profile",
+                    "headless",
+                    "--json",
+                    "--permission-mode",
+                    "danger-full-access",
+                    "--approval-policy",
+                    "never",
+                ),
+                tail_args=("-",),
+                prompt_delivery=PROMPT_DELIVERY_STDIN,
+                output_protocol=DSH_JSON_LINES_PROTOCOL_ID,
+                read_only=False,
+            ),
+            AGENT_PROFILE_DELIBERATE: AgentProfileSpec(
+                args=(
+                    "--profile",
+                    "headless",
+                    "--json",
+                    "--permission-mode",
+                    "danger-full-access",
+                    "--approval-policy",
+                    "never",
+                ),
+                tail_args=("-",),
+                prompt_delivery=PROMPT_DELIVERY_STDIN,
+                output_protocol=DSH_JSON_LINES_PROTOCOL_ID,
+                read_only=True,
+            ),
+            AGENT_PROFILE_GENERATE: AgentProfileSpec(
+                args=(
+                    "--profile",
+                    "headless",
+                    "--json",
+                    "--permission-mode",
+                    "read-only",
+                    "--approval-policy",
+                    "never",
+                ),
+                tail_args=("-",),
+                prompt_delivery=PROMPT_DELIVERY_STDIN,
+                output_protocol=DSH_JSON_LINES_PROTOCOL_ID,
+                read_only=True,
+                read_only_enforced=True,
+            ),
+            AGENT_PROFILE_REPL: AgentProfileSpec(
+                args=(
+                    "--profile",
+                    "headless",
+                    "--json",
+                    "--permission-mode",
+                    "danger-full-access",
+                    "--approval-policy",
+                    "never",
+                ),
+                tail_args=("-",),
+                prompt_delivery=PROMPT_DELIVERY_STDIN,
+                output_protocol=DSH_JSON_LINES_PROTOCOL_ID,
+                read_only=False,
+            ),
+        },
+    ),
 }
 
 
@@ -682,8 +886,10 @@ __all__ = [
     "BUILTIN_AGENT_SPECS",
     "CLAUDE_STREAM_JSON_PROTOCOL_ID",
     "CODEX_JSON_LINES_PROTOCOL_ID",
+    "DSH_JSON_LINES_PROTOCOL_ID",
     "INTERACTIVE_PROFILE_ID",
     "INTERACTIVE_PROMPT_DELIVERIES",
+    "MCODE_JSON_LINES_PROTOCOL_ID",
     "NON_INTERACTIVE_PROMPT_DELIVERIES",
     "OPENCODE_JSON_LINES_PROTOCOL_ID",
     "PI_JSON_LINES_PROTOCOL_ID",

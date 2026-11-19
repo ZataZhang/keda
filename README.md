@@ -67,17 +67,21 @@
 brew install ZataZhang/tap/kedacode
 ```
 
-**任何平台（uv / pipx，含 Windows PowerShell）：**
+**macOS / Linux / Windows（uv / pipx）：**
 
 ```bash
-uv tool install kedacode      # 推荐：uv 隔离环境，Windows 原生可用
+uv tool install kedacode      # 推荐：uv 隔离环境
 # 或
 pipx install kedacode
 ```
 
+Windows 的支持范围与 macOS / Linux 不同：CLI 基本面、`kc console` 与系统托盘 App 可用；
+`kc daemon`、`kc preview`、`kc container` 依赖 POSIX 进程组，暂不支持，启动时会直接报错并说明。
+详见[安装指南](docs/getting-started/installation.md#windows)。
+
 `uv tool install` 不会自动配置 shell 补全。在 bash、zsh 或 fish 中，若尚未配置，首次在交互式终端运行 `kc` 时会显示选择菜单，默认选中安装；选择安装后本次命令会先退出，提示重载 shell，再重新运行刚才的 `kc` 命令。macOS 若也尚未安装菜单栏 App，会先显示一个独立的 App 安装菜单。也可以按所用 shell 执行一次 `kc completion install --shell <bash|zsh|fish>`（选择其中一个）。详细步骤见下方「安装 shell 自动补全」。
 
-macOS 用户首次交互运行 `kc` 时，如果尚未安装菜单栏 App，还会看到一次可选的 App 安装菜单；它和补全设置是两次独立选择，安装不会替换 `uv` 管理的 CLI。之后也可执行 `kc desktop install`，完整说明见[安装指南](docs/getting-started/installation.md#macos-菜单栏-app-可选)。
+macOS 用户首次交互运行 `kc` 时，如果尚未安装菜单栏 App，还会看到一次可选的 App 安装菜单；它和补全设置是两次独立选择，安装不会替换 `uv` 管理的 CLI。之后也可执行 `kc desktop install`；Windows 用户同样可以执行该命令安装系统托盘 App。完整说明见[安装指南](docs/getting-started/installation.md#macos-菜单栏-app-可选)。
 
 **install.sh（自动选择 `uv` / `pipx` / `pip --user`，零 sudo，失败有明确提示）：**
 
@@ -113,6 +117,32 @@ wheel 分发。`kc init` 会仅下载这两个 Skill 并安装到用户级目录
 是 Codex、Claude、Kimi Code 等已检测到的 agent 配置目录。可用 `KEDACODE_SKILLS_DIR` 覆盖安装
 根目录（CI / 测试把安装落到临时目录时用），用 `KEDACODE_PRD_SKILL_PATH` 直接指定某一份
 `SKILL.md`。
+
+### 让 AI Agent 帮你安装和配置 KedaCode
+
+如果你希望自己的 AI Agent 代为安装 `kc` 并完成配置，可以把下面这段提示词发给它。Agent 会先询问要接入的仓库和偏好的执行 Agent，再按你的回答继续。
+
+```text
+请在这台电脑上安装并配置 KedaCode。它的源码仓库是 https://github.com/ZataZhang/keda，Python 安装包名为 `kedacode`，安装后的命令是 `kc`。
+
+请先在线阅读安装指南 https://github.com/ZataZhang/keda/blob/main/docs/getting-started/installation.md 和 Agent Runner 指南 https://github.com/ZataZhang/keda/blob/main/docs/guides/agent-runner.md。安装 CLI 无需克隆 KedaCode 源码。然后检查操作系统、架构、Python、`uv`、`kc`、GitHub CLI (`gh`) 和已安装的 Agent CLI。以上只做只读检查，凭据和认证文件内容无需读取。
+
+检查完成后，先向我确认两件事；在我回答前不要安装软件或写入配置：
+1. 这次只安装 CLI，还是也要初始化仓库？如果要初始化，请问我仓库的绝对路径。
+2. 我希望 KedaCode 使用哪个执行 Agent？如果我不确定，请列出检查到的可用选项让我选；也允许我选择暂不设置。
+
+收到回答后按以下步骤执行：
+1. 如果 `kc` 尚未可用，使用适合本机的官方安装方式安装 `kedacode`；若已有可用版本，先报告版本并保留现有安装。不要使用 `sudo`，也不要未经确认修改 shell 启动文件。完成后运行 `kc --version` 和 `kc --help` 验证；以官方文档和本机帮助为准，不猜测命令参数。
+2. 用 `gh auth status` 检查 GitHub CLI 登录状态。若未登录，告诉我需要完成 `gh auth login -h github.com`；不要索取或代为保存 token。GitHub labels 同步受登录状态影响时，说明结果和后续步骤。
+3. 如果我选择初始化仓库，先检查仓库路径、Git 状态和现有 `.kedacode.toml`。尚未初始化时，在该仓库运行 `kc init --dry-run`，把将修改的仓库配置、`.gitignore`、用户级 Skills 和 GitHub labels 汇总给我；得到我确认后再运行 `kc init`。如果仓库已经初始化，不要覆盖配置，也不要运行 `kc init --force`。
+4. 如果我选择了执行 Agent，运行 `kc agent list` 确认它已安装，并用 `kc agent setup --dry-run` 预览生命周期配置。把将写入全局 `~/.kedacode/config.toml` 的内容告诉我；得到确认后才应用。不要替我安装或切换 Agent、账号、模型，也不要静默选择其他 Agent。
+5. 不要启动 daemon、执行任务队列、创建 Issue/PR，或做上述安装和配置之外的改动。shell 补全和桌面 App 属于可选项，先询问我。
+6. 最后汇报安装版本与方式、初始化的仓库、配置结果、验证结果，以及仍需我亲自完成的步骤。
+
+遇到需要管理员权限、目标不明确或文档与本机不一致时，先说明具体原因和计划，再等我决定；不要猜测或绕过限制。
+```
+
+详细步骤见[安装指南](docs/getting-started/installation.md)和[Agent Runner 使用指南](docs/guides/agent-runner.md)。
 
 ## 前置要求
 
@@ -299,7 +329,7 @@ uv run kc ask "运行一次 dry-run 看看 ready 队列" --execute --yes
 ### 清理已关闭 Issue 的本地分支
 
 `kc worktree cleanup` 用于清理本地遗留的 `issue-<number>` 分支及
-`.kc-worktrees/issue-<number>` worktree；已有 `.iar-worktrees/` 仓库继续沿用旧目录。默认只预览；只有传入 `--yes` 才会删除。
+`.kc-worktrees/issue-<number>` worktree。旧 `.iar-worktrees/` 中的工作树需先迁入默认目录，才会由此命令管理。默认只预览；只有传入 `--yes` 才会删除。
 清理前会执行 `git fetch <remote> --prune`，并且默认只删除同时满足“GitHub Issue
 已关闭、远端同名分支已不存在、worktree 干净、分支已合入远端 base branch”的分支。
 历史 `<repo>-worktrees/tasks/issue-<number>` worktree 不会被该命令自动删除，应按需
@@ -431,13 +461,14 @@ uv pip install "kedacode[backup]"   # 云备份：boto3
 ```
 
 `pywebview` 已包含在默认依赖中，Console 看板的「开启独立窗口」会打开一个临时桌面窗口。
-macOS 菜单栏状态面板（点击顶部图标展开，并可固定成悬浮窗）从源码构建：
+桌面 App（macOS 菜单栏 / Windows 系统托盘，点击图标展开状态面板并支持固定悬浮）从源码构建：
 
 ```bash
 just desktop-install
 ```
 
-安装后双击 `~/Applications/KedaCode.app`。该 App 只用于本机自用构建，不签名、不公证、不公开分发。
+macOS 安装后双击 `~/Applications/KedaCode.app`；Windows 会构建 NSIS 安装包并启动交互式安装，
+安装后从开始菜单启动，托盘出现图标。该 App 只用于本机自用构建，不签名、不公证、不公开分发。
 
 ## 架构概览
 
@@ -455,20 +486,11 @@ src/backend/
   infrastructure/ → 基础设施层（模型、存储、HTTP、配置、日志）
 ```
 
-依赖方向严格向下：`api → core → engines → infrastructure`，由 `hooks/shared/check_architecture.py` 在 pre-commit 强制校验。
+依赖方向严格向下：`api → core → engines → infrastructure`，由 `hooks/shared/check_architecture.py` 在 pre-commit 强制校验。具体规则是 `api/` 只能依赖 `core/`，`core/` 可以静态依赖 `engines/` 与 `infrastructure/`（装配 facade 直接导入实现，不再用 `importlib` 绕过检查），`engines/` 与 `infrastructure/` 不得反向依赖外层。
 
 ### 作为工程骨架复用
 
 除 `kc` 本身外，仓库也是一套可整体拿去起新项目的 Python 工程骨架：四层依赖由 pre-commit 强制校验，配套 worktree 脚本、PRD 驱动流程与 `just` 工具链。`scripts/shared/`、`hooks/shared/`、`docs/ai-standards/` 等由上游模板仓 [`zata-codes-template`](https://github.com/ZataZhang/zata-codes-template) 同步维护，下游项目不要手改。只想使用 `kc` 的读者可以跳过本节。
-
-## Docker 部署
-
-```bash
-# Docker Compose 启动
-docker compose up --build
-```
-
-详见 `docker-compose.yml` 和 `docker-compose.dokploy.yml`。
 
 ## 开发规范
 

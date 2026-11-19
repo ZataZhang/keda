@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Sequence
@@ -31,6 +32,7 @@ from typing import TYPE_CHECKING, Sequence
 if TYPE_CHECKING:
     # 仅注解使用：避免 interfaces -> models 的运行时反向依赖。
     from backend.core.shared.models.agent_model_preset import ModelSelection
+    from backend.core.shared.models.agent_runner import IssueCommentRecord
 
 from backend.core.shared.models.agent_deliberation import (
     DeliberationEvent,
@@ -415,6 +417,14 @@ class GitHubApiRateLimitError(RuntimeError):
     """
 
 
+class GitHubApiUnavailableError(RuntimeError):
+    """GitHub API 瞬时连接故障在有限重试后仍不可用。
+
+    用例层捕获此异常后应保留 Issue 状态并记录为暂缓重试；不能把 GitHub
+    服务中断记成 Agent 执行失败，也不能在无法读取远端状态时继续写入标签。
+    """
+
+
 class IGitHubClient(ABC):
     """与 GitHub 交互的端口。
 
@@ -423,8 +433,9 @@ class IGitHubClient(ABC):
     工作流，而具体实现（通常基于 GitHub CLI ``gh`` 或 REST API）位于
     下层，可被独立替换与测试。
 
-    实现遇到明确的 API 限流时抛出 :class:`GitHubApiRateLimitError`，调用方保留
-    当前状态并推迟到之后的 daemon 轮询，不应按 Agent 失败处理。
+    实现遇到明确的 API 限流时抛出 :class:`GitHubApiRateLimitError`，遇到已重试耗尽的
+    瞬时连接错误时抛出 :class:`GitHubApiUnavailableError`。调用方保留当前状态并推迟
+    到之后的 daemon 轮询，不应按 Agent 失败处理。
     """
 
     @abstractmethod
@@ -503,6 +514,14 @@ class IGitHubClient(ABC):
             body: 新的 Issue 描述正文，支持 Markdown。
         """
         ...
+
+    @abstractmethod
+    def presence_creation_lock(self) -> AbstractContextManager[None]:
+        """返回同一 GitHub 仓库在本机共享的状态板创建锁。"""
+
+    @abstractmethod
+    def close_issue(self, issue_number: int) -> None:
+        """关闭指定 Issue。"""
 
     @abstractmethod
     def create_issue(
@@ -645,6 +664,21 @@ class IGitHubClient(ABC):
         """
         ...
 
+    def list_issue_comment_records(
+        self,
+        issue_number: int,
+        *,
+        trusted_only: bool = False,
+        body_contains: str | None = None,
+        require_success: bool = False,
+    ) -> list[IssueCommentRecord]:
+        """返回包含 GitHub 服务端更新时间和作者的评论记录。
+
+        默认实现保留旧适配器兼容性。需要租约判断的调用必须使用支持
+        ``updated_at`` 的基础设施实现；不支持时会显式失败，不能猜测时间。
+        """
+        raise NotImplementedError("GitHub client does not expose comment timestamps.")
+
     @abstractmethod
     def edit_issue_comment(self, comment_id: int, body: str) -> None:
         """编辑某个 Issue 评论的正文。
@@ -652,6 +686,15 @@ class IGitHubClient(ABC):
         Args:
             comment_id: 目标评论的 numeric ID。
             body: 新的 Markdown 正文。
+        """
+        ...
+
+    @abstractmethod
+    def delete_issue_comment(self, comment_id: int) -> None:
+        """删除指定的 Issue 评论。
+
+        Args:
+            comment_id: 要删除的 numeric 评论 ID。
         """
         ...
 

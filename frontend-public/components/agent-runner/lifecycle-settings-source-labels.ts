@@ -7,6 +7,7 @@
 export const LAYER_SOURCE_LABELS: Record<string, string> = {
   global: "全局 config.toml",
   repository: "仓库 .kedacode.toml",
+  local_override: "个人覆盖 .kedacode.local.toml",
   legacy: "既有配置键",
   builtin: "内置默认",
 };

@@ -221,6 +221,22 @@ def test_main_blocks_a_prd_with_open_execution_items(
     assert "human-1" not in printed_output
 
 
+def test_main_allows_open_execution_items_only_with_explicit_validation_blocked_banner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """显式阻塞横幅允许保留执行侧空框；正常横幅的同种空框仍由上一用例拦截。"""
+    _init_git_repository(tmp_path)
+    prd_path = tmp_path / _ACTIVE_PRD_PATH
+    prd_path.parent.mkdir(parents=True)
+    prd_path.write_text(
+        "> ⏸️ **验收状态**：验证阻塞 — 后续任务已登记。\n"
+        + prd_with_checklist_body(_EXECUTION_ITEM_OPEN_BODY),
+        encoding="utf-8",
+    )
+
+    assert _run_hook_main(monkeypatch, tmp_path, _ACTIVE_PRD_PATH) == 0
+
+
 def test_main_checks_an_archived_prd_only_once_it_is_staged(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

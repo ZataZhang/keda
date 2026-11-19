@@ -114,6 +114,29 @@ verification_commands = [
 
 未覆盖的字段自动继承全局 `[agent_runner]` 默认值。环境变量仍可对全局段生效，但暂不支持通过环境变量覆盖单个仓库的字段。
 
+### 个人本地覆盖 `.kedacode.local.toml`
+
+仓库根目录的 `.kedacode.local.toml` 是个人覆盖层，结构与 `.kedacode.toml` 相同，叠加在其之上：
+
+```text
+内置默认 < 全局 config.toml < registry [agent_runner.repositories.<id>] < .kedacode.toml < .kedacode.local.toml < PRD 头部覆盖
+```
+
+- 用途：只属于本机或个人账号的选择，例如某个 agent 额度耗尽时把 verifier / review 临时切到别的 agent。团队约定仍写在 `.kedacode.toml`。
+- 合并语义：表按键递归合并（未写的兄弟键保留），标量与数组整体替换。
+- 不进版本库：`kc init` 会把它写进托管的 `.gitignore` 块。
+- worktree：当前检出没有该文件时，回落读取主检出根目录的同名文件，因此 `kc` 创建的 worktree 无需复制。
+- 限制：不得包含 `[agent_runner.repository]` 身份段（会直接报错）；仓库目录没有 `.kedacode.toml` 时该文件不生效；`kc` 的配置写回仍只写全局与 `.kedacode.toml`；Web 生命周期设置页把其中声明的阶段绑定标为个人覆盖并只读呈现。
+
+```toml
+# .kedacode.local.toml
+[agent_runner.validation]
+verifier_agent = "claude"
+
+[agent_runner.pre_pr_review]
+review_agent = "claude"
+```
+
 `[agent_runner.runner].timeout_resume_attempts` 控制 agent 进程超时后同一 session 可额外续跑的轮数，默认 `1`；每一轮沿用当前阶段配置的超时时限，设为 `0` 可关闭。该预算按 session 记录，不影响网络瞬时错误重试或验证失败后的普通 recovery。详细配置见 [Agent Runner 使用指南](agent-runner.md)。
 
 <a id="agent-runner-agent-registry"></a>
@@ -126,7 +149,7 @@ verification_commands = [
 
 agent 注册表按**三层**合并，后一层逐字段覆盖前一层：
 
-1. **内置默认**：代码内 `BUILTIN_AGENT_SPECS`（`codex` / `claude` / `kimi` / `pi` / `codebuddy` / `qoder` / `opencode`），是注册表唯一的代码内默认来源；
+1. **内置默认**：代码内 `BUILTIN_AGENT_SPECS`（`codex` / `claude` / `kimi` / `pi` / `codebuddy` / `qoder` / `opencode` / `mcode` / `dsh`），是注册表唯一的代码内默认来源；
 2. **全局覆盖**：`config.toml` 顶层 `[agent_runner.agents.*]`；
 3. **仓库级覆盖**：`[agent_runner.repositories.<repo_id>.agents.*]`。
 
@@ -172,7 +195,7 @@ judge_timeout_seconds = 120
 - 评审预设**就是**既有的 `[agent_runner.presets.<name>]`：不新增模型目录，也不需要 API
   key——认证沿用各 agent CLI 自己的配置。评审以该 agent 的 `judge` 形态运行（空目录 +
   禁用全部内置工具，见 [评测与测试](../dev/evaluation.md)）；没有该形态的 agent
-  （codex、kimi、opencode）页面标记不可用，创建 run 时 fail-fast，不写入 0 分。
+  （codex、kimi、opencode、mcode、dsh）页面标记不可用，创建 run 时 fail-fast，不写入 0 分。
 - 执行侧同样不新增配置：候选执行复用同一份预设。
 - suite YAML、rubric v1、授权流程与结果口径见 [评测与测试](../dev/evaluation.md)，
   HTTP 契约见 [API 参考](../api/references.md)。
@@ -223,7 +246,7 @@ allow_execute_yes = true
 ```
 
 - `enabled`：是否启用 `kc ask`。
-- `default_agent`：默认 planner agent（支持 `claude`、`codex`、`kimi`）。
+- `default_agent`：默认 planner agent（支持任一声明了 `generate` 用途的 agent：`codex` / `claude` / `kimi` / `pi` / `codebuddy` / `qoder` / `mcode` / `dsh`；`opencode` 未声明 `generate`）。
 - `default_output_dir`：决策审计文件默认输出目录。
 - `planner_timeout_seconds`：planner agent 超时时间（秒）。
 - `max_context_chars`：传入 planner 的上下文最大字符数。
@@ -267,7 +290,7 @@ confirm_commands = [
 ```
 
 - `enabled`：是否启用 REPL；设为 `false` 时 `kc repl` 直接报 `REPL is disabled in configuration.` 并以 1 退出。
-- `default_agent`：默认 REPL agent（支持 `claude`、`codex`、`kimi`）。
+- `default_agent`：默认 REPL agent（支持任一声明了 `repl` 用途的 agent；九个内置 agent 都声明了）。
   `auto` 不被接受为 REPL 默认 agent（`kc run` 才用 auto）。
 - `default_output_dir`：REPL 会话审计目录前缀；每次会话创建
   `<default_output_dir>/<session-id>/`，包含 `session.json`、

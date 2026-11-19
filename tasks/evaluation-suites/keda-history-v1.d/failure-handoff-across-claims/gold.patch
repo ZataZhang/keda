@@ -1,0 +1,686 @@
+diff --git a/src/backend/core/use_cases/agent_runner_commit.py b/src/backend/core/use_cases/agent_runner_commit.py
+index 992156f5..18818587 100644
+--- a/src/backend/core/use_cases/agent_runner_commit.py
++++ b/src/backend/core/use_cases/agent_runner_commit.py
+@@ -418,2 +418,6 @@ def checkpoint_uncommitted_progress(
+-    发布门禁（``_reuse_existing_local_commit`` / publication）仍会拦截未完成的
+-    工作，因此 checkpoint 永远不会被推送或合入；它只让进度可续作。
++    正常发布门禁（``_reuse_existing_local_commit`` / publication）仍会拦截未完成的
++    工作，所以 checkpoint 不会经由成功路径被推送。**唯一的例外**是 recovery 耗尽后的
++    失败交接（``agent_runner_issue_handlers._record_failure_handoff``）：它会带着这个
++    WIP 快照发布一个 Draft PR 供人审阅，并为此显式放宽归档那一项检查。该例外不放松任何
++    其它安全检查，也不给 PR 任何验收态——缺 ``validation/verifier-passed`` 时既有签核 /
++    合并 / 归档门禁照常拒绝，因此快照仍然**永远不会被合入**。
+diff --git a/src/backend/core/use_cases/agent_runner_events.py b/src/backend/core/use_cases/agent_runner_events.py
+index 78c45e0a..806576e8 100644
+--- a/src/backend/core/use_cases/agent_runner_events.py
++++ b/src/backend/core/use_cases/agent_runner_events.py
+@@ -34,0 +35,60 @@ _REWORK_COMPLETION_PHASES = {
++
++# 交接记录（recovery 耗尽时写到 Issue 上的那条失败上下文评论）的定位锚点。
++# 沿用仓库既有的 ``iar:*`` 隐藏 marker 约定：它只是可确定性解析的键值元数据，
++# 不是标签、不是状态枚举，也不参与任何门禁判定。
++#
++# ``checkpoint`` 刻意收得比 ``iar:event`` 的 ``head=`` 宽（不限 [a-f0-9]+）：marker
++# 解析不出时下一轮会按"没有上一轮上下文"处理，也就悄悄退回到本功能要消除的"从零反推"。
++# 定位能力比取值校验更重要，因此只要是单个非空白 token 就认。
++_FAILURE_CONTEXT_MARKER_PATTERN = re.compile(
++    r"<!--\s*iar:failure-context\s+"
++    r"checkpoint=(?P<checkpoint>[^\s>]+)\s+"
++    r"attempts=(?P<attempts>\d+)"
++    r"(?:\s+verifier=(?P<verifier>[^\s>]+))?"
++    r"(?:\s+evidence=(?P<evidence>[^\s>]+))?"
++    r"\s*-->"
++)
++
++
++def format_failure_context_marker(
++    *,
++    checkpoint_sha: str | None,
++    attempt_count: int,
++    verifier_state: str,
++    evidence_dir: str,
++) -> str:
++    """格式化交接记录用的隐藏 ``iar:failure-context`` marker。
++
++    marker 只携带供下一轮定位与展示用的键值元数据，失败结论本身写在同一条评论的
++    Markdown 正文里。``checkpoint_sha`` 为 ``None`` 表示本轮没有留下可安全推送的
++    WIP 快照，此时渲染成 ``none`` 而不是省略该字段——读取侧要能分辨"确实没有快照"
++    与"marker 不带这个键"。
++    """
++    marker_parts = [
++        f"checkpoint={checkpoint_sha or 'none'}",
++        f"attempts={attempt_count}",
++        f"verifier={verifier_state}",
++        f"evidence={evidence_dir}",
++    ]
++    return f"<!-- iar:failure-context {' '.join(marker_parts)} -->"
++
++
++def has_failure_context_marker(comment_body: str) -> bool:
++    """这条 Issue 评论是否是 recovery 耗尽时写下的交接记录。"""
++    return _FAILURE_CONTEXT_MARKER_PATTERN.search(comment_body) is not None
++
++
++def find_latest_failure_context_comment(comment_bodies: list[str]) -> str | None:
++    """返回最近一条带 ``iar:failure-context`` marker 的 Issue 评论正文。
++
++    latest-wins 与 :func:`parse_latest_event_marker` 同构：按时间倒序取第一条命中。
++    只取一条是刻意的限量——Issue 上的历史评论既有噪音也有早已修复的旧失败，全量
++    注入会稀释信号并撑爆 prompt 预算。无命中时返回 ``None``，调用方按"没有上一轮
++    上下文"处理（fail-closed：不猜测、不伪造）。
++    """
++    for comment_body in reversed(comment_bodies):
++        if has_failure_context_marker(comment_body):
++            return comment_body
++    return None
++
++
+diff --git a/src/backend/core/use_cases/agent_runner_failure.py b/src/backend/core/use_cases/agent_runner_failure.py
+index da5d794d..df39e40a 100644
+--- a/src/backend/core/use_cases/agent_runner_failure.py
++++ b/src/backend/core/use_cases/agent_runner_failure.py
+@@ -15,0 +16 @@ from backend.core.shared.models.agent_runner import (
++from backend.core.use_cases.agent_runner_events import format_failure_context_marker
+@@ -36,0 +38 @@ __all__ = [
++    "format_failure_context_comment",
+@@ -604,0 +607,185 @@ def format_failure_comment(
++_DELIVERABLE_NAME_PATTERN = re.compile(r"rv-\d+(?:-[A-Za-z0-9_.-]+)?(?:\.[A-Za-z0-9]+)?")
++
++
++def _extract_named_deliverables(attempt_results: list[AttemptResult]) -> list[str]:
++    """从 attempt 历史里原样摘出门禁点名的 ``rv-<n>`` 呈递物名。
++
++    FR-2 要求记录含"缺失呈递物"。这里只做**文本转述**——把门禁报告自己写出来的
++    ``rv-3`` / ``rv-3-prd-render.png`` 这类名字收集起来，不判断它到底缺没缺、也不
++    为它建枚举；判断仍留在门禁原文里，由人或下一轮自己读。
++    """
++    named: list[str] = []
++    seen: set[str] = set()
++    for result in attempt_results:
++        for match in _DELIVERABLE_NAME_PATTERN.findall(result.detail):
++            if match not in seen:
++                seen.add(match)
++                named.append(match)
++    return named
++
++
++def format_failure_context_comment(
++    exc: BaseException,
++    attempt_results: list[AttemptResult],
++    *,
++    issue_number: int,
++    checkpoint_sha: str | None,
++    evidence_dir: str,
++) -> str:
++    """渲染 recovery 耗尽时写到 Issue 上的交接记录。
++
++    耗尽不是终点而是交班点：本轮"做到哪、卡在哪、缺什么、快照在哪个 SHA"必须落成
++    一份下一轮能读回、人能定位的记录。本函数只做**事实转述**——verifier 说过什么、
++    agent 试过几轮、最后一道门禁的报告原文、快照 SHA——不新增"产品失败 / 审核事故"
++    的机器判定，因此也不产出任何标签或状态。
++
++    正文刻意写清快照性质：耗尽时可发布的只是 :func:`checkpoint_uncommitted_progress`
++    建的 WIP 中途快照，它可能连编译都不过，不是"实现完成但没过验收"。
++
++    Args:
++        exc: 触发耗尽的异常（``MaxRetriesExceededError``）。
++        attempt_results: 本轮的 attempt 历史，来自异常携带的 attempt 列表。
++        issue_number: 目标 Issue 编号。
++        checkpoint_sha: WIP 快照 commit SHA；``None`` 表示本轮没有留下可安全推送的
++            快照（干净工作树、分支不符或改动全为禁改路径）。
++        evidence_dir: 该 Issue 的证据目录相对路径，供人自行核对原始诊断。
++
++    Returns:
++        以 ``iar:failure-context`` marker 开头的 Markdown 评论正文。
++    """
++    # Local import: run_verifier_agent 依赖 run_agent_once，而后者又导入本模块，
++    # 模块级导入会成环。verdict 的解析沿用既有确定性 parser，不另起一套判定。
++    from backend.core.use_cases.run_verifier_agent import parse_verifier_verdict
++
++    last_gate_report = attempt_results[-1].detail if attempt_results else str(exc)
++    # verdict 从最近一次 attempt 往前找**第一个真正形成的判定**，而不是只看最后一跳：
++    # 耗尽时最后一轮常见的是更早某道门禁（验证命令 / PRD 交付 / 证据）拦住的，它会把
++    # verifier 那句真 RED 挤出末位。只读末位会把"上一轮明确判红"误写成"没有形成结论",
++    # 误导接手方去查一个并不存在的问题。
++    verdict = parse_verifier_verdict(last_gate_report)
++    verdict_attempt_number = attempt_results[-1].attempt_number if attempt_results else None
++    if not verdict.marker_found:
++        for earlier_result in reversed(attempt_results):
++            earlier_verdict = parse_verifier_verdict(earlier_result.detail)
++            if earlier_verdict.marker_found:
++                verdict = earlier_verdict
++                verdict_attempt_number = earlier_result.attempt_number
++                break
++    marker_state = verdict.risk if verdict.marker_found else "no-verdict"
++    missing_deliverables = _extract_named_deliverables(attempt_results)
++
++    lines = [
++        format_failure_context_marker(
++            checkpoint_sha=checkpoint_sha,
++            attempt_count=len(attempt_results),
++            verifier_state=marker_state,
++            evidence_dir=evidence_dir,
++        ),
++        "",
++        "## Agent Runner Handoff — Recovery Budget Exhausted",
++        "",
++        "This Issue's runner exhausted its recovery attempts without clearing the "
++        "delivery gates. The record below is a **factual handoff** for the next "
++        "claim, not an acceptance result: it transcribes what the gates reported "
++        "and does not judge whether that is a product defect or a review incident.",
++        "",
++        "",
++    ]
++    if checkpoint_sha is None:
++        # 没有快照时不能把上一行那句"WIP checkpoint"照抄下来，否则读者会以为工作树上
++        # 有个半成品提交可以续作——恰好是"WIP 快照 ≠ 完成品"这条边界最容易被误读的方向。
++        lines.extend(
++            [
++                "- Snapshot nature: none — this round left no commit at all, so the "
++                "next claim continues from whatever the working tree holds, not from a "
++                "WIP snapshot.",
++                "- Checkpoint commit: none — this round left no safely publishable "
++                "snapshot (clean worktree, branch mismatch, or only forbidden paths).",
++            ]
++        )
++    else:
++        lines.extend(
++            [
++                "- Snapshot nature: `WIP checkpoint` — a mid-progress commit, "
++                "**not** a finished implementation.",
++                f"- Checkpoint commit: `{checkpoint_sha}`",
++            ]
++        )
++    lines.append(f"- Attempts this claim: {len(attempt_results)}")
++
++    if verdict.marker_found and verdict.risk == "red":
++        lines.append(
++            "- Verifier: formed an explicit **red** verdict; its findings are quoted "
++            "in the gate report below."
++        )
++    elif verdict.marker_found:
++        lines.append(
++            f"- Verifier: formed a `{verdict.risk}` verdict, but a later gate still "
++            "blocked the run; see the gate report below."
++        )
++    else:
++        lines.append(
++            "- Verifier: **no verdict was formed** this round. The run stopped before "
++            "the independent verifier produced a parseable decision, so nothing here "
++            "says the implementation is wrong — and nothing says it is right either."
++        )
++    if verdict_attempt_number is not None and attempt_results:
++        last_attempt_number = attempt_results[-1].attempt_number
++        if verdict_attempt_number != last_attempt_number:
++            lines.append(
++                f"  - That verdict was recorded on attempt {verdict_attempt_number}; "
++                f"the run then continued to attempt {last_attempt_number}, whose gate "
++                "report is the one quoted below."
++            )
++    if missing_deliverables:
++        rendered_deliverables = ", ".join(f"`{name}`" for name in missing_deliverables)
++        lines.append(
++            f"- Deliverables named by the gate reports: {rendered_deliverables} "
++            "(transcribed from the reports below — this record does not judge whether "
++            "each one is actually missing)."
++        )
++    else:
++        lines.append(
++            "- Deliverables: no `rv-<n>` artifact was named in the recorded gate "
++            "reports; read them below to see what the last round actually lacked."
++        )
++
++    lines.append(f"- Evidence directory: `{evidence_dir}`")
++    lines.extend(
++        [
++            "- Acceptance label: `validation/verifier-passed` is **absent**, so the "
++            "existing sign-off, merge and archive gates keep refusing this work. "
++            "That is the gate doing its job, not a new gate introduced here.",
++            "",
++            "### Last gate report",
++            "",
++            "```text",
++            truncate_recovery_output(last_gate_report),
++            "```",
++            "",
++        ]
++    )
++
++    if attempt_results:
++        lines.append(format_attempt_history(attempt_results))
++        lines.append("")
++
++    lines.extend(
++        [
++            "### What The Next Claim Should Do",
++            "",
++            "Continue **from the checkpoint commit** instead of restarting: inspect "
++            "`git log`, the PRD Acceptance Checklist, and the gate report above, then "
++            "implement only what remains and produce the missing deliverables.",
++            "Treat everything on this line as the previous round's *statement*, not a "
++            "ruling — re-verify against the PRD before acting on it.",
++            "",
++            "```bash",
++            f"gh issue edit {issue_number} " "--add-label agent/ready --remove-label agent/failed",
++            "```",
++            "",
++        ]
++    )
++    return "\n".join(lines)
++
++
+diff --git a/src/backend/core/use_cases/agent_runner_feedback.py b/src/backend/core/use_cases/agent_runner_feedback.py
+index 318a09a4..11983624 100644
+--- a/src/backend/core/use_cases/agent_runner_feedback.py
++++ b/src/backend/core/use_cases/agent_runner_feedback.py
+@@ -51,0 +52,24 @@ _DEFAULT_PRD_INLINE_MAX_CHARS = 20000
++# 跨 claim 回灌时内联"上一轮交接记录"的上限。交接记录含 attempt 历史，容易很长，
++# 而 prompt 是有限资源；只取头部即可，因为记录的关键字段（快照性质、checkpoint
++# SHA、verifier 结论、证据目录）都排在前面，超限时显式标注截断而非静默丢弃。
++_MAX_FAILURE_CONTEXT_INLINE_CHARS = 8000
++
++
++def truncate_failure_context_for_prompt(failure_context: str) -> str:
++    """把上一轮交接记录限量内联进续作 prompt。
++
++    超过 :data:`_MAX_FAILURE_CONTEXT_INLINE_CHARS` 时保留头部并显式追加截断说明，
++    使接手方知道自己看到的是片段而不是全文——交接记录是唯一事实源，prompt 里只放
++    它的节选。
++    """
++    if len(failure_context) <= _MAX_FAILURE_CONTEXT_INLINE_CHARS:
++        return failure_context
++    return "\n".join(
++        [
++            failure_context[:_MAX_FAILURE_CONTEXT_INLINE_CHARS].rstrip(),
++            "",
++            "[handoff record truncated; the full text is the "
++            "`iar:failure-context` Issue comment]",
++        ]
++    )
++
+@@ -975,0 +1000 @@ def build_progress_continuation_prompt(
++    previous_failure_context: str = "",
+@@ -982,0 +1008,5 @@ def build_progress_continuation_prompt(
++
++    ``previous_failure_context`` 是上一轮 recovery 耗尽时写到 Issue 上的交接记录
++    （``iar:failure-context`` 评论）正文，由调用方按 latest-wins 只取最近一条传入。
++    它是"上一轮的陈述"而非事实裁定，因此措辞要求接手方自行对照 PRD 复核；无记录时
++    不注入本段，prompt 与不带本功能时逐字一致。
+@@ -1000,0 +1031,15 @@ def build_progress_continuation_prompt(
++    handoff_section = ""
++    if previous_failure_context:
++        handoff_section = "\n".join(
++            [
++                "The previous claim handed off this record when it exhausted its "
++                "recovery budget. It is the previous round's **statement**, not a "
++                "ruling: re-verify it against the PRD and the code before acting on "
++                "it, and note that any commit it mentions is a WIP mid-progress "
++                "snapshot rather than a finished implementation.",
++                "",
++                truncate_failure_context_for_prompt(previous_failure_context),
++                "",
++            ]
++        )
++
+@@ -1014 +1059,20 @@ def build_progress_continuation_prompt(
+-    return "\n".join(
++    prompt_parts = [
++        f"Continue GitHub Issue #{issue.number}: {issue.title}",
++        "",
++        f"Issue URL: {issue.url}",
++        f"Worktree: {worktree_path}",
++        "",
++        "This worktree already contains committed progress from earlier runner "
++        "attempts. Do not restart from scratch and do not revert existing "
++        "commits. Inspect the current state first (`git log`, existing files, "
++        "and the PRD Acceptance Checklist), then implement only what remains.",
++        prd_line,
++        "",
++    ]
++    # 交接段为空时**整个不插入**，而不是插一个空串：多插一个空串会让没有交接记录的
++    # claim 也多出一个空行，于是"无记录时 prompt 与本功能不存在时逐字一致"这条判据
++    # 就不成立了。（failure_section / verification_section 保持原有的插空串写法，
++    # 那两者是本功能之前就有的形态，改了会动到既有输出。）
++    if handoff_section:
++        prompt_parts.append(handoff_section)
++    prompt_parts.extend(
+@@ -1016,11 +1079,0 @@ def build_progress_continuation_prompt(
+-            f"Continue GitHub Issue #{issue.number}: {issue.title}",
+-            "",
+-            f"Issue URL: {issue.url}",
+-            f"Worktree: {worktree_path}",
+-            "",
+-            "This worktree already contains committed progress from earlier runner "
+-            "attempts. Do not restart from scratch and do not revert existing "
+-            "commits. Inspect the current state first (`git log`, existing files, "
+-            "and the PRD Acceptance Checklist), then implement only what remains.",
+-            prd_line,
+-            "",
+@@ -1039,0 +1093 @@ def build_progress_continuation_prompt(
++    return "\n".join(prompt_parts)
+diff --git a/src/backend/core/use_cases/agent_runner_issue_handlers.py b/src/backend/core/use_cases/agent_runner_issue_handlers.py
+index e52fe51f..37850764 100644
+--- a/src/backend/core/use_cases/agent_runner_issue_handlers.py
++++ b/src/backend/core/use_cases/agent_runner_issue_handlers.py
+@@ -42,0 +43,8 @@ from backend.core.use_cases.agent_runner_blocked_claim import (
++from backend.core.use_cases.agent_runner_events import (
++    find_latest_failure_context_comment,
++    has_failure_context_marker,
++)
++from backend.core.use_cases.agent_runner_failure import (
++    MaxRetriesExceededError,
++    format_failure_context_comment,
++)
+@@ -51,0 +60 @@ from backend.core.use_cases.agent_runner_publication import (
++from backend.core.use_cases.agent_runner_publish import publish_changes
+@@ -57,0 +67 @@ from backend.core.use_cases.agent_runner_validation import (
++    resolve_issue_evidence_relpath,
+@@ -232,0 +243,277 @@ def _process_blocked_resolution(
++# Draft PR 正文里指向交接评论的那一段的锚点。有了它，重复耗尽时改写的是同一段而
++# 不是越叠越长；也让"正文只是快照、评论才是事实源"这条边界在 PR 上写明。
++_PR_HANDOFF_REF_MARKER = "<!-- iar:failure-context-ref -->"
++
++
++def _build_pr_handoff_ref_block(
++    handoff_url: str,
++    *,
++    attempt_count: int,
++    handoff_comment_posted: bool,
++) -> str:
++    """构造 Draft PR 正文尾部固定附上的交接回链段。
++
++    这一段只是**指向**交接评论的快照说明，不复述结论：交接评论是唯一事实源，PR
++    正文可能落后于它。它也不改变任何状态——能不能签核、合并、归档仍由既有门禁按
++    ``validation/verifier-passed`` 与当前 tree 的证据判定。
++
++    ``handoff_comment_posted`` 为 ``False`` 时（评论写入自身失败）不能再把它写成
++    "权威交接记录"，否则 PR 会指向一条根本不存在的评论；此时退化为指向 Issue 的
++    评论列表，措辞如实降级。
++    """
++    record_line = (
++        f"- Authoritative handoff record (latest round): <{handoff_url}>"
++        if handoff_comment_posted
++        else (
++            "- Handoff record could not be posted to this Issue; see the Issue "
++            f"comment list for whatever the runner managed to report: <{handoff_url}>"
++        )
++    )
++    return "\n".join(
++        [
++            _PR_HANDOFF_REF_MARKER,
++            "",
++            "## Previous Round Handoff",
++            "",
++            f"This Draft PR was published from a **WIP checkpoint** after the runner "
++            f"exhausted its recovery budget ({attempt_count} attempts). The commits "
++            "here are mid-progress work, not a finished implementation, and the "
++            "existence of this PR is not an acceptance result.",
++            "",
++            record_line,
++            "- `validation/verifier-passed` is **absent**, so the existing sign-off, "
++            "merge and archive gates keep refusing this PR by design. Nothing in this "
++            "section changes that, and the gates are not modified by this feature.",
++            "",
++        ]
++    )
++
++
++def _with_pr_handoff_ref(existing_pr_body: str, handoff_ref_block: str) -> str:
++    """把交接回链段固定附到 PR 正文尾部，重复写入时替换而非追加。"""
++    body_without_previous_ref = existing_pr_body
++    if _PR_HANDOFF_REF_MARKER in existing_pr_body:
++        body_without_previous_ref = existing_pr_body.split(_PR_HANDOFF_REF_MARKER, 1)[0]
++    stripped_body = body_without_previous_ref.rstrip()
++    if not stripped_body:
++        return handoff_ref_block
++    return f"{stripped_body}\n\n{handoff_ref_block}"
++
++
++def _resolve_handoff_comment_url(
++    issue: IssueSummary,
++    github_client: IGitHubClient,
++) -> str:
++    """定位刚写下的交接评论并返回其 permalink。
++
++    端口上的 :meth:`IGitHubClient.comment_issue` 不返回评论 ID，因此回读评论列表按
++    marker 找最近一条。读不到时退回 Issue URL——回链的目的是让人顺路找到最新结论，
++    落到 Issue 上仍然找得到，不能因为拿不到 permalink 就放弃发布。
++    """
++    try:
++        comment_entries = github_client.list_issue_comment_entries(issue.number)
++    except Exception as entries_exc:  # noqa: BLE001 - 回链尽力而为，不阻断发布
++        _logger.warning(
++            "Cannot resolve handoff comment permalink for Issue #%d: %s",
++            issue.number,
++            entries_exc,
++        )
++        return issue.url
++    for comment_id, comment_body in reversed(comment_entries):
++        if comment_id and has_failure_context_marker(comment_body):
++            return f"{issue.url}#issuecomment-{comment_id}"
++    return issue.url
++
++
++def _attach_handoff_ref_to_draft_pr(
++    *,
++    issue: IssueSummary,
++    github_client: IGitHubClient,
++    branch: str,
++    handoff_url: str,
++    attempt_count: int,
++    handoff_comment_posted: bool,
++) -> None:
++    """把交接回链固定附到该分支的 PR 正文尾部。
++
++    内容生成被关闭（回落到 ``fallback_body``）或复用既有 PR 未改写正文时，
++    ``create_draft_pr`` 都不会带上这段上下文，因此回链在发布之后单独补一次，
++    使 FR-6 的"无论哪种形态人都能顺链找到最新结论"成立。
++    """
++    pr_context = github_client.get_pull_request_context(branch)
++    if pr_context is None or pr_context.number is None:
++        _logger.warning(
++            "Skipping handoff back-link on the Draft PR for Issue #%d: "
++            "PR context for branch %s is unavailable.",
++            issue.number,
++            branch,
++        )
++        return
++    github_client.update_pull_request_body(
++        pr_context.number,
++        _with_pr_handoff_ref(
++            pr_context.body,
++            _build_pr_handoff_ref_block(
++                handoff_url,
++                attempt_count=attempt_count,
++                handoff_comment_posted=handoff_comment_posted,
++            ),
++        ),
++    )
++
++
++def _read_previous_failure_context(
++    issue: IssueSummary,
++    github_client: IGitHubClient,
++) -> str:
++    """按 latest-wins 取上一轮的交接记录正文，供续作 prompt 回灌。
++
++    只取最近一条、不取全部评论：Issue 历史里既有噪音也有早已修复的旧失败，注入越多
++    下一轮越可能被过期信息带偏。读不到或解析不出时返回空串（fail-closed 到"没有上一
++    轮上下文"），既不阻断续作也不伪造上下文。
++    """
++    try:
++        comment_bodies = github_client.list_issue_comments(issue.number)
++    except Exception as comments_exc:  # noqa: BLE001 - 缺上下文照常续作
++        _logger.warning(
++            "Cannot read Issue #%d comments for failure-context reflow: %s",
++            issue.number,
++            comments_exc,
++        )
++        return ""
++    return find_latest_failure_context_comment(comment_bodies) or ""
++
++
++def _record_failure_handoff(
++    *,
++    issue: IssueSummary,
++    worktree_path: Path,
++    config: AppConfig,
++    github_client: IGitHubClient,
++    process_runner: IProcessRunner,
++    failure_exc: MaxRetriesExceededError,
++    checkpoint_sha: str | None,
++    expected_branch: str,
++    content_generator: IContentGenerator | None,
++) -> None:
++    """recovery 耗尽时写交接记录，并在存在安全 commit 时发布同源的 Draft PR。
++
++    处理顺序是刻意排定的：先由调用方 checkpoint、再写交接记录（**无论有没有快照**，
++    因为"无 commit 也要交班"是必须覆盖的一格）、有快照才发布 PR。
++
++    整层 best-effort：**包括渲染本身在内的任何一步抛错都只记日志、绝不上抛**。交接
++    写挂了不能把"验证没过"变成"报告写挂了"，原始 ``MaxRetriesExceededError`` 必须
++    照常由调用方抛出。渲染之所以也要包进来，是因为它并不比评论调用更安全：
++    ``attempt_results`` 的形状、证据路径解析、以及 :func:`format_failure_context_comment`
++    里对 verifier verdict 的解析都可能抛；只包评论会留下这条缺口。
++    """
++    try:
++        _write_failure_handoff(
++            issue=issue,
++            worktree_path=worktree_path,
++            config=config,
++            github_client=github_client,
++            process_runner=process_runner,
++            failure_exc=failure_exc,
++            checkpoint_sha=checkpoint_sha,
++            expected_branch=expected_branch,
++            content_generator=content_generator,
++        )
++    except Exception as handoff_exc:  # noqa: BLE001 - 交接失败绝不掩盖原始失败
++        _logger.error(
++            "Failed to record the failure handoff for Issue #%d: %s "
++            "(the original recovery exhaustion is still being raised).",
++            issue.number,
++            handoff_exc,
++        )
++
++
++def _write_failure_handoff(
++    *,
++    issue: IssueSummary,
++    worktree_path: Path,
++    config: AppConfig,
++    github_client: IGitHubClient,
++    process_runner: IProcessRunner,
++    failure_exc: MaxRetriesExceededError,
++    checkpoint_sha: str | None,
++    expected_branch: str,
++    content_generator: IContentGenerator | None,
++) -> None:
++    """交接记录与失败 Draft PR 的实际写入步骤，由 :func:`_record_failure_handoff` 包护。
++
++    评论 / 发布 / 回链三步各自吞异常，好让"评论写挂了但仍然发布了 PR"这类部分成功
++    如实留在日志里；渲染与快照分支留在外层守卫内。
++    """
++    attempt_results = list(failure_exc.attempt_results)
++    handoff_body = format_failure_context_comment(
++        failure_exc,
++        attempt_results,
++        issue_number=issue.number,
++        checkpoint_sha=checkpoint_sha,
++        evidence_dir=resolve_issue_evidence_relpath(config, issue),
++    )
++    # 评论没写成功时不能继续宣称"权威交接记录"，否则 PR 正文会指向一条不存在的评论。
++    handoff_url = issue.url
++    handoff_comment_posted = False
++    try:
++        github_client.comment_issue(issue.number, handoff_body)
++    except Exception as comment_exc:  # noqa: BLE001 - 保留原始失败
++        _logger.error(
++            "Failed to write the failure handoff comment on Issue #%d: %s",
++            issue.number,
++            comment_exc,
++        )
++    else:
++        handoff_comment_posted = True
++        handoff_url = _resolve_handoff_comment_url(issue, github_client)
++
++    if checkpoint_sha is None:
++        _logger.info(
++            "Issue #%d exhausted recovery without a safely publishable commit; "
++            "handoff record written, no Draft PR published.",
++            issue.number,
++        )
++        return
++
++    # 本 PRD 唯一放宽的安全检查是 require_prd_archived=False，且只在这条耗尽路径上
++    # 显式传入。注意此刻在途改动已被 checkpoint 提交，push 侧的 forbidden/evidence
++    # 检查按未提交状态取变更集、对已提交内容实际是空转；真正的禁改路径隔离发生在
++    # checkpoint 的 staging（checkpoint_uncommitted_progress 显式排除禁改路径）。放宽
++    # 的只有归档这一项，其余检查调用照旧执行。
++    try:
++        branch, _pr_url = publish_changes(
++            issue,
++            worktree_path,
++            config,
++            github_client,
++            process_runner,
++            expected_branch=expected_branch,
++            content_generator=content_generator,
++            require_prd_archived=False,
++        )
++    except Exception as publish_exc:  # noqa: BLE001 - 发布失败不掩盖原始失败
++        _logger.error(
++            "Failed to publish the failure Draft PR for Issue #%d: %s",
++            issue.number,
++            publish_exc,
++        )
++        return
++
++    try:
++        _attach_handoff_ref_to_draft_pr(
++            issue=issue,
++            github_client=github_client,
++            branch=branch,
++            handoff_url=handoff_url,
++            attempt_count=len(attempt_results),
++            handoff_comment_posted=handoff_comment_posted,
++        )
++    except Exception as ref_exc:  # noqa: BLE001 - 回链失败不掩盖原始失败
++        _logger.error(
++            "Failed to attach the handoff back-link to the Draft PR for Issue #%d: %s",
++            issue.number,
++            ref_exc,
++        )
++
++
+@@ -320,0 +608 @@ def _process_ready_issue(
++            previous_failure_context=_read_previous_failure_context(issue, github_client),
+@@ -354 +642,5 @@ def _process_ready_issue(
+-    except (MaxRetriesExceededError, ProviderCapacityError, KeyboardInterrupt):
++    except (
++        MaxRetriesExceededError,
++        ProviderCapacityError,
++        KeyboardInterrupt,
++    ) as in_flight_failure_exc:
+@@ -359,0 +652 @@ def _process_ready_issue(
++        checkpoint_sha: str | None = None
+@@ -381,0 +675,18 @@ def _process_ready_issue(
++
++        # 交接只属于"这一轮没通过验收"，所以显式收窄到 MaxRetriesExceededError：
++        # ProviderCapacityError 是限流/容量，不代表本轮工作未通过；KeyboardInterrupt
++        # 是用户主动中断，且它根本没有 attempt_results。挂在整个 except 元组上会让
++        # 一次 Ctrl-C 发出一条假的失败结论、甚至一个 Draft PR，并因访问
++        # attempt_results 抛 AttributeError 把用户的中断变成一条假故障。
++        if isinstance(in_flight_failure_exc, MaxRetriesExceededError):
++            _record_failure_handoff(
++                issue=issue,
++                worktree_path=worktree_path,
++                config=config,
++                github_client=github_client,
++                process_runner=process_runner,
++                failure_exc=in_flight_failure_exc,
++                checkpoint_sha=checkpoint_sha,
++                expected_branch=expected_branch,
++                content_generator=content_generator,
++            )

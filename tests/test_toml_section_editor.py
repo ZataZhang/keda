@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import fcntl
 import os
 import stat
 import time
@@ -21,6 +20,7 @@ from backend.core.shared.models.config_edit import (
     ConfigLockBusyError,
 )
 from backend.infrastructure.config import toml_section_editor
+from backend.infrastructure.file_lock import lock_backend_name
 from backend.infrastructure.config.toml_section_editor import (
     ArrayTableUpdate,
     TableKeyUpdate,
@@ -31,6 +31,11 @@ from backend.infrastructure.config.toml_section_editor import (
     update_toml_table_keys,
 )
 
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows 上锁断言整体跳过
+    fcntl = None  # type: ignore[assignment]
+
 _RUNNER_TABLE = ("agent_runner", "runner")
 _CANDIDATES_KEY = "agent_fallback_candidates"
 _LIFECYCLE_PRESETS_TABLE = ("agent_runner", "lifecycle_presets")
@@ -38,8 +43,14 @@ _GHOST_PRESET_TABLE = ("agent_runner", "presets", "ghost")
 
 #: 没有 fcntl/msvcrt 的平台上跨进程建议锁不成立：相关断言跳过，而不是"静默通过"。
 requires_advisory_lock = pytest.mark.skipif(
-    toml_section_editor._LOCK_BACKEND == "none",
-    reason="本平台没有 fcntl / msvcrt，跨进程写锁不可验证",
+    lock_backend_name() != "fcntl",
+    reason="本平台没有 fcntl，跨进程写锁不可验证",
+)
+
+#: Windows 没有 POSIX 权限位 / chown 语义：权限位断言只在 POSIX 上可验证。
+requires_posix_permissions = pytest.mark.skipif(
+    os.name == "nt",
+    reason="Windows 没有 POSIX 权限位语义，权限断言跳过",
 )
 
 _CONFIG_WITH_ANNOTATED_CANDIDATES = """\
@@ -215,23 +226,7 @@ model = "sonnet"
     return path
 
 
-def test_new_lock_file_without_fchmod_support(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """没有 ``os.fchmod`` 的平台仍能打开配置锁文件。"""
-    if hasattr(os, "fchmod"):
-        monkeypatch.delattr(os, "fchmod")
-
-    lock_path = tmp_path / "config.toml.lock"
-    file_descriptor = toml_section_editor._open_lock_file(lock_path)
-    try:
-        os.write(file_descriptor, b"lock")
-    finally:
-        os.close(file_descriptor)
-
-    assert lock_path.read_bytes() == b"lock"
-
-
+@requires_posix_permissions
 def test_write_keeps_existing_file_mode(config_path: Path) -> None:
     """原子替换沿用目标权限位：一次写回不把 0644 降级成 mkstemp 的 0600。
 
@@ -243,6 +238,7 @@ def test_write_keeps_existing_file_mode(config_path: Path) -> None:
     assert stat.S_IMODE(config_path.stat().st_mode) == 0o644
 
 
+@requires_posix_permissions
 def test_write_keeps_tighter_current_mode(config_path: Path) -> None:
     """0600 是现状时同样沿用——写回只保持权限，不擅自放宽或收紧。"""
     os.chmod(config_path, 0o600)
@@ -250,6 +246,7 @@ def test_write_keeps_tighter_current_mode(config_path: Path) -> None:
     assert stat.S_IMODE(config_path.stat().st_mode) == 0o600
 
 
+@requires_posix_permissions
 def test_created_config_file_is_readable_by_default(tmp_path: Path) -> None:
     """新建配置文件用 0644，而不是临时文件的 0600。"""
     created = tmp_path / "fresh.toml"
@@ -355,6 +352,7 @@ def test_invalid_toml_is_not_overwritten(config_path: Path) -> None:
     assert config_path.read_text(encoding="utf-8") == corrupted
 
 
+@requires_advisory_lock
 def test_read_modify_write_holds_exclusive_lock(config_path: Path) -> None:
     """读-改-写全程持有同目录写锁：第二个写入者拿不到锁，因此不会插进来丢键。"""
     lock_path = config_path.with_name(config_path.name + ".lock")
@@ -387,7 +385,7 @@ def test_busy_lock_fails_fast_instead_of_blocking_forever(config_path: Path, mon
     with open(lock_path, "a", encoding="utf-8") as holder_handle:
         fcntl.flock(holder_handle.fileno(), fcntl.LOCK_EX)
         monkeypatch.setattr(toml_section_editor, "_LOCK_WAIT_TIMEOUT_SECONDS", 0.2)
-        monkeypatch.setattr(toml_section_editor, "_LOCK_RETRY_INTERVAL_SECONDS", 0.02)
+        monkeypatch.setattr("backend.infrastructure.file_lock.LOCK_RETRY_INTERVAL_SECONDS", 0.02)
         before = config_path.read_bytes()
         started_at = time.monotonic()
 
@@ -438,6 +436,7 @@ def test_public_write_lock_is_the_same_lock(config_path: Path) -> None:
                 fcntl.flock(probe_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
 
 
+@requires_posix_permissions
 def test_lock_file_is_owner_only(config_path: Path) -> None:
     """锁文件不含数据，权限必须是 0600，而不是 ``0666 & ~umask`` 的默认宽权限。"""
     update_toml_table_keys(config_path, _RUNNER_TABLE, {"max_agent_switches": 3})
@@ -445,6 +444,7 @@ def test_lock_file_is_owner_only(config_path: Path) -> None:
     assert stat.S_IMODE(lock_path.stat().st_mode) == 0o600
 
 
+@requires_posix_permissions
 def test_atomic_replace_carries_target_ownership(config_path: Path, monkeypatch) -> None:
     """原子替换把目标原本的 uid/gid 搬到临时文件，写后属主不被换成写入进程。"""
     chown_calls: list[tuple[int, int]] = []
@@ -460,6 +460,7 @@ def test_atomic_replace_carries_target_ownership(config_path: Path, monkeypatch)
     assert chown_calls == [(target_stat.st_uid, target_stat.st_gid)]
 
 
+@requires_posix_permissions
 def test_unprivileged_chown_does_not_abort_the_write(config_path: Path, monkeypatch) -> None:
     """非特权进程 chown 不动属主时**继续写完**：属主保不住不该把一次合法保存改成失败。"""
 

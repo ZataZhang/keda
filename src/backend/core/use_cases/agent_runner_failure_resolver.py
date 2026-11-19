@@ -1,19 +1,18 @@
 """agent 失败恢复编排能力的 core 编排入口（薄 facade）。
 
-转发 :mod:`backend.engines.agent_runner.failure_resolver` 的
-:class:`AgentFailureResolver`，使 ``api/`` 层只依赖 core。实现机制
-（模块加载时经 ``importlib`` 解析 engines 实现）见
-:mod:`backend.core.use_cases.agent_runner_factory` 的模块 docstring。
+按四层依赖方向（``api → core → engines → infrastructure``），``api/`` 只依赖
+``core/``，本模块把下层实现转发给上层。``core/`` 静态依赖 ``engines/`` 是
+允许的（见 ``docs/ai-standards/architecture.md``），不再用 ``importlib``
+动态加载：依赖因此对检查器、IDE 与类型检查都可见。本模块只做层次归位，
+不新增编排逻辑；各名字语义以
+:mod:`backend.engines.agent_runner.failure_resolver` 为准。
 """
 
 from __future__ import annotations
 
-import importlib
-
-_engines_failure_resolver_module = importlib.import_module(
-    "backend.engines.agent_runner.failure_resolver"
+from backend.engines.agent_runner.failure_resolver import (
+    AgentFailureResolver,
 )
 
-AgentFailureResolver = _engines_failure_resolver_module.AgentFailureResolver
 
 __all__ = ["AgentFailureResolver"]

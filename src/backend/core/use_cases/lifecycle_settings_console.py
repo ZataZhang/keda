@@ -9,7 +9,7 @@ scope 与来源词汇表、``LifecycleAgentsUpdateError`` 复用
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 from backend.core.shared.models.agent_model_preset import (
@@ -24,8 +24,11 @@ from backend.core.shared.models.lifecycle_agent import (
     LIFECYCLE_AGENT_KEYS,
     LIFECYCLE_AGENT_STAGE_LABELS,
     LIFECYCLE_SOURCE_GLOBAL,
+    LIFECYCLE_SOURCE_LOCAL_OVERRIDE,
+    LIFECYCLE_SOURCE_REPOSITORY,
     normalize_lifecycle_agent_value,
 )
+from backend.core.shared.models.product_identity import REPOSITORY_LOCAL_OVERRIDE_FILENAME
 from backend.core.use_cases.agent_candidate_fallback import (
     effective_fallback_candidates,
 )
@@ -343,6 +346,7 @@ def build_lifecycle_settings_view(
     scope: str,
     repo_id: str | None = None,
     global_config: AppConfig | None = None,
+    local_override_stages: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
     """构建"生命周期矩阵 + 模型预设 + 执行器回退"的聚合读写视图。
 
@@ -357,6 +361,8 @@ def build_lifecycle_settings_view(
         scope: ``global`` 或 ``repository``。
         repo_id: 仓库级视图的仓库 id；全局视图为 ``None``。
         global_config: ``scope=repository`` 时独立加载的全局配置，用于区分预设来源层。
+        local_override_stages: 绑定声明在个人覆盖 ``.kedacode.local.toml`` 的阶段键；
+            这些行的绑定来源标为 ``local_override``，而不是可写的 ``repository``。
 
     Returns:
         含 ``lifecycles`` / ``presets`` / ``fallback`` 三段、``agent_availability``
@@ -379,6 +385,13 @@ def build_lifecycle_settings_view(
         lifecycle_row["affected_stages"] = (
             list(stages_by_preset.get(bound_preset, [])) if bound_preset is not None else []
         )
+        # 个人覆盖与 .kedacode.toml 在加载时已合并成同一"仓库层"；这里按文件事实拆出来，
+        # 否则页面会对一个写不到的层提供"解绑"。
+        if (
+            lifecycle_row["key"] in local_override_stages
+            and lifecycle_row["field_sources"]["preset"] == LIFECYCLE_SOURCE_REPOSITORY
+        ):
+            lifecycle_row["field_sources"]["preset"] = LIFECYCLE_SOURCE_LOCAL_OVERRIDE
 
     presets: list[dict[str, Any]] = []
     for preset_name, preset in config.agent_presets.items():
@@ -483,6 +496,31 @@ def _normalized_optional_field(raw_value: Any) -> str | None:
         return None
     stripped_value = raw_value.strip()
     return stripped_value or None
+
+
+def local_override_binding_conflict(
+    stages: Iterable[str], local_override_stages: frozenset[str]
+) -> str | None:
+    """若要改写的阶段绑定由个人覆盖决定，返回可读拒绝原因；否则返回 ``None``。
+
+    仓库范围的写回只落 ``.kedacode.toml``，而个人覆盖 ``.kedacode.local.toml`` 同键
+    优先：解绑会撞上"本层没有这个表"，改绑写成功也不生效。页面与 CLI 共用这段判定与文案。
+
+    Args:
+        stages: 本次请求要改写绑定的阶段键。
+        local_override_stages: 绑定声明在个人覆盖文件里的阶段键。
+
+    Returns:
+        指明阶段与覆盖文件的拒绝原因；无冲突时为 ``None``。
+    """
+    blocked_stages = sorted(stage for stage in stages if stage in local_override_stages)
+    if not blocked_stages:
+        return None
+    return (
+        f"阶段 {', '.join(blocked_stages)} 的绑定声明在个人覆盖 "
+        f"{REPOSITORY_LOCAL_OVERRIDE_FILENAME} 里，优先级高于 .kedacode.toml，"
+        "在仓库范围修改不会生效：请直接编辑该文件。"
+    )
 
 
 def validate_lifecycle_preset_binding_update(

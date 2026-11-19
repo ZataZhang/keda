@@ -17,15 +17,18 @@ use objc2_app_kit::NSScreen;
 use objc2_foundation::NSPoint;
 use tauri::menu::{CheckMenuItem, Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+#[cfg(target_os = "macos")]
+use tauri::ActivationPolicy;
 use tauri::{
-    ActivationPolicy, AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
-    WindowEvent,
+    AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent,
 };
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tauri_plugin_notification::NotificationExt;
 #[cfg(not(target_os = "macos"))]
 use tauri_plugin_positioner::{Position, WindowExt};
+#[cfg(target_os = "macos")]
+mod shell_path;
 
 const CONSOLE_PROBE_PATH: &str = "/api/v1/agent-runner/console/version";
 const COMPANION_PATH: &str = "/app/companion/?desktop=tauri";
@@ -37,12 +40,28 @@ const PANEL_SHORTCUT: &str = "CommandOrControl+Shift+K";
 const AUTOSTART_FLAG: &str = "--autostart";
 const CONSOLE_STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
 const CONSOLE_PROBE_INTERVAL: Duration = Duration::from_millis(400);
+/// 托盘点击与「面板失焦自动收起」之间的去抖窗口（Windows/Linux）。
+///
+/// 点击托盘图标会让面板先收到失焦事件并被收起，同一个点击再走 toggle 时
+/// 面板已经不可见——若不加这层判断，点击会立刻把面板重新打开，表现为
+/// 「点托盘图标关不掉面板」。
+#[cfg(not(target_os = "macos"))]
+const TRAY_CLICK_DEBOUNCE: Duration = Duration::from_millis(300);
+/// Windows 下以无控制台窗口方式启动子进程，避免桌面 App 拉起 `kc console`
+/// 时闪出一个黑色控制台窗口（关掉它还会连带终止 Console）。
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 #[derive(Default)]
 struct PanelState {
     pinned: Mutex<bool>,
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     dock_icon_visible: Mutex<bool>,
     console_origin: Mutex<Option<String>>,
+    /// 最近一次因失焦自动收起面板的时刻，仅非 macOS 平台使用，
+    /// 去抖窗口见 [`TRAY_CLICK_DEBOUNCE`]。
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    last_auto_hide: Mutex<Option<Instant>>,
 }
 
 #[derive(Default)]
@@ -61,8 +80,7 @@ impl Drop for ConsoleProcess {
     fn drop(&mut self) {
         if let Ok(child_slot) = self.child.get_mut() {
             if let Some(mut child) = child_slot.take() {
-                let _ = child.kill();
-                let _ = child.wait();
+                terminate_console_process(&mut child);
             }
         }
     }
@@ -183,8 +201,47 @@ fn toggle_panel(app: &AppHandle) {
         let _ = window.hide();
         return;
     }
+    // 面板刚被这次点击的失焦事件收起过：保持收起，别把它又打开。
+    if panel_just_auto_hidden(app) {
+        return;
+    }
     if let Err(error) = show_panel(app) {
         append_log(&format!("面板显示失败：{error}\n"));
+    }
+}
+
+/// 记录一次「面板因失焦自动收起」，供 [`panel_just_auto_hidden`] 去抖。
+fn record_auto_hide(app: &AppHandle) {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = app;
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        if let Ok(mut hide_slot) = app.state::<PanelState>().last_auto_hide.lock() {
+            *hide_slot = Some(Instant::now());
+        }
+    }
+}
+
+/// 面板是否刚刚因为失焦被自动收起。
+///
+/// 只在非 macOS 平台参与判断：macOS 的菜单栏图标属于同一个 App，点它不会让
+/// 面板失焦；Windows 的托盘图标属于 shell，点它必然先让面板失焦。
+fn panel_just_auto_hidden(app: &AppHandle) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = app;
+        false
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        app.state::<PanelState>()
+            .last_auto_hide
+            .lock()
+            .ok()
+            .and_then(|hide_slot| *hide_slot)
+            .is_some_and(|hidden_at| hidden_at.elapsed() < TRAY_CLICK_DEBOUNCE)
     }
 }
 
@@ -238,9 +295,9 @@ fn open_console_window(app: AppHandle) -> Result<(), String> {
 
 /// 在系统默认浏览器中打开 http/https 链接。
 ///
-/// 控制台窗口是 Tauri 的 WKWebView，`target="_blank"` 不会被它转换成系统浏览器
+/// 控制台窗口是 Tauri 的 WebView，`target="_blank"` 不会被它转换成系统浏览器
 /// 新标签（没有实现新窗口代理），页面里的 Issue / PR 链接看起来就「点了没反应」。
-/// 前端在 Tauri 环境里改走这个命令，由宿主调用 `open` 交给用户配置的浏览器。
+/// 前端在 Tauri 环境里改走这个命令，由宿主调用系统默认浏览器。
 #[tauri::command]
 fn open_external_url(url: String) -> Result<(), String> {
     let parsed = tauri::Url::parse(&url).map_err(|error| format!("链接无效：{error}"))?;
@@ -254,7 +311,16 @@ fn open_external_url(url: String) -> Result<(), String> {
             .spawn()
             .map_err(|error| format!("无法打开系统浏览器：{error}"))?;
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        // rundll32 交给 URL 协议处理器，等价于双击链接；比 `cmd /C start`
+        // 少一层 shell 解析，URL 里的 & 之类不会被当命令分隔符。
+        Command::new("rundll32.exe")
+            .args(["url.dll,FileProtocolHandler", parsed.as_str()])
+            .spawn()
+            .map_err(|error| format!("无法打开系统浏览器：{error}"))?;
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         return Err("当前平台未实现外部浏览器打开".to_string());
     }
@@ -263,28 +329,44 @@ fn open_external_url(url: String) -> Result<(), String> {
 
 /// 切到常规 App 形态：有 Dock 图标、进 Cmd+Tab、窗口能正经到前台。
 fn promote_to_regular_app(app: &AppHandle) {
-    if let Err(error) = app.set_activation_policy(ActivationPolicy::Regular) {
-        append_log(&format!("切换常规 App 形态失败：{error}\n"));
-        return;
+    #[cfg(target_os = "macos")]
+    {
+        if let Err(error) = app.set_activation_policy(ActivationPolicy::Regular) {
+            append_log(&format!("切换常规 App 形态失败：{error}\n"));
+            return;
+        }
+        // 启动路径跑在工作线程上，AppKit 的激活只能在主线程做。
+        let main_thread_handle = app.clone();
+        let _ = main_thread_handle.run_on_main_thread(activate_app);
     }
-    // 启动路径跑在工作线程上，AppKit 的激活只能在主线程做。
-    let main_thread_handle = app.clone();
-    let _ = main_thread_handle.run_on_main_thread(activate_app);
+    // Windows 没有激活策略：窗口本来就是常规窗口，无需切换。
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+    }
 }
 
 /// 控制台窗口关闭后回到菜单栏形态；用户显式勾了 Dock 图标则保持不动。
 fn restore_menubar_policy(app: &AppHandle) {
-    let dock_icon_visible = app
-        .state::<PanelState>()
-        .dock_icon_visible
-        .lock()
-        .map(|visible| *visible)
-        .unwrap_or(false);
-    if dock_icon_visible {
-        return;
+    #[cfg(target_os = "macos")]
+    {
+        let dock_icon_visible = app
+            .state::<PanelState>()
+            .dock_icon_visible
+            .lock()
+            .map(|visible| *visible)
+            .unwrap_or(false);
+        if dock_icon_visible {
+            return;
+        }
+        if let Err(error) = app.set_activation_policy(ActivationPolicy::Accessory) {
+            append_log(&format!("切回菜单栏形态失败：{error}\n"));
+        }
     }
-    if let Err(error) = app.set_activation_policy(ActivationPolicy::Accessory) {
-        append_log(&format!("切回菜单栏形态失败：{error}\n"));
+    // Windows 没有菜单栏/Dock 形态可以回退，窗口关闭就是关闭。
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
     }
 }
 
@@ -314,23 +396,31 @@ fn notify_task(app: AppHandle, title: String, body: String) -> Result<(), String
 
 /// 切换 Dock 图标。菜单栏模式（Accessory）不占 Dock，也不进 Cmd+Tab。
 fn toggle_dock_icon(app: &AppHandle) {
-    let Some(next) = toggle_flag(&app.state::<PanelState>().dock_icon_visible) else {
-        return;
-    };
-    let policy = if next {
-        ActivationPolicy::Regular
-    } else {
-        ActivationPolicy::Accessory
-    };
-    if let Err(error) = app.set_activation_policy(policy) {
-        append_log(&format!("切换 Dock 图标失败：{error}\n"));
-        return;
+    #[cfg(target_os = "macos")]
+    {
+        let Some(next) = toggle_flag(&app.state::<PanelState>().dock_icon_visible) else {
+            return;
+        };
+        let policy = if next {
+            ActivationPolicy::Regular
+        } else {
+            ActivationPolicy::Accessory
+        };
+        if let Err(error) = app.set_activation_policy(policy) {
+            append_log(&format!("切换 Dock 图标失败：{error}\n"));
+            return;
+        }
+        // 切回 Regular 后要主动激活一次，否则 Dock 图标出现了窗口还在后台。
+        if next {
+            let _ = show_panel(app);
+        }
+        set_menu_checked(app, MenuSlot::Dock, next);
     }
-    // 切回 Regular 后要主动激活一次，否则 Dock 图标出现了窗口还在后台。
-    if next {
-        let _ = show_panel(app);
+    // Windows 没有 Dock；该菜单项在非 macOS 平台不创建，这里不会被调用。
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
     }
-    set_menu_checked(app, MenuSlot::Dock, next);
 }
 
 /// 切换登录自启；状态由 autostart 插件持久化，菜单勾选只是回显。
@@ -349,6 +439,7 @@ fn toggle_autostart(app: &AppHandle) {
 }
 
 /// 翻转一个布尔状态；锁中毒时返回 None，调用方直接放弃本次动作。
+#[cfg(target_os = "macos")]
 fn toggle_flag(slot: &Mutex<bool>) -> Option<bool> {
     let mut value = slot.lock().ok()?;
     *value = !*value;
@@ -356,6 +447,8 @@ fn toggle_flag(slot: &Mutex<bool>) -> Option<bool> {
 }
 
 #[derive(Clone, Copy)]
+// Windows 没有 Dock，Dock 变体在非 macOS 平台不会构造，这里只消除告警。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 enum MenuSlot {
     Dock,
     Autostart,
@@ -365,7 +458,11 @@ enum MenuSlot {
 fn set_menu_checked(app: &AppHandle, slot: MenuSlot, checked: bool) {
     let menu_state = app.state::<MenuState>();
     let handle = match slot {
-        MenuSlot::Dock => menu_state.dock_item.lock().ok().and_then(|item| item.clone()),
+        MenuSlot::Dock => menu_state
+            .dock_item
+            .lock()
+            .ok()
+            .and_then(|item| item.clone()),
         MenuSlot::Autostart => menu_state
             .autostart_item
             .lock()
@@ -432,8 +529,8 @@ fn move_panel_to_tray(window: &WebviewWindow) -> Result<(), String> {
         let window_width = window_frame.size.width;
         let window_height = window_frame.size.height;
         let leftmost_x = visible_frame.origin.x;
-        let rightmost_x = (visible_frame.origin.x + visible_frame.size.width - window_width)
-            .max(leftmost_x);
+        let rightmost_x =
+            (visible_frame.origin.x + visible_frame.size.width - window_width).max(leftmost_x);
         let panel_x = (pointer.x - window_width / 2.0).clamp(leftmost_x, rightmost_x);
         // 顶边贴住菜单栏下沿；窗口比可见区还高时退化为底边对齐，
         // 避免 clamp 的上下界倒挂。
@@ -455,7 +552,9 @@ fn main() {
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             // 用户再次点 App 图标 = 想看主界面；Console 还没起来时才退回面板。
             if let Err(error) = open_console_window(app.clone()) {
-                append_log(&format!("重复启动打开控制台失败：{error}，退回状态面板。\n"));
+                append_log(&format!(
+                    "重复启动打开控制台失败：{error}，退回状态面板。\n"
+                ));
                 if let Err(panel_error) = show_panel(app) {
                     append_log(&format!("重复启动唤出面板失败：{panel_error}\n"));
                 }
@@ -463,6 +562,7 @@ fn main() {
         }))
         .plugin(tauri_plugin_positioner::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             Some(vec![AUTOSTART_FLAG]),
@@ -509,6 +609,7 @@ fn main() {
                         .unwrap_or(false);
                     if !pinned {
                         let _ = window.hide();
+                        record_auto_hide(app);
                     }
                 }
                 WindowEvent::CloseRequested { api, .. } => {
@@ -547,6 +648,9 @@ fn main() {
 
             let open_console_item =
                 MenuItem::with_id(app, "open-console", "打开完整控制台", true, None::<&str>)?;
+            // Dock 是 macOS 概念：Windows 托盘 App 没有等价开关，不创建该菜单项，
+            // 避免出现点了没有任何效果的入口。
+            #[cfg(target_os = "macos")]
             let dock_item = CheckMenuItem::with_id(
                 app,
                 "dock-icon",
@@ -564,12 +668,16 @@ fn main() {
                 None::<&str>,
             )?;
             let quit_item = MenuItem::with_id(app, "quit", "退出 KedaCode", true, None::<&str>)?;
+            #[cfg(target_os = "macos")]
             let menu = Menu::with_items(
                 app,
                 &[&open_console_item, &dock_item, &autostart_item, &quit_item],
             )?;
+            #[cfg(not(target_os = "macos"))]
+            let menu = Menu::with_items(app, &[&open_console_item, &autostart_item, &quit_item])?;
 
             let menu_state = app.state::<MenuState>();
+            #[cfg(target_os = "macos")]
             if let Ok(mut slot) = menu_state.dock_item.lock() {
                 *slot = Some(dock_item);
             }
@@ -581,11 +689,20 @@ fn main() {
                 append_log(&format!("注册全局快捷键失败：{error}\n"));
             }
 
-            let icon = tauri::include_image!("icons/menubar.png");
+            // macOS 用透明底单色模板随系统主题适配；Windows 托盘显示应用彩色图标。
+            #[cfg(target_os = "macos")]
+            let tray_icon = tauri::include_image!("icons/menubar.png");
+            #[cfg(not(target_os = "macos"))]
+            let tray_icon = tauri::include_image!("icons/128x128@2x.png");
 
-            TrayIconBuilder::with_id("kedacode-menubar")
-                .icon(icon)
-                .icon_as_template(true)
+            #[cfg(target_os = "macos")]
+            let tray_builder = TrayIconBuilder::with_id("kedacode-menubar")
+                .icon(tray_icon)
+                .icon_as_template(true);
+            #[cfg(not(target_os = "macos"))]
+            let tray_builder = TrayIconBuilder::with_id("kedacode-menubar").icon(tray_icon);
+
+            tray_builder
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id().as_ref() {
@@ -655,7 +772,7 @@ fn main() {
             Ok(())
         })
         .build(tauri::generate_context!())
-        .expect("无法初始化 KedaCode 菜单栏应用");
+        .expect("无法初始化 KedaCode 桌面 App");
 
     application.run(|app, event| match event {
         RunEvent::Exit => stop_console(app, true),
@@ -672,7 +789,8 @@ fn main() {
 
 fn launch_console(app: &AppHandle) -> Result<String, String> {
     let console_cli = find_console_cli().ok_or_else(|| {
-        "没有找到 kc 命令。请先安装 KedaCode CLI（uv tool install kedacode），再重新打开菜单栏 App。".to_string()
+        "没有找到 kc 命令。请先安装 KedaCode CLI（uv tool install kedacode），再重新打开桌面 App。"
+            .to_string()
     })?;
     let port = choose_free_port()?;
     let origin = format!("http://127.0.0.1:{port}");
@@ -687,6 +805,23 @@ fn launch_console(app: &AppHandle) -> Result<String, String> {
         .stdout(Stdio::from(log_copy))
         .stderr(Stdio::from(log_file));
 
+    // Windows 上 kc 是控制台程序：不指定 CREATE_NO_WINDOW 会先闪出一个黑窗口，
+    // 用户顺手关掉它就会连带杀掉 Console。
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    #[cfg(target_os = "macos")]
+    if let Some(login_shell_path) = shell_path::resolve_user_path() {
+        command.env("PATH", login_shell_path);
+        append_log("已将用户登录 shell 的 PATH 传给 Console 与后台 runner。\n");
+    } else {
+        append_log("读取用户登录 shell 的 PATH 失败，Console 将沿用桌面 App 的 PATH。\n");
+    }
+
     if let Some(repository_root) = repository_root() {
         command.current_dir(repository_root);
     }
@@ -700,19 +835,18 @@ fn launch_console(app: &AppHandle) -> Result<String, String> {
     ));
     let process_state = app.state::<ConsoleProcess>();
     let Ok(mut child_slot) = process_state.child.lock() else {
-        let _ = child.kill();
-        let _ = child.wait();
+        terminate_console_process(&mut child);
         return Err("Console 进程状态锁不可用".to_string());
     };
     if process_state.shutting_down.load(Ordering::Acquire) {
         drop(child_slot);
-        let _ = child.kill();
-        let _ = child.wait();
-        return Err("KedaCode 菜单栏 App 正在退出".to_string());
+        terminate_console_process(&mut child);
+        return Err("KedaCode 桌面 App 正在退出".to_string());
     }
     child_slot.replace(child);
     drop(child_slot);
 
+    let log_hint = console_log_hint();
     let deadline = Instant::now() + CONSOLE_STARTUP_TIMEOUT;
     while Instant::now() < deadline {
         if console_is_ready(port) {
@@ -720,30 +854,64 @@ fn launch_console(app: &AppHandle) -> Result<String, String> {
             return Ok(origin);
         }
         if child_has_exited(app) {
-            return Err(
-                "kc console 已退出。请查看 ~/Library/Logs/KedaCode/desktop-console.log。"
-                    .to_string(),
-            );
+            return Err(format!("kc console 已退出。请查看 {log_hint}。"));
         }
         thread::sleep(CONSOLE_PROBE_INTERVAL);
     }
 
     stop_console(app, false);
-    Err("kc console 启动超时。请查看 ~/Library/Logs/KedaCode/desktop-console.log。".to_string())
+    Err(format!("kc console 启动超时。请查看 {log_hint}。"))
 }
 
+/// 查找本机 `kc` 可执行文件。
+///
+/// macOS 上 `uv tool install` 落在 `~/.local/bin`，Homebrew 落在
+/// `/opt/homebrew/bin` 或 `/usr/local/bin`；Windows 上 uv 的 shim 是
+/// `%USERPROFILE%\.local\bin\kc.exe`，pip --user 则是
+/// `%APPDATA%\Python\Scripts\kc.exe`。最后都回落到进程 PATH，覆盖用户自定义安装位置。
 fn find_console_cli() -> Option<PathBuf> {
-    let home_directory = env::var_os("HOME").map(PathBuf::from);
     let mut candidates = Vec::new();
-    if let Some(home) = home_directory.as_ref() {
-        candidates.push(home.join(".local/bin/kc"));
+    for directory in console_cli_directories() {
+        for file_name in CONSOLE_CLI_FILE_NAMES {
+            candidates.push(directory.join(file_name));
+        }
     }
-    candidates.push(PathBuf::from("/opt/homebrew/bin/kc"));
-    candidates.push(PathBuf::from("/usr/local/bin/kc"));
     if let Some(path_value) = env::var_os("PATH") {
-        candidates.extend(env::split_paths(&path_value).map(|directory| directory.join("kc")));
+        for directory in env::split_paths(&path_value) {
+            for file_name in CONSOLE_CLI_FILE_NAMES {
+                candidates.push(directory.join(file_name));
+            }
+        }
     }
     candidates.into_iter().find(|candidate| candidate.is_file())
+}
+
+#[cfg(target_os = "windows")]
+const CONSOLE_CLI_FILE_NAMES: &[&str] = &["kc.exe"];
+#[cfg(not(target_os = "windows"))]
+const CONSOLE_CLI_FILE_NAMES: &[&str] = &["kc"];
+
+fn console_cli_directories() -> Vec<PathBuf> {
+    let mut directories = Vec::new();
+    // Windows 原生进程通常只有 USERPROFILE；macOS 只有 HOME。
+    if let Some(user_home) = env::var_os("USERPROFILE")
+        .or_else(|| env::var_os("HOME"))
+        .map(PathBuf::from)
+    {
+        directories.push(user_home.join(".local").join("bin"));
+    }
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(app_data) = env::var_os("APPDATA") {
+            directories.push(PathBuf::from(app_data).join("Python").join("Scripts"));
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        directories.push(PathBuf::from("/opt/homebrew/bin"));
+        directories.push(PathBuf::from("/usr/local/bin"));
+    }
+    directories
 }
 
 fn repository_root() -> Option<PathBuf> {
@@ -814,10 +982,30 @@ fn stop_console(app: &AppHandle, app_is_exiting: bool) {
         return;
     };
     if let Some(mut child) = child_slot.take() {
-        let _ = child.kill();
-        let _ = child.wait();
-        append_log("已回收 KedaCode 菜单栏 App 启动的 kc console。\n");
+        terminate_console_process(&mut child);
+        append_log("已回收 KedaCode 桌面 App 启动的 kc console。\n");
     }
+}
+
+/// 结束 Console 子进程。
+///
+/// Windows 上 `kc.exe` 只是 uv 生成的启动器，它会再拉起真正的 Python 进程；
+/// 只杀启动器会留下孤儿 Console，因此整棵进程树一起结束。
+fn terminate_console_process(child: &mut Child) {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+
+        let _ = Command::new("taskkill")
+            .args(["/PID", &child.id().to_string(), "/T", "/F"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .creation_flags(CREATE_NO_WINDOW)
+            .status();
+    }
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 fn set_startup_status(window: &WebviewWindow, message: &str) {
@@ -829,11 +1017,47 @@ fn set_startup_status(window: &WebviewWindow, message: &str) {
     let _ = window.eval(&script);
 }
 
+/// 桌面 App 的日志目录：macOS 走 `~/Library/Logs/KedaCode`，
+/// Windows 走 `%LOCALAPPDATA%\KedaCode\logs`（与托盘 App 的常规位置一致）。
+fn desktop_log_directory() -> std::io::Result<PathBuf> {
+    #[cfg(target_os = "macos")]
+    {
+        let home = env::var_os("HOME")
+            .map(PathBuf::from)
+            .ok_or_else(|| std::io::Error::other("找不到 HOME 目录"))?;
+        Ok(home.join("Library").join("Logs").join("KedaCode"))
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let local_app_data = env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .or_else(|| {
+                env::var_os("USERPROFILE")
+                    .map(|home| PathBuf::from(home).join("AppData").join("Local"))
+            })
+            .ok_or_else(|| std::io::Error::other("找不到 LOCALAPPDATA 目录"))?;
+        Ok(local_app_data.join("KedaCode").join("logs"))
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        Err(std::io::Error::other("当前平台没有桌面 App 日志目录"))
+    }
+}
+
+/// 日志文件路径，用于面板与启动失败提示。
+fn console_log_hint() -> String {
+    desktop_log_directory()
+        .map(|log_directory| {
+            log_directory
+                .join("desktop-console.log")
+                .display()
+                .to_string()
+        })
+        .unwrap_or_else(|_| "desktop-console.log".to_string())
+}
+
 fn open_log_file() -> std::io::Result<File> {
-    let home = env::var_os("HOME")
-        .map(PathBuf::from)
-        .ok_or_else(|| std::io::Error::other("找不到 HOME 目录"))?;
-    let log_directory = home.join("Library/Logs/KedaCode");
+    let log_directory = desktop_log_directory()?;
     fs::create_dir_all(&log_directory)?;
     OpenOptions::new()
         .create(true)

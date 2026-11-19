@@ -397,6 +397,117 @@ def test_auto_declared_by_matrix_follows_concrete_legacy_keys() -> None:
     assert resolve_supervisor_agent(issue, config, "auto", fallback_agent="claude") == "kimi"
 
 
+def test_one_time_executor_override_beats_stage_preset_binding() -> None:
+    """一次性显式执行器覆盖高于阶段预设绑定。
+
+    预设绑定整体决定该阶段（agent + 模型 + 推理档）；覆盖若投递到矩阵 / PRD
+    覆盖层就会被它遮蔽，Console「换执行器续跑」选了 mcode 也仍按预设的 codex
+    跑——这里钉住"用户选的执行器真的被使用"。
+    """
+    from dataclasses import replace
+
+    from backend.core.shared.models.agent_model_preset import AgentModelPreset
+    from backend.core.shared.models.lifecycle_agent import LifecyclePresetsConfig
+    from backend.core.use_cases.agent_runner_agent_selection import choose_agent
+
+    config = AppConfig(
+        agent_presets={"codex-luna-max": AgentModelPreset(agent="codex", model="gpt-6-luna")},
+        lifecycle_presets=LifecyclePresetsConfig(
+            repository_layer={"implementation": "codex-luna-max"}
+        ),
+    )
+    overridden_issue = replace(
+        _issue(),
+        explicit_executor_overrides=(("implementation", "mcode"),),
+    )
+
+    # 无覆盖时仍是预设声明的执行器（既有语义不变）。
+    assert choose_agent(_issue(), config, "auto") == "codex"
+    # 有覆盖时用覆盖的执行器：预设绑定不再遮蔽。
+    assert choose_agent(overridden_issue, config, "auto") == "mcode"
+    assert resolve_lifecycle_agent("implementation", config, issue=overridden_issue) == "mcode"
+    # 命令行显式 --agent 仍然最高。
+    assert choose_agent(overridden_issue, config, "codex") == "codex"
+
+
+def test_one_time_executor_override_applies_to_verifier_stage() -> None:
+    """校验阶段的一次性覆盖同样高于预设绑定。"""
+    from dataclasses import replace
+
+    from backend.core.shared.models.agent_model_preset import AgentModelPreset
+    from backend.core.shared.models.lifecycle_agent import LifecyclePresetsConfig
+    from backend.core.use_cases.run_verifier_agent import _choose_verifier_agent
+
+    config = AppConfig(
+        agent_presets={"codex-luna-max": AgentModelPreset(agent="codex", model="gpt-6-luna")},
+        lifecycle_presets=LifecyclePresetsConfig(repository_layer={"verifier": "codex-luna-max"}),
+    )
+    overridden_issue = replace(
+        _issue(),
+        explicit_executor_overrides=(("verifier", "qoder"),),
+    )
+
+    assert resolve_lifecycle_agent("verifier", config, issue=overridden_issue) == "qoder"
+    assert _choose_verifier_agent(config, "codex", issue=overridden_issue) == "qoder"
+
+
+def test_one_time_executor_override_does_not_leak_into_deliberate_stage() -> None:
+    """实现阶段的一次性覆盖不串味到辩论阶段：覆盖按阶段取，不跨阶段生效。"""
+    from dataclasses import replace
+
+    from backend.core.shared.models.lifecycle_agent import LifecycleAgentsConfig
+    from backend.core.use_cases.agent_runner_agent_selection import choose_agent
+
+    overridden_issue = replace(
+        _issue(labels=("agent/codex",)),
+        explicit_executor_overrides=(("implementation", "mcode"),),
+    )
+    auto_deliberate_config = AppConfig(
+        lifecycle_agents=LifecycleAgentsConfig(repository_layer={"deliberate": "auto"}),
+    )
+
+    # 辩论阶段按自己的语义解析（标签路由 / 既有合成者），不吃实现阶段的覆盖。
+    assert (
+        resolve_lifecycle_agent("deliberate", auto_deliberate_config, issue=overridden_issue)
+        == "codex"
+    )
+    assert resolve_lifecycle_agent("deliberate", AppConfig(), issue=overridden_issue) == "claude"
+    # 实现阶段确实用上了覆盖。
+    assert choose_agent(overridden_issue, AppConfig(), "auto") == "mcode"
+
+
+def test_verifier_preset_matching_builder_uses_distinct_fallback() -> None:
+    """verifier 预设若绑定到 builder agent，门禁改用不同 agent。"""
+    from backend.core.shared.models.agent_model_preset import AgentModelPreset
+    from backend.core.shared.models.lifecycle_agent import LifecyclePresetsConfig
+    from backend.core.use_cases.run_verifier_agent import _choose_verifier_agent
+
+    config = AppConfig(
+        runner=RunnerConfig(agent_fallback_order=("codex", "qoder", "codebuddy")),
+        agent_presets={"codex-luna-max": AgentModelPreset(agent="codex", model="gpt-6-luna")},
+        lifecycle_presets=LifecyclePresetsConfig(repository_layer={"verifier": "codex-luna-max"}),
+    )
+
+    assert _choose_verifier_agent(config, "codex") == "qoder"
+
+
+def test_verifier_gate_fails_when_no_agent_is_independent() -> None:
+    """没有不同于 builder 的 verifier 候选时必须阻断，不能自我复核。"""
+    from backend.core.shared.models.agent_runner import ValidationConfig
+    from backend.core.use_cases.run_verifier_agent import (
+        VerifierUnavailableError,
+        _choose_verifier_agent,
+    )
+
+    config = AppConfig(
+        runner=RunnerConfig(agent_fallback_order=("codex",)),
+        validation=ValidationConfig(verifier_agent="codex"),
+    )
+
+    with pytest.raises(VerifierUnavailableError, match="no configured agent distinct from builder"):
+        _choose_verifier_agent(config, "codex")
+
+
 def test_fallback_order_still_driven_by_runner_config() -> None:
     """回退顺序仍由 [agent_runner.runner] 驱动（矩阵只选主 agent）。"""
     config = AppConfig(runner=RunnerConfig(agent_fallback_order=("kimi",)))

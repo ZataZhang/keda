@@ -449,7 +449,7 @@ def test_run_once_uncommitted_changes_validation_failure_does_not_stage(
     just_test_count = sum(
         1 for command in commands if is_bash_wrapped_verification_call(command, ("just", "test"))
     )
-    assert just_test_count == 3
+    assert just_test_count == 2
     assert ("git", "add", "-A") not in commands
     assert ("git", "commit", "-m", "[Agent] Issue #123: Example") not in commands
     failed_calls = [
@@ -468,10 +468,11 @@ def test_run_once_uncommitted_changes_validation_failure_does_not_stage(
         c
         for c in fake_client.calls
         if c["method"] == "comment_issue"
-        and "Command failed" in c.get("body", "")
+        and "Failed after 2 attempts" in c.get("body", "")
         and "<!-- kc:attempt-history -->" not in c.get("body", "")
     ]
     assert len(failure_comment_calls) == 1
+    assert "recovery_stalled" in failure_comment_calls[0]["body"]
 
 
 def test_run_once_uncommitted_changes_missing_request_fails(tmp_path: Path) -> None:

@@ -354,7 +354,7 @@ curl -sS \
 
 ### `GET /api/v1/agent-runner/console/evaluation/presets`
 
-页面下拉数据：`execution_presets`（来自既有 `[agent_runner.presets.<name>]`）、`judge_presets`（评审预设即同一份执行预设，逐项带 `agent` / `model` / `reasoning_effort` 与 `available` / `reason` 可用性探针——只检查 agent 是否声明禁用工具的 `judge` 形态且 CLI 在 PATH 上，**不起进程、不发起网络调用**；codex / kimi / opencode 等无该形态的 agent 为 `available=false`）、`default_judge_presets` 与并发/超时配置。所有条目 `cost_status` 固定为 `unknown`。
+页面下拉数据：`execution_presets`（来自既有 `[agent_runner.presets.<name>]`）、`judge_presets`（评审预设即同一份执行预设，逐项带 `agent` / `model` / `reasoning_effort` 与 `available` / `reason` 可用性探针——只检查 agent 是否声明禁用工具的 `judge` 形态且 CLI 在 PATH 上，**不起进程、不发起网络调用**；codex / kimi / opencode / mcode / dsh 等无该形态的 agent 为 `available=false`）、`default_judge_presets` 与并发/超时配置。所有条目 `cost_status` 固定为 `unknown`。
 
 ### `GET /api/v1/agent-runner/console/evaluation/runs` / `POST .../runs`
 
@@ -390,13 +390,23 @@ run 详情：`run`、`results`（逐候选执行）、`scores`（逐评审评分
 
 ### `GET /api/v1/agent-runner/console/runtime/tasks`
 
-值守看板（`/app/dashboard/` 默认视图）的任务摘要，只读。**不新增任何存储**：任务身份与标签来自监控快照，运行终态来自运行账本，阶段 / preset / 模型来自 attempt 账本，PRD 关联来自生命周期账本。
+值守看板（`/app/dashboard/` 默认视图）的任务摘要，只读。**不新增数据库表**：任务身份与标签来自监控快照，运行终态来自运行账本，阶段 / preset / 模型来自 attempt 账本，PRD 关联来自生命周期账本。运行中的任务还会读取既有 invocation 账本；只有当前会话最近一条调用没有结束事件时，才返回该调用的实际执行器与请求模型。GitHub 同步故障诊断附在现有快照载荷中，暂缓运行写入现有运行账本。
+
+任务摘要只读本地快照、账本与进程内证据分支索引后立即返回；缺失或过期的证据分支索引在 HTTP 响应后后台刷新。`Review` 可用性会在后续看板轮询中更新，不会让首屏等待 `git ls-remote`。
+
+当 Issue 保持 `agent/supervising`、最近动作是 `wait_for_checks`、最近执行成功结束且生命周期账本可用时，任务状态显示为 `waiting`，等待原因是 `recheck`；若发现更新的未收口生命周期会话，则仍显示为 `running`。完整规则见[运行看板状态说明](../guides/agent-runner.md#runtime-dashboard-status)。
+
+周期或手动监控扫描会把近 7 天未收口生命周期记录中的 Issue 一并纳入当前状态补扫，即使它没有对应的运行记录；因此 GitHub 已关闭状态可以覆盖残留的本地运行生命周期。
 
 - 数据范围严格绑定当前 registry 的启用仓库：账本按 `repo_id` 逐仓库读取，已删除或禁用的仓库即使仍有历史运行行也不会回到看板。
-- GitHub Issue 为 closed 时优先归入 `closed`，不受残留 `agent/*` 标签影响，也不表示 Agent 已成功完成；open Issue 再按 `agent/*` 标签推导状态，其中 `agent/blocked` 对应 `blocked`、`agent/failed` 对应 `failed`、`agent/review` 与 `agent/ready` 同归 `waiting`。没有可判定标签时依次回落到运行账本终态、`unknown`，未知不折算成零。
-- 分桶顺序为 `running` → `blocked` → `failed` → `waiting` → `completed` → `closed` → `unknown`，同状态内按开始时间新者在前。
+- GitHub Issue 为 closed 时优先归入 `closed`，不受残留 `agent/*` 标签影响，也不表示 Agent 已成功完成；open Issue 再按 `agent/*` 标签推导状态，其中 `agent/blocked` 对应 `blocked`、`agent/failed` 对应 `failed`、`agent/review` 与 `agent/ready` 同归 `waiting`。没有可判定标签时依次回落到运行账本终态、`unknown`；已确认是 GitHub 读取故障时显示 `deferred`，不把已知故障原因折叠成 `unknown`。
+- 分桶顺序为 `running` → `deferred` → `blocked` → `failed` → `waiting` → `completed` → `closed` → `unknown`，同状态内按开始时间新者在前。
 - `status_reason` 说明状态来源（当前监控标签、Issue 关闭状态或运行账本终态）；监控异常只放在独立的 `anomaly_types` 列表中，不覆盖状态来源，也不直接表示失败原因。
+- `blocking_reason` 仅在任务为阻塞且最近一次 `post_pr_supervisor` 动作为 `request_human_input` 时，透传该 Issue 事件评论里的 `Summary`；没有匹配摘要时为 `null`。看板将它作为阻塞原因单独显示。
+- `sync_error`、`last_observed_status` 与 `last_observed_at` 用于披露已知的 GitHub 读取 / 同步故障。看板保留最后成功观察到的状态和时间，并将其标为过期；未知状态若可由同步故障解释，则进入 `deferred`。下一次成功同步会清除故障提示。
+- `last_error_summary` 透传最近一次已收口运行记录中的失败、阻塞或暂缓原因；不读取或解析原始 Issue 日志，新执行已开始、无错误或旧记录缺失时为 `null`。
 - `duration_seconds` 对运行中的任务由「attempt 开始时间 → 生成时间」推算，是如实的已耗时，不是任何百分比。
+- `unclosed_invocation_executor` / `unclosed_invocation_model` 仅表示当前会话最近一次实际调用尚无结束事件；账本未收口不能单独证明执行进程仍存活。没有匹配调用、读端不可用或时间无法关联时留空，读取失败会把 `invocation_ledger` 加入 `unavailable_sources`。
 
 ```json
 {
@@ -411,9 +421,15 @@ run 详情：`run`、`results`（逐候选执行）、`scores`（逐评审评分
       "issue_url": "https://github.com/…/issues/283",
       "status": "running",
       "status_reason": "当前监控标签：agent/running",
+      "blocking_reason": null,
+      "sync_error": null,
+      "last_observed_status": null,
+      "last_observed_at": null,
       "anomaly_types": [],
       "phase": "implement",
       "agent": "claude",
+      "unclosed_invocation_executor": "claude",
+      "unclosed_invocation_model": "…",
       "preset": "fast",
       "model": "…",
       "attempt_number": 2,
@@ -422,11 +438,13 @@ run 详情：`run`、`results`（逐候选执行）、`scores`（逐评审评分
       "finished_at": null,
       "duration_seconds": 1800.0,
       "last_outcome": null,
+      "last_error_summary": null,
       "labels": ["agent/running"]
     }
   ],
   "status_counts": {
     "running": 1,
+    "deferred": 0,
     "waiting": 0,
     "blocked": 0,
     "failed": 0,
@@ -444,7 +462,7 @@ run 详情：`run`、`results`（逐候选执行）、`scores`（逐评审评分
 
 字段语义：
 
-- `unavailable_sources`：读取失败或整体不可信的数据来源名（`monitor_snapshot` / `run_history` / `prd_lifecycle` / `attempt_ledger`）。任一来源失败只把该来源标为不可用，不折叠成「没有任务」。
+- `unavailable_sources`：读取失败或整体不可信的数据来源名（`monitor_snapshot` / `run_history` / `prd_lifecycle` / `attempt_ledger` / `invocation_ledger`）。任一来源失败只把该来源标为不可用，不折叠成「没有任务」。
 - `sync_status` / `scanned_at` / `missing_repo_ids`：直接透传快照读路径的结果，`pending_first_sync` 表示整体还不可信。
 - `truncated`：任务数超过 100 行上限时为 `true`，此时列表是排序后的前 100 条；历史复盘请看 Stats 页面。
 - **改动树触达读数不在本响应里**：摘要只带 `prd_path`，展示侧按它调用 `GET …/backlog/prds/{encoded_path}/progress`，避免出现第二份影响树检测逻辑。
@@ -531,7 +549,9 @@ run 详情：`run`、`results`（逐候选执行）、`scores`（逐评审评分
 
 ### 运行时自省 `backend.api.cli_schema`
 
-`kc schema --json` 从已注册的 Typer/click 命令树派生，不维护第二份命令清单：顶层为 `name` / `help` / `exit_codes` / `command_count` / `commands`；每条命令含 `path`、`help`、`arguments`、`options`；每个参数含名称、类型、是否必填、枚举取值、默认值与示例。`kc ask` 与 `kc deliberate` 的 `--output` 是输出目录（文本型），不在机器格式之列。`kc run --fast-merge` 作为 `run` 的一次性旗标由该自动派生暴露，不另立清单。
+`kc schema --json` 从已注册的 Typer/click 命令树派生，不维护第二份命令清单：顶层为 `name` / `help` / `exit_codes` / `command_count` / `commands`；每条命令含 `path`、`help`、`arguments`、`options`；每个参数含名称、类型、是否必填、枚举取值、默认值与示例。`kc ask` 与 `kc deliberate` 的 `--output` 是输出目录（文本型），不在机器格式之列。`kc run --fast-merge` 与 `--progress` 作为 `run` 的一次性旗标由该自动派生暴露，不另立清单。
+
+`kc run --progress` 是前台执行的增量事件流，不等同于 `--output json`：普通 Agent 输出保留在 stdout；stderr 中每条以 `KC_PROGRESS ` 开头的行，移除此前缀后是一个 JSON 对象，带 `schema_version: 1`。`run.started`、`run.lifecycle`、`run.progress` 与 `run.finished` 分别表示启动、生命周期阶段变化、30 秒心跳和本次命令终态。调用方应保持进程会话打开并实时消费 stderr；最终状态描述 runner 命令本身，不代表 PR 已合并或人工验收完成。
 
 ### PR 正文快速通道 marker `kc:fast-merge`
 

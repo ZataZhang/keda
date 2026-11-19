@@ -3,6 +3,7 @@
   "productName": "KedaCode",
   "version": "../package.json",
   "identifier": "com.kedacode.desktop",
+  "mainBinaryName": "KedaCode",
   "build": {
     "frontendDist": "../ui"
   },
@@ -27,25 +28,23 @@
       }
     ],
     "security": {
-      "capabilities": ["menubar-panel"],
+      "capabilities": [
+        "menubar-panel"
+      ],
       "csp": null
     }
   },
   "bundle": {
     "active": true,
-    "targets": ["app", "dmg"],
-    "category": "public.app-category.developer-tools",
     "shortDescription": "KedaCode 任务状态面板",
-    "longDescription": "从 macOS 菜单栏查看 Agent Runner 状态并固定为悬浮窗。",
+    "longDescription": "从 macOS 菜单栏或 Windows 系统托盘查看 Agent Runner 状态，并固定为置顶悬浮窗。",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
+      "icons/icon.ico",
       "icons/icon.png"
-    ],
-    "macOS": {
-      "minimumSystemVersion": "12.0"
-    }
+    ]
   }
 }

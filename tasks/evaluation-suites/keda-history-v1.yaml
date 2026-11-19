@@ -1,0 +1,224 @@
+id: keda-history-v1
+version: 1.0.0
+title: Keda historical backend fixes (M13 seed)
+repo_path: .
+base_ref: main
+rubric:
+  id: default-rubric
+  version: v1
+check:
+  timeout_seconds: 240
+cases:
+- id: supervisor-check-decisions
+  prompt: 'After a pull request is sent for review, check summaries sometimes cause
+    the supervisor to treat an unrun or pending check as proof that code must be changed
+    or that human review cannot proceed. Make the outcome reflect the available facts:
+    executed failing jobs may lead to repair, while pending or unrun checks may still
+    proceed to human review when local validation is complete, with their state clearly
+    disclosed and never described as passing.'
+  check_recipe: uv-pytest
+  base_ref: f6c51fdc8a58bfab1a21f3dcf28b8d4a80b1498e
+  split: dev
+  check_targets:
+  - tests/test_pr_supervisor.py::test_build_supervisor_prompt_requires_ci_execution_distinction
+  - tests/test_pr_supervisor.py::test_supervisor_action_gate_keeps_approval_when_checks_fail
+  - tests/test_pr_supervisor.py::test_supervisor_action_gate_keeps_approval_when_checks_pending
+  - tests/test_pr_supervisor.py::test_supervisor_action_gate_keeps_approval_when_sign_off_and_other_checks_fail
+  - tests/test_pr_supervisor.py::test_supervisor_action_gate_keeps_human_input_for_sign_off_only
+  - tests/test_pr_supervisor.py::test_supervisor_loop_keeps_agent_approval_under_failed_checks
+  - tests/test_pr_supervisor.py::test_supervisor_loop_keeps_agent_approval_under_pending_checks
+  - tests/test_review_once.py::test_review_once_detects_checks_state_change_and_triggers_supervisor
+  - tests/test_review_once.py::test_review_once_keeps_agent_approval_under_pending_checks
+  held_out:
+  - tests/test_pr_supervisor.py
+  - tests/test_review_once.py
+  candidate_hidden:
+  - tasks/pending/P1-BUG-20260924-100212-agent-led-post-pr-ci-decision.md
+  - tasks/pending/P1-FEAT-20260916-134008-roadmap-prd-cicd-monitor-auto-repair.md
+  gold_patch: gold.patch
+- id: captured-process-final-output
+  prompt: A captured child process can keep running after a period without output.
+    When it finishes, the returned result must contain all text written to standard
+    output and error. If a descendant keeps a pipe open after the child exits, collection
+    must still finish within a bound. Keep the existing overall timeout, inactivity
+    timeout, and cancellation behavior.
+  check_recipe: uv-pytest
+  base_ref: e17f599a14a243dcdd1e7fefec04aa42674a0655
+  split: dev
+  check_targets:
+  - tests/test_process_runner.py::test_captured_output_includes_stdout_written_when_process_exits
+  held_out:
+  - tests/test_process_runner.py
+  candidate_hidden:
+  - tasks/archive/P1-BUG-20260624-194537-agent-execution-timeout-hang.md
+  - tasks/archive/P1-FEAT-20260628-041733-realistic-validation-independent-verifier-gate.md
+  - tasks/archive/P1-FEAT-20261011-160913-verifier-human-takeover.md
+  gold_patch: gold.patch
+- id: daemon-safe-logging
+  prompt: Logging configuration must tolerate an invalid level without stopping the
+    process, rotate date-named files when a long-running process crosses a day boundary,
+    clean expired files during rotation, and keep the application's own file handler
+    attached when unrelated root handlers already exist. Keep normal settings unchanged
+    and make the log-listing fallback agree with the configured log location.
+  check_recipe: uv-pytest
+  base_ref: f0af2d60c18dc157feb918364552e31bf56d8290
+  split: dev
+  check_targets:
+  - tests/test_cli_registry.py::test_logs_command_fallback_when_log_file_missing
+  - tests/test_cli_registry.py::test_logs_command_fallback_when_no_records
+  held_out:
+  - tests/test_cli_registry.py
+  candidate_hidden:
+  - tasks/pending/P0-BUG-20260930-145323-logging-config-robustness.md
+  gold_patch: gold.patch
+- id: idea-local-wall-clock
+  prompt: When a person adds an idea without an explicit event time, store the current
+    local wall-clock time in the idea entry. Do not store a UTC wall-clock and later
+    present it as local time. Preserve an explicitly supplied event time.
+  check_recipe: uv-pytest
+  base_ref: 155797a1f803a38f510eae6d3d8671fc5b25fc2d
+  split: dev
+  check_targets:
+  - tests/test_idea_inbox.py::test_append_idea_default_stamp_is_local_wall_clock
+  held_out:
+  - tests/test_idea_inbox.py
+  candidate_hidden:
+  - docs/guides/idea-inbox.md
+  - tasks/archive/P1-FEAT-20260614-203810-frontend-idea-inbox-cross-platform.md
+  gold_patch: gold.patch
+- id: short-term-memory-records
+  prompt: Keep short-term execution history out of a target repository and avoid putting
+    full tool transcripts in the compact summary. Preserve enough context for later
+    skill distillation to recover the full attempt history; continue reading older
+    records, fall back safely when a referenced log is missing or unsafe, and respect
+    a configured memory location.
+  check_recipe: uv-pytest
+  base_ref: d0595887f838686cb21caacd503cf2ffe4310413
+  split: dev
+  check_targets:
+  - tests/test_agent_runner_memory.py::test_short_term_store_keeps_context_compact_and_hydrates_detail_logs
+  - tests/test_agent_runner_memory.py::test_short_term_summary_skips_trailing_output_fences
+  held_out:
+  - tests/test_agent_runner_memory.py
+  candidate_hidden:
+  - tasks/archive/P1-BUG-20260704-153640-agent-runner-memory-stable-anchoring.md
+  - tasks/archive/P1-FEAT-20260626-093933-agent-runner-memory-persistence.md
+  gold_patch: gold.patch
+- id: failure-handoff-across-claims
+  prompt: When recovery continues in a later claim, retain the most recent useful
+    failure context so work does not restart from a snapshot without an explanation.
+    If recovery is exhausted, leave a reviewable outcome that accurately reports the
+    failure and available validation state; do not make unfinished work look complete.
+  check_recipe: uv-pytest
+  base_ref: 87ab96ee149eae7240f7ecd16eb1de81d7ef4dae
+  split: dev
+  check_targets:
+  - tests/test_agent_runner_checkpoint.py::test_next_claim_reflows_latest_handoff_record_into_continuation_prompt
+  - tests/test_agent_runner_publish.py::test_require_prd_archived_false_appears_only_on_the_exhaustion_path
+  - tests/test_agent_runner_run_once.py::test_run_once_no_new_commits_fails
+  - tests/test_agent_runner_run_once_commit.py::test_run_once_uncommitted_changes_missing_request_fails
+  held_out:
+  - tests/test_agent_runner_checkpoint.py
+  - tests/test_agent_runner_publish.py
+  - tests/test_agent_runner_run_once.py
+  - tests/test_agent_runner_run_once_commit.py
+  candidate_hidden:
+  - tasks/archive/20260521-134944-prd-agent-commit-handoff.md
+  - tasks/pending/P1-FEAT-20260922-000431-blocked-draft-pr-validation-failure.md
+  gold_patch: gold.patch
+- id: generated-pr-content-contract
+  prompt: Generated pull request content should keep a useful title when the generated
+    opening line is only a closing reference, and deterministic template or fallback
+    content should meet the same publication contract as generated content. Preserve
+    useful closing references in the body.
+  check_recipe: uv-pytest
+  base_ref: 076aa00eb684daec1f3ff28c101a53614cc00595
+  split: dev
+  check_targets:
+  - tests/test_generated_content.py::test_generate_pr_content_agent_mode_markdown
+  - tests/test_generated_content.py::test_generate_pr_content_closing_reference_title_uses_fallback_title
+  held_out:
+  - tests/test_generated_content.py
+  candidate_hidden:
+  - tasks/archive/20260523-161546-prd-ai-generated-issue-and-pr-content.md
+  - tasks/archive/P2-FEAT-20260527-190923-prd-from-issue.md
+  gold_patch: gold.patch
+- id: issue-create-ready-default
+  prompt: Creating an issue should put it in the ready queue by default. Keep an explicit
+    opt-out for people who only want to create it, and make the command help, machine-readable
+    schema, and packaged operator instructions agree on the effective default.
+  check_recipe: uv-pytest
+  base_ref: 0522db0839631c2c997d0641699519ba3ee7a44e
+  split: dev
+  check_targets:
+  - tests/test_agent_runner_cli.py::test_cli_parser_issue_create_defaults
+  held_out:
+  - tests/test_agent_runner_cli.py
+  candidate_hidden:
+  - tasks/archive/P1-FEAT-20260924-020856-iar-operator-skill-and-predictable-queue.md
+  - docs/guides/agent-runner.md
+  - src/backend/engines/agent_runner/templates/skills/kedacode-operator/SKILL.md
+  gold_patch: gold.patch
+- id: github-budget-ledger-failure
+  prompt: Failure to write the local usage ledger must not make an otherwise valid
+    GitHub operation fail or replace its original rate-limit error. Keep a useful
+    warning that makes the degraded cross-process accounting state clear.
+  check_recipe: uv-pytest
+  base_ref: 51faf140236c84d64f24d7721a2afe779ed182c4
+  split: holdout
+  check_targets:
+  - tests/test_github_api_budget.py::test_rate_limit_is_still_deferred_when_the_ledger_is_unwritable
+  - tests/test_github_api_budget.py::test_unwritable_ledger_does_not_break_normal_gh_calls
+  - tests/test_github_api_budget.py::test_unwritable_ledger_never_raises_from_recording
+  held_out:
+  - tests/test_github_api_budget.py
+  candidate_hidden: []
+  gold_patch: gold.patch
+- id: issue-list-table-output
+  prompt: The default tabular issue listing should return its rows without crashing.
+    When more than one repository is selected, make the repository for each row clear;
+    keep the single-repository view concise.
+  check_recipe: uv-pytest
+  base_ref: 947fd1e6f7ab1738683aeba977d535b3b76f73e0
+  split: holdout
+  check_targets:
+  - tests/test_issue_list.py::test_issue_list_default_table_output_renders_rows
+  - tests/test_issue_list.py::test_issue_list_table_adds_repo_column_for_multiple_repos
+  held_out:
+  - tests/test_issue_list.py
+  candidate_hidden:
+  - tasks/archive/P2-FEAT-20260622-215922-iar-issue-list-with-pr-status.md
+  gold_patch: gold.patch
+- id: worktree-env-run-state
+  prompt: A worktree should inherit normal environment configuration without inheriting
+    the parent checkout's allocated service-port state. A worktree command must not
+    reuse a still-running service from a different checkout.
+  check_recipe: uv-pytest
+  base_ref: 13641cdce5cc095953f7f002659e030b6323ef11
+  split: holdout
+  check_targets:
+  - tests/test_worktree_env.py::test_never_copies_run_state_file
+  held_out:
+  - tests/test_worktree_env.py
+  candidate_hidden:
+  - tasks/archive/P1-BUG-20260914-171901-console-e2e-and-archive-view-defects.md
+  gold_patch: gold.patch
+- id: token-usage-by-prd
+  prompt: The Stats API should include token totals grouped by PRD alongside the existing
+    flow and agent breakdowns. Aggregate repeated runs for one PRD, rank by total
+    usage, omit entries with no usage, and preserve the endpoint's safe empty response
+    when ledger reads fail.
+  check_recipe: uv-pytest
+  base_ref: d486dbdc9f0a41a14b9a572425a11f9b7161c226
+  split: holdout
+  check_targets:
+  - tests/test_prd_lifecycle.py::test_prd_lifecycle_stats_mounts_token_usage_by_prd
+  - tests/test_prd_lifecycle.py::test_prd_lifecycle_stats_reuses_ledger_reads_for_by_prd
+  - tests/test_prd_lifecycle.py::test_prd_lifecycle_stats_degrades_by_prd_on_read_failure
+  - tests/test_prd_lifecycle.py::test_stats_endpoint_degrades_when_ledger_unreadable
+  held_out:
+  - tests/test_prd_lifecycle.py
+  candidate_hidden:
+  - tasks/archive/P1-FEAT-20260930-212702-agent-token-usage-stats.md
+  - tasks/pending/P1-FEAT-20261006-013227-stats-token-usage-by-prd.md
+  gold_patch: gold.patch

@@ -1,12 +1,8 @@
-"""记忆子系统的 composition root 辅助。
+"""记忆子系统的装配 helper。
 
-``core/agent/memory/`` 不能直接 ``import backend.infrastructure.*``（架构
-依赖方向限制）。本模块通过动态模块加载（``importlib.import_module``）在
-运行时获取具体 store 实现，以避开静态 AST 检查。
-
-由于 ``importlib.import_module`` 调用在 AST 中只显示为一次普通
-``Call`` 节点，``hooks/shared/check_architecture.py`` 不会将其误判为
-``from backend.infrastructure import ...`` 导入。
+按四层依赖方向（``api → core → engines → infrastructure``），``core/`` 可以
+静态依赖 ``infrastructure/`` 的适配器（见 ``docs/ai-standards/architecture.md``）；
+本模块因此在模块加载时直接导入具体 store 实现，不再用 ``importlib`` 规避 AST 检查。
 
 锚点职责分工：
 - :mod:`backend.engines.agent_runner.factory._anchor_memory_config`
@@ -19,10 +15,11 @@
 
 from __future__ import annotations
 
-import importlib
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from backend.infrastructure.memory import build_memory_stores, resolve_memory_paths
 
 if TYPE_CHECKING:  # pragma: no cover - typing-only.
     from backend.core.agent.memory.protocols import (
@@ -67,8 +64,7 @@ def _log_relative_anchor_warning(memory_config: "MemoryConfig") -> None:
 
 def _build_short_term_impl(worktree_path: Path, memory_config: "MemoryConfig"):
     """Construct a concrete short-term store via dynamic import."""
-    infra_pkg = importlib.import_module("backend.infrastructure.memory")
-    paths = infra_pkg.resolve_memory_paths(
+    paths = resolve_memory_paths(
         worktree_path,
         base_dir=memory_config.base_dir,
         skill_drafts_dir=memory_config.skill_drafts_dir,
@@ -77,7 +73,7 @@ def _build_short_term_impl(worktree_path: Path, memory_config: "MemoryConfig"):
         short_term_repository_identity=memory_config.short_term_repository_identity,
         legacy_short_term_base_dirs=memory_config.legacy_short_term_base_dirs,
     )
-    bundle = infra_pkg.build_memory_stores()
+    bundle = build_memory_stores()
     return bundle.short_term(
         paths["short_term_base"],
         repository_identity=paths["short_term_repository_identity"],
@@ -86,26 +82,24 @@ def _build_short_term_impl(worktree_path: Path, memory_config: "MemoryConfig"):
 
 
 def _build_long_term_impl(worktree_path: Path, memory_config: "MemoryConfig"):
-    infra_pkg = importlib.import_module("backend.infrastructure.memory")
-    paths = infra_pkg.resolve_memory_paths(
+    paths = resolve_memory_paths(
         worktree_path,
         base_dir=memory_config.base_dir,
         skill_drafts_dir=memory_config.skill_drafts_dir,
         promoted_skills_dirs=memory_config.promoted_skills_dirs,
     )
-    bundle = infra_pkg.build_memory_stores()
+    bundle = build_memory_stores()
     return bundle.long_term(paths["long_term_base"])
 
 
 def _build_skill_impl(worktree_path: Path, memory_config: "MemoryConfig"):
-    infra_pkg = importlib.import_module("backend.infrastructure.memory")
-    paths = infra_pkg.resolve_memory_paths(
+    paths = resolve_memory_paths(
         worktree_path,
         base_dir=memory_config.base_dir,
         skill_drafts_dir=memory_config.skill_drafts_dir,
         promoted_skills_dirs=memory_config.promoted_skills_dirs,
     )
-    bundle = infra_pkg.build_memory_stores()
+    bundle = build_memory_stores()
     return bundle.skill(paths["skill_drafts_dir"])
 
 

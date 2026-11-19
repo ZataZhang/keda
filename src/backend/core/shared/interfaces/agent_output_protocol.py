@@ -7,7 +7,7 @@
 
 协议**实现**位于 ``engines/agent_runner/output_protocols/``（经
 ``kedacode.agent_output_protocols`` entry point 注册）；core 侧（构造器、
-用例）只依赖本接口，满足 ``core`` 不得依赖 ``engines`` 的架构约束；
+用例）面向本接口编程，具体实现由注册表在运行时发现。
 ``infrastructure`` 允许导入本模块（白名单 ``core.shared.interfaces``）。
 
 协议 id 常量（``PLAIN_PROTOCOL_ID`` 等）统一定义在
@@ -26,6 +26,8 @@ from typing import TYPE_CHECKING
 from backend.core.shared.models.agent_spec import (
     CLAUDE_STREAM_JSON_PROTOCOL_ID,
     CODEX_JSON_LINES_PROTOCOL_ID,
+    DSH_JSON_LINES_PROTOCOL_ID,
+    MCODE_JSON_LINES_PROTOCOL_ID,
     OPENCODE_JSON_LINES_PROTOCOL_ID,
     PI_JSON_LINES_PROTOCOL_ID,
     PLAIN_PROTOCOL_ID,
@@ -66,6 +68,8 @@ class OutputRelayRequest:
             :meth:`IProcessRunner.run` 的同名参数）；沿用调用方进程组的实现必须
             忽略它——按这个键去终止会打到宿主进程自己身上，监督器因此对这类协议
             只能诊断、不能处置（fail-closed，不是静默假成功）。
+        cancel_check: Issue 级 verifier 接管取消探针（Issue #278），由支持的协议
+            传给拥有子进程的 watchdog；未接入 watchdog 的协议不得声称支持接管取消。
     """
 
     argv: tuple[str, ...]
@@ -79,6 +83,7 @@ class OutputRelayRequest:
     output_sink: Callable[[str], None] | None = None
     display_sink: Callable[[str], None] | None = None
     attempt_key: str | None = None
+    cancel_check: Callable[[], bool] | None = None
 
 
 class IAgentOutputProtocol(ABC):
@@ -123,6 +128,8 @@ class IAgentOutputProtocolRegistry(ABC):
 __all__ = [
     "CLAUDE_STREAM_JSON_PROTOCOL_ID",
     "CODEX_JSON_LINES_PROTOCOL_ID",
+    "DSH_JSON_LINES_PROTOCOL_ID",
+    "MCODE_JSON_LINES_PROTOCOL_ID",
     "OPENCODE_JSON_LINES_PROTOCOL_ID",
     "PI_JSON_LINES_PROTOCOL_ID",
     "PLAIN_PROTOCOL_ID",

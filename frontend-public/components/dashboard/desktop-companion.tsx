@@ -20,7 +20,15 @@ import { formatLocalDateTime } from "@/lib/utils";
 
 import { RuntimeTaskPhaseDescription, RuntimeTaskPhase } from "./runtime-task-phase";
 import { RuntimeTaskAnomalies, RuntimeTaskImpact } from "./runtime-task-detail";
-import { RuntimeTaskDuration, RuntimeTaskObservation, RuntimeTaskWatch, isActiveRuntimeTask, runtimeStatusPresentation, runtimeTaskKey } from "./runtime-task-list";
+import {
+  RuntimeTaskBlockingReason,
+  RuntimeTaskDuration,
+  RuntimeTaskObservation,
+  RuntimeTaskWatch,
+  isActiveRuntimeTask,
+  runtimeStatusPresentation,
+  runtimeTaskKey,
+} from "./runtime-task-list";
 
 /** 小窗轮询间隔：与网页看板同一节奏（PRD §7.1.5「沿用现有 Dashboard 监控刷新」）。 */
 const COMPANION_POLL_MS = 15_000;
@@ -47,7 +55,14 @@ interface DesktopCompanionProps {
 }
 
 /** 顶部计数条的分桶顺序：与看板状态优先级一致，计数为 0 的桶不占位。 */
-const STATUS_COUNT_ORDER = ["running", "waiting", "blocked", "failed", "unknown"] as const;
+const STATUS_COUNT_ORDER = [
+  "running",
+  "deferred",
+  "waiting",
+  "blocked",
+  "failed",
+  "unknown",
+] as const;
 
 /**
  * 渲染活动任务的分状态计数。
@@ -300,6 +315,7 @@ function CompanionTaskRow({
         className="line-clamp-2 text-[11px] leading-snug text-slate-500 dark:text-slate-400"
       />
       <RuntimeTaskObservation task={task} />
+      <RuntimeTaskBlockingReason task={task} compact />
       <span className="flex flex-wrap gap-x-2 text-[11px] text-slate-500">
         {task.agent ? (
           <span>
@@ -309,9 +325,13 @@ function CompanionTaskRow({
         ) : null}
         <RuntimeTaskDuration task={task} />
       </span>
-      {["blocked", "failed"].includes(task.status) ? (
+      {["blocked", "failed", "deferred"].includes(task.status) ? (
         <p
-          className="text-[11px] break-words text-red-700 dark:text-red-300"
+          className={
+            task.status === "deferred"
+              ? "text-[11px] break-words text-amber-700 dark:text-amber-300"
+              : "text-[11px] break-words text-red-700 dark:text-red-300"
+          }
           data-testid="runtime-task-status-reason"
         >
           状态来源：{task.status_reason ?? "未提供，请查看任务详情"}

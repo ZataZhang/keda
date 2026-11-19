@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 # CLI 主命令是 kc，另有同名长写 kedacode（见 [project.scripts]）。
 # 改名时穷举命令见 PRD 7.5 第 3 条。
 name = "kedacode"
-version = "0.5.0"
+version = "0.8.0"
 description = "KedaCode (kc) — turn GitHub Issues into a local AI agent queue."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -77,6 +77,8 @@ claude-stream-json = "backend.engines.agent_runner.output_protocols.claude_strea
 pi-json-lines = "backend.engines.agent_runner.output_protocols.pi_json_lines:PiJsonLinesOutputProtocol"
 codex-json-lines = "backend.engines.agent_runner.output_protocols.codex_json_lines:CodexJsonLinesOutputProtocol"
 opencode-json-lines = "backend.engines.agent_runner.output_protocols.opencode_json_lines:OpenCodeJsonLinesOutputProtocol"
+mcode-json-lines = "backend.engines.agent_runner.output_protocols.mcode_json_lines:McodeJsonLinesOutputProtocol"
+dsh-json-lines = "backend.engines.agent_runner.output_protocols.dsh_json_lines:DshJsonLinesOutputProtocol"
 
 [project.optional-dependencies]
 llm = [
@@ -146,3 +148,18 @@ markers = [
 [tool.ruff]
 target-version = "py311"
 line-length = 100
+
+# docs/ai-standards/comments-docstrings.md 声明后端强制 docstring 规则，配置就在这里。
+# keda 不采用模板的 ruff.toml（见上方 pytest 段落前的说明），这组规则必须在本文件显式启用，
+# 否则文档写着强制、实际只跑 Ruff 默认规则集。BLE001 是代码里
+# `# noqa: BLE001 - 原因` 约定所针对的规则：启用后，新增的宽泛捕获必须写明理由。
+[tool.ruff.lint]
+extend-select = [
+    "D100", "D101", "D102", "D103", "D104", "D105", "D106", "D107",
+    "D419",
+    "BLE001",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# 这组规则只约束后端源码；测试、脚本、hooks 与迁移不在范围内。
+"!src/backend/**/*.py" = ["D100", "D101", "D102", "D103", "D104", "D105", "D106", "D107", "D419", "BLE001"]

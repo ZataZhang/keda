@@ -282,6 +282,16 @@ def _merge_profile_settings(
             f"agents.{agent_name}.profiles.{profile_name}: prompt_delivery='flag' "
             f"requires prompt_flag."
         )
+    # ``read_only_enforced`` 说的是"这串 argv 里有 provider 自己的只读沙箱/禁工具开关"。
+    # 因此它跟着 argv 走：配置覆盖了任何一段命令片段，内置默认的强制声明就失效，必须
+    # 重新显式声明——否则把 codex 的 ``--sandbox read-only`` 换成别的，调用方仍会
+    # 以为这一次写不进工作区。
+    argv_overridden = {"args", "tail_args", "expand"} & declared
+    inherited_enforced = (
+        base_profile.read_only_enforced
+        if base_profile is not None and not argv_overridden
+        else False
+    )
     return AgentProfileSpec(
         args=tuple(
             profile_settings.args
@@ -314,6 +324,11 @@ def _merge_profile_settings(
             profile_settings.read_only
             if profile_settings.read_only is not None
             else (base_profile.read_only if base_profile is not None else False)
+        ),
+        read_only_enforced=(
+            profile_settings.read_only_enforced
+            if "read_only_enforced" in declared
+            else inherited_enforced
         ),
     )
 
@@ -826,16 +841,18 @@ def build_app_config_from_settings(
         repl=repl,
         agent_session=agent_session,
         stall_supervisor=stall_supervisor,
+        daemon=DaemonConfig(
+            hosted_maintenance_enabled=(agent_runner_settings.daemon.hosted_maintenance_enabled),
+            disk_low_watermark_bytes=(agent_runner_settings.daemon.disk_low_watermark_bytes),
+            disk_resume_watermark_bytes=(agent_runner_settings.daemon.disk_resume_watermark_bytes),
+            presence_enabled=agent_runner_settings.daemon.presence_enabled,
+            lease_ttl_seconds=agent_runner_settings.daemon.lease_ttl_seconds,
+        ),
         deliberation=deliberation,
         lifecycle_agents=lifecycle_agents,
         agent_presets=build_agent_presets_from_settings(agent_runner_settings.presets),
         lifecycle_presets=build_lifecycle_presets_config_from_settings(
             agent_runner_settings.lifecycle_presets
-        ),
-        daemon=DaemonConfig(
-            hosted_maintenance_enabled=(agent_runner_settings.daemon.hosted_maintenance_enabled),
-            disk_low_watermark_bytes=(agent_runner_settings.daemon.disk_low_watermark_bytes),
-            disk_resume_watermark_bytes=(agent_runner_settings.daemon.disk_resume_watermark_bytes),
         ),
     )
 

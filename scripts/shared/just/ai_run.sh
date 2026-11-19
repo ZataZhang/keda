@@ -59,7 +59,7 @@ if [ "$mode" = "interactive" ]; then
             # `claude "<prompt>"` starts a REPL with the prompt as the
             # first user message; --dangerously-skip-permissions lets
             # the AI read/edit files without per-action prompts.
-            claude --dangerously-skip-permissions "$prompt_text" || true
+            claude --dangerously-skip-permissions "$prompt_text"
             ;;
         kimi)
             # kimi requires the --prompt flag. Pass the prompt through an
@@ -68,14 +68,11 @@ if [ "$mode" = "interactive" ]; then
             # Use --continue to resume the previous session for the current
             # working directory; kimi falls back to a fresh session if none
             # exists, so first-time callers are not broken.
-            KIMI_PROMPT="$prompt_text" "${SHELL:-bash}" -i -c 'kimi --continue --prompt "$KIMI_PROMPT"' || true
+            KIMI_PROMPT="$prompt_text" "${SHELL:-bash}" -i -c 'kimi --continue --prompt "$KIMI_PROMPT"'
             ;;
         *)
-            # Unknown tools: pass the prompt as a positional argument
-            # through the user's interactive shell so aliases resolve.
-            # The tool name is expanded literally for alias expansion;
-            # the prompt travels in an env var to preserve newlines.
-            AI_PROMPT="$prompt_text" "${SHELL:-bash}" -i -c "$ai_tool"' "$AI_PROMPT"' || true
+            # 工具名与提示词作为参数传入，不作为 Shell 代码执行。
+            AI_TOOL="$ai_tool" AI_PROMPT="$prompt_text" "${SHELL:-bash}" -i -c '"$AI_TOOL" "$AI_PROMPT"'
             ;;
     esac
 else
@@ -84,9 +81,7 @@ else
     case "$ai_tool" in
         claude)
             # claude: --print + --verbose + stream-json lets jq render
-            # thinking/tool calls in real time. The trailing `|| true`
-            # swallows non-zero exits so a truncated stream doesn't
-            # surface as a recipe failure.
+            # 实时显示工具调用；pipefail 保留 CLI 或 jq 的失败状态。
             # NOTE: Do not redirect stderr (2>&1) into jq. Claude Code may
             # emit status/warning lines (e.g. connector notices) on stderr
             # before the JSON stream starts, which breaks jq parsing.
@@ -135,17 +130,17 @@ else
                             empty
                         end
                     )
-                ' || true
+                '
             ;;
         kimi)
             # kimi uses --prompt flag instead of positional argument.
             # Use an env var so multi-line prompts survive bash -c quoting.
-            KIMI_PROMPT="$prompt_text" "${SHELL:-bash}" -i -c 'kimi --prompt "$KIMI_PROMPT"' || true
+            KIMI_PROMPT="$prompt_text" "${SHELL:-bash}" -i -c 'kimi --prompt "$KIMI_PROMPT"'
             ;;
         *)
             # Passthrough: any other tool name gets the prompt as a
             # positional argument through the user's interactive shell.
-            AI_PROMPT="$prompt_text" "${SHELL:-bash}" -i -c "$ai_tool"' "$AI_PROMPT"' || true
+            AI_TOOL="$ai_tool" AI_PROMPT="$prompt_text" "${SHELL:-bash}" -i -c '"$AI_TOOL" "$AI_PROMPT"'
             ;;
     esac
 fi

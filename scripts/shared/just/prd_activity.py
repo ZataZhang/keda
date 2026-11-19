@@ -148,24 +148,17 @@ def resolve_archive_landed_timestamp(prd_path: Path) -> float | None:
 
 
 def format_waiting_text(prd_record: PrdRecord) -> str | None:
-    """已在主仓库归档、横幅为 ``🧍 待人工验收`` 的记录：渲染"等人验收了多久"。
-
-    Args:
-        prd_record (PrdRecord): 单条 PRD 记录。
-
-    Returns:
-        str | None: 形如 ``🧍 waiting 3d0h`` 的文本；记录不是"已在主仓库归档且待人工"，
-        或归档落地时间取不到时返回 ``None``，调用方继续按其余信号渲染。
-    """
-    if not (
-        prd_locator.is_main_repo_archived(prd_record.prd_path) and prd_record.awaits_human_review
-    ):
+    """为主仓库里待人工验收或验证阻塞的归档记录渲染等待时长。"""
+    if not prd_locator.is_main_repo_archived(prd_record.prd_path):
+        return None
+    if not (prd_record.awaits_human_review or prd_record.validation_blocked):
         return None
     archive_landed_timestamp = resolve_archive_landed_timestamp(prd_record.prd_path)
     if archive_landed_timestamp is None:
         return None
     waiting_seconds = datetime.now(timezone.utc).timestamp() - archive_landed_timestamp
-    return f"🧍 waiting {format_duration_text(waiting_seconds)}"
+    waiting_prefix = "⏸️ blocked" if prd_record.validation_blocked else "🧍 waiting"
+    return f"{waiting_prefix} {format_duration_text(waiting_seconds)}"
 
 
 def format_activity_cell(
@@ -221,10 +214,8 @@ def format_activity_cell(
         branch_name_text, worktree_path = matched_worktree
         worktree_archive_prd_path = worktree_path / "tasks" / "archive" / prd_record.prd_path.name
         if worktree_archive_prd_path.is_file():
-            # worktree 内 tasks/archive 已有这条 PRD：收尾已在分支上完成，主线缺的
-            # 只是合并动作。归档是比锁更强的交付事实，判定因此排在锁之前：残留锁
-            # （无论新鲜还是过期）把已完成的 PRD 渲染成 RUNNING / STALE，都会误导
-            # 人重新执行一个已完成的任务。
+            if prd_record.validation_blocked:
+                return palette.yellow(f"⏸️ validation-blocked @{branch_name_text} · awaiting merge")
             return palette.green(f"✔ branch-archived @{branch_name_text} · awaiting merge")
 
     lock_snapshot = prd_lock.inspect_prd_lock(main_repo_root, prd_record.prd_path.stem)

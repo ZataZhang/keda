@@ -76,9 +76,11 @@ class IShortTermMemoryStore(Protocol):
         repo_id: str,
         issue_number: int,
         payload: ShortTermContextPayload,
-    ) -> Path: ...
+    ) -> Path:
+        """持久化某个 Issue 的短期记忆并返回文件路径。"""
 
-    def load(self, repo_id: str, issue_number: int) -> ShortTermContextPayload | None: ...
+    def load(self, repo_id: str, issue_number: int) -> ShortTermContextPayload | None:
+        """读取某个 Issue 的短期记忆；不存在时返回 ``None``。"""
 
 
 class ILongTermMemoryStore(Protocol):
@@ -91,9 +93,11 @@ class ILongTermMemoryStore(Protocol):
         topic: str,
         content: str,
         tags: Iterable[str] = (),
-    ) -> Path: ...
+    ) -> Path:
+        """追加或新建一条长期事实并返回文件路径。"""
 
-    def load_all(self) -> list[LongTermFactRecord]: ...
+    def load_all(self) -> list[LongTermFactRecord]:
+        """读取全部长期事实。"""
 
 
 class ISkillStore(Protocol):
@@ -110,7 +114,8 @@ class ISkillStore(Protocol):
         draft: bool = True,
         usage_count: int = 0,
         success_count: int = 0,
-    ) -> Path: ...
+    ) -> Path:
+        """把新的或更新后的 skill 草稿写入草稿目录并返回文件路径。"""
 
     def find_similar_draft(
         self,
@@ -119,7 +124,8 @@ class ISkillStore(Protocol):
         tags: Iterable[str],
         description: str = "",
         similarity_threshold: float = 0.8,
-    ) -> SkillRecord | None: ...
+    ) -> SkillRecord | None:
+        """按名称、标签与描述查找最接近的已有草稿；没有达到阈值的返回 ``None``。"""
 
     def update_draft(
         self,
@@ -133,17 +139,21 @@ class ISkillStore(Protocol):
         success_count: int = 0,
         version: str | None = None,
         draft: bool = True,
-    ) -> Path: ...
+    ) -> Path:
+        """把更新内容合并进已有草稿并返回其新路径。"""
 
-    def reset_usage_metrics(self, draft: SkillRecord) -> Path: ...
+    def reset_usage_metrics(self, draft: SkillRecord) -> Path:
+        """清空草稿未经验证的使用计数，草稿内容保持不变。"""
 
-    def load_promoted_skills(self, skills_dirs: Iterable[str | Path]) -> list[SkillRecord]: ...
+    def load_promoted_skills(self, skills_dirs: Iterable[str | Path]) -> list[SkillRecord]:
+        """从给定目录读取全部已晋升（非草稿）的 skill。"""
 
     def promote_draft(
         self,
         draft: SkillRecord,
         target_dirs: Iterable[str | Path],
-    ) -> Path | None: ...
+    ) -> Path | None:
+        """把草稿移到第一个可写的目标目录并清除草稿标记；没有可写目录时返回 ``None``。"""
 
 
 __all__ = [

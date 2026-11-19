@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
 
@@ -67,6 +68,7 @@ from backend.core.shared.models.agent_runner_config import (  # noqa: F401
     DaemonConfig,
     AppConfig,
 )
+from backend.core.shared.models.machine_identity import MachineIdentity  # noqa: F401
 
 
 @dataclass(frozen=True)
@@ -77,6 +79,20 @@ class RepositoryRunContext:
     display_name: str
     repo_path: Path
     config: AppConfig
+    #: Issue 日志根目录；``None`` 时取 ``repo_path / "logs"``。``--repo`` 指向
+    #: 已注册仓库的其他 checkout（如 git worktree）时锚定到登记路径，
+    #: 让 Console 与 ``kc logs --issue`` 能读到。
+    log_base: Path | None = None
+
+
+@dataclass(frozen=True)
+class IssueCommentRecord:
+    """GitHub Issue 评论的可信读取投影。"""
+
+    comment_id: int
+    body: str
+    updated_at: datetime
+    author: str
 
 
 class PublishFailureCategory(Enum):

@@ -3,8 +3,7 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> 🧍 **验收状态**：待人工验收 — 执行侧已完成，仅剩 1 项 Human-Confirmed 未确认，证据包见 §9。
-> 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
+> ✅ **验收状态**：已验收 — 2026-10-28 按合并态追认（交付 PR #253 于 2026-10-09 合并）。本次未逐项人工复核；遗留与未闭环项见文末 Change Log。
 
 本文分两层：Part A（§1–§4）面向人审，只讲行为与决策；Part B（§5–§13）面向执行器，含机制、改动树与验证命令。
 
@@ -335,8 +334,9 @@ run_skill_install_command                  ▼
 ### 9.2 Acceptance Evidence Package
 
 #### Human-Confirmed
+> 2026-10-28 按合并态追认：以下各项由用户一次性确认，未逐项人工复核；遗留与未闭环项见文末 Change Log。
 
-- [ ] **退出码统一为 1**（§2 决策）：确认 `kc skill install` 对「远程模板不可用」与「远程模板 fail-closed 拒绝覆盖」统一返回退出码 1（与 `kc init` 一致）可接受。证据见 rv-3 与负控测试 `test_skill_install_remote_template_failure_exits_one_like_init`。
+- [x] **退出码统一为 1**（§2 决策）：确认 `kc skill install` 对「远程模板不可用」与「远程模板 fail-closed 拒绝覆盖」统一返回退出码 1（与 `kc init` 一致）可接受。证据见 rv-3 与负控测试 `test_skill_install_remote_template_failure_exits_one_like_init`。
 
 #### Behavior Acceptance
 
@@ -418,3 +418,11 @@ run_skill_install_command                  ▼
 - Reason: 实现与证据已在前序尝试完成（代码、测试、rv 捕获件齐备），但 PRD 从未升级到 Machine Contract 结构，交付门禁无法解析验收清单。
 - Impact: 只改 PRD 文档与新增证据文本报告（verification-plan / evidence-report），不改任何已交付代码、测试或 oracle 语义；验收口径四条原样保留为 rv-1–rv-4 与 §9 勾选项；新增 §2 唯一人工决策（退出码统一为 1）对应 Human-Confirmed 空框一项。
 - Review: 执行侧自检（结构对齐 archived v5 范例 P1-FEAT-20261007-013031；`check_prd_acceptance_checklist.py --check-provided --archive-ready` 通过；横幅与 §9 一致）。
+
+### 2026-10-28 · 按合并态批量追认验收
+- Type: human acceptance
+- Before: 横幅为待人工验收，§9 Human-Confirmed 尚有 1 项空框；交付 PR #253 已于 2026-10-09 合并，但未记录人工验收。
+- After: 2026-10-28 按合并态追认，全部 Human-Confirmed 项勾选，横幅改为已验收。本次未逐项人工复核；勾选不表示未执行项已验证。遗留与未闭环：仓库内无独立 verifier 报告文件；退出码统一为 1 的决定按默认呈递接受。
+- Reason: 交付代码已在主干运行 19 天，逐项补审无法改变既成事实；按用户 2026-10-28 的决定以合并态追认关闭验收账本，原有风险披露全部保留。
+- Impact: 仅验收记录变化，无实现、契约、证据或门禁变化。
+- Review: 用户 2026-10-28 在对话中明确批准批量追认；本条目未声称逐项复核。

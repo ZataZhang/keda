@@ -5,8 +5,7 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，那里是唯一事实源。
 
-> 🧍 **验收状态**：待人工验收 — 2 项 Human-Confirmed 待确认
-> 本行是 §9 Acceptance Checklist 的投影，那里是唯一事实源。
+> ✅ **验收状态**：已验收 — 2026-10-28 按合并态追认（交付 PR #270 于 2026-10-11 合并）。本次未逐项人工复核；遗留与未闭环项见文末 Change Log。
 
 本文分为两层：Part A 供需求方确认统计行为与口径；Part B 为实现者提供代码边界、复用路径和验证证据要求。
 
@@ -342,9 +341,10 @@ No external validation required; repository evidence was sufficient.
 5. **回归门禁：** 既有 Stats 完成度、趋势、PRD 生命周期和 Token 汇总断言仍通过；前端类型检查与 build 通过。
 
 ### Human-Confirmed (来自 Part A 风险地图)
+> 2026-10-28 按合并态追认：以下各项由用户一次性确认，未逐项人工复核；遗留与未闭环项见文末 Change Log。
 
-- [ ] §2 决策一：确认 Agent / 预设成功率按 attempt 计算，整项任务结果不归属到单个 Agent 或预设。
-- [ ] §9.1 人读呈递区已查看，或按表中复核方法完成检查。
+- [x] §2 决策一：确认 Agent / 预设成功率按 attempt 计算，整项任务结果不归属到单个 Agent 或预设。
+- [x] §9.1 人读呈递区已查看，或按表中复核方法完成检查。
 
 ### Architecture Acceptance
 
@@ -562,3 +562,11 @@ No external validation required; repository evidence was sufficient.
 - Reason: 解决独立复核指出的证据不一致，并按仓库交付流程完成 verifier gate 与执行侧归档。
 - Impact: 不改变实现或用户可见行为；两项 `Human-Confirmed` 保持未勾选，验收横幅为 `🧍 待人工验收`，等待用户查看呈递证据后确认。
 - Review: Independent verifier PASS at `07f93d55980a761831aaaa10d1318decaee9925c`; Human-Confirmed items remain open.
+
+### 2026-10-28 · 按合并态批量追认验收
+- Type: human acceptance
+- Before: 横幅为待人工验收，§9 Human-Confirmed 尚有 2 项空框；交付 PR #270 已于 2026-10-11 合并，但未记录人工验收。
+- After: 2026-10-28 按合并态追认，全部 Human-Confirmed 项勾选，横幅改为已验收。本次未逐项人工复核；勾选不表示未执行项已验证。遗留与未闭环：独立 verifier PASS（HEAD 07f93d55）。
+- Reason: 交付代码已在主干运行 17 天，逐项补审无法改变既成事实；按用户 2026-10-28 的决定以合并态追认关闭验收账本，原有风险披露全部保留。
+- Impact: 仅验收记录变化，无实现、契约、证据或门禁变化。
+- Review: 用户 2026-10-28 在对话中明确批准批量追认；本条目未声称逐项复核。

@@ -12,8 +12,10 @@ from backend.core.shared.prd_checklist import PrdChecklistResult, parse_prd_chec
 from tests.support.agent_runner import (
     AWAITING_HUMAN_BANNER,
     NOT_STARTED_BANNER,
+    VALIDATION_BLOCKED_BANNER,
     build_acceptance_prd,
     require_banner_aware_prd_skill,
+    require_validation_blocked_prd_skill,
 )
 
 
@@ -346,6 +348,17 @@ class TestAcceptanceStatusBanner:
         # 合并队列 hold 用的保守口径仍把误标成 [~] 的人审项算作没回答。
         assert [line for line, _ in result.human_pending_items] == [14, 15]
         assert result.execution_unchecked_items == []
+
+    def test_validation_blocked_banner_comes_from_the_skill(self) -> None:
+        """v6 阻塞横幅原样映射为 validation_blocked，执行侧空框仍保留。"""
+        require_validation_blocked_prd_skill()
+
+        result = parse_prd_checklist(
+            build_acceptance_prd(VALIDATION_BLOCKED_BANNER, execution_marks=(" ",))
+        )
+
+        assert result.acceptance_status == "validation_blocked"
+        assert result.execution_unchecked_items == [(9, "- [ ] rv-1: executor-owned item 1")]
 
     @pytest.mark.parametrize(
         ("banner_line", "expected_status"),

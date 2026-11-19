@@ -74,7 +74,10 @@ Loop 配方是仓库内的 Markdown 文件，建议存放在 `tasks/loops/<id>.m
 创建一个不带 `PRD path:` 锚点的普通 Issue，因此不会生成 PRD 文件、不往 `main` 推送、也不会
 留下需要清理的本地文件；agent 在 Issue 正文里拿到的是配方的完整规则，证据目录按
 `issue-<N>` 走，Issue 不会出现在按 PRD 扫描的 Backlog 页面里。代价是没有 PRD 的验收清单与
-证据 manifest，交付是否合格由 PR 上的 CI 把关。
+证据 manifest，交付是否合格由 PR 上的 CI 把关。进入人工评审前，执行 Agent 仍应在证据目录
+生成 `human-review-checklist.md`，集中说明人工决策、PR 状态、关键证据、实际验证结果、未验证边界、
+下一步与 Issue 关闭条件；PR 值守发现页面缺失或过期时走现有修复流程。它是人审呈递页，不是新增
+硬门禁，也不要求后端或 CI 任务制造截图、视频。
 
 `skip_when` 可让 loop 在“无事可做”时不造票，例如 `skip_when: last_ci_status=success,none`：
 触发时先执行 `pre_command`，变量命中列表就跳过本次（不建 Issue、不消耗 agent），并把

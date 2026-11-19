@@ -15,6 +15,7 @@ from backend.api.backlog_sync import (
     start_backlog_scheduler,
     stop_backlog_scheduler,
 )
+from backend.api.loopback_request_guard import LoopbackRequestGuardMiddleware
 from backend.api.monitor_sync import (
     start_monitor_scheduler,
     stop_monitor_scheduler,
@@ -106,6 +107,8 @@ def create_app() -> FastAPI:
     ``local_auth`` no-op，并安装未认证即 401 的中间件；本机模式保持原样。
     """
     application = FastAPI(title="keda backend", lifespan=lifespan)
+    # 回环访问仍经过来源检查，防止浏览器跨站请求本机 API。
+    application.add_middleware(LoopbackRequestGuardMiddleware)
     application.include_router(agent_runner.router, prefix="/api/v1")
     application.include_router(agent_runner_console.router, prefix="/api/v1")
     application.include_router(agent_runner_console_issues.router, prefix="/api/v1")

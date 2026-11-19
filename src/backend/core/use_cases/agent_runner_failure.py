@@ -19,6 +19,7 @@ from backend.core.shared.models.agent_runner import (
     FailureType,
     PublishFailureCategory,
 )
+from backend.core.use_cases.agent_runner_check_result import CheckActionDirective
 from backend.core.use_cases.agent_runner_failure_format import (
     ATTEMPT_HISTORY_HEADING,
     build_publish_failure_comment_body,
@@ -46,10 +47,12 @@ __all__ = [
     "AgentUnavailableError",
     "DependencyEnvironmentBlockedError",
     "ForbiddenBlockedError",
+    "HumanActionRequiredError",
     "IssueBlockedDuringNoChangeError",
     "MaxRetriesExceededError",
     "ProviderCapacityError",
     "PublishFailureError",
+    "RecoveryStalledError",
     "UnrecoverableError",
     "build_publish_failure_comment_body",
     "classify_failure",
@@ -78,6 +81,12 @@ class AgentRunnerAttemptError(RuntimeError):
         message: str,
         attempt_results: list[AttemptResult],
     ) -> None:
+        """记录失败信息与历次尝试结果。
+
+        Args:
+            message: 失败描述。
+            attempt_results: 截至失败时的历次尝试结果。
+        """
         super().__init__(message)
         self.attempt_results = attempt_results
 
@@ -86,10 +95,33 @@ class MaxRetriesExceededError(AgentRunnerAttemptError):
     """Raised when all recovery attempts are exhausted."""
 
     def __init__(self, attempt_results: list[AttemptResult]) -> None:
+        """按尝试次数生成失败信息。
+
+        Args:
+            attempt_results: 用尽重试时的历次尝试结果。
+        """
         super().__init__(
             f"Failed after {len(attempt_results)} attempts.",
             attempt_results,
         )
+
+
+class RecoveryStalledError(AgentRunnerAttemptError):
+    """当前 Agent 连续遇到相同检查失败，交由备用 Agent 接手。"""
+
+    def __init__(
+        self,
+        directive: CheckActionDirective,
+        attempt_results: list[AttemptResult],
+    ) -> None:
+        """记录停滞原因和本轮尝试历史。
+
+        Args:
+            directive: Runner 对重复失败生成的说明。
+            attempt_results: 当前 Agent 的尝试历史。
+        """
+        super().__init__(directive.summary, attempt_results)
+        self.directive = directive
 
 
 class UnrecoverableError(AgentRunnerAttemptError):
@@ -100,6 +132,12 @@ class UnrecoverableError(AgentRunnerAttemptError):
         message: str,
         attempt_results: list[AttemptResult],
     ) -> None:
+        """记录不可恢复的失败。
+
+        Args:
+            message: 失败描述。
+            attempt_results: 截至失败时的历次尝试结果。
+        """
         super().__init__(message, attempt_results)
 
 
@@ -111,13 +149,64 @@ class ForbiddenBlockedError(AgentRunnerAttemptError):
         message: str,
         attempt_results: list[AttemptResult],
     ) -> None:
+        """记录因禁止路径而被阻塞、需要人工介入的失败。
+
+        Args:
+            message: 失败描述。
+            attempt_results: 截至失败时的历次尝试结果。
+        """
         super().__init__(message, attempt_results)
+
+
+class HumanActionRequiredError(AgentRunnerAttemptError):
+    """当检查明确要求人工介入时抛出。"""
+
+    def __init__(
+        self,
+        issue_number: int,
+        directive: CheckActionDirective,
+        attempt_results: list[AttemptResult],
+    ) -> None:
+        """记录人工阻塞原因，并准备可直接发布的 Issue 交接说明。
+
+        Args:
+            issue_number: 当前 GitHub Issue 编号。
+            directive: 外部检查或恢复停滞判定给出的阻塞说明。
+            attempt_results: 本轮执行已记录的尝试历史。
+        """
+        super().__init__(directive.summary, attempt_results)
+        self.directive = directive
+        issue_comment_body = "\n".join(
+            [
+                "## Agent Runner Blocked",
+                "",
+                f"- Block type: `{directive.block_type}`",
+                f"- Reason: {directive.summary}",
+                f"- Next action: {directive.next_action}",
+                "",
+                "After resolving the blocker, continue the Issue with:",
+                "",
+                "```bash",
+                f"kc blocked-continue --issue {issue_number}",
+                "```",
+            ]
+        )
+        attempt_history = format_attempt_history(attempt_results)
+        self.issue_comment_body = "\n\n".join(
+            section for section in (issue_comment_body, attempt_history) if section
+        )
 
 
 class IssueBlockedDuringNoChangeError(AgentRunnerAttemptError):
     """无代码变更的执行期间 Issue 转为 blocked 时发起人工交接。"""
 
     def __init__(self, issue_number: int, attempt_results: list[AttemptResult]) -> None:
+        """生成阻塞说明与对应的 Issue 评论正文。
+
+        Args:
+            issue_number: 在无改动运行期间被移入阻塞状态的 Issue 编号。
+            attempt_results: 截至阻塞时的历次尝试结果。
+        """
         message = f"Issue #{issue_number} was moved to the blocked state during a no-change run."
         super().__init__(message, attempt_results)
         self.issue_comment_body = "\n".join(
@@ -157,6 +246,12 @@ class DependencyEnvironmentBlockedError(RuntimeError):
         message: str,
         dependency_records: Sequence[FrontendProjectRecord],
     ) -> None:
+        """记录依赖环境阻塞并生成对应的 Issue 评论正文。
+
+        Args:
+            message: 阻塞描述。
+            dependency_records: 触发本次判定的依赖准备诊断记录。
+        """
         super().__init__(message)
         self.dependency_records = tuple(dependency_records)
         self.issue_comment_body = "\n".join(
@@ -208,6 +303,13 @@ class AgentUnavailableError(AgentRunnerAttemptError):
         *,
         context: str | None = None,
     ) -> None:
+        """记录不可用的 agent 及发现它不可用的调用上下文。
+
+        Args:
+            agent: 找不到可执行文件的 agent 名称。
+            attempt_results: 截至失败时的历次尝试结果，省略时为空。
+            context: 哪一次调用发现它不可用（阶段 / profile / 可执行文件名）。
+        """
         super().__init__(
             f"Agent '{agent}' is unavailable (command not found).",
             attempt_results or [],
@@ -230,6 +332,13 @@ class PublishFailureError(RuntimeError):
         worktree_path: Path | None = None,
         failure_category: PublishFailureCategory = PublishFailureCategory.UNKNOWN,
     ) -> None:
+        """记录发布失败及其分类。
+
+        Args:
+            message: 失败描述。
+            worktree_path: 发布失败时所在的 worktree 路径。
+            failure_category: 发布失败分类。
+        """
         super().__init__(message)
         self.worktree_path = worktree_path
         self.failure_category = failure_category

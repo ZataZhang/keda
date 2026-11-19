@@ -397,6 +397,8 @@ _is_upstream_owned() {
         tests/playwright-e2e/README.md) return 1 ;;
         # Shared justfile recipes (the project-private justfile imports this)
         justfile.shared) return 0 ;;
+        # PR 交付命令依赖这两份互相链接的共享指南；其他项目文档仍归项目所有。
+        docs/guides/ai-pr.md|docs/guides/agent-dataset.md) return 0 ;;
         # Shared shell / Python / bash utilities shipped with the template
         scripts/shared/*) return 0 ;;
         # Cross-cutting build scripts maintained by the template
@@ -561,7 +563,7 @@ SKILL_INSTALL_TARGET_DIRS=()
 # 可在交互菜单里显式选中）。默认探测只认工具自己读取的技能目录：把 Skill 装进
 # 某个中间层目录（由一个工具统一转发到各工具目录）看似能覆盖多个工具，实际依赖
 # 其转发，转发一停就变成「中间层更新了、工具看不见」——Codex / Claude 因此改为直连。
-SKILL_ADAPTER_NAMES=("Codex" "Claude" "Pi" "Qoder" "Kimi Code" "CodeBuddy" "KedaCode")
+SKILL_ADAPTER_NAMES=("Codex" "Claude" "Pi" "Qoder" "Kimi Code" "CodeBuddy" "MiniMax Code" "KedaCode" "DSH")
 SKILL_ADAPTER_DIRS=(
     "$HOME/.codex/skills"
     "$HOME/.claude/skills"
@@ -569,7 +571,9 @@ SKILL_ADAPTER_DIRS=(
     "$HOME/.qoder-cn/skills"
     "$HOME/.kimi-code/skills"
     "$HOME/.codebuddy/skills"
+    "$HOME/.minimax/skills"
     "$HOME/.kedacode/skills"
+    "$HOME/.dsh/skills"
 )
 SKILL_ADAPTER_AUTO_DETECT_DIRS=(
     "$HOME/.codex"
@@ -578,7 +582,9 @@ SKILL_ADAPTER_AUTO_DETECT_DIRS=(
     "$HOME/.qoder-cn"
     ""
     "$HOME/.codebuddy"
+    "$HOME/.minimax"
     "$HOME/.kedacode"
+    "$HOME/.dsh"
 )
 
 _append_unique_skill_target() {
