@@ -1,17 +1,11 @@
 "use client"
 
-// 全站顶部的「有新版本」提示条。
-//
-// 打开 / 刷新管理终端时后台静默比对一次（会话内只查一次），发现后端版本落后于
-// PyPI 最新版且该版本未被用户跳过时出现。刻意不提供「一键升级」：console 只展示
-// 命令、不替用户执行 CLI 动作（见 copyable-command.tsx 的设计约定）。
-
 import { useEffect, useState } from "react"
 import { ArrowUpCircle, X } from "lucide-react"
 
 import { CopyableCommand } from "@/components/agent-runner/copyable-command"
 import { Button } from "@/components/ui/button"
-import { fetchConsoleVersion, fetchLatestPyPiVersion, isNewerVersion } from "@/lib/api/version"
+import { fetchConsoleVersion, fetchLatestPyPiVersion, isNewerVersion, upgradeConsole } from "@/lib/api/version"
 import {
   readSkippedUpdateVersion,
   writeSkippedUpdateVersion,
@@ -19,9 +13,6 @@ import {
 
 /** 发布页地址，用于「查看变更」。 */
 const RELEASES_URL = "https://github.com/ZataZhang/keda/releases"
-
-/** 推荐的升级命令（`uv tool install` 安装路径下最省事；brew 用户可自行替换）。 */
-const UPGRADE_COMMAND = "uv tool upgrade kedacode"
 
 /** PyPI 查询的超时上限：超过就当作「查不到」，静默降级。 */
 const PYPI_TIMEOUT_MS = 5000
@@ -31,6 +22,10 @@ export function UpdateBanner() {
   const [currentVersion, setCurrentVersion] = useState<string | null>(null)
   const [latestVersion, setLatestVersion] = useState<string | null>(null)
   // 本次会话内点过「×」后不再出现；「跳过此版本」则按版本号长期记忆。
+  const [upgradeCommand, setUpgradeCommand] = useState<string | null>(null)
+  const [upgrading, setUpgrading] = useState(false)
+  const [installedVersion, setInstalledVersion] = useState<string | null>(null)
+  const [upgradeError, setUpgradeError] = useState<string | null>(null)
   const [dismissed, setDismissed] = useState(false)
 
   useEffect(() => {
@@ -40,10 +35,11 @@ export function UpdateBanner() {
 
     void (async () => {
       try {
-        const [current, latest] = await Promise.all([
+        const [installation, latest] = await Promise.all([
           fetchConsoleVersion(),
           fetchLatestPyPiVersion(controller.signal),
         ])
+        const current = installation.version
         // 拿不到任一侧、当前版本是占位值（源码树 / 未打包）、该版本已被跳过、
         // 或最新版并不更新时，一律不显示。
         if (cancelled || !latest || !current || current.includes("unknown")) {
@@ -55,6 +51,7 @@ export function UpdateBanner() {
         if (!isNewerVersion(current, latest)) {
           return
         }
+        setUpgradeCommand(installation.upgrade_command ?? null)
         setCurrentVersion(current)
         setLatestVersion(latest)
       } catch {
@@ -71,6 +68,19 @@ export function UpdateBanner() {
     }
   }, [])
 
+  async function handleUpgrade() {
+    setUpgrading(true)
+    setUpgradeError(null)
+    try {
+      const installation = await upgradeConsole()
+      setInstalledVersion(installation.version)
+    } catch (error) {
+      setUpgradeError(error instanceof Error ? error.message : "升级失败，请手动升级。")
+    } finally {
+      setUpgrading(false)
+    }
+  }
+
   if (!currentVersion || !latestVersion || dismissed) {
     return null
   }
@@ -79,9 +89,22 @@ export function UpdateBanner() {
     <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-100">
       <ArrowUpCircle className="size-4 shrink-0" aria-hidden="true" />
       <span className="font-medium">
-        有新版本 v{latestVersion}（当前 v{currentVersion}）
+        {installedVersion
+          ? `已安装 v${installedVersion}，请重启 KedaCode 以使用新版本。`
+          : `有新版本 v${latestVersion}（当前 v${currentVersion}）`}
       </span>
-      <CopyableCommand command={UPGRADE_COMMAND} className="max-w-xs" />
+      {!installedVersion && (
+        <>
+          {upgradeCommand && (
+            <Button type="button" size="sm" disabled={upgrading} onClick={handleUpgrade}>
+              {upgrading ? "正在升级…" : "立即升级"}
+            </Button>
+          )}
+          {upgradeCommand
+            ? <CopyableCommand command={upgradeCommand} className="max-w-xs" />
+            : <span>请按安装方式手动升级</span>}
+        </>
+      )}
       <a
         href={RELEASES_URL}
         target="_blank"
@@ -95,6 +118,8 @@ export function UpdateBanner() {
         type="button"
         variant="ghost"
         size="sm"
+        hidden={Boolean(installedVersion)}
+        disabled={upgrading}
         onClick={() => {
           writeSkippedUpdateVersion(latestVersion)
           setLatestVersion(null)
@@ -108,10 +133,12 @@ export function UpdateBanner() {
         size="icon-sm"
         aria-label="关闭升级提示"
         title="关闭"
+        disabled={upgrading}
         onClick={() => setDismissed(true)}
       >
         <X className="size-4" />
       </Button>
+      {upgradeError && <p role="alert" className="basis-full">{upgradeError}</p>}
     </div>
   )
 }

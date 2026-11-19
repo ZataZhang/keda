@@ -4,7 +4,7 @@
 // 会与实际安装的包漂移。最新版本直接由浏览器查 PyPI（其 JSON API 允许跨域），
 // 因此后端不必引入对外网络调用；离线 / 超时 / 被墙一律静默降级。
 
-import { get } from "./client";
+import { get, post } from "./client";
 
 /** PyPI 上的发行版名，与后端 `--version` 查询用同一个名字。 */
 const PYPI_PACKAGE_NAME = "kedacode";
@@ -12,14 +12,14 @@ const PYPI_PACKAGE_NAME = "kedacode";
 /** PyPI JSON API：`info.version` 即最新版本。 */
 const PYPI_JSON_URL = `https://pypi.org/pypi/${PYPI_PACKAGE_NAME}/json`;
 
-/**
- * 取后端当前运行的 KedaCode 版本。
- *
- * @returns 后端上报的版本字符串。
- */
-export async function fetchConsoleVersion(): Promise<string> {
-  const response = await get<{ version: string }>("/v1/agent-runner/console/version");
-  return response.version;
+/** 读取运行时版本和当前安装器对应的升级命令。 */
+export function fetchConsoleVersion(): Promise<{ version: string; upgrade_command?: string | null }> {
+  return get("/v1/agent-runner/console/version");
+}
+
+/** 请求本机 Console 执行升级，返回安装后复核的版本。 */
+export function upgradeConsole(): Promise<{ version: string }> {
+  return post("/v1/agent-runner/console/upgrade");
 }
 
 /**

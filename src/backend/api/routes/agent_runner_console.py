@@ -21,6 +21,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, FiniteFloat
 
 from backend.api.backlog_sync import wake_backlog_scheduler
+from backend.api.cli_update_check import detect_upgrade_command
 from backend.api.monitor_sync import wake_monitor_scheduler
 from backend.api.response_cache import TTLResponseCache
 from backend.api.routes.agent_runner_console_takeover import build_issue_action_response
@@ -580,7 +581,8 @@ def get_console_version() -> dict:
     而**当前**版本必须来自后端运行时——构建期注入会与实际安装的包漂移
     （``just console-sync`` 本地构建与已安装 wheel 未必同版本）。
     """
-    return {"version": resolve_keda_version()}
+    plan = detect_upgrade_command()
+    return {"version": resolve_keda_version(), "upgrade_command": plan.display if plan else None}
 
 
 @router.get("/agent-runner/repositories")

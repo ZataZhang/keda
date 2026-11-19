@@ -23,16 +23,21 @@ from __future__ import annotations
 
 import logging
 import mimetypes
+import subprocess
 import uuid
 from dataclasses import asdict, replace
 from pathlib import Path
+from threading import Lock
 from typing import Any
 from urllib.parse import quote, urlsplit
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Response
 from fastapi.responses import FileResponse
+from packaging.version import Version
 
+from backend.api.cli_update_check import detect_upgrade_command
 from backend.api.loopback_request_guard import LOOPBACK_HOSTS
+from backend.api.version_info import _UNKNOWN_VERSION, resolve_keda_version
 from backend.core.shared.interfaces.desktop_companion import (
     DesktopCompanionLauncher,
     DesktopCompanionSnapshot,
@@ -449,6 +454,41 @@ def get_desktop_companion_status(request: Request) -> dict[str, Any]:
     console_origin = _trusted_bound_origin(request)
     snapshot = _companion_launcher().snapshot(console_origin=console_origin)
     return _companion_payload(snapshot, console_origin)
+
+
+_upgrade_lock = Lock()
+
+
+@router.post("/agent-runner/console/upgrade")
+def upgrade_console_installation(request: Request) -> dict[str, str]:
+    """使用当前安装器升级本机 KedaCode，并复核安装后的版本。"""
+    _trusted_console_origin(request)
+    if not _upgrade_lock.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="升级正在进行，请稍候。")
+    try:
+        plan = detect_upgrade_command()
+        if plan is None:
+            raise HTTPException(status_code=409, detail="无法识别安装方式，请手动升级。")
+        previous_version = resolve_keda_version()
+        try:
+            result = subprocess.run(plan.argv, stdin=subprocess.DEVNULL, timeout=300, check=False)
+        except subprocess.TimeoutExpired as exc:
+            raise HTTPException(status_code=504, detail="升级超时，请检查安装版本。") from exc
+        except OSError as exc:
+            raise HTTPException(status_code=502, detail="无法启动安装器，请手动升级。") from exc
+        if result.returncode != 0:
+            raise HTTPException(
+                status_code=502,
+                detail=f"升级失败（退出码 {result.returncode}），请手动运行 {plan.display}。",
+            )
+        installed_version = resolve_keda_version()
+        if installed_version == _UNKNOWN_VERSION or Version(installed_version) <= Version(
+            previous_version
+        ):
+            raise HTTPException(status_code=409, detail="安装器未安装更高版本，请检查安装器。")
+        return {"version": installed_version}
+    finally:
+        _upgrade_lock.release()
 
 
 @router.post("/agent-runner/console/desktop-companion/window")

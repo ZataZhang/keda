@@ -157,6 +157,12 @@ kc container down
 
 完整说明见 `docs/guides/agent-runner.md` 的「容器化运行」章节。Docker 未安装时该子命令返回明确错误，不影响本机 `kc daemon` 用法。
 
+## 在管理终端升级
+
+本机管理终端发现新版并识别出安装方式时，点击「立即升级」即可调用对应的安装器。
+看到安装成功提示后，重新打开管理终端。如果正在运行常驻 Runner，也要重启 Runner 才会加载新版本。
+如果没有「立即升级」按钮，请按实际安装方式手动升级。
+
 ## 启动时版本更新检查
 
 每次启动 `kc` 时（`kc --version`、`--help` 等只读入口除外）会对照 PyPI 上的最新发布版本，发现新版后**仅在交互式终端**（stdin 与 stderr 都是 TTY）提示并询问是否升级；确认后用与你实际安装方式匹配的命令执行升级（`uv tool upgrade kedacode` / `pipx upgrade kedacode` / `brew upgrade kedacode` / `python -m pip install --upgrade kedacode`），并在执行后复核已安装版本，只有确实换到新版才报升级成功。`brew upgrade` 只给真正由 Homebrew formula 安装的副本（安装路径位于 `Cellar/kedacode/…`），跑在 Homebrew Python 里的 pip 安装不会被误当成 brew 托管。识别不出安装方式（如源码 editable、tarball 直链安装）或你拒绝自动执行时，只打印对应安装器的可复制命令，不会猜测执行。
