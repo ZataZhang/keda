@@ -50,6 +50,10 @@ from backend.core.use_cases.agent_runner_workflow import (
     transition_issue_workflow_state,
     workflow_state_labels,
 )
+from backend.core.use_cases.backlog_ci_delivery import (
+    AutoRepairDecisionContext,
+    prepare_supervisor_repair,
+)
 from backend.core.use_cases.lifecycle_agent_resolution import attach_prd_lifecycle_overrides
 from backend.core.use_cases.pr_supervisor import (
     guard_supervisor_action_for_pr_state,
@@ -563,51 +567,18 @@ def _process_review_candidate(
         if stashed:
             pop_worktree_stash(worktree_path, process_runner)
         if action_result.action == "repair_pr_branch":
-            # CI 修复受独立开关约束，纯代码审查修复只受共同轮数预算约束。
-            from backend.core.use_cases.backlog_ci_delivery import (
-                AutoRepairDecisionContext,
-                enqueue_approved_auto_repair,
-                gate_auto_repair_decision,
-            )
-
-            allowed, gate_reason = gate_auto_repair_decision(
-                config=config,
-                github_client=github_client,
-                context=AutoRepairDecisionContext(
+            repair_status = prepare_supervisor_repair(
+                config,
+                github_client,
+                issue,
+                AutoRepairDecisionContext(
                     issue_number=issue.number,
                     pr_context=pr_context,
                     repair_scope=action_result.repair_scope,
                 ),
             )
-            if not allowed:
-                _logger.info(
-                    "Issue #%d auto CI repair blocked by policy: %s",
-                    issue.number,
-                    gate_reason,
-                )
-                # 留在 supervising 会被"上下文未变"永久跳过且看板一直显示运行中；
-                # 转 blocked 交人处理，显式修复入口不依赖当前标签，仍可直接请求。
-                github_client.comment_issue(
-                    issue.number,
-                    f"## Agent Runner Auto Repair Stopped\n\n- Reason: {gate_reason}\n"
-                    "- Next: 需要人工处理 PR；修复预算未耗尽时也可显式请求一次修复"
-                    "（Backlog 问题卡 / `kc backlog ci repair`）。",
-                )
-                transition_issue_workflow_state(
-                    github_client, issue.number, config, config.labels.blocked
-                )
-                return "blocked_ci_repair_policy"
-            enqueued, detail = enqueue_approved_auto_repair(
-                issue=issue,
-                pr_context=pr_context,
-                config=config,
-                github_client=github_client,
-                pr_branch=pr_branch,
-                execution_owner="supervisor",
-            )
-            if not enqueued:
-                _logger.info("Issue #%d repair request skipped: %s", issue.number, detail)
-                return "skipped_duplicate_rework"
+            if repair_status != "ready":
+                return repair_status
             pending_rework = parse_latest_pending_rework_marker(
                 github_client.list_issue_comments(issue.number)
             )
@@ -696,9 +667,9 @@ def review_once(
         Exit code (0 on success, 1 if any issue failed).
     """
     effective_repo_id = repo_id or repo_path.name
-    candidates = github_client.list_review_candidate_issues(
-        [config.labels.supervising, config.labels.review, LEGACY_REVIEW_LABEL], max_issues
-    )
+    review_labels = (config.labels.supervising, config.labels.review, LEGACY_REVIEW_LABEL)
+    candidates = github_client.list_review_candidate_issues(review_labels, max_issues)
+    eligible_labels = set(review_labels)
     if not candidates:
         _logger.info(
             "No open Issues found with labels %s or %s.",
@@ -719,85 +690,95 @@ def review_once(
                 issue.title,
             )
             continue
-        try:
-            if LEGACY_REVIEW_LABEL in issue.labels:
+        with github_client.issue_supervision_lock(issue.number) as owns_supervision:
+            if not owns_supervision:
+                _logger.info("Issue #%d already has a local supervisor; skipping.", issue.number)
+                continue
+            eligible_issue_confirmed = False
+            try:
+                # 候选快照可能早于上一位持有者的交接，拿到锁后按当前状态准入。
                 issue = github_client.get_issue(issue.number)
-                if issue.state.upper() != "OPEN":
+                if issue.state.upper() != "OPEN" or not eligible_labels.intersection(issue.labels):
                     continue
-            if LEGACY_REVIEW_LABEL in issue.labels:
-                other_states = [
-                    label
-                    for label in workflow_state_labels(config)
-                    if label not in {LEGACY_REVIEW_LABEL, config.labels.review}
-                    and label in issue.labels
-                ]
-                if len(other_states) > 1:
-                    _logger.warning(
-                        "Issue #%d has legacy review plus conflicting workflow labels %s; "
-                        "leaving it unchanged.",
-                        issue.number,
-                        other_states,
+                if LEGACY_REVIEW_LABEL in issue.labels:
+                    other_states = [
+                        label
+                        for label in workflow_state_labels(config)
+                        if label not in {LEGACY_REVIEW_LABEL, config.labels.review}
+                        and label in issue.labels
+                    ]
+                    if len(other_states) > 1:
+                        _logger.warning(
+                            "Issue #%d has legacy review plus conflicting workflow labels %s; "
+                            "leaving it unchanged.",
+                            issue.number,
+                            other_states,
+                        )
+                        continue
+                    target_state = other_states[0] if other_states else config.labels.review
+                    transition_issue_workflow_state(
+                        github_client, issue.number, config, target_state
                     )
+                    if target_state not in {config.labels.review, config.labels.supervising}:
+                        continue
+                    issue = github_client.get_issue(issue.number)
+                eligible_issue_confirmed = True
+                if config.labels.review in issue.labels:
+                    synchronize_human_review_label(github_client, issue, config)
+                outcome = _process_review_candidate(
+                    issue=issue,
+                    repo_path=repo_path,
+                    config=config,
+                    agent=agent,
+                    github_client=github_client,
+                    process_runner=process_runner,
+                    run_history_store=run_history_store,
+                    repo_id=repo_id or "",
+                )
+                _logger.info(
+                    "Review outcome for Issue #%d: %s (%s)",
+                    issue.number,
+                    outcome,
+                    issue.title,
+                )
+                _record_review_outcome(
+                    run_history_store=run_history_store,
+                    repo_id=effective_repo_id,
+                    issue=issue,
+                    outcome=outcome,
+                    actor="review_once",
+                )
+            except (GitHubApiRateLimitError, GitHubApiUnavailableError) as exc:
+                # Supervisor marker 可能已经成功发布；保留当前 label，让下一轮按 marker
+                # 对齐状态，避免把已完成的判断改写成失败。
+                exit_code = 1
+                github_api_deferred = True
+                _logger.warning(
+                    "Deferring review for Issue #%d while GitHub API is unavailable; "
+                    "keeping its current workflow state for the next poll: %s",
+                    issue.number,
+                    exc,
+                )
+                break
+            except Exception as exc:  # noqa: BLE001 - report queue failures and continue.
+                exit_code = 1
+                _logger.error("Review failed for Issue #%d: %s", issue.number, exc)
+                if not eligible_issue_confirmed:
                     continue
-                target_state = other_states[0] if other_states else config.labels.review
-                transition_issue_workflow_state(github_client, issue.number, config, target_state)
-                if target_state not in {config.labels.review, config.labels.supervising}:
-                    continue
-                issue = github_client.get_issue(issue.number)
-            if config.labels.review in issue.labels:
-                synchronize_human_review_label(github_client, issue, config)
-            outcome = _process_review_candidate(
-                issue=issue,
-                repo_path=repo_path,
-                config=config,
-                agent=agent,
-                github_client=github_client,
-                process_runner=process_runner,
-                run_history_store=run_history_store,
-                repo_id=repo_id or "",
-            )
-            _logger.info(
-                "Review outcome for Issue #%d: %s (%s)",
-                issue.number,
-                outcome,
-                issue.title,
-            )
-            _record_review_outcome(
-                run_history_store=run_history_store,
-                repo_id=effective_repo_id,
-                issue=issue,
-                outcome=outcome,
-                actor="review_once",
-            )
-        except (GitHubApiRateLimitError, GitHubApiUnavailableError) as exc:
-            # Supervisor marker 可能已经成功发布；保留当前 label，让下一轮按 marker
-            # 对齐状态，避免把已完成的判断改写成失败。
-            exit_code = 1
-            github_api_deferred = True
-            _logger.warning(
-                "Deferring review for Issue #%d while GitHub API is unavailable; "
-                "keeping its current workflow state for the next poll: %s",
-                issue.number,
-                exc,
-            )
-            break
-        except Exception as exc:  # noqa: BLE001 - report queue failures and continue.
-            exit_code = 1
-            transition_issue_workflow_state(
-                github_client, issue.number, config, config.labels.failed
-            )
-            github_client.comment_issue(
-                issue.number,
-                f"## Agent Runner Review Failed\n\n```text\n{exc}\n```\n",
-            )
-            _logger.error("Review failed for Issue #%d: %s", issue.number, exc)
-            _record_review_outcome(
-                run_history_store=run_history_store,
-                repo_id=effective_repo_id,
-                issue=issue,
-                outcome="marked_failed",
-                actor="review_once",
-            )
+                transition_issue_workflow_state(
+                    github_client, issue.number, config, config.labels.failed
+                )
+                github_client.comment_issue(
+                    issue.number,
+                    f"## Agent Runner Review Failed\n\n```text\n{exc}\n```\n",
+                )
+                _record_review_outcome(
+                    run_history_store=run_history_store,
+                    repo_id=effective_repo_id,
+                    issue=issue,
+                    outcome="marked_failed",
+                    actor="review_once",
+                )
 
     # Autopilot 启用时运行合并队列：全局 auto_merge 开启则沿用原双开关行为；
     # 否则队列只处理带通用 Issue 授权或单 PRD 显式授权标签的 Issue。

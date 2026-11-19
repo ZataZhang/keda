@@ -129,6 +129,8 @@ def test_review_once_skips_excluded_in_flight_issues(
     fake_client.list_review_candidate_issues = lambda labels, limit: [
         _make_ready_issue(number, f"I{number}", "", ("agent/supervising",)) for number in (1, 2)
     ]
+    for issue_number in (1, 2):
+        fake_client.set_issue_labels(issue_number, ("agent/supervising",))
     exit_code = review_module.review_once(
         repo_path=tmp_path,
         config=AppConfig(),

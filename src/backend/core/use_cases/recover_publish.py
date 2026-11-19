@@ -807,7 +807,7 @@ def recover_publish_issue(
     content_generator: IContentGenerator | None = None,
     repo_id: str | None = None,
 ) -> PublishRecoveryResult:
-    """在现有工作树锁内恢复发布，标签 DIRECT 同时复用跨机器认领仲裁。
+    """持有本机监督锁及现有工作树锁时恢复发布。
 
     Args:
         request: 恢复目标与可选分支。
@@ -823,7 +823,7 @@ def recover_publish_issue(
 
     Raises:
         PublishRecoveryError: 发布或交接失败。
-        RuntimeError: 工作树已经被其他执行者锁定。
+        RuntimeError: 本机监督权或工作树已被其他执行者持有。
     """
     from backend.core.use_cases.agent_runner_blocked_claim import (
         _acquire_blocked_claim_lock,
@@ -831,20 +831,23 @@ def recover_publish_issue(
         worktree_claim_lock_path,
     )
 
-    worktree_path = resolve_existing_worktree(
-        repo_path, request.issue_number, config, process_runner
-    )
-    lock_path = worktree_claim_lock_path(worktree_path)
-    _acquire_blocked_claim_lock(lock_path, request.issue_number)
-    try:
-        return _recover_publish_issue_owned(
-            request=request,
-            repo_path=repo_path,
-            config=config,
-            github_client=github_client,
-            process_runner=process_runner,
-            content_generator=content_generator,
-            repo_id=repo_id,
+    with github_client.issue_supervision_lock(request.issue_number) as owns_supervision:
+        if not owns_supervision:
+            raise RuntimeError(f"Issue #{request.issue_number} already has a local supervisor.")
+        worktree_path = resolve_existing_worktree(
+            repo_path, request.issue_number, config, process_runner
         )
-    finally:
-        _release_blocked_claim_lock(lock_path)
+        lock_path = worktree_claim_lock_path(worktree_path)
+        _acquire_blocked_claim_lock(lock_path, request.issue_number)
+        try:
+            return _recover_publish_issue_owned(
+                request=request,
+                repo_path=repo_path,
+                config=config,
+                github_client=github_client,
+                process_runner=process_runner,
+                content_generator=content_generator,
+                repo_id=repo_id,
+            )
+        finally:
+            _release_blocked_claim_lock(lock_path)

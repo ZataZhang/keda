@@ -520,6 +520,17 @@ class IGitHubClient(ABC):
         """返回同一 GitHub 仓库在本机共享的状态板创建锁。"""
 
     @abstractmethod
+    def issue_supervision_lock(self, issue_number: int) -> AbstractContextManager[bool]:
+        """尝试占有本机对该 Issue 的监督权。
+
+        Args:
+            issue_number: GitHub Issue 编号。
+
+        Returns:
+            上下文管理器。取得监督权时返回 True，已有持有者时返回 False。
+        """
+
+    @abstractmethod
     def close_issue(self, issue_number: int) -> None:
         """关闭指定 Issue。"""
 

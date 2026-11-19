@@ -5456,13 +5456,15 @@ uv run kc backlog advance --repo <repo-id>
 
 有 PR 的 PRD 在实现与本地验证结束后进入「等待真实 CI/CD」阶段：daemon 的 review pass 持续刷新 GitHub checks，Backlog 右侧 `CI/CD` 标签同时展示原始 checks 状态与 Agent 决定/未验证说明。**checks 状态本身从不映射为动作**——是否修复由 Supervisor Agent 依据 checks 证据与 PRD 验收要求决定，平台只按策略约束 Agent 选出的 `repair_pr_branch` 动作。
 
+同一台机器上，发布线程和独立值守按 GitHub 仓库与 Issue 共享监督锁。发布线程在写入 `agent/supervising` 前取得监督权，值守遇到持有者就跳过，取得监督权后重新读取当前标签。这样，发布后的内联监督和轮询不会同时处理同一个 PR 或互相覆盖状态。等待检查和执行获准修复期间保持 `agent/supervising`。执行异常导致本轮退出且不再自动重试时，才用 `agent/failed` 表示停止；待人工决定和自动修复策略拒绝则用 `agent/blocked`。
+
 #### 策略模型：全局默认 + 单 PRD 三态覆盖
 
 - **全局默认**：仓库级 `post_pr_supervisor.auto_repair_ci`（`.kedacode.toml`，默认 `false`），由 Backlog 顶部「全局自动修复 CI/CD」开关或 `kc backlog ci policy --global on|off` 控制；只改这一个布尔键，与 Autopilot、`safety.auto_merge`、提交前 Fix Agent 互不联动（Autopilot 的合并队列等 checks 全绿是合并门禁，不会因失败而触发自动修复）。
 - **单 PRD 覆盖**：`inherit`（跟随全局，默认）/ `on`（强制开启）/ `off`（强制关闭），事实源是对应 GitHub Issue 最新一条 `<!-- kc:ci-auto-repair-policy value=... -->` marker；无 Issue 的 PRD 只能跟随全局。
 - **最终生效值**由服务端按 `显式 on/off ?? fresh 全局值` 计算（`on → true`、`off → false`、`inherit → 全局值`），API/CLI 只回显，前端不得自行推断。
 
-Supervisor 的 `repair_pr_branch` JSON 决策包含 `repair_scope`：纯代码审查问题使用 `code_review`，CI 失败修复或混合问题使用 `ci`。缺失或无效值保守按 `ci` 处理。`auto_repair_ci` 与单 PRD 覆盖只限制 `ci`；`code_review` 不受 CI 自动修复开关影响。获准的修复都由 Supervisor 生命周期内的配置 repair agent 执行，Issue 保持 `agent/supervising`，不会重新认领 builder。两类修复共享 `max_repair_attempts` 上限及同一 head 的幂等请求，不扩大总重试预算。repair agent 遇到供应商额度耗尽、CLI 不可用、执行器自身的 agent/profile/模型配置不兼容、进程启动失败或可恢复的执行崩溃时，按 `agent_fallback_order` / 生效候选链切换执行器；切换候选时丢弃只适用于原执行器的模型选择。验证失败仍留在同一修复恢复循环，不作为换执行器条件。Supervisor 评论回显范围，便于核对实际政策。
+Supervisor 的 `repair_pr_branch` JSON 决策包含 `repair_scope`：纯代码审查问题使用 `code_review`，CI 失败修复或混合问题使用 `ci`。缺失或无效值保守按 `ci` 处理。`auto_repair_ci` 与单 PRD 覆盖只限制 `ci`；`code_review` 不受 CI 自动修复开关影响。发布后的内联监督和值守共用同一套策略、修复轮数和 head 去重规则。获准后先同步 `agent/supervising`，再启动 Supervisor 生命周期内的 repair agent。repair agent 遇到供应商额度耗尽、CLI 不可用、执行器自身的 agent/profile/模型配置不兼容、进程启动失败或可恢复的执行崩溃时，按 `agent_fallback_order` / 生效候选链切换执行器；切换候选时丢弃只适用于原执行器的模型选择。验证失败仍留在同一修复恢复循环，不作为换执行器条件。Supervisor 评论回显范围，便于核对实际政策。
 
 #### 多轮修复与重入去重
 

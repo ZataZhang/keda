@@ -717,6 +717,68 @@ def _should_run_post_pr_supervisor(
     return True
 
 
+def _handoff_published_pr(published_pr: _VerifiedPrPublication, *, run_supervisor: bool) -> None:
+    """持有监督权后公布交接状态，避免值守线程抢跑并覆盖标签。"""
+    from backend.core.use_cases.agent_runner_supervisor import _run_supervisor_with_repair_loop
+
+    request = published_pr.verification_request
+    github_client = published_pr.github_client
+    issue = request.issue
+    config = request.config
+    with github_client.issue_supervision_lock(issue.number) as owns_supervision:
+        if not owns_supervision:
+            _logger.info(
+                "Issue #%d is already supervised; leaving publication state unchanged.",
+                issue.number,
+            )
+            return
+        if not run_supervisor:
+            review_add_labels, review_remove_labels = _review_handoff_label_updates(issue, config)
+            _edit_issue_labels_after_publish(
+                issue_number=issue.number,
+                add_labels=review_add_labels,
+                remove_labels=review_remove_labels,
+                worktree_path=request.worktree_path,
+                github_client=github_client,
+            )
+            return
+        _edit_issue_labels_after_publish(
+            issue_number=issue.number,
+            add_labels=[config.labels.supervising],
+            remove_labels=[
+                label
+                for label in workflow_state_labels(config)
+                if label != config.labels.supervising
+            ],
+            worktree_path=request.worktree_path,
+            github_client=github_client,
+        )
+        pr_context = github_client.get_pull_request_context(published_pr.branch)
+        if pr_context is None:
+            _logger.warning(
+                "Deferring post-PR supervisor for Issue #%d branch %s: "
+                "complete PR context is unavailable.",
+                issue.number,
+                published_pr.branch,
+            )
+            return
+        supervisor_config = config.for_next_agent_stage()
+        supervisor_agent = resolve_supervisor_agent(
+            issue, supervisor_config, "auto", fallback_agent=request.selected_agent
+        )
+        _run_supervisor_with_repair_loop(
+            issue=issue,
+            worktree_path=request.worktree_path,
+            config=supervisor_config,
+            github_client=github_client,
+            process_runner=request.process_runner,
+            pr_context=pr_context,
+            supervisor_agent=supervisor_agent,
+            executor_agent=request.selected_agent,
+            repo_id=request.repo_id,
+        )
+
+
 def _finish_implementation_publication(
     *,
     issue: IssueSummary,
@@ -759,11 +821,6 @@ def _finish_implementation_publication(
             此时不写任何标签。
         repo_id: 稳定的仓库 registry id，用于读取对应的短期执行记忆。
     """
-    # 导入监督循环（避免循环导入）
-    from backend.core.use_cases.agent_runner_supervisor import (
-        _run_supervisor_with_repair_loop,
-    )
-
     verification_results = commit_result.verification_results
     after_sha = get_head_sha(worktree_path, process_runner)
 
@@ -852,61 +909,10 @@ def _finish_implementation_publication(
         )
     )
 
-    # NORMAL/FAST 先进入 supervising；DIRECT 留在当前状态直到最终 review 交接成功。
-    if publish_stage is not PublishStage.DIRECT:
-        _edit_issue_labels_after_publish(
-            issue_number=issue.number,
-            add_labels=[config.labels.supervising],
-            remove_labels=[
-                label
-                for label in workflow_state_labels(config)
-                if label != config.labels.supervising
-            ],
-            worktree_path=worktree_path,
-            github_client=github_client,
-        )
-
-    # 步骤 4: PR 后监督（可选；直发档不进监督）
-    if _should_run_post_pr_supervisor(config, publish_stage, issue.number):
-        # 获取 PR 上下文（如果已存在）
-        pr_context = github_client.get_pull_request_context(reviewed_pr.branch)
-        if pr_context is None:
-            _logger.warning(
-                "Deferring post-PR supervisor for Issue #%d branch %s: "
-                "complete PR context is unavailable.",
-                issue.number,
-                reviewed_pr.branch,
-            )
-        else:
-            supervisor_config = config.for_next_agent_stage()
-            supervisor_agent = resolve_supervisor_agent(
-                issue,
-                supervisor_config,
-                "auto",
-                fallback_agent=selected_agent,
-            )
-            # 启动监督修复循环
-            _run_supervisor_with_repair_loop(
-                issue=issue,
-                worktree_path=worktree_path,
-                config=supervisor_config,
-                github_client=github_client,
-                process_runner=process_runner,
-                pr_context=pr_context,
-                supervisor_agent=supervisor_agent,
-                executor_agent=selected_agent,
-                repo_id=repo_id,
-            )
-    else:
-        # 未启用监督（或直发档旁路）时直接进入 review 标签
-        review_add_labels, review_remove_labels = _review_handoff_label_updates(issue, config)
-        _edit_issue_labels_after_publish(
-            issue_number=issue.number,
-            add_labels=review_add_labels,
-            remove_labels=review_remove_labels,
-            worktree_path=worktree_path,
-            github_client=github_client,
-        )
+    _handoff_published_pr(
+        reviewed_pr,
+        run_supervisor=_should_run_post_pr_supervisor(config, publish_stage, issue.number),
+    )
 
     if direct_pr_label is not None:
         complete_direct_pr_round(github_client, issue)
@@ -965,11 +971,6 @@ def _finish_existing_commit_publication(
         repo_id: 稳定仓库标识（Issue #278），透传给 verdict 发布前的
             merged/HEAD 复核；``None`` 时复核照常但过期结论不落闸。
     """
-    # 导入监督循环（避免循环导入）
-    from backend.core.use_cases.agent_runner_supervisor import (
-        _run_supervisor_with_repair_loop,
-    )
-
     verification_results = commit_result.verification_results
     head_sha = get_head_sha(worktree_path, process_runner)
 
@@ -1039,53 +1040,10 @@ def _finish_existing_commit_publication(
         )
     )
 
-    # NORMAL/FAST 恢复先进入 supervising；DIRECT 直接完成最终 review 交接。
-    if publish_stage is not PublishStage.DIRECT:
-        _edit_issue_labels_after_publish(
-            issue_number=issue.number,
-            add_labels=[config.labels.supervising],
-            remove_labels=workflow_state_labels(config),
-            worktree_path=worktree_path,
-            github_client=github_client,
-        )
-    # 步骤 4: PR 后监督（可选；直发档不进监督）
-    if _should_run_post_pr_supervisor(config, publish_stage, issue.number):
-        pr_context = github_client.get_pull_request_context(reviewed_pr.branch)
-        if pr_context is None:
-            _logger.warning(
-                "Deferring post-PR supervisor for Issue #%d branch %s: "
-                "complete PR context is unavailable.",
-                issue.number,
-                reviewed_pr.branch,
-            )
-        else:
-            supervisor_config = config.for_next_agent_stage()
-            supervisor_agent = resolve_supervisor_agent(
-                issue,
-                supervisor_config,
-                "auto",
-                fallback_agent=selected_agent,
-            )
-            _run_supervisor_with_repair_loop(
-                issue=issue,
-                worktree_path=worktree_path,
-                config=supervisor_config,
-                github_client=github_client,
-                process_runner=process_runner,
-                pr_context=pr_context,
-                supervisor_agent=supervisor_agent,
-                executor_agent=selected_agent,
-                repo_id=repo_id,
-            )
-    else:
-        review_add_labels, review_remove_labels = _review_handoff_label_updates(issue, config)
-        _edit_issue_labels_after_publish(
-            issue_number=issue.number,
-            add_labels=review_add_labels,
-            remove_labels=review_remove_labels,
-            worktree_path=worktree_path,
-            github_client=github_client,
-        )
+    _handoff_published_pr(
+        reviewed_pr,
+        run_supervisor=_should_run_post_pr_supervisor(config, publish_stage, issue.number),
+    )
 
     if direct_pr_label is not None:
         complete_direct_pr_round(github_client, issue)

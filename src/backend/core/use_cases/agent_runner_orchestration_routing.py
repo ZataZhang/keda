@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from backend.core.shared.interfaces.agent_runner import IProcessRunner
+from backend.core.shared.interfaces.agent_runner import IGitHubClient, IProcessRunner
 from backend.core.shared.interfaces.runner_console import (
     IRunHistoryStore,
     PrdLifecycleEventRecord,
@@ -36,6 +36,7 @@ class _IssueRoutingContext:
     log_base: Path
     output_view: IRunnerLiveView
     console_sink: Callable[[str], None] | None
+    github_client: IGitHubClient
     process_runner: IProcessRunner
     run_history_store: IRunHistoryStore | None
     progress_callback: Callable[[RunProgressEvent], None] | None
@@ -56,45 +57,55 @@ def _process_routed_issue(
     """在输出路由与观测上下文里处理一个 Issue；路由自身的异常按失败返回。"""
     issue, issue_kind = issue_and_kind
     try:
-        with issue_output_routing(
-            repo_id=routing.effective_repo_id,
-            issue_number=issue.number,
-            log_base=routing.log_base,
-            output_view=routing.output_view,
-            console_sink=routing.console_sink,
-        ) as sink:
-            scoped_runner = _OutputRoutedProcessRunner(routing.process_runner, sink)
+        # 持锁到执行线程收尾，包含发布后监督异常时写入的终态。
+        with routing.github_client.issue_supervision_lock(issue.number) as owns_issue:
+            if not owns_issue:
+                _logger.info(
+                    "Issue #%d already has a local workflow owner; skipping.", issue.number
+                )
+                return 0
+            with issue_output_routing(
+                repo_id=routing.effective_repo_id,
+                issue_number=issue.number,
+                log_base=routing.log_base,
+                output_view=routing.output_view,
+                console_sink=routing.console_sink,
+            ) as sink:
+                scoped_runner = _OutputRoutedProcessRunner(routing.process_runner, sink)
 
-            def emit_issue_progress(event_record: PrdLifecycleEventRecord) -> None:
-                if routing.progress_callback is None:
-                    return
-                routing.progress_callback(
-                    RunProgressEvent(
+                def emit_issue_progress(event_record: PrdLifecycleEventRecord) -> None:
+                    if routing.progress_callback is None:
+                        return
+                    routing.progress_callback(
+                        RunProgressEvent(
+                            repo_id=routing.effective_repo_id,
+                            issue_number=issue.number,
+                            lifecycle_event=event_record.event_type,
+                            phase=event_record.phase,
+                            status=event_record.status,
+                            occurred_at=event_record.occurred_at,
+                        )
+                    )
+
+                progress_sink = (
+                    emit_issue_progress if routing.progress_callback is not None else None
+                )
+                with bound_invocation_trace_context(
+                    build_invocation_trace_context(
                         repo_id=routing.effective_repo_id,
                         issue_number=issue.number,
-                        lifecycle_event=event_record.event_type,
-                        phase=event_record.phase,
-                        status=event_record.status,
-                        occurred_at=event_record.occurred_at,
+                        run_history_store=routing.run_history_store,
                     )
-                )
-
-            progress_sink = emit_issue_progress if routing.progress_callback is not None else None
-            with bound_invocation_trace_context(
-                build_invocation_trace_context(
-                    repo_id=routing.effective_repo_id,
-                    issue_number=issue.number,
-                    run_history_store=routing.run_history_store,
-                )
-            ):
-                with lifecycle_progress_scope(progress_sink):
-                    return routing.process_issue(
-                        issue,
-                        issue_kind,
-                        process_runner=scoped_runner,
-                        output_view=routing.output_view,
-                        **routing.process_kwargs,
-                    )
+                ):
+                    with lifecycle_progress_scope(progress_sink):
+                        return routing.process_issue(
+                            issue,
+                            issue_kind,
+                            github_client=routing.github_client,
+                            process_runner=scoped_runner,
+                            output_view=routing.output_view,
+                            **routing.process_kwargs,
+                        )
     except Exception as exc:  # noqa: BLE001 - 单个 Issue 的 I/O 不应中断本轮。
         _logger.error("Output routing failed for Issue #%d: %s", issue.number, exc)
         return 1

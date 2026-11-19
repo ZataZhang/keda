@@ -24,6 +24,11 @@ pipx install kedacode
 Python 依赖在 Windows 上可直接安装；但**支持范围**与 macOS / Linux 不同，见下方
 [Windows 支持范围](#windows)。
 
+用 `uv tool install -e /path/to/keda` 安装源码时，运行依赖由 uv 工具环境管理。
+源码更新后如果 `kc` 启动报 `ModuleNotFoundError: No module named 'requests'`，用
+`uv tool install --reinstall-package kedacode -e /path/to/keda` 同步工具环境的依赖，再运行
+`kc --version` 确认启动正常。
+
 ### Shell 自动补全（一次性启用）
 
 `uv tool install` 会安装 `kc` 命令，但不会替应用修改 shell 配置来启用命令补全。安装后按当前使用的 shell 执行一次：
