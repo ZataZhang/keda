@@ -102,6 +102,7 @@ tasks/evidence/**
 
 # KedaCode TOML 写回的跨进程锁（与 config.toml / .kedacode.toml 同目录，零字节）
 *.toml.lock
+/.kedacode.local.toml
 
 
 # Agent

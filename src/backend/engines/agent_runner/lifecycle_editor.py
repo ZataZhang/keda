@@ -258,7 +258,7 @@ def create_lifecycle_settings_editor(
     """按 scope 构造编辑器：全局写 ``config.toml``，仓库写该仓库 ``.kedacode.toml``。
 
     Args:
-        scope: ``global`` 或 ``repository``。
+        scope: ``global``、``repository`` 或 ``local``。
         repo_path: 仓库根目录（``scope=repository`` 时必填）。
 
     Returns:
@@ -267,6 +267,12 @@ def create_lifecycle_settings_editor(
     Raises:
         ValueError: ``scope=repository`` 却未提供 ``repo_path``，或 scope 非法。
     """
+    if scope == "local":
+        if repo_path is None:
+            raise ValueError("repo_path is required for scope='local'.")
+        return TomlLifecycleSettingsEditor(
+            Path(repo_path) / product_identity.REPOSITORY_LOCAL_OVERRIDE_FILENAME
+        )
     if scope == "repository":
         if repo_path is None:
             raise ValueError("repo_path is required for scope='repository'.")
@@ -275,7 +281,7 @@ def create_lifecycle_settings_editor(
         )
     if scope == "global":
         return TomlLifecycleSettingsEditor(resolve_config_toml_path())
-    raise ValueError(f"Unknown scope '{scope}'. Valid scopes: global, repository.")
+    raise ValueError(f"Unknown scope '{scope}'. Valid scopes: global, repository, local.")
 
 
 __all__ = [

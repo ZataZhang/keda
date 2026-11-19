@@ -28,6 +28,7 @@ from backend.core.use_cases.agent_onboarding import (
     availability_available_agents,
     build_agent_add_plan,
     build_fix_plan,
+    build_local_setup_plan,
     build_setup_plan,
     list_agent_availability,
     resolve_agent_availability,
@@ -237,6 +238,24 @@ def test_setup_plan_marks_the_masking_preset_for_unbind(path_lookup: set[str]) -
         ).unbind_stage_preset
         is False
     )
+
+
+def test_local_setup_binds_personal_preset_over_repository_choice(path_lookup: set[str]) -> None:
+    """共享预设仍保留，个人绑定使用独立名称覆盖同一阶段。"""
+    path_lookup.add("claude")
+    config = _config(presets={"team": AgentModelPreset(agent="codex")})
+    config = dataclasses.replace(
+        config,
+        lifecycle_presets=LifecycleAgentsConfig(repository_layer={"implementation": "team"}),
+    )
+    personal_plan = build_local_setup_plan(
+        config, build_setup_plan(config, stage="implementation", agent="claude")
+    )
+    assert personal_plan.preset == "local-setup-implementation-claude"
+    assert personal_plan.local_preset_agent == "claude"
+    assert not personal_plan.unbind_stage_preset
+    assert not personal_plan.already_satisfied
+    assert config.lifecycle_presets.declared_value("implementation") == "team"
 
 
 def test_setup_plan_is_idempotent_and_only_reports_global_layer(path_lookup: set[str]) -> None:

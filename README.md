@@ -135,7 +135,7 @@ wheel 分发。`kc init` 会仅下载这两个 Skill 并安装到用户级目录
 1. 如果 `kc` 尚未可用，使用适合本机的官方安装方式安装 `kedacode`；若已有可用版本，先报告版本并保留现有安装。不要使用 `sudo`，也不要未经确认修改 shell 启动文件。完成后运行 `kc --version` 和 `kc --help` 验证；以官方文档和本机帮助为准，不猜测命令参数。
 2. 用 `gh auth status` 检查 GitHub CLI 登录状态。若未登录，告诉我需要完成 `gh auth login -h github.com`；不要索取或代为保存 token。GitHub labels 同步受登录状态影响时，说明结果和后续步骤。
 3. 如果我选择初始化仓库，先检查仓库路径、Git 状态和现有 `.kedacode.toml`。尚未初始化时，在该仓库运行 `kc init --dry-run`，把将修改的仓库配置、`.gitignore`、用户级 Skills 和 GitHub labels 汇总给我；得到我确认后再运行 `kc init`。如果仓库已经初始化，不要覆盖配置，也不要运行 `kc init --force`。
-4. 如果我选择了执行 Agent，运行 `kc agent list` 确认它已安装，并用 `kc agent setup --dry-run` 预览生命周期配置。把将写入全局 `~/.kedacode/config.toml` 的内容告诉我；得到确认后才应用。不要替我安装或切换 Agent、账号、模型，也不要静默选择其他 Agent。
+4. 在目标仓库运行 `kc agent setup --local --dry-run --json`，查看当前生效的 implementation 执行器和本机候选。已配置且找得到 CLI 时沿用，除非我要求切换。否则推荐本机候选并等我确认；也允许暂不配置。确认后运行 `kc agent setup --local --agent <名称> --yes`，只写个人 `.kedacode.local.toml`。仅安装 CLI 时，可用 `kc agent setup --dry-run --json` 检查机器级配置。找到 CLI 只表示 PATH 能解析它，登录和模型权限需要另行确认。
 5. 不要启动 daemon、执行任务队列、创建 Issue/PR，或做上述安装和配置之外的改动。shell 补全和桌面 App 属于可选项，先询问我。
 6. 最后汇报安装版本与方式、初始化的仓库、配置结果、验证结果，以及仍需我亲自完成的步骤。
 

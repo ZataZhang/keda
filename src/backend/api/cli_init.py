@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 from backend.api.cli_console import console, error_console
 from backend.api.cli_skill import sync_user_skills
 from backend.core.shared.models.agent_spec import AgentSpec
+from backend.core.use_cases.agent_onboarding import availability_available_agents
 from backend.core.use_cases.agent_runner_factory import (
     build_app_config,
     create_github_client,
@@ -59,7 +60,7 @@ def _run_init_command(parsed: argparse.Namespace, process_runner: IProcessRunner
         logger.error("kc init failed: %s", exc)
         error_console.print(
             "Hint: 只想重装/刷新用户级 Skills 时不必改动这份配置，运行 "
-            "`kc skill install`；仅当确实要重建配置才用 `kc init --force`. "
+            "`kc skill install`。检查此仓库的执行器请运行 `kc agent setup --local --dry-run`；仅当确实要重建配置才用 `kc init --force`. "
             "To refresh skills without touching the local config, run "
             "`kc skill install`; use `kc init --force` only to rebuild it.",
             markup=False,
@@ -93,6 +94,30 @@ def _run_init_command(parsed: argparse.Namespace, process_runner: IProcessRunner
             f"[dim]KedaCode local config already up to date:[/] {init_result.config_path}"
         )
     _print_gitignore_summary(gitignore_result)
+    installed_agents = availability_available_agents(app_config.agents)
+    if installed_agents:
+        console.print(
+            "Agent CLIs found on PATH: " + ", ".join(entry.agent for entry in installed_agents),
+            markup=False,
+        )
+        console.print(
+            "Review this repository's executor: kc agent setup --local --dry-run",
+            markup=False,
+        )
+        if len(installed_agents) == 1:
+            console.print(
+                f"Select {installed_agents[0].agent} for this checkout with "
+                f"kc agent setup --local --agent {shlex.quote(installed_agents[0].agent)}",
+                markup=False,
+            )
+        else:
+            console.print("Choose an executor with kc agent setup --local.", markup=False)
+    else:
+        console.print(
+            "No supported Agent CLI found on PATH. Install one before running tasks, "
+            "then run kc agent setup --local --dry-run.",
+            markup=False,
+        )
     skills_exit_code = _sync_user_skills_or_report_error(
         process_runner=process_runner,
         dry_run=False,

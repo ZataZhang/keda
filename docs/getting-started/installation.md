@@ -208,3 +208,14 @@ uv / pipx / Homebrew 安装的用户直接用对应工具卸载：
 ```bash
 uv tool uninstall kedacode      # 或 pipx uninstall kedacode / brew uninstall kedacode
 ```
+
+
+## 检查并选择本机执行器
+
+安装 CLI 后，新仓库先运行 `kc init`。加入已有仓库时，在检出目录直接运行：
+
+```bash
+kc agent setup --local --dry-run
+```
+
+检查会报告当前生效的 implementation 执行器和本机 PATH 上可找到的候选。当前选择可用时可以直接沿用；只有一个候选时可以优先选它，有多个时可运行 `kc agent setup --local` 交互选择。确认后也可使用 `kc agent setup --local --agent <名称> --yes`。写入只落个人 `.kedacode.local.toml`，要求 Git 忽略该文件。旧仓库可把 `/.kedacode.local.toml` 和 `/.kedacode.local.toml.lock` 添加到本地 Git exclude。没有候选仍可完成安装，先装一个受支持的 Agent CLI 再回来配置。PATH 检查与 CLI 实际启动、账号登录和模型权限是不同的验证步骤。

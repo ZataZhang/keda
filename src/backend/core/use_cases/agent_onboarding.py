@@ -384,7 +384,8 @@ class AgentSetupPlan:
             矩阵路径为 ``None``。
         unbind_stage_preset: 全局层该阶段是否已有预设绑定需要解绑——预设会
             遮蔽矩阵，不解绑则刚写入的 agent 选择永远不会生效。
-        already_satisfied: 全局层现状已等于目标状态（重复执行不写文件）。
+        already_satisfied: 现状已等于目标状态（重复执行不写文件）。
+        local_preset_agent: 创建个人预设时写入的执行器名称。
     """
 
     stage: str
@@ -392,6 +393,7 @@ class AgentSetupPlan:
     preset: str | None
     unbind_stage_preset: bool
     already_satisfied: bool
+    local_preset_agent: str | None = None
 
 
 def _require_available_agent(
@@ -471,6 +473,36 @@ def build_setup_plan(
             stage not in config.lifecycle_presets.global_layer
             and config.lifecycle_agents.global_layer.get(stage) == agent
         ),
+    )
+
+
+def build_local_setup_plan(config: AppConfig, plan: AgentSetupPlan) -> AgentSetupPlan:
+    """将个人执行器选择转换为预设绑定，避免被共享预设遮蔽。"""
+    if plan.agent is None:
+        return dataclasses.replace(
+            plan,
+            already_satisfied=config.lifecycle_presets.declared_value(plan.stage) == plan.preset,
+        )
+    prefix = f"local-setup-{plan.stage}-{plan.agent}"
+    preset_name = prefix
+    suffix = 1
+    while preset_name in config.agent_presets:
+        existing = config.agent_presets[preset_name]
+        if (
+            existing.agent == plan.agent
+            and not existing.model
+            and not existing.reasoning_effort
+            and config.lifecycle_presets.declared_value(plan.stage) == preset_name
+        ):
+            return dataclasses.replace(plan, preset=preset_name, already_satisfied=True)
+        suffix += 1
+        preset_name = f"{prefix}-{suffix}"
+    return dataclasses.replace(
+        plan,
+        preset=preset_name,
+        local_preset_agent=plan.agent,
+        unbind_stage_preset=False,
+        already_satisfied=False,
     )
 
 
@@ -603,8 +635,7 @@ def build_agent_add_plan(
     """
     if not _AGENT_NAME_PATTERN.match(agent_name):
         raise AgentOnboardingError(
-            f"invalid agent name '{agent_name}': use letters/digits/'_'/'-' "
-            "starting with a letter."
+            f"invalid agent name '{agent_name}': use letters/digits/'_'/'-' starting with a letter."
         )
     if agent_name in config.agents:
         raise AgentOnboardingError(
@@ -706,6 +737,15 @@ class SetupSettingsEditor(Protocol):
         """把整段读-改-写圈进同一把配置写锁的上下文。"""
         ...
 
+    def update_presets_and_bindings(
+        self,
+        *,
+        preset_updates: Mapping[str, Mapping[str, object] | None],
+        binding_updates: Mapping[str, object],
+    ) -> None:
+        """原子保存预设定义和阶段绑定。"""
+        ...
+
     def update_lifecycle_agents(self, values: Mapping[str, object]) -> None:
         """写回 ``[agent_runner.lifecycle_agents]``。"""
         ...
@@ -736,6 +776,12 @@ def apply_setup_plan(editor: SetupSettingsEditor, plan: AgentSetupPlan) -> None:
             时配置文件保持调用前状态（解绑先失败则矩阵未写）。
     """
     if plan.already_satisfied:
+        return
+    if plan.local_preset_agent is not None and plan.preset is not None:
+        editor.update_presets_and_bindings(
+            preset_updates={plan.preset: {"agent": plan.local_preset_agent}},
+            binding_updates={plan.stage: plan.preset},
+        )
         return
     with editor.write_transaction():
         if plan.preset is not None:
@@ -769,8 +815,8 @@ __all__ = [
     "GATE_LIFECYCLE_STAGES",
     "HINT_CHECK_LIFECYCLE",
     "SETUP_MENU_STAGES",
-    "AgentAvailability",
     "AgentAddPlan",
+    "AgentAvailability",
     "AgentFixEntry",
     "AgentOnboardingError",
     "AgentSetupHint",
@@ -785,6 +831,7 @@ __all__ = [
     "availability_available_agents",
     "build_agent_add_plan",
     "build_fix_plan",
+    "build_local_setup_plan",
     "build_setup_plan",
     "list_agent_availability",
     "resolve_agent_availability",

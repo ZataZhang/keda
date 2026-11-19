@@ -224,13 +224,15 @@ def add_session_commands(subparsers: argparse._SubParsersAction) -> None:
     add_machine_output_options(agent_presets_parser)
 
     # kc agent setup / kc agent add：可用性与自定义注册的写入口。
-    # 两者都写机器级 config.toml（全局层），因此不挂 add_common_options——
-    # 容忍仓库选择器只会让"我以为改了某个仓库"落到机器级配置上。
+    # 默认写机器级配置；setup --local 明确使用当前检出的个人文件。
     agent_setup_parser = agent_subparsers.add_parser(
         "setup",
-        help="Guide lifecycle stage selection by what is actually installed (global layer).",
+        help="Guide lifecycle stage selection by what is actually installed.",
     )
     agent_setup_parser.set_defaults(command="agent setup")
+    agent_setup_parser.add_argument(
+        "--local", action="store_true", help="Use the current repository personal override."
+    )
     agent_setup_parser.add_argument(
         "--stage",
         default=None,

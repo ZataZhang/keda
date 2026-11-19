@@ -5,12 +5,14 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import sys
+from pathlib import Path
 
 from backend.api.cli_console import console, error_console
 from backend.api.cli_exit_codes import ExitCode
 from backend.api.cli_output import OUTPUT_FORMAT_JSON, CliError, emit
+from backend.api.cli_parsed_commands.agent_lifecycle import _resolve_repo_context, _write_or_fail
 from backend.api.cli_parsed_context import ParsedCommandContext
-from backend.api.cli_parsed_commands.agent_lifecycle import _write_or_fail
+from backend.core.shared.models import product_identity
 from backend.core.use_cases.agent_onboarding import (
     SETUP_MENU_STAGES,
     AgentOnboardingError,
@@ -21,8 +23,10 @@ from backend.core.use_cases.agent_onboarding import (
     availability_available_agents,
     build_agent_add_plan,
     build_fix_plan,
+    build_local_setup_plan,
     build_setup_plan,
     resolve_agent_availability,
+    resolve_setup_hint,
 )
 from backend.core.use_cases.agent_runner_factory import (
     build_app_config,
@@ -32,11 +36,10 @@ from backend.core.use_cases.agent_runner_factory import (
 )
 from backend.core.use_cases.lifecycle_agents_console import SCOPE_GLOBAL
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Agent 安装引导（kc agent setup）与自定义注册（kc agent add）
 #
-# 计划与校验全部在 core（agent_onboarding），触文件之前失败；写回复用全局层
+# 计划与校验全部在 core（agent_onboarding），触文件之前失败；写回复用
 # lifecycle editor 与同一把配置写锁。setup 的可用性判定与 agent list 共用
 # shutil.which 事实源，不引入第二套探测。
 # ─────────────────────────────────────────────────────────────────────────────
@@ -109,7 +112,7 @@ def _prompt_agent_setup_selection(global_config) -> tuple[str, str]:
 
 
 def run_agent_setup_command(ctx: ParsedCommandContext) -> int:
-    """``kc agent setup``：按本机可用性引导阶段选择（写入限全局层）。
+    """``kc agent setup``：按本机可用性引导阶段选择（全局或个人覆盖）。
 
     四种形态：``--fix`` 清理全局层指向不可用 agent 的绑定；带 ``--agent`` /
     ``--preset`` 落一次显式选择；``--dry-run`` / 无选择时只读列出可用性；
@@ -121,7 +124,18 @@ def run_agent_setup_command(ctx: ParsedCommandContext) -> int:
     as_json = ctx.output_format == OUTPUT_FORMAT_JSON
     fresh_settings = load_fresh_agent_runner_settings()
     global_config = build_app_config_from_settings(fresh_settings)
-    editor = create_lifecycle_settings_editor(SCOPE_GLOBAL)
+    local = bool(getattr(parsed, "local", False))
+    setup_config = global_config
+    if local:
+        if getattr(parsed, "fix", False):
+            raise CliError("--fix applies only to the global configuration.", code=ExitCode.USAGE)
+        repo_context = _resolve_repo_context(fresh_settings, None, str(Path.cwd()))
+        if not product_identity.has_repository_config(repo_context.repo_path):
+            raise CliError("Run kc init before setting a personal override.", code=ExitCode.USAGE)
+        setup_config = repo_context.config
+        editor = create_lifecycle_settings_editor("local", repo_context.repo_path)
+    else:
+        editor = create_lifecycle_settings_editor(SCOPE_GLOBAL)
 
     if getattr(parsed, "fix", False):
         fix_entries = build_fix_plan(global_config)
@@ -176,10 +190,18 @@ def run_agent_setup_command(ctx: ParsedCommandContext) -> int:
         if dry_run or as_json:
             # 与 Console 生命周期视图共用 core 的同一份序列化，避免同一个事实在
             # 两处发展出不同键名。
-            availability_entries = agent_availability_entries(global_config.agents)
+            availability_entries = agent_availability_entries(setup_config.agents)
+            hint = resolve_setup_hint(setup_config)
 
             def _render_readonly() -> None:
                 console.print(f"agents on this machine · config={editor.config_path}", markup=False)
+                if local:
+                    console.print(
+                        f"effective implementation agent: {hint.agent or 'auto'} ({hint.reason})",
+                        markup=False,
+                    )
+                if not any(entry["available"] for entry in availability_entries):
+                    console.print("Install a supported Agent CLI, then rerun this check.")
                 for entry in availability_entries:
                     status = "available" if entry["available"] else "missing"
                     console.print(
@@ -187,7 +209,7 @@ def run_agent_setup_command(ctx: ParsedCommandContext) -> int:
                         markup=False,
                     )
                 console.print(
-                    "next: kc agent setup --agent <available-name> "
+                    f"next: kc agent setup {'--local ' if local else ''}--agent <available-name> "
                     "(stage menu: " + ", ".join(SETUP_MENU_STAGES) + ")",
                     markup=False,
                 )
@@ -201,33 +223,60 @@ def run_agent_setup_command(ctx: ParsedCommandContext) -> int:
                 ],
                 "config_path": str(editor.config_path),
             }
+            if local:
+                listing_document["effective_implementation"] = dataclasses.asdict(hint)
             emit(
                 listing_document if as_json else None,
                 fmt=ctx.output_format,
                 human_renderer=_render_readonly,
             )
             return 0
-        stage, agent = _prompt_agent_setup_selection(global_config)
+        stage, agent = _prompt_agent_setup_selection(setup_config)
 
     try:
-        plan = build_setup_plan(global_config, stage=stage, agent=agent, preset=preset)
+        plan = build_setup_plan(setup_config, stage=stage, agent=agent, preset=preset)
     except AgentOnboardingError as exc:
         raise _onboarding_error(exc) from exc
 
+    if local:
+        # 个人层须覆盖共享的阶段预设；裸 agent 矩阵会被该预设遮蔽。
+        plan = build_local_setup_plan(setup_config, plan)
     cancelled = False
     if not dry_run and not plan.already_satisfied:
+        if (
+            local
+            and not getattr(parsed, "yes", False)
+            and not (sys.stdin.isatty() and sys.stderr.isatty() and not as_json)
+        ):
+            raise CliError(
+                "Personal setup requires --yes outside an interactive terminal.",
+                code=ExitCode.USAGE,
+            )
         target_note = (
             f"preset '{plan.preset}'" if plan.preset is not None else f"agent '{plan.agent}'"
         )
         if not _confirm_global_write(
             parsed,
             as_json=as_json,
-            question=(
-                f"Write global stage '{plan.stage}' -> {target_note} " f"into {editor.config_path}?"
-            ),
+            question=(f"Write stage '{plan.stage}' -> {target_note} into {editor.config_path}?"),
         ):
             cancelled = True
         else:
+            if local:
+                for personal_name in (
+                    editor.config_path.name,
+                    f"{editor.config_path.name}.lock",
+                ):
+                    ignore_result = ctx.process_runner.run(
+                        ["git", "check-ignore", "--quiet", "--", personal_name],
+                        cwd=editor.config_path.parent,
+                        check=False,
+                    )
+                    if ignore_result.return_code != 0:
+                        raise CliError(
+                            f"Add /{personal_name} to your local Git exclude before setup.",
+                            code=ExitCode.USAGE,
+                        )
             _write_or_fail(lambda: apply_setup_plan(editor, plan), "setup write failed")
 
     setup_document = {

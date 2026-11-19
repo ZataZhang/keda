@@ -10,7 +10,7 @@ The user says 「装环境」「初始化仓库」「把这个仓库登记进来
 2. **Skill conflict semantics** — a prior packaged `kedacode-operator` Skill that has not been edited refreshes automatically when the user next starts a native session. User changes to managed files are preserved by default; `kc session` stops before starting the provider until the conflict is resolved. To inspect or replace one copy only, use `kc skill repair-operator --skill-dir <absolute-path> --dry-run` and, only when the user explicitly asks to replace its managed files, add `--force`.
 3. **The remote template download needs network and GitHub access** — `kc init` and `kc skill install` both clone the `prd` / `code-reviewer` template skills; a label-sync failure during init is reported, not fatal, but the user should hear why.
 4. **Repository ambiguity** — when the working directory matches several registered repositories, later commands refuse to guess; init reports the repo id it registered, and other routes pass it as `--repo-id <id>`.
-5. **`kc agent setup` and `kc agent add --write` write machine-level config** — the first edits the global lifecycle matrix in `~/.kedacode/config.toml`, the second appends an agent registration to the same file. Both refuse to choose for the user: preview with `kc agent setup --dry-run` (or `kc agent add` without `--write`, which only prints the TOML), then apply the choice the user named. Never run either to make a failing run "go through" by swapping the user's agent without saying so.
+5. **By default, `kc agent setup` and `kc agent add --write` write machine-level config** — the first edits the global lifecycle matrix in `~/.kedacode/config.toml`, the second appends an agent registration to the same file. Both refuse to choose for the user: preview with `kc agent setup --dry-run` (or `kc agent add` without `--write`, which only prints the TOML), then apply the choice the user named. Never run either to make a failing run "go through" by swapping the user's agent without saying so.
 
 ## Local console
 
@@ -119,3 +119,6 @@ closed 的历史条目默认不改；仅在用户需要这些历史条目时使�
 ## Related
 
 Once the environment is set up, everyday operations start from the routing table in the main file — most commonly 建 issue (`${CODEBUDDY_SKILL_DIR}/references/create-issue.md`).
+
+
+For an initialized repository, run `kc agent setup --local --dry-run --json` from its checkout. Report its effective implementation executor and binaries found on PATH. Reuse a valid choice or ask the user to choose an installed executor. After confirmation, use `kc agent setup --local --agent <name> --yes` to write the Git-ignored personal override. An empty candidate list is compatible with completing CLI installation. PATH discovery does not verify startup, authentication or model access.

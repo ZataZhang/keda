@@ -13,6 +13,7 @@ from typing import Annotated
 import typer
 
 from backend.api.cli_typer_app import (
+    _HELP_CONTEXT,
     ConfigOption,
     JsonOutputOption,
     OutputFormat,
@@ -20,7 +21,6 @@ from backend.api.cli_typer_app import (
     RepoIdOption,
     RepoOption,
     RunAgentChoice,
-    _HELP_CONTEXT,
     _enum_value,
     _run_typer_command,
     _run_typer_repository_command,
@@ -257,6 +257,9 @@ def agent_presets_command(
 
 @agent_app.command("setup")
 def agent_setup_command(
+    local: Annotated[
+        bool, typer.Option("--local", help="Use the current repository personal override.")
+    ] = False,
     stage: Annotated[
         str | None,
         typer.Option("--stage", help="Lifecycle stage to configure (default: implementation)."),
@@ -284,9 +287,10 @@ def agent_setup_command(
     output: OutputOption = OutputFormat.table,
     as_json: JsonOutputOption = False,
 ) -> int:
-    """Guide lifecycle stage selection by what is actually installed (global layer)."""
+    """Guide lifecycle stage selection by what is actually installed (global or personal layer)."""
     return _run_typer_command(
         "agent setup",
+        local=local,
         stage=stage,
         agent=_enum_value(agent) if agent is not None else None,
         preset=preset,
@@ -301,7 +305,7 @@ def agent_setup_command(
 @agent_app.command("add")
 def agent_add_command(
     name: Annotated[str, typer.Argument(help="New agent name (not already registered).")],
-    bin: Annotated[  # noqa: A002
+    bin: Annotated[
         str,
         typer.Option("--bin", help="Executable name to look up in PATH."),
     ],
@@ -433,17 +437,17 @@ __all__ = [
     "agent_setup_command",
     "ask_command",
     "deliberate_command",
-    "repl_command",
+    "fallback_candidate_add_command",
+    "fallback_candidate_move_command",
+    "fallback_candidate_preset_set_command",
+    "fallback_candidate_preset_unset_command",
+    "fallback_candidate_remove_command",
+    "fallback_list_command",
     "lifecycle_list_command",
     "lifecycle_set_command",
     "lifecycle_unset_command",
     "preset_set_command",
-    "fallback_list_command",
-    "fallback_candidate_add_command",
-    "fallback_candidate_remove_command",
-    "fallback_candidate_move_command",
-    "fallback_candidate_preset_set_command",
-    "fallback_candidate_preset_unset_command",
+    "repl_command",
 ]
 
 
