@@ -717,12 +717,16 @@ def _should_run_post_pr_supervisor(
     return True
 
 
-def _handoff_published_pr(published_pr: _VerifiedPrPublication, *, run_supervisor: bool) -> None:
+def _handoff_published_pr(
+    request: FinalVerificationRequest,
+    github_client: IGitHubClient,
+    branch: str,
+    *,
+    run_supervisor: bool,
+) -> None:
     """持有监督权后公布交接状态，避免值守线程抢跑并覆盖标签。"""
     from backend.core.use_cases.agent_runner_supervisor import _run_supervisor_with_repair_loop
 
-    request = published_pr.verification_request
-    github_client = published_pr.github_client
     issue = request.issue
     config = request.config
     with github_client.issue_supervision_lock(issue.number) as owns_supervision:
@@ -753,13 +757,13 @@ def _handoff_published_pr(published_pr: _VerifiedPrPublication, *, run_superviso
             worktree_path=request.worktree_path,
             github_client=github_client,
         )
-        pr_context = github_client.get_pull_request_context(published_pr.branch)
+        pr_context = github_client.get_pull_request_context(branch)
         if pr_context is None:
             _logger.warning(
                 "Deferring post-PR supervisor for Issue #%d branch %s: "
                 "complete PR context is unavailable.",
                 issue.number,
-                published_pr.branch,
+                branch,
             )
             return
         supervisor_config = config.for_next_agent_stage()
@@ -910,7 +914,9 @@ def _finish_implementation_publication(
     )
 
     _handoff_published_pr(
-        reviewed_pr,
+        final_verification_request,
+        github_client,
+        reviewed_pr.branch,
         run_supervisor=_should_run_post_pr_supervisor(config, publish_stage, issue.number),
     )
 
@@ -1041,7 +1047,9 @@ def _finish_existing_commit_publication(
     )
 
     _handoff_published_pr(
-        reviewed_pr,
+        final_verification_request,
+        github_client,
+        reviewed_pr.branch,
         run_supervisor=_should_run_post_pr_supervisor(config, publish_stage, issue.number),
     )
 
