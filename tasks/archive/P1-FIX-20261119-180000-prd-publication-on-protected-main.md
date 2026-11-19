@@ -223,9 +223,9 @@ No frontend impact：改动只涉及 CLI、runner 后端和文字操作指南，
 - Public behavior and contracts: 新选项显式启用；默认 main 发布与 `--no-publish-prd` 保持原语义；冲突拒绝覆盖；失败 Issue 不会被提前 ready。
 - Related PRD status: #398/#399 未被读取或修改；#398 保留为后续人工验收与恢复流程。
 - Requirements and risks: 四项实现要求均由对应 rv 证据覆盖；RV-3 的 Agent fixture 在观察实际 worktree 后退出，因此不宣称已验证付费 Agent 实现或 Draft PR 发布。
-- Validation blocker: None；四项 executor-owned 验收均有最终代码树证据，独立 verifier 第 3 轮为 `PASS`。
-- Validation follow-up: 维护流程发布后由人工按 9.1 检查真实 #398；Human-Confirmed 项保持未勾选，归档由 runner 处理。
-- 自动验证结果：`kc evidence check` 4/4；定向 pytest 176 passed；`just lint --reuse` 与全文件 lint（除 `check-test-flag` 外）通过；MkDocs build 通过。
+- Validation blocker: 四项 PRD 行为验收在当前源代码 head `a914f022` 上均有通过的最终代码树证据；PR 集成仍被 `agent_runner_orchestration_runtime.py` 的 main 分支冲突阻塞，Round 4 verifier 不将此树视为 integration-ready。
+- Validation follow-up: 集成冲突按获准的分支工作流解决后，需在新 head 重跑四项 RV 与独立 verifier 并刷新 PR 元数据；随后由人工按 9.1 检查真实 #398，Human-Confirmed 项保持未勾选，归档由 runner 处理。
+- 自动验证结果：当前源代码 head `a914f022` 上 `kc evidence check` 4/4；定向 pytest 176 passed；全文件 lint（除 `check-test-flag` 外）通过；MkDocs build 通过。独立 verifier Round 4 对实现与 RV 证据判为 `PASS`，但单独记录了集成阻塞。
 
 ## 14. Change Log
 
@@ -262,3 +262,11 @@ No frontend impact：改动只涉及 CLI、runner 后端和文字操作指南，
 - Reason: keep the Issue link anchored to its published PRD snapshot, isolate concurrent Git fetches, and make final-tree evidence traceable.
 - Impact: publication defaults and ready ordering are unchanged; all four RV items pass on the repaired tree.
 - Review: independent verifier Round 3 `PASS`; final `kc evidence check` 4/4, targeted pytest 176 passed, reuse/full lint and MkDocs build passed.
+
+### Refresh evidence for current review findings
+- Type: validation / evidence / documentation
+- Before: the in-tree verifier report stopped at Round 3, the latest local evidence manifest still summarized 174 targeted tests, and the PR description/comment referenced older heads.
+- After: all four RV commands were replayed against source head `a914f022`; `kc evidence check` passed 4/4, RV-4 recorded 176 targeted tests, and a separate Round 4 verifier passed the implementation and RV evidence. The lifecycle read-failure docstrings are confirmed correct.
+- Reason: tie the review response to the current code snapshot and refresh the evidence that had drifted after later source repairs.
+- Impact: no product source changed; all four behavior oracles still pass. The branch remains 7 commits ahead / 15 behind main with one real orchestration-runtime merge conflict; this evidence does not claim that the conflict is resolved or the PR integration-ready.
+- Review: independent verifier Round 4 `PASS` for current implementation/RV evidence; integration remains blocked pending an allowed branch integration and a new validation snapshot.

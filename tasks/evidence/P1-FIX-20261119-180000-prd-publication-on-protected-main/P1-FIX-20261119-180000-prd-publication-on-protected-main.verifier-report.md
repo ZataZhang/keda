@@ -34,3 +34,13 @@ The verifier confirmed that RV-1 through RV-4 raw outputs contain negative scena
 **Verdict: PASS.** The verifier reviewed the post-repair diff and confirmed that recovery preserves the original pinned commit when the stored commit contains the same PRD bytes, and that task-branch publication reads its base through a unique ref without relying on the shared `FETCH_HEAD`. The two new regressions cover branch advancement and an interleaved fetch.
 
 The final-tree evidence run passed all four RV items (4.0s, 7.1s, 9.9s, and 44.9s); targeted tests report 176 passed. The verifier confirmed the evidence report, verification plan, and archived PRD use the archived canonical path and final test count. The human #398 confirmation remains open; #398/#399 were not accessed.
+
+## Round 4 — current review repair snapshot (`a914f022`)
+
+**Verdict: PASS for the current implementation and RV evidence; PR integration remains blocked.** A separate read-only verifier reviewed the current source, lifecycle documentation, four latest raw RV outputs, manifest, and PRD/evidence consistency. It found no product defect and confirmed that the lifecycle docstrings distinguish main-checkout read failures from published task-branch fetch/read failures.
+
+- `kc evidence check --evidence tasks/evidence/P1-FIX-20261119-180000-prd-publication-on-protected-main`: **4/4 passed** (2.8s, 4.1s, 6.4s, 23.0s). RV-4 recorded **176 passed** targeted tests, full lint passed with only the documented `check-test-flag` skip, and MkDocs built successfully.
+- The ignored local `evidence.json` was corrected from 174 to 176 targeted tests so its summary matches the latest raw RV-4 output.
+- The source snapshot is commit `a914f022af9c3583752914f93900448346ab565c`, tree `50aa69692472cd061070385debd462f76a428b8f`. The two low-severity lifecycle documentation findings were already corrected in this tree; no source change was needed in this repair.
+- Integration is not clear: current `main` is `51461449cb1069113b3d6a827297f92c16bcff2f`; this branch is 7 commits ahead / 15 behind, and `git merge-tree --write-tree main issue-400` reports one content conflict in `src/backend/core/use_cases/agent_runner_orchestration_runtime.py` against merge base `f56f2d1fd1e7b3ee6f1367c84bd7ec8487b37dde`. The conflict is valid. The current tree is not a post-conflict-resolution tree, and the verifier does not certify it as integration-ready.
+- No real #398/#399 or GitHub Issue/branch state was read or changed during the RV replay. The no-merge/no-stage/no-commit/no-push task constraints prevent resolving and publishing the branch conflict here.
