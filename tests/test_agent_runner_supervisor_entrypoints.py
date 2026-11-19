@@ -309,14 +309,22 @@ def test_supervisor_owned_rework_stays_supervising_and_skips_inline_rereview(
     )
 
 
-@pytest.mark.parametrize("action", ("repair_pr_branch", "rebase_pr_branch"))
+@pytest.mark.parametrize(
+    ("action", "auto_repair_ci"),
+    (("repair_pr_branch", True), ("repair_pr_branch", False), ("rebase_pr_branch", False)),
+)
 def test_supervisor_loop_defers_after_rework_when_pr_context_refresh_fails(
     action: str,
+    auto_repair_ci: bool,
     tmp_path: Path,
 ) -> None:
-    """PR 上下文丢失后不得直接批准进入下一阶段。"""
+    """内联监督按策略修复；PR 上下文丢失后不得直接批准。"""
     github_client = FakeGitHubClient()
-    config = AppConfig(post_pr_supervisor=PostPrSupervisorConfig(max_repair_attempts=1))
+    config = AppConfig(
+        post_pr_supervisor=PostPrSupervisorConfig(
+            max_repair_attempts=1, auto_repair_ci=auto_repair_ci
+        )
+    )
     pr_context = PullRequestContext(
         pr_url="https://github.com/example/repo/pull/1",
         branch="issue-1",
@@ -324,13 +332,21 @@ def test_supervisor_loop_defers_after_rework_when_pr_context_refresh_fails(
         base_sha="base-sha",
     )
 
+    def _verify_repair_state(**kwargs: object) -> list[CommandResult]:
+        assert github_client.get_issue(1).labels == (config.labels.supervising,)
+        return []
+
+    github_client.set_issue_labels(1, (config.labels.failed,))
+
     with (
         patch.object(
             agent_runner_supervisor,
             "run_post_pr_supervisor_cycle",
             return_value=SupervisorActionResult(action=action),
         ) as supervisor_cycle,
-        patch.object(agent_runner_supervisor, "execute_repair", return_value=[]),
+        patch.object(
+            agent_runner_supervisor, "execute_repair", side_effect=_verify_repair_state
+        ) as execute_repair,
         patch.object(agent_runner_supervisor, "execute_rebase", return_value=[]),
         patch.object(agent_runner_supervisor, "get_head_sha", return_value="after-sha"),
     ):
@@ -345,6 +361,17 @@ def test_supervisor_loop_defers_after_rework_when_pr_context_refresh_fails(
         )
 
     assert supervisor_cycle.call_count == 1
+    if action == "repair_pr_branch" and not auto_repair_ci:
+        execute_repair.assert_not_called()
+        assert github_client.get_issue(1).labels == (config.labels.blocked,)
+        assert any(
+            "CI/CD 自动修复未开启" in call["body"]
+            for call in github_client.calls
+            if call["method"] == "comment_issue"
+        )
+        return
+    if action == "repair_pr_branch":
+        execute_repair.assert_called_once()
     assert any(call["method"] == "get_pull_request_context" for call in github_client.calls)
     assert not any(
         call["method"] == "edit_issue_labels" and config.labels.review in call["add"]

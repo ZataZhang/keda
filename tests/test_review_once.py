@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from backend.infrastructure import github_client as github_client_module
 from backend.core.shared.models.agent_runner import (
     AppConfig,
     AutopilotConfig,
@@ -29,6 +31,49 @@ from backend.core.use_cases.review_once import (
 )
 from tests.conftest import FakeGitHubClient, FakeProcessRunner
 from tests.support.agent_runner import default_worktree_path_response
+
+
+def test_review_once_skips_owned_issue_and_rechecks_stale_candidates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """发布线程持锁时值守不启动；释放后也不使用过期的待监督标签。"""
+    monkeypatch.setattr(github_client_module, "state_home", lambda: tmp_path)
+    monkeypatch.setattr(
+        github_client_module.GitHubCliClient, "_get_owner_repo", lambda self: "Example/Repo"
+    )
+    publisher = github_client_module.GitHubCliClient(tmp_path / "publisher")
+    poller = github_client_module.GitHubCliClient(tmp_path / "poller")
+    client = FakeGitHubClient()
+    config = AppConfig(autopilot=AutopilotConfig(enabled=False))
+    candidate = IssueSummary(
+        number=1, title="Issue", url="u", body="", labels=(config.labels.supervising,)
+    )
+    client.list_review_candidate_issues = lambda labels, limit: [candidate]
+    client.issue_supervision_lock = poller.issue_supervision_lock
+    client.set_issue_labels(candidate.number, candidate.labels)
+
+    def _poll() -> int:
+        return review_once(
+            repo_path=tmp_path,
+            config=config,
+            dry_run=False,
+            agent="auto",
+            max_issues=1,
+            github_client=client,
+            process_runner=FakeProcessRunner(),
+        )
+
+    with patch("backend.core.use_cases.review_once._process_review_candidate") as review_candidate:
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            with publisher.issue_supervision_lock(candidate.number) as owns_supervision:
+                assert owns_supervision
+                assert executor.submit(_poll).result(timeout=5) == 0
+                assert not any(call["method"] == "get_issue" for call in client.calls)
+                review_candidate.assert_not_called()
+        client.set_issue_labels(candidate.number, (config.labels.failed,))
+        assert _poll() == 0
+        review_candidate.assert_not_called()
+        assert not any(call["method"] == "edit_issue_labels" for call in client.calls)
 
 
 def _marker_comment(
@@ -368,6 +413,7 @@ def test_review_once_logs_supervisor_rebase_outcome(caplog) -> None:
     )
     client = FakeGitHubClient()
     client.list_review_candidate_issues = lambda labels, limit: [issue]
+    client.set_issue_labels(issue.number, issue.labels)
     client._remote_base_sha = "def456"
     client._issue_comments[1] = [
         _marker_comment(mergeable=True, issue_comments_count=1, pr_comments_count=0)
@@ -754,6 +800,7 @@ def test_review_once_consults_takeover_gate_with_the_registry_repo_id(
     fake_client = FakeGitHubClient()
     fake_client.list_review_candidate_issues = lambda labels, limit: [issue]
     queried_repo_ids: list[str | None] = []
+    fake_client.set_issue_labels(issue.number, issue.labels)
 
     def _record_gate(*, repo_id: str | None, issue_number: int) -> bool:
         queried_repo_ids.append(repo_id)

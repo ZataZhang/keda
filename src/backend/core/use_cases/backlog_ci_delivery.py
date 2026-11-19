@@ -260,8 +260,7 @@ def request_manual_ci_repair(
             and marker.head_sha == pr_context.head_sha
         ):
             return False, (
-                f"当前 head {pr_context.head_sha[:12]} 的修复请求已存在（幂等跳过，"
-                "不新增副作用）。"
+                f"当前 head {pr_context.head_sha[:12]} 的修复请求已存在（幂等跳过，不新增副作用）。"
             )
     round_count = count_ci_repair_rounds(comments)
     max_rounds = max(0, config.post_pr_supervisor.max_repair_attempts)
@@ -297,13 +296,12 @@ def gate_auto_repair_decision(
     github_client: IGitHubClient,
     context: AutoRepairDecisionContext,
 ) -> tuple[bool, str]:
-    """Supervisor Agent 选择 repair 后的策略门禁（review_once 调用）。
+    """判断 Supervisor Agent 选择的修复是否获得授权。
 
     按「Agent 决定 + 策略约束」执行：``checks_state`` 不触发动作，这里只在
     Agent 已选择 ``repair_pr_branch`` 后判断生效策略与剩余预算。
     ``repair_scope=code_review`` 不受 CI 开关限制，但仍共享修复轮数上限。返回
-    ``(allowed, reason)``；本函数零副作用。不允许时调用方不得评论修复意图或
-    push，review_once 会把 Issue 转入 ``agent/blocked`` 并评论原因交人处理。
+    ``(allowed, reason)``；本函数零副作用。
 
     Args:
         config: 仓库运行配置。
@@ -386,6 +384,48 @@ def enqueue_approved_auto_repair(
     return True, detail
 
 
+def prepare_supervisor_repair(
+    config: AppConfig,
+    github_client: IGitHubClient,
+    issue: IssueSummary,
+    decision: AutoRepairDecisionContext,
+) -> Literal["ready", "blocked_ci_repair_policy", "skipped_duplicate_rework"]:
+    """检查授权、登记修复请求并在启动前同步 Issue 状态。
+
+    Args:
+        config: 本轮生效的仓库配置。
+        github_client: Issue 读写端口。
+        issue: 当前由调用方持有监督权的 Issue。
+        decision: 修复范围和当前 PR 快照。
+
+    Returns:
+        修复已就绪、被策略阻塞或同一提交已请求过修复。
+    """
+    from backend.core.use_cases.agent_runner_workflow import transition_issue_workflow_state
+
+    allowed, gate_reason = gate_auto_repair_decision(
+        config=config, github_client=github_client, context=decision
+    )
+    if not allowed:
+        github_client.comment_issue(
+            issue.number,
+            f"## Agent Runner Auto Repair Stopped\n\n- Reason: {gate_reason}\n"
+            "- Next: 需要人工处理 PR；修复预算未耗尽时也可显式请求一次修复"
+            "（Backlog 问题卡 / `kc backlog ci repair`）。",
+        )
+        transition_issue_workflow_state(github_client, issue.number, config, config.labels.blocked)
+        return "blocked_ci_repair_policy"
+    enqueued, _ = enqueue_approved_auto_repair(
+        issue=issue,
+        pr_context=decision.pr_context,
+        config=config,
+        github_client=github_client,
+        pr_branch=decision.pr_context.branch,
+        execution_owner="supervisor",
+    )
+    return "ready" if enqueued else "skipped_duplicate_rework"
+
+
 # 供 API/CLI 层把 dataclass 投影序列化时保持字段命名一致（复用 _serialize）。
 __all__ = [
     "BacklogCiPolicyError",
@@ -394,6 +434,7 @@ __all__ = [
     "count_ci_repair_rounds",
     "enqueue_approved_auto_repair",
     "gate_auto_repair_decision",
+    "prepare_supervisor_repair",
     "read_stored_policy",
     "request_manual_ci_repair",
     "resolve_effective_policy_for_issue",

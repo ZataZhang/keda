@@ -42,6 +42,10 @@ from backend.core.use_cases.agent_runner_issue_control import (
 from backend.core.use_cases.agent_runner_workflow import (
     transition_issue_workflow_state,
 )
+from backend.core.use_cases.backlog_ci_delivery import (
+    AutoRepairDecisionContext,
+    prepare_supervisor_repair,
+)
 from backend.core.use_cases.run_agent_once import (
     get_head_sha,
     resolve_repair_agent,
@@ -92,7 +96,7 @@ def _run_supervisor_with_repair_loop(
     """
     if autopilot_hold_blocks(repo_id=repo_id, issue_number=issue.number):
         _logger.info(
-            "Issue #%d is under manual takeover hold; " "post-PR supervisor not started.",
+            "Issue #%d is under manual takeover hold; post-PR supervisor not started.",
             issue.number,
         )
         return
@@ -246,7 +250,7 @@ def _run_supervisor_with_repair_loop(
             "rebase_pr_branch",
         ):
             is_rebase = action_result.action == "rebase_pr_branch"
-            if cycle > max_repair:
+            if action_result.action != "repair_pr_branch" and cycle > max_repair:
                 if stashed:
                     pop_worktree_stash(worktree_path, process_runner)
                 github_client.comment_issue(
@@ -270,17 +274,31 @@ def _run_supervisor_with_repair_loop(
                 )
                 return
 
-            github_client.comment_issue(
-                issue.number,
-                build_rework_intent_comment(
-                    action=action_result.action,
-                    pr_branch=current_pr_context.branch,
-                    head_sha=current_pr_context.head_sha,
-                    execution_owner="supervisor",
-                ),
-            )
             if stashed:
                 pop_worktree_stash(worktree_path, process_runner)
+            if action_result.action == "repair_pr_branch":
+                repair_status = prepare_supervisor_repair(
+                    config,
+                    github_client,
+                    issue,
+                    AutoRepairDecisionContext(
+                        issue_number=issue.number,
+                        pr_context=current_pr_context,
+                        repair_scope=action_result.repair_scope,
+                    ),
+                )
+                if repair_status != "ready":
+                    return
+            else:
+                github_client.comment_issue(
+                    issue.number,
+                    build_rework_intent_comment(
+                        action=action_result.action,
+                        pr_branch=current_pr_context.branch,
+                        head_sha=current_pr_context.head_sha,
+                        execution_owner="supervisor",
+                    ),
+                )
             if is_rebase:
                 verification_results = execute_rebase(
                     issue=issue,

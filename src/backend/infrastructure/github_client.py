@@ -34,7 +34,8 @@ import re
 import subprocess
 import time
 import tomllib
-from contextlib import AbstractContextManager
+from collections.abc import Iterator
+from contextlib import AbstractContextManager, ExitStack, contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Sequence
@@ -690,6 +691,26 @@ class GitHubCliClient:
         """按 GitHub 仓库名锁定本机的状态板初始化。"""
         repo_slug = self._get_owner_repo().lower()
         return file_lock(state_home() / "presence-locks" / f"{repo_slug}.lock")
+
+    @contextmanager
+    def issue_supervision_lock(self, issue_number: int) -> Iterator[bool]:
+        """按 GitHub 仓库和 Issue 编号争用本机监督权。
+
+        Args:
+            issue_number: 目标 Issue 编号。
+
+        Yields:
+            取得锁时为 True，已有持有者时为 False。
+        """
+        repo_slug = self._get_owner_repo().lower()
+        lock_path = state_home() / "supervision-locks" / repo_slug / f"{issue_number}.lock"
+        with ExitStack() as lock_stack:
+            try:
+                lock_stack.enter_context(file_lock(lock_path, timeout_seconds=0))
+            except TimeoutError:
+                yield False
+                return
+            yield True
 
     def close_issue(self, issue_number: int) -> None:
         """通过 GitHub REST API 关闭指定 Issue。"""

@@ -497,6 +497,10 @@ class FakeGitHubClient(IGitHubClient):
         """返回测试用的空锁。"""
         return nullcontext()
 
+    def issue_supervision_lock(self, issue_number: int) -> AbstractContextManager[bool]:
+        """测试客户端默认取得监督权。"""
+        return nullcontext(True)
+
     def close_issue(self, issue_number: int) -> None:
         """把 Issue 置为 ``CLOSED``，用于布置「执行期间被关闭」这一 GitHub 事实。
 
