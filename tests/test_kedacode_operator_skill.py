@@ -437,6 +437,8 @@ _ALLOWED_FLAGS: dict[tuple[str, ...], set[str]] = {
         "--require-validation",
         "--ready",
         "--no-ready",
+        "--publish-to-issue-branch",
+        "--recover-issue",
         "--repo",
     },
     # issue-235：随包 Skill 写明 direct-pr 标签由 `kc labels sync` 建立/改名，

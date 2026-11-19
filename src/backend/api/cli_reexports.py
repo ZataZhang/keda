@@ -33,6 +33,10 @@ from backend.core.use_cases.create_issue_from_prd import (
     create_issue_from_prd,
     resolve_prd_paths,
 )
+from backend.core.use_cases.issue_prd_publication import (
+    IssuePrdPublicationRequest,
+    recover_issue_prd_publication,
+)
 from backend.core.use_cases.create_issue_from_prompt import (
     IssueFromPromptRequest,
     create_issue_from_prompt,
@@ -96,6 +100,7 @@ __all__ = [
     "DeliberationRequest",
     "IssueFromPrdRequest",
     "IssueFromPromptRequest",
+    "IssuePrdPublicationRequest",
     "ReplSessionDeps",
     "ReplSessionInputs",
     "_ensure_gh_auth_or_prompt",
@@ -112,6 +117,7 @@ __all__ = [
     "create_github_client",
     "create_issue_from_prd",
     "create_issue_from_prompt",
+    "recover_issue_prd_publication",
     "create_loop_clock",
     "create_loop_state_store",
     "create_planner_runner",

@@ -8,7 +8,7 @@ CLI 入口基于 Typer/Rich：`kc --help` 会展示分组命令、参数和别�
 
 - **init**：在目标 Git 仓库创建仓库本地 `.kedacode.toml` 配置
 - **labels sync**：在目标仓库创建或更新标准 labels（`agent/ready`、`agent/running`、`agent/supervising` 等）
-- **issue create**：从一个或多个 PRD Markdown 文件创建 GitHub Issue，**默认带上 `agent/ready` 直接进队列**（`--no-ready` 可只建 Issue 不排队），并默认在 ready 前发布 PRD（可用 `--no-publish-prd` 关闭，兼容旧命令 `issue-from-prd`）；也可以用 `--from-prompt "<一句话需求>"` 直接开一条**没有 PRD** 的 Issue（与 PRD 路径参数互斥，生成的正文不含 PRD 锚点，验收小节靠 `--require-validation` 显式开启）
+- **issue create**：从一个或多个 PRD Markdown 文件创建 GitHub Issue，**默认带上 `agent/ready` 直接进队列**（`--no-ready` 可只建 Issue 不排队），并默认在 ready 前发布 PRD；base branch 受保护时可显式用 `--publish-to-issue-branch` 发布到 `issue-<N>`，半完成发布可用 `--recover-issue <N>` 复用原 Issue；也可以用 `--from-prompt "<一句话需求>"` 直接开一条**没有 PRD** 的 Issue（与 PRD 路径参数互斥，生成的正文不含 PRD 锚点，验收小节靠 `--require-validation` 显式开启）
 - **run**：单次轮询执行，**目标必填**——`--issue <N>` 定向处理一个 Issue，或传 PRD 路径（解析其回链 Issue），或显式 `--all-ready` 按优先级处理整个 ready 队列（兼容旧命令 `run-once`；不传目标即用法错误）。可加 `--progress` 获取前台结构化进度事件。daemon 的互斥**只挡队列轮询**：同仓 daemon 在跑时 `--all-ready` 拒绝（`--takeover` 显式接管），`kc run --issue <N>` 照常执行——定向不要求 `agent/ready`，只按认领状态把关；租约仍有效的远端认领即使带 `--takeover` 也不能强制接手（见「显式定向的领取准入」）
 - **batch aggregate**：`kc run --all-ready --aggregate-pr --max-issues <N>` 显式把本轮至少两个已选 Issue 收为一批；分别运行现有任务流程后，只在全部成功时组合、验证并发布唯一总 Draft PR。跨多次运行时可用 `kc pr aggregate --issue <N> --issue <N>` 显式指定成员或重试聚合阶段。普通 `run`、daemon 和 loop 不自动汇总。**同一条聚合资格门对两个入口都一样**：成员 Issue 必须是 open 且已带 `agent/automated-review-passed`，且每个来源 PR 的必需 checks 必须已是 `SUCCESS`；刚发布完的 Issue 通常还停在 `agent/supervising`、Draft PR 的 checks 还是 PENDING，所以单次夜间 `kc run --all-ready --aggregate-pr` 常会在资格阶段被拒，需要等 checks 与标签落定后再补一次 `kc pr aggregate --issue ...`（见「批次聚合的资格门与两次调用」）。
 - **supervise**：单次处理已有 PR 的 Issue，基于 PR 上下文变化运行 post-PR supervisor cycle（兼容旧命令 `review`；历史命令 `review-once` 已删除）
@@ -2958,9 +2958,21 @@ uv run --project /path/to/keda kc issue create tasks/pending/feature-login.md \
 
 当发布 PRD 且传入 `--ready` 时，创建 Issue 的第一步不会带 `agent/ready`。只有 PRD commit push 成功后，命令才会通过 GitHub API 给 Issue 添加 `agent/ready`。如果 push 失败，命令返回失败，保留已创建但未 ready 的 backlog Issue，runner 不会领取它。
 
-Ready 发布要求当前分支等于 `[agent_runner.git].base_branch`，因为 runner 默认从 base branch 创建 worktree。若当前分支不是 base branch，命令会失败并提示切换到 base branch 或改用 `--no-ready`。
+默认 Ready 发布要求当前分支等于 `[agent_runner.git].base_branch`，因为 runner 默认从 base branch 创建 worktree。若当前分支不是 base branch，命令会失败并提示切换到 base branch 或改用 `--no-ready`。
 
-如果 PRD 发布阶段的 Git 命令失败，例如 `git commit` 被 pre-commit hook 拦截，`kc issue create` 会在终端和日志中展示失败命令、退出码以及捕获到的 stdout/stderr，便于直接看到 hook 或 Git 返回的原始错误。
+如果 base branch 受保护或用户明确要求任务分支发布，可传 `--publish-to-issue-branch`。命令会创建 Issue 后在隔离 Git worktree 中只提交 PRD，并以普通推送写入远端 `issue-<N>` 分支；不会向 base branch 推送。Issue 的 `agent/ready` 仍在 PRD 推送与固定提交链接写回成功后才添加。Issue 正文中的 `PRD path:` 机器锚点会保留，GitHub 链接固定到该次发布提交。
+
+若创建 Issue 后 PRD 回写、分支推送或元数据更新失败，错误会报告 Issue 当前状态与恢复命令。用 `kc issue create <prd-path> --recover-issue <N>` 可以复用原 Issue；命令校验仓库、Issue 编号和 PRD 路径，不会新建重复 Issue。相同 PRD 内容可重复恢复，若远端 `issue-<N>` 分支已有不同内容则拒绝覆盖。创建请求的 ready 意图会保存在 Issue 正文 marker 中；恢复也可以显式传 `--ready` 或 `--no-ready` 覆盖该意图。
+
+```bash
+# base branch 受保护时，在任务分支发布并按默认请求加入 ready 队列
+kc issue create tasks/pending/example.md --publish-to-issue-branch
+
+# Issue 已创建但 PRD 未发布时，恢复同一 Issue
+kc issue create tasks/pending/example.md --recover-issue 42
+```
+
+如果 PRD 发布阶段的 Git 命令失败，例如 `git commit` 被 pre-commit hook 拦截或 base branch 保护拒绝 push，`kc issue create` 会说明已创建 Issue 的状态，并给出包含原 Issue 编号的 `--recover-issue` 命令；终端和日志也会展示失败命令、退出码以及捕获到的 stdout/stderr，便于直接看到 hook 或 Git 返回的原始错误。
 
 Runner 新建 issue worktree 时，默认会同步 base branch 的远程 tracking ref 作为起点，使新分支基于最新远程提交，而非可能过期的本地 base branch。复用已存在的 worktree 时，runner 会在 agent 执行前自动将当前 worktree 分支与配置的远程同名分支做安全对齐：仅当 worktree 干净且本地分支是远程分支的祖先时执行 fast-forward；本地已有未发布 commit 时保留本地状态；worktree 脏或分支已分叉时显式失败，要求人工处理，而不是自动 rebase、merge 或 reset。
 

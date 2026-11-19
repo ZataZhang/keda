@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from urllib.parse import quote
 
 # 行首 PRD 锚点：前缀形态与 ``extract_prd_path`` 的解析正则一致（反引号紧跟冒号）。
 # 第 1 组是锚点本体，第 2 组是反引号内路径，第 3 组是行内剩余文本（幂等判断用）。
@@ -31,6 +32,8 @@ _GITHUB_URL_SLUG_RE = re.compile(
 
 # 追加到锚点行尾的链接文案（与手工修复 issue #247 时相同的格式）。
 _LINK_SUFFIX_TEMPLATE = "（[在 GitHub 打开](https://github.com/{slug}/blob/HEAD/{path})）"
+_PINNED_LINK_SUFFIX_TEMPLATE = "（[在 GitHub 打开](https://github.com/{slug}/blob/{ref}/{path})）"
+_GENERATED_LINK_SUFFIX_RE = re.compile(r"（\[在 GitHub 打开\]\(https?://[^)]+\)）")
 
 
 def parse_github_slug_from_url(url: str) -> str:
@@ -133,3 +136,30 @@ def append_prd_github_link(body: str, *, repo_path: Path) -> str:
         return anchor + _LINK_SUFFIX_TEMPLATE.format(slug=slug, path=path)
 
     return _PRD_ANCHOR_LINE_RE.sub(_append, body)
+
+
+def pin_prd_github_link(
+    body: str,
+    *,
+    relative_prd_path: Path,
+    github_repo_slug: str,
+    commit_sha: str,
+) -> str:
+    """把 PRD path 锚点后的 GitHub 链接固定到具体发布提交。"""
+    if not body or "PRD path:" not in body:
+        return body
+    pinned_path = quote(relative_prd_path.as_posix(), safe="/")
+    pinned_suffix = _PINNED_LINK_SUFFIX_TEMPLATE.format(
+        slug=github_repo_slug,
+        ref=commit_sha,
+        path=pinned_path,
+    )
+
+    def _pin(match: re.Match[str]) -> str:
+        anchor_text, anchored_path, trailing_text = match.groups()
+        if anchored_path.strip() != relative_prd_path.as_posix():
+            return match.group(0)
+        trailing_text = _GENERATED_LINK_SUFFIX_RE.sub("", trailing_text, count=1)
+        return f"{anchor_text}{pinned_suffix}{trailing_text}"
+
+    return _PRD_ANCHOR_LINE_RE.sub(_pin, body)

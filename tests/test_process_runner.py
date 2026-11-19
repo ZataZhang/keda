@@ -1051,9 +1051,9 @@ def test_captured_output_includes_stdout_written_when_process_exits(tmp_path: Pa
     runner = SubprocessRunner()
     script = (
         "import sys, time\n"
-        "for progress_index in range(110):\n"
+        "for progress_index in range(12):\n"
         "    print(f'progress {progress_index}', file=sys.stderr, flush=True)\n"
-        "    time.sleep(0.1)\n"
+        "    time.sleep(1)\n"
         "print('FINAL VERDICT', flush=True)\n"
     )
 
@@ -1066,7 +1066,7 @@ def test_captured_output_includes_stdout_written_when_process_exits(tmp_path: Pa
     )
 
     assert completed_process.stdout == "FINAL VERDICT\n"
-    assert "progress 109" in completed_process.stderr
+    assert "progress 11" in completed_process.stderr
 
 
 def test_captured_output_returns_when_descendant_keeps_pipes_open(

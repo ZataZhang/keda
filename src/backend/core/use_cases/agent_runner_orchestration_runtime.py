@@ -145,7 +145,12 @@ def _process_single_issue(
     # PRD 级覆盖随 Issue 流动：在这里（唯一同时掌握 repo 路径与 Issue 的位置）从该
     # Issue 引用的 PRD 文件解析头部 lifecycle_agents 块并回填，使实现 / 审核 / 监督
     # 等阶段的解析函数无需额外参数即可读到 PRD 级覆盖（最高优先级）。
-    issue = attach_prd_lifecycle_overrides(issue, repo_path)
+    issue = attach_prd_lifecycle_overrides(
+        issue,
+        repo_path,
+        process_runner=process_runner,
+        git_remote=config.git.remote,
+    )
     issue, retry_override_claim = prepare_issue_retry_override(
         IssueRetryOverrideRequest(
             issue=issue,

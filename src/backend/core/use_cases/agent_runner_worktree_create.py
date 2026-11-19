@@ -37,6 +37,7 @@ from backend.core.use_cases.agent_runner_worktree_branch import (
     _ensure_worktree_branch,
     _reconcile_worktree_with_remote_branch,
 )
+from backend.core.use_cases.issue_prd_publication import published_issue_prd_branch
 from backend.core.use_cases.worktree_database import (
     WorktreeDatabaseProvisionRequest,
     provision_worktree_database,
@@ -108,6 +109,8 @@ def _resolve_fork_base(
       worktree contains the upstream tip even when the local branch lags a
       newer remote push. Falls back to the local branch only when the fetch
       fails but the branch exists locally; raises when neither is available.
+    - An existing branch for this Issue is the resume point, refreshed before
+      applying dependency or base-branch sequencing.
     - ``via-main`` (default): refresh the remote base and fork from the fetched
       remote-tracking ref, so the worktree always contains the latest upstream
       changes. This closes the silent-staleness gap where a downstream run
@@ -116,6 +119,35 @@ def _resolve_fork_base(
     declaration = parse_dependency_marker(issue.body)
     remote = config.git.remote
     local_base = config.worktree.base_branch or config.git.base_branch
+    issue_branch = f"issue-{issue.number}"
+    published_prd_branch = published_issue_prd_branch(
+        issue_number=issue.number,
+        issue_body=issue.body,
+    )
+    issue_remote_ref = f"{remote}/{issue_branch}"
+    issue_fetch_result = process_runner.run(
+        [
+            "git",
+            "fetch",
+            remote,
+            f"+{issue_branch}:refs/remotes/{remote}/{issue_branch}",
+        ],
+        cwd=repo_path,
+        check=False,
+    )
+    if issue_fetch_result.return_code == 0:
+        issue_remote_exists = process_runner.run(
+            ["git", "rev-parse", "--verify", "--quiet", issue_remote_ref],
+            cwd=repo_path,
+            check=False,
+        )
+        if issue_remote_exists.return_code == 0:
+            return issue_remote_ref
+    if published_prd_branch is not None:
+        raise RuntimeError(
+            f"Issue #{issue.number} publishes its PRD on '{remote}/{published_prd_branch}', "
+            "but the task branch could not be fetched."
+        )
 
     if declaration is not None and declaration.sequence == "stack" and declaration.issue_numbers:
         upstream_branch = f"issue-{declaration.issue_numbers[0]}"

@@ -46,6 +46,8 @@ class IssueFromPrdRequest:
         force: 为 ``True`` 时替换 PRD 中已有的 ``- GitHub Issue:`` 行，
             而不是抛出 ``ValueError``。
         publish_prd: 为 ``True`` 时在 Issue 创建后对 PRD 文件执行 stage、commit、push。
+        publish_to_issue_branch: 为 ``True`` 时使用隔离 Git worktree 将 PRD 发布到
+            ``issue-<N>`` 任务分支；ready 在分支推送和 Issue 元数据写回后添加。
         git_remote: 要 push 到的 Git remote 名称（默认 ``"origin"``）。
         git_base_branch: 基础分支名称。当 ``queue_ready=True`` 且 ``publish_prd=True`` 时必需。
         generated_content_config: 可选的 AI 内容生成配置。
@@ -72,6 +74,7 @@ class IssueFromPrdRequest:
     labels_config: LabelConfig | None = None
     force: bool = False
     publish_prd: bool = False
+    publish_to_issue_branch: bool = False
     git_remote: str = "origin"
     git_base_branch: str = "main"
     generated_content_config: GeneratedContentConfig | None = None
@@ -302,7 +305,7 @@ def build_issue_labels(
     apply_routing_labels(
         labels,
         queue_ready=request.queue_ready,
-        ready_deferred_until_publish=request.publish_prd,
+        ready_deferred_until_publish=request.publish_prd or request.publish_to_issue_branch,
         issue_agent=request.issue_agent,
         labels_config=effective_labels_config,
     )
