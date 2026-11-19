@@ -64,6 +64,7 @@ def reconcile_runtime_task(
     if task.status not in {
         RuntimeTaskStatus.RUNNING,
         RuntimeTaskStatus.COMPLETED,
+        RuntimeTaskStatus.FAILED,
         RuntimeTaskStatus.UNKNOWN,
     }:
         return task
@@ -125,6 +126,14 @@ def reconcile_runtime_task(
         and session_terminal is None
         and session_start is not None
         and (recorded_finish is None or session_start > recorded_finish)
+        and (
+            task.status is not RuntimeTaskStatus.FAILED
+            or (
+                recorded_finish is not None
+                and session_start
+                > (parse_runtime_timestamp(task.last_observed_at) or recorded_finish)
+            )
+        )
     ):
         session_phase = derive_current_phase(lifecycle_run, session_events).value
         return replace(
