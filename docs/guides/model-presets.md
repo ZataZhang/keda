@@ -199,6 +199,10 @@ kc agent fallback candidate move   <position> --to <n>  --scope … [--repo-id <
 - **删不掉的东西不能报成功**：`lifecycle unset` 要求该阶段在**目标层**确有绑定，删除预设要求
   该预设由**目标层**声明。在仓库范围解绑一个只由全局层绑定的阶段、或删除一个只有全局层声明的
   预设，都不会改动任何配置文件——这类请求以用法错误（2）退出并指出该改哪一层，文件字节不变。
+- **个人覆盖的绑定只读**：阶段绑定声明在 `.kedacode.local.toml` 时，`lifecycle list` 的仓库视图把
+  该行 `field_sources.preset` 标为 `local_override`（人读输出带 `binding:local-override`）；在仓库
+  范围对它 `lifecycle set` / `unset` 以用法错误（2）退出并指明该文件，`.kedacode.toml` 不变——
+  个人覆盖同键优先，写进 `.kedacode.toml` 也不会生效。
 - 未知 stage、未注册 agent、未知预设、预设 agent 与候选执行器不一致、给缺 `reasoning_effort_args`
   模板的 agent 设非空 effort——都在**写文件或调用 agent 前**返回可诊断的非零退出，目标文件字节不变。
 - 目标配置文件本身不是合法 TOML 时，写命令以一般错误（1）退出并提示先修复该文件；原文件一字

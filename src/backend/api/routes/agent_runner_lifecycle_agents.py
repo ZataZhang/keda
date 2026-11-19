@@ -31,7 +31,6 @@ from backend.core.shared.models.config_edit import (
     ConfigLockBusyError,
 )
 from backend.core.shared.models.lifecycle_agent import LIFECYCLE_AGENT_PRD_OVERRIDE_KEYS
-from backend.core.shared.models.product_identity import REPOSITORY_LOCAL_OVERRIDE_FILENAME
 from backend.core.use_cases.agent_runner_factory import (
     build_app_config_from_settings,
     collect_repository_own_presets,
@@ -58,6 +57,7 @@ from backend.core.use_cases.lifecycle_agents_console import (
 from backend.core.use_cases.lifecycle_settings_console import (
     build_fallback_candidates_view,
     build_lifecycle_settings_view,
+    local_override_binding_conflict,
     validate_fallback_candidates_update,
     validate_lifecycle_preset_binding_update,
     validate_preset_update,
@@ -226,17 +226,11 @@ def _reject_local_override_bindings(request: UpdateLifecycleSettingsRequest) -> 
     Raises:
         HTTPException: 422，请求里含有绑定声明在 ``.kedacode.local.toml`` 的阶段。
     """
-    local_stages = _local_override_stages(request.scope, request.repo_id)
-    blocked_stages = sorted(stage for stage in request.bindings if stage in local_stages)
-    if blocked_stages:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"阶段 {', '.join(blocked_stages)} 的绑定声明在个人覆盖 "
-                f"{REPOSITORY_LOCAL_OVERRIDE_FILENAME} 里，优先级高于 .kedacode.toml，"
-                "本页修改不会生效：请直接编辑该文件。"
-            ),
-        )
+    conflict_message = local_override_binding_conflict(
+        request.bindings, _local_override_stages(request.scope, request.repo_id)
+    )
+    if conflict_message is not None:
+        raise HTTPException(status_code=422, detail=conflict_message)
 
 
 @router.get("/agent-runner/lifecycle-settings")
