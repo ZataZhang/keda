@@ -2962,7 +2962,7 @@ uv run --project /path/to/keda kc issue create tasks/pending/feature-login.md \
 
 如果 base branch 受保护或用户明确要求任务分支发布，可传 `--publish-to-issue-branch`。命令会创建 Issue 后在隔离 Git worktree 中只提交 PRD，并以普通推送写入远端 `issue-<N>` 分支；不会向 base branch 推送。Issue 的 `agent/ready` 仍在 PRD 推送与固定提交链接写回成功后才添加。Issue 正文中的 `PRD path:` 机器锚点会保留，GitHub 链接固定到该次发布提交。
 
-若创建 Issue 后 PRD 回写、分支推送或元数据更新失败，错误会报告 Issue 当前状态与恢复命令。用 `kc issue create <prd-path> --recover-issue <N>` 可以复用原 Issue；命令校验仓库、Issue 编号和 PRD 路径，不会新建重复 Issue。相同 PRD 内容可重复恢复，若远端 `issue-<N>` 分支已有不同内容则拒绝覆盖。创建请求的 ready 意图会保存在 Issue 正文 marker 中；恢复也可以显式传 `--ready` 或 `--no-ready` 覆盖该意图。
+若创建 Issue 后 PRD 回写、分支推送或元数据更新失败，错误会报告 Issue 当前状态与恢复命令。用 `kc issue create <prd-path> --recover-issue <N>` 可以复用原 Issue；命令校验仓库、Issue 编号和 PRD 路径，不会新建重复 Issue。相同 PRD 内容可重复恢复，若远端 `issue-<N>` 分支已有不同内容则拒绝覆盖。任务分支发布会把 ready 意图保存在 Issue 正文 marker 中；失败时打印的恢复命令也会带上原请求对应的 `--ready` 或 `--no-ready`。手动恢复没有该 marker 的旧 Issue 时，应显式传入期望的 ready 选项。
 
 ```bash
 # base branch 受保护时，在任务分支发布并按默认请求加入 ready 队列

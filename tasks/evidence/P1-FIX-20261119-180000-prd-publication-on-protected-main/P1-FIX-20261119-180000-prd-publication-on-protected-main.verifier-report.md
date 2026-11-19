@@ -1,6 +1,6 @@
 # Independent Verifier Report
 
-- PRD: `tasks/pending/P1-FIX-20261119-180000-prd-publication-on-protected-main.md`
+- PRD: `tasks/archive/P1-FIX-20261119-180000-prd-publication-on-protected-main.md`
 - Verifier: separate read-only verifier agent
 - Verdict: **PASS**
 
@@ -26,5 +26,11 @@ The verifier confirmed that RV-1 through RV-4 raw outputs contain negative scena
 
 - **BLOCKER — resolved:** round 1 found incomplete/misleading evidence records and a missing structured §7.6 oracle block. All requested records and evidence references were corrected before this round.
 - **Non-blocking limitation:** RV-3's observable Agent intentionally exits 23 after recording its real `issue-42` worktree. It proves branch PRD delivery and executor selection, not a paid Agent implementation or Draft PR publication; the PRD, evidence report, and manifest state this boundary.
-- **Non-blocking limitation:** RV-4 skips only the `check-test-flag` pre-commit hook because pre-commit hides unstaged files and changes its marker tree. All other full lint hooks passed, and the relevant tests ran directly with `--no-testmon` (174 passed).
+- **Non-blocking limitation (Round 2 snapshot, before pre-PR repairs):** RV-4 skipped only the `check-test-flag` pre-commit hook because pre-commit hides unstaged files and changes its marker tree. All other full lint hooks passed, and the relevant tests ran directly with `--no-testmon` (174 passed on that snapshot; the repaired final tree has 176 passing targeted tests).
 - The verifier did not access or modify #398/#399. Keep the Human-Confirmed item open for the maintainer's real #398 check.
+
+## Round 3 — final-tree pre-PR review
+
+**Verdict: PASS.** The verifier reviewed the post-repair diff and confirmed that recovery preserves the original pinned commit when the stored commit contains the same PRD bytes, and that task-branch publication reads its base through a unique ref without relying on the shared `FETCH_HEAD`. The two new regressions cover branch advancement and an interleaved fetch.
+
+The final-tree evidence run passed all four RV items (4.0s, 7.1s, 9.9s, and 44.9s); targeted tests report 176 passed. The verifier confirmed the evidence report, verification plan, and archived PRD use the archived canonical path and final test count. The human #398 confirmation remains open; #398/#399 were not accessed.

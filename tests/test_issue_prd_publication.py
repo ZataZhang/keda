@@ -25,6 +25,7 @@ from backend.core.use_cases.create_issue_from_prd import (
 )
 from backend.core.use_cases.issue_prd_publication import (
     IssuePrdPublicationRequest,
+    _publish_prd_commit,
     recover_issue_prd_publication,
     validate_issue_prd_path,
 )
@@ -283,6 +284,155 @@ def test_recovery_reuses_issue_is_idempotent_and_rejects_remote_conflict(
     assert "remote content was preserved" in conflict_text
     assert _remote_ref_sha(remote_path, "issue-42") == initial_issue_branch_sha
     assert sum(call["method"] == "create_issue" for call in github_client.calls) == 1
+
+
+def test_recovery_preserves_pinned_prd_commit_after_branch_advances(tmp_path: Path) -> None:
+    """分支后续提交不应让同内容恢复改写 PRD 的固定提交链接。"""
+    repo_path = tmp_path / "repo"
+    remote_path = tmp_path / "remote.git"
+    _create_git_remote(repo_path, remote_path)
+    prd_relative_path = Path("tasks/pending/feature.md")
+    issue_url = "https://github.com/example/repo/issues/42"
+    prd_path = repo_path / prd_relative_path
+    prd_path.parent.mkdir(parents=True)
+    prd_text = f"# PRD: Pinned publication\n\n- GitHub Issue: {issue_url}\n"
+
+    _run_git(repo_path, "checkout", "-b", "issue-42")
+    prd_path.write_text(prd_text, encoding="utf-8")
+    _run_git(repo_path, "add", prd_relative_path.as_posix())
+    _run_git(repo_path, "commit", "-m", "publish PRD")
+    _run_git(repo_path, "push", "origin", "issue-42")
+    publication_commit_sha = _run_git(repo_path, "rev-parse", "HEAD").stdout.strip()
+    _run_git(repo_path, "checkout", "main")
+    prd_path.parent.mkdir(parents=True, exist_ok=True)
+    prd_path.write_text(prd_text, encoding="utf-8")
+
+    github_client = _StatefulGitHubClient()
+    github_client._issue_get_bodies[42] = (
+        f"- PRD path: `{prd_relative_path.as_posix()}` "
+        f"（[在 GitHub 打开](https://github.com/example/repo/blob/{publication_commit_sha}/"
+        f"{prd_relative_path.as_posix()})）\n\n"
+        "<!-- kc:prd-publication version=1 state=published queue_ready=true "
+        f"branch=issue-42 commit={publication_commit_sha} -->\n"
+    )
+    github_client._issue_labels[42] = (LabelConfig().ready,)
+
+    branch_writer_path = tmp_path / "branch-writer"
+    subprocess.run(
+        ["git", "clone", "--branch", "issue-42", str(remote_path), str(branch_writer_path)],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    _run_git(branch_writer_path, "config", "user.name", "Publication Test")
+    _run_git(branch_writer_path, "config", "user.email", "publication-test@example.com")
+    (branch_writer_path / "implementation.txt").write_text(
+        "implementation progress\n", encoding="utf-8"
+    )
+    _run_git(branch_writer_path, "add", "implementation.txt")
+    _run_git(branch_writer_path, "commit", "-m", "record implementation progress")
+    _run_git(branch_writer_path, "push", "origin", "issue-42")
+    advanced_branch_sha = _run_git(branch_writer_path, "rev-parse", "HEAD").stdout.strip()
+
+    recovery_result = recover_issue_prd_publication(
+        request=IssuePrdPublicationRequest(
+            repo_path=repo_path,
+            prd_path=prd_relative_path,
+            issue_number=42,
+            git_remote="origin",
+            git_base_branch="main",
+        ),
+        github_client=github_client,
+        process_runner=SubprocessRunner(),
+    )
+
+    assert advanced_branch_sha != publication_commit_sha
+    assert recovery_result.commit_sha == publication_commit_sha
+    assert _remote_ref_sha(remote_path, "issue-42") == advanced_branch_sha
+    final_issue_body = github_client._issue_get_bodies[42]
+    assert f"/blob/{publication_commit_sha}/{prd_relative_path.as_posix()}" in final_issue_body
+    assert f"commit={publication_commit_sha}" in final_issue_body
+
+
+def test_publication_base_isolated_from_concurrent_fetch_head_updates(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """另一个并发 fetch 改写 FETCH_HEAD 时仍从指定 base 分支发布。"""
+    from collections.abc import Sequence
+
+    from backend.core.shared.models.agent_runner import CommandResult
+
+    repo_path = tmp_path / "repo"
+    remote_path = tmp_path / "remote.git"
+    _create_git_remote(repo_path, remote_path)
+    base_sha = _remote_ref_sha(remote_path, "main")
+    _run_git(repo_path, "checkout", "-b", "issue-decoy")
+    (repo_path / "decoy.txt").write_text("unrelated branch\n", encoding="utf-8")
+    _run_git(repo_path, "add", "decoy.txt")
+    _run_git(repo_path, "commit", "-m", "create competing branch")
+    _run_git(repo_path, "push", "origin", "issue-decoy")
+    _run_git(repo_path, "checkout", "main")
+
+    prd_relative_path = Path("tasks/pending/feature.md")
+    (repo_path / prd_relative_path).parent.mkdir(parents=True)
+    prd_text = "# PRD: Isolated fetch ref\n"
+    (repo_path / prd_relative_path).write_text(prd_text, encoding="utf-8")
+    subprocess_runner = SubprocessRunner()
+    original_run = subprocess_runner.run
+    fetch_head_was_interleaved = False
+
+    def run_with_competing_fetch(
+        command: Sequence[str],
+        *,
+        cwd: Path,
+        check: bool = True,
+    ) -> CommandResult:
+        nonlocal fetch_head_was_interleaved
+        command_result = original_run(command, cwd=cwd, check=check)
+        if (
+            any("refs/heads/main" in argument for argument in command)
+            and not fetch_head_was_interleaved
+        ):
+            fetch_head_was_interleaved = True
+            original_run(
+                ["git", "fetch", "origin", "refs/heads/issue-decoy"],
+                cwd=cwd,
+                check=False,
+            )
+        return command_result
+
+    monkeypatch.setattr(subprocess_runner, "run", run_with_competing_fetch)
+    _publish_prd_commit(
+        repo_path=repo_path,
+        relative_prd_path=prd_relative_path,
+        prd_text=prd_text,
+        issue_number=42,
+        issue_branch="issue-42",
+        git_remote="origin",
+        git_base_branch="main",
+        process_runner=subprocess_runner,
+    )
+
+    assert fetch_head_was_interleaved
+    published_changed_paths = subprocess.run(
+        [
+            "git",
+            "--git-dir",
+            str(remote_path),
+            "diff",
+            "--name-only",
+            "refs/heads/main",
+            "refs/heads/issue-42",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    ).stdout.splitlines()
+    assert published_changed_paths == [prd_relative_path.as_posix()]
+    assert _remote_ref_sha(remote_path, "main") == base_sha
 
 
 def test_runner_reads_published_branch_prd_before_selecting_agent_and_creates_worktree(

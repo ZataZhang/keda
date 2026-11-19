@@ -1,6 +1,6 @@
 # Verification Plan
 
-PRD: `tasks/pending/P1-FIX-20261119-180000-prd-publication-on-protected-main.md`
+PRD: `tasks/archive/P1-FIX-20261119-180000-prd-publication-on-protected-main.md`
 
 | RV item | Real-entry check | Negative control | Evidence |
 |---|---|---|---|

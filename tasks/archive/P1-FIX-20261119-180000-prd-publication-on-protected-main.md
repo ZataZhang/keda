@@ -223,9 +223,9 @@ No frontend impact：改动只涉及 CLI、runner 后端和文字操作指南，
 - Public behavior and contracts: 新选项显式启用；默认 main 发布与 `--no-publish-prd` 保持原语义；冲突拒绝覆盖；失败 Issue 不会被提前 ready。
 - Related PRD status: #398/#399 未被读取或修改；#398 保留为后续人工验收与恢复流程。
 - Requirements and risks: 四项实现要求均由对应 rv 证据覆盖；RV-3 的 Agent fixture 在观察实际 worktree 后退出，因此不宣称已验证付费 Agent 实现或 Draft PR 发布。
-- Validation blocker: None；四项 executor-owned 验收均有最新证据，独立 verifier 第 2 轮为 `PASS`。
+- Validation blocker: None；四项 executor-owned 验收均有最终代码树证据，独立 verifier 第 3 轮为 `PASS`。
 - Validation follow-up: 维护流程发布后由人工按 9.1 检查真实 #398；Human-Confirmed 项保持未勾选，归档由 runner 处理。
-- 自动验证结果：`kc evidence check` 4/4；定向 pytest 174 passed；全文件 lint 除 `check-test-flag` 外通过；MkDocs build 通过。
+- 自动验证结果：`kc evidence check` 4/4；定向 pytest 176 passed；`just lint --reuse` 与全文件 lint（除 `check-test-flag` 外）通过；MkDocs build 通过。
 
 ## 14. Change Log
 
@@ -254,3 +254,11 @@ No frontend impact：改动只涉及 CLI、runner 后端和文字操作指南，
 - Reason: 只有独立复核确认实现和证据链完整后才完成执行侧验收。
 - Impact: 需求与代码范围不变；未访问或修改 #398/#399，真实 #398 检查留给维护者，归档由 runner 处理。
 - Review: 独立 verifier 第 2 轮 `PASS`；RV-3 仅证明真实 runner worktree 的 PRD 路由与执行器选择，不宣称 Draft PR 已发布。
+
+### Resolve pre-PR review findings and revalidate
+- Type: implementation / validation / documentation
+- Before: pre-PR review found that repeated recovery could retarget the pinned PRD link to a later branch tip, and publication resolved its base through shared `FETCH_HEAD`; tracked evidence still recorded the earlier 174-test snapshot.
+- After: recovery preserves the original commit when it contains the same PRD bytes; base fetch uses a unique temporary ref; evidence links and records point to the archived PRD and final 176-test result. The Human-Confirmed #398 item remains unchecked.
+- Reason: keep the Issue link anchored to its published PRD snapshot, isolate concurrent Git fetches, and make final-tree evidence traceable.
+- Impact: publication defaults and ready ordering are unchanged; all four RV items pass on the repaired tree.
+- Review: independent verifier Round 3 `PASS`; final `kc evidence check` 4/4, targeted pytest 176 passed, reuse/full lint and MkDocs build passed.

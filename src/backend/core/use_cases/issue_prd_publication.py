@@ -9,6 +9,7 @@ import shutil
 import tempfile
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
+from uuid import uuid4
 
 from backend.core.shared.interfaces.agent_runner import IGitHubClient, IProcessRunner
 from backend.core.shared.models.agent_runner import IssueSummary, LabelConfig
@@ -408,6 +409,19 @@ def _publish_and_finalize_issue_prd(
             git_base_branch=git_base_branch,
             process_runner=process_runner,
         )
+        if current_metadata is not None and current_metadata.state == "published":
+            previous_prd_result = process_runner.run(
+                [
+                    "git",
+                    "show",
+                    f"{current_metadata.commit_sha}:{relative_prd_path.as_posix()}",
+                ],
+                cwd=repo_path,
+                check=False,
+            )
+            if previous_prd_result.return_code != 0 or previous_prd_result.stdout == prd_text:
+                # 原发布提交仍是本次 PRD 快照；分支后续提交不应让恢复操作改写固定链接。
+                commit_sha = current_metadata.commit_sha or commit_sha
         pinned_issue_body = pin_prd_github_link(
             issue.body,
             relative_prd_path=relative_prd_path,
@@ -482,14 +496,26 @@ def _publish_prd_commit(
             f"{branch_probe.stderr.strip()}"
         )
 
-    process_runner.run(["git", "fetch", git_remote, fetch_ref], cwd=repo_path)
-    base_sha = process_runner.run(["git", "rev-parse", "FETCH_HEAD"], cwd=repo_path).stdout.strip()
-    if not re.fullmatch(r"[0-9a-fA-F]{40,64}", base_sha):
-        raise RuntimeError(f"Git returned an invalid commit SHA for {git_remote}/{fetch_ref}.")
-
+    publication_fetch_ref = f"refs/kc/issue-prd-publication/{issue_number}/{uuid4().hex}"
     temporary_worktree_path = Path(tempfile.mkdtemp(prefix=f"kc-issue-{issue_number}-prd-"))
     worktree_added = False
     try:
+        # FETCH_HEAD 是共享文件；命名临时 ref 可避免并发 Runner fetch 覆盖本次基线。
+        process_runner.run(
+            [
+                "git",
+                "fetch",
+                "--no-write-fetch-head",
+                git_remote,
+                f"+{fetch_ref}:{publication_fetch_ref}",
+            ],
+            cwd=repo_path,
+        )
+        base_sha = process_runner.run(
+            ["git", "rev-parse", publication_fetch_ref], cwd=repo_path
+        ).stdout.strip()
+        if not re.fullmatch(r"[0-9a-fA-F]{40,64}", base_sha):
+            raise RuntimeError(f"Git returned an invalid commit SHA for {git_remote}/{fetch_ref}.")
         process_runner.run(
             ["git", "worktree", "add", "--detach", str(temporary_worktree_path), base_sha],
             cwd=repo_path,
@@ -575,6 +601,11 @@ def _publish_prd_commit(
                     temporary_worktree_path,
                     cleanup_result.stderr.strip(),
                 )
+        process_runner.run(
+            ["git", "update-ref", "-d", publication_fetch_ref],
+            cwd=repo_path,
+            check=False,
+        )
         shutil.rmtree(temporary_worktree_path, ignore_errors=True)
 
 

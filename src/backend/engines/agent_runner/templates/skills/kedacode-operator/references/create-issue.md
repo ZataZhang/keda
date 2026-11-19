@@ -25,7 +25,7 @@ The user says 「把 tasks/pending/xxx.md 建成 issue」「建个 issue」「�
 
 ## Recovery
 
-- If Issue creation succeeded but PRD publication did not, use the recovery command printed by `kc issue create`, for example `kc issue create tasks/pending/<file>.md --recover-issue 42`. It reuses that Issue, checks the repository and PRD-path anchors, safely retries identical content, and refuses to overwrite different remote PRD content. Ready intent is stored in an Issue-body marker; `--ready` and `--no-ready` can explicitly override it.
+- If Issue creation succeeded but PRD publication did not, use the recovery command printed by `kc issue create`, for example `kc issue create tasks/pending/<file>.md --recover-issue 42 --ready`. It reuses that Issue, checks the repository and PRD-path anchors, safely retries identical content, and refuses to overwrite different remote PRD content. Task-branch publication stores ready intent in an Issue-body marker, and the printed recovery command preserves the original request with `--ready` or `--no-ready`. When manually recovering a legacy Issue without that marker, pass the intended ready option explicitly.
 - Wrong or duplicate Issue: close the extra one (`gh issue close <N> --comment "duplicate of <M>"`) and keep the one the PRD links back to; fix the PRD's `- GitHub Issue:` line if it now points at a closed Issue.
 - Creation does not run an implementation Agent or create its Issue worktree. For `--from-prompt`, cleanup is GitHub-side only; for a PRD-path creation, also inspect the back-written local link and any already-published PRD commit. Correct the link through the normal authorized publication flow; do not reset Git history or discard unrelated changes.
 
