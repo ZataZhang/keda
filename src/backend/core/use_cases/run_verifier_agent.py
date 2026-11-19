@@ -498,6 +498,7 @@ def run_verifier_gate(
         config,
         evidence_dir=resolve_issue_evidence_dir(worktree_path, config, issue),
     )
+    config = config.for_next_agent_stage()
     verifier_agent = _choose_verifier_agent(
         config,
         builder_agent,

@@ -256,6 +256,39 @@ def test_run_verifier_gate_passes_on_green(monkeypatch: pytest.MonkeyPatch, tmp_
     assert record.get("called") is True
 
 
+def test_verifier_reads_updated_preset_after_implementation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """校验启动时读取新绑定，已删除的启动预设不影响本次校验。"""
+    from backend.core.shared.models.agent_model_preset import AgentModelPreset
+    from backend.core.use_cases import run_verifier_agent as rva
+
+    startup = AppConfig()
+    startup = replace(
+        startup,
+        lifecycle_presets=replace(startup.lifecycle_presets, global_layer={"verifier": "old"}),
+    )
+    updated = replace(
+        startup,
+        agent_presets={"new": AgentModelPreset(agent="kimi", model="new-model")},
+        lifecycle_presets=replace(startup.lifecycle_presets, global_layer={"verifier": "new"}),
+    )
+    config = replace(startup, lifecycle_config_loader=lambda: updated)
+    _patch_gate_deps(monkeypatch, rva, ValidationVerdict(risk="green"), {})
+
+    def verify(*args, **kwargs):
+        assert args[4] == "kimi"
+        assert kwargs["model_selection"].model == "new-model"
+        return ValidationVerdict(risk="green")
+
+    monkeypatch.setattr(rva, "run_verifier_agent", verify)
+    assert (
+        rva.run_verifier_gate(_structured_issue(), tmp_path, config, FakeProcessRunner(), "codex")
+        is not None
+    )
+    assert config.lifecycle_presets.global_layer == {"verifier": "old"}
+
+
 def test_run_verifier_gate_rejects_uncommitted_implementation(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

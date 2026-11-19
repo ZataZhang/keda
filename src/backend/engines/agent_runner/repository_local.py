@@ -208,8 +208,7 @@ TOML_HEADER_COMMENT = """# KedaCode 本地仓库配置
 # `kc init` 会写入仓库级配置的默认值（generated_content 除外，见文末示例）；这些值
 # 随后显式覆盖全局默认值。没有默认值的可选字段、以及未写入的 generated_content，
 # 才继承 config.toml / 环境变量 / 代码里的全局默认值。
-# 本文件在 daemon 启动时读取一次：改完要重启 daemon 才生效（`kc run` 这类单轮
-# 命令每次调用都重新读取，无需重启）。
+# 执行器配置在 daemon 领取新任务与进入交付阶段时重读；其他配置通常在启动时读取。
 # 完整字段说明见 docs/guides/agent-runner.md。
 """
 

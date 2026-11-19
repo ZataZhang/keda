@@ -153,6 +153,7 @@ def _attempt_delivery_closeout(
 
     worktree_path = request.worktree_path
     process_runner = request.process_runner
+    config = config.for_next_agent_stage()
     allowed_scope = build_closeout_allowed_scope(issue, config)
     before_snapshot = capture_closeout_snapshot(issue, worktree_path, config, process_runner)
     try:

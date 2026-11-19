@@ -478,10 +478,14 @@ def test_main_daemon_default_interval_uses_config(monkeypatch) -> None:
 
     monkeypatch.setenv("KEDACODE_SKIP_GH_AUTH_CHECK", "1")
 
-    mock_context = MagicMock()
-    mock_context.repo_path = Path("/tmp/repo")
-    mock_context.repo_id = "repo"
-    mock_context.display_name = "Repo"
+    from backend.core.shared.models.agent_runner import AppConfig, RepositoryRunContext
+
+    mock_context = RepositoryRunContext(
+        repo_path=Path("/tmp/repo"),
+        repo_id="repo",
+        display_name="Repo",
+        config=AppConfig(),
+    )
 
     with (
         patch(
@@ -508,10 +512,14 @@ def test_main_review_daemon_default_interval_uses_config(monkeypatch) -> None:
 
     monkeypatch.setenv("KEDACODE_SKIP_GH_AUTH_CHECK", "1")
 
-    mock_context = MagicMock()
-    mock_context.repo_path = Path("/tmp/repo")
-    mock_context.repo_id = "repo"
-    mock_context.display_name = "Repo"
+    from backend.core.shared.models.agent_runner import AppConfig, RepositoryRunContext
+
+    mock_context = RepositoryRunContext(
+        repo_path=Path("/tmp/repo"),
+        repo_id="repo",
+        display_name="Repo",
+        config=AppConfig(),
+    )
 
     with (
         patch(
@@ -534,10 +542,14 @@ def test_main_daemon_interval_override(monkeypatch) -> None:
 
     monkeypatch.setenv("KEDACODE_SKIP_GH_AUTH_CHECK", "1")
 
-    mock_context = MagicMock()
-    mock_context.repo_path = Path("/tmp/repo")
-    mock_context.repo_id = "repo"
-    mock_context.display_name = "Repo"
+    from backend.core.shared.models.agent_runner import AppConfig, RepositoryRunContext
+
+    mock_context = RepositoryRunContext(
+        repo_path=Path("/tmp/repo"),
+        repo_id="repo",
+        display_name="Repo",
+        config=AppConfig(),
+    )
 
     with (
         patch(
@@ -1010,10 +1022,14 @@ def test_main_daemon_cwd_matches_enabled_single_repo(monkeypatch) -> None:
 
     monkeypatch.setenv("KEDACODE_SKIP_GH_AUTH_CHECK", "1")
 
-    mock_context = MagicMock()
-    mock_context.repo_path = Path("/tmp/repo")
-    mock_context.repo_id = "keda-main"
-    mock_context.display_name = "Keda Main"
+    from backend.core.shared.models.agent_runner import AppConfig, RepositoryRunContext
+
+    mock_context = RepositoryRunContext(
+        repo_path=Path("/tmp/repo"),
+        repo_id="keda-main",
+        display_name="Keda Main",
+        config=AppConfig(),
+    )
 
     settings = MagicMock()
     settings.repositories = {
@@ -1059,10 +1075,14 @@ def test_main_review_daemon_cwd_matches_enabled_single_repo(monkeypatch) -> None
 
     monkeypatch.setenv("KEDACODE_SKIP_GH_AUTH_CHECK", "1")
 
-    mock_context = MagicMock()
-    mock_context.repo_path = Path("/tmp/repo")
-    mock_context.repo_id = "keda-main"
-    mock_context.display_name = "Keda Main"
+    from backend.core.shared.models.agent_runner import AppConfig, RepositoryRunContext
+
+    mock_context = RepositoryRunContext(
+        repo_path=Path("/tmp/repo"),
+        repo_id="keda-main",
+        display_name="Keda Main",
+        config=AppConfig(),
+    )
 
     settings = MagicMock()
     settings.repositories = {
@@ -1277,10 +1297,14 @@ def test_main_daemon_explicit_all_targets_all_repositories(monkeypatch) -> None:
 
     monkeypatch.setenv("KEDACODE_SKIP_GH_AUTH_CHECK", "1")
 
-    mock_context = MagicMock()
-    mock_context.repo_path = Path("/tmp/repo")
-    mock_context.repo_id = "repo"
-    mock_context.display_name = "Repo"
+    from backend.core.shared.models.agent_runner import AppConfig, RepositoryRunContext
+
+    mock_context = RepositoryRunContext(
+        repo_path=Path("/tmp/repo"),
+        repo_id="repo",
+        display_name="Repo",
+        config=AppConfig(),
+    )
 
     settings = MagicMock()
     settings.repositories = {
@@ -1320,10 +1344,14 @@ def test_main_daemon_with_repo_id_does_not_default_to_all(monkeypatch) -> None:
 
     monkeypatch.setenv("KEDACODE_SKIP_GH_AUTH_CHECK", "1")
 
-    mock_context = MagicMock()
-    mock_context.repo_path = Path("/tmp/repo")
-    mock_context.repo_id = "keda"
-    mock_context.display_name = "Keda"
+    from backend.core.shared.models.agent_runner import AppConfig, RepositoryRunContext
+
+    mock_context = RepositoryRunContext(
+        repo_path=Path("/tmp/repo"),
+        repo_id="keda",
+        display_name="Keda",
+        config=AppConfig(),
+    )
 
     with (
         patch(
@@ -4221,10 +4249,14 @@ def test_main_daemon_passes_transcript_runner_factory(monkeypatch) -> None:
 
     monkeypatch.setenv("KEDACODE_SKIP_GH_AUTH_CHECK", "1")
 
-    mock_context = MagicMock()
-    mock_context.repo_path = Path("/tmp/repo")
-    mock_context.repo_id = "repo"
-    mock_context.display_name = "Repo"
+    from backend.core.shared.models.agent_runner import AppConfig, RepositoryRunContext
+
+    mock_context = RepositoryRunContext(
+        repo_path=Path("/tmp/repo"),
+        repo_id="repo",
+        display_name="Repo",
+        config=AppConfig(),
+    )
 
     with (
         patch(

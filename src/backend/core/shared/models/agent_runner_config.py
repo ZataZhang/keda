@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass, field, replace
 
 from backend.core.shared.models import product_identity
 from backend.core.shared.models.agent_runner_execution import (
@@ -804,3 +805,25 @@ class AppConfig:
     agent_presets: dict[str, AgentModelPreset] = field(default_factory=dict)
     # 阶段 -> 预设 绑定的两层声明视图（PRD 块随 Issue 流动，不在本视图内）。
     lifecycle_presets: LifecyclePresetsConfig = field(default_factory=LifecyclePresetsConfig)
+    lifecycle_config_loader: Callable[[], AppConfig] | None = field(
+        default=None, repr=False, compare=False
+    )
+
+    def for_next_agent_stage(self) -> AppConfig:
+        """读取阶段执行器配置，同时保留本次任务的工作流和安全设置。"""
+        if self.lifecycle_config_loader is None:
+            return self
+        refreshed_config = self.lifecycle_config_loader()
+        return replace(
+            self,
+            agents=refreshed_config.agents,
+            agent_presets=refreshed_config.agent_presets,
+            lifecycle_agents=refreshed_config.lifecycle_agents,
+            lifecycle_presets=refreshed_config.lifecycle_presets,
+            runner=replace(
+                self.runner,
+                agent_fallback_order=refreshed_config.runner.agent_fallback_order,
+                agent_fallback_candidates=refreshed_config.runner.agent_fallback_candidates,
+                max_agent_switches=refreshed_config.runner.max_agent_switches,
+            ),
+        )

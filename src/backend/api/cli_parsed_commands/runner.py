@@ -7,6 +7,7 @@ dispatcher.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 from backend.api.cli_console import console
@@ -24,6 +25,7 @@ from backend.api.cli_registry import _run_daemon_status_command
 from backend.api.agent_runner_views.runner_live_view import create_runner_live_view
 from backend.core.shared.interfaces.agent_runner import IGitHubClient
 from backend.core.shared.models.agent_runner import IssueSummary, RepositoryRunContext
+from backend.core.shared.models.agent_runner_config import AppConfig
 from backend.core.shared.models.publish_stage import PublishStage
 from backend.api import cli as _cli
 from backend.core.shared.interfaces.runner_console import RunnerProcessKind
@@ -32,6 +34,7 @@ from backend.core.use_cases.agent_runner_factory import (
     create_machine_identity_store,
     create_process_supervisor,
     create_registry_editor,
+    load_fresh_agent_runner_settings,
     logger,
 )
 
@@ -71,6 +74,45 @@ def _resolve_initialized_repository_contexts(
     for context in contexts:
         _cli.require_repository_initialized(context.repo_path, ctx.process_runner)
     return contexts
+
+
+def _with_lifecycle_reload(
+    context: RepositoryRunContext, ctx: ParsedCommandContext
+) -> RepositoryRunContext:
+    """保留启动目标，在阶段边界读取同一仓库的当前配置。"""
+    from backend.api.cli_model_preset_anchor import CLI_PRESET_NAME
+
+    startup_preset = context.config.agent_presets.get(CLI_PRESET_NAME)
+
+    def load_stage_config() -> AppConfig:
+        """读取新配置并恢复启动时的 CLI 预设覆盖。"""
+        fresh_contexts = _resolve_cli_repository_targets(
+            parsed=ctx.parsed,
+            runner_settings=load_fresh_agent_runner_settings(),
+            repo_id=ctx.repo_id if not getattr(ctx.parsed, "all_repositories", False) else None,
+            repo_override=ctx.repo_override,
+        )
+        for fresh_context in fresh_contexts:
+            if (fresh_context.repo_id, fresh_context.repo_path) == (
+                context.repo_id,
+                context.repo_path,
+            ):
+                fresh_config = fresh_context.config
+                if startup_preset is None:
+                    return fresh_config
+                return replace(
+                    fresh_config,
+                    agent_presets={**fresh_config.agent_presets, CLI_PRESET_NAME: startup_preset},
+                    lifecycle_presets=replace(
+                        fresh_config.lifecycle_presets,
+                        global_layer=context.config.lifecycle_presets.global_layer,
+                    ),
+                )
+        raise ValueError(f"Cannot reload configuration for repository '{context.repo_id}'.")
+
+    return replace(
+        context, config=replace(context.config, lifecycle_config_loader=load_stage_config)
+    )
 
 
 def _validate_aggregate_run_options(parsed: object, configured_max_issues: int) -> None:
@@ -809,6 +851,7 @@ def run_daemon_command(ctx: ParsedCommandContext) -> int:
             suggestion="kc daemon run --concurrency <N>",
         )
     contexts = _resolve_initialized_repository_contexts(ctx, anchored_stage="implementation")
+    contexts = [_with_lifecycle_reload(context, ctx) for context in contexts]
     if contexts:
         _ensure_gh_auth_or_prompt(contexts[0].repo_path, ctx.process_runner)
     interval = (
@@ -962,6 +1005,7 @@ def run_review_command(ctx: ParsedCommandContext) -> int:
 def run_review_daemon_command(ctx: ParsedCommandContext) -> int:
     """持续运行 post-PR supervisor 检查。"""
     contexts = _resolve_initialized_repository_contexts(ctx, anchored_stage="supervisor")
+    contexts = [_with_lifecycle_reload(context, ctx) for context in contexts]
     if contexts:
         _ensure_gh_auth_or_prompt(contexts[0].repo_path, ctx.process_runner)
     interval = (

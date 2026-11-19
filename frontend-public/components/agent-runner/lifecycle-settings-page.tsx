@@ -12,13 +12,12 @@
 // 写回保持保留式语义：矩阵只提交改动过的预设与绑定（一次 PATCH），回退候选按
 // 完整期望数组写回（PUT）。二者目标文件不同，互不牵连。
 
-import { ConsolePage, ConsolePageHeader, ConsoleToolbar, ConsoleSectionTabs, consoleTabClassName } from "@/components/layout/console-page";
+import { ConsolePage } from "@/components/layout/console-page";
 import {
   type ReactNode,
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
 } from "react";
 import { toast } from "sonner";
@@ -35,7 +34,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
@@ -43,7 +41,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ResourceErrorAlert } from "@/components/agent-runner/resource-error-alert";
-import { cn } from "@/lib/utils";
 import { fetchRegistryRepositories } from "@/lib/api/console";
 import {
   fetchLifecycleSettings,
@@ -77,6 +74,11 @@ import {
   PRESET_SOURCE_LABELS,
   displayOptionalField,
 } from "@/components/agent-runner/lifecycle-settings-source-labels";
+import { LifecycleSettingsScopeBar } from "@/components/agent-runner/lifecycle-settings-scope-bar";
+import {
+  LifecycleSettingsSectionTabs,
+  type LifecycleSettingsTab,
+} from "@/components/agent-runner/lifecycle-settings-section-tabs";
 /** 回退候选行编辑器的草稿态：完整期望数组 + 预算。 */
 function baselineCandidates(
   view: LifecycleSettingsView,
@@ -96,14 +98,6 @@ interface LifecycleSettingsPageProps {
   workspaceNavigation?: ReactNode;
 }
 
-const LIFECYCLE_SETTINGS_TABS = [
-  { id: "matrix", label: "生命周期矩阵" },
-  { id: "presets", label: "模型预设" },
-  { id: "fallback", label: "执行器回退" },
-] as const;
-
-type LifecycleSettingsTab = (typeof LIFECYCLE_SETTINGS_TABS)[number]["id"];
-
 /**
  * 生命周期、模型预设与执行器回退的统一设置页。
  *
@@ -119,7 +113,6 @@ export function LifecycleSettingsPage({
   const [repoId, setRepoId] = useState<string | undefined>(initialRepoId);
   const [activeSettingsTab, setActiveSettingsTab] =
     useState<LifecycleSettingsTab>("matrix");
-  const settingsTablistRef = useRef<HTMLElement | null>(null);
   const [repositories, setRepositories] = useState<RegistryRepositoryEntry[]>(
     [],
   );
@@ -368,7 +361,7 @@ export function LifecycleSettingsPage({
       // 避免一次矩阵保存静默丢弃未保存的回退编辑。
       setPresetDraft({});
       setBindingDraft({});
-      toast.success("生命周期设置已保存。");
+      toast.success("生命周期设置已保存；支持配置重载的 Runner 会在后续执行阶段读取新值。");
     } catch (error) {
       setMatrixError(error instanceof Error ? error.message : "保存失败。");
     } finally {
@@ -478,7 +471,7 @@ export function LifecycleSettingsPage({
       );
       setCandidateDraft(null);
       setSwitchesDraft(null);
-      toast.success("执行器回退候选已保存。");
+      toast.success("执行器回退候选已保存；支持配置重载的 Runner 会在后续执行阶段读取新值。");
     } catch (error) {
       setFallbackError(error instanceof Error ? error.message : "保存失败。");
     } finally {
@@ -504,113 +497,6 @@ export function LifecycleSettingsPage({
     return (view?.presets ?? [])
       .filter((preset) => preset.agent === agentName && presetDraft[preset.name] !== null)
       .map((preset) => ({ value: preset.name, label: preset.name }));
-  }
-
-  /** 渲染全局 / 仓库范围选择条（仓库范围附下拉选仓库）。 */
-  function renderScopeBar() {
-    return (
-      <>
-        <ConsolePageHeader title="生命周期与模型设置" description="配置全局或仓库的阶段 Agent、模型预设与执行器回退。" />
-        {workspaceNavigation}
-        <ConsoleToolbar>
-          <div className="inline-flex rounded-md border border-border p-0.5">
-            <button
-              type="button"
-              onClick={() => switchScope("global")}
-              data-testid="scope-global"
-              className={cn(
-                "h-8 rounded-md px-3 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                scope === "global"
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              全局
-            </button>
-            <button
-              type="button"
-              onClick={() => switchScope("repository")}
-              data-testid="scope-repository"
-              className={cn(
-                "h-8 rounded-md px-3 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                scope === "repository"
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              仓库
-            </button>
-          </div>
-          {scope === "repository" ? (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button type="button" variant="outline" size="sm" data-testid="scope-repo-select">
-                  {repositories.find((repo) => repo.repo_id === repoId)?.display_name ??
-                    repoId ??
-                    "选择仓库"}
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="min-w-56">
-                {repositories.map((repo) => (
-                  <DropdownMenuItem
-                    key={repo.repo_id}
-                    onSelect={() => switchRepo(repo.repo_id)}
-                    data-testid={`scope-repo-option-${repo.repo_id}`}
-                  >
-                    {repo.display_name ?? repo.repo_id}
-                  </DropdownMenuItem>
-                ))}
-                {repositories.length === 0 ? (
-                  <DropdownMenuLabel className="text-xs text-slate-500">
-                    暂无启用的仓库
-                  </DropdownMenuLabel>
-                ) : null}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          ) : null}
-        </ConsoleToolbar>
-      </>
-    );
-  }
-
-  /** 切换设置区块；重置主滚动区位置，确保新面板从顶部开始显示。 */
-  function switchSettingsTab(nextTab: LifecycleSettingsTab) {
-    if (nextTab === activeSettingsTab) {
-      return;
-    }
-    setActiveSettingsTab(nextTab);
-    const pageScroller = settingsTablistRef.current?.closest("main");
-    if (pageScroller instanceof HTMLElement) {
-      pageScroller.scrollTo({ top: 0, behavior: "smooth" });
-    }
-  }
-
-  /** 吸顶 Tab 导航（矩阵 / 预设 / 回退）。 */
-  function renderBlockNav() {
-    return (
-      <ConsoleSectionTabs
-        ref={settingsTablistRef}
-        role="tablist"
-        aria-label="生命周期设置区块"
-        data-testid="block-nav"
-      >
-        {LIFECYCLE_SETTINGS_TABS.map((tab) => (
-          <button
-            key={tab.id}
-            id={`lifecycle-settings-tab-${tab.id}`}
-            type="button"
-            role="tab"
-            aria-selected={activeSettingsTab === tab.id}
-            aria-controls={`lifecycle-settings-panel-${tab.id}`}
-            data-testid={`settings-tab-${tab.id}`}
-            onClick={() => switchSettingsTab(tab.id)}
-            className={consoleTabClassName(activeSettingsTab === tab.id)}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </ConsoleSectionTabs>
-    );
   }
 
   /** 渲染生命周期矩阵区块（九阶段生效值 + 绑定预设 + 保存）。 */
@@ -1024,7 +910,14 @@ export function LifecycleSettingsPage({
   if (loadError) {
     return (
       <ConsolePage>
-        {renderScopeBar()}
+        <LifecycleSettingsScopeBar
+          scope={scope}
+          repoId={repoId}
+          repositories={repositories}
+          workspaceNavigation={workspaceNavigation}
+          onScopeChange={switchScope}
+          onRepoChange={switchRepo}
+        />
         <ResourceErrorAlert message={loadError} testId="lifecycle-settings-error" />
       </ConsolePage>
     );
@@ -1033,7 +926,14 @@ export function LifecycleSettingsPage({
   if (scope === "repository" && !repoId) {
     return (
       <ConsolePage data-testid="lifecycle-settings-page">
-        {renderScopeBar()}
+        <LifecycleSettingsScopeBar
+          scope={scope}
+          repoId={repoId}
+          repositories={repositories}
+          workspaceNavigation={workspaceNavigation}
+          onScopeChange={switchScope}
+          onRepoChange={switchRepo}
+        />
         <p className="text-sm text-slate-500" data-testid="lifecycle-settings-pick-repo">
           请选择一个仓库以编辑其生命周期设置。
         </p>
@@ -1044,7 +944,14 @@ export function LifecycleSettingsPage({
   if (isLoading || !viewMatchesSelection) {
     return (
       <ConsolePage data-testid="lifecycle-settings-page">
-        {renderScopeBar()}
+        <LifecycleSettingsScopeBar
+          scope={scope}
+          repoId={repoId}
+          repositories={repositories}
+          workspaceNavigation={workspaceNavigation}
+          onScopeChange={switchScope}
+          onRepoChange={switchRepo}
+        />
         <p className="text-sm text-slate-500" data-testid="lifecycle-settings-loading">
           加载中…
         </p>
@@ -1054,17 +961,28 @@ export function LifecycleSettingsPage({
 
   return (
     <ConsolePage data-testid="lifecycle-settings-page">
-      {renderScopeBar()}
-      <p className="text-xs text-slate-500 dark:text-slate-400">
+      <LifecycleSettingsScopeBar
+        scope={scope}
+        repoId={repoId}
+        repositories={repositories}
+        workspaceNavigation={workspaceNavigation}
+        onScopeChange={switchScope}
+        onRepoChange={switchRepo}
+      />
+      <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-200">
         {view.scope === "global"
           ? "正在编辑：全局 config.toml。"
-          : `正在编辑：仓库 ${view.repo_id ?? ""}。生命周期矩阵与预设绑定写入该仓库的 .kedacode.toml；仅下方「执行器回退」固定写入机器级 config.toml。`}
+          : `正在编辑：仓库 ${view.repo_id ?? ""}。生命周期矩阵与预设绑定写入该仓库的 .kedacode.toml；仅下方「执行器回退」固定写入机器级 config.toml。`}{" "}
+        本页展示磁盘上的配置。Runner 在领取新任务，以及进入修复、收尾、校验、审核或监督阶段时读取最新的执行器设置。已开始的阶段继续使用启动时的执行器。
       </p>
       <p className="text-xs text-slate-500 dark:text-slate-400">
         本页展示全局 / 仓库基线；PRD 头部声明与单次运行的 CLI 旗标（--preset / --model
         / --reasoning-effort）对单个 PRD / 运行优先生效。
       </p>
-      {renderBlockNav()}
+      <LifecycleSettingsSectionTabs
+        activeTab={activeSettingsTab}
+        onTabChange={setActiveSettingsTab}
+      />
       <div
         id="lifecycle-settings-panel-matrix"
         role="tabpanel"

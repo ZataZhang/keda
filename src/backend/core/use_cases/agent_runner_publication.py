@@ -878,9 +878,10 @@ def _finish_implementation_publication(
                 reviewed_pr.branch,
             )
         else:
+            supervisor_config = config.for_next_agent_stage()
             supervisor_agent = resolve_supervisor_agent(
                 issue,
-                config,
+                supervisor_config,
                 "auto",
                 fallback_agent=selected_agent,
             )
@@ -888,7 +889,7 @@ def _finish_implementation_publication(
             _run_supervisor_with_repair_loop(
                 issue=issue,
                 worktree_path=worktree_path,
-                config=config,
+                config=supervisor_config,
                 github_client=github_client,
                 process_runner=process_runner,
                 pr_context=pr_context,
@@ -1058,16 +1059,17 @@ def _finish_existing_commit_publication(
                 reviewed_pr.branch,
             )
         else:
+            supervisor_config = config.for_next_agent_stage()
             supervisor_agent = resolve_supervisor_agent(
                 issue,
-                config,
+                supervisor_config,
                 "auto",
                 fallback_agent=selected_agent,
             )
             _run_supervisor_with_repair_loop(
                 issue=issue,
                 worktree_path=worktree_path,
-                config=config,
+                config=supervisor_config,
                 github_client=github_client,
                 process_runner=process_runner,
                 pr_context=pr_context,

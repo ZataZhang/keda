@@ -730,10 +730,10 @@ def _run_daemon_loop(request: _AgentDaemonLoopRequest) -> None:
 
             pass_activity = PassActivity()
             try:
-                # Phase 2: Ready issue execution.
+                # 每轮领取任务前更新实现阶段的执行器配置。
                 run_once(
                     repo_path=context.repo_path,
-                    config=context.config,
+                    config=context.config.for_next_agent_stage(),
                     dry_run=False,
                     agent=agent,
                     max_issues=execution_ceiling,

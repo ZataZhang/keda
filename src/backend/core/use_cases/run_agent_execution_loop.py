@@ -673,10 +673,11 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                     )
                 else:
                     try:
+                        fix_config = config.for_next_agent_stage()
                         fix_agent_result = run_fix_agent(
                             resolve_lifecycle_agent(
                                 "fix",
-                                config,
+                                fix_config,
                                 issue=issue,
                                 selected_agent=selected_agent,
                                 prd_overrides=prd_overrides,
@@ -684,14 +685,14 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                             ),
                             issue,
                             worktree_path,
-                            config,
+                            fix_config,
                             process_runner,
                             verification_results=exc.verification_results,
                             # fix 未自绑时继承实现者绑定；不一致由 resilient 层丢弃并记日志。
                             model_selection=(
                                 resolve_lifecycle_model_selection(
                                     "fix",
-                                    config,
+                                    fix_config,
                                     issue=issue,
                                     prd_preset_overrides=prd_preset_overrides,
                                 )
@@ -705,7 +706,7 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                             "fix",
                             resolve_lifecycle_agent(
                                 "fix",
-                                config,
+                                fix_config,
                                 issue=issue,
                                 selected_agent=selected_agent,
                                 prd_overrides=prd_overrides,

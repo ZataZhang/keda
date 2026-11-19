@@ -358,6 +358,7 @@ def _process_review_candidate(
             last_marker = None
         else:
             issue = attach_prd_lifecycle_overrides(issue, repo_path)
+            config = config.for_next_agent_stage()
             supervisor_agent = resolve_supervisor_agent(issue, config, agent)
             return _execute_supervisor_rework(
                 issue=issue,
@@ -457,6 +458,7 @@ def _process_review_candidate(
     issue = attach_prd_lifecycle_overrides(issue, repo_path)
     # 命令行 --agent > PRD 覆盖 > post_pr_supervisor.supervisor_agent > Issue 标签路由，
     # 与发布路径共用同一解析规则（此前这里只按标签走，配置的 supervisor 被忽略）。
+    config = config.for_next_agent_stage()
     supervisor_agent = resolve_supervisor_agent(issue, config, agent)
     cycle = (last_marker.cycle + 1) if last_marker else 1
 

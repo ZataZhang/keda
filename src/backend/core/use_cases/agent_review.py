@@ -256,6 +256,7 @@ def run_pre_pr_review(
         _logger.info("Pre-PR review disabled for Issue #%d.", issue.number)
         return head_sha_before, verification_results
 
+    config = config.for_next_agent_stage()
     reviewer_agent = resolve_reviewer_agent(issue, config, selected_agent)
     # review 阶段绑定的模型选择：只认 review 自己的绑定；换人（repair 交给
     # 别人 / 回退换 reviewer）即丢弃。逐候选现算，见下方候选遍历。

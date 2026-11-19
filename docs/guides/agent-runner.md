@@ -562,7 +562,11 @@ uv run --project /path/to/keda kc init
 
 在"选 agent"之上，还可以给阶段绑定**命名模型预设**（`[agent_runner.presets.<name>]` + `[agent_runner.lifecycle_presets]`）：绑定后该阶段整体由预设决定 (agent, 模型, 推理档)，遮蔽矩阵同键声明；换人（fallback / 显式 `--agent`）时**主 agent 的模型绑定自动丢弃**并在日志与 `attempt_records`（`preset` / `model` 列）中标注；被选中的回退候选若自带 `preset`（`[[agent_runner.runner.agent_fallback_candidates]]`）则应用该候选自己的模型 / 推理档。完整语义、优先级与命令行一次性旗标见 [Agent 模型预设](model-presets.md)。
 
-生命周期矩阵、模型预设与执行器回退候选合并到管理终端 Repositories 下的**执行器与模型**页 `/app/repositories/lifecycle/`，与仓库列表平级：顶部范围选择器切换「全局」（写状态目录的 `config.toml`，通常是 `~/.kedacode/config.toml`）与「仓库」（写该仓库 `.kedacode.toml`）；设置内容通过吸顶 Tab 在「生命周期矩阵」「模型预设」「执行器回退」之间切换，每次显示一个区块；矩阵中九阶段一行显示最终生效 Agent / 模型 / 推理深度与**逐字段来源**。Backlog 仓库行齿轮进入同一页并预选该仓库，不再另设编辑器。旧地址 `/app/settings/lifecycle/` 会保留并转到新入口。Settings 的 Agent 管理只保留 Agent 标签配置。执行器回退候选是**机器级**配置，固定写全局状态目录配置，不随范围切换改变落点。页面展示的是所选**基线**：PRD 头部覆盖与单次 `--preset/--model/--reasoning-effort` 仍可在其上覆写，页面会提示而不把基线冒充成某个 PRD 的最终值。对应的命令行持久化入口（`kc agent lifecycle|preset|fallback`，写入必须显式 `--scope`，仓库写入必须给 `--repo-id`）见 [Agent 模型预设](model-presets.md) 第 7 节。
+生命周期矩阵、模型预设与执行器回退候选合并到管理终端 Repositories 下的**执行器与模型**页 `/app/repositories/lifecycle/`，与仓库列表平级：顶部范围选择器切换「全局」（写状态目录的 `config.toml`，通常是 `~/.kedacode/config.toml`）与「仓库」（写该仓库 `.kedacode.toml`）；设置内容通过吸顶 Tab 在「生命周期矩阵」「模型预设」「执行器回退」之间切换，每次显示一个区块；矩阵中九阶段一行显示最终生效 Agent / 模型 / 推理深度与**逐字段来源**。Backlog 仓库行齿轮进入同一页并预选该仓库，不再另设编辑器。旧地址 `/app/settings/lifecycle/` 会保留并转到新入口。Settings 的 Agent 管理只保留 Agent 标签配置。执行器回退候选是**机器级**配置，固定写全局状态目录配置，不随范围切换改变落点。页面展示的是所选**基线**：PRD 头部覆盖与单次 `--preset/--model/--reasoning-effort` 仍可在其上覆写，页面会提示而不把基线冒充成某个 PRD 的最终值。
+
+生命周期矩阵、模型预设与执行器回退保存后立即写入磁盘。daemon 在领取新一批任务前重读执行器配置，同一 Issue 进入修复、收尾、独立校验、审核或监督时也会重新读取。正在执行的阶段使用该阶段开始时的配置。CLI 和 PRD 的覆盖规则继续适用。升级时需重启旧 daemon 一次。
+
+对应的命令行持久化入口（`kc agent lifecycle|preset|fallback`，写入必须显式 `--scope`，仓库写入必须给 `--repo-id`）见 [Agent 模型预设](model-presets.md) 第 7 节。
 
 ### `.gitignore` 托管块与 prd skill 契约
 
@@ -641,8 +645,7 @@ kc skill install             # 安装/刷新全部用户级 Skill
 # `kc init` 会写入仓库级配置的默认值（generated_content 除外，见文末示例）；这些值
 # 随后显式覆盖全局默认值。没有默认值的可选字段、以及未写入的 generated_content，
 # 才继承 config.toml / 环境变量 / 代码里的全局默认值。
-# 本文件在 daemon 启动时读取一次：改完要重启 daemon 才生效（`kc run` 这类单轮
-# 命令每次调用都重新读取，无需重启）。
+# 执行器配置在 daemon 领取新任务与进入交付阶段时重读；其他配置通常在启动时读取。
 # 完整字段说明见 docs/guides/agent-runner.md。
 
 # 仓库身份标识（用于多仓库管理时区分不同仓库）
