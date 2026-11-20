@@ -85,7 +85,7 @@ def add_setup_commands(subparsers: argparse._SubParsersAction) -> None:
     issue_create_parser.add_argument(
         "--ready",
         action=argparse.BooleanOptionalAction,
-        default=True,
+        default=None,
         help="Add the ready label so a runner can pick the Issue up (default: on).",
     )
     issue_create_parser.add_argument(
@@ -106,6 +106,16 @@ def add_setup_commands(subparsers: argparse._SubParsersAction) -> None:
             "(default: on; pass --no-publish-prd to defer publishing to the "
             "interactive prompt)."
         ),
+    )
+    issue_create_parser.add_argument(
+        "--publish-to-issue-branch",
+        action="store_true",
+        help="Publish the PRD to issue-<N> in an isolated Git worktree.",
+    )
+    issue_create_parser.add_argument(
+        "--recover-issue",
+        type=int,
+        help="Resume PRD publication for an existing Issue instead of creating one.",
     )
     issue_create_parser.add_argument("--force", action="store_true", default=None)
     issue_create_parser.add_argument(

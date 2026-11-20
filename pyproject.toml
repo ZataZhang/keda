@@ -121,6 +121,7 @@ dev = [
     "pymdown-extensions>=10.14",
     "socksio>=1.0.0",
     "pytest-timeout>=2.4.0",
+    "tiktoken>=0.12.0",
 ]
 
 # 上游模板仓 zata-codes-template 另有独立的 pytest.ini 与 ruff.toml。keda 刻意

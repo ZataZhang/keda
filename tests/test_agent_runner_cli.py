@@ -155,8 +155,8 @@ def test_cli_parser_issue_create_defaults() -> None:
     assert parsed.issue_command == "create"
     assert parsed.prd_paths == ["tasks/example.md"]
     assert parsed.type == "feature"
-    # Issue 默认入队（--ready 为默认），用户可用 --no-ready 显式退出。
-    assert parsed.ready is True
+    # None 保留「用户未指定」状态；命令 handler 会将创建默认归一为 ready。
+    assert parsed.ready is None
     assert parsed.agent == "auto"
     # --publish-prd / --force 是三态：None 表示「未给出」，由 handler 归一为默认值。
     # `--from-prompt` 需要区分「没提」与「显式给出」（后者是矛盾指令，必须报错）。
@@ -164,6 +164,25 @@ def test_cli_parser_issue_create_defaults() -> None:
     assert parsed.force is None
     assert parsed.from_prompt is None
     assert parsed.require_validation is False
+    assert parsed.publish_to_issue_branch is False
+    assert parsed.recover_issue is None
+
+
+def test_cli_parser_issue_create_branch_publication_and_recovery() -> None:
+    """issue create 注册任务分支发布和恢复旗标。"""
+    parser = build_parser()
+    published = parser.parse_args(
+        ["issue", "create", "tasks/example.md", "--publish-to-issue-branch"]
+    )
+    recovered = parser.parse_args(
+        ["issue", "create", "tasks/example.md", "--recover-issue", "42", "--no-ready"]
+    )
+
+    assert published.publish_to_issue_branch is True
+    assert published.recover_issue is None
+    assert recovered.publish_to_issue_branch is False
+    assert recovered.recover_issue == 42
+    assert recovered.ready is False
 
 
 def test_cli_parser_issue_create_multiple_paths() -> None:

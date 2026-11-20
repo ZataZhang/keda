@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import logging
+import shlex
 from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
@@ -37,6 +38,7 @@ from backend.core.shared.interfaces.agent_runner import (
     IProcessRunner,
 )
 from backend.core.shared.models.agent_runner import (
+    IssueSummary,
     LabelConfig,
     evidence_dir_uses_task_subdirs,
 )
@@ -63,6 +65,13 @@ from backend.core.use_cases.generated_content import (
     generate_issue_content,
 )
 from backend.core.use_cases.issue_prd_github_link import append_prd_github_link
+from backend.core.use_cases.issue_prd_publication import (
+    ensure_issue_prd_path_anchor,
+    pending_prd_publication_marker,
+    publish_prd_for_created_issue,
+    validate_issue_branch_publication_target,
+    validate_issue_prd_path,
+)
 from backend.core.use_cases.lifecycle_agent_resolution import parse_prd_lifecycle_overrides
 
 from backend.core.use_cases.create_issue_from_prd_helpers import (
@@ -560,10 +569,16 @@ def create_issue_from_prd(
 
     Raises:
         ValueError: 当 PRD 已有 GitHub Issue 链接且 ``force=False``，
-            或当 ``publish_prd=True`` 时缺少 ``process_runner``。
+            或任务分支发布与 ``force=True`` 同时指定，或发布时缺少 ``process_runner``。
         RuntimeError: 当 PRD 发布无法完成时（错误分支、暂存区冲突、
             push 失败等）。
     """
+
+    if request.publish_to_issue_branch and request.force:
+        raise ValueError(
+            "force=True cannot be combined with publish_to_issue_branch=True; "
+            "publishing to an Issue branch must preserve the existing PRD Issue link."
+        )
 
     # ------------------------------------------------------------------
     # 1. 解析路径，得到绝对路径（用于 I/O）和相对路径（用于 Issue 正文和提交信息）。
@@ -612,7 +627,17 @@ def create_issue_from_prd(
     # 5. 发布预检（仅在 publish_prd=True 时执行）。
     # ------------------------------------------------------------------
     publish_context: PrdPublishContext | None = None
-    if request.publish_prd:
+    if request.publish_to_issue_branch:
+        if process_runner is None:
+            raise ValueError("process_runner is required when publish_to_issue_branch=True.")
+        validate_issue_prd_path(request.repo_path, request.prd_path)
+        validate_issue_branch_publication_target(
+            repo_path=request.repo_path,
+            git_remote=request.git_remote,
+            git_base_branch=request.git_base_branch,
+            process_runner=process_runner,
+        )
+    elif request.publish_prd:
         if process_runner is None:
             raise ValueError("process_runner is required when publish_prd=True.")
         current_branch = current_git_branch(request.repo_path, process_runner)
@@ -688,7 +713,14 @@ def create_issue_from_prd(
         body = f"{body.rstrip()}\n\n{dependency_marker}\n"
 
     # 在锚点行尾追加 GitHub blob 链接；无 GitHub remote 时原样返回（幂等）。
+    if request.publish_to_issue_branch:
+        body = ensure_issue_prd_path_anchor(body, relative_prd_path)
     body = append_prd_github_link(body, repo_path=request.repo_path)
+    if request.publish_to_issue_branch:
+        body = (
+            f"{body.rstrip()}\n\n"
+            f"{pending_prd_publication_marker(queue_ready=request.queue_ready)}\n"
+        )
 
     # ------------------------------------------------------------------
     # 7.5 物化 Realistic Validation 区块。
@@ -738,22 +770,56 @@ def create_issue_from_prd(
     # ------------------------------------------------------------------
     # 9. 将 Issue URL 回写到 PRD。
     # ------------------------------------------------------------------
-    write_issue_link(
-        prd_text=prd_text,
-        absolute_prd_path=absolute_prd_path,
-        issue_url=issue_url,
-        force=request.force,
-    )
+    if request.publish_to_issue_branch:
+        issue_summary = IssueSummary(
+            number=parse_issue_number(issue_url),
+            title=title,
+            url=issue_url,
+            body=body,
+            labels=tuple(labels),
+        )
+        publish_prd_for_created_issue(
+            issue=issue_summary,
+            absolute_prd_path=absolute_prd_path,
+            relative_prd_path=relative_prd_path,
+            repo_path=request.repo_path,
+            git_remote=request.git_remote,
+            git_base_branch=request.git_base_branch,
+            queue_ready=request.queue_ready,
+            labels_config=effective_labels_config,
+            github_client=github_client,
+            process_runner=process_runner,
+        )
+    else:
+        write_issue_link(
+            prd_text=prd_text,
+            absolute_prd_path=absolute_prd_path,
+            issue_url=issue_url,
+            force=request.force,
+        )
 
     # ------------------------------------------------------------------
     # 10. 发布 PRD 文件并可选地添加 ready 标签。
     # ------------------------------------------------------------------
     if publish_context is not None:
-        publish_prd_file(publish_context, process_runner)
-        if request.queue_ready:
-            github_client.edit_issue_labels(
-                parse_issue_number(issue_url), add=[effective_labels_config.ready]
+        try:
+            publish_prd_file(publish_context, process_runner)
+            if request.queue_ready:
+                github_client.edit_issue_labels(
+                    parse_issue_number(issue_url), add=[effective_labels_config.ready]
+                )
+        except Exception as exc:  # noqa: BLE001 - Issue 已创建，需提供同一 Issue 的恢复入口。
+            issue_number = parse_issue_number(issue_url)
+            recovery_command = (
+                f"kc issue create {shlex.quote(relative_prd_path.as_posix())} "
+                f"--recover-issue {issue_number} "
+                f"{'--ready' if request.queue_ready else '--no-ready'}"
             )
+            raise RuntimeError(
+                f"Issue #{issue_number} ({issue_url}) was created and is not marked ready; "
+                "PRD publication did not complete. Resume this Issue with: "
+                f"{recovery_command}. Cause: {exc}"
+            ) from exc
 
     _logger.info("Created GitHub Issue: %s", issue_url)
     return issue_url

@@ -38,6 +38,7 @@ import re
 from collections.abc import Mapping
 from pathlib import Path
 
+from backend.core.shared.interfaces.agent_runner import IProcessRunner
 from backend.core.shared.models.agent_model_preset import ModelSelection, resolve_model_selection
 from backend.core.shared.models.agent_runner import AppConfig, IssueSummary
 from backend.core.shared.models.lifecycle_agent import (
@@ -469,38 +470,165 @@ def declared_lifecycle_preset(
 def attach_prd_lifecycle_overrides(
     issue: IssueSummary,
     repo_path: Path | None,
+    *,
+    process_runner: IProcessRunner | None = None,
+    git_remote: str = "origin",
 ) -> IssueSummary:
     """从该 Issue 引用的 PRD 文件解析头部覆盖，回填到 ``IssueSummary``。
 
-    最佳努力：PRD 路径缺失、文件不存在或解析失败时原样返回该 Issue（记一条 warning），
-    绝不让"读 PRD 头部"这一步打断流水线。同时解析 ``lifecycle_agents`` 与
+    主检出 PRD 缺失或读取失败、PRD 覆盖块解析失败时，记录 warning 并原样返回该 Issue。
+    如果 Issue 已发布到任务分支，则该分支是执行输入的权威来源；缺失、越出仓库或不是
+    Markdown 的 PRD 锚点，以及获取或读取分支 PRD 失败，都会抛错阻止流水线继续，不能
+    静默回退到主检出文件或默认执行器。成功读取后，同时解析 ``lifecycle_agents`` 与
     ``lifecycle_presets`` 两个块，分别回填到 ``lifecycle_overrides`` 与
     ``lifecycle_preset_overrides``。
 
     Args:
         issue: 待处理的 Issue。
         repo_path: 目标仓库主检出根（PRD 随仓库存在，worktree 尚未创建时也可读）。
+        process_runner: 可选 Git 进程端口；主检出缺少 PRD 时从 ``issue-<N>`` 获取。
+        git_remote: runner 配置的 Git remote 名称。
 
     Returns:
-        回填了覆盖字段的 Issue；无覆盖或读取失败时返回原对象。
+        回填了覆盖字段的 Issue；主检出 PRD 无覆盖、读取失败或覆盖块解析失败时返回原对象。
+        已发布任务分支 PRD 的获取或读取失败会抛出异常；其覆盖块解析失败仍返回原对象。
+
+    Raises:
+        ValueError: 已发布 Issue 缺少有效的仓库内 Markdown PRD 锚点，或发布 marker 无效。
+        RuntimeError: 已发布 Issue 缺少仓库根目录，无法读取其权威 PRD 来源。
     """
-    if repo_path is None:
-        return issue
     # 局部导入：agent_runner_feedback 与解析函数分属不同子系统，避免模块级环。
     from backend.core.use_cases.agent_runner_feedback import extract_prd_path
+    from backend.core.use_cases.issue_prd_publication import (
+        published_issue_prd_branch,
+        read_published_issue_prd_text,
+    )
 
+    published_issue_branch = published_issue_prd_branch(
+        issue_number=issue.number,
+        issue_body=issue.body,
+    )
+    has_published_prd = published_issue_branch is not None
     prd_relative_path = extract_prd_path(issue.body)
     if prd_relative_path is None:
+        if has_published_prd:
+            raise ValueError(
+                f"Issue #{issue.number} has a published PRD marker but no valid PRD path anchor."
+            )
         return issue
-    prd_file_path = repo_path / prd_relative_path
+    if repo_path is None:
+        if has_published_prd:
+            raise RuntimeError(
+                f"Issue #{issue.number} has a published PRD but no repository root is available."
+            )
+        return issue
+    resolved_repo_path = repo_path.resolve()
+    prd_file_path = (resolved_repo_path / prd_relative_path).resolve()
     try:
-        prd_text = prd_file_path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as exc:
+        prd_relative_to_repo = prd_file_path.relative_to(resolved_repo_path)
+    except ValueError:
+        if has_published_prd:
+            raise ValueError(
+                f"Issue #{issue.number} has a published PRD path outside repository "
+                f"'{resolved_repo_path}': '{prd_relative_path}'."
+            )
         _logger.warning(
-            "Issue #%d: could not read PRD '%s' for lifecycle overrides: %s",
+            "Issue #%d: PRD path '%s' is outside repository '%s'; skipping lifecycle overrides.",
+            issue.number,
+            prd_relative_path,
+            resolved_repo_path,
+        )
+        return issue
+    if prd_relative_to_repo.suffix.lower() != ".md":
+        if has_published_prd:
+            raise ValueError(
+                f"Issue #{issue.number} has a published PRD path that is not a Markdown file: "
+                f"'{prd_relative_path}'."
+            )
+        _logger.warning(
+            "Issue #%d: PRD path '%s' is not a Markdown file; skipping lifecycle overrides.",
+            issue.number,
+            prd_relative_path,
+        )
+        return issue
+    published_branch_prd_text: str | None = None
+    if process_runner is not None:
+        # 新发布协议把已发布 Issue 分支作为执行输入的权威来源；即使主检出也有同名
+        # 文件，仍先读远端，避免执行器覆盖来自另一份较旧或较新的本地副本。
+        try:
+            published_branch_prd_text = read_published_issue_prd_text(
+                issue=issue,
+                repo_path=resolved_repo_path,
+                git_remote=git_remote,
+                process_runner=process_runner,
+            )
+        except (RuntimeError, ValueError) as exc:
+            _logger.warning(
+                "Issue #%d: could not read its published PRD branch for lifecycle overrides: %s",
+                issue.number,
+                exc,
+            )
+            raise
+    if published_branch_prd_text is not None:
+        prd_text = published_branch_prd_text
+    elif prd_file_path.is_file():
+        try:
+            prd_text = prd_file_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            _logger.warning(
+                "Issue #%d: could not read PRD '%s' for lifecycle overrides: %s",
+                issue.number,
+                prd_file_path,
+                exc,
+            )
+            return issue
+    elif process_runner is not None:
+        issue_branch = f"issue-{issue.number}"
+        fetch_result = process_runner.run(
+            [
+                "git",
+                "fetch",
+                git_remote,
+                f"+{issue_branch}:refs/remotes/{git_remote}/{issue_branch}",
+            ],
+            cwd=resolved_repo_path,
+            check=False,
+        )
+        if fetch_result.return_code != 0:
+            _logger.warning(
+                "Issue #%d: could not fetch '%s/%s' to read PRD lifecycle overrides: %s",
+                issue.number,
+                git_remote,
+                issue_branch,
+                fetch_result.stderr.strip(),
+            )
+            return issue
+        show_result = process_runner.run(
+            [
+                "git",
+                "show",
+                f"{git_remote}/{issue_branch}:{prd_relative_to_repo.as_posix()}",
+            ],
+            cwd=resolved_repo_path,
+            check=False,
+        )
+        if show_result.return_code != 0:
+            _logger.warning(
+                "Issue #%d: could not read PRD '%s' from '%s/%s': %s",
+                issue.number,
+                prd_relative_path,
+                git_remote,
+                issue_branch,
+                show_result.stderr.strip(),
+            )
+            return issue
+        prd_text = show_result.stdout
+    else:
+        _logger.warning(
+            "Issue #%d: PRD '%s' is missing from the main checkout and no Git process "
+            "runner is available to read its task branch.",
             issue.number,
             prd_file_path,
-            exc,
         )
         return issue
     updated_fields: dict[str, object] = {}

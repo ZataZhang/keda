@@ -84,6 +84,42 @@ def _require_issue_create_source(
                 code=ExitCode.USAGE,
                 suggestion='kc issue create --from-prompt "<需求>" --require-validation',
             )
+        recover_issue = getattr(parsed, "recover_issue", None)
+        publish_to_issue_branch = bool(getattr(parsed, "publish_to_issue_branch", False))
+        if recover_issue is not None and recover_issue < 1:
+            raise CliError("--recover-issue requires a positive Issue number.", code=ExitCode.USAGE)
+        if recover_issue is not None and publish_to_issue_branch:
+            raise CliError(
+                "--recover-issue already publishes to issue-<N>; it cannot be combined with "
+                "--publish-to-issue-branch.",
+                code=ExitCode.USAGE,
+            )
+        if recover_issue is not None and getattr(parsed, "force", None):
+            raise CliError(
+                "--force cannot replace the PRD anchor during Issue publication recovery.",
+                code=ExitCode.USAGE,
+            )
+        if recover_issue is not None and getattr(parsed, "publish_prd", None) is False:
+            raise CliError(
+                "--no-publish-prd cannot be combined with --recover-issue.",
+                code=ExitCode.USAGE,
+            )
+        if publish_to_issue_branch and getattr(parsed, "publish_prd", None) is False:
+            raise CliError(
+                "--publish-to-issue-branch requires PRD publishing; remove --no-publish-prd.",
+                code=ExitCode.USAGE,
+            )
+        if publish_to_issue_branch and getattr(parsed, "force", None):
+            raise CliError(
+                "--force cannot replace an existing Issue link while publishing to an Issue branch.",
+                code=ExitCode.USAGE,
+            )
+        if recover_issue is not None and len(raw_prd_paths) != 1:
+            raise CliError(
+                "--recover-issue requires exactly one PRD file path.",
+                code=ExitCode.USAGE,
+                suggestion="kc issue create <prd-path> --recover-issue <issue-number>",
+            )
         return
     if not from_prompt.strip():
         raise CliError(
@@ -91,11 +127,16 @@ def _require_issue_create_source(
             code=ExitCode.USAGE,
             suggestion='kc issue create --from-prompt "<一句话需求>"',
         )
-    conflicting_flags = ", ".join(
+    conflicting_flag_names = [
         flag
         for flag, attr in (("--publish-prd", "publish_prd"), ("--force", "force"))
         if getattr(parsed, attr, None) is not None
-    )
+    ]
+    if getattr(parsed, "publish_to_issue_branch", False):
+        conflicting_flag_names.append("--publish-to-issue-branch")
+    if getattr(parsed, "recover_issue", None) is not None:
+        conflicting_flag_names.append("--recover-issue")
+    conflicting_flags = ", ".join(conflicting_flag_names)
     if conflicting_flags:
         raise CliError(
             f"{conflicting_flags} only apply to PRD-path creation; "
@@ -155,7 +196,7 @@ def _run_issue_create_from_prompt(
                 prompt_text=from_prompt,
                 issue_type=ctx.parsed.type,
                 title_override=ctx.parsed.title,
-                queue_ready=ctx.parsed.ready,
+                queue_ready=(True if ctx.parsed.ready is None else ctx.parsed.ready),
                 issue_agent=ctx.parsed.agent,
                 labels_config=context.config.labels,
                 depends_on=tuple(getattr(ctx.parsed, "depends_on", []) or []),
@@ -186,7 +227,7 @@ def _run_issue_create_from_prompt(
                     {
                         "prompt": from_prompt,
                         "issue_url": issue_url,
-                        "ready": bool(ctx.parsed.ready),
+                        "ready": True if ctx.parsed.ready is None else bool(ctx.parsed.ready),
                         "require_validation": require_validation,
                     }
                 ],
@@ -197,7 +238,7 @@ def _run_issue_create_from_prompt(
         )
     else:
         console.print(f"[green]Created GitHub Issue:[/] {issue_url}")
-    if not ctx.parsed.ready:
+    if ctx.parsed.ready is False:
         logger.info(
             "Issue created without '%s' label. " "Use --ready if you want a runner to pick it up.",
             context.config.labels.ready,
@@ -225,6 +266,80 @@ def run_issue_create_command(ctx: ParsedCommandContext) -> int:
         return _run_issue_create_from_prompt(
             ctx, context=context, from_prompt=from_prompt, machine_mode=machine_mode
         )
+    recover_issue_number = getattr(ctx.parsed, "recover_issue", None)
+    if recover_issue_number is not None:
+        raw_prd_path = Path(raw_prd_paths[0])
+        absolute_prd_path, relative_prd_path = _cli.resolve_prd_paths(
+            context.repo_path, raw_prd_path
+        )
+        if not absolute_prd_path.is_file() or absolute_prd_path.suffix.lower() != ".md":
+            raise CliError(
+                "--recover-issue requires one existing Markdown PRD file.",
+                code=ExitCode.USAGE,
+            )
+        _cli.require_repository_initialized(context.repo_path, ctx.process_runner)
+        _cli._ensure_gh_auth_or_prompt(context.repo_path, ctx.process_runner)
+        github_client = _cli.create_github_client(context.repo_path, ctx.process_runner)
+        try:
+            recovered_publication = _cli.recover_issue_prd_publication(
+                request=_cli.IssuePrdPublicationRequest(
+                    repo_path=context.repo_path,
+                    prd_path=relative_prd_path,
+                    issue_number=recover_issue_number,
+                    git_remote=context.config.git.remote,
+                    git_base_branch=context.config.git.base_branch,
+                    queue_ready=ctx.parsed.ready,
+                    labels_config=context.config.labels,
+                ),
+                github_client=github_client,
+                process_runner=ctx.process_runner,
+            )
+        except Exception as exc:  # noqa: BLE001 - 把可重试恢复失败报告给 CLI 用户。
+            detail = _format_cli_exception(exc)
+            logger.error(
+                "Failed to recover PRD publication for Issue #%d:\n%s", recover_issue_number, detail
+            )
+            if machine_mode:
+                emit_json(
+                    {
+                        "created": [],
+                        "recovered": [],
+                        "skipped": [],
+                        "failed": [relative_prd_path.as_posix()],
+                        "note": None,
+                    }
+                )
+            else:
+                error_console.print(
+                    f"[red]Failed to recover PRD publication for Issue #{recover_issue_number}:[/]"
+                )
+                error_console.print(detail, markup=False)
+            return ExitCode.GENERAL
+        if machine_mode:
+            emit_json(
+                {
+                    "created": [],
+                    "recovered": [
+                        {
+                            "prd": relative_prd_path.as_posix(),
+                            "issue_url": recovered_publication.issue_url,
+                            "branch": recovered_publication.branch,
+                            "commit_sha": recovered_publication.commit_sha,
+                            "ready": recovered_publication.ready,
+                            "prd_published": True,
+                        }
+                    ],
+                    "skipped": [],
+                    "failed": [],
+                    "note": None,
+                }
+            )
+        else:
+            console.print(
+                f"[green]Recovered PRD publication for Issue #{recover_issue_number}:[/] "
+                f"{recovered_publication.branch} @ {recovered_publication.commit_sha}"
+            )
+        return ExitCode.SUCCESS
     try:
         prd_paths, skipped_prd_paths = _cli._expand_prd_paths(context.repo_path, raw_prd_paths)
     except ValueError as exc:
@@ -274,6 +389,7 @@ def run_issue_create_command(ctx: ParsedCommandContext) -> int:
     # 需要把「没提」和「显式 --no-publish-prd」区分开（后者是矛盾指令，要报错），
     # PRD 路径在这里把「没提」归一回原本的默认值，行为逐字不变。
     publish_prd = True if ctx.parsed.publish_prd is None else ctx.parsed.publish_prd
+    queue_ready_requested = True if ctx.parsed.ready is None else ctx.parsed.ready
     force = bool(ctx.parsed.force)
 
     failed_prd_paths: list[str] = []
@@ -281,7 +397,7 @@ def run_issue_create_command(ctx: ParsedCommandContext) -> int:
         # publish_prd 默认开启；仅当用户显式 --no-publish-prd 时，
         # 先把 queue_ready 压成 False，避免 Issue 还没发布就已经 ready，
         # runner 在 worktree 里读到过时 PRD。交互式 prompt 在 push 成功后再补 ready。
-        queue_ready_for_request = ctx.parsed.ready if publish_prd else False
+        queue_ready_for_request = queue_ready_requested if publish_prd else False
         try:
             _, relative_prd_path = _cli.resolve_prd_paths(context.repo_path, Path(prd_path_text))
             issue_url = _cli.create_issue_from_prd(
@@ -295,6 +411,9 @@ def run_issue_create_command(ctx: ParsedCommandContext) -> int:
                     labels_config=context.config.labels,
                     force=force,
                     publish_prd=publish_prd,
+                    publish_to_issue_branch=bool(
+                        getattr(ctx.parsed, "publish_to_issue_branch", False)
+                    ),
                     git_remote=context.config.git.remote,
                     git_base_branch=context.config.git.base_branch,
                     generated_content_config=gc_config,
@@ -324,13 +443,15 @@ def run_issue_create_command(ctx: ParsedCommandContext) -> int:
                     repo_path=context.repo_path,
                     relative_prd_path=relative_prd_path,
                     issue_url=issue_url,
-                    queue_ready=ctx.parsed.ready,
+                    queue_ready=queue_ready_requested,
                     git_remote=context.config.git.remote,
                     labels_config=context.config.labels,
                     github_client=github_client,
                     process_runner=ctx.process_runner,
                 )
-            if not ctx.parsed.ready or (ctx.parsed.ready and not publish_prd and not published):
+            if not queue_ready_requested or (
+                queue_ready_requested and not publish_prd and not published
+            ):
                 logger.info(
                     "Issue created without '%s' label. "
                     "Use --ready if you want a runner to pick it up.",
@@ -343,7 +464,7 @@ def run_issue_create_command(ctx: ParsedCommandContext) -> int:
                     "issue_url": issue_url,
                     # ready 报告生效状态而非请求旗标：--no-publish-prd 且未发布时
                     # queue_ready 被压成 False，机器消费方不能读到与标签不符的 true。
-                    "ready": bool(ctx.parsed.ready and (publish_prd or published)),
+                    "ready": bool(queue_ready_requested and (publish_prd or published)),
                     "prd_published": published if not publish_prd else True,
                 }
             )

@@ -146,10 +146,13 @@ def _process_single_issue(
     Returns:
         ``0`` on success or skip, ``1`` on a recorded failure/block.
     """
-    # PRD 级覆盖随 Issue 流动：在这里（唯一同时掌握 repo 路径与 Issue 的位置）从该
-    # Issue 引用的 PRD 文件解析头部 lifecycle_agents 块并回填，使实现 / 审核 / 监督
-    # 等阶段的解析函数无需额外参数即可读到 PRD 级覆盖（最高优先级）。
-    issue = attach_prd_lifecycle_overrides(issue, repo_path)
+    # 在 worktree 创建前从 Issue 引用的 PRD 解析 lifecycle_agents 覆盖。
+    issue = attach_prd_lifecycle_overrides(
+        issue,
+        repo_path,
+        process_runner=process_runner,
+        git_remote=config.git.remote,
+    )
     issue, retry_override_claim = prepare_issue_retry_override(
         IssueRetryOverrideRequest(
             issue=issue,
@@ -664,7 +667,6 @@ def run_once(request: RunOnceRequest) -> int:
     output_view = request.output_view
     effective_repo_id = repo_id or repo_path.name
 
-    # 前置检查
     if not dry_run:
         try:
             run_preflight_checks(repo_path, config, process_runner)

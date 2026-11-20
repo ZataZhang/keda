@@ -36,9 +36,11 @@ def _run_issue_create_command(
     prd_paths: list[str] | None,
     issue_type: IssueTypeChoice,
     title: str | None,
-    ready: bool,
+    ready: bool | None,
     agent: IssueAgentChoice,
     publish_prd: bool | None,
+    publish_to_issue_branch: bool,
+    recover_issue: int | None,
     force: bool | None,
     repo: str | None,
     repo_id: str | None,
@@ -72,6 +74,8 @@ def _run_issue_create_command(
         ready=ready,
         agent=_enum_value(agent),
         publish_prd=publish_prd,
+        publish_to_issue_branch=publish_to_issue_branch,
+        recover_issue=recover_issue,
         force=force,
         depends_on=depends_on,
     )
@@ -112,9 +116,9 @@ def issue_create_command(
         str | None, typer.Option("--title", help="Override generated issue title.")
     ] = None,
     ready: Annotated[
-        bool,
+        bool | None,
         typer.Option("--ready/--no-ready", help="Queue the Issue for a runner (default: on)."),
-    ] = True,
+    ] = None,
     agent: Annotated[
         IssueAgentChoice,
         typer.Option("--agent", help="Optional agent routing label."),
@@ -124,6 +128,20 @@ def issue_create_command(
         typer.Option(
             "--publish-prd/--no-publish-prd",
             help="Publish the PRD before ready (default: on).",
+        ),
+    ] = None,
+    publish_to_issue_branch: Annotated[
+        bool,
+        typer.Option(
+            "--publish-to-issue-branch",
+            help="Publish the PRD to issue-<N> in an isolated Git worktree.",
+        ),
+    ] = False,
+    recover_issue: Annotated[
+        int | None,
+        typer.Option(
+            "--recover-issue",
+            help="Resume PRD publication for an existing Issue instead of creating one.",
         ),
     ] = None,
     force: Annotated[bool | None, typer.Option("--force", help="Bypass PRD checks.")] = None,
@@ -151,6 +169,8 @@ def issue_create_command(
         ready=ready,
         agent=agent,
         publish_prd=publish_prd,
+        publish_to_issue_branch=publish_to_issue_branch,
+        recover_issue=recover_issue,
         force=force,
         depends_on=tuple(depends_on or ()),
         preset=preset,

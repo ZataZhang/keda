@@ -335,6 +335,42 @@ def test_attach_prd_lifecycle_overrides_reads_prd_header(tmp_path: Path) -> None
     assert attach_prd_lifecycle_overrides(missing_prd_issue, repo_path).lifecycle_overrides == ()
 
 
+@pytest.mark.parametrize(
+    ("prd_anchor", "expected_message"),
+    [
+        (None, "no valid PRD path anchor"),
+        ("../outside/prd.md", "outside repository"),
+        ("tasks/pending/notes.txt", "not a Markdown file"),
+    ],
+)
+def test_published_prd_with_invalid_anchor_fails_closed(
+    tmp_path: Path,
+    prd_anchor: str | None,
+    expected_message: str,
+) -> None:
+    """已发布 PRD 的无效锚点必须阻断执行，不能静默回落到默认执行器。"""
+    from backend.core.use_cases.lifecycle_agent_resolution import (
+        attach_prd_lifecycle_overrides,
+    )
+
+    body_lines = [
+        "<!-- kc:prd-publication version=1 state=published queue_ready=true "
+        "branch=issue-42 commit=abcdef1234567 -->"
+    ]
+    if prd_anchor is not None:
+        body_lines.append(f"- PRD path: `{prd_anchor}`")
+    issue = IssueSummary(
+        number=42,
+        title="Published PRD",
+        url="https://example/42",
+        body="\n".join(body_lines),
+        labels=(),
+    )
+
+    with pytest.raises(ValueError, match=expected_message):
+        attach_prd_lifecycle_overrides(issue, tmp_path / "repo")
+
+
 def test_fix_agent_defaults_to_selected_agent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

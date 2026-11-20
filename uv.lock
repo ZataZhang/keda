@@ -960,6 +960,7 @@ dev = [
     { name = "pytest-testmon" },
     { name = "pytest-timeout" },
     { name = "socksio" },
+    { name = "tiktoken" },
 ]
 
 [package.metadata]
@@ -1007,6 +1008,7 @@ dev = [
     { name = "pytest-testmon", specifier = ">=2.1.0" },
     { name = "pytest-timeout", specifier = ">=2.4.0" },
     { name = "socksio", specifier = ">=1.0.0" },
+    { name = "tiktoken", specifier = ">=0.12.0" },
 ]
 
 [[package]]

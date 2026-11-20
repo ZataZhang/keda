@@ -84,6 +84,8 @@ CI 只是异步门禁，不要守着它等。三条约定：
 
 守卫测试 `tests/test_kedacode_operator_skill.py` 覆盖随包 skill 的安装资源与冲突保护，并抽取主文件与全部 `references/*.md` 中的反引号 `kc` 命令示例，逐项与真实命令树（`kc schema --json`）及允许旗标白名单比对——失败会点名来源文件与旗标；命令表内容漂移不再只靠人工与评审发现。
 
+随包 operator skill 的 `SKILL.md` 全文（含 frontmatter 和空行）不得超过 **5,000 tokens、500 行**。`tiktoken` 的 `o200k_base` 是仓库固定的计数口径，首次运行测试且缓存为空时会获取词表。子命令细节通过 `references/` 按需读取，两个上限只约束主文件。
+
 ## Justfile Layering
 
 仓库根目录下的 `just` 入口被拆分为两层，分别由模板上游和派生项目自己拥有：

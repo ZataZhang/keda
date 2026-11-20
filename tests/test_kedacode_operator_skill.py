@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import tiktoken
 
 from backend.api import cli  # noqa: F401  先导入调度器，避免解析命令模块的循环导入
 from backend.api.cli_schema import build_command_schema
@@ -437,6 +438,8 @@ _ALLOWED_FLAGS: dict[tuple[str, ...], set[str]] = {
         "--require-validation",
         "--ready",
         "--no-ready",
+        "--publish-to-issue-branch",
+        "--recover-issue",
         "--repo",
     },
     # issue-235：随包 Skill 写明 direct-pr 标签由 `kc labels sync` 建立/改名，
@@ -848,11 +851,19 @@ def test_packaged_skill_description_covers_every_route_keyword() -> None:
 # ── 主文件常驻底线（rv-5）与内容守卫（作用域=主文件或全部受管文件）──────────
 
 
-def test_packaged_skill_main_file_keeps_shared_baselines() -> None:
-    """瘦身后主文件非空行 ≤ 70，且共享底线（退出码表、只读禁令、目标契约、自省入口）常驻。"""
+def test_packaged_skill_main_file_stays_within_context_budget() -> None:
+    """按固定分词器检查主文件的完整上下文开销。"""
     main_text = _PACKAGED_SKILL.read_text(encoding="utf-8")
-    nonblank_line_count = sum(1 for line in main_text.splitlines() if line.strip())
-    assert nonblank_line_count <= 70, f"主文件非空行 {nonblank_line_count} 超过常驻上限 70"
+    line_count = len(main_text.splitlines())
+    assert line_count <= 500, f"SKILL.md 有 {line_count} 行，超过上限 500 行"
+    skill_encoding = tiktoken.get_encoding("o200k_base")
+    token_count = len(skill_encoding.encode_ordinary(main_text))
+    assert token_count <= 5_000, f"SKILL.md 有 {token_count} tokens（o200k_base），超过上限 5,000"
+
+
+def test_packaged_skill_main_file_keeps_shared_baselines() -> None:
+    """主文件保留退出码表、只读禁令、目标契约和自省入口。"""
+    main_text = _PACKAGED_SKILL.read_text(encoding="utf-8")
     # 完整退出码表：7 个错误名 + 7 个退出码。
     for error_token in (
         "`ok`",
