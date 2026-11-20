@@ -469,6 +469,14 @@ def upgrade_console_installation(request: Request) -> dict[str, str]:
         plan = detect_upgrade_command()
         if plan is None:
             raise HTTPException(status_code=409, detail="无法识别安装方式，请手动升级。")
+        if not plan.can_run_in_process:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "当前安装固定了版本，升级需要重建安装环境，Windows 上管理终端运行时"
+                    f"无法完成。请退出 KedaCode 桌面应用后，在新终端运行 {plan.display}。"
+                ),
+            )
         previous_version = resolve_keda_version()
         try:
             result = subprocess.run(plan.argv, stdin=subprocess.DEVNULL, timeout=300, check=False)

@@ -17,6 +17,9 @@
   之后紧跟发行名，跑在 Homebrew Python 里的 pip 安装不算 brew 安装；来源不适合
   原地升级（源码、editable、tarball 直链）或识别不出安装方式时，只打印可复制的
   命令，绝不猜测执行。
+- uv tool 安装若被固定到精确版本，``uv tool upgrade`` 不会越过约束，改用
+  ``uv tool install kedacode@latest``；该命令会重建环境，Windows 上运行中的 kc
+  进程占着环境文件，因此只打印命令、请用户退出 KedaCode 后手动执行。
 """
 
 from __future__ import annotations
@@ -30,6 +33,7 @@ import site
 import subprocess
 import sys
 import time
+import tomllib
 import urllib.request
 from dataclasses import dataclass
 from importlib import metadata as importlib_metadata
@@ -96,14 +100,23 @@ class UpgradeCommand:
 
     Attributes:
         argv: 传给 :func:`subprocess.run` 的参数序列。
+        rebuilds_environment: 命令会重建整个 uv tool 环境（版本被固定时只能改用
+            ``uv tool install``）。Windows 上正在运行的 kc 进程（包括发起升级的
+            这一个和管理终端）占着环境文件，重建必然因文件占用失败。
     """
 
     argv: tuple[str, ...]
+    rebuilds_environment: bool = False
 
     @property
     def display(self) -> str:
         """可复制粘贴的命令行文本。"""
         return shlex.join(self.argv)
+
+    @property
+    def can_run_in_process(self) -> bool:
+        """当前进程能否直接执行该命令；否则只能退出 KedaCode 后手动执行。"""
+        return not (self.rebuilds_environment and os.name == "nt")
 
 
 def _truthy_env_flag(environ: Mapping[str, str] | None = None) -> bool:
@@ -349,6 +362,47 @@ def _has_path_part_sequence(path_text: str, *expected_parts: str) -> bool:
     )
 
 
+def _uv_tool_upgrade_command(tool_prefix: Path) -> UpgradeCommand | None:
+    """按 uv tool 安装记录选择升级命令。
+
+    ``uv tool upgrade`` 遵守安装时的版本约束：用 ``kedacode==X`` 或安装脚本
+    ``--version`` 装的副本永远停在 X，命令退出 0 却什么都不装。这种情况改用
+    ``uv tool install kedacode@latest`` 替换约束；带 extras 的固定安装无法用一条
+    命令安全改写，交给调用方打印候选命令。
+
+    Args:
+        tool_prefix: uv tool 隔离环境根目录（即 :data:`sys.prefix`）。
+
+    Returns:
+        升级命令；固定版本且带 extras 时为 ``None``。
+    """
+    try:
+        receipt_document = tomllib.loads(
+            (tool_prefix / "uv-receipt.toml").read_text(encoding="utf-8")
+        )
+    except (OSError, tomllib.TOMLDecodeError):
+        receipt_document = {}
+    tool_requirements = receipt_document.get("tool", {}).get("requirements", [])
+    pinned_requirement = next(
+        (
+            requirement
+            for requirement in tool_requirements
+            if isinstance(requirement, dict)
+            and requirement.get("name") == _DISTRIBUTION_NAME
+            and requirement.get("specifier")
+        ),
+        None,
+    )
+    if pinned_requirement is None:
+        return UpgradeCommand(("uv", "tool", "upgrade", _DISTRIBUTION_NAME))
+    if pinned_requirement.get("extras"):
+        return None
+    return UpgradeCommand(
+        ("uv", "tool", "install", f"{_DISTRIBUTION_NAME}@latest"),
+        rebuilds_environment=True,
+    )
+
+
 def detect_upgrade_command() -> UpgradeCommand | None:
     """按当前安装痕迹识别可自动执行的升级命令；识别不出返回 ``None``。
 
@@ -376,7 +430,7 @@ def detect_upgrade_command() -> UpgradeCommand | None:
     if _installed_from_non_pypi_source():
         return None
     if _has_path_part_sequence(prefix_path, "uv", "tools") and shutil.which("uv"):
-        return UpgradeCommand(("uv", "tool", "upgrade", _DISTRIBUTION_NAME))
+        return _uv_tool_upgrade_command(Path(prefix_path))
     if _has_path_part_sequence(prefix_path, "pipx", "venvs") and shutil.which("pipx"):
         return UpgradeCommand(("pipx", "upgrade", _DISTRIBUTION_NAME))
     if sys.prefix != sys.base_prefix:
@@ -450,6 +504,17 @@ def _handle_update_notice(notice: UpdateNotice) -> None:
         _suppress_cached_notice(notice)
         return
     _print_available_notice(notice, upgrade_hint=plan.display)
+    if not plan.can_run_in_process:
+        _suppress_cached_notice(notice)
+        error_console.print(
+            "This install is pinned to an exact version, so upgrading rebuilds its "
+            "environment, which Windows blocks while KedaCode is running. Quit the "
+            "KedaCode desktop app and any running kc commands (including kc console), "
+            "then run the command above in a new terminal.",
+            markup=False,
+            soft_wrap=True,
+        )
+        return
     confirmed = typer.confirm(f"Run `{plan.display}` now?", default=False, err=True)
     if not confirmed:
         _suppress_cached_notice(notice)
