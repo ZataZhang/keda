@@ -1,0 +1,12 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.13, pytest-9.0.2, pluggy-1.6.0 -- /private/tmp/keda366.mal3U6/source/.venv/bin/python
+cachedir: .pytest_cache
+testmon: deactivated through --no-testmon
+rootdir: /private/tmp/keda366.mal3U6/source
+configfile: pyproject.toml
+plugins: anyio-4.12.1, timeout-2.4.0, langsmith-0.6.2, testmon-2.2.0
+collecting ... collected 1 item
+
+tests/test_process_runner.py::test_captured_output_includes_stdout_written_when_process_exits PASSED [100%]
+
+============================== 1 passed in 12.19s ==============================
