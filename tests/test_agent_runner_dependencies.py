@@ -251,7 +251,7 @@ class TestParseDeliveryDependencies:
 
         assert result.depends_on_issues == ()
         assert result.depends_on_prds == (
-            "tasks/pending/P1-FEAT-20261019-140531-m13-golden-eval-baseline.md",
+            "tasks/archive/P1-FEAT-20261019-140531-m13-golden-eval-baseline.md",
         )
         assert result.gate_type == "hard"
         assert result.sequence == "via-main"
@@ -339,13 +339,14 @@ class TestParseDeliveryDependencies:
                     "expected": {
                         "depends_on_issues": [],
                         "depends_on_prds": [
-                            "tasks/pending/P1-FEAT-20261019-140531-m13-golden-eval-baseline.md"
+                            "tasks/archive/P1-FEAT-20261019-140531-m13-golden-eval-baseline.md"
                         ],
                         "gate_type": "hard",
                         "sequence": "via-main",
                         "notes": (
-                            "需要前置 PRD 已将 suite 校准、快照隔离、延后判分、重复结果账本及 "
-                            "v16 schema 落到主线；本 PRD 之后将账本推进到 v17。"
+                            "前置交付已将 suite 校准、快照隔离、延后判分、重复结果账本及 "
+                            "v16 schema 落到主线；本 PRD 在此基础上将账本推进到 v17。"
+                            "开工前依赖看板已显示满足。"
                         ),
                     },
                 },
