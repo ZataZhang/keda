@@ -2961,7 +2961,7 @@ uv run --project /path/to/keda kc issue create tasks/pending/feature-login.md \
 
 默认 Ready 发布要求当前分支等于 `[agent_runner.git].base_branch`，因为 runner 默认从 base branch 创建 worktree。若当前分支不是 base branch，命令会失败并提示切换到 base branch 或改用 `--no-ready`。
 
-如果 base branch 受保护或用户明确要求任务分支发布，可传 `--publish-to-issue-branch`。命令会创建 Issue 后在隔离 Git worktree 中只提交 PRD，并以普通推送写入远端 `issue-<N>` 分支；不会向 base branch 推送。Issue 的 `agent/ready` 仍在 PRD 推送与固定提交链接写回成功后才添加。Issue 正文中的 `PRD path:` 机器锚点会保留，GitHub 链接固定到该次发布提交。
+如果 base branch 受保护或用户明确要求任务分支发布，可传 `--publish-to-issue-branch`。命令会创建 Issue 后在隔离 Git worktree 中只提交 PRD，并以普通推送写入远端 `issue-<N>` 分支；不会向 base branch 推送。Issue 的 `agent/ready` 仍在 PRD 推送与固定提交链接写回成功后才添加。Issue 正文中的 `PRD path:` 机器锚点会保留，GitHub 链接固定到该次发布提交；runner 解析生命周期覆盖时使用 marker 中的提交 SHA，即使任务分支后来前进也不会读到新的 PRD 版本。若固定提交不可读取，runner 会阻断该 Issue，不回退到分支 tip。
 
 Runner 识别到已发布 marker 后，会先验证 PRD 锚点；锚点缺失、指向仓库外或不是 Markdown 文件时会阻断该 Issue，不会静默跳过 PRD 覆盖并继续使用默认执行器。
 

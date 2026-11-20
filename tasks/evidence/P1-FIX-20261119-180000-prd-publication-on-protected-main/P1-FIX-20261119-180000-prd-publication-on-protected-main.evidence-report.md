@@ -207,6 +207,36 @@ The current worktree started at HEAD `6045419d9815b061e3db875b0f2665c1607af8c2`.
 - `git diff --check`: **passed** after the audit edits.
 - The evidence runner emitted a non-fatal permission warning when it attempted to create `/Users/zata/code/keda/logs/app-2026-11-20.log` outside this worktree; all four evidence items still passed. The initial read-only PR snapshot and comment fetch confirmed stale remote records; no GitHub fields, refs, or Issue state were changed.
 
+## Current reviewer repair verification — 2026-11-20 (`14f87c01` plus worktree changes)
+
+This is the latest local snapshot for the pinned-commit repair. HEAD remains `14f87c0163b3e36a5d924958d1d1aea867fc6e1c99`; source, test, skill, and guide changes are uncommitted worktree content for the runner. The independent Round 6 verdict above predates these changes and does not certify this snapshot.
+
+| Finding | Disposition | Evidence |
+|---|---|---|
+| Operator skill exceeds the 70-line merged-tree limit | **Fixed.** | The protected-base/recovery route terms moved into the existing `建 issue` row, removing one non-empty line. The worktree main file has 69 non-empty lines; read-only `git merge-file -p` against the current merge base and `main` also returns a clean merged file with 69 non-empty lines. |
+| PR branch history is not synchronized with current `main` | **Confirmed; unresolved under the no-branch-change constraint.** | `main` is `51461449cb1069113b3d6a827297f92c16bcff2f`; HEAD is `14f87c0163b3e36a5d924958d1d1aea867fc6e1c99`; `git rev-list --left-right --count main...HEAD` is `15 13` and merge base is `f56f2d1fd1e7b3ee6f1367c84bd7ec8487b37dde`. `main` is not an ancestor. No branch switch, merge, rebase, commit, or push was run. |
+| PR description and validation comment cite old snapshots | **Confirmed; GitHub metadata untouched.** | The supplied review reports stale PR #405 head/base, verifier, and test claims. This worktree-only pass did not edit the PR body or comment; the local evidence below is not a substitute for updating them after the runner publishes the new head. |
+| Archived PRD Final Reconciliation cites old head and divergence | **Fixed locally.** | Its current reconciliation names HEAD `14f87c01`, `main` `51461449`, and `15/13`, distinguishes content mergeability from ancestry sync, and records this repair's test and RV results plus outstanding verifier/remote follow-ups. |
+| Runner reads branch tip instead of marker commit | **Fixed.** | `read_published_issue_prd_text()` validates the marker's branch and commit together, fetches the branch, then executes `git show <marker-commit>:<PRD-path>`. A real local remote regression advances the branch and changes PRD bytes; the function returns the text from the pinned commit. |
+| Content conflict with current `main` | **Resolved for the current committed snapshot.** | `git merge-tree --write-tree main HEAD` exits successfully with tree `f96d7ca7a5a034d44278457e47c57b86f061f1b2` and no conflict paths. The branch history remains unsynchronized; this dry-run excludes worktree changes and does not establish GitHub PR integration. |
+| Lifecycle summary and Returns docstrings | **Already correct.** | `lifecycle_agent_resolution.py:479–493` distinguishes main-checkout read failures from published task-branch failures, which raise. No docstring change was needed. |
+| Independent verifier Round 6 finding | **Previously satisfied, but stale for this repair.** | Round 6 remains valid for its recorded source/test fingerprints. Since this repair changes `issue_prd_publication.py` and its test, no new independent verifier verdict is claimed here. |
+| Invalid published anchors fail closed | **Already fixed and covered by the current RV replay.** | RV-4 includes lifecycle routing regression tests for missing, out-of-repository, and non-Markdown anchors. |
+| Operator skill's top-level issue route | **Already fixed and retained.** | The existing route now carries both `--publish-to-issue-branch` and `--recover-issue <N>` within the line budget. |
+
+### Checks on this worktree
+
+- `UV_CACHE_DIR=/private/tmp/kc-issue-400-uv-cache just lint --reuse`: passed jscpd, duplicate-code, architecture, guideline consistency, and max-file-lines.
+- `UV_CACHE_DIR=/private/tmp/kc-issue-400-uv-cache SKIP=check-test-flag just lint --full`: passed all remaining full-lint hooks. The first unsuppressed attempt correctly rejected the stale test marker; the following `just test` refreshed it, and a final unsuppressed `UV_CACHE_DIR=/private/tmp/kc-issue-400-uv-cache just lint --full` passed.
+- `UV_CACHE_DIR=/private/tmp/kc-issue-400-uv-cache just test`: **108 passed, 341 deselected**.
+- `UV_CACHE_DIR=/private/tmp/kc-issue-400-uv-cache uv run --no-sync --project . pytest --no-testmon -q tests/test_issue_prd_publication.py tests/test_kedacode_operator_skill.py tests/test_lifecycle_agent_routing.py`: **64 passed**.
+- `UV_CACHE_DIR=/private/tmp/kc-issue-400-uv-cache uv run --no-sync --project . kc evidence check --evidence tasks/evidence/P1-FIX-20261119-180000-prd-publication-on-protected-main`: **4/4 passed** (RV-1 2.7s, RV-2 4.3s, RV-3 6.8s, RV-4 25.7s). RV-4's embedded targeted suite reports **231 passed** and includes lint plus MkDocs build.
+- `UV_CACHE_DIR=/private/tmp/kc-issue-400-uv-cache uv run --no-sync --project . mkdocs build`: passed in 4.31s. MkDocs emitted its existing unlinked-page and optional signature-formatting INFO notices.
+- `git diff --check`: passed on the final worktree. Current source/test diff fingerprint: `3d508f3c02a29169b0ec7b5f8b1091d9809297f7d582f7246e637842dbec0cc3`; current source/test/docs diff fingerprint: `51e3a424e871755e7bd352319c69191326bd14e0cd731e65dde8803a4a415db0`.
+- Final changed-file SHA-256: publication source `8d26b9a846b887299a0c5e4f0d179fa0997fc0af26c26d3f01378458e7808d09`; publication tests `f604a6343d355c837a57d17da39482ab24cdf4b3c84f8a3ffda9c35b9de2017f`; operator skill `7d63f676c2bc8e6b2700c35d8f4ebcea5b95a7b8c295a8da9edc62e25abf7ae4`; create-issue reference `fe3270915c5c04480f94ed634d65a76812e33b35dd70414b5fd605f576fc5250`; runner guide `54a0784fed817a69af6250aa53ef692b05ac2c928246ef0a596f997e9448c4be`.
+- Refreshed raw RV SHA-256: RV-1 `e86804c6d89d6d00bd5fafb7163dad9c24f200e68102ed718c40f8dce8adaa1b`; RV-2 `c304ff7edede0767a84a994dcaf50ecbcf1dcc184dbb92e39056bbf70f1a0c36`; RV-3 `cf3f9dd72f84faffdde15a2ba5b6cdaf8e587f9c45f667a16c3915d2079d4cc0`; RV-4 `a221aed551ef0b7f4c84833de571bce274413767e70339d303fa822baceffd14`.
+- `.agent-runner/commit-request.json` is valid JSON and runner-local, so it is not part of the source/test fingerprint. No GitHub metadata or branch refs were modified. A fresh independent verifier, synchronized history, and PR #405 metadata refresh remain outstanding.
+
 ## Current reviewer repair audit — 2026-11-20 (`f55efead` base with final worktree changes)
 
 The worktree started from commit `f55efeadb41d282b6d1b662369e5dda4c64db689`. This repair adds a fail-closed check for invalid PRD anchors on published Issues, updates the packaged operator route and runner guide, adds three regression cases, and refreshes RV-4's targeted suite. The local `evidence.json` is ignored by Git and now records RV-4's 230-test result. The runner commit request is present at `.agent-runner/commit-request.json`.

@@ -26,6 +26,7 @@ from backend.core.use_cases.create_issue_from_prd import (
 from backend.core.use_cases.issue_prd_publication import (
     IssuePrdPublicationRequest,
     _publish_prd_commit,
+    read_published_issue_prd_text,
     recover_issue_prd_publication,
     validate_issue_prd_path,
 )
@@ -571,6 +572,60 @@ def test_runner_reads_published_branch_prd_before_selecting_agent_and_creates_wo
         )
         == "kimi"
     )
+
+
+def test_read_published_issue_prd_text_uses_marker_commit_after_branch_advances(
+    tmp_path: Path,
+) -> None:
+    """任务分支前进后仍按 Issue marker 固定的提交读取 PRD。"""
+    repo_path = tmp_path / "repo"
+    remote_path = tmp_path / "remote.git"
+    _create_git_remote(repo_path, remote_path)
+    prd_relative_path = Path("tasks/pending/feature.md")
+    prd_path = repo_path / prd_relative_path
+    prd_path.parent.mkdir(parents=True)
+
+    _run_git(repo_path, "checkout", "-b", "issue-42")
+    pinned_prd_text = (
+        "# PRD: Pinned source\n\n"
+        "- lifecycle_agents:\n  - implementation: kimi\n\n"
+        "Published snapshot.\n"
+    )
+    prd_path.write_text(pinned_prd_text, encoding="utf-8")
+    _run_git(repo_path, "add", prd_relative_path.as_posix())
+    _run_git(repo_path, "commit", "-m", "publish PRD")
+    _run_git(repo_path, "push", "-u", "origin", "issue-42")
+    published_commit_sha = _run_git(repo_path, "rev-parse", "HEAD").stdout.strip()
+
+    branch_tip_prd_text = pinned_prd_text.replace("kimi", "codebuddy").replace(
+        "Published snapshot.", "Branch tip snapshot."
+    )
+    prd_path.write_text(branch_tip_prd_text, encoding="utf-8")
+    _run_git(repo_path, "add", prd_relative_path.as_posix())
+    _run_git(repo_path, "commit", "-m", "update branch PRD")
+    _run_git(repo_path, "push", "origin", "issue-42")
+
+    issue = IssueSummary(
+        number=42,
+        title="Pinned source",
+        url="https://github.com/example/repo/issues/42",
+        body=(
+            f"- PRD path: `{prd_relative_path.as_posix()}`\n\n"
+            "<!-- kc:prd-publication version=1 state=published queue_ready=true "
+            f"branch=issue-42 commit={published_commit_sha} -->\n"
+        ),
+        labels=(),
+    )
+
+    published_prd_text = read_published_issue_prd_text(
+        issue=issue,
+        repo_path=repo_path,
+        git_remote="origin",
+        process_runner=SubprocessRunner(),
+    )
+
+    assert published_prd_text == pinned_prd_text
+    assert published_prd_text != branch_tip_prd_text
 
 
 def test_recovery_explicit_no_ready_removes_existing_ready_label(tmp_path: Path) -> None:

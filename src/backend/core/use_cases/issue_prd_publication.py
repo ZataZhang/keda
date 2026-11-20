@@ -154,8 +154,12 @@ def parse_prd_publication_metadata(issue_body: str) -> PrdPublicationMetadata | 
     )
 
 
-def published_issue_prd_branch(*, issue_number: int, issue_body: str) -> str | None:
-    """返回已发布 PRD 所属的任务分支，并验证分支编号与 Issue 一致。"""
+def _published_issue_prd_reference(
+    *,
+    issue_number: int,
+    issue_body: str,
+) -> tuple[str, str] | None:
+    """验证发布 marker 并返回固定的任务分支和提交。"""
     publication_metadata = parse_prd_publication_metadata(issue_body)
     if publication_metadata is None or publication_metadata.state != "published":
         return None
@@ -165,7 +169,18 @@ def published_issue_prd_branch(*, issue_number: int, issue_body: str) -> str | N
             f"Issue #{issue_number} publication marker must point to "
             f"'{expected_branch}', got {publication_metadata.branch!r}."
         )
-    return expected_branch
+    if publication_metadata.commit_sha is None:
+        raise ValueError(f"Issue #{issue_number} published PRD marker is missing its commit SHA.")
+    return expected_branch, publication_metadata.commit_sha
+
+
+def published_issue_prd_branch(*, issue_number: int, issue_body: str) -> str | None:
+    """返回已发布 PRD 所属的任务分支，并验证分支编号与 Issue 一致。"""
+    published_reference = _published_issue_prd_reference(
+        issue_number=issue_number,
+        issue_body=issue_body,
+    )
+    return published_reference[0] if published_reference is not None else None
 
 
 def read_published_issue_prd_text(
@@ -175,13 +190,14 @@ def read_published_issue_prd_text(
     git_remote: str,
     process_runner: IProcessRunner,
 ) -> str | None:
-    """从已发布 Issue 分支读取 PRD，供调度前解析 lifecycle 覆盖。"""
-    issue_branch = published_issue_prd_branch(
+    """从发布 marker 固定的提交读取 PRD，供调度前解析 lifecycle 覆盖。"""
+    published_reference = _published_issue_prd_reference(
         issue_number=issue.number,
         issue_body=issue.body,
     )
-    if issue_branch is None:
+    if published_reference is None:
         return None
+    issue_branch, published_commit_sha = published_reference
 
     prd_anchor = extract_prd_path(issue.body)
     normalized_prd_anchor = _normalize_prd_anchor(prd_anchor or "")
@@ -203,14 +219,14 @@ def read_published_issue_prd_text(
         )
 
     prd_show_result = process_runner.run(
-        ["git", "show", f"{remote_ref}:{normalized_prd_anchor}"],
+        ["git", "show", f"{published_commit_sha}:{normalized_prd_anchor}"],
         cwd=repo_path,
         check=False,
     )
     if prd_show_result.return_code != 0:
         raise RuntimeError(
-            f"Published PRD '{normalized_prd_anchor}' is missing from "
-            f"'{git_remote}/{issue_branch}' for Issue #{issue.number}: "
+            f"Published PRD '{normalized_prd_anchor}' at commit '{published_commit_sha}' "
+            f"could not be read from '{git_remote}/{issue_branch}' for Issue #{issue.number}: "
             f"{prd_show_result.stderr.strip()}"
         )
     return prd_show_result.stdout

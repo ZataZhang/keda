@@ -220,12 +220,12 @@ No frontend impact：改动只涉及 CLI、runner 后端和文字操作指南，
 ### Final Reconciliation
 
 - Interpretation: 实现符合显式任务分支发布、原 Issue 恢复、runner 分支读取和旧默认兼容的确认范围；#398 实地结果留给维护者。
-- Public behavior and contracts: 新选项显式启用；默认 main 发布与 `--no-publish-prd` 保持原语义；冲突拒绝覆盖；失败 Issue 不会被提前 ready。
+- Public behavior and contracts: 新选项显式启用；默认 main 发布与 `--no-publish-prd` 保持原语义；冲突拒绝覆盖；失败 Issue 不会被提前 ready。已发布 PRD 的生命周期解析按 marker 的提交 SHA 读取，即使任务分支后来前进也不会读取分支 tip 上的另一份 PRD。
 - Related PRD status: #398/#399 未被读取或修改；#398 保留为后续人工验收与恢复流程。
-- Requirements and risks: 四项实现要求均由对应 rv 证据覆盖；RV-3 的 Agent fixture 在观察实际 worktree 后退出，因此不宣称已验证付费 Agent 实现或 Draft PR 发布。
-- Validation blocker: 当前代码行为验证通过，PR 集成历史仍未同步。提交 HEAD 为 `f55efeadb41d282b6d1b662369e5dda4c64db689`，本地 `main` 为 `51461449cb1069113b3d6a827297f92c16bcff2f`；`git rev-list --left-right --count main...HEAD` 返回 `15 12`，merge base 为 `f56f2d1fd1e7b3ee6f1367c84bd7ec8487b37dde`，且 `main` 不是 HEAD 的祖先。`git merge-tree --write-tree main HEAD` 返回树 `334d00ac3ffe75a047f1dfa23188800569838049` 且无冲突路径，只证明提交内容可合并，不代表历史已同步；当前未提交工作树修改不包含在该检查内。上一份只读 PR #405 快照仍记录旧 head/base 与旧验证快照；本次只允许修改 worktree 文件，未访问或更新远端 PR 正文和评论。
-- Validation follow-up: 在允许的分支工作流中将 PR 分支历史同步到当前 `main`，在同步后的 head 上重跑所需验证，更新 PR #405 正文与验证评论到最终 head/base 及对应证据，再检查 GitHub 对新 base 的集成状态；随后由人工按 9.1 检查真实 #398，Human-Confirmed 项保持未勾选。本次禁止切换/合并/推送，远端 PR 记录因此仍待更新。
-- 自动验证结果：新增 lifecycle 回归覆盖已发布 marker 缺少锚点、仓库外锚点和非 Markdown 锚点，均失败关闭；顶层 operator skill 已路由到发布与恢复用法。当前直接相关测试 28 passed，本地 `just test` 为 102 passed、319 deselected；最新 `kc evidence check` 4/4，RV-4 记录 230 passed、全量 lint 与 MkDocs build 通过。独立 verifier Round 6 对当前代码与 RV 证据为 PASS，并单独重跑 56 项测试。当前源码/测试、文档及四项 RV 输出的最终指纹见证据报告；Round 6 不覆盖 main 历史同步。
+- Requirements and risks: 四项既有实现要求仍由对应 RV 证据覆盖；新增固定提交回归验证了分支前进时的 PRD 读取。RV-3 的 Agent fixture 在观察实际 worktree 后退出，因此不宣称已验证付费 Agent 实现或 Draft PR 发布。
+- Validation blocker: 本次代码与 RV 验证通过，但独立 verifier 尚未审查这次固定提交改动，且 PR 分支历史仍未同步。提交 HEAD 为 `14f87c0163b3e36a5d924958d1d1aea867fc6e1c99`，本地 `main` 为 `51461449cb1069113b3d6a827297f92c16bcff2f`；`git rev-list --left-right --count main...HEAD` 返回 `15 13`，merge base 为 `f56f2d1fd1e7b3ee6f1367c84bd7ec8487b37dde`，`main` 不是 HEAD 的祖先。`git merge-tree --write-tree main HEAD` 生成无冲突树 `f96d7ca7a5a034d44278457e47c57b86f061f1b2`，说明当前提交内容可合并，但不代表历史同步或 GitHub 新 base 集成状态，且不包含本次未提交工作树修改。Round 6 `PASS` 覆盖前一份代码树，不作为本次改动的独立验证。PR #405 正文和评论仍是旧快照；本次仅修改 worktree 文件，没有更新远端记录。
+- Validation follow-up: runner 提交本次修复后，在最终提交树上做独立 verifier 复核并更新本地证据快照；按允许的分支工作流将 PR 历史同步到当前 `main`，在同步后的 head 上重跑验证，再更新 PR #405 正文和验证评论、确认 GitHub 对新 base 的集成状态；随后由人工按 9.1 检查真实 #398，Human-Confirmed 项保持未勾选。当前禁止切换、合并、提交、推送及修改 worktree 外文件，因此这些事项仍待后续处理。
+- 自动验证结果：`just test` 为 108 passed、341 deselected；关闭 testmon 的 publication、operator-skill 与 lifecycle 定向测试为 64 passed；四项 `kc evidence check` 均通过，RV-4 记录 231 passed；`just lint --reuse`、未跳过的 `just lint --full` 与 `uv run --no-sync --project . mkdocs build` 均通过。完整命令、文件 SHA-256、RV 输出 SHA-256 和最终工作树差异指纹见证据报告。独立验证仍待补充。
 
 ## 14. Change Log
 
@@ -294,3 +294,11 @@ No frontend impact：改动只涉及 CLI、runner 后端和文字操作指南，
 - Reason: an invalid authoritative task-branch source must stop Issue execution instead of silently selecting the default executor.
 - Impact: ordinary, unpublished Issue anchors retain their existing warning/skip behavior. PR branch history and remote PR metadata remain pending under the explicit worktree-only, no-merge, no-push constraints.
 - Review: independent verifier Round 6 `PASS`; all four required RV items pass on this worktree. Main history synchronization and remote PR evidence remain pending under the explicit no-merge/no-push/worktree-only constraints.
+
+### Read published PRD from its pinned commit
+- Type: implementation / validation / documentation
+- Before: lifecycle resolution fetched `issue-<N>` and read the PRD from its current tip even though the Issue marker and clickable GitHub link record the original publication commit.
+- After: the runner validates the marker once, fetches the task branch, and reads the PRD path at the marker's commit SHA. A real-Git regression advances the branch with changed PRD bytes and confirms the pinned text is returned. The operator reference and runner guide document the pinned-source behavior and fail-closed error path.
+- Reason: keep lifecycle overrides tied to the same published PRD snapshot the Issue links to, preventing task-branch edits from silently changing scheduling input.
+- Impact: normal branch publication and later branch progress remain supported; if the pinned object cannot be read, the runner stops instead of falling back to the branch tip. The operator main file is 69 non-empty lines in this worktree; removing the redundant route paragraph offsets main's added route row in the clean merge tree, keeping the merged file at or below the 70-line test cap.
+- Review: current worktree `just test` 108 passed / 341 deselected; direct affected tests 64 passed; four RV items passed. The Round 6 verifier predates this code change; a fresh independent verifier and PR #405 metadata refresh remain pending.
