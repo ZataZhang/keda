@@ -1,6 +1,6 @@
 # PRD: M13 Keda 工作流与 Claude 单次执行对照评测
 
-> ⛔ **交付前置**：排在 P1-FEAT-20261019-140531-m13-golden-eval-baseline 之后开工。该 PRD 先交付隔离执行、题目校准与重复账本；本 PRD 依赖这些能力复用同一把可靠的判分尺子。
+> ✅ **交付前置已完成**：黄金评测基线已归档到 `tasks/archive/P1-FEAT-20261019-140531-m13-golden-eval-baseline.md`；`just prd status pending --detail` 显示本 PRD 的依赖满足。本 PRD 复用其校准题集、隔离执行、重复账本与 v16 schema，并将账本增量升级到 v17。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
 > ⬜ **验收状态**：未开工。
@@ -45,6 +45,8 @@ M13 的黄金评测基线能回答“直接运行 Claude 时，同一道题是�
 | 🤖 自动验证 | 探针检查候选仓库本身的文件、Git 对象与 remote。 | 各候选为独立快照、不共享 Git 对象，无 remote；候选运行期间目录内没有隐藏判分材料和后续修复对象。该验证不证明同用户跨目录读取或网络访问已被阻止。 |
 | 🤖 自动验证 | Keda 达到流程调用上限、超时、需要人工处理或遇到本地 GitHub 替身故障。 | 流程状态分别记录为预算耗尽、超时、需人工或执行故障；它们不被伪装成测试失败，另一组和同题其他重复继续保留结果。 |
 
+- [x] 我确认本节解读与行为样例准确表达需求；按 2026-11-20 用户授权，由 Agent 代为勾选。
+
 ### Decisions taken silently (我默默定了这些)
 
 - **比较对象** → 同一个 Claude CLI 预设：直接组对题目只运行一次 Claude；Keda 组由 Keda 使用同一 Claude agent / model / reasoning 配置运行自身生命周期阶段。Keda 的额外阶段提示与编排就是本次被测变量。
@@ -83,6 +85,8 @@ M13 的黄金评测基线能回答“直接运行 Claude 时，同一道题是�
 
 **请确认：** 是否同意把本次结论限定为“同一 Claude CLI 配置下，Keda 工作流相对 Claude 单次执行的配对效果”，并接受 Keda 每个候选最多调用 Agent CLI 6 次？
 
+- [x] 接受推荐：两组使用同一 Claude preset；Keda 每个候选最多调用 6 次 Agent CLI；调用数和耗时不解释为费用等价。（按 2026-11-20 用户授权由 Agent 代选）
+
 **验收：** 页面逐题展示两组结果及调用次数，不输出模型能力排名或费用结论。
 
 ### 决策二：是否接受本地隔离工作流作为 Keda 候选
@@ -90,6 +94,8 @@ M13 的黄金评测基线能回答“直接运行 Claude 时，同一道题是�
 建议在独立快照中运行 Keda 的真实本地编排、验证、review 和修复代码；GitHub Issue / PR 写入边界使用仅本机的临时替身，不触达真实 GitHub。这样能安全地重复运行并真实观察 Keda 的核心本地工作流，但不覆盖远程 PR、GitHub Actions CI、合并和发布行为。若将这些远程行为也纳入，需另行增加真实沙箱仓库、凭据和外部写入授权，成本与验证范围会明显扩大。
 
 **请确认：** 是否接受“真实 Keda 本地工作流 + 本机 GitHub 替身 + 停在待发布结果”的范围？
+
+- [x] 接受推荐：运行真实本地编排并将 Keda 管理的 GitHub 写入限定在本机替身；不创建真实 Issue / PR、不推送或合并。（按 2026-11-20 用户授权由 Agent 代选）
 
 **验收：** 探针证据显示实现、验证、review / 修复阶段来自现有 Keda 编排路径；GitHub 请求只到临时替身，不创建真实 Issue、PR 或远程分支。
 
@@ -100,6 +106,8 @@ M13 的黄金评测基线能回答“直接运行 Claude 时，同一道题是�
 建议在前置基线 PRD 的 v16 账本上增量升到 v17：每条结果标记 direct 或 Keda 组别，并为 Keda run 保存配置指纹和受限阶段摘要。现有单 Agent 结果迁移后归为 direct 组，保留原有 run、result 和 judge score。这个改动让同题重复结果可以成对保存；代价是 SQLite 迁移需重建结果唯一键。
 
 **请确认：** 是否接受保留既有记录的 v16 → v17 增量迁移和新的候选组唯一键？
+
+- [x] 接受推荐：保留 v16 既有 run / result / score，旧结果映射为 direct_agent；升级到 v17 并按候选组区分唯一键。（按 2026-11-20 用户授权由 Agent 代选）
 
 **验收：** 旧 run 详情仍可读；同题同一重复序号可分别保存两种候选，但同组重复写入会被拒绝。
 
@@ -173,7 +181,7 @@ erDiagram
 - **Architecture Constraints：** api → core → engines → infrastructure 依赖方向不变；core 保存比较规则、候选类型和端口，进程 / 文件 / git / 隔离 GitHub 替身由 engines / infrastructure 边界提供；API 路由只处理 DTO 和错误映射。不得让 engines/model_evaluation 静态导入 core 实现模块，也不得让 API 直接导入 engines。若现有 Keda 编排入口不能由评测入口安全调用，应先抽出窄的 core-owned workflow port 并在现有组装路径中接线，不复制 _process_ready_issue 或 review / repair 阶段代码。
 - **Frontend Impact：** 只涉及 frontend-public/（Next.js + TypeScript，pnpm）。目标页是 app/(app)/app/evaluations/page.tsx，结果展示在 components/evaluations/run-detail-panel.tsx，API client 和类型位于 lib/api/console.ts、lib/api/types.ts。本地开发通过 just run all 启动栈，单独启动管理终端前端可用 just run frontend-public。现有 console-evaluations.no-auth.spec.ts 会 mock Evaluation API，只能覆盖前端请求契约；新增 paired E2E 用例走真实页面、真实 API 和 SQLite，Agent CLI 才允许替换成探针。
 - **Runtime Constraints：** Console 使用本地 SQLite；Agent CLI 沿用现有凭据和执行器配置。执行为人工启动的本机评测，Keda 候选必须运行在临时工作目录，GitHub 写入边界仅连本地替身。当前 evaluation 的单次 Agent 超时默认 900 秒；对照 run 需冻结并共享单候选总超时。
-- **Existing PRD Relationship：** 本 PRD 硬依赖待办中的 tasks/pending/P1-FEAT-20261019-140531-m13-golden-eval-baseline.md。它是其后续消费者，不能重复实现 suite 隔离、校准或重复账本。tasks/archive/P1-FEAT-20261012-103909-multi-judge-agent-evaluation.md 是现有评测页面与账本的基础；P2-FEAT-20261009-171037-agent-preset-performance-stats 与本功能口径互补，不负责配对实验。当前未找到独立的 M13 成本 / 人工事件入账 PRD；本 PRD 不依赖或代替该工作。
+- **Existing PRD Relationship：** 本 PRD 硬依赖已归档的 `tasks/archive/P1-FEAT-20261019-140531-m13-golden-eval-baseline.md`。该前置交付已在主线，可复用其 suite 隔离、校准和 v16 重复账本，不重复实现。`tasks/archive/P1-FEAT-20261012-103909-multi-judge-agent-evaluation.md` 是现有评测页面与账本的基础；`P2-FEAT-20261009-171037-agent-preset-performance-stats` 与本功能口径互补，不负责配对实验。当前未找到独立的 M13 成本 / 人工事件入账 PRD；本 PRD 不依赖或代替该工作。
 - **Potential Redundancy Risks：** 不新建 Keda 第二套 issue orchestrator；不复制 baseline harness；不创建第二个 run registry 或独立候选调度系统；阶段追踪放在评测结果已有的 run/candidate 关系中，不扩展成通用事件平台。
 
 ## 6. Recommendation
@@ -457,10 +465,10 @@ R2 / R3 oracles 共 3 条。无新增独立服务、无新的外部 API / CLI �
 ### Delivery Dependencies
 
 - Depends on tasks/issues:
-  - tasks/pending/P1-FEAT-20261019-140531-m13-golden-eval-baseline.md
+  - tasks/archive/P1-FEAT-20261019-140531-m13-golden-eval-baseline.md
 - Gate type: hard
 - Sequence: via-main
-- Notes: 需要前置 PRD 已将 suite 校准、快照隔离、延后判分、重复结果账本及 v16 schema 落到主线；本 PRD 之后将账本推进到 v17。
+- Notes: 前置交付已将 suite 校准、快照隔离、延后判分、重复结果账本及 v16 schema 落到主线；本 PRD 在此基础上将账本推进到 v17。开工前依赖看板已显示满足。
 
 ## 9. Acceptance Checklist
 
@@ -583,18 +591,22 @@ R2 / R3 oracles 共 3 条。无新增独立服务、无新的外部 API / CLI �
 | D-02 | Keda 候选应运行到哪里 | 真实本地编排到验证 / review / 修复完成；GitHub 交互只进本机替身，不创建真实 Issue / PR | 每个重复都创建真实 GitHub 任务和 PR | 防止评测产生持久外部写入，并避免 GitHub / CI 波动掩盖工作流差异。 |
 | D-03 | 是否另建 Keda 评测实现 | 在现有 Evaluation 执行矩阵中添加固定候选类型，复用现有 Issue orchestrator | 复制一套评测专用 Keda 阶段序列或新服务 | 只有真实主编排路径才能回答 Keda 工作流是否产生差异；复制会造成行为漂移。 |
 | D-04 | 是否将对照结果转成“胜负” | 展示逐题配对结果、重复稳定性、耗时与调用数，不设胜者或阈值 | 单一总分 / 自动排名 / 合并门槛 | 当前样本量和成本遥测不足以支持稳健排名或自动决策。 |
+| D-05 | 两组如何控制模型差异与调用预算 | 同一 Claude preset；Keda 每个候选最多调用 6 次；不从调用数推导费用等价 | 混用模型 / preset，或不限制阶段调用数 | 让比较聚焦 Keda 编排，同时限制运行成本并避免超出证据范围的结论。用户于 2026-11-20 授权 Agent 勾选此推荐方案。 |
+| D-06 | Keda 候选的执行和外部写入边界 | 使用真实本地 Keda 编排，GitHub 写入只进入本机替身，停在待发布结果 | 每个重复创建真实 Issue / PR 并触达 GitHub | 避免评测产生持久外部副作用；远程发布与 CI 不属于本次比较。用户于 2026-11-20 授权 Agent 勾选此推荐方案。 |
+| D-07 | 如何兼容现有 evaluation 账本 | 将 v16 增量迁移到 v17；保留旧记录并映射为 direct_agent；唯一键包含候选组 | 覆盖旧账本或另建配对评测数据库 | 延续已交付基线并让同题两组结果可并存，降低迁移与维护成本。用户于 2026-11-20 授权 Agent 勾选此推荐方案。 |
 
 ### Change Log
 
 - **2026-10-28**：按用户确认将隔离承诺限定为候选快照内容与 Git 对象，区分 Keda 编排的 GitHub 替身与验证环境的外部写入防护；探针按候选和重复标识固定行为，预算、超时、需人工及基础设施故障通过依赖行为触发，由真实编排派生终态，不直接注入结果。
 
 - **2026-10-28**：用户确认将固定 1/3、3/3 与 review / 修复分支限定为受控 Agent fixture；真实 Claude 重复运行作可选效果实验，按实际结果验记录与统计，不要求指定失败次数、修复成功或组间胜负。
+- **2026-11-20**：前置黄金评测基线已归档，依赖状态复核为满足；修正旧的阻塞说明并将依赖路径更新到 archive。按用户明确授权，由 Agent 勾选 Section 1 解读及 Section 2 三项推荐决策；`Human-Confirmed` 仍留给最终 PR 人工验收。
 
 ### Final Reconciliation
 
 - Interpretation: not yet implemented.
 - Public behavior and contracts: not yet implemented.
-- Related PRD status: blocked on the M13 golden evaluation baseline PRD.
+- Related PRD status: M13 golden evaluation baseline is archived and its hard dependency is satisfied; human acceptance of that separate PRD does not block this implementation dependency.
 - Requirements and risks: not yet implemented.
 - Reconciled differences:
   - none; update this section against the shipped implementation and fresh evidence before archive.
