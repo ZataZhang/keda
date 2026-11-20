@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import subprocess
 from contextlib import nullcontext
@@ -14,6 +13,7 @@ from typing import Callable, ContextManager
 from backend.core.shared.interfaces.agent_runner import GitHubApiUnavailableError, IGitHubClient
 from backend.core.shared.models.agent_labels import KEDACODE_PRESENCE_LABEL
 from backend.core.shared.models.agent_runner import AppConfig, IssueCommentRecord, IssueSummary
+from backend.core.shared.models.platform_support import is_process_alive
 
 PRESENCE_OFFLINE_AFTER = timedelta(minutes=5)
 PRESENCE_UPDATE_INTERVAL_SECONDS = 60
@@ -403,21 +403,6 @@ def _reusable_presence_comment(
         if parsed_entry.process_state == "exited" or not pid_alive(process_id):
             return comment_record
     return None
-
-
-def is_process_alive(process_id: int) -> bool:
-    """只探测本机 PID；权限错误视为存活，避免覆盖活动进程的评论。"""
-    if process_id <= 0:
-        return False
-    try:
-        os.kill(process_id, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    except OSError:
-        return True
-    return True
 
 
 def _escape_marker_breaks(serialized_payload: str) -> str:

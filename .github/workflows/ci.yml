@@ -110,7 +110,7 @@ jobs:
 
       - name: Run Windows-supported test subset
         run: |
-          uv run pytest --no-testmon -q tests/test_file_lock.py tests/test_toml_section_editor.py tests/test_lifecycle_agents_console_api.py
+          uv run pytest --no-testmon -q tests/test_file_lock.py tests/test_toml_section_editor.py tests/test_lifecycle_agents_console_api.py tests/test_posix_shell.py tests/test_platform_support.py
 
   validate-template:
     # job 级超时，不是步骤级。两者由不同的东西执行：步骤超时归 runner

@@ -42,6 +42,7 @@ from backend.infrastructure.attempt_process_registry import (
 )
 from backend.infrastructure.child_env import build_e2e_child_env, build_sanitized_child_env
 from backend.infrastructure.logging.logger import logger
+from backend.infrastructure.posix_shell import with_platform_posix_shell
 from backend.infrastructure.process_identity import process_start_time
 from backend.infrastructure.process_runner_streams import (
     ClaudeStreamRenderer as ClaudeStreamRenderer,
@@ -338,7 +339,7 @@ class SubprocessRunner:
                 进程组并抛 ``InterruptedError``；要求 ``capture_output=True`` 且带
                 ``timeout``，否则报错、不静默降级。探针抛错按"未取消"继续。
         """
-        command = _with_available_own_command(command)
+        command = with_platform_posix_shell(_with_available_own_command(command))
         started_mono: float = time.monotonic()
         if env_profile is not None:
             child_env: dict[str, str] = _resolve_profiled_child_env(

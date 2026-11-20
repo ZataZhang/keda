@@ -5,6 +5,8 @@ preview 与容器模式依赖进程组（``os.killpg`` / ``setsid``）或 POSIX 
 在 Windows 上没有等价实现。与其让调用落到 ``AttributeError: module 'os' has no
 attribute 'killpg'`` 或留下半启动的进程，不如在入口处失败并说明替代路径。
 
+:func:`is_process_alive` 是跨平台的进程探活，取代各处 POSIX 专用的 ``os.kill(pid, 0)``。
+
 本模块放在 core，是因为四个层都可能需要这道判定：core 用例（daemon / container）、
 engines（takeover）、infrastructure（preview）都允许依赖 ``core.shared.models``。
 """
@@ -12,6 +14,8 @@ engines（takeover）、infrastructure（preview）都允许依赖 ``core.shared
 from __future__ import annotations
 
 import os
+
+import psutil
 
 
 class UnsupportedPlatformFeatureError(RuntimeError):
@@ -45,8 +49,30 @@ def require_posix_process_groups(feature: str) -> None:
     )
 
 
+def is_process_alive(process_id: int) -> bool:
+    """跨平台判断本机进程号是否存活（锁 / 认领 / 在线状态的 owner 探活）。
+
+    POSIX 习惯的 ``os.kill(pid, 0)`` 在 Windows 上不是探活：信号 ``0`` 恰好是
+    ``CTRL_C_EVENT``，会走控制台 Ctrl+C 事件，对不存在的进程抛的是
+    ``OSError(winerror=87)`` 而不是 ``ProcessLookupError``，于是死进程被当成存活，
+    崩溃留下的认领永远回收不了。``psutil.pid_exists`` 在 POSIX 上内部同样用
+    ``kill(pid, 0)`` 并把无权限（EPERM）视为存活，在 Windows 上用 ``OpenProcess``。
+
+    Args:
+        process_id: 本机进程号。
+
+    Returns:
+        进程存在（含属于其他用户的进程）为 ``True``；``process_id <= 0`` 或进程
+        不存在为 ``False``。
+    """
+    if process_id <= 0:
+        return False
+    return bool(psutil.pid_exists(process_id))
+
+
 __all__ = [
     "UnsupportedPlatformFeatureError",
+    "is_process_alive",
     "require_posix_process_groups",
     "supports_posix_process_groups",
 ]
