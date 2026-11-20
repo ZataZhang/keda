@@ -31,6 +31,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from backend.core.shared.models import product_identity
+from backend.core.shared.models.platform_support import (
+    is_process_alive as _is_pid_alive,
+)
 from backend.core.shared.models.platform_support import require_posix_process_groups
 from backend.core.shared.interfaces.container_runner import (
     ContainerCommandPlan,
@@ -258,17 +261,6 @@ def garbage_collect_runner_resources(
         按资源分类的扫描、跳过、删除或失败结果。
     """
     return controller.run_container_gc(request, runner=runner)
-
-
-def _is_pid_alive(pid: int) -> bool:
-    """进程存活判定（macOS / Linux 均兼容）。"""
-    if pid <= 0:
-        return False
-    try:
-        os.kill(pid, 0)
-    except OSError:
-        return False
-    return True
 
 
 def create_default_container_auth_importer() -> IContainerAuthImporter:

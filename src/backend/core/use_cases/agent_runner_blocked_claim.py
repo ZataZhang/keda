@@ -6,6 +6,8 @@ import logging
 import os
 from pathlib import Path
 
+from backend.core.shared.models.platform_support import is_process_alive
+
 _logger = logging.getLogger(__name__)
 
 
@@ -39,8 +41,7 @@ def _acquire_blocked_claim_lock(lock_path: Path, issue_number: int) -> None:
         owner_pid = None
 
     if owner_pid is not None:
-        try:
-            os.kill(owner_pid, 0)
+        if is_process_alive(owner_pid):
             _logger.info(
                 "Blocked Issue #%d worktree already claimed by alive process %d.",
                 issue_number,
@@ -49,12 +50,11 @@ def _acquire_blocked_claim_lock(lock_path: Path, issue_number: int) -> None:
             raise BlockedWorktreeClaimedError(
                 f"Blocked Issue #{issue_number} worktree is already being processed."
             )
-        except OSError:
-            _logger.warning(
-                "Stealing stale blocked claim lock for Issue #%d from dead PID %d.",
-                issue_number,
-                owner_pid,
-            )
+        _logger.warning(
+            "Stealing stale blocked claim lock for Issue #%d from dead PID %d.",
+            issue_number,
+            owner_pid,
+        )
 
     try:
         lock_path.unlink()

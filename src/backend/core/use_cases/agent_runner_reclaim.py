@@ -19,7 +19,6 @@ TTL 路径的额外保护:claim marker 没有 ``started_at`` 字段时(老 marke
 from __future__ import annotations
 
 import logging
-import os
 import re
 import socket
 from dataclasses import dataclass
@@ -28,6 +27,7 @@ from typing import Callable
 
 from backend.core.shared.interfaces.agent_runner import IGitHubClient
 from backend.core.shared.models.agent_runner import AppConfig
+from backend.core.shared.models.platform_support import is_process_alive
 from backend.core.use_cases.agent_runner_workflow import (
     transition_issue_workflow_state,
 )
@@ -152,22 +152,12 @@ def parse_claim_marker_detail(comment_body: str) -> ClaimMarkerDetail | None:
 def is_pid_alive(pid: int) -> bool:
     """Return whether ``pid`` is a live process on this host.
 
-    ``os.kill(pid, 0)`` sends no signal — it only probes existence. A
-    ``PermissionError`` means the PID exists but is owned by another user, so
-    it is still alive and must not be reclaimed. Any uncertainty errs toward
-    "alive" so a live run is never disturbed.
+    Delegates to the cross-platform probe: a PID owned by another user still
+    counts as alive and must not be reclaimed. ``os.kill(pid, 0)`` is not used
+    because on Windows it reports dead PIDs as alive, so stale claims were
+    never reclaimed there.
     """
-    if pid <= 0:
-        return False
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    except OSError:
-        return True
-    return True
+    return is_process_alive(pid)
 
 
 def reclaim_stale_running_issues(

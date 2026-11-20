@@ -28,6 +28,9 @@ import tomlkit
 
 from backend.core.shared.models import product_identity
 from backend.core.shared.models.config_edit import ConfigDocumentInvalidError
+from backend.core.shared.models.platform_support import (
+    is_process_alive as _is_pid_alive,
+)
 from backend.infrastructure.config.toml_section_editor import mutate_toml_document
 
 #: 状态目录下的默认文件名，与 ``[agent_runner.console]`` 的默认取值一致；
@@ -118,22 +121,6 @@ class OccupancyReport:
 
     scanner_available: bool
     pid_set: frozenset[int]
-
-
-def _is_pid_alive(pid: int) -> bool:
-    """进程号是否存活；``pid <= 0`` 视为不存在。"""
-    if pid <= 0:
-        return False
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        # 进程存在但不属于当前用户：迁移仍应拒绝，宁可不动。
-        return True
-    except OSError:
-        return False
-    return True
 
 
 def _pids_from_lock_files(state_dir_path: Path) -> frozenset[int]:

@@ -17,6 +17,10 @@ import os
 from collections.abc import Iterable
 from pathlib import Path
 
+from backend.core.shared.models.platform_support import (
+    is_process_alive as _is_process_alive,
+)
+
 _logger = logging.getLogger(__name__)
 
 # Subdirectory under the product home (the process registry's parent directory)
@@ -67,15 +71,6 @@ def daemon_lock_path(lock_dir: Path, repo_id: str) -> Path:
         Path to the repository's lock file under ``lock_dir``.
     """
     return lock_dir / f"{repo_id}.lock"
-
-
-def _is_process_alive(pid: int) -> bool:
-    """Return ``True`` when a process with ``pid`` is currently alive."""
-    try:
-        os.kill(pid, 0)
-    except OSError:
-        return False
-    return True
 
 
 def _write_lock_owner(lock_path: Path) -> None:
