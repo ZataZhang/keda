@@ -216,6 +216,7 @@ Hosted Runner 也可选择启用 Linux 虚拟桌面：`[agent_runner.hosted].des
 - `command -v kc` 没命中：把 `~/.local/bin` 加入 `PATH`，或在新 shell 中重试。
 - macOS GUI 终端未继承 `PATH`：在 shell rc 中显式追加 `export PATH="$HOME/.local/bin:$PATH"`。
 - 安装器报 Python 版本过低：升级到 Python >= 3.11，或使用 `uv python install 3.12` 后重试。
+- `kc` 启动即报 `kc cannot start: the Python module '…' is not installed`：kc 的依赖变了（常见于源码可编辑安装 `git pull` 之后）但运行环境没有重装。按提示里的命令重装即可，例如 uv tool 可编辑安装执行 `uv tool install --reinstall --editable <源码目录>`，在源码仓库自己的 `.venv` 里则执行 `uv sync`。
 
 ## 卸载
 

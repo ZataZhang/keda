@@ -100,7 +100,7 @@ uvx twine upload packaging/keda-code/dist/*
 
 ## 命令入口与 tap formula
 
-wheel 提供两个完全等价的 console script，都指向 `backend.api.cli:main`：主命令 `kc`，以及与安装名对齐的别名 `kedacode`。**刻意不提供 `keda` 入口**——CNCF KEDA 目前只发 YAML manifest、homebrew-core 里也还没有 `keda` formula，但它一旦发 CLI，名字必然是 `keda` 且会进 homebrew-core，届时本项目 formula 的 `bin/keda` 符号链接会与之硬冲突，用户 `brew install` 直接失败。
+wheel 提供两个完全等价的 console script，都指向 `backend.api.cli_entry:main`：主命令 `kc`，以及与安装名对齐的别名 `kedacode`。**刻意不提供 `keda` 入口**——CNCF KEDA 目前只发 YAML manifest、homebrew-core 里也还没有 `keda` formula，但它一旦发 CLI，名字必然是 `keda` 且会进 homebrew-core，届时本项目 formula 的 `bin/keda` 符号链接会与之硬冲突，用户 `brew install` 直接失败。
 
 新增或改名 console script 时，除了 `pyproject.toml` 的 `[project.scripts]`，还要同步这几处：
 

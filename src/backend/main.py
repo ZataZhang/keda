@@ -1,7 +1,7 @@
 """Backend application entrypoint.
 
 Runs the FastAPI app for local development (``python -m backend.main``).
-The CLI entry point lives in ``backend.api.cli:main`` and is registered via
+The CLI entry point lives in ``backend.api.cli_entry:main`` and is registered via
 ``[project.scripts]`` in ``pyproject.toml``.
 """
 
