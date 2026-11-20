@@ -27,16 +27,16 @@ acceptance_assertion=PASS
 | rv-2 | PASS | 变更前真实 CLI 接受 `gitlab`（退出码 0）；当前真实 CLI 在加载配置时退出码 1，并列出 `github` / `gitea`。 |
 | rv-3 | PASS | 未声明平台与显式 `github` 的真实入口均以 1 结束，平台/配置错误提示数为 0；gitea 负向对照触发未实现提示。 |
 | rv-4 | PASS | gitea 配置下的本地生命周期查询退出码 0；同一配置的 Issue 查询退出码 1。 |
-| rv-5 | PASS | 定向 pytest 实际运行并通过。`CI=1 PYTEST_ADDOPTS=--testmon-noselect just test` 完整执行本地测试目标：`5608 passed, 1 skipped`。架构搜索显示客户端只在工厂构造、`gitea` 只定义于共享模型、工厂调用数为 26 且与基线一致、签名未变、接口 diff 为空。 |
+| rv-5 | PASS | 定向 pytest 实际运行两个平台相关测试文件并通过 81 项；300 秒门禁复跑中，`just test` 通过项目支持的本地目标运行配置测试（70 项），关闭 testmon 选择且绕过 Justfile 成功标记。另存有完整本地测试档原始结果：`5608 passed, 1 skipped`，见 `rv-5-full-suite.txt`。架构搜索显示客户端只在工厂构造、`gitea` 只定义于共享模型、工厂调用数为 26 且与基线一致、签名未变、接口 diff 为空。 |
 | rv-6 | PASS | `uv run mkdocs build --strict` 退出码 0；配置说明与 Agent Runner 交叉引用搜索均命中。 |
 
-运行 `UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache uv run kc evidence check --evidence tasks/evidence/P2-FEAT-20261119-152718-repository-platform-selection-skeleton` 结果为 `6/6 passed`；本地门禁复跑超时覆盖为 1260 秒，复跑缓存已关闭。RV-5 的 stdout 断言检查 pytest 失败摘要（` failed,` / ` failed in`），不把测试名中的示例文本“evidence check failed”误判为失败用例。早先的全量诊断运行曾分别在 backlog API 与 max-file-lines guard 用例失败；两个用例各自单独运行时通过，随后完整全量运行通过。没有截图、录屏或界面变更；此 PRD 的人审面是 CLI 输出。
+运行 `UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache uv run kc evidence check --evidence tasks/evidence/P2-FEAT-20261119-152718-repository-platform-selection-skeleton` 结果为 `6/6 passed`，门禁复跑限制为 300 秒且缓存已关闭。RV-5 的 stdout 断言检查 pytest 失败摘要（` failed,` / ` failed in`），不把测试名中的示例文本“evidence check failed”误判为失败用例。早先的全量诊断运行曾分别在 backlog API 与 max-file-lines guard 用例失败；两个用例各自单独运行时通过，随后完整全量运行通过。没有截图、录屏或界面变更；此 PRD 的人审面是 CLI 输出。
 
 ## 验证身份
 
 - 工作分支：`issue-398`
-- 验证时 HEAD：`f5cffa14ffb979a74d9a8b622b78136dd45bc0cf`
-- 验证时 `HEAD^{tree}`：`e0b1f2355668b302741b62ebf1233f89cd4518af`
+- 验证时 HEAD：`8dda8346072ab59baf3aca7fcecaa2f5bd608db9`
+- 验证时 `HEAD^{tree}`：`aa0f0fbd7f201fe683a7bd6b676858e3237fc312`
 - 实现已在工作树 HEAD 中。PRD 归档和代码落地由 runner 处理；本次没有创建 PR。
 
 ## 复核备注
