@@ -362,6 +362,97 @@ test.describe('runtime board (mocked API)', () => {
     await expect(page.getByTestId('dashboard-repo-header')).toHaveCount(0)
   })
 
+  test('executor machine pill tells local from other machines beside the status', async ({ page }) => {
+    const remoteRunning = {
+      ...RUNNING_TASK,
+      issue_number: 22,
+      task_key: 'keda-main#22',
+      issue_title: 'Remote Running Issue',
+      issue_url: 'https://example.test/22',
+      pr_url: null,
+      pr_number: null,
+      agent: null,
+      preset: null,
+      model: null,
+      attempt_number: null,
+      started_at: null,
+      duration_seconds: null,
+      executor_host: 'host-b.local',
+      executor_is_local: false,
+      executor_basis: 'machine_id',
+      executor_role: 'running',
+      local_run_superseded: true,
+    }
+    const remoteFailed = {
+      ...FAILED_TASK,
+      agent: null,
+      attempt_number: null,
+      started_at: null,
+      finished_at: null,
+      duration_seconds: null,
+      last_outcome: null,
+      executor_host: 'host-b.local',
+      executor_is_local: false,
+      executor_basis: 'machine_id',
+      executor_role: 'last_claim',
+      local_run_superseded: true,
+    }
+    const queued = {
+      ...FAILED_TASK,
+      issue_number: 23,
+      task_key: 'keda-main#23',
+      issue_title: 'Queued Issue',
+      issue_url: 'https://example.test/23',
+      status: 'waiting',
+      waiting_reason: 'queued',
+      status_reason: '当前监控标签：agent/ready',
+      agent: null,
+      labels: ['agent/ready'],
+    }
+    await mockBoardApi(page, {
+      tasks: {
+        tasks: [
+          {
+            ...RUNNING_TASK,
+            executor_host: 'host-a.local',
+            executor_is_local: true,
+            executor_basis: 'machine_id',
+            executor_role: 'running',
+            local_run_superseded: false,
+          },
+          remoteRunning,
+          remoteFailed,
+          queued,
+        ],
+        status_counts: { running: 2, waiting: 1, blocked: 0, failed: 1, completed: 0, closed: 0, unknown: 0 },
+      },
+    })
+    await page.goto('/app/dashboard')
+
+    const localRow = page.getByTestId('runtime-task-row-keda-main-21')
+    const remoteRow = page.getByTestId('runtime-task-row-keda-main-22')
+    const failedRow = page.getByTestId('runtime-task-row-keda-main-19')
+    await expect(localRow.getByTestId('runtime-task-executor')).toHaveText('本机 · host-a.local')
+    await expect(localRow.getByTestId('runtime-task-executor')).toHaveAttribute('title', /^执行机器/)
+    await expect(remoteRow.getByTestId('runtime-task-executor')).toHaveText('其他机器 · host-b.local')
+    await expect(failedRow.getByTestId('runtime-task-executor')).toHaveText('其他机器 · host-b.local')
+    await expect(failedRow.getByTestId('runtime-task-executor')).toHaveAttribute('title', /^最近认领/)
+    // 胶囊紧挨状态胶囊，同一行，不额外占行。
+    const statusBox = await failedRow.getByText('失败', { exact: true }).boundingBox()
+    const pillBox = await failedRow.getByTestId('runtime-task-executor').boundingBox()
+    expect(Math.abs((statusBox?.y ?? 0) - (pillBox?.y ?? 100))).toBeLessThan(4)
+    await expect(failedRow.getByTestId('runtime-task-local-run-superseded')).toHaveText('本机无这一轮运行记录')
+    await expect(failedRow.getByTestId('runtime-task-failure-reason')).toHaveCount(0)
+    await expect(failedRow).not.toContainText('最近执行')
+    await expect(remoteRow.getByTestId('runtime-task-local-run-superseded')).toBeVisible()
+    await expect(localRow.getByTestId('runtime-task-local-run-superseded')).toHaveCount(0)
+    await page.getByRole('button', { name: /全部/ }).first().click()
+    await expect(page.getByTestId('runtime-task-row-keda-main-23').getByTestId('runtime-task-executor')).toHaveCount(0)
+    await page.getByRole('button', { name: /活动任务/ }).first().click()
+    const screenshotPath = process.env.RV_SCREENSHOT_PATH ?? '/tmp/keda-runtime-executor-pill.png'
+    await page.getByTestId('runtime-task-list').screenshot({ path: screenshotPath, animations: 'disabled' })
+  })
+
   test('task detail distinguishes a draft from a Ready PR with a stale label', async ({ page }) => {
     const warning = 'PR #22 已转为 Ready，Issue 当前标签仍为「运行中」（agent/running）。'
     await mockBoardApi(page, {

@@ -33,7 +33,11 @@ from backend.core.shared.models.agent_runner import (
     PullRequestContext,
     ReviewEventMarker,
 )
-from backend.core.use_cases.agent_runner_events import parse_latest_event_marker
+from backend.core.use_cases.agent_runner_claim_lease import latest_claim_record
+from backend.core.use_cases.agent_runner_events import (
+    parse_latest_event_marker,
+    parse_latest_failure_summary,
+)
 from backend.core.use_cases.worktree_path_output import parse_worktree_path_stdout
 
 if TYPE_CHECKING:
@@ -120,6 +124,9 @@ class IssueMonitoringSnapshot:
     suggested_cli_commands: tuple[str, ...]
     has_anomaly: bool
     anomaly_types: tuple[str, ...]
+    #: 最近一条可信认领的持有者 ``{host, machine_id, claim_started_at}``；
+    #: 只在运行中 / 失败 / 阻塞状态读取，读不到时为 ``None``。
+    claim_holder: dict | None = None
     #: 最近一条 ``## Agent Runner … Failed`` 评论的一行摘要；Issue 在其他机器上
     #: 失败时，本机运行账本没有记录，运行看板靠它显示失败原因。
     latest_failure_summary: str | None = None
@@ -266,51 +273,6 @@ def parse_event_timeline(comments: Iterable[str]) -> list[EventTimelineEntry]:
                 )
             )
     return timeline
-
-
-_FAILURE_HEADING_PATTERN = re.compile(
-    r"##[ \t]+(Agent Runner\b[^\n]*\bFailed)[ \t]*$", re.MULTILINE
-)
-_FENCED_BLOCK_PATTERN = re.compile(r"```[^\n]*\n(.*?)```", re.DOTALL)
-_ERROR_LINE_PATTERN = re.compile(r"^(?:error|fatal)\b|^\w+(?:Error|Exception)\b", re.IGNORECASE)
-_FAILURE_SUMMARY_MAX_LENGTH = 300
-
-
-def parse_latest_failure_summary(comments: list[str]) -> str | None:
-    """取最近一条 ``## Agent Runner … Failed`` 评论的一行摘要。
-
-    失败评论由出错的那台机器发出、不带 ``kc:event`` 标记，因此不进时间线。
-    摘要为标题加首个代码块里最后一条错误行（``error:`` / ``fatal:`` 或
-    ``XxxError:``，避开堆栈之后的 git ``hint:`` 之类说明）；代码块里没有错误行时
-    取其最后一个非空行，评论没有代码块时取标题后的第一个非空行。
-
-    Args:
-        comments: Issue 评论正文，按时间从旧到新排列。
-
-    Returns:
-        截断到 300 字符的摘要；没有失败评论时为 ``None``。
-    """
-    for comment_body in reversed(comments):
-        stripped_body = (comment_body or "").lstrip()
-        heading_match = _FAILURE_HEADING_PATTERN.match(stripped_body)
-        if heading_match is None:
-            continue
-        body_after_heading = stripped_body[heading_match.end() :]
-        fence_match = _FENCED_BLOCK_PATTERN.search(body_after_heading)
-        detail_source = fence_match.group(1) if fence_match else body_after_heading
-        detail_lines = [line.strip() for line in detail_source.splitlines() if line.strip()]
-        failure_heading = heading_match.group(1)
-        if not detail_lines:
-            return failure_heading
-        if fence_match is None:
-            detail_line = detail_lines[0]
-        else:
-            detail_line = next(
-                (line for line in reversed(detail_lines) if _ERROR_LINE_PATTERN.search(line)),
-                detail_lines[-1],
-            )
-        return f"{failure_heading}: {detail_line}"[:_FAILURE_SUMMARY_MAX_LENGTH]
-    return None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -620,6 +582,51 @@ def _extract_pr_number(pr_url: str) -> int | None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+#: 认领评论的检索片段，与 ``kc peers`` 和崩溃回收的读取口径一致。
+_CLAIM_MARKER_NEEDLE = "<!-- kc:claim "
+
+
+def _read_claim_holder(
+    *,
+    issue_number: int,
+    primary_label: str,
+    config_labels: LabelConfig,
+    github_client: IGitHubClient,
+) -> dict | None:
+    """读取运行中 / 失败 / 阻塞 Issue 最近一条可信认领的持有者。
+
+    只采信可信作者写的认领，避免任意评论者伪造执行机器。读取失败只丢这一个
+    字段，不能进入扫描错误——那会让整仓快照被判为不完整。
+    """
+    if primary_label not in (
+        config_labels.running,
+        config_labels.supervising,
+        config_labels.failed,
+        config_labels.blocked,
+    ):
+        return None
+    try:
+        comment_records = github_client.list_issue_comment_records(
+            issue_number,
+            trusted_only=True,
+            body_contains=_CLAIM_MARKER_NEEDLE,
+        )
+    except Exception as exc:  # noqa: BLE001 - 认领只是展示增强，失败降级为不显示。
+        _logger.warning("Claim holder read failed for Issue #%d: %s", issue_number, exc)
+        return None
+    parsed_claim = latest_claim_record(list(comment_records or ()))
+    if parsed_claim is None:
+        return None
+    _, claim_detail, lease = parsed_claim
+    return {
+        "host": claim_detail.host,
+        "machine_id": lease.machine_id if lease is not None else None,
+        "claim_started_at": (
+            claim_detail.started_at.isoformat() if claim_detail.started_at is not None else None
+        ),
+    }
+
+
 def build_issue_snapshot(
     *,
     issue: IssueSummary,
@@ -682,6 +689,12 @@ def build_issue_snapshot(
         ),
         has_anomaly=has_anomaly,
         anomaly_types=tuple(anomaly.type for anomaly in anomalies),
+        claim_holder=_read_claim_holder(
+            issue_number=issue.number,
+            primary_label=primary_label,
+            config_labels=config.labels,
+            github_client=github_client,
+        ),
         latest_failure_summary=parse_latest_failure_summary(comments),
     )
 

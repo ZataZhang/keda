@@ -107,6 +107,11 @@ class RuntimeTask:
         labels: 监控看到的 `agent/*` 标签，供前端保持一致的状态文字。
         evidence_video_available: 该 Issue 是否有可播放的本地证据视频；没有证据视频时为 False。
         evidence_page_available: 该 Issue 是否有本地或证据分支上的人审页（human-review-checklist.md 等）。
+        executor_host: 最近一条可信认领的机器主机名；未读到认领时为 ``None``。
+        executor_is_local: 认领机器是否本机；本机编号不可用而无法判断时为 ``None``。
+        executor_basis: 本机判断依据：``machine_id``（新版认领）或 ``hostname``（旧版认领）。
+        executor_role: ``running`` 表示正在执行，``last_claim`` 表示最近一次认领（失败 / 阻塞）。
+        local_run_superseded: 认领来自其他机器且晚于本机最近运行；此时本机运行字段已清空。
     """
 
     repo_id: str
@@ -147,6 +152,11 @@ class RuntimeTask:
     pipeline_stage: str | None = None
     pr_is_draft: bool | None = None
     pr_label_warning: str | None = None
+    executor_host: str | None = None
+    executor_is_local: bool | None = None
+    executor_basis: str | None = None
+    executor_role: str | None = None
+    local_run_superseded: bool = False
 
     @property
     def task_key(self) -> str:

@@ -24,6 +24,13 @@ _EVENT_MARKER_PATTERN = re.compile(
     r"\s*-->"
 )
 
+_FAILURE_HEADING_PATTERN = re.compile(
+    r"##[ \t]+(Agent Runner\b[^\n]*\bFailed)[ \t]*$", re.MULTILINE
+)
+_FENCED_BLOCK_PATTERN = re.compile(r"```[^\n]*\n(.*?)```", re.DOTALL)
+_ERROR_LINE_PATTERN = re.compile(r"^(?:error|fatal)\b|^\w+(?:Error|Exception)\b", re.IGNORECASE)
+_FAILURE_SUMMARY_MAX_LENGTH = 300
+
 
 _REWORK_COMPLETION_PHASES = {
     "implementation_complete",
@@ -143,6 +150,43 @@ def parse_latest_event_marker(comments: list[str]) -> ReviewEventMarker | None:
         marker = _parse_event_marker(comment_body)
         if marker is not None:
             return marker
+    return None
+
+
+def parse_latest_failure_summary(comments: list[str]) -> str | None:
+    """取最近一条 ``## Agent Runner … Failed`` 评论的一行摘要。
+
+    失败评论由出错的那台机器发出、不带 ``kc:event`` 标记，因此不进事件时间线。
+    摘要为标题加首个代码块里最后一条错误行（``error:`` / ``fatal:`` 或
+    ``XxxError:``，避开堆栈之后的 git ``hint:`` 之类说明）；代码块里没有错误行时
+    取其最后一个非空行，评论没有代码块时取标题后的第一个非空行。
+
+    Args:
+        comments: Issue 评论正文，按时间从旧到新排列。
+
+    Returns:
+        截断到 300 字符的摘要；没有失败评论时为 ``None``。
+    """
+    for comment_body in reversed(comments):
+        stripped_body = (comment_body or "").lstrip()
+        heading_match = _FAILURE_HEADING_PATTERN.match(stripped_body)
+        if heading_match is None:
+            continue
+        body_after_heading = stripped_body[heading_match.end() :]
+        fence_match = _FENCED_BLOCK_PATTERN.search(body_after_heading)
+        detail_source = fence_match.group(1) if fence_match else body_after_heading
+        detail_lines = [line.strip() for line in detail_source.splitlines() if line.strip()]
+        failure_heading = heading_match.group(1)
+        if not detail_lines:
+            return failure_heading
+        if fence_match is None:
+            detail_line = detail_lines[0]
+        else:
+            detail_line = next(
+                (line for line in reversed(detail_lines) if _ERROR_LINE_PATTERN.search(line)),
+                detail_lines[-1],
+            )
+        return f"{failure_heading}: {detail_line}"[:_FAILURE_SUMMARY_MAX_LENGTH]
     return None
 
 
