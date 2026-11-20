@@ -477,10 +477,11 @@ def attach_prd_lifecycle_overrides(
     """从该 Issue 引用的 PRD 文件解析头部覆盖，回填到 ``IssueSummary``。
 
     主检出 PRD 缺失或读取失败、PRD 覆盖块解析失败时，记录 warning 并原样返回该 Issue。
-    如果 Issue 已发布到任务分支，则该分支是执行输入的权威来源；获取或读取分支 PRD
-    失败会重新抛出，阻止流水线继续，不能静默回退到主检出文件。成功读取后，同时解析
-    ``lifecycle_agents`` 与 ``lifecycle_presets`` 两个块，分别回填到
-    ``lifecycle_overrides`` 与 ``lifecycle_preset_overrides``。
+    如果 Issue 已发布到任务分支，则该分支是执行输入的权威来源；缺失、越出仓库或不是
+    Markdown 的 PRD 锚点，以及获取或读取分支 PRD 失败，都会抛错阻止流水线继续，不能
+    静默回退到主检出文件或默认执行器。成功读取后，同时解析 ``lifecycle_agents`` 与
+    ``lifecycle_presets`` 两个块，分别回填到 ``lifecycle_overrides`` 与
+    ``lifecycle_preset_overrides``。
 
     Args:
         issue: 待处理的 Issue。
@@ -491,20 +492,46 @@ def attach_prd_lifecycle_overrides(
     Returns:
         回填了覆盖字段的 Issue；主检出 PRD 无覆盖、读取失败或覆盖块解析失败时返回原对象。
         已发布任务分支 PRD 的获取或读取失败会抛出异常；其覆盖块解析失败仍返回原对象。
+
+    Raises:
+        ValueError: 已发布 Issue 缺少有效的仓库内 Markdown PRD 锚点，或发布 marker 无效。
+        RuntimeError: 已发布 Issue 缺少仓库根目录，无法读取其权威 PRD 来源。
     """
-    if repo_path is None:
-        return issue
     # 局部导入：agent_runner_feedback 与解析函数分属不同子系统，避免模块级环。
     from backend.core.use_cases.agent_runner_feedback import extract_prd_path
+    from backend.core.use_cases.issue_prd_publication import (
+        published_issue_prd_branch,
+        read_published_issue_prd_text,
+    )
 
+    published_issue_branch = published_issue_prd_branch(
+        issue_number=issue.number,
+        issue_body=issue.body,
+    )
+    has_published_prd = published_issue_branch is not None
     prd_relative_path = extract_prd_path(issue.body)
     if prd_relative_path is None:
+        if has_published_prd:
+            raise ValueError(
+                f"Issue #{issue.number} has a published PRD marker but no valid PRD path anchor."
+            )
+        return issue
+    if repo_path is None:
+        if has_published_prd:
+            raise RuntimeError(
+                f"Issue #{issue.number} has a published PRD but no repository root is available."
+            )
         return issue
     resolved_repo_path = repo_path.resolve()
     prd_file_path = (resolved_repo_path / prd_relative_path).resolve()
     try:
         prd_relative_to_repo = prd_file_path.relative_to(resolved_repo_path)
     except ValueError:
+        if has_published_prd:
+            raise ValueError(
+                f"Issue #{issue.number} has a published PRD path outside repository "
+                f"'{resolved_repo_path}': '{prd_relative_path}'."
+            )
         _logger.warning(
             "Issue #%d: PRD path '%s' is outside repository '%s'; skipping lifecycle overrides.",
             issue.number,
@@ -513,6 +540,11 @@ def attach_prd_lifecycle_overrides(
         )
         return issue
     if prd_relative_to_repo.suffix.lower() != ".md":
+        if has_published_prd:
+            raise ValueError(
+                f"Issue #{issue.number} has a published PRD path that is not a Markdown file: "
+                f"'{prd_relative_path}'."
+            )
         _logger.warning(
             "Issue #%d: PRD path '%s' is not a Markdown file; skipping lifecycle overrides.",
             issue.number,
@@ -523,8 +555,6 @@ def attach_prd_lifecycle_overrides(
     if process_runner is not None:
         # 新发布协议把已发布 Issue 分支作为执行输入的权威来源；即使主检出也有同名
         # 文件，仍先读远端，避免执行器覆盖来自另一份较旧或较新的本地副本。
-        from backend.core.use_cases.issue_prd_publication import read_published_issue_prd_text
-
         try:
             published_branch_prd_text = read_published_issue_prd_text(
                 issue=issue,

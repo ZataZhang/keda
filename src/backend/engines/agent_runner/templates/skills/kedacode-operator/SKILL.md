@@ -11,7 +11,7 @@ Use this skill when the user asks to operate the KedaCode CLI or its managed run
 
 | Route | The user may say | Read first |
 |---|---|---|
-| 建 issue | 建个 issue / 把 tasks/pending/xxx.md 建成 issue / 开个 Issue / issue create | `${CODEBUDDY_SKILL_DIR}/references/create-issue.md` |
+| 建 issue | 建个 issue / 把 tasks/pending/xxx.md 建成 issue / 开个 Issue / issue create / main 受保护时发布 PRD / 恢复已创建 Issue 的 PRD | `${CODEBUDDY_SKILL_DIR}/references/create-issue.md` |
 | 查 issue | 查 issue / issue list / 看看有哪些 Issue / 这个 PRD 有 issue 吗 | `${CODEBUDDY_SKILL_DIR}/references/issue-inspect.md` |
 | 查生命周期 | 当前到哪个 lifecycle / 哪些 Issue 已通过某个阶段 / 看 Issue 的生命周期时间线 | `${CODEBUDDY_SKILL_DIR}/references/lifecycle.md` |
 | 看其他机器 | 另一台机器在做什么 / 哪些机器在线 / kc peers / 同仓机器 | `${CODEBUDDY_SKILL_DIR}/references/peers.md` |
@@ -22,6 +22,8 @@ Use this skill when the user asks to operate the KedaCode CLI or its managed run
 | 后台跑 | 挂后台 / 让它自己跑 / daemon / 起守护 / 停掉它 / 并行上限 / 最多同时跑几个 / 并发调成 N | `${CODEBUDDY_SKILL_DIR}/references/daemon.md` |
 | CI 交付 | CI 状态 / checks 怎么样 / 自动修复 / 修一下 CI / backlog ci | `${CODEBUDDY_SKILL_DIR}/references/ci.md` |
 | 装环境与查 Agent 配置 | 升级旧版本 / 迁移配置或标记 / 停机迁移 / kc config migrate / 装环境 / 初始化仓库 / kc init / 重装 skill / 刷新 skill / kc skill install / 修复 operator skill / kc skill repair-operator / 安装菜单栏 App / kc desktop install / 有哪些模型预设 / agent doctor / 生命周期矩阵 / 九阶段生效模型 / kc agent lifecycle / kc agent preset / 回退候选 / kc agent fallback / 这台机器装了哪些 agent / kc agent list / 该用哪个 agent / kc agent setup / 注册一个自己的 agent / kc agent add / 这个命令收什么旗标 / 裸 kc 进哪个入口 / kc session 与 kc repl 的区别 / 起个预览 / 起 dev server | `${CODEBUDDY_SKILL_DIR}/references/setup-and-config.md` |
+
+When the base branch rejects PRD publication, follow the create-issue reference's `--publish-to-issue-branch` flow. If the Issue already exists, use its `--recover-issue <N>` flow so it is not duplicated or left as an unexecutable ready Issue.
 
 Use the repository guide as the authoritative command reference. Start with `kc --help` or the relevant subcommand `--help` when command details differ by KedaCode version. Do not claim `--dry-run` executes work. The supported command names are `kc` and `kedacode`; the old `iar` command is no longer installed. Update old scripts and CI commands to use `kc`.
 
