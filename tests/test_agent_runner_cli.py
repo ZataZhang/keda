@@ -849,8 +849,10 @@ def _patch_console_script_entry_points(monkeypatch) -> None:
 
     def fake_entry_points(**_selection_kwargs):
         return [
-            EntryPoint(name="iar", value="backend.api.cli:main", group="console_scripts"),
-            EntryPoint(name="kedacode", value="backend.api.cli:main", group="console_scripts"),
+            EntryPoint(name="iar", value="backend.api.cli_entry:main", group="console_scripts"),
+            EntryPoint(
+                name="kedacode", value="backend.api.cli_entry:main", group="console_scripts"
+            ),
             EntryPoint(name="unrelated", value="other.cli:app", group="console_scripts"),
         ]
 
@@ -865,10 +867,12 @@ def test_alias_command_names_includes_only_current_commands(monkeypatch) -> None
 
     def fake_entry_points(**_selection_kwargs):
         return [
-            EntryPoint(name="iar", value="backend.api.cli:main", group="console_scripts"),
-            EntryPoint(name="kedacode", value="backend.api.cli:main", group="console_scripts"),
+            EntryPoint(name="iar", value="backend.api.cli_entry:main", group="console_scripts"),
+            EntryPoint(
+                name="kedacode", value="backend.api.cli_entry:main", group="console_scripts"
+            ),
             # 残留的旧发行版会重复声明同一入口，应被去重
-            EntryPoint(name="iar", value="backend.api.cli:main", group="console_scripts"),
+            EntryPoint(name="iar", value="backend.api.cli_entry:main", group="console_scripts"),
             EntryPoint(name="unrelated", value="other.cli:app", group="console_scripts"),
         ]
 

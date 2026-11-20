@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import json
+import os
 import site
 import sys
 import urllib.request
@@ -56,8 +57,12 @@ class _Pipe:
 
 @pytest.fixture(autouse=True)
 def _isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """把 HOME 指向空目录，让状态目录与缓存落在可丢弃的 tmp 里。"""
+    """把 HOME 指向空目录，让状态目录与缓存落在可丢弃的 tmp 里。
+
+    Windows 上 :meth:`pathlib.Path.home` 读 ``USERPROFILE``，一并指向 tmp。
+    """
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     return tmp_path
 
 
@@ -449,6 +454,80 @@ def test_windows_uv_tool_install_maps_to_uv_tool_upgrade(
     assert plan is not None and plan.argv == ("uv", "tool", "upgrade", "kedacode")
 
 
+def _write_uv_receipt(tool_prefix: Path, requirement_line: str) -> None:
+    """在 uv tool 环境根目录落一份最小 ``uv-receipt.toml``。"""
+    tool_prefix.mkdir(parents=True, exist_ok=True)
+    (tool_prefix / "uv-receipt.toml").write_text(
+        f"[tool]\nrequirements = [{requirement_line}]\n", encoding="utf-8"
+    )
+
+
+def test_pinned_uv_tool_install_maps_to_install_latest(
+    _pypi_managed_install: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """版本被固定的 uv tool 安装改用 `uv tool install kedacode@latest`，并标记会重建环境。
+
+    `uv tool upgrade` 遵守安装约束，对 `kedacode==0.8.0` 退出 0 却什么都不装。
+    """
+    tool_prefix = tmp_path / "uv" / "tools" / "kedacode"
+    _write_uv_receipt(tool_prefix, '{ name = "kedacode", specifier = "==0.8.0" }')
+    monkeypatch.setattr(sys, "prefix", str(tool_prefix))
+    monkeypatch.setattr(cli_update_check.shutil, "which", lambda name: f"/usr/bin/{name}")
+
+    plan = detect_upgrade_command()
+
+    assert plan is not None
+    assert plan.argv == ("uv", "tool", "install", "kedacode@latest")
+    assert plan.rebuilds_environment is True
+
+
+def test_unpinned_uv_receipt_keeps_uv_tool_upgrade(
+    _pypi_managed_install: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """安装记录里没有版本约束时仍走原地升级，不重建环境。"""
+    tool_prefix = tmp_path / "uv" / "tools" / "kedacode"
+    _write_uv_receipt(tool_prefix, '{ name = "kedacode" }')
+    monkeypatch.setattr(sys, "prefix", str(tool_prefix))
+    monkeypatch.setattr(cli_update_check.shutil, "which", lambda name: f"/usr/bin/{name}")
+
+    plan = detect_upgrade_command()
+
+    assert plan is not None
+    assert plan.argv == ("uv", "tool", "upgrade", "kedacode")
+    assert plan.rebuilds_environment is False
+
+
+def test_pinned_uv_tool_install_with_extras_is_not_auto_upgraded(
+    _pypi_managed_install: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """固定版本且带 extras 时无法用一条命令安全改写，交给候选命令兜底。"""
+    tool_prefix = tmp_path / "uv" / "tools" / "kedacode"
+    _write_uv_receipt(
+        tool_prefix, '{ name = "kedacode", extras = ["postgres"], specifier = "==0.8.0" }'
+    )
+    monkeypatch.setattr(sys, "prefix", str(tool_prefix))
+    monkeypatch.setattr(cli_update_check.shutil, "which", lambda name: f"/usr/bin/{name}")
+
+    assert detect_upgrade_command() is None
+
+
+@pytest.mark.parametrize(
+    ("os_name", "rebuilds_environment", "expected"),
+    [
+        pytest.param("nt", True, False, id="windows-rebuild-blocked"),
+        pytest.param("nt", False, True, id="windows-in-place-upgrade"),
+        pytest.param("posix", True, True, id="posix-rebuild"),
+    ],
+)
+def test_can_run_in_process_only_blocks_windows_environment_rebuild(
+    monkeypatch: pytest.MonkeyPatch, os_name: str, rebuilds_environment: bool, expected: bool
+) -> None:
+    """只有 Windows 上重建环境的命令不能由运行中的 kc 自己执行。"""
+    monkeypatch.setattr(cli_update_check, "os", SimpleNamespace(name=os_name, environ=os.environ))
+    upgrade_plan = UpgradeCommand(("uv", "tool", "upgrade", "kedacode"), rebuilds_environment)
+    assert upgrade_plan.can_run_in_process is expected
+
+
 def test_pipx_install_maps_to_pipx_upgrade(
     _pypi_managed_install: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -741,6 +820,50 @@ def test_declined_upgrade_prints_copyable_command_only(
     startup_update_check(["registry", "list"])
     assert capsys.readouterr().err == ""
     assert confirm_calls == ["confirm"]
+
+
+def test_windows_environment_rebuild_is_printed_not_run(
+    _isolated_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Windows 上重建环境的升级不询问、不执行，只给命令并提示先退出 KedaCode。"""
+    _interactive_ready(monkeypatch)
+    monkeypatch.setattr(cli_update_check, "resolve_keda_version", lambda: "0.2.1")
+    _write_cache(
+        _isolated_home,
+        {
+            "checked_at": cli_update_check.time.time(),
+            "current_version": "0.2.1",
+            "latest_version": "0.3.0",
+        },
+    )
+    monkeypatch.setattr(cli_update_check, "os", SimpleNamespace(name="nt", environ=os.environ))
+    monkeypatch.setattr(
+        cli_update_check,
+        "detect_upgrade_command",
+        lambda: UpgradeCommand(
+            ("uv", "tool", "install", "kedacode@latest"), rebuilds_environment=True
+        ),
+    )
+    confirm_calls: list[str] = []
+    monkeypatch.setattr(
+        cli_update_check.typer, "confirm", lambda *a, **k: confirm_calls.append("confirm")
+    )
+    run_calls: list[list[str]] = []
+    monkeypatch.setattr(
+        cli_update_check.subprocess, "run", lambda argv, **k: run_calls.append(argv)
+    )
+
+    startup_update_check(["registry", "list"])
+
+    assert confirm_calls == []
+    assert run_calls == []
+    captured_err = capsys.readouterr().err
+    assert "uv tool install kedacode@latest" in captured_err
+    assert "Quit the KedaCode desktop app" in captured_err
+    cache_record = json.loads(_cache_file(_isolated_home).read_text(encoding="utf-8"))
+    assert cache_record["suppressed_version"] == "0.3.0"
 
 
 def test_unrecognized_install_lists_candidate_commands(
