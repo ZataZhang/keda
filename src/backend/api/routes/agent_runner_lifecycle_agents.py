@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictInt
 
 from backend.core.shared.models.agent_model_preset import AgentModelPreset
 from backend.core.shared.models.agent_runner import AppConfig, RepositoryRunContext
@@ -59,6 +59,7 @@ from backend.core.use_cases.lifecycle_settings_console import (
     build_lifecycle_settings_view,
     local_override_binding_conflict,
     validate_fallback_candidates_update,
+    validate_content_generation_timeout_updates,
     validate_lifecycle_preset_binding_update,
     validate_preset_update,
 )
@@ -277,6 +278,32 @@ def update_lifecycle_settings(request: UpdateLifecycleSettingsRequest) -> dict:
         config, editor = _select_scope_config(request.scope, request.repo_id)
         with editor.write_transaction():
             _validate_and_apply_lifecycle_settings(request, config, editor)
+
+    _write_or_fail_http(_validate_and_write)
+    refreshed_config, _editor = _select_scope_config(request.scope, request.repo_id)
+    return _aggregate_view(refreshed_config, request.scope, request.repo_id)
+
+
+class UpdateContentGenerationTimeoutsRequest(BaseModel):
+    """内容生成目标超时写回请求；``null`` 清除仓库层覆盖。"""
+
+    scope: str = Field(default=SCOPE_GLOBAL, pattern="^(global|repository)$")
+    repo_id: str | None = None
+    values: dict[str, StrictInt | None]
+
+
+@router.put("/agent-runner/lifecycle-settings/content-generation-timeouts")
+def update_content_generation_timeouts(request: UpdateContentGenerationTimeoutsRequest) -> dict:
+    """保留式写回内容生成目标超时，并返回该视角下的最新生命周期设置。"""
+
+    def _validate_and_write() -> None:
+        _config, editor = _select_scope_config(request.scope, request.repo_id)
+        with editor.write_transaction():
+            try:
+                normalized_values = validate_content_generation_timeout_updates(request.values)
+            except LifecycleAgentsUpdateError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            editor.update_generated_content_timeouts(normalized_values)
 
     _write_or_fail_http(_validate_and_write)
     refreshed_config, _editor = _select_scope_config(request.scope, request.repo_id)

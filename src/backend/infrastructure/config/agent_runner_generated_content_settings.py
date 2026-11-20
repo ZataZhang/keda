@@ -24,7 +24,7 @@ class AgentRunnerGeneratedContentTargetSettings(BaseModel):
     title_template: str | list[str] = ""
     body_template: str | list[str] = ""
     agent: str = "auto"
-    timeout_seconds: int = 120
+    timeout_seconds: int = 600
     prompt: str | list[str] = ""
     include_commit_log: bool = True
     include_diff_stat: bool = True
@@ -67,7 +67,7 @@ class AgentRunnerGeneratedContentSettings(BaseModel):
     )
     draft_pr: AgentRunnerGeneratedContentTargetSettings = Field(
         default_factory=lambda: AgentRunnerGeneratedContentTargetSettings(
-            enabled=False, output="markdown"
+            enabled=False, output="markdown", timeout_seconds=1200
         )
     )
     prd_from_issue: AgentRunnerGeneratedContentTargetSettings = Field(

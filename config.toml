@@ -967,7 +967,7 @@ body_template = [
   "- PR should include: `Closes #<issue-number>`",
 ]
 agent = "auto"
-timeout_seconds = 120
+timeout_seconds = 600
 prompt = [
   "Generate a readable GitHub Issue from this PRD.",
   "Return strict JSON with keys: title, body.",
@@ -1005,7 +1005,7 @@ body_template = [
   "- PR should include: `Closes #<issue-number>`",
 ]
 agent = "auto"
-timeout_seconds = 120
+timeout_seconds = 600
 prompt = [
   "Turn this requirement description into a self-sufficient GitHub Issue.",
   "Return strict JSON with keys: title, body.",
@@ -1057,7 +1057,7 @@ enabled = true
 mode = "agent"
 output = "markdown"
 agent = "auto"
-timeout_seconds = 120
+timeout_seconds = 600
 include_commit_log = false
 include_diff_stat = false
 body_template = [

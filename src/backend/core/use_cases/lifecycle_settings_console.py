@@ -54,6 +54,14 @@ from backend.core.use_cases.lifecycle_agents_console import (
     _resolve_source_layer,
 )
 
+CONTENT_GENERATION_TIMEOUT_TARGETS = {
+    "issue_from_prd": "从 PRD 生成 Issue",
+    "issue_from_prompt": "从需求描述生成 Issue",
+    "draft_pr": "生成 Draft PR 标题和正文",
+    "prd_from_issue": "从 Issue 生成 PRD",
+}
+CONTENT_GENERATION_TIMEOUT_MAX_SECONDS = 86400
+
 
 def _model_capability(config: AppConfig, agent_name: str | None) -> tuple[bool, bool]:
     """返回某 agent 是否声明了模型 / 推理档参数模板（``model_supported, effort_supported``）。
@@ -411,6 +419,20 @@ def build_lifecycle_settings_view(
             }
         )
 
+    content_generation_timeouts = [
+        {
+            "key": target_name,
+            "label": target_label,
+            "timeout_seconds": getattr(config.generated_content, target_name).timeout_seconds,
+            "global_timeout_seconds": (
+                getattr(global_config.generated_content, target_name).timeout_seconds
+                if global_config is not None
+                else None
+            ),
+        }
+        for target_name, target_label in CONTENT_GENERATION_TIMEOUT_TARGETS.items()
+    ]
+
     return {
         "scope": scope,
         "repo_id": repo_id,
@@ -422,6 +444,10 @@ def build_lifecycle_settings_view(
         "lifecycles": lifecycles,
         "presets": presets,
         "fallback": build_fallback_candidates_view(config),
+        "content_generation_timeouts": {
+            "max_seconds": CONTENT_GENERATION_TIMEOUT_MAX_SECONDS,
+            "targets": content_generation_timeouts,
+        },
         "field_source_vocabulary": {
             FIELD_SOURCE_PRESET: "预设声明",
             FIELD_SOURCE_INHERITED: "继承实现阶段",
@@ -430,6 +456,42 @@ def build_lifecycle_settings_view(
             FIELD_SOURCE_PRESET_UNRESOLVED: "绑定预设未定义（已删除或未声明，请先解绑或重建该预设）",
         },
     }
+
+
+def validate_content_generation_timeout_updates(
+    values: Mapping[str, Any],
+) -> dict[str, int | None]:
+    """校验内容生成目标的超时增量；``None`` 表示删除本层覆盖。
+
+    Args:
+        values: 内容生成目标名到秒数的增量；仓库层可用 ``None`` 恢复全局值。
+
+    Returns:
+        通过校验的目标名和秒数映射。
+
+    Raises:
+        LifecycleAgentsUpdateError: 未知目标、空更新，或秒数不在允许范围内。
+    """
+    if not values:
+        raise LifecycleAgentsUpdateError("At least one content generation timeout is required.")
+
+    normalized_values: dict[str, int | None] = {}
+    for target_name, timeout_seconds in values.items():
+        if target_name not in CONTENT_GENERATION_TIMEOUT_TARGETS:
+            raise LifecycleAgentsUpdateError(
+                f"Unknown generated-content target '{target_name}'. Valid targets: "
+                f"{', '.join(CONTENT_GENERATION_TIMEOUT_TARGETS)}."
+            )
+        if timeout_seconds is not None and (
+            type(timeout_seconds) is not int
+            or not 1 <= timeout_seconds <= CONTENT_GENERATION_TIMEOUT_MAX_SECONDS
+        ):
+            raise LifecycleAgentsUpdateError(
+                f"{target_name}.timeout_seconds must be an integer between 1 and "
+                f"{CONTENT_GENERATION_TIMEOUT_MAX_SECONDS}."
+            )
+        normalized_values[target_name] = timeout_seconds
+    return normalized_values
 
 
 def validate_preset_update(

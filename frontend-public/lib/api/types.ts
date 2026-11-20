@@ -1229,6 +1229,27 @@ export type AgentFallbackCandidatesView = {
   agents: string[];
 };
 
+/** 可单独调整超时的内容生成目标。 */
+export type GeneratedContentTimeoutTargetKey =
+  | "issue_from_prd"
+  | "issue_from_prompt"
+  | "draft_pr"
+  | "prd_from_issue";
+
+/** 单个内容生成目标的生效时限与全局基线。 */
+export type GeneratedContentTimeoutTarget = {
+  key: GeneratedContentTimeoutTargetKey;
+  label: string;
+  timeout_seconds: number;
+  global_timeout_seconds: number | null;
+};
+
+/** 生命周期设置页中的内容生成超时配置。 */
+export type GeneratedContentTimeoutsView = {
+  max_seconds: number;
+  targets: GeneratedContentTimeoutTarget[];
+};
+
 /** 聚合生命周期设置的完整读写视图。 */
 export type LifecycleSettingsView = {
   scope: LifecycleAgentScope;
@@ -1242,6 +1263,7 @@ export type LifecycleSettingsView = {
   lifecycles: LifecycleSettingsRow[];
   presets: AgentPresetDefinition[];
   fallback: AgentFallbackCandidatesView;
+  content_generation_timeouts: GeneratedContentTimeoutsView;
   /** 来源标签 -> 中文说明（后端下发，前端只渲染）。 */
   field_source_vocabulary: Record<string, string>;
 };

@@ -450,7 +450,7 @@ def test_prd_override_view_excludes_planner(console_env: dict) -> None:
 
 
 def test_lifecycle_settings_aggregate_view_shape(console_env: dict) -> None:
-    """GET /lifecycle-settings 返回九阶段生效值 + 逐字段来源 + 预设清单 + 回退候选三段。"""
+    """GET /lifecycle-settings 返回生命周期、预设、回退及内容生成时限。"""
     client = console_env["client"]
     view = client.get("/api/v1/agent-runner/lifecycle-settings", params={"scope": "global"}).json()
     assert view["scope"] == "global"
@@ -471,6 +471,103 @@ def test_lifecycle_settings_aggregate_view_shape(console_env: dict) -> None:
     implementation = next(r for r in view["lifecycles"] if r["key"] == "implementation")
     assert implementation["preset_name"] is None
     assert "fallback" in view and "presets" in view
+    assert view["content_generation_timeouts"]["max_seconds"] == 86400
+    assert {
+        target["key"]: target["timeout_seconds"]
+        for target in view["content_generation_timeouts"]["targets"]
+    } == {
+        "issue_from_prd": 600,
+        "issue_from_prompt": 600,
+        "draft_pr": 1200,
+        "prd_from_issue": 600,
+    }
+
+
+def test_content_generation_timeouts_update_global_and_repository_scopes(
+    console_env: dict,
+) -> None:
+    """全局超时可调整，仓库可覆盖并清除覆盖以继承全局值。"""
+    client = console_env["client"]
+    global_response = client.put(
+        "/api/v1/agent-runner/lifecycle-settings/content-generation-timeouts",
+        json={"scope": "global", "values": {"issue_from_prd": 900, "draft_pr": 1800}},
+    )
+    assert global_response.status_code == 200
+    global_disk = _parse_toml(console_env["config_path"])
+    assert (
+        global_disk["agent_runner"]["generated_content"]["issue_from_prd"]["timeout_seconds"] == 900
+    )
+    assert global_disk["agent_runner"]["generated_content"]["draft_pr"]["timeout_seconds"] == 1800
+
+    repository_url = "/api/v1/agent-runner/lifecycle-settings/content-generation-timeouts"
+    repository_response = client.put(
+        repository_url,
+        json={
+            "scope": "repository",
+            "repo_id": "testrepo",
+            "values": {"issue_from_prd": 1500},
+        },
+    )
+    assert repository_response.status_code == 200
+    repository_targets = {
+        target["key"]: target
+        for target in repository_response.json()["content_generation_timeouts"]["targets"]
+    }
+    assert repository_targets["issue_from_prd"]["timeout_seconds"] == 1500
+    assert repository_targets["issue_from_prd"]["global_timeout_seconds"] == 900
+    repo_disk = _parse_toml(console_env["iar_config_path"])
+    assert (
+        repo_disk["agent_runner"]["generated_content"]["issue_from_prd"]["timeout_seconds"] == 1500
+    )
+
+    reset_response = client.put(
+        repository_url,
+        json={
+            "scope": "repository",
+            "repo_id": "testrepo",
+            "values": {"issue_from_prd": None},
+        },
+    )
+    assert reset_response.status_code == 200
+    reset_target = next(
+        target
+        for target in reset_response.json()["content_generation_timeouts"]["targets"]
+        if target["key"] == "issue_from_prd"
+    )
+    assert reset_target["timeout_seconds"] == reset_target["global_timeout_seconds"] == 900
+    repo_disk = _parse_toml(console_env["iar_config_path"])
+    assert "generated_content" not in repo_disk["agent_runner"]
+    assert (
+        _parse_toml(console_env["config_path"])["agent_runner"]["generated_content"][
+            "issue_from_prd"
+        ]["timeout_seconds"]
+        == 900
+    )
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        {},
+        {"unknown_target": 600},
+        {"issue_from_prd": 0},
+        {"issue_from_prd": 86401},
+        {"issue_from_prd": True},
+    ],
+)
+def test_content_generation_timeouts_reject_invalid_updates_without_writing(
+    console_env: dict, values: dict[str, object]
+) -> None:
+    """拒绝空、未知、越界或非整数的时限更新，且不改配置文件。"""
+    config_before = console_env["config_path"].read_bytes()
+    repository_before = console_env["iar_config_path"].read_bytes()
+    response = console_env["client"].put(
+        "/api/v1/agent-runner/lifecycle-settings/content-generation-timeouts",
+        json={"scope": "global", "values": values},
+    )
+    assert response.status_code == 422
+    assert console_env["config_path"].read_bytes() == config_before
+    assert console_env["iar_config_path"].read_bytes() == repository_before
 
 
 def test_preset_create_and_bind_writes_config_toml(console_env: dict) -> None:

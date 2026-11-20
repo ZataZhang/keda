@@ -2535,7 +2535,7 @@ The PRD-from-Issue generation target is configured under `[agent_runner.generate
 enabled = true
 mode = "agent"
 agent = "auto"
-timeout_seconds = 120
+timeout_seconds = 600
 body_template = "..."
 prompt = "..."   # fallback only — used when the prd skill spec is unreachable
 ```
@@ -3295,8 +3295,8 @@ PRD 写下的时刻和执行它的时刻之间仓库还在变，PRD 点名的路
 
 - `mode = "agent"`（**默认**）：用 `.format()` 渲染配置的 `prompt`，调用本地只读 agent，解析输出。
   `kc issue create`（从 PRD）、`kc issue create --from-prompt`（无 PRD）、开 Draft PR、rework-prd
-  其中 Draft PR 正文默认 `draft_pr.enabled = false`，直接使用确定性正文；其余三处默认调一次 agent（超时上限
-  `timeout_seconds`，默认 120 秒）。
+  其中 Draft PR 正文默认 `draft_pr.enabled = false`，直接使用确定性正文；其余三处默认调一次 agent。
+  这些内容生成调用有独立的墙钟上限：Issue / PRD 生成默认 600 秒，Draft PR 默认 1200 秒。
 - `mode = "template"`（**已废弃**）：跳过 agent，直接用 `.format()` 渲染 `title_template` 和
   `body_template`。仍被接受，但将在后续版本移除；模板的长期用途是下面的失败兜底。
   仓库 `.kedacode.toml` 里钉成 `mode = "template"` 的 target，加载配置时会记一条弃用警告（同一进程里
@@ -3335,6 +3335,13 @@ Issue 创建或 PR 发布，而是按下面的顺序落到下一级，并各记�
 2. `fallback = "template"`（目前唯一支持的值）时，渲染 `title_template` / `body_template`；
 3. 调用方内置的确定性文案（Issue 用 PRD 派生的标题与正文；PR 用
    `Closes #N` + Summary / Validation / Risk / Reviewer Notes，包含提交日志、diff stat、发布 HEAD 与发布 HEAD 中已提交的验证计划/证据报告/verifier 报告链接）。
+
+### 调整内容生成时限
+
+Console 的「Agent Runner → 生命周期设置 → 内容生成时限」页可按目标调整超时，单位为秒，允许设置
+1–86400 秒。全局视角写入机器级 `config.toml`；仓库视角写入仓库 `.kedacode.toml`，可单独覆盖，
+并通过「跟随全局」清除该目标的仓库覆盖。保存只影响之后启动的内容生成任务，已启动任务继续使用启动时
+读取的超时。延长时限会让无响应的生成调用等待更久；触发超时后仍按上述模板 / 确定性正文顺序兜底。
 
 Draft PR 默认不等待 AI 生成。需要 AI 撰写时显式设置
 `[agent_runner.generated_content.draft_pr] enabled = true`；既有显式开启的配置继续生效，
@@ -3418,7 +3425,7 @@ body_template = [
   "{acceptance_items}",
 ]
 agent = "auto"
-timeout_seconds = 60
+timeout_seconds = 600
 prompt = [
   "Generate a readable GitHub Issue from this PRD.",
   "Return strict JSON with keys: title, body.",
@@ -3464,7 +3471,7 @@ enabled = true
 mode = "agent"
 output = "markdown"
 agent = "auto"
-timeout_seconds = 120
+timeout_seconds = 600
 include_commit_log = false
 include_diff_stat = false
 body_template = [

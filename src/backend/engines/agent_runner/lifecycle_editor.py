@@ -121,6 +121,19 @@ class TomlLifecycleSettingsEditor:
             values,
         )
 
+    def update_generated_content_timeouts(self, values: Mapping[str, int | None]) -> None:
+        """一次写回各内容生成目标的超时；``None`` 删除该层的目标级覆盖。"""
+        apply_toml_updates(
+            self._config_path,
+            [
+                TableKeyUpdate(
+                    ("agent_runner", "generated_content", target_name),
+                    {"timeout_seconds": timeout_seconds},
+                )
+                for target_name, timeout_seconds in values.items()
+            ],
+        )
+
     def update_presets_and_bindings(
         self,
         *,

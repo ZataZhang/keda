@@ -648,7 +648,7 @@ class GeneratedContentTargetConfig:
     title_template: str = ""
     body_template: str = ""
     agent: str = "auto"
-    timeout_seconds: int = 120
+    timeout_seconds: int = 600
     prompt: str = ""
     include_commit_log: bool = True
     include_diff_stat: bool = True
@@ -677,7 +677,9 @@ class GeneratedContentConfig:
         default_factory=GeneratedContentTargetConfig
     )
     draft_pr: GeneratedContentTargetConfig = field(
-        default_factory=lambda: GeneratedContentTargetConfig(enabled=False, output="markdown")
+        default_factory=lambda: GeneratedContentTargetConfig(
+            enabled=False, output="markdown", timeout_seconds=1200
+        )
     )
     prd_from_issue: GeneratedContentTargetConfig = field(
         default_factory=lambda: GeneratedContentTargetConfig(output="markdown")

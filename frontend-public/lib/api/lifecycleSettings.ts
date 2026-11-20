@@ -10,6 +10,7 @@ import type {
   AgentFallbackCandidatesView,
   AgentPresetPayload,
   FallbackCandidateWriteEntry,
+  GeneratedContentTimeoutTargetKey,
   LifecycleAgentScope,
   LifecycleSettingsView,
 } from "./types";
@@ -54,6 +55,24 @@ export async function updateLifecycleSettings(params: {
     repo_id: params.repoId ?? null,
     presets: params.presets,
     bindings: params.bindings,
+  });
+}
+
+/**
+ * 保留式写回内容生成超时；仓库作用域的 `null` 会清除本地覆盖并继承全局值。
+ *
+ * @param params - 视角、仓库 id 与本次修改的目标超时。
+ * @returns 写后重读的聚合视图。
+ */
+export async function updateContentGenerationTimeouts(params: {
+  scope: LifecycleAgentScope;
+  repoId?: string;
+  values: Partial<Record<GeneratedContentTimeoutTargetKey, number | null>>;
+}): Promise<LifecycleSettingsView> {
+  return put(`${BASE_PATH}/lifecycle-settings/content-generation-timeouts`, {
+    scope: params.scope,
+    repo_id: params.repoId ?? null,
+    values: params.values,
   });
 }
 

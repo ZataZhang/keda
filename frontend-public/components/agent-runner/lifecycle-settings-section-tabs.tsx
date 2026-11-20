@@ -10,6 +10,7 @@ import {
 export const LIFECYCLE_SETTINGS_TABS = [
   { id: "matrix", label: "生命周期矩阵" },
   { id: "presets", label: "模型预设" },
+  { id: "content-timeouts", label: "内容生成时限" },
   { id: "fallback", label: "执行器回退" },
 ] as const;
 

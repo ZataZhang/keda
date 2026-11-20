@@ -2,11 +2,12 @@
 
 // 生命周期、模型预设与执行器回退的统一设置页（全局层 / 仓库层共用）。
 //
-// 一个页面通过吸顶 Tab 提供三类设置区块，全部读自同一份聚合视图
+// 一个页面通过吸顶 Tab 提供四类设置区块，全部读自同一份聚合视图
 // `GET /lifecycle-settings`（core 层把矩阵 / 预设 / 回退折叠成同一解析结果，页面与 CLI 不再各算各的）：
 // - 生命周期矩阵：九阶段各自的最终生效 agent / 模型 / 推理深度 + 逐字段来源，
 //   通过「绑定预设」设定显式值（预设是原子三元组，遮蔽矩阵同键声明）；
 // - 模型预设：新建 / 编辑 / 删除命名预设，编辑前提示共享该预设的受影响阶段；
+// - 内容生成时限：按目标设置 wall-clock 超时；仓库视角可覆盖或恢复全局值；
 // - 执行器回退候选：为每个回退候选绑定同一执行器的命名预设。
 //
 // 写回保持保留式语义：矩阵只提交改动过的预设与绑定（一次 PATCH），回退候选按
@@ -41,6 +42,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ResourceErrorAlert } from "@/components/agent-runner/resource-error-alert";
+import { LifecycleContentGenerationTimeouts } from "@/components/agent-runner/lifecycle-content-generation-timeouts";
 import { fetchRegistryRepositories } from "@/lib/api/console";
 import {
   fetchLifecycleSettings,
@@ -972,7 +974,7 @@ export function LifecycleSettingsPage({
       <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-200">
         {view.scope === "global"
           ? "正在编辑：全局 config.toml。"
-          : `正在编辑：仓库 ${view.repo_id ?? ""}。生命周期矩阵与预设绑定写入该仓库的 .kedacode.toml；仅下方「执行器回退」固定写入机器级 config.toml。`}{" "}
+          : `正在编辑：仓库 ${view.repo_id ?? ""}。生命周期矩阵、预设绑定和内容生成时限写入该仓库的 .kedacode.toml；仅「执行器回退」固定写入机器级 config.toml。`}{" "}
         本页展示磁盘上的配置。Runner 在领取新任务，以及进入修复、收尾、校验、审核或监督阶段时读取最新的执行器设置。已开始的阶段继续使用启动时的执行器。
       </p>
       <p className="text-xs text-slate-500 dark:text-slate-400">
@@ -1004,6 +1006,21 @@ export function LifecycleSettingsPage({
         data-testid="settings-tab-panel-presets"
       >
         {renderPresetSection(view)}
+      </div>
+      <div
+        id="lifecycle-settings-panel-content-timeouts"
+        role="tabpanel"
+        aria-labelledby="lifecycle-settings-tab-content-timeouts"
+        tabIndex={0}
+        hidden={activeSettingsTab !== "content-timeouts"}
+        className="focus:outline-none"
+        data-testid="settings-tab-panel-content-timeouts"
+      >
+        <LifecycleContentGenerationTimeouts
+          key={`${view.scope}:${view.repo_id ?? "global"}`}
+          view={view}
+          onSaved={setView}
+        />
       </div>
       <div
         id="lifecycle-settings-panel-fallback"
