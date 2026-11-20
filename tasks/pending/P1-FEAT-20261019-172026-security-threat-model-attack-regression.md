@@ -48,6 +48,8 @@ Agent Runner 会把外部 Issue、评论、日志和仓库指令交给有本机�
 | 🤖 自动验证 | 由后续任务读取已晋升技能。 | 回归能区分持久化前后的状态；不会只根据原进程中的对象声称持久化成功。 |
 | 🤖 自动验证 | 回归桩收到未声明的外部命令或输入形状。 | 桩以非零退出并报告未识别输入；不会用默认成功掩盖未覆盖路径。 |
 
+- [x] 我确认本节解读与行为样例准确表达需求；按 2026-11-20 用户授权，由 Agent 代为勾选。
+
 **我默默定了这些**
 
 - **本期只建立模型与证据，不修复产品控制**：按你上一轮选择的推荐项，任何确认后的缺口都登记为待修项，由各自的后续 PRD 决定修复。
@@ -88,6 +90,8 @@ Keda 维护者得到一页公开安全模型，能快速看出每类输入可能
 仓库没有已登记的私有安全问题跟踪库；现有本机状态目录已经由 Git 忽略。推荐把详细复现保存在该目录下的私有安全记录文件，公开页只保留不含利用信息的类别和状态。这样没有外部服务与权限配置，但记录不会随 Git 同步或自动备份。若以后需要多维护者共同处理，届时迁到专用私有跟踪库。
 
 **请确认：** 是否同意本期将详细缺口记录放在本机忽略目录下的私有文件，并接受它不自动跨机器同步？
+
+- [x] 接受推荐：详细复现只保存在本机忽略文件 `.kedacode/security/private-known-gaps.md`；接受它不自动跨机器同步或备份。（按 2026-11-20 用户授权由 Agent 代选）
 
 **验收：** 公开页面和 Git 变更中不出现私有记录里的复现内容；本地私有记录不进入 Git，公开目录只留下缺口类别、严重度、状态和不透明编号。
 
@@ -470,5 +474,17 @@ R2 / R3 可执行 oracle 共三条（rv-1、rv-2、rv-3），未超过 PRD 范�
 | D-03 | 公开安全材料披露到什么程度 | 公开架构、控制、缺口类别、状态与定性严重度；复现细节留私有 | 把未修缺口的端点、载荷和步骤完整放进公共文档与测试 | 公开复现会降低攻击成本，而类别级状态仍能展示安全工程方法与覆盖边界。 |
 | D-04 | 已知缺口怎样保持与代码一致 | 用具名断言锁定当前观察；行为变化时测试失败并要求同步转状态 | 使用 skip 或非严格 xfail 让用例静默略过 | 当前行为可以被 CI 如实观察，状态翻转不能在没有审阅的情况下通过。 |
 | D-05 | 安全回归的执行位置 | 新增 tests/security/，无真实凭据，加入现有 pytest / CI 收集 | 另设手动脚本或独立在线安全服务 | 离线确定性回归适合进入常规全量 CI，维护一套测试入口成本更低。 |
-| D-06 | 本机私有记录的存储位置 | **推荐待确认：** 本机忽略文件 .kedacode/security/private-known-gaps.md | 直接写进公开 tasks/ 或新建私有远程服务 | .kedacode/ 已被忽略，本地文件满足本期隐私边界且无需接入服务；代价是不能自动同步或备份，需由 §2 人工确认。 |
+| D-06 | 本机私有记录的存储位置 | 本机忽略文件 `.kedacode/security/private-known-gaps.md`；用户于 2026-11-20 授权 Agent 勾选推荐方案 | 直接写进公开 tasks/ 或新建私有远程服务 | `.kedacode/` 已被忽略，本地文件满足本期隐私边界且无需接入服务；接受它不能自动同步或备份，若以后有多维护者再迁移到私有跟踪库。 |
 | D-07 | 威胁模型覆盖哪些攻击面 | 盘点八类，自动测试只覆盖可稳定离线验证的子集 | 只记录恶意 Issue、凭据与文件修改三类 | 漏掉本地 API 与持久技能这两个跨任务信任边界会让模型无法解释后续 prompt 污染风险。 |
+
+### Change Log
+
+- **2026-11-20**：按用户明确授权，由 Agent 勾选 Section 1 解读与 Section 2 私有缺口存放位置的推荐方案。最终公开安全模型仍需在 PR 中人工审阅；§9 `Human-Confirmed` 项保持未勾选。
+
+### Final Reconciliation
+
+- Interpretation: approved under the user's explicit delegation; implementation has not started.
+- Public behavior and contracts: unchanged; this PRD still limits work to documentation and offline deterministic regression tests.
+- Related PRD status: no delivery dependencies; real-model attack evaluation remains a separate future decision.
+- Requirements and risks: D-06 selects the local ignored file; its no-sync / no-backup limitation remains disclosed in §12.
+- Reconciled differences: none before implementation; update this section against the final source and fresh evidence before archive.
