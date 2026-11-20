@@ -17,7 +17,7 @@ exit=1
 acceptance_assertion=PASS
 ```
 
-该行来自真实 `uv run kc --repo <temporary repository> issue list` 输出，证据文件完整保留 Rich CLI 的原始换行。实现者已交叉检查六项 `kc evidence check` 均为 PASS。关联：[GitHub Issue #398](https://github.com/ZataZhang/keda/issues/398)。本执行流未创建 PR 或 CI 运行，因此没有对应链接；由 runner 后续发布。
+该行来自真实 `uv run kc --repo <temporary repository> issue list` 输出，证据文件完整保留 Rich CLI 的原始换行。人审期望：退出码 `1`；包含 `gitea`、`platform`、`not implemented`、当前仅支持 `github` 和回退方法；不含 `Traceback`。关联：[GitHub Issue #398](https://github.com/ZataZhang/keda/issues/398)。本执行流未创建 PR 或 CI 运行，因此没有对应链接；由 runner 后续发布。
 
 ## 验证结果
 
@@ -27,17 +27,17 @@ acceptance_assertion=PASS
 | rv-2 | PASS | 变更前真实 CLI 接受 `gitlab`（退出码 0）；当前真实 CLI 在加载配置时退出码 1，并列出 `github` / `gitea`。 |
 | rv-3 | PASS | 未声明平台与显式 `github` 的真实入口均以 1 结束，平台/配置错误提示数为 0；gitea 负向对照触发未实现提示。 |
 | rv-4 | PASS | gitea 配置下的本地生命周期查询退出码 0；同一配置的 Issue 查询退出码 1。 |
-| rv-5 | PASS | 定向测试实际运行 81 项并通过。最终代码修改后的普通 `just test` 曾实际运行 326 项并通过、698 项由 testmon 排除；证据复跑时命中同一 worktree 的成功标记并跳过。一次额外 `CI=1 just test` 诊断报告 `no tests ran`，不计为通过证据。架构搜索显示客户端只在工厂构造、`gitea` 只定义于共享模型、工厂调用数为 26 且与基线一致、签名未变、接口 diff 为空。 |
+| rv-5 | PASS | 定向 pytest 实际运行并通过。`CI=1 PYTEST_ADDOPTS=--testmon-noselect just test` 完整执行本地测试目标：`5608 passed, 1 skipped`。架构搜索显示客户端只在工厂构造、`gitea` 只定义于共享模型、工厂调用数为 26 且与基线一致、签名未变、接口 diff 为空。 |
 | rv-6 | PASS | `uv run mkdocs build --strict` 退出码 0；配置说明与 Agent Runner 交叉引用搜索均命中。 |
 
-运行 `UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache uv run kc evidence check --evidence tasks/evidence/P2-FEAT-20261119-152718-repository-platform-selection-skeleton` 结果为 `6/6 passed`。六条证据在最后一次影响实现和测试的修改之后重新采集。没有截图、录屏或界面变更；此 PRD 的人审面是 CLI 输出。
+运行 `UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache uv run kc evidence check --evidence tasks/evidence/P2-FEAT-20261119-152718-repository-platform-selection-skeleton` 结果为 `6/6 passed`；本地门禁复跑超时覆盖为 1260 秒，复跑缓存已关闭。RV-5 的 stdout 断言检查 pytest 失败摘要（` failed,` / ` failed in`），不把测试名中的示例文本“evidence check failed”误判为失败用例。早先的全量诊断运行曾分别在 backlog API 与 max-file-lines guard 用例失败；两个用例各自单独运行时通过，随后完整全量运行通过。没有截图、录屏或界面变更；此 PRD 的人审面是 CLI 输出。
 
 ## 验证身份
 
 - 工作分支：`issue-398`
-- 验证时 HEAD：`1ad17462d893edfafaf6b41f7a420bab02ed0140`
-- 验证时 `HEAD^{tree}`：`ca2ef55fa1554dbfd7f9b8cca94f8f0dc9635a3f`
-- 验证时实现仍处于工作树，尚未提交；上述 HEAD/tree 是其基线。提交和归档由 runner 处理。
+- 验证时 HEAD：`f5cffa14ffb979a74d9a8b622b78136dd45bc0cf`
+- 验证时 `HEAD^{tree}`：`e0b1f2355668b302741b62ebf1233f89cd4518af`
+- 实现已在工作树 HEAD 中。PRD 归档和代码落地由 runner 处理；本次没有创建 PR。
 
 ## 复核备注
 
