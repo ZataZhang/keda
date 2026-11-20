@@ -86,7 +86,21 @@ Windows 原生支持**不需要 POSIX 进程组**的那部分能力；依赖进�
 
 不支持的入口会抛出 `UnsupportedPlatformFeatureError`，消息会指明需要 Linux / macOS。
 CI 的 `windows-latest` job 只跑支持范围内的子集：全量模块 import 冒烟、跨平台文件锁、
-TOML 写回与 Console API 契约；daemon / preview / container 的 POSIX 专用测试不进入该 job。
+TOML 写回、Console API 契约、POSIX shell 选择与跨平台进程探活；daemon / preview / container
+的 POSIX 专用测试不进入该 job。
+
+**shell 命令自动适配**：验证命令（`verification_commands`）、`pre_commit_verification_command`、
+证据复跑、浏览器 E2E 与 loop 的前置命令都是 POSIX shell 写法（如 `SKIP=x uv run …`、`&&`），
+kc 以 `bash -lc` / `/bin/sh -c` 执行它们。同一份配置在 macOS / Linux 与 Windows 上通用，无需按平台改写：
+
+- macOS / Linux：照常使用系统的 `bash` / `/bin/sh`，行为不变。
+- Windows：kc 从 `git` 的安装位置自动找到 Git for Windows 自带的 `<Git 目录>\bin\bash.exe` 执行，
+  不使用 `C:\Windows\System32\bash.exe` / `WindowsApps\bash.exe`（那是 WSL 启动器，未装发行版时直接报错）。
+  因此无论 kc 从 PowerShell、cmd、Git Bash 还是托盘应用启动，结果都一致。找不到 Git Bash 时命令会报错并提示安装
+  [Git for Windows](https://git-scm.com/download/win)；配置里用到的工具（如 `just`、`uv`）仍需自行安装并在 PATH 上。
+
+进程存活判断（daemon 单实例锁、`agent/running` 过期认领回收、机器在线状态等）统一使用 `psutil`，
+在 Windows 上同样能正确识别已退出的进程。
 
 **curl 一键脚本（macOS / Linux）：**
 
