@@ -23,6 +23,7 @@ from backend.core.shared.models.agent_runner import (
     IssueSummary,
     PullRequestContext,
 )
+from backend.core.use_cases.agent_runner_events import parse_latest_failure_summary
 from backend.core.use_cases.agent_runner_monitor import (
     Anomaly,
     AnomalyDetectionContext,
@@ -32,7 +33,6 @@ from backend.core.use_cases.agent_runner_monitor import (
     build_repository_overview,
     detect_anomalies,
     parse_event_timeline,
-    parse_latest_failure_summary,
 )
 from tests.conftest import FakeGitHubClient, FakeProcessRunner
 
