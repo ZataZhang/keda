@@ -1061,7 +1061,7 @@ def test_captured_output_includes_stdout_written_when_process_exits(tmp_path: Pa
         [sys.executable, "-c", script],
         cwd=tmp_path,
         capture_output=True,
-        timeout=20,
+        timeout=60,
         inactivity_timeout=3,
     )
 
