@@ -19,6 +19,7 @@ import type { RuntimeTaskEntry, RuntimeTaskSummary } from "@/lib/api/types";
 import { formatLocalDateTime } from "@/lib/utils";
 
 import { RuntimeTaskPhaseDescription, RuntimeTaskPhase } from "./runtime-task-phase";
+import { RuntimeTaskExecutor, RuntimeTaskLocalRunSuperseded } from "./runtime-task-executor";
 import { RuntimeTaskAnomalies, RuntimeTaskImpact } from "./runtime-task-detail";
 import {
   RuntimeTaskBlockingReason,
@@ -301,6 +302,7 @@ function CompanionTaskRow({
     >
       <span className="flex flex-wrap items-center gap-1.5 text-xs">
         <Badge variant={presentation.variant}>{presentation.label}</Badge>
+        <RuntimeTaskExecutor task={task} />
         <RuntimeTaskPhase task={task} />
         <RuntimeTaskWatch task={task} />
         <span className="font-medium text-slate-900 dark:text-slate-100">
@@ -317,6 +319,7 @@ function CompanionTaskRow({
       <RuntimeTaskObservation task={task} />
       <RuntimeTaskBlockingReason task={task} compact />
       <span className="flex flex-wrap gap-x-2 text-[11px] text-slate-500">
+        <RuntimeTaskLocalRunSuperseded task={task} />
         {task.agent ? (
           <span>
             最近执行：{task.agent}

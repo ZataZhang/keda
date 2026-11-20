@@ -40,6 +40,7 @@ import {
   RuntimeTaskPhase,
   runtimePhaseLabel,
 } from "./runtime-task-phase";
+import { RuntimeTaskExecutor, RuntimeTaskLocalRunSuperseded } from "./runtime-task-executor";
 import {
   RuntimeTaskBlockingReason,
   RuntimeTaskDuration,
@@ -411,6 +412,7 @@ export function RuntimeTaskDetail({
         <CardHeader className="pb-2">
           <CardTitle className="flex flex-wrap items-center gap-2 text-sm">
             <Badge variant={presentation.variant}>{presentation.label}</Badge>
+            <RuntimeTaskExecutor task={task} />
             <RuntimeTaskPhase task={task} />
             <RuntimeTaskWatch task={task} />
             <span>{identity}</span>
@@ -557,6 +559,7 @@ export function RuntimeTaskDetail({
           ) : null}
           <RuntimeTaskAnomalies task={task} />
           <div className="flex flex-wrap gap-x-4 gap-y-1">
+            <RuntimeTaskLocalRunSuperseded task={task} />
             <span>
               最近执行：{task.agent ?? "未知"}
               {task.preset ? ` · preset ${task.preset}` : ""}

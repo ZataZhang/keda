@@ -1713,6 +1713,16 @@ export type RuntimeTaskEntry = {
   evidence_video_available?: boolean;
   /** 该任务是否有本地人审页（human-review-checklist.md 等）。 */
   evidence_page_available?: boolean;
+  /** 最近一条可信认领的机器主机名；未读到认领或旧后端时为空。 */
+  executor_host?: string | null;
+  /** 认领机器是否本机；本机编号不可用时为 null。 */
+  executor_is_local?: boolean | null;
+  /** 本机判断依据：machine_id（新版认领）或 hostname（旧版认领）。 */
+  executor_basis?: "machine_id" | "hostname" | null;
+  /** running 表示正在执行；last_claim 表示失败 / 阻塞任务的最近一次认领。 */
+  executor_role?: "running" | "last_claim" | null;
+  /** 其他机器的认领晚于本机最近运行；此时本机运行字段已被后端清空。 */
+  local_run_superseded?: boolean;
 };
 
 /** 看板任务摘要：列表 + 分桶计数 + 数据来源可用性披露。 */

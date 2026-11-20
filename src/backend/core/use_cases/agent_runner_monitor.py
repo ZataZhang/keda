@@ -33,6 +33,7 @@ from backend.core.shared.models.agent_runner import (
     PullRequestContext,
     ReviewEventMarker,
 )
+from backend.core.use_cases.agent_runner_claim_lease import latest_claim_record
 from backend.core.use_cases.agent_runner_events import parse_latest_event_marker
 from backend.core.use_cases.worktree_path_output import parse_worktree_path_stdout
 
@@ -120,6 +121,9 @@ class IssueMonitoringSnapshot:
     suggested_cli_commands: tuple[str, ...]
     has_anomaly: bool
     anomaly_types: tuple[str, ...]
+    #: 最近一条可信认领的持有者 ``{host, machine_id, claim_started_at}``；
+    #: 只在运行中 / 失败 / 阻塞状态读取，读不到时为 ``None``。
+    claim_holder: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -572,6 +576,51 @@ def _extract_pr_number(pr_url: str) -> int | None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+#: 认领评论的检索片段，与 ``kc peers`` 和崩溃回收的读取口径一致。
+_CLAIM_MARKER_NEEDLE = "<!-- kc:claim "
+
+
+def _read_claim_holder(
+    *,
+    issue_number: int,
+    primary_label: str,
+    config_labels: LabelConfig,
+    github_client: IGitHubClient,
+) -> dict | None:
+    """读取运行中 / 失败 / 阻塞 Issue 最近一条可信认领的持有者。
+
+    只采信可信作者写的认领，避免任意评论者伪造执行机器。读取失败只丢这一个
+    字段，不能进入扫描错误——那会让整仓快照被判为不完整。
+    """
+    if primary_label not in (
+        config_labels.running,
+        config_labels.supervising,
+        config_labels.failed,
+        config_labels.blocked,
+    ):
+        return None
+    try:
+        comment_records = github_client.list_issue_comment_records(
+            issue_number,
+            trusted_only=True,
+            body_contains=_CLAIM_MARKER_NEEDLE,
+        )
+    except Exception as exc:  # noqa: BLE001 - 认领只是展示增强，失败降级为不显示。
+        _logger.warning("Claim holder read failed for Issue #%d: %s", issue_number, exc)
+        return None
+    parsed_claim = latest_claim_record(list(comment_records or ()))
+    if parsed_claim is None:
+        return None
+    _, claim_detail, lease = parsed_claim
+    return {
+        "host": claim_detail.host,
+        "machine_id": lease.machine_id if lease is not None else None,
+        "claim_started_at": (
+            claim_detail.started_at.isoformat() if claim_detail.started_at is not None else None
+        ),
+    }
+
+
 def build_issue_snapshot(
     *,
     issue: IssueSummary,
@@ -634,6 +683,12 @@ def build_issue_snapshot(
         ),
         has_anomaly=has_anomaly,
         anomaly_types=tuple(anomaly.type for anomaly in anomalies),
+        claim_holder=_read_claim_holder(
+            issue_number=issue.number,
+            primary_label=primary_label,
+            config_labels=config.labels,
+            github_client=github_client,
+        ),
     )
 
 

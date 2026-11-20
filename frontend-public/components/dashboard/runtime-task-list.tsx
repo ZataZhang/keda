@@ -21,6 +21,7 @@ import { handleExternalLinkClick } from "@/lib/open-external";
 import { cn, formatLocalDateTime } from "@/lib/utils";
 
 import { RuntimeTaskHumanReviewPage } from "./runtime-task-evidence-page";
+import { RuntimeTaskExecutor, RuntimeTaskLocalRunSuperseded } from "./runtime-task-executor";
 import { RuntimeTaskPhaseDescription, RuntimeTaskPhase } from "./runtime-task-phase";
 
 /** 状态分桶的人读文案与配色（唯一事实源，列表/详情/小窗共用）。 */
@@ -352,6 +353,7 @@ function RuntimeTaskRow({
         >
         <span className="flex flex-wrap items-center gap-2">
           <Badge variant={presentation.variant}>{presentation.label}</Badge>
+          <RuntimeTaskExecutor task={task} />
           <RuntimeTaskPhase task={task} />
           <RuntimeTaskWatch task={task} />
           <span className="font-medium text-slate-900 dark:text-slate-100">{identity}</span>
@@ -372,6 +374,7 @@ function RuntimeTaskRow({
           </span>
         ) : null}
         <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
+          <RuntimeTaskLocalRunSuperseded task={task} />
           {task.unclosed_invocation_executor ? (
             <span title="调用账本尚未记录该调用的结束事件；此信息不能单独证明执行进程仍存活。">
               未结束调用：{task.unclosed_invocation_executor}

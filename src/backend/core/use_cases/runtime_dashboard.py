@@ -17,8 +17,9 @@
 from __future__ import annotations
 
 import logging
+import socket
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -48,6 +49,7 @@ from backend.core.use_cases.runtime_failure_diagnosis import (
     diagnose_runtime_failure,
     lifecycle_stage_for_invocation_phase,
 )
+from backend.core.use_cases.coordination_heartbeat import current_machine_id
 from backend.core.use_cases.monitor_snapshots import MonitorSnapshotOverview, SnapshotOverviewResult
 from backend.core.use_cases.runtime_task_observation import (
     SOURCE_PRD_LIFECYCLE,
@@ -90,6 +92,115 @@ _UNTRUSTED_SYNC_STATUSES = frozenset({"pending_first_sync"})
 
 #: 运行账本一次扫描的最大行数：窗口内正常量级远小于此，超出即属历史复盘（Stats 页面）。
 _RUN_SCAN_LIMIT = 1000
+
+
+#: 认领机器标签只在这些分桶显示：运行中表示「谁在做」，失败 / 阻塞表示「最近谁做过」。
+_EXECUTOR_VISIBLE_STATUSES = frozenset(
+    {RuntimeTaskStatus.RUNNING, RuntimeTaskStatus.FAILED, RuntimeTaskStatus.BLOCKED}
+)
+
+
+@dataclass(frozen=True)
+class LocalMachineIdentity:
+    """判断认领是否来自本机所需的本机身份。
+
+    Attributes:
+        machine_id: 本机稳定机器编号；读不到时为 ``None``。
+        host: 本机主机名，仅用于没有机器编号的旧版认领。
+    """
+
+    machine_id: str | None
+    host: str
+
+
+def _current_local_identity() -> LocalMachineIdentity:
+    """读取本机机器编号与主机名；编号读取失败时如实返回 ``None``。"""
+    try:
+        machine_id = current_machine_id()
+    except Exception as exc:  # noqa: BLE001 - 身份读不到只影响本机判断，不能让看板 500。
+        _logger.warning("Runtime summary failed to read local machine id: %s", exc)
+        machine_id = None
+    return LocalMachineIdentity(machine_id=machine_id, host=socket.gethostname())
+
+
+def _executor_fields(
+    issue_entry: Mapping[str, Any],
+    status: RuntimeTaskStatus,
+    local_identity: Callable[[], LocalMachineIdentity],
+) -> dict[str, Any]:
+    """由快照里的认领持有者算出执行机器字段。
+
+    判断规则与 ``is_local_claim`` 一致：有机器编号按编号比较，旧版认领回退主机名；
+    区别是本机编号不可用时返回 ``None``（显示为未知），不默认判成远端或本机。
+    """
+    claim_holder = issue_entry.get("claim_holder")
+    if status not in _EXECUTOR_VISIBLE_STATUSES or not isinstance(claim_holder, Mapping):
+        return {}
+    claim_host = claim_holder.get("host")
+    if not isinstance(claim_host, str) or not claim_host:
+        return {}
+    identity = local_identity()
+    claim_machine_id = claim_holder.get("machine_id")
+    if isinstance(claim_machine_id, str) and claim_machine_id:
+        executor_basis = "machine_id"
+        executor_is_local = (
+            claim_machine_id == identity.machine_id if identity.machine_id is not None else None
+        )
+    else:
+        executor_basis = "hostname"
+        executor_is_local = claim_host == identity.host
+    return {
+        "executor_host": claim_host,
+        "executor_is_local": executor_is_local,
+        "executor_basis": executor_basis,
+        "executor_role": "running" if status is RuntimeTaskStatus.RUNNING else "last_claim",
+    }
+
+
+def _claim_started_at(issue_entry: Mapping[str, Any]) -> datetime | None:
+    """返回快照认领持有者记录的认领开始时间。"""
+    claim_holder = issue_entry.get("claim_holder")
+    if not isinstance(claim_holder, Mapping):
+        return None
+    raw_started_at = claim_holder.get("claim_started_at")
+    return parse_runtime_timestamp(raw_started_at) if isinstance(raw_started_at, str) else None
+
+
+def _without_superseded_local_run(
+    task: RuntimeTask, claim_started_at: datetime | None
+) -> RuntimeTask:
+    """其他机器的认领晚于本机最近运行时，清空本机运行字段。
+
+    这些字段来自本机账本，属于更早的一轮；继续显示会把本机旧结果冒充成
+    其他机器当前的进度。任一时间缺失时无法比较，保持原样。
+    """
+    local_started_at = parse_runtime_timestamp(task.started_at)
+    if (
+        task.executor_is_local is not False
+        or claim_started_at is None
+        or local_started_at is None
+        or local_started_at >= claim_started_at
+    ):
+        return task
+    return replace(
+        task,
+        local_run_superseded=True,
+        agent=None,
+        preset=None,
+        model=None,
+        attempt_number=None,
+        started_at=None,
+        finished_at=None,
+        duration_seconds=None,
+        last_outcome=None,
+        last_error_summary=None,
+        failure_stage=None,
+        failure_reason=None,
+        failed_executors=(),
+        unclosed_invocation_executor=None,
+        unclosed_invocation_model=None,
+        pipeline_stage=None,
+    )
 
 
 def _is_before_runtime_window(started_at: str | None, window_start: datetime) -> bool:
@@ -245,6 +356,7 @@ def _snapshot_task(
     issue_entry: Mapping[str, Any],
     run_record: RunRecord | None,
     prd_path: str | None,
+    local_identity: Callable[[], LocalMachineIdentity],
 ) -> RuntimeTask | None:
     """由监控快照条目 + 运行账本回落组装一条任务摘要。"""
     repo_id = repo_snapshot.repo_id
@@ -369,6 +481,7 @@ def _snapshot_task(
         prd_path=prd_path,
         labels=labels,
         anomaly_types=anomaly_types,
+        **_executor_fields(issue_entry, status, local_identity),
     )
 
 
@@ -620,6 +733,7 @@ def build_runtime_task_summary(
     now: datetime | None = None,
     max_rows: int = RUNTIME_TASK_MAX_ROWS,
     evidence_media: Callable[[RuntimeTask], EvidenceMedia | None] | None = None,
+    local_identity: LocalMachineIdentity | None = None,
 ) -> RuntimeTaskSummary:
     """组装运行态任务摘要。
 
@@ -633,12 +747,22 @@ def build_runtime_task_summary(
         max_rows: 摘要行数上限，超出时截断并置 ``truncated=True``。
         evidence_media: 解析某个任务的本地证据（视频与人审页）；未接线时两者都
             记为没有，按钮自然不出现。
+        local_identity: 判断认领是否来自本机的身份，注入以便单测确定性；
+            默认读取本机机器编号与主机名。
 
     Returns:
         RuntimeTaskSummary: 任务摘要与数据来源可用性披露。改动树触达读数不在其中，
         展示侧按 ``prd_path`` 走现有 progress 契约取数。
     """
     reference_time = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    # 只有遇到带认领的条目才读取本机身份，避免无认领时也去碰机器身份文件。
+    resolved_identities: list[LocalMachineIdentity] = [local_identity] if local_identity else []
+
+    def effective_identity() -> LocalMachineIdentity:
+        if not resolved_identities:
+            resolved_identities.append(_current_local_identity())
+        return resolved_identities[0]
+
     unavailable_sources: set[str] = set()
     allowed_repo_ids = set(enabled_repo_ids)
 
@@ -682,6 +806,7 @@ def build_runtime_task_summary(
     tasks: list[RuntimeTask] = []
     seen_keys: set[tuple[str, int]] = set()
     latest_actions_by_issue: dict[tuple[str, int], str | None] = {}
+    claim_started_at_by_issue: dict[tuple[str, int], datetime | None] = {}
 
     for repo_snapshot in snapshot_overview.repositories:
         display_name = str(repo_snapshot.overview.get("display_name") or repo_snapshot.repo_id)
@@ -696,11 +821,13 @@ def build_runtime_task_summary(
                 issue_entry=issue_entry,
                 run_record=runs_by_issue.get(key),
                 prd_path=prd_path_by_issue.get(key),
+                local_identity=effective_identity,
             )
             if task is None:
                 continue
             seen_keys.add(key)
             latest_actions_by_issue[key] = _latest_timeline_action(issue_entry)
+            claim_started_at_by_issue[key] = _claim_started_at(issue_entry)
             tasks.append(task)
 
     for key, run_record in runs_by_issue.items():
@@ -779,6 +906,13 @@ def build_runtime_task_summary(
         )
         for task in visible_tasks
     )
+    # 必须在所有本机账本补齐之后执行，否则被清空的字段会被后续补齐重新填回。
+    visible_tasks = tuple(
+        _without_superseded_local_run(
+            task, claim_started_at_by_issue.get((task.repo_id, task.issue_number))
+        )
+        for task in visible_tasks
+    )
 
     status_counts = {status.value: 0 for status in RuntimeTaskStatus}
     for task in visible_tasks:
@@ -802,6 +936,7 @@ __all__ = [
     "SOURCE_MONITOR_SNAPSHOT",
     "SOURCE_PRD_LIFECYCLE",
     "SOURCE_RUN_HISTORY",
+    "LocalMachineIdentity",
     "build_runtime_task_summary",
     "parse_runtime_timestamp",
     "status_for_labels",
