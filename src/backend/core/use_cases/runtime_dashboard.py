@@ -448,6 +448,13 @@ def _snapshot_task(
         else:
             status_reason = "当前同步失败，任务状态可能已过期。"
 
+    last_error_summary = run_record.error_summary if run_record else None
+    if not last_error_summary and status is RuntimeTaskStatus.FAILED:
+        # 在其他机器上失败的 Issue 本机没有运行账本，失败原因只在 Issue 评论里。
+        remote_failure_summary = issue_entry.get("latest_failure_summary")
+        if isinstance(remote_failure_summary, str) and remote_failure_summary:
+            last_error_summary = remote_failure_summary
+
     title = issue_entry.get("title")
     url = issue_entry.get("url")
     return RuntimeTask(
@@ -477,7 +484,7 @@ def _snapshot_task(
         finished_at=run_record.finished_at if run_record else None,
         duration_seconds=run_record.duration_seconds if run_record else None,
         last_outcome=run_record.outcome if run_record else None,
-        last_error_summary=run_record.error_summary if run_record else None,
+        last_error_summary=last_error_summary,
         prd_path=prd_path,
         labels=labels,
         anomaly_types=anomaly_types,

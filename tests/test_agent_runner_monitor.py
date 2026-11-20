@@ -32,6 +32,7 @@ from backend.core.use_cases.agent_runner_monitor import (
     build_repository_overview,
     detect_anomalies,
     parse_event_timeline,
+    parse_latest_failure_summary,
 )
 from tests.conftest import FakeGitHubClient, FakeProcessRunner
 
@@ -114,6 +115,82 @@ class _CollidingIssueClient:
 # ─────────────────────────────────────────────────────────────────────────────
 # Scenario: parse_event_timeline
 # ─────────────────────────────────────────────────────────────────────────────
+
+
+_REMOTE_REVIEW_FAILURE_COMMENT = (
+    "## Agent Runner Review Failed\n\n```text\n"
+    "Command '['kc', 'worktree', 'path', '--branch', 'issue-366']' returned non-zero "
+    "exit status 1.\n\n--- stderr/stdout ---\nTraceback (most recent call last):\n"
+    '  File "/Users/x/.local/bin/kc", line 4, in <module>\n'
+    "ModuleNotFoundError: No module named 'requests'\n```\n"
+)
+
+
+def test_parse_latest_failure_summary_uses_last_line_of_traceback() -> None:
+    """另一台机器发出的失败评论：摘要取标题加堆栈最后一行，即错误本身。"""
+    comments = [
+        "## Agent Runner Failed\n\n```text\nold failure\n```\n",
+        "## Agent Runner Claimed\n\n- Host: `mac`\n",
+        _REMOTE_REVIEW_FAILURE_COMMENT,
+    ]
+
+    assert parse_latest_failure_summary(comments) == (
+        "Agent Runner Review Failed: ModuleNotFoundError: No module named 'requests'"
+    )
+
+
+def test_parse_latest_failure_summary_skips_trailing_git_hints() -> None:
+    """git push 被拒时堆栈后面跟着 hint 行：摘要取 error 行而不是最后一条 hint。"""
+    push_failure_comment = (
+        "## Agent Runner Failed\n\n```text\n"
+        "Command '['git', 'push', 'origin', 'issue-366']' returned non-zero exit status 1.\n"
+        " ! [rejected]          issue-366 -> issue-366 (non-fast-forward)\n"
+        "error: failed to push some refs to 'origin'\n"
+        "hint: Updates were rejected because the tip of your current branch is behind\n"
+        "hint: See the 'Note about fast-forwards' in 'git push --help' for details.\n```\n"
+    )
+
+    assert parse_latest_failure_summary([push_failure_comment]) == (
+        "Agent Runner Failed: error: failed to push some refs to 'origin'"
+    )
+
+
+def test_parse_latest_failure_summary_without_code_block_and_absent() -> None:
+    """没有代码块时取标题后的首行；没有失败评论时返回 None。"""
+    plain_failure_comment = "## Agent Runner Merge Queue Failed\n\nrebase conflict on main\n"
+
+    assert parse_latest_failure_summary([plain_failure_comment]) == (
+        "Agent Runner Merge Queue Failed: rebase conflict on main"
+    )
+    assert parse_latest_failure_summary(["## Agent Runner Claimed\n", "LGTM"]) is None
+
+
+def test_build_issue_snapshot_records_latest_failure_summary() -> None:
+    """快照携带失败摘要，供运行看板在本机无运行账本时显示失败原因。"""
+    from backend.core.shared.models.agent_runner import WorktreeConfig
+
+    missing_worktree = "/missing/issue-366"
+    runner = FakeProcessRunner(
+        responses={
+            ("echo", missing_worktree): CommandResult(
+                command=("echo", missing_worktree),
+                return_code=0,
+                stdout=f"{missing_worktree}\n",
+                stderr="",
+            ),
+        }
+    )
+    snapshot = build_issue_snapshot(
+        issue=_make_issue(366, labels=("agent/failed",)),
+        config=AppConfig(worktree=WorktreeConfig(path_command=f"echo {missing_worktree}")),
+        github_client=FakeGitHubClient(),
+        process_runner=runner,
+        repo_path=Path("/tmp/does-not-matter"),
+        comments=[_REMOTE_REVIEW_FAILURE_COMMENT],
+    )
+
+    assert snapshot.latest_failure_summary is not None
+    assert snapshot.latest_failure_summary.endswith("No module named 'requests'")
 
 
 def test_parse_event_timeline_orders_markers_oldest_first() -> None:

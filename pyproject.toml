@@ -62,12 +62,12 @@ dependencies = [
 
 [project.scripts]
 # 两个入口指向同一实现：kc 是主命令，kedacode 是与分发名同名的长写。
-kc = "backend.api.cli:main"
+kc = "backend.api.cli_entry:main"
 # 装的是 kedacode、敲的却是两个字母，这个落差让人装完不知道该敲什么，所以给安装名留一个
 # 同功能别名。刻意不提供 keda / keda-code 入口：bin/keda 会和 CNCF KEDA 将来可能
 # 进 homebrew-core 的同名 formula 抢符号链接（那时 brew install 直接失败），
 # 而带连字符的命令名没人会敲。
-kedacode = "backend.api.cli:main"
+kedacode = "backend.api.cli_entry:main"
 
 [project.entry-points."kedacode.agent_output_protocols"]
 # 内置输出协议与第三方插件走同一 entry point group 注册；

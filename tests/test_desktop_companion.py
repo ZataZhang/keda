@@ -15,12 +15,14 @@ import sys
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
 import backend.api.routes.agent_runner_console_runtime as runtime_routes
+from backend.api import cli_update_check
 import backend.engines.desktop_companion.helper as helper_module
 import backend.engines.desktop_companion.installer as installer_module
 import backend.engines.desktop_companion.launcher as launcher_module
@@ -501,6 +503,29 @@ def test_runtime_routes_are_registered_under_the_console_prefix() -> None:
         "/agent-runner/console/desktop-companion/window/close",
         "/agent-runner/console/upgrade",
     }
+
+
+def test_console_upgrade_refuses_windows_environment_rebuild(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """面板进程自己占着安装环境：Windows 上需重建环境的升级直接拒绝并给出手动命令。"""
+    monkeypatch.setattr(cli_update_check, "os", SimpleNamespace(name="nt"))
+    rebuild_plan = cli_update_check.UpgradeCommand(
+        ("uv", "tool", "install", "kedacode@latest"), rebuilds_environment=True
+    )
+    monkeypatch.setattr(runtime_routes, "detect_upgrade_command", lambda: rebuild_plan)
+    run_calls: list[object] = []
+    monkeypatch.setattr(
+        runtime_routes.subprocess, "run", lambda *args, **kwargs: run_calls.append(args)
+    )
+    request = _http_request(("127.0.0.1", 8313), [("Origin", CONSOLE_ORIGIN)])
+
+    with pytest.raises(HTTPException) as excinfo:
+        runtime_routes.upgrade_console_installation(request)
+
+    assert excinfo.value.status_code == 409
+    assert "uv tool install kedacode@latest" in str(excinfo.value.detail)
+    assert run_calls == []
 
 
 def test_install_disk_image_matches_canonical_mount_point(

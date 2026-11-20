@@ -26,7 +26,7 @@ _COMPLETION_ENV_VAR = product_identity.COMPLETION_ENV_VAR_NAME
 # bash 补全脚本的 XDG 配置目录名沿用长命令名（与 PyPI 发行名一致）。
 _USER_CONFIG_DIR_NAME = product_identity.LONG_COMMAND_NAME
 # 与主命令同 target 的 console script 即别名入口，单一事实源是 pyproject [project.scripts]。
-_CLI_ENTRY_POINT_TARGET = "backend.api.cli:main"
+_CLI_ENTRY_POINT_TARGET = "backend.api.cli_entry:main"
 _COMPLETION_HINT_MARKER_PREFIX = ".completion-setup-prompt-shown"
 
 

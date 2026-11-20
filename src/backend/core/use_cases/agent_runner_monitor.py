@@ -124,6 +124,9 @@ class IssueMonitoringSnapshot:
     #: 最近一条可信认领的持有者 ``{host, machine_id, claim_started_at}``；
     #: 只在运行中 / 失败 / 阻塞状态读取，读不到时为 ``None``。
     claim_holder: dict | None = None
+    #: 最近一条 ``## Agent Runner … Failed`` 评论的一行摘要；Issue 在其他机器上
+    #: 失败时，本机运行账本没有记录，运行看板靠它显示失败原因。
+    latest_failure_summary: str | None = None
 
 
 @dataclass(frozen=True)
@@ -267,6 +270,51 @@ def parse_event_timeline(comments: Iterable[str]) -> list[EventTimelineEntry]:
                 )
             )
     return timeline
+
+
+_FAILURE_HEADING_PATTERN = re.compile(
+    r"##[ \t]+(Agent Runner\b[^\n]*\bFailed)[ \t]*$", re.MULTILINE
+)
+_FENCED_BLOCK_PATTERN = re.compile(r"```[^\n]*\n(.*?)```", re.DOTALL)
+_ERROR_LINE_PATTERN = re.compile(r"^(?:error|fatal)\b|^\w+(?:Error|Exception)\b", re.IGNORECASE)
+_FAILURE_SUMMARY_MAX_LENGTH = 300
+
+
+def parse_latest_failure_summary(comments: list[str]) -> str | None:
+    """取最近一条 ``## Agent Runner … Failed`` 评论的一行摘要。
+
+    失败评论由出错的那台机器发出、不带 ``kc:event`` 标记，因此不进时间线。
+    摘要为标题加首个代码块里最后一条错误行（``error:`` / ``fatal:`` 或
+    ``XxxError:``，避开堆栈之后的 git ``hint:`` 之类说明）；代码块里没有错误行时
+    取其最后一个非空行，评论没有代码块时取标题后的第一个非空行。
+
+    Args:
+        comments: Issue 评论正文，按时间从旧到新排列。
+
+    Returns:
+        截断到 300 字符的摘要；没有失败评论时为 ``None``。
+    """
+    for comment_body in reversed(comments):
+        stripped_body = (comment_body or "").lstrip()
+        heading_match = _FAILURE_HEADING_PATTERN.match(stripped_body)
+        if heading_match is None:
+            continue
+        body_after_heading = stripped_body[heading_match.end() :]
+        fence_match = _FENCED_BLOCK_PATTERN.search(body_after_heading)
+        detail_source = fence_match.group(1) if fence_match else body_after_heading
+        detail_lines = [line.strip() for line in detail_source.splitlines() if line.strip()]
+        failure_heading = heading_match.group(1)
+        if not detail_lines:
+            return failure_heading
+        if fence_match is None:
+            detail_line = detail_lines[0]
+        else:
+            detail_line = next(
+                (line for line in reversed(detail_lines) if _ERROR_LINE_PATTERN.search(line)),
+                detail_lines[-1],
+            )
+        return f"{failure_heading}: {detail_line}"[:_FAILURE_SUMMARY_MAX_LENGTH]
+    return None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -689,6 +737,7 @@ def build_issue_snapshot(
             config_labels=config.labels,
             github_client=github_client,
         ),
+        latest_failure_summary=parse_latest_failure_summary(comments),
     )
 
 
