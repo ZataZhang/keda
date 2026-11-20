@@ -8,6 +8,10 @@ from typing import Any
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from backend.core.shared.models import product_identity
+from backend.core.shared.models.repository_platform import (
+    DEFAULT_REPOSITORY_PLATFORM,
+    validate_repository_platform,
+)
 from backend.infrastructure.config.agent_runner_settings_models import (
     AgentRunnerAgentSettings,
     AgentRunnerAutopilotSettings,
@@ -41,7 +45,7 @@ logger = logging.getLogger("backend.infrastructure.config.agent_runner_settings"
 
 
 class AgentRunnerRepositoryMetadataSettings(BaseModel):
-    """Repository identity stored in the repository-local KedaCode config."""
+    """从仓库本地 KedaCode 配置读取的仓库身份信息。"""
 
     id: str | None = None
     enabled: bool = True
@@ -50,6 +54,13 @@ class AgentRunnerRepositoryMetadataSettings(BaseModel):
     # PR column on ``kc issue list`` is populated. Omitting it is allowed
     # — the PR column then stays empty with a one-shot stderr warning.
     github_repo: str | None = None
+    platform: str = DEFAULT_REPOSITORY_PLATFORM
+
+    @field_validator("platform", mode="before")
+    @classmethod
+    def _validate_platform(cls, value: object) -> str:
+        """严格校验仓库身份段中的平台名称。"""
+        return validate_repository_platform(value)
 
     @field_validator("github_repo")
     @classmethod
@@ -106,7 +117,7 @@ class _AgentRunnerRepositoryOverrideSettings(BaseModel):
 
 
 class AgentRunnerRepositorySettings(_AgentRunnerRepositoryOverrideSettings):
-    """Per-repository Agent Runner configuration overrides."""
+    """单个目标仓库的 Agent Runner 配置覆盖。"""
 
     path: str
     id: str | None = None
@@ -121,6 +132,13 @@ class AgentRunnerRepositorySettings(_AgentRunnerRepositoryOverrideSettings):
     # the local-config loader propagates the value at merge time. See
     # the field validator on the metadata class for the format contract.
     github_repo: str | None = None
+    platform: str = DEFAULT_REPOSITORY_PLATFORM
+
+    @field_validator("platform", mode="before")
+    @classmethod
+    def _validate_platform(cls, value: object) -> str:
+        """严格校验仓库设置中的平台名称。"""
+        return validate_repository_platform(value)
 
     @field_validator("github_repo")
     @classmethod
@@ -373,6 +391,7 @@ def load_agent_runner_local_settings(
         enabled=repository_metadata.enabled,
         display_name=repository_metadata.display_name,
         github_repo=repository_metadata.github_repo,
+        platform=repository_metadata.platform,
         labels=local_settings.labels,
         agents=local_settings.agents,
         git=local_settings.git,

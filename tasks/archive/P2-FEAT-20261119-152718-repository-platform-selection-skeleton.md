@@ -5,7 +5,7 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> ⬜ **验收状态**：未开工。
+> 🧍 **验收状态**：待人工验收。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 > 本 PRD 分两个 altitude，分别服务不同读者，自上而下阅读：
@@ -277,17 +277,11 @@ This section is a living implementation guide based on current repository analys
 │       └── 函数签名与返回类型标注不变；docstring 补充分发说明
 │
 ├── Tests
-│   ├── tests/test_agent_runner_config.py
-│   │   [修改]
-│   │   【总结】补充 platform 的合法值、非法值、默认值与加载传递用例
-│   │
-│   │   ├── 合法值参数化：github、gitea、不写
-│   │   ├── 非法值参数化：gitlab、GitHub、空串、两端带空格
-│   │   └── load_agent_runner_local_settings 传递 platform
 │   └── tests/test_repository_platform_dispatch.py
 │       [新增]
-│       【总结】断言工厂在三种平台声明下的分发结果
+│       【总结】覆盖平台校验、默认值、加载传递与工厂分发
 │
+│       ├── 合法值 github / gitea；非法值 gitlab、GitHub、空串、首尾空格
 │       ├── 无配置文件、未声明、显式 github → 返回 GitHubCliClient
 │       └── gitea → 抛"平台尚未实现"异常，且传入的假进程执行器记录的调用数为 0
 │
@@ -302,7 +296,7 @@ This section is a living implementation guide based on current repository analys
 Frontend: No frontend impact（见 §5）。
 ```
 
-该文件列表是当前分析得到的预期范围，可能不完整，见 7.3。新增 `tests/test_repository_platform_dispatch.py` 的理由：`tests/test_agent_runner_config.py` 已有 959 个非空行，接近单文件 1000 行上限，分发用例放进去会超限。
+该文件列表是当前分析得到的预期范围，可能不完整，见 7.3。实现时复核发现 `tests/test_agent_runner_config.py` 已有 992 个非空行；为遵守单文件 1000 行限制，平台 schema、加载与分发用例均集中在新增的 `tests/test_repository_platform_dispatch.py`，不再改动旧配置测试文件。
 
 ### 7.3 Risk Classification Register 与 Executor Drift Guard
 
@@ -353,7 +347,8 @@ flowchart TD
   test_layer: smoke
   required_for_acceptance: true
   presentation: "tasks/evidence/P2-FEAT-20261119-152718-repository-platform-selection-skeleton/rv-1-gitea-not-implemented.txt（真实终端输出的完整捕获）。自查：在仓库根目录执行本条 real_entry，看最后一行是否为 exit=1、提示是否讲清原因和改法"
-  negative_control: "not needed — 实现前 platform 是未知键、被静默接受，同一条命令不会输出 not implemented，红已必然"
+  negative_control: "同一真实入口把配置改为 platform = \"github\"，仍断言必须出现 gitea 的 not implemented 提示；该断言应失败，证明检查区分平台分发结果"
+  expected_fail: "GitHub 输入正常走现有路径，输出没有 gitea 或 not implemented，且仓库身份未配置时命令以既有仓库身份错误结束"
 - id: rv-2
   behavior: 仓库配置把平台声明为不认识的名字时，读取仓库配置即报错并列出允许的取值
   reviewer: verifier
@@ -364,7 +359,8 @@ flowchart TD
   tier: R1
   test_layer: smoke
   required_for_acceptance: true
-  negative_control: "not needed — 实现前同一条命令退出码为 0（2026-11-19 已在 0.8.0 上实测），红已必然"
+  negative_control: "在变更前真实运行同一命令，配置含 platform = \"gitlab\"；检查要求的配置错误与允许值断言应失败"
+  expected_fail: "命令退出码为 0，仍打印 lifecycle 配置，缺少 platform、gitlab、github、gitea 的错误信息"
 - id: rv-3
   behavior: 不声明平台与显式声明 github 的仓库行为相同，且都不出现平台或配置非法的提示
   reviewer: verifier
@@ -375,6 +371,8 @@ flowchart TD
   tier: R1
   test_layer: smoke
   required_for_acceptance: true
+  negative_control: "将显式 github 的仓库配置改为 platform = \"gitea\" 后仍要求两份输出无平台提示；该断言应失败"
+  expected_fail: "显式 gitea 的调用在工厂处分发并输出 not implemented，未声明仓库仍走 GitHub 路径，平台提示计数为 1"
 - id: rv-4
   behavior: 平台声明为 gitea 时，只读本机配置的命令照常成功
   reviewer: verifier
@@ -385,16 +383,19 @@ flowchart TD
   tier: R1
   test_layer: smoke
   required_for_acceptance: true
-  negative_control: "not needed — 若实现成读配置即拒绝 gitea，本条退出码为 1，断言比较的是具体数值"
+  negative_control: "同一个临时仓库再运行 issue list 这一平台访问入口；它应因 gitea 尚未实现而失败，作为本地命令可以继续运行的真实对照"
+  expected_fail: "issue list 以退出码 1 输出包含 gitea、platform、not implemented 的提示；对照的本地 lifecycle list 必须退出码 0"
 - id: rv-5
   behavior: 平台名的合法值、非法值、默认值、加载传递与工厂分发逐项成立，且仓库现有测试不经修改通过
   reviewer: verifier
-  real_entry: "uv run pytest tests/test_agent_runner_config.py tests/test_repository_platform_dispatch.py -q && just test"
+  real_entry: "UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache uv run pytest tests/test_agent_runner_config.py tests/test_repository_platform_dispatch.py -q --testmon-noselect && just test"
   expected: "两条命令退出码均为 0；非法值用例覆盖 gitlab、GitHub、空串、两端带空格；gitea 分发用例断言假进程执行器的调用数为 0"
   mock_boundary: "进程执行器使用 tests/conftest.py 的 FakeProcessRunner；配置模型、加载函数和工厂必须是真实实现"
   tier: R1
   test_layer: unit
   required_for_acceptance: true
+  negative_control: "运行 UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache uv run python -c 'from backend.core.shared.models.repository_platform import validate_repository_platform; assert validate_repository_platform(\"gitlab\") == \"gitlab\"'"
+  expected_fail: "validate_repository_platform 抛出 ValueError，指出收到的 gitlab 及允许值 github、gitea"
 - id: rv-6
   behavior: 配置指南写明 platform 键、取值、默认值与 gitea 当前状态，文档可严格构建
   reviewer: verifier
@@ -404,6 +405,8 @@ flowchart TD
   tier: R0
   test_layer: smoke
   required_for_acceptance: true
+  negative_control: "git show HEAD:docs/guides/configuration.md | rg -n 'platform.*gitea|gitea.*platform'"
+  expected_fail: "基础版本指南不含该配置说明，rg 退出码为 1；修改后的指南应命中"
 ```
 
 Failure triage:
@@ -473,38 +476,38 @@ Failure triage:
 
 ### Architecture Acceptance
 
-- [ ] `rg -n "GitHubCliClient\(" src/backend` 只命中工厂内一处构造，证据：`rv-5-pytest.txt` 同目录下的 `arch-search.txt`
-- [ ] `rg -n "\"gitea\"" src/backend` 只命中 `src/backend/core/shared/models/repository_platform.py`，证据：`arch-search.txt`
+- [x] `rg -n "GitHubCliClient\(" src/backend` 只命中工厂内一处构造，证据：`rv-5-pytest.txt`、`arch-search.txt`
+- [x] `rg -n "\"gitea\"" src/backend` 只命中 `src/backend/core/shared/models/repository_platform.py`，证据：`rv-5-pytest.txt`、`arch-search.txt`
 
 ### Dependency Acceptance
 
-- [ ] `create_github_client` 的签名与返回类型标注未变，`rg -c "create_github_client\(" src/backend` 的统计与改动前一致，证据：`arch-search.txt`
-- [ ] `IGitHubClient` 接口无改动：`git diff --stat -- src/backend/core/shared/interfaces/agent_runner.py` 为空，证据：`arch-search.txt`
+- [x] `create_github_client` 的签名与返回类型标注未变，`rg -c "create_github_client\(" src/backend` 的统计与改动前一致，证据：`rv-5-pytest.txt`、`arch-search.txt`
+- [x] `IGitHubClient` 接口无改动：`git diff --stat -- src/backend/core/shared/interfaces/agent_runner.py` 为空，证据：`rv-5-pytest.txt`、`arch-search.txt`
 
 ### Behavior Acceptance
 
-- [ ] 平台声明为 `gitea` 时访问代码平台的命令以退出码 1 结束并给出约定提示，证据：`rv-1-gitea-not-implemented.txt`
-- [ ] 平台声明为未知名字时读配置即以退出码 1 失败并列出允许值，证据：`rv-2-unknown-platform.txt`
-- [ ] 未声明与显式 `github` 的退出码相同且无平台相关提示，证据：`rv-3-default-unchanged.txt`
-- [ ] 平台声明为 `gitea` 时只读本机配置的命令退出码为 0，证据：`rv-4-local-command-ok.txt`
+- [x] 平台声明为 `gitea` 时访问代码平台的命令以退出码 1 结束并给出约定提示，证据：`rv-1-gitea-not-implemented.txt`
+- [x] 平台声明为未知名字时读配置即以退出码 1 失败并列出允许值，证据：`rv-2-unknown-platform.txt`
+- [x] 未声明与显式 `github` 的退出码相同且无平台相关提示，证据：`rv-3-default-unchanged.txt`
+- [x] 平台声明为 `gitea` 时只读本机配置的命令退出码为 0，证据：`rv-4-local-command-ok.txt`
 
 ### Documentation Acceptance
 
-- [ ] `docs/guides/configuration.md` 写明 `platform` 键、取值、默认值与 `gitea` 当前状态，`uv run mkdocs build --strict` 通过，证据：`rv-6-docs-build.txt`
-- [ ] `docs/guides/agent-runner.md` 中 `github_repo` 所在段落已加入对 `platform` 的交叉引用，证据：`rv-6-docs-build.txt` 中的 `rg` 输出
+- [x] `docs/guides/configuration.md` 写明 `platform` 键、取值、默认值与 `gitea` 当前状态，`uv run mkdocs build --strict` 通过，证据：`rv-6-docs-build.txt`
+- [x] `docs/guides/agent-runner.md` 中 `github_repo` 所在段落已加入对 `platform` 的交叉引用，证据：`rv-6-docs-build.txt` 中的 `rg` 输出
 
 ### Validation Acceptance
 
-- [ ] `uv run pytest tests/test_agent_runner_config.py tests/test_repository_platform_dispatch.py -q` 通过，证据：`rv-5-pytest.txt`
-- [ ] `just test` 通过，且 `git diff --stat -- tests` 只显示 `tests/test_agent_runner_config.py` 的新增用例与新文件 `tests/test_repository_platform_dispatch.py`，证据：`rv-5-pytest.txt`
-- [ ] rv-1 至 rv-4 均通过真实 CLI 入口 `uv run kc` 执行，未以单元测试或辅助函数替代，证据：各 `rv-*.txt` 首行记录的完整命令
-- [ ] 全部证据在最后一次影响相关代码的改动之后重新采集，证据报告中记录了采集时的 `git rev-parse HEAD` 与 `git rev-parse HEAD^{tree}`
+- [x] `uv run pytest tests/test_agent_runner_config.py tests/test_repository_platform_dispatch.py -q --testmon-noselect` 通过并实际执行用例，证据：`rv-5-pytest.txt`
+- [x] `just test` 通过，且 tests 工作树变更仅包含新文件 `tests/test_repository_platform_dispatch.py`（用 `git status --short -- tests` 核对；未跟踪文件不会出现在 `git diff --stat`），证据：`rv-5-pytest.txt`
+- [x] rv-1 至 rv-4 均通过真实 CLI 入口 `uv run kc` 执行，未以单元测试或辅助函数替代，证据：各 `rv-*.txt` 首行记录的完整命令
+- [x] 全部证据在最后一次影响相关代码的改动之后重新采集，证据报告中记录了采集时的 `git rev-parse HEAD` 与 `git rev-parse HEAD^{tree}`
 
 ### Delivery Readiness
 
-- [ ] 推荐方案完整实现，未引入注册表、插件机制等并行抽象，证据：`arch-search.txt`
-- [ ] §9.1 呈递表的呈递物路径已回填，完成回复原样带上了呈递表内容
-- [ ] 证据报告首节是「人审导航」，包含 rv-1 输出的关键行原文、打开命令与逐项期望值
+- [x] 推荐方案完整实现，未引入注册表、插件机制等并行抽象，证据：`arch-search.txt`
+- [x] §9.1 呈递表的呈递物路径已回填，完成回复原样带上了呈递表内容
+- [x] 证据报告首节是「人审导航」，包含 rv-1 输出的关键行原文、打开命令与逐项期望值
 
 ---
 
@@ -554,12 +557,15 @@ Failure triage:
 
 ### Final Reconciliation (Archive Only)
 
-- Interpretation: 归档时填写
-- Public behavior and contracts: 归档时填写
-- Related PRD status: 归档时填写
-- Requirements and risks: 归档时填写
+- Interpretation: 实现符合解读回显；仓库身份段新增可选 `platform`，未声明默认 `github`，`gitea` 仅在代码平台客户端工厂处分发失败，其他本地配置读取照常工作。
+- Public behavior and contracts: 没有新增 CLI 参数或退出码类别。未知平台值沿用配置加载错误与退出码 1；`gitea` 提示包含 `platform`、`not implemented`、当前只支持 `github` 和回退设置方法。客户端工厂签名与返回类型不变。
+- Related PRD status: 本次没有关联的 pending PRD；后续 Gitea 客户端对接仍是独立后续工作，本次不实现。
+- Requirements and risks: FR-1 至 FR-6 均由配置测试、真实 CLI、架构搜索与严格文档构建验证。声明 `gitea` 的仓库在实际 Gitea 对接交付前仍不可执行代码托管操作，符合已确认的非目标。
 - Reconciled differences:
-  - 归档时填写
+  - 旧配置测试文件已有 992 个非空行，平台 schema、加载和分发测试集中在新文件 `tests/test_repository_platform_dispatch.py`；测试范围不变。
+  - RV-5 定向 pytest 使用 `--testmon-noselect`，防止缓存把目标用例全部筛掉；真实运行通过 81 项。
+  - 未触及 §7.3 之外的生产变更点；没有修改 `IGitHubClient`、`create_github_client` 调用方、命令表面或平台抽象体系。
+  - 执行者自检及 evidence checker 均通过；独立 verifier 由 runner 在发布流程中执行。人审框保持未勾选，PRD 仍在 pending 路径，归档由 runner 负责。
 
 ## Change Log
 
@@ -578,3 +584,35 @@ Failure triage:
 - Reason: 需求方于 2026-11-19 在对话中确认解读，并对两项决策都选择推荐项；未直接编辑本文件，按对话回复记录
 - Impact: 不改变范围、行为、oracle 与验收项；实现可以按推荐方案开工
 - Review: 确认框本身未被勾选，保留给需求方本人补勾
+
+### 调整测试文件范围并强化负向控制
+- Type: test / evidence
+- Before: 计划在 `tests/test_agent_runner_config.py` 与新分发测试文件之间拆分平台校验和工厂用例；rv-1 至 rv-4 有部分负向控制标注为无需执行
+- After: 因旧测试文件已有 992 个非空行，所有平台模型、加载与分发用例集中到 `tests/test_repository_platform_dispatch.py`；为 rv-1 至 rv-6 明确记录可执行负向控制及预期失败现象，并将架构检索结果纳入 rv-5 证据
+- Reason: 保持单文件行数限制，并满足本次交付要求：每个验证项都必须展示能使其变红的对照
+- Impact: 功能范围和用户可见行为不变；测试文件列表、rv 负向控制和 rv-5 证据内容有调整
+- Review: 执行前已由实现者按仓库行数与验证要求核对；需求方人审项保持未勾选
+
+### 修正未跟踪测试文件的验收证据表述
+- Type: evidence
+- Before: 验收项要求用 `git diff --stat -- tests` 显示新建的未跟踪测试文件
+- After: 验收项改为用 `git status --short -- tests` 确认唯一测试工作树变更，并说明未跟踪文件不进入 `git diff --stat`
+- Reason: 按执行限制不运行 `git add`，未跟踪文件不会出现在 diff stat 中
+- Impact: 不改变测试范围；只修正可执行的证据核对方式
+- Review: 实现者已核对 Git 对未跟踪文件的呈现行为
+
+### 关闭 RV-5 定向测试的 testmon 选择
+- Type: test / evidence
+- Before: RV-5 使用无附加参数的定向 pytest 命令
+- After: 定向 pytest 增加 `--testmon-noselect`，确保测试映射缓存不会把目标文件中的全部用例筛掉
+- Reason: 实际运行观察到命令退出码为 0，但显示 81 deselected；退出码不能代替用例执行证据
+- Impact: 只调整验证命令；测试范围仍是原配置测试与新增平台分发测试
+- Review: 根据实际输出核对并记录；后续证据必须显示目标用例实际执行
+
+### 完成实现与执行侧证据
+- Type: implementation / evidence
+- Before: 功能未实现；Realistic Validation 和执行侧 Acceptance Checklist 均未完成
+- After: 完成仓库平台声明、加载校验与客户端工厂分发；rv-1 至 rv-6 的证据、manifest、验证计划和人审导航已采集，执行侧 checklist 已按证据勾选
+- Reason: 完成 Issue #398 的已批准交付范围，并提供可复核的真实入口结果
+- Impact: 默认 GitHub 行为保持原样；未实现 Gitea 接入；三项 Human-Confirmed 保持未勾选；PRD 保留在 pending，交由 runner 完成独立 verifier 和归档流程
+- Review: 执行者自检通过；独立 verifier 状态待 runner 处理；人审项尚待需求方复核

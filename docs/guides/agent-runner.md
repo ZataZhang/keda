@@ -1649,6 +1649,7 @@ github_repo = "owner/backend-service"
 - 每个仓库必须有 `path`（本地绝对路径）。
 - `enabled = false` 可临时禁用某个仓库。
 - `github_repo` 是可选的 `owner/name` 字符串，供 `kc issue list` 的 PR 列以及 GitHub API 操作使用；缺省时，GitHub API 客户端从目标仓库的 Git remote URL 推断仓库身份。两处都无法提供仓库身份时会提示配置该字段，不会调用 `gh repo view` 查询 GitHub 元数据。
+- 与 `github_repo` 同属仓库身份信息的 `platform` 通过 `.kedacode.toml` 的 `[agent_runner.repository]` 段声明，省略时默认为 `github`；目前 `gitea` 尚未实现。配置格式、允许值与改回 GitHub 的方式见[配置指南](configuration.md#agent-runner-repo-config)。
 - registry 配置中的 `github_repo` 仅供 `kc issue list` 查询 PR 列；GitHub API 操作仍从目标仓库自身的 `.kedacode.toml` 或 Git remote 解析仓库身份。
 - registry 通常只保留 `path` 和 `enabled`；仓库级 overrides 仍兼容，但建议迁移到目标仓库的 `.kedacode.toml`。
 - 未指定 `--repo`、`--repo-id` 或 `--all` 时，单仓库命令（如 `kc run`、`kc supervise`）只处理当前 Git 仓库；`kc daemon` 和 `kc supervise-daemon` 同样只处理当前已初始化注册仓库，未命中、未初始化或匹配多个时报错。如需监控所有 enabled registry entries，请显式使用 `--all`。

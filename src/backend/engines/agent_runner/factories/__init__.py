@@ -33,6 +33,11 @@ from backend.core.shared.models.agent_runner import (
     AppConfig,
     RepositoryRunContext,
 )
+from backend.core.shared.models.product_identity import effective_repository_config_path
+from backend.core.shared.models.repository_platform import (
+    GITHUB_PLATFORM,
+    RepositoryPlatformNotImplementedError,
+)
 from backend.engines.agent_runner.deliberation_outputs import (
     write_deliberation_outputs,
 )
@@ -65,6 +70,7 @@ from backend.infrastructure.config.repository_settings_editor import (
 from backend.infrastructure.config.settings import (
     AgentRunnerSettings,
     config,
+    load_agent_runner_local_settings,
     resolve_project_root_path,
     resolve_registry_config_toml_path,
 )
@@ -412,17 +418,28 @@ def create_github_client(
     bypass_budget_pause: bool = False,
     request_timeout_seconds: int | None = None,
 ) -> GitHubCliClient:
-    """创建使用共享 API 预算的 GitHub 客户端。
+    """按仓库声明的平台创建代码托管客户端。
 
     Args:
-        repo_path: GitHub CLI 操作所在的仓库目录。
+        repo_path: 代码托管平台操作所在的仓库目录。
         process_runner: 可选的子进程执行器。
         bypass_budget_pause: 是否只绕过预算暂停闸门，API 调用仍会记账。
         request_timeout_seconds: 未单独指定超时的 gh 命令默认时限。
 
     Returns:
         连接到共享 API 用量账本的 GitHub CLI 客户端。
+
+    Raises:
+        ValueError: 仓库本地配置无效。
+        RepositoryPlatformNotImplementedError: 仓库声明的平台尚未实现。
     """
+    repository_settings = load_agent_runner_local_settings(repo_path)
+    if repository_settings is not None and repository_settings.platform != GITHUB_PLATFORM:
+        raise RepositoryPlatformNotImplementedError(
+            platform_name=repository_settings.platform,
+            config_path=effective_repository_config_path(Path(repository_settings.path)),
+        )
+
     return GitHubCliClient(
         repo_path,
         process_runner,
