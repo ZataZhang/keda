@@ -114,6 +114,8 @@ verification_commands = [
 
 未覆盖的字段自动继承全局 `[agent_runner]` 默认值。环境变量仍可对全局段生效，但暂不支持通过环境变量覆盖单个仓库的字段。
 
+仓库自身的 `.kedacode.toml` 可在 `[agent_runner.repository]` 身份段声明 `platform`。允许值为 `github` 和 `gitea`，省略时默认为 `github`；平台名必须完全匹配小写写法。当前只有 `github` 已实现，声明 `gitea` 的仓库在执行代码托管平台操作时会收到尚未实现的提示；要继续使用现有 GitHub 对接，请设置 `platform = "github"`。未知值、大小写不符、带首尾空格或空字符串会在读取配置时被拒绝。个人本地覆盖文件不能改写该身份段。
+
 ### 个人本地覆盖 `.kedacode.local.toml`
 
 仓库根目录的 `.kedacode.local.toml` 是个人覆盖层，结构与 `.kedacode.toml` 相同，叠加在其之上：
