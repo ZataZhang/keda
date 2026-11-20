@@ -356,6 +356,45 @@ def test_local_failure_fills_missing_snapshot_status(
     assert runtime_payload["tasks"][0]["last_outcome"] == outcome
 
 
+def test_remote_failure_summary_fills_missing_local_error(tmp_path) -> None:
+    """在其他机器上失败、本机没有运行账本：失败原因取自快照里的失败评论摘要。"""
+    store = _store(tmp_path)
+    remote_failed_issue = _issue(366, labels=["agent/failed"])
+    remote_failed_issue["latest_failure_summary"] = (
+        "Agent Runner Review Failed: ModuleNotFoundError: No module named 'requests'"
+    )
+    _seed_snapshot(store, "keda", [remote_failed_issue])
+
+    failed_task = _summary(store, ["keda"]).tasks[0]
+
+    assert failed_task.status is RuntimeTaskStatus.FAILED
+    assert failed_task.last_error_summary == remote_failed_issue["latest_failure_summary"]
+
+
+def test_local_error_summary_wins_over_remote_failure_summary(tmp_path) -> None:
+    """本机运行账本已有错误摘要时保持原样，不被评论摘要覆盖。"""
+    store = _store(tmp_path)
+    failed_issue = _issue(366, labels=["agent/failed"])
+    failed_issue["latest_failure_summary"] = "Agent Runner Failed: remote"
+    _seed_snapshot(store, "keda", [failed_issue])
+    store.append_run(
+        RunRecord(
+            repo_id="keda",
+            repo_path="/tmp/keda",
+            issue_number=366,
+            trigger="console_run",
+            agent="codex",
+            outcome="failed",
+            error_summary="本机错误",
+            started_at=_iso(-20),
+            finished_at=_iso(-10),
+            duration_seconds=600.0,
+        )
+    )
+
+    assert _summary(store, ["keda"]).tasks[0].last_error_summary == "本机错误"
+
+
 def test_failed_executor_run_includes_diagnosis_and_failed_executors(tmp_path) -> None:
     """失败看板摘要由实际 invocation 事件填充可读原因与阶段执行器。"""
     store = _store(tmp_path)
