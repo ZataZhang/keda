@@ -4,50 +4,53 @@
 
 Authorize runner access to `/Users/zata/.kedacode/machine.lock`, or run the targeted recovery from an authorized local environment. The ownership lock must not be bypassed with a different state directory.
 
-## Issue and PR status
+## Current Issue and PR status
 
-Live status checked on 2026-11-21 at 07:40 UTC:
+Live status checked on 2026-11-21 at 08:20 UTC:
 
-- Patrol: [Issue #419](https://github.com/ZataZhang/keda/issues/419) is open and currently labeled `agent/failed`; branch `issue-419`. The supervisor requested a branch repair, but the latest attempt failed at `kc worktree path --branch issue-419` because the global launcher could not import `requests` ([latest failure comment](https://github.com/ZataZhang/keda/issues/419#issuecomment-7059355469)).
-- Patrol PR: [PR #420](https://github.com/ZataZhang/keda/pull/420) is open as a draft, based on `main`. Its checked head is `745bfd6dbc28b4b832049039976ff08b984d2dc0`.
-- Target: [Issue #398](https://github.com/ZataZhang/keda/issues/398) remains open and `agent/blocked`; branch `issue-398` at `5eeed84be10b37fa521cfac5bcad697050323263`.
-- Related implementation PR: [PR #418](https://github.com/ZataZhang/keda/pull/418) is open, non-draft, and reported mergeable. Its human review / PRD acceptance is still pending.
+- Patrol: [Issue #419](https://github.com/ZataZhang/keda/issues/419) is open and labeled `agent/failed`; its latest review failure reports that the global `kc` launcher could not import `requests` ([failure comment](https://github.com/ZataZhang/keda/issues/419#issuecomment-7059720587)). The branch and PR head are `issue-419` / `a840773485bca9ebbf9be1f38af346c72c1fc19c`.
+- Patrol PR: [PR #420](https://github.com/ZataZhang/keda/pull/420) is open as a draft, based on `main`, mergeable with a clean merge state, and currently at `a840773485bca9ebbf9be1f38af346c72c1fc19c`.
+- Target: [Issue #398](https://github.com/ZataZhang/keda/issues/398) is open and labeled `agent/blocked`; branch `issue-398` is at `5eeed84be10b37fa521cfac5bcad697050323263`.
+- Related implementation PR: [PR #418](https://github.com/ZataZhang/keda/pull/418) is open, non-draft, mergeable, and clean at `5eeed84be10b37fa521cfac5bcad697050323263`. Its human review / PRD acceptance remains pending.
+- The live open queues contain only #398 under `agent/blocked` and only #419 under `agent/failed`.
 
 ## What happened
 
-- The patrol initially found no open `agent/blocked` Issues and one `agent/failed` Issue, #398. Its implementation attempt had succeeded; the later review failure came from the global `kc` launcher missing `requests` ([failure comment](https://github.com/ZataZhang/keda/issues/398#issuecomment-7058120853)).
-- The project-managed CLI resolved the existing #398 worktree. Targeted recovery stopped before recovery or publication because access to the configured machine lock was denied. The blocker and options were posted on [Issue #398](https://github.com/ZataZhang/keda/issues/398#issuecomment-7058639795), and #398 was moved to `agent/blocked`.
-- At that point the patrol was also moved to `agent/blocked`. After PR #420 was created, its post-PR supervisor requested a repair because this handoff was stale. That repair attempt failed in the global `kc` launcher, so the latest live patrol state is `agent/failed`.
-- No product code changed in the patrol PR. PR #420 carries the handoff record. No tests were run as part of the #398 recovery attempt.
+- The patrol initially found no open `agent/blocked` Issues and one `agent/failed` Issue, #398. Its implementation attempt succeeded; the later review failure came from the global `kc` launcher missing `requests` ([failure comment](https://github.com/ZataZhang/keda/issues/398#issuecomment-7058120853)).
+- The project-managed CLI resolved the existing #398 worktree. Targeted recovery stopped before recovery or publication because access to `/Users/zata/.kedacode/machine.lock` was denied. The blocker and options were posted on [Issue #398](https://github.com/ZataZhang/keda/issues/398#issuecomment-7058639795), and #398 was moved to `agent/blocked`.
+- The patrol was also moved to `agent/blocked`. After PR #420 was created, a branch repair completed at `a840773485bca9ebbf9be1f38af346c72c1fc19c`; its repair-complete event reports verification passed ([repair-complete event](https://github.com/ZataZhang/keda/issues/419#issuecomment-7059532801)). A later review attempt failed while the global `kc` launcher tried to resolve the worktree, so the live patrol state is again `agent/failed`.
+- No product code changed in this patrol PR. PR #420 carries the handoff record. No tests were run as part of the #398 recovery attempt.
 
 ## PR #420 verification results
 
-The following results apply to PR head `745bfd6dbc28b4b832049039976ff08b984d2dc0` before this checklist refresh. They do not cover this new repair until it is committed and CI runs again.
+The following GitHub results are for the current PR head `a840773485bca9ebbf9be1f38af346c72c1fc19c` and were re-read on 2026-11-21 at 08:20 UTC.
 
-- Final-tree evidence from the PR record: `c86fc0fe5d97d3a4c3aff24b2cf33725afb269a9`, calculated with `tasks/pending/`, `tasks/archive/`, and `tasks/evidence/issue-419/` excluded. This repair only changes the excluded checklist plus the ignored runner commit-request file, so the verified non-record tree is unchanged.
-- GitHub reported 15 check runs: 13 succeeded and 2 were skipped; none failed or remained pending. The supervisor recorded this result in its [post-PR report](https://github.com/ZataZhang/keda/issues/419#issuecomment-7059339284).
-- The [Validation Gate](https://github.com/ZataZhang/keda/actions/runs/44878896941), [CI](https://github.com/ZataZhang/keda/actions/runs/44878897032), and [Install smoke](https://github.com/ZataZhang/keda/actions/runs/44878896938) workflow runs completed successfully.
-- The runner reported `git diff --check`, all-files pre-commit, `just test all`, and `uv run mkdocs build --strict` all passed in its [implementation-complete record](https://github.com/ZataZhang/keda/issues/419#issuecomment-7059092192).
-- `just lint` was not evidenced in the PR verification record.
-- The independent pre-PR review approved this docs-only handoff with no findings ([review record](https://github.com/ZataZhang/keda/issues/419#issuecomment-7059155556)).
+- The current 15 check runs are complete: 13 succeeded and 2 were skipped; none failed or remained pending. The skipped checks are `Report main CI failure` and the optional public-PyPI install probe.
+- The [CI run](https://github.com/ZataZhang/keda/actions/runs/44882184076), [Install smoke run](https://github.com/ZataZhang/keda/actions/runs/44882184194), and [Validation Gate run](https://github.com/ZataZhang/keda/actions/runs/44882184114) completed; the current check list is available from `gh pr checks 420 --repo ZataZhang/keda`.
+- The latest branch repair-complete event reports verification passed. The earlier implementation-complete record on `745bfd6dbc28b4b832049039976ff08b984d2dc0` reports `git diff --check`, all-files pre-commit, `just test all`, and `uv run mkdocs build --strict` passed. The non-record source tree has not changed since that tested head.
+- `just lint` is not evidenced in the PR verification records.
+- PR #418 is also currently clean and mergeable; its current head has 15 completed check runs, 13 succeeded and 2 skipped. Human review / PRD acceptance is still pending.
 
-## Checklist refresh verification
+## Current worktree refresh verification
 
-These checks cover the current worktree refresh; they are separate from the earlier PR checks above. No tests were run for this documentation-only repair.
+These checks validate this documentation-only refresh and its commit request. The PR checks above apply to the remote head `a840773485bca9ebbf9be1f38af346c72c1fc19c` before the runner commits this refresh. No product-code tests were run for this documentation-only change.
 
 - `UV_CACHE_DIR=/private/tmp/keda-issue419-uv-cache uv run --no-sync python hooks/shared/check_guidelines_consistency.py`: passed.
 - `UV_CACHE_DIR=/private/tmp/keda-issue419-uv-cache uv run --no-sync mkdocs build --strict`: passed (exit 0).
-- `UV_CACHE_DIR=/private/tmp/keda-issue419-uv-cache SKIP=check-test-flag uv run --no-sync pre-commit run --files tasks/evidence/issue-419/human-review-checklist.md .agent-runner/commit-request.json --show-diff-on-failure`: passed; the test-flag hook was skipped because this repair changes no executable code.
+- `UV_CACHE_DIR=/private/tmp/keda-issue419-uv-cache SKIP=check-test-flag uv run --no-sync pre-commit run --files tasks/evidence/issue-419/human-review-checklist.md .agent-runner/commit-request.json --show-diff-on-failure`: passed; `check-test-flag` was skipped because this refresh changes no executable code.
 - `UV_CACHE_DIR=/private/tmp/keda-issue419-uv-cache uv run --no-sync python -m json.tool .agent-runner/commit-request.json`: passed.
 - `git diff --check`: passed.
+- The requested PR-body update was rejected by the GitHub connector with `MCP tool call requires approval, but approval policy is never`. The remote PR body remains unchanged; a complete replacement is prepared in `.agent-runner/pr-420-body.md` for an approved metadata update.
 
 ## Recovery commands and results
 
-- `gh issue list --repo ZataZhang/keda --state open --label agent/blocked --limit 1000`: initially empty; after handling, #398 and the patrol were reported as blocked.
-- `gh issue list --repo ZataZhang/keda --state open --label agent/failed --limit 1000`: initially #398; after handling, empty.
+- `gh issue list --repo ZataZhang/keda --state open --label agent/blocked --limit 1000`: initially empty; current queue contains #398.
+- `gh issue list --repo ZataZhang/keda --state open --label agent/failed --limit 1000`: initially #398; current queue contains #419.
 - `kc logs --repo-id keda --issue 398`: log ended with supervisor approval and successful publication of the existing branch.
 - `PYTHONDONTWRITEBYTECODE=1 UV_CACHE_DIR=/private/tmp/keda-issue419-uv-cache uv run --no-sync kc worktree path --branch issue-398` (from `/Users/zata/code/keda`): exit 0; resolved `/Users/zata/code/keda/.kc-worktrees/issue-398`.
 - `PYTHONDONTWRITEBYTECODE=1 UV_CACHE_DIR=/private/tmp/keda-issue419-uv-cache uv run --no-sync kc recover --issue 398 --repo-id keda --branch issue-398`: exit 4 before recovery; `Operation not permitted: '/Users/zata/.kedacode/machine.lock'`.
+- `gh pr checks 420 --repo ZataZhang/keda`: 13 passed, 2 skipped, 0 failed or pending.
+- `gh pr view 418 --repo ZataZhang/keda --json state,isDraft,mergeable,mergeStateStatus,headRefOid,statusCheckRollup`: open, non-draft, mergeable and clean; 13 passed, 2 skipped.
 
 ## Remaining work and next human action
 
@@ -56,3 +59,14 @@ Recovery has not completed, so #398 has not returned to its post-review state. G
 ## Patrol closing condition
 
 Re-query both open workflow queues with `--limit 1000`. Close #419 only after #398's recovery and human decision are complete and no other actionable `agent/blocked` or `agent/failed` Issue remains; otherwise keep the patrol open with its target and PR links.
+
+## Final-tree evidence
+
+- Current remote source head: `a840773485bca9ebbf9be1f38af346c72c1fc19c`.
+- The recorded non-record source tree is `c86fc0fe5d97d3a4c3aff24b2cf33725afb269a9`, excluding `tasks/pending/`, `tasks/archive/`, and `tasks/evidence/issue-419/`. The repair changes only the excluded evidence file plus ignored `.agent-runner/commit-request.json` and `.agent-runner/pr-420-body.md`; no product source or tests changed.
+- At final verification, `git rev-parse HEAD` remained `a840773485bca9ebbf9be1f38af346c72c1fc19c`; `git status --short --branch` showed only `M tasks/evidence/issue-419/human-review-checklist.md`, and the source-path filtered diff was empty. The `.agent-runner/` request and body-draft files are ignored. The runner will create the requested commit; no future commit SHA is assumed here.
+
+## Finding disposition
+
+- Fixed locally: refreshed the checklist to the current head, live Issue labels, current PR states, current check results, and the successful repair-complete event.
+- Partially addressed: the PR-body refresh is prepared in `.agent-runner/pr-420-body.md`, but the remote update was blocked by the GitHub connector's approval policy. The finding is valid; the PR body still needs the prepared replacement applied through an approved update.
