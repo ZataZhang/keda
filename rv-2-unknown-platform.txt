@@ -1,0 +1,53 @@
+negative control: pre-change real entry UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache uv run kc --repo "/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/tmp.ucmL12ztsP" agent lifecycle list --scope repository
+lifecycle settings · scope=repository · repo=rv2
+stages:
+  implementation       agent=codex preset=codex-luna-max model=gpt-6-luna 
+effort=max
+  fix                  agent=codex preset=- model=gpt-6-luna effort=max  
+[follows-implementation]
+  closeout             agent=codex preset=- model=gpt-6-luna effort=max  
+[follows-implementation]
+  verifier             agent=codex preset=codex-luna-max model=gpt-6-luna 
+effort=max
+  review               agent=codex preset=codex-luna-max model=gpt-6-luna 
+effort=max
+  supervisor           agent=codex preset=codex-luna-max model=gpt-6-luna 
+effort=max
+  planner              agent=codebuddy preset=codebuddy-default model=- effort=-
+  content_generation   agent=codebuddy preset=codebuddy-default model=- effort=-
+  deliberate           agent=codebuddy preset=codebuddy-default model=- effort=-
+presets (6):
+  codebuddy-glm5_3-flash-max agent=codebuddy model=glm-5.3-flash effort=max 
+source=global bound=[-]
+  codebuddy-deepseek-v4_1-flash agent=codebuddy model=deepseek-v4.1-flash 
+effort=high source=global bound=[-]
+  claude-default   agent=claude model=- effort=- source=global bound=[-]
+  codebuddy-default agent=codebuddy model=- effort=- source=global 
+bound=[planner, content_generation, deliberate]
+  codex-nosandbox-luna-max agent=codex-nosandbox model=gpt-6-luna effort=max 
+source=global bound=[-]
+  codex-luna-max   agent=codex model=gpt-6-luna effort=max source=global 
+bound=[implementation, verifier, review, supervisor]
+fallback · max_agent_switches=4 budget_by_candidate_step=True
+  1. agent=qoder preset=- model=- effort=-
+  2. agent=codebuddy preset=- model=- effort=-
+  3. agent=kimi preset=- model=- effort=-
+  4. agent=claude preset=- model=- effort=-
+negative_control_exit=0
+negative_control_assertion=EXPECTED_FAIL_unknown_platform_was_accepted
+real_entry: UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache uv run kc --repo "/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/tmp.AIYIPPREwm" agent lifecycle list --scope repository
+error: Invalid KedaCode local config at /private/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/tmp.AIYIPPREwm/.kedacode.toml: 1 validation error for AgentRunnerLocalSettings
+repository.platform
+  Value error, Invalid repository.platform value 'gitlab'; expected one of: 'github', 'gitea'. [type=value_error, input_value='gitlab', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.12/v/value_error
+next: kc registry list
+exit=1
+acceptance_assertion=PASS
+real_entry: UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache uv run kc --repo "/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/tmp.VG6lC1B7QY" agent lifecycle list --scope repository
+error: Invalid KedaCode local config at /private/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/tmp.VG6lC1B7QY/.kedacode.toml: 1 validation error for AgentRunnerLocalSettings
+repository.platform
+  Value error, Invalid repository.platform value 'gitlab'; expected one of: 'github', 'gitea'. [type=value_error, input_value='gitlab', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.12/v/value_error
+next: kc registry list
+exit=1
+acceptance_assertion=PASS

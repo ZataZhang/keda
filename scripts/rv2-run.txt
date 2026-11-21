@@ -1,0 +1,8 @@
+real_entry: UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache uv run kc --repo "/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/tmp.VG6lC1B7QY" agent lifecycle list --scope repository
+error: Invalid KedaCode local config at /private/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/tmp.VG6lC1B7QY/.kedacode.toml: 1 validation error for AgentRunnerLocalSettings
+repository.platform
+  Value error, Invalid repository.platform value 'gitlab'; expected one of: 'github', 'gitea'. [type=value_error, input_value='gitlab', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.12/v/value_error
+next: kc registry list
+exit=1
+acceptance_assertion=PASS

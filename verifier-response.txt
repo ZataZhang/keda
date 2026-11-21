@@ -1,0 +1,323 @@
+# Independent verifier raw response
+# issue: #398
+# verifier agent: qoder
+# builder sha: 5eeed84be10b37fa521cfac5bcad697050323263
+# parsed risk: yellow
+# verdict marker found: yes
+# response chars: 31202
+
+
+[agent tool] Bash: git log --oneline -8 && echo "---HEAD---" && git rev-parse HEAD && git rev-parse HEAD^{tree} && echo "---STATUS---" && git status --short
+
+[agent tool] Bash: ls -la tasks/evidence/P2-FEAT-20261119-152718-repository-platform-selection-skeleton/ 2>/dev/null && echo "---scripts---" && ls -la tasks/evidence/P2-FEAT-20261119-152718-repository-platform-selection-skeleton/scripts/ 2>/dev/null
+
+[agent tool] Bash: git show --stat f5cffa14 | head -60
+
+[agent tool] Bash: find src/backend -name "repository_platform*" -o -name "*platform*" | grep -v __pycache__ | sort
+
+[agent tool] Bash: git show f5cffa14 -- src/backend/ | head -250
+
+[agent tool] Bash: git show f5cffa14 -- docs/ tests/ | head -200
+
+[agent tool] Bash: git diff --stat 1ad17462..HEAD -- tests/
+
+[agent tool] Bash: git show --stat e05c14ca 5eeed84b | head -40 && echo "=== tests changed since base ===" && git diff --stat 1ad17462..HEAD -- tests/ src/ docs/
+
+[agent tool] Bash: grep -rn "GitHubCliClient(" src/backend --include=*.py | grep -v __pycache__ ; echo "=== exit $? ==="; echo "--- create_github_client call sites ---"; grep -rn "create_github_client" src/ --include=*.py | grep -v __pycache__ | head -40
+
+[agent tool] Grep: src
+
+[agent tool] Grep: src
+
+[agent tool] Bash: grep -rn "\"gh\"\|'gh'\|\[.gh., " src/backend --include="*.py" 2>/dev/null | grep -v __pycache__ | head -30; echo "=== count ==="; grep -rln "gh " src/backend/engines/agent_runner --include="*.py" 2>/dev/null | head
+
+[agent tool] Read: /Users/zata/code/keda/.kc-worktrees/issue-398/src/backend/core/shared/models/platform_support.py
+
+[agent tool] Read: /Users/zata/code/keda/.kc-worktrees/issue-398/tasks/evidence/P2-FEAT-20261119-152718-repository-platform-selection-skeleton/scripts/rv1-capture.sh
+
+[agent tool] Read: /Users/zata/code/keda/.kc-worktrees/issue-398/tasks/evidence/P2-FEAT-20261119-152718-repository-platform-selection-skeleton/rv-1-gitea-not-implemented.txt
+
+[agent tool] Bash: ls -d .venv 2>/dev/null; ls -la /private/tmp/keda-issue-398-uv-cache 2>/dev/null | head -3; cat justfile | grep -n "^test\|^lint\|uv run\|^sync" | head -20; echo "--- pyproject tool.uv ---"; grep -n "no-sync\|\[tool.uv\]" -A5 pyproject.toml | head -30
+
+[agent tool] Bash: mkdir -p /private/tmp/kc398-verify && cd /private/tmp/kc398-verify && rm -rf r_gitea r_github r_none r_unknown r_case r_space r_empty r_int && for n in gitea github none unknown case space empty int; do mkdir -p r_$n && git -C r_$n init -q; done
+printf '[agent_runner.repository]\nid = "p-gitea"\nplatform = "gitea"\n' > r_gitea/.kedacode.toml
+printf '[agent_runner.repository]\nid = "p-github"\nplatform = "github"\n' > r_github/.kedacode.toml
+printf '[agent_runner.repository]\nid = "p-none"\n' > r_none/.kedacode.toml
+printf '[agent_runner.repository]\nid = "p-unknown"\nplatform = "gitlab"\n' > r_unknown/.kedacode.toml
+printf '[agent_runner.repository]\nid = "p-case"\nplatform = "GitHub"\n' > r_case/.kedacode.toml
+printf '[agent_runner.repository]\nid = "p-space"\nplatform = " github "\n' > r_space/.kedacode.toml
+printf '[agent_runner.repository]\nid = "p-empty"\nplatform = ""\n' > r_empty/.kedacode.toml
+printf '[agent_runner.repository]\nid = "p-int"\nplatform = 1\n' > r_int/.kedacode.toml
+ls -la /private/tmp/kc398-verify && echo OK
+
+[agent tool] Bash: export UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache && time uv run kc --repo /private/tmp/kc398-verify/r_gitea issue list > /private/tmp/kc398-verify/out_gitea.txt 2>&1; echo "exit=$?"; cat /private/tmp/kc398-verify/out_gitea.txt
+
+[agent tool] Bash: cd /private/tmp/kc398-verify && mkdir -p bin && cat > bin/gh <<'EOF'
+#!/bin/sh
+echo "GH_CALLED: $*" >> /private/tmp/kc398-verify/gh_calls.log
+case "$1 $2" in
+  "repo view") echo '{"nameWithOwner":"fakeowner/fakerepo"}' ;;
+  "issue list") echo '[]' ;;
+  "pr view") echo '{"nodes":[]}' ;;
+  "auth status") echo 'logged in'; exit 0 ;;
+  *) echo '{}' ;;
+esac
+exit 0
+EOF
+chmod +x bin/gh && rm -f gh_calls.log
+printf '[agent_runner.repository]\nid = "p-gitea"\nplatform = "gitea"\ngithub_repo = "fakeowner/fakerepo"\n' > r_gitea/.kedacode.toml
+printf '[agent_runner.repository]\nid = "p-github"\nplatform = "github"\ngithub_repo = "fakeowner/fakerepo"\n' > r_github/.kedacode.toml
+printf '[agent_runner.repository]\nid = "p-none"\ngithub_repo = "fakeowner/fakerepo"\n' > r_none/.kedacode.toml
+echo fixtures-updated
+
+[agent tool] Bash: export UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache; export PATH=/private/tmp/kc398-verify/bin:$PATH
+for n in gitea github none; do rm -f /private/tmp/kc398-verify/gh_calls.log; echo "=== r_$n ==="; uv run kc --repo /private/tmp/kc398-verify/r_$n issue list > /private/tmp/kc398-verify/gh_$n.txt 2>&1; echo "exit=$?"; cat /private/tmp/kc398-verify/gh_$n.txt; echo "--- gh calls: $(cat /private/tmp/kc398-verify/gh_calls.log 2>/dev/null | tr '\n' '|' )"; done
+
+[agent tool] Bash: export UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache; cd /private/tmp/kc398-verify
+printf '[agent_runner.repository]\nid = "p-unknown"\nplatform = "gitlab"\ngithub_repo = "fakeowner/fakerepo"\n' > r_unknown/.kedacode.toml
+printf '[agent_runner.repository]\nid = "p-case"\nplatform = "GitHub"\ngithub_repo = "fakeowner/fakerepo"\n' > r_case/.kedacode.toml
+printf '[agent_runner.repository]\nid = "p-space"\nplatform = " github "\ngithub_repo = "fakeowner/fakerepo"\n' > r_space/.kedacode.toml
+printf '[agent_runner.repository]\nid = "p-empty"\nplatform = ""\ngithub_repo = "fakeowner/fakerepo"\n' > r_empty/.kedacode.toml
+printf '[agent_runner.repository]\nid = "p-int"\nplatform = 1\ngithub_repo = "fakeowner/fakerepo"\n' > r_int/.kedacode.toml
+for n in unknown case space empty int; do rm -f gh_calls.log; echo "===== r_$n (issue list) ====="; uv run --project /Users/zata/code/keda/.kc-worktrees/issue-398 kc --repo /private/tmp/kc398-verify/r_$n issue list > out_$n.txt 2>&1; echo "exit=$?"; head -30 out_$n.txt; echo "-- gh calls: $(cat gh_calls.log 2>/dev/null | wc -l | tr -d ' ')"; done
+
+[agent tool] Bash: export UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache; cd /private/tmp/kc398-verify
+echo "===== rv-4 local command (gitea) ====="; rm -f gh_calls.log
+uv run --project /Users/zata/code/keda/.kc-worktrees/issue-398 kc --repo /private/tmp/kc398-verify/r_gitea agent lifecycle list --scope repository; echo "exit=$?"; echo "-- gh calls: $(cat gh_calls.log 2>/dev/null | wc -l | tr -d ' ')"
+echo "===== local command with UNKNOWN platform (expect load failure) ====="
+uv run --project /Users/zata/code/keda/.kc-worktrees/issue-398 kc --repo /private/tmp/kc398-verify/r_unknown agent lifecycle list --scope repository 2>&1 | head -5; echo "exit_pipeline=${PIPESTATUS[0]}"
+
+[agent tool] Grep: src
+
+[agent tool] Bash: export UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache; export PATH=/private/tmp/kc398-verify/bin:$PATH; cd /private/tmp/kc398-verify
+for cmd in "issue view 1" "pr list" "label list" "backlog list" "agent dispatch --help"; do
+  echo "===== kc $cmd (gitea) ====="; rm -f gh_calls.log
+  ( uv run --project /Users/zata/code/keda/.kc-worktrees/issue-398 kc --repo /private/tmp/kc398-verify/r_gitea $cmd ) > o.txt 2>&1; echo "exit=$?"; grep -ci "not implemented" o.txt | sed 's/^/not_implemented_lines=/'; echo "gh_calls=$(cat gh_calls.log 2>/dev/null | wc -l | tr -d ' ')"; head -6 o.txt; echo
+done
+
+[agent tool] Bash: export UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache; uv run kc --help 2>&1 | sed -n '1,60p'
+
+[agent tool] Bash: export UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache; uv run kc --help 2>&1 | sed -n '60,110p'
+
+[agent tool] Write: /private/tmp/kc398-verify/probe.sh
+
+[agent tool] Edit: /private/tmp/kc398-verify/probe.sh
+
+[agent tool] Bash: bash /private/tmp/kc398-verify/probe.sh 2>&1 | tail -80
+
+[agent tool] Read: /Users/zata/code/keda/.kc-worktrees/issue-398/src/backend/core/use_cases/agent_runner_evidence_prune.py offset=170 limit=45
+
+[agent tool] Grep: src/backend
+
+[agent tool] Grep: src/backend
+
+[agent tool] Read: /Users/zata/code/keda/.kc-worktrees/issue-398/src/backend/api/cli_typer_evidence.py offset=150 limit=115
+
+[agent tool] Grep: src/backend
+
+[agent tool] Bash: export UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache; uv run pytest tests/test_repository_platform_dispatch.py -q 2>&1 | tail -15
+
+[agent tool] Grep: src/backend
+
+[agent tool] Bash: grep -n "addopts\|markers\|\[tool.pytest" -A12 pyproject.toml | sed -n '1,60p'; echo "=== pytest.ini/conftest? ==="; ls pytest.ini setup.cfg tox.ini conftest.py 2>/dev/null
+
+[agent tool] Bash: export UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache; uv run pytest tests/test_repository_platform_dispatch.py tests/test_agent_runner_config.py -q -o addopts="" 2>&1 | tail -12
+
+[agent tool] Bash: head -30 tasks/evidence/P2-FEAT-20261119-152718-repository-platform-selection-skeleton/rv-5-pytest.txt; echo "...."; tail -25 tasks/evidence/P2-FEAT-20261119-152718-repository-platform-selection-skeleton/rv-5-pytest.txt
+
+[agent tool] Bash: grep -rn "platform" tests/test_agent_runner_config.py | head; echo "=== just test recipe ==="; grep -n "^test" -A20 justfile | sed -n '1,50p'
+
+[agent tool] Bash: tail -20 tasks/evidence/P2-FEAT-20261119-152718-repository-platform-selection-skeleton/rv-5-full-suite.txt; echo "=== head ==="; head -12 tasks/evidence/P2-FEAT-20261119-152718-repository-platform-selection-skeleton/rv-5-full-suite.txt
+
+[agent tool] Bash: grep -n "^test\|^lint\|JUST_LOCAL_TEST_TARGET" justfile | head -20
+
+[agent tool] Bash: ls -la justfile Justfile 2>&1 | head; grep -c "" justfile 2>/dev/null; grep -n "test" justfile 2>/dev/null | head -20
+
+[agent tool] Bash: export UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache; CI=1 timeout 900 just test 2>&1 | tail -25; echo "just_test_exit=${PIPESTATUS[0]}"
+
+[agent tool] Bash: export UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache; CI=1 just test 2>&1 | tail -25; echo "just_test_exit=${pipestatus[1]}"
+
+[agent tool] Bash: sed -n '1,60p' Justfile
+
+[agent tool] Bash: grep -n "just test\|pytest\|JUST_" tasks/evidence/P2-FEAT-20261119-152718-repository-platform-selection-skeleton/scripts/rv5-capture.sh | head -20
+
+[agent tool] Bash: export UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache; CI=1 PYTEST_ADDOPTS=--testmon-noselect just test > /private/tmp/kc398-verify/just_test_full.txt 2>&1; echo "exit=$?" >> /private/tmp/kc398-verify/just_test_full.txt; tail -3 /private/tmp/kc398-verify/just_test_full.txt
+
+[agent tool] Bash: git show --stat 8dda8346 | tail -8
+
+[agent tool] Bash: export UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache; cd /private/tmp/kc398-verify
+echo "===== platform in .kedacode.local.toml (personal override) ====="
+rm -rf r_local && mkdir r_local && git -C r_local init -q
+printf '[agent_runner.repository]\nid = "p-local"\n' > r_local/.kedacode.toml
+printf '[agent_runner.repository]\nplatform = "gitea"\n' > r_local/.kedacode.local.toml
+uv run --project /Users/zata/code/keda/.kc-worktrees/issue-398 kc --repo /private/tmp/kc398-verify/r_local issue list 2>&1 | head -8; echo "exit=${pipestatus[1]}"
+echo; echo "===== --json machine output under gitea ====="
+uv run --project /Users/zata/code/keda/.kc-worktrees/issue-398 kc --repo /private/tmp/kc398-verify/r_gitea issue list --json 2>&1 | head -12; echo "exit=${pipestatus[1]}"
+
+[agent tool] Bash: export UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache
+echo "=== grep platform in init/template writers ==="
+grep -rn "platform" src/backend/infrastructure/config/repository_settings_editor.py src/backend/core/use_cases/repo_init.py 2>/dev/null | head
+echo "=== templates that generate .kedacode.toml ==="
+grep -rln "agent_runner.repository" src/backend --include="*.py" --include="*.toml" --include="*.tmpl" 2>/dev/null | grep -v __pycache__ | head
+echo "=== effective_repository_config_path ==="
+grep -n "def effective_repository_config_path" -A 20 src/backend/core/shared/models/product_identity.py
+
+[agent tool] Bash: export UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache; uv run mkdocs build --strict > /private/tmp/kc398-verify/mkdocs.txt 2>&1; echo "mkdocs_exit=$?"; tail -8 /private/tmp/kc398-verify/mkdocs.txt; echo "=== rg docs ==="; rg -n "platform" docs/guides/configuration.md | head -10; echo "--- anchor check ---"; rg -n "agent-runner-repo-config" docs/guides/configuration.md mkdocs.yml | head -5; rg -n "platform" docs/guides/agent-runner.md | head -5
+
+[agent tool] Bash: grep -rn "def resolve_registry_config_toml_path" -A 25 src/backend/infrastructure/config/settings.py | head -40; echo "=== env var names ==="; grep -rn "CONFIG_DIR\|KEDACODE_HOME\|_CONFIG_PATH" src/backend/infrastructure/config/settings.py | head -15
+
+[agent tool] Bash: grep -n "def load_agent_runner_local_settings" -A 40 src/backend/infrastructure/config/agent_runner_repository_settings.py | head -60
+
+[agent tool] Bash: git ls-files .kedacode.toml; echo "tracked_exit=$?"; ls -la .kedacode.toml 2>&1 | head -2; grep -rn "kedacode.toml" docs/getting-started/installation.md 2>/dev/null | head -3
+
+[agent tool] Bash: export UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache; export PATH=/private/tmp/kc398-verify/bin:$PATH; cd /private/tmp/kc398-verify
+rm -rf wt_main && mkdir wt_main && git -C wt_main init -q && git -C wt_main -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+printf '[agent_runner.repository]\nid = "p-wt"\nplatform = "gitea"\ngithub_repo = "fakeowner/wtrepo"\n' > wt_main/.kedacode.toml
+git -C wt_main worktree add -q ../wt_link -b wt-branch 2>/dev/null; ls ../wt_link/.kedacode.toml 2>&1 | head -2
+echo "=== issue list on the LINKED WORKTREE (untracked .kedacode.toml) ==="
+rm -f gh_calls.log; uv run --project /Users/zata/code/keda/.kc-worktrees/issue-398 kc --repo /private/tmp/kc398-verify/wt_link issue list 2>&1 | head -6; echo "exit=${pipestatus[1]}"; echo "gh_calls=$(wc -l < gh_calls.log 2>/dev/null | tr -d ' ' || echo 0)"; cat gh_calls.log 2>/dev/null
+
+[agent tool] Bash: export UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache
+echo "=== NC item6: base docs lacked platform+gitea ==="; git show 1ad17462:docs/guides/configuration.md | rg -n 'platform.*gitea|gitea.*platform'; echo "rg_exit=$?"
+echo "=== NC item5: validator rejects gitlab ==="; uv run python -c 'from backend.core.shared.models.repository_platform import validate_repository_platform; print(validate_repository_platform("github")); validate_repository_platform("gitlab")' 2>&1 | tail -3; echo "py_exit=$?"
+echo "=== NC item5b: validator must NOT accept unknown (assert-style) ==="; uv run python -c 'from backend.core.shared.models.repository_platform import validate_repository_platform as v
+for bad in ["gitlab","GitHub"," github ",""]:
+    try:
+        v(bad); print("FAIL_not_rejected", repr(bad))
+    except ValueError as e: print("rejected", repr(bad))'
+echo "=== arch: rg gitea in src/backend ==="; rg -n '"gitea"' src/backend; echo "=== arch: rg -c create_github_client ==="; rg -c "create_github_client\(" src/backend | awk -F: '{s+=$2} END {print "total="s}'
+
+[agent tool] Bash: export UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache; cd /private/tmp/kc398-verify
+rm -rf r_typo && mkdir r_typo && git -C r_typo init -q
+printf '[agent_runner.repository]\nid = "p-typo"\nplatfrm = "gitlab"\n' > r_typo/.kedacode.toml
+echo "=== misspelled key 'platfrm' (simulates pre-change: unknown identity key) ==="
+uv run --project /Users/zata/code/keda/.kc-worktrees/issue-398 kc --repo /private/tmp/kc398-verify/r_typo agent lifecycle list --scope repository 2>&1 | head -3; echo "exit=${pipestatus[1]}"
+
+[agent tool] Bash: export UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache; cd /private/tmp/kc398-verify
+uv run --project /Users/zata/code/keda/.kc-worktrees/issue-398 kc --repo /private/tmp/kc398-verify/r_typo agent lifecycle list --scope repository > typo_out.txt 2>&1; echo "exit=$?"; grep -ci "platform" typo_out.txt; tail -3 /private/tmp/kc398-verify/just_test_full.txt 2>/dev/null
+
+[agent tool] Read: /Users/zata/code/keda/.kc-worktrees/issue-398/src/backend/api/routes/agent_runner_console_issues.py offset=125 limit=60
+
+[agent tool] Bash: grep -rn "RepositoryPlatformNotImplementedError" src/backend docs tests tasks/evidence/P2-FEAT-20261119-152718-repository-platform-selection-skeleton/*.md | grep -v __pycache__ | head -20
+
+[agent tool] Bash: grep -rn "exception_handler\|@app.exception" src/backend/api/*.py src/backend/*.py 2>/dev/null | grep -v __pycache__ | head -20
+
+[agent tool] Grep: src/backend
+
+[agent tool] Bash: export UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache; uv run pytest tests/test_repository_platform_dispatch.py -q -o addopts="" --tb=short -k "unknown or reject or spellings" 2>&1 | tail -5
+echo "=== MUTATION: make factory a no-op (simulate absent gate) ==="
+cp src/backend/engines/agent_runner/factories/__init__.py /private/tmp/kc398-verify/factories_backup.py
+python3 - <<'PY'
+from pathlib import Path
+p = Path("src/backend/engines/agent_runner/factories/__init__.py")
+text = p.read_text(encoding="utf-8")
+old = "    if repository_settings is not None and repository_settings.platform != GITHUB_PLATFORM:"
+assert old in text, "anchor not found"
+p.write_text(text.replace(old, "    if False:", 1), encoding="utf-8")
+print("patched")
+PY
+
+[agent tool] Bash: export UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache; export PATH=/private/tmp/kc398-verify/bin:$PATH
+echo "=== MUTATED BUILD: kc issue list on gitea repo (expect gate ABSENT) ==="
+uv run kc --repo /private/tmp/kc398-verify/r_gitea issue list > /private/tmp/kc398-verify/mut.txt 2>&1; echo "exit=$?"; grep -ci "not implemented" /private/tmp/kc398-verify/mut.txt | sed 's/^/not_implemented_hits=/'; grep -c "GH_CALLED\|gh" /dev/null; cat /private/tmp/kc398-verify/gh_calls.log 2>/dev/null | head -3
+echo "=== MUTATED BUILD: dispatch test (expect RED) ==="
+uv run pytest tests/test_repository_platform_dispatch.py -q -o addopts="" 2>&1 | tail -6
+
+[agent tool] Bash: cp /private/tmp/kc398-verify/factories_backup.py src/backend/engines/agent_runner/factories/__init__.py && git status --short && echo "restored_diff_empty=$(git diff --stat | wc -l | tr -d ' ')" && export UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache && uv run pytest tests/test_repository_platform_dispatch.py -q -o addopts="" 2>&1 | tail -3
+
+[agent tool] Bash: tail -6 /private/tmp/kc398-verify/just_test_full.txt 2>/dev/null; echo "=== job output file ==="; tail -5 /var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/qoder-cli-cn-501/-Users-zata-code-keda--kc-worktrees-issue-398/4ffbefed-e28d-4b62-9644-a9cb0d6d6821/tasks/b1oemqimw.output 2>/dev/null
+
+[agent tool] Read: /Users/zata/code/keda/.kc-worktrees/issue-398/tasks/evidence/P2-FEAT-20261119-152718-repository-platform-selection-skeleton/P2-FEAT-20261119-152718-repository-platform-selection-skeleton.evidence-report.md
+
+[agent tool] Bash: git diff --stat f5cffa14..HEAD -- src tests docs; echo "code_diff_empty_lines=$(git diff --stat f5cffa14..HEAD -- src tests docs | wc -l | tr -d ' ')"
+echo "=== rv2-history.txt (pre-change NC) ==="; head -30 tasks/evidence/P2-FEAT-20261119-152718-repository-platform-selection-skeleton/scripts/rv2-history.txt
+echo "=== rv2-prechange-negative.sh ==="; cat tasks/evidence/P2-FEAT-20261119-152718-repository-platform-selection-skeleton/scripts/rv2-prechange-negative.sh
+
+[agent tool] Bash: tail -5 tasks/evidence/P2-FEAT-20261119-152718-repository-platform-selection-skeleton/scripts/rv2-history.txt
+export UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache; export PATH=/private/tmp/kc398-verify/bin:$PATH; cd /private/tmp/kc398-verify
+echo "=== --json separation: gitea ==="; uv run --project /Users/zata/code/keda/.kc-worktrees/issue-398 kc --repo /private/tmp/kc398-verify/r_gitea issue list --json >g.json 2>g.err; echo "exit=$?"; echo "--stdout--"; cat g.json; echo "--stderr--"; head -4 g.err
+echo "=== --json separation: github (pre-existing error shape) ==="; uv run --project /Users/zata/code/keda/.kc-worktrees/issue-398 kc --repo /private/tmp/kc398-verify/r_github issue list --json >h.json 2>h.err; echo "exit=$?"; echo "--stdout--"; cat h.json; echo "--stderr--"; head -4 h.err
+
+[agent tool] Bash: grep -n "^exit=\|negative_control\|real_entry\|pre-change\|acceptance_assertion\|lifecycle settings" tasks/evidence/P2-FEAT-20261119-152718-repository-platform-selection-skeleton/scripts/rv2-history.txt; echo "=== does the pre-change script check out base? ==="; grep -rn "git \|worktree\|checkout" tasks/evidence/P2-FEAT-20261119-152718-repository-platform-selection-skeleton/scripts/rv2-capture.sh | head
+
+[agent tool] Grep: src/backend
+
+[agent tool] Bash: tail -12 /private/tmp/kc398-verify/just_test_full.txt; echo "=== job status file ==="; ls -la /var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/qoder-cli-cn-501/-Users-zata-code-keda--kc-worktrees-issue-398/4ffbefed-e28d-4b62-9644-a9cb0d6d6821/tasks/b1oemqimw.output 2>/dev/null; tail -3 /var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/qoder-cli-cn-501/-Users-zata-code-keda--kc-worktrees-issue-398/4ffbefed-e28d-4b62-9644-a9cb0d6d6821/tasks/b1oemqimw.output 2>/dev/null
+
+[agent tool] Bash: export UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache; uv run kc evidence check --evidence tasks/evidence/P2-FEAT-20261119-152718-repository-platform-selection-skeleton 2>&1 | tail -20; echo "evidence_check_exit=${pipestatus[1]}"
+
+[agent tool] Bash: cd tasks/evidence/P2-FEAT-20261119-152718-repository-platform-selection-skeleton && for f in rv-2-unknown-platform.txt rv-3-default-unchanged.txt rv-4-local-command-ok.txt; do echo "=== $f ==="; head -2 $f; grep -n "^exit=\|acceptance_assertion" $f | head -4; done
+
+[agent tool] Bash: cd /Users/zata/code/keda/.kc-worktrees/issue-398 && tail -6 /private/tmp/kc398-verify/just_test_full.txt
+
+[agent tool] Bash: grep -n "platform\|identity\|agent_runner.repository\|def .*write\|def .*migrate" src/backend/engines/agent_runner/repository_local_migration.py | head -25; echo "=== agent_runner_repository_local.py ==="; grep -n "platform\|def \|_IDENTITY\|github_repo" src/backend/core/use_cases/agent_runner_repository_local.py | head -30
+
+[agent tool] Bash: sed -n '176,240p' src/backend/engines/agent_runner/repository_local_migration.py
+
+[agent tool] Bash: tail -8 /private/tmp/kc398-verify/just_test_full.txt; echo "---"; grep -c "FAILED\|ERROR" /private/tmp/kc398-verify/just_test_full.txt
+
+[agent tool] Bash: grep -n "FAILED\|ERROR" /private/tmp/kc398-verify/just_test_full.txt | head -5
+
+[agent tool] Bash: tail -3 /private/tmp/kc398-verify/just_test_full.txt; echo "=== failure detail (if present) ==="; grep -n "test_github_failure_keeps_previous_backlog_snapshot" -A 3 /private/tmp/kc398-verify/just_test_full.txt | sed -n '1,20p'
+
+[agent tool] Bash: grep -n "def test_github_failure_keeps_previous_backlog_snapshot" -B 15 -A 40 tests/test_backlog_api.py | head -80
+
+[agent tool] Read: /Users/zata/code/keda/.kc-worktrees/issue-398/tasks/evidence/P2-FEAT-20261119-152718-repository-platform-selection-skeleton/P2-FEAT-20261119-152718-repository-platform-selection-skeleton.verifier-report.md
+
+[agent tool] Bash: tail -4 /private/tmp/kc398-verify/just_test_full.txt
+
+[agent tool] Bash: sed -n '505,560p' src/backend/api/cli_loop.py
+
+[agent tool] Bash: tail -20 /private/tmp/kc398-verify/just_test_full.txt | sed -n '1,20p'
+
+[agent tool] Bash: sed -n '295,360p' tests/test_backlog_api.py
+
+[agent tool] Bash: sleep 100; tail -3 /private/tmp/kc398-verify/just_test_full.txt
+
+[agent tool] Bash: sleep 240; tail -4 /private/tmp/kc398-verify/just_test_full.txt
+
+[agent tool] Bash: sleep 90; tail -8 /private/tmp/kc398-verify/just_test_full.txt
+
+[agent tool] Bash: export UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache; uv run pytest tests/test_backlog_api.py -q -o addopts="" 2>&1 | tail -6; echo "=== does the file touch the factory/platform? ==="; grep -n "create_github_client\|platform\|load_agent_runner_local_settings" tests/test_backlog_api.py | head
+
+[agent tool] Bash: export UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache; for i in 1 2 3; do uv run pytest "tests/test_backlog_api.py::test_github_failure_keeps_previous_backlog_snapshot" -q -o addopts="" 2>&1 | tail -1; done; echo "=== flake history in repo ==="; grep -rn "wait_until_idle" docs/ai-standards/testing.md | head -3; git log --oneline -3 -- tests/test_backlog_api.py
+
+[agent tool] Bash: git status --short; echo "status_lines=$(git status --short | wc -l | tr -d ' ')"; git rev-parse HEAD; rm -rf /private/tmp/kc398-verify/r_local /private/tmp/kc398-verify/wt_main /private/tmp/kc398-verify/wt_link 2>/dev/null; echo "temp fixtures kept under /private/tmp/kc398-verify for reference"; ls /private/tmp/kc398-verify | head -20
+
+[agent result] ## Independent verification report — issue #398 (repository platform declaration & dispatch skeleton)
+
+I re-derived the oracles from the intent and ran them myself through the real `uv run kc` CLI at HEAD `5eeed84b`, with an instrumented `gh` shim on `PATH` that logs every subprocess invocation (so "stops before touching the code platform" is measured, not inferred).
+
+### What I ran and what I actually saw
+
+| Oracle | My command | Observed |
+|---|---|---|
+| rv-1 | `kc --repo <platform=gitea> issue list` | exit **1**; output contains `gitea`, `platform`, `not implemented`, `Only 'github' is currently supported`, the config path and `set platform = 'github'`; **no** `Traceback` |
+| rv-1 (stronger) | same, with logging `gh` shim | **0** `gh` calls for gitea vs **2** for `github` (`api rate_limit`, `api -X GET repos/…/issues`) → the gate really fires before any platform access |
+| rv-2 | `gitlab`, `GitHub`, `" github "`, `""`, `1` | exit **1** at config load in all five; message names `repository.platform`, the received value, and allowed `'github', 'gitea'`; also fails on a purely local command → proves load-time rejection, not access-time |
+| rv-3 | no `platform` vs `platform = "github"` | identical exit code **and** identical `gh` call sequence; 0 platform/config messages in both |
+| rv-4 | `kc --repo <gitea> agent lifecycle list --scope repository` | exit **0**, 0 `gh` calls |
+| rv-5 | `pytest tests/test_agent_runner_config.py tests/test_repository_platform_dispatch.py -q -o addopts=""` | **81 passed** (plain `uv run pytest` reports "11 deselected" because `addopts=--testmon` — I had to clear it to get a real run) |
+| rv-6 | `uv run mkdocs build --strict` | exit 0; configuration.md carries key/values/default/gitea status; agent-runner.md cross-ref anchor `#agent-runner-repo-config` exists |
+| gate | `uv run kc evidence check --evidence …` | 6/6 PASSED (re-executes the capture scripts live) |
+
+**Negative controls — all went RED as required:** github control lacks the gitea message (item 1); `validate_repository_platform("gitlab")` raises while `"github"` returns (item 5); `git show 1ad17462:docs/guides/configuration.md | rg 'platform.*gitea'` → exit 1 (item 6); gitea control emits the platform message when the "no message" assertion is applied to it (item 3); `issue list` on the gitea repo exits 1 when used against the rv-4 assertion (item 4). For item 2's pre-change claim I reproduced the equivalent live: a misspelled identity key (`platfrm = "gitlab"`) is silently ignored with exit 0, which is exactly why pre-change `platform = "gitlab"` was accepted.
+
+**Mutation probe (strongest check):** I temporarily changed the gate condition to `if False:` and re-ran. The gitea repo then **did** call `gh api repos/fakeowner/fakerepo/issues`, the "not implemented" text vanished, and `test_create_github_client_stops_before_process_for_gitea` failed. File restored; `git status` is clean at HEAD.
+
+**Architecture / scope:** `GitHubCliClient(` → 1 hit (factories:443); `"gitea"` in `src/backend` → 1 hit; `create_github_client(` count 26; `repository_settings.platform` is read at exactly one decision point (factories/__init__.py:437); no registry/plugin abstraction; factory signature + return annotation unchanged; `interfaces/agent_runner.py` diff empty; no code change after `f5cffa14` (later commits are docs/evidence only); `kc init`/config writers don't emit the key; `.kedacode.local.toml` identity override rejected with exit 1; the config migration is line-deletion based so `platform` survives it.
+
+### Gaps found (real, non-blocking)
+
+1. **Ungated GitHub paths remain.** `kc evidence prune --repo-id <id>` resolves the slug from the git remote and runs `gh pr list --repo <slug>` (`core/use_cases/agent_runner_evidence_prune.py:192`) — and with `--apply` deletes remote branches — without consulting `platform`. Same class: `core/use_cases/loop_builtin.py:62` templates raw `gh issue list --repo`. Only a gitea-declared repo that *also* has a github.com remote is exposed. The PRD excluded takeover and preview templates but not these. (Verified by code reading; I deliberately did not run `evidence prune` to avoid mutating the shared registry.)
+2. **Web console returns 500, not the explanation.** `create_github_client()` is called *outside* the `try` in `api/routes/agent_runner_console_issues.py:141,169`, and `RepositoryPlatformNotImplementedError` is a bare `RuntimeError` with no FastAPI handler anywhere (`rg exception_handler src/backend` → no matches). Boundary 3 holds (no GitHub data is touched) but the "并说明" part degrades to an opaque 500 for console users.
+3. **"立即停止" is not literal.** `issue list` still prints the GitHub-specific `[WARN] … has no github_repo configured` line and an empty table, and reports the platform error under the GitHub-flavoured `Error fetching <repo>:` prefix. Cosmetic — zero `gh` calls.
+4. **Linked worktrees without a tracked `.kedacode.toml` lose the declaration.** `load_agent_runner_local_settings` returns `None` if the file isn't at that root, so I demonstrated a worktree of a gitea repo falling back to GitHub behaviour ("Unable to determine repository owner/name"). Inherent to the pre-existing identity section (`github_repo` behaves the same); kc-managed worktrees of a committed config are unaffected.
+5. **Evidence bookkeeping is inaccurate.** The acceptance item claiming new cases in `tests/test_agent_runner_config.py` is false — that file was never modified; only the new `tests/test_repository_platform_dispatch.py` exists. And `rv-5-pytest.txt`'s "`just test`" was bounded via `JUST_LOCAL_TEST_TARGET=tests/test_agent_runner_config.py`, so it is not the standard local tier (the unbounded run lives in `rv-5-full-suite.txt`).
+6. **My own unbounded local test tier:** `5607 passed, 1 failed, 1 skipped` at HEAD. The failure was `tests/test_backlog_api.py::test_github_failure_keeps_previous_backlog_snapshot` (`scanned_at` mismatch under concurrent load). That test monkeypatches `create_github_client` away, passes 19/19 for its file and 3/3 in isolation, and the module's history already contains a "make force-refresh test race-safe" commit → pre-existing timing flake, not caused by #398.
+
+### Verdict
+
+Every oracle row, all four key boundaries, and the measurable objectives are independently confirmed on the real CLI, and the checks are proven able to fail (including a mutation probe). What keeps this from green is scope-adjacent residue, not a broken main path: two ungated GitHub paths outside the factory, an unexplained 500 in the console, and stale evidence bookkeeping in rv-5.
+
+<!-- kc:verifier-verdict risk=yellow -->

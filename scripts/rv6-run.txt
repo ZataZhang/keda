@@ -1,0 +1,57 @@
+negative control: git show HEAD:docs/guides/configuration.md | rg -n 'platform.*gitea|gitea.*platform'
+negative_control_exit=1
+negative_control_assertion=EXPECTED_FAIL_base_configuration_guide_lacks_platform_contract
+real_entry: UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache uv run mkdocs build --strict
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /Users/zata/code/keda/.kc-worktrees/issue-398/site
+INFO    -  The following pages exist in the docs directory, but are not included in the "nav" configuration:
+  - ai-standards/alembic.md
+  - prototypes/blocked-draft-pr-surface.md
+  - prototypes/kc-agent-terminal-preview.md
+  - prototypes/roadmap-prd-cicd-auto-repair.md
+  - prototypes/roadmap-prd-controls-evidence-autopilot.md
+  - prototypes/verifier-human-takeover.md
+  - prototypes/assets/backlog-unified-concurrency-ceiling.prompt.md
+  - prototypes/assets/blocked-draft-pr-01-failure-context-comment.source.md
+  - prototypes/assets/blocked-draft-pr-02-draft-pr-body.source.md
+  - prototypes/assets/kc-terminal-agent-preview.prompt.md
+  - prototypes/assets/keda-vs-claude-paired-evaluation.source.md
+  - prototypes/assets/roadmap-prd-cicd-01-waiting.prompt.md
+  - prototypes/assets/roadmap-prd-cicd-02-repairing.prompt.md
+  - prototypes/assets/roadmap-prd-cicd-03-rechecking.prompt.md
+  - prototypes/assets/roadmap-prd-cicd-04-passed.prompt.md
+  - prototypes/assets/roadmap-prd-cicd-auto-repair.prompt.md
+  - prototypes/assets/roadmap-prd-controls-evidence-autopilot-progress-archived.prompt.md
+  - prototypes/assets/roadmap-prd-controls-evidence-autopilot-progress-degraded.prompt.md
+  - prototypes/assets/roadmap-prd-controls-evidence-autopilot-progress-running.prompt.md
+  - prototypes/assets/roadmap-prd-controls-evidence-autopilot.prompt.md
+  - prototypes/assets/runtime-board-preview.source.md
+  - prototypes/assets/runtime-consent-preview.source.md
+  - prototypes/assets/runtime-evaluation-baseline-preview.source.md
+  - prototypes/assets/runtime-evaluation-preview.source.md
+  - prototypes/assets/runtime-widget-preview.source.md
+  - prototypes/assets/lifecycle-agent-matrix/prd-content-real.source.md
+  - prototypes/assets/lifecycle-agent-matrix/preview-fallback-settings.source.md
+  - prototypes/assets/lifecycle-agent-matrix/preview-lifecycle-settings.source.md
+  - prototypes/assets/lifecycle-agent-matrix/preview-settings.source.md
+  - prototypes/assets/lifecycle-agent-matrix/repositories-lifecycle-settings-concept.prompt.md
+  - prototypes/assets/lifecycle-agent-matrix/roadmap-real.source.md
+  - prototypes/assets/lifecycle-agent-matrix/settings-real.source.md
+  - prototypes/live-concept-workbench/assets/01-live-web-preview.prompt.md
+  - prototypes/live-concept-workbench/assets/02-concept-map.prompt.md
+  - prototypes/live-concept-workbench/assets/03-concept-brief.prompt.md
+  - prototypes/live-concept-workbench/assets/04-storyboard.prompt.md
+  - prototypes/live-concept-workbench/assets/05-three-directions.prompt.md
+  - prototypes/live-concept-workbench/assets/06-artifact-tabs-history.prompt.md
+  - prototypes/tailscale-machine-management/prototype.md
+INFO    -  mkdocstrings_handlers: Formatting signatures requires either Black or Ruff to be installed.
+INFO    -  Documentation built in 9.44 seconds
+build_exit=0
+documentation search: rg -n "platform" docs/guides/configuration.md
+117:仓库自身的 `.kedacode.toml` 可在 `[agent_runner.repository]` 身份段声明 `platform`。允许值为 `github` 和 `gitea`，省略时默认为 `github`；平台名必须完全匹配小写写法。当前只有 `github` 已实现，声明 `gitea` 的仓库在执行代码托管平台操作时会收到尚未实现的提示；要继续使用现有 GitHub 对接，请设置 `platform = "github"`。未知值、大小写不符、带首尾空格或空字符串会在读取配置时被拒绝。个人本地覆盖文件不能改写该身份段。
+cross_reference search: rg -n "platform" docs/guides/agent-runner.md
+1652:- 与 `github_repo` 同属仓库身份信息的 `platform` 通过 `.kedacode.toml` 的 `[agent_runner.repository]` 段声明，省略时默认为 `github`；目前 `gitea` 尚未实现。配置格式、允许值与改回 GitHub 的方式见[配置指南](configuration.md#agent-runner-repo-config)。
+4849:  [Anthropic 公开价格](https://platform.claude.com/docs/en/about-claude/pricing)
+6014:| Codex CLI（OpenAI） | `https://platform.openai.com/api-keys` | OpenAI 平台 API 账户有可用额度 |
+6015:| Kimi Code CLI | `https://platform.kimi.com/console/api-keys` | Kimi 平台 API 账户有可用额度 |
+acceptance_assertion=PASS

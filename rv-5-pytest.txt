@@ -1,0 +1,110 @@
+negative control: UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache uv run python -c "from backend.core.shared.models.repository_platform import validate_repository_platform; assert validate_repository_platform(\"gitlab\") == \"gitlab\""
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    from backend.core.shared.models.repository_platform import validate_repository_platform; assert validate_repository_platform("gitlab") == "gitlab"
+                                                                                                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^
+  File "/Users/zata/code/keda/.kc-worktrees/issue-398/src/backend/core/shared/models/repository_platform.py", line 45, in validate_repository_platform
+    raise ValueError(
+    ...<2 lines>...
+    )
+ValueError: Invalid repository.platform value 'gitlab'; expected one of: 'github', 'gitea'.
+negative_control_exit=1
+negative_control_assertion=EXPECTED_FAIL_invalid_platform_is_rejected
+real_entry: UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache uv run pytest tests/test_agent_runner_config.py tests/test_repository_platform_dispatch.py -q --testmon-noselect
+........................................................................ [ 88%]
+.........                                                                [100%]
+81 passed in 2.28s
+targeted_exit=0
+real_entry: CI=1 PYTEST_ADDOPTS=--testmon-noselect JUST_LOCAL_TEST_TARGET=tests/test_agent_runner_config.py JUST_TEST_TIMEOUT_SECONDS=240 UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache just test
+🔍 Running full lint checks...
+✅ Lint passed. Proceeding to tests...
+============================= test session starts ==============================
+collecting ... collected 70 items
+
+tests/test_agent_runner_config.py::test_runner_settings_escalation_ladder_defaults PASSED [  1%]
+tests/test_agent_runner_config.py::test_autopilot_settings_rejects_non_squash_merge_method PASSED [  2%]
+tests/test_agent_runner_config.py::test_generated_content_targets_default_to_agent_mode PASSED [  4%]
+tests/test_agent_runner_config.py::test_repository_metadata_github_repo_accepts_valid_values[owner/repo] PASSED [  5%]
+tests/test_agent_runner_config.py::test_merge_repository_config_adds_repositories_dict_entry PASSED [  7%]
+tests/test_agent_runner_config.py::test_repository_metadata_github_repo_accepts_valid_values[zata-zhangtao/keda] PASSED [  8%]
+tests/test_agent_runner_config.py::test_repository_settings_github_repo_rejects_invalid_values[owner/] PASSED [ 10%]
+tests/test_agent_runner_config.py::test_repository_metadata_github_repo_rejects_invalid_values[host/owner/repo] PASSED [ 11%]
+tests/test_agent_runner_config.py::test_repository_metadata_github_repo_rejects_invalid_values[not-a-slash] PASSED [ 12%]
+tests/test_agent_runner_config.py::test_repository_metadata_github_repo_accepts_valid_values[owner-with-dashes/repo_with_underscores] PASSED [ 14%]
+tests/test_agent_runner_config.py::test_repository_metadata_github_repo_rejects_invalid_values[/owner/repo] PASSED [ 15%]
+tests/test_agent_runner_config.py::test_repository_settings_github_repo_rejects_invalid_values[host/owner/repo] PASSED [ 17%]
+tests/test_agent_runner_config.py::test_repository_settings_github_repo_rejects_invalid_values[not-a-slash] PASSED [ 18%]
+tests/test_agent_runner_config.py::test_repository_metadata_github_repo_rejects_invalid_values[/repo] PASSED [ 20%]
+tests/test_agent_runner_config.py::test_repository_metadata_github_repo_rejects_invalid_values[owner/] PASSED [ 21%]
+tests/test_agent_runner_config.py::test_repository_settings_github_repo_rejects_invalid_values[/repo] PASSED [ 22%]
+tests/test_agent_runner_config.py::test_merge_repository_config_falls_back_to_path_key PASSED [ 24%]
+tests/test_agent_runner_config.py::test_merge_repository_config_inherits_label_agent_labels PASSED [ 25%]
+tests/test_agent_runner_config.py::test_merge_repository_config_overrides_backlog_auto_advance PASSED [ 27%]
+tests/test_agent_runner_config.py::test_merge_repository_config_overrides_autopilot PASSED [ 28%]
+tests/test_agent_runner_config.py::test_merge_repository_config_overrides_agent_fallback_order PASSED [ 30%]
+tests/test_agent_runner_config.py::test_build_generated_content_config_from_settings PASSED [ 31%]
+tests/test_agent_runner_config.py::test_merge_repository_config_overrides_deliberation PASSED [ 32%]
+tests/test_agent_runner_config.py::test_repository_metadata_github_repo_rejects_invalid_values[owner/repo/] PASSED [ 34%]
+tests/test_agent_runner_config.py::test_merge_repository_config_overrides_labels PASSED [ 35%]
+tests/test_agent_runner_config.py::test_merge_repository_config_inherits_unset_fields PASSED [ 37%]
+tests/test_agent_runner_config.py::test_merge_repository_config_inherits_max_concurrent_issues PASSED [ 38%]
+tests/test_agent_runner_config.py::test_merge_repository_config_overrides_git PASSED [ 40%]
+tests/test_agent_runner_config.py::test_merge_repository_config_inherits_deliberation_profiles PASSED [ 41%]
+tests/test_agent_runner_config.py::test_merge_repository_config_overrides_generated_content PASSED [ 42%]
+tests/test_agent_runner_config.py::test_merge_repository_config_inherits_generated_content PASSED [ 44%]
+tests/test_agent_runner_config.py::test_merge_repository_config_ignores_empty_template_overrides PASSED [ 45%]
+tests/test_agent_runner_config.py::test_hosted_runner_auth_root_default_is_valid_for_linux_hosted_path PASSED [ 47%]
+tests/test_agent_runner_config.py::test_merge_repository_config_preserves_unrelated_identities PASSED [ 48%]
+tests/test_agent_runner_config.py::test_hosted_public_base_url_requires_https_except_localhost PASSED [ 50%]
+tests/test_agent_runner_config.py::test_iar_toml_renders_max_concurrent_issues_comment PASSED [ 51%]
+tests/test_agent_runner_config.py::test_hosted_runner_repository_binding_requires_absolute_path_pair PASSED [ 52%]
+tests/test_agent_runner_config.py::test_build_app_config_maps_validation_language_and_structured_evidence PASSED [ 54%]
+tests/test_agent_runner_config.py::test_agent_runner_daemon_settings_defaults PASSED [ 55%]
+tests/test_agent_runner_config.py::test_max_concurrent_issues_default_and_factory_mapping PASSED [ 57%]
+tests/test_agent_runner_config.py::test_build_app_config_from_settings_maps_deliberation PASSED [ 58%]
+tests/test_agent_runner_config.py::test_build_app_config_from_settings_maps_backlog_auto_advance PASSED [ 60%]
+tests/test_agent_runner_config.py::test_build_app_config_from_settings_maps_autopilot_defaults PASSED [ 61%]
+tests/test_agent_runner_config.py::test_resolve_repository_targets_mutual_exclusion PASSED [ 62%]
+tests/test_agent_runner_config.py::test_build_app_config_from_settings_maps_autopilot_overrides PASSED [ 64%]
+tests/test_agent_runner_config.py::test_build_app_config_from_settings_structure PASSED [ 65%]
+tests/test_agent_runner_config.py::test_retired_max_issues_is_ignored_with_a_warning PASSED [ 67%]
+tests/test_agent_runner_config.py::test_retired_max_issues_warns_only_once_per_process PASSED [ 68%]
+tests/test_agent_runner_config.py::test_require_repository_initialized_accepts_valid_config PASSED [ 70%]
+tests/test_agent_runner_config.py::test_require_repository_initialized_rejects_missing_agent_runner_section PASSED [ 71%]
+tests/test_agent_runner_config.py::test_require_repository_initialized_rejects_empty_repo_id PASSED [ 72%]
+tests/test_agent_runner_config.py::test_require_repository_initialized_rejects_invalid_toml PASSED [ 74%]
+tests/test_agent_runner_config.py::test_require_repository_initialized_rejects_missing_config PASSED [ 75%]
+tests/test_agent_runner_config.py::test_load_agent_runner_local_settings_propagates_github_repo PASSED [ 77%]
+tests/test_agent_runner_config.py::test_resolve_repository_targets_disabled_repo PASSED [ 78%]
+tests/test_agent_runner_config.py::test_resolve_repository_targets_by_repo_id_merges_local_config PASSED [ 80%]
+tests/test_agent_runner_config.py::test_merge_repository_config_overrides_validation_language PASSED [ 81%]
+tests/test_agent_runner_config.py::test_resolve_repository_targets_ad_hoc_repo PASSED [ 82%]
+tests/test_agent_runner_config.py::test_resolve_issue_from_prd_uses_local_cwd_config PASSED [ 84%]
+tests/test_agent_runner_config.py::test_resolve_repository_targets_local_config_disables_validation PASSED [ 85%]
+tests/test_agent_runner_config.py::test_resolve_repository_targets_merges_local_deliberation PASSED [ 87%]
+tests/test_agent_runner_config.py::test_resolve_repository_targets_rejects_disabled_local_config PASSED [ 88%]
+tests/test_agent_runner_config.py::test_resolve_repository_targets_by_repo_id PASSED [ 90%]
+tests/test_agent_runner_config.py::test_resolve_repository_targets_fallback_when_empty PASSED [ 91%]
+tests/test_agent_runner_config.py::test_local_iar_toml_overrides_autopilot PASSED [ 92%]
+tests/test_agent_runner_config.py::test_resolve_repository_targets_repo_path_loads_local_config PASSED [ 94%]
+tests/test_agent_runner_config.py::test_resolve_repository_targets_all_enabled_requires_all_selector PASSED [ 95%]
+tests/test_agent_runner_config.py::test_resolve_issue_from_prd_fallback PASSED [ 97%]
+tests/test_agent_runner_config.py::test_resolve_repository_targets_no_selector_uses_current_git_repo PASSED [ 98%]
+tests/test_agent_runner_config.py::test_resolve_repository_targets_other_checkout_anchors_log_base_to_registry PASSED [100%]
+
+============================== 70 passed in 2.35s ==============================
+✅ just test flag updated: issue-398 @ 8dda8346072ab59baf3aca7fcecaa2f5bd608db9
+✅ just lint --full flag updated: issue-398 @ 8dda8346072ab59baf3aca7fcecaa2f5bd608db9
+just_test_exit=0
+just_test_assertion=PASS
+architecture search: rg -n "GitHubCliClient\(" src/backend
+src/backend/engines/agent_runner/factories/__init__.py:443:    return GitHubCliClient(
+architecture search: rg -n "\"gitea\"" src/backend
+src/backend/core/shared/models/repository_platform.py:19:GITEA_PLATFORM = "gitea"
+factory_calls_baseline=26
+factory_calls_worktree=26
+create_github_client signature and return annotation: unchanged
+github_client_interface_diff=empty
+test_worktree_status:
+test_worktree_status_assertion=tracked_and_clean
+acceptance_assertion=PASS

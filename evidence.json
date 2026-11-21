@@ -1,0 +1,114 @@
+{
+  "version": 1,
+  "language": "zh-CN",
+  "items": [
+    {
+      "item_number": 1,
+      "item_name": "gitea 平台访问前拦截",
+      "command": "bash tasks/evidence/P2-FEAT-20261119-152718-repository-platform-selection-skeleton/scripts/rv1-capture.sh",
+      "evidence_files": ["rv-1-gitea-not-implemented.txt"],
+      "output_summary": "gitea 的 issue list 退出码为 1，输出 not implemented、当前仅支持 github 与修改回 github 的方法；无 Traceback。github 对照不出现 gitea 提示。",
+      "explanation": "真实 kc CLI 入口先运行 github 负向对照，再以 gitea 配置运行 issue list；断言检查分发提示和退出码，故能区分默认 GitHub 路径与未实现平台。",
+      "risks": "临时仓库没有远端和 GitHub 凭据；gitea 分支在任何 gh 请求前终止。命令会先打印现有 Issue 表格框架和仓库身份提示。",
+      "negative_control": "同一 CLI 入口改用 platform = \"github\"，仍断言输出包含 gitea 的 not implemented；实际输出不含该消息，负向断言失败。",
+      "expected_fail": "github 对照不包含 gitea 或 not implemented；若把该输出误当作 gitea 拦截成功，消息断言会失败。",
+      "stdout_assertions": [
+        {"severity": "high", "pattern": "platform 'gitea' is not implemented."},
+        {"severity": "high", "pattern": "exit=1"},
+        {"severity": "high", "pattern": "acceptance_assertion=PASS"},
+        {"severity": "high", "pattern": "Traceback", "must_match": false}
+      ]
+    },
+    {
+      "item_number": 2,
+      "item_name": "未知平台加载期拒绝",
+      "command": "bash tasks/evidence/P2-FEAT-20261119-152718-repository-platform-selection-skeleton/scripts/rv2-capture.sh",
+      "evidence_files": ["rv-2-unknown-platform.txt"],
+      "output_summary": "变更前真实 lifecycle list 接受 gitlab 并以 0 退出；变更后真实入口以 1 退出，错误包含 repository.platform、gitlab、github 与 gitea。",
+      "explanation": "证据文件保留变更前后的真实 CLI 输出。当前可复跑脚本使用 gitlab 配置访问本地 lifecycle 命令，并检查完整允许值列表及退出码。",
+      "risks": "变更前负向控制是本次代码修改前实际捕获的 CLI 输出；临时配置不包含凭据或外部服务依赖。",
+      "negative_control": "变更前运行 UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache uv run kc --repo <临时仓库，platform = \"gitlab\"> agent lifecycle list --scope repository。",
+      "expected_fail": "变更前命令退出码为 0 并打印 lifecycle 设置，缺少 platform、gitlab 与允许值错误；配置校验验收断言变红。",
+      "stdout_assertions": [
+        {"severity": "high", "pattern": "Invalid repository.platform value 'gitlab'"},
+        {"severity": "high", "pattern": "exit=1"},
+        {"severity": "high", "pattern": "acceptance_assertion=PASS"},
+        {"severity": "high", "pattern": "Traceback", "must_match": false}
+      ]
+    },
+    {
+      "item_number": 3,
+      "item_name": "默认 GitHub 行为保持一致",
+      "command": "bash tasks/evidence/P2-FEAT-20261119-152718-repository-platform-selection-skeleton/scripts/rv3-capture.sh",
+      "evidence_files": ["rv-3-default-unchanged.txt"],
+      "output_summary": "未声明与显式 github 的 issue list 均以退出码 1 因缺少仓库 owner/name 结束；两份输出没有平台未实现或本地配置非法提示。gitea 对照输出 not implemented。",
+      "explanation": "三个真实 CLI 调用使用相同无远端临时仓库；前两者比较退出码与平台错误文本，第三个 gitea 对照证明检查能识别平台分发。",
+      "risks": "无远端仓库，因此验证的是现有本地身份失败行为的一致性，不访问 GitHub，也不证明 GitHub 网络调用成功。",
+      "negative_control": "将显式 github 对照改为 platform = \"gitea\"，继续要求没有平台提示；gitea 调用会输出 not implemented，使该断言失败。",
+      "expected_fail": "负向对照平台提示计数为 1；未声明与 github 主比较仍保持同一退出码。",
+      "stdout_assertions": [
+        {"severity": "high", "pattern": "exit_a=1"},
+        {"severity": "high", "pattern": "exit_b=1"},
+        {"severity": "high", "pattern": "platform_or_config_message_count=0"},
+        {"severity": "high", "pattern": "acceptance_assertion=PASS"}
+      ]
+    },
+    {
+      "item_number": 4,
+      "item_name": "gitea 配置下本地命令可用",
+      "command": "bash tasks/evidence/P2-FEAT-20261119-152718-repository-platform-selection-skeleton/scripts/rv4-capture.sh",
+      "evidence_files": ["rv-4-local-command-ok.txt"],
+      "output_summary": "gitea 配置下 agent lifecycle list --scope repository 退出码为 0 并打印 scope=repository；同一仓库 issue list 退出码为 1 且输出 not implemented。",
+      "explanation": "真实 CLI 的本地配置读取命令与访问代码平台命令使用同一临时仓库，证明仅客户端工厂入口拦截 gitea。",
+      "risks": "issue list 控制在发出 gh 请求前结束；本地命令只读当前测试仓库配置。",
+      "negative_control": "在该 gitea 仓库运行 UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache uv run kc --repo <repo> issue list。",
+      "expected_fail": "平台访问对照退出码为 1 并出现 not implemented；本地 lifecycle list 若错误地进入平台工厂也会无法满足退出码 0 断言。",
+      "stdout_assertions": [
+        {"severity": "high", "pattern": "negative_control_exit=1"},
+        {"severity": "high", "pattern": "exit=0"},
+        {"severity": "high", "pattern": "scope=repository"},
+        {"severity": "high", "pattern": "acceptance_assertion=PASS"}
+      ]
+    },
+    {
+      "item_number": 5,
+      "item_name": "平台校验、加载、分发与回归测试",
+      "command": "bash tasks/evidence/P2-FEAT-20261119-152718-repository-platform-selection-skeleton/scripts/rv5-capture.sh",
+      "evidence_files": ["rv-5-pytest.txt", "rv-5-full-suite.txt"],
+      "output_summary": "无效值负向控制抛 ValueError；定向 pytest 实际执行配置与分发测试并通过；300 秒内的 Justfile 本地核心目标运行配置测试。另有完整本地测试档实际执行记录：5608 passed、1 skipped。GitHubCliClient 仅工厂构造、gitea 词表仅共享模块定义、工厂调用数与基线同为 26，签名未变、接口 diff 为空。",
+      "explanation": "真实 pytest 执行两个平台相关测试文件；Justfile 的本地核心目标运行配置测试，CI=1 绕过 Justfile 成功标记，--testmon-noselect 确保目标文件中的测试实际执行。另附完整测试档的原始通过输出。脚本拒绝 no tests ran，并检查架构搜索、签名与干净测试工作树。",
+      "risks": "平台定向 pytest 涵盖配置与分发测试；300 秒门禁复跑中的 just test 使用项目支持的 JUST_LOCAL_TEST_TARGET 运行配置测试文件。完整测试档已另行实际运行并通过，原始输出在 rv-5-full-suite.txt。门禁复跑缓存关闭，目标文件的测试不由 testmon 筛选。",
+      "negative_control": "UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache uv run python -c 'from backend.core.shared.models.repository_platform import validate_repository_platform; assert validate_repository_platform(\"gitlab\") == \"gitlab\"'。",
+      "expected_fail": "命令以非零退出并抛 ValueError：Invalid repository.platform value 'gitlab'; expected one of: 'github', 'gitea'.",
+      "stdout_assertions": [
+        {"severity": "high", "pattern": " passed"},
+        {"severity": "high", "pattern": " failed,", "must_match": false},
+        {"severity": "high", "pattern": " failed in", "must_match": false},
+        {"severity": "high", "pattern": "create_github_client signature and return annotation: unchanged"},
+        {"severity": "high", "pattern": "just_test_assertion=PASS"},
+        {"severity": "high", "pattern": "no tests ran", "must_match": false},
+        {"severity": "high", "pattern": "test_worktree_status_assertion=tracked_and_clean"},
+        {"severity": "high", "pattern": "github_client_interface_diff=empty"},
+        {"severity": "high", "pattern": "acceptance_assertion=PASS"}
+      ]
+    },
+    {
+      "item_number": 6,
+      "item_name": "配置文档与严格构建",
+      "command": "bash tasks/evidence/P2-FEAT-20261119-152718-repository-platform-selection-skeleton/scripts/rv6-capture.sh",
+      "evidence_files": ["rv-6-docs-build.txt"],
+      "output_summary": "基础版本配置指南的 platform/gitea 搜索退出码为 1；当前 uv run mkdocs build --strict 退出码为 0，配置指南包含键和值，Agent Runner 指南含 github_repo/platform 交叉引用。",
+      "explanation": "负向搜索以 Git 基础版本为输入，正向检查通过严格 MkDocs 构建和两个真实文档文件的关键词搜索。",
+      "risks": "严格构建会报告既有的未加入 nav 原型文件提示；本次配置指南和 Agent Runner 指南均已在既有导航中，新增链接锚点经构建验证。",
+      "negative_control": "git show 1ad17462d893edfafaf6b41f7a420bab02ed0140:docs/guides/configuration.md | rg -n 'platform.*gitea|gitea.*platform'。",
+      "expected_fail": "基础版本无 platform 与 gitea 同段说明，rg 退出码为 1；文档要求断言变红。",
+      "stdout_assertions": [
+        {"severity": "high", "pattern": "build_exit=0"},
+        {"severity": "high", "pattern": "`platform`"},
+        {"severity": "high", "pattern": "`gitea`"},
+        {"severity": "high", "pattern": "agent-runner-repo-config"},
+        {"severity": "high", "pattern": "acceptance_assertion=PASS"}
+      ]
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+negative control: UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache uv run kc --repo "/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/tmp.vQB3BJYqSn" issue list
+[WARN] Repository 'rv1-control' has no github_repo configured; PR column will be empty. Set github_repo = "owner/name" in [agent_runner.repositories.<id>] or .kedacode.toml.
+┏━━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━━━┳━━━━┓
+┃ Issue ┃ Title ┃ State ┃ Labels ┃ PR ┃
+┡━━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━━╇━━━━┩
+└───────┴───────┴───────┴────────┴────┘
+Error fetching <repo>: 
+/private/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/tmp.vQB3BJYqSn: Unable 
+to determine repository owner/name: set .github_repo in .kedacode.toml or add a 
+GitHub remote.
+negative_control_exit=1
+negative_control_assertion=EXPECTED_FAIL_missing_gitea_message
+real_entry: UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache uv run kc --repo "/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/tmp.To7Kt7yrd2" issue list
+[WARN] Repository 'rv1' has no github_repo configured; PR column will be empty. Set github_repo = "owner/name" in [agent_runner.repositories.<id>] or .kedacode.toml.
+┏━━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━━━┳━━━━┓
+┃ Issue ┃ Title ┃ State ┃ Labels ┃ PR ┃
+┡━━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━━╇━━━━┩
+└───────┴───────┴───────┴────────┴────┘
+Error fetching <repo>: 
+/private/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/tmp.To7Kt7yrd2: The 
+repository platform 'gitea' is not implemented. Only 'github' is currently 
+supported. To switch back to GitHub, edit 
+/private/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/tmp.To7Kt7yrd2/.kedacod
+e.toml and set platform = 'github'.
+exit=1
+acceptance_assertion=PASS

@@ -1,0 +1,6 @@
+rg -n "GitHubCliClient\(" src/backend
+src/backend/engines/agent_runner/factories/__init__.py:443:    return GitHubCliClient(
+rg -n "\"gitea\"" src/backend
+src/backend/core/shared/models/repository_platform.py:19:GITEA_PLATFORM = "gitea"
+create_github_client baseline=26 worktree=26
+IGitHubClient diff: empty

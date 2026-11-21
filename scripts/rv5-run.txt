@@ -1,0 +1,31 @@
+negative control: UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache uv run python -c "from backend.core.shared.models.repository_platform import validate_repository_platform; assert validate_repository_platform(\"gitlab\") == \"gitlab\""
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    from backend.core.shared.models.repository_platform import validate_repository_platform; assert validate_repository_platform("gitlab") == "gitlab"
+                                                                                                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^
+  File "/Users/zata/code/keda/.kc-worktrees/issue-398/src/backend/core/shared/models/repository_platform.py", line 45, in validate_repository_platform
+    raise ValueError(
+    ...<2 lines>...
+    )
+ValueError: Invalid repository.platform value 'gitlab'; expected one of: 'github', 'gitea'.
+negative_control_exit=1
+negative_control_assertion=EXPECTED_FAIL_invalid_platform_is_rejected
+real_entry: UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache uv run pytest tests/test_agent_runner_config.py tests/test_repository_platform_dispatch.py -q --testmon-noselect
+........................................................................ [ 88%]
+.........                                                                [100%]
+81 passed in 2.41s
+targeted_exit=0
+real_entry: UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache just test
+✅ just test flag valid: issue-398 @ 1ad17462 (tree: ea163000); skipping tests.
+just_test_exit=0
+architecture search: rg -n "GitHubCliClient\(" src/backend
+src/backend/engines/agent_runner/factories/__init__.py:443:    return GitHubCliClient(
+architecture search: rg -n "\"gitea\"" src/backend
+src/backend/core/shared/models/repository_platform.py:19:GITEA_PLATFORM = "gitea"
+factory_calls_baseline=26
+factory_calls_worktree=26
+create_github_client signature and return annotation: unchanged
+github_client_interface_diff=empty
+test_worktree_status:
+?? tests/test_repository_platform_dispatch.py
+acceptance_assertion=PASS

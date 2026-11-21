@@ -1,0 +1,38 @@
+negative control real entry: UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache uv run kc --repo "/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/tmp.6JjhwM8xax" issue list
+[WARN] Repository 'rv3-control' has no github_repo configured; PR column will be empty. Set github_repo = "owner/name" in [agent_runner.repositories.<id>] or .kedacode.toml.
+┏━━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━━━┳━━━━┓
+┃ Issue ┃ Title ┃ State ┃ Labels ┃ PR ┃
+┡━━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━━╇━━━━┩
+└───────┴───────┴───────┴────────┴────┘
+Error fetching <repo>: 
+/private/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/tmp.6JjhwM8xax: The 
+repository platform 'gitea' is not implemented. Only 'github' is currently 
+supported. To switch back to GitHub, edit 
+/private/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/tmp.6JjhwM8xax/.kedacod
+e.toml and set platform = 'github'.
+negative_control_exit=1
+negative_control_assertion=EXPECTED_FAIL_no_platform_hint_rule_for_github_does_not_apply_to_gitea
+real_entry_a: UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache uv run kc --repo "/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/tmp.xwpkcZqUfa" issue list
+[WARN] Repository 'rv3' has no github_repo configured; PR column will be empty. Set github_repo = "owner/name" in [agent_runner.repositories.<id>] or .kedacode.toml.
+┏━━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━━━┳━━━━┓
+┃ Issue ┃ Title ┃ State ┃ Labels ┃ PR ┃
+┡━━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━━╇━━━━┩
+└───────┴───────┴───────┴────────┴────┘
+Error fetching <repo>: 
+/private/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/tmp.xwpkcZqUfa: Unable 
+to determine repository owner/name: set .github_repo in .kedacode.toml or add a 
+GitHub remote.
+exit_a=1
+real_entry_b: UV_CACHE_DIR=/private/tmp/keda-issue-398-uv-cache uv run kc --repo "/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/tmp.oC1oVAn6I7" issue list
+[WARN] Repository 'rv3' has no github_repo configured; PR column will be empty. Set github_repo = "owner/name" in [agent_runner.repositories.<id>] or .kedacode.toml.
+┏━━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━━━┳━━━━┓
+┃ Issue ┃ Title ┃ State ┃ Labels ┃ PR ┃
+┡━━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━━╇━━━━┩
+└───────┴───────┴───────┴────────┴────┘
+Error fetching <repo>: 
+/private/var/folders/n8/x_smwvn16b3b30f7wnl4s2kh0000gn/T/tmp.oC1oVAn6I7: Unable 
+to determine repository owner/name: set .github_repo in .kedacode.toml or add a 
+GitHub remote.
+exit_b=1
+platform_or_config_message_count=0
+acceptance_assertion=PASS
