@@ -15,6 +15,8 @@ v2 suite 的 `held_out` 和 `candidate_hidden` 路径用于防止候选 Agent �
 3. 从冻结来源 commit 恢复 `held_out` 和 `candidate_hidden` 的基线版本。
 4. 将 suite 资料中的 `held_out` 测试文件覆盖到快照，运行固定 check recipe。
 
+候选 diff 以执行前的过滤快照 tree 为起点，包含候选已提交和未提交的改动。补丁保留 Git 的换行和上下文空白，并携带二进制差异。用该题的过滤基线重放补丁时，已声明的隐藏文件仍独立于候选改动。
+
 Agent 执行失败时不运行判分，但在记录已有代码 diff 前仍会删除候选创建的隐藏路径。检查完成后，执行器删除整个候选仓库。
 
 ## 保证范围

@@ -1,0 +1,205 @@
+diff --git a/README.md b/README.md
+index 8b6b8c12..7bc0ce2e 100644
+--- a/README.md
++++ b/README.md
+@@ -233 +233 @@ kc console
+-# 指定端口（省略时从 config.toml [agent_runner.console].port 起自动挑选空闲端口）
++# 指定端口（省略时先复用已在运行的实例，没有则在 config.toml [agent_runner.console].port 起自动挑选空闲端口）
+@@ -239,0 +240,2 @@ kc console --no-browser
++`kc console` 可重复调用：若已有 console 在监听，再敲一次只会打开它当前监听的 URL 并退出，不会因为默认端口被自己占住而顺延开第二个实例——关掉浏览器后想再看面板，直接再跑一次 `kc console`，无需重启服务。确实要并行跑第二个实例（例如另一套状态目录），显式指定一个空闲 `--port`。
++
+diff --git a/docs/guides/agent-runner.md b/docs/guides/agent-runner.md
+index 197bc2e9..27a70ac9 100644
+--- a/docs/guides/agent-runner.md
++++ b/docs/guides/agent-runner.md
+@@ -3669 +3669 @@ Overview 还会按 severity 汇总 `anomaly_count` 和 `anomaly_summary`（`warn
+-管理终端是多仓库面板，但在哪个仓库目录敲 `iar console`，打开就应该落在**那个
++管理终端是多仓库面板，但在哪个仓库目录敲 `kc console`，打开就应该落在**那个
+@@ -3674 +3674 @@ Overview 还会按 severity 汇总 `anomaly_count` 和 `anomaly_summary`（`warn
+-   `iar console` 就选中 `keda`，`cd` 到别的仓库再敲就切到那个仓库。
++   `kc console` 就选中 `keda`，`cd` 到别的仓库再敲就切到那个仓库。
+@@ -3698 +3698 @@ kc console
+-# 指定端口（省略时从 [agent_runner.console].port 起自动挑选空闲端口）
++# 指定端口（省略时先复用已在运行的实例，没有则在 [agent_runner.console].port 起自动挑选空闲端口）
+@@ -3707 +3707,10 @@ kc console --no-browser
+-  空闲端口，显式指定的端口不顺延、占用即报错退出。
++  空闲端口，显式指定的端口不顺延。
++- **重复调用不会起第二个实例**：启动前先在候选端口上探测是否已有 console 在
++  服务（打开发端自带的版本端点，认得出才算命中，本机其它占端口的服务不会被
++  误认），命中就只打开它当前监听的 URL 并退出。因此关掉浏览器后想再看面板，
++  直接再跑一次 `kc console`，不需要先停掉服务；同理，现有实例当初因端口占用
++  顺延到过别的端口，再次调用也会找回它，而不是在缺省端口新开一个。
++  要并行跑第二个 console（例如另一套状态目录）就显式指定一个空闲 `--port`；
++  显式端口被**非 console** 的服务占用时仍按原样报错退出。
++- 复用现有实例时 `--no-browser` 依旧有效：只打印 URL、不拉起浏览器，适合脚本
++  里取 URL 或配合 SSH 端口转发（`ssh -L 8313:127.0.0.1:8313 <host>`）。
+@@ -3713,2 +3722,4 @@ kc console --no-browser
+-- 改后端路由后必须**重启** `iar console` 才生效；`just console-sync` 只替换
+-  静态前端产物，不重载后端代码。
++- 改后端路由后必须**重启** `kc console` 才生效；`just console-sync` 只替换
++  静态前端产物，不重载后端代码。注意复用逻辑发生在这次重启之前——旧版本进程
++  仍在监听时，新装的 `kc console` 只会重开浏览器而不会把它换成新代码，需要先
++  停掉旧实例。
+@@ -3938 +3949 @@ host = "127.0.0.1"                               # 监听地址（固定本机
+-port = 8600                                      # kc console 缺省端口（被占用时自动顺延）
++port = 8600                                      # kc console 缺省端口（已有实例在跑则复用，否则被占用时自动顺延）
+diff --git a/src/backend/api/cli_typer_console.py b/src/backend/api/cli_typer_console.py
+index 0ccf652a..cebe6e0e 100644
+--- a/src/backend/api/cli_typer_console.py
++++ b/src/backend/api/cli_typer_console.py
+@@ -4,3 +4,6 @@
+-分发的前端静态产物。端口解析、浏览器拉起都收敛在本模块内的纯函数上，
+-便于单测直接覆盖；命令本身不触碰 ``~/.kedacode/processes.json``，与面板
+-托管的 runner 进程互不干扰。
++分发的前端静态产物。端口解析、现有实例探测、浏览器拉起都收敛在本模块内的
++纯函数上，便于单测直接覆盖；命令本身不触碰 ``~/.kedacode/processes.json``，
++与面板托管的 runner 进程互不干扰。
++
++重复调用不再起第二个实例：启动前先在候选端口上探测是否已有 console 在服务，
++命中则直接打开它当前监听的 URL 并退出，避免默认端口被自己占住时顺延开第二个。
+@@ -10,0 +14,2 @@ from __future__ import annotations
++import http.client
++import json
+@@ -12,0 +18 @@ import threading
++import urllib.request
+@@ -13,0 +20 @@ import webbrowser
++from collections.abc import Iterable
+@@ -35,0 +43,9 @@ _BROWSER_OPEN_DELAY_SECONDS = 1.0
++#: 判定“这个端口上是不是已经在跑 kc console”的探测路径：console 后端自带的
++#: 版本查询路由，返回 ``{"version": ...}``。选它是因为它随面板同源存在，
++#: 不必为 CLI 探测再新增一层对外 HTTP 表面。
++_CONSOLE_PROBE_PATH = "/api/v1/agent-runner/console/version"
++
++#: 单个端口探测的超时秒数。回环上的正常响应是毫秒级，这个值只给“端口被一个
++#: 连得上但不回数据的本机服务占住”的异常场景兜底，避免 CLI 卡死。
++_CONSOLE_PROBE_TIMEOUT_SECONDS = 0.5
++
+@@ -50,0 +67,83 @@ def _port_is_available(host: str, port: int) -> bool:
++def console_url_for(host: str, port: int) -> str:
++    """拼出 console 面板首页地址。"""
++    return f"http://{host}:{port}/"
++
++
++def _is_running_console(host: str, port: int) -> bool:
++    """探测 ``host:port`` 上是否已有 ``kc console`` 在提供服务。
++
++    端口绑不上只能说明“有东西在听”，无法区分我们自己的 console 和本机另一个
++    占端口的服务，因此用版本端点做身份判定：能取回带 ``version`` 键的 JSON
++    才算命中。任何连接失败、超时、协议错乱（对端回了非 HTTP 字节）或非 JSON
++    响应都判为未命中。
++
++    Args:
++        host: 监听地址（固定回环）。
++        port: 已知被占用的端口。
++
++    Returns:
++        该端口上确实是 kc console 时为 ``True``。
++    """
++    probe_url = f"http://{host}:{port}{_CONSOLE_PROBE_PATH}"
++    try:
++        with urllib.request.urlopen(probe_url, timeout=_CONSOLE_PROBE_TIMEOUT_SECONDS) as response:
++            version_payload = json.loads(response.read())
++    except (OSError, ValueError, http.client.HTTPException):
++        return False
++    return isinstance(version_payload, dict) and "version" in version_payload
++
++
++def find_running_console(*, host: str, candidate_ports: Iterable[int]) -> int | None:
++    """在候选端口里找出已在监听的 ``kc console`` 实例。
++
++    只对绑不上的端口发起 HTTP 探测：干净机器上默认端口可直接绑定，一个请求都
++    不会发出。
++
++    Args:
++        host: 监听地址（固定回环）。
++        candidate_ports: 待探测端口，按升序遍历，命中即返回最早的实例。
++
++    Returns:
++        现有 console 实际监听的端口；候选里没有 console 在跑时返回 ``None``。
++    """
++    for candidate_port in candidate_ports:
++        if _port_is_available(host, candidate_port):
++            continue
++        if _is_running_console(host, candidate_port):
++            return candidate_port
++    return None
++
++
++def reopen_running_console(*, host: str, port: int, open_browser: bool) -> None:
++    """复用已在运行的 console：告知其 URL，并按需重新打开浏览器面板。
++
++    Args:
++        host: 现有实例的监听地址。
++        port: 现有实例实际监听的端口。
++        open_browser: 是否调用 ``webbrowser.open`` 重新打开面板；``--no-browser``
++            时只打印 URL，供脚本或远程转发场景自行取用。
++    """
++    console_url = console_url_for(host, port)
++    typer.echo(f"kc console is already running on {console_url} (reopening, no new instance)")
++    if open_browser:
++        webbrowser.open(console_url)
++
++
++def console_candidate_ports(*, explicit_port: int | None, default_port: int) -> Iterable[int]:
++    """返回本次调用需要探测“是否已有 console”的端口集合。
++
++    显式 ``--port`` 时只关心那个端口；缺省时覆盖与端口顺延相同的扫描窗口，
++    这样现有实例当初因端口占用而顺延过也仍能被找回来。
++
++    Args:
++        explicit_port: 用户显式传入的 ``--port``。
++        default_port: 配置里的默认端口，扫描窗口起点。
++
++    Returns:
++        升序的待探测端口集合。
++    """
++    if explicit_port is not None:
++        return [explicit_port]
++    return range(default_port, default_port + _PORT_SCAN_WINDOW)
++
++
+@@ -52 +151,4 @@ def resolve_console_port(*, host: str, explicit_port: int | None, default_port:
+-    """解析 ``kc console`` 实际监听的端口。
++    """解析新 console 实例实际监听的端口。
++
++    调用前 :func:`find_running_console` 已确认候选端口上没有 console 在跑，
++    因此这里的“端口被占用”只剩本机其它服务的场景。
+@@ -92 +194 @@ def launch_console(*, host: str, port: int, open_browser: bool) -> None:
+-    console_url = f"http://{host}:{port}/"
++    console_url = console_url_for(host, port)
+@@ -111,2 +213,3 @@ def console_callback(
+-                "Port to listen on. Omit to auto-pick starting from "
+-                "[agent_runner.console].port; explicit ports never shift."
++                "Port to listen on. Omit to reuse a running console or "
++                "auto-pick starting from [agent_runner.console].port; "
++                "explicit ports never shift."
+@@ -121 +224,6 @@ def console_callback(
+-    """启动 KedaCode 管理终端（API + 内置前端面板），前台运行。"""
++    """启动 KedaCode 管理终端（API + 内置前端面板），前台运行。
++
++    已有 console 在跑时不开第二个实例：直接打开它监听的 URL 后退出，因此关掉
++    浏览器再敲一次 ``kc console`` 就能重新看到面板，无需重启服务。想并行跑
++    第二个 console（例如另一套状态目录），显式指定一个空闲 ``--port``。
++    """
+@@ -124,0 +233,14 @@ def console_callback(
++    running_console_port = find_running_console(
++        host=CONSOLE_HOST,
++        candidate_ports=console_candidate_ports(
++            explicit_port=port,
++            default_port=console_settings.port,
++        ),
++    )
++    if running_console_port is not None:
++        reopen_running_console(
++            host=CONSOLE_HOST,
++            port=running_console_port,
++            open_browser=not no_browser,
++        )
++        return
+@@ -143,0 +266,2 @@ __all__ = [
++    "console_candidate_ports",
++    "console_url_for",
+@@ -144,0 +269 @@ __all__ = [
++    "find_running_console",
+@@ -145,0 +271 @@ __all__ = [
++    "reopen_running_console",

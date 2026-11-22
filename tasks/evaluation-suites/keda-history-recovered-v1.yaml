@@ -1,0 +1,62 @@
+id: keda-history-recovered-v1
+version: 1.1.0
+title: Keda 独立行为回归评测集
+repo_path: .
+base_ref: main
+rubric:
+  id: default-rubric
+  version: v1
+check:
+  timeout_seconds: 240
+cases:
+- id: process-error-detail
+  prompt: When a checked subprocess command exits nonzero, keep the exception compatible
+    with subprocess.CalledProcessError and retain the original command and return
+    code. Its string must append captured stderr when present and fall back to stdout
+    otherwise. Limit that diagnostic output to about 4 KB and flag truncation. Preserve
+    successful commands and check=False behavior.
+  check_recipe: uv-pytest
+  base_ref: 0f57ca8fdb8ac130e594c562353f21bb3df9044a
+  split: holdout
+  check_targets:
+  - tests/test_eval_process_error_detail.py
+  held_out:
+  - tests/test_eval_process_error_detail.py
+  candidate_hidden:
+  - tasks/pending/P1-BUG-20260527-173500-process-runner-error-diagnosability.md
+  gold_patch: gold.patch
+- id: worktree-remote-alignment
+  prompt: Before returning from the existing worktree preparation entry point, reconcile
+    the checked-out issue branch with the same branch on the configured Git remote.
+    Fetch it and fast-forward only if it is ahead and the worktree is clean. Preserve
+    local-ahead branches and missing remote branches. Stop with a clear error when
+    the branches have diverged or a fast-forward would touch a dirty worktree. Do
+    not discard local changes or push or rewrite history as part of this worktree
+    preparation.
+  check_recipe: uv-pytest
+  base_ref: 5926c32bd6a0ce681d5a4afe2e6875820898fa27
+  split: holdout
+  check_targets:
+  - tests/test_eval_worktree_remote_alignment.py
+  held_out:
+  - tests/test_eval_worktree_remote_alignment.py
+  candidate_hidden:
+  - tasks/pending/P1-BUG-20260527-112400-agent-runner-worktree-sync.md
+  gold_patch: gold.patch
+- id: console-existing-instance
+  prompt: When kc console is called again while its service is already running, reopen
+    the URL of that existing service and exit successfully without launching a duplicate
+    instance. Reuse its real loopback port even when it was shifted from the original
+    default. Use the Console version API to identify it rather than treating any occupied
+    port as Console. If --port is explicit, only reuse a Console on that port. Respect
+    --no-browser by printing the existing URL without opening it. Preserve initial
+    foreground startup when there is no existing Console.
+  check_recipe: uv-pytest
+  base_ref: e1e23af0e2015b3cd7df0be7c83809eaad1f79d3
+  split: holdout
+  check_targets:
+  - tests/test_eval_console_reuse.py
+  held_out:
+  - tests/test_eval_console_reuse.py
+  candidate_hidden: []
+  gold_patch: gold.patch

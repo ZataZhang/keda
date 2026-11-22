@@ -152,6 +152,34 @@ def test_snapshot_diff_omits_candidate_hidden_content_and_restores_for_checks(
     assert outside_marker.read_text(encoding="utf-8") == "unchanged\n"
 
 
+def test_snapshot_diff_replays_binary_and_preserves_trailing_context(tmp_path: Path) -> None:
+    """导出的补丁能恢复二进制变更、CRLF 和补丁尾部的空白上下文行。"""
+    source_repo = _create_source_repo(tmp_path)
+    (source_repo / ".gitattributes").write_text(
+        "src/binary.bin binary\nsrc/z-context.txt -text diff\n", encoding="utf-8"
+    )
+    binary_path = Path("src/binary.bin")
+    text_path = Path("src/z-context.txt")
+    (source_repo / binary_path).write_bytes(b"\0original\xff")
+    (source_repo / text_path).write_bytes(b"original\r\ncontext\r\n\r\n")
+    baseline = _commit(source_repo, "baseline")
+    candidate = tmp_path / "candidate"
+    replay = tmp_path / "replay"
+    for snapshot in (candidate, replay):
+        workspace.create_snapshot_repo(str(source_repo), baseline, snapshot)
+
+    expected_binary = b"\0updated\xfe"
+    expected_text = "更新\r\ncontext\r\n\r\n".encode("utf-8")
+    (candidate / binary_path).write_bytes(expected_binary)
+    (candidate / text_path).write_bytes(expected_text)
+
+    patch_path = tmp_path / "candidate.patch"
+    patch_path.write_bytes(workspace.collect_diff(candidate, "HEAD").encode("utf-8"))
+    workspace.apply_gold_patch(replay, patch_path)
+    assert (replay / binary_path).read_bytes() == expected_binary
+    assert (replay / text_path).read_bytes() == expected_text
+
+
 def _create_source_repo(tmp_path: Path) -> Path:
     """为快照判分测试建立包含隐藏文件与依赖清单的来源仓库。"""
     source_repo = tmp_path / "source"

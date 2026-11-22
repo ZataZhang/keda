@@ -1,5 +1,5 @@
 id: keda-history-v1
-version: 1.0.0
+version: 1.3.0
 title: Keda historical backend fixes (M13 seed)
 repo_path: .
 base_ref: main
@@ -10,28 +10,31 @@ check:
   timeout_seconds: 240
 cases:
 - id: supervisor-check-decisions
-  prompt: 'After a pull request is sent for review, check summaries sometimes cause
-    the supervisor to treat an unrun or pending check as proof that code must be changed
-    or that human review cannot proceed. Make the outcome reflect the available facts:
-    executed failing jobs may lead to repair, while pending or unrun checks may still
-    proceed to human review when local validation is complete, with their state clearly
-    disclosed and never described as passing.'
+  prompt: After a pull request is sent for review, give the supervisor the raw check
+    facts and guide it to distinguish completed failures, pending or unrun jobs, and
+    insufficient evidence. A concrete executed failure can justify repair. Pending
+    or unrun jobs can proceed to human review when local validation and the task requirements
+    allow it. The supervisor must disclose unverified remote checks without calling
+    them passing. The platform must preserve the supervisor's legal action and summary
+    regardless of check rollup or a sole manual sign-off failure, while retaining
+    the existing merge conflict guard. Check-state transitions must continue to trigger
+    supervisor reevaluation.
   check_recipe: uv-pytest
   base_ref: f6c51fdc8a58bfab1a21f3dcf28b8d4a80b1498e
   split: dev
   check_targets:
-  - tests/test_pr_supervisor.py::test_build_supervisor_prompt_requires_ci_execution_distinction
-  - tests/test_pr_supervisor.py::test_supervisor_action_gate_keeps_approval_when_checks_fail
-  - tests/test_pr_supervisor.py::test_supervisor_action_gate_keeps_approval_when_checks_pending
-  - tests/test_pr_supervisor.py::test_supervisor_action_gate_keeps_approval_when_sign_off_and_other_checks_fail
-  - tests/test_pr_supervisor.py::test_supervisor_action_gate_keeps_human_input_for_sign_off_only
-  - tests/test_pr_supervisor.py::test_supervisor_loop_keeps_agent_approval_under_failed_checks
-  - tests/test_pr_supervisor.py::test_supervisor_loop_keeps_agent_approval_under_pending_checks
-  - tests/test_review_once.py::test_review_once_detects_checks_state_change_and_triggers_supervisor
-  - tests/test_review_once.py::test_review_once_keeps_agent_approval_under_pending_checks
+  - tests/test_eval_pr_supervisor.py::test_build_supervisor_prompt_requires_ci_execution_distinction
+  - tests/test_eval_pr_supervisor.py::test_supervisor_action_gate_keeps_approval_when_checks_fail
+  - tests/test_eval_pr_supervisor.py::test_supervisor_action_gate_keeps_approval_when_checks_pending
+  - tests/test_eval_pr_supervisor.py::test_supervisor_action_gate_keeps_approval_when_sign_off_and_other_checks_fail
+  - tests/test_eval_pr_supervisor.py::test_supervisor_action_gate_keeps_human_input_for_sign_off_only
+  - tests/test_eval_pr_supervisor.py::test_supervisor_loop_keeps_agent_approval_under_failed_checks
+  - tests/test_eval_pr_supervisor.py::test_supervisor_loop_keeps_agent_approval_under_pending_checks
+  - tests/test_eval_review_once.py::test_review_once_detects_checks_state_change_and_triggers_supervisor
+  - tests/test_eval_review_once.py::test_review_once_keeps_agent_approval_under_pending_checks
   held_out:
-  - tests/test_pr_supervisor.py
-  - tests/test_review_once.py
+  - tests/test_eval_pr_supervisor.py
+  - tests/test_eval_review_once.py
   candidate_hidden:
   - tasks/pending/P1-BUG-20260924-100212-agent-led-post-pr-ci-decision.md
   - tasks/pending/P1-FEAT-20260916-134008-roadmap-prd-cicd-monitor-auto-repair.md
@@ -39,16 +42,17 @@ cases:
 - id: captured-process-final-output
   prompt: A captured child process can keep running after a period without output.
     When it finishes, the returned result must contain all text written to standard
-    output and error. If a descendant keeps a pipe open after the child exits, collection
-    must still finish within a bound. Keep the existing overall timeout, inactivity
-    timeout, and cancellation behavior.
+    output and error. After the direct child exits, descendants retaining those pipes
+    must not keep capture waiting beyond the existing five-second drain allowance.
+    Preserve overall timeout, inactivity timeout, and cancellation behavior.
   check_recipe: uv-pytest
   base_ref: e17f599a14a243dcdd1e7fefec04aa42674a0655
   split: dev
   check_targets:
-  - tests/test_process_runner.py::test_captured_output_includes_stdout_written_when_process_exits
+  - tests/test_eval_process_runner.py::test_captured_output_includes_stdout_written_when_process_exits
+  - tests/test_eval_process_runner.py::test_captured_output_returns_when_descendant_keeps_pipes_open
   held_out:
-  - tests/test_process_runner.py
+  - tests/test_eval_process_runner.py
   candidate_hidden:
   - tasks/archive/P1-BUG-20260624-194537-agent-execution-timeout-hang.md
   - tasks/archive/P1-FEAT-20260628-041733-realistic-validation-independent-verifier-gate.md
@@ -64,10 +68,10 @@ cases:
   base_ref: f0af2d60c18dc157feb918364552e31bf56d8290
   split: dev
   check_targets:
-  - tests/test_cli_registry.py::test_logs_command_fallback_when_log_file_missing
-  - tests/test_cli_registry.py::test_logs_command_fallback_when_no_records
+  - tests/test_eval_cli_registry.py::test_logs_command_fallback_when_log_file_missing
+  - tests/test_eval_cli_registry.py::test_logs_command_fallback_when_no_records
   held_out:
-  - tests/test_cli_registry.py
+  - tests/test_eval_cli_registry.py
   candidate_hidden:
   - tasks/pending/P0-BUG-20260930-145323-logging-config-robustness.md
   gold_patch: gold.patch
@@ -87,58 +91,70 @@ cases:
   - tasks/archive/P1-FEAT-20260614-203810-frontend-idea-inbox-cross-platform.md
   gold_patch: gold.patch
 - id: short-term-memory-records
-  prompt: Keep short-term execution history out of a target repository and avoid putting
-    full tool transcripts in the compact summary. Preserve enough context for later
-    skill distillation to recover the full attempt history; continue reading older
-    records, fall back safely when a referenced log is missing or unsafe, and respect
-    a configured memory location.
+  prompt: Keep default short-term execution history outside the target repository
+    and honor explicit memory locations. Keep stored summaries and attempt details
+    at most 240 characters, without trailing stdout or stderr labels and fenced transcripts.
+    Store full attempt and final-solution text as separate logs under the issue's
+    attempt-details directory. Reuse the same log when those texts are identical.
+    The JSON record should point to them with per-attempt detail_log_path and final_solution_log_path,
+    and loading should hydrate the full text. Keep older inline records readable and
+    use compact values when a log is missing or an unsafe path would escape the issue's
+    memory directory.
   check_recipe: uv-pytest
   base_ref: d0595887f838686cb21caacd503cf2ffe4310413
   split: dev
   check_targets:
-  - tests/test_agent_runner_memory.py::test_short_term_store_keeps_context_compact_and_hydrates_detail_logs
-  - tests/test_agent_runner_memory.py::test_short_term_summary_skips_trailing_output_fences
+  - tests/test_eval_agent_runner_memory.py::test_short_term_store_keeps_context_compact_and_hydrates_detail_logs
+  - tests/test_eval_agent_runner_memory.py::test_short_term_summary_skips_trailing_output_fences
+  - tests/test_eval_agent_runner_memory.py::test_short_term_store_ignores_traversal_and_symlink_detail_references
   held_out:
-  - tests/test_agent_runner_memory.py
+  - tests/test_eval_agent_runner_memory.py
   candidate_hidden:
   - tasks/archive/P1-BUG-20260704-153640-agent-runner-memory-stable-anchoring.md
   - tasks/archive/P1-FEAT-20260626-093933-agent-runner-memory-persistence.md
   gold_patch: gold.patch
 - id: failure-handoff-across-claims
-  prompt: When recovery continues in a later claim, retain the most recent useful
-    failure context so work does not restart from a snapshot without an explanation.
-    If recovery is exhausted, leave a reviewable outcome that accurately reports the
-    failure and available validation state; do not make unfinished work look complete.
+  prompt: When the recovery budget runs out, write a structured Issue handoff using
+    the iar:failure-context comment marker. Include the checkpoint commit, failed
+    attempts, validation outcome and available evidence. When a later claim continues
+    partial work, inject the newest structured Issue handoff into the continuation
+    prompt and omit stale handoffs and unrelated comments. If an unpublished code
+    checkpoint exists, publish or update a draft PR for that head with a link to the
+    Issue handoff, clearly report the validation failure, and leave the Issue blocked
+    using the existing state. This exhaustion path may publish while the PRD remains
+    pending. Keep the commit and PRD archive requirements for ordinary successful
+    publication. If no checkpoint exists, report the exhaustion and leave the Issue
+    blocked without creating a draft.
   check_recipe: uv-pytest
   base_ref: 87ab96ee149eae7240f7ecd16eb1de81d7ef4dae
   split: dev
   check_targets:
-  - tests/test_agent_runner_checkpoint.py::test_next_claim_reflows_latest_handoff_record_into_continuation_prompt
-  - tests/test_agent_runner_publish.py::test_require_prd_archived_false_appears_only_on_the_exhaustion_path
-  - tests/test_agent_runner_run_once.py::test_run_once_no_new_commits_fails
-  - tests/test_agent_runner_run_once_commit.py::test_run_once_uncommitted_changes_missing_request_fails
+  - tests/test_eval_agent_runner_checkpoint.py::test_next_claim_reflows_latest_handoff_record_into_continuation_prompt
+  - tests/test_eval_agent_runner_run_once.py::test_run_once_no_new_commits_fails
+  - tests/test_eval_agent_runner_run_once.py::test_run_once_git_mv_prd_before_commit
+  - tests/test_eval_agent_runner_run_once_commit.py::test_run_once_uncommitted_changes_missing_request_fails
   held_out:
-  - tests/test_agent_runner_checkpoint.py
-  - tests/test_agent_runner_publish.py
-  - tests/test_agent_runner_run_once.py
-  - tests/test_agent_runner_run_once_commit.py
+  - tests/test_eval_agent_runner_checkpoint.py
+  - tests/test_eval_agent_runner_publish.py
+  - tests/test_eval_agent_runner_run_once.py
+  - tests/test_eval_agent_runner_run_once_commit.py
   candidate_hidden:
   - tasks/archive/20260521-134944-prd-agent-commit-handoff.md
   - tasks/pending/P1-FEAT-20260922-000431-blocked-draft-pr-validation-failure.md
   gold_patch: gold.patch
 - id: generated-pr-content-contract
   prompt: Generated pull request content should keep a useful title when the generated
-    opening line is only a closing reference, and deterministic template or fallback
-    content should meet the same publication contract as generated content. Preserve
-    useful closing references in the body.
+    opening line is only a closing reference. A closing reference can include a colon
+    or terminal punctuation. Deterministic templates and fallback content should meet
+    the same publication contract as generated content. Preserve useful closing references
+    in the body.
   check_recipe: uv-pytest
   base_ref: 076aa00eb684daec1f3ff28c101a53614cc00595
   split: dev
   check_targets:
-  - tests/test_generated_content.py::test_generate_pr_content_agent_mode_markdown
-  - tests/test_generated_content.py::test_generate_pr_content_closing_reference_title_uses_fallback_title
+  - tests/test_eval_pr_publication_contract.py::test_draft_pr_preserves_meaningful_title_and_closes_issue
   held_out:
-  - tests/test_generated_content.py
+  - tests/test_eval_pr_publication_contract.py
   candidate_hidden:
   - tasks/archive/20260523-161546-prd-ai-generated-issue-and-pr-content.md
   - tasks/archive/P2-FEAT-20260527-190923-prd-from-issue.md
@@ -162,16 +178,18 @@ cases:
 - id: github-budget-ledger-failure
   prompt: Failure to write the local usage ledger must not make an otherwise valid
     GitHub operation fail or replace its original rate-limit error. Keep a useful
-    warning that makes the degraded cross-process accounting state clear.
+    warning that makes the degraded cross-process accounting state clear. The ledger
+    recording methods also need to finish without throwing when called directly, even
+    while the file cannot be updated.
   check_recipe: uv-pytest
   base_ref: 51faf140236c84d64f24d7721a2afe779ed182c4
   split: holdout
   check_targets:
-  - tests/test_github_api_budget.py::test_rate_limit_is_still_deferred_when_the_ledger_is_unwritable
-  - tests/test_github_api_budget.py::test_unwritable_ledger_does_not_break_normal_gh_calls
-  - tests/test_github_api_budget.py::test_unwritable_ledger_never_raises_from_recording
+  - tests/test_eval_budget_failure_behavior.py::test_successful_issue_query_survives_ledger_error
+  - tests/test_eval_budget_failure_behavior.py::test_rate_limit_takes_precedence_over_ledger_write_error
+  - tests/test_eval_budget_failure_behavior.py::test_direct_ledger_recording_is_best_effort
   held_out:
-  - tests/test_github_api_budget.py
+  - tests/test_eval_budget_failure_behavior.py
   candidate_hidden: []
   gold_patch: gold.patch
 - id: issue-list-table-output
@@ -204,20 +222,23 @@ cases:
   - tasks/archive/P1-BUG-20260914-171901-console-e2e-and-archive-view-defects.md
   gold_patch: gold.patch
 - id: token-usage-by-prd
-  prompt: The Stats API should include token totals grouped by PRD alongside the existing
-    flow and agent breakdowns. Aggregate repeated runs for one PRD, rank by total
-    usage, omit entries with no usage, and preserve the endpoint's safe empty response
-    when ledger reads fail.
+  prompt: Extend the existing Stats API at /api/v1/agent-runner/console/stats/prd-lifecycle
+    to expose a top-level token_usage_by_prd list alongside the unchanged token_usage
+    flow and agent breakdowns. Merge repeated runs for one PRD, rank by total usage,
+    omit entries with no usage and retain the existing ledger read set rather than
+    fetching it again. When ledger reads fail, return the usual safe HTTP 200 response
+    with an empty token_usage_by_prd list.
   check_recipe: uv-pytest
   base_ref: d486dbdc9f0a41a14b9a572425a11f9b7161c226
   split: holdout
   check_targets:
-  - tests/test_prd_lifecycle.py::test_prd_lifecycle_stats_mounts_token_usage_by_prd
-  - tests/test_prd_lifecycle.py::test_prd_lifecycle_stats_reuses_ledger_reads_for_by_prd
-  - tests/test_prd_lifecycle.py::test_prd_lifecycle_stats_degrades_by_prd_on_read_failure
-  - tests/test_prd_lifecycle.py::test_stats_endpoint_degrades_when_ledger_unreadable
+  - tests/test_eval_prd_lifecycle.py::test_prd_lifecycle_stats_mounts_token_usage_by_prd
+  - tests/test_eval_prd_lifecycle.py::test_prd_lifecycle_stats_reuses_ledger_reads_for_by_prd
+  - tests/test_eval_prd_lifecycle.py::test_prd_lifecycle_stats_degrades_by_prd_on_read_failure
+  - tests/test_eval_prd_lifecycle.py::test_stats_endpoint_exposes_token_usage_by_prd
+  - tests/test_eval_prd_lifecycle.py::test_stats_endpoint_degrades_when_ledger_unreadable
   held_out:
-  - tests/test_prd_lifecycle.py
+  - tests/test_eval_prd_lifecycle.py
   candidate_hidden:
   - tasks/archive/P1-FEAT-20260930-212702-agent-token-usage-stats.md
   - tasks/pending/P1-FEAT-20261006-013227-stats-token-usage-by-prd.md

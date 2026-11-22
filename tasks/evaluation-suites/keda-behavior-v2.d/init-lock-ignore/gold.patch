@@ -1,0 +1,6 @@
+diff --git a/src/backend/engines/agent_runner/repository_gitignore.py b/src/backend/engines/agent_runner/repository_gitignore.py
+index a4e1a5dc..528676ee 100644
+--- a/src/backend/engines/agent_runner/repository_gitignore.py
++++ b/src/backend/engines/agent_runner/repository_gitignore.py
+@@ -36,0 +37 @@ GITIGNORE_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
++    ("# KedaCode TOML write lock (zero-byte, next to the config it guards)", ("*.toml.lock",)),

@@ -1994,13 +1994,20 @@ agent/ready
 1. RV 证据和仓库验证命令通过、PRD 执行侧条目完成并归档后，runner 将分支 push 到配置 remote，并创建或复用 Draft PR；此时不添加 `validation/verifier-passed`
 2. Draft PR 创建成功后，runner 尽力把人审材料上传到证据分支。看板按 PR 仓库刷新证据分支索引，同一仓库的远端查询至少间隔 30 秒，因此 `Review` 按钮通常可在 verifier 运行期间出现；材料发布失败只记录告警，不阻断 verifier。该入口表示可以提前查看材料，不表示验证通过或已经进入待人工评审状态
 3. 独立 verifier 对已提交工作树进行验证；失败时进入原有修复循环，后续合格提交更新同一个 Draft PR
-4. verifier 通过后，runner 写 Issue comment `Implementation Complete` 并构建 review packet（Issue、PRD、diff、changed paths、verification results、AI standards、review workflow）
+4. verifier 通过后，runner 写 Issue comment `Implementation Complete` 并构建 review packet（Issue、PRD、提交 diff、工作区状态、验证结果、AI standards、review workflow）
 5. **Reviewer 必须通过 Skill 工具调用 `code-reviewer` skill** 并把 skill 输出的 findings 写进响应的 `findings` JSON 数组；review packet 默认模板（`agent_review.DEFAULT_REVIEW_PROMPT_TEMPLATE`）会显式提示 reviewer 这一行为，并提供 findings schema（`category` / `severity` / `file` / `line` / `title` / `description` / `recommendation`）。仓库可在 `[agent_runner.pre_pr_review].review_prompt_template` 覆盖该模板，未配置时回退到代码默认。
 6. 若 reviewer 在当前 worktree / Issue 下已有可续传 session id，就接着该会话执行 review；没有记录时创建新会话。调用使用 `[agent_runner.pre_pr_review].timeout_seconds` 限制最长运行时间
 7. Reviewer 可直接修改 worktree；修改后写入 `.agent-runner/commit-request.json`
 8. Runner 通过 commit proxy 提交 reviewer 修改、重新运行 `verification_commands` 并 push 修复；更新 PR head 前先移除已有的 `validation/verifier-passed`，最终复核通过后再加回
 9. Runner 写 Issue comment `Pre-PR Review Result`（含 findings 表格）
 10. Review 通过后复用已创建的 Draft PR（或在提前发布失败时补建）；最终 head 的证据分支和 PR 证据评论在 verifier 结论发布阶段刷新；review 未收敛时走软失败路径并写 comment
+
+Review packet 单独标明未提交的工作区状态。提交 diff 超过 8,000 字符时，预览仍列出所有变更文件，并给出读取当前基线与待审提交之间完整差异的 Git 命令。
+默认审查规则要求从需求对应的正常入口核对实现。需求同时覆盖其他命令、配置分支或已有状态时，审查者应验证受影响的路径再作结论。
+
+可操作的问题必须有明确需求或既有契约作为依据。任务没有要求改变的优先级、默认值和
+兼容行为应保留；需求有歧义时说明不确定之处，不能自行发明新规则再据此修改代码。
+应用补丁因上下文不匹配被拒绝后，先重新读取受影响文件，再基于当前内容修订。
 
 提前出现的 `Review` 入口只允许预览验证材料：Issue 仍显示运行中，verifier 失败时仍按失败或阻塞状态呈现。PR 证据评论随最终 verifier 结论发布；`human/awaiting-review` 仍等 post-PR supervisor 通过且策略要求人工处理后才添加。
 
@@ -4485,6 +4492,8 @@ kc console --api-only --no-browser
   顺延到过别的端口，再次调用也会找回它，而不是在缺省端口新开一个。
   要并行跑第二个 console（例如另一套状态目录）就显式指定一个空闲 `--port`；
   显式端口被**非 console** 的服务占用时仍按原样报错退出。
+- macOS/Linux 允许复用关闭后仍有 `TIME_WAIT` 连接的端口，但正在监听的服务仍算占用，
+  包括监听 `0.0.0.0` 的服务。Windows 保持原有端口探测行为。
 - 复用现有实例时 `--no-browser` 依旧有效：只打印 URL、不拉起浏览器，适合脚本
   里取 URL 或配合 SSH 端口转发（`ssh -L 8313:127.0.0.1:8313 <host>`）。
 - 源码开发模式缺少静态面板产物（整个目录不在，或目录在但缺 `index.html`

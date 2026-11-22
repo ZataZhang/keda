@@ -1,0 +1,28 @@
+diff --git a/src/backend/infrastructure/process_runner.py b/src/backend/infrastructure/process_runner.py
+index e0fef2d3..280fdfbf 100644
+--- a/src/backend/infrastructure/process_runner.py
++++ b/src/backend/infrastructure/process_runner.py
+@@ -17,0 +18 @@ _MAX_BUFFER_SIZE = 4096
++_MAX_ERROR_DETAIL_LEN = 4096
+@@ -72,0 +74,18 @@ class CommandResult:
++class CommandFailedError(subprocess.CalledProcessError):
++    """CalledProcessError with captured stderr/stdout included in the message."""
++
++    def __str__(self) -> str:
++        base = super().__str__()
++        detail = self.stderr or self.output or ""
++        if not detail:
++            return base
++        if isinstance(detail, bytes):
++            detail = detail.decode("utf-8", errors="replace")
++        detail = detail.strip()
++        if not detail:
++            return base
++        if len(detail) > _MAX_ERROR_DETAIL_LEN:
++            detail = detail[:_MAX_ERROR_DETAIL_LEN] + "\n... (truncated)"
++        return f"{base}\n\n--- stderr/stdout ---\n{detail}"
++
++
+@@ -185 +204 @@ class SubprocessRunner:
+-            raise subprocess.CalledProcessError(
++            raise CommandFailedError(

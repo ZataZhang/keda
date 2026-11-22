@@ -1,0 +1,142 @@
+diff --git a/README.md b/README.md
+index dd02dff7..1614e614 100644
+--- a/README.md
++++ b/README.md
+@@ -83,0 +84,2 @@ iar completion show --shell zsh
++**前置步骤：所有 `iar` 子命令（除 `iar init` 本身外）都要求目标仓库已经执行过 `iar init`**。未初始化时命令会立即失败并提示运行 `iar init`。
++
+diff --git a/docs/guides/agent-runner.md b/docs/guides/agent-runner.md
+index b6935ba1..ed6b4a19 100644
+--- a/docs/guides/agent-runner.md
++++ b/docs/guides/agent-runner.md
+@@ -30,0 +31,15 @@ iar --help
++### 初始化门禁
++
++除 `iar init` 外，所有 `iar` 子命令在执行前都会检查目标仓库是否已完成初始化（仓库根目录存在有效的 `.iar.toml`）。未初始化时命令会立即以非零退出码失败，并提示先运行 `iar init`：
++
++```bash
++# 首次在目标仓库使用前，必须先初始化
++iar init
++
++# 之后才能执行其他命令
++iar labels sync
++iar run --dry-run
++```
++
++`iar init` 本身不受门禁限制，包括 `--dry-run` 和 `--force` 形式。本 PRD 不提供 `--skip-init-check` 等绕过开关。
++
+@@ -199 +214 @@ agent/waiting              → 上游 closed → 自动放行
+-`iar` 默认以当前 Git 仓库作为目标仓库。首次在目标仓库使用前，先生成仓库本地配置：
++`iar` 默认以当前 Git 仓库作为目标仓库。**首次在目标仓库使用前必须先执行 `iar init`**，否则除 `iar init` 外的所有命令都会失败并提示初始化。
+diff --git a/src/backend/api/cli.py b/src/backend/api/cli.py
+index 7dcdf174..7945d264 100644
+--- a/src/backend/api/cli.py
++++ b/src/backend/api/cli.py
+@@ -67,0 +68 @@ from backend.engines.agent_runner.repository_local import (
++    IARRepositoryNotInitializedError,
+@@ -70,0 +72 @@ from backend.engines.agent_runner.repository_local import (
++    require_iar_repository_initialized,
+@@ -276,0 +279,9 @@ def _create_run_history_store_or_none():
++def _handle_not_initialized_error(exc: IARRepositoryNotInitializedError) -> int:
++    """Print a friendly error and suggest running `iar init`."""
++    error_console.print("[red]Repository is not initialized for iar.[/]")
++    error_console.print(f"Expected local config: {exc.config_path}", soft_wrap=True)
++    error_console.print("Run the following command from the repository root:")
++    error_console.print("  iar init")
++    return 1
++
++
+@@ -335,0 +347 @@ def _run_parsed_command(parsed: argparse.Namespace) -> int:
++            require_iar_repository_initialized(repo_root_path, process_runner)
+@@ -338,0 +351,2 @@ def _run_parsed_command(parsed: argparse.Namespace) -> int:
++        except IARRepositoryNotInitializedError as exc:
++            return _handle_not_initialized_error(exc)
+@@ -402,0 +417,2 @@ def _run_parsed_command(parsed: argparse.Namespace) -> int:
++            for context in contexts:
++                require_iar_repository_initialized(context.repo_path, process_runner)
+@@ -419,0 +436 @@ def _run_parsed_command(parsed: argparse.Namespace) -> int:
++            require_iar_repository_initialized(context.repo_path, process_runner)
+@@ -489,0 +507,2 @@ def _run_parsed_command(parsed: argparse.Namespace) -> int:
++            for context in contexts:
++                require_iar_repository_initialized(context.repo_path, process_runner)
+@@ -511,0 +531,2 @@ def _run_parsed_command(parsed: argparse.Namespace) -> int:
++            for context in contexts:
++                require_iar_repository_initialized(context.repo_path, process_runner)
+@@ -537,0 +559,2 @@ def _run_parsed_command(parsed: argparse.Namespace) -> int:
++            for context in contexts:
++                require_iar_repository_initialized(context.repo_path, process_runner)
+@@ -571,0 +595,2 @@ def _run_parsed_command(parsed: argparse.Namespace) -> int:
++            for context in contexts:
++                require_iar_repository_initialized(context.repo_path, process_runner)
+@@ -600,0 +626,2 @@ def _run_parsed_command(parsed: argparse.Namespace) -> int:
++            for context in contexts:
++                require_iar_repository_initialized(context.repo_path, process_runner)
+@@ -649,0 +677,2 @@ def _run_parsed_command(parsed: argparse.Namespace) -> int:
++            for context in contexts:
++                require_iar_repository_initialized(context.repo_path, process_runner)
+@@ -687,0 +717,2 @@ def _run_parsed_command(parsed: argparse.Namespace) -> int:
++            for context in contexts:
++                require_iar_repository_initialized(context.repo_path, process_runner)
+@@ -736,0 +768,6 @@ def _run_parsed_command(parsed: argparse.Namespace) -> int:
++            deliberate_repo_root_path = detect_git_repository_root(
++                Path.cwd(), process_runner
++            )
++            require_iar_repository_initialized(
++                deliberate_repo_root_path, process_runner
++            )
+@@ -800,0 +838,2 @@ def _run_parsed_command(parsed: argparse.Namespace) -> int:
++    except IARRepositoryNotInitializedError as exc:
++        return _handle_not_initialized_error(exc)
+diff --git a/src/backend/engines/agent_runner/repository_local.py b/src/backend/engines/agent_runner/repository_local.py
+index 9c0d2ee2..b5f90889 100644
+--- a/src/backend/engines/agent_runner/repository_local.py
++++ b/src/backend/engines/agent_runner/repository_local.py
+@@ -16,0 +17 @@ from backend.infrastructure.config.settings import (
++    AgentRunnerPostPrSupervisorSettings,
+@@ -24 +24,0 @@ from backend.infrastructure.config.settings import (
+-    AgentRunnerPostPrSupervisorSettings,
+@@ -25,0 +26 @@ from backend.infrastructure.config.settings import (
++    load_agent_runner_local_settings,
+@@ -29,0 +31,42 @@ from backend.infrastructure.process_runner import CommandResult, SubprocessRunne
++class IARRepositoryNotInitializedError(Exception):
++    """Raised when a target repository has not run `iar init`."""
++
++    def __init__(self, repo_root_path: Path, config_path: Path) -> None:
++        self.repo_root_path = repo_root_path
++        self.config_path = config_path
++        super().__init__(
++            f"Repository '{repo_root_path}' is not initialized for iar. "
++            f"Expected local config: {config_path}"
++        )
++
++
++def require_iar_repository_initialized(
++    repo_root_path: Path,
++    process_runner: SubprocessRunner | None = None,  # noqa: ARG001
++) -> None:
++    """Raise if the repository lacks a valid .iar.toml.
++
++    A valid local config means:
++    - `.iar.toml` exists as a regular file.
++    - It is parseable TOML.
++    - It contains an `[agent_runner]` section.
++    - `repository.id` is non-empty.
++
++    Args:
++        repo_root_path: Target Git repository root path.
++        process_runner: Optional subprocess runner (unused, kept for API
++            symmetry with other repository-local helpers).
++
++    Raises:
++        IARRepositoryNotInitializedError: If the repository is not initialized.
++    """
++    config_path = repo_root_path / IAR_REPOSITORY_CONFIG_FILENAME
++    try:
++        local_settings = load_agent_runner_local_settings(repo_root_path)
++    except ValueError as exc:
++        raise IARRepositoryNotInitializedError(repo_root_path, config_path) from exc
++
++    if local_settings is None or not local_settings.id:
++        raise IARRepositoryNotInitializedError(repo_root_path, config_path)
++
++

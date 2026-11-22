@@ -1,0 +1,71 @@
+diff --git a/src/backend/core/use_cases/agent_runner_monitor.py b/src/backend/core/use_cases/agent_runner_monitor.py
+index c5cb02d2..c656d3d3 100644
+--- a/src/backend/core/use_cases/agent_runner_monitor.py
++++ b/src/backend/core/use_cases/agent_runner_monitor.py
+@@ -122,0 +123,3 @@ class IssueMonitoringSnapshot:
++    #: 最近一条 ``## Agent Runner … Failed`` 评论的一行摘要；Issue 在其他机器上
++    #: 失败时，本机运行账本没有记录，运行看板靠它显示失败原因。
++    latest_failure_summary: str | None = None
+@@ -267,0 +271,45 @@ def parse_event_timeline(comments: Iterable[str]) -> list[EventTimelineEntry]:
++_FAILURE_HEADING_PATTERN = re.compile(
++    r"##[ \t]+(Agent Runner\b[^\n]*\bFailed)[ \t]*$", re.MULTILINE
++)
++_FENCED_BLOCK_PATTERN = re.compile(r"```[^\n]*\n(.*?)```", re.DOTALL)
++_ERROR_LINE_PATTERN = re.compile(r"^(?:error|fatal)\b|^\w+(?:Error|Exception)\b", re.IGNORECASE)
++_FAILURE_SUMMARY_MAX_LENGTH = 300
++
++
++def parse_latest_failure_summary(comments: list[str]) -> str | None:
++    """取最近一条 ``## Agent Runner … Failed`` 评论的一行摘要。
++
++    失败评论由出错的那台机器发出、不带 ``kc:event`` 标记，因此不进时间线。
++    摘要为标题加首个代码块里最后一条错误行（``error:`` / ``fatal:`` 或
++    ``XxxError:``，避开堆栈之后的 git ``hint:`` 之类说明）；代码块里没有错误行时
++    取其最后一个非空行，评论没有代码块时取标题后的第一个非空行。
++
++    Args:
++        comments: Issue 评论正文，按时间从旧到新排列。
++
++    Returns:
++        截断到 300 字符的摘要；没有失败评论时为 ``None``。
++    """
++    for comment_body in reversed(comments):
++        stripped_body = (comment_body or "").lstrip()
++        heading_match = _FAILURE_HEADING_PATTERN.match(stripped_body)
++        if heading_match is None:
++            continue
++        body_after_heading = stripped_body[heading_match.end() :]
++        fence_match = _FENCED_BLOCK_PATTERN.search(body_after_heading)
++        detail_source = fence_match.group(1) if fence_match else body_after_heading
++        detail_lines = [line.strip() for line in detail_source.splitlines() if line.strip()]
++        failure_heading = heading_match.group(1)
++        if not detail_lines:
++            return failure_heading
++        if fence_match is None:
++            detail_line = detail_lines[0]
++        else:
++            detail_line = next(
++                (line for line in reversed(detail_lines) if _ERROR_LINE_PATTERN.search(line)),
++                detail_lines[-1],
++            )
++        return f"{failure_heading}: {detail_line}"[:_FAILURE_SUMMARY_MAX_LENGTH]
++    return None
++
++
+@@ -636,0 +685 @@ def build_issue_snapshot(
++        latest_failure_summary=parse_latest_failure_summary(comments),
+diff --git a/src/backend/core/use_cases/runtime_dashboard.py b/src/backend/core/use_cases/runtime_dashboard.py
+index 32f35091..ce5a939b 100644
+--- a/src/backend/core/use_cases/runtime_dashboard.py
++++ b/src/backend/core/use_cases/runtime_dashboard.py
+@@ -338,0 +339,7 @@ def _snapshot_task(
++    last_error_summary = run_record.error_summary if run_record else None
++    if not last_error_summary and status is RuntimeTaskStatus.FAILED:
++        # 在其他机器上失败的 Issue 本机没有运行账本，失败原因只在 Issue 评论里。
++        remote_failure_summary = issue_entry.get("latest_failure_summary")
++        if isinstance(remote_failure_summary, str) and remote_failure_summary:
++            last_error_summary = remote_failure_summary
++
+@@ -368 +375 @@ def _snapshot_task(
+-        last_error_summary=run_record.error_summary if run_record else None,
++        last_error_summary=last_error_summary,

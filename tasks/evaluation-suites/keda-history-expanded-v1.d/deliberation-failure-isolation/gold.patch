@@ -1,0 +1,1374 @@
+diff --git a/.github/workflows/validation-gate.yml b/.github/workflows/validation-gate.yml
+index 24081a5..a0257af 100644
+--- a/.github/workflows/validation-gate.yml
++++ b/.github/workflows/validation-gate.yml
+@@ -45,6 +45,12 @@ jobs:
+
+           declared_total = int(block_match.group(1))
+           block_text = block_match.group(2)
++          if declared_total == 0:
++              print(
++                  "Realistic Validation explicitly skipped (total=0); gate passes."
++              )
++              sys.exit(0)
++
+           checked_count = len(
+               re.findall(r"^\s*[-*] \[[xX]\] ", block_text, re.M)
+           )
+diff --git a/config.toml b/config.toml
+index 48c11bc..13ae18f 100644
+--- a/config.toml
++++ b/config.toml
+@@ -430,6 +430,8 @@ allow_execute_yes = true
+ default_rounds = 2
+ default_synthesizer = "claude"
+ default_output_dir = "logs/agent-runner/deliberations"
++continue_on_agent_error = true
++agent_failure_timeout_seconds = 300
+
+ [agent_runner.deliberation.profiles.architect]
+ agent = "claude"
+diff --git a/docs/guides/agent-runner.md b/docs/guides/agent-runner.md
+index d69cc08..da6840c 100644
+--- a/docs/guides/agent-runner.md
++++ b/docs/guides/agent-runner.md
+@@ -2399,7 +2399,16 @@ cat logs/agent-runner/deliberations/test-001/workspaces/implementer/round-1-outp
+ cat logs/agent-runner/deliberations/test-001/workspaces/synthesizer/synthesis-output.md
+ ```
+
+-若任一参与 agent 或 synthesizer 子进程返回非 0 退出码，`iar deliberate` 会整体失败并返回非 0 退出码；已发生的事件和 partial output 仍保留在对应文件中便于排查。
++若任一参与 agent 或 synthesizer 子进程返回非 0 退出码，默认行为不再整体失败，而是记录失败并继续；`--strict` 可恢复为失败即非 0。
++
++> **失败隔离与回退**：从本 PRD 起，`iar deliberate` 对单个 agent 失败默认隔离并继续。
++> - 失败 agent 的 `workspaces/<profile_id>/round-<n>-output.md` 保留 partial 输出。
++> - TTY 下会提示选择回退模型，5 分钟无选择自动切换到下一个可用模型。
++> - 非 TTY / CI 下直接自动切换，不阻塞。
++> - 使用 `--strict` 或设置 `continue_on_agent_error = false` 时，任一 agent 失败即让 CLI 返回非 0。
++> - 全部参与 agent 和 synthesizer 均失败时，无论是否 `--strict` 都返回非 0。
++>
++> 注意：默认 `skeptic` profile 使用 `kimi`，此前 `kimi` deliberation 命令错误地传递了 `--quiet`，`kimi` CLI 不支持该选项。修复后 `kimi` 命令为 `kimi --input-format text`。
+
+ ### 安全边界
+
+@@ -2418,6 +2427,10 @@ cat logs/agent-runner/deliberations/test-001/workspaces/synthesizer/synthesis-ou
+ default_rounds = 2
+ default_synthesizer = "claude"
+ default_output_dir = "logs/agent-runner/deliberations"
++# 是否对单个 agent 失败继续执行（默认 true）
++continue_on_agent_error = true
++# TTY 下等待用户选择回退模型的超时秒数（默认 300）
++agent_failure_timeout_seconds = 300
+
+ [agent_runner.deliberation.profiles.architect]
+ agent = "claude"
+@@ -2430,6 +2443,8 @@ role = "skeptic"
+ behavior_prompt = "You are a skeptical reviewer..."
+ ```
+
++`session.json` 新增 `failed_agents` 字段，记录失败的 `profile_id`、尝试的 agent、最终回退 agent（如有）和失败原因。
++
+ ## 架构说明
+
+ Agent Runner 的代码分布在四层架构中：
+diff --git a/src/backend/api/cli.py b/src/backend/api/cli.py
+index ff56f86..3b04674 100644
+--- a/src/backend/api/cli.py
++++ b/src/backend/api/cli.py
+@@ -11,8 +11,6 @@ from __future__ import annotations
+ import argparse
+ import dataclasses
+ import os
+-import shlex
+-import subprocess
+ from pathlib import Path
+ from typing import TYPE_CHECKING, Any
+
+@@ -21,6 +19,10 @@ from backend.api.cli_init import (
+     _print_workflow_config_plan,
+     _run_init_command,
+ )
++from backend.api.cli_prd_utils import (
++    _expand_prd_paths,
++    _prompt_and_publish_prd_if_needed,
++)
+ from backend.api.cli_registry import (
+     _run_registry_list_command,
+     _run_registry_reinit_command,
+@@ -29,14 +31,10 @@ from backend.api.cli_registry import (
+     _run_registry_stop_command,
+ )
+ from backend.api.cli_takeover import _run_takeover_command
++from backend.api.cli_utils import _format_cli_exception
+ from backend.core.use_cases.create_issue_from_prd import (
+-    ISSUE_LINK_LINE_RE,
+     IssueFromPrdRequest,
+-    PrdPublishContext,
+     create_issue_from_prd,
+-    current_git_branch,
+-    parse_issue_number,
+-    publish_prd_file,
+     resolve_prd_paths,
+ )
+ from backend.core.use_cases.run_agent_daemon import run_agent_daemon
+@@ -60,7 +58,6 @@ from backend.core.use_cases.worktree_cleanup import (
+ )
+ from backend.core.use_cases.worktree_env import copy_missing_env_files
+ from backend.core.shared.models.agent_deliberation import DeliberationSession
+-from backend.core.shared.models.agent_runner import LabelConfig
+ from backend.engines.agent_runner.factory import (
+     create_console_store,
+     create_content_generator,
+@@ -78,6 +75,7 @@ from backend.engines.agent_runner.factory import (
+     resolve_repository_targets,
+     write_deliberation_outputs,
+ )
++from backend.engines.agent_runner.failure_resolver import AgentFailureResolver
+ from backend.engines.agent_runner.live_terminal import create_output_view
+ from backend.engines.agent_runner.repository_local import (
+     IARRepositoryNotInitializedError,
+@@ -95,157 +93,16 @@ from backend.engines.agent_runner.workflow_install import (
+     install_workflow,
+ )
+
+-_MAX_CLI_ERROR_STREAM_CHARS = 12000
+-
+-
+ if TYPE_CHECKING:
+     from backend.core.shared.interfaces.agent_runner import (
+         IGitHubClient,
+         IProcessRunner,
+     )
+     from backend.core.shared.models.agent_runner import (
+-        LabelConfig,
+         RepositoryRunContext,
+     )
+
+
+-def _format_command_for_cli(command: object) -> str:
+-    """Format a failed command for CLI diagnostics."""
+-    if isinstance(command, str):
+-        return command
+-    if isinstance(command, (list, tuple)):
+-        return shlex.join(str(command_part) for command_part in command)
+-    return str(command)
+-
+-
+-def _decode_cli_error_stream(stream_value: object) -> str:
+-    """Decode captured subprocess output for CLI diagnostics."""
+-    if stream_value is None:
+-        return ""
+-    if isinstance(stream_value, bytes):
+-        return stream_value.decode("utf-8", errors="replace")
+-    return str(stream_value)
+-
+-
+-def _truncate_cli_error_stream(stream_text: str) -> str:
+-    """Limit very large captured command output in CLI diagnostics."""
+-    if len(stream_text) <= _MAX_CLI_ERROR_STREAM_CHARS:
+-        return stream_text
+-    omitted_char_count = len(stream_text) - _MAX_CLI_ERROR_STREAM_CHARS
+-    return (
+-        stream_text[:_MAX_CLI_ERROR_STREAM_CHARS]
+-        + f"\n... truncated {omitted_char_count} chars ..."
+-    )
+-
+-
+-def _format_cli_exception(exc: BaseException) -> str:
+-    """Format an exception with subprocess stdout/stderr when available."""
+-    if not isinstance(exc, subprocess.CalledProcessError):
+-        return str(exc)
+-
+-    lines = [
+-        "Command failed.",
+-        f"Command: {_format_command_for_cli(exc.cmd)}",
+-        f"Exit code: {exc.returncode}",
+-    ]
+-    stdout_text = _truncate_cli_error_stream(_decode_cli_error_stream(exc.output))
+-    stderr_text = _truncate_cli_error_stream(_decode_cli_error_stream(exc.stderr))
+-    if stdout_text:
+-        lines.extend(["", "stdout:", stdout_text.rstrip()])
+-    if stderr_text:
+-        lines.extend(["", "stderr:", stderr_text.rstrip()])
+-    if not stdout_text and not stderr_text:
+-        lines.append("No stdout or stderr was captured.")
+-    return "\n".join(lines)
+-
+-
+-@dataclasses.dataclass(frozen=True)
+-class _DefaultDaemonTarget:
+-    """Result of inferring a daemon target from cwd."""
+-
+-    repo_id: str | None
+-    error: str
+-
+-
+-def _resolve_default_daemon_target() -> _DefaultDaemonTarget:
+-    """Infer the daemon target repository from the current working directory.
+-
+-    Returns:
+-        _DefaultDaemonTarget: when ``repo_id`` is set, use that repository;
+-        when ``error`` is set, fail early with the error message. If both are
+-        None/empty, fall back to --all.
+-    """
+-    try:
+-        cwd_git_root = detect_git_repository_root(Path.cwd())
+-    except ValueError:
+-        # Not inside a git repository: keep the legacy --all fallback so that
+-        # commands like nohup iar daemon still work outside a repository.
+-        return _DefaultDaemonTarget(repo_id=None, error="")
+-    settings = load_fresh_agent_runner_settings()
+-    match = find_repository_match_for_path(settings, cwd_git_root)
+-    if match.is_unique_enabled:
+-        assert match.matched_repo_id is not None  # noqa: S101
+-        return _DefaultDaemonTarget(repo_id=match.matched_repo_id, error="")
+-    if match.is_disabled:
+-        assert match.disabled_repo_id is not None  # noqa: S101
+-        return _DefaultDaemonTarget(
+-            repo_id=None,
+-            error=(
+-                f"Repository '{match.disabled_repo_id}' is disabled. "
+-                "Use --repo-id to target it explicitly or enable it in config.toml."
+-            ),
+-        )
+-    if match.is_ambiguous:
+-        candidates = ", ".join(repo_id for repo_id, _ in match.enabled_candidates)
+-        return _DefaultDaemonTarget(
+-            repo_id=None,
+-            error=(
+-                f"Current directory matches multiple enabled repositories: {candidates}. "
+-                "Use --repo-id to target one, or --all to target all."
+-            ),
+-        )
+-    return _DefaultDaemonTarget(repo_id=None, error="")
+-
+-
+-def _prompt_and_publish_prd_if_needed(
+-    *,
+-    repo_path: Path,
+-    relative_prd_path: Path,
+-    issue_url: str,
+-    queue_ready: bool,
+-    git_remote: str,
+-    labels_config: "LabelConfig",
+-    github_client: "IGitHubClient",
+-    process_runner: "IProcessRunner",
+-) -> bool:
+-    """Prompt user to commit and push PRD changes if working tree is dirty."""
+-
+-    status_result = process_runner.run(["git", "status", "--porcelain"], cwd=repo_path)
+-    if not status_result.stdout.strip():
+-        return False
+-
+-    prd_path_text = relative_prd_path.as_posix()
+-    print(f"\n检测到 PRD 文件有未提交的变更：{prd_path_text}")
+-    response = input("是否立即 commit 并 push 该变更？(y/N): ")
+-    if response.lower() not in ("y", "yes"):
+-        return False
+-
+-    current_branch = current_git_branch(repo_path, process_runner)
+-    publish_context = PrdPublishContext(
+-        repo_path=repo_path,
+-        relative_prd_path=relative_prd_path,
+-        git_remote=git_remote,
+-        current_branch=current_branch,
+-    )
+-    publish_prd_file(publish_context, process_runner)
+-    if queue_ready:
+-        github_client.edit_issue_labels(
+-            parse_issue_number(issue_url),
+-            add=[labels_config.ready],
+-        )
+-    return True
+-
+-
+ def _ensure_gh_auth_or_prompt(
+     repo_path: Path, process_runner: "IProcessRunner"
+ ) -> None:
+@@ -319,6 +176,54 @@ def _resolve_cli_repository_targets(
+     )
+
+
++@dataclasses.dataclass(frozen=True)
++class _DefaultDaemonTarget:
++    """Result of inferring a daemon target from cwd."""
++
++    repo_id: str | None
++    error: str
++
++
++def _resolve_default_daemon_target() -> _DefaultDaemonTarget:
++    """Infer the daemon target repository from the current working directory.
++
++    Returns:
++        _DefaultDaemonTarget: when ``repo_id`` is set, use that repository;
++        when ``error`` is set, fail early with the error message. If both are
++        None/empty, fall back to --all.
++    """
++    try:
++        cwd_git_root = detect_git_repository_root(Path.cwd())
++    except ValueError:
++        # Not inside a git repository: keep the legacy --all fallback so that
++        # commands like nohup iar daemon still work outside a repository.
++        return _DefaultDaemonTarget(repo_id=None, error="")
++    settings = load_fresh_agent_runner_settings()
++    match = find_repository_match_for_path(settings, cwd_git_root)
++    if match.is_unique_enabled:
++        assert match.matched_repo_id is not None  # noqa: S101
++        return _DefaultDaemonTarget(repo_id=match.matched_repo_id, error="")
++    if match.is_disabled:
++        assert match.disabled_repo_id is not None  # noqa: S101
++        return _DefaultDaemonTarget(
++            repo_id=None,
++            error=(
++                f"Repository '{match.disabled_repo_id}' is disabled. "
++                "Use --repo-id to target it explicitly or enable it in config.toml."
++            ),
++        )
++    if match.is_ambiguous:
++        candidates = ", ".join(repo_id for repo_id, _ in match.enabled_candidates)
++        return _DefaultDaemonTarget(
++            repo_id=None,
++            error=(
++                f"Current directory matches multiple enabled repositories: {candidates}. "
++                "Use --repo-id to target one, or --all to target all."
++            ),
++        )
++    return _DefaultDaemonTarget(repo_id=None, error="")
++
++
+ def _resolve_run_trigger(command_kind: str) -> str:
+     """解析运行记录的 trigger 来源。
+
+@@ -350,93 +255,6 @@ def _handle_not_initialized_error(exc: IARRepositoryNotInitializedError) -> int:
+     return 1
+
+
+-def _expand_prd_paths(
+-    repo_path: Path, prd_paths: list[str]
+-) -> tuple[list[str], list[str]]:
+-    """Expand directories in ``prd_paths`` to their ``*.md`` files.
+-
+-    Files are returned as repo-relative paths. Directories are expanded to
+-    their immediate ``*.md`` children, sorted by filename. PRDs that already
+-    contain a ``- GitHub Issue:`` URL are skipped when discovered via a
+-    directory, because the user's intent is to create Issues only for pending
+-    PRDs. Explicitly passed files are not skipped so that errors remain
+-    visible. Non-existent paths are passed through unchanged so that downstream
+-    validation can report them with its usual diagnostics.
+-
+-    Args:
+-        repo_path: Repository root used to resolve relative paths.
+-        prd_paths: Raw CLI arguments, each may be a file or a directory.
+-
+-    Returns:
+-        ``(expanded_paths, skipped_paths)`` tuple. ``expanded_paths`` are
+-        repo-relative PRD Markdown files to process. ``skipped_paths`` are
+-        repo-relative PRD files that already have an Issue link and were
+-        discovered through a directory argument.
+-
+-    Raises:
+-        ValueError: When a directory is empty of ``*.md`` files or the
+-            final expanded list is empty.
+-    """
+-
+-    expanded_paths: list[str] = []
+-    skipped_paths: list[str] = []
+-    seen_paths: set[str] = set()
+-
+-    def _has_issue_link(absolute_prd_path: Path) -> bool:
+-        try:
+-            prd_text = absolute_prd_path.read_text(encoding="utf-8")
+-        except OSError:
+-            return False
+-        return any(ISSUE_LINK_LINE_RE.match(line) for line in prd_text.splitlines())
+-
+-    for prd_path_text in prd_paths:
+-        candidate_path = (repo_path / prd_path_text).resolve()
+-
+-        if not candidate_path.exists():
+-            expanded_paths.append(prd_path_text)
+-            continue
+-
+-        is_directory = candidate_path.is_dir()
+-        if candidate_path.is_file():
+-            if candidate_path.suffix.lower() != ".md":
+-                raise ValueError(f"PRD file must be a Markdown file: {prd_path_text}")
+-            file_entries = [candidate_path]
+-        elif is_directory:
+-            file_entries = sorted(
+-                [
+-                    entry
+-                    for entry in candidate_path.iterdir()
+-                    if entry.is_file() and entry.suffix.lower() == ".md"
+-                ],
+-                key=lambda entry: entry.name,
+-            )
+-            if not file_entries:
+-                raise ValueError(
+-                    f"Directory contains no PRD Markdown files: {prd_path_text}"
+-                )
+-        else:
+-            raise ValueError(
+-                f"PRD path is neither a file nor a directory: {prd_path_text}"
+-            )
+-
+-        for file_entry in file_entries:
+-            relative_path = file_entry.relative_to(repo_path.resolve()).as_posix()
+-            if relative_path in seen_paths:
+-                continue
+-            seen_paths.add(relative_path)
+-
+-            if is_directory and _has_issue_link(file_entry):
+-                skipped_paths.append(relative_path)
+-                continue
+-
+-            expanded_paths.append(relative_path)
+-
+-    if not expanded_paths and not skipped_paths:
+-        raise ValueError("No PRD Markdown files found.")
+-
+-    return expanded_paths, skipped_paths
+-
+-
+ def _run_parsed_command(parsed: argparse.Namespace) -> int:
+     """Run a command after CLI arguments have been parsed."""
+     if parsed.config:
+@@ -1133,6 +951,7 @@ def _run_parsed_command(parsed: argparse.Namespace) -> int:
+             output_path.mkdir(parents=True, exist_ok=True)
+             output_view = create_output_view()
+             event_sink = create_event_sink(output_path, output_view)
++            resolver = AgentFailureResolver()
+             result = run_agent_deliberation(
+                 request=request,
+                 config=deliberation_config,
+@@ -1140,6 +959,7 @@ def _run_parsed_command(parsed: argparse.Namespace) -> int:
+                 event_sink=event_sink,
+                 target_repo_path=context.repo_path,
+                 output_view=output_view,
++                resolver=resolver.resolve,
+             )
+             selected_profile_ids = tuple(
+                 dict.fromkeys(
+@@ -1168,6 +988,37 @@ def _run_parsed_command(parsed: argparse.Namespace) -> int:
+             )
+             write_deliberation_outputs(result, session, output_path)
+             console.print(f"\n[green]Deliberation complete:[/] {output_path}")
++            if result.failed_agents:
++                for failure in result.failed_agents:
++                    logger.warning(
++                        "Deliberation agent failed: profile=%s attempted=%s "
++                        "fallback=%s reason=%s",
++                        failure.profile_id,
++                        failure.attempted_agent,
++                        failure.fallback_agent,
++                        failure.reason,
++                    )
++                    console.print(
++                        f"[yellow]Agent '{failure.profile_id}' failed "
++                        f"(attempted={failure.attempted_agent}, "
++                        f"fallback={failure.fallback_agent or 'none'}, "
++                        f"reason={failure.reason}).[/]"
++                    )
++            strict_mode = (
++                parsed.strict or not deliberation_config.continue_on_agent_error
++            )
++            if strict_mode and result.failed_agents:
++                return 1
++            if not any(failure.profile_id == "synthesizer" for failure in result.failed_agents):
++                return 0
++            participant_attempts = sum(
++                len(round_outputs) for round_outputs in result.agent_outputs.values()
++            )
++            unrecovered_failures = sum(
++                failure.profile_id != "synthesizer" and failure.fallback_agent is None
++                for failure in result.failed_agents
++            )
++            return int(unrecovered_failures >= participant_attempts)
+             return 0
+     except IARRepositoryNotInitializedError as exc:
+         return _handle_not_initialized_error(exc)
+diff --git a/src/backend/api/cli_init.py b/src/backend/api/cli_init.py
+index 0d8e17b..2f0f5ce 100644
+--- a/src/backend/api/cli_init.py
++++ b/src/backend/api/cli_init.py
+@@ -53,7 +53,12 @@ def _run_init_command(
+             markup=False,
+         )
+         return 0
+-    console.print(f"[green]Wrote IAR local config:[/] {init_result.config_path}")
++    if init_result.wrote_file:
++        console.print(f"[green]Wrote IAR local config:[/] {init_result.config_path}")
++    else:
++        console.print(
++            f"[dim]IAR local config already up to date:[/] {init_result.config_path}"
++        )
+     copy_skills_flag = (
+         False
+         if getattr(parsed, "skip_skills", False)
+diff --git a/src/backend/api/cli_parser.py b/src/backend/api/cli_parser.py
+index a6e8fb1..b1c407c 100644
+--- a/src/backend/api/cli_parser.py
++++ b/src/backend/api/cli_parser.py
+@@ -264,6 +264,11 @@ def build_parser() -> argparse.ArgumentParser:
+     deliberate_parser.add_argument(
+         "--session-id", default=None, help="Optional session ID for reproducibility."
+     )
++    deliberate_parser.add_argument(
++        "--strict",
++        action="store_true",
++        help="Return non-zero exit code if any agent fails.",
++    )
+     add_common_options(deliberate_parser)
+
+     worktree_parser = subparsers.add_parser(
+diff --git a/src/backend/api/cli_prd_utils.py b/src/backend/api/cli_prd_utils.py
+new file mode 100644
+index 0000000..e1ddb27
+--- /dev/null
++++ b/src/backend/api/cli_prd_utils.py
+@@ -0,0 +1,151 @@
++"""CLI helpers for PRD expansion and publishing.
++
++Keeps ``backend.api.cli`` compact by isolating PRD-path handling and the
++interactive publish prompt used by ``iar issue create``.
++"""
++
++from __future__ import annotations
++
++from pathlib import Path
++from typing import TYPE_CHECKING
++
++from backend.core.use_cases.create_issue_from_prd import (
++    ISSUE_LINK_LINE_RE,
++    PrdPublishContext,
++    current_git_branch,
++    parse_issue_number,
++    publish_prd_file,
++)
++
++if TYPE_CHECKING:
++    from backend.core.shared.interfaces.agent_runner import (
++        IGitHubClient,
++        IProcessRunner,
++    )
++    from backend.core.shared.models.agent_runner import LabelConfig
++
++
++def _prompt_and_publish_prd_if_needed(
++    *,
++    repo_path: Path,
++    relative_prd_path: Path,
++    issue_url: str,
++    queue_ready: bool,
++    git_remote: str,
++    labels_config: "LabelConfig",
++    github_client: "IGitHubClient",
++    process_runner: "IProcessRunner",
++) -> bool:
++    """Prompt user to commit and push PRD changes if working tree is dirty."""
++
++    status_result = process_runner.run(["git", "status", "--porcelain"], cwd=repo_path)
++    if not status_result.stdout.strip():
++        return False
++
++    prd_path_text = relative_prd_path.as_posix()
++    print(f"\n检测到 PRD 文件有未提交的变更：{prd_path_text}")
++    response = input("是否立即 commit 并 push 该变更？(y/N): ")
++    if response.lower() not in ("y", "yes"):
++        return False
++
++    current_branch = current_git_branch(repo_path, process_runner)
++    publish_context = PrdPublishContext(
++        repo_path=repo_path,
++        relative_prd_path=relative_prd_path,
++        git_remote=git_remote,
++        current_branch=current_branch,
++    )
++    publish_prd_file(publish_context, process_runner)
++    if queue_ready:
++        github_client.edit_issue_labels(
++            parse_issue_number(issue_url),
++            add=[labels_config.ready],
++        )
++    return True
++
++
++def _expand_prd_paths(
++    repo_path: Path, prd_paths: list[str]
++) -> tuple[list[str], list[str]]:
++    """Expand directories in ``prd_paths`` to their ``*.md`` files.
++
++    Files are returned as repo-relative paths. Directories are expanded to
++    their immediate ``*.md`` children, sorted by filename. PRDs that already
++    contain a ``- GitHub Issue:`` URL are skipped when discovered via a
++    directory, because the user's intent is to create Issues only for pending
++    PRDs. Explicitly passed files are not skipped so that errors remain
++    visible. Non-existent paths are passed through unchanged so that downstream
++    validation can report them with its usual diagnostics.
++
++    Args:
++        repo_path: Repository root used to resolve relative paths.
++        prd_paths: Raw CLI arguments, each may be a file or a directory.
++
++    Returns:
++        ``(expanded_paths, skipped_paths)`` tuple. ``expanded_paths`` are
++        repo-relative PRD Markdown files to process. ``skipped_paths`` are
++        repo-relative PRD files that already have an Issue link and were
++        discovered through a directory argument.
++
++    Raises:
++        ValueError: When a directory is empty of ``*.md`` files or the
++            final expanded list is empty.
++    """
++
++    expanded_paths: list[str] = []
++    skipped_paths: list[str] = []
++    seen_paths: set[str] = set()
++
++    def _has_issue_link(absolute_prd_path: Path) -> bool:
++        try:
++            prd_text = absolute_prd_path.read_text(encoding="utf-8")
++        except OSError:
++            return False
++        return any(ISSUE_LINK_LINE_RE.match(line) for line in prd_text.splitlines())
++
++    for prd_path_text in prd_paths:
++        candidate_path = (repo_path / prd_path_text).resolve()
++
++        if not candidate_path.exists():
++            expanded_paths.append(prd_path_text)
++            continue
++
++        is_directory = candidate_path.is_dir()
++        if candidate_path.is_file():
++            if candidate_path.suffix.lower() != ".md":
++                raise ValueError(f"PRD file must be a Markdown file: {prd_path_text}")
++            file_entries = [candidate_path]
++        elif is_directory:
++            file_entries = sorted(
++                [
++                    entry
++                    for entry in candidate_path.iterdir()
++                    if entry.is_file() and entry.suffix.lower() == ".md"
++                ],
++                key=lambda entry: entry.name,
++            )
++            if not file_entries:
++                raise ValueError(
++                    f"Directory contains no PRD Markdown files: {prd_path_text}"
++                )
++        else:
++            raise ValueError(
++                f"PRD path is neither a file nor a directory: {prd_path_text}"
++            )
++
++        for file_entry in file_entries:
++            relative_path = file_entry.relative_to(repo_path.resolve()).as_posix()
++            if relative_path in seen_paths:
++                continue
++            seen_paths.add(relative_path)
++
++            if is_directory and _has_issue_link(file_entry):
++                skipped_paths.append(relative_path)
++                continue
++
++            expanded_paths.append(relative_path)
++
++    if not expanded_paths and not skipped_paths:
++        raise ValueError("No PRD Markdown files found.")
++
++    return expanded_paths, skipped_paths
+diff --git a/src/backend/api/cli_typer.py b/src/backend/api/cli_typer.py
+index c65a2de..b019578 100644
+--- a/src/backend/api/cli_typer.py
++++ b/src/backend/api/cli_typer.py
+@@ -869,6 +869,10 @@ def deliberate_command(
+         str | None,
+         typer.Option("--session-id", help="Optional session ID for reproducibility."),
+     ] = None,
++    strict: Annotated[
++        bool,
++        typer.Option("--strict", help="Return non-zero exit code if any agent fails."),
++    ] = False,
+     repo: RepoOption = None,
+     repo_id: RepoIdOption = None,
+     config: ConfigOption = None,
+@@ -886,6 +890,7 @@ def deliberate_command(
+         synthesizer=synthesizer,
+         output=output,
+         session_id=session_id,
++        strict=strict,
+     )
+
+
+diff --git a/src/backend/api/cli_utils.py b/src/backend/api/cli_utils.py
+new file mode 100644
+index 0000000..21cf1d2
+--- /dev/null
++++ b/src/backend/api/cli_utils.py
+@@ -0,0 +1,62 @@
++"""Shared CLI helpers not tied to a specific command.
++
++This module keeps ``backend.api.cli`` below the file-size limit by housing
++small, reusable formatting and error-handling utilities.
++"""
++
++from __future__ import annotations
++
++import shlex
++import subprocess
++
++_MAX_CLI_ERROR_STREAM_CHARS = 12000
++
++
++def _format_command_for_cli(command: object) -> str:
++    """Format a failed command for CLI diagnostics."""
++    if isinstance(command, str):
++        return command
++    if isinstance(command, (list, tuple)):
++        return shlex.join(str(command_part) for command_part in command)
++    return str(command)
++
++
++def _decode_cli_error_stream(stream_value: object) -> str:
++    """Decode captured subprocess output for CLI diagnostics."""
++    if stream_value is None:
++        return ""
++    if isinstance(stream_value, bytes):
++        return stream_value.decode("utf-8", errors="replace")
++    return str(stream_value)
++
++
++def _truncate_cli_error_stream(stream_text: str) -> str:
++    """Limit very large captured command output in CLI diagnostics."""
++    if len(stream_text) <= _MAX_CLI_ERROR_STREAM_CHARS:
++        return stream_text
++    omitted_char_count = len(stream_text) - _MAX_CLI_ERROR_STREAM_CHARS
++    return (
++        stream_text[:_MAX_CLI_ERROR_STREAM_CHARS]
++        + f"\n... truncated {omitted_char_count} chars ..."
++    )
++
++
++def _format_cli_exception(exc: BaseException) -> str:
++    """Format an exception with subprocess stdout/stderr when available."""
++    if not isinstance(exc, subprocess.CalledProcessError):
++        return str(exc)
++
++    lines = [
++        "Command failed.",
++        f"Command: {_format_command_for_cli(exc.cmd)}",
++        f"Exit code: {exc.returncode}",
++    ]
++    stdout_text = _truncate_cli_error_stream(_decode_cli_error_stream(exc.output))
++    stderr_text = _truncate_cli_error_stream(_decode_cli_error_stream(exc.stderr))
++    if stdout_text:
++        lines.extend(["", "stdout:", stdout_text.rstrip()])
++    if stderr_text:
++        lines.extend(["", "stderr:", stderr_text.rstrip()])
++    if not stdout_text and not stderr_text:
++        lines.append("No stdout or stderr was captured.")
++    return "\n".join(lines)
+diff --git a/src/backend/core/shared/models/agent_deliberation.py b/src/backend/core/shared/models/agent_deliberation.py
+index af53cda..ac338b4 100644
+--- a/src/backend/core/shared/models/agent_deliberation.py
++++ b/src/backend/core/shared/models/agent_deliberation.py
+@@ -16,6 +16,16 @@ class DeliberationAgentProfile:
+     behavior_prompt: str
+
+
++@dataclass(frozen=True)
++class DeliberationAgentFailure:
++    """Record of a single agent failure during deliberation."""
++
++    profile_id: str
++    attempted_agent: str
++    fallback_agent: str | None
++    reason: str
++
++
+ @dataclass(frozen=True)
+ class DeliberationConfig:
+     """Deliberation defaults and profiles."""
+@@ -23,6 +33,8 @@ class DeliberationConfig:
+     default_rounds: int = 2
+     default_synthesizer: str = "claude"
+     default_output_dir: str = "logs/agent-runner/deliberations"
++    continue_on_agent_error: bool = True
++    agent_failure_timeout_seconds: int = 300
+     profiles: tuple[DeliberationAgentProfile, ...] = field(
+         default_factory=lambda: (
+             DeliberationAgentProfile(
+@@ -99,6 +111,7 @@ class DeliberationResult:
+     output_dir: str
+     started_at: str
+     finished_at: str
++    failed_agents: tuple[DeliberationAgentFailure, ...] = ()
+
+
+ @dataclass(frozen=True)
+diff --git a/src/backend/core/use_cases/run_agent_deliberation.py b/src/backend/core/use_cases/run_agent_deliberation.py
+index bf5cd02..4d49e5e 100644
+--- a/src/backend/core/use_cases/run_agent_deliberation.py
++++ b/src/backend/core/use_cases/run_agent_deliberation.py
+@@ -7,6 +7,7 @@ import re
+ import threading
+ from collections.abc import Callable
+ from concurrent.futures import ThreadPoolExecutor
++from dataclasses import dataclass
+ from datetime import datetime, timezone
+ from pathlib import Path
+ from typing import TYPE_CHECKING
+@@ -15,6 +16,7 @@ from backend.core.shared.interfaces.agent_runner import (
+     IAgentTranscriptRunner,
+ )
+ from backend.core.shared.models.agent_deliberation import (
++    DeliberationAgentFailure,
+     DeliberationAgentProfile,
+     DeliberationConfig,
+     DeliberationEvent,
+@@ -126,6 +128,16 @@ def _write_workspace_output(output_path: Path, output_text: str) -> None:
+     )
+
+
++@dataclass(frozen=True)
++class AgentRunOutcome:
++    """Outcome of running a single deliberation agent."""
++
++    success: bool
++    stdout: str
++    return_code: int
++    profile_id: str
++
++
+ def _create_streaming_sink(
+     output_path: Path,
+     output_view: IAgentOutputView,
+@@ -184,7 +196,7 @@ def _run_single_agent(
+     output_view: IAgentOutputView,
+     output_sink: Callable[[str], None] | None = None,
+     display_sink: Callable[[str], None] | None = None,
+-) -> str:
++) -> "AgentRunOutcome":
+     _emit(
+         event_sink,
+         session_id,
+@@ -215,12 +227,12 @@ def _run_single_agent(
+         "agent_finished",
+         f"exit={result.return_code}",
+     )
+-    if result.return_code != 0:
+-        raise RuntimeError(
+-            f"Deliberation agent '{agent_label}' failed with exit code "
+-            f"{result.return_code}."
+-        )
+-    return output_text
++    return AgentRunOutcome(
++        success=result.return_code == 0,
++        stdout=output_text,
++        return_code=result.return_code,
++        profile_id=agent_label,
++    )
+
+
+ def _run_round(
+@@ -233,13 +245,18 @@ def _run_round(
+     workspace_root: Path,
+     session_id: str,
+     output_view: IAgentOutputView,
+-) -> dict[str, str]:
++    config: DeliberationConfig,
++    resolver: "Callable[[DeliberationAgentProfile, str], DeliberationAgentProfile | None] | None" = None,
++) -> tuple[dict[str, str], list[DeliberationAgentFailure]]:
+     outputs: dict[str, str] = {}
++    failed_agents: list[DeliberationAgentFailure] = []
+
+     # Register profiles with the output view for this round
+     output_view.register_round_profiles(round_number, profiles)
+
+-    def _run_profile(profile: DeliberationAgentProfile) -> tuple[str, str]:
++    def _run_profile(
++        profile: DeliberationAgentProfile, *, preceding_output: str = ""
++    ) -> AgentRunOutcome:
+         prompt = prompt_builder(profile)
+         profile_workspace = workspace_root / profile.profile_id
+         profile_workspace.mkdir(parents=True, exist_ok=True)
+@@ -247,10 +264,12 @@ def _run_round(
+         streaming_sink = _create_streaming_sink(
+             output_path, output_view, round_number, profile.profile_id
+         )
++        if preceding_output:
++            _write_workspace_output(output_path, f"{preceding_output}\n\n")
+         display_sink = _create_display_sink(
+             output_view, round_number, profile.profile_id
+         )
+-        output = _run_single_agent(
++        return _run_single_agent(
+             agent_name=profile.agent,
+             prompt=prompt,
+             cwd=profile_workspace,
+@@ -263,15 +282,64 @@ def _run_round(
+             output_sink=streaming_sink,
+             display_sink=display_sink,
+         )
+-        return profile.profile_id, output
+
++    outcomes: list[AgentRunOutcome] = []
+     with ThreadPoolExecutor(max_workers=len(profiles)) as executor:
+         futures = [executor.submit(_run_profile, profile) for profile in profiles]
+         for future in futures:
+-            profile_id, output = future.result()
+-            outputs[profile_id] = output
++            outcomes.append(future.result())
++
++    for outcome in outcomes:
++        if outcome.success:
++            outputs[outcome.profile_id] = outcome.stdout
++            continue
++        if not config.continue_on_agent_error:
++            raise RuntimeError(
++                f"Deliberation agent '{outcome.profile_id}' failed with exit code "
++                f"{outcome.return_code}."
++            )
++        profile_by_id = {p.profile_id: p for p in profiles}
++        failed_profile = profile_by_id[outcome.profile_id]
++        reason = f"exit={outcome.return_code}"
++        fallback: DeliberationAgentProfile | None = None
++        if resolver is not None:
++            try:
++                fallback = resolver(failed_profile, reason, config)
++            except TypeError:
++                fallback = resolver(failed_profile, reason)
++        if fallback is not None:
++            _emit(
++                event_sink,
++                session_id,
++                round_number,
++                failed_profile.profile_id,
++                "agent_fallback",
++                f"fallback={fallback.agent}",
++            )
++            fallback_outcome = _run_profile(fallback, preceding_output=outcome.stdout)
++            if fallback_outcome.success:
++                outputs[fallback.profile_id] = fallback_outcome.stdout
++                failed_agents.append(
++                    DeliberationAgentFailure(
++                        profile_id=failed_profile.profile_id,
++                        attempted_agent=failed_profile.agent,
++                        fallback_agent=fallback.agent,
++                        reason=reason,
++                    )
++                )
++                continue
++            reason = f"fallback={fallback.agent} exit={fallback_outcome.return_code}"
++        outputs[failed_profile.profile_id] = outcome.stdout
++        failed_agents.append(
++            DeliberationAgentFailure(
++                profile_id=failed_profile.profile_id,
++                attempted_agent=failed_profile.agent,
++                fallback_agent=None,
++                reason=reason,
++            )
++        )
+
+-    return outputs
++    return outputs, failed_agents
+
+
+ def _format_round_transcript(
+@@ -323,6 +391,7 @@ def run_agent_deliberation(
+     event_sink: Callable[[DeliberationEvent], None],
+     target_repo_path: Path,
+     output_view: IAgentOutputView | None = None,
++    resolver: "Callable[[DeliberationAgentProfile, str], DeliberationAgentProfile | None] | None" = None,
+ ) -> DeliberationResult:
+     """Run a multi-agent deliberation session.
+
+@@ -334,6 +403,10 @@ def run_agent_deliberation(
+         target_repo_path: Path to the target repository for read-only safety checks.
+         output_view: Optional output view for live terminal display. If not
+             provided, a NoOpOutputView is used.
++        resolver: Optional callable that decides how to recover from a single
++            agent failure. Receives the failed profile and a reason string, and
++            returns a fallback profile or None. If None, failures are recorded
++            without retry.
+
+     Returns:
+         DeliberationResult with the final report.
+@@ -352,6 +425,7 @@ def run_agent_deliberation(
+
+         started_at = _now_iso()
+         emitted_events: list[DeliberationEvent] = []
++        session_failed_agents: list[DeliberationAgentFailure] = []
+
+         def _record_event(event: DeliberationEvent) -> None:
+             emitted_events.append(event)
+@@ -379,7 +453,7 @@ def run_agent_deliberation(
+         round_outputs: dict[int, dict[str, str]] = {}
+
+         # Isolation round
+-        isolation_outputs = _run_round(
++        isolation_outputs, isolation_failures = _run_round(
+             request=request,
+             profiles=selected_profiles,
+             round_number=1,
+@@ -389,14 +463,17 @@ def run_agent_deliberation(
+             workspace_root=workspace_root,
+             session_id=session_id,
+             output_view=output_view,
++            config=config,
++            resolver=resolver,
+         )
++        session_failed_agents.extend(isolation_failures)
+         round_outputs[1] = isolation_outputs
+         transcript_parts.append(_format_round_transcript(1, isolation_outputs))
+
+         # Discussion rounds
+         for round_number in range(2, request.rounds + 1):
+             current_transcript = "\n\n".join(transcript_parts)
+-            discussion_outputs = _run_round(
++            discussion_outputs, discussion_failures = _run_round(
+                 request=request,
+                 profiles=selected_profiles,
+                 round_number=round_number,
+@@ -408,7 +485,10 @@ def run_agent_deliberation(
+                 workspace_root=workspace_root,
+                 session_id=session_id,
+                 output_view=output_view,
++                config=config,
++                resolver=resolver,
+             )
++            session_failed_agents.extend(discussion_failures)
+             round_outputs[round_number] = discussion_outputs
+             transcript_parts.append(
+                 _format_round_transcript(round_number, discussion_outputs)
+@@ -462,13 +542,30 @@ def run_agent_deliberation(
+             "agent_finished",
+             f"exit={synthesis_result.return_code}",
+         )
+-        if synthesis_result.return_code != 0:
+-            raise RuntimeError(
+-                "Deliberation synthesizer failed with exit code "
+-                f"{synthesis_result.return_code}."
+-            )
+
+         parsed = _parse_synthesis(synthesis_output)
++        if synthesis_result.return_code != 0:
++            if not config.continue_on_agent_error:
++                raise RuntimeError(
++                    "Deliberation synthesizer failed with exit code "
++                    f"{synthesis_result.return_code}."
++                )
++            session_failed_agents.append(
++                DeliberationAgentFailure(
++                    profile_id="synthesizer",
++                    attempted_agent=request.synthesizer,
++                    fallback_agent=None,
++                    reason=f"exit={synthesis_result.return_code}",
++                )
++            )
++            _emit(
++                _record_event,
++                session_id,
++                0,
++                "system",
++                "synthesis_failed",
++                f"exit={synthesis_result.return_code}",
++            )
+
+         finished_at = _now_iso()
+         _emit(
+@@ -496,6 +593,7 @@ def run_agent_deliberation(
+             output_dir=str(output_dir),
+             started_at=started_at,
+             finished_at=finished_at,
++            failed_agents=tuple(session_failed_agents),
+         )
+
+         return result
+diff --git a/src/backend/engines/agent_runner/deliberation_outputs.py b/src/backend/engines/agent_runner/deliberation_outputs.py
+index 279d4cb..fa6e814 100644
+--- a/src/backend/engines/agent_runner/deliberation_outputs.py
++++ b/src/backend/engines/agent_runner/deliberation_outputs.py
+@@ -6,11 +6,21 @@ import json
+ from pathlib import Path
+
+ from backend.core.shared.models.agent_deliberation import (
++    DeliberationAgentFailure,
+     DeliberationResult,
+     DeliberationSession,
+ )
+
+
++def _serialize_failure(failure: DeliberationAgentFailure) -> dict:
++    return {
++        "profile_id": failure.profile_id,
++        "attempted_agent": failure.attempted_agent,
++        "fallback_agent": failure.fallback_agent,
++        "reason": failure.reason,
++    }
++
++
+ def write_deliberation_outputs(
+     result: DeliberationResult,
+     session: DeliberationSession,
+@@ -91,6 +101,7 @@ def write_deliberation_outputs(
+         "output_dir": str(session.output_dir),
+         "started_at": session.started_at,
+         "finished_at": session.finished_at,
++        "failed_agents": [_serialize_failure(f) for f in result.failed_agents],
+     }
+     session_path.write_text(
+         json.dumps(session_data, indent=2, ensure_ascii=False),
+diff --git a/src/backend/engines/agent_runner/factory.py b/src/backend/engines/agent_runner/factory.py
+index 0dafabb..088c76e 100644
+--- a/src/backend/engines/agent_runner/factory.py
++++ b/src/backend/engines/agent_runner/factory.py
+@@ -149,6 +149,8 @@ def _build_deliberation_config(
+         default_rounds=deliberation_settings.default_rounds,
+         default_synthesizer=deliberation_settings.default_synthesizer,
+         default_output_dir=deliberation_settings.default_output_dir,
++        continue_on_agent_error=deliberation_settings.continue_on_agent_error,
++        agent_failure_timeout_seconds=deliberation_settings.agent_failure_timeout_seconds,
+         profiles=profiles,
+     )
+
+@@ -488,6 +490,12 @@ def _merge_deliberation_config(
+         default_output_dir=override_data.get(
+             "default_output_dir", base_config.default_output_dir
+         ),
++        continue_on_agent_error=override_data.get(
++            "continue_on_agent_error", base_config.continue_on_agent_error
++        ),
++        agent_failure_timeout_seconds=override_data.get(
++            "agent_failure_timeout_seconds", base_config.agent_failure_timeout_seconds
++        ),
+         profiles=tuple(profiles.values()),
+     )
+
+diff --git a/src/backend/engines/agent_runner/failure_resolver.py b/src/backend/engines/agent_runner/failure_resolver.py
+new file mode 100644
+index 0000000..83e5a24
+--- /dev/null
++++ b/src/backend/engines/agent_runner/failure_resolver.py
+@@ -0,0 +1,169 @@
++"""Agent failure resolver for deliberation sessions.
++
++Provides interactive and automatic model fallback when a single participant
++or synthesizer fails during a deliberation round.
++"""
++
++from __future__ import annotations
++
++import sys
++import threading
++from collections.abc import Callable
++from dataclasses import dataclass
++
++from backend.core.shared.models.agent_deliberation import (
++    DeliberationAgentProfile,
++    DeliberationConfig,
++)
++
++
++@dataclass(frozen=True)
++class FallbackSelection:
++    """Result of a fallback model selection."""
++
++    profile: "DeliberationAgentProfile"
++    auto_selected: bool
++
++
++class AgentFailureResolver:
++    """Resolve a failed agent by selecting a fallback model.
++
++    The resolver keeps the original profile_id, role, and behavior_prompt
++    and only swaps the underlying agent command. In TTY mode it prompts the
++    user; in non-TTY mode it automatically picks the next available model.
++    """
++
++    def __init__(
++        self,
++        *,
++        is_tty: bool | None = None,
++        input_reader: Callable[[str], str] | None = None,
++        printer: Callable[[str], None] | None = None,
++    ) -> None:
++        self._is_tty = (
++            is_tty
++            if is_tty is not None
++            else (sys.stdin.isatty() and sys.stdout.isatty())
++        )
++        self._input_reader = input_reader or input
++        self._printer = printer or print
++
++    def _available_agents(
++        self,
++        failed_profile: "DeliberationAgentProfile",
++        config: "DeliberationConfig",
++    ) -> tuple[str, ...]:
++        seen: list[str] = []
++        for profile in config.profiles:
++            if profile.agent == failed_profile.agent:
++                continue
++            if profile.agent not in seen:
++                seen.append(profile.agent)
++        return tuple(seen)
++
++    def _prompt_for_fallback(
++        self,
++        failed_profile: "DeliberationAgentProfile",
++        available_agents: tuple[str, ...],
++        timeout_seconds: int,
++    ) -> str | None:
++        if not available_agents:
++            return None
++
++        lines = [
++            f"\n[round failure] agent={failed_profile.profile_id} "
++            f"provider={failed_profile.agent}",
++            "",
++            "The agent failed. Available fallback models:",
++        ]
++        for index, agent_name in enumerate(available_agents, start=1):
++            lines.append(f"  {index}) {agent_name}")
++        lines.append("")
++        prompt_text = (
++            f"Choose a fallback model (auto-selecting {available_agents[0]} "
++            f"in {timeout_seconds}s): "
++        )
++        self._printer("\n".join(lines))
++        self._printer(prompt_text, end="")
++
++        result_container: list[str | None] = [None]
++        lock = threading.Lock()
++
++        def _read_input() -> None:
++            try:
++                value = self._input_reader("")
++                with lock:
++                    result_container[0] = value.strip()
++            except EOFError:
++                pass
++            except Exception:  # noqa: BLE001
++                pass
++
++        reader_thread = threading.Thread(target=_read_input, daemon=True)
++        reader_thread.start()
++        reader_thread.join(timeout=timeout_seconds)
++
++        with lock:
++            choice = result_container[0]
++        if choice is None:
++            self._printer(
++                f"\nNo selection within {timeout_seconds}s; automatically "
++                f"switching {failed_profile.profile_id} to {available_agents[0]}."
++            )
++            return available_agents[0]
++
++        if choice.isdigit():
++            idx = int(choice) - 1
++            if 0 <= idx < len(available_agents):
++                return available_agents[idx]
++
++        matched = [a for a in available_agents if a.lower() == choice.lower()]
++        if matched:
++            return matched[0]
++
++        self._printer(
++            f"\nInvalid selection {choice!r}; automatically switching "
++            f"{failed_profile.profile_id} to {available_agents[0]}."
++        )
++        return available_agents[0]
++
++    def resolve(
++        self,
++        failed_profile: "DeliberationAgentProfile",
++        reason: str,
++        config: "DeliberationConfig | None" = None,
++    ) -> "DeliberationAgentProfile | None":
++        """Return a fallback profile or None if no fallback is available.
++
++        Args:
++            failed_profile: The profile that failed.
++            config: Deliberation configuration used to derive available models.
++            reason: Human-readable failure reason for logging/prompts.
++
++        Returns:
++            A new profile with a different agent, or None when no other agent
++            is configured.
++        """
++        _ = reason
++        available_agents = self._available_agents(
++            failed_profile, config or DeliberationConfig()
++        )
++        if not available_agents:
++            return None
++
++        if self._is_tty:
++            selected_agent = self._prompt_for_fallback(
++                failed_profile, available_agents, config.agent_failure_timeout_seconds
++            )
++        else:
++            selected_agent = available_agents[0]
++
++        if selected_agent is None:
++            return None
++
++        return DeliberationAgentProfile(
++            profile_id=failed_profile.profile_id,
++            agent=selected_agent,
++            role=failed_profile.role,
++            behavior_prompt=failed_profile.behavior_prompt,
++        )
+diff --git a/src/backend/engines/agent_runner/repository_local.py b/src/backend/engines/agent_runner/repository_local.py
+index eee657a..fee2289 100644
+--- a/src/backend/engines/agent_runner/repository_local.py
++++ b/src/backend/engines/agent_runner/repository_local.py
+@@ -666,9 +666,17 @@ def initialize_repository_local_config(
+     )
+     config_path = repo_root_path / IAR_REPOSITORY_CONFIG_FILENAME
+     if config_path.exists() and not options.force and not options.dry_run:
+-        raise ValueError(
+-            f"IAR local config already exists at {config_path}. "
+-            "Use --force to overwrite it."
++        existing_text = config_path.read_text(encoding="utf-8")
++        if existing_text != config_text:
++            raise ValueError(
++                f"IAR local config already exists at {config_path}. "
++                "Use --force to overwrite it."
++            )
++        return RepositoryInitResult(
++            repo_root_path=repo_root_path,
++            config_path=config_path,
++            config_text=config_text,
++            wrote_file=False,
+         )
+     if options.dry_run:
+         return RepositoryInitResult(
+diff --git a/src/backend/engines/agent_runner/transcript_runner.py b/src/backend/engines/agent_runner/transcript_runner.py
+index 413c385..323452e 100644
+--- a/src/backend/engines/agent_runner/transcript_runner.py
++++ b/src/backend/engines/agent_runner/transcript_runner.py
+@@ -217,7 +217,7 @@ def _build_deliberation_command(agent_name: str, prompt: str, cwd: Path) -> list
+             prompt,
+         ]
+     if agent_name == "kimi":
+-        return ["kimi", "--quiet", "--input-format", "text"]
++        return ["kimi", "--input-format", "text"]
+     return [
+         "codex",
+         "--cd",
+diff --git a/src/backend/infrastructure/config/settings.py b/src/backend/infrastructure/config/settings.py
+index 79a590f..ea8263d 100644
+--- a/src/backend/infrastructure/config/settings.py
++++ b/src/backend/infrastructure/config/settings.py
+@@ -540,6 +540,8 @@ class AgentRunnerDeliberationSettings(BaseModel):
+     default_rounds: int = 2
+     default_synthesizer: str = "claude"
+     default_output_dir: str = "logs/agent-runner/deliberations"
++    continue_on_agent_error: bool = True
++    agent_failure_timeout_seconds: int = 300
+     profiles: dict[str, AgentRunnerDeliberationProfileSettings] = Field(
+         default_factory=lambda: {
+             "architect": AgentRunnerDeliberationProfileSettings(

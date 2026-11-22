@@ -147,8 +147,18 @@ def test_suite_hash_includes_materials_and_rejects_unsafe_targets() -> None:
         "suite.yaml",
         {**materials, "case-0/gold.patch": b"patch-v2"},
     )
+    with_local_cache = parse_evaluation_suite(
+        raw_text,
+        "suite.yaml",
+        {
+            **materials,
+            "case-0/held_out/tests/__pycache__/test_behavior.cpython-313.pyc": b"local bytecode",
+            ".DS_Store": b"local directory metadata",
+        },
+    )
     assert first.requires_calibration is True
     assert first.content_hash != second.content_hash
+    assert first.content_hash == with_local_cache.content_hash
     assert first.cases[0].candidate_hidden == ("tasks/pending/known-answer.md",)
 
     with pytest.raises(ValueError, match="非法相对路径"):

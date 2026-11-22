@@ -39,11 +39,16 @@ Agent/模型效果对照）已落地为一条本地 Console 产品路径，下�
 
 - 版本化 YAML 存放在 `tasks/evaluation-suites/`，字段规范与维护流程见该目录的
   `README.md`（样例：`tasks/evaluation-suites/example.yaml`）。
+- `keda-history-v1` 冻结首批历史案例。`keda-history-expanded-v1` 增加了讨论失败恢复、
+  终端入口、日志续读、技能更新和证据自检等公开历史任务。基线和来源列在评测集目录。
+- `keda-history-recovered-v1` 用真实子进程、本地 Git 远端及本机 HTTP 服务恢复三道旧归档题。
+  新增判分文件与基线已有的回归测试分开，候选仍可执行基线测试。
 - 必填字段：`id`、`version`（semver）、`repo_path`、`base_ref`、非空 `cases`；
   每条 case 含 `id`（`^[a-z0-9][a-z0-9._-]{0,79}$`）、`prompt` 与白名单
   `check_recipe`（pytest / uv-pytest / unittest / node-test）。v2 case 还可指定
   `base_ref`、`split`、`check_targets`、`held_out`、`candidate_hidden` 与 `gold_patch`；资料存于 YAML
-  同级 `<stem>.d/<case_id>/`，资料内容也参与 suite hash。`repo_path: .` 表示当前
+  同级 `<stem>.d/<case_id>/`，声明的 `held_out` 文件和 `gold_patch` 内容也参与 suite hash。
+  未列入题目声明的本地缓存不影响校准。`repo_path: .` 表示当前
   Keda 检出根。`check_targets` 使用 pytest 文件路径或节点 id（如
   `tests/test_example.py::test_empty`），不使用 Python 导入路径写法。
 - suite `id` 在 registry 目录内必须唯一：重复定义会让两个文件一起被判
@@ -125,7 +130,7 @@ Agent/模型效果对照）已落地为一条本地 Console 产品路径，下�
 
 ### 数据保留与删除
 
-- 持久层（Console SQLite，`PRAGMA user_version` v16）只存结构化摘要：
+- 持久层使用 Console SQLite 保存结构化摘要：
   不保存 raw prompt、完整 patch、token 用量原文、环境变量或密钥值。
 - 暂存 payload 与隔离 worktree 在评分完成、拒绝、取消或删除 run 时清除；
   删除 run 级联清除其结果与评分行。强制删除仍在执行的 run 时，在飞线程的
@@ -160,6 +165,10 @@ Agent/模型效果对照）已落地为一条本地 Console 产品路径，下�
   `tasks/evidence/P1-FEAT-20261012-103909-multi-judge-agent-evaluation/`）。
 
 ## 建议指标
+
+比较原生 Codex 与 Keda 的工作流、或隔离 pre-PR 审查收益时，使用
+[等时限评测 CLI](evaluation-ablation.md)。`kc eval` 复用 suite 和快照实现，
+提供三次正负校准、相同总时间预算及逐项结果；不替代本页的 Console 评审授权流程。
 
 - 正确率或任务完成率
 - 响应时延

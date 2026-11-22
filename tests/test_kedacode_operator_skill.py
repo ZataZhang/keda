@@ -465,6 +465,32 @@ _ALLOWED_FLAGS: dict[tuple[str, ...], set[str]] = {
     # 本地证据自检入口（Issue #341）：与交付门禁同源复跑 evidence.json 命令。
     # 旗标集合取自 ``kc schema --json`` 的真实命令树。
     ("evidence", "check"): {"--evidence", "--worktree", "--timeout", "--json", "--output"},
+    ("eval", "suites"): {"--repo", "--json", "--output"},
+    ("eval", "calibrate"): {
+        "--suite",
+        "--case",
+        "--output-dir",
+        "--concurrency",
+        "--repo",
+        "--json",
+        "--output",
+    },
+    ("eval", "run"): {
+        "--live",
+        "--calibration",
+        "--suite",
+        "--case",
+        "--output-dir",
+        "--preset",
+        "--review-preset",
+        "--seconds",
+        "--concurrency",
+        "--repeats",
+        "--repo",
+        "--json",
+        "--output",
+    },
+    ("eval", "report"): {"--json", "--output"},
     ("evidence", "prune"): {
         "--all",
         "--apply",

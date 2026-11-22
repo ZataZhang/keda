@@ -82,7 +82,7 @@ def _recover_evaluation_runs_on_launch() -> None:
 
 
 def _port_is_available(host: str, port: int) -> bool:
-    """探测 ``host:port`` 当前是否可以绑定监听。"""
+    """探测端口能否复用，同时排除通配地址上的活动监听。"""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe_socket:
         try:
             # 与 Uvicorn 在 POSIX 上的监听行为一致，允许重用仍有 TIME_WAIT 连接的端口。
@@ -91,6 +91,17 @@ def _port_is_available(host: str, port: int) -> bool:
             probe_socket.bind((host, port))
         except OSError:
             return False
+    if sys.platform != "win32":
+        # macOS 可允许通配地址与回环地址同时复用绑定，需确认没有活动监听。
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as connection_probe:
+            connection_probe.settimeout(_CONSOLE_PROBE_TIMEOUT_SECONDS)
+            try:
+                connection_probe.connect((host, port))
+            except ConnectionRefusedError:
+                return True
+            except OSError:
+                return False
+        return False
     return True
 
 

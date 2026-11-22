@@ -1,0 +1,1154 @@
+diff --git a/docs/guides/agent-runner.md b/docs/guides/agent-runner.md
+index 57b9b6a9..0c3ccd54 100644
+--- a/docs/guides/agent-runner.md
++++ b/docs/guides/agent-runner.md
+@@ -767 +767 @@ Fix Agent 只挂在「提交前验证失败」这一个入口。代码写完、
+-- RV 命令被 keda 复跑后未通过或超时（`ensure_validation_commands_pass`）
++- RV 命令被 keda 复跑后未通过或超时（`ensure_validation_commands_pass`）；门禁一次聚合全部未通过项，不再只报第一条
+@@ -3547,0 +3548,21 @@ RV 命令非零退出或 stdout 断言失败时，尝试详情会保留失败命
++#### 本地自检：`kc evidence check`（提交前必跑）
++
++`kc evidence check` 是交付门禁的本地前移入口，判定与门禁完全同源（manifest 解析、`bash -lc` 复跑、超时、`stdout_assertions`），只是把反馈从"提交后等门禁、一次一条"变成"本地几秒、一次全量"。声明了 `stdout_assertions` 的证据包必须先自检全部 PASS 再请求提交。
++
++```bash
++# 缺省在 tasks/evidence/ 下寻找唯一含 evidence.json 的子目录
++kc evidence check
++
++# 显式指定证据目录 / worktree / 本地超时
++kc evidence check --evidence tasks/evidence/<prd-stem> --worktree . --timeout 30
++
++# 机器可读：stdout 只含 JSON，退出码 0 全通过、1 有失败、2 用法错误
++kc evidence check --json | python -c 'import json,sys; print(json.load(sys.stdin)["passed"])'
++```
++
++- 所有失败一次列全：单题失败不中断其余题目；断言未命中时同时给出期望子串与实际输出中最接近的一行。
++- `--timeout` 只用于本地快速迭代，不得大于 `validation.reexecute_timeout_seconds`（默认 300 秒）；本地超时的输出会明确标注门禁上限，避免把"等不及"误读成证据错误。
++- manifest 格式错误时不执行任何证据命令，直接逐条报格式错误。
++- 自检通过不等于交付通过：门禁仍会复跑，且环境差异（网络、端口占用、外部服务）可能让门禁失败。自检只读，不会修改证据、代码或断言。
++- 门禁侧 `ensure_validation_commands_pass` 复用同一编排，失败信息改为一次聚合全部未通过项（逐条带命令与失败类别），通过判据不变。
++
+diff --git a/docs/guides/prd-standard.md b/docs/guides/prd-standard.md
+index 0c624aa6..aa2a3f06 100644
+--- a/docs/guides/prd-standard.md
++++ b/docs/guides/prd-standard.md
+@@ -55,0 +56 @@ keda 的 agent runner 会把 PRD 的 Realistic Validation oracle 物化到 Issue
++- **声明了 `stdout_assertions` 的证据包，提交前必须运行 `kc evidence check` 并确认全部 PASS。** 该命令与交付门禁使用同一份解析、复跑与断言判定，把全部失败一次列出，并给出期望串与实际输出中最接近的一行；单条命令的门禁复跑上限默认 300 秒（`validation.reexecute_timeout_seconds`），`--timeout` 只能在本地调小。门禁失败信息也改为聚合全部未通过项。
+diff --git a/src/backend/api/cli_typer_app.py b/src/backend/api/cli_typer_app.py
+index 3937a8e1..da4fee10 100644
+--- a/src/backend/api/cli_typer_app.py
++++ b/src/backend/api/cli_typer_app.py
+@@ -85,0 +86 @@ __all__ = [
++    "evidence_app",
+@@ -238,0 +240,5 @@ preview_app = typer.Typer(
++evidence_app = typer.Typer(
++    help="Check Realistic Validation evidence locally with the delivery gate's own judgment.",
++    no_args_is_help=True,
++    context_settings=_HELP_CONTEXT,
++)
+@@ -258,0 +265 @@ app.add_typer(preview_app, name="preview")
++app.add_typer(evidence_app, name="evidence")
+@@ -465,0 +473 @@ from backend.api import (  # noqa: E402,F401
++    cli_typer_evidence,
+diff --git a/src/backend/api/cli_typer_evidence.py b/src/backend/api/cli_typer_evidence.py
+new file mode 100644
+index 00000000..05a015a2
+--- /dev/null
++++ b/src/backend/api/cli_typer_evidence.py
+@@ -0,0 +1,143 @@
++"""Typer commands under ``kc evidence``.
++
++只读自检入口：按交付门禁同一份判定（manifest 解析、复跑超时、输出断言）在本地
++复跑 ``evidence.json`` 中的命令，把全部失败一次列出并给出断言差在哪个词。
++不修改证据、代码或断言，也不改变门禁的通过判据。
++"""
++
++from __future__ import annotations
++
++from pathlib import Path
++from typing import Annotated
++
++import typer
++
++from backend.api.cli_console import console
++from backend.api.cli_exit_codes import ExitCode
++from backend.api.cli_output import (
++    OUTPUT_FORMAT_JSON,
++    CliError,
++    OutputFormat,
++    emit,
++    output_format_of,
++    render_cli_error,
++    route_logs_to_stderr,
++)
++from backend.api.cli_typer_app import JsonOutputOption, OutputOption, evidence_app
++from backend.core.use_cases.agent_runner_evidence_check import (
++    EvidenceCheckRequest,
++    EvidenceDirectoryResolutionError,
++    resolve_check_evidence_dir,
++    run_evidence_check,
++)
++from backend.core.use_cases.agent_runner_factory import (
++    create_process_runner,
++    get_agent_runner_settings,
++    resolve_repository_targets,
++)
++
++
++@evidence_app.command("check")
++def evidence_check_command(
++    evidence: Annotated[
++        str | None,
++        typer.Option(
++            "--evidence",
++            help="Evidence directory holding evidence.json (default: the only "
++            "candidate under the configured evidence dir).",
++        ),
++    ] = None,
++    worktree: Annotated[
++        str | None,
++        typer.Option("--worktree", help="Worktree to re-run commands in (default: cwd)."),
++    ] = None,
++    timeout: Annotated[
++        int | None,
++        typer.Option(
++            "--timeout",
++            help="Local per-command timeout in seconds for fast iteration; "
++            "must not exceed the gate limit.",
++        ),
++    ] = None,
++    output: OutputOption = OutputFormat.table,
++    as_json: JsonOutputOption = False,
++) -> int:
++    """Re-run evidence commands locally; list every failure in one pass."""
++    output_format = output_format_of(output=output, as_json=as_json)
++    if output_format == OUTPUT_FORMAT_JSON:
++        route_logs_to_stderr()
++
++    worktree_path = Path(worktree).expanduser().resolve() if worktree else Path.cwd()
++    if not worktree_path.is_dir():
++        return render_cli_error(
++            CliError(
++                f"Worktree `{worktree_path}` is not a directory.",
++                code=ExitCode.USAGE,
++                suggestion="kc evidence check --worktree <path>",
++            ),
++            fmt=output_format,
++        )
++
++    # 与交付门禁一致：使用仓库级合并后的有效配置（.kedacode.toml 可覆盖
++    # evidence_dir / reexecute_timeout_seconds），而不是全局配置视图。
++    try:
++        repository_contexts = resolve_repository_targets(
++            get_agent_runner_settings(),
++            fallback_path=str(worktree_path),
++        )
++    except ValueError as resolution_error:
++        return render_cli_error(
++            CliError(str(resolution_error), code=ExitCode.USAGE),
++            fmt=output_format,
++        )
++    app_config = repository_contexts[0].config
++    gate_timeout_seconds = app_config.validation.reexecute_timeout_seconds
++    effective_timeout_seconds = gate_timeout_seconds if timeout is None else timeout
++    if effective_timeout_seconds < 1 or effective_timeout_seconds > gate_timeout_seconds:
++        return render_cli_error(
++            CliError(
++                f"--timeout must be between 1 and {gate_timeout_seconds} seconds "
++                f"(the delivery gate limit); got {effective_timeout_seconds}.",
++                code=ExitCode.USAGE,
++                suggestion=f"kc evidence check --timeout {gate_timeout_seconds}",
++            ),
++            fmt=output_format,
++        )
++
++    try:
++        evidence_dir = resolve_check_evidence_dir(
++            worktree_path,
++            app_config,
++            explicit_evidence=evidence,
++        )
++    except EvidenceDirectoryResolutionError as resolution_error:
++        return render_cli_error(
++            CliError(
++                str(resolution_error),
++                code=ExitCode.USAGE,
++                suggestion="kc evidence check --evidence <dir>",
++            ),
++            fmt=output_format,
++        )
++
++    report = run_evidence_check(
++        worktree_path,
++        app_config,
++        create_process_runner(),
++        EvidenceCheckRequest(
++            evidence_dir=evidence_dir,
++            timeout_seconds=effective_timeout_seconds,
++            gate_timeout_seconds=gate_timeout_seconds,
++        ),
++    )
++    emit(
++        report.to_payload(),
++        fmt=output_format,
++        human_renderer=lambda: console.print(
++            report.render_human(), markup=False, highlight=False, soft_wrap=True
++        ),
++    )
++    return int(ExitCode.SUCCESS) if report.passed else int(ExitCode.GENERAL)
++
++
++__all__ = ["evidence_check_command"]
+diff --git a/src/backend/core/use_cases/agent_runner_evidence_assertions.py b/src/backend/core/use_cases/agent_runner_evidence_assertions.py
+new file mode 100644
+index 00000000..dd87a1cf
+--- /dev/null
++++ b/src/backend/core/use_cases/agent_runner_evidence_assertions.py
+@@ -0,0 +1,189 @@
++"""Realistic Validation 输出断言的唯一实现（门禁与本地自检共用）。
++
++命令 exit 0 不等于检查点成立：``[ -d x ] || true`` 这类兜底会让命令稳定
++exit 0 而从未真正验证。本模块按 manifest 的 ``stdout_assertions`` 对 keda
++自己复跑得到的 stdout/stderr 做子串断言，并给出实际输出中最接近期望串的一行。
++
++调用方：
++
++- 交付门禁编排 :func:`backend.core.use_cases.agent_runner_evidence_check.run_evidence_check`
++- 门禁入口 :func:`backend.core.use_cases.agent_runner_validation.ensure_validation_commands_pass`
++
++两处调用同一份实现，仓库内不存在第二套断言语义。
++"""
++
++from __future__ import annotations
++
++import difflib
++import heapq
++from dataclasses import dataclass
++
++from backend.core.shared.models.agent_runner import CommandResult
++from backend.core.use_cases.agent_runner_feedback import format_result_for_recovery
++from backend.core.use_cases.agent_runner_structured_evidence import (
++    EvidenceBlock,
++    StdoutAssertion,
++    ValidationEvidenceError,
++)
++
++
++def _assertion_target_text(assertion: StdoutAssertion, command_result: CommandResult) -> str:
++    """Return the stream the assertion must be evaluated against."""
++    return command_result.stderr if assertion.source == "stderr" else command_result.stdout
++
++
++def _is_stdout_assertion_satisfied(
++    assertion: StdoutAssertion, command_result: CommandResult
++) -> bool:
++    """判断一条输出断言是否被满足（``must_match`` 时要求出现，否则要求不出现）。"""
++    target_text = _assertion_target_text(assertion, command_result)
++    pattern_matched = assertion.pattern in target_text
++    return pattern_matched if assertion.must_match else not pattern_matched
++
++
++@dataclass(frozen=True)
++class StdoutAssertionFailure:
++    """一条未满足的输出断言，附实际输出中最接近期望串的一行（FR-4）。
++
++    Attributes:
++        assertion_index: 断言在 item ``stdout_assertions`` 中的 1-based 序号。
++        assertion: 未满足的断言原文。
++        closest_output_line: 实际输出中最接近 ``pattern`` 的非空行；目标流为空时为
++            ``None``。
++    """
++
++    assertion_index: int
++    assertion: StdoutAssertion
++    closest_output_line: str | None
++
++
++class StdoutAssertionError(ValidationEvidenceError):
++    """输出断言未满足，携带结构化失败明细供门禁与自检共用渲染。
++
++    自检命令需要把"期望串 vs 最接近的实际输出行"渲染进人读表格与 ``--json``；
++    把明细挂在异常上（而不是让调用方解析英文散文）保证自检与门禁读到的是同一份
++    判定结果，不会各自推导出不同结论。
++    """
++
++    def __init__(
++        self,
++        message: str,
++        assertion_failures: tuple[StdoutAssertionFailure, ...],
++    ) -> None:
++        """记录失败消息与结构化断言明细。
++
++        Args:
++            message: 面向 agent 的完整失败说明。
++            assertion_failures: 未满足的断言明细，至少一条。
++        """
++        super().__init__(message)
++        self.assertion_failures = assertion_failures
++
++
++_MAX_CLOSEST_LINE_CHARS = 300
++_CLOSEST_LINE_PREFILTER_COUNT = 20
++
++
++def _closest_output_line(output_text: str, pattern: str) -> str | None:
++    """返回 ``output_text`` 中最接近 ``pattern`` 的非空行（相似度用 difflib）。
++
++    先用 ``quick_ratio`` 线性预筛出少量候选，再对候选计算完整 ratio：单条 RV 命令
++    的 stdout 可能有成百上千行，逐行做 O(n*m) 的完整比较在长输出上代价过高。
++    """
++    candidate_lines = [line.strip() for line in output_text.splitlines() if line.strip()]
++    if not candidate_lines:
++        return None
++    prefilter_matcher = difflib.SequenceMatcher(None, pattern, "")
++
++    def _quick_similarity(candidate_line: str) -> float:
++        prefilter_matcher.set_seq2(candidate_line)
++        return prefilter_matcher.quick_ratio()
++
++    shortlisted_lines = heapq.nlargest(
++        _CLOSEST_LINE_PREFILTER_COUNT, candidate_lines, key=_quick_similarity
++    )
++    closest_line = max(
++        shortlisted_lines,
++        key=lambda candidate_line: difflib.SequenceMatcher(None, pattern, candidate_line).ratio(),
++    )
++    if len(closest_line) <= _MAX_CLOSEST_LINE_CHARS:
++        return closest_line
++    return closest_line[: _MAX_CLOSEST_LINE_CHARS - 1] + "…"
++
++
++def _find_stdout_assertion_failures(
++    block: EvidenceBlock, command_result: CommandResult
++) -> tuple[StdoutAssertionFailure, ...]:
++    """收集 item 中所有未满足的输出断言（不短路，便于一次修完）。
++
++    判定本身仍只调用同模块的唯一子串判定函数；本函数只负责遍历与采集诊断
++    信息，不引入第二套匹配语义。
++    """
++    assertion_failures: list[StdoutAssertionFailure] = []
++    for assertion_index, assertion in enumerate(block.stdout_assertions, start=1):
++        if _is_stdout_assertion_satisfied(assertion, command_result):
++            continue
++        target_text = _assertion_target_text(assertion, command_result)
++        assertion_failures.append(
++            StdoutAssertionFailure(
++                assertion_index=assertion_index,
++                assertion=assertion,
++                closest_output_line=_closest_output_line(target_text, assertion.pattern),
++            )
++        )
++    return tuple(assertion_failures)
++
++
++def _validate_stdout_assertions(block: EvidenceBlock, command_result: CommandResult) -> None:
++    """对已 exit 0 的 RV 命令执行 manifest 声明的输出断言（补丁 1）。
++
++    退出码只是"命令没崩"，不代表检查点成立：``[ -d x ] || true`` 这类兜底会让
++    命令稳定 exit 0 而从未真正验证。这里按 manifest 的 ``stdout_assertions`` 对
++    keda 自己复跑得到的 stdout/stderr 做子串断言，失败即抛
++    ``StdoutAssertionError``（``ValidationEvidenceError`` 子类）进入既有 recovery
++    循环——与 exit code 失败走同一条路。
++
++    同一条命令的多条断言一次全部报出，并给出实际输出中最接近期望串的一行，
++    避免 agent 每轮只看到第一条、只改一个字（Issue #334 的 `example-derived`
++    事故形态）。
++
++    Raises:
++        StdoutAssertionError: 任一断言未被满足。错误消息指明断言序号、
++            pattern、source 与最接近的实际输出行，并附带限长后的命令退出码、
++            stdout 与 stderr。
++    """
++    assertion_failures = _find_stdout_assertion_failures(block, command_result)
++    if not assertion_failures:
++        return
++    failure_lines: list[str] = []
++    for assertion_failure in assertion_failures:
++        assertion = assertion_failure.assertion
++        expectation_text = (
++            f"must contain {assertion.pattern!r}"
++            if assertion.must_match
++            else f"must not contain {assertion.pattern!r}"
++        )
++        failure_lines.append(
++            f"- assertion #{assertion_failure.assertion_index}: {expectation_text} in "
++            f"{assertion.source} (severity={assertion.severity})"
++        )
++        if assertion_failure.closest_output_line is None:
++            failure_lines.append(f"  no output lines were captured on {assertion.source}")
++        else:
++            failure_lines.append(
++                f"  closest {assertion.source} line: {assertion_failure.closest_output_line!r}"
++            )
++    failure_details_text = "\n".join(failure_lines)
++    raise StdoutAssertionError(
++        f"Realistic Validation item {block.item_number} exited 0 but its stdout "
++        f"assertion(s) failed (command `{block.command}`). An exit code of 0 is not "
++        "proof the checkpoint holds — remove `|| true` / `|| echo ok` style fallbacks "
++        "and make the command actually assert, or correct the declared assertion.\n\n"
++        f"{failure_details_text}\n\n"
++        "Captured command result:\n"
++        f"{format_result_for_recovery(command_result)}",
++        assertion_failures,
++    )
++
++
++__all__ = ["StdoutAssertionError", "StdoutAssertionFailure"]
+diff --git a/src/backend/core/use_cases/agent_runner_evidence_check.py b/src/backend/core/use_cases/agent_runner_evidence_check.py
+new file mode 100644
+index 00000000..01bc7394
+--- /dev/null
++++ b/src/backend/core/use_cases/agent_runner_evidence_check.py
+@@ -0,0 +1,529 @@
++"""本地证据自检编排：逐项复跑、收集结果、聚合渲染（FR-1～FR-5）。
++
++判定逻辑只有一份，全部复用交付门禁的既有实现：
++
++- manifest 解析与字段校验：``load_evidence_manifest``
++- 命令复跑形态：``bash -lc`` + worktree cwd + 门禁超时语义
++- 输出断言：交付门禁使用的同一子串判定函数（见 ``agent_runner_evidence_assertions``）
++
++本模块只负责"逐项跑、收集结果、不抛异常"，把结果交给两个消费方：
++
++- ``kc evidence check``（本地自检）：渲染人读表格或 ``--json``，按结果设置退出码；
++- :func:`backend.core.use_cases.agent_runner_validation.ensure_validation_commands_pass`
++  （交付门禁）：把全部失败聚合成一个 ``ValidationEvidenceError``。
++
++这样自检与门禁不存在第二套判据，也不可能出现"本地绿、门禁红"的断言结论分歧。
++"""
++
++from __future__ import annotations
++
++import subprocess
++from dataclasses import dataclass
++from pathlib import Path
++from typing import Callable
++
++from backend.core.shared.interfaces.agent_runner import IProcessRunner
++from backend.core.shared.models.agent_runner import (
++    AppConfig,
++    CommandResult,
++    DeliveryGateFailureKind,
++)
++from backend.core.use_cases.agent_runner_feedback import format_result_for_recovery
++from backend.core.use_cases.agent_runner_structured_evidence import (
++    EvidenceBlock,
++    ValidationEvidenceError,
++    load_evidence_manifest,
++)
++from backend.core.use_cases import agent_runner_evidence_assertions
++
++STATUS_PASSED = "passed"
++STATUS_SKIPPED = "skipped"
++STATUS_FAILED = "failed"
++STATUS_TIMEOUT = "timeout"
++
++FAILURE_KIND_NONZERO_EXIT = "nonzero_exit"
++FAILURE_KIND_TIMEOUT = "timeout"
++FAILURE_KIND_ASSERTION = "assertion"
++
++
++class EvidenceDirectoryResolutionError(ValueError):
++    """缺省证据目录解析出现歧义（多个候选）时抛出。
++
++    自检不猜目标目录：找到多个含 ``evidence.json`` 的子目录时列出候选并要求
++    调用方用 ``--evidence`` 明确指定。CLI 把本错误映射为用法错误（退出码 2）。
++    """
++
++    def __init__(self, search_root: Path, candidates: tuple[Path, ...]) -> None:
++        """记录搜索根与全部候选目录。
++
++        Args:
++            search_root: 配置的证据目录根（如 ``tasks/evidence``）。
++            candidates: 含 ``evidence.json`` 的全部候选子目录。
++        """
++        candidate_text = ", ".join(str(candidate) for candidate in candidates)
++        super().__init__(
++            f"More than one evidence directory under `{search_root}` contains "
++            f"`evidence.json`: {candidate_text}. Pass --evidence <dir> to choose one."
++        )
++        self.search_root = search_root
++        self.candidates = candidates
++
++
++def resolve_check_evidence_dir(
++    worktree_path: Path,
++    config: AppConfig,
++    *,
++    explicit_evidence: str | None = None,
++) -> Path:
++    """解析自检要读取的证据目录（显式参数 → 唯一候选 → 报错列候选）。
++
++    Args:
++        worktree_path: worktree 根目录。
++        config: 运行配置，提供证据目录根。
++        explicit_evidence: ``--evidence`` 的原始取值；相对路径按 worktree 解析。
++
++    Returns:
++        证据目录的绝对路径。显式参数不校验存在性——缺失由 manifest 加载给出
++        可读错误；缺省模式下也允许返回配置根（其下没有 manifest 时同样报缺失）。
++
++    Raises:
++        EvidenceDirectoryResolutionError: 缺省模式下找到多个含 ``evidence.json``
++            的子目录。
++    """
++    if explicit_evidence:
++        explicit_path = Path(explicit_evidence).expanduser()
++        if not explicit_path.is_absolute():
++            explicit_path = worktree_path / explicit_path
++        return explicit_path
++
++    configured_root = worktree_path / config.validation.evidence_dir
++    if (configured_root / "evidence.json").is_file():
++        return configured_root
++    if not configured_root.is_dir():
++        return configured_root
++    candidate_directories = tuple(
++        sorted(
++            candidate_path
++            for candidate_path in configured_root.iterdir()
++            if candidate_path.is_dir() and (candidate_path / "evidence.json").is_file()
++        )
++    )
++    if len(candidate_directories) == 1:
++        return candidate_directories[0]
++    if len(candidate_directories) > 1:
++        raise EvidenceDirectoryResolutionError(configured_root, candidate_directories)
++    return configured_root
++
++
++@dataclass(frozen=True)
++class EvidenceCheckRequest:
++    """一次自检/门禁复跑的输入。
++
++    Attributes:
++        evidence_dir: 已解析的证据目录。
++        timeout_seconds: 本次单条命令的实际超时（自检可用 ``--timeout`` 调小）。
++        gate_timeout_seconds: 交付门禁的配置上限（``reexecute_timeout_seconds``）。
++        skip_block: 门禁缓存命中时返回 ``True`` 以跳过该条；自检不传。
++        record_pass: 某条通过后的回调（门禁用于收集可写缓存的条目）；自检不传。
++    """
++
++    evidence_dir: Path
++    timeout_seconds: int
++    gate_timeout_seconds: int
++    skip_block: Callable[[EvidenceBlock], bool] | None = None
++    record_pass: Callable[[EvidenceBlock], None] | None = None
++
++
++@dataclass(frozen=True)
++class EvidenceManifestFailure:
++    """manifest 无法解析时的失败条目（不执行任何证据命令）。
++
++    Attributes:
++        message: 原始失败说明。
++        failure_kind: 门禁分类；``None`` 表示按真失败处理。
++    """
++
++    message: str
++    failure_kind: DeliveryGateFailureKind | None = None
++
++
++@dataclass(frozen=True)
++class EvidenceCheckItemResult:
++    """单个 checklist item 自检结果。
++
++    Attributes:
++        block: manifest 中该 item 的原始证据块。
++        status: ``passed`` / ``skipped``（门禁缓存命中）/ ``failed`` / ``timeout``。
++        failure_kind: ``nonzero_exit`` / ``timeout`` / ``assertion``；通过时为 ``None``。
++        exit_code: 命令退出码；超时或未执行为 ``None``。
++        duration_seconds: 命令墙钟耗时；跳过或未执行时为 ``0.0``。
++        assertion_failures: 未满足的输出断言明细。
++        detail: 面向 agent 的完整失败诊断（通过时为空）。
++    """
++
++    block: EvidenceBlock
++    status: str
++    failure_kind: str | None = None
++    exit_code: int | None = None
++    duration_seconds: float = 0.0
++    assertion_failures: tuple[agent_runner_evidence_assertions.StdoutAssertionFailure, ...] = ()
++    detail: str = ""
++
++    @property
++    def passed(self) -> bool:
++        """该项是否算通过（缓存命中亦算通过）。"""
++        return self.status in (STATUS_PASSED, STATUS_SKIPPED)
++
++
++@dataclass(frozen=True)
++class EvidenceCheckReport:
++    """全部 item 的聚合结果；自检与门禁共用的唯一结果结构。
++
++    Attributes:
++        worktree_path: 复跑命令的 worktree。
++        request: 本次复跑输入（含实际超时与门禁上限）。
++        evidence_dir: 已解析的证据目录。
++        manifest_failures: manifest 解析失败；非空时 ``item_results`` 必为空。
++        item_results: 逐项结果（保持 manifest 顺序）。
++        language: manifest 声明的语言；解析失败时为空串。
++    """
++
++    worktree_path: Path
++    request: EvidenceCheckRequest
++    evidence_dir: Path
++    manifest_failures: tuple[EvidenceManifestFailure, ...]
++    item_results: tuple[EvidenceCheckItemResult, ...]
++    language: str = ""
++
++    @property
++    def passed(self) -> bool:
++        """整体是否通过：manifest 合法且所有 item 通过。"""
++        return not self.manifest_failures and all(
++            item_result.passed for item_result in self.item_results
++        )
++
++    @property
++    def failed_item_results(self) -> tuple[EvidenceCheckItemResult, ...]:
++        """全部未通过的 item（保持 manifest 顺序）。"""
++        return tuple(item_result for item_result in self.item_results if not item_result.passed)
++
++    @property
++    def passed_count(self) -> int:
++        """通过（含缓存命中）的 item 数。"""
++        return sum(1 for item_result in self.item_results if item_result.passed)
++
++    @property
++    def total_count(self) -> int:
++        """manifest 中的 item 总数。"""
++        return len(self.item_results)
++
++    @property
++    def local_timeout(self) -> bool:
++        """本次实际超时是否严格小于门禁上限（即用了 ``--timeout`` 调小）。"""
++        return self.request.timeout_seconds < self.request.gate_timeout_seconds
++
++    @property
++    def gate_failure_kind(self) -> DeliveryGateFailureKind:
++        """门禁失败分类：manifest 格式错误沿用其分类，其余按真失败处理。"""
++        for manifest_failure in self.manifest_failures:
++            if manifest_failure.failure_kind is not None:
++                return manifest_failure.failure_kind
++        return DeliveryGateFailureKind.SUBSTANTIVE
++
++    @property
++    def evidence_dir_display(self) -> str:
++        """证据目录的展示文本：worktree 相对路径优先。"""
++        try:
++            return self.evidence_dir.relative_to(self.worktree_path).as_posix()
++        except ValueError:
++            return self.evidence_dir.as_posix()
++
++    def summary_text(self) -> str:
++        """一行汇总：通过数/总数 + 各失败状态计数。"""
++        if self.manifest_failures:
++            return "manifest error — no evidence command was executed"
++        failed_count = sum(
++            1 for item_result in self.item_results if item_result.status == STATUS_FAILED
++        )
++        timeout_count = sum(
++            1 for item_result in self.item_results if item_result.status == STATUS_TIMEOUT
++        )
++        skipped_count = sum(
++            1 for item_result in self.item_results if item_result.status == STATUS_SKIPPED
++        )
++        segments = [f"{self.passed_count}/{self.total_count} passed"]
++        if failed_count:
++            segments.append(f"{failed_count} failed")
++        if timeout_count:
++            segments.append(f"{timeout_count} timed out")
++        if skipped_count:
++            segments.append(f"{skipped_count} skipped (gate cache)")
++        return ", ".join(segments)
++
++    def render_human(self) -> str:
++        """渲染人读输出：逐项结论 + 失败诊断 + 汇总行。"""
++        lines = [
++            f"Evidence directory: {self.evidence_dir_display}",
++            f"Timeout: {self.request.timeout_seconds}s "
++            f"(delivery gate limit: {self.request.gate_timeout_seconds}s)",
++        ]
++        if self.local_timeout:
++            lines.append(
++                "Local timeout is shorter than the gate limit; a local timeout is "
++                "not a gate verdict. Re-run without --timeout before treating it as "
++                "a failure."
++            )
++        if self.manifest_failures:
++            lines.append("")
++            lines.append("Manifest errors (no evidence command was executed):")
++            for manifest_failure in self.manifest_failures:
++                lines.append(f"- {manifest_failure.message}")
++        else:
++            for item_result in self.item_results:
++                lines.append("")
++                lines.append(
++                    f"{item_result.status.upper():<8} item {item_result.block.item_number}"
++                    f" ({item_result.duration_seconds:.1f}s): {item_result.block.item_name}"
++                )
++                if item_result.detail:
++                    for detail_line in item_result.detail.splitlines():
++                        lines.append(f"  {detail_line}")
++        lines.append("")
++        lines.append(f"Result: {self.summary_text()}")
++        return "\n".join(lines)
++
++    def render_gate_failure(self) -> str:
++        """渲染交付门禁的聚合失败消息（一次列出全部未通过项）。"""
++        if self.manifest_failures:
++            failure_lines = [
++                "Structured evidence manifest is invalid; no evidence command was executed.",
++                *(f"- {manifest_failure.message}" for manifest_failure in self.manifest_failures),
++            ]
++            return "\n".join(failure_lines)
++        failed_results = self.failed_item_results
++        header = (
++            f"Realistic Validation re-execution failed for {len(failed_results)} item(s) "
++            "after keda re-ran their commands. Every failure is listed below so they "
++            "can all be fixed in one pass."
++        )
++        sections = [
++            f"=== Item {item_result.block.item_number} ({item_result.status}) ===\n"
++            f"{item_result.detail}"
++            for item_result in failed_results
++        ]
++        return "\n\n".join([header, *sections])
++
++    def to_payload(self) -> dict[str, object]:
++        """构造稳定的机器可读结果（``kc evidence check --json``）。"""
++        failed_count = sum(
++            1 for item_result in self.item_results if item_result.status == STATUS_FAILED
++        )
++        timeout_count = sum(
++            1 for item_result in self.item_results if item_result.status == STATUS_TIMEOUT
++        )
++        skipped_count = sum(
++            1 for item_result in self.item_results if item_result.status == STATUS_SKIPPED
++        )
++        return {
++            "version": 1,
++            "worktree": str(self.worktree_path),
++            "evidence_dir": self.evidence_dir_display,
++            "timeout_seconds": self.request.timeout_seconds,
++            "gate_timeout_seconds": self.request.gate_timeout_seconds,
++            "local_timeout": self.local_timeout,
++            "passed": self.passed,
++            "summary": {
++                "total": self.total_count,
++                "passed": self.passed_count,
++                "failed": failed_count,
++                "timed_out": timeout_count,
++                "skipped": skipped_count,
++            },
++            "manifest_errors": [
++                {
++                    "message": manifest_failure.message,
++                    "failure_kind": (
++                        manifest_failure.failure_kind.value
++                        if manifest_failure.failure_kind is not None
++                        else DeliveryGateFailureKind.SUBSTANTIVE.value
++                    ),
++                }
++                for manifest_failure in self.manifest_failures
++            ],
++            "items": [
++                {
++                    "item_number": item_result.block.item_number,
++                    "item_name": item_result.block.item_name,
++                    "command": item_result.block.command,
++                    "status": item_result.status,
++                    "failure_kind": item_result.failure_kind,
++                    "exit_code": item_result.exit_code,
++                    "duration_seconds": round(item_result.duration_seconds, 3),
++                    "assertion_failures": [
++                        {
++                            "assertion_index": assertion_failure.assertion_index,
++                            "pattern": assertion_failure.assertion.pattern,
++                            "source": assertion_failure.assertion.source,
++                            "must_match": assertion_failure.assertion.must_match,
++                            "severity": assertion_failure.assertion.severity,
++                            "closest_output_line": assertion_failure.closest_output_line,
++                        }
++                        for assertion_failure in item_result.assertion_failures
++                    ],
++                    "detail": item_result.detail,
++                }
++                for item_result in self.item_results
++            ],
++        }
++
++
++def _format_nonzero_exit_detail(block: EvidenceBlock, command_result: CommandResult) -> str:
++    """构造非零退出的失败诊断（保留门禁历史文案以便 recovery 提示不变）。"""
++    return (
++        f"Realistic Validation item {block.item_number} failed when keda "
++        "re-ran its command.\n\n"
++        f"{format_result_for_recovery(command_result)}\n\n"
++        "keda re-executes RV commands to confirm they actually pass — the "
++        "agent's evidence file alone is not trusted. Fix the behavior so the "
++        "command passes (or correct the command)."
++    )
++
++
++def _format_timeout_detail(block: EvidenceBlock, request: EvidenceCheckRequest) -> str:
++    """构造超时诊断；本地调小时明确标注门禁上限（决策一验收）。"""
++    local_timeout_note = ""
++    if request.timeout_seconds < request.gate_timeout_seconds:
++        local_timeout_note = (
++            f" This run used the local --timeout {request.timeout_seconds}s; the "
++            f"delivery gate limit is {request.gate_timeout_seconds}s, so this local "
++            "timeout is not a gate verdict by itself."
++        )
++    return (
++        f"Realistic Validation item {block.item_number} timed out when keda "
++        f"re-ran its command (>{request.timeout_seconds}s): `{block.command}`. "
++        "The reproducible command must be a self-terminating check that probes "
++        "the real entry point and exits, not a long-running server."
++        f"{local_timeout_note}"
++    )
++
++
++def _run_single_block(
++    worktree_path: Path,
++    process_runner: IProcessRunner,
++    request: EvidenceCheckRequest,
++    block: EvidenceBlock,
++) -> EvidenceCheckItemResult:
++    """复跑单个 item 的命令并按门禁同一判据分类结果（不抛异常）。"""
++    try:
++        command_result = process_runner.run(
++            ["bash", "-lc", block.command],
++            cwd=worktree_path,
++            check=False,
++            capture_output=True,
++            timeout=request.timeout_seconds,
++            label=f"rv-reexec-{block.item_number}",
++        )
++    except subprocess.TimeoutExpired:
++        return EvidenceCheckItemResult(
++            block=block,
++            status=STATUS_TIMEOUT,
++            failure_kind=FAILURE_KIND_TIMEOUT,
++            detail=_format_timeout_detail(block, request),
++        )
++    if command_result.return_code != 0:
++        return EvidenceCheckItemResult(
++            block=block,
++            status=STATUS_FAILED,
++            failure_kind=FAILURE_KIND_NONZERO_EXIT,
++            exit_code=command_result.return_code,
++            duration_seconds=command_result.duration_seconds,
++            detail=_format_nonzero_exit_detail(block, command_result),
++        )
++    try:
++        agent_runner_evidence_assertions._validate_stdout_assertions(block, command_result)
++    except agent_runner_evidence_assertions.StdoutAssertionError as assertion_error:
++        return EvidenceCheckItemResult(
++            block=block,
++            status=STATUS_FAILED,
++            failure_kind=FAILURE_KIND_ASSERTION,
++            exit_code=command_result.return_code,
++            duration_seconds=command_result.duration_seconds,
++            assertion_failures=assertion_error.assertion_failures,
++            detail=str(assertion_error),
++        )
++    return EvidenceCheckItemResult(
++        block=block,
++        status=STATUS_PASSED,
++        exit_code=command_result.return_code,
++        duration_seconds=command_result.duration_seconds,
++    )
++
++
++def run_evidence_check(
++    worktree_path: Path,
++    config: AppConfig,
++    process_runner: IProcessRunner,
++    request: EvidenceCheckRequest,
++) -> EvidenceCheckReport:
++    """复跑 evidence manifest 的全部命令并聚合逐项结论。
++
++    manifest 解析失败时立即返回格式错误报告，**不执行任何证据命令**——否则
++    一个字段笔误会带来真实副作用（探针写文件、启动服务），却仍被判失败。
++
++    Args:
++        worktree_path: worktree 根目录（命令 cwd）。
++        config: 运行配置；manifest 解析复用其证据目录约定。
++        process_runner: 命令执行端口（生产为真实子进程）。
++        request: 本次复跑输入（证据目录、超时、门禁缓存钩子）。
++
++    Returns:
++        聚合结果；是否通过、退出码与渲染全部由调用方基于该结构决定。
++    """
++    try:
++        manifest = load_evidence_manifest(
++            worktree_path,
++            config,
++            evidence_dir=request.evidence_dir,
++        )
++    except ValidationEvidenceError as manifest_error:
++        return EvidenceCheckReport(
++            worktree_path=worktree_path,
++            request=request,
++            evidence_dir=request.evidence_dir,
++            manifest_failures=(
++                EvidenceManifestFailure(
++                    message=str(manifest_error),
++                    failure_kind=manifest_error.kind,
++                ),
++            ),
++            item_results=(),
++        )
++
++    item_results: list[EvidenceCheckItemResult] = []
++    for block in manifest.items:
++        if request.skip_block is not None and request.skip_block(block):
++            item_results.append(EvidenceCheckItemResult(block=block, status=STATUS_SKIPPED))
++            continue
++        item_result = _run_single_block(worktree_path, process_runner, request, block)
++        if item_result.passed and request.record_pass is not None:
++            request.record_pass(block)
++        item_results.append(item_result)
++    return EvidenceCheckReport(
++        worktree_path=worktree_path,
++        request=request,
++        evidence_dir=request.evidence_dir,
++        manifest_failures=(),
++        item_results=tuple(item_results),
++        language=manifest.language,
++    )
++
++
++__all__ = [
++    "EvidenceCheckItemResult",
++    "EvidenceCheckReport",
++    "EvidenceCheckRequest",
++    "EvidenceDirectoryResolutionError",
++    "EvidenceManifestFailure",
++    "resolve_check_evidence_dir",
++    "run_evidence_check",
++]
+diff --git a/src/backend/core/use_cases/agent_runner_structured_evidence.py b/src/backend/core/use_cases/agent_runner_structured_evidence.py
+index 909bdf0b..51e48909 100644
+--- a/src/backend/core/use_cases/agent_runner_structured_evidence.py
++++ b/src/backend/core/use_cases/agent_runner_structured_evidence.py
+@@ -954,0 +955,2 @@ def build_structured_evidence_prompt_suffix(language: str) -> str:
++            "单条命令的门禁复跑上限默认 300 秒（`[agent_runner.validation].reexecute_timeout_seconds`），"
++            "命令必须是自终止的检查，不能是长驻服务。"
+@@ -959,0 +962,3 @@ def build_structured_evidence_prompt_suffix(language: str) -> str:
++            "声明了 `stdout_assertions` 就必须先本地自检通过：运行 "
++            "`kc evidence check --evidence {evidence_dir}`，它会用与交付门禁相同的判定复跑命令并核对断言；"
++            "自检全部 PASS 后再请求提交。"
+@@ -981,0 +987,3 @@ def build_structured_evidence_prompt_suffix(language: str) -> str:
++        "The delivery gate re-runs each command with a default 300s limit "
++        "(`[agent_runner.validation].reexecute_timeout_seconds`), so every command "
++        "must be a self-terminating check, never a long-running server. "
+@@ -987,0 +996,4 @@ def build_structured_evidence_prompt_suffix(language: str) -> str:
++        "If you declare `stdout_assertions`, you must pass the local self-check before "
++        "requesting a commit: run `kc evidence check --evidence {evidence_dir}` — it "
++        "re-runs the commands and checks the assertions with the delivery gate's own "
++        "judgment. "
+diff --git a/src/backend/core/use_cases/agent_runner_validation.py b/src/backend/core/use_cases/agent_runner_validation.py
+index f2efc53c..44c09d28 100644
+--- a/src/backend/core/use_cases/agent_runner_validation.py
++++ b/src/backend/core/use_cases/agent_runner_validation.py
+@@ -29 +28,0 @@ import re
+-import subprocess
+@@ -39 +37,0 @@ from backend.core.shared.models.agent_runner import (
+-    CommandResult,
+@@ -63 +60,0 @@ from backend.core.use_cases.agent_runner_feedback import (
+-    format_result_for_recovery,
+@@ -72 +68,0 @@ from backend.core.use_cases.agent_runner_structured_evidence import (
+-    StdoutAssertion,
+@@ -756,47 +751,0 @@ def _save_rv_reexec_cache(cache_path: Path, entries: dict[str, str]) -> None:
+-def _assertion_target_text(assertion: StdoutAssertion, command_result: CommandResult) -> str:
+-    """Return the stream the assertion must be evaluated against."""
+-    return command_result.stderr if assertion.source == "stderr" else command_result.stdout
+-
+-
+-def _is_stdout_assertion_satisfied(
+-    assertion: StdoutAssertion, command_result: CommandResult
+-) -> bool:
+-    """判断一条输出断言是否被满足（``must_match`` 时要求出现，否则要求不出现）。"""
+-    target_text = _assertion_target_text(assertion, command_result)
+-    pattern_matched = assertion.pattern in target_text
+-    return pattern_matched if assertion.must_match else not pattern_matched
+-
+-
+-def _validate_stdout_assertions(block: EvidenceBlock, command_result: CommandResult) -> None:
+-    """对已 exit 0 的 RV 命令执行 manifest 声明的输出断言（补丁 1）。
+-
+-    退出码只是"命令没崩"，不代表检查点成立：``[ -d x ] || true`` 这类兜底会让
+-    命令稳定 exit 0 而从未真正验证。这里按 manifest 的 ``stdout_assertions`` 对
+-    keda 自己复跑得到的 stdout/stderr 做子串断言，失败即抛
+-    ``ValidationEvidenceError`` 进入既有 recovery 循环——与 exit code 失败走同一条路。
+-
+-    Raises:
+-        ValidationEvidenceError: 任一断言未被满足。错误消息指明断言序号、
+-            pattern、source，并附带限长后的命令退出码、stdout 与 stderr，便于
+-            agent 和 Console 页面直接定位失败输出。
+-    """
+-    for assertion_index, assertion in enumerate(block.stdout_assertions, start=1):
+-        if _is_stdout_assertion_satisfied(assertion, command_result):
+-            continue
+-        expectation_text = (
+-            f"must contain {assertion.pattern!r}"
+-            if assertion.must_match
+-            else f"must not contain {assertion.pattern!r}"
+-        )
+-        raise ValidationEvidenceError(
+-            f"Realistic Validation item {block.item_number} exited 0 but its stdout "
+-            f"assertion #{assertion_index} failed: {expectation_text} in "
+-            f"{assertion.source} (severity={assertion.severity}, "
+-            f"command `{block.command}`). An exit code of 0 is not proof the "
+-            "checkpoint holds — remove `|| true` / `|| echo ok` style fallbacks and "
+-            "make the command actually assert, or correct the declared assertion.\n\n"
+-            "Captured command result:\n"
+-            f"{format_result_for_recovery(command_result)}"
+-        )
+-
+-
+@@ -816,0 +766,4 @@ def ensure_validation_commands_pass(
++    复跑编排与 ``kc evidence check`` 完全同源
++    (:func:`run_evidence_check`):所有 item 跑完后一次性聚合全部失败,而不是
++    遇到第一条就停。通过判据不变——任一项未通过仍然阻断交付。
++
+@@ -824,2 +777,3 @@ def ensure_validation_commands_pass(
+-        ValidationEvidenceError: 任一命令被 keda 复跑后未通过或超时；非零退出与
+-            stdout 断言失败会在错误详情中附带命令、退出码、stdout 和 stderr。
++        ValidationEvidenceError: 任一命令被 keda 复跑后未通过或超时；错误消息
++            一次列出全部未通过项，非零退出与 stdout 断言失败会附带命令、
++            退出码、stdout 和 stderr。
+@@ -834,4 +788,6 @@ def ensure_validation_commands_pass(
+-    manifest = load_evidence_manifest(
+-        worktree_path,
+-        config,
+-        evidence_dir=resolve_issue_evidence_dir(worktree_path, config, issue),
++    # 延迟导入：只在真正复跑门禁时才需要整条自检编排（结构化证据解析 +
++    # 断言模块）；放在函数内避免仅导入证据门禁的调用方在加载期拉起全部依赖。
++    from backend.core.use_cases.agent_runner_evidence_check import (
++        STATUS_PASSED,
++        EvidenceCheckRequest,
++        run_evidence_check,
+@@ -838,0 +795 @@ def ensure_validation_commands_pass(
++
+@@ -853,10 +810,9 @@ def ensure_validation_commands_pass(
+-    for block in manifest.items:
+-        cache_key = (
+-            _rv_reexec_cache_key(
+-                tree_fingerprint,
+-                block.item_number,
+-                block.command,
+-                oracle_digest,
+-            )
+-            if tree_fingerprint
+-            else None
++    def _cache_key_for_block(block: EvidenceBlock) -> str | None:
++        """该 item 在当前代码树 / 命令 / oracle 上的缓存键；无指纹时为空。"""
++        if tree_fingerprint is None:
++            return None
++        return _rv_reexec_cache_key(
++            tree_fingerprint,
++            block.item_number,
++            block.command,
++            oracle_digest,
+@@ -864,7 +820,34 @@ def ensure_validation_commands_pass(
+-        if cache_key is not None and cache_key in cache_entries:
+-            _logger.info(
+-                "Realistic Validation item %s: skipping re-execution; command "
+-                "already passed at tree %s.",
+-                block.item_number,
+-                tree_fingerprint,
+-            )
++
++    def _skip_cached_block(block: EvidenceBlock) -> bool:
++        """缓存命中时跳过复跑（同一代码树上该命令已真实通过）。"""
++        cache_key = _cache_key_for_block(block)
++        if cache_key is None or cache_key not in cache_entries:
++            return False
++        _logger.info(
++            "Realistic Validation item %s: skipping re-execution; command "
++            "already passed at tree %s.",
++            block.item_number,
++            tree_fingerprint,
++        )
++        return True
++
++    def _record_passed_block(block: EvidenceBlock) -> None:
++        """登记通过项；仅在整轮无失败时统一落盘，假绿灯不得固化。"""
++        cache_key = _cache_key_for_block(block)
++        if cache_key is not None:
++            newly_passed[cache_key] = datetime.now(UTC).isoformat()
++
++    report = run_evidence_check(
++        worktree_path,
++        config,
++        process_runner,
++        EvidenceCheckRequest(
++            evidence_dir=resolve_issue_evidence_dir(worktree_path, config, issue),
++            timeout_seconds=timeout_seconds,
++            gate_timeout_seconds=timeout_seconds,
++            skip_block=_skip_cached_block if tree_fingerprint else None,
++            record_pass=_record_passed_block if tree_fingerprint else None,
++        ),
++    )
++    for item_result in report.item_results:
++        if item_result.status != STATUS_PASSED:
+@@ -872,30 +854,0 @@ def ensure_validation_commands_pass(
+-        try:
+-            result = process_runner.run(
+-                ["bash", "-lc", block.command],
+-                cwd=worktree_path,
+-                check=False,
+-                capture_output=True,
+-                timeout=timeout_seconds,
+-                label=f"rv-reexec-{block.item_number}",
+-            )
+-        except subprocess.TimeoutExpired as timeout_error:
+-            # RV 命令复跑超时 / 失败 = 行为没做对，保持真失败分类（收尾层不得接手）。
+-            raise ValidationEvidenceError(
+-                f"Realistic Validation item {block.item_number} timed out when keda "
+-                f"re-ran its command (>{timeout_seconds}s): `{block.command}`. The "
+-                "reproducible command must be a self-terminating check that probes the "
+-                "real entry point and exits, not a long-running server. Set "
+-                "`validation.reexecute_commands=false` to opt out."
+-            ) from timeout_error
+-        if result.return_code != 0:
+-            raise ValidationEvidenceError(
+-                f"Realistic Validation item {block.item_number} failed when keda "
+-                "re-ran its command.\n\n"
+-                f"{format_result_for_recovery(result)}\n\n"
+-                "keda re-executes RV commands to confirm they actually pass — the "
+-                "agent's evidence file alone is not trusted. Fix the behavior so the "
+-                "command passes (or correct the command). Set "
+-                "`validation.reexecute_commands=false` to opt out."
+-            )
+-        # exit 0 只是"命令没崩"：断言未过时不得写缓存，否则假绿灯会被缓存固化。
+-        _validate_stdout_assertions(block, result)
+@@ -906,2 +859,8 @@ def ensure_validation_commands_pass(
+-            block.item_number,
+-            result.duration_seconds,
++            item_result.block.item_number,
++            item_result.duration_seconds,
++        )
++    if not report.passed:
++        # 复跑失败 / 超时 / 断言未命中 = 行为没做对，保持真失败分类（收尾层不得接手）。
++        raise ValidationEvidenceError(
++            report.render_gate_failure(),
++            kind=report.gate_failure_kind,
+@@ -909,2 +867,0 @@ def ensure_validation_commands_pass(
+-        if cache_key is not None:
+-            newly_passed[cache_key] = datetime.now(UTC).isoformat()
+diff --git a/src/backend/engines/agent_runner/templates/skills/kedacode-operator/SKILL.md b/src/backend/engines/agent_runner/templates/skills/kedacode-operator/SKILL.md
+index 79bc5b0f..861c2f7e 100644
+--- a/src/backend/engines/agent_runner/templates/skills/kedacode-operator/SKILL.md
++++ b/src/backend/engines/agent_runner/templates/skills/kedacode-operator/SKILL.md
+@@ -40 +40 @@ Use the repository guide as the authoritative command reference. Start with `kc
+-- **Unknown flag, default, or enum value**: read `kc schema --json` — read-only introspection derived from the live command tree: every command, flag, type, required flag, enum choices, default, and an example — instead of guessing from a table. One caveat: `required` reflects the declaration layer only, so the persistent-write commands' `--scope` exports as `required=False` even though omitting it exits `2` — always pass `--scope` (and `--repo-id` for repository writes) on those.
++- **Unknown flag, default, or enum value**: read `kc schema --json` — read-only introspection derived from the live command tree: every command, flag, type, required flag, enum choices, default, and an example — instead of guessing from a table. Evidence packages that declare `stdout_assertions` must pass `kc evidence check` first; see run-once for its flags and exit codes. One caveat: `required` reflects the declaration layer only, so the persistent-write commands' `--scope` exports as `required=False` even though omitting it exits `2` — always pass `--scope` (and `--repo-id` for repository writes) on those.
+diff --git a/src/backend/engines/agent_runner/templates/skills/kedacode-operator/references/run-once.md b/src/backend/engines/agent_runner/templates/skills/kedacode-operator/references/run-once.md
+index e5d2a11f..5ed59cc3 100644
+--- a/src/backend/engines/agent_runner/templates/skills/kedacode-operator/references/run-once.md
++++ b/src/backend/engines/agent_runner/templates/skills/kedacode-operator/references/run-once.md
+@@ -22,0 +23 @@ The user says 「跑一下」「跑一次」「执行这个 Issue」「把 197
++- **Evidence self-check before delivery**: `kc evidence check` re-runs each `evidence.json` command with the delivery gate's own parser, timeout and `stdout_assertions` judgment, lists every failure in one pass, and prints the expected substring plus the closest actual output line. An evidence block that declares `stdout_assertions` must pass this first. `--timeout` may only shorten the gate limit (default 300s; larger values exit `2`); exit codes are `0` all passed / `1` failures / `2` usage error, and `--json` emits `{passed, summary, items, manifest_errors}` on stdout. Passing the self-check does not replace the gate — environment differences can still fail it.

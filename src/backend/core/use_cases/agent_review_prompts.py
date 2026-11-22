@@ -11,6 +11,22 @@ DEFAULT_REVIEW_PROMPT_TEMPLATE: tuple[str, ...] = (
         "duplicate root causes, and then repair the complete set together."
     ),
     (
+        "Trace the requested behavior through its normal entry point. If the requirement "
+        "also applies to an alternate command, configuration, or existing state, use a "
+        "focused check to verify the affected route before approving."
+    ),
+    (
+        "Ground each actionable finding in an explicit requirement or an existing contract "
+        "you can identify in code, documentation, or tests. Preserve documented precedence, "
+        "defaults, and compatibility unless the task requests changing them. Explain "
+        "uncertain requirements in the summary; do not invent a new policy from ambiguous "
+        "wording and then treat the current behavior as a defect."
+    ),
+    (
+        "If a patch is rejected because its context no longer matches, reread the affected "
+        "file and revise against its current contents before trying again."
+    ),
+    (
         "On a follow-up review, focus on the repair diff, previously reported findings, "
         "and affected boundaries. Report newly discovered regressions, but do not reopen "
         "resolved findings without evidence or introduce unrelated cleanup."

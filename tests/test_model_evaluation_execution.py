@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import json
 import shutil
 import threading
 import time
@@ -42,6 +43,7 @@ from backend.infrastructure.config.agent_runner_settings_models import (
 )
 from backend.infrastructure.config.settings import AgentRunnerSettings
 from backend.infrastructure.persistence.console_store import SqliteConsoleStore
+from tests.test_model_evaluation_workspace import _commit, _create_source_repo
 
 _CASE = EvaluationSuiteCase(case_id="case-a", prompt="实现 FizzBuzz", check_recipe="pytest")
 _SUITE = EvaluationSuite(
@@ -237,6 +239,79 @@ def _execute_cell(harness: Any, run: EvaluationRunRecord, snapshot: dict[str, An
 def _only_result(harness: Any, run_id: str = "eval-cell0000001") -> Any:
     (row,) = harness.store.list_evaluation_results(run_id)
     return row
+
+
+def test_committed_candidate_changes_reach_local_judge_payload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """用实际 Git 与检查命令验证已提交、未提交和隐藏文件的差异边界。"""
+    source_repo = _create_source_repo(tmp_path)
+    (source_repo / "tests/test_behavior.py").write_text(
+        "from pathlib import Path\n"
+        "from unittest import TestCase\n\n"
+        "class BehaviorTest(TestCase):\n"
+        "    def test_candidate_behavior(self):\n"
+        "        self.assertEqual(Path('src/app.py').read_text(encoding='utf-8'), 'value = 2\\n')\n"
+        "        self.assertEqual(Path('tasks/answer.md').read_text(encoding='utf-8'), 'hidden answer\\n')\n",
+        encoding="utf-8",
+    )
+    source_commit = _commit(source_repo, "evaluation baseline")
+    _, source_tree = workspace.probe_base(str(source_repo), source_commit)
+    case = replace(_CASE, check_recipe="unittest", candidate_hidden=("tasks/answer.md",))
+    suite = replace(_SUITE, requires_calibration=True, cases=(case,))
+    run = _run(repo_path=str(source_repo), base_commit=source_commit, base_tree_hash=source_tree)
+    store = SqliteConsoleStore(tmp_path / "console.db")
+    store.save_evaluation_run(run)
+    evaluation_root = tmp_path / "evaluation"
+    settings = AgentRunnerSettings(
+        presets={"alpha": AgentRunnerPresetSettings(agent="codex", model="gpt-alpha")},
+    )
+
+    def commit_candidate(
+        *, worktree_path: Path, **_kwargs: Any
+    ) -> agent_adapter.CandidateAgentOutcome:
+        assert not (worktree_path / "tasks/answer.md").exists()
+        (worktree_path / "src/app.py").write_text("value = 2\n", encoding="utf-8")
+        (worktree_path / "tasks").mkdir(exist_ok=True)
+        (worktree_path / "tasks/answer.md").write_text("candidate notes\n", encoding="utf-8")
+        _commit(worktree_path, "candidate implementation")
+        (worktree_path / "notes.md").write_text("uncommitted note\n", encoding="utf-8")
+        return agent_adapter.CandidateAgentOutcome(
+            ok=True,
+            timed_out=False,
+            summary=None,
+            exit_code=0,
+            duration_seconds=0.0,
+            usage_summary=None,
+            error=None,
+        )
+
+    monkeypatch.setattr(execution, "_store", lambda: store)
+    monkeypatch.setattr(agent_adapter, "run_candidate", commit_candidate)
+    execution._execute_cell(
+        execution._EvaluationCellContext(
+            run=run,
+            case=case,
+            suite=suite,
+            preset_snapshot=dict(_SNAPSHOT),
+            root=evaluation_root,
+            settings=settings,
+            staged_entries=[],
+            lock=threading.Lock(),
+        )
+    )
+
+    (candidate_result,) = store.list_evaluation_results(run.run_id)
+    assert candidate_result.check_status == EvaluationCheckStatus.passed.value
+    staged_payload = workspace.read_payload(
+        workspace.staging_dir(evaluation_root, run.run_id), f"{candidate_result.result_id}.json"
+    )
+    assert staged_payload is not None
+    staged_diff = json.loads(staged_payload)["diff"]
+    assert "-value = 1\n+value = 2\n" in staged_diff
+    assert "+uncommitted note\n" in staged_diff
+    assert "tasks/answer.md" not in staged_diff
+    assert candidate_result.diff_hash == sha256_text(staged_diff)
 
 
 def test_candidate_config_drift_stops_before_worktree_and_agent(harness: Any) -> None:

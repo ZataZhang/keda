@@ -1,0 +1,101 @@
+diff --git a/src/backend/api/routes/agent_runner.py b/src/backend/api/routes/agent_runner.py
+index c3608505..4deca5a7 100644
+--- a/src/backend/api/routes/agent_runner.py
++++ b/src/backend/api/routes/agent_runner.py
+@@ -334 +334,2 @@ def _recent_tracked_issue_numbers(repositories: Sequence[Any]) -> dict[str, list
+-    每仓库最多补扫 20 个，避免为历史复盘付出无界 GitHub 调用。
++    每仓库收集近 7 天运行记录与未收口生命周期记录，按 Issue 编号去重后最多补扫
++    20 个；运行记录由存储端先按 Issue 去重，避免重复重试占满 GitHub 查询名额。
+@@ -343,2 +344,4 @@ def _recent_tracked_issue_numbers(repositories: Sequence[Any]) -> dict[str, list
+-            runs = run_history_store.list_recent_runs(
+-                repo_id=repository.repo_id, limit=_TRACKED_ISSUE_SCAN_LIMIT
++            runs = run_history_store.list_recent_runs_by_issue(
++                repo_id=repository.repo_id,
++                since_started_at=cutoff.isoformat(timespec="seconds"),
++                limit=_TRACKED_ISSUE_SCAN_LIMIT,
+diff --git a/src/backend/core/shared/interfaces/runner_console.py b/src/backend/core/shared/interfaces/runner_console.py
+index 290e89be..8bfa9329 100644
+--- a/src/backend/core/shared/interfaces/runner_console.py
++++ b/src/backend/core/shared/interfaces/runner_console.py
+@@ -292,0 +293,16 @@ class IRunHistoryStore(ABC):
++    @abstractmethod
++    def list_recent_runs_by_issue(
++        self, *, repo_id: str, since_started_at: str, limit: int = 100
++    ) -> list[RunRecord]:
++        """按起始时间筛选，并为每个 Issue 返回最新写入的一条运行记录。
++
++        Args:
++            repo_id: 目标仓库标识。
++            since_started_at: 起始时间下界（ISO-8601 UTC），包含该时刻。
++            limit: 最多返回的不同 Issue 数量。
++
++        Returns:
++            list[RunRecord]: 按最近写入顺序倒排、每个 Issue 至多一条的运行记录。
++        """
++        ...
++
+diff --git a/src/backend/infrastructure/persistence/console_store_history.py b/src/backend/infrastructure/persistence/console_store_history.py
+index b32f72b6..e81e6d08 100644
+--- a/src/backend/infrastructure/persistence/console_store_history.py
++++ b/src/backend/infrastructure/persistence/console_store_history.py
+@@ -6,0 +7 @@ import logging
++import sqlite3
+@@ -103,0 +105,18 @@ class AgentPerformanceRecords:
++def _run_record_from_row(record_row: sqlite3.Row) -> RunRecord:
++    """把 SQLite 运行记录行转换为接口模型。"""
++    return RunRecord(
++        repo_id=record_row["repo_id"],
++        repo_path=record_row["repo_path"],
++        issue_number=int(record_row["issue_number"]),
++        trigger=record_row["trigger"],
++        agent=record_row["agent"],
++        outcome=record_row["outcome"],
++        error_summary=record_row["error_summary"],
++        started_at=record_row["started_at"],
++        finished_at=record_row["finished_at"],
++        duration_seconds=float(record_row["duration_seconds"]),
++        issue_title=record_row["issue_title"],
++        issue_url=record_row["issue_url"],
++    )
++
++
+@@ -122,17 +141,22 @@ class RunHistoryReadMixin:
+-        return [
+-            RunRecord(
+-                repo_id=record_row["repo_id"],
+-                repo_path=record_row["repo_path"],
+-                issue_number=int(record_row["issue_number"]),
+-                trigger=record_row["trigger"],
+-                agent=record_row["agent"],
+-                outcome=record_row["outcome"],
+-                error_summary=record_row["error_summary"],
+-                started_at=record_row["started_at"],
+-                finished_at=record_row["finished_at"],
+-                duration_seconds=float(record_row["duration_seconds"]),
+-                issue_title=record_row["issue_title"],
+-                issue_url=record_row["issue_url"],
+-            )
+-            for record_row in record_rows
+-        ]
++        return [_run_record_from_row(record_row) for record_row in record_rows]
++
++    def list_recent_runs_by_issue(
++        self, *, repo_id: str, since_started_at: str, limit: int = 100
++    ) -> list[RunRecord]:
++        """按起始时间筛选，并为每个 Issue 返回最新写入的一条运行记录。"""
++        query = (
++            "SELECT recent_run.repo_id, recent_run.repo_path, recent_run.issue_number, "
++            "recent_run.trigger, recent_run.agent, recent_run.outcome, "
++            "recent_run.error_summary, recent_run.started_at, recent_run.finished_at, "
++            "recent_run.duration_seconds, recent_run.issue_title, recent_run.issue_url "
++            "FROM run_records AS recent_run "
++            "JOIN ("
++            "SELECT MAX(id) AS latest_id FROM run_records "
++            "WHERE repo_id = ? AND started_at >= ? "
++            "GROUP BY issue_number ORDER BY latest_id DESC LIMIT ?"
++            ") AS latest_issue_run ON latest_issue_run.latest_id = recent_run.id "
++            "ORDER BY recent_run.id DESC"
++        )
++        with self._connection() as connection:
++            record_rows = connection.execute(query, (repo_id, since_started_at, limit)).fetchall()
++        return [_run_record_from_row(record_row) for record_row in record_rows]

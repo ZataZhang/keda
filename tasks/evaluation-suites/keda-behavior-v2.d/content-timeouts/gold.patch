@@ -1,0 +1,159 @@
+diff --git a/config.toml b/config.toml
+index f93dc723..9e0e1d90 100644
+--- a/config.toml
++++ b/config.toml
+@@ -970 +970 @@ agent = "auto"
+-timeout_seconds = 120
++timeout_seconds = 600
+@@ -1008 +1008 @@ agent = "auto"
+-timeout_seconds = 120
++timeout_seconds = 600
+@@ -1060 +1060 @@ agent = "auto"
+-timeout_seconds = 120
++timeout_seconds = 600
+diff --git a/src/backend/api/routes/agent_runner_lifecycle_agents.py b/src/backend/api/routes/agent_runner_lifecycle_agents.py
+index 8b8b94ba..246e0e46 100644
+--- a/src/backend/api/routes/agent_runner_lifecycle_agents.py
++++ b/src/backend/api/routes/agent_runner_lifecycle_agents.py
+@@ -24 +24 @@ from fastapi import APIRouter, HTTPException
+-from pydantic import BaseModel, Field
++from pydantic import BaseModel, Field, StrictInt
+@@ -61,0 +62 @@ from backend.core.use_cases.lifecycle_settings_console import (
++    validate_content_generation_timeout_updates,
+@@ -285,0 +287,26 @@ def update_lifecycle_settings(request: UpdateLifecycleSettingsRequest) -> dict:
++class UpdateContentGenerationTimeoutsRequest(BaseModel):
++    """内容生成目标超时写回请求；``null`` 清除仓库层覆盖。"""
++
++    scope: str = Field(default=SCOPE_GLOBAL, pattern="^(global|repository)$")
++    repo_id: str | None = None
++    values: dict[str, StrictInt | None]
++
++
++@router.put("/agent-runner/lifecycle-settings/content-generation-timeouts")
++def update_content_generation_timeouts(request: UpdateContentGenerationTimeoutsRequest) -> dict:
++    """保留式写回内容生成目标超时，并返回该视角下的最新生命周期设置。"""
++
++    def _validate_and_write() -> None:
++        _config, editor = _select_scope_config(request.scope, request.repo_id)
++        with editor.write_transaction():
++            try:
++                normalized_values = validate_content_generation_timeout_updates(request.values)
++            except LifecycleAgentsUpdateError as exc:
++                raise HTTPException(status_code=422, detail=str(exc)) from exc
++            editor.update_generated_content_timeouts(normalized_values)
++
++    _write_or_fail_http(_validate_and_write)
++    refreshed_config, _editor = _select_scope_config(request.scope, request.repo_id)
++    return _aggregate_view(refreshed_config, request.scope, request.repo_id)
++
++
+diff --git a/src/backend/core/shared/models/agent_runner_config.py b/src/backend/core/shared/models/agent_runner_config.py
+index 553b46cf..5b2df805 100644
+--- a/src/backend/core/shared/models/agent_runner_config.py
++++ b/src/backend/core/shared/models/agent_runner_config.py
+@@ -651 +651 @@ class GeneratedContentTargetConfig:
+-    timeout_seconds: int = 120
++    timeout_seconds: int = 600
+@@ -680 +680,3 @@ class GeneratedContentConfig:
+-        default_factory=lambda: GeneratedContentTargetConfig(enabled=False, output="markdown")
++        default_factory=lambda: GeneratedContentTargetConfig(
++            enabled=False, output="markdown", timeout_seconds=1200
++        )
+diff --git a/src/backend/core/use_cases/lifecycle_settings_console.py b/src/backend/core/use_cases/lifecycle_settings_console.py
+index f8bde289..8d3f6c4c 100644
+--- a/src/backend/core/use_cases/lifecycle_settings_console.py
++++ b/src/backend/core/use_cases/lifecycle_settings_console.py
+@@ -56,0 +57,8 @@ from backend.core.use_cases.lifecycle_agents_console import (
++CONTENT_GENERATION_TIMEOUT_TARGETS = {
++    "issue_from_prd": "从 PRD 生成 Issue",
++    "issue_from_prompt": "从需求描述生成 Issue",
++    "draft_pr": "生成 Draft PR 标题和正文",
++    "prd_from_issue": "从 Issue 生成 PRD",
++}
++CONTENT_GENERATION_TIMEOUT_MAX_SECONDS = 86400
++
+@@ -413,0 +422,14 @@ def build_lifecycle_settings_view(
++    content_generation_timeouts = [
++        {
++            "key": target_name,
++            "label": target_label,
++            "timeout_seconds": getattr(config.generated_content, target_name).timeout_seconds,
++            "global_timeout_seconds": (
++                getattr(global_config.generated_content, target_name).timeout_seconds
++                if global_config is not None
++                else None
++            ),
++        }
++        for target_name, target_label in CONTENT_GENERATION_TIMEOUT_TARGETS.items()
++    ]
++
+@@ -424,0 +447,4 @@ def build_lifecycle_settings_view(
++        "content_generation_timeouts": {
++            "max_seconds": CONTENT_GENERATION_TIMEOUT_MAX_SECONDS,
++            "targets": content_generation_timeouts,
++        },
+@@ -434,0 +461,36 @@ def build_lifecycle_settings_view(
++def validate_content_generation_timeout_updates(
++    values: Mapping[str, Any],
++) -> dict[str, int | None]:
++    """校验内容生成目标的超时增量；``None`` 表示删除本层覆盖。
++
++    Args:
++        values: 内容生成目标名到秒数的增量；仓库层可用 ``None`` 恢复全局值。
++
++    Returns:
++        通过校验的目标名和秒数映射。
++
++    Raises:
++        LifecycleAgentsUpdateError: 未知目标、空更新，或秒数不在允许范围内。
++    """
++    if not values:
++        raise LifecycleAgentsUpdateError("At least one content generation timeout is required.")
++
++    normalized_values: dict[str, int | None] = {}
++    for target_name, timeout_seconds in values.items():
++        if target_name not in CONTENT_GENERATION_TIMEOUT_TARGETS:
++            raise LifecycleAgentsUpdateError(
++                f"Unknown generated-content target '{target_name}'. Valid targets: "
++                f"{', '.join(CONTENT_GENERATION_TIMEOUT_TARGETS)}."
++            )
++        if timeout_seconds is not None and (
++            type(timeout_seconds) is not int
++            or not 1 <= timeout_seconds <= CONTENT_GENERATION_TIMEOUT_MAX_SECONDS
++        ):
++            raise LifecycleAgentsUpdateError(
++                f"{target_name}.timeout_seconds must be an integer between 1 and "
++                f"{CONTENT_GENERATION_TIMEOUT_MAX_SECONDS}."
++            )
++        normalized_values[target_name] = timeout_seconds
++    return normalized_values
++
++
+diff --git a/src/backend/engines/agent_runner/lifecycle_editor.py b/src/backend/engines/agent_runner/lifecycle_editor.py
+index fc42a1e3..5dbf24db 100644
+--- a/src/backend/engines/agent_runner/lifecycle_editor.py
++++ b/src/backend/engines/agent_runner/lifecycle_editor.py
+@@ -123,0 +124,13 @@ class TomlLifecycleSettingsEditor:
++    def update_generated_content_timeouts(self, values: Mapping[str, int | None]) -> None:
++        """一次写回各内容生成目标的超时；``None`` 删除该层的目标级覆盖。"""
++        apply_toml_updates(
++            self._config_path,
++            [
++                TableKeyUpdate(
++                    ("agent_runner", "generated_content", target_name),
++                    {"timeout_seconds": timeout_seconds},
++                )
++                for target_name, timeout_seconds in values.items()
++            ],
++        )
++
+diff --git a/src/backend/infrastructure/config/agent_runner_generated_content_settings.py b/src/backend/infrastructure/config/agent_runner_generated_content_settings.py
+index f2fcbfbe..39f7a654 100644
+--- a/src/backend/infrastructure/config/agent_runner_generated_content_settings.py
++++ b/src/backend/infrastructure/config/agent_runner_generated_content_settings.py
+@@ -27 +27 @@ class AgentRunnerGeneratedContentTargetSettings(BaseModel):
+-    timeout_seconds: int = 120
++    timeout_seconds: int = 600
+@@ -70 +70 @@ class AgentRunnerGeneratedContentSettings(BaseModel):
+-            enabled=False, output="markdown"
++            enabled=False, output="markdown", timeout_seconds=1200

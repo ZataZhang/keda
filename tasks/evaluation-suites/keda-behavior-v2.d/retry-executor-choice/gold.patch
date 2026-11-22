@@ -1,0 +1,311 @@
+diff --git a/src/backend/core/shared/models/agent_runner_config.py b/src/backend/core/shared/models/agent_runner_config.py
+index 15a394bf..dd3dc2c1 100644
+--- a/src/backend/core/shared/models/agent_runner_config.py
++++ b/src/backend/core/shared/models/agent_runner_config.py
+@@ -48,0 +49,6 @@ class IssueSummary:
++    #: 该 Issue 的**一次性显式执行器覆盖**（键值对元组）：Console「换执行器续跑」
++    #: 为单个 Issue、单个阶段选定的执行器（如 ``implementation`` -> ``mcode``）。
++    #: 优先级高于阶段预设绑定与生命周期矩阵声明、低于命令行 ``--agent``——
++    #: 预设绑定整体决定该阶段，用矩阵层投递会让这层一次性选择被静默遮蔽，
++    #: 用户选了 mcode 仍按预设的 codex 跑（换执行器续跑形同虚设）。
++    explicit_executor_overrides: tuple[tuple[str, str], ...] = ()
+diff --git a/src/backend/core/use_cases/agent_runner_agent_selection.py b/src/backend/core/use_cases/agent_runner_agent_selection.py
+index 34f6b0e7..e9029748 100644
+--- a/src/backend/core/use_cases/agent_runner_agent_selection.py
++++ b/src/backend/core/use_cases/agent_runner_agent_selection.py
+@@ -25 +25,7 @@ REPAIR_AGENT_EXECUTOR = "executor"
+-def choose_agent(issue: IssueSummary, config: AppConfig, override_agent: str) -> str:
++def choose_agent(
++    issue: IssueSummary,
++    config: AppConfig,
++    override_agent: str,
++    *,
++    lifecycle: str = "implementation",
++) -> str:
+@@ -28 +34,2 @@ def choose_agent(issue: IssueSummary, config: AppConfig, override_agent: str) ->
+-    优先级：显式 ``override_agent``（CLI / loop recipe）> 阶段预设绑定
++    优先级：显式 ``override_agent``（CLI / loop recipe）> Issue 的一次性显式执行器
++    覆盖（Console「换执行器续跑」）> 阶段预设绑定
+@@ -32,0 +40,7 @@ def choose_agent(issue: IssueSummary, config: AppConfig, override_agent: str) ->
++
++    Args:
++        issue: 正在处理的 Issue。
++        config: Agent Runner 配置。
++        override_agent: ``--agent`` 覆盖（``"auto"`` 走标签路由）。
++        lifecycle: 一次性显式执行器覆盖所属的阶段。默认 ``implementation``；
++            辩论阶段按标签路由时传 ``deliberate``，避免实现阶段的覆盖串味。
+@@ -35,0 +50,9 @@ def choose_agent(issue: IssueSummary, config: AppConfig, override_agent: str) ->
++    # 一次性显式执行器覆盖高于预设绑定：预设绑定整体决定该阶段，若让它遮蔽这层
++    # 选择，用户在 Console 选定的执行器永远不会被真正使用。
++    from backend.core.use_cases.lifecycle_agent_resolution import (
++        explicit_executor_override_agent,
++    )
++
++    explicit_agent = explicit_executor_override_agent(issue, lifecycle, config=config)
++    if explicit_agent is not None:
++        return explicit_agent
+diff --git a/src/backend/core/use_cases/agent_runner_issue_handlers.py b/src/backend/core/use_cases/agent_runner_issue_handlers.py
+index 555dfc2c..765e1001 100644
+--- a/src/backend/core/use_cases/agent_runner_issue_handlers.py
++++ b/src/backend/core/use_cases/agent_runner_issue_handlers.py
+@@ -20,0 +21 @@ from collections.abc import Callable
++from dataclasses import replace
+@@ -114,0 +116,27 @@ _logger = logging.getLogger(__name__)
++def _adopt_fresh_issue_snapshot(
++    fresh_issue: IssueSummary,
++    previous_issue: IssueSummary,
++) -> IssueSummary:
++    """采用认领后的新鲜 Issue 快照，但保留随 Issue 流动的本地覆盖字段。
++
++    fresh 读取的目的是刷新标签 / 状态 / 正文，**不是**丢掉本地附加的覆盖：
++    PRD 级 ``lifecycle_agents`` / ``lifecycle_presets`` 覆盖与一次性显式执行器
++    覆盖（Console「换执行器续跑」）都随 Issue 流动。直接整体赋值会让 review /
++    supervisor / verifier 这类按覆盖字段选执行器的阶段静默丢绑定——一次性覆盖
++    尤其致命：用户选的执行器会被阶段预设绑定遮蔽，等于没选。
++
++    Args:
++        fresh_issue: 认领后从 GitHub fresh 读取的 Issue 快照。
++        previous_issue: 认领前携带本地覆盖字段的 Issue。
++
++    Returns:
++        带新鲜标签 / 状态、且保留本地覆盖字段的 Issue。
++    """
++    return replace(
++        fresh_issue,
++        lifecycle_overrides=previous_issue.lifecycle_overrides,
++        lifecycle_preset_overrides=previous_issue.lifecycle_preset_overrides,
++        explicit_executor_overrides=previous_issue.explicit_executor_overrides,
++    )
++
++
+@@ -275 +303 @@ def _process_blocked_resolution(
+-        issue = stage_decision.issue
++        issue = _adopt_fresh_issue_snapshot(stage_decision.issue, issue)
+@@ -483 +511 @@ def _process_ready_issue(
+-    issue = stage_decision.issue
++    issue = _adopt_fresh_issue_snapshot(stage_decision.issue, issue)
+@@ -913 +941 @@ def _process_running_publish_recovery(
+-        issue = stage_decision.issue
++        issue = _adopt_fresh_issue_snapshot(stage_decision.issue, issue)
+diff --git a/src/backend/core/use_cases/agent_runner_orchestration_runtime.py b/src/backend/core/use_cases/agent_runner_orchestration_runtime.py
+index c20b01c2..6967935b 100644
+--- a/src/backend/core/use_cases/agent_runner_orchestration_runtime.py
++++ b/src/backend/core/use_cases/agent_runner_orchestration_runtime.py
+@@ -378 +378,2 @@ def _process_single_issue(
+-            # 因此以新鲜快照为底、把两个 lifecycle 覆盖字段带过来。
++            # 因此以新鲜快照为底、把三个覆盖字段带过来（一次性显式执行器覆盖也在内：
++            # 认领后的 fix / verifier / review 阶段仍要用用户选定的执行器）。
+@@ -382,0 +384 @@ def _process_single_issue(
++                explicit_executor_overrides=issue.explicit_executor_overrides,
+diff --git a/src/backend/core/use_cases/console_actions.py b/src/backend/core/use_cases/console_actions.py
+index 90aa93a8..986a62e0 100644
+--- a/src/backend/core/use_cases/console_actions.py
++++ b/src/backend/core/use_cases/console_actions.py
+@@ -280 +280,7 @@ def _execute_retry_failed_with_executor(
+-    """保存一次性阶段覆盖并把失败 Issue 重新放回 ready 队列。"""
++    """保存一次性阶段覆盖并把失败 Issue 重新放回 ready 队列。
++
++    幂等：同一次「换执行器续跑」被重复提交时（用户没看到结果又点一次），
++    第二次不再报错——第一次已经把覆盖写入并把 Issue 放回 ready 队列，标签
++    随之不再是 failed。此时按本次选择更新待消费覆盖并如实回报状态；既没有
++    失败标签、也没有待消费覆盖，才是真正的场景不符。
++    """
+@@ -288 +294,10 @@ def _execute_retry_failed_with_executor(
+-    if failed_label not in issue.labels:
++    override_store = resolve_issue_retry_override_store(store)
++    if override_store is None:
++        raise ConsoleActionError("This Console store does not support one-time executor overrides.")
++    pending_override = override_store.get_issue_retry_override(
++        repo_id=repo_id,
++        issue_number=issue_number,
++    )
++    # 待消费覆盖仍在 = 上一次点击已把它排进 ready 队列、Runner 尚未认领。
++    already_queued = failed_label not in issue.labels and pending_override is not None
++    if failed_label not in issue.labels and pending_override is None:
+@@ -320,3 +334,0 @@ def _execute_retry_failed_with_executor(
+-    override_store = resolve_issue_retry_override_store(store)
+-    if override_store is None:
+-        raise ConsoleActionError("This Console store does not support one-time executor overrides.")
+@@ -329,0 +342,7 @@ def _execute_retry_failed_with_executor(
++    if already_queued:
++        # 已经在队列里：不再翻标签（队列状态由上一次点击改好了），只更新覆盖并
++        # 如实回报"已排入"，避免把重复提交说成失败。
++        return (
++            f"Issue #{issue_number} is already queued; the pending executor override was "
++            f"updated to resume at {lifecycle_stage} with executor '{executor}'."
++        )
+diff --git a/src/backend/core/use_cases/issue_retry_overrides.py b/src/backend/core/use_cases/issue_retry_overrides.py
+index 1fb9183f..61fdc275 100644
+--- a/src/backend/core/use_cases/issue_retry_overrides.py
++++ b/src/backend/core/use_cases/issue_retry_overrides.py
+@@ -1 +1,8 @@
+-"""Issue 单次续跑执行器覆盖的可选本地存储能力。"""
++"""Issue 单次续跑执行器覆盖的可选本地存储能力。
++
++覆盖经 :attr:`IssueSummary.explicit_executor_overrides` 随 Issue 流动——这是
++**独立于生命周期矩阵声明**的一层：阶段预设绑定整体决定该阶段（agent + 模型 +
++推理档），若把一次性选择投递成矩阵声明，预设绑定会把它遮蔽，用户在 Console 选
++的执行器永远不生效。解析侧的优先级见
++:func:`backend.core.use_cases.lifecycle_agent_resolution.explicit_executor_override_agent`。
++"""
+@@ -77 +84,6 @@ def prepare_issue_retry_override(
+-    """验证并应用待处理的单次执行器覆盖。"""
++    """验证并应用待处理的单次执行器覆盖。
++
++    覆盖写入 :attr:`IssueSummary.explicit_executor_overrides`（一次性显式执行器
++    覆盖层），**不**写入 ``lifecycle_overrides``（生命周期矩阵 / PRD 覆盖层）：
++    后者会被阶段预设绑定遮蔽，"换执行器续跑"因此静默失效。
++    """
+@@ -99,2 +111,2 @@ def prepare_issue_retry_override(
+-    lifecycle_overrides = dict(request.issue.lifecycle_overrides)
+-    lifecycle_overrides[stage] = executor
++    explicit_executor_overrides = dict(request.issue.explicit_executor_overrides)
++    explicit_executor_overrides[stage] = executor
+@@ -103 +115 @@ def prepare_issue_retry_override(
+-        lifecycle_overrides=tuple(lifecycle_overrides.items()),
++        explicit_executor_overrides=tuple(sorted(explicit_executor_overrides.items())),
+diff --git a/src/backend/core/use_cases/lifecycle_agent_resolution.py b/src/backend/core/use_cases/lifecycle_agent_resolution.py
+index fb9739a5..9a49b83d 100644
+--- a/src/backend/core/use_cases/lifecycle_agent_resolution.py
++++ b/src/backend/core/use_cases/lifecycle_agent_resolution.py
+@@ -19,0 +20,4 @@
++矩阵声明之外还有两层更高的显式选择：命令行 ``--agent``（最高）与 Console
++「换执行器续跑」的一次性显式执行器覆盖（:func:`explicit_executor_override_agent`，
++高于阶段预设绑定）——后者的存在理由见该函数 docstring。
++
+@@ -377,0 +382,34 @@ def effective_prd_overrides(
++def explicit_executor_override_agent(
++    issue: IssueSummary | None,
++    lifecycle: str,
++    *,
++    config: AppConfig,
++) -> str | None:
++    """返回该 Issue 携带的**一次性显式执行器覆盖**（Console「换执行器续跑」）。
++
++    这层覆盖是针对单个 Issue、单个阶段的一次性显式选择（用户在 Console 为
++    失败阶段挑的执行器），优先级**高于**阶段预设绑定与生命周期矩阵声明、
++    **低于**命令行 ``--agent``。必须独立成层：阶段预设绑定整体决定该阶段
++    （agent + 模型 + 推理档），若把它投递成矩阵声明，预设绑定会静默遮蔽这层
++    选择——用户选了 mcode，Runner 仍按预设的 codex 跑，"换执行器续跑"形同虚设。
++
++    Args:
++        issue: 当前 Issue；``None`` 表示无上下文。
++        lifecycle: 生命周期键。
++        config: 已按"仓库层 > 全局层"合并好的应用配置（校验 agent 是否注册）。
++
++    Returns:
++        该阶段被显式覆盖的 agent 名；未覆盖时返回 ``None``。
++
++    Raises:
++        UnknownAgentError: 覆盖值不是已注册 agent（fail-fast，不静默回落）。
++    """
++    if issue is None:
++        return None
++    explicit_overrides = dict(getattr(issue, "explicit_executor_overrides", ()) or ())
++    overridden_agent = explicit_overrides.get(lifecycle)
++    if overridden_agent is None:
++        return None
++    return _validate_registered(overridden_agent, lifecycle=lifecycle, config=config)
++
++
+@@ -535,0 +574,5 @@ def resolve_lifecycle_agent(
++        # 一次性显式执行器覆盖次之：高于预设绑定与矩阵声明（否则用户在 Console
++        # 选定的执行器会被预设静默遮蔽）。
++        explicit_agent = explicit_executor_override_agent(issue, lifecycle, config=config)
++        if explicit_agent is not None:
++            return explicit_agent
+@@ -791 +834,8 @@ def _resolve_auto(
+-            return choose_agent(issue, config, LIFECYCLE_AGENT_AUTO)
++            # 辩论阶段按标签路由；显式声明 lifecycle="deliberate" 以免
++            # implementation 阶段的一次性执行器覆盖串味到这里。
++            return choose_agent(
++                issue,
++                config,
++                LIFECYCLE_AGENT_AUTO,
++                lifecycle="deliberate",
++            )
+diff --git a/src/backend/core/use_cases/run_verifier_agent.py b/src/backend/core/use_cases/run_verifier_agent.py
+index dd316b58..bde63f5d 100644
+--- a/src/backend/core/use_cases/run_verifier_agent.py
++++ b/src/backend/core/use_cases/run_verifier_agent.py
+@@ -227,0 +228 @@ def _choose_verifier_agent(
++        explicit_executor_override_agent,
+@@ -230,0 +232,13 @@ def _choose_verifier_agent(
++    # 一次性显式执行器覆盖（Console「换执行器续跑」）优先于预设绑定与既有配置键：
++    # 用户为校验阶段挑定的执行器不能被阶段预设静默遮蔽。
++    explicit_verifier_agent = explicit_executor_override_agent(issue, "verifier", config=config)
++    if explicit_verifier_agent is not None:
++        if explicit_verifier_agent != builder_agent:
++            return explicit_verifier_agent
++        _logger.warning(
++            "One-time verifier override %r matches builder for Issue #%s; selecting a distinct "
++            "fallback agent instead.",
++            explicit_verifier_agent,
++            issue.number if issue is not None else "unknown",
++        )
++
+diff --git a/src/backend/engines/agent_runner/output_protocols/__init__.py b/src/backend/engines/agent_runner/output_protocols/__init__.py
+index 6d89aee5..897c2efb 100644
+--- a/src/backend/engines/agent_runner/output_protocols/__init__.py
++++ b/src/backend/engines/agent_runner/output_protocols/__init__.py
+@@ -13,0 +14,7 @@
++
++内置协议实现在**包导入期**一次性导入（见
++:func:`_import_builtin_protocol_modules`）：长驻进程（daemon / ``kc run``）
++可能跨越一次代码更新，运行期再从磁盘懒加载实现模块就会拿到**新**的实现、
++配上进程启动时导入的**旧**核心接口类，得到半新半旧的代码快照，表现为
++``'OutputRelayRequest' object has no attribute 'cancel_check'`` 这类难以
++定位的属性错误。启动时统一导入保证整进程同一份快照。
+@@ -17,0 +25 @@ from __future__ import annotations
++import importlib
+@@ -29,0 +38,10 @@ ENTRY_POINT_GROUP = product_identity.OUTPUT_PROTOCOL_ENTRY_POINT_GROUP
++BUILTIN_PROTOCOL_MODULE_NAMES: tuple[str, ...] = (
++    "plain",
++    "claude_stream_json",
++    "codex_json_lines",
++    "opencode_json_lines",
++    "pi_json_lines",
++    "mcode_json_lines",
++)
++"""内置协议实现模块名（与 :mod:`backend.engines.agent_runner.output_protocols` 同包）。"""
++
+@@ -116,0 +135,25 @@ def get_output_protocol_registry() -> EntryPointProtocolRegistry:
++def _import_builtin_protocol_modules() -> None:
++    """在包导入期导入全部内置协议实现模块（fail-fast，不降级）。
++
++    为什么必须提前导入：协议实现模块若在运行期才从磁盘加载，长驻进程
++    （daemon / ``kc run``）跨过一次代码更新后就会混用两份代码——实现模块是
++    更新后的**新**版本，核心中继请求类却是进程启动时导入的**旧**版本，
++    属性对不上时报 ``'OutputRelayRequest' object has no attribute
++    'cancel_check'`` 这类难以定位的错误。启动时统一导入，整进程同一份快照。
++
++    Raises:
++        OutputProtocolLoadError: 某个内置协议模块导入失败（绝不静默回落到
++            ``plain``——那会把结构化事件流当纯文本中继）。
++    """
++    for module_name in BUILTIN_PROTOCOL_MODULE_NAMES:
++        try:
++            importlib.import_module(f"{__name__}.{module_name}")
++        except Exception as exc:  # noqa: BLE001 - 任何加载失败都不降级
++            raise OutputProtocolLoadError(
++                f"Built-in output protocol module '{module_name}' failed to import: {exc}"
++            ) from exc
++
++
++_import_builtin_protocol_modules()
++
++
+@@ -117,0 +161 @@ __all__ = [
++    "BUILTIN_PROTOCOL_MODULE_NAMES",
+diff --git a/src/backend/infrastructure/github_models.py b/src/backend/infrastructure/github_models.py
+index 3e005300..e724bef5 100644
+--- a/src/backend/infrastructure/github_models.py
++++ b/src/backend/infrastructure/github_models.py
+@@ -32,2 +32,2 @@ class IssueSummary:
+-    镜像 :class:`backend.core.shared.models.agent_runner.IssueSummary`；两个
+-    ``lifecycle_*`` 字段必须保持同步，否则编排入口的
++    镜像 :class:`backend.core.shared.models.agent_runner.IssueSummary`；三个
++    ``lifecycle_*`` / ``explicit_executor_overrides`` 字段必须保持同步，否则编排入口的
+@@ -47,0 +48,2 @@ class IssueSummary:
++    #: 该 Issue 的一次性显式执行器覆盖（键值对元组）；语义见 core 侧同名字段。
++    explicit_executor_overrides: tuple[tuple[str, str], ...] = ()

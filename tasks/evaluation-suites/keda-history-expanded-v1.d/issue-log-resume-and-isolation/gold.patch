@@ -1,0 +1,1351 @@
+diff --git a/docs/architecture/system-design.md b/docs/architecture/system-design.md
+index 4c8f9997..fafb06e9 100644
+--- a/docs/architecture/system-design.md
++++ b/docs/architecture/system-design.md
+@@ -191,0 +192,9 @@ src/backend/api/ → src/backend/core/ → src/backend/engines/ → src/backend/
++### Issue 输出与进程日志的职责边界
++
++Agent Runner 有两类只读日志，刻意分开：
++
++- **托管进程日志**（`core/use_cases/console_processes.py`）：面向 `iar daemon` / `iar review-daemon` 这类登记在进程 registry 里的常驻进程，按 `process_id` 续读。用于排查「daemon 进程本身还在不在、为什么退出」。
++- **Issue 实时输出**（`core/use_cases/issue_logs.py` + `infrastructure/console/issue_log_reader.py`）：面向「某个 Issue 正在被 Agent 处理」的可见输出，按 `(repo_id, issue_number, attempt_id, offset)` 续读。单次 `iar run`（串行）与并行 daemon 都把每个 Issue 的可见输出落到 `logs/agent-runner/issues/<repo_id>/issue-<N>-<时间戳>.log`，CLI（`iar logs --issue`）与 Console API 共享同一窄端口 `core/shared/interfaces/issue_log_reader.py`，读取范围被限制在已注册仓库的固定日志子树内，不接受客户端传入的任意路径。首次读取支持「尾部窗口」（`tail` 请求标记：忽略偏移、从文件末尾回推最多 `max_bytes` 字节），之后按返回的 `next_offset` 增量续读。
++
++Issue 日志不登记为托管进程，也不伪造 `process_id`；两者在 API 上是独立端点，避免把「进程还活着」误当成「任务有实时输出」。
++
+diff --git a/docs/guides/agent-runner.md b/docs/guides/agent-runner.md
+index d3929520..e9a5b6d1 100644
+--- a/docs/guides/agent-runner.md
++++ b/docs/guides/agent-runner.md
+@@ -1109,0 +1110,22 @@ iar logs --kind review_daemon -f
++#### 查看单个 Issue 的实时输出（`iar logs --issue`）
++
++单次 `iar run` 或 daemon 处理某个 Issue 时，Agent 的可见输出会即时落到
++`logs/agent-runner/issues/<repo_id>/issue-<N>-<时间戳>.log`。用 `--issue`
++可以在**另一个终端**按 Issue 号查看这条流，无需知道进程 ID 或日志目录：
++
++```bash
++# 查看 Issue #42 最近一次尝试的最近输出（尾部窗口）
++iar logs --repo-id keda-main --issue 42
++
++# 持续跟随 Issue #42 的输出（重试时自动切换尝试，Ctrl-C 退出）
++iar logs --repo-id keda-main --issue 42 --follow
++```
++
++行为说明：
++
++- `--issue <N>` 与 `--kind` 互斥；不带 `--issue` 时保持原有进程日志语义。
++- 首次输出给**尾部窗口**（默认最近 64 KiB，再按 `--lines` 截行），不会从头倾泻整份日志；之后按字节偏移增量续读。
++- 默认跟随该 Issue 的**最新尝试**；重试产生新文件时 CLI 会提示并切换。
++- Issue 尚未开始、日志已清理或仓库未注册时，显示明确的空态 / 不可用提示，不会回退到别的 Issue 或进程日志。
++- 单次 `iar run`（串行）与并行 daemon 使用同一归属规则；原启动终端的可读输出不受影响。
++
+@@ -1768,0 +1791 @@ iar daemon --concurrency 3
++- **按 Issue 从第二终端 / Console 查看**：`iar logs --repo-id <repo> --issue <N> [--follow]` 或 Console 的 PRD 详情「实时输出」标签，都读取同一份 per-Issue 日志文件；单次 `iar run`（串行）也走同一路径，只是不显示多列看板。
+@@ -3186,0 +3210 @@ GET    /api/v1/agent-runner/console/processes/{id}/logs?offset=0
++GET    /api/v1/agent-runner/console/repositories/{repo}/issues/{n}/logs?offset=0&attempt_id=&tail=  Issue 实时输出（只读；tail=1 取尾部窗口）
+diff --git a/frontend-public/components/roadmap/prd-detail.tsx b/frontend-public/components/roadmap/prd-detail.tsx
+index 4b9d40be..42e5abdd 100644
+--- a/frontend-public/components/roadmap/prd-detail.tsx
++++ b/frontend-public/components/roadmap/prd-detail.tsx
+@@ -17,0 +18 @@ import { PrdEvidenceView } from "./prd-evidence-view";
++import { PrdIssueOutputView } from "./prd-issue-output-view";
+@@ -24,0 +26 @@ export const PRD_LIFECYCLE_TAB_ID = "lifecycle";
++export const PRD_ISSUE_OUTPUT_TAB_ID = "issue-output";
+@@ -74,0 +77,17 @@ export function PrdDetail({
++    // 仅对有关联 Issue 的 PRD 展示「实时输出」标签；无 Issue 的 PRD 不产生
++    // 可跟随的 Agent 输出流。
++    ...(prd.issue_number
++      ? [
++          {
++            id: PRD_ISSUE_OUTPUT_TAB_ID,
++            label: "实时输出",
++            render: () => (
++              <PrdIssueOutputView
++                key={`${repoId}-${prd.issue_number}`}
++                repoId={repoId}
++                issueNumber={prd.issue_number as number}
++              />
++            ),
++          },
++        ]
++      : []),
+diff --git a/frontend-public/components/roadmap/prd-issue-output-view.tsx b/frontend-public/components/roadmap/prd-issue-output-view.tsx
+new file mode 100644
+index 00000000..7e8f3818
+--- /dev/null
++++ b/frontend-public/components/roadmap/prd-issue-output-view.tsx
+@@ -0,0 +1,188 @@
++"use client";
++
++// PRD 详情「实时输出」标签：按仓库 + Issue 号轮询该 Issue 的 Agent 可见输出。
++//
++// 复用进程日志抽屉的 offset 轮询模式（2.5s），但数据源换成 Issue 日志 API
++// （`/console/repositories/<repo_id>/issues/<N>/logs`）。支持暂停/继续、
++// 新尝试切换提示、截断/清理/无日志的明确空态，且关闭标签即停止轮询。
++
++import { useEffect, useRef, useState } from "react";
++
++import { Button } from "@/components/ui/button";
++import { fetchIssueLog } from "@/lib/api/console";
++import type { IssueLogChunk } from "@/lib/api/types";
++
++const LOG_POLL_INTERVAL_MS = 2500;
++// 防止超长日志拖垮页面，只保留尾部 ~200KB。
++const MAX_LOG_CHARS = 200_000;
++
++interface PrdIssueOutputViewProps {
++  repoId: string;
++  issueNumber: number;
++}
++
++/**
++ * 渲染单个 Issue 的实时输出面板。
++ *
++ * @param props.repoId - 已注册仓库标识。
++ * @param props.issueNumber - 要跟随的 Issue 编号。
++ * @returns Issue 实时输出面板。
++ */
++export function PrdIssueOutputView({ repoId, issueNumber }: PrdIssueOutputViewProps) {
++  const [logContent, setLogContent] = useState("");
++  const [paused, setPaused] = useState(false);
++  const [notice, setNotice] = useState<string | null>(null);
++  const [attemptId, setAttemptId] = useState<string | null>(null);
++  const offsetRef = useRef(0);
++  const attemptIdRef = useRef<string | null>(null);
++  const containerRef = useRef<HTMLPreElement | null>(null);
++
++  useEffect(() => {
++    // 切换 PRD / Issue 时重置状态，避免把上一个 Issue 的偏移拼到当前内容。
++    // ref 重置可以同步做；state 重置必须异步（React 禁止在 effect 体内同步
++    // setState，会把渲染级联放大）。
++    offsetRef.current = 0;
++    attemptIdRef.current = null;
++    let cancelled = false;
++
++    /**
++     * 拉取一次 Issue 日志块并按状态机更新视图。
++     *
++     * 首次请求（attempt 未知）走尾部窗口；之后按 ``offsetRef`` 增量续读。
++     * 暂停、卸载或切换 Issue 时直接短路。
++     */
++    async function pollLog() {
++      if (cancelled || paused) {
++        return;
++      }
++      try {
++        const chunk: IssueLogChunk = await fetchIssueLog({
++          repoId,
++          issueNumber,
++          offset: offsetRef.current,
++          attemptId: attemptIdRef.current,
++          // 首次（attempt 未知）取尾部窗口，之后按字节偏移增量续读。
++          tail: attemptIdRef.current === null,
++        });
++        if (cancelled) {
++          return;
++        }
++        // 首次成功响应后才清旧 Issue 的显示状态：失败时保留上一屏内容，
++        // 避免网络抖动把已读输出闪成空白。
++        if (attemptIdRef.current === null) {
++          setLogContent("");
++          setNotice(null);
++          setAttemptId(null);
++        }
++
++        if (chunk.status === "no_attempt") {
++          setNotice("该 Issue 暂无可用输出（尚未开始或日志已清理）。");
++          return;
++        }
++        if (chunk.status === "repo_not_found") {
++          setNotice("目标仓库未注册或已禁用，无法读取 Issue 输出。");
++          return;
++        }
++        if (chunk.status === "attempt_gone") {
++          setNotice(
++            chunk.latest_attempt_id && chunk.latest_attempt_id !== attemptIdRef.current
++              ? `当前尝试已不可用，已切换到最新尝试 ${chunk.latest_attempt_id}。`
++              : "当前尝试已不可用（日志已清理）。",
++          );
++          // 尝试被清理：重置到最新尝试，避免把旧偏移拼到新文件。
++          attemptIdRef.current = chunk.latest_attempt_id;
++          offsetRef.current = 0;
++          if (chunk.latest_attempt_id) {
++            setLogContent("");
++          }
++          return;
++        }
++        if (chunk.status === "truncated") {
++          setNotice("日志已轮转或截断，已从最新位置续读。");
++          offsetRef.current = chunk.next_offset;
++          return;
++        }
++
++        // 检测是否出现了新尝试（重试/新执行）。
++        if (
++          chunk.latest_attempt_id &&
++          chunk.attempt_id &&
++          chunk.latest_attempt_id !== chunk.attempt_id
++        ) {
++          setNotice(`检测到新尝试：${chunk.attempt_id} → ${chunk.latest_attempt_id}。`);
++          attemptIdRef.current = chunk.latest_attempt_id;
++          offsetRef.current = 0;
++          setLogContent("");
++          return;
++        }
++
++        if (chunk.attempt_id && chunk.attempt_id !== attemptIdRef.current) {
++          setAttemptId(chunk.attempt_id);
++          attemptIdRef.current = chunk.attempt_id;
++        }
++        if (chunk.content) {
++          setNotice(null);
++          offsetRef.current = chunk.next_offset;
++          setLogContent((current) => {
++            const merged = current + chunk.content;
++            return merged.length > MAX_LOG_CHARS ? merged.slice(-MAX_LOG_CHARS) : merged;
++          });
++        } else {
++          offsetRef.current = chunk.next_offset;
++        }
++      } catch (error) {
++        if (!cancelled) {
++          setNotice(
++            error instanceof Error ? `读取 Issue 输出失败：${error.message}` : "读取 Issue 输出失败。",
++          );
++        }
++      }
++    }
++
++    void pollLog();
++    const timer = setInterval(() => void pollLog(), LOG_POLL_INTERVAL_MS);
++    return () => {
++      cancelled = true;
++      clearInterval(timer);
++    };
++  }, [repoId, issueNumber, paused]);
++
++  useEffect(() => {
++    const container = containerRef.current;
++    if (container) {
++      container.scrollTop = container.scrollHeight;
++    }
++  }, [logContent]);
++
++  return (
++    <div className="flex min-h-0 flex-1 flex-col gap-2" data-testid="prd-issue-output">
++      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
++        <div className="flex flex-wrap items-center gap-2">
++          <span data-testid="prd-issue-output-attempt">
++            {attemptId ? `本次尝试：${attemptId}` : "等待第一次输出…"}
++          </span>
++          {notice ? (
++            <span className="text-amber-600 dark:text-amber-400" data-testid="prd-issue-output-notice">
++              {notice}
++            </span>
++          ) : null}
++        </div>
++        <Button
++          size="sm"
++          variant="outline"
++          onClick={() => setPaused((current) => !current)}
++          data-testid="prd-issue-output-toggle"
++        >
++          {paused ? "继续" : "暂停"}
++        </Button>
++      </div>
++      <pre
++        ref={containerRef}
++        className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-all rounded-md border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-800 dark:bg-slate-950"
++        data-testid="prd-issue-output-content"
++      >
++        {logContent || "（暂无输出）"}
++      </pre>
++    </div>
++  );
++}
+diff --git a/frontend-public/lib/api/console.ts b/frontend-public/lib/api/console.ts
+index b03fb515..b84f0b21 100644
+--- a/frontend-public/lib/api/console.ts
++++ b/frontend-public/lib/api/console.ts
+@@ -15,0 +16 @@ import type {
++  IssueLogChunk,
+@@ -60,0 +62,40 @@ export async function fetchProcessLog(
++// ── Issue 实时输出 ──────────────────────────────────────────────────────────
++
++/**
++ * 按仓库 + Issue 号续读该 Issue 的 Agent 可见输出。
++ *
++ * 与托管进程日志端点刻意分开：Issue 日志不属于托管进程 registry，读取范围
++ * 被限制在该注册仓库的固定日志子树内，不接受客户端传入的文件路径。
++ *
++ * @param params.repoId - 已注册仓库 ID。
++ * @param params.issueNumber - Issue 编号（正整数）。
++ * @param params.offset - 字节偏移；``0`` 表示从头读。
++ * @param params.attemptId - 显式指定的尝试；省略表示读最新尝试。
++ * @param params.tail - 为真时忽略 ``offset``，返回末尾窗口并对齐
++ *   ``next_offset`` 到文件末尾（用于「先尾部后增量」的首次拉取）。
++ * @returns 带尝试标识与续读偏移的日志块。
++ */
++export async function fetchIssueLog(params: {
++  repoId: string;
++  issueNumber: number;
++  offset?: number;
++  attemptId?: string | null;
++  tail?: boolean;
++}): Promise<IssueLogChunk> {
++  const searchParams = new URLSearchParams();
++  if (params.offset !== undefined) {
++    searchParams.set("offset", String(params.offset));
++  }
++  if (params.attemptId) {
++    searchParams.set("attempt_id", params.attemptId);
++  }
++  if (params.tail) {
++    searchParams.set("tail", "true");
++  }
++  const query = searchParams.toString();
++  return get<IssueLogChunk>(
++    `${BASE_PATH}/console/repositories/${encodeURIComponent(params.repoId)}` +
++      `/issues/${params.issueNumber}/logs${query ? `?${query}` : ""}`,
++  );
++}
++
+diff --git a/frontend-public/lib/api/types.ts b/frontend-public/lib/api/types.ts
+index 94787d64..aadee4a3 100644
+--- a/frontend-public/lib/api/types.ts
++++ b/frontend-public/lib/api/types.ts
+@@ -204,0 +205,19 @@ export type ProcessLogChunk = {
++// Issue 实时输出（与后端 `issue_logs` 用例的读取状态对齐）。
++export type IssueLogStatus =
++  | "ok"
++  | "no_attempt"
++  | "attempt_gone"
++  | "truncated"
++  | "repo_not_found";
++
++export type IssueLogChunk = {
++  repo_id: string;
++  issue_number: number;
++  status: IssueLogStatus;
++  attempt_id: string | null;
++  latest_attempt_id: string | null;
++  content: string;
++  next_offset: number;
++  eof: boolean;
++};
++
+diff --git a/src/backend/api/cli_parser.py b/src/backend/api/cli_parser.py
+index 9c854562..9752fded 100644
+--- a/src/backend/api/cli_parser.py
++++ b/src/backend/api/cli_parser.py
+@@ -260 +260 @@ def build_parser() -> argparse.ArgumentParser:
+-        default="daemon",
++        default=None,
+@@ -269,0 +270,10 @@ def build_parser() -> argparse.ArgumentParser:
++    logs_parser.add_argument(
++        "--issue",
++        type=int,
++        default=None,
++        metavar="N",
++        help=(
++            "Read the per-Issue agent output log for the given Issue number "
++            "(mutually exclusive with --kind)."
++        ),
++    )
+diff --git a/src/backend/api/cli_registry.py b/src/backend/api/cli_registry.py
+index de0eb2be..0fd83cac 100644
+--- a/src/backend/api/cli_registry.py
++++ b/src/backend/api/cli_registry.py
+@@ -39,0 +40,8 @@ from backend.core.use_cases.console_processes import (
++from backend.core.use_cases.issue_logs import (
++    DEFAULT_TAIL_BYTES,
++    IssueLogSelection,
++    IssueLogStatus,
++    create_issue_log_reader,
++    describe_issue_log_status,
++    read_issue_log,
++)
+@@ -586,0 +595,177 @@ def _print_logs_fallback(repo_id: str, kind: str) -> int:
++def _print_issue_log_selection(selection: IssueLogSelection, *, issue_number: int) -> None:
++    """把一次 Issue 日志读取结果写到原始终端。"""
++    notice = describe_issue_log_status(selection, issue_number=issue_number)
++    if notice:
++        console.print(f"[yellow]{notice}[/]")
++    if selection.content:
++        # 内容本身可能跨多次 read 拼出，避免 Rich 把 Agent 文本当 markup 解析。
++        print(selection.content, end="")
++
++
++def _follow_issue_log(
++    *,
++    repo_id: str,
++    issue_number: int,
++    lines: int,
++    follow: bool,
++    contexts: list[Any],
++) -> int:
++    """读取一个 Issue 的输出；``follow`` 为真时持续跟随直到结束或 Ctrl-C。
++
++    首次给尾部窗口；之后按字节偏移轮询。重试产生新尝试时提示并切换；
++    尝试被清理、日志被截断、Issue 结束且日志稳定后退出。
++    """
++    repo_path_by_id = {context.repo_id: context.repo_path for context in contexts}
++    reader = create_issue_log_reader(repo_path_by_id.get)
++
++    # 首次读取：默认跟随最新尝试，给尾部窗口（tail=True 忽略偏移，起点由
++    # 文件大小回推，大于窗口的历史内容不会被从头倾泻出来）。
++    selection = read_issue_log(
++        reader=reader,
++        repo_id=repo_id,
++        issue_number=issue_number,
++        attempt_id=None,
++        offset=0,
++        max_bytes=DEFAULT_TAIL_BYTES,
++        tail=True,
++    )
++    if selection.status is IssueLogStatus.REPO_NOT_FOUND:
++        console.print(f"[yellow]Repository '{repo_id}' 未注册或已禁用。[/]")
++        return 1
++    if selection.status is IssueLogStatus.NO_ATTEMPT:
++        console.print(f"[yellow]Issue #{issue_number} 暂无可用输出（尚未开始或日志已清理）。[/]")
++        return 0
++
++    current_attempt_id = selection.attempt_id
++    if selection.content:
++        _print_issue_log_selection(
++            IssueLogSelection(
++                status=selection.status,
++                attempt_id=selection.attempt_id,
++                latest_attempt_id=selection.latest_attempt_id,
++                content=_trim_to_last_lines(selection.content, lines),
++                next_offset=selection.next_offset,
++                eof=selection.eof,
++            ),
++            issue_number=issue_number,
++        )
++    next_offset = selection.next_offset
++
++    if not follow:
++        # 不带 --follow：打印尾部窗口即退出，绝不进入轮询。
++        return 0
++
++    while True:
++        try:
++            time.sleep(_LOGS_POLL_INTERVAL_SECONDS)
++        except KeyboardInterrupt:
++            return 0
++
++        selection = read_issue_log(
++            reader=reader,
++            repo_id=repo_id,
++            issue_number=issue_number,
++            attempt_id=current_attempt_id,
++            offset=next_offset,
++            max_bytes=_DEFAULT_LOG_CHUNK_BYTES,
++        )
++
++        if selection.status is IssueLogStatus.ATTEMPT_GONE:
++            console.print(
++                f"[yellow]Issue #{issue_number} 的尝试 {current_attempt_id} 已不可用；"
++                "切换至最新尝试。[/]"
++            )
++            # 重新定位到最新尝试（偏移重置，避免把旧偏移拼到新文件）。
++            selection = read_issue_log(
++                reader=reader,
++                repo_id=repo_id,
++                issue_number=issue_number,
++                attempt_id=None,
++                offset=0,
++                max_bytes=_DEFAULT_LOG_CHUNK_BYTES,
++            )
++            if selection.status is not IssueLogStatus.OK:
++                _print_issue_log_selection(selection, issue_number=issue_number)
++                return 0
++            current_attempt_id = selection.attempt_id
++            next_offset = selection.next_offset
++            _print_issue_log_selection(selection, issue_number=issue_number)
++            continue
++
++        if selection.status is IssueLogStatus.TRUNCATED:
++            console.print(
++                f"[yellow]Issue #{issue_number} 的日志已轮转或截断，已从最新位置续读。[/]"
++            )
++            selection = read_issue_log(
++                reader=reader,
++                repo_id=repo_id,
++                issue_number=issue_number,
++                attempt_id=current_attempt_id,
++                offset=0,
++                max_bytes=_DEFAULT_LOG_CHUNK_BYTES,
++            )
++            if selection.status is not IssueLogStatus.OK:
++                _print_issue_log_selection(selection, issue_number=issue_number)
++                return 0
++            next_offset = selection.next_offset
++            _print_issue_log_selection(selection, issue_number=issue_number)
++            continue
++
++        if selection.status is IssueLogStatus.NO_ATTEMPT:
++            _print_issue_log_selection(selection, issue_number=issue_number)
++            return 0
++
++        if selection.status is IssueLogStatus.REPO_NOT_FOUND:
++            _print_issue_log_selection(selection, issue_number=issue_number)
++            return 1
++
++        # 检测是否出现了新尝试（重试/新执行）。
++        if (
++            selection.latest_attempt_id is not None
++            and selection.attempt_id is not None
++            and selection.latest_attempt_id != selection.attempt_id
++        ):
++            console.print(
++                f"[dim](new attempt detected: {selection.attempt_id} -> "
++                f"{selection.latest_attempt_id})[/]"
++            )
++            selection = read_issue_log(
++                reader=reader,
++                repo_id=repo_id,
++                issue_number=issue_number,
++                attempt_id=selection.latest_attempt_id,
++                offset=0,
++                max_bytes=_DEFAULT_LOG_CHUNK_BYTES,
++            )
++            current_attempt_id = selection.attempt_id
++            next_offset = selection.next_offset
++            _print_issue_log_selection(selection, issue_number=issue_number)
++            continue
++
++        if selection.content:
++            print(selection.content, end="")
++        next_offset = selection.next_offset
++        if selection.eof:
++            # Issue 结束且日志稳定：再确认没有新尝试后退出。
++            latest = read_issue_log(
++                reader=reader,
++                repo_id=repo_id,
++                issue_number=issue_number,
++                attempt_id=None,
++                offset=0,
++                max_bytes=1,
++            )
++            if latest.status is not IssueLogStatus.OK or latest.attempt_id == current_attempt_id:
++                print(
++                    f"\n[dim](Issue #{issue_number} attempt {current_attempt_id} "
++                    "reached end of log; tail ends here)[/]"
++                )
++                return 0
++            # 新尝试出现：切过去继续跟随。
++            console.print(
++                f"[dim](new attempt detected: {current_attempt_id} -> " f"{latest.attempt_id})[/]"
++            )
++            current_attempt_id = latest.attempt_id
++            next_offset = latest.next_offset
++
++
+@@ -594 +779,5 @@ def _run_logs_command(
+-    """Print the recent log of a managed daemon / review-daemon process."""
++    """Print the recent log of a managed daemon / review-daemon process.
++
++    With ``--issue <N>``, read the per-Issue agent output log instead of a
++    managed process log. The two modes are mutually exclusive.
++    """
+@@ -613 +802 @@ def _run_logs_command(
+-    kind = getattr(parsed, "kind", _DAEMON_KIND) or _DAEMON_KIND
++    kind = getattr(parsed, "kind", None) or _DAEMON_KIND
+@@ -620,0 +810,14 @@ def _run_logs_command(
++    issue_number = getattr(parsed, "issue", None)
++    if issue_number is not None:
++        # ``--kind`` 缺省为 daemon；只有用户显式传了非默认 kind 才与
++        # ``--issue`` 冲突（Typer 路径靠 ``kind_explicit``，argparse 路径靠
++        # ``parsed.kind is not None``）。
++        kind_explicit = bool(getattr(parsed, "kind_explicit", False)) or (
++            getattr(parsed, "kind", None) is not None and kind != _DAEMON_KIND
++        )
++        if kind_explicit:
++            error_console.print(
++                "[red]--issue and --kind are mutually exclusive; use one or the other.[/]"
++            )
++            return 2
++
+@@ -623,0 +827,9 @@ def _run_logs_command(
++    if issue_number is not None:
++        return _follow_issue_log(
++            repo_id=context.repo_id,
++            issue_number=issue_number,
++            lines=lines,
++            follow=follow,
++            contexts=contexts,
++        )
++
+diff --git a/src/backend/api/cli_typer_runner.py b/src/backend/api/cli_typer_runner.py
+index a42aecf4..0bf0a2d5 100644
+--- a/src/backend/api/cli_typer_runner.py
++++ b/src/backend/api/cli_typer_runner.py
+@@ -110,0 +111,8 @@ def logs_command(
++    issue: Annotated[
++        int | None,
++        typer.Option(
++            "--issue",
++            help="Read the per-Issue agent output log for the given Issue number "
++            "(mutually exclusive with --kind).",
++        ),
++    ] = None,
+@@ -123 +131,2 @@ def logs_command(
+-    the review-daemon log instead.
++    the review-daemon log instead.  Pass --issue <N> to read the per-Issue
++    agent output log for one Issue instead of a process log.
+@@ -125,0 +135,4 @@ def logs_command(
++    # Typer 的默认值与显式传参无法区分；``--issue`` 与 ``--kind`` 互斥，
++    # 用 ``--issue is not None`` 结合 ``kind != default`` 判断是否冲突，
++    # 避免把默认 ``daemon`` 当成用户显式选择。
++    kind_explicit = kind != LogsKindChoice.daemon
+@@ -131,0 +145,2 @@ def logs_command(
++        issue=issue,
++        kind_explicit=kind_explicit,
+diff --git a/src/backend/api/routes/agent_runner_console.py b/src/backend/api/routes/agent_runner_console.py
+index 2b783d23..a0deff21 100644
+--- a/src/backend/api/routes/agent_runner_console.py
++++ b/src/backend/api/routes/agent_runner_console.py
+@@ -13,0 +14 @@ import logging
++from collections.abc import Callable, Sequence
+@@ -27,0 +29 @@ from backend.core.shared.interfaces.runner_console import (
++from backend.core.shared.models.agent_runner import RepositoryRunContext
+@@ -43,0 +46,5 @@ from backend.core.use_cases.console_stats import (
++from backend.core.use_cases.issue_logs import (
++    DEFAULT_TAIL_BYTES,
++    create_issue_log_reader,
++    read_issue_log,
++)
+@@ -174,0 +182,65 @@ def read_console_process_log(process_id: str, offset: int = 0) -> dict:
++# ─────────────────────────────────────────────────────────────────────────────
++# Issue 实时输出（只读，按仓库 + Issue 号）
++# ─────────────────────────────────────────────────────────────────────────────
++
++
++def _issue_log_repo_path_resolver(
++    contexts: Sequence[RepositoryRunContext],
++) -> Callable[[str], Path | None]:
++    """把已解析的仓库上下文列表适配为 Issue 日志读取器的解析回调。"""
++    by_repo_id = {context.repo_id: context.repo_path for context in contexts}
++    return by_repo_id.get
++
++
++@router.get("/agent-runner/console/repositories/{repo_id}/issues/{issue_number}/logs")
++def read_console_issue_log(
++    repo_id: str,
++    issue_number: int,
++    offset: int = 0,
++    attempt_id: str | None = None,
++    max_bytes: int = DEFAULT_TAIL_BYTES,
++    tail: bool = False,
++) -> dict:
++    """按仓库 + Issue 号续读该 Issue 的 Agent 可见输出。
++
++    与托管进程日志端点刻意分开：Issue 日志不属于托管进程 registry，读取
++    范围被限制在该注册仓库的固定日志子树内，不接受客户端传入的文件路径。
++    ``tail=true`` 时忽略 ``offset``，返回末尾 ``max_bytes`` 字节的窗口，
++    ``next_offset`` 对齐到文件末尾，便于前端「先尾部后增量」。
++    """
++    if issue_number <= 0:
++        raise HTTPException(status_code=400, detail="issue_number must be a positive integer.")
++    if offset < 0:
++        raise HTTPException(status_code=400, detail="offset must be non-negative.")
++    contexts = _resolve_contexts()
++    known_repo_ids = {context.repo_id for context in contexts}
++    if repo_id not in known_repo_ids:
++        raise HTTPException(
++            status_code=404,
++            detail=f"Repository '{repo_id}' is not registered or not enabled.",
++        )
++    reader = create_issue_log_reader(_issue_log_repo_path_resolver(contexts))
++    # 上限收敛：单次读取不得超过默认尾部窗口，避免客户端用大 max_bytes
++    # 一次拉走整份日志。
++    bounded_max_bytes = min(max(max_bytes, 1), DEFAULT_TAIL_BYTES)
++    selection = read_issue_log(
++        reader=reader,
++        repo_id=repo_id,
++        issue_number=issue_number,
++        attempt_id=attempt_id,
++        offset=offset,
++        max_bytes=bounded_max_bytes,
++        tail=tail,
++    )
++    return {
++        "repo_id": repo_id,
++        "issue_number": issue_number,
++        "status": selection.status.value,
++        "attempt_id": selection.attempt_id,
++        "latest_attempt_id": selection.latest_attempt_id,
++        "content": selection.content,
++        "next_offset": selection.next_offset,
++        "eof": selection.eof,
++    }
++
++
+diff --git a/src/backend/core/shared/interfaces/issue_log_reader.py b/src/backend/core/shared/interfaces/issue_log_reader.py
+new file mode 100644
+index 00000000..3d8b030c
+--- /dev/null
++++ b/src/backend/core/shared/interfaces/issue_log_reader.py
+@@ -0,0 +1,98 @@
++"""按 Issue 读取 Agent 输出日志的窄端口与数据模型。
++
++本模块定义「仓库 + Issue 编号 + 尝试」三维定位的只读日志读取契约：
++
++- :class:`IssueLogReader` 是 core 侧消费的唯一端口；Infrastructure 提供
++  面向固定日志子树（``<repo>/logs/agent-runner/issues/<repo_id>/``）的
++  实现。Core 不感知文件布局细节，只处理选择规则与状态映射。
++- 读取结果被限制在已注册仓库的受控日志子树内：不接受绝对路径、任意
++  目录或客户端传入的文件名，防路径逃逸与跨 Issue 混读。
++
++配合 :mod:`backend.core.use_cases.issue_logs` 的选择规则，CLI 与 Console
++API 共享同一日志事实源与同一状态语义。
++"""
++
++from __future__ import annotations
++
++from dataclasses import dataclass
++from enum import Enum
++from typing import Protocol
++
++
++class IssueLogStatus(Enum):
++    """一次 Issue 日志读取的结果状态。
++
++    - ``OK``：命中目标尝试文件，``content``/``next_offset``/``eof`` 有效。
++    - ``NO_ATTEMPT``：该 Issue 当前没有任何日志文件（尚未开始或已清理）。
++    - ``ATTEMPT_GONE``：调用方指定的 ``attempt_id`` 曾存在但已不可读
++      （被清理或轮转）；调用方应回到「最新尝试」重新定位。
++    - ``TRUNCATED``：文件在两次读取之间被替换或截断（``offset`` 越过
++      当前文件大小）；调用方应重置偏移重读。
++    - ``REPO_NOT_FOUND``：``repo_id`` 未注册或未启用，服务端拒绝读取。
++    """
++
++    OK = "ok"
++    NO_ATTEMPT = "no_attempt"
++    ATTEMPT_GONE = "attempt_gone"
++    TRUNCATED = "truncated"
++    REPO_NOT_FOUND = "repo_not_found"
++
++
++@dataclass(frozen=True)
++class IssueLogReadRequest:
++    """一次 Issue 日志读取的显式选择条件。
++
++    ``attempt_id`` 为 ``None`` 表示「读最新尝试」；否则要求服务端返回该
++    尝试，若文件已不存在则以 ``ATTEMPT_GONE`` 显式报告，而不是静默改读
++    别的尝试或别的 Issue。
++
++    ``tail`` 为 ``True`` 时忽略 ``offset``，返回文件末尾最多
++    ``max_bytes`` 字节的尾部窗口（用于「首次给尾部」场景）；返回的
++    ``next_offset`` 对齐到文件末尾，便于调用方原地转入续读。
++    """
++
++    repo_id: str
++    issue_number: int
++    attempt_id: str | None = None
++    offset: int = 0
++    max_bytes: int = 64 * 1024
++    tail: bool = False
++
++
++@dataclass(frozen=True)
++class IssueLogReadResult:
++    """一次 Issue 日志读取的结果。
++
++    ``attempt_id`` 是服务端按文件身份生成的不透明标识（文件名），调用方
++    续读时原样回传；``next_offset`` 是下一次读取的字节偏移；``eof`` 表示
++    本次已读到当前文件末尾。非 ``OK`` 状态下 ``content`` 为空、
++    ``attempt_id``/``next_offset`` 仅在同名尝试仍存在时有意义。
++    """
++
++    status: IssueLogStatus
++    attempt_id: str | None
++    content: str
++    next_offset: int
++    eof: bool
++
++
++class IssueLogReader(Protocol):
++    """按已注册仓库、Issue 编号与字节偏移读取日志的最窄端口。"""
++
++    def read_issue_log(self, request: IssueLogReadRequest) -> IssueLogReadResult:
++        """读取一次有界日志块。
++
++        实现方负责：把 ``repo_id`` 解析到已注册仓库根、把读取范围限制在
++        该仓库固定日志子树内、处理 UTF-8 分段与文件消失/截断，并返回稳定
++        的 ``attempt_id`` 与 ``next_offset``。实现方不得接受或拼接调用方
++        提供的任意文件路径。
++        """
++        ...
++
++
++__all__ = [
++    "IssueLogReader",
++    "IssueLogReadRequest",
++    "IssueLogReadResult",
++    "IssueLogStatus",
++]
+diff --git a/src/backend/core/use_cases/agent_runner_orchestration_runtime.py b/src/backend/core/use_cases/agent_runner_orchestration_runtime.py
+index 265c9d81..f499b26b 100644
+--- a/src/backend/core/use_cases/agent_runner_orchestration_runtime.py
++++ b/src/backend/core/use_cases/agent_runner_orchestration_runtime.py
+@@ -3,0 +4 @@ from __future__ import annotations
++import sys
+@@ -757,2 +758,4 @@ def run_once(request: RunOnceRequest) -> int:
+-    # 串行路径：concurrency<=1 时逐个处理，与历史行为逐字节一致——无线程池、
+-    # 无每 Issue 日志文件、无实时看板（NoOp 视图把展示调用变为空操作）。
++    # 串行路径：concurrency<=1 时逐个处理。与历史行为的唯一差异是——每个
++    # Issue 的可见输出同时落到 ``logs/agent-runner/issues/<repo_id>/`` 下
++    # 的 per-Issue 文件（供第二终端 / Console 按 Issue 续读），原启动终端
++    # 的可读输出经 ``console_sink`` 原样保留（TTY 与重定向两种场景一致）。
+@@ -760,0 +764,27 @@ def run_once(request: RunOnceRequest) -> int:
++        log_base = repo_path / "logs"
++
++        def _console_mirror(chunk: str) -> None:
++            print(chunk, end="", flush=True, file=sys.stdout)
++
++        def _process_serial(item: tuple[IssueSummary, str]) -> int:
++            issue, issue_kind = item
++            try:
++                with issue_output_routing(
++                    repo_id=effective_repo_id,
++                    issue_number=issue.number,
++                    log_base=log_base,
++                    output_view=noop_view,
++                    console_sink=_console_mirror,
++                ) as sink:
++                    scoped_runner = _OutputRoutedProcessRunner(process_runner, sink)
++                    return _process_single_issue(
++                        issue,
++                        issue_kind,
++                        process_runner=scoped_runner,
++                        output_view=noop_view,
++                        **process_kwargs,
++                    )
++            except Exception as exc:  # noqa: BLE001 - 单个 Issue 的 I/O 不应中断本轮。
++                _logger.error("Serial routing failed for Issue #%d: %s", issue.number, exc)
++                return 1
++
+@@ -763,7 +793 @@ def run_once(request: RunOnceRequest) -> int:
+-            exit_code |= _process_single_issue(
+-                issue,
+-                issue_kind,
+-                process_runner=process_runner,
+-                output_view=noop_view,
+-                **process_kwargs,
+-            )
++            exit_code |= _process_serial((issue, issue_kind))
+diff --git a/src/backend/core/use_cases/agent_runner_output_routing.py b/src/backend/core/use_cases/agent_runner_output_routing.py
+index 00b8cd7a..e7d716a4 100644
+--- a/src/backend/core/use_cases/agent_runner_output_routing.py
++++ b/src/backend/core/use_cases/agent_runner_output_routing.py
+@@ -19,0 +20 @@ from __future__ import annotations
++import inspect
+@@ -47,0 +49,7 @@ class _OutputRoutedProcessRunner:
++        # 测试 fake 与自定义 runner 常用精简签名（缺 output_sink /
++        # output_protocol 等新参数）。预先探测被包装 run 接受的参数集，
++        # 委托时只传它声明得起的部分，避免包装器比接口「多嘴」炸 TypeError。
++        try:
++            self._accepted_params = set(inspect.signature(wrapped.run).parameters)
++        except (TypeError, ValueError):
++            self._accepted_params = set()
+@@ -60,0 +69 @@ class _OutputRoutedProcessRunner:
++        output_protocol: str | None = None,
+@@ -62,12 +71,22 @@ class _OutputRoutedProcessRunner:
+-        """Delegate to the wrapped runner, defaulting ``output_sink`` per Issue."""
+-        return self._wrapped.run(
+-            command,
+-            cwd=cwd,
+-            check=check,
+-            timeout=timeout,
+-            inactivity_timeout=inactivity_timeout,
+-            capture_output=capture_output,
+-            input_text=input_text,
+-            label=label,
+-            output_sink=output_sink if output_sink is not None else self._sink,
+-        )
++        """Delegate to the wrapped runner, defaulting ``output_sink`` per Issue.
++
++        签名与 :class:`IProcessRunner` 逐参数对齐，但只把被包装运行器实际
++        声明的关键字参数继续下传；未声明的保持缺省语义（等价于历史行为里
++        根本不存在该参数）。
++        """
++        run_kwargs: dict[str, object] = {
++            "cwd": cwd,
++            "check": check,
++            "timeout": timeout,
++            "inactivity_timeout": inactivity_timeout,
++            "capture_output": capture_output,
++            "input_text": input_text,
++            "label": label,
++            "output_sink": output_sink if output_sink is not None else self._sink,
++            "output_protocol": output_protocol,
++        }
++        if self._accepted_params:
++            run_kwargs = {
++                name: value for name, value in run_kwargs.items() if name in self._accepted_params
++            }
++        return self._wrapped.run(command, **run_kwargs)
+@@ -129,0 +149 @@ def issue_output_routing(
++    console_sink: Callable[[str], None] | None = None,
+@@ -143,0 +164,4 @@ def issue_output_routing(
++        console_sink: 可选的「原终端镜像」回调。串行 ``iar run`` 传入它，
++            让 sink 同时把可读文本写回启动终端（保持原有前台输出），并行
++            daemon 则保持 ``None``（面板已承担展示）。只传**可读文本**，
++            避免 Rich 控制字符污染日志文件。
+@@ -151,0 +176,2 @@ def issue_output_routing(
++        if console_sink is not None:
++            console_sink(chunk)
+diff --git a/src/backend/core/use_cases/issue_logs.py b/src/backend/core/use_cases/issue_logs.py
+new file mode 100644
+index 00000000..a52b2f1a
+--- /dev/null
++++ b/src/backend/core/use_cases/issue_logs.py
+@@ -0,0 +1,157 @@
++"""按 Issue 读取 Agent 输出日志的统一选择规则。
++
++CLI（``iar logs --issue``）与 Console API
++（``GET .../issues/{issue_number}/logs``）共享同一套语义，本模块是唯一
++事实源：
++
++- 默认跟随该 Issue 的**最新尝试**；客户端拿到 ``attempt_id`` 后在续读时
++  原样回传，重试产生新文件时由客户端显式切换并重置偏移。
++- 缺失、清理、截断、未注册仓库分别映射为稳定状态，CLI/API 各自渲染为
++  可读提示，不把「进程还活着」或「另一个 Issue 的日志」冒充成当前进度。
++- 读取范围只经 :class:`IssueLogReader` 窄端口；core 不直接 glob 任意
++  路径，也不感知 ``Path`` 布局细节。
++"""
++
++from __future__ import annotations
++
++from collections.abc import Callable
++from dataclasses import dataclass
++from pathlib import Path
++
++from backend.core.shared.interfaces.issue_log_reader import (
++    IssueLogReader,
++    IssueLogReadRequest,
++    IssueLogStatus,
++)
++
++#: CLI 首次读取时回看最近内容的默认字节窗口（约等于 64 KiB 尾部）。
++#: 与进程日志的 ``_DEFAULT_LOG_CHUNK_BYTES`` 对齐，避免首次加载过大。
++DEFAULT_TAIL_BYTES = 64 * 1024
++
++
++@dataclass(frozen=True)
++class IssueLogSelection:
++    """一次 Issue 日志读取的高层结果，供 CLI / API 渲染。
++
++    ``latest_attempt_id`` 始终是当前最新尝试（若存在），供调用方判断
++    「是否出现了新尝试」；``status`` 为底层读取状态。
++    """
++
++    status: IssueLogStatus
++    attempt_id: str | None
++    latest_attempt_id: str | None
++    content: str
++    next_offset: int
++    eof: bool
++
++
++def read_issue_log(
++    *,
++    reader: IssueLogReader,
++    repo_id: str,
++    issue_number: int,
++    attempt_id: str | None = None,
++    offset: int = 0,
++    max_bytes: int = DEFAULT_TAIL_BYTES,
++    tail: bool = False,
++) -> IssueLogSelection:
++    """按仓库 + Issue 读取一次日志块，并附带上「最新尝试」供切换判断。
++
++    Args:
++        reader: Issue 日志窄端口实现。
++        repo_id: 已注册仓库 ID。
++        issue_number: Issue 编号（必须为正整数）。
++        attempt_id: 显式指定的尝试；``None`` 表示读最新尝试。
++        offset: 字节偏移；``0`` 表示从头读。
++        max_bytes: 单次读取字节上限。
++        tail: ``True`` 时忽略 ``offset``，返回末尾 ``max_bytes`` 字节的
++            尾部窗口；``next_offset`` 对齐到文件末尾，便于原地续读。
++
++    Returns:
++        带最新尝试标识的读取结果；``status`` 非 ``OK`` 时 ``content``
++        为空，``latest_attempt_id`` 仍反映当前最新尝试（便于提示切换）。
++    """
++    result = reader.read_issue_log(
++        IssueLogReadRequest(
++            repo_id=repo_id,
++            issue_number=issue_number,
++            attempt_id=attempt_id,
++            offset=offset,
++            max_bytes=max_bytes,
++            tail=tail,
++        )
++    )
++
++    # ``latest_attempt_id`` 必须始终反映「当前最新尝试」，而不是「本次读到
++    # 的尝试」；否则客户端无法发现重试产生的新文件。因此无论本次读取是否
++    # 命中显式 ``attempt_id``，都单独探一次最新尝试。
++    latest = reader.read_issue_log(
++        IssueLogReadRequest(
++            repo_id=repo_id,
++            issue_number=issue_number,
++            attempt_id=None,
++            offset=0,
++            max_bytes=1,
++        )
++    )
++    latest_attempt_id = latest.attempt_id if latest.status is IssueLogStatus.OK else None
++
++    return IssueLogSelection(
++        status=result.status,
++        attempt_id=result.attempt_id,
++        latest_attempt_id=latest_attempt_id,
++        content=result.content,
++        next_offset=result.next_offset,
++        eof=result.eof,
++    )
++
++
++def describe_issue_log_status(selection: IssueLogSelection, *, issue_number: int) -> str:
++    """把读取状态渲染为一句可读的 CLI / 日志提示。"""
++    if selection.status is IssueLogStatus.NO_ATTEMPT:
++        return f"Issue #{issue_number} 暂无可用输出（尚未开始或日志已清理）。"
++    if selection.status is IssueLogStatus.ATTEMPT_GONE:
++        if selection.latest_attempt_id and selection.latest_attempt_id != selection.attempt_id:
++            return (
++                f"Issue #{issue_number} 的尝试 {selection.attempt_id} 已不可用；"
++                f"已切换到最新尝试 {selection.latest_attempt_id}。"
++            )
++        return f"Issue #{issue_number} 的尝试 {selection.attempt_id} 已不可用（日志已清理）。"
++    if selection.status is IssueLogStatus.TRUNCATED:
++        return f"Issue #{issue_number} 的日志已轮转或截断，已从最新位置续读。"
++    if selection.status is IssueLogStatus.REPO_NOT_FOUND:
++        return "目标仓库未注册或已禁用，无法读取 Issue 输出。"
++    return ""
++
++
++def create_issue_log_reader(
++    repo_path_resolver: Callable[[str], Path | None],
++) -> IssueLogReader:
++    """创建默认的文件系统 Issue 日志读取器。
++
++    Core 只面向 ``IssueLogReader`` 端口编程，但具体的文件系统实现由
++    Infrastructure 提供；为保持 ``core`` 不静态 import ``infrastructure``
++    的架构约束（``hooks/shared/check_architecture.py`` 的 AST 检查），这里
++    用 ``importlib`` 在运行时解析实现，与
++    :mod:`backend.core.use_cases.agent_runner_factory` 的做法一致。
++
++    Args:
++        repo_path_resolver: 把 ``repo_id`` 解析为已注册仓库根的回调；
++            返回 ``None`` 表示未注册或不可用。
++
++    Returns:
++        面向已注册仓库固定日志子树的只读读取器。
++    """
++    import importlib
++
++    reader_module = importlib.import_module("backend.infrastructure.console.issue_log_reader")
++    return reader_module.FilesystemIssueLogReader(repo_path_resolver)
++
++
++__all__ = [
++    "DEFAULT_TAIL_BYTES",
++    "IssueLogSelection",
++    "create_issue_log_reader",
++    "describe_issue_log_status",
++    "read_issue_log",
++]
+diff --git a/src/backend/engines/agent_runner/templates/skills/iar-operator/SKILL.md b/src/backend/engines/agent_runner/templates/skills/iar-operator/SKILL.md
+index 353ec772..402318e4 100644
+--- a/src/backend/engines/agent_runner/templates/skills/iar-operator/SKILL.md
++++ b/src/backend/engines/agent_runner/templates/skills/iar-operator/SKILL.md
+@@ -3 +3 @@ name: iar-operator
+-description: Use IAR to initialize a repository, enqueue PRDs, inspect Issues and the ready queue, run work once, or manage IAR daemons.
++description: Use IAR to initialize a repository, enqueue PRDs, inspect Issues and the ready queue, run work once, manage IAR daemons, or view live agent output per Issue.
+@@ -8 +8 @@ description: Use IAR to initialize a repository, enqueue PRDs, inspect Issues an
+-Use this skill when the user asks to operate the IAR CLI or its managed runner. First identify whether they want setup, enqueueing, read-only inspection, one execution pass, or persistent background processing. Do not turn a request to inspect or preview into execution.
++Use this skill when the user asks to operate the IAR CLI or its managed runner. First identify whether they want setup, enqueueing, read-only inspection, one execution pass, persistent background processing, or viewing agent output. Do not turn a request to inspect, preview, or "just check progress" into execution.
+@@ -15 +15 @@ Use this skill when the user asks to operate the IAR CLI or its managed runner.
+-| Put a PRD in the queue | `iar issue create --help`; see “PRD 与 Issue 操作” in `docs/guides/agent-runner.md` | Creates or publishes a GitHub Issue and can make it ready for the runner. Confirm the intended PRD and readiness before writing. |
++| Put a PRD in the queue | `iar issue create --help`; see "PRD 与 Issue 操作" in `docs/guides/agent-runner.md` | Creates or publishes a GitHub Issue and can make it ready for the runner. Confirm the intended PRD and readiness before writing. |
+@@ -19 +19 @@ Use this skill when the user asks to operate the IAR CLI or its managed runner.
+-| Inspect or manage persistent runner processes | `iar registry start|stop`, `iar registry list`, `iar daemon status`, `iar logs`; see “启动与停止托管 daemon” in `docs/guides/agent-runner.md` | `registry start` launches persistent runner and review-daemon processes by default; `daemon status` and `logs` inspect them, `registry stop` terminates managed processes. |
++| Inspect or manage persistent runner processes | `iar registry start|stop`, `iar registry list`, `iar daemon status`, `iar logs`; see "启动与停止托管 daemon" in `docs/guides/agent-runner.md` | `registry start` launches persistent runner and review-daemon processes by default; `daemon status` and `logs` inspect them, `registry stop` terminates managed processes. |
+@@ -22,0 +23,17 @@ Use the repository guide as the authoritative command reference. Start with `iar
++## Viewing agent live output
++
++Four distinct paths, driven by the user's intent. Never start `iar run` or `iar registry start` just because the user asked to *view* progress — a read-only request gets a read-only command.
++
++| Intent | Path | Boundaries |
++|---|---|---|
++| Start a task and watch a quick summary via Codex `/ps` | Ask Codex to start `iar run --repo <path> --max-issues 1` (or `iar logs --repo <path> --issue <N> --follow`) in a background terminal of the *current* session, then type `/ps` | `/ps` only lists background terminals started by this same Codex session, and shows at most the last few non-empty output lines. Use it for a quick glance, not full history. |
++| Follow one Issue's full output from a second terminal | `iar logs --repo <path> --issue <N> --follow` (omit `--follow` for a one-shot tail) | Works for tasks started anywhere (this session, another terminal, the daemon). First output is a tail window; `--follow` polls by offset, announces and switches to the new attempt on retry, and prints an explicit empty state when the Issue has not started or its log was cleaned. |
++| Just view an existing task's progress (no new execution) | `iar logs --repo <path> --issue <N>`; use `iar issue list --repo <path>` to find the Issue number first if unknown | Read-only: never starts or restarts work. A task launched outside this Codex session never appears in `/ps` — use this command instead. |
++| View output in the web console | Open the Roadmap page, enter the PRD detail for the PRD linked to the Issue, and switch to the "实时输出" tab | Same log source as the CLI; polls every few seconds with pause/resume. The tab exists only for PRDs with a linked Issue. |
++
++Notes that keep expectations accurate:
++
++- `iar logs` without `--issue` keeps its old meaning: it tails the log of a *managed process* (`--kind daemon` or `--kind review_daemon`), not a specific Issue. `--issue` and `--kind` are mutually exclusive.
++- `/ps` reads whatever the background command writes to stdout. Keda keeps Issue number, attempt switches, and key actions recognizable on stdout, but `/ps` truncates to recent lines — complete history lives in `iar logs --issue` or the web console.
++- An exited Issue keeps its last log file; "no output yet" means the Issue has not started or its log was cleaned up, and the CLI says so explicitly instead of printing nothing.
++
+diff --git a/src/backend/infrastructure/console/issue_log_reader.py b/src/backend/infrastructure/console/issue_log_reader.py
+new file mode 100644
+index 00000000..3af2ece1
+--- /dev/null
++++ b/src/backend/infrastructure/console/issue_log_reader.py
+@@ -0,0 +1,248 @@
++"""文件系统版 Issue 日志读取器。
++
++在既有 Console 文件读取边界内，把读取范围限制在「已注册仓库根」下的
++固定日志子树 ``logs/agent-runner/issues/<repo_id>/``：
++
++- 仓库解析：``repo_id`` 必须能在当前 registry（``config.toml``）中解析
++  为启用的仓库，否则返回 ``REPO_NOT_FOUND``，绝不接受调用方传入的任意
++  路径或 repo_id 目录。
++- 尝试枚举：只匹配 ``issue-<N>-<时间戳>.log`` 命名，按修改时间取最新；
++  不接受客户端传入的文件名。
++- 安全读取：打开前做 ``resolve()`` 与父目录比对，拒绝符号链接逃逸；
++  读取按字节偏移做有界小块读取，不整文件装载；UTF-8 截断处用
++  ``errors="replace"`` 防止跨块乱码。
++
++本模块只依赖 ``core.shared.interfaces`` 与标准库，不反向依赖
++``engines`` / ``api``，保持四层依赖方向。
++"""
++
++from __future__ import annotations
++
++import logging
++import re
++from pathlib import Path
++from typing import Callable
++
++from backend.core.shared.interfaces.issue_log_reader import (
++    IssueLogReadRequest,
++    IssueLogReadResult,
++    IssueLogStatus,
++)
++
++_logger = logging.getLogger(__name__)
++
++#: 单次读取的默认字节上限（与进程日志的 ``_DEFAULT_LOG_CHUNK_BYTES`` 对齐）。
++_DEFAULT_MAX_BYTES = 64 * 1024
++
++#: 尝试文件名模式：``issue-<N>-<YYYYMMDD>-<HHMMSS>.log``。
++_ATTEMPT_NAME_PATTERN = re.compile(r"^issue-(\d+)-(\d{8}-\d{6})\.log$")
++
++
++def _issue_log_directory(repo_path: Path, repo_id: str) -> Path:
++    """返回某仓库下受控的 Issue 日志子树路径。"""
++    return repo_path / "logs" / "agent-runner" / "issues" / repo_id
++
++
++def _resolve_repo_path(
++    repo_id: str, repo_path_resolver: Callable[[str], Path | None]
++) -> Path | None:
++    """把 ``repo_id`` 解析为已注册仓库根；未注册或不可用返回 ``None``。
++
++    ``repo_path_resolver`` 由组装方注入（典型实现来自
++    ``resolve_repository_targets`` 的 registry 解析结果），本模块不自行
++    glob 用户路径。
++    """
++    try:
++        resolved = repo_path_resolver(repo_id)
++    except Exception as exc:  # noqa: BLE001 - 仓库解析失败一律视为不可用。
++        _logger.warning("Failed to resolve repository '%s': %s", repo_id, exc)
++        return None
++    if resolved is None:
++        return None
++    return resolved.expanduser().resolve()
++
++
++def _list_attempt_files(log_directory: Path, issue_number: int) -> list[tuple[str, Path, float]]:
++    """枚举某 Issue 的全部尝试文件，按修改时间升序。
++
++    返回 ``(attempt_id, path, mtime)`` 三元组；``attempt_id`` 即文件名，
++    对客户端不透明。只接受符合命名约定的常规文件，符号链接在后续
++    读取前再单独拦截。
++    """
++    if not log_directory.is_dir():
++        return []
++    candidates: list[tuple[str, Path, float]] = []
++    for entry in log_directory.iterdir():
++        match = _ATTEMPT_NAME_PATTERN.match(entry.name)
++        if match is None or int(match.group(1)) != issue_number:
++            continue
++        try:
++            stat_result = entry.stat()
++        except OSError:
++            continue
++        candidates.append((entry.name, entry, stat_result.st_mtime))
++    candidates.sort(key=lambda item: (item[2], item[0]))
++    return candidates
++
++
++def _is_within_directory(path: Path, directory: Path) -> bool:
++    """判断 ``path`` 解析后是否仍位于 ``directory`` 之内（防符号链接逃逸）。"""
++    try:
++        resolved = path.resolve(strict=True)
++        resolved.relative_to(directory.resolve())
++    except (OSError, ValueError):
++        return False
++    return True
++
++
++def _drop_incomplete_leading_utf8(raw_chunk: bytes) -> bytes:
++    """丢弃块首因任意偏移切分产生的不完整 UTF-8 序列。
++
++    尾部窗口的起点可能落在多字节字符中间；continuation 字节
++    （``0b10xxxxxx``）不可能是序列首字节，直接剥掉即可对齐到下一个
++    字符边界。
++    """
++    index = 0
++    while index < len(raw_chunk) and (raw_chunk[index] & 0b1100_0000) == 0b1000_0000:
++        index += 1
++    return raw_chunk[index:]
++
++
++def read_issue_log_chunk(
++    request: IssueLogReadRequest,
++    *,
++    repo_path_resolver: Callable[[str], Path | None],
++) -> IssueLogReadResult:
++    """按请求读取一次有界的 Issue 日志块。
++
++    Args:
++        request: 读取选择条件（仓库、Issue、可选尝试、字节偏移与上限）。
++        repo_path_resolver: 把 ``repo_id`` 解析为已注册仓库根的回调；
++            返回 ``None`` 表示未注册或不可用。
++
++    Returns:
++        稳定状态的读取结果；任何越界、缺失、截断都映射为显式状态，
++        不静默改读别的 Issue 或任意路径。
++    """
++    if request.offset < 0:
++        # 负偏移视同截断：让调用方重置到 0 重读，而不是抛出 500。
++        return IssueLogReadResult(
++            status=IssueLogStatus.TRUNCATED,
++            attempt_id=request.attempt_id,
++            content="",
++            next_offset=0,
++            eof=True,
++        )
++
++    repo_path = _resolve_repo_path(request.repo_id, repo_path_resolver)
++    if repo_path is None:
++        return IssueLogReadResult(
++            status=IssueLogStatus.REPO_NOT_FOUND,
++            attempt_id=None,
++            content="",
++            next_offset=0,
++            eof=True,
++        )
++
++    log_directory = _issue_log_directory(repo_path, request.repo_id)
++    attempts = _list_attempt_files(log_directory, request.issue_number)
++    if not attempts:
++        return IssueLogReadResult(
++            status=IssueLogStatus.NO_ATTEMPT,
++            attempt_id=None,
++            content="",
++            next_offset=0,
++            eof=True,
++        )
++
++    if request.attempt_id is None:
++        selected_attempt_id, selected_path, _mtime = attempts[-1]
++    else:
++        matched = [item for item in attempts if item[0] == request.attempt_id]
++        if not matched:
++            return IssueLogReadResult(
++                status=IssueLogStatus.ATTEMPT_GONE,
++                attempt_id=request.attempt_id,
++                content="",
++                next_offset=0,
++                eof=True,
++            )
++        selected_attempt_id, selected_path, _mtime = matched[-1]
++
++    # 符号链接 / 路径逃逸检查：即使文件名来自我们自己的枚举，也在打开前
++    # 再验证一次解析后的真实位置仍在受控子树内。
++    if not _is_within_directory(selected_path, log_directory):
++        _logger.warning(
++            "Refusing to read issue log outside controlled subtree: %s",
++            selected_path,
++        )
++        return IssueLogReadResult(
++            status=IssueLogStatus.ATTEMPT_GONE,
++            attempt_id=selected_attempt_id,
++            content="",
++            next_offset=0,
++            eof=True,
++        )
++
++    try:
++        file_size = selected_path.stat().st_size
++    except OSError:
++        return IssueLogReadResult(
++            status=IssueLogStatus.ATTEMPT_GONE,
++            attempt_id=selected_attempt_id,
++            content="",
++            next_offset=0,
++            eof=True,
++        )
++
++    if request.offset > file_size:
++        # 文件在两次读取之间被截断或替换：显式报告，禁止把旧偏移拼到
++        # 新内容上（会把旧尝试错拼成当前进度）。
++        return IssueLogReadResult(
++            status=IssueLogStatus.TRUNCATED,
++            attempt_id=selected_attempt_id,
++            content="",
++            next_offset=0,
++            eof=True,
++        )
++
++    max_bytes = max(request.max_bytes, 1)
++    # 尾部窗口：忽略请求偏移，从 ``max(0, size - max_bytes)`` 起读，返回的
++    # ``next_offset`` 对齐到文件末尾，调用方原地转入续读即可。窗口起点可能
++    # 落在多字节字符中间：丢弃首个不完整序列，避免首行出现乱码字符。
++    start_offset = max(0, file_size - max_bytes) if request.tail else request.offset
++    with selected_path.open("rb") as log_file:
++        log_file.seek(start_offset)
++        raw_chunk = log_file.read(max_bytes)
++        next_offset = log_file.tell()
++        eof = log_file.read(1) == b""
++
++    if request.tail and start_offset > 0:
++        raw_chunk = _drop_incomplete_leading_utf8(raw_chunk)
++
++    return IssueLogReadResult(
++        status=IssueLogStatus.OK,
++        attempt_id=selected_attempt_id,
++        content=raw_chunk.decode("utf-8", errors="replace"),
++        next_offset=next_offset,
++        eof=eof,
++    )
++
++
++class FilesystemIssueLogReader:
++    """把 :func:`read_issue_log_chunk` 适配为 ``IssueLogReader`` 端口。
++
++    通过注入的 ``repo_path_resolver`` 与 registry 对齐；读取规则本身
++    不依赖具体配置来源，便于测试与不同宿主（CLI / Console API）复用。
++    """
++
++    def __init__(self, repo_path_resolver: Callable[[str], Path | None]) -> None:
++        """注入仓库路径解析回调。"""
++        self._repo_path_resolver = repo_path_resolver
++
++    def read_issue_log(self, request: IssueLogReadRequest) -> IssueLogReadResult:
++        """读取一次有界日志块；参数与状态语义见 :func:`read_issue_log_chunk`。"""
++        return read_issue_log_chunk(request, repo_path_resolver=self._repo_path_resolver)
++
++
++__all__ = ["FilesystemIssueLogReader", "read_issue_log_chunk"]

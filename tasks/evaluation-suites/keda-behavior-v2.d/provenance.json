@@ -1,0 +1,160 @@
+[
+  {
+    "case_id": "init-lock-ignore",
+    "source_commit": "67d7e36db144f797e5f24a36e8906ee2a5c0839a",
+    "base_commit": "ad5d181035fa5df46cb04c7bcbd98b0cfbfea618",
+    "source_cluster": "67d7e36db144f797e5f24a36e8906ee2a5c0839a",
+    "stratum": "small",
+    "source_paths": [
+      "src/backend/engines/agent_runner/repository_gitignore.py"
+    ],
+    "input_provenance": "agent-curated from public repository change; not human-reviewed",
+    "fidelity": "local integration; external GitHub is a transport fixture",
+    "live_evaluated_before_first_inclusion": false,
+    "first_included_suite_version": "1.0.0"
+  },
+  {
+    "case_id": "monitor-partial-read",
+    "source_commit": "b0fff41386cb8923ddb2c200dea2e5d915829a91",
+    "base_commit": "40e1e7d5d477f66c0cfb1a2fa27da474a8a1a6a1",
+    "source_cluster": "b0fff41386cb8923ddb2c200dea2e5d915829a91",
+    "stratum": "medium",
+    "source_paths": [
+      "src/backend/core/use_cases/agent_runner_monitor.py"
+    ],
+    "input_provenance": "agent-curated from public repository change; not human-reviewed",
+    "fidelity": "local integration; external GitHub is a transport fixture",
+    "live_evaluated_before_first_inclusion": false,
+    "first_included_suite_version": "1.0.0"
+  },
+  {
+    "case_id": "protocol-cancellation",
+    "source_commit": "582c594b2b21e471be79b68332564b95e988b7bf",
+    "base_commit": "436ce051ed5edac4ac11bfcba2db4edd01ba36c2",
+    "source_cluster": "582c594b2b21e471be79b68332564b95e988b7bf",
+    "stratum": "medium",
+    "source_paths": [
+      "src/backend/core/shared/interfaces/agent_output_protocol.py",
+      "src/backend/engines/agent_runner"
+    ],
+    "input_provenance": "agent-curated from public repository change; not human-reviewed",
+    "fidelity": "local integration; external GitHub is a transport fixture",
+    "live_evaluated_before_first_inclusion": false,
+    "first_included_suite_version": "1.0.0"
+  },
+  {
+    "case_id": "content-timeouts",
+    "source_commit": "37a607ff118a2d98b0e3383d84c0b8b6ce7551ed",
+    "base_commit": "4f4fbffc22f7faf3c45f58f5922c9177db134569",
+    "source_cluster": "37a607ff118a2d98b0e3383d84c0b8b6ce7551ed",
+    "stratum": "cross-layer",
+    "source_paths": [
+      "src/backend",
+      "config.toml"
+    ],
+    "input_provenance": "agent-curated from public repository change; not human-reviewed",
+    "fidelity": "local integration; external GitHub is a transport fixture",
+    "live_evaluated_before_first_inclusion": false,
+    "first_included_suite_version": "1.0.0"
+  },
+  {
+    "case_id": "retry-executor-choice",
+    "source_commit": "875c98435d702e7d0423cda90ce8eeee71859c19",
+    "base_commit": "582c594b2b21e471be79b68332564b95e988b7bf",
+    "source_cluster": "875c98435d702e7d0423cda90ce8eeee71859c19",
+    "stratum": "cross-layer",
+    "source_paths": [
+      "src/backend/core",
+      "src/backend/infrastructure/github_models.py",
+      "src/backend/engines/agent_runner/output_protocols"
+    ],
+    "input_provenance": "agent-curated from public repository change; not human-reviewed",
+    "fidelity": "local integration; external GitHub is a transport fixture",
+    "live_evaluated_before_first_inclusion": false,
+    "first_included_suite_version": "1.0.0"
+  },
+  {
+    "case_id": "remote-failure-reason",
+    "source_commit": "147ab13245c5aed403fd847d3a3337386bb7db4e",
+    "base_commit": "f5ba21d6587ce1ea0b398d121e4d89db7e2d10d0",
+    "source_cluster": "147ab13245c5aed403fd847d3a3337386bb7db4e",
+    "stratum": "cross-layer",
+    "source_paths": [
+      "src/backend/core/use_cases/agent_runner_monitor.py",
+      "src/backend/core/use_cases/runtime_dashboard.py"
+    ],
+    "input_provenance": "agent-curated from public repository change; not human-reviewed",
+    "fidelity": "local integration; external GitHub is a transport fixture",
+    "live_evaluated_before_first_inclusion": false,
+    "first_included_suite_version": "1.0.0"
+  },
+  {
+    "case_id": "skill-sync-opt-in",
+    "source_commit": "a5d043f0e60a3130a7e06ffa435eebadbf2f06db",
+    "base_commit": "6da56af2de8371bdac1ca61551fa857dfb3a4aac",
+    "source_cluster": "a5d043f0e60a3130a7e06ffa435eebadbf2f06db",
+    "stratum": "small",
+    "source_paths": [
+      "src/backend/api/cli_startup_skill_sync.py"
+    ],
+    "input_provenance": "agent-curated from public repository change; not human-reviewed",
+    "fidelity": "local integration; external GitHub is a transport fixture",
+    "live_evaluated_before_first_inclusion": false,
+    "first_included_suite_version": "1.0.0"
+  },
+  {
+    "case_id": "presence-response-loss",
+    "source_commit": "7b9a8bdb2b3ed254c0baa81acfce37d20260c3cd",
+    "base_commit": "5997e246a676dda416b1a6e5733e99d929378a76",
+    "source_cluster": "7b9a8bdb2b3ed254c0baa81acfce37d20260c3cd",
+    "stratum": "medium",
+    "source_paths": [
+      "src/backend/core/shared/interfaces/agent_runner.py",
+      "src/backend/core/use_cases/machine_presence.py",
+      "src/backend/infrastructure/github_client.py",
+      "src/backend/infrastructure/github_issue_ops.py"
+    ],
+    "input_provenance": "agent-curated from public repository change; not human-reviewed",
+    "fidelity": "local integration; external GitHub is a transport fixture",
+    "live_evaluated_before_first_inclusion": false,
+    "first_included_suite_version": "1.0.0"
+  },
+  {
+    "case_id": "console-port-reuse",
+    "source_commit": "2059d4ffdfa8c5a8cc550e2705b090ce439981d6",
+    "base_commit": "6dceaa0ba94c285776e76109a324051d1dd04d79",
+    "source_cluster": "2059d4ffdfa8c5a8cc550e2705b090ce439981d6",
+    "stratum": "small",
+    "source_paths": [
+      "src/backend/api/cli_typer_console.py"
+    ],
+    "input_provenance": "agent-curated from public repository change; not human-reviewed",
+    "fidelity": "local integration; external GitHub is a transport fixture",
+    "live_evaluated_before_first_inclusion": false,
+    "first_included_suite_version": "1.0.0",
+    "reference_corrections": [
+      {
+        "suite_version": "1.2.0",
+        "reason": "Original public patch permits macOS wildcard listener reuse; independently reproduced against current product. Add bounded TCP probe after closing bind probe.",
+        "origin": "review-discovered boundary, independently reproduced; not a new independent task",
+        "original_source_commit_retained": true
+      }
+    ]
+  },
+  {
+    "case_id": "monitor-distinct-history",
+    "source_commit": "9f7a09027d92827cbaa78c8099b5e5f3716e1ae6",
+    "base_commit": "d143a77aec8d8172df75e4090b3e0bb4d956e7d4",
+    "source_cluster": "9f7a09027d92827cbaa78c8099b5e5f3716e1ae6",
+    "stratum": "medium",
+    "source_paths": [
+      "src/backend/api/routes/agent_runner.py",
+      "src/backend/core/shared/interfaces/runner_console.py",
+      "src/backend/infrastructure/persistence/console_store_history.py"
+    ],
+    "input_provenance": "agent-curated from public repository change; not human-reviewed",
+    "fidelity": "local integration; external GitHub is a transport fixture",
+    "live_evaluated_before_first_inclusion": false,
+    "first_included_suite_version": "1.0.0"
+  }
+]

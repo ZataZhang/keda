@@ -1,0 +1,157 @@
+id: keda-behavior-v2
+version: 1.2.1
+title: Keda 新行为对照集（首次使用后归开发集）
+repo_path: .
+base_ref: main
+rubric:
+  id: default-rubric
+  version: v1
+check:
+  timeout_seconds: 180
+cases:
+- id: init-lock-ignore
+  prompt: 初始化产生的 TOML 写锁文件不应出现在 Git 未跟踪列表。更新初始化维护的忽略规则，使任意目录中的 *.toml.lock 被忽略，但正常
+    .toml 配置仍可跟踪。保留用户原有忽略规则，重复同步应幂等，dry-run 不写文件。
+  check_recipe: uv-pytest
+  base_ref: ad5d181035fa5df46cb04c7bcbd98b0cfbfea618
+  split: dev
+  check_targets:
+  - tests/test_eval_behavior.py
+  held_out:
+  - tests/test_eval_behavior.py
+  candidate_hidden:
+  - tasks/evaluation-suites
+  - tasks/evidence
+  gold_patch: gold.patch
+- id: monitor-partial-read
+  prompt: 监控补扫近期历史 Issue 时，单个 Issue 已删除或读取失败不应阻止整仓快照更新。跳过该历史条目，继续保留其他 Issue 的最新状态，包括已关闭的
+    Issue。主队列扫描本身失败仍需报告，不能把不完整扫描伪装为成功。
+  check_recipe: uv-pytest
+  base_ref: 40e1e7d5d477f66c0cfb1a2fa27da474a8a1a6a1
+  split: dev
+  check_targets:
+  - tests/test_eval_behavior.py
+  held_out:
+  - tests/test_eval_behavior.py
+  candidate_hidden:
+  - tasks/evaluation-suites
+  - tasks/evidence
+  gold_patch: gold.patch
+- id: protocol-cancellation
+  prompt: 人工接管 verifier 后，取消探针已触发，但使用 claude-stream-json 或 codex-json-lines 输出协议的
+    Agent 子进程仍在运行。修复生产协议执行路径，使 cancel_check 为真时及时终止子进程并抛出 InterruptedError；持续为假时正常完成。保留正常输出和用量解析行为。
+  check_recipe: uv-pytest
+  base_ref: 436ce051ed5edac4ac11bfcba2db4edd01ba36c2
+  split: dev
+  check_targets:
+  - tests/test_eval_behavior.py
+  held_out:
+  - tests/test_eval_behavior.py
+  candidate_hidden:
+  - tasks/evaluation-suites
+  - tasks/evidence
+  gold_patch: gold.patch
+- id: content-timeouts
+  prompt: 为内容生成增加可持久化的时限设置，范围限后端配置和 Console API。GET /api/v1/agent-runner/lifecycle-settings
+    返回 content_generation_timeouts，含 max_seconds=86400 和 targets。四类 key 为 issue_from_prd、issue_from_prompt、draft_pr、prd_from_issue，默认分别600、600、1200、600秒。PUT
+    /api/v1/agent-runner/lifecycle-settings/content-generation-timeouts 接受 scope=global
+    或 repository、仓库 repo_id、values 键值映射；仓库覆盖优先，null 删除覆盖恢复继承。返回更新后的视图，target 包含 key、timeout_seconds、global_timeout_seconds。时限仅接受1到86400的整数；拒绝布尔、小数、未知key和空更新，HTTP
+    422且文件不变。局部更新不得覆盖无关设置。
+  check_recipe: uv-pytest
+  base_ref: 4f4fbffc22f7faf3c45f58f5922c9177db134569
+  split: dev
+  check_targets:
+  - tests/test_eval_behavior.py
+  held_out:
+  - tests/test_eval_behavior.py
+  candidate_hidden:
+  - tasks/evaluation-suites
+  - tasks/evidence
+  gold_patch: gold.patch
+- id: retry-executor-choice
+  prompt: Console 的 retry_failed_with_executor 动作接受换执行器并续跑后，本次实际执行器必须使用用户选择，优先于阶段预设绑定；显式命令行
+    --agent 仍保持最高优先级，不能被这次 Console 选择覆盖。覆盖要通过 SQLite 在后续运行可见，只消费一次，不改全局或仓库预设。已排队且存在待消费覆盖的同一任务再次提交时应接受：同一选择重复提交保持幂等，提交不同执行器时将待消费覆盖更新为本次最新选择，均不重复翻转标签。保留对无失败、无待消费覆盖的运行中任务的拒绝行为。
+  check_recipe: uv-pytest
+  base_ref: 582c594b2b21e471be79b68332564b95e988b7bf
+  split: dev
+  check_targets:
+  - tests/test_eval_behavior.py
+  held_out:
+  - tests/test_eval_behavior.py
+  - tests/eval_support.py
+  candidate_hidden:
+  - tasks/evaluation-suites
+  - tasks/evidence
+  gold_patch: gold.patch
+- id: remote-failure-reason
+  prompt: '任务在另一台机器失败，本机没有运行账本时，运行看板也要显示原因。监控应从最近的 ## Agent Runner ... Failed 评论提取摘要，经快照传给看板
+    last_error_summary。有代码块时使用最有用的错误行，跳过尾部 git hint；没有代码块时使用标题后的说明。忽略后续无关评论，已有本机错误摘要优先，复用已有评论读取，不增加
+    GitHub 查询。'
+  check_recipe: uv-pytest
+  base_ref: f5ba21d6587ce1ea0b398d121e4d89db7e2d10d0
+  split: dev
+  check_targets:
+  - tests/test_eval_behavior.py
+  held_out:
+  - tests/test_eval_behavior.py
+  - tests/eval_support.py
+  candidate_hidden:
+  - tasks/evaluation-suites
+  - tasks/evidence
+  gold_patch: gold.patch
+- id: skill-sync-opt-in
+  prompt: 普通交互命令启动时不要默认修改用户级 Skill。随包 operator 的启动自动同步仅在 KEDACODE_AUTO_SKILL_SYNC=1
+    时启用；未设置或0时不安装、不刷新。KEDACODE_NO_SKILL_SYNC=1 优先禁止同步。保持版本缓存、用户修改保护以及机器输出、帮助、非交互和
+    dry-run 的既有跳过规则。范围限启动同步。
+  check_recipe: uv-pytest
+  base_ref: 6da56af2de8371bdac1ca61551fa857dfb3a4aac
+  split: dev
+  check_targets:
+  - tests/test_eval_behavior.py
+  held_out:
+  - tests/test_eval_behavior.py
+  candidate_hidden:
+  - tasks/evaluation-suites
+  - tasks/evidence
+  gold_patch: gold.patch
+- id: presence-response-loss
+  prompt: 机器状态板 Issue 创建可能已在服务端成功，但客户端丢失响应。初始化应先回读并复用已存在的 open 状态板，不能直接失败或再次创建重复 Issue。已有状态板时不得创建新
+    Issue，未能确认落地时仍应报告原始错误。保留状态板选择的兼容性。
+  check_recipe: uv-pytest
+  base_ref: 5997e246a676dda416b1a6e5733e99d929378a76
+  split: dev
+  check_targets:
+  - tests/test_eval_behavior.py
+  held_out:
+  - tests/test_eval_behavior.py
+  candidate_hidden:
+  - tasks/evaluation-suites
+  - tasks/evidence
+  gold_patch: gold.patch
+- id: console-port-reuse
+  prompt: POSIX 上 Console 停止后立刻重启，端口仍有 TIME_WAIT 连接时误报占用。修复端口选择，使已关闭监听器的可重用端口能够继续使用；仍在监听的其他服务不能误判为空闲。显式端口冲突继续报错，保留
+    Windows 的现有行为。范围限 Python Console 端口探测。
+  check_recipe: uv-pytest
+  base_ref: 6dceaa0ba94c285776e76109a324051d1dd04d79
+  split: dev
+  check_targets:
+  - tests/test_eval_behavior.py
+  held_out:
+  - tests/test_eval_behavior.py
+  candidate_hidden:
+  - tasks/evaluation-suites
+  - tasks/evidence
+  gold_patch: gold.patch
+- id: monitor-distinct-history
+  prompt: 监控补扫近期运行 Issue 的名额应按不同 Issue 计数。某个 Issue 多次重试不能挤掉仍在7天窗口内的其他 Issue，每仓最多20个不同编号；保持仓库隔离、最近优先和已有未收口生命周期记录补扫行为。使用真实运行账本读取，不能仅扩大任意行数上限。
+  check_recipe: uv-pytest
+  base_ref: d143a77aec8d8172df75e4090b3e0bb4d956e7d4
+  split: dev
+  check_targets:
+  - tests/test_eval_behavior.py
+  held_out:
+  - tests/test_eval_behavior.py
+  candidate_hidden:
+  - tasks/evaluation-suites
+  - tasks/evidence
+  gold_patch: gold.patch

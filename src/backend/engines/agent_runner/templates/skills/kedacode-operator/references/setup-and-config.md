@@ -122,3 +122,22 @@ Once the environment is set up, everyday operations start from the routing table
 
 
 For an initialized repository, run `kc agent setup --local --dry-run --json` from its checkout. Report its effective implementation executor and binaries found on PATH. Reuse a valid choice or ask the user to choose an installed executor. After confirmation, use `kc agent setup --local --agent <name> --yes` to write the Git-ignored personal override. An empty candidate list is compatible with completing CLI installation. PATH discovery does not verify startup, authentication or model access.
+
+## 本地评测
+
+Use `kc eval suites --json` to inspect versioned suites in the selected checkout. Pass `--repo <path>`
+when running from outside it. Reading suites or a report does not start model calls.
+
+1. Run `kc eval calibrate --suite keda-behavior-v2 --case console-port-reuse --output-dir /tmp/keda-calibration`.
+   Each case requires three valid empty-patch failures and three reference-patch passes. Keep the directory for the next step.
+2. When the user authorizes real model use, run
+   `kc eval run --live --suite keda-behavior-v2 --case console-port-reuse --calibration /tmp/keda-calibration --output-dir /tmp/keda-live`.
+   A run requires calibration for the same suite content and Git bases. Add `--review-preset <name>`
+   to add a fourth workflow with a different review preset. The implementation preset and total per-cell budget stay matched.
+3. Read `kc eval report /tmp/keda-live --json` for completed cells, valid scores, patch passes, and
+   passes that also finished delivery. No model invocation is needed to rebuild reports.
+
+Execution and calibration require macOS/Linux. GitHub issue and PR operations in the benchmark use
+local fixtures. A finished matrix may contain wrong answers or timeouts. Exit 1 instead indicates
+failed calibration or missing/invalid benchmark data. Check per-cell logs before interpreting scores.
+Use unique output directories so earlier records remain available.

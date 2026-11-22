@@ -1,0 +1,1471 @@
+diff --git a/config.toml b/config.toml
+index e0477fcc..02f31634 100644
+--- a/config.toml
++++ b/config.toml
+@@ -429,0 +430,33 @@ allow_execute_yes = true
++# =============================================================================
++# Agent Runner REPL Configuration (`iar` with no subcommand)
++# =============================================================================
++# Controls the interactive REPL entrypoint. Default agent is `claude`;
++# `--agent codex|kimi` overrides it per invocation. `--agent auto` is
++# rejected here (use `iar run` for that).
++[agent_runner.repl]
++enabled = true
++default_agent = "claude"
++default_output_dir = "logs/agent-runner/repl"
++max_context_chars = 24000
++agent_timeout_seconds = 120
++# Commands the REPL executor may run without explicit confirmation.
++# Each entry is a prefix matched against the argv tail after `iar`.
++auto_confirm_commands = [
++  "labels sync --dry-run",
++  "run --dry-run",
++  "review --dry-run",
++  "ask --plan-only",
++]
++# Commands that prompt the user for confirmation before execution.
++confirm_commands = [
++  "run",
++  "daemon",
++  "review",
++  "review-daemon",
++  "issue create",
++  "recover",
++  "blocked-continue",
++  "worktree create",
++  "worktree remove",
++]
++
+diff --git a/docs/guides/agent-runner.md b/docs/guides/agent-runner.md
+index fab93e0d..5e203c90 100644
+--- a/docs/guides/agent-runner.md
++++ b/docs/guides/agent-runner.md
+@@ -1158,0 +1159,84 @@ iar recover --issue 5 --branch issue-5
++## REPL 入口
++
++直接运行 `iar`（不带任何子命令）会进入交互式 REPL 入口。底层调用
++[`claude` / `codex` / `kimi`](#repl-agent--command-protocol) 等本地
++agent，把仓库上下文与自然语言指令直接转成 IAR 子命令并执行。
++
++### 行为差异
++
++| 触发方式 | 行为 |
++|---|---|
++| `iar`（TTY） | 启动 REPL，循环读取用户输入，调用 agent，把 agent 标注的 `<<IAR_EXEC>>` 命令翻译成 `iar <subcommand>` 并执行 |
++| `iar`（非 TTY） | 打印 Typer 帮助文本并以非零退出码失败，避免 CI / pipe 脚本 hang 住 |
++| `iar --help` / `iar -h` | 仍然打印帮助（不进入 REPL） |
++| `iar repl` | 显式启动 REPL 的子命令形式 |
++| `iar repl --agent codex` | 显式覆盖 REPL 默认 agent |
++
++非 TTY 行为保证现有脚本（如 `cd repo && iar --help`）继续工作。
++
++### REPL Agent & Command Protocol
++
++- 默认 agent 来自 `[agent_runner.repl].default_agent`（默认 `claude`）。
++- `--agent codex|kimi` 可覆盖；`--agent auto` 在 REPL 入口被拒绝并回退
++  到 `[agent_runner.repl].default_agent`（auto 仅用于 `iar run`）。
++- agent 的回复里通过标记协议请求执行 IAR 子命令：
++
++  ```
++  <<IAR_EXEC>> iar labels sync --dry-run <<END_IAR_EXEC>>
++  ```
++
++  REPL 把标记里的命令交给命令执行器，执行器按白名单与确认策略运行：
++  - 默认白名单覆盖 `init` / `labels` / `issue` / `run` / `daemon` /
++    `review` / `review-daemon` / `recover` / `blocked-continue` / `ask` /
++    `deliberate` / `takeover` / `worktree` / `registry` / `workflow` /
++    `completion`。
++  - 只读 / dry-run 命令自动执行（`labels sync --dry-run`、
++    `run --dry-run`、`ask --plan-only` 等）。
++  - 写操作 / 高风险命令（`run`、`daemon`、`issue create`、`recover`、
++    `blocked-continue`、`worktree create/remove` 等）执行前会询问
++    `Execute? [y/N]`。
++  - 不在白名单内的命令、含 shell 元字符的请求、`git push` / `git merge`
++    / `git reset` 等直接 git 写操作都会被拒绝并反馈给 agent。
++
++每次执行的结果以 `[IAR_EXEC_RESULT]` 块回写到对话历史；agent 在下一轮
++回复里就能看到 stdout / stderr / exit_code。
++
++### 退出与审计
++
++- 用户输入 `/exit` 或 `Ctrl+C` / EOF 时退出 REPL，返回码为 0。
++- 会话元数据、对话历史、命令执行记录写入
++  `logs/agent-runner/repl/<session-id>/`，包含 `session.json`、
++  `transcript.md` 与 `commands.json`。可通过 `[agent_runner.repl].default_output_dir`
++  覆盖。
++- REPL 内部最大 64 轮（防御性封顶），防止 agent 卡在循环里无限增长。
++
++### 与 `iar ask` 的边界
++
++- `iar ask <prompt>` 是单次决策入口：要求 agent 输出结构化 JSON
++  DecisionPlan + 受控执行；适合 CI / 一次性自动执行场景。
++- `iar`（REPL）是持续多轮对话入口：agent 可以反复请求执行 IAR 子命令，
++  每轮都把结果反馈回对话；适合本地探索与人工协作场景。
++- 二者共享 `[agent_runner.interactive_decision]` 与
++  `[agent_runner.repl]` 配置段，但 settings 完全独立（默认 agent、
++  超时、白名单都分开）。
++
++### 示例：同步 Labels 并启动 daemon
++
++```bash
++$ cd /path/to/repo
++$ iar
++iar> sync the labels for me, then start the daemon.
++I'll sync the labels.
++<<IAR_EXEC>> iar labels sync <<END_IAR_EXEC>>
++[Executed] iar labels sync
++stdout: ✅ labels synced
++
++Now I'll start the daemon.
++<<IAR_EXEC>> iar daemon <<END_IAR_EXEC>>
++This command starts a long-running daemon. Execute? [y/N] y
++[Executed] iar daemon
++stdout: Daemon started with PID 12345
++
++iar> /exit
++```
++
+diff --git a/docs/guides/configuration.md b/docs/guides/configuration.md
+index f3c9eeca..e94847db 100644
+--- a/docs/guides/configuration.md
++++ b/docs/guides/configuration.md
+@@ -146,0 +147,57 @@ allow_execute_yes = true
++## Agent Runner REPL 配置
++
++`config.toml` 的 `[agent_runner.repl]` 段配置 `iar` 无参数进入的交互式
++REPL 入口。整段与 `[agent_runner.interactive_decision]` 隔离，二者可
++独立调整默认 agent、超时、白名单策略。
++
++```toml
++[agent_runner.repl]
++enabled = true
++default_agent = "claude"
++default_output_dir = "logs/agent-runner/repl"
++max_context_chars = 24000
++agent_timeout_seconds = 120
++auto_confirm_commands = [
++  "labels sync --dry-run",
++  "run --dry-run",
++  "review --dry-run",
++  "ask --plan-only",
++]
++confirm_commands = [
++  "run",
++  "daemon",
++  "review",
++  "review-daemon",
++  "issue create",
++  "recover",
++  "blocked-continue",
++  "worktree create",
++  "worktree remove",
++]
++```
++
++- `enabled`：是否启用 REPL 入口；设为 `false` 时 `iar` 无参数仍走
++  Typer 默认帮助路径。
++- `default_agent`：默认 REPL agent（支持 `claude`、`codex`、`kimi`）。
++  `auto` 不被接受为 REPL 默认 agent（`iar run` 才用 auto）。
++- `default_output_dir`：REPL 会话审计目录前缀；每次会话创建
++  `<default_output_dir>/<session-id>/`，包含 `session.json`、
++  `transcript.md`、`commands.json`。
++- `max_context_chars`：首条 system prompt 的最大字符数（超出部分被
++  截断并保留头尾）。
++- `agent_timeout_seconds`：每轮调用 agent 子进程的超时；超时或非零
++  退出码会作为 `[IAR_EXEC_RESULT] exit_code=...` 块追加到对话历史。
++- `auto_confirm_commands`：前缀匹配列表，匹配的命令直接执行。
++- `confirm_commands`：前缀匹配列表，匹配的命令执行前先询问用户
++  `Execute? [y/N]`。
++
++`auto_confirm_commands` 与 `confirm_commands` 都按「剥离 `iar` 后剩余
++的命令 tail」做前缀匹配，例如 `"run --dry-run"` 只对
++`iar run --dry-run` 自动放行；`"run"` 则对 `iar run ...` 的所有调用
++询问确认。
++
++`.iar.toml` 可在 `[agent_runner.repl]` 段覆盖上述任意字段，实现仓库级
++REPL 策略：默认全局 agent 是 `claude`，某个仓库可改为 `kimi` 或
++`codex`；默认 dry-run 白名单之外的命令可通过
++`confirm_commands` 在仓库层收紧或放宽。
++
+diff --git a/src/backend/api/cli.py b/src/backend/api/cli.py
+index d82bd44f..8a21e1f2 100644
+--- a/src/backend/api/cli.py
++++ b/src/backend/api/cli.py
+@@ -56,0 +57,5 @@ from backend.core.use_cases.interactive_decision import run_interactive_decision
++from backend.core.use_cases.repl_session import (
++    ReplSessionDeps,
++    ReplSessionInputs,
++    run_repl_session,
++)
+@@ -75,0 +81 @@ from backend.engines.agent_runner.factory import (
++    create_repl_command_executor,
+@@ -883,0 +890,47 @@ def _run_parsed_command(parsed: argparse.Namespace) -> int:
++        if parsed.command == "repl":
++            contexts = _resolve_cli_repository_targets(
++                parsed=parsed,
++                runner_settings=runner_settings,
++                repo_id=repo_id,
++                repo_override=repo_override,
++            )
++            for context in contexts:
++                require_iar_repository_initialized(context.repo_path, process_runner)
++            if len(contexts) != 1:
++                logger.error(
++                    "repl requires exactly one target repository. "
++                    "Use --repo or --repo-id to specify."
++                )
++                return 1
++            context = contexts[0]
++            _ensure_gh_auth_or_prompt(context.repo_path, process_runner)
++            github_client = create_github_client(context.repo_path, process_runner)
++            agent_override = getattr(parsed, "agent", None)
++            if agent_override == "auto":
++                logger.error(
++                    "`--agent auto` is not supported by the REPL entrypoint; "
++                    "use `claude`, `codex`, or `kimi`. "
++                    "Falling back to [agent_runner.repl].default_agent."
++                )
++                agent_override = None
++            effective_agent = agent_override or context.config.repl.default_agent
++            content_generator = create_content_generator(
++                process_runner, read_only=False
++            )
++            command_executor = create_repl_command_executor(
++                process_runner=process_runner,
++                config=context.config.repl,
++            )
++            inputs = ReplSessionInputs(
++                context=context,
++                agent=effective_agent,
++                config=context.config.repl,
++            )
++            deps = ReplSessionDeps(
++                process_runner=process_runner,
++                content_generator=content_generator,
++                command_executor=command_executor,
++                github_client=github_client,
++            )
++            return run_repl_session(inputs, deps)
++
+diff --git a/src/backend/api/cli_parser.py b/src/backend/api/cli_parser.py
+index def811a9..353df33c 100644
+--- a/src/backend/api/cli_parser.py
++++ b/src/backend/api/cli_parser.py
+@@ -298,0 +299,12 @@ def build_parser() -> argparse.ArgumentParser:
++    repl_parser = subparsers.add_parser(
++        "repl",
++        help="Run the interactive REPL session (equivalent to `iar` with no subcommand).",
++    )
++    repl_parser.add_argument(
++        "--agent",
++        choices=("codex", "claude", "kimi"),
++        default=None,
++        help="Override the REPL agent (defaults to [agent_runner.repl].default_agent).",
++    )
++    add_common_options(repl_parser)
++
+diff --git a/src/backend/api/cli_typer.py b/src/backend/api/cli_typer.py
+index 9cf8e32b..9fc011f7 100644
+--- a/src/backend/api/cli_typer.py
++++ b/src/backend/api/cli_typer.py
+@@ -73 +73 @@ app = typer.Typer(
+-    no_args_is_help=True,
++    no_args_is_help=False,
+@@ -198 +198 @@ def _run_typer_repository_command(
+-@app.callback()
++@app.callback(invoke_without_command=True)
+@@ -203,0 +204,9 @@ def _app_callback(
++    agent: Annotated[
++        RunAgentChoice | None,
++        typer.Option(
++            "--agent",
++            help="Override the REPL default agent. "
++            "Accepts codex/claude/kimi; 'auto' falls back to "
++            "[agent_runner.repl].default_agent.",
++        ),
++    ] = None,
+@@ -205 +214 @@ def _app_callback(
+-    """Store top-level options so legacy and modern forms both work."""
++    """Store top-level options and dispatch the no-arg REPL entrypoint."""
+@@ -206,0 +216,18 @@ def _app_callback(
++    if ctx.invoked_subcommand is not None:
++        return
++    # No subcommand and the user did not pass --help. The REPL entrypoint
++    # only makes sense inside an interactive terminal; otherwise fall back
++    # to Typer's standard help-and-exit behaviour so CI / pipe-driven
++    # scripts keep working.
++    agent_override = _enum_value(agent) if agent is not None else None
++    if sys.stdin.isatty():
++        _run_typer_command(
++            "repl",
++            repo=repo,
++            repo_id=repo_id,
++            config=config,
++            agent=agent_override,
++        )
++        return
++    typer.echo(ctx.get_help())
++    raise typer.Exit(code=1)
+@@ -874,0 +902,25 @@ def ask_command(
++@app.command("repl")
++def repl_command(
++    ctx: typer.Context,
++    agent: Annotated[
++        RunAgentChoice,
++        typer.Option(
++            "--agent",
++            help="Override the REPL agent (defaults to [agent_runner.repl].default_agent).",
++        ),
++    ] = RunAgentChoice.claude,
++    repo: RepoOption = None,
++    repo_id: RepoIdOption = None,
++    config: ConfigOption = None,
++) -> int:
++    """Run the interactive REPL session."""
++    selector_options = _typer_selector_options(
++        ctx, repo=repo, repo_id=repo_id, config=config
++    )
++    return _run_typer_command(
++        "repl",
++        **selector_options,
++        agent=_enum_value(agent),
++    )
++
++
+diff --git a/src/backend/core/shared/interfaces/agent_runner.py b/src/backend/core/shared/interfaces/agent_runner.py
+index 2218c185..377d6b29 100644
+--- a/src/backend/core/shared/interfaces/agent_runner.py
++++ b/src/backend/core/shared/interfaces/agent_runner.py
+@@ -10 +10 @@
+-模块内包含四个端口：
++模块内包含五个端口：
+@@ -14,0 +15 @@
++- ``IReplCommandExecutor``：在 REPL 入口中校验并执行 IAR 子命令。
+@@ -25,0 +27 @@ from collections.abc import Callable
++from dataclasses import dataclass
+@@ -40,0 +43,47 @@ from backend.core.shared.models.agent_deliberation import (
++@dataclass(frozen=True)
++class IarExecRequest:
++    """A single command request parsed from an ``<<IAR_EXEC>>`` marker.
++
++    Attributes:
++        argv: Argument vector of the requested command. The first element is
++            the IAR subcommand name (for example ``"labels"``); the remaining
++            elements are positional / optional arguments destined for that
++            subcommand.
++        raw_text: The original raw text inside the markers, preserved for
++            audit logging.
++    """
++
++    argv: tuple[str, ...]
++    raw_text: str
++
++
++@dataclass(frozen=True)
++class ReplExecOutcome:
++    """The result of executing a single IAR command from the REPL.
++
++    Attributes:
++        argv: The argv that was actually executed (echoed back so the REPL
++            can include it in audit logs and conversation history).
++        return_code: Exit code from the underlying subprocess.
++        stdout: Captured standard output, truncated by the executor.
++        stderr: Captured standard error, truncated by the executor.
++        rejected: True when the executor refused to execute the command
++            outright (whitelist violation or shell metacharacter).
++        rejection_reason: Human-readable explanation when ``rejected`` is
++            True; empty string otherwise.
++        confirmation_prompted: True when the user was asked to confirm the
++            command before execution (write/risky commands).
++        confirmation_granted: True when the user confirmed the command;
++            ``None`` when no confirmation was needed.
++    """
++
++    argv: tuple[str, ...]
++    return_code: int
++    stdout: str
++    stderr: str
++    rejected: bool = False
++    rejection_reason: str = ""
++    confirmation_prompted: bool = False
++    confirmation_granted: bool | None = None
++
++
+@@ -192,0 +242,31 @@ class IContentGenerator(ABC):
++class IReplCommandExecutor(ABC):
++    """在 REPL 入口中校验并执行 IAR 子命令的端口。
++
++    REPL use case 本身只负责「读取用户输入、调用 agent、解析
++    ``<<IAR_EXEC>>`` 标记、把结果回填到对话历史」。所有与命令本身
++    的策略（白名单、是否需要用户确认、如何执行、如何截断输出）都
++    收敛到本端口的实现里，方便在单元测试中替换成 fake 实现，也
++    方便未来扩展（例如集成 dry-run / 沙箱执行）。
++    """
++
++    @abstractmethod
++    def execute(
++        self,
++        request: IarExecRequest,
++        *,
++        repo_path: Path,
++    ) -> ReplExecOutcome:
++        """校验并执行一条来自 REPL 的 IAR 子命令请求。
++
++        Args:
++            request: 解析后的命令请求，包含 argv 与原始文本。
++            repo_path: 命令应在其下执行的目标仓库路径。
++
++        Returns:
++            ``ReplExecOutcome``：描述命令执行结果（成功、被拒、被
++            截断等）。被拒的命令也需要返回一个 outcome，由 REPL
++            use case 决定如何回写到对话历史。
++        """
++        ...
++
++
+diff --git a/src/backend/core/shared/models/agent_decision.py b/src/backend/core/shared/models/agent_decision.py
+index 148736dc..ac2abd8a 100644
+--- a/src/backend/core/shared/models/agent_decision.py
++++ b/src/backend/core/shared/models/agent_decision.py
+@@ -94,0 +95,52 @@ class InteractiveDecisionConfig:
++
++
++@dataclass(frozen=True)
++class ReplConfig:
++    """Core configuration for the ``iar`` REPL entrypoint.
++
++    Mirrors :class:`InteractiveDecisionConfig` but isolates the REPL's
++    risk surface (default agent, timeout, audit directory, command
++    allow / confirm lists) so that ``iar ask`` and ``iar`` (no args)
++    can evolve independently.
++
++    Attributes:
++        enabled: When ``False``, the no-arg CLI falls back to the
++            historical help-and-exit behaviour.
++        default_agent: Default agent name used when ``--agent`` is not
++            provided. ``"auto"`` is not accepted here — the CLI already
++            translates it before reaching this config.
++        default_output_dir: Directory under which ``<session_id>`` audit
++            folders are written.
++        max_context_chars: Maximum characters for the first system
++            prompt. Long prompts are truncated with markers.
++        agent_timeout_seconds: Per-turn timeout for agent subprocess
++            calls. Non-zero exit (including timeout) is appended back
++            to the conversation history so the agent can react.
++        auto_confirm_commands: Prefix list (after ``iar``) of command
++            argv tails that the executor may run without confirmation.
++        confirm_commands: Prefix list of command argv tails that must be
++            confirmed interactively before execution.
++    """
++
++    enabled: bool = True
++    default_agent: str = "claude"
++    default_output_dir: str = "logs/agent-runner/repl"
++    max_context_chars: int = 24000
++    agent_timeout_seconds: int = 120
++    auto_confirm_commands: tuple[str, ...] = (
++        "labels sync --dry-run",
++        "run --dry-run",
++        "review --dry-run",
++        "ask --plan-only",
++    )
++    confirm_commands: tuple[str, ...] = (
++        "run",
++        "daemon",
++        "review",
++        "review-daemon",
++        "issue create",
++        "recover",
++        "blocked-continue",
++        "worktree create",
++        "worktree remove",
++    )
+diff --git a/src/backend/core/shared/models/agent_runner.py b/src/backend/core/shared/models/agent_runner.py
+index 8a15d489..6ab34ef5 100644
+--- a/src/backend/core/shared/models/agent_runner.py
++++ b/src/backend/core/shared/models/agent_runner.py
+@@ -9 +9,4 @@ from pathlib import Path
+-from backend.core.shared.models.agent_decision import InteractiveDecisionConfig
++from backend.core.shared.models.agent_decision import (
++    InteractiveDecisionConfig,
++    ReplConfig,
++)
+@@ -403,0 +407 @@ class AppConfig:
++    repl: ReplConfig = field(default_factory=ReplConfig)
+diff --git a/src/backend/core/use_cases/repl_session.py b/src/backend/core/use_cases/repl_session.py
+new file mode 100644
+index 00000000..d2b97a52
+--- /dev/null
++++ b/src/backend/core/use_cases/repl_session.py
+@@ -0,0 +1,536 @@
++"""REPL (Read-Eval-Print Loop) use case for the ``iar`` no-arg entrypoint.
++
++The REPL drives a multi-turn conversation between the user and a configured
++agent, parsing ``<<IAR_EXEC>> ... <<END_IAR_EXEC>>`` markers in the agent
++reply to execute whitelisted IAR subcommands and feed the captured output
++back into the conversation history.
++
++Architecture notes:
++- Business logic lives in core/; the agent command builder is reused from
++  ``backend.engines.agent_runner.factory``.
++- I/O ports (process runner, content generator, GitHub client, command
++  executor) are injected via :class:`ReplSessionDeps`, so unit tests can
++  substitute fake implementations without spawning real subprocesses.
++- Marker text is concentrated in module-level constants so that future
++  translations or protocol revisions touch a single location.
++"""
++
++from __future__ import annotations
++
++import json
++import logging
++import shlex
++from collections.abc import Callable, Sequence
++from dataclasses import dataclass
++from datetime import datetime, timezone
++from pathlib import Path
++from typing import Any
++
++from backend.core.shared.interfaces.agent_runner import (
++    IarExecRequest,
++    IContentGenerator,
++    IGitHubClient,
++    IProcessRunner,
++    IReplCommandExecutor,
++    ReplExecOutcome,
++)
++from backend.core.shared.models.agent_decision import ReplConfig
++from backend.core.shared.models.agent_runner import (
++    CommandResult,
++    RepositoryRunContext,
++)
++from backend.core.use_cases.interactive_decision import (
++    _build_issue_summary,
++    _build_pending_prd_summary,
++    _truncate_prompt,
++)
++
++_logger = logging.getLogger(__name__)
++
++IAR_EXEC_OPEN_MARKER = "<<IAR_EXEC>>"
++IAR_EXEC_CLOSE_MARKER = "<<END_IAR_EXEC>>"
++IAR_EXEC_RESULT_OPEN_TAG = "[IAR_EXEC_RESULT]"
++IAR_EXEC_RESULT_CLOSE_TAG = "[/IAR_EXEC_RESULT]"
++
++EXIT_COMMAND = "/exit"
++HELP_COMMAND = "/help"
++
++DEFAULT_PROMPT_SUFFIX = "iar> "
++MAX_TURNS = 64
++
++_IAR_AVAILABLE_SUBCOMMAND_HINT = (
++    "Available `iar` subcommands: "
++    "init, labels, issue, run, daemon, review, review-daemon, recover, "
++    "blocked-continue, ask, deliberate, takeover, worktree, registry, "
++    "workflow, completion."
++)
++
++
++@dataclass(frozen=True)
++class ReplTurn:
++    """A single turn in the REPL conversation history."""
++
++    role: str  # "user" | "assistant" | "system" | "tool"
++    content: str
++
++
++@dataclass(frozen=True)
++class ReplSessionInputs:
++    """Input boundary for :func:`run_repl_session`.
++
++    Attributes:
++        context: Resolved repository target. ``context.repo_path`` is the
++            REPL's working directory and must already be initialized with
++            ``iar init``.
++        agent: The agent identifier to use. ``"auto"`` is rejected at the
++            CLI layer; this use case trusts the caller.
++        config: REPL configuration (defaults / timeouts / allowlist).
++        output_dir: Optional override for the audit directory. Defaults
++            to ``config.default_output_dir``.
++        stdin: Optional replacement for :data:`sys.stdin` (used in tests).
++        stdout: Optional replacement for the prompt writer (tests).
++    """
++
++    context: RepositoryRunContext
++    agent: str
++    config: ReplConfig
++    output_dir: Path | None = None
++    stdin: Any = None
++    stdout: Any = None
++
++
++@dataclass(frozen=True)
++class ReplSessionDeps:
++    """Dependency injection boundary for the REPL use case."""
++
++    process_runner: IProcessRunner
++    content_generator: IContentGenerator
++    command_executor: IReplCommandExecutor
++    github_client: IGitHubClient | None = None
++    # Optional factory used by tests that want a per-call fake github client.
++    github_client_factory: Callable[[Path], IGitHubClient] | None = None
++    # Optional override for the user-input function (defaults to input()).
++    input_fn: Callable[[str], str] | None = None
++    # Optional override for the prompt writer (defaults to print).
++    prompt_output_fn: Callable[[str], None] | None = None
++    # Optional override for the per-turn assistant reply printer.
++    reply_output_fn: Callable[[str], None] | None = None
++
++
++def _now_iso() -> str:
++    return datetime.now(timezone.utc).isoformat()
++
++
++def _generate_session_id() -> str:
++    return datetime.now(timezone.utc).strftime("repl-%Y%m%d-%H%M%S-%f")[:-3]
++
++
++def parse_iar_exec_markers(text: str) -> tuple[IarExecRequest, ...]:
++    """Extract ``<<IAR_EXEC>>`` command requests from an agent reply.
++
++    The protocol accepts multiple markers per reply. Each marker body is
++    parsed via :func:`shlex.split` so that quoted arguments stay intact
++    while stray newlines or extra whitespace are tolerated. Anything that
++    fails to parse is logged and skipped — the rest of the reply still
++    reaches the conversation history.
++    """
++    if not text:
++        return ()
++    requests: list[IarExecRequest] = []
++    cursor = 0
++    while cursor < len(text):
++        start_idx = text.find(IAR_EXEC_OPEN_MARKER, cursor)
++        if start_idx == -1:
++            break
++        end_idx = text.find(IAR_EXEC_CLOSE_MARKER, start_idx)
++        if end_idx == -1:
++            break
++        body = text[start_idx + len(IAR_EXEC_OPEN_MARKER) : end_idx].strip()
++        cursor = end_idx + len(IAR_EXEC_CLOSE_MARKER)
++        if not body:
++            continue
++        try:
++            argv = shlex.split(body)
++        except ValueError as exc:
++            _logger.warning("Skipping malformed IAR_EXEC body %r: %s", body, exc)
++            continue
++        if not argv:
++            continue
++        # Strip a leading `iar` token so that the executor never sees a
++        # duplicate ``["iar", "iar", ...]``. The protocol is documented
++        # to include `iar` in the marker body, but it is redundant from
++        # the executor's perspective.
++        if argv[0] == "iar":
++            argv = argv[1:]
++        if not argv:
++            continue
++        requests.append(IarExecRequest(argv=tuple(argv), raw_text=body))
++    return tuple(requests)
++
++
++def _strip_exec_markers(text: str) -> str:
++    """Remove ``<<IAR_EXEC>>...<<END_IAR_EXEC>>`` markers from assistant text.
++
++    Used for the visible reply printed to the terminal so that the
++    conversation transcript shown to the user does not include raw
++    protocol markers. The full marker text is still preserved in the
++    conversation history passed back to the agent.
++    """
++    if not text:
++        return text
++    result: list[str] = []
++    cursor = 0
++    while cursor < len(text):
++        start_idx = text.find(IAR_EXEC_OPEN_MARKER, cursor)
++        if start_idx == -1:
++            result.append(text[cursor:])
++            break
++        result.append(text[cursor:start_idx])
++        end_idx = text.find(IAR_EXEC_CLOSE_MARKER, start_idx)
++        if end_idx == -1:
++            break
++        cursor = end_idx + len(IAR_EXEC_CLOSE_MARKER)
++    return "".join(result).strip()
++
++
++def _build_system_prompt(
++    *,
++    context: RepositoryRunContext,
++    config: ReplConfig,
++    session_id: str,
++    github_client: IGitHubClient | None,
++) -> str:
++    """Assemble the first system prompt for the REPL.
++
++    Reuses the planning-aware blocks from ``iar ask`` (pending PRD
++    summary, GitHub Issue summary) and layers REPL-only fields
++    (``.iar.toml`` summary, command-execution protocol, available
++    subcommand hint). When ``github_client`` is ``None`` (e.g. in unit
++    tests or non-interactive auth-disabled mode), the Issue summary
++    falls back to a friendly placeholder.
++    """
++    repo_config = context.config
++    pending_prd_summary = _build_pending_prd_summary(context.repo_path)
++    if github_client is not None:
++        issue_summary = _build_issue_summary(
++            context.repo_path, repo_config, github_client
++        )
++    else:
++        issue_summary = "GitHub Issue summary unavailable (no client)."
++
++    config_summary = (
++        f"repository.id={context.repo_id}, "
++        f"git.base_branch={repo_config.git.base_branch}, "
++        f"runner.default_agent={repo_config.runner.default_agent}, "
++        f"verification_commands={list(repo_config.runner.verification_commands)}, "
++        f"labels.ready={repo_config.labels.ready}, "
++        f"labels.failed={repo_config.labels.failed}"
++    )
++
++    protocol = (
++        "Command execution protocol:\n"
++        f"- To ask me to run an `iar` subcommand, wrap the full command "
++        f"(including `iar`) inside markers like:\n"
++        f"  {IAR_EXEC_OPEN_MARKER} iar labels sync {IAR_EXEC_CLOSE_MARKER}\n"
++        f"- Only whitelisted `iar` subcommands are allowed. Direct shell "
++        f"commands, `git push` / `git merge` / `git reset`, and arbitrary "
++        f"`rm` invocations are refused.\n"
++        f"- I will execute read-only/dry-run commands automatically. "
++        f"Write or risky commands require explicit user confirmation.\n"
++        f"- Each execution result is appended back to our conversation as a "
++        f"`{IAR_EXEC_RESULT_OPEN_TAG}` block.\n"
++        "- You do not need to confirm successful commands; just react to "
++        "their output."
++    )
++
++    parts: list[str] = []
++    parts.append(
++        "You are the agent assistant for an interactive IAR REPL session.\n"
++        f"Session ID: {session_id}\n"
++        f"Repository: {context.repo_id} ({context.display_name})\n"
++        f"Path: {context.repo_path}\n\n"
++        "The user will type natural-language requests. Use the context "
++        "below and your shell tooling to assist them. When you need to "
++        "invoke an `iar` subcommand on the user's behalf, follow the "
++        "command-execution protocol strictly.\n\n"
++        f"{protocol}\n\n"
++        f"{_IAR_AVAILABLE_SUBCOMMAND_HINT}\n"
++    )
++    parts.append(f"## Repository .iar.toml summary\n{config_summary}\n")
++    parts.append(
++        "## Decision context (carried over from `iar ask`)\n"
++        f"- Pending PRDs:\n{pending_prd_summary}\n"
++        f"- Relevant Issues:\n{issue_summary}\n"
++    )
++
++    return _truncate_prompt("\n".join(parts), config.max_context_chars)
++
++
++def _serialize_history(history: Sequence[ReplTurn]) -> str:
++    """Serialize the conversation history as a single prompt for the agent.
++
++    The agent CLI sees one ``-p`` / ``--prompt`` argument; we therefore
++    flatten the structured turns into a labelled, deterministic text.
++    """
++    blocks: list[str] = []
++    for turn in history:
++        role_label = {
++            "system": "[SYSTEM]",
++            "user": "[USER]",
++            "assistant": "[ASSISTANT]",
++            "tool": "[TOOL]",
++        }.get(turn.role, f"[{turn.role.upper()}]")
++        blocks.append(f"{role_label}\n{turn.content}")
++    return "\n\n".join(blocks)
++
++
++def _format_exec_result_for_agent(outcome: ReplExecOutcome) -> str:
++    """Render a :class:`ReplExecOutcome` as a tool-result block."""
++    cmd_text = "iar " + " ".join(outcome.argv)
++    if outcome.rejected:
++        body = (
++            f"{IAR_EXEC_RESULT_OPEN_TAG}\n"
++            f"command: {cmd_text}\n"
++            f"status: rejected\n"
++            f"reason: {outcome.rejection_reason}\n"
++            f"{IAR_EXEC_RESULT_CLOSE_TAG}"
++        )
++        return body
++    status_label = "ok" if outcome.return_code == 0 else "failed"
++    body_lines = [
++        IAR_EXEC_RESULT_OPEN_TAG,
++        f"command: {cmd_text}",
++        f"status: {status_label}",
++        f"exit_code: {outcome.return_code}",
++    ]
++    if outcome.stdout:
++        body_lines.append(f"stdout:\n{outcome.stdout}")
++    if outcome.stderr:
++        body_lines.append(f"stderr:\n{outcome.stderr}")
++    body_lines.append(IAR_EXEC_RESULT_CLOSE_TAG)
++    return "\n".join(body_lines)
++
++
++def _write_audit(
++    *,
++    session_dir: Path,
++    history: Sequence[ReplTurn],
++    executed_commands: Sequence[dict[str, Any]],
++    metadata: dict[str, Any],
++) -> None:
++    """Write the REPL session audit files."""
++    session_dir.mkdir(parents=True, exist_ok=True)
++    transcript_path = session_dir / "transcript.md"
++    transcript_lines: list[str] = [
++        f"# REPL session {metadata.get('session_id', '')}",
++        "",
++        f"- repository: {metadata.get('repo_id', '')}",
++        f"- repo_path: {metadata.get('repo_path', '')}",
++        f"- agent: {metadata.get('agent', '')}",
++        f"- started_at: {metadata.get('started_at', '')}",
++        f"- finished_at: {metadata.get('finished_at', '')}",
++        "",
++        "## Conversation",
++        "",
++    ]
++    for turn in history:
++        title = {
++            "system": "System",
++            "user": "User",
++            "assistant": "Assistant",
++            "tool": "Tool result",
++        }.get(turn.role, turn.role.capitalize())
++        transcript_lines.append(f"### {title}")
++        transcript_lines.append("")
++        transcript_lines.append(turn.content)
++        transcript_lines.append("")
++    transcript_path.write_text("\n".join(transcript_lines), encoding="utf-8")
++
++    (session_dir / "commands.json").write_text(
++        json.dumps(list(executed_commands), indent=2, ensure_ascii=False),
++        encoding="utf-8",
++    )
++    (session_dir / "session.json").write_text(
++        json.dumps(metadata, indent=2, ensure_ascii=False),
++        encoding="utf-8",
++    )
++
++
++def _read_user_input(
++    input_fn: Callable[[str], str] | None,
++    prompt: str,
++) -> str | None:
++    """Read a single line of user input.
++
++    Returns ``None`` on EOF (so the REPL exits gracefully). Both
++    :class:`EOFError` and a raised :class:`StopIteration` (typical of
++    empty iterators in unit tests) are treated as EOF.
++    """
++    call = input_fn if input_fn is not None else input
++    try:
++        return call(prompt)
++    except (EOFError, StopIteration):
++        return None
++
++
++def run_repl_session(inputs: ReplSessionInputs, deps: ReplSessionDeps) -> int:
++    """Run the interactive REPL session.
++
++    Returns the process exit code (0 on normal ``/exit``/EOF, 1 on a
++    configuration / initialization failure). The function is blocking;
++    call sites that need to spawn it should run it on the main thread
++    or wrap it in :class:`concurrent.futures.ThreadPoolExecutor`.
++    """
++    config = inputs.config
++    repo_path = inputs.context.repo_path
++
++    if not config.enabled:
++        _logger.error("REPL is disabled in configuration.")
++        return 1
++
++    session_id = _generate_session_id()
++    output_root = inputs.output_dir or Path(config.default_output_dir)
++    output_root = output_root.expanduser()
++    if not output_root.is_absolute():
++        output_root = (repo_path / output_root).resolve()
++    session_dir = output_root / session_id
++
++    history: list[ReplTurn] = []
++    executed_commands: list[dict[str, Any]] = []
++
++    started_at = _now_iso()
++    prompt_output = (
++        deps.prompt_output_fn if deps.prompt_output_fn is not None else print
++    )
++    reply_output = deps.reply_output_fn if deps.reply_output_fn is not None else print
++
++    system_prompt = _build_system_prompt(
++        context=inputs.context,
++        config=config,
++        session_id=session_id,
++        github_client=deps.github_client,
++    )
++    history.append(ReplTurn(role="system", content=system_prompt))
++
++    prompt_output(
++        f"REPL session started (id={session_id}, agent={inputs.agent}). "
++        "Type '/exit' to quit, '/help' for available commands."
++    )
++
++    turn_count = 0
++    try:
++        while turn_count < MAX_TURNS:
++            user_line = _read_user_input(deps.input_fn, DEFAULT_PROMPT_SUFFIX)
++            if user_line is None:
++                prompt_output("\n[EOF received; exiting REPL.]")
++                break
++            user_line = user_line.strip()
++            if not user_line:
++                continue
++            if user_line == EXIT_COMMAND:
++                prompt_output("[Exiting REPL.]")
++                break
++            if user_line == HELP_COMMAND:
++                prompt_output(
++                    "REPL commands:\n"
++                    f"  {EXIT_COMMAND}    quit the session\n"
++                    f"  {HELP_COMMAND}    show this help\n"
++                    "  anything else     forwarded to the agent\n\n"
++                    f"{_IAR_AVAILABLE_SUBCOMMAND_HINT}"
++                )
++                continue
++
++            turn_count += 1
++            history.append(ReplTurn(role="user", content=user_line))
++
++            agent_result: CommandResult = deps.content_generator.generate(
++                inputs.agent,
++                _serialize_history(history),
++                cwd=repo_path,
++                timeout=config.agent_timeout_seconds,
++            )
++
++            if agent_result.return_code != 0:
++                error_block = (
++                    f"[AGENT_ERROR]\n"
++                    f"exit_code={agent_result.return_code}\n"
++                    f"stderr:\n{agent_result.stderr}"
++                )
++                history.append(ReplTurn(role="tool", content=error_block))
++                prompt_output(f"[agent error: exit_code={agent_result.return_code}]")
++                if agent_result.stderr:
++                    prompt_output(agent_result.stderr)
++                continue
++
++            assistant_text = agent_result.stdout
++            history.append(ReplTurn(role="assistant", content=assistant_text))
++
++            marker_requests: Sequence[IarExecRequest] = parse_iar_exec_markers(
++                assistant_text
++            )
++            for exec_request in marker_requests:
++                outcome: ReplExecOutcome = deps.command_executor.execute(
++                    exec_request, repo_path=repo_path
++                )
++                result_block = _format_exec_result_for_agent(outcome)
++                history.append(ReplTurn(role="tool", content=result_block))
++                executed_commands.append(
++                    {
++                        "argv": list(outcome.argv),
++                        "raw_text": exec_request.raw_text,
++                        "return_code": outcome.return_code,
++                        "rejected": outcome.rejected,
++                        "rejection_reason": outcome.rejection_reason,
++                        "confirmation_prompted": outcome.confirmation_prompted,
++                        "confirmation_granted": outcome.confirmation_granted,
++                    }
++                )
++
++            visible_reply = _strip_exec_markers(assistant_text)
++            if visible_reply:
++                reply_output(visible_reply)
++
++        if turn_count >= MAX_TURNS:
++            prompt_output(f"[REPL hit the {MAX_TURNS}-turn safety cap; exiting.]")
++    except KeyboardInterrupt:
++        prompt_output("\n[Interrupted; exiting REPL.]")
++
++    finished_at = _now_iso()
++    metadata = {
++        "session_id": session_id,
++        "repo_id": inputs.context.repo_id,
++        "repo_path": str(repo_path),
++        "display_name": inputs.context.display_name,
++        "agent": inputs.agent,
++        "started_at": started_at,
++        "finished_at": finished_at,
++        "turns": turn_count,
++        "commands_executed": len(executed_commands),
++        "history_length": len(history),
++    }
++    try:
++        _write_audit(
++            session_dir=session_dir,
++            history=tuple(history),
++            executed_commands=tuple(executed_commands),
++            metadata=metadata,
++        )
++    except OSError as exc:
++        _logger.warning("Failed to write REPL audit to %s: %s", session_dir, exc)
++
++    return 0
++
++
++__all__ = [
++    "ReplSessionInputs",
++    "ReplSessionDeps",
++    "ReplTurn",
++    "IAR_EXEC_OPEN_MARKER",
++    "IAR_EXEC_CLOSE_MARKER",
++    "IAR_EXEC_RESULT_OPEN_TAG",
++    "IAR_EXEC_RESULT_CLOSE_TAG",
++    "EXIT_COMMAND",
++    "HELP_COMMAND",
++    "parse_iar_exec_markers",
++    "run_repl_session",
++]
+diff --git a/src/backend/engines/agent_runner/factory.py b/src/backend/engines/agent_runner/factory.py
+index bfa90e19..56832777 100644
+--- a/src/backend/engines/agent_runner/factory.py
++++ b/src/backend/engines/agent_runner/factory.py
+@@ -24 +24,4 @@ from backend.core.shared.models.agent_deliberation import (
+-from backend.core.shared.models.agent_decision import InteractiveDecisionConfig
++from backend.core.shared.models.agent_decision import (
++    InteractiveDecisionConfig,
++    ReplConfig,
++)
+@@ -55,0 +59 @@ from backend.infrastructure.config.settings import (
++    AgentRunnerReplSettings,
+@@ -94,0 +99 @@ __all__ = [
++    "create_repl_command_executor",
+@@ -158,0 +164,13 @@ def _build_deliberation_config(
++def _build_repl_config(repl_settings: AgentRunnerReplSettings) -> ReplConfig:
++    """Convert pydantic REPL settings to frozen core config."""
++    return ReplConfig(
++        enabled=repl_settings.enabled,
++        default_agent=repl_settings.default_agent,
++        default_output_dir=repl_settings.default_output_dir,
++        max_context_chars=repl_settings.max_context_chars,
++        agent_timeout_seconds=repl_settings.agent_timeout_seconds,
++        auto_confirm_commands=tuple(repl_settings.auto_confirm_commands),
++        confirm_commands=tuple(repl_settings.confirm_commands),
++    )
++
++
+@@ -176,0 +195 @@ def build_app_config_from_settings(
++    repl = _build_repl_config(agent_runner_settings.repl)
+@@ -257,0 +277 @@ def build_app_config_from_settings(
++        repl=repl,
+@@ -542,0 +563 @@ def merge_repository_config(
++    repl = _merge_optional_model(global_config.repl, repo_settings.repl)
+@@ -554,0 +576 @@ def merge_repository_config(
++        repl=repl,
+@@ -882 +904,6 @@ class SubprocessContentGenerator(IContentGenerator):
+-    def __init__(self, process_runner: SubprocessRunner) -> None:
++    def __init__(
++        self,
++        process_runner: SubprocessRunner,
++        *,
++        read_only: bool = True,
++    ) -> None:
+@@ -883,0 +911 @@ class SubprocessContentGenerator(IContentGenerator):
++        self._read_only = read_only
+@@ -893,2 +921,10 @@ class SubprocessContentGenerator(IContentGenerator):
+-        """Run a read-only content generator and return its output."""
+-        command = _build_content_generation_command(agent_name, prompt, cwd)
++        """Run a content generator and return its output.
++
++        When the instance was constructed with ``read_only=True`` (the
++        default) the agent runs in its read-only sandbox. The REPL
++        entrypoint constructs the generator with ``read_only=False`` so
++        the agent can mutate files inside the user's confirmation model.
++        """
++        command = _build_content_generation_command(
++            agent_name, prompt, cwd, read_only=self._read_only
++        )
+@@ -901 +937,5 @@ def _build_content_generation_command(
+-    agent_name: str, prompt: str, cwd: Path
++    agent_name: str,
++    prompt: str,
++    cwd: Path,
++    *,
++    read_only: bool = True,
+@@ -902,0 +943,18 @@ def _build_content_generation_command(
++    """Build the agent command for content generation / REPL use.
++
++    Args:
++        agent_name: ``claude`` / ``codex`` / ``kimi`` (or any value that
++            should fall back to ``claude``).
++        prompt: Full prompt text passed to the agent.
++        cwd: Working directory for the agent subprocess.
++        read_only: When ``True`` (default), ``codex`` is invoked with
++            ``--sandbox read-only --ask-for-approval never`` so it cannot
++            modify the filesystem. When ``False`` (used by the REPL
++            entrypoint), the sandbox flag is dropped so the agent is free
++            to write files within the user's confirmation model. ``claude``
++            and ``kimi`` commands are unaffected by this flag because they
++            already have a single canonical invocation shape.
++
++    Returns:
++        Command argv ready to be handed to a process runner.
++    """
+@@ -905,0 +964,12 @@ def _build_content_generation_command(
++        if read_only:
++            return [
++                "codex",
++                "--cd",
++                str(cwd),
++                "--sandbox",
++                "read-only",
++                "--ask-for-approval",
++                "never",
++                "exec",
++                prompt,
++            ]
+@@ -910,4 +979,0 @@ def _build_content_generation_command(
+-            "--sandbox",
+-            "read-only",
+-            "--ask-for-approval",
+-            "never",
+@@ -926,0 +993,11 @@ def _build_content_generation_command(
++def _build_repl_command(agent_name: str, prompt: str, cwd: Path) -> list[str]:
++    """Build the agent command used by the ``iar`` REPL entrypoint.
++
++    Delegates to :func:`_build_content_generation_command` with
++    ``read_only=False`` so that REPL-managed sessions do not run inside
++    ``codex``'s read-only sandbox. The REPL's own command executor
++    provides the safety boundary for arbitrary IAR subcommands.
++    """
++    return _build_content_generation_command(agent_name, prompt, cwd, read_only=False)
++
++
+@@ -979,0 +1057,2 @@ def create_content_generator(
++    *,
++    read_only: bool = True,
+@@ -982 +1061,3 @@ def create_content_generator(
+-    return SubprocessContentGenerator(process_runner or SubprocessRunner())
++    return SubprocessContentGenerator(
++        process_runner or SubprocessRunner(), read_only=read_only
++    )
+@@ -1114,0 +1196,22 @@ def create_github_client(
++
++
++def create_repl_command_executor(
++    process_runner: SubprocessRunner | None = None,
++    config: ReplConfig | None = None,
++):
++    """Create a :class:`ReplCommandExecutor` for the REPL entrypoint.
++
++    Imports the executor lazily to avoid a hard dependency from this
++    module's import time. ``config`` defaults to the merged global
++    ReplConfig (``config.agent_runner.repl`` translated via
++    ``build_app_config``).
++    """
++    from backend.engines.agent_runner.repl_command_executor import (
++        ReplCommandExecutor,
++    )
++
++    if config is None:
++        config = build_app_config().repl
++    return ReplCommandExecutor(
++        process_runner=process_runner or SubprocessRunner(), config=config
++    )
+diff --git a/src/backend/engines/agent_runner/repl_command_executor.py b/src/backend/engines/agent_runner/repl_command_executor.py
+new file mode 100644
+index 00000000..aee25b8d
+--- /dev/null
++++ b/src/backend/engines/agent_runner/repl_command_executor.py
+@@ -0,0 +1,224 @@
++"""REPL command executor.
++
++Implements :class:`IReplCommandExecutor` for the ``iar`` REPL entrypoint.
++The executor owns the policy decisions that core use cases should not
++have to know about: which IAR subcommands are allowed, which need
++explicit confirmation, how to invoke the real ``iar`` CLI as a
++subprocess, and how to truncate captured output before returning it to
++the conversation history.
++
++The executor never falls back to a shell interpreter: commands are
++dispatched as argv vectors so there is no quoting / expansion attack
++surface even when the agent emits unusual strings.
++"""
++
++from __future__ import annotations
++
++import logging
++from pathlib import Path
++
++from backend.core.shared.interfaces.agent_runner import (
++    IarExecRequest,
++    IProcessRunner,
++    IReplCommandExecutor,
++    ReplExecOutcome,
++)
++from backend.core.shared.models.agent_decision import ReplConfig
++
++_logger = logging.getLogger(__name__)
++
++_DEFAULT_ALLOWLIST: tuple[str, ...] = (
++    "init",
++    "labels",
++    "issue",
++    "run",
++    "daemon",
++    "review",
++    "review-daemon",
++    "recover",
++    "blocked-continue",
++    "ask",
++    "deliberate",
++    "takeover",
++    "worktree",
++    "registry",
++    "workflow",
++    "completion",
++    "--version",
++    "version",
++)
++
++_DEFAULT_DENYLIST_PREFIXES: tuple[str, ...] = (
++    "git push",
++    "git merge",
++    "git reset",
++    "git clean",
++    "gh ",
++    "rm -rf",
++    "rm -fr",
++)
++
++_DEFAULT_DENYLIST_SHELL_METACHARS: str = ";&|`$><\n\r"
++
++_MAX_STDOUT_CHARS = 6000
++_MAX_STDERR_CHARS = 3000
++
++
++def _truncate(text: str, max_chars: int) -> str:
++    if len(text) <= max_chars:
++        return text
++    return text[:max_chars] + f"\n... truncated {len(text) - max_chars} chars ..."
++
++
++def _starts_with_any(text: str, prefixes: tuple[str, ...]) -> bool:
++    return any(text == prefix or text.startswith(prefix + " ") for prefix in prefixes)
++
++
++class ReplCommandExecutor(IReplCommandExecutor):
++    """Validate and execute IAR subcommands requested by the REPL agent.
++
++    Args:
++        process_runner: Subprocess runner used to invoke ``iar``.
++        config: REPL configuration (allowlist / confirm / audit settings).
++        input_fn: Replacement for ``builtins.input`` so unit tests can
++            drive the confirmation prompts deterministically. Defaults to
++            the real :func:`input`.
++        prompt_output_fn: Replacement for the side-channel used to print
++            confirmation prompts. Defaults to :func:`print`.
++    """
++
++    def __init__(
++        self,
++        process_runner: IProcessRunner,
++        config: ReplConfig,
++        *,
++        input_fn=None,
++        prompt_output_fn=None,
++    ) -> None:
++        self._process_runner = process_runner
++        self._config = config
++        self._input_fn = input_fn if input_fn is not None else input
++        self._prompt_output_fn = (
++            prompt_output_fn if prompt_output_fn is not None else print
++        )
++
++    def execute(
++        self,
++        request: IarExecRequest,
++        *,
++        repo_path: Path,
++    ) -> ReplExecOutcome:
++        argv = list(request.argv)
++        if not argv:
++            return ReplExecOutcome(
++                argv=tuple(argv),
++                return_code=2,
++                stdout="",
++                stderr="",
++                rejected=True,
++                rejection_reason="Empty command.",
++            )
++
++        # Reject any shell metacharacters before doing anything else.
++        joined = " ".join(argv)
++        for bad_char in _DEFAULT_DENYLIST_SHELL_METACHARS:
++            if bad_char in joined:
++                return ReplExecOutcome(
++                    argv=tuple(argv),
++                    return_code=2,
++                    stdout="",
++                    stderr="",
++                    rejected=True,
++                    rejection_reason=(
++                        "Command contains forbidden shell metacharacter "
++                        f"{bad_char!r}; only IAR subcommands are allowed."
++                    ),
++                )
++
++        # Denylist prefix check covers direct git / gh / rm escape hatches.
++        if _starts_with_any(joined, _DEFAULT_DENYLIST_PREFIXES):
++            return ReplExecOutcome(
++                argv=tuple(argv),
++                return_code=2,
++                stdout="",
++                stderr="",
++                rejected=True,
++                rejection_reason=(
++                    f"Command {joined!r} is forbidden in the REPL sandbox."
++                ),
++            )
++
++        # Allowlist: the first argv must match a known IAR subcommand.
++        head = argv[0]
++        if head not in _DEFAULT_ALLOWLIST:
++            return ReplExecOutcome(
++                argv=tuple(argv),
++                return_code=2,
++                stdout="",
++                stderr="",
++                rejected=True,
++                rejection_reason=(f"Command {head!r} is not in the REPL allowlist."),
++            )
++
++        tail = " ".join(argv[1:])
++        prefix = f"{head} {tail}".strip()
++
++        needs_confirmation = _starts_with_any(prefix, self._config.confirm_commands)
++        auto_confirm = _starts_with_any(prefix, self._config.auto_confirm_commands)
++
++        confirmation_granted: bool | None = None
++        if auto_confirm:
++            confirmation_granted = True
++        elif needs_confirmation:
++            self._prompt_output_fn(
++                f"\nThe agent wants to run a write/risky command:\n"
++                f"  iar {prefix}\n"
++                f"This command is in the confirm list. Execute? [y/N]: "
++            )
++            try:
++                response = self._input_fn("")
++            except EOFError:
++                return ReplExecOutcome(
++                    argv=tuple(argv),
++                    return_code=2,
++                    stdout="",
++                    stderr="",
++                    rejected=True,
++                    rejection_reason=(
++                        "No interactive input available for confirmation; "
++                        "command refused."
++                    ),
++                    confirmation_prompted=True,
++                    confirmation_granted=False,
++                )
++            confirmation_granted = response.strip().lower() in ("y", "yes")
++            if not confirmation_granted:
++                return ReplExecOutcome(
++                    argv=tuple(argv),
++                    return_code=2,
++                    stdout="",
++                    stderr="",
++                    rejected=True,
++                    rejection_reason="User did not confirm the command.",
++                    confirmation_prompted=True,
++                    confirmation_granted=False,
++                )
++
++        _logger.info("REPL executing: iar %s", prefix)
++        result = self._process_runner.run(
++            ["iar", *argv],
++            cwd=repo_path,
++            capture_output=True,
++            check=False,
++        )
++        return ReplExecOutcome(
++            argv=tuple(argv),
++            return_code=result.return_code,
++            stdout=_truncate(result.stdout, _MAX_STDOUT_CHARS),
++            stderr=_truncate(result.stderr, _MAX_STDERR_CHARS),
++            confirmation_prompted=needs_confirmation,
++            confirmation_granted=confirmation_granted,
++        )
++
++
++__all__ = ["ReplCommandExecutor"]
+diff --git a/src/backend/infrastructure/config/settings.py b/src/backend/infrastructure/config/settings.py
+index 1a9537ff..ca5e0e2d 100644
+--- a/src/backend/infrastructure/config/settings.py
++++ b/src/backend/infrastructure/config/settings.py
+@@ -538,0 +539,46 @@ class AgentRunnerInteractiveDecisionSettings(BaseModel):
++class AgentRunnerReplSettings(BaseModel):
++    """Interactive REPL (`iar` with no subcommand) configuration.
++
++    The REPL entrypoint lets the user chat with a configured agent and
++    grants the agent the ability to request execution of whitelisted IAR
++    subcommands via ``<<IAR_EXEC>> ... <<END_IAR_EXEC>>`` markers. This
++    settings block isolates the REPL's risk surface (default agent,
++    command allow/confirm lists, audit directory) from the ``iar ask``
++    decision planner.
++    """
++
++    enabled: bool = True
++    default_agent: str = "claude"
++    default_output_dir: str = "logs/agent-runner/repl"
++    max_context_chars: int = 24000
++    agent_timeout_seconds: int = 120
++    # Commands that the executor may run without explicit confirmation.
++    # Each entry is a *prefix* matched against the argv tail (everything
++    # after ``iar``), so ``"labels sync --dry-run"`` auto-confirms only
++    # that exact form. Anything not listed here is either matched against
++    # ``confirm_commands`` (which prompts) or rejected outright.
++    auto_confirm_commands: list[str] = Field(
++        default_factory=lambda: [
++            "labels sync --dry-run",
++            "run --dry-run",
++            "review --dry-run",
++            "ask --plan-only",
++        ]
++    )
++    # Commands whose execution prompts the user for confirmation. Matched
++    # with the same prefix rules as ``auto_confirm_commands``.
++    confirm_commands: list[str] = Field(
++        default_factory=lambda: [
++            "run",
++            "daemon",
++            "review",
++            "review-daemon",
++            "issue create",
++            "recover",
++            "blocked-continue",
++            "worktree create",
++            "worktree remove",
++        ]
++    )
++
++
+@@ -649,0 +696 @@ class _AgentRunnerRepositoryOverrideSettings(BaseModel):
++    repl: AgentRunnerReplSettings | None = None
+@@ -727,0 +775 @@ def load_agent_runner_local_settings(
++        repl=local_settings.repl,
+@@ -769,0 +818 @@ class AgentRunnerSettings(BaseSettings):
++    repl: AgentRunnerReplSettings = Field(default_factory=AgentRunnerReplSettings)
+@@ -942,0 +992 @@ __all__ = [
++    "AgentRunnerReplSettings",
