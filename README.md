@@ -27,6 +27,8 @@
   <sub>Issue 认领后的执行链全貌——分诊、PRD 生成、发布档位与合并收尾；细节见 <a href="./docs/guides/agent-runner.md">docs/guides/agent-runner.md</a>。</sub>
 </p>
 
+[当前工作目标](ROADMAP.md) · [产品边界与候选方向](docs/project/product-boundaries.md)
+
 ### Agent 生命周期
 
 下面按职责分成三个彼此独立的功能区，它们不组成一条统一流程。每个功能区都有自己的入口和触发条件；同一功能区内的阶段也只在各自条件满足时运行。
