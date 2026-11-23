@@ -150,7 +150,6 @@ class GiteaApiClient(IGitHubClient):
             }
         )
         self._authenticated_login: str | None = None
-        self._has_repository_write_access: bool | None = None
 
     def __repr__(self) -> str:
         """返回不包含令牌或请求头的诊断表示。"""
@@ -404,10 +403,9 @@ class GiteaApiClient(IGitHubClient):
 
         selected_comments: list[dict[str, Any]] = []
         current_login: str | None = None
-        has_repository_write_access = False
         if trusted_only:
             current_login = self._get_authenticated_login()
-            has_repository_write_access = self._get_repository_write_access()
+        author_permissions: dict[str, bool] = {}
         for raw_comment in comment_payloads:
             body_value = raw_comment.get("body")
             if body_contains is not None:
@@ -415,12 +413,16 @@ class GiteaApiClient(IGitHubClient):
                     raise RuntimeError("Gitea comment query returned malformed body metadata.")
                 if body_contains not in body_value:
                     continue
-            if trusted_only and not has_repository_write_access:
+            if trusted_only:
                 raw_user = raw_comment.get("user")
                 author_login = raw_user.get("login") if isinstance(raw_user, dict) else None
-                if not current_login or author_login != current_login:
+                if not isinstance(author_login, str) or not author_login:
+                    raise RuntimeError("Gitea trusted comment has no author login.")
+                if author_login != current_login and author_login not in author_permissions:
+                    author_permissions[author_login] = self._author_can_write_issues(author_login)
+                if author_login != current_login and not author_permissions[author_login]:
                     continue
-            if require_success and (
+            if (require_success or trusted_only) and (
                 type(raw_comment.get("id")) is not int
                 or raw_comment["id"] <= 0
                 or not isinstance(body_value, str)
@@ -439,22 +441,24 @@ class GiteaApiClient(IGitHubClient):
         self._authenticated_login = user_payload["login"]
         return self._authenticated_login
 
-    def _get_repository_write_access(self) -> bool:
-        """读取当前 token 在仓库上的 push/admin 权限。"""
-        if self._has_repository_write_access is not None:
-            return self._has_repository_write_access
-        repository_payload = self._request_json(
+    def _author_can_write_issues(self, author_login: str) -> bool:
+        """核验评论作者在仓库中的权限；无法确认时拒绝信任。"""
+        permission_payload = self._request_json(
             "GET",
-            self._repository_api_path(""),
+            self._repository_api_path(f"collaborators/{quote(author_login, safe='')}/permission"),
+            GiteaRequestOptions(allow_not_found=True),
         )
-        if not isinstance(repository_payload, dict):
-            raise RuntimeError("Cannot establish Gitea repository permissions.")
-        permissions = repository_payload.get("permissions")
-        permission_payload = permissions if isinstance(permissions, dict) else {}
-        self._has_repository_write_access = bool(
-            permission_payload.get("push") or permission_payload.get("admin")
-        )
-        return self._has_repository_write_access
+        if permission_payload is None:
+            return False
+        if not isinstance(permission_payload, dict) or permission_payload.get("permission") not in {
+            "none",
+            "read",
+            "write",
+            "admin",
+            "owner",
+        }:
+            raise RuntimeError("Cannot establish Gitea comment author permissions.")
+        return permission_payload["permission"] in {"write", "admin", "owner"}
 
     @staticmethod
     def _build_lock_component(lock_text: str) -> str:
