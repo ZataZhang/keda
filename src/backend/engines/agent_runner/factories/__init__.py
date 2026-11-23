@@ -10,12 +10,13 @@ continues to re-export them for backward compatibility.
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Sequence
 
 from backend.core.shared.interfaces.agent_output_view import IAgentOutputView
-from backend.core.shared.interfaces.agent_runner import IProcessRunner
+from backend.core.shared.interfaces.agent_runner import IGitHubClient, IProcessRunner
 from backend.core.shared.interfaces.machine_identity import IMachineIdentityStore
 from backend.core.shared.interfaces.agent_session import (
     IForegroundSessionLauncher,
@@ -33,10 +34,9 @@ from backend.core.shared.models.agent_runner import (
     AppConfig,
     RepositoryRunContext,
 )
-from backend.core.shared.models.product_identity import effective_repository_config_path
 from backend.core.shared.models.repository_platform import (
-    GITHUB_PLATFORM,
-    RepositoryPlatformNotImplementedError,
+    GITEA_PLATFORM,
+    RepositoryPlatformConfigurationError,
 )
 from backend.engines.agent_runner.deliberation_outputs import (
     write_deliberation_outputs,
@@ -76,6 +76,11 @@ from backend.infrastructure.config.settings import (
 )
 from backend.infrastructure.console.process_supervisor import PidfileProcessSupervisor
 from backend.infrastructure.github_client import GitHubCliClient
+from backend.infrastructure.gitea_client import (
+    GiteaApiClient,
+    GiteaRepositoryBinding,
+    parse_gitea_remote_url,
+)
 from backend.infrastructure.logging.logger import logger
 from backend.infrastructure.persistence.console_store import SqliteConsoleStore
 from backend.infrastructure.process_runner import SubprocessRunner
@@ -413,11 +418,11 @@ def create_github_api_budget() -> JsonGitHubApiBudget:
 
 def create_github_client(
     repo_path: Path,
-    process_runner: SubprocessRunner | None = None,
+    process_runner: IProcessRunner | None = None,
     *,
     bypass_budget_pause: bool = False,
     request_timeout_seconds: int | None = None,
-) -> GitHubCliClient:
+) -> IGitHubClient:
     """按仓库声明的平台创建代码托管客户端。
 
     Args:
@@ -427,17 +432,66 @@ def create_github_client(
         request_timeout_seconds: 未单独指定超时的 gh 命令默认时限。
 
     Returns:
-        连接到共享 API 用量账本的 GitHub CLI 客户端。
+        按仓库声明的平台创建的代码平台客户端。
 
     Raises:
         ValueError: 仓库本地配置无效。
-        RepositoryPlatformNotImplementedError: 仓库声明的平台尚未实现。
+        RepositoryPlatformConfigurationError: Gitea 发布远端、机器登记或令牌配置无效。
     """
     repository_settings = load_agent_runner_local_settings(repo_path)
-    if repository_settings is not None and repository_settings.platform != GITHUB_PLATFORM:
-        raise RepositoryPlatformNotImplementedError(
-            platform_name=repository_settings.platform,
-            config_path=effective_repository_config_path(Path(repository_settings.path)),
+    if repository_settings is not None and repository_settings.platform == GITEA_PLATFORM:
+        machine_settings = load_fresh_agent_runner_settings()
+        repository_remote_name = (
+            repository_settings.git.remote
+            if repository_settings.git is not None
+            else machine_settings.git.remote
+        )
+        remote_url_result = (process_runner or SubprocessRunner()).run(
+            ["git", "remote", "get-url", "--push", repository_remote_name],
+            cwd=repo_path,
+            check=False,
+        )
+        if remote_url_result.return_code != 0 or not remote_url_result.stdout.strip():
+            raise RepositoryPlatformConfigurationError(
+                f"Cannot read publishing Git remote {repository_remote_name!r} from "
+                f"repository {repo_path}. Configure [agent_runner.git].remote or add that remote."
+            )
+        parsed_remote = parse_gitea_remote_url(remote_url_result.stdout)
+        if parsed_remote is None:
+            raise RepositoryPlatformConfigurationError(
+                f"Cannot determine the Gitea host and owner/repo from publishing remote "
+                f"{repository_remote_name!r} in {repo_path}."
+            )
+        remote_hostname, owner_repo = parsed_remote
+        matched_instance = next(
+            (
+                instance_settings
+                for instance_settings in machine_settings.gitea_instances
+                if instance_settings.hostname == remote_hostname
+            ),
+            None,
+        )
+        if matched_instance is None:
+            raise RepositoryPlatformConfigurationError(
+                f"Gitea host {remote_hostname!r} is not registered in the machine config. "
+                "Add agent_runner.gitea_instances entries with base_url and token_env to your "
+                "local KedaCode config.toml before using this repository."
+            )
+        gitea_token = os.environ.get(matched_instance.token_env)
+        if not gitea_token or not gitea_token.strip():
+            raise RepositoryPlatformConfigurationError(
+                f"Gitea token environment variable {matched_instance.token_env!r} is unset "
+                "or empty; set it before making Gitea requests."
+            )
+        return GiteaApiClient(
+            GiteaRepositoryBinding(
+                repo_path=repo_path,
+                base_url=matched_instance.base_url,
+                host=remote_hostname,
+                owner_repo=owner_repo,
+            ),
+            token=gitea_token,
+            process_runner=process_runner,
         )
 
     return GitHubCliClient(

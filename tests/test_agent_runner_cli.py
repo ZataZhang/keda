@@ -2986,13 +2986,13 @@ def test_main_init_succeeds_when_repository_not_initialized(
     assert exit_code == 0
 
 
-def test_main_init_returns_failure_for_unsupported_label_sync_platform(
+def test_main_init_returns_failure_for_unconfigured_gitea_label_sync(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """标签同步遇到尚未实现的平台时，init 应返回非零退出码。"""
+    """Gitea 仓库无法解析发布 remote 时，init 应以非零退出码结束。"""
     from backend.api import cli_init
 
-    repo_path = _init_bare_git_repository(tmp_path, "unsupported-platform")
+    repo_path = _init_bare_git_repository(tmp_path, "unconfigured-gitea")
     monkeypatch.chdir(repo_path)
     config_path = repo_path / ".kedacode.toml"
     config_text = '[agent_runner.repository]\nplatform = "gitea"\n'
@@ -3012,7 +3012,7 @@ def test_main_init_returns_failure_for_unsupported_label_sync_platform(
 
     assert main(["init", "--no-update-gitignore"]) == 1
     stderr = capsys.readouterr().err
-    assert "The repository platform 'gitea' is not implemented." in stderr
+    assert "Cannot read publishing Git remote" in stderr
     assert "Traceback" not in stderr
 
 

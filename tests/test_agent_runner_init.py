@@ -6,6 +6,7 @@ import hashlib
 import subprocess
 import tomllib
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from pydantic import BaseModel
@@ -32,6 +33,7 @@ from backend.engines.agent_runner.repository_local import (
     initialize_repository_local_config,
 )
 from backend.infrastructure.config.settings import AgentRunnerLocalSettings
+from backend.infrastructure.config.gitea_settings import GiteaInstanceSettings
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
@@ -133,6 +135,39 @@ def test_iar_init_dry_run_real_entry(tmp_path: Path) -> None:
     assert "Please review verification_commands" in completed.stderr
     assert "git diff --check" in completed.stderr
     assert not (repo_path / product_identity.REPOSITORY_CONFIG_FILENAME).exists()
+
+
+def test_iar_init_selects_gitea_for_registered_publishing_host(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """kc init writes a Gitea declaration before its initial label sync."""
+    repo_path = _init_git_repository(tmp_path, "registered-gitea")
+    _run_git(
+        repo_path,
+        "remote",
+        "set-url",
+        "origin",
+        "https://git.example.test/team/target.git",
+    )
+    monkeypatch.setattr(
+        "backend.engines.agent_runner.repository_local.AgentRunnerSettings",
+        lambda: SimpleNamespace(
+            gitea_instances=[
+                GiteaInstanceSettings(
+                    base_url="https://git.example.test",
+                    token_env="RV_GITEA_TOKEN",
+                )
+            ]
+        ),
+    )
+
+    _, config_text, _ = build_repository_local_config_text(
+        RepositoryInitOptions(cwd=repo_path, dry_run=True)
+    )
+
+    repository_settings = tomllib.loads(config_text)["agent_runner"]["repository"]
+    assert repository_settings["platform"] == "gitea"
 
 
 def test_iar_init_result_includes_verification_commands(tmp_path: Path) -> None:

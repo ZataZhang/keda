@@ -21,6 +21,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
+from urllib.parse import quote, urlsplit, urlunsplit
 
 from backend.core.shared.interfaces.agent_runner import IProcessRunner
 from backend.core.shared.models.agent_runner import (
@@ -28,6 +29,7 @@ from backend.core.shared.models.agent_runner import (
     DeliveryGateError,
     DeliveryGateFailureKind,
 )
+from backend.core.shared.models.pull_request_url import parse_pull_request_number
 from backend.core.use_cases.agent_runner_primary_demo import (
     PRIMARY_DEMO_PROMPT_EN,
     PRIMARY_DEMO_PROMPT_ZH,
@@ -48,9 +50,6 @@ _EVIDENCE_ITEM_FILE_PATTERN = re.compile(r"^rv-(?P<item>\d+)[-.]", re.IGNORECASE
 _EVIDENCE_ITEM_SECTION_PATTERN = re.compile(
     r"\[\s*Item\s+(?P<item>\d+)(?P<sub>[a-z]?)\s*\]",
     re.IGNORECASE,
-)
-_PR_URL_PATTERN = re.compile(
-    r"https?://[^/]+/(?P<owner>[^/]+)/(?P<repo>[^/]+)/pull/(?P<number>\d+)"
 )
 _MAX_INLINE_EVIDENCE_CHARS = 3000
 
@@ -856,13 +855,33 @@ def validate_evidence_manifest(
 
 
 def build_evidence_blob_url(pr_url: str, branch: str, file_name: str) -> str | None:
-    """Build the repository blob URL for an evidence file."""
-    url_match = _PR_URL_PATTERN.search(pr_url)
-    if not url_match:
+    """生成 GitHub 或 Gitea 仓库证据分支的文件链接。"""
+    if parse_pull_request_number(pr_url) is None:
         return None
-    owner = url_match.group("owner")
-    repo = url_match.group("repo")
-    return f"https://github.com/{owner}/{repo}/blob/{branch}/{file_name}"
+    parsed_pr_url = urlsplit(pr_url)
+    path_parts = [part for part in parsed_pr_url.path.split("/") if part]
+    pull_segment_index = next(
+        (
+            index
+            for index, path_part in enumerate(path_parts)
+            if path_part.lower() in {"pull", "pulls"}
+            and index > 1
+            and index + 1 < len(path_parts)
+            and path_parts[index + 1].isdigit()
+        ),
+        None,
+    )
+    if pull_segment_index is None:
+        return None
+    pull_segment = path_parts[pull_segment_index].lower()
+    blob_path_segments = (
+        ["src", "branch", *branch.split("/")]
+        if pull_segment == "pulls"
+        else ["blob", *branch.split("/")]
+    )
+    link_prefix_parts = path_parts[:pull_segment_index] + blob_path_segments + file_name.split("/")
+    encoded_path = "/" + "/".join(quote(path_part, safe="") for path_part in link_prefix_parts)
+    return urlunsplit((parsed_pr_url.scheme, parsed_pr_url.netloc, encoded_path, "", ""))
 
 
 def _short_sha(sha256_hex: str) -> str:

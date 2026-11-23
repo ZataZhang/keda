@@ -114,7 +114,15 @@ verification_commands = [
 
 未覆盖的字段自动继承全局 `[agent_runner]` 默认值。环境变量仍可对全局段生效，但暂不支持通过环境变量覆盖单个仓库的字段。
 
-仓库自身的 `.kedacode.toml` 可在 `[agent_runner.repository]` 身份段声明 `platform`。允许值为 `github` 和 `gitea`，省略时默认为 `github`；平台名必须完全匹配小写写法。当前只有 `github` 已实现，声明 `gitea` 的仓库在执行代码托管平台操作时会收到尚未实现的提示；要继续使用现有 GitHub 对接，请设置 `platform = "github"`。未知值、大小写不符、带首尾空格或空字符串会在读取配置时被拒绝。个人本地覆盖文件不能改写该身份段。
+仓库自身的 `.kedacode.toml` 可在 `[agent_runner.repository]` 身份段声明 `platform`。允许值为 `github` 和 `gitea`，省略时默认为 `github`；平台名必须完全匹配小写写法。`kc init` 会将发布 remote 的主机名与本机 Gitea 登记匹配，命中时在仓库配置中写入 `platform = "gitea"`，因此 init 后的首次标签同步也走 Gitea。Gitea 仓库还要求运行 kc 的机器在全局状态目录 `~/.kedacode/config.toml` 登记实例：
+
+```toml
+[[agent_runner.gitea_instances]]
+base_url = "https://git.example.com"
+token_env = "GITEA_TOKEN"
+```
+
+令牌值通过环境变量 `GITEA_TOKEN` 注入；仓库内的 `.kedacode.toml` 与 `.kedacode.local.toml` 只能声明 `platform = "gitea"`，不能声明实例地址或令牌变量。非本机 Gitea 地址必须使用 HTTPS；只有 `localhost` 和 `127.0.0.1` 可使用 HTTP。未登记 remote 主机或令牌变量为空时，kc 会在发出请求前停止。Gitea 支持 Issue、标签、评论、Pull Request、合并与提交状态操作；草稿 PR 使用 `WIP: ` 标题前缀。未知平台值、大小写不符、带首尾空格或空字符串会在读取配置时被拒绝。
 
 ### 个人本地覆盖 `.kedacode.local.toml`
 
