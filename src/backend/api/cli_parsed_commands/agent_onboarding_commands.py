@@ -5,14 +5,20 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 
 from backend.api.cli_console import console, error_console
 from backend.api.cli_exit_codes import ExitCode
 from backend.api.cli_output import OUTPUT_FORMAT_JSON, CliError, emit
-from backend.api.cli_parsed_commands.agent_lifecycle import _resolve_repo_context, _write_or_fail
+from backend.api.cli_parsed_commands.agent_lifecycle import (
+    _resolve_repo_context,
+    _warn_about_shared_model,
+    _write_or_fail,
+)
 from backend.api.cli_parsed_context import ParsedCommandContext
 from backend.core.shared.models import product_identity
+from backend.core.shared.models.agent_runner import AppConfig
 from backend.core.use_cases.agent_onboarding import (
     SETUP_MENU_STAGES,
     AgentOnboardingError,
@@ -111,6 +117,27 @@ def _prompt_agent_setup_selection(global_config) -> tuple[str, str]:
     return stage, available[selected_index - 1].agent
 
 
+def _warn_for_setup_models(
+    config: AppConfig,
+    *,
+    local: bool = False,
+    preset_updates: Mapping[str, str | None] | None = None,
+) -> None:
+    """按当前或拟写入的阶段预设报告同模型提醒。"""
+    if preset_updates:
+        bindings = config.lifecycle_presets
+        layer = "repository_layer" if local else "global_layer"
+        planned_bindings = {**getattr(bindings, layer), **preset_updates}
+        config = dataclasses.replace(
+            config,
+            lifecycle_presets=dataclasses.replace(
+                bindings,
+                **{layer: {stage: preset for stage, preset in planned_bindings.items() if preset}},
+            ),
+        )
+    _warn_about_shared_model(config)
+
+
 def run_agent_setup_command(ctx: ParsedCommandContext) -> int:
     """``kc agent setup``：按本机可用性引导阶段选择（全局或个人覆盖）。
 
@@ -172,6 +199,12 @@ def run_agent_setup_command(ctx: ParsedCommandContext) -> int:
             fmt=ctx.output_format,
             human_renderer=_render_fix,
         )
+        _warn_for_setup_models(
+            global_config,
+            preset_updates={
+                entry.stage: None for entry in fix_entries if entry.layer == "lifecycle_presets"
+            },
+        )
         return 0
 
     stage = getattr(parsed, "stage", None) or "implementation"
@@ -230,6 +263,7 @@ def run_agent_setup_command(ctx: ParsedCommandContext) -> int:
                 fmt=ctx.output_format,
                 human_renderer=_render_readonly,
             )
+            _warn_for_setup_models(setup_config, local=local)
             return 0
         stage, agent = _prompt_agent_setup_selection(setup_config)
 
@@ -320,6 +354,12 @@ def run_agent_setup_command(ctx: ParsedCommandContext) -> int:
         fmt=ctx.output_format,
         human_renderer=_render_setup,
     )
+    if not cancelled:
+        _warn_for_setup_models(
+            setup_config,
+            local=local,
+            preset_updates={plan.stage: plan.preset} if not plan.already_satisfied else None,
+        )
     return 0
 
 

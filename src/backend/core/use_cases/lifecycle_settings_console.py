@@ -348,6 +348,34 @@ def build_fallback_candidates_view(config: AppConfig) -> dict[str, Any]:
     }
 
 
+def stages_sharing_implementation_model(
+    config: AppConfig,
+) -> tuple[str, tuple[str, ...]] | None:
+    """找出与实现阶段使用同一显式模型的审查阶段。
+
+    Args:
+        config: 用于解析实际生效预设的配置。
+
+    Returns:
+        实现模型 ID 与命中的阶段键，无命中时返回 None。
+    """
+    review_stages = ("verifier", "review", "supervisor")
+    explicit_models: dict[str, str] = {}
+    for stage in ("implementation", *review_stages):
+        if config.lifecycle_presets.declared_value(stage) is None:
+            continue
+        row = _lifecycle_row_source(stage, config)
+        if row["model_supported"] and row["model"]:
+            explicit_models[stage] = row["model"]
+    implementation_model = explicit_models.get("implementation")
+    if implementation_model is None:
+        return None
+    matching_stages = tuple(
+        stage for stage in review_stages if explicit_models.get(stage) == implementation_model
+    )
+    return (implementation_model, matching_stages) if matching_stages else None
+
+
 def build_lifecycle_settings_view(
     config: AppConfig,
     *,

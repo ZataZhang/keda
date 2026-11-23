@@ -172,6 +172,8 @@ supervisor / planner / content_generation / deliberate）。
 若已有配置中的阶段绑定指向未定义的预设，矩阵会保留绑定名并标明来源和未解析状态；绑定下拉也会显示
 「预设未定义：名称」，不会把悬空引用伪装成未绑定。打开下拉后可选择清除该层绑定，或先重建同名预设。
 
+<a id="cli"></a>
+
 ### 7.2 持久化 CLI
 
 与页面调用同一 core 用例 / TOML editor。**读取可自动推断 effective 范围；所有写入必须显式
@@ -193,6 +195,10 @@ kc agent fallback candidate move   <position> --to <n>  --scope … [--repo-id <
 
 - `lifecycle list` / `fallback list` 输出固定九行 / 有序候选，`--output json`（或 `--json`）字段
   名稳定、顺序确定，含 scope / repo id 与来源；写命令成功后重新打印生效视图（写后 fresh 读）。
+- `kc agent lifecycle list` 和 `kc agent setup` 会比较 `verifier`、`review`、`supervisor`
+  与 `implementation` 的生效模型 ID。命中时在 stderr 合并提示一次，列出共用模型的阶段，
+  建议高风险任务使用更强的模型。不同的预设名或推理强度仍算同一模型，未显式指定模型的阶段
+  跳过比较。`setup --dry-run` 有写入计划时按计划结果比较。提醒不影响保存、退出码或任务运行。
 - `preset set` 是 **upsert**：省略 `--model` / `--reasoning-effort` 表示该预设不显式设置该字段。
   要设三元组先 `preset set` 再 `lifecycle set` 绑定；`lifecycle unset` 只删当前层该阶段的绑定
   （仓库层清除后回落全局，全局清除后回落既有直接 Agent / legacy / 内置默认）。

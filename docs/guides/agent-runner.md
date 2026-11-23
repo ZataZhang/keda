@@ -5854,6 +5854,8 @@ uv run kc agent setup --fix --yes
 
 行为边界，逐条都是可验证的：
 
+- **同模型提醒**：引导会提示哪些审查阶段与实现阶段共用模型。比较规则见
+  [Agent 模型预设](model-presets.md#cli)。
 - **阶段闭集**：引导只管 `implementation` / `verifier` / `review`（一次轮次里真正会调用
   agent 的三个入口）。修复 / 收尾沿用实现者，其余阶段走 [Agent 模型预设](model-presets.md)
   的高级配置。

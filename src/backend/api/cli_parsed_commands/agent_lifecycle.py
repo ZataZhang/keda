@@ -8,11 +8,12 @@ from pathlib import Path
 from typing import Any
 
 from backend.api import cli as _cli
-from backend.api.cli_console import console
+from backend.api.cli_console import console, error_console
 from backend.api.cli_exit_codes import ExitCode
 from backend.api.cli_helpers import repository_selector_error
 from backend.api.cli_output import OUTPUT_FORMAT_JSON, CliError, emit
 from backend.api.cli_parsed_context import ParsedCommandContext
+from backend.core.shared.models.agent_runner import AppConfig
 from backend.core.shared.models.config_edit import (
     ConfigDocumentInvalidError,
     ConfigKeyMissingError,
@@ -39,6 +40,7 @@ from backend.core.use_cases.lifecycle_settings_console import (
     build_fallback_candidates_view,
     build_lifecycle_settings_view,
     local_override_binding_conflict,
+    stages_sharing_implementation_model,
     validate_fallback_candidates_update,
     validate_lifecycle_preset_binding_update,
     validate_preset_update,
@@ -210,6 +212,18 @@ def _render_lifecycle_settings(view: dict[str, Any]) -> None:
     _render_fallback_body(view["fallback"])
 
 
+def _warn_about_shared_model(config: AppConfig) -> None:
+    """在 stderr 合并报告共用实现模型的审查阶段。"""
+    shared_model = stages_sharing_implementation_model(config)
+    if shared_model is not None:
+        model, stages = shared_model
+        error_console.print(
+            f"Warning: {', '.join(stages)} use the same model as implementation ({model}). "
+            "Consider a stronger model for these stages, especially for high-risk work.",
+            markup=False,
+        )
+
+
 def _emit_lifecycle_view(ctx: ParsedCommandContext, *, allow_effective: bool) -> int:
     """重新解析 scope 并 emit 聚合生命周期视图（写后复读用同一 fresh 路径）。"""
     target = _resolve_lifecycle_scope(ctx, allow_effective=allow_effective)
@@ -225,6 +239,8 @@ def _emit_lifecycle_view(ctx: ParsedCommandContext, *, allow_effective: bool) ->
         fmt=ctx.output_format,
         human_renderer=lambda: _render_lifecycle_settings(view),
     )
+    if allow_effective:
+        _warn_about_shared_model(target.config)
     return 0
 
 
