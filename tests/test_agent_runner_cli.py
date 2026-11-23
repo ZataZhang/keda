@@ -2981,6 +2981,36 @@ def test_main_init_succeeds_when_repository_not_initialized(
     assert exit_code == 0
 
 
+def test_main_init_returns_failure_for_unsupported_label_sync_platform(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """标签同步遇到尚未实现的平台时，init 应返回非零退出码。"""
+    from backend.api import cli_init
+
+    repo_path = _init_bare_git_repository(tmp_path, "unsupported-platform")
+    monkeypatch.chdir(repo_path)
+    config_path = repo_path / ".kedacode.toml"
+    config_text = '[agent_runner.repository]\nplatform = "gitea"\n'
+    config_path.write_text(config_text, encoding="utf-8")
+    monkeypatch.setattr(
+        cli_init,
+        "initialize_repository_local_config",
+        lambda *_args: cli_init.RepositoryInitResult(
+            repo_root_path=repo_path,
+            config_path=config_path,
+            config_text=config_text,
+            wrote_file=False,
+            repo_id=None,
+        ),
+    )
+    monkeypatch.setattr(cli_init, "_sync_user_skills_or_report_error", lambda **_kwargs: 0)
+
+    assert main(["init", "--no-update-gitignore"]) == 1
+    stderr = capsys.readouterr().err
+    assert "The repository platform 'gitea' is not implemented." in stderr
+    assert "Traceback" not in stderr
+
+
 def _write_iar_toml(repo_root: Path, repo_id: str) -> None:
     """Write a minimal .kedacode.toml for CLI discovery tests."""
     iar_toml = repo_root / ".kedacode.toml"

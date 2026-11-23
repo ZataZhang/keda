@@ -550,6 +550,8 @@ uv run --project /path/to/keda kc init
 
 `kc init` 成功写入本地配置后，还会自动把当前仓库注册（或更新路径）到全局 `config.toml` 的 `[agent_runner.repositories]` 中，使 `kc daemon` 默认即可在当前仓库启动。如果该 `repo_id` 已在 registry 中但指向不同路径，init 会自动更新 registry 路径到当前位置。
 
+`kc init` 若在标签同步时遇到尚未实现的仓库平台，会说明原因并以退出码 `1` 结束。
+
 用户级 Skill 同步失败不会中断仓库注册与 GitHub 标签同步；`kc init` 会继续完成这些步骤，并在最终退出时仍以非零退出码报告 Skill 同步失败。
 
 ### 机器级 `config.toml` 的认定与托管进程继承
