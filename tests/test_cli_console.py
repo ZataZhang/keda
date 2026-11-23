@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import socket
+import sys
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -154,10 +155,14 @@ class _ForeignApiHandler(_JsonApiHandler):
     payload = {"service": "something-else"}
 
 
-def _bind_ephemeral_port() -> tuple[socket.socket, int]:
-    """Bind a listening socket on an OS-assigned port; return it with its port."""
+def _bind_ephemeral_port(
+    *, host: str = "127.0.0.1", reuse_address: bool = False
+) -> tuple[socket.socket, int]:
+    """在系统分配的端口监听，返回 socket 和端口。"""
     listening_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    listening_socket.bind(("127.0.0.1", 0))
+    if reuse_address:
+        listening_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    listening_socket.bind((host, 0))
     listening_socket.listen(1)
     return listening_socket, int(listening_socket.getsockname()[1])
 
@@ -198,18 +203,39 @@ class TestResolveConsolePort:
             resolve_console_port(host="127.0.0.1", explicit_port=None, default_port=8313)
 
 
-def test_real_probe_sees_a_bound_port() -> None:
-    """The production probe reports a port that is really being listened on.
-
-    One real-socket check is kept so the stubbed selection tests above cannot
-    drift away from actual socket behavior; the port is OS-assigned, so this
-    test never collides with a fixed port band.
-    """
-    listening_socket, occupied_port = _bind_ephemeral_port()
+@pytest.mark.parametrize(
+    "listener_host,reuse_address",
+    [("127.0.0.1", False), ("127.0.0.1", True), ("0.0.0.0", True)],
+)
+def test_real_probe_sees_a_bound_port(listener_host: str, reuse_address: bool) -> None:
+    """真实监听必须阻止显式端口选择，包括可复用的通配地址监听。"""
+    listening_socket, occupied_port = _bind_ephemeral_port(
+        host=listener_host, reuse_address=reuse_address
+    )
     try:
         assert cli_console._port_is_available("127.0.0.1", occupied_port) is False
+        with pytest.raises(ConsolePortUnavailableError):
+            resolve_console_port(
+                host="127.0.0.1", explicit_port=occupied_port, default_port=occupied_port
+            )
     finally:
         listening_socket.close()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="TIME_WAIT 复用仅改动 POSIX 路径")
+def test_real_probe_reuses_port_after_active_close() -> None:
+    """服务端主动关闭后，真实 TIME_WAIT 不应阻止立即重启。"""
+    listening_socket, closed_port = _bind_ephemeral_port(reuse_address=True)
+    with listening_socket, socket.create_connection(("127.0.0.1", closed_port)) as client:
+        connection, _ = listening_socket.accept()
+        with connection:
+            connection.shutdown(socket.SHUT_WR)
+            assert client.recv(1) == b""
+            client.shutdown(socket.SHUT_WR)
+    assert (
+        resolve_console_port(host="127.0.0.1", explicit_port=closed_port, default_port=closed_port)
+        == closed_port
+    )
 
 
 def test_real_probe_identifies_a_console_over_http() -> None:

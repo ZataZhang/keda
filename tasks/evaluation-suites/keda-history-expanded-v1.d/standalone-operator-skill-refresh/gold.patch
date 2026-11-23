@@ -1,0 +1,533 @@
+diff --git a/docs/guides/agent-runner.md b/docs/guides/agent-runner.md
+index 27a70ac9..767e6577 100644
+--- a/docs/guides/agent-runner.md
++++ b/docs/guides/agent-runner.md
+@@ -434 +434 @@ uv run --project /path/to/keda kc init
+-`kc init --dry-run` 只打印将要写入的内容，不创建文件。新生成的 `.kedacode.toml` 会包含全部**仓库级可覆盖**配置段及其具有默认值的字段，其中 `[agent_runner.autopilot]` 默认关闭；如需启用快速合并，还必须同时把 `[agent_runner.safety].auto_merge` 设为 `true`。这些初始值会固定为当前仓库的显式配置，后续修改全局默认值不会覆盖它们；**`generated_content` 是例外**：脚手架不写它（见下文「`generated_content` 不由 `kc init` 写入」）。`.kedacode.toml` 已存在时，`kc init` 会拒绝覆盖；确认需要重建时显式传入 `--force`。
++`kc init --dry-run` 只打印将要写入的内容，不创建文件。新生成的 `.kedacode.toml` 会包含全部**仓库级可覆盖**配置段及其具有默认值的字段，其中 `[agent_runner.autopilot]` 默认关闭；如需启用快速合并，还必须同时把 `[agent_runner.safety].auto_merge` 设为 `true`。这些初始值会固定为当前仓库的显式配置，后续修改全局默认值不会覆盖它们；**`generated_content` 是例外**：脚手架不写它（见下文「`generated_content` 不由 `kc init` 写入」）。`.kedacode.toml` 已存在时，`kc init` 会拒绝覆盖并把用户导向 `kc skill install`；确认需要重建时显式传入 `--force`。
+@@ -461 +461 @@ tasks/evidence/**
+-同时 `kc init` 会从远程模板仓库安装 prd / code-reviewer skill（`--force` 会传递给 skill 安装，允许覆盖本地改过的同名 skill）。PRD 格式约定（Change Log 条目结构、验收复选框语法、分组标题、rv-id 证据命名、证据目录布局）的唯一出处是 prd skill 的 `## Machine Contract (vN)` 章节，而且**解析实现也只有一份**——skill 自带的 `scripts/prd_contract.py`：kc 各 prompt 只注入一行指向该契约的指针、不复述教学，验收清单与 Change Log 也不再由 kc 自己解析，而是把 PRD 文本交给该脚本、取回 JSON 结构。**daemon 在每轮执行循环前预检**三件事：prd skill 可解析、契约主版本落在受支持集合内（当前 v3/v4/v5；集合语义让"skill 先 bump、keda 后跟进"的发版错峰不会卡住）、以及兄弟 `scripts/prd_contract.py` 与 `SKILL.md` 成套存在（只装半套会在启动时就点名缺哪个文件，而不是拖到交付门禁）。错误给出安全修复方式（重跑 `kc init`，或设置 `KEDACODE_PRD_SKILL_PATH` 指向完整 skill），不建议盲目运行可能覆盖用户级 Skill 的 `kc init --force`。**安装目标首位是 keda 自有目录 `~/.kedacode/skills`**：解析时优先取这份，因此用户删掉 agent 目录里的 prd 副本不影响 `kc` 的正常解析；其后才是各 agent 用户级目录。CI / 测试可用 `KEDACODE_SKILLS_DIR` 把安装根覆盖到临时目录。
++同时 `kc init` 会从远程模板仓库安装 prd / code-reviewer skill（`--force` 会传递给 skill 安装，允许覆盖本地改过的同名 skill）。PRD 格式约定（Change Log 条目结构、验收复选框语法、分组标题、rv-id 证据命名、证据目录布局）的唯一出处是 prd skill 的 `## Machine Contract (vN)` 章节，而且**解析实现也只有一份**——skill 自带的 `scripts/prd_contract.py`：kc 各 prompt 只注入一行指向该契约的指针、不复述教学，验收清单与 Change Log 也不再由 kc 自己解析，而是把 PRD 文本交给该脚本、取回 JSON 结构。**daemon 在每轮执行循环前预检**三件事：prd skill 可解析、契约主版本落在受支持集合内（当前 v3/v4/v5；集合语义让"skill 先 bump、keda 后跟进"的发版错峰不会卡住）、以及兄弟 `scripts/prd_contract.py` 与 `SKILL.md` 成套存在（只装半套会在启动时就点名缺哪个文件，而不是拖到交付门禁）。错误给出安全修复方式（重装 skill 用 `kc skill install`、重建仓库配置才用 `kc init --force`，或设置 `KEDACODE_PRD_SKILL_PATH` 指向完整 skill），不建议盲目运行可能覆盖用户级 Skill 的 `--force` 形式。**安装目标首位是 keda 自有目录 `~/.kedacode/skills`**：解析时优先取这份，因此用户删掉 agent 目录里的 prd 副本不影响 `kc` 的正常解析；其后才是各 agent 用户级目录。CI / 测试可用 `KEDACODE_SKILLS_DIR` 把安装根覆盖到临时目录。
+@@ -466,0 +467,17 @@ ready Issue 按 GitHub label `priority/P0`、`priority/P1`、`priority/P2`、`pr
++### 用户级 Skill 的独立安装与刷新（`kc skill install`）
++
++`kc init` 内嵌的 Skill 同步（远程模板 `prd` / `code-reviewer` + 随包 `kedacode-operator`）也可以不经仓库配置独立触发：`kc skill install`。它与 init 走同一份安装实现（内容来源、安装根解析、幂等跳过、旧名副本清理与 fail-closed 语义完全一致），但不读写 `.kedacode.toml`、不注册仓库、不同步 labels 与 gitignore——典型场景是升级 kedacode 后 operator skill 改名，而常用仓库里 `.kedacode.toml` 已存在、`kc init` 第一步就会被挡住，此时在各安装根补装新名 skill 并清理未被改动的旧名副本只需一条命令：
++
++```bash
++kc skill install --dry-run   # 预览全部安装根的安装计划，不写任何文件
++kc skill install             # 安装/刷新全部用户级 Skill
++```
++
++与 init 相同的冲突语义：
++
++- 用户改动过的同名 Skill（受管文件与随包/远程模板不一致）默认保留并报告冲突，`--force` 才覆盖；
++- 旧名副本只有逐字节等于历史随包版本才自动删除，改动过的保留并回显路径；
++- 远程模板 `prd` / `code-reviewer` 的本地 `SKILL.md` 与远程不同且未传 `--force` 时报错退出（fail-closed，不覆盖）。
++
++`kc skill install` 面向用户级安装根，与目标仓库无关：传 `--repo` / `--repo-id` / `--config` 会被以用法错误拒绝（退出码 2）。
++
+@@ -1914,0 +1932,4 @@ kc init
++# 重装/刷新用户级 Skill（不触碰 .kedacode.toml，仓库已 init 过也能用）
++kc skill install --dry-run
++kc skill install
++
+diff --git a/src/backend/api/cli_init.py b/src/backend/api/cli_init.py
+index 6f72ab37..83c60540 100644
+--- a/src/backend/api/cli_init.py
++++ b/src/backend/api/cli_init.py
+@@ -9,0 +10 @@ from backend.api.cli_console import console, error_console
++from backend.api.cli_skill import sync_user_skills
+@@ -16,5 +17 @@ from backend.core.use_cases.agent_runner_factory import (
+-from backend.core.use_cases.agent_runner_init_assets import (
+-    RemoteTemplateSkillInstallOptions,
+-    install_packaged_operator_skill,
+-    install_remote_template_skills,
+-)
++from backend.core.use_cases.agent_runner_init_assets import RemoteTemplateSkillInstallError
+@@ -28,0 +26 @@ from backend.core.use_cases.agent_runner_repository_local import (
++    RepositoryLocalConfigExistsError,
+@@ -53,0 +52,10 @@ def _run_init_command(parsed: argparse.Namespace, process_runner: IProcessRunner
++    except RepositoryLocalConfigExistsError as exc:
++        logger.error("kc init failed: %s", exc)
++        error_console.print(
++            "Hint: 只想重装/刷新用户级 Skills 时不必改动这份配置，运行 "
++            "`kc skill install`；仅当确实要重建配置才用 `kc init --force`. "
++            "To refresh skills without touching the local config, run "
++            "`kc skill install`; use `kc init --force` only to rebuild it.",
++            markup=False,
++        )
++        return 1
+@@ -69,8 +77,2 @@ def _run_init_command(parsed: argparse.Namespace, process_runner: IProcessRunner
+-        remote_skill_result = install_remote_template_skills(
+-            RemoteTemplateSkillInstallOptions(
+-                process_runner=process_runner, dry_run=True, force=parsed.force
+-            )
+-        )
+-        remote_skill_names = ", ".join(remote_skill_result.installed_skill_names)
+-        remote_skill_roots = ", ".join(
+-            str(root_path) for root_path in remote_skill_result.target_skills_roots
++        return _sync_user_skills_or_report_error(
++            process_runner=process_runner, dry_run=True, force=parsed.force
+@@ -78,13 +79,0 @@ def _run_init_command(parsed: argparse.Namespace, process_runner: IProcessRunner
+-        console.print(
+-            f"[cyan]Would install remote template skills:[/] {remote_skill_names} -> "
+-            f"{remote_skill_roots}",
+-            markup=False,
+-        )
+-        for skills_root in remote_skill_result.target_skills_roots:
+-            operator_skill_result = install_packaged_operator_skill(
+-                target_skills_root=skills_root,
+-                dry_run=True,
+-                force=parsed.force,
+-            )
+-            _print_operator_skill_plan(operator_skill_result)
+-        return 0
+@@ -98,12 +87,2 @@ def _run_init_command(parsed: argparse.Namespace, process_runner: IProcessRunner
+-    try:
+-        remote_skill_result = install_remote_template_skills(
+-            RemoteTemplateSkillInstallOptions(process_runner=process_runner, force=parsed.force)
+-        )
+-    except Exception as exc:  # noqa: BLE001 - remote availability is required by kc init.
+-        error_console.print(f"[red]Remote template skill installation failed:[/] {exc}")
+-        return 1
+-    remote_skill_names = ", ".join(remote_skill_result.installed_skill_names)
+-    overwritten_names = ", ".join(remote_skill_result.overwritten_skill_names)
+-    skipped_names = ", ".join(remote_skill_result.skipped_skill_names)
+-    remote_skill_roots = ", ".join(
+-        str(root_path) for root_path in remote_skill_result.target_skills_roots
++    skills_exit_code = _sync_user_skills_or_report_error(
++        process_runner=process_runner, dry_run=False, force=parsed.force
+@@ -111,17 +90,2 @@ def _run_init_command(parsed: argparse.Namespace, process_runner: IProcessRunner
+-    console.print(
+-        f"[green]Installed remote template skills:[/] {remote_skill_names} -> "
+-        f"{remote_skill_roots}"
+-    )
+-    if overwritten_names:
+-        console.print(
+-            f"[yellow]Overwrote user-owned skills (matching remote template):[/] {overwritten_names}"
+-        )
+-    if skipped_names:
+-        console.print(f"[dim]Remote template skills already up to date:[/] {skipped_names}")
+-    for skills_root in remote_skill_result.target_skills_roots:
+-        operator_skill_result = install_packaged_operator_skill(
+-            target_skills_root=skills_root,
+-            dry_run=False,
+-            force=parsed.force,
+-        )
+-        _print_operator_skill_plan(operator_skill_result)
++    if skills_exit_code:
++        return skills_exit_code
+@@ -157,27 +121,10 @@ def _run_init_command(parsed: argparse.Namespace, process_runner: IProcessRunner
+-def _print_operator_skill_plan(result) -> None:
+-    """呈现内置 operator Skill 的安装、冲突保护或覆盖结果，并回显旧名副本处理说明。"""
+-    if result.action == "preserve-conflict":
+-        prefix = (
+-            "Would preserve existing user skill"
+-            if result.dry_run
+-            else "Preserved existing user skill"
+-        )
+-        print(f"{prefix} (conflict; use --force to replace): {result.target_path}")
+-    elif result.action == "up-to-date":
+-        print(f"KedaCode operator skill already up to date: {result.target_path}")
+-    else:
+-        if result.action == "overwrite":
+-            prefix = (
+-                "Would overwrite packaged KedaCode operator skill"
+-                if result.dry_run
+-                else "Overwrote packaged KedaCode operator skill"
+-            )
+-        else:
+-            prefix = (
+-                "Would install packaged KedaCode operator skill"
+-                if result.dry_run
+-                else "Installed KedaCode operator skill"
+-            )
+-        print(f"{prefix}: {result.target_path}")
+-    if result.legacy_notice:
+-        print(result.legacy_notice)
++def _sync_user_skills_or_report_error(
++    *, process_runner: IProcessRunner, dry_run: bool, force: bool
++) -> int:
++    """同步用户级 Skills，远程模板不可用或冲突时报告原因并以失败退出。"""
++    try:
++        sync_user_skills(process_runner=process_runner, dry_run=dry_run, force=force)
++    except RemoteTemplateSkillInstallError as exc:
++        error_console.print(f"[red]Remote template skill installation failed:[/] {exc}")
++        return 1
++    return 0
+diff --git a/src/backend/api/cli_parsed_commands/__init__.py b/src/backend/api/cli_parsed_commands/__init__.py
+index 3a4f3284..577e470f 100644
+--- a/src/backend/api/cli_parsed_commands/__init__.py
++++ b/src/backend/api/cli_parsed_commands/__init__.py
+@@ -61,0 +62 @@ from backend.api.cli_parsed_commands.runner import (
++from backend.api.cli_parsed_commands.skill import run_skill_install_command
+@@ -70,0 +72 @@ _DISPATCH_TABLE: dict[str, callable] = {
++    "skill install": run_skill_install_command,
+diff --git a/src/backend/api/cli_parsed_commands/skill.py b/src/backend/api/cli_parsed_commands/skill.py
+new file mode 100644
+index 00000000..b6069919
+--- /dev/null
++++ b/src/backend/api/cli_parsed_commands/skill.py
+@@ -0,0 +1,60 @@
++"""``kc skill`` 子命令 handlers。
++
++与 ``kc init`` 的区别只在于范围：本组命令不读写仓库本地配置，只把随包
++operator Skill 与远程模板 Skill 同步到用户级安装根，因此在已经 ``kc init``
++过的仓库里也能直接重装（issue-245）。
++"""
++
++from __future__ import annotations
++
++from backend.api.cli_exit_codes import ExitCode
++from backend.api.cli_output import CliError
++from backend.api.cli_parsed_context import ParsedCommandContext
++from backend.api.cli_skill import sync_user_skills
++from backend.core.use_cases.agent_runner_init_assets import RemoteTemplateSkillInstallError
++
++
++def run_skill_install_command(ctx: ParsedCommandContext) -> int:
++    """``kc skill install``：安装或刷新全部用户级 Skills。
++
++    Args:
++        ctx: 已解析的命令上下文，``parsed.dry_run`` / ``parsed.force`` 控制写入。
++
++    Returns:
++        命令退出码：``0`` 表示已同步（或已给出计划），冲突保护不是失败。
++
++    Raises:
++        CliError: 传入了仓库选择器（本命令与目标仓库无关），或远程模板 Skill
++            不可用 / 被用户改动且未声明 ``--force``。
++    """
++    # argparse 门面的仓库 selector 用 ``argparse.SUPPRESS``，未传时属性不存在，
++    # 统一走 ``getattr`` 才能同时覆盖 Typer 与门面两条解析路径。
++    if (
++        ctx.repo_id is not None
++        or ctx.repo_override is not None
++        or getattr(ctx.parsed, "config", None) is not None
++    ):
++        raise CliError(
++            "kc skill install writes to user-level skill roots; "
++            "it takes no repository. Omit --repo/--repo-id/--config.",
++            code=ExitCode.USAGE,
++            suggestion="kc skill install --dry-run",
++        )
++    try:
++        sync_user_skills(
++            process_runner=ctx.process_runner,
++            dry_run=ctx.parsed.dry_run,
++            force=ctx.parsed.force,
++        )
++    except RemoteTemplateSkillInstallError as exc:
++        # 与 ``kc init`` 对同一失败给出同一退出码：这个异常既覆盖远程模板不可用，
++        # 也覆盖 fail-closed 的改名拒绝，命令树无法只认后者，因此不升级为 ``conflict``。
++        raise CliError(
++            str(exc),
++            code=ExitCode.GENERAL,
++            suggestion="kc skill install --dry-run",
++        ) from exc
++    return 0
++
++
++__all__ = ["run_skill_install_command"]
+diff --git a/src/backend/api/cli_parser_ops_commands.py b/src/backend/api/cli_parser_ops_commands.py
+index d6d65002..8030f12e 100644
+--- a/src/backend/api/cli_parser_ops_commands.py
++++ b/src/backend/api/cli_parser_ops_commands.py
+@@ -45,0 +46,22 @@ def add_ops_commands(subparsers: argparse._SubParsersAction) -> None:
++    skill_parser = subparsers.add_parser(
++        "skill",
++        help="Install and refresh the packaged and remote-template user-level Skills.",
++    )
++    skill_subparsers = skill_parser.add_subparsers(dest="skill_command", required=True)
++    skill_install_parser = skill_subparsers.add_parser(
++        "install",
++        help="Install or refresh user-level Skills in every detected skill root.",
++    )
++    skill_install_parser.set_defaults(command="skill install")
++    skill_install_parser.add_argument(
++        "--force",
++        action="store_true",
++        help="Replace user-modified skills and delete legacy-named copies outright.",
++    )
++    skill_install_parser.add_argument(
++        "--dry-run",
++        action="store_true",
++        help="Print the install plan for every skill root without writing anything.",
++    )
++    add_common_options(skill_install_parser)
++
+diff --git a/src/backend/api/cli_skill.py b/src/backend/api/cli_skill.py
+new file mode 100644
+index 00000000..15991052
+--- /dev/null
++++ b/src/backend/api/cli_skill.py
+@@ -0,0 +1,114 @@
++"""用户级 Skills 的安装与刷新——``kc init`` 与 ``kc skill install`` 的共享实现。
++
++两条入口都调用 :func:`sync_user_skills`：远程模板 Skill 与随包 operator Skill 的
++内容来源、目标安装根、幂等跳过、旧名副本清理与 fail-closed 保护全部由
++:mod:`backend.core.use_cases.agent_runner_init_assets` 的安装实现决定，本模块只按
++安装根逐个编排调用并呈现结果。把它抽出来是因为「只想重装/刷新 Skill」在仓库已有
++``.kedacode.toml`` 时曾完全无路可走——唯一入口 ``kc init`` 的第一步就会被已存在的
++配置挡死（issue-245）。
++"""
++
++from __future__ import annotations
++
++from typing import TYPE_CHECKING
++
++from backend.api.cli_console import console
++from backend.core.use_cases.agent_runner_init_assets import (
++    PackagedSkillInstallResult,
++    RemoteTemplateSkillInstallOptions,
++    RemoteTemplateSkillInstallResult,
++    install_packaged_operator_skill,
++    install_remote_template_skills,
++)
++
++if TYPE_CHECKING:
++    from backend.core.shared.interfaces.agent_runner import IProcessRunner
++
++
++def sync_user_skills(*, process_runner: IProcessRunner, dry_run: bool, force: bool) -> None:
++    """把远程模板 Skill 与随包 operator Skill 同步到全部用户级安装根。
++
++    安装根由安装实现自己解析（``KEDACODE_SKILLS_DIR`` 优先，其后是产品自有目录与
++    各 agent 的用户级 skills 目录），调用方不传路径，因此 ``kc init`` 与
++    ``kc skill install`` 永远写到同一批目录、也永远用同一套冲突判定。
++
++    Args:
++        process_runner: 执行受限 Git 命令的端口（远程模板下载使用）。
++        dry_run: 是否只打印计划、不触碰文件系统。
++        force: 是否覆盖用户改动过的同名 Skill，并直接删除旧名 operator 副本。
++
++    Raises:
++        RemoteTemplateSkillInstallError: 远程模板拉取失败，或远程模板 Skill 已被
++            用户改动且未声明 ``force``（fail-closed，不覆盖），或随包目录缺少
++            ``SKILL.md`` / 目标是指向别处的符号链接。随包 operator Skill 的冲突
++            不在此列：它默认保留用户内容并打印冲突提示。
++    """
++    remote_skill_result = install_remote_template_skills(
++        RemoteTemplateSkillInstallOptions(
++            process_runner=process_runner,
++            dry_run=dry_run,
++            force=force,
++        )
++    )
++    _print_remote_template_skill_result(remote_skill_result)
++    for skills_root in remote_skill_result.target_skills_roots:
++        _print_operator_skill_plan(
++            install_packaged_operator_skill(
++                target_skills_root=skills_root,
++                dry_run=dry_run,
++                force=force,
++            )
++        )
++
++
++def _print_remote_template_skill_result(result: RemoteTemplateSkillInstallResult) -> None:
++    """呈现远程模板 Skill 的同步结果；dry-run 下只呈现计划路径。"""
++    skill_names = ", ".join(result.installed_skill_names)
++    skills_roots = ", ".join(str(root_path) for root_path in result.target_skills_roots)
++    if result.dry_run:
++        console.print(
++            f"[cyan]Would install remote template skills:[/] {skill_names} -> {skills_roots}",
++            markup=False,
++        )
++        return
++    console.print(f"[green]Installed remote template skills:[/] {skill_names} -> {skills_roots}")
++    overwritten_names = ", ".join(result.overwritten_skill_names)
++    skipped_names = ", ".join(result.skipped_skill_names)
++    if overwritten_names:
++        console.print(
++            f"[yellow]Overwrote user-owned skills (matching remote template):[/] {overwritten_names}"
++        )
++    if skipped_names:
++        console.print(f"[dim]Remote template skills already up to date:[/] {skipped_names}")
++
++
++def _print_operator_skill_plan(result: PackagedSkillInstallResult) -> None:
++    """呈现内置 operator Skill 的安装、冲突保护或覆盖结果，并回显旧名副本处理说明。"""
++    if result.action == "preserve-conflict":
++        prefix = (
++            "Would preserve existing user skill"
++            if result.dry_run
++            else "Preserved existing user skill"
++        )
++        print(f"{prefix} (conflict; use --force to replace): {result.target_path}")
++    elif result.action == "up-to-date":
++        print(f"KedaCode operator skill already up to date: {result.target_path}")
++    else:
++        if result.action == "overwrite":
++            prefix = (
++                "Would overwrite packaged KedaCode operator skill"
++                if result.dry_run
++                else "Overwrote packaged KedaCode operator skill"
++            )
++        else:
++            prefix = (
++                "Would install packaged KedaCode operator skill"
++                if result.dry_run
++                else "Installed KedaCode operator skill"
++            )
++        print(f"{prefix}: {result.target_path}")
++    if result.legacy_notice:
++        print(result.legacy_notice)
++
++
++__all__ = ["sync_user_skills"]
+diff --git a/src/backend/api/cli_typer_app.py b/src/backend/api/cli_typer_app.py
+index a0c95f15..cc74caab 100644
+--- a/src/backend/api/cli_typer_app.py
++++ b/src/backend/api/cli_typer_app.py
+@@ -79,0 +80 @@ __all__ = [
++    "skill_app",
+@@ -205,0 +207,5 @@ auth_app = typer.Typer(
++skill_app = typer.Typer(
++    help="Install and refresh the packaged and remote-template user-level Skills.",
++    no_args_is_help=True,
++    context_settings=_HELP_CONTEXT,
++)
+@@ -220,0 +227 @@ app.add_typer(agent_app, name="agent")
++app.add_typer(skill_app, name="skill")
+@@ -414,0 +422 @@ from backend.api import (  # noqa: E402,F401
++    cli_typer_skill,
+diff --git a/src/backend/api/cli_typer_skill.py b/src/backend/api/cli_typer_skill.py
+new file mode 100644
+index 00000000..ee525ba0
+--- /dev/null
++++ b/src/backend/api/cli_typer_skill.py
+@@ -0,0 +1,49 @@
++"""Typer commands under ``kc skill``.
++
++Holds :func:`skill_install_command`, the user-level Skill installer/refresh
++entry that works independently of the repository-local config.
++"""
++
++from __future__ import annotations
++
++from typing import Annotated
++
++import typer
++
++from backend.api.cli_typer_app import (
++    ConfigOption,
++    RepoIdOption,
++    RepoOption,
++    _run_typer_command,
++    _typer_selector_options,
++    skill_app,
++)
++
++
++@skill_app.command("install")
++def skill_install_command(
++    ctx: typer.Context,
++    force: Annotated[
++        bool,
++        typer.Option(
++            "--force",
++            help="Replace user-modified skills and delete legacy-named copies outright.",
++        ),
++    ] = False,
++    dry_run: Annotated[
++        bool,
++        typer.Option(
++            "--dry-run",
++            help="Print the install plan for every skill root without writing anything.",
++        ),
++    ] = False,
++    repo: RepoOption = None,
++    repo_id: RepoIdOption = None,
++    config: ConfigOption = None,
++) -> int:
++    """Install or refresh the packaged and remote-template skills in all user roots."""
++    selector_options = _typer_selector_options(ctx, repo=repo, repo_id=repo_id, config=config)
++    return _run_typer_command("skill install", **selector_options, force=force, dry_run=dry_run)
++
++
++__all__ = ["skill_install_command"]
+diff --git a/src/backend/core/use_cases/agent_runner_init_assets.py b/src/backend/core/use_cases/agent_runner_init_assets.py
+index 7edcf052..126eff83 100644
+--- a/src/backend/core/use_cases/agent_runner_init_assets.py
++++ b/src/backend/core/use_cases/agent_runner_init_assets.py
+@@ -34,0 +35,7 @@ install_packaged_operator_skill = (
++PackagedSkillInstallResult = _engines_remote_template_skills_module.PackagedSkillInstallResult
++RemoteTemplateSkillInstallError = (
++    _engines_remote_template_skills_module.RemoteTemplateSkillInstallError
++)
++RemoteTemplateSkillInstallResult = (
++    _engines_remote_template_skills_module.RemoteTemplateSkillInstallResult
++)
+@@ -41,0 +49,2 @@ __all__ = [
++    "PackagedSkillInstallResult",
++    "RemoteTemplateSkillInstallError",
+@@ -42,0 +52 @@ __all__ = [
++    "RemoteTemplateSkillInstallResult",
+diff --git a/src/backend/core/use_cases/agent_runner_repository_local.py b/src/backend/core/use_cases/agent_runner_repository_local.py
+index ebd941df..f2b38c23 100644
+--- a/src/backend/core/use_cases/agent_runner_repository_local.py
++++ b/src/backend/core/use_cases/agent_runner_repository_local.py
+@@ -23,0 +24 @@ RepositoryInitOptions = _engines_repository_local_module.RepositoryInitOptions
++RepositoryLocalConfigExistsError = _engines_repository_local_module.RepositoryLocalConfigExistsError
+@@ -43,0 +45 @@ __all__ = [
++    "RepositoryLocalConfigExistsError",
+diff --git a/src/backend/engines/agent_runner/repository_local.py b/src/backend/engines/agent_runner/repository_local.py
+index bd6d3b35..2ccadacf 100644
+--- a/src/backend/engines/agent_runner/repository_local.py
++++ b/src/backend/engines/agent_runner/repository_local.py
+@@ -68,0 +69,14 @@ class IARRepositoryNotInitializedError(Exception):
++class RepositoryLocalConfigExistsError(ValueError):
++    """仓库本地配置已存在且与本次生成结果不同，且调用方未声明覆盖。
++
++    单独成类型（而非裸 ``ValueError``）是为了让 CLI 能认出「配置冲突」这一种失败，
++    在不改变既有退出码的前提下把用户导向与配置文件无关的 Skill 重装入口。
++    """
++
++    def __init__(self, config_path: Path) -> None:
++        self.config_path = config_path
++        super().__init__(
++            f"KedaCode local config already exists at {config_path}. Use --force to overwrite it."
++        )
++
++
+@@ -850 +864,2 @@ def initialize_repository_local_config(
+-        ValueError: If the repository config already exists and overwrite was not forced.
++        RepositoryLocalConfigExistsError: 仓库本地配置已存在且未声明覆盖
++            （仍是 :class:`ValueError` 的子类，既有捕获不受影响）。
+@@ -877,3 +892 @@ def initialize_repository_local_config(
+-            raise ValueError(
+-                f"KedaCode local config already exists at {config_path}. Use --force to overwrite it."
+-            )
++            raise RepositoryLocalConfigExistsError(config_path)
+diff --git a/src/backend/engines/agent_runner/templates/skills/kedacode-operator/SKILL.md b/src/backend/engines/agent_runner/templates/skills/kedacode-operator/SKILL.md
+index 8a2d0a6c..3922f00a 100644
+--- a/src/backend/engines/agent_runner/templates/skills/kedacode-operator/SKILL.md
++++ b/src/backend/engines/agent_runner/templates/skills/kedacode-operator/SKILL.md
+@@ -21 +21 @@ Use this skill when the user asks to operate the KedaCode CLI or its managed run
+-| 装环境与查 Agent 配置 | 装环境 / 初始化仓库 / kc init / 有哪些模型预设 / agent doctor / 这个命令收什么旗标 | `${CODEBUDDY_SKILL_DIR}/references/setup-and-config.md` |
++| 装环境与查 Agent 配置 | 装环境 / 初始化仓库 / kc init / 重装 skill / 刷新 skill / kc skill install / 有哪些模型预设 / agent doctor / 这个命令收什么旗标 | `${CODEBUDDY_SKILL_DIR}/references/setup-and-config.md` |
+@@ -70,2 +70,2 @@ Whenever the reader of the output is a program rather than a human, pass `--json
+-- **Old-name packaged copy cleanup**: `kc init` also checks every install root for a leftover operator Skill published under the previous name. It removes one only when the directory holds nothing but the known packaged files and its `SKILL.md` matches a past packaged version byte for byte; a modified copy is kept and its path is reported so nothing is lost silently. `kc init --force` removes the old-name copy outright.
+-- The PRD runner currently accepts Machine Contract v3, v4, and v5. Versions outside the supported set fail preflight before GitHub state writes. Updating the installed `prd` Skill is a separate action; do not recommend blind `kc init --force`, because it can replace user-owned Skills.
++- **Old-name packaged copy cleanup**: installing the packaged operator Skill — via `kc init` or the config-free `kc skill install` — also checks every install root for a leftover operator Skill published under the previous name. It removes one only when the directory holds nothing but the known packaged files and its `SKILL.md` matches a past packaged version byte for byte; a modified copy is kept and its path is reported so nothing is lost silently. `--force` (on either command) removes the old-name copy outright. Prefer `kc skill install` when the repository already has a `.kedacode.toml`: `kc init` stops at its first step when that config exists and only `--force` proceeds, rewriting the whole file.
++- The PRD runner currently accepts Machine Contract v3, v4, and v5. Versions outside the supported set fail preflight before GitHub state writes. Updating the installed `prd` Skill is a separate action: `kc skill install` refreshes it without touching any repository config, and its `--force` (like any `--force`) is only for an explicit replace request — do not recommend blind `kc init --force`, because it rewrites the whole `.kedacode.toml`.
+diff --git a/src/backend/engines/agent_runner/templates/skills/kedacode-operator/references/setup-and-config.md b/src/backend/engines/agent_runner/templates/skills/kedacode-operator/references/setup-and-config.md
+index bf03c6c1..d6dde63f 100644
+--- a/src/backend/engines/agent_runner/templates/skills/kedacode-operator/references/setup-and-config.md
++++ b/src/backend/engines/agent_runner/templates/skills/kedacode-operator/references/setup-and-config.md
+@@ -5 +5 @@
+-The user says 「装环境」「初始化仓库」「把这个仓库登记进来」「kc init」, or asks what agents/models/presets exist (「有哪些模型预设」「这条命令收什么旗标」), or translates the CLI directly: `kc init` / `kc agent presets` / `kc agent doctor` / `kc schema`.
++The user says 「装环境」「初始化仓库」「把这个仓库登记进来」「kc init」, 「重装 skill」「刷新 skill」「kc skill install」, or asks what agents/models/presets exist (「有哪些模型预设」「这条命令收什么旗标」), or translates the CLI directly: `kc init` / `kc skill install` / `kc agent presets` / `kc agent doctor` / `kc schema`.
+@@ -11 +11 @@ The user says 「装环境」「初始化仓库」「把这个仓库登记进来
+-3. **The remote template download needs network and GitHub access** — `kc init` also clones the `prd` / `code-reviewer` template skills and syncs labels; a label-sync failure is reported, not fatal, but the user should hear why.
++3. **The remote template download needs network and GitHub access** — `kc init` and `kc skill install` both clone the `prd` / `code-reviewer` template skills; a label-sync failure during init is reported, not fatal, but the user should hear why.
+@@ -16,0 +17 @@ The user says 「装环境」「初始化仓库」「把这个仓库登记进来
++- Refresh user-level Skills only (already-initialized repo, renamed packaged skill, or an explicit skill-refresh request): `kc skill install --dry-run`, then `kc skill install`. It never reads or writes `.kedacode.toml`, so it also works where `kc init` would stop at the existing config; it takes no repository (reject `--repo` / `--repo-id` / `--config` as a usage error).
+@@ -20 +21 @@ The user says 「装环境」「初始化仓库」「把这个仓库登记进来
+-- Never run `kc init --force` to "fix" an installation problem, and never treat the presets/doctor/schema commands as writes — they are read-only.
++- Never run `kc init --force` to "fix" an installation problem — skill refresh has its own entry in `kc skill install`; never treat the presets/doctor/schema commands as writes — they are read-only.
+@@ -24 +25,2 @@ The user says 「装环境」「初始化仓库」「把这个仓库登记进来
+-- A conflict report from `kc init` means your own Skill files were preserved — nothing was lost; act only on the user's explicit overwrite request.
++- A conflict report from `kc init` or `kc skill install` means your own Skill files were preserved — nothing was lost; act only on the user's explicit overwrite request.
++- `kc init` refusing to run because `.kedacode.toml` already exists is not an installation failure: run `kc skill install` for the Skill side, and reserve `kc init --force` for a genuine config rebuild (it rewrites the whole file).

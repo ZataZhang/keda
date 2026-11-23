@@ -1,0 +1,158 @@
+diff --git a/src/backend/core/shared/interfaces/agent_runner.py b/src/backend/core/shared/interfaces/agent_runner.py
+index 5adc1b32..4239e9e8 100644
+--- a/src/backend/core/shared/interfaces/agent_runner.py
++++ b/src/backend/core/shared/interfaces/agent_runner.py
+@@ -26,0 +27 @@ from collections.abc import Callable
++from contextlib import AbstractContextManager
+@@ -516,0 +518,8 @@ class IGitHubClient(ABC):
++    @abstractmethod
++    def presence_creation_lock(self) -> AbstractContextManager[None]:
++        """返回同一 GitHub 仓库在本机共享的状态板创建锁。"""
++
++    @abstractmethod
++    def close_issue(self, issue_number: int) -> None:
++        """关闭指定 Issue。"""
++
+diff --git a/src/backend/core/use_cases/machine_presence.py b/src/backend/core/use_cases/machine_presence.py
+index b1ae05f7..c409acad 100644
+--- a/src/backend/core/use_cases/machine_presence.py
++++ b/src/backend/core/use_cases/machine_presence.py
+@@ -7,0 +8 @@ import re
++import subprocess
+@@ -13 +14 @@ from typing import Callable, ContextManager
+-from backend.core.shared.interfaces.agent_runner import IGitHubClient
++from backend.core.shared.interfaces.agent_runner import GitHubApiUnavailableError, IGitHubClient
+@@ -47,4 +48 @@ class PresenceEntry:
+-def ensure_presence_issue(
+-    github_client: IGitHubClient,
+-    config: AppConfig,
+-) -> IssueSummary:
++def ensure_presence_issue(github_client: IGitHubClient) -> IssueSummary:
+@@ -54,12 +52,4 @@ def ensure_presence_issue(
+-        github_client.sync_labels(config.labels, config.agents)
+-        github_client.create_issue(
+-            title="KedaCode 机器状态",
+-            body=(
+-                "此 Issue 汇总 KedaCode 在本仓库上的机器与执行状态。\n\n"
+-                "状态由 kc 自动维护，请勿手动编辑或添加任务标签。"
+-            ),
+-            labels=(KEDACODE_PRESENCE_LABEL,),
+-        )
+-        presence_issues = _open_presence_issues(github_client)
+-    if not presence_issues:
+-        raise RuntimeError("GitHub did not return the KedaCode presence Issue after creation.")
++        with github_client.presence_creation_lock():
++            presence_issues = _open_presence_issues(github_client)
++            if not presence_issues:
++                presence_issues = _create_presence_issue(github_client)
+@@ -106,0 +97 @@ def ensure_presence_issue(
++        github_client.close_issue(duplicate_issue.number)
+@@ -113,0 +105,22 @@ def ensure_presence_issue(
++def _create_presence_issue(github_client: IGitHubClient) -> list[IssueSummary]:
++    """创建状态板，写入结果不确定时先回读。"""
++    try:
++        github_client.create_issue(
++            title="KedaCode 机器状态",
++            body=(
++                "此 Issue 汇总 KedaCode 在本仓库上的机器与执行状态。\n\n"
++                "状态由 kc 自动维护，请勿手动编辑或添加任务标签。"
++            ),
++            labels=(KEDACODE_PRESENCE_LABEL,),
++        )
++    except (GitHubApiUnavailableError, subprocess.CalledProcessError):
++        presence_issues = _open_presence_issues(github_client)
++        if presence_issues:
++            return presence_issues
++        raise
++    presence_issues = _open_presence_issues(github_client)
++    if not presence_issues:
++        raise RuntimeError("GitHub did not return the KedaCode presence Issue after creation.")
++    return presence_issues
++
++
+@@ -132 +145 @@ def update_presence_comment(
+-    presence_issue = ensure_presence_issue(github_client, config)
++    presence_issue = ensure_presence_issue(github_client)
+diff --git a/src/backend/infrastructure/github_client.py b/src/backend/infrastructure/github_client.py
+index ec01993d..374ffa04 100644
+--- a/src/backend/infrastructure/github_client.py
++++ b/src/backend/infrastructure/github_client.py
+@@ -36,0 +37 @@ import tomllib
++from contextlib import AbstractContextManager
+@@ -51,0 +53,2 @@ from backend.core.shared.models.agent_spec import AgentSpec
++from backend.core.shared.models.product_identity import state_home
++from backend.infrastructure.file_lock import file_lock
+@@ -345,0 +349 @@ class GitHubCliClient:
++        attempts: int = _MAX_GH_RETRIES,
+@@ -348,0 +353,2 @@ class GitHubCliClient:
++        非幂等写入可通过 attempts=1 将重试交给能回读的调用方。
++
+@@ -366 +372 @@ class GitHubCliClient:
+-        for attempt in range(1, _MAX_GH_RETRIES + 1):
++        for attempt in range(1, attempts + 1):
+@@ -390 +396 @@ class GitHubCliClient:
+-                        if attempt >= _MAX_GH_RETRIES:
++                        if attempt >= attempts:
+@@ -396 +402 @@ class GitHubCliClient:
+-                                f"{_MAX_GH_RETRIES} attempts: {failure_detail}"
++                                f"{attempts} attempts: {failure_detail}"
+@@ -401 +407 @@ class GitHubCliClient:
+-                            _MAX_GH_RETRIES,
++                            attempts,
+@@ -420 +426 @@ class GitHubCliClient:
+-                if attempt >= _MAX_GH_RETRIES:
++                if attempt >= attempts:
+@@ -422,2 +428 @@ class GitHubCliClient:
+-                        "GitHub API connection timed out after "
+-                        f"{_MAX_GH_RETRIES} attempts: {exc.stderr}"
++                        f"GitHub API connection timed out after {attempts} attempts: {exc.stderr}"
+@@ -428 +433 @@ class GitHubCliClient:
+-                    _MAX_GH_RETRIES,
++                    attempts,
+@@ -443 +448 @@ class GitHubCliClient:
+-                if attempt >= _MAX_GH_RETRIES:
++                if attempt >= attempts:
+@@ -447 +452 @@ class GitHubCliClient:
+-                        f"{_MAX_GH_RETRIES} attempts: {failure_detail}"
++                        f"{attempts} attempts: {failure_detail}"
+@@ -452 +457 @@ class GitHubCliClient:
+-                    _MAX_GH_RETRIES,
++                    attempts,
+@@ -683,0 +689,20 @@ class GitHubCliClient:
++    def presence_creation_lock(self) -> AbstractContextManager[None]:
++        """按 GitHub 仓库名锁定本机的状态板初始化。"""
++        repo_slug = self._get_owner_repo().lower()
++        return file_lock(state_home() / "presence-locks" / f"{repo_slug}.lock")
++
++    def close_issue(self, issue_number: int) -> None:
++        """通过 GitHub REST API 关闭指定 Issue。"""
++        self._run_with_retry(
++            [
++                "gh",
++                "api",
++                "-X",
++                "PATCH",
++                f"repos/{self._get_owner_repo()}/issues/{issue_number}",
++                "-f",
++                "state=closed",
++            ],
++            cwd=self.repo_path,
++        )
++
+diff --git a/src/backend/infrastructure/github_issue_ops.py b/src/backend/infrastructure/github_issue_ops.py
+index adf2fc3f..3d3d1ff9 100644
+--- a/src/backend/infrastructure/github_issue_ops.py
++++ b/src/backend/infrastructure/github_issue_ops.py
+@@ -28,0 +29 @@ from backend.core.shared.interfaces.agent_runner import (
++from backend.core.shared.models.agent_labels import KEDACODE_PRESENCE_LABEL
+@@ -48 +49 @@ class _ClientProtocol(Protocol):
+-        self, command: Sequence[str], *, cwd: Path, check: bool = True
++        self, command: Sequence[str], *, cwd: Path, check: bool = True, attempts: int = ...
+@@ -356,0 +358 @@ def create_issue(
++        retry_options = {"attempts": 1} if KEDACODE_PRESENCE_LABEL in labels else {}
+@@ -358 +360 @@ def create_issue(
+-            result = client._run_with_retry(command, cwd=client.repo_path)
++            result = client._run_with_retry(command, cwd=client.repo_path, **retry_options)
+@@ -371 +373 @@ def create_issue(
+-            result = client._run_with_retry(command, cwd=client.repo_path)
++            result = client._run_with_retry(command, cwd=client.repo_path, **retry_options)

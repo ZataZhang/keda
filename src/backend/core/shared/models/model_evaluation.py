@@ -253,6 +253,7 @@ def parse_evaluation_suite(
     Args:
         raw_text: suite 文件的原始 UTF-8 文本。
         source_path: suite 文件路径，仅用于错误定位。
+        material_files: 资料目录中的文件。提供时校验声明的文件存在，并将其纳入摘要。
 
     Returns:
         EvaluationSuite: 通过校验的 suite 值对象，含内容 hash。
@@ -298,6 +299,7 @@ def parse_evaluation_suite(
         raise ValueError(f"suite '{source_path}': cases 必须是非空列表")
     cases: list[EvaluationSuiteCase] = []
     seen_case_ids: set[str] = set()
+    declared_material_files: dict[str, bytes] = {}
     suite_requires_calibration = False
     for index, raw_case in enumerate(raw_cases):
         location = f"suite '{source_path}' cases[{index}]"
@@ -358,11 +360,14 @@ def parse_evaluation_suite(
                     raise ValueError(
                         f"{location} '{case_id}': 缺少判分材料 {expected_material_path}"
                     )
-            if (
-                gold_patch is not None
-                and f"{case_material_prefix}{gold_patch}" not in material_files
-            ):
-                raise ValueError(f"{location} '{case_id}': 缺少 gold patch {gold_patch}")
+                declared_material_files[expected_material_path] = material_files[
+                    expected_material_path
+                ]
+            if gold_patch is not None:
+                gold_material_path = f"{case_material_prefix}{gold_patch}"
+                if gold_material_path not in material_files:
+                    raise ValueError(f"{location} '{case_id}': 缺少 gold patch {gold_patch}")
+                declared_material_files[gold_material_path] = material_files[gold_material_path]
         cases.append(
             EvaluationSuiteCase(
                 case_id=case_id,
@@ -388,7 +393,7 @@ def parse_evaluation_suite(
         check_timeout_seconds=timeout_seconds,
         cases=tuple(cases),
         source_path=source_path,
-        content_hash=compute_suite_content_hash(raw_text, material_files),
+        content_hash=compute_suite_content_hash(raw_text, declared_material_files),
         requires_calibration=suite_requires_calibration,
     )
 

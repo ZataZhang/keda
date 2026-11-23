@@ -98,17 +98,29 @@ def suite_registry_root() -> Path:
     return resolve_project_root_path() / SUITE_SUBDIR
 
 
-def list_suites() -> list[dict[str, Any]]:
+def list_suites(
+    *, registry: Path | None = None, include_calibration: bool = True
+) -> list[dict[str, Any]]:
     """列出 registry 目录下的 suite 及其校验状态（维护者校验入口）。
 
     同一目录内重复的 suite id 无法确定 ``load_suite`` 会取哪个文件，因此
     涉及的两个文件**一起**降级为 invalid，口径与 README 及 ``load_suite``
     的报错一致，避免页面下拉里出现两个同名可选项。
+
+    Args:
+        registry: 显式题库目录；省略时沿用 Console 的项目根目录。
+        include_calibration: 是否从 Console 账本读取校准记录。
+
+    Returns:
+        经解析和唯一性检查的题库描述。
     """
-    root = suite_registry_root()
+    root = suite_registry_root() if registry is None else registry
     if not root.is_dir():
         return []
-    entries = [_describe_suite_file(path) for path in sorted(root.glob("*.yaml"))]
+    entries = [
+        _describe_suite_file(path, include_calibration=include_calibration)
+        for path in sorted(root.glob("*.yaml"))
+    ]
     id_counts: dict[str, int] = {}
     for entry in entries:
         if entry["valid"]:
@@ -129,7 +141,7 @@ def _mark_duplicate_suite_entry(entry: dict[str, Any], duplicated_ids: set[str])
     }
 
 
-def _describe_suite_file(path: Path) -> dict[str, Any]:
+def _describe_suite_file(path: Path, *, include_calibration: bool) -> dict[str, Any]:
     """解析单个 suite 文件为 DTO；失败时返回可解释的 invalid 条目。"""
     try:
         raw = path.read_text(encoding="utf-8")
@@ -152,14 +164,25 @@ def _describe_suite_file(path: Path) -> dict[str, Any]:
         "check_timeout_seconds": suite.check_timeout_seconds,
         "cases": [dataclasses.asdict(case) for case in suite.cases],
         "requires_calibration": suite.requires_calibration,
-        "calibration": _suite_calibration(suite),
+        "calibration": _suite_calibration(suite) if include_calibration else None,
         "errors": [],
     }
 
 
-def load_suite(suite_id: str) -> EvaluationSuite:
-    """按 suite id 从 registry 加载并解析；不可用时抛动作错误。"""
-    root = suite_registry_root()
+def load_suite(suite_id: str, *, registry: Path | None = None) -> EvaluationSuite:
+    """按 ID 从指定目录加载并校验题库。
+
+    Args:
+        suite_id: 题库唯一标识。
+        registry: 显式目录；省略时沿用 Console 的项目根目录。
+
+    Returns:
+        解析后的题库和资料指纹。
+
+    Raises:
+        EvaluationActionError: 目录无效、题库不存在或有重名定义。
+    """
+    root = suite_registry_root() if registry is None else registry
     if not root.is_dir():
         raise EvaluationActionError("invalid", f"suite registry 目录不存在: {root}")
     matches: list[EvaluationSuite] = []

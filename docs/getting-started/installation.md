@@ -82,6 +82,7 @@ Windows 原生支持**不需要 POSIX 进程组**的那部分能力；依赖进�
 | 系统托盘 App（`kc desktop install`） | ✅ 支持 | 与 macOS 菜单栏 App 共用同一份 `kc console` |
 | `kc daemon` / `kc supervise-daemon` | ❌ 暂不支持 | 依赖 `os.killpg` 整组回收 agent 子进程树 |
 | `kc preview` | ❌ 暂不支持 | 依赖独立进程组标识与整组终止 |
+| `kc eval` | 部分支持 | `suites`、`report` 可用；校准和真实执行需要 Linux/macOS 进程组 |
 | `kc container`（容器化 runner） | ❌ 暂不支持 | 依赖 POSIX uid/gid 与进程组 |
 
 不支持的入口会抛出 `UnsupportedPlatformFeatureError`，消息会指明需要 Linux / macOS。

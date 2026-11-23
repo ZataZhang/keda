@@ -287,7 +287,7 @@ def create_or_reuse_worktree(
             f"path_command return_code={path_result.return_code}, "
             f"path_command stdout={path_result.stdout!r}."
         )
-    # 证据目录本地排除：截图/输出证据永远不进代码 diff。
+    # 先排除本地验证产物与会话记录，避免旧分支把 runner 写入的状态加入提交。
     ensure_evidence_dir_excluded(worktree_path, config, process_runner)
     copied_env_paths = copy_missing_env_files(repo_path, worktree_path)
     if copied_env_paths:

@@ -205,7 +205,7 @@ kc 现在只能对接 GitHub，而"仓库在哪个平台"这件事既没有地�
   - `tests/test_agent_runner_config.py` 中 `test_repository_metadata_github_repo_*` 与 `test_load_agent_runner_local_settings_propagates_github_repo`：新键测试的样板。
 - Architecture pattern to preserve: 四层依赖 `api → core → engines → infrastructure`；`infrastructure` 可以引用 `core/shared` 的常量与类型（现状如 `github_client.py` 引用 `core/shared/interfaces/github_api_budget`）。分发属于装配，留在 `engines` 的工厂里。
 - Frontend impact: `No frontend impact`。`frontend-admin`、`frontend-public` 都不读取仓库身份段的字段（`rg -n "github_repo" frontend-admin/src frontend-public/src` 无结果），本次也不新增界面。
-- Existing PRD relationship: 已检查 `tasks/pending/`（9 份）与 `tasks/archive/`，没有以平台选择或多平台适配为主题的 PRD；`rg -n -i "gitea|gitlab|平台适配" tasks/pending` 无相关结果。本 PRD 独立，不依赖也不阻塞任何 pending PRD。`ROADMAP.md` 的 Open Questions 中"是否只支持 GitHub，还是需要预留 GitLab 等平台适配层"是本 PRD 回应的未决问题。
+- Existing PRD relationship: 本 PRD 独立交付，为 Gitea 客户端提供平台选择入口。它回应了[旧路线图记录的多平台问题](../../docs/project/roadmap-history.md)，当前入口见[产品边界](../../docs/project/product-boundaries.md#候选扩展)。
 - Redundancy risks: 平台名字符串在校验处和分发处各写一遍会漂移，必须只定义一处；不要为"以后可能有的平台"引入注册表或插件机制。
 
 ---
@@ -534,7 +534,7 @@ Failure triage:
 
 ## 12. Risks And Follow-Ups
 
-- **方向尚未得到维护者确认**：是否引入多平台适配是 `ROADMAP.md` 的未决问题。若维护者不接受这个方向，本 PRD 应整体撤回，而不是改成别的形态合入。
+- **方向尚未得到维护者确认**：多平台适配列在[候选扩展](../../docs/project/product-boundaries.md#候选扩展)。若维护者不接受这个方向，本 PRD 应整体撤回，而不是改成别的形态合入。
 - **"能写但不能用"的取值**：`gitea` 在后续实现合入之前只会得到"尚未实现"的错误。这是决策二推荐项的已知代价，由提示文案和文档说明承担。
 - **registry 条目**：机器级 registry 条目与仓库内配置共用一部分模型。实现时要确认 registry 条目里即使写了 `platform` 也不会影响工厂判断，并在文档中写明"平台只在仓库内配置声明"；若发现 registry 层会让它生效，先更新本 PRD 再继续。
 - **控制台与常驻进程的呈现**：声明 `gitea` 的仓库会在面板和每轮轮询中重复得到同一条错误，本次不做专门设计。

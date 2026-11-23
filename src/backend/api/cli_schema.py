@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import inspect
 from enum import Enum
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, get_args
 
 import click
 
@@ -55,15 +55,44 @@ def _clean_help(command: Any) -> str:
 
 def _type_name(param: Any) -> str:
     """返回参数类型的名字（``string`` / ``integer`` / ``boolean`` / ``choice`` …）。"""
-    return getattr(param.type, "name", str(param.type))
+    click_type = getattr(param, "type", None)
+    if click_type is not None:
+        return getattr(click_type, "name", str(click_type))
+    # Typer 0.29 的参数用 TypeDescriptor 替换了 Click ParamType。
+    descriptor = param.type_descriptor
+    if descriptor.is_choice:
+        return "choice"
+    if descriptor.is_path:
+        return descriptor.path_type
+    if descriptor.is_file:
+        return "file"
+    if descriptor.is_datetime:
+        return "datetime"
+    if descriptor.is_tuple:
+        return (
+            "<"
+            + " ".join(_scalar_type_name(part) for part in get_args(descriptor.annotation))
+            + ">"
+        )
+    annotation = get_args(descriptor.annotation)[0] if descriptor.is_list else descriptor.annotation
+    type_name = _scalar_type_name(annotation)
+    return f"{type_name} range" if descriptor.is_ranged else type_name
+
+
+def _scalar_type_name(annotation: Any) -> str:
+    """将标量注解归一到现有 ``kc schema`` 类型词汇。"""
+    return {str: "text", int: "integer", float: "float", bool: "boolean"}.get(
+        annotation, getattr(annotation, "__name__", "text").lower()
+    )
 
 
 def _enum_choices(param: Any) -> list[str] | None:
     """枚举/候选参数的合法取值列表，其它参数返回 ``None``。"""
-    choices = getattr(param.type, "choices", None)
+    type_metadata = getattr(param, "type", None) or param.type_descriptor
+    choices = getattr(type_metadata, "choices", None)
     if choices is None:
         return None
-    return [str(choice) for choice in choices]
+    return [str(_enum_value(choice)) for choice in choices]
 
 
 def _is_bool_flag(param: Any) -> bool:

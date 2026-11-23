@@ -1,0 +1,471 @@
+diff --git a/docs/guides/agent-runner.md b/docs/guides/agent-runner.md
+index 3badcb92..b61c7d26 100644
+--- a/docs/guides/agent-runner.md
++++ b/docs/guides/agent-runner.md
+@@ -412,0 +413,11 @@ include_diff_stat = true
++## worktree 分支安全与自动修复
++
++`iar run` 在把 agent 放入 worktree 前会执行两项准备：
++
++1. **远程分支对齐**：如果 `refs/remotes/<remote>/issue-<number>` 存在，则 fetch 并仅当本地分支是其祖先、且 worktree 干净时做 fast-forward；dirty、diverged 或本地领先场景会保留本地状态并失败/继续，不会 destructive reset。
++2. **分支状态自愈**：如果 worktree 处于 detached HEAD（例如 post-PR supervisor 正在 rebase 或被人工 checkout 到某个 commit），runner 会尝试自动恢复：
++   - 处于 active rebase 时：无冲突则 `rebase --continue`；有冲突则调用配置的 AI agent 解决冲突并继续 rebase，和 post-PR supervisor 的冲突解决策略一致。只有 agent 在 `max_repair_attempts` 次尝试后仍无法解决，才会 fallback 到 `rebase --abort` 并 checkout 目标分支。
++   - 单纯 detached HEAD：若 `issue-<number>` 分支不存在或当前 HEAD 领先于该分支，则把分支指到当前 HEAD 并 checkout；若已分叉则报错，避免静默丢失历史。
++
++如果恢复失败，runner 会把 Issue 标记为 `failed` 并给出可操作的错误信息；成功则继续正常执行 agent、验证和发布流程。
++
+@@ -1032 +1043 @@ Ready 发布要求当前分支等于 `[agent_runner.git].base_branch`，因为 r
+-Runner 新建 issue worktree 时，默认会同步 base branch 的远程 tracking ref 作为起点，使新分支基于最新远程提交，而非可能过期的本地 base branch。复用已存在的 worktree 时不会自动 rebase 或 reset；如需更新基线，请手动处理或删除旧 worktree 后重建。
++Runner 新建 issue worktree 时，默认会同步 base branch 的远程 tracking ref 作为起点，使新分支基于最新远程提交，而非可能过期的本地 base branch。复用已存在的 worktree 时，runner 会在 agent 执行前自动将当前 worktree 分支与配置的远程同名分支做安全对齐：仅当 worktree 干净且本地分支是远程分支的祖先时执行 fast-forward；本地已有未发布 commit 时保留本地状态；worktree 脏或分支已分叉时显式失败，要求人工处理，而不是自动 rebase、merge 或 reset。
+diff --git a/src/backend/core/use_cases/agent_runner_commit.py b/src/backend/core/use_cases/agent_runner_commit.py
+index be6c35bd..ef979d35 100644
+--- a/src/backend/core/use_cases/agent_runner_commit.py
++++ b/src/backend/core/use_cases/agent_runner_commit.py
+@@ -154,0 +155,2 @@ def commit_requested_changes(
++    if not current_branch:
++        raise RuntimeError("Refusing to commit: worktree is in detached HEAD state.")
+diff --git a/src/backend/core/use_cases/agent_runner_git.py b/src/backend/core/use_cases/agent_runner_git.py
+index 012604e4..49cbcd60 100644
+--- a/src/backend/core/use_cases/agent_runner_git.py
++++ b/src/backend/core/use_cases/agent_runner_git.py
+@@ -11,0 +12 @@ __all__ = [
++    "get_active_rebase_target",
+@@ -14,0 +16 @@ __all__ = [
++    "is_detached_head",
+@@ -32,0 +35,40 @@ def get_current_branch(worktree_path: Path, process_runner: IProcessRunner) -> s
++def is_detached_head(worktree_path: Path, process_runner: IProcessRunner) -> bool:
++    """Return whether the worktree is in detached HEAD state."""
++    result = process_runner.run(
++        ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=worktree_path
++    )
++    return result.stdout.strip() == "HEAD"
++
++
++def get_active_rebase_target(
++    worktree_path: Path, process_runner: IProcessRunner
++) -> str | None:
++    """Return the target branch of an active rebase, or None if not rebasing.
++
++    Reads Git's rebase metadata directories. An active rebase leaves the
++    worktree in detached HEAD, so callers must pair this with
++    :func:`is_detached_head` to distinguish a rebase from a plain checkout.
++    """
++    for rebase_dir in ("rebase-merge", "rebase-apply"):
++        result = process_runner.run(
++            ["git", "rev-parse", "--git-path", f"{rebase_dir}/head-name"],
++            cwd=worktree_path,
++            check=False,
++        )
++        if result.return_code != 0 or not result.stdout.strip():
++            continue
++        head_name_path = Path(result.stdout.strip())
++        if not head_name_path.is_absolute():
++            head_name_path = worktree_path / head_name_path
++        if not head_name_path.is_file():
++            continue
++        try:
++            raw_name = head_name_path.read_text(encoding="utf-8").strip()
++        except OSError:
++            continue
++        if raw_name.startswith("refs/heads/"):
++            return raw_name[len("refs/heads/") :]
++        return raw_name
++    return None
++
++
+diff --git a/src/backend/core/use_cases/agent_runner_orchestrate.py b/src/backend/core/use_cases/agent_runner_orchestrate.py
+index 53b4bfe8..3d202c82 100644
+--- a/src/backend/core/use_cases/agent_runner_orchestrate.py
++++ b/src/backend/core/use_cases/agent_runner_orchestrate.py
+@@ -50 +50 @@ from backend.core.use_cases.agent_runner_blocked_claim import (
+-from backend.core.use_cases.agent_runner_git import has_changes
++from backend.core.use_cases.agent_runner_git import has_changes, get_current_branch
+@@ -74,0 +75,3 @@ from backend.core.use_cases.pr_supervisor import (
++from backend.core.use_cases.agent_runner_worktree_branch import (
++    _ensure_worktree_branch,
++)
+@@ -79 +81,0 @@ from backend.core.use_cases.run_agent_once import (
+-    get_current_branch,
+@@ -419 +420,0 @@ def _process_blocked_resolution(
+-    current_branch = get_current_branch(worktree_path, process_runner)
+@@ -420,0 +422,4 @@ def _process_blocked_resolution(
++    _ensure_worktree_branch(
++        worktree_path, expected_branch, issue, config, process_runner
++    )
++    current_branch = get_current_branch(worktree_path, process_runner)
+@@ -756 +761,4 @@ def _process_running_publish_recovery(
+-    expected_branch = get_current_branch(worktree_path, process_runner)
++    expected_branch = f"issue-{issue.number}"
++    _ensure_worktree_branch(
++        worktree_path, expected_branch, issue, config, process_runner
++    )
+diff --git a/src/backend/core/use_cases/agent_runner_publish.py b/src/backend/core/use_cases/agent_runner_publish.py
+index 07078cbe..08aa418b 100644
+--- a/src/backend/core/use_cases/agent_runner_publish.py
++++ b/src/backend/core/use_cases/agent_runner_publish.py
+@@ -127,0 +128,2 @@ def publish_changes(
++    if not branch:
++        raise RuntimeError("Refusing to publish: worktree is in detached HEAD state.")
+diff --git a/src/backend/core/use_cases/agent_runner_worktree_branch.py b/src/backend/core/use_cases/agent_runner_worktree_branch.py
+new file mode 100644
+index 00000000..d25e29b5
+--- /dev/null
++++ b/src/backend/core/use_cases/agent_runner_worktree_branch.py
+@@ -0,0 +1,313 @@
++"""Worktree branch healing and remote reconciliation for the agent runner."""
++
++from __future__ import annotations
++
++import logging
++import subprocess
++from pathlib import Path
++
++from backend.core.shared.interfaces.agent_runner import IProcessRunner
++from backend.core.shared.models.agent_runner import AppConfig, IssueSummary
++from backend.core.use_cases.agent_runner_commit import (
++    read_commit_request,
++    remove_commit_request,
++    validate_safe_changes,
++)
++from backend.core.use_cases.agent_runner_feedback import ensure_verification_passed
++from backend.core.use_cases.agent_runner_git import (
++    get_active_rebase_target,
++    get_current_branch,
++    get_head_sha,
++    has_changes,
++    is_detached_head,
++    run_verification,
++)
++
++_logger = logging.getLogger(__name__)
++
++__all__ = [
++    "_ensure_worktree_branch",
++    "_reconcile_worktree_with_remote_branch",
++]
++
++
++def _ensure_worktree_branch(
++    worktree_path: Path,
++    expected_branch: str,
++    issue: IssueSummary,
++    config: AppConfig,
++    process_runner: IProcessRunner,
++) -> None:
++    """Make sure the worktree is on the expected branch, self-healing when safe.
++
++    A worktree can end up in detached HEAD because of a concurrent or aborted
++    rebase (e.g. the post-PR supervisor rebased while the main runner claimed
++    the Issue). This helper recovers automatically:
++
++    - Active rebase: try ``git rebase --continue`` when there are no conflicts;
++      when conflicts exist, ask the configured agent to resolve them and then
++      continue the rebase. If the agent cannot resolve the conflicts after the
++      configured number of attempts, abort the rebase and checkout the recorded
++      target branch so the runner can still proceed.
++    - Detached HEAD without active rebase: move the expected branch to the
++      current detached HEAD when the move is a fast-forward or the branch does
++      not exist yet. If the branch and HEAD have diverged, raise a clear error
++      so a human can decide which history to keep.
++    """
++    if not is_detached_head(worktree_path, process_runner):
++        return
++
++    rebase_target = get_active_rebase_target(worktree_path, process_runner)
++    if rebase_target is not None:
++        _recover_from_active_rebase(
++            worktree_path, rebase_target, issue, config, process_runner
++        )
++        return
++
++    _attach_branch_to_detached_head(worktree_path, expected_branch, process_runner)
++
++
++def _recover_from_active_rebase(
++    worktree_path: Path,
++    rebase_target: str,
++    issue: IssueSummary,
++    config: AppConfig,
++    process_runner: IProcessRunner,
++) -> None:
++    """Leave an active rebase in a clean checkout of ``rebase_target``.
++
++    Reuses the same agent-driven conflict resolution strategy as the post-PR
++    supervisor: when ``git rebase --continue`` cannot proceed because of
++    conflicts, the configured agent is prompted to resolve them and write a
++    commit request. The runner stages the resolved files, verifies them, and
++    continues the rebase. Only after exhausting the configured repair attempts
++    do we fall back to ``git rebase --abort``.
++    """
++    from backend.core.use_cases.pr_supervisor import build_conflict_resolution_prompt
++
++    def _try_continue_rebase() -> bool:
++        continue_result = process_runner.run(
++            ["git", "rebase", "--continue"],
++            cwd=worktree_path,
++            check=False,
++        )
++        return continue_result.return_code == 0
++
++    def _conflicted_files() -> list[str]:
++        diff_names_result = process_runner.run(
++            ["git", "diff", "--name-only", "--diff-filter", "U"],
++            cwd=worktree_path,
++            check=False,
++        )
++        return [
++            line.strip()
++            for line in diff_names_result.stdout.splitlines()
++            if line.strip()
++        ]
++
++    if not _conflicted_files() and _try_continue_rebase():
++        return
++
++    max_attempts = max(0, config.post_pr_supervisor.max_repair_attempts)
++    for _attempt in range(1, max_attempts + 1):
++        conflicted = _conflicted_files()
++        if not conflicted:
++            if _try_continue_rebase():
++                return
++            break
++
++        prompt = build_conflict_resolution_prompt(
++            issue,
++            rebase_target,
++            get_head_sha(worktree_path, process_runner),
++            conflicted,
++        )
++
++        # Avoid a circular import: run_agent_once imports this module, and the
++        # agent helpers in turn import pr_supervisor.
++        from backend.core.use_cases.run_agent_once import (
++            choose_agent,
++            run_agent_with_prompt,
++        )
++
++        agent_name = choose_agent(issue, config, "auto")
++        try:
++            run_agent_with_prompt(agent_name, prompt, worktree_path, process_runner)
++        except (RuntimeError, OSError, subprocess.CalledProcessError) as exc:
++            _logger.warning(
++                "Agent conflict resolution attempt %d/%d failed for Issue #%d: %s",
++                _attempt,
++                max_attempts,
++                issue.number,
++                exc,
++            )
++            continue
++
++        request_path = worktree_path / ".agent-runner" / "commit-request.json"
++        if not request_path.is_file():
++            continue
++        commit_message = read_commit_request(worktree_path, issue)
++        remove_commit_request(worktree_path)
++        if not has_changes(worktree_path, process_runner):
++            raise RuntimeError("Agent requested a commit but produced no file changes.")
++        validate_safe_changes(worktree_path, config, process_runner)
++        process_runner.run(["git", "add", "-A"], cwd=worktree_path)
++        verification_results = run_verification(worktree_path, config, process_runner)
++        ensure_verification_passed(verification_results)
++        process_runner.run(
++            ["git", "commit", "-m", commit_message],
++            cwd=worktree_path,
++        )
++        if _try_continue_rebase():
++            return
++
++    process_runner.run(["git", "rebase", "--abort"], cwd=worktree_path, check=False)
++    if is_detached_head(worktree_path, process_runner):
++        process_runner.run(["git", "checkout", rebase_target], cwd=worktree_path)
++
++
++def _attach_branch_to_detached_head(
++    worktree_path: Path,
++    expected_branch: str,
++    process_runner: IProcessRunner,
++) -> None:
++    """Move ``expected_branch`` to the detached HEAD when it is safe to do so."""
++    detached_sha = get_head_sha(worktree_path, process_runner)
++    branch_ref = f"refs/heads/{expected_branch}"
++    branch_exists_result = process_runner.run(
++        ["git", "show-ref", "--verify", "--quiet", branch_ref],
++        cwd=worktree_path,
++        check=False,
++    )
++
++    if branch_exists_result.return_code != 0:
++        process_runner.run(
++            ["git", "checkout", "-b", expected_branch],
++            cwd=worktree_path,
++        )
++        return
++
++    branch_sha = _rev_parse(worktree_path, branch_ref, process_runner)
++    if detached_sha == branch_sha:
++        process_runner.run(["git", "checkout", expected_branch], cwd=worktree_path)
++        return
++
++    branch_is_ancestor = _is_ancestor(
++        worktree_path, branch_sha, detached_sha, process_runner
++    )
++    if branch_is_ancestor:
++        process_runner.run(
++            ["git", "checkout", "-B", expected_branch, detached_sha],
++            cwd=worktree_path,
++        )
++        return
++
++    raise RuntimeError(
++        f"Worktree {worktree_path} is in detached HEAD and the expected branch "
++        f"'{expected_branch}' has diverged from HEAD ({detached_sha[:8]}). "
++        "Manual reconciliation is required to decide which history to keep."
++    )
++
++
++def _remote_branch_exists(
++    worktree_path: Path,
++    remote: str,
++    branch: str,
++    process_runner: IProcessRunner,
++) -> bool:
++    """Check whether a branch exists on the configured remote."""
++    result = process_runner.run(
++        ["git", "ls-remote", "--heads", remote, branch],
++        cwd=worktree_path,
++        check=False,
++    )
++    return result.return_code == 0 and bool(result.stdout.strip())
++
++
++def _fetch_remote_branch(
++    worktree_path: Path,
++    remote: str,
++    branch: str,
++    process_runner: IProcessRunner,
++) -> None:
++    """Fetch a single remote branch into its remote-tracking ref."""
++    process_runner.run(
++        ["git", "fetch", remote, f"+{branch}:refs/remotes/{remote}/{branch}"],
++        cwd=worktree_path,
++    )
++
++
++def _is_ancestor(
++    worktree_path: Path,
++    ancestor_sha: str,
++    descendant_ref: str,
++    process_runner: IProcessRunner,
++) -> bool:
++    """Return whether ancestor_sha is an ancestor of descendant_ref."""
++    result = process_runner.run(
++        ["git", "merge-base", "--is-ancestor", ancestor_sha, descendant_ref],
++        cwd=worktree_path,
++        check=False,
++    )
++    return result.return_code == 0
++
++
++def _rev_parse(
++    worktree_path: Path,
++    ref: str,
++    process_runner: IProcessRunner,
++) -> str:
++    """Return the full SHA for a ref."""
++    result = process_runner.run(["git", "rev-parse", ref], cwd=worktree_path)
++    return result.stdout.strip()
++
++
++def _reconcile_worktree_with_remote_branch(
++    worktree_path: Path,
++    config: AppConfig,
++    process_runner: IProcessRunner,
++) -> None:
++    """Safely reconcile the current worktree branch with its remote branch.
++
++    - Remote branch missing: no-op.
++    - Already in sync: no-op.
++    - Local behind remote with clean worktree: fast-forward.
++    - Local behind remote with dirty worktree: fail without reset.
++    - Local ahead of remote: preserve local commits.
++    - Diverged: fail and request manual reconciliation.
++    """
++    branch = get_current_branch(worktree_path, process_runner)
++    remote = config.git.remote
++    remote_ref = f"{remote}/{branch}"
++
++    if not _remote_branch_exists(worktree_path, remote, branch, process_runner):
++        return
++
++    _fetch_remote_branch(worktree_path, remote, branch, process_runner)
++
++    local_sha = get_head_sha(worktree_path, process_runner)
++    remote_sha = _rev_parse(worktree_path, remote_ref, process_runner)
++    if local_sha == remote_sha:
++        return
++
++    local_is_ancestor = _is_ancestor(
++        worktree_path, local_sha, remote_ref, process_runner
++    )
++    remote_is_ancestor = _is_ancestor(worktree_path, remote_sha, "HEAD", process_runner)
++
++    if local_is_ancestor:
++        if has_changes(worktree_path, process_runner):
++            raise RuntimeError(
++                f"Worktree branch {branch} is behind {remote_ref}, "
++                "but the worktree has uncommitted changes."
++            )
++        process_runner.run(["git", "merge", "--ff-only", remote_ref], cwd=worktree_path)
++        return
++
++    if remote_is_ancestor:
++        return
++
++    raise RuntimeError(
++        f"Worktree branch {branch} has diverged from {remote_ref}; "
++        "manual reconciliation is required."
++    )
+diff --git a/src/backend/core/use_cases/pr_supervisor.py b/src/backend/core/use_cases/pr_supervisor.py
+index 8ddf4700..5c772edd 100644
+--- a/src/backend/core/use_cases/pr_supervisor.py
++++ b/src/backend/core/use_cases/pr_supervisor.py
+@@ -22,0 +23,4 @@ from backend.core.use_cases.agent_runner_events import (
++from backend.core.use_cases.agent_runner_commit import (
++    read_commit_request,
++    remove_commit_request,
++)
+@@ -30,2 +33,0 @@ from backend.core.use_cases.run_agent_once import (
+-    read_commit_request,
+-    remove_commit_request,
+diff --git a/src/backend/core/use_cases/run_agent_once.py b/src/backend/core/use_cases/run_agent_once.py
+index 59176d31..ca4765a8 100644
+--- a/src/backend/core/use_cases/run_agent_once.py
++++ b/src/backend/core/use_cases/run_agent_once.py
+@@ -41,2 +40,0 @@ from backend.core.use_cases.agent_runner_commit import (
+-    read_commit_request,
+-    remove_commit_request,
+@@ -76,0 +75 @@ from backend.core.use_cases.agent_runner_git import (
++    get_active_rebase_target,
+@@ -79,0 +79 @@ from backend.core.use_cases.agent_runner_git import (
++    is_detached_head,
+@@ -96,0 +97,4 @@ from backend.core.use_cases.agent_runner_validation import (
++from backend.core.use_cases.agent_runner_worktree_branch import (
++    _ensure_worktree_branch,
++    _reconcile_worktree_with_remote_branch,
++)
+@@ -108,0 +113,2 @@ __all__ = [
++    "_ensure_worktree_branch",
++    "_reconcile_worktree_with_remote_branch",
+@@ -130,0 +137 @@ __all__ = [
++    "get_active_rebase_target",
+@@ -133,0 +141 @@ __all__ = [
++    "is_detached_head",
+@@ -137,2 +144,0 @@ __all__ = [
+-    "read_commit_request",
+-    "remove_commit_request",
+@@ -277,0 +284,5 @@ def create_or_reuse_worktree(
++    _reconcile_worktree_with_remote_branch(worktree_path, config, process_runner)
++    expected_branch = f"issue-{issue.number}"
++    _ensure_worktree_branch(
++        worktree_path, expected_branch, issue, config, process_runner
++    )

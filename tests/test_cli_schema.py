@@ -22,11 +22,21 @@ from backend.api.cli_schema import build_command_schema, render_schema_human
 from backend.api.cli_typer_app import app
 
 #: ``argparse`` 门面未收录的命令：只在 Typer 侧存在，不参与旗标对齐检查。
-#: ``lifecycle`` 与 ``schema``/``tokens``/``evidence check`` 同类：只读 Typer 原生命令，
+#: ``lifecycle``、``schema``、``tokens``、``evidence`` 和 ``eval`` 是 Typer 原生命令，
 #: 直接调用 core 用例并发射结果，不经过 argparse 门面的执行后端；收录到门面只会
 #: 留下解析得了、执行不了的死条目。
 FACADE_EXEMPT_COMMANDS = frozenset(
-    {"schema", "tokens", "lifecycle", "evidence check", "evidence prune"}
+    {
+        "schema",
+        "tokens",
+        "lifecycle",
+        "evidence check",
+        "evidence prune",
+        "eval suites",
+        "eval calibrate",
+        "eval run",
+        "eval report",
+    }
 )
 
 #: ``--output`` 在这些命令上是**输出目录**，不是格式取值域，必须被排除在机读契约之外。
@@ -141,6 +151,16 @@ def test_directory_output_commands_keep_their_own_output_semantics(schema: dict[
         assert options["--output"]["type"] == "text"
         assert options["--output"]["enum"] is None
         assert "--json" not in options
+
+
+def test_eval_schema_exposes_output_directory_and_repeated_cases(schema: dict[str, Any]) -> None:
+    """评测的产物目录、可重复题号和 JSON 格式在真实命令树中各有语义。"""
+    entries = {entry["name"]: entry for entry in schema["commands"]}
+    options = {option["name"]: option for option in entries["eval run"]["options"]}
+    assert options["--output-dir"]["type"] == "path"
+    assert options["--case"]["type"] == "text" and options["--case"]["multiple"]
+    assert options["--output"]["enum"] == ["table", "json"]
+    assert entries["eval report"]["arguments"][0]["name"] == "run_dir"
 
 
 def test_argparse_facade_matches_typer_machine_flags(schema: dict[str, Any]) -> None:

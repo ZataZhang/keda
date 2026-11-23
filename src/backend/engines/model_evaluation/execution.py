@@ -335,6 +335,7 @@ def _execute_cell(context: _EvaluationCellContext) -> None:
                 raise ValueError(
                     f"快照基线 tree 不一致: 期望 {base_tree_hash}，实际 {observed_base_tree}"
                 )
+            snapshot_base_tree = workspace.worktree_tree_hash(worktree_path)
             material_root = (
                 Path(suite.source_path)
                 .with_suffix("")
@@ -374,10 +375,13 @@ def _execute_cell(context: _EvaluationCellContext) -> None:
                     settings=settings,
                     timeout_seconds=settings.evaluation.agent_timeout_seconds,
                 )
-            if outcome.ok and suite is not None and suite.requires_calibration:
+            restore_scoring_files = outcome.ok and suite is not None and suite.requires_calibration
+            if restore_scoring_files:
                 workspace.restore_dependency_manifests(run.repo_path, base_commit, worktree_path)
-                workspace.remove_held_out_files(worktree_path, excluded_snapshot_paths)
-                diff_text = workspace.collect_diff(worktree_path, "HEAD")
+            workspace.remove_held_out_files(worktree_path, excluded_snapshot_paths)
+            # 候选可能提交改动，评审差异始终从运行前的过滤快照计算。
+            diff_text = workspace.collect_diff(worktree_path, snapshot_base_tree)
+            if restore_scoring_files:
                 workspace.restore_held_out_base_files(
                     run.repo_path,
                     base_commit,
@@ -387,9 +391,6 @@ def _execute_cell(context: _EvaluationCellContext) -> None:
                 assert material_root is not None
                 held_out_dir = material_root / "held_out"
                 workspace.overlay_held_out(worktree_path, held_out_dir, case.held_out)
-            else:
-                workspace.remove_held_out_files(worktree_path, excluded_snapshot_paths)
-                diff_text = workspace.collect_diff(worktree_path, "HEAD")
         except subprocess.TimeoutExpired:
             result = dataclasses.replace(
                 result,

@@ -150,17 +150,42 @@ def collect_diff(worktree_path: Path, base_commit: str) -> str:
 
     先把工作区变更 ``git add -A`` 落入 index（**不 commit**），再 diff，
     使 untracked 新文件也进入评审可见范围。主工作区与远端仓库不受影响。
+
+    Args:
+        worktree_path: 隔离的候选仓库。
+        base_commit: 候选的冻结基线提交或对应的 Git tree。
+
+    Returns:
+        str: 保留换行和上下文空白的 UTF-8 Git 补丁；二进制差异也可重放。
+
+    Raises:
+        EvaluationWorkspaceError: Git 失败，或补丁不可解码、超出输出上限。
     """
     try:
         _git(worktree_path, ["add", "-A"])
     except EvaluationWorkspaceError:
         # add 失败（如权限问题）不阻断：退化为仅跟踪文件的 diff。
         _logger.warning("evaluation diff: git add failed in %s", worktree_path)
-    return _git(
+    patch_bytes = _git_bytes(
         worktree_path,
-        ["-c", "core.quotepath=false", "diff", "--no-color", base_commit],
-        max_output=8_000_000,
+        [
+            "-c",
+            "core.quotepath=false",
+            "diff",
+            "--no-color",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--binary",
+            base_commit,
+            "--",
+        ],
     )
+    if len(patch_bytes) > 8_000_000:
+        raise EvaluationWorkspaceError("git 输出超过安全上限，拒绝处理")
+    try:
+        return patch_bytes.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise EvaluationWorkspaceError("git 补丁不是有效的 UTF-8 文本") from exc
 
 
 def restore_dependency_manifests(repo_path: str, commit: str, snapshot_path: Path) -> None:

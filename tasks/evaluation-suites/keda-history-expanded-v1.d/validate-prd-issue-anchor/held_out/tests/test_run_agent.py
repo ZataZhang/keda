@@ -1,0 +1,5832 @@
+"""Tests for the local Issue runner."""
+
+from __future__ import annotations
+
+import logging
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from backend.core.shared.models.agent_runner import (
+    AppConfig,
+    AttemptResult,
+    CommandResult,
+    FailureType,
+    GeneratedContentConfig,
+    GeneratedContentTargetConfig,
+    GitConfig,
+    IssueSummary,
+    PostPrSupervisorConfig,
+    PrePushReviewConfig,
+    PromptConfig,
+    PullRequestContext,
+    ReviewEventMarker,
+    RunnerConfig,
+    WorktreeConfig,
+)
+from backend.core.use_cases.run_agent_once import (
+    MaxRetriesExceededError,
+    PrdDeliveryError,
+    build_recovery_prompt,
+    build_prompt,
+    choose_agent,
+    classify_failure,
+    commit_requested_changes,
+    create_or_reuse_worktree,
+    detect_usage_limit_root_cause,
+    ensure_prd_delivery_ready,
+    extract_agent_response_text,
+    extract_prd_path,
+    format_agent_execution_failure,
+    format_attempt_history,
+    format_command,
+    format_failure_comment,
+    get_head_sha,
+    publish_changes,
+    resolve_prd_archive_path,
+    run_agent_with_prompt,
+    validate_safe_changes,
+    _reconcile_worktree_with_remote_branch,
+)
+from backend.core.use_cases.agent_runner_events import format_event_marker
+from tests.conftest import FakeGitHubClient, FakeProcessRunner
+
+
+def test_format_command_substitutes_issue_number() -> None:
+    """Command templates should have {issue_number} replaced."""
+    result = format_command("echo {issue_number}", issue_number=42)
+    assert result == ["echo", "42"]
+
+
+def test_choose_agent_override() -> None:
+    """CLI override should take precedence."""
+    issue = IssueSummary(number=1, title="T", url="U", body="B", labels=())
+    config = AppConfig()
+    assert choose_agent(issue, config, "claude") == "claude"
+
+
+def test_choose_agent_from_labels() -> None:
+    """Issue labels should determine agent when override is auto."""
+    issue = IssueSummary(number=1, title="T", url="U", body="B", labels=("agent/claude",))
+    config = AppConfig()
+    assert choose_agent(issue, config, "auto") == "claude"
+
+
+def test_choose_agent_defaults_to_claude() -> None:
+    """Default agent should be claude when no signals are present."""
+    issue = IssueSummary(number=1, title="T", url="U", body="B", labels=())
+    config = AppConfig()
+    assert choose_agent(issue, config, "auto") == "claude"
+
+
+def test_run_agent_with_prompt_uses_claude_yolo_mode(tmp_path: Path) -> None:
+    """Claude runner should bypass permission prompts for unattended execution."""
+    fake_runner = FakeProcessRunner()
+
+    run_agent_with_prompt("claude", "Implement the issue.", tmp_path, fake_runner)
+
+    assert fake_runner.calls == [
+        [
+            "claude",
+            "--dangerously-skip-permissions",
+            "--verbose",
+            "-p",
+            "--output-format",
+            "stream-json",
+            "--include-partial-messages",
+            "Implement the issue.",
+        ]
+    ]
+
+
+def test_run_agent_with_prompt_can_capture_output(tmp_path: Path) -> None:
+    """Prepared agent runs should opt into captured stdout when needed."""
+    command = (
+        "codex",
+        "--cd",
+        str(tmp_path),
+        "--sandbox",
+        "workspace-write",
+        "--ask-for-approval",
+        "never",
+        "exec",
+        "Review.",
+    )
+    fake_runner = FakeProcessRunner(
+        responses={
+            command: CommandResult(
+                command=command,
+                return_code=0,
+                stdout='{"verdict": "approved"}',
+                stderr="",
+            )
+        }
+    )
+
+    uncaptured = run_agent_with_prompt("codex", "Review.", tmp_path, fake_runner)
+    captured = run_agent_with_prompt(
+        "codex",
+        "Review.",
+        tmp_path,
+        fake_runner,
+        capture_output=True,
+    )
+
+    assert uncaptured.stdout == ""
+    assert captured.stdout == '{"verdict": "approved"}'
+
+
+def test_run_agent_with_prompt_passes_timeout(tmp_path: Path) -> None:
+    """Prepared agent runs should pass timeout through to the process runner."""
+
+    class _RecordingTimeoutRunner(FakeProcessRunner):
+        def __init__(self) -> None:
+            super().__init__()
+            self.timeouts: list[int | None] = []
+
+        def run(self, command, *, cwd, check=True, timeout=None, capture_output=True):
+            self.timeouts.append(timeout)
+            return super().run(
+                command,
+                cwd=cwd,
+                check=check,
+                timeout=timeout,
+                capture_output=capture_output,
+            )
+
+    fake_runner = _RecordingTimeoutRunner()
+
+    run_agent_with_prompt(
+        "codex",
+        "Review.",
+        tmp_path,
+        fake_runner,
+        capture_output=True,
+        timeout_seconds=123,
+    )
+
+    assert fake_runner.timeouts == [123]
+
+
+def test_extract_agent_response_text_from_claude_stream_json() -> None:
+    """Captured Claude stream-json should be reduced to assistant text."""
+    result = CommandResult(
+        command=("claude", "--output-format", "stream-json", "-p", "Review."),
+        return_code=0,
+        stdout=(
+            '{"type":"stream_event","event":{"delta":'
+            '{"type":"text_delta","text":"```json\\n"}}}\n'
+            '{"type":"stream_event","event":{"delta":'
+            '{"type":"text_delta","text":"{\\"verdict\\": '
+            '\\"approved\\"}\\n```"}}}\n'
+        ),
+        stderr="",
+    )
+
+    assert extract_agent_response_text(result) == ('```json\n{"verdict": "approved"}\n```')
+
+
+def test_extract_agent_response_text_keeps_rendered_stream_output() -> None:
+    """Already-rendered stream output must be returned verbatim.
+
+    Process runner 会把 Claude stream-json 渲染成纯文本后返回；若再按事件流
+    逐行重解析，数组末尾不带逗号的字符串元素恰好是合法 JSON 标量，会被静默
+    丢弃并破坏 reviewer verdict JSON（回归自 Issue #53 pre-push review 失败）。
+    """
+    rendered_stdout = (
+        "```json\n"
+        "{\n"
+        '"verdict": "approved",\n'
+        '"summary": "ok",\n'
+        '"findings_medium": [\n'
+        '"first finding with trailing comma",\n'
+        '"last finding is a valid standalone JSON string"\n'
+        "]\n"
+        "}\n"
+        "```\n"
+    )
+    result = CommandResult(
+        command=("claude", "--output-format", "stream-json", "-p", "Review."),
+        return_code=0,
+        stdout=rendered_stdout,
+        stderr="",
+    )
+
+    assert extract_agent_response_text(result) == rendered_stdout
+
+
+def test_run_once_dry_run() -> None:
+    """Dry-run should list ready work without mutating labels."""
+    fake_client = FakeGitHubClient()
+    fake_client.list_ready_issues = lambda ready_label, limit: [
+        IssueSummary(
+            number=123,
+            title="Example",
+            url="https://github.com/example/repo/issues/123",
+            body="PRD path: `tasks/example.md`",
+            labels=("agent/ready", "agent/codex"),
+        )
+    ]
+    fake_runner = FakeProcessRunner()
+    config = AppConfig()
+
+    from backend.core.use_cases.agent_runner_orchestrate import run_once
+
+    exit_code = run_once(
+        repo_path=Path("."),
+        config=config,
+        dry_run=True,
+        agent="auto",
+        max_issues=1,
+        github_client=fake_client,
+        process_runner=fake_runner,
+    )
+
+    assert exit_code == 0
+    edit_calls = [c for c in fake_client.calls if c["method"] == "edit_issue_labels"]
+    assert len(edit_calls) == 0
+
+
+def test_run_once_preflight_rejects_missing_configured_remote(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """run_once should fail before claiming work when configured remote is absent."""
+    fake_client = FakeGitHubClient()
+    fake_runner = FakeProcessRunner(
+        responses={
+            _git_remote_command(): _git_remote_result("zata"),
+        }
+    )
+    caplog.set_level(logging.ERROR, logger="backend.core.use_cases.run_agent_once")
+
+    from backend.core.use_cases.agent_runner_orchestrate import run_once
+
+    exit_code = run_once(
+        repo_path=Path("."),
+        config=AppConfig(),
+        dry_run=False,
+        agent="auto",
+        max_issues=1,
+        github_client=fake_client,
+        process_runner=fake_runner,
+    )
+
+    assert exit_code == 1
+    assert fake_client.calls == []
+    assert fake_runner.calls == [["git", "remote"]]
+    assert "Configured git remote 'origin' does not exist" in caplog.text
+    assert "Available remotes: zata" in caplog.text
+
+
+def test_build_prompt_uses_commit_request_proxy() -> None:
+    """Prompt should route commit intent through the runner proxy."""
+    issue = IssueSummary(
+        number=1,
+        title="Test",
+        url="https://github.com/example/repo/issues/1",
+        body="Test body",
+        labels=(),
+    )
+    prompt = build_prompt(issue, Path("/worktree"), PromptConfig())
+    assert "Do not merge main, delete branches, push, or create PRs" in prompt
+    assert "Do not run `git add` or `git commit`" in prompt
+    assert ".agent-runner/commit-request.json" in prompt
+    assert "commit_message" in prompt
+
+
+def test_build_prompt_fallback_to_default() -> None:
+    """Empty prompt config should fall back to the built-in default template."""
+    issue = IssueSummary(
+        number=1,
+        title="Test",
+        url="https://github.com/example/repo/issues/1",
+        body="Test body",
+        labels=(),
+    )
+    prompt = build_prompt(issue, Path("/worktree"), PromptConfig())
+    assert "Complete GitHub Issue #1: Test" in prompt
+    assert "Execution rules:" in prompt
+
+
+def test_build_prompt_uses_config_template() -> None:
+    """Custom phase template in PromptConfig should override the default."""
+    issue = IssueSummary(
+        number=42,
+        title="Custom",
+        url="https://github.com/example/repo/issues/42",
+        body="Custom body",
+        labels=(),
+    )
+    custom_template = "Issue #{issue_number}: {issue_title}\n{issue_body}"
+    prompt_config = PromptConfig(phases={"execution": custom_template})
+    prompt = build_prompt(issue, Path("/worktree"), prompt_config)
+    assert prompt == "Issue #42: Custom\nCustom body"
+
+
+def test_build_prompt_replaces_all_placeholders() -> None:
+    """All template placeholders should be replaced with issue values."""
+    issue = IssueSummary(
+        number=7,
+        title="Replace Test",
+        url="https://github.com/example/repo/issues/7",
+        body="PRD path: `docs/prd.md`",
+        labels=(),
+    )
+    template = (
+        "num={issue_number} title={issue_title} url={issue_url} "
+        "path={worktree_path} body={issue_body} prd={prd_line}"
+    )
+    prompt_config = PromptConfig(phases={"execution": template})
+    prompt = build_prompt(issue, Path("/wt"), prompt_config)
+    assert "num=7" in prompt
+    assert "title=Replace Test" in prompt
+    assert "url=https://github.com/example/repo/issues/7" in prompt
+    assert "path=/wt" in prompt
+    assert "body=PRD path: `docs/prd.md`" in prompt
+    assert "prd=Also read the canonical PRD at `docs/prd.md`" in prompt
+
+
+def test_build_recovery_prompt_includes_failure_context() -> None:
+    """Recovery prompt should give the agent enough detail to fix and retry."""
+    issue = IssueSummary(
+        number=1,
+        title="Test",
+        url="https://github.com/example/repo/issues/1",
+        body="Test body",
+        labels=(),
+    )
+    failure_summary = "\n".join(
+        [
+            "Verification after runner staged changes with git add -A failed.",
+            "Command: `just test`",
+            "stdout: failing stdout",
+            "stderr: failing stderr",
+        ]
+    )
+
+    prompt = build_recovery_prompt(
+        issue,
+        Path("/worktree"),
+        recovery_attempt=1,
+        max_recovery_attempts=2,
+        failure_summary=failure_summary,
+    )
+
+    assert "Recovery attempt: 1/2" in prompt
+    assert "Verification after runner staged changes with git add -A failed" in prompt
+    assert "failing stdout" in prompt
+    assert "failing stderr" in prompt
+    assert "Do not run `git add` or `git commit`" in prompt
+    assert ".agent-runner/commit-request.json" in prompt
+
+
+def test_extract_prd_path_finds_backtick_path() -> None:
+    """PRD path should be extracted from a line-start anchor."""
+    body = "Some text\n- PRD path: `tasks/pending/example.md`\nMore text"
+    assert extract_prd_path(body) == "tasks/pending/example.md"
+
+
+def test_extract_prd_path_ignores_inline_mention() -> None:
+    """Inline `PRD path:` in prose must not shadow the canonical anchor."""
+    body = (
+        "Add a core `create_prd_from_issue` workflow and an optional "
+        "`PRD path:` anchor. The daemon detects `agent/rework-prd`.\n\n"
+        "## Canonical PRD\n\n"
+        "- PRD path: `tasks/pending/P2-FEAT-20260527-190923-prd-from-issue.md`\n"
+    )
+    assert extract_prd_path(body) == "tasks/pending/P2-FEAT-20260527-190923-prd-from-issue.md"
+
+
+def test_extract_prd_path_returns_none_when_missing() -> None:
+    """None should be returned when no PRD path is present."""
+    assert extract_prd_path("No PRD here.") is None
+
+
+def test_extract_prd_path_ignores_inline_code_anchor() -> None:
+    """`PRD path:` inside prose must not be mistaken for the canonical anchor."""
+    body = (
+        "...an optional existing `PRD path:` anchor. The daemon or `run` path...\n"
+        "\n"
+        "## Canonical PRD\n"
+        "- PRD path: `tasks/archive/P2-FEAT-20260527-190923-prd-from-issue.md`\n"
+    )
+    assert extract_prd_path(body) == "tasks/archive/P2-FEAT-20260527-190923-prd-from-issue.md"
+
+
+def test_extract_prd_path_rejects_garbage_anchor() -> None:
+    """Malformed anchors that do not look like relative paths must be ignored."""
+    body = (
+        "- PRD path: ` anchor. The daemon or `run` path`\n"
+        "- PRD path: `tasks/pending/P2-FEAT-20260527-190923-prd-from-issue.md`\n"
+    )
+    assert extract_prd_path(body) == "tasks/pending/P2-FEAT-20260527-190923-prd-from-issue.md"
+
+
+def test_build_prompt_includes_prd_closeout_for_pending_prd() -> None:
+    """Prompt should instruct the agent to update checklist and archive pending PRDs."""
+    issue = IssueSummary(
+        number=1,
+        title="Test",
+        url="https://github.com/example/repo/issues/1",
+        body="PRD path: `tasks/pending/example.md`",
+        labels=(),
+    )
+    prompt = build_prompt(issue, Path("/worktree"), PromptConfig())
+    assert "tasks/pending/example.md" in prompt
+    assert "Acceptance Checklist" in prompt
+    assert "tasks/pending/" in prompt
+    assert "tasks/archive/" in prompt
+
+
+def test_build_prompt_no_prd_path() -> None:
+    """Prompt should give generic PRD advice when no canonical path is present."""
+    issue = IssueSummary(
+        number=1,
+        title="Test",
+        url="https://github.com/example/repo/issues/1",
+        body="Just a regular issue.",
+        labels=(),
+    )
+    prompt = build_prompt(issue, Path("/worktree"), PromptConfig())
+    assert "If the Issue references a PRD, read it before editing." in prompt
+
+
+def test_build_recovery_prompt_includes_prd_closeout() -> None:
+    """Recovery prompt should remind the agent about PRD closeout state."""
+    issue = IssueSummary(
+        number=1,
+        title="Test",
+        url="https://github.com/example/repo/issues/1",
+        body="PRD path: `tasks/pending/example.md`",
+        labels=(),
+    )
+    prompt = build_recovery_prompt(
+        issue,
+        Path("/worktree"),
+        recovery_attempt=1,
+        max_recovery_attempts=2,
+        failure_summary="Something broke.",
+    )
+    assert "tasks/pending/example.md" in prompt
+    assert "Acceptance Checklist" in prompt
+    assert "archived if complete" in prompt
+
+
+def test_resolve_prd_archive_path_converts_pending() -> None:
+    """Pending PRD paths should map to the archive directory."""
+    assert resolve_prd_archive_path("tasks/pending/example.md") == "tasks/archive/example.md"
+
+
+def test_resolve_prd_archive_path_returns_none_for_non_pending() -> None:
+    """Non-pending paths should not resolve to an archive path."""
+    assert resolve_prd_archive_path("tasks/archive/example.md") is None
+    assert resolve_prd_archive_path("docs/example.md") is None
+
+
+def test_ensure_prd_delivery_ready_skips_when_no_prd_path(tmp_path: Path) -> None:
+    """Gate should be a no-op when the Issue has no canonical PRD path."""
+    issue = IssueSummary(number=1, title="T", url="U", body="No PRD.", labels=())
+    fake_runner = FakeProcessRunner()
+    ensure_prd_delivery_ready(issue, tmp_path, fake_runner)
+    assert fake_runner.calls == []
+
+
+def test_ensure_prd_delivery_ready_raises_when_pending_incomplete(
+    tmp_path: Path,
+) -> None:
+    """Pending PRD with unchecked items should raise PrdDeliveryError."""
+    issue = IssueSummary(
+        number=1,
+        title="T",
+        url="U",
+        body="PRD path: `tasks/pending/example.md`",
+        labels=(),
+    )
+    prd_path = tmp_path / "tasks" / "pending" / "example.md"
+    prd_path.parent.mkdir(parents=True, exist_ok=True)
+    prd_path.write_text(
+        "\n".join(
+            [
+                "# PRD",
+                "",
+                "## Acceptance Checklist",
+                "",
+                "- [x] done",
+                "- [ ] undone",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    fake_runner = FakeProcessRunner()
+    with pytest.raises(PrdDeliveryError, match="unchecked items"):
+        ensure_prd_delivery_ready(issue, tmp_path, fake_runner)
+
+
+def test_ensure_prd_delivery_ready_git_mv_when_pending_complete(
+    tmp_path: Path,
+) -> None:
+    """Complete pending PRD should be moved to archive by git mv."""
+    issue = IssueSummary(
+        number=1,
+        title="T",
+        url="U",
+        body="PRD path: `tasks/pending/example.md`",
+        labels=(),
+    )
+    prd_path = tmp_path / "tasks" / "pending" / "example.md"
+    archive_dir = tmp_path / "tasks" / "archive"
+    prd_path.parent.mkdir(parents=True, exist_ok=True)
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    prd_path.write_text(
+        "\n".join(
+            [
+                "# PRD",
+                "",
+                "## Acceptance Checklist",
+                "",
+                "- [x] done",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    fake_runner = FakeProcessRunner()
+    ensure_prd_delivery_ready(issue, tmp_path, fake_runner)
+    assert [
+        "git",
+        "mv",
+        "tasks/pending/example.md",
+        "tasks/archive/example.md",
+    ] in fake_runner.calls
+
+
+def test_ensure_prd_delivery_ready_passes_when_archive_complete(
+    tmp_path: Path,
+) -> None:
+    """Archived PRD with all items checked should pass the gate."""
+    issue = IssueSummary(
+        number=1,
+        title="T",
+        url="U",
+        body="PRD path: `tasks/pending/example.md`",
+        labels=(),
+    )
+    archive_path = tmp_path / "tasks" / "archive" / "example.md"
+    archive_path.parent.mkdir(parents=True, exist_ok=True)
+    archive_path.write_text(
+        "\n".join(
+            [
+                "# PRD",
+                "",
+                "## Acceptance Checklist",
+                "",
+                "- [x] done",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    fake_runner = FakeProcessRunner()
+    ensure_prd_delivery_ready(issue, tmp_path, fake_runner)
+    assert fake_runner.calls == []
+
+
+def test_ensure_prd_delivery_ready_raises_when_missing_section(
+    tmp_path: Path,
+) -> None:
+    """PRD without Acceptance Checklist section should raise PrdDeliveryError."""
+    issue = IssueSummary(
+        number=1,
+        title="T",
+        url="U",
+        body="PRD path: `tasks/pending/example.md`",
+        labels=(),
+    )
+    prd_path = tmp_path / "tasks" / "pending" / "example.md"
+    prd_path.parent.mkdir(parents=True, exist_ok=True)
+    prd_path.write_text("# PRD\n", encoding="utf-8")
+    fake_runner = FakeProcessRunner()
+    with pytest.raises(PrdDeliveryError, match="Acceptance Checklist section missing"):
+        ensure_prd_delivery_ready(issue, tmp_path, fake_runner)
+
+
+def test_ensure_prd_delivery_ready_raises_when_prd_missing(
+    tmp_path: Path,
+) -> None:
+    """Missing canonical PRD should raise PrdDeliveryError."""
+    issue = IssueSummary(
+        number=1,
+        title="T",
+        url="U",
+        body="PRD path: `tasks/pending/example.md`",
+        labels=(),
+    )
+    fake_runner = FakeProcessRunner()
+    with pytest.raises(PrdDeliveryError, match="Canonical PRD not found"):
+        ensure_prd_delivery_ready(issue, tmp_path, fake_runner)
+
+
+def test_ensure_prd_delivery_ready_raises_when_archive_dir_missing(
+    tmp_path: Path,
+) -> None:
+    """Pending PRD ready for archive but missing archive dir should raise PrdDeliveryError."""
+    issue = IssueSummary(
+        number=1,
+        title="T",
+        url="U",
+        body="PRD path: `tasks/pending/example.md`",
+        labels=(),
+    )
+    prd_path = tmp_path / "tasks" / "pending" / "example.md"
+    prd_path.parent.mkdir(parents=True, exist_ok=True)
+    prd_path.write_text(
+        "\n".join(
+            [
+                "# PRD",
+                "",
+                "## Acceptance Checklist",
+                "",
+                "- [x] done",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    fake_runner = FakeProcessRunner()
+    with pytest.raises(PrdDeliveryError, match="Archive directory does not exist"):
+        ensure_prd_delivery_ready(issue, tmp_path, fake_runner)
+
+
+def test_get_head_sha() -> None:
+    """get_head_sha should return the HEAD SHA."""
+    fake_runner = FakeProcessRunner(
+        responses={
+            ("git", "rev-parse", "HEAD"): CommandResult(
+                command=("git", "rev-parse", "HEAD"),
+                return_code=0,
+                stdout="abc123def456\n",
+                stderr="",
+            ),
+        }
+    )
+    sha = get_head_sha(Path("."), fake_runner)
+    assert sha == "abc123def456"
+
+
+def test_publish_changes_no_git_commit() -> None:
+    """publish_changes should not call git add or git commit."""
+    issue = IssueSummary(
+        number=1,
+        title="Test",
+        url="https://github.com/example/repo/issues/1",
+        body="Test body",
+        labels=(),
+    )
+    fake_client = FakeGitHubClient()
+    fake_runner = FakeProcessRunner(
+        responses={
+            ("git", "branch", "--show-current"): CommandResult(
+                command=("git", "branch", "--show-current"),
+                return_code=0,
+                stdout="issue-1\n",
+                stderr="",
+            ),
+            ("git", "status", "--porcelain"): CommandResult(
+                command=("git", "status", "--porcelain"),
+                return_code=0,
+                stdout="",
+                stderr="",
+            ),
+            _git_remote_command(): _git_remote_result("origin"),
+        }
+    )
+    branch, pr_url = publish_changes(issue, Path("."), AppConfig(), fake_client, fake_runner)
+    assert branch == "issue-1"
+    assert pr_url == "https://github.com/example/repo/pull/1"
+    commands = [tuple(c) for c in fake_runner.calls]
+    assert ("git", "add", "-A") not in commands
+    assert ("git", "commit", "-m", "agent: complete issue #1") not in commands
+    assert ("git", "push", "-u", "origin", "issue-1") in commands
+
+
+def test_publish_changes_reuses_existing_open_pr() -> None:
+    """publish_changes should reuse an existing open PR instead of recreating it."""
+    issue = IssueSummary(
+        number=1,
+        title="Test",
+        url="https://github.com/example/repo/issues/1",
+        body="Test body",
+        labels=(),
+    )
+    fake_client = FakeGitHubClient()
+    fake_client._open_prs["issue-1"] = "https://github.com/example/repo/pull/52"
+    fake_runner = FakeProcessRunner(
+        responses={
+            ("git", "branch", "--show-current"): CommandResult(
+                command=("git", "branch", "--show-current"),
+                return_code=0,
+                stdout="issue-1\n",
+                stderr="",
+            ),
+            ("git", "status", "--porcelain"): CommandResult(
+                command=("git", "status", "--porcelain"),
+                return_code=0,
+                stdout="",
+                stderr="",
+            ),
+            _git_remote_command(): _git_remote_result("origin"),
+        }
+    )
+    branch, pr_url = publish_changes(issue, Path("."), AppConfig(), fake_client, fake_runner)
+    assert branch == "issue-1"
+    assert pr_url == "https://github.com/example/repo/pull/52"
+    commands = [tuple(c) for c in fake_runner.calls]
+    assert ("git", "push", "-u", "origin", "issue-1") in commands
+    method_names = [call["method"] for call in fake_client.calls]
+    assert "find_open_pr_by_head" in method_names
+    assert "create_draft_pr" not in method_names
+
+
+def test_publish_changes_creates_pr_when_no_open_pr() -> None:
+    """publish_changes should create a draft PR when the branch has no open PR."""
+    issue = IssueSummary(
+        number=1,
+        title="Test",
+        url="https://github.com/example/repo/issues/1",
+        body="Test body",
+        labels=(),
+    )
+    fake_client = FakeGitHubClient()
+    fake_runner = FakeProcessRunner(
+        responses={
+            ("git", "branch", "--show-current"): CommandResult(
+                command=("git", "branch", "--show-current"),
+                return_code=0,
+                stdout="issue-1\n",
+                stderr="",
+            ),
+            ("git", "status", "--porcelain"): CommandResult(
+                command=("git", "status", "--porcelain"),
+                return_code=0,
+                stdout="",
+                stderr="",
+            ),
+            _git_remote_command(): _git_remote_result("origin"),
+        }
+    )
+    branch, pr_url = publish_changes(issue, Path("."), AppConfig(), fake_client, fake_runner)
+    assert branch == "issue-1"
+    assert pr_url == "https://github.com/example/repo/pull/1"
+    method_names = [call["method"] for call in fake_client.calls]
+    assert "find_open_pr_by_head" in method_names
+    assert "create_draft_pr" in method_names
+
+
+def test_publish_changes_rejects_missing_configured_remote() -> None:
+    """publish_changes should fail instead of guessing another remote."""
+    issue = IssueSummary(
+        number=1,
+        title="Test",
+        url="https://github.com/example/repo/issues/1",
+        body="Test body",
+        labels=(),
+    )
+    fake_client = FakeGitHubClient()
+    fake_runner = FakeProcessRunner(
+        responses={
+            ("git", "branch", "--show-current"): CommandResult(
+                command=("git", "branch", "--show-current"),
+                return_code=0,
+                stdout="issue-1\n",
+                stderr="",
+            ),
+            ("git", "status", "--porcelain"): CommandResult(
+                command=("git", "status", "--porcelain"),
+                return_code=0,
+                stdout="",
+                stderr="",
+            ),
+            _git_remote_command(): _git_remote_result("zata", "upstream"),
+        }
+    )
+
+    with pytest.raises(RuntimeError, match="Configured git remote 'origin'"):
+        publish_changes(issue, Path("."), AppConfig(), fake_client, fake_runner)
+
+    commands = [tuple(c) for c in fake_runner.calls]
+    assert ("git", "push", "-u", "origin", "issue-1") not in commands
+    assert ("git", "push", "-u", "zata", "issue-1") not in commands
+
+
+def test_publish_changes_uses_configured_existing_remote() -> None:
+    """publish_changes should push only to the configured remote."""
+    issue = IssueSummary(
+        number=1,
+        title="Test",
+        url="https://github.com/example/repo/issues/1",
+        body="Test body",
+        labels=(),
+    )
+    fake_client = FakeGitHubClient()
+    fake_runner = FakeProcessRunner(
+        responses={
+            ("git", "branch", "--show-current"): CommandResult(
+                command=("git", "branch", "--show-current"),
+                return_code=0,
+                stdout="issue-1\n",
+                stderr="",
+            ),
+            ("git", "status", "--porcelain"): CommandResult(
+                command=("git", "status", "--porcelain"),
+                return_code=0,
+                stdout="",
+                stderr="",
+            ),
+            _git_remote_command(): _git_remote_result("origin", "zata"),
+        }
+    )
+    config = AppConfig(git=GitConfig(remote="zata"))
+
+    branch, _ = publish_changes(issue, Path("."), config, fake_client, fake_runner)
+
+    assert branch == "issue-1"
+    commands = [tuple(c) for c in fake_runner.calls]
+    assert ("git", "push", "-u", "zata", "issue-1") in commands
+    assert ("git", "push", "-u", "origin", "issue-1") not in commands
+
+
+def test_publish_changes_rejects_branch_change() -> None:
+    """publish_changes should refuse to push if the worktree branch changed."""
+    issue = IssueSummary(
+        number=1,
+        title="Test",
+        url="https://github.com/example/repo/issues/1",
+        body="Test body",
+        labels=(),
+    )
+    fake_runner = FakeProcessRunner(
+        responses={
+            ("git", "branch", "--show-current"): CommandResult(
+                command=("git", "branch", "--show-current"),
+                return_code=0,
+                stdout="main\n",
+                stderr="",
+            ),
+        }
+    )
+
+    with pytest.raises(RuntimeError, match="unexpected branch: main"):
+        publish_changes(
+            issue,
+            Path("."),
+            AppConfig(),
+            FakeGitHubClient(),
+            fake_runner,
+            expected_branch="issue-1",
+        )
+
+    commands = [tuple(c) for c in fake_runner.calls]
+    assert ("git", "status", "--porcelain") not in commands
+    assert ("git", "push", "-u", "origin", "main") not in commands
+
+
+def test_publish_failure_category_push_vs_pr_create() -> None:
+    """publish_changes wrapper should report push vs pr_create accurately."""
+    from backend.core.use_cases.agent_runner_failure import PublishFailureError
+    from backend.core.use_cases.agent_runner_publication import (
+        _publish_changes_with_recovery_context,
+    )
+    from backend.core.shared.models.agent_runner import PublishFailureCategory
+
+    issue = IssueSummary(
+        number=1,
+        title="Test",
+        url="https://github.com/example/repo/issues/1",
+        body="Test body",
+        labels=(),
+    )
+
+    # Scenario 1: git push fails -> category=push
+    fake_runner_push_fail = FakeProcessRunner(
+        responses={
+            ("git", "branch", "--show-current"): CommandResult(
+                command=("git", "branch", "--show-current"),
+                return_code=0,
+                stdout="issue-1\n",
+                stderr="",
+            ),
+            ("git", "status", "--porcelain"): CommandResult(
+                command=("git", "status", "--porcelain"),
+                return_code=0,
+                stdout="",
+                stderr="",
+            ),
+            ("git", "remote"): CommandResult(
+                command=("git", "remote"),
+                return_code=0,
+                stdout="origin\n",
+                stderr="",
+            ),
+            ("git", "push", "-u", "origin", "issue-1"): CommandResult(
+                command=("git", "push", "-u", "origin", "issue-1"),
+                return_code=1,
+                stdout="",
+                stderr="push rejected",
+            ),
+        }
+    )
+    with pytest.raises(PublishFailureError) as exc_info:
+        _publish_changes_with_recovery_context(
+            issue=issue,
+            worktree_path=Path("."),
+            config=AppConfig(),
+            github_client=FakeGitHubClient(),
+            process_runner=fake_runner_push_fail,
+            expected_branch="issue-1",
+            content_generator=None,
+        )
+    assert exc_info.value.failure_category == PublishFailureCategory.PUSH
+
+    # Scenario 2: PR creation fails -> category=pr_create
+    class _PRCreateFailClient(FakeGitHubClient):
+        def create_draft_pr(self, **kwargs: object) -> str:
+            raise RuntimeError("gh pr create failed")
+
+    fake_runner_pr_fail = FakeProcessRunner(
+        responses={
+            ("git", "branch", "--show-current"): CommandResult(
+                command=("git", "branch", "--show-current"),
+                return_code=0,
+                stdout="issue-1\n",
+                stderr="",
+            ),
+            ("git", "status", "--porcelain"): CommandResult(
+                command=("git", "status", "--porcelain"),
+                return_code=0,
+                stdout="",
+                stderr="",
+            ),
+            ("git", "remote"): CommandResult(
+                command=("git", "remote"),
+                return_code=0,
+                stdout="origin\n",
+                stderr="",
+            ),
+            ("git", "push", "-u", "origin", "issue-1"): CommandResult(
+                command=("git", "push", "-u", "origin", "issue-1"),
+                return_code=0,
+                stdout="",
+                stderr="",
+            ),
+        }
+    )
+    with pytest.raises(PublishFailureError) as exc_info:
+        _publish_changes_with_recovery_context(
+            issue=issue,
+            worktree_path=Path("."),
+            config=AppConfig(),
+            github_client=_PRCreateFailClient(),
+            process_runner=fake_runner_pr_fail,
+            expected_branch="issue-1",
+            content_generator=None,
+        )
+    assert exc_info.value.failure_category == PublishFailureCategory.PR_CREATE
+
+
+def test_validate_safe_changes_rejects_forbidden_path(tmp_path: Path) -> None:
+    """Runner should not publish configured secret-like paths."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    from tests.test_create_issue_from_prd import _init_repo
+
+    _init_repo(repo)
+    (repo / ".env").write_text("SECRET=value\n", encoding="utf-8")
+
+    fake_runner = FakeProcessRunner(
+        responses={
+            ("git", "status", "--porcelain", "-z"): CommandResult(
+                command=("git", "status", "--porcelain", "-z"),
+                return_code=0,
+                stdout=" M .env\0",
+                stderr="",
+            ),
+        }
+    )
+
+    with pytest.raises(RuntimeError, match="Refusing to publish forbidden paths: .env"):
+        validate_safe_changes(repo, AppConfig(), fake_runner)
+
+
+def _make_ready_issue() -> IssueSummary:
+    return IssueSummary(
+        number=123,
+        title="Example",
+        url="https://github.com/example/repo/issues/123",
+        body="Example body",
+        labels=("agent/ready", "agent/codex"),
+    )
+
+
+def _make_prd_issue(
+    prd_path: str = "tasks/pending/example.md",
+) -> IssueSummary:
+    return IssueSummary(
+        number=123,
+        title="Example",
+        url="https://github.com/example/repo/issues/123",
+        body=f"PRD path: `{prd_path}`",
+        labels=("agent/ready", "agent/codex"),
+    )
+
+
+def _config_for_worktree(
+    worktree_path: Path,
+    *verification_commands: str,
+    max_recovery_attempts: int = 2,
+    recovery_retry_delay_seconds: int = 0,
+) -> AppConfig:
+    commands = verification_commands or ("just test",)
+    return AppConfig(
+        runner=RunnerConfig(
+            max_recovery_attempts=max_recovery_attempts,
+            recovery_retry_delay_seconds=recovery_retry_delay_seconds,
+            verification_commands=commands,
+        ),
+        worktree=WorktreeConfig(path_command=f"echo {worktree_path}"),
+    )
+
+
+def _config_with_review_disabled(
+    worktree_path: Path | None = None,
+    *verification_commands: str,
+    max_recovery_attempts: int = 2,
+    recovery_retry_delay_seconds: int = 0,
+) -> AppConfig:
+    """Return a config with pre-push review and post-PR supervisor disabled."""
+    commands = verification_commands or ("just test",)
+    worktree_cfg = (
+        WorktreeConfig(path_command=f"echo {worktree_path}") if worktree_path else WorktreeConfig()
+    )
+    return AppConfig(
+        runner=RunnerConfig(
+            max_recovery_attempts=max_recovery_attempts,
+            recovery_retry_delay_seconds=recovery_retry_delay_seconds,
+            verification_commands=commands,
+        ),
+        worktree=worktree_cfg,
+        pre_push_review=PrePushReviewConfig(enabled=False),
+        post_pr_supervisor=PostPrSupervisorConfig(enabled=False),
+    )
+
+
+def _worktree_path_response(
+    worktree_path: Path,
+) -> tuple[tuple[str, ...], CommandResult]:
+    command = ("echo", str(worktree_path))
+    return command, CommandResult(
+        command=command,
+        return_code=0,
+        stdout=f"{worktree_path}\n",
+        stderr="",
+    )
+
+
+def _git_remote_command() -> tuple[str, ...]:
+    return ("git", "remote")
+
+
+def _git_remote_result(*remote_names: str) -> CommandResult:
+    command = _git_remote_command()
+    return CommandResult(
+        command=command,
+        return_code=0,
+        stdout="".join(f"{remote_name}\n" for remote_name in remote_names),
+        stderr="",
+    )
+
+
+def _write_commit_request(worktree_path: Path, commit_message: str) -> None:
+    request_path = worktree_path / ".agent-runner" / "commit-request.json"
+    request_path.parent.mkdir(parents=True, exist_ok=True)
+    request_path.write_text(
+        f'{{"commit_message": "{commit_message}"}}\n',
+        encoding="utf-8",
+    )
+
+
+def _write_complete_prd(worktree_path: Path, relative_path: str = "tasks/example.md") -> None:
+    prd_path = worktree_path / relative_path
+    prd_path.parent.mkdir(parents=True, exist_ok=True)
+    prd_path.write_text(
+        "\n".join(
+            [
+                "# PRD: Example",
+                "",
+                "## 7. Acceptance Checklist",
+                "",
+                "- [x] item 1",
+                "- [x] item 2",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
+def _write_incomplete_prd(worktree_path: Path, relative_path: str = "tasks/example.md") -> None:
+    prd_path = worktree_path / relative_path
+    prd_path.parent.mkdir(parents=True, exist_ok=True)
+    prd_path.write_text(
+        "\n".join(
+            [
+                "# PRD: Example",
+                "",
+                "## 7. Acceptance Checklist",
+                "",
+                "- [x] item 1",
+                "- [ ] item 2",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_run_once_uncommitted_changes_runner_commits(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """run_once should commit requested agent changes before publishing."""
+    fake_client = FakeGitHubClient()
+    issue = _make_ready_issue()
+    fake_client.list_ready_issues = lambda ready_label, limit: [issue]
+    worktree_path = tmp_path / "issue-123"
+    worktree_path.mkdir()
+    _write_commit_request(worktree_path, "agent: implement example")
+
+    class _FallbackCommitRunner(FakeProcessRunner):
+        def __init__(self) -> None:
+            super().__init__()
+            self._sha_calls = 0
+            self._status_calls = 0
+
+        def run(self, command, *, cwd, check=True, timeout=None, capture_output=True):
+            command_tuple = tuple(command)
+            if command_tuple == ("git", "rev-parse", "HEAD"):
+                self.calls.append(list(command))
+                self._sha_calls += 1
+                sha = "after-sha" if self._sha_calls > 1 else "before-sha"
+                return CommandResult(
+                    command=command_tuple,
+                    return_code=0,
+                    stdout=f"{sha}\n",
+                    stderr="",
+                )
+            if command_tuple == ("git", "status", "--porcelain"):
+                self.calls.append(list(command))
+                self._status_calls += 1
+                status_stdout = (
+                    " M file.txt\n?? .agent-runner/commit-request.json\n"
+                    if self._status_calls == 1
+                    else " M file.txt\n"
+                    if self._status_calls < 4
+                    else ""
+                )
+                return CommandResult(
+                    command=command_tuple,
+                    return_code=0,
+                    stdout=status_stdout,
+                    stderr="",
+                )
+            return super().run(
+                command,
+                cwd=cwd,
+                check=check,
+                timeout=timeout,
+                capture_output=capture_output,
+            )
+
+    fake_runner = _FallbackCommitRunner()
+    path_command, path_result = _worktree_path_response(worktree_path)
+    fake_runner.responses = {
+        path_command: path_result,
+        ("git", "branch", "--show-current"): CommandResult(
+            command=("git", "branch", "--show-current"),
+            return_code=0,
+            stdout="issue-123\n",
+            stderr="",
+        ),
+        _git_remote_command(): _git_remote_result("origin"),
+    }
+    config = _config_with_review_disabled(worktree_path, "npm test")
+    caplog.set_level(logging.WARNING, logger="backend.core.use_cases.run_agent_once")
+
+    from backend.core.use_cases.agent_runner_orchestrate import run_once
+
+    exit_code = run_once(
+        repo_path=Path("."),
+        config=config,
+        dry_run=False,
+        agent="auto",
+        max_issues=1,
+        github_client=fake_client,
+        process_runner=fake_runner,
+    )
+
+    assert exit_code == 0
+    commands = [tuple(command) for command in fake_runner.calls]
+    commit_command = (
+        "git",
+        "commit",
+        "-m",
+        "agent: implement example",
+    )
+    validation_indices = [
+        index for index, command in enumerate(commands) if command == ("npm", "test")
+    ]
+    add_index = commands.index(("git", "add", "-A"))
+    commit_index = commands.index(commit_command)
+    head_indices = [
+        index for index, command in enumerate(commands) if command == ("git", "rev-parse", "HEAD")
+    ]
+    assert len(validation_indices) == 2
+    assert validation_indices[0] < add_index < validation_indices[1] < commit_index
+    assert commit_index < head_indices[-1]
+    assert ("just", "test") not in commands
+    assert not (worktree_path / ".agent-runner" / "commit-request.json").exists()
+    assert ("git", "push", "-u", "origin", "issue-123") in commands
+    assert (
+        "Agent left uncommitted changes for Issue #123; "
+        "runner processing commit request." in caplog.text
+    )
+    review_calls = [
+        c
+        for c in fake_client.calls
+        if c["method"] == "edit_issue_labels" and config.labels.review in c.get("add", [])
+    ]
+    assert len(review_calls) == 1
+    pr_calls = [c for c in fake_client.calls if c["method"] == "create_draft_pr"]
+    assert len(pr_calls) == 1
+    failed_calls = [
+        c
+        for c in fake_client.calls
+        if c["method"] == "edit_issue_labels" and config.labels.failed in c.get("add", [])
+    ]
+    assert len(failed_calls) == 0
+
+
+def test_run_once_recovers_after_staged_verification_failure(
+    tmp_path: Path,
+) -> None:
+    """run_once should ask the agent to fix failures found after git add."""
+    fake_client = FakeGitHubClient()
+    issue = _make_ready_issue()
+    fake_client.list_ready_issues = lambda ready_label, limit: [issue]
+    worktree_path = tmp_path / "issue-123"
+    worktree_path.mkdir()
+    _write_commit_request(worktree_path, "agent: initial attempt")
+
+    class _StagedRecoveryRunner(FakeProcessRunner):
+        def __init__(self) -> None:
+            super().__init__()
+            self._sha_calls = 0
+            self._test_calls = 0
+            self._committed = False
+
+        def run(self, command, *, cwd, check=True, timeout=None, capture_output=True):
+            command_tuple = tuple(command)
+            self.calls.append(list(command))
+            if command_tuple in self.responses:
+                result = self.responses[command_tuple]
+                if check and result.return_code != 0:
+                    raise RuntimeError(f"Command failed: {command}")
+                return result
+            if command_tuple[:1] == ("codex",):
+                prompt = command_tuple[-1]
+                if "Recovery attempt: 1/2" in prompt:
+                    _write_commit_request(worktree_path, "agent: recovered fix")
+                return CommandResult(command_tuple, 0, "", "")
+            if command_tuple == ("git", "rev-parse", "HEAD"):
+                self._sha_calls += 1
+                sha = "after-sha" if self._sha_calls > 1 else "before-sha"
+                return CommandResult(command_tuple, 0, f"{sha}\n", "")
+            if command_tuple == ("git", "branch", "--show-current"):
+                return CommandResult(command_tuple, 0, "issue-123\n", "")
+            if command_tuple == ("git", "status", "--porcelain"):
+                stdout = "" if self._committed else " M file.txt\n"
+                return CommandResult(command_tuple, 0, stdout, "")
+            if command_tuple == ("just", "test"):
+                self._test_calls += 1
+                if self._test_calls == 2:
+                    return CommandResult(
+                        command_tuple,
+                        1,
+                        "staged stdout\n",
+                        "staged stderr\n",
+                    )
+                return CommandResult(command_tuple, 0, "", "")
+            if command_tuple == ("git", "commit", "-m", "agent: recovered fix"):
+                self._committed = True
+                return CommandResult(command_tuple, 0, "", "")
+            return CommandResult(command_tuple, 0, "", "")
+
+    fake_runner = _StagedRecoveryRunner()
+    path_command, path_result = _worktree_path_response(worktree_path)
+    fake_runner.responses = {
+        path_command: path_result,
+        _git_remote_command(): _git_remote_result("origin"),
+    }
+    config = _config_with_review_disabled(worktree_path)
+
+    from backend.core.use_cases.agent_runner_orchestrate import run_once
+
+    exit_code = run_once(
+        repo_path=Path("."),
+        config=config,
+        dry_run=False,
+        agent="auto",
+        max_issues=1,
+        github_client=fake_client,
+        process_runner=fake_runner,
+    )
+
+    assert exit_code == 0
+    commands = [tuple(command) for command in fake_runner.calls]
+    add_indices = [
+        index for index, command in enumerate(commands) if command == ("git", "add", "-A")
+    ]
+    test_indices = [index for index, command in enumerate(commands) if command == ("just", "test")]
+    reset_index = commands.index(("git", "reset", "--mixed"))
+    recovery_prompt = [command[-1] for command in commands if command[:1] == ("codex",)][1]
+    assert len(add_indices) == 2
+    assert len(test_indices) == 4
+    assert add_indices[0] < test_indices[1] < reset_index
+    assert reset_index < add_indices[1] < test_indices[3]
+    assert "Verification after runner staged changes with git add -A failed" in recovery_prompt
+    assert "staged stdout" in recovery_prompt
+    assert "staged stderr" in recovery_prompt
+    assert ("git", "commit", "-m", "agent: recovered fix") in commands
+
+
+def test_run_once_recovers_after_agent_command_failure(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """run_once should retry when the agent CLI exits before verification."""
+    fake_client = FakeGitHubClient()
+    issue = _make_ready_issue()
+    fake_client.list_ready_issues = lambda ready_label, limit: [issue]
+    worktree_path = tmp_path / "issue-123"
+    worktree_path.mkdir()
+
+    class _AgentCommandRecoveryRunner(FakeProcessRunner):
+        def __init__(self) -> None:
+            super().__init__()
+            self._agent_calls = 0
+            self._sha_calls = 0
+            self._committed = False
+
+        def run(self, command, *, cwd, check=True, timeout=None, capture_output=True):
+            command_tuple = tuple(command)
+            self.calls.append(list(command))
+            if command_tuple in self.responses:
+                return self.responses[command_tuple]
+            if command_tuple[:1] == ("codex",):
+                self._agent_calls += 1
+                if self._agent_calls == 1:
+                    raise RuntimeError("API Error: 400 Invalid request Error")
+                prompt = command_tuple[-1]
+                assert "Recovery attempt: 1/2" in prompt
+                assert "API Error: 400 Invalid request Error" in prompt
+                _write_commit_request(worktree_path, "agent: recovered after api error")
+                return CommandResult(command_tuple, 0, "", "")
+            if command_tuple == ("git", "rev-parse", "HEAD"):
+                self._sha_calls += 1
+                sha = "after-sha" if self._sha_calls > 1 else "before-sha"
+                return CommandResult(command_tuple, 0, f"{sha}\n", "")
+            if command_tuple == ("git", "branch", "--show-current"):
+                return CommandResult(command_tuple, 0, "issue-123\n", "")
+            if command_tuple == ("git", "status", "--porcelain"):
+                stdout = "" if self._committed else " M file.txt\n"
+                return CommandResult(command_tuple, 0, stdout, "")
+            if command_tuple == (
+                "git",
+                "commit",
+                "-m",
+                "agent: recovered after api error",
+            ):
+                self._committed = True
+                return CommandResult(command_tuple, 0, "", "")
+            return CommandResult(command_tuple, 0, "", "")
+
+    fake_runner = _AgentCommandRecoveryRunner()
+    path_command, path_result = _worktree_path_response(worktree_path)
+    fake_runner.responses = {
+        path_command: path_result,
+        _git_remote_command(): _git_remote_result("origin"),
+    }
+    sleep_calls: list[int] = []
+    monkeypatch.setattr(
+        "backend.core.use_cases.run_agent_once.time.sleep",
+        lambda seconds: sleep_calls.append(seconds),
+    )
+    config = _config_with_review_disabled(worktree_path, recovery_retry_delay_seconds=7)
+    caplog.set_level(logging.WARNING, logger="backend.core.use_cases.run_agent_once")
+
+    from backend.core.use_cases.agent_runner_orchestrate import run_once
+
+    exit_code = run_once(
+        repo_path=Path("."),
+        config=config,
+        dry_run=False,
+        agent="auto",
+        max_issues=1,
+        github_client=fake_client,
+        process_runner=fake_runner,
+    )
+
+    commands = [tuple(command) for command in fake_runner.calls]
+    agent_commands = [command for command in commands if command[:1] == ("codex",)]
+    failed_calls = [
+        c
+        for c in fake_client.calls
+        if c["method"] == "edit_issue_labels" and config.labels.failed in c.get("add", [])
+    ]
+    assert exit_code == 0
+    assert len(agent_commands) == 2
+    assert sleep_calls == [7]
+    assert ("git", "commit", "-m", "agent: recovered after api error") in commands
+    assert len(failed_calls) == 0
+    assert "Agent command failed for Issue #123" in caplog.text
+
+
+def test_run_once_uncommitted_changes_validation_failure_does_not_stage(
+    tmp_path: Path,
+) -> None:
+    """run_once should not stage fallback changes when validation fails."""
+    fake_client = FakeGitHubClient()
+    issue = _make_ready_issue()
+    fake_client.list_ready_issues = lambda ready_label, limit: [issue]
+    worktree_path = tmp_path / "issue-123"
+    worktree_path.mkdir()
+    _write_commit_request(worktree_path, "agent: implement example")
+    _write_complete_prd(worktree_path)
+
+    path_command, path_result = _worktree_path_response(worktree_path)
+    fake_runner = FakeProcessRunner(
+        responses={
+            path_command: path_result,
+            ("git", "rev-parse", "HEAD"): CommandResult(
+                command=("git", "rev-parse", "HEAD"),
+                return_code=0,
+                stdout="before-sha\n",
+                stderr="",
+            ),
+            ("git", "status", "--porcelain"): CommandResult(
+                command=("git", "status", "--porcelain"),
+                return_code=0,
+                stdout=" M file.txt\n",
+                stderr="",
+            ),
+            ("just", "test"): CommandResult(
+                command=("just", "test"),
+                return_code=1,
+                stdout="",
+                stderr="tests failed\n",
+            ),
+            _git_remote_command(): _git_remote_result("origin"),
+        }
+    )
+    config = _config_with_review_disabled(worktree_path)
+
+    from backend.core.use_cases.agent_runner_orchestrate import run_once
+
+    exit_code = run_once(
+        repo_path=Path("."),
+        config=config,
+        dry_run=False,
+        agent="auto",
+        max_issues=1,
+        github_client=fake_client,
+        process_runner=fake_runner,
+    )
+
+    assert exit_code == 1
+    commands = [tuple(command) for command in fake_runner.calls]
+    assert commands.count(("just", "test")) == 3
+    assert ("git", "add", "-A") not in commands
+    assert ("git", "commit", "-m", "[Agent] Issue #123: Example") not in commands
+    failed_calls = [
+        c
+        for c in fake_client.calls
+        if c["method"] == "edit_issue_labels" and config.labels.failed in c.get("add", [])
+    ]
+    assert len(failed_calls) == 1
+    comment_calls = [
+        c
+        for c in fake_client.calls
+        if c["method"] == "comment_issue" and "Command failed" in c.get("body", "")
+    ]
+    assert len(comment_calls) == 1
+
+
+def test_run_once_uncommitted_changes_missing_request_fails(tmp_path: Path) -> None:
+    """run_once should not commit changes without an agent commit request."""
+    fake_client = FakeGitHubClient()
+    issue = _make_ready_issue()
+    fake_client.list_ready_issues = lambda ready_label, limit: [issue]
+    worktree_path = tmp_path / "issue-123"
+    worktree_path.mkdir()
+    _write_complete_prd(worktree_path)
+
+    path_command, path_result = _worktree_path_response(worktree_path)
+    fake_runner = FakeProcessRunner(
+        responses={
+            path_command: path_result,
+            ("git", "rev-parse", "HEAD"): CommandResult(
+                command=("git", "rev-parse", "HEAD"),
+                return_code=0,
+                stdout="before-sha\n",
+                stderr="",
+            ),
+            ("git", "branch", "--show-current"): CommandResult(
+                command=("git", "branch", "--show-current"),
+                return_code=0,
+                stdout="issue-123\n",
+                stderr="",
+            ),
+            ("git", "status", "--porcelain"): CommandResult(
+                command=("git", "status", "--porcelain"),
+                return_code=0,
+                stdout=" M file.txt\n",
+                stderr="",
+            ),
+            _git_remote_command(): _git_remote_result("origin"),
+        }
+    )
+    config = _config_with_review_disabled(worktree_path)
+
+    from backend.core.use_cases.agent_runner_orchestrate import run_once
+
+    exit_code = run_once(
+        repo_path=Path("."),
+        config=config,
+        dry_run=False,
+        agent="auto",
+        max_issues=1,
+        github_client=fake_client,
+        process_runner=fake_runner,
+    )
+
+    assert exit_code == 1
+    commands = [tuple(command) for command in fake_runner.calls]
+    # 正常 commit proxy 仍拒绝在缺少 commit-request 时按 agent 的 message 提交；
+    # 失败前的 WIP checkpoint（--no-verify）是另一条路径，用于跨 claim 保留进度。
+    proxy_commits = [
+        command
+        for command in commands
+        if command[:2] == ("git", "commit") and "--no-verify" not in command
+    ]
+    assert proxy_commits == []
+    comment_calls = [
+        c
+        for c in fake_client.calls
+        if c["method"] == "comment_issue" and "commit request" in c.get("body", "")
+    ]
+    assert len(comment_calls) == 1
+
+
+def test_run_once_uncommitted_changes_commit_failure_fails(tmp_path: Path) -> None:
+    """run_once should fail if the runner fallback commit fails."""
+    fake_client = FakeGitHubClient()
+    issue = _make_ready_issue()
+    fake_client.list_ready_issues = lambda ready_label, limit: [issue]
+    worktree_path = tmp_path / "issue-123"
+    worktree_path.mkdir()
+    _write_commit_request(worktree_path, "[Agent] Issue #123: Example")
+    _write_complete_prd(worktree_path)
+
+    path_command, path_result = _worktree_path_response(worktree_path)
+    fake_runner = FakeProcessRunner(
+        responses={
+            path_command: path_result,
+            ("git", "rev-parse", "HEAD"): CommandResult(
+                command=("git", "rev-parse", "HEAD"),
+                return_code=0,
+                stdout="before-sha\n",
+                stderr="",
+            ),
+            ("git", "branch", "--show-current"): CommandResult(
+                command=("git", "branch", "--show-current"),
+                return_code=0,
+                stdout="issue-123\n",
+                stderr="",
+            ),
+            ("git", "status", "--porcelain"): CommandResult(
+                command=("git", "status", "--porcelain"),
+                return_code=0,
+                stdout=" M file.txt\n",
+                stderr="",
+            ),
+            ("git", "commit", "-m", "[Agent] Issue #123: Example"): CommandResult(
+                command=("git", "commit", "-m", "[Agent] Issue #123: Example"),
+                return_code=1,
+                stdout="",
+                stderr="commit failed\n",
+            ),
+            _git_remote_command(): _git_remote_result("origin"),
+        }
+    )
+    config = _config_with_review_disabled(worktree_path)
+
+    from backend.core.use_cases.agent_runner_orchestrate import run_once
+
+    exit_code = run_once(
+        repo_path=Path("."),
+        config=config,
+        dry_run=False,
+        agent="auto",
+        max_issues=1,
+        github_client=fake_client,
+        process_runner=fake_runner,
+    )
+
+    assert exit_code == 1
+    commands = [tuple(command) for command in fake_runner.calls]
+    commit_command = ("git", "commit", "-m", "[Agent] Issue #123: Example")
+    test_indices = [index for index, command in enumerate(commands) if command == ("just", "test")]
+    add_index = commands.index(("git", "add", "-A"))
+    assert len(test_indices) == 2
+    assert test_indices[0] < add_index < test_indices[1]
+    assert test_indices[1] < commands.index(commit_command)
+    failed_calls = [
+        c
+        for c in fake_client.calls
+        if c["method"] == "edit_issue_labels" and config.labels.failed in c.get("add", [])
+    ]
+    assert len(failed_calls) == 1
+    comment_calls = [
+        c
+        for c in fake_client.calls
+        if c["method"] == "comment_issue" and "Command failed" in c.get("body", "")
+    ]
+    assert len(comment_calls) == 1
+
+
+def test_commit_requested_changes_rejects_branch_change(tmp_path: Path) -> None:
+    """Commit proxy should only commit on the expected branch."""
+    worktree_path = tmp_path / "issue-123"
+    worktree_path.mkdir()
+    _write_commit_request(worktree_path, "agent: implement example")
+    fake_runner = FakeProcessRunner(
+        responses={
+            ("git", "branch", "--show-current"): CommandResult(
+                command=("git", "branch", "--show-current"),
+                return_code=0,
+                stdout="main\n",
+                stderr="",
+            ),
+        }
+    )
+
+    with pytest.raises(RuntimeError, match="unexpected branch: main"):
+        commit_requested_changes(
+            _make_ready_issue(),
+            worktree_path,
+            AppConfig(),
+            fake_runner,
+            expected_branch="issue-123",
+        )
+
+    commands = [tuple(command) for command in fake_runner.calls]
+    assert ("git", "add", "-A") not in commands
+
+
+def test_commit_requested_changes_rejects_forbidden_paths(tmp_path: Path) -> None:
+    """Commit proxy should apply forbidden path checks before staging."""
+    worktree_path = tmp_path / "issue-123"
+    worktree_path.mkdir()
+    _write_commit_request(worktree_path, "agent: implement example")
+    fake_runner = FakeProcessRunner(
+        responses={
+            ("git", "branch", "--show-current"): CommandResult(
+                command=("git", "branch", "--show-current"),
+                return_code=0,
+                stdout="issue-123\n",
+                stderr="",
+            ),
+            ("git", "status", "--porcelain"): CommandResult(
+                command=("git", "status", "--porcelain"),
+                return_code=0,
+                stdout=" M .env\n",
+                stderr="",
+            ),
+            ("git", "status", "--porcelain", "-z"): CommandResult(
+                command=("git", "status", "--porcelain", "-z"),
+                return_code=0,
+                stdout=" M .env\0",
+                stderr="",
+            ),
+        }
+    )
+
+    with pytest.raises(RuntimeError, match="Refusing to publish forbidden paths"):
+        commit_requested_changes(
+            _make_ready_issue(),
+            worktree_path,
+            AppConfig(),
+            fake_runner,
+            expected_branch="issue-123",
+        )
+
+    commands = [tuple(command) for command in fake_runner.calls]
+    assert ("git", "add", "-A") not in commands
+
+
+def test_commit_requested_changes_restages_tracked_verification_edits(
+    tmp_path: Path,
+) -> None:
+    """Commit proxy should sync formatter edits made during verification."""
+    worktree_path = tmp_path / "issue-123"
+    worktree_path.mkdir()
+    _write_commit_request(worktree_path, "agent: implement example")
+    fake_runner = FakeProcessRunner(
+        responses={
+            ("git", "branch", "--show-current"): CommandResult(
+                command=("git", "branch", "--show-current"),
+                return_code=0,
+                stdout="issue-123\n",
+                stderr="",
+            ),
+            ("git", "status", "--porcelain"): CommandResult(
+                command=("git", "status", "--porcelain"),
+                return_code=0,
+                stdout=" M tests/test_example.py\n",
+                stderr="",
+            ),
+            ("git", "diff", "--quiet"): CommandResult(
+                command=("git", "diff", "--quiet"),
+                return_code=1,
+                stdout="",
+                stderr="",
+            ),
+        }
+    )
+    config = AppConfig(runner=RunnerConfig(verification_commands=("just test",)))
+
+    commit_requested_changes(
+        _make_ready_issue(),
+        worktree_path,
+        config,
+        fake_runner,
+        expected_branch="issue-123",
+    )
+
+    commands = [tuple(command) for command in fake_runner.calls]
+    initial_stage_index = commands.index(("git", "add", "-A"))
+    verification_index = commands.index(("just", "test"))
+    tracked_diff_index = commands.index(("git", "diff", "--quiet"))
+    tracked_restage_index = commands.index(("git", "add", "-u"))
+    commit_index = commands.index(("git", "commit", "-m", "agent: implement example"))
+    assert (
+        initial_stage_index
+        < verification_index
+        < tracked_diff_index
+        < tracked_restage_index
+        < commit_index
+    )
+
+
+def test_run_once_no_new_commits_fails() -> None:
+    """run_once should fail when the agent produces no new commits."""
+    fake_client = FakeGitHubClient()
+    issue = _make_ready_issue()
+    fake_client.list_ready_issues = lambda ready_label, limit: [issue]
+
+    fake_runner = FakeProcessRunner(
+        responses={
+            ("git", "rev-parse", "HEAD"): CommandResult(
+                command=("git", "rev-parse", "HEAD"),
+                return_code=0,
+                stdout="same-sha\n",
+                stderr="",
+            ),
+            ("git", "status", "--porcelain"): CommandResult(
+                command=("git", "status", "--porcelain"),
+                return_code=0,
+                stdout="",
+                stderr="",
+            ),
+            _git_remote_command(): _git_remote_result("origin"),
+        }
+    )
+    config = AppConfig(runner=RunnerConfig(recovery_retry_delay_seconds=0))
+
+    from backend.core.use_cases.agent_runner_orchestrate import run_once
+
+    exit_code = run_once(
+        repo_path=Path("."),
+        config=config,
+        dry_run=False,
+        agent="auto",
+        max_issues=1,
+        github_client=fake_client,
+        process_runner=fake_runner,
+    )
+
+    assert exit_code == 1
+    failed_calls = [
+        c
+        for c in fake_client.calls
+        if c["method"] == "edit_issue_labels" and config.labels.failed in c.get("add", [])
+    ]
+    assert len(failed_calls) == 1
+    comment_calls = [
+        c
+        for c in fake_client.calls
+        if c["method"] == "comment_issue" and "no git commits" in c.get("body", "")
+    ]
+    assert len(comment_calls) == 1
+
+
+def test_run_once_success(tmp_path: Path) -> None:
+    """run_once should succeed through pre-push review and supervisor approval."""
+    fake_client = FakeGitHubClient()
+    issue = _make_ready_issue()
+    fake_client.list_ready_issues = lambda ready_label, limit: [issue]
+    fake_client._pr_contexts["issue-123"] = PullRequestContext(
+        pr_url="https://github.com/example/repo/pull/1",
+        branch="issue-123",
+        head_sha="after-sha",
+        base_sha="before-sha",
+    )
+    worktree_path = tmp_path / "issue-123"
+    worktree_path.mkdir()
+
+    class _SuccessRunner(FakeProcessRunner):
+        def __init__(self) -> None:
+            super().__init__()
+            self._sha_calls = 0
+            self._agent_calls = 0
+
+        def run(self, command, *, cwd, check=True, timeout=None, capture_output=True):
+            command_tuple = tuple(command)
+            self.calls.append(list(command))
+            if command_tuple == ("git", "rev-parse", "HEAD"):
+                self._sha_calls += 1
+                sha = "after-sha" if self._sha_calls > 1 else "before-sha"
+                return CommandResult(
+                    command=command_tuple, return_code=0, stdout=f"{sha}\n", stderr=""
+                )
+            if command_tuple[:1] == ("codex",):
+                self._agent_calls += 1
+                # Agent 1: implementation, Agent 2: pre-push review, Agent 3: supervisor
+                if self._agent_calls == 2:
+                    return CommandResult(
+                        command=command_tuple,
+                        return_code=0,
+                        stdout='{"verdict": "approved", "summary": "LGTM"}'
+                        if capture_output
+                        else "",
+                        stderr="",
+                    )
+                if self._agent_calls == 3:
+                    return CommandResult(
+                        command=command_tuple,
+                        return_code=0,
+                        stdout=('{"action": "approve_for_human_review", "summary": "LGTM"}')
+                        if capture_output
+                        else "",
+                        stderr="",
+                    )
+                return CommandResult(command=command_tuple, return_code=0, stdout="", stderr="")
+            if command_tuple in self.responses:
+                result = self.responses[command_tuple]
+                if check and result.return_code != 0:
+                    raise RuntimeError(f"Command failed: {command}")
+                return result
+            return CommandResult(command=command_tuple, return_code=0, stdout="", stderr="")
+
+    fake_runner = _SuccessRunner()
+    path_command, path_result = _worktree_path_response(worktree_path)
+    fake_runner.responses = {
+        path_command: path_result,
+        ("git", "status", "--porcelain"): CommandResult(
+            command=("git", "status", "--porcelain"),
+            return_code=0,
+            stdout="",
+            stderr="",
+        ),
+        ("git", "branch", "--show-current"): CommandResult(
+            command=("git", "branch", "--show-current"),
+            return_code=0,
+            stdout="issue-123\n",
+            stderr="",
+        ),
+        _git_remote_command(): _git_remote_result("origin"),
+    }
+    config = AppConfig(worktree=WorktreeConfig(path_command=f"echo {worktree_path}"))
+
+    from backend.core.use_cases.agent_runner_orchestrate import run_once
+
+    exit_code = run_once(
+        repo_path=tmp_path,
+        config=config,
+        dry_run=False,
+        agent="auto",
+        max_issues=1,
+        github_client=fake_client,
+        process_runner=fake_runner,
+    )
+
+    assert exit_code == 0
+    # Labels: ready -> running -> supervising -> review
+    label_calls = [c for c in fake_client.calls if c["method"] == "edit_issue_labels"]
+    added_labels = [label for c in label_calls for label in c.get("add", [])]
+    assert config.labels.review in added_labels
+    assert config.labels.supervising in added_labels
+    pr_calls = [c for c in fake_client.calls if c["method"] == "create_draft_pr"]
+    assert len(pr_calls) == 1
+    comment_calls = [c for c in fake_client.calls if c["method"] == "comment_issue"]
+    bodies = [c["body"] for c in comment_calls]
+    assert any("Implementation Complete" in b for b in bodies)
+    assert any("Pre-Push Review" in b for b in bodies)
+    assert any("Draft PR Created" in b for b in bodies)
+    assert any("Post-PR Supervisor" in b for b in bodies)
+
+
+def test_run_once_failure_removes_supervising_label(tmp_path: Path) -> None:
+    """Failure after Draft PR creation should not leave supervising with failed."""
+    fake_client = FakeGitHubClient()
+    issue = _make_ready_issue()
+    fake_client.list_ready_issues = lambda ready_label, limit: [issue]
+    fake_client._pr_contexts["issue-123"] = PullRequestContext(
+        pr_url="https://github.com/example/repo/pull/1",
+        branch="issue-123",
+        head_sha="after-sha",
+        base_sha="before-sha",
+    )
+    worktree_path = tmp_path / "issue-123"
+    worktree_path.mkdir()
+
+    class _SupervisorFailureRunner(FakeProcessRunner):
+        def __init__(self) -> None:
+            super().__init__()
+            self._sha_calls = 0
+            self._agent_calls = 0
+
+        def run(self, command, *, cwd, check=True, timeout=None, capture_output=True):
+            command_tuple = tuple(command)
+            self.calls.append(list(command))
+            if command_tuple == ("git", "rev-parse", "HEAD"):
+                self._sha_calls += 1
+                sha = "after-sha" if self._sha_calls > 1 else "before-sha"
+                return CommandResult(
+                    command=command_tuple, return_code=0, stdout=f"{sha}\n", stderr=""
+                )
+            if command_tuple[:1] == ("codex",):
+                self._agent_calls += 1
+                if self._agent_calls == 2:
+                    return CommandResult(
+                        command=command_tuple,
+                        return_code=0,
+                        stdout='{"verdict": "approved", "summary": "LGTM"}',
+                        stderr="",
+                    )
+                if self._agent_calls == 3:
+                    raise RuntimeError("supervisor crashed")
+                return CommandResult(command=command_tuple, return_code=0, stdout="", stderr="")
+            if command_tuple in self.responses:
+                result = self.responses[command_tuple]
+                if check and result.return_code != 0:
+                    raise RuntimeError(f"Command failed: {command}")
+                return result
+            return CommandResult(command=command_tuple, return_code=0, stdout="", stderr="")
+
+    fake_runner = _SupervisorFailureRunner()
+    path_command, path_result = _worktree_path_response(worktree_path)
+    fake_runner.responses = {
+        path_command: path_result,
+        ("git", "status", "--porcelain"): CommandResult(
+            command=("git", "status", "--porcelain"),
+            return_code=0,
+            stdout="",
+            stderr="",
+        ),
+        ("git", "branch", "--show-current"): CommandResult(
+            command=("git", "branch", "--show-current"),
+            return_code=0,
+            stdout="issue-123\n",
+            stderr="",
+        ),
+        _git_remote_command(): _git_remote_result("origin"),
+    }
+    config = AppConfig(worktree=WorktreeConfig(path_command=f"echo {worktree_path}"))
+
+    from backend.core.use_cases.agent_runner_orchestrate import run_once
+
+    exit_code = run_once(
+        repo_path=tmp_path,
+        config=config,
+        dry_run=False,
+        agent="auto",
+        max_issues=1,
+        github_client=fake_client,
+        process_runner=fake_runner,
+    )
+
+    assert exit_code == 1
+    failed_calls = [
+        call
+        for call in fake_client.calls
+        if call["method"] == "edit_issue_labels" and config.labels.failed in call.get("add", [])
+    ]
+    assert len(failed_calls) == 1
+    assert config.labels.supervising in failed_calls[0]["remove"]
+    assert config.labels.agent_labels["codex"] not in failed_calls[0]["remove"]
+    # After failure the Issue should be left with exactly one workflow label.
+    final_labels = set(fake_client._issue_labels[issue.number])
+    workflow_labels = {
+        config.labels.ready,
+        config.labels.running,
+        config.labels.supervising,
+        config.labels.review,
+        config.labels.failed,
+        config.labels.blocked,
+    }
+    assert final_labels.intersection(workflow_labels) == {config.labels.failed}
+
+
+def test_guard_running_issue_is_rework_rejects_stale_head() -> None:
+    """Rework marker whose head does not match the open PR must be ignored."""
+    from backend.core.use_cases.agent_runner_orchestrate import (
+        _guard_running_issue_is_rework,
+    )
+
+    config = AppConfig()
+    issue = IssueSummary(
+        number=1,
+        title="T",
+        url="U",
+        body="B",
+        labels=(config.labels.running,),
+    )
+    fake_client = FakeGitHubClient()
+    fake_client._issue_comments[issue.number] = [
+        "\n".join(
+            [
+                format_event_marker(
+                    phase="post_pr_rework_requested",
+                    cycle=1,
+                    head_sha="old-sha",
+                    pr_branch="issue-1",
+                    action="repair_pr_branch",
+                ),
+                "",
+                "## Agent Runner Post-PR Rework Requested",
+            ]
+        )
+    ]
+    fake_client._pr_contexts["issue-1"] = PullRequestContext(
+        pr_url="https://github.com/example/repo/pull/1",
+        branch="issue-1",
+        head_sha="new-sha",
+        base_sha="base-sha",
+    )
+
+    is_rework, marker = _guard_running_issue_is_rework(issue, config, fake_client)
+
+    assert is_rework is False
+    assert marker is None
+
+
+def test_process_running_rework_blocks_when_worktree_missing(
+    tmp_path: Path,
+) -> None:
+    """Missing rework worktree must transition Issue to blocked with recovery note."""
+    from backend.core.use_cases.agent_runner_orchestrate import _process_running_rework
+
+    config = AppConfig()
+    issue = IssueSummary(
+        number=1,
+        title="T",
+        url="U",
+        body="B",
+        labels=(config.labels.running,),
+    )
+    fake_client = FakeGitHubClient()
+    fake_client._issue_labels[issue.number] = issue.labels
+    missing_path = tmp_path / "missing-wt"
+    fake_process_runner = FakeProcessRunner(
+        responses={
+            ("echo", str(missing_path)): CommandResult(
+                command=("echo", str(missing_path)),
+                return_code=0,
+                stdout=f"{missing_path}\n",
+                stderr="",
+            )
+        }
+    )
+    marker = ReviewEventMarker(
+        version=1,
+        phase="post_pr_rework_requested",
+        cycle=1,
+        head_sha="abc123",
+        pr_branch="issue-1",
+        action="repair_pr_branch",
+    )
+
+    _process_running_rework(
+        issue=issue,
+        repo_path=tmp_path,
+        config=AppConfig(worktree=WorktreeConfig(path_command=f"echo {missing_path}")),
+        agent="auto",
+        github_client=fake_client,
+        process_runner=fake_process_runner,
+        marker=marker,
+    )
+
+    blocked_calls = [
+        call
+        for call in fake_client.calls
+        if call["method"] == "edit_issue_labels" and config.labels.blocked in call.get("add", [])
+    ]
+    assert len(blocked_calls) == 1
+    final_labels = set(fake_client._issue_labels[issue.number])
+    workflow_labels = {
+        config.labels.ready,
+        config.labels.running,
+        config.labels.supervising,
+        config.labels.review,
+        config.labels.failed,
+        config.labels.blocked,
+    }
+    assert final_labels.intersection(workflow_labels) == {config.labels.blocked}
+    comment_calls = [call for call in fake_client.calls if call["method"] == "comment_issue"]
+    assert any(str(missing_path) in call["body"] for call in comment_calls)
+
+
+def test_run_once_git_mv_prd_before_commit(tmp_path: Path) -> None:
+    """run_once should git mv a complete pending PRD before staging and committing."""
+    fake_client = FakeGitHubClient()
+    issue = _make_prd_issue("tasks/pending/example.md")
+    fake_client.list_ready_issues = lambda ready_label, limit: [issue]
+    worktree_path = tmp_path / "issue-123"
+    worktree_path.mkdir()
+    _write_commit_request(worktree_path, "agent: implement example")
+    _write_complete_prd(worktree_path, "tasks/pending/example.md")
+    (worktree_path / "tasks" / "archive").mkdir(parents=True, exist_ok=True)
+    src_file = worktree_path / "src" / "file.py"
+    src_file.parent.mkdir(parents=True, exist_ok=True)
+    src_file.write_text("# code\n", encoding="utf-8")
+
+    class _PrdSuccessRunner(FakeProcessRunner):
+        def __init__(self) -> None:
+            super().__init__()
+            self._sha_calls = 0
+            self._status_calls = 0
+
+        def run(self, command, *, cwd, check=True, timeout=None, capture_output=True):
+            command_tuple = tuple(command)
+            if command_tuple == ("git", "rev-parse", "HEAD"):
+                self.calls.append(list(command))
+                self._sha_calls += 1
+                sha = "after-sha" if self._sha_calls > 1 else "before-sha"
+                return CommandResult(
+                    command=command_tuple,
+                    return_code=0,
+                    stdout=f"{sha}\n",
+                    stderr="",
+                )
+            if command_tuple == ("git", "status", "--porcelain"):
+                self.calls.append(list(command))
+                self._status_calls += 1
+                status_stdout = (
+                    " M src/file.py\n?? .agent-runner/commit-request.json\n"
+                    if self._status_calls == 1
+                    else " M src/file.py\nR  tasks/pending/example.md -> tasks/archive/example.md\n"
+                    if self._status_calls == 2
+                    else ""
+                )
+                return CommandResult(
+                    command=command_tuple,
+                    return_code=0,
+                    stdout=status_stdout,
+                    stderr="",
+                )
+            if command_tuple == (
+                "git",
+                "mv",
+                "tasks/pending/example.md",
+                "tasks/archive/example.md",
+            ):
+                self.calls.append(list(command))
+                pending_path = Path(cwd) / "tasks" / "pending" / "example.md"
+                archive_path = Path(cwd) / "tasks" / "archive" / "example.md"
+                if pending_path.exists():
+                    archive_path.parent.mkdir(parents=True, exist_ok=True)
+                    pending_path.rename(archive_path)
+                return CommandResult(command=command_tuple, return_code=0, stdout="", stderr="")
+            return super().run(
+                command,
+                cwd=cwd,
+                check=check,
+                timeout=timeout,
+                capture_output=capture_output,
+            )
+
+    fake_runner = _PrdSuccessRunner()
+    path_command, path_result = _worktree_path_response(worktree_path)
+    fake_runner.responses = {
+        path_command: path_result,
+        ("git", "branch", "--show-current"): CommandResult(
+            command=("git", "branch", "--show-current"),
+            return_code=0,
+            stdout="issue-123\n",
+            stderr="",
+        ),
+        _git_remote_command(): _git_remote_result("origin"),
+    }
+    config = _config_with_review_disabled(worktree_path, "npm test")
+
+    from backend.core.use_cases.run_agent_once import run_once
+
+    exit_code = run_once(
+        repo_path=Path("."),
+        config=config,
+        dry_run=False,
+        agent="auto",
+        max_issues=1,
+        github_client=fake_client,
+        process_runner=fake_runner,
+    )
+
+    assert exit_code == 0
+    commands = [tuple(command) for command in fake_runner.calls]
+    mv_index = commands.index(("git", "mv", "tasks/pending/example.md", "tasks/archive/example.md"))
+    add_index = commands.index(("git", "add", "-A"))
+    commit_index = commands.index(("git", "commit", "-m", "agent: implement example"))
+    assert mv_index < add_index < commit_index
+    pr_calls = [c for c in fake_client.calls if c["method"] == "create_draft_pr"]
+    assert len(pr_calls) == 1
+
+
+def test_run_once_recovers_after_prd_delivery_failure(tmp_path: Path) -> None:
+    """run_once should recover when the pending PRD checklist is initially incomplete."""
+    fake_client = FakeGitHubClient()
+    issue = _make_prd_issue("tasks/pending/example.md")
+    fake_client.list_ready_issues = lambda ready_label, limit: [issue]
+    worktree_path = tmp_path / "issue-123"
+    worktree_path.mkdir()
+    _write_incomplete_prd(worktree_path, "tasks/pending/example.md")
+    (worktree_path / "tasks" / "archive").mkdir(parents=True, exist_ok=True)
+
+    class _PrdRecoveryRunner(FakeProcessRunner):
+        def __init__(self) -> None:
+            super().__init__()
+            self._sha_calls = 0
+            self._agent_calls = 0
+            self._committed = False
+
+        def run(self, command, *, cwd, check=True, timeout=None, capture_output=True):
+            command_tuple = tuple(command)
+            self.calls.append(list(command))
+            if command_tuple in self.responses:
+                result = self.responses[command_tuple]
+                if check and result.return_code != 0:
+                    raise RuntimeError(f"Command failed: {command}")
+                return result
+            if command_tuple[:1] == ("codex",):
+                self._agent_calls += 1
+                prompt = command_tuple[-1]
+                if "Recovery attempt: 1/2" in prompt:
+                    assert "PRD delivery check failed" in prompt
+                    assert "unchecked items" in prompt
+                    _write_commit_request(worktree_path, "agent: recovered fix")
+                    _write_complete_prd(worktree_path, "tasks/pending/example.md")
+                return CommandResult(command_tuple, 0, "", "")
+            if command_tuple == ("git", "rev-parse", "HEAD"):
+                self._sha_calls += 1
+                sha = "after-sha" if self._sha_calls > 1 else "before-sha"
+                return CommandResult(command_tuple, 0, f"{sha}\n", "")
+            if command_tuple == ("git", "branch", "--show-current"):
+                return CommandResult(command_tuple, 0, "issue-123\n", "")
+            if command_tuple == ("git", "status", "--porcelain"):
+                stdout = "" if self._committed else " M file.txt\n"
+                return CommandResult(command_tuple, 0, stdout, "")
+            if command_tuple == ("git", "commit", "-m", "agent: recovered fix"):
+                self._committed = True
+                return CommandResult(command_tuple, 0, "", "")
+            if command_tuple == (
+                "git",
+                "mv",
+                "tasks/pending/example.md",
+                "tasks/archive/example.md",
+            ):
+                pending_path = Path(cwd) / "tasks" / "pending" / "example.md"
+                archive_path = Path(cwd) / "tasks" / "archive" / "example.md"
+                if pending_path.exists():
+                    archive_path.parent.mkdir(parents=True, exist_ok=True)
+                    pending_path.rename(archive_path)
+                return CommandResult(command_tuple, 0, "", "")
+            return CommandResult(command_tuple, 0, "", "")
+
+    fake_runner = _PrdRecoveryRunner()
+    path_command, path_result = _worktree_path_response(worktree_path)
+    fake_runner.responses = {
+        path_command: path_result,
+        _git_remote_command(): _git_remote_result("origin"),
+    }
+    config = _config_with_review_disabled(worktree_path)
+
+    from backend.core.use_cases.run_agent_once import run_once
+
+    exit_code = run_once(
+        repo_path=Path("."),
+        config=config,
+        dry_run=False,
+        agent="auto",
+        max_issues=1,
+        github_client=fake_client,
+        process_runner=fake_runner,
+    )
+
+    assert exit_code == 0
+    commands = [tuple(command) for command in fake_runner.calls]
+    agent_commands = [command for command in commands if command[:1] == ("codex",)]
+    assert len(agent_commands) == 2
+    mv_index = commands.index(("git", "mv", "tasks/pending/example.md", "tasks/archive/example.md"))
+    add_index = commands.index(("git", "add", "-A"))
+    commit_index = commands.index(("git", "commit", "-m", "agent: recovered fix"))
+    assert mv_index < add_index < commit_index
+    failed_calls = [
+        c
+        for c in fake_client.calls
+        if c["method"] == "edit_issue_labels" and config.labels.failed in c.get("add", [])
+    ]
+    assert len(failed_calls) == 0
+
+
+def test_run_agent_repositories_once_aggregates_exit_code() -> None:
+    """Multi-repo run should return 1 if any repository fails."""
+    from backend.core.shared.models.agent_runner import (
+        RepositoryRunContext,
+    )
+    from backend.core.use_cases.run_agent_repositories_once import (
+        run_agent_repositories_once,
+    )
+
+    fake_client = FakeGitHubClient()
+    fake_client.list_ready_issues = lambda ready_label, limit: []
+    fake_runner = FakeProcessRunner(
+        responses={
+            ("git", "remote"): CommandResult(
+                command=("git", "remote"),
+                return_code=0,
+                stdout="origin\n",
+                stderr="",
+            ),
+        }
+    )
+
+    contexts = [
+        RepositoryRunContext(
+            repo_id="repo-a",
+            display_name="Repo A",
+            repo_path=Path("."),
+            config=AppConfig(),
+        ),
+        RepositoryRunContext(
+            repo_id="repo-b",
+            display_name="Repo B",
+            repo_path=Path("."),
+            config=AppConfig(),
+        ),
+    ]
+
+    exit_code = run_agent_repositories_once(
+        contexts=contexts,
+        dry_run=False,
+        agent="auto",
+        max_issues=1,
+        process_runner=fake_runner,
+        github_client_factory=lambda rp: fake_client,
+    )
+
+    assert exit_code == 0
+
+
+def test_run_agent_repositories_once_isolates_failures() -> None:
+    """One repository failure should not block subsequent repositories."""
+    from backend.core.shared.models.agent_runner import (
+        RepositoryRunContext,
+    )
+    from backend.core.use_cases.run_agent_repositories_once import (
+        run_agent_repositories_once,
+    )
+
+    class _FailingClient(FakeGitHubClient):
+        def __init__(self, should_fail: bool = False) -> None:
+            super().__init__()
+            self._should_fail = should_fail
+
+        def list_ready_issues(self, ready_label: str, limit: int) -> list:
+            if self._should_fail:
+                raise RuntimeError("Simulated failure")
+            return []
+
+    contexts = [
+        RepositoryRunContext(
+            repo_id="repo-a",
+            display_name="Repo A",
+            repo_path=Path("."),
+            config=AppConfig(),
+        ),
+        RepositoryRunContext(
+            repo_id="repo-b",
+            display_name="Repo B",
+            repo_path=Path("."),
+            config=AppConfig(),
+        ),
+    ]
+
+    call_index = [0]
+
+    def client_factory(rp: Path) -> FakeGitHubClient:
+        call_index[0] += 1
+        return _FailingClient(should_fail=(call_index[0] == 1))
+
+    fake_runner = FakeProcessRunner()
+    exit_code = run_agent_repositories_once(
+        contexts=contexts,
+        dry_run=False,
+        agent="auto",
+        max_issues=1,
+        process_runner=fake_runner,
+        github_client_factory=client_factory,
+    )
+
+    assert exit_code == 1
+
+
+def test_publish_changes_generated_pr_template_mode() -> None:
+    """Template mode should render PR title and body when enabled."""
+    issue = IssueSummary(
+        number=42,
+        title="Test Feature",
+        url="https://github.com/example/repo/issues/42",
+        body="Test body",
+        labels=(),
+    )
+    fake_client = FakeGitHubClient()
+    fake_runner = FakeProcessRunner(
+        responses={
+            ("git", "branch", "--show-current"): CommandResult(
+                command=("git", "branch", "--show-current"),
+                return_code=0,
+                stdout="issue-42\n",
+                stderr="",
+            ),
+            ("git", "status", "--porcelain"): CommandResult(
+                command=("git", "status", "--porcelain"),
+                return_code=0,
+                stdout="",
+                stderr="",
+            ),
+            _git_remote_command(): _git_remote_result("origin"),
+            ("git", "log", "main..HEAD", "--pretty=format:%s"): CommandResult(
+                command=("git", "log", "main..HEAD", "--pretty=format:%s"),
+                return_code=0,
+                stdout="feat: implement feature\n",
+                stderr="",
+            ),
+            ("git", "diff", "--stat", "main...HEAD"): CommandResult(
+                command=("git", "diff", "--stat", "main...HEAD"),
+                return_code=0,
+                stdout="1 file changed, 10 insertions\n",
+                stderr="",
+            ),
+        }
+    )
+    gc_config = GeneratedContentConfig(
+        enabled=True,
+        draft_pr=GeneratedContentTargetConfig(
+            enabled=True,
+            mode="template",
+            title_template="[Agent] {issue_title}",
+            body_template="Closes #{issue_number}\n\n{commit_log}\n\n{diff_stat}",
+            include_commit_log=True,
+            include_diff_stat=True,
+        ),
+    )
+    from backend.core.shared.models.agent_runner import AppConfig, GitConfig
+
+    app_config = AppConfig(
+        git=GitConfig(remote="origin", base_branch="main"),
+        generated_content=gc_config,
+    )
+
+    branch, pr_url = publish_changes(issue, Path("."), app_config, fake_client, fake_runner)
+
+    assert branch == "issue-42"
+    pr_calls = [c for c in fake_client.calls if c["method"] == "create_draft_pr"]
+    assert len(pr_calls) == 1
+    assert pr_calls[0]["title"] == "[Agent] Test Feature"
+    assert "Closes #42" in pr_calls[0]["body"]
+    assert "feat: implement feature" in pr_calls[0]["body"]
+
+
+def test_publish_changes_generated_pr_fallback_on_missing_closes() -> None:
+    """Generated PR missing Closes anchor should fallback to deterministic template."""
+    issue = IssueSummary(
+        number=42,
+        title="Test Feature",
+        url="https://github.com/example/repo/issues/42",
+        body="Test body",
+        labels=(),
+    )
+    fake_client = FakeGitHubClient()
+    fake_runner = FakeProcessRunner(
+        responses={
+            ("git", "branch", "--show-current"): CommandResult(
+                command=("git", "branch", "--show-current"),
+                return_code=0,
+                stdout="issue-42\n",
+                stderr="",
+            ),
+            ("git", "status", "--porcelain"): CommandResult(
+                command=("git", "status", "--porcelain"),
+                return_code=0,
+                stdout="",
+                stderr="",
+            ),
+            _git_remote_command(): _git_remote_result("origin"),
+        }
+    )
+    gc_config = GeneratedContentConfig(
+        enabled=True,
+        draft_pr=GeneratedContentTargetConfig(
+            enabled=True,
+            mode="template",
+            title_template="Title",
+            body_template="No closes here.",
+        ),
+    )
+    from backend.core.shared.models.agent_runner import AppConfig, GitConfig
+
+    app_config = AppConfig(
+        git=GitConfig(remote="origin", base_branch="main"),
+        generated_content=gc_config,
+    )
+
+    branch, pr_url = publish_changes(issue, Path("."), app_config, fake_client, fake_runner)
+
+    pr_calls = [c for c in fake_client.calls if c["method"] == "create_draft_pr"]
+    assert len(pr_calls) == 1
+    assert pr_calls[0]["title"] == "[Agent] Test Feature"
+    assert "Closes #42" in pr_calls[0]["body"]
+
+
+def test_publish_changes_disabled_uses_fallback() -> None:
+    """When generated content is disabled, deterministic PR body should be used."""
+    issue = IssueSummary(
+        number=1,
+        title="Test",
+        url="https://github.com/example/repo/issues/1",
+        body="Test body",
+        labels=(),
+    )
+    fake_client = FakeGitHubClient()
+    fake_runner = FakeProcessRunner(
+        responses={
+            ("git", "branch", "--show-current"): CommandResult(
+                command=("git", "branch", "--show-current"),
+                return_code=0,
+                stdout="issue-1\n",
+                stderr="",
+            ),
+            ("git", "status", "--porcelain"): CommandResult(
+                command=("git", "status", "--porcelain"),
+                return_code=0,
+                stdout="",
+                stderr="",
+            ),
+            _git_remote_command(): _git_remote_result("origin"),
+        }
+    )
+    gc_config = GeneratedContentConfig(enabled=False)
+    from backend.core.shared.models.agent_runner import AppConfig, GitConfig
+
+    app_config = AppConfig(
+        git=GitConfig(remote="origin", base_branch="main"),
+        generated_content=gc_config,
+    )
+
+    branch, pr_url = publish_changes(issue, Path("."), app_config, fake_client, fake_runner)
+
+    pr_calls = [c for c in fake_client.calls if c["method"] == "create_draft_pr"]
+    assert len(pr_calls) == 1
+    assert pr_calls[0]["title"] == "[Agent] Test"
+    assert "Closes #1" in pr_calls[0]["body"]
+
+
+def test_classify_failure_uncommitted() -> None:
+    """classify_failure should return UNCOMMITTED_CHANGES when worktree is dirty."""
+    agent_result = CommandResult(("codex",), 0, "", "")
+    failure_type = classify_failure(
+        before_sha="abc",
+        after_sha="abc",
+        has_uncommitted=True,
+        agent_result=agent_result,
+        verification_results=[],
+        exc=None,
+    )
+    assert failure_type == FailureType.UNCOMMITTED_CHANGES
+
+
+def test_classify_failure_no_commits() -> None:
+    """classify_failure should return NO_COMMITS when SHA did not change."""
+    agent_result = CommandResult(("codex",), 0, "", "")
+    failure_type = classify_failure(
+        before_sha="abc",
+        after_sha="abc",
+        has_uncommitted=False,
+        agent_result=agent_result,
+        verification_results=[],
+        exc=None,
+    )
+    assert failure_type == FailureType.NO_COMMITS
+
+
+def test_classify_failure_verification_failed() -> None:
+    """classify_failure should return VERIFICATION_FAILED when a check fails."""
+    agent_result = CommandResult(("codex",), 0, "", "")
+    verification_results = [
+        CommandResult(("just", "test"), 1, "", "tests failed"),
+    ]
+    failure_type = classify_failure(
+        before_sha="abc",
+        after_sha="def",
+        has_uncommitted=False,
+        agent_result=agent_result,
+        verification_results=verification_results,
+        exc=None,
+    )
+    assert failure_type == FailureType.VERIFICATION_FAILED
+
+
+def test_classify_failure_agent_error() -> None:
+    """classify_failure should return AGENT_ERROR when agent exits non-zero."""
+    agent_result = CommandResult(("codex",), 1, "", "API error")
+    failure_type = classify_failure(
+        before_sha="abc",
+        after_sha="def",
+        has_uncommitted=False,
+        agent_result=agent_result,
+        verification_results=[CommandResult(("just", "test"), 0, "", "")],
+        exc=None,
+    )
+    assert failure_type == FailureType.AGENT_ERROR
+
+
+def test_classify_failure_forbidden_blocked_paths() -> None:
+    """classify_failure should return FORBIDDEN_BLOCKED for forbidden path violations."""
+    agent_result = CommandResult(("codex",), 0, "", "")
+    exc = RuntimeError("Refusing to publish forbidden paths: .env")
+    failure_type = classify_failure(
+        before_sha="abc",
+        after_sha="abc",
+        has_uncommitted=False,
+        agent_result=agent_result,
+        verification_results=[],
+        exc=exc,
+    )
+    assert failure_type == FailureType.FORBIDDEN_BLOCKED
+
+
+def test_classify_failure_success() -> None:
+    """classify_failure should return SUCCESS when everything passes."""
+    agent_result = CommandResult(("codex",), 0, "", "")
+    failure_type = classify_failure(
+        before_sha="abc",
+        after_sha="def",
+        has_uncommitted=False,
+        agent_result=agent_result,
+        verification_results=[CommandResult(("just", "test"), 0, "", "")],
+        exc=None,
+    )
+    assert failure_type == FailureType.SUCCESS
+
+
+def test_recovery_loop_success_on_second_attempt(tmp_path: Path) -> None:
+    """Runner should succeed when recovery agent fixes the issue on attempt 2."""
+    fake_client = FakeGitHubClient()
+    issue = _make_ready_issue()
+    fake_client.list_ready_issues = lambda ready_label, limit: [issue]
+    worktree_path = tmp_path / "issue-123"
+    worktree_path.mkdir()
+
+    class _RecoverySuccessRunner(FakeProcessRunner):
+        def __init__(self) -> None:
+            super().__init__()
+            self._sha_calls = 0
+            self._agent_calls = 0
+            self._committed = False
+
+        def run(self, command, *, cwd, check=True, timeout=None, capture_output=True):
+            command_tuple = tuple(command)
+            self.calls.append(list(command))
+            if command_tuple in self.responses:
+                result = self.responses[command_tuple]
+                if check and result.return_code != 0:
+                    raise RuntimeError(f"Command failed: {command}")
+                return result
+            if command_tuple[:1] == ("codex",):
+                self._agent_calls += 1
+                if self._agent_calls == 1:
+                    # First attempt: produce no commits
+                    return CommandResult(command_tuple, 0, "", "")
+                if self._agent_calls == 2:
+                    # Recovery: write commit request and succeed
+                    _write_commit_request(worktree_path, "agent: recovered")
+                    return CommandResult(command_tuple, 0, "", "")
+            if command_tuple == ("git", "rev-parse", "HEAD"):
+                self._sha_calls += 1
+                sha = "after-sha" if self._sha_calls > 1 else "before-sha"
+                return CommandResult(command_tuple, 0, f"{sha}\n", "")
+            if command_tuple == ("git", "branch", "--show-current"):
+                return CommandResult(command_tuple, 0, "issue-123\n", "")
+            if command_tuple == ("git", "status", "--porcelain"):
+                stdout = "" if self._committed else " M file.txt\n"
+                return CommandResult(command_tuple, 0, stdout, "")
+            if command_tuple == ("git", "commit", "-m", "agent: recovered"):
+                self._committed = True
+                return CommandResult(command_tuple, 0, "", "")
+            return CommandResult(command_tuple, 0, "", "")
+
+    fake_runner = _RecoverySuccessRunner()
+    path_command, path_result = _worktree_path_response(worktree_path)
+    fake_runner.responses = {
+        path_command: path_result,
+        _git_remote_command(): _git_remote_result("origin"),
+    }
+    config = _config_with_review_disabled(worktree_path)
+
+    from backend.core.use_cases.agent_runner_orchestrate import run_once
+
+    exit_code = run_once(
+        repo_path=Path("."),
+        config=config,
+        dry_run=False,
+        agent="auto",
+        max_issues=1,
+        github_client=fake_client,
+        process_runner=fake_runner,
+    )
+
+    assert exit_code == 0
+    commands = [tuple(command) for command in fake_runner.calls]
+    agent_commands = [command for command in commands if command[:1] == ("codex",)]
+    assert len(agent_commands) == 2
+    comment_calls = [c for c in fake_client.calls if c["method"] == "comment_issue"]
+    implementation_comment = [
+        c for c in comment_calls if "Implementation Complete" in c.get("body", "")
+    ]
+    assert len(implementation_comment) == 1
+    assert "Attempt History" in implementation_comment[0]["body"]
+
+
+def test_recovery_loop_exhausted_raises_max_retries(tmp_path: Path) -> None:
+    """Runner should fail with MaxRetriesExceededError when all attempts fail."""
+    fake_client = FakeGitHubClient()
+    issue = _make_ready_issue()
+    fake_client.list_ready_issues = lambda ready_label, limit: [issue]
+    worktree_path = tmp_path / "issue-123"
+    worktree_path.mkdir()
+
+    class _ExhaustedRunner(FakeProcessRunner):
+        def __init__(self) -> None:
+            super().__init__()
+            self._sha_calls = 0
+
+        def run(self, command, *, cwd, check=True, timeout=None, capture_output=True):
+            command_tuple = tuple(command)
+            self.calls.append(list(command))
+            if command_tuple in self.responses:
+                return self.responses[command_tuple]
+            if command_tuple[:1] == ("codex",):
+                # Always produce no commits
+                return CommandResult(command_tuple, 0, "", "")
+            if command_tuple == ("git", "rev-parse", "HEAD"):
+                self._sha_calls += 1
+                return CommandResult(command_tuple, 0, "same-sha\n", "")
+            if command_tuple == ("git", "status", "--porcelain"):
+                return CommandResult(command_tuple, 0, "", "")
+            return CommandResult(command_tuple, 0, "", "")
+
+    fake_runner = _ExhaustedRunner()
+    path_command, path_result = _worktree_path_response(worktree_path)
+    fake_runner.responses = {
+        path_command: path_result,
+        _git_remote_command(): _git_remote_result("origin"),
+    }
+    config = _config_with_review_disabled(
+        worktree_path, max_recovery_attempts=1, recovery_retry_delay_seconds=0
+    )
+
+    from backend.core.use_cases.agent_runner_orchestrate import run_once
+
+    exit_code = run_once(
+        repo_path=Path("."),
+        config=config,
+        dry_run=False,
+        agent="auto",
+        max_issues=1,
+        github_client=fake_client,
+        process_runner=fake_runner,
+    )
+
+    assert exit_code == 1
+    failed_calls = [
+        c
+        for c in fake_client.calls
+        if c["method"] == "edit_issue_labels" and config.labels.failed in c.get("add", [])
+    ]
+    assert len(failed_calls) == 1
+    comment_calls = [c for c in fake_client.calls if c["method"] == "comment_issue"]
+    failure_comment = comment_calls[-1]
+    assert "Attempt History" in failure_comment["body"]
+    assert "Failed after 2 attempts" in failure_comment["body"]
+    assert "no_commits" in failure_comment["body"]
+
+
+def test_run_once_reuses_existing_clean_local_commit(tmp_path: Path) -> None:
+    """Runner should publish an existing clean commit without invoking the agent."""
+    fake_client = FakeGitHubClient()
+    issue = _make_ready_issue()
+    fake_client.list_ready_issues = lambda ready_label, limit: [issue]
+    worktree_path = tmp_path / "issue-123"
+    worktree_path.mkdir()
+
+    class _ExistingCommitRunner(FakeProcessRunner):
+        def run(self, command, *, cwd, check=True, timeout=None, capture_output=True):
+            command_tuple = tuple(command)
+            self.calls.append(list(command))
+            if command_tuple in self.responses:
+                return self.responses[command_tuple]
+            if command_tuple[:1] == ("codex",):
+                raise AssertionError("agent should not be invoked")
+            if command_tuple == ("git", "rev-parse", "HEAD"):
+                return CommandResult(command_tuple, 0, "existing-sha\n", "")
+            if command_tuple == ("git", "branch", "--show-current"):
+                return CommandResult(command_tuple, 0, "issue-123\n", "")
+            if command_tuple == ("git", "status", "--porcelain"):
+                return CommandResult(command_tuple, 0, "", "")
+            if command_tuple == (
+                "git",
+                "rev-list",
+                "--count",
+                "origin/main..HEAD",
+            ):
+                return CommandResult(command_tuple, 0, "1\n", "")
+            return CommandResult(command_tuple, 0, "", "")
+
+    fake_runner = _ExistingCommitRunner()
+    path_command, path_result = _worktree_path_response(worktree_path)
+    fake_runner.responses = {
+        path_command: path_result,
+        _git_remote_command(): _git_remote_result("origin"),
+    }
+    config = _config_with_review_disabled(worktree_path)
+
+    from backend.core.use_cases.agent_runner_orchestrate import run_once
+
+    exit_code = run_once(
+        repo_path=Path("."),
+        config=config,
+        dry_run=False,
+        agent="auto",
+        max_issues=1,
+        github_client=fake_client,
+        process_runner=fake_runner,
+    )
+
+    assert exit_code == 0
+    commands = [tuple(command) for command in fake_runner.calls]
+    assert not [command for command in commands if command[:1] == ("codex",)]
+    assert ("git", "push", "-u", "origin", "issue-123") in commands
+    comment_calls = [c for c in fake_client.calls if c["method"] == "comment_issue"]
+    implementation_comment = [
+        c for c in comment_calls if "Implementation Complete" in c.get("body", "")
+    ]
+    assert len(implementation_comment) == 1
+    assert "Reused 1 existing local commit" in implementation_comment[0]["body"]
+
+
+# ---------------------------------------------------------------------------
+# 进度落盘：失败时 checkpoint + 跨 claim 在已提交进度上续作
+# ---------------------------------------------------------------------------
+
+
+def _checkpoint_issue() -> IssueSummary:
+    return IssueSummary(
+        number=84,
+        title="Big feature",
+        url="https://github.com/example/repo/issues/84",
+        body="PRD path: `tasks/pending/example.md`",
+        labels=("agent/running",),
+    )
+
+
+def test_checkpoint_uncommitted_progress_commits_and_returns_sha(
+    tmp_path: Path,
+) -> None:
+    """有未提交改动时应 git add -A + --no-verify commit，并返回新 SHA。"""
+    from backend.core.use_cases.run_agent_once import checkpoint_uncommitted_progress
+
+    runner = FakeProcessRunner(
+        responses={
+            ("git", "status", "--porcelain"): CommandResult(
+                ("git", "status", "--porcelain"), 0, " M src/feature.py\n", ""
+            ),
+            ("git", "branch", "--show-current"): CommandResult(
+                ("git", "branch", "--show-current"), 0, "issue-84\n", ""
+            ),
+            ("git", "rev-parse", "HEAD"): CommandResult(
+                ("git", "rev-parse", "HEAD"), 0, "checkpoint-sha\n", ""
+            ),
+        }
+    )
+
+    result_sha = checkpoint_uncommitted_progress(
+        _checkpoint_issue(),
+        tmp_path,
+        AppConfig(),
+        runner,
+        expected_branch="issue-84",
+    )
+
+    assert result_sha == "checkpoint-sha"
+    commands = [tuple(call) for call in runner.calls]
+    assert ("git", "add", "-A") in commands
+    commit_calls = [c for c in commands if c[:2] == ("git", "commit")]
+    assert len(commit_calls) == 1
+    assert "--no-verify" in commit_calls[0]
+    assert any("[Agent][WIP] Issue #84 checkpoint" in token for token in commit_calls[0])
+
+
+def test_checkpoint_uncommitted_progress_returns_none_when_clean(
+    tmp_path: Path,
+) -> None:
+    """工作区干净时不提交、返回 None。"""
+    from backend.core.use_cases.run_agent_once import checkpoint_uncommitted_progress
+
+    runner = FakeProcessRunner()  # git status --porcelain → 空 → 无改动
+
+    result_sha = checkpoint_uncommitted_progress(
+        _checkpoint_issue(),
+        tmp_path,
+        AppConfig(),
+        runner,
+        expected_branch="issue-84",
+    )
+
+    assert result_sha is None
+    assert not [c for c in runner.calls if tuple(c)[:2] == ("git", "commit")]
+
+
+def test_checkpoint_uncommitted_progress_returns_none_on_branch_mismatch(
+    tmp_path: Path,
+) -> None:
+    """分支与期望不符时拒绝提交（防止误提交到非 Issue 分支）。"""
+    from backend.core.use_cases.run_agent_once import checkpoint_uncommitted_progress
+
+    runner = FakeProcessRunner(
+        responses={
+            ("git", "status", "--porcelain"): CommandResult(
+                ("git", "status", "--porcelain"), 0, " M src/feature.py\n", ""
+            ),
+            ("git", "branch", "--show-current"): CommandResult(
+                ("git", "branch", "--show-current"), 0, "main\n", ""
+            ),
+        }
+    )
+
+    result_sha = checkpoint_uncommitted_progress(
+        _checkpoint_issue(),
+        tmp_path,
+        AppConfig(),
+        runner,
+        expected_branch="issue-84",
+    )
+
+    assert result_sha is None
+    assert not [c for c in runner.calls if tuple(c)[:2] == ("git", "commit")]
+
+
+def test_checkpoint_uncommitted_progress_blocks_forbidden_paths(
+    tmp_path: Path,
+) -> None:
+    """触碰禁改路径时拒绝 checkpoint，绝不把敏感文件提交进历史。"""
+    from backend.core.use_cases.run_agent_once import checkpoint_uncommitted_progress
+
+    runner = FakeProcessRunner(
+        responses={
+            ("git", "status", "--porcelain"): CommandResult(
+                ("git", "status", "--porcelain"), 0, " M .env\n", ""
+            ),
+            ("git", "branch", "--show-current"): CommandResult(
+                ("git", "branch", "--show-current"), 0, "issue-84\n", ""
+            ),
+            ("git", "status", "--porcelain", "-z"): CommandResult(
+                ("git", "status", "--porcelain", "-z"), 0, " M .env\0", ""
+            ),
+        }
+    )
+
+    with pytest.raises(RuntimeError, match="forbidden"):
+        checkpoint_uncommitted_progress(
+            _checkpoint_issue(),
+            tmp_path,
+            AppConfig(),
+            runner,
+            expected_branch="issue-84",
+        )
+
+    assert not [c for c in runner.calls if tuple(c)[:2] == ("git", "commit")]
+
+
+def test_build_progress_continuation_prompt_mentions_existing_progress() -> None:
+    """续作 prompt 要明确"已有提交、不要从零开始/回退"并引用 PRD 路径。"""
+    from backend.core.use_cases.run_agent_once import (
+        build_progress_continuation_prompt,
+    )
+
+    prompt = build_progress_continuation_prompt(
+        _make_prd_issue("tasks/pending/feature.md"),
+        Path("/tmp/wt/issue-123"),
+    )
+
+    assert "Continue GitHub Issue #123" in prompt
+    assert "already contains committed progress" in prompt
+    assert "do not revert existing" in prompt.lower()
+    assert "tasks/pending/feature.md" in prompt
+    assert "commit-request.json" in prompt
+
+
+def test_process_ready_issue_continues_from_partial_commit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """已有部分提交但门禁未过时，应重跑 agent 续作（带 continuation prompt），不硬失败。"""
+    from backend.core.shared.models.agent_runner import AgentCommitResult
+    from backend.core.use_cases import agent_runner_orchestrate as orch
+    from backend.core.use_cases import run_agent_once
+    from backend.core.use_cases.run_agent_once import PrdDeliveryError
+
+    issue = _make_prd_issue("tasks/pending/example.md")
+    worktree_path = tmp_path / "issue-123"
+    worktree_path.mkdir()
+
+    def _raise_not_ready(*_args: object, **_kwargs: object) -> None:
+        raise PrdDeliveryError("Acceptance Checklist has unchecked items")
+
+    monkeypatch.setattr(orch, "_reuse_existing_local_commit", _raise_not_ready)
+    monkeypatch.setattr(orch, "create_or_reuse_worktree", lambda *a, **k: worktree_path)
+    monkeypatch.setattr(orch, "get_head_sha", lambda *a, **k: "partial-sha")
+    monkeypatch.setattr(orch, "get_current_branch", lambda *a, **k: "issue-123")
+
+    captured: dict[str, object] = {}
+
+    def _fake_run_agent_until_committed(**kwargs: object) -> AgentCommitResult:
+        captured["called"] = True
+        captured["prompt_override"] = kwargs.get("prompt_override")
+        return AgentCommitResult(verification_results=[], attempt_results=[])
+
+    monkeypatch.setattr(
+        run_agent_once, "run_agent_until_committed", _fake_run_agent_until_committed
+    )
+
+    finish_called: dict[str, bool] = {}
+
+    def _fake_finish(**_kwargs: object) -> None:
+        finish_called["yes"] = True
+
+    monkeypatch.setattr(orch, "_finish_implementation_publication", _fake_finish)
+
+    orch._process_ready_issue(
+        issue=issue,
+        repo_path=Path("."),
+        config=_config_with_review_disabled(worktree_path),
+        agent="auto",
+        github_client=FakeGitHubClient(),
+        process_runner=FakeProcessRunner(),
+    )
+
+    assert captured.get("called") is True
+    continuation_prompt = captured.get("prompt_override")
+    assert isinstance(continuation_prompt, str)
+    assert "already contains committed progress" in continuation_prompt
+    assert finish_called.get("yes") is True
+
+
+def test_process_ready_issue_checkpoints_on_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """run_agent_until_committed 耗尽重试时，应 checkpoint 在途进度后再抛出。"""
+    from backend.core.use_cases import agent_runner_orchestrate as orch
+    from backend.core.use_cases import run_agent_once
+    from backend.core.use_cases.run_agent_once import MaxRetriesExceededError
+
+    issue = _make_prd_issue("tasks/pending/example.md")
+    worktree_path = tmp_path / "issue-123"
+    worktree_path.mkdir()
+
+    monkeypatch.setattr(orch, "_reuse_existing_local_commit", lambda *a, **k: None)
+    monkeypatch.setattr(orch, "create_or_reuse_worktree", lambda *a, **k: worktree_path)
+    monkeypatch.setattr(orch, "get_head_sha", lambda *a, **k: "before-sha")
+    monkeypatch.setattr(orch, "get_current_branch", lambda *a, **k: "issue-123")
+
+    def _raise_max(**_kwargs: object) -> None:
+        raise MaxRetriesExceededError([])
+
+    monkeypatch.setattr(run_agent_once, "run_agent_until_committed", _raise_max)
+
+    checkpoint_called: dict[str, object] = {}
+
+    def _fake_checkpoint(
+        _issue: object,
+        _worktree: object,
+        _config: object,
+        _runner: object,
+        *,
+        expected_branch: str,
+    ) -> str:
+        checkpoint_called["branch"] = expected_branch
+        return "wip-sha"
+
+    monkeypatch.setattr(run_agent_once, "checkpoint_uncommitted_progress", _fake_checkpoint)
+
+    with pytest.raises(MaxRetriesExceededError):
+        orch._process_ready_issue(
+            issue=issue,
+            repo_path=Path("."),
+            config=_config_with_review_disabled(worktree_path),
+            agent="auto",
+            github_client=FakeGitHubClient(),
+            process_runner=FakeProcessRunner(),
+        )
+
+    assert checkpoint_called.get("branch") == "issue-123"
+
+
+def test_run_once_recovers_running_issue_with_existing_local_commit(
+    tmp_path: Path,
+) -> None:
+    """Running Issues with clean local commits should resume publish without agent."""
+    fake_client = FakeGitHubClient()
+    issue = IssueSummary(
+        number=123,
+        title="Example",
+        url="https://github.com/example/repo/issues/123",
+        body="Example body",
+        labels=("agent/running", "agent/codex"),
+    )
+    fake_client.list_ready_issues = lambda ready_label, limit: []
+    fake_client.list_review_candidate_issues = lambda labels, limit: [issue]
+    worktree_path = tmp_path / "issue-123"
+    worktree_path.mkdir()
+
+    class _RunningRecoveryRunner(FakeProcessRunner):
+        def run(self, command, *, cwd, check=True, timeout=None, capture_output=True):
+            command_tuple = tuple(command)
+            self.calls.append(list(command))
+            if command_tuple in self.responses:
+                return self.responses[command_tuple]
+            if command_tuple[:1] == ("codex",):
+                raise AssertionError("agent should not be invoked")
+            if command_tuple == ("git", "rev-parse", "HEAD"):
+                return CommandResult(command_tuple, 0, "existing-sha\n", "")
+            if command_tuple == ("git", "branch", "--show-current"):
+                return CommandResult(command_tuple, 0, "issue-123\n", "")
+            if command_tuple == ("git", "status", "--porcelain"):
+                return CommandResult(command_tuple, 0, "", "")
+            if command_tuple == (
+                "git",
+                "rev-list",
+                "--count",
+                "origin/main..HEAD",
+            ):
+                return CommandResult(command_tuple, 0, "1\n", "")
+            return CommandResult(command_tuple, 0, "", "")
+
+    fake_runner = _RunningRecoveryRunner()
+    path_command, path_result = _worktree_path_response(worktree_path)
+    fake_runner.responses = {
+        path_command: path_result,
+        _git_remote_command(): _git_remote_result("origin"),
+    }
+    config = _config_with_review_disabled(worktree_path)
+
+    from backend.core.use_cases.agent_runner_orchestrate import run_once
+
+    exit_code = run_once(
+        repo_path=Path("."),
+        config=config,
+        dry_run=False,
+        agent="auto",
+        max_issues=1,
+        github_client=fake_client,
+        process_runner=fake_runner,
+    )
+
+    assert exit_code == 0
+    commands = [tuple(command) for command in fake_runner.calls]
+    assert not [command for command in commands if command[:1] == ("codex",)]
+    assert ("git", "push", "-u", "origin", "issue-123") in commands
+    label_calls = [c for c in fake_client.calls if c["method"] == "edit_issue_labels"]
+    assert any(config.labels.review in c.get("add", []) for c in label_calls)
+
+
+def test_attempt_history_in_issue_comment(tmp_path: Path) -> None:
+    """Successful run should include Attempt History in the implementation comment."""
+    fake_client = FakeGitHubClient()
+    issue = _make_ready_issue()
+    fake_client.list_ready_issues = lambda ready_label, limit: [issue]
+    worktree_path = tmp_path / "issue-123"
+    worktree_path.mkdir()
+
+    class _HistoryRunner(FakeProcessRunner):
+        def __init__(self) -> None:
+            super().__init__()
+            self._sha_calls = 0
+            self._agent_calls = 0
+
+        def run(self, command, *, cwd, check=True, timeout=None, capture_output=True):
+            command_tuple = tuple(command)
+            self.calls.append(list(command))
+            if command_tuple in self.responses:
+                result = self.responses[command_tuple]
+                if check and result.return_code != 0:
+                    raise RuntimeError(f"Command failed: {command}")
+                return result
+            if command_tuple[:1] == ("codex",):
+                self._agent_calls += 1
+                if self._agent_calls == 1:
+                    # First attempt fails verification
+                    return CommandResult(command_tuple, 0, "", "")
+                if self._agent_calls == 2:
+                    # Recovery succeeds
+                    _write_commit_request(worktree_path, "agent: fix")
+                    return CommandResult(command_tuple, 0, "", "")
+            if command_tuple == ("git", "rev-parse", "HEAD"):
+                self._sha_calls += 1
+                sha = "after-sha" if self._sha_calls > 1 else "before-sha"
+                return CommandResult(command_tuple, 0, f"{sha}\n", "")
+            if command_tuple == ("git", "branch", "--show-current"):
+                return CommandResult(command_tuple, 0, "issue-123\n", "")
+            if command_tuple == ("git", "status", "--porcelain"):
+                stdout = " M file.txt\n" if self._agent_calls < 2 else ""
+                return CommandResult(command_tuple, 0, stdout, "")
+            if command_tuple == ("git", "commit", "-m", "agent: fix"):
+                return CommandResult(command_tuple, 0, "", "")
+            return CommandResult(command_tuple, 0, "", "")
+
+    fake_runner = _HistoryRunner()
+    path_command, path_result = _worktree_path_response(worktree_path)
+    fake_runner.responses = {
+        path_command: path_result,
+        _git_remote_command(): _git_remote_result("origin"),
+    }
+    config = _config_with_review_disabled(worktree_path, "echo ok")
+
+    from backend.core.use_cases.agent_runner_orchestrate import run_once
+
+    exit_code = run_once(
+        repo_path=Path("."),
+        config=config,
+        dry_run=False,
+        agent="auto",
+        max_issues=1,
+        github_client=fake_client,
+        process_runner=fake_runner,
+    )
+
+    assert exit_code == 0
+    comment_calls = [c for c in fake_client.calls if c["method"] == "comment_issue"]
+    implementation_comment = [
+        c for c in comment_calls if "Implementation Complete" in c.get("body", "")
+    ]
+    assert len(implementation_comment) == 1
+    body = implementation_comment[0]["body"]
+    assert "Attempt History" in body
+    assert "success" in body
+    assert "| 1 |" in body
+    assert "| 2 |" in body
+
+
+def test_format_attempt_history_empty() -> None:
+    """format_attempt_history should return empty string for empty results."""
+    assert format_attempt_history([]) == ""
+
+
+def test_format_attempt_history_table() -> None:
+    """format_attempt_history should render a markdown table."""
+    results = [
+        AttemptResult(
+            attempt_number=1,
+            failure_type=FailureType.NO_COMMITS,
+            recovered=False,
+            detail="No commits produced.",
+        ),
+        AttemptResult(
+            attempt_number=2,
+            failure_type=FailureType.SUCCESS,
+            recovered=True,
+            detail="Agent fixed the issue.",
+        ),
+    ]
+    table = format_attempt_history(results)
+    assert "| Attempt | Failure Type | Recovered | Detail |" in table
+    assert "| 1 | no_commits | No | No commits produced. |" in table
+    assert "| 2 | success | Yes | Agent fixed the issue. |" in table
+
+
+_USAGE_LIMIT_STDOUT = (
+    "\n[agent error] API Error: Request rejected (429) · usage limit exceeded, "
+    "5-hour usage limit reached for Token Plan Max (9917000/9917000 used), "
+    "resets at 2026-06-10T15:00:00+08:00 (2056)\n"
+)
+
+
+def _usage_limit_agent_error() -> subprocess.CalledProcessError:
+    return subprocess.CalledProcessError(
+        1,
+        ["claude", "--dangerously-skip-permissions", "-p", "HUGE_RECOVERY_PROMPT"],
+        output=_USAGE_LIMIT_STDOUT,
+        stderr="",
+    )
+
+
+def test_format_attempt_history_keeps_error_tail() -> None:
+    """The Detail column should surface the actual error, not boilerplate."""
+    detail = format_agent_execution_failure(_usage_limit_agent_error())
+    table = format_attempt_history(
+        [
+            AttemptResult(
+                attempt_number=1,
+                failure_type=FailureType.AGENT_ERROR,
+                recovered=False,
+                detail=detail,
+            )
+        ]
+    )
+    assert "usage limit exceeded" in table
+    assert "resets at 2026-06-10T15:00:00+08:00" in table
+    assert "Agent command failed before runner verification" not in table
+
+
+def test_format_attempt_history_escapes_table_pipes() -> None:
+    """Pipes in the detail must not break the Markdown table."""
+    table = format_attempt_history(
+        [
+            AttemptResult(
+                attempt_number=1,
+                failure_type=FailureType.AGENT_ERROR,
+                recovered=False,
+                detail="left | right",
+            )
+        ]
+    )
+    assert "left \\| right" in table
+
+
+def test_detect_usage_limit_root_cause() -> None:
+    """Usage-limit errors should yield a summary with the reset time."""
+    summary = detect_usage_limit_root_cause(_USAGE_LIMIT_STDOUT)
+    assert summary is not None
+    assert "429" in summary
+    assert "2026-06-10T15:00:00+08:00" in summary
+    assert detect_usage_limit_root_cause("just lint failed with exit code 1") is None
+
+
+def test_format_failure_comment_surfaces_usage_limit_root_cause() -> None:
+    """The comment should lead with a root-cause line for usage limit failures."""
+    attempt_history = [
+        AttemptResult(
+            attempt_number=1,
+            failure_type=FailureType.AGENT_ERROR,
+            recovered=False,
+            detail=format_agent_execution_failure(_usage_limit_agent_error()),
+        )
+    ]
+    body = format_failure_comment(MaxRetriesExceededError(attempt_history), attempt_history)
+    root_cause_index = body.index("**Root cause:**")
+    assert "2026-06-10T15:00:00+08:00" in body
+    assert root_cause_index < body.index("### Attempt History")
+
+
+def test_format_failure_comment_omits_agent_prompt_from_cause() -> None:
+    """A CalledProcessError cause must not echo the full agent prompt."""
+    attempt_history = [
+        AttemptResult(
+            attempt_number=1,
+            failure_type=FailureType.AGENT_ERROR,
+            recovered=False,
+            detail="Agent command failed.",
+        )
+    ]
+    failure = MaxRetriesExceededError(attempt_history)
+    failure.__cause__ = _usage_limit_agent_error()
+    body = format_failure_comment(failure, attempt_history)
+    assert "HUGE_RECOVERY_PROMPT" not in body
+    assert "Command: `claude`" in body
+    assert "usage limit exceeded" in body
+
+
+def test_format_failure_comment_includes_recovery_guidance() -> None:
+    """With an issue number, the comment must end with relabel recovery steps."""
+    attempt_history = [
+        AttemptResult(
+            attempt_number=1,
+            failure_type=FailureType.AGENT_ERROR,
+            recovered=False,
+            detail="Agent command failed.",
+        )
+    ]
+    failure = MaxRetriesExceededError(attempt_history)
+    body = format_failure_comment(failure, attempt_history, issue_number=53)
+    assert "### How To Recover" in body
+    assert "gh issue edit 53 --add-label agent/ready --remove-label agent/failed" in body
+    assert "docs/guides/agent-runner.md" in body
+    assert body.index("### How To Recover") > body.index("### Attempt History")
+
+
+def test_format_failure_comment_without_issue_number_unchanged() -> None:
+    """Without an issue number, no recovery guidance is appended."""
+    attempt_history = [
+        AttemptResult(
+            attempt_number=1,
+            failure_type=FailureType.AGENT_ERROR,
+            recovered=False,
+            detail="Agent command failed.",
+        )
+    ]
+    body = format_failure_comment(MaxRetriesExceededError(attempt_history))
+    assert "gh issue edit" not in body
+    assert "How To Recover" not in body
+
+
+def test_scenario_b_precommit_lint_failure_recovery(tmp_path: Path) -> None:
+    """Scene B: Agent committed, just lint failed, recovery fixed, 2nd pass.
+
+    Steps:
+    1. Agent writes commit-request (runner will stage and commit on its behalf).
+    2. Runner stages with ``git add -A``.
+    3. ``just lint`` returns non-zero -> VERIFICATION_FAILED.
+    4. Runner injects stderr into recovery prompt.
+    5. Recovery agent fixes and writes new commit-request.
+    6. Runner re-stages, re-runs ``just lint`` -> passes.
+    7. Runner commits and publishes.
+    """
+    fake_client = FakeGitHubClient()
+    issue = _make_ready_issue()
+    fake_client.list_ready_issues = lambda ready_label, limit: [issue]
+    worktree_path = tmp_path / "issue-123"
+    worktree_path.mkdir()
+    _write_commit_request(worktree_path, "agent: initial attempt")
+
+    class _LintRecoveryRunner(FakeProcessRunner):
+        def __init__(self) -> None:
+            super().__init__()
+            self._sha_calls = 0
+            self._lint_calls = 0
+            self._committed = False
+
+        def run(self, command, *, cwd, check=True, timeout=None, capture_output=True):
+            command_tuple = tuple(command)
+            self.calls.append(list(command))
+            if command_tuple in self.responses:
+                result = self.responses[command_tuple]
+                if check and result.return_code != 0:
+                    raise RuntimeError(f"Command failed: {command}")
+                return result
+            if command_tuple[:1] == ("codex",):
+                prompt = command_tuple[-1]
+                if "Recovery attempt: 1/2" in prompt:
+                    assert (
+                        "Verification after runner staged changes with git add -A failed" in prompt
+                    )
+                    assert "lint stdout" in prompt
+                    assert "lint stderr" in prompt
+                    _write_commit_request(worktree_path, "agent: fix lint")
+                return CommandResult(command_tuple, 0, "", "")
+            if command_tuple == ("git", "rev-parse", "HEAD"):
+                self._sha_calls += 1
+                sha = "after-sha" if self._sha_calls > 1 else "before-sha"
+                return CommandResult(command_tuple, 0, f"{sha}\n", "")
+            if command_tuple == ("git", "branch", "--show-current"):
+                return CommandResult(command_tuple, 0, "issue-123\n", "")
+            if command_tuple == ("git", "status", "--porcelain"):
+                stdout = "" if self._committed else " M file.txt\n"
+                return CommandResult(command_tuple, 0, stdout, "")
+            if command_tuple == ("just", "lint"):
+                self._lint_calls += 1
+                if self._lint_calls == 2:
+                    return CommandResult(
+                        command_tuple,
+                        1,
+                        "lint stdout\n",
+                        "lint stderr\n",
+                    )
+                return CommandResult(command_tuple, 0, "", "")
+            if command_tuple == ("git", "commit", "-m", "agent: fix lint"):
+                self._committed = True
+                return CommandResult(command_tuple, 0, "", "")
+            return CommandResult(command_tuple, 0, "", "")
+
+    fake_runner = _LintRecoveryRunner()
+    path_command, path_result = _worktree_path_response(worktree_path)
+    fake_runner.responses = {
+        path_command: path_result,
+        _git_remote_command(): _git_remote_result("origin"),
+    }
+    config = _config_with_review_disabled(worktree_path, "just lint")
+
+    from backend.core.use_cases.agent_runner_orchestrate import run_once
+
+    exit_code = run_once(
+        repo_path=Path("."),
+        config=config,
+        dry_run=False,
+        agent="auto",
+        max_issues=1,
+        github_client=fake_client,
+        process_runner=fake_runner,
+    )
+
+    assert exit_code == 0
+    commands = [tuple(command) for command in fake_runner.calls]
+    add_indices = [
+        index for index, command in enumerate(commands) if command == ("git", "add", "-A")
+    ]
+    lint_indices = [index for index, command in enumerate(commands) if command == ("just", "lint")]
+    reset_index = commands.index(("git", "reset", "--mixed"))
+    recovery_prompt = [command[-1] for command in commands if command[:1] == ("codex",)][1]
+
+    # Two staging rounds (initial + recovery)
+    assert len(add_indices) == 2
+    # just lint runs: pre-stage attempt 0, staged attempt 0, pre-stage recovery, staged recovery
+    assert len(lint_indices) == 4
+    assert add_indices[0] < lint_indices[1] < reset_index
+    assert reset_index < add_indices[1] < lint_indices[3]
+    assert "Verification after runner staged changes with git add -A failed" in recovery_prompt
+    assert "lint stdout" in recovery_prompt
+    assert "lint stderr" in recovery_prompt
+    assert ("git", "commit", "-m", "agent: fix lint") in commands
+
+    # Verify attempt history records the failed attempt then success.
+    comment_calls = [c for c in fake_client.calls if c["method"] == "comment_issue"]
+    implementation_comment = [
+        c for c in comment_calls if "Implementation Complete" in c.get("body", "")
+    ]
+    assert len(implementation_comment) == 1
+    body = implementation_comment[0]["body"]
+    assert "Attempt History" in body
+    assert "verification_failed" in body
+    assert "success" in body
+
+
+def test_scenario_e_lint_exhausted_max_retries(tmp_path: Path) -> None:
+    """Scene E: staged verification fails on all 3 attempts, MaxRetriesExceededError.
+
+    Steps:
+    1. Attempt 0: Agent writes commit-request, runner stages, ``just lint`` fails.
+    2. Attempt 1 (recovery): Agent fixes, runner re-stages, ``just lint`` still fails.
+    3. Attempt 2 (recovery): Agent fixes again, runner re-stages, ``just lint`` still fails.
+    4. All attempts exhausted → runner marks issue as failed.
+    5. Issue comment contains Attempt History with 3 rows of ``verification_failed``.
+    """
+    fake_client = FakeGitHubClient()
+    issue = _make_ready_issue()
+    fake_client.list_ready_issues = lambda ready_label, limit: [issue]
+    worktree_path = tmp_path / "issue-123"
+    worktree_path.mkdir()
+
+    class _LintExhaustedRunner(FakeProcessRunner):
+        def __init__(self) -> None:
+            super().__init__()
+            self._sha_calls = 0
+            self._agent_calls = 0
+
+        def run(self, command, *, cwd, check=True, timeout=None, capture_output=True):
+            command_tuple = tuple(command)
+            self.calls.append(list(command))
+            if command_tuple in self.responses:
+                result = self.responses[command_tuple]
+                if check and result.return_code != 0:
+                    raise RuntimeError(f"Command failed: {command}")
+                return result
+            if command_tuple[:1] == ("codex",):
+                self._agent_calls += 1
+                _write_commit_request(worktree_path, f"agent: attempt {self._agent_calls}")
+                return CommandResult(command_tuple, 0, "", "")
+            if command_tuple == ("git", "rev-parse", "HEAD"):
+                self._sha_calls += 1
+                sha = "after-sha" if self._sha_calls > 1 else "before-sha"
+                return CommandResult(command_tuple, 0, f"{sha}\n", "")
+            if command_tuple == ("git", "branch", "--show-current"):
+                return CommandResult(command_tuple, 0, "issue-123\n", "")
+            if command_tuple == ("git", "status", "--porcelain"):
+                return CommandResult(command_tuple, 0, " M file.txt\n", "")
+            if command_tuple == ("just", "lint"):
+                return CommandResult(command_tuple, 1, "lint stdout\n", "lint stderr\n")
+            return CommandResult(command_tuple, 0, "", "")
+
+    fake_runner = _LintExhaustedRunner()
+    path_command, path_result = _worktree_path_response(worktree_path)
+    fake_runner.responses = {
+        path_command: path_result,
+        _git_remote_command(): _git_remote_result("origin"),
+    }
+    config = _config_with_review_disabled(worktree_path, "just lint")
+
+    from backend.core.use_cases.agent_runner_orchestrate import run_once
+
+    exit_code = run_once(
+        repo_path=Path("."),
+        config=config,
+        dry_run=False,
+        agent="auto",
+        max_issues=1,
+        github_client=fake_client,
+        process_runner=fake_runner,
+    )
+
+    assert exit_code == 1
+    commands = [tuple(command) for command in fake_runner.calls]
+    lint_indices = [index for index, command in enumerate(commands) if command == ("just", "lint")]
+    add_indices = [
+        index for index, command in enumerate(commands) if command == ("git", "add", "-A")
+    ]
+    reset_indices = [
+        index for index, command in enumerate(commands) if command == ("git", "reset", "--mixed")
+    ]
+
+    # just lint 在 3 次尝试的预 staging 验证都失败，正常流程从不进入 commit proxy。
+    # 重试耗尽后，runner 把在途改动 checkpoint 成一个 WIP commit（git add -A +
+    # git commit --no-verify），供下次 claim 在已提交进度上续作。
+    assert len(lint_indices) == 3
+    assert len(add_indices) == 1
+    assert len(reset_indices) == 0
+    checkpoint_commits = [
+        command
+        for command in commands
+        if command[:2] == ("git", "commit") and "--no-verify" in command
+    ]
+    assert len(checkpoint_commits) == 1
+
+    failed_calls = [
+        c
+        for c in fake_client.calls
+        if c["method"] == "edit_issue_labels" and config.labels.failed in c.get("add", [])
+    ]
+    assert len(failed_calls) == 1
+    comment_calls = [c for c in fake_client.calls if c["method"] == "comment_issue"]
+    failure_comment = comment_calls[-1]
+    assert "Attempt History" in failure_comment["body"]
+    assert "Failed after 3 attempts" in failure_comment["body"]
+    assert "verification_failed" in failure_comment["body"]
+    assert "| 1 |" in failure_comment["body"]
+    assert "| 2 |" in failure_comment["body"]
+    assert "| 3 |" in failure_comment["body"]
+
+
+def test_run_once_rebase_conflict_detached_head(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pending rework rebase_pr_branch should succeed even with detached HEAD."""
+    import json
+
+    from backend.core.use_cases.agent_runner_events import format_event_marker
+    from backend.core.use_cases.agent_runner_orchestrate import run_once
+
+    issue = IssueSummary(
+        number=73,
+        title="Rebase detached head test",
+        url="https://github.com/example/repo/issues/73",
+        body="",
+        labels=("agent/running", "agent/codex"),
+    )
+    worktree_path = tmp_path / "issue-73"
+    worktree_path.mkdir()
+
+    marker = format_event_marker(
+        phase="post_pr_rework_requested",
+        cycle=1,
+        head_sha="abc123",
+        pr_branch="issue-73",
+        action="rebase_pr_branch",
+    )
+    rework_comment = "\n".join(
+        [
+            marker,
+            "",
+            "## Agent Runner Post-PR Rework Requested",
+            "",
+            "- Action: rebase_pr_branch",
+            "- PR Branch: `issue-73`",
+            "- Head SHA: `abc123`",
+        ]
+    )
+
+    fake_client = FakeGitHubClient()
+    fake_client.list_review_candidate_issues = (
+        lambda labels, limit: [issue] if "agent/running" in labels else []
+    )
+    fake_client.comment_issue(73, rework_comment)
+    fake_client._open_prs["issue-73"] = "https://github.com/example/repo/pull/73"
+    fake_client._pr_contexts["issue-73"] = PullRequestContext(
+        pr_url="https://github.com/example/repo/pull/73",
+        branch="issue-73",
+        head_sha="abc123",
+        base_sha="base123",
+    )
+
+    rebase_merge_dir = worktree_path / ".git" / "rebase-merge"
+    rebase_merge_dir.mkdir(parents=True, exist_ok=True)
+    head_name_path = rebase_merge_dir / "head-name"
+    head_name_path.write_text("refs/heads/issue-73", encoding="utf-8")
+
+    request_path = worktree_path / ".agent-runner" / "commit-request.json"
+    request_path.parent.mkdir(parents=True, exist_ok=True)
+    request_path.write_text(
+        json.dumps({"commit_message": "resolve conflict"}),
+        encoding="utf-8",
+    )
+
+    class _DetachedHeadReworkRunner(FakeProcessRunner):
+        def __init__(self, worktree_path: Path) -> None:
+            super().__init__()
+            self._worktree_path = worktree_path
+            self._branch_calls = 0
+
+        def run(
+            self,
+            command,
+            *,
+            cwd,
+            check=True,
+            timeout=None,
+            capture_output=True,
+        ):
+            command_tuple = tuple(command)
+            if command_tuple == ("git", "branch", "--show-current"):
+                self._branch_calls += 1
+                self.calls.append(list(command))
+                if self._branch_calls <= 2:
+                    return CommandResult(command_tuple, 0, "issue-73\n", "")
+                return CommandResult(command_tuple, 0, "", "")
+            if command_tuple == (
+                "git",
+                "rev-parse",
+                "--git-path",
+                "rebase-merge/head-name",
+            ):
+                self.calls.append(list(command))
+                head_name_path = self._worktree_path / ".git" / "rebase-merge" / "head-name"
+                return CommandResult(command_tuple, 0, str(head_name_path) + "\n", "")
+            return super().run(
+                command,
+                cwd=cwd,
+                check=check,
+                timeout=timeout,
+                capture_output=capture_output,
+            )
+
+    fake_runner = _DetachedHeadReworkRunner(worktree_path)
+    path_command, path_result = _worktree_path_response(worktree_path)
+    fake_runner.responses = {
+        path_command: path_result,
+        ("git", "rev-parse", "HEAD"): CommandResult(
+            command=("git", "rev-parse", "HEAD"),
+            return_code=0,
+            stdout="abc123\n",
+            stderr="",
+        ),
+        ("git", "fetch", "origin", "main"): CommandResult(
+            command=("git", "fetch", "origin", "main"),
+            return_code=0,
+            stdout="",
+            stderr="",
+        ),
+        ("git", "rebase", "origin/main"): CommandResult(
+            command=("git", "rebase", "origin/main"),
+            return_code=1,
+            stdout="",
+            stderr="CONFLICT",
+        ),
+        ("git", "diff", "--name-only", "--diff-filter=U"): CommandResult(
+            command=("git", "diff", "--name-only", "--diff-filter=U"),
+            return_code=0,
+            stdout="file.py\n",
+            stderr="",
+        ),
+        ("git", "status", "--porcelain"): CommandResult(
+            command=("git", "status", "--porcelain"),
+            return_code=0,
+            stdout=" M file.py\n",
+            stderr="",
+        ),
+        ("git", "add", "-A"): CommandResult(
+            command=("git", "add", "-A"),
+            return_code=0,
+            stdout="",
+            stderr="",
+        ),
+        ("git", "-c", "core.editor=true", "rebase", "--continue"): CommandResult(
+            command=("git", "-c", "core.editor=true", "rebase", "--continue"),
+            return_code=0,
+            stdout="",
+            stderr="",
+        ),
+        (
+            "git",
+            "push",
+            "--force-with-lease",
+            "origin",
+            "issue-73",
+        ): CommandResult(
+            command=(
+                "git",
+                "push",
+                "--force-with-lease",
+                "origin",
+                "issue-73",
+            ),
+            return_code=0,
+            stdout="",
+            stderr="",
+        ),
+        _git_remote_command(): _git_remote_result("origin"),
+    }
+
+    def _noop_run_agent(
+        agent_name,
+        prompt,
+        worktree_path,
+        process_runner,
+        *,
+        capture_output=False,
+        timeout_seconds=None,
+    ):
+        return CommandResult(command=("noop",), return_code=0, stdout="", stderr="")
+
+    monkeypatch.setattr(
+        "backend.core.use_cases.pr_supervisor.run_agent_with_prompt",
+        _noop_run_agent,
+    )
+
+    config = AppConfig(
+        runner=RunnerConfig(verification_commands=()),
+        worktree=WorktreeConfig(path_command=f"echo {worktree_path}"),
+        pre_push_review=PrePushReviewConfig(enabled=False),
+        post_pr_supervisor=PostPrSupervisorConfig(enabled=False),
+    )
+
+    exit_code = run_once(
+        repo_path=tmp_path,
+        config=config,
+        dry_run=False,
+        agent="auto",
+        max_issues=1,
+        github_client=fake_client,
+        process_runner=fake_runner,
+    )
+
+    assert exit_code == 0
+    commands = [tuple(c) for c in fake_runner.calls]
+    assert ("git", "-c", "core.editor=true", "rebase", "--continue") in commands
+    assert (
+        "git",
+        "push",
+        "--force-with-lease",
+        "origin",
+        "issue-73",
+    ) in commands
+    assert not any(c[:2] == ("git", "commit") for c in commands)
+
+
+def _worktree_reconcile_branch_result(branch: str = "issue-123") -> CommandResult:
+    return CommandResult(
+        command=("git", "branch", "--show-current"),
+        return_code=0,
+        stdout=f"{branch}\n",
+        stderr="",
+    )
+
+
+def _worktree_reconcile_ls_remote_result(
+    *, exists: bool, remote: str = "origin", branch: str = "issue-123"
+) -> tuple[tuple[str, ...], CommandResult]:
+    stdout = f"abc123\trefs/heads/{branch}\n" if exists else ""
+    command = ("git", "ls-remote", "--heads", remote, branch)
+    return command, CommandResult(command=command, return_code=0, stdout=stdout, stderr="")
+
+
+def _worktree_reconcile_rev_parse_result(
+    ref: str, sha: str
+) -> tuple[tuple[str, ...], CommandResult]:
+    command = ("git", "rev-parse", ref)
+    return command, CommandResult(command=command, return_code=0, stdout=f"{sha}\n", stderr="")
+
+
+def _worktree_reconcile_ancestor_result(
+    ancestor: str, descendant: str, is_ancestor: bool
+) -> tuple[tuple[str, ...], CommandResult]:
+    command = ("git", "merge-base", "--is-ancestor", ancestor, descendant)
+    return command, CommandResult(
+        command=command, return_code=0 if is_ancestor else 1, stdout="", stderr=""
+    )
+
+
+def _worktree_reconcile_status_result(dirty: bool) -> CommandResult:
+    return CommandResult(
+        command=("git", "status", "--porcelain"),
+        return_code=0,
+        stdout=" M file.txt\n" if dirty else "",
+        stderr="",
+    )
+
+
+def test_worktree_reconcile_remote_ahead_clean_fast_forwards(tmp_path: Path) -> None:
+    """Clean local-behind worktree fast-forwards to the fetched remote branch."""
+    fake_runner = FakeProcessRunner(
+        responses={
+            ("git", "branch", "--show-current"): _worktree_reconcile_branch_result(),
+            _worktree_reconcile_ls_remote_result(exists=True)[
+                0
+            ]: _worktree_reconcile_ls_remote_result(exists=True)[1],
+            _worktree_reconcile_rev_parse_result("HEAD", "local-sha")[
+                0
+            ]: _worktree_reconcile_rev_parse_result("HEAD", "local-sha")[1],
+            _worktree_reconcile_rev_parse_result("origin/issue-123", "remote-sha")[
+                0
+            ]: _worktree_reconcile_rev_parse_result("origin/issue-123", "remote-sha")[1],
+            _worktree_reconcile_ancestor_result("local-sha", "origin/issue-123", True)[
+                0
+            ]: _worktree_reconcile_ancestor_result("local-sha", "origin/issue-123", True)[1],
+            _worktree_reconcile_ancestor_result("remote-sha", "HEAD", False)[
+                0
+            ]: _worktree_reconcile_ancestor_result("remote-sha", "HEAD", False)[1],
+            ("git", "status", "--porcelain"): _worktree_reconcile_status_result(dirty=False),
+            ("git", "merge", "--ff-only", "origin/issue-123"): CommandResult(
+                command=("git", "merge", "--ff-only", "origin/issue-123"),
+                return_code=0,
+                stdout="",
+                stderr="",
+            ),
+        }
+    )
+
+    _reconcile_worktree_with_remote_branch(tmp_path, AppConfig(), fake_runner)
+
+    commands = [tuple(c) for c in fake_runner.calls]
+    assert (
+        "git",
+        "fetch",
+        "origin",
+        "+issue-123:refs/remotes/origin/issue-123",
+    ) in commands
+    assert ("git", "merge", "--ff-only", "origin/issue-123") in commands
+
+
+def test_worktree_reconcile_remote_ahead_dirty_fails(tmp_path: Path) -> None:
+    """Dirty local-behind worktree fails instead of resetting local changes."""
+    fake_runner = FakeProcessRunner(
+        responses={
+            ("git", "branch", "--show-current"): _worktree_reconcile_branch_result(),
+            _worktree_reconcile_ls_remote_result(exists=True)[
+                0
+            ]: _worktree_reconcile_ls_remote_result(exists=True)[1],
+            _worktree_reconcile_rev_parse_result("HEAD", "local-sha")[
+                0
+            ]: _worktree_reconcile_rev_parse_result("HEAD", "local-sha")[1],
+            _worktree_reconcile_rev_parse_result("origin/issue-123", "remote-sha")[
+                0
+            ]: _worktree_reconcile_rev_parse_result("origin/issue-123", "remote-sha")[1],
+            _worktree_reconcile_ancestor_result("local-sha", "origin/issue-123", True)[
+                0
+            ]: _worktree_reconcile_ancestor_result("local-sha", "origin/issue-123", True)[1],
+            _worktree_reconcile_ancestor_result("remote-sha", "HEAD", False)[
+                0
+            ]: _worktree_reconcile_ancestor_result("remote-sha", "HEAD", False)[1],
+            ("git", "status", "--porcelain"): _worktree_reconcile_status_result(dirty=True),
+        }
+    )
+
+    with pytest.raises(RuntimeError, match="uncommitted changes"):
+        _reconcile_worktree_with_remote_branch(tmp_path, AppConfig(), fake_runner)
+
+    commands = [tuple(c) for c in fake_runner.calls]
+    assert ("git", "merge", "--ff-only", "origin/issue-123") not in commands
+    assert ("git", "reset", "--hard") not in commands
+
+
+def test_worktree_reconcile_local_ahead_preserved(tmp_path: Path) -> None:
+    """Local-ahead worktree is left untouched to support publish recovery."""
+    fake_runner = FakeProcessRunner(
+        responses={
+            ("git", "branch", "--show-current"): _worktree_reconcile_branch_result(),
+            _worktree_reconcile_ls_remote_result(exists=True)[
+                0
+            ]: _worktree_reconcile_ls_remote_result(exists=True)[1],
+            _worktree_reconcile_rev_parse_result("HEAD", "local-sha")[
+                0
+            ]: _worktree_reconcile_rev_parse_result("HEAD", "local-sha")[1],
+            _worktree_reconcile_rev_parse_result("origin/issue-123", "remote-sha")[
+                0
+            ]: _worktree_reconcile_rev_parse_result("origin/issue-123", "remote-sha")[1],
+            _worktree_reconcile_ancestor_result("local-sha", "origin/issue-123", False)[
+                0
+            ]: _worktree_reconcile_ancestor_result("local-sha", "origin/issue-123", False)[1],
+            _worktree_reconcile_ancestor_result("remote-sha", "HEAD", True)[
+                0
+            ]: _worktree_reconcile_ancestor_result("remote-sha", "HEAD", True)[1],
+        }
+    )
+
+    _reconcile_worktree_with_remote_branch(tmp_path, AppConfig(), fake_runner)
+
+    commands = [tuple(c) for c in fake_runner.calls]
+    assert ("git", "merge", "--ff-only", "origin/issue-123") not in commands
+    assert ("git", "reset", "--hard") not in commands
+
+
+def test_worktree_reconcile_diverged_fails(tmp_path: Path) -> None:
+    """Diverged branch fails and requests manual reconciliation."""
+    fake_runner = FakeProcessRunner(
+        responses={
+            ("git", "branch", "--show-current"): _worktree_reconcile_branch_result(),
+            _worktree_reconcile_ls_remote_result(exists=True)[
+                0
+            ]: _worktree_reconcile_ls_remote_result(exists=True)[1],
+            _worktree_reconcile_rev_parse_result("HEAD", "local-sha")[
+                0
+            ]: _worktree_reconcile_rev_parse_result("HEAD", "local-sha")[1],
+            _worktree_reconcile_rev_parse_result("origin/issue-123", "remote-sha")[
+                0
+            ]: _worktree_reconcile_rev_parse_result("origin/issue-123", "remote-sha")[1],
+            _worktree_reconcile_ancestor_result("local-sha", "origin/issue-123", False)[
+                0
+            ]: _worktree_reconcile_ancestor_result("local-sha", "origin/issue-123", False)[1],
+            _worktree_reconcile_ancestor_result("remote-sha", "HEAD", False)[
+                0
+            ]: _worktree_reconcile_ancestor_result("remote-sha", "HEAD", False)[1],
+        }
+    )
+
+    with pytest.raises(RuntimeError, match="diverged"):
+        _reconcile_worktree_with_remote_branch(tmp_path, AppConfig(), fake_runner)
+
+    commands = [tuple(c) for c in fake_runner.calls]
+    assert ("git", "merge") not in commands
+    assert ("git", "rebase") not in commands
+    assert ("git", "reset") not in commands
+
+
+def test_worktree_reconcile_missing_remote_branch_noops(tmp_path: Path) -> None:
+    """No-op when the configured remote does not have the current branch."""
+    fake_runner = FakeProcessRunner(
+        responses={
+            ("git", "branch", "--show-current"): _worktree_reconcile_branch_result(),
+            _worktree_reconcile_ls_remote_result(exists=False)[
+                0
+            ]: _worktree_reconcile_ls_remote_result(exists=False)[1],
+        }
+    )
+
+    _reconcile_worktree_with_remote_branch(tmp_path, AppConfig(), fake_runner)
+
+    commands = [tuple(c) for c in fake_runner.calls]
+    assert ("git", "fetch") not in commands
+
+
+def test_worktree_reconcile_already_synced_noops(tmp_path: Path) -> None:
+    """No-op when local HEAD equals the fetched remote branch."""
+    fake_runner = FakeProcessRunner(
+        responses={
+            ("git", "branch", "--show-current"): _worktree_reconcile_branch_result(),
+            _worktree_reconcile_ls_remote_result(exists=True)[
+                0
+            ]: _worktree_reconcile_ls_remote_result(exists=True)[1],
+            _worktree_reconcile_rev_parse_result("HEAD", "same-sha")[
+                0
+            ]: _worktree_reconcile_rev_parse_result("HEAD", "same-sha")[1],
+            _worktree_reconcile_rev_parse_result("origin/issue-123", "same-sha")[
+                0
+            ]: _worktree_reconcile_rev_parse_result("origin/issue-123", "same-sha")[1],
+        }
+    )
+
+    _reconcile_worktree_with_remote_branch(tmp_path, AppConfig(), fake_runner)
+
+    commands = [tuple(c) for c in fake_runner.calls]
+    assert ("git", "merge", "--ff-only", "origin/issue-123") not in commands
+
+
+def test_worktree_reconcile_uses_configured_remote(tmp_path: Path) -> None:
+    """Reconcile uses config.git.remote instead of hard-coded origin."""
+    config = AppConfig(git=GitConfig(remote="zata"))
+    fake_runner = FakeProcessRunner(
+        responses={
+            ("git", "branch", "--show-current"): _worktree_reconcile_branch_result(),
+            _worktree_reconcile_ls_remote_result(exists=True, remote="zata")[
+                0
+            ]: _worktree_reconcile_ls_remote_result(exists=True, remote="zata")[1],
+            _worktree_reconcile_rev_parse_result("HEAD", "local-sha")[
+                0
+            ]: _worktree_reconcile_rev_parse_result("HEAD", "local-sha")[1],
+            _worktree_reconcile_rev_parse_result("zata/issue-123", "remote-sha")[
+                0
+            ]: _worktree_reconcile_rev_parse_result("zata/issue-123", "remote-sha")[1],
+            _worktree_reconcile_ancestor_result("local-sha", "zata/issue-123", True)[
+                0
+            ]: _worktree_reconcile_ancestor_result("local-sha", "zata/issue-123", True)[1],
+            _worktree_reconcile_ancestor_result("remote-sha", "HEAD", False)[
+                0
+            ]: _worktree_reconcile_ancestor_result("remote-sha", "HEAD", False)[1],
+            ("git", "status", "--porcelain"): _worktree_reconcile_status_result(dirty=False),
+            ("git", "merge", "--ff-only", "zata/issue-123"): CommandResult(
+                command=("git", "merge", "--ff-only", "zata/issue-123"),
+                return_code=0,
+                stdout="",
+                stderr="",
+            ),
+        }
+    )
+
+    _reconcile_worktree_with_remote_branch(tmp_path, config, fake_runner)
+
+    commands = [tuple(c) for c in fake_runner.calls]
+    assert ("git", "ls-remote", "--heads", "zata", "issue-123") in commands
+    assert (
+        "git",
+        "fetch",
+        "zata",
+        "+issue-123:refs/remotes/zata/issue-123",
+    ) in commands
+    assert ("git", "merge", "--ff-only", "zata/issue-123") in commands
+
+
+def test_create_or_reuse_worktree_calls_reconcile(tmp_path: Path) -> None:
+    """create_or_reuse_worktree should invoke remote branch reconciliation."""
+    worktree_path = tmp_path / "issue-123"
+    worktree_path.mkdir()
+    path_command = ("echo", str(worktree_path))
+    fake_runner = FakeProcessRunner(
+        responses={
+            path_command: CommandResult(
+                command=path_command,
+                return_code=0,
+                stdout=f"{worktree_path}\n",
+                stderr="",
+            ),
+            ("git", "branch", "--show-current"): _worktree_reconcile_branch_result(),
+            _worktree_reconcile_ls_remote_result(exists=False)[
+                0
+            ]: _worktree_reconcile_ls_remote_result(exists=False)[1],
+        }
+    )
+    config = AppConfig(
+        worktree=WorktreeConfig(
+            create_command=f"echo created {worktree_path}",
+            reuse_command=f"echo reused {worktree_path}",
+            path_command=f"echo {worktree_path}",
+        )
+    )
+
+    result_path = create_or_reuse_worktree(
+        tmp_path,
+        IssueSummary(number=123, title="T", url="U", body="B", labels=()),
+        config,
+        fake_runner,
+    )
+
+    assert result_path == worktree_path.resolve()
+    commands = [tuple(c) for c in fake_runner.calls]
+    assert ("git", "branch", "--show-current") in commands
+
+
+def test_create_or_reuse_worktree_heals_detached_before_reconcile(
+    tmp_path: Path,
+) -> None:
+    """Detached worktree is reattached before remote branch reconciliation."""
+    worktree_path = tmp_path / "issue-123"
+    worktree_path.mkdir()
+    path_command = ("echo", str(worktree_path))
+
+    class _DetachedThenBranchRunner(FakeProcessRunner):
+        def __init__(self) -> None:
+            super().__init__(
+                responses={
+                    path_command: CommandResult(
+                        command=path_command,
+                        return_code=0,
+                        stdout=f"{worktree_path}\n",
+                        stderr="",
+                    ),
+                    ("git", "rev-parse", "--git-path", "info/exclude"): CommandResult(
+                        command=("git", "rev-parse", "--git-path", "info/exclude"),
+                        return_code=1,
+                        stdout="",
+                        stderr="",
+                    ),
+                    ("git", "rev-parse", "--abbrev-ref", "HEAD"): CommandResult(
+                        command=("git", "rev-parse", "--abbrev-ref", "HEAD"),
+                        return_code=0,
+                        stdout="HEAD\n",
+                        stderr="",
+                    ),
+                    (
+                        "git",
+                        "rev-parse",
+                        "--git-path",
+                        "rebase-merge/head-name",
+                    ): CommandResult(
+                        command=(
+                            "git",
+                            "rev-parse",
+                            "--git-path",
+                            "rebase-merge/head-name",
+                        ),
+                        return_code=0,
+                        stdout="missing-rebase-merge-head-name\n",
+                        stderr="",
+                    ),
+                    (
+                        "git",
+                        "rev-parse",
+                        "--git-path",
+                        "rebase-apply/head-name",
+                    ): CommandResult(
+                        command=(
+                            "git",
+                            "rev-parse",
+                            "--git-path",
+                            "rebase-apply/head-name",
+                        ),
+                        return_code=0,
+                        stdout="missing-rebase-apply-head-name\n",
+                        stderr="",
+                    ),
+                    ("git", "rev-parse", "--git-path", "rebase-merge"): CommandResult(
+                        command=("git", "rev-parse", "--git-path", "rebase-merge"),
+                        return_code=0,
+                        stdout="missing-rebase-merge\n",
+                        stderr="",
+                    ),
+                    ("git", "rev-parse", "--git-path", "rebase-apply"): CommandResult(
+                        command=("git", "rev-parse", "--git-path", "rebase-apply"),
+                        return_code=0,
+                        stdout="missing-rebase-apply\n",
+                        stderr="",
+                    ),
+                    ("git", "rev-parse", "HEAD"): CommandResult(
+                        command=("git", "rev-parse", "HEAD"),
+                        return_code=0,
+                        stdout="detached-sha\n",
+                        stderr="",
+                    ),
+                    (
+                        "git",
+                        "show-ref",
+                        "--verify",
+                        "--quiet",
+                        "refs/heads/issue-123",
+                    ): CommandResult(
+                        command=(
+                            "git",
+                            "show-ref",
+                            "--verify",
+                            "--quiet",
+                            "refs/heads/issue-123",
+                        ),
+                        return_code=0,
+                        stdout="",
+                        stderr="",
+                    ),
+                    ("git", "rev-parse", "refs/heads/issue-123"): CommandResult(
+                        command=("git", "rev-parse", "refs/heads/issue-123"),
+                        return_code=0,
+                        stdout="detached-sha\n",
+                        stderr="",
+                    ),
+                    ("git", "checkout", "issue-123"): CommandResult(
+                        command=("git", "checkout", "issue-123"),
+                        return_code=0,
+                        stdout="",
+                        stderr="",
+                    ),
+                    ("git", "branch", "--show-current"): CommandResult(
+                        command=("git", "branch", "--show-current"),
+                        return_code=0,
+                        stdout="issue-123\n",
+                        stderr="",
+                    ),
+                    _worktree_reconcile_ls_remote_result(exists=False)[
+                        0
+                    ]: _worktree_reconcile_ls_remote_result(exists=False)[1],
+                }
+            )
+
+    fake_runner = _DetachedThenBranchRunner()
+    config = AppConfig(
+        worktree=WorktreeConfig(
+            create_command=f"echo created {worktree_path}",
+            reuse_command=f"echo reused {worktree_path}",
+            path_command=f"echo {worktree_path}",
+        )
+    )
+
+    result_path = create_or_reuse_worktree(
+        tmp_path,
+        IssueSummary(number=123, title="T", url="U", body="B", labels=()),
+        config,
+        fake_runner,
+    )
+
+    assert result_path == worktree_path.resolve()
+    commands = [tuple(c) for c in fake_runner.calls]
+    checkout_index = commands.index(("git", "checkout", "issue-123"))
+    ls_remote_index = commands.index(("git", "ls-remote", "--heads", "origin", "issue-123"))
+    assert checkout_index < ls_remote_index
+    assert ("git", "ls-remote", "--heads", "origin", "") not in commands
+
+
+# Real Git integration helpers
+
+
+def _git_init_bare(path: Path) -> Path:
+    subprocess.run(["git", "init", "--bare", str(path)], check=True, capture_output=True)
+    return path
+
+
+def _git_init(path: Path) -> Path:
+    subprocess.run(["git", "init", str(path)], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(path), "branch", "-M", "main"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(path), "config", "user.email", "test@example.com"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(path), "config", "user.name", "Test User"],
+        check=True,
+        capture_output=True,
+    )
+    return path
+
+
+def _git_commit(path: Path, message: str) -> str:
+    subprocess.run(
+        ["git", "-C", str(path), "commit", "--allow-empty", "-m", message],
+        check=True,
+        capture_output=True,
+    )
+    sha_result = subprocess.run(
+        ["git", "-C", str(path), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return sha_result.stdout.strip()
+
+
+def test_worktree_reconcile_remote_ahead_real_git_fast_forwards(tmp_path: Path) -> None:
+    """Reused clean worktree fast-forwards when remote branch is ahead."""
+    remote_path = tmp_path / "remote.git"
+    local_path = tmp_path / "local"
+
+    _git_init_bare(remote_path)
+    local_repo = _git_init(local_path)
+    subprocess.run(
+        ["git", "-C", str(local_repo), "remote", "add", "origin", str(remote_path)],
+        check=True,
+        capture_output=True,
+    )
+    _git_commit(local_repo, "initial")
+    subprocess.run(
+        ["git", "-C", str(local_repo), "push", "-u", "origin", "main"],
+        check=True,
+        capture_output=True,
+    )
+
+    subprocess.run(
+        ["git", "-C", str(local_repo), "checkout", "-b", "issue-123"],
+        check=True,
+        capture_output=True,
+    )
+    _git_commit(local_repo, "issue start")
+    subprocess.run(
+        ["git", "-C", str(local_repo), "push", "-u", "origin", "issue-123"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(local_repo), "checkout", "main"],
+        check=True,
+        capture_output=True,
+    )
+
+    worktree_path = tmp_path / "issue-123"
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(local_repo),
+            "worktree",
+            "add",
+            str(worktree_path),
+            "issue-123",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    local_head_before = subprocess.run(
+        ["git", "-C", str(worktree_path), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    # Advance remote issue-123 from another clone
+    other_path = tmp_path / "other"
+    other_repo = _git_init(other_path)
+    subprocess.run(
+        ["git", "-C", str(other_repo), "remote", "add", "origin", str(remote_path)],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(other_repo), "fetch", "origin"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(other_repo),
+            "checkout",
+            "-b",
+            "issue-123",
+            "--track",
+            "origin/issue-123",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    remote_head = _git_commit(other_repo, "remote advance")
+    subprocess.run(
+        ["git", "-C", str(other_repo), "push", "origin", "issue-123"],
+        check=True,
+        capture_output=True,
+    )
+
+    from backend.infrastructure.process_runner import SubprocessRunner
+
+    _reconcile_worktree_with_remote_branch(worktree_path, AppConfig(), SubprocessRunner())
+
+    local_head_after = subprocess.run(
+        ["git", "-C", str(worktree_path), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert local_head_before != remote_head
+    assert local_head_after == remote_head
+
+
+def test_worktree_reconcile_local_ahead_real_git_preserved(tmp_path: Path) -> None:
+    """Local-ahead worktree keeps its commits when remote is behind."""
+    remote_path = tmp_path / "remote.git"
+    local_path = tmp_path / "local"
+
+    _git_init_bare(remote_path)
+    local_repo = _git_init(local_path)
+    subprocess.run(
+        ["git", "-C", str(local_repo), "remote", "add", "origin", str(remote_path)],
+        check=True,
+        capture_output=True,
+    )
+    _git_commit(local_repo, "initial")
+    subprocess.run(
+        ["git", "-C", str(local_repo), "push", "-u", "origin", "main"],
+        check=True,
+        capture_output=True,
+    )
+
+    subprocess.run(
+        ["git", "-C", str(local_repo), "checkout", "-b", "issue-123"],
+        check=True,
+        capture_output=True,
+    )
+    _git_commit(local_repo, "issue start")
+    subprocess.run(
+        ["git", "-C", str(local_repo), "push", "-u", "origin", "issue-123"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(local_repo), "checkout", "main"],
+        check=True,
+        capture_output=True,
+    )
+
+    worktree_path = tmp_path / "issue-123"
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(local_repo),
+            "worktree",
+            "add",
+            str(worktree_path),
+            "issue-123",
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+    local_ahead = _git_commit(worktree_path, "local only")
+
+    from backend.infrastructure.process_runner import SubprocessRunner
+
+    _reconcile_worktree_with_remote_branch(worktree_path, AppConfig(), SubprocessRunner())
+
+    local_head_after = subprocess.run(
+        ["git", "-C", str(worktree_path), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert local_head_after == local_ahead
+
+
+def test_worktree_reconcile_dirty_real_git_fails(tmp_path: Path) -> None:
+    """Dirty worktree behind remote fails without destructive reset."""
+    remote_path = tmp_path / "remote.git"
+    local_path = tmp_path / "local"
+
+    _git_init_bare(remote_path)
+    local_repo = _git_init(local_path)
+    subprocess.run(
+        ["git", "-C", str(local_repo), "remote", "add", "origin", str(remote_path)],
+        check=True,
+        capture_output=True,
+    )
+    tracked = local_path / "tracked.txt"
+    tracked.write_text("base\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "-C", str(local_repo), "add", "tracked.txt"],
+        check=True,
+        capture_output=True,
+    )
+    _git_commit(local_repo, "initial")
+    subprocess.run(
+        ["git", "-C", str(local_repo), "push", "-u", "origin", "main"],
+        check=True,
+        capture_output=True,
+    )
+
+    subprocess.run(
+        ["git", "-C", str(local_repo), "checkout", "-b", "issue-123"],
+        check=True,
+        capture_output=True,
+    )
+    _git_commit(local_repo, "issue start")
+    subprocess.run(
+        ["git", "-C", str(local_repo), "push", "-u", "origin", "issue-123"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(local_repo), "checkout", "main"],
+        check=True,
+        capture_output=True,
+    )
+
+    worktree_path = tmp_path / "issue-123"
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(local_repo),
+            "worktree",
+            "add",
+            str(worktree_path),
+            "issue-123",
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+    # Advance remote issue-123
+    other_path = tmp_path / "other"
+    other_repo = _git_init(other_path)
+    subprocess.run(
+        ["git", "-C", str(other_repo), "remote", "add", "origin", str(remote_path)],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(other_repo), "fetch", "origin"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(other_repo),
+            "checkout",
+            "-b",
+            "issue-123",
+            "--track",
+            "origin/issue-123",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    _git_commit(other_repo, "remote advance")
+    subprocess.run(
+        ["git", "-C", str(other_repo), "push", "origin", "issue-123"],
+        check=True,
+        capture_output=True,
+    )
+
+    # Make worktree dirty
+    dirty_file = worktree_path / "tracked.txt"
+    dirty_file.write_text("dirty\n", encoding="utf-8")
+
+    from backend.infrastructure.process_runner import SubprocessRunner
+
+    with pytest.raises(RuntimeError, match="uncommitted changes"):
+        _reconcile_worktree_with_remote_branch(worktree_path, AppConfig(), SubprocessRunner())
+
+    status = subprocess.run(
+        ["git", "-C", str(worktree_path), "status", "--porcelain"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert "tracked.txt" in status
+
+
+def test_worktree_reconcile_diverged_real_git_fails(tmp_path: Path) -> None:
+    """Diverged worktree fails and does not rebase, merge, or reset."""
+    remote_path = tmp_path / "remote.git"
+    local_path = tmp_path / "local"
+
+    _git_init_bare(remote_path)
+    local_repo = _git_init(local_path)
+    subprocess.run(
+        ["git", "-C", str(local_repo), "remote", "add", "origin", str(remote_path)],
+        check=True,
+        capture_output=True,
+    )
+    _git_commit(local_repo, "initial")
+    subprocess.run(
+        ["git", "-C", str(local_repo), "push", "-u", "origin", "main"],
+        check=True,
+        capture_output=True,
+    )
+
+    subprocess.run(
+        ["git", "-C", str(local_repo), "checkout", "-b", "issue-123"],
+        check=True,
+        capture_output=True,
+    )
+    _git_commit(local_repo, "issue start")
+    subprocess.run(
+        ["git", "-C", str(local_repo), "push", "-u", "origin", "issue-123"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(local_repo), "checkout", "main"],
+        check=True,
+        capture_output=True,
+    )
+
+    worktree_path = tmp_path / "issue-123"
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(local_repo),
+            "worktree",
+            "add",
+            str(worktree_path),
+            "issue-123",
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+    # Local commit in worktree
+    local_head = _git_commit(worktree_path, "local advance")
+
+    # Force-push a different history to remote
+    other_path = tmp_path / "other"
+    other_repo = _git_init(other_path)
+    subprocess.run(
+        ["git", "-C", str(other_repo), "remote", "add", "origin", str(remote_path)],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(other_repo), "fetch", "origin"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(other_repo),
+            "checkout",
+            "-b",
+            "issue-123",
+            "--track",
+            "origin/issue-123",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(other_repo), "reset", "--hard", "origin/main"],
+        check=True,
+        capture_output=True,
+    )
+    _ = _git_commit(other_repo, "diverged remote advance")
+    subprocess.run(
+        ["git", "-C", str(other_repo), "push", "--force", "origin", "issue-123"],
+        check=True,
+        capture_output=True,
+    )
+
+    from backend.infrastructure.process_runner import SubprocessRunner
+
+    with pytest.raises(RuntimeError, match="diverged"):
+        _reconcile_worktree_with_remote_branch(worktree_path, AppConfig(), SubprocessRunner())
+
+    final_head = subprocess.run(
+        ["git", "-C", str(worktree_path), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert final_head == local_head
+
+
+def test_worktree_reconcile_custom_remote_real_git(tmp_path: Path) -> None:
+    """Reconcile fast-forwards using a non-origin remote name."""
+    remote_path = tmp_path / "remote.git"
+    local_path = tmp_path / "local"
+
+    _git_init_bare(remote_path)
+    local_repo = _git_init(local_path)
+    subprocess.run(
+        ["git", "-C", str(local_repo), "remote", "add", "zata", str(remote_path)],
+        check=True,
+        capture_output=True,
+    )
+    _git_commit(local_repo, "initial")
+    subprocess.run(
+        ["git", "-C", str(local_repo), "push", "-u", "zata", "main"],
+        check=True,
+        capture_output=True,
+    )
+
+    subprocess.run(
+        ["git", "-C", str(local_repo), "checkout", "-b", "issue-123"],
+        check=True,
+        capture_output=True,
+    )
+    _git_commit(local_repo, "issue start")
+    subprocess.run(
+        ["git", "-C", str(local_repo), "push", "-u", "zata", "issue-123"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(local_repo), "checkout", "main"],
+        check=True,
+        capture_output=True,
+    )
+
+    worktree_path = tmp_path / "issue-123"
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(local_repo),
+            "worktree",
+            "add",
+            str(worktree_path),
+            "issue-123",
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+    other_path = tmp_path / "other"
+    other_repo = _git_init(other_path)
+    subprocess.run(
+        ["git", "-C", str(other_repo), "remote", "add", "zata", str(remote_path)],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(["git", "-C", str(other_repo), "fetch", "zata"], check=True, capture_output=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(other_repo),
+            "checkout",
+            "-b",
+            "issue-123",
+            "--track",
+            "zata/issue-123",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    remote_head = _git_commit(other_repo, "zata advance")
+    subprocess.run(
+        ["git", "-C", str(other_repo), "push", "zata", "issue-123"],
+        check=True,
+        capture_output=True,
+    )
+
+    from backend.infrastructure.process_runner import SubprocessRunner
+
+    config = AppConfig(git=GitConfig(remote="zata"))
+    _reconcile_worktree_with_remote_branch(worktree_path, config, SubprocessRunner())
+
+    local_head_after = subprocess.run(
+        ["git", "-C", str(worktree_path), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert local_head_after == remote_head
+
+
+def test_create_or_reuse_worktree_real_git_fast_forwards(tmp_path: Path) -> None:
+    """create_or_reuse_worktree fast-forwards a reused clean worktree."""
+    remote_path = tmp_path / "remote.git"
+    local_path = tmp_path / "local"
+
+    _git_init_bare(remote_path)
+    local_repo = _git_init(local_path)
+    subprocess.run(
+        ["git", "-C", str(local_repo), "remote", "add", "origin", str(remote_path)],
+        check=True,
+        capture_output=True,
+    )
+    _git_commit(local_repo, "initial")
+    subprocess.run(
+        ["git", "-C", str(local_repo), "push", "-u", "origin", "main"],
+        check=True,
+        capture_output=True,
+    )
+
+    subprocess.run(
+        ["git", "-C", str(local_repo), "checkout", "-b", "issue-123"],
+        check=True,
+        capture_output=True,
+    )
+    _git_commit(local_repo, "issue start")
+    subprocess.run(
+        ["git", "-C", str(local_repo), "push", "-u", "origin", "issue-123"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(local_repo), "checkout", "main"],
+        check=True,
+        capture_output=True,
+    )
+
+    worktree_path = tmp_path / "issue-123"
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(local_repo),
+            "worktree",
+            "add",
+            str(worktree_path),
+            "issue-123",
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+    other_path = tmp_path / "other"
+    other_repo = _git_init(other_path)
+    subprocess.run(
+        ["git", "-C", str(other_repo), "remote", "add", "origin", str(remote_path)],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(other_repo), "fetch", "origin"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(other_repo),
+            "checkout",
+            "-b",
+            "issue-123",
+            "--track",
+            "origin/issue-123",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    remote_head = _git_commit(other_repo, "remote advance")
+    subprocess.run(
+        ["git", "-C", str(other_repo), "push", "origin", "issue-123"],
+        check=True,
+        capture_output=True,
+    )
+
+    from backend.infrastructure.process_runner import SubprocessRunner
+
+    config = AppConfig(
+        worktree=WorktreeConfig(
+            create_command="echo create-fail",
+            reuse_command="echo reused",
+            path_command=f"echo {worktree_path}",
+        )
+    )
+
+    result_path = create_or_reuse_worktree(
+        local_path,
+        IssueSummary(number=123, title="T", url="U", body="B", labels=()),
+        config,
+        SubprocessRunner(),
+    )
+
+    assert result_path == worktree_path.resolve()
+    local_head_after = subprocess.run(
+        ["git", "-C", str(worktree_path), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert local_head_after == remote_head
+
+
+def test_worktree_reconcile_run_once(tmp_path: Path) -> None:
+    """run_once issues reconcile commands before invoking the agent."""
+    fake_client = FakeGitHubClient()
+    issue = _make_ready_issue()
+    fake_client.list_ready_issues = lambda ready_label, limit: [issue]
+    worktree_path = tmp_path / "issue-123"
+    worktree_path.mkdir()
+    _write_commit_request(worktree_path, "agent: run once reconcile")
+
+    class _ReconcileOrderRunner(FakeProcessRunner):
+        def __init__(self, wt_path: Path) -> None:
+            super().__init__()
+            self._wt_path = wt_path
+            self._sha_calls = 0
+            self._status_calls = 0
+            self._committed = False
+            self.responses = {
+                ("git", "remote"): _git_remote_result("origin"),
+                (
+                    "git",
+                    "ls-remote",
+                    "--heads",
+                    "origin",
+                    "refs/heads/iar-evidence/*",
+                ): CommandResult(
+                    command=(
+                        "git",
+                        "ls-remote",
+                        "--heads",
+                        "origin",
+                        "refs/heads/iar-evidence/*",
+                    ),
+                    return_code=0,
+                    stdout="",
+                    stderr="",
+                ),
+                (
+                    "git",
+                    "branch",
+                    "--show-current",
+                ): _worktree_reconcile_branch_result(),
+                _worktree_reconcile_ls_remote_result(exists=True)[
+                    0
+                ]: _worktree_reconcile_ls_remote_result(exists=True)[1],
+                _worktree_reconcile_rev_parse_result("origin/issue-123", "remote-sha")[
+                    0
+                ]: _worktree_reconcile_rev_parse_result("origin/issue-123", "remote-sha")[1],
+                _worktree_reconcile_ancestor_result("local-sha", "origin/issue-123", True)[
+                    0
+                ]: _worktree_reconcile_ancestor_result("local-sha", "origin/issue-123", True)[1],
+                _worktree_reconcile_ancestor_result("remote-sha", "HEAD", False)[
+                    0
+                ]: _worktree_reconcile_ancestor_result("remote-sha", "HEAD", False)[1],
+                ("git", "merge", "--ff-only", "origin/issue-123"): CommandResult(
+                    command=("git", "merge", "--ff-only", "origin/issue-123"),
+                    return_code=0,
+                    stdout="",
+                    stderr="",
+                ),
+                ("git", "rev-parse", "--git-path", "info/exclude"): CommandResult(
+                    command=("git", "rev-parse", "--git-path", "info/exclude"),
+                    return_code=0,
+                    stdout=".git/info/exclude\n",
+                    stderr="",
+                ),
+                ("git", "rev-list", "--count", "origin/main..HEAD"): CommandResult(
+                    command=("git", "rev-list", "--count", "origin/main..HEAD"),
+                    return_code=0,
+                    stdout="0\n",
+                    stderr="",
+                ),
+                ("git", "push", "-u", "origin", "issue-123"): CommandResult(
+                    command=("git", "push", "-u", "origin", "issue-123"),
+                    return_code=0,
+                    stdout="",
+                    stderr="",
+                ),
+            }
+
+        def run(
+            self,
+            command,
+            *,
+            cwd,
+            check=True,
+            timeout=None,
+            capture_output=True,
+            input_text=None,
+        ):
+            command_tuple = tuple(command)
+            self.calls.append(list(command))
+            if command_tuple in self.responses:
+                result = self.responses[command_tuple]
+                if check and result.return_code != 0:
+                    raise RuntimeError(f"Command failed: {command}")
+                return result
+            if command_tuple == ("git", "rev-parse", "HEAD"):
+                self._sha_calls += 1
+                sha = (
+                    "after-sha"
+                    if self._committed
+                    else "remote-sha"
+                    if self._sha_calls > 1
+                    else "local-sha"
+                )
+                return CommandResult(command_tuple, 0, f"{sha}\n", "")
+            if command_tuple == ("git", "status", "--porcelain"):
+                self._status_calls += 1
+                status_stdout = (
+                    ""
+                    if self._status_calls == 1 or self._committed
+                    else " M file.txt\n?? .agent-runner/commit-request.json\n"
+                )
+                return CommandResult(command_tuple, 0, status_stdout, "")
+            if command_tuple[:1] == ("codex",):
+                (self._wt_path / "fake.txt").write_text("change\n", encoding="utf-8")
+                return CommandResult(command_tuple, 0, "", "")
+            if command_tuple == ("git", "commit", "-m", "agent: run once reconcile"):
+                self._committed = True
+                return CommandResult(command_tuple, 0, "", "")
+            return CommandResult(command_tuple, 0, "", "")
+
+    path_command = ("echo", str(worktree_path))
+    fake_runner = _ReconcileOrderRunner(worktree_path)
+    fake_runner.responses[path_command] = CommandResult(
+        command=path_command, return_code=0, stdout=f"{worktree_path}\n", stderr=""
+    )
+    config = _config_with_review_disabled(worktree_path, "echo ok")
+
+    from backend.core.use_cases.agent_runner_orchestrate import run_once
+
+    exit_code = run_once(
+        repo_path=Path("."),
+        config=config,
+        dry_run=False,
+        agent="auto",
+        max_issues=1,
+        github_client=fake_client,
+        process_runner=fake_runner,
+    )
+
+    assert exit_code == 0
+    commands = [tuple(c) for c in fake_runner.calls]
+    merge_index = commands.index(("git", "merge", "--ff-only", "origin/issue-123"))
+    codex_indices = [i for i, c in enumerate(commands) if c[:1] == ("codex",)]
+    assert codex_indices
+    assert all(merge_index < idx for idx in codex_indices)
+
+
+def test_ensure_worktree_branch_creates_branch_for_detached_head_real_git(
+    tmp_path: Path,
+) -> None:
+    """Detached HEAD without an existing branch is healed by creating it."""
+    repo_path = tmp_path / "repo"
+    worktree_path = tmp_path / "issue-123"
+    repo = _git_init(repo_path)
+    _git_commit(repo, "initial")
+    subprocess.run(
+        ["git", "-C", str(repo), "checkout", "-b", "issue-123"],
+        check=True,
+        capture_output=True,
+    )
+    _git_commit(repo, "on branch")
+    subprocess.run(
+        ["git", "-C", str(repo), "checkout", "main"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repo), "worktree", "add", str(worktree_path), "issue-123"],
+        check=True,
+        capture_output=True,
+    )
+    detached_sha = _git_commit(worktree_path, "detached commit")
+    subprocess.run(
+        ["git", "-C", str(worktree_path), "checkout", detached_sha],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(worktree_path), "branch", "-D", "issue-123"],
+        check=True,
+        capture_output=True,
+    )
+
+    from backend.infrastructure.process_runner import SubprocessRunner
+    from backend.core.use_cases.run_agent_once import _ensure_worktree_branch
+
+    _ensure_worktree_branch(
+        worktree_path,
+        "issue-123",
+        IssueSummary(number=123, title="T", url="U", body="B", labels=()),
+        AppConfig(),
+        SubprocessRunner(),
+    )
+
+    current_branch = subprocess.run(
+        ["git", "-C", str(worktree_path), "branch", "--show-current"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert current_branch == "issue-123"
+    head_sha = subprocess.run(
+        ["git", "-C", str(worktree_path), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert head_sha == detached_sha
+
+
+def test_ensure_worktree_branch_fast_forwards_branch_real_git(tmp_path: Path) -> None:
+    """Detached HEAD ahead of the expected branch is healed by fast-forward."""
+    repo_path = tmp_path / "repo"
+    worktree_path = tmp_path / "issue-123"
+    repo = _git_init(repo_path)
+    _git_commit(repo, "initial")
+    subprocess.run(
+        ["git", "-C", str(repo), "checkout", "-b", "issue-123"],
+        check=True,
+        capture_output=True,
+    )
+    _git_commit(repo, "on branch")
+    subprocess.run(
+        ["git", "-C", str(repo), "checkout", "main"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repo), "worktree", "add", str(worktree_path), "issue-123"],
+        check=True,
+        capture_output=True,
+    )
+    detached_sha = _git_commit(worktree_path, "detached commit")
+    subprocess.run(
+        ["git", "-C", str(worktree_path), "checkout", detached_sha],
+        check=True,
+        capture_output=True,
+    )
+
+    from backend.infrastructure.process_runner import SubprocessRunner
+    from backend.core.use_cases.run_agent_once import _ensure_worktree_branch
+
+    _ensure_worktree_branch(
+        worktree_path,
+        "issue-123",
+        IssueSummary(number=123, title="T", url="U", body="B", labels=()),
+        AppConfig(),
+        SubprocessRunner(),
+    )
+
+    current_branch = subprocess.run(
+        ["git", "-C", str(worktree_path), "branch", "--show-current"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert current_branch == "issue-123"
+    head_sha = subprocess.run(
+        ["git", "-C", str(worktree_path), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert head_sha == detached_sha
+
+
+def test_ensure_worktree_branch_raises_when_branch_diverged_real_git(
+    tmp_path: Path,
+) -> None:
+    """Detached HEAD that diverged from the expected branch cannot be healed."""
+    repo_path = tmp_path / "repo"
+    worktree_path = tmp_path / "issue-123"
+    repo = _git_init(repo_path)
+    _git_commit(repo, "initial")
+    subprocess.run(
+        ["git", "-C", str(repo), "checkout", "-b", "issue-123"],
+        check=True,
+        capture_output=True,
+    )
+    _git_commit(repo, "on branch")
+    subprocess.run(
+        ["git", "-C", str(repo), "checkout", "main"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repo), "worktree", "add", str(worktree_path), "issue-123"],
+        check=True,
+        capture_output=True,
+    )
+    detached_sha = _git_commit(worktree_path, "detached commit")
+    subprocess.run(
+        ["git", "-C", str(worktree_path), "checkout", detached_sha],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repo), "checkout", "issue-123"],
+        check=True,
+        capture_output=True,
+    )
+    _git_commit(repo, "branch moved on")
+
+    from backend.infrastructure.process_runner import SubprocessRunner
+    from backend.core.use_cases.run_agent_once import _ensure_worktree_branch
+
+    with pytest.raises(RuntimeError, match="diverged"):
+        _ensure_worktree_branch(
+            worktree_path,
+            "issue-123",
+            IssueSummary(number=123, title="T", url="U", body="B", labels=()),
+            AppConfig(),
+            SubprocessRunner(),
+        )
+
+
+def test_ensure_worktree_branch_aborts_conflicted_rebase_after_agent_fails_real_git(
+    tmp_path: Path,
+) -> None:
+    """Active rebase with conflicts falls back to abort when agent resolution fails."""
+    repo_path = tmp_path / "repo"
+    worktree_path = tmp_path / "issue-123"
+    repo = _git_init(repo_path)
+    _git_commit(repo, "initial")
+    file_path = repo / "file.txt"
+    file_path.write_text("main content\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "-C", str(repo), "add", str(file_path)],
+        check=True,
+        capture_output=True,
+    )
+    _git_commit(repo, "main commit")
+
+    subprocess.run(
+        ["git", "-C", str(repo), "checkout", "-b", "issue-123"],
+        check=True,
+        capture_output=True,
+    )
+    file_path.write_text("issue content\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "-C", str(repo), "add", str(file_path)],
+        check=True,
+        capture_output=True,
+    )
+    _git_commit(repo, "issue commit")
+    subprocess.run(
+        ["git", "-C", str(repo), "checkout", "main"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repo), "worktree", "add", str(worktree_path), "issue-123"],
+        check=True,
+        capture_output=True,
+    )
+
+    subprocess.run(
+        ["git", "-C", str(worktree_path), "rebase", "main"],
+        check=False,
+        capture_output=True,
+    )
+
+    from backend.infrastructure.process_runner import SubprocessRunner
+    from backend.core.use_cases.run_agent_once import _ensure_worktree_branch
+
+    _ensure_worktree_branch(
+        worktree_path,
+        "issue-123",
+        IssueSummary(number=123, title="T", url="U", body="B", labels=()),
+        AppConfig(),
+        SubprocessRunner(),
+    )
+
+    current_branch = subprocess.run(
+        ["git", "-C", str(worktree_path), "branch", "--show-current"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert current_branch == "issue-123"
+    assert not (worktree_path / ".git" / "rebase-merge").exists()
+    assert not (worktree_path / ".git" / "rebase-apply").exists()
+
+
+def test_ensure_worktree_branch_rejects_mismatched_rebase_target(
+    tmp_path: Path,
+) -> None:
+    """Active rebase for a different branch is left for manual recovery."""
+    worktree_path = tmp_path / "issue-123"
+    worktree_path.mkdir()
+    rebase_merge = worktree_path / ".git" / "rebase-merge"
+    rebase_merge.mkdir(parents=True)
+    head_name = rebase_merge / "head-name"
+    head_name.write_text("refs/heads/issue-999", encoding="utf-8")
+
+    fake_runner = FakeProcessRunner(
+        responses={
+            ("git", "rev-parse", "--abbrev-ref", "HEAD"): CommandResult(
+                command=("git", "rev-parse", "--abbrev-ref", "HEAD"),
+                return_code=0,
+                stdout="HEAD\n",
+                stderr="",
+            ),
+            ("git", "rev-parse", "--git-path", "rebase-merge/head-name"): CommandResult(
+                command=("git", "rev-parse", "--git-path", "rebase-merge/head-name"),
+                return_code=0,
+                stdout=f"{head_name}\n",
+                stderr="",
+            ),
+        }
+    )
+
+    from backend.core.use_cases.run_agent_once import _ensure_worktree_branch
+
+    with pytest.raises(
+        RuntimeError,
+        match="active rebase for branch 'issue-999'.*expects 'issue-123'",
+    ):
+        _ensure_worktree_branch(
+            worktree_path,
+            "issue-123",
+            IssueSummary(number=123, title="T", url="U", body="B", labels=()),
+            AppConfig(),
+            fake_runner,
+        )
+
+    commands = [tuple(c) for c in fake_runner.calls]
+    assert ("git", "-c", "core.editor=true", "rebase", "--continue") not in commands
+    assert ("git", "rebase", "--abort") not in commands
+    assert ("git", "checkout", "issue-999") not in commands
+
+
+def test_ensure_worktree_branch_rejects_unconfirmed_rebase_target(
+    tmp_path: Path,
+) -> None:
+    """Active rebase with unreadable target is not treated as plain detached HEAD."""
+    worktree_path = tmp_path / "issue-123"
+    worktree_path.mkdir()
+    rebase_merge = worktree_path / ".git" / "rebase-merge"
+    rebase_merge.mkdir(parents=True)
+
+    fake_runner = FakeProcessRunner(
+        responses={
+            ("git", "rev-parse", "--abbrev-ref", "HEAD"): CommandResult(
+                command=("git", "rev-parse", "--abbrev-ref", "HEAD"),
+                return_code=0,
+                stdout="HEAD\n",
+                stderr="",
+            ),
+            ("git", "rev-parse", "--git-path", "rebase-merge/head-name"): CommandResult(
+                command=("git", "rev-parse", "--git-path", "rebase-merge/head-name"),
+                return_code=0,
+                stdout=f"{rebase_merge / 'missing-head-name'}\n",
+                stderr="",
+            ),
+            ("git", "rev-parse", "--git-path", "rebase-apply/head-name"): CommandResult(
+                command=("git", "rev-parse", "--git-path", "rebase-apply/head-name"),
+                return_code=0,
+                stdout=f"{worktree_path / '.git' / 'rebase-apply' / 'head-name'}\n",
+                stderr="",
+            ),
+            ("git", "rev-parse", "--git-path", "rebase-merge"): CommandResult(
+                command=("git", "rev-parse", "--git-path", "rebase-merge"),
+                return_code=0,
+                stdout=f"{rebase_merge}\n",
+                stderr="",
+            ),
+        }
+    )
+
+    from backend.core.use_cases.run_agent_once import _ensure_worktree_branch
+
+    with pytest.raises(RuntimeError, match="target branch cannot be confirmed"):
+        _ensure_worktree_branch(
+            worktree_path,
+            "issue-123",
+            IssueSummary(number=123, title="T", url="U", body="B", labels=()),
+            AppConfig(),
+            fake_runner,
+        )
+
+    commands = [tuple(c) for c in fake_runner.calls]
+    assert ("git", "checkout", "issue-123") not in commands
+    assert ("git", "checkout", "-b", "issue-123") not in commands
+    assert ("git", "rebase", "--abort") not in commands
+
+
+def test_create_or_reuse_worktree_heals_detached_head_real_git(tmp_path: Path) -> None:
+    """create_or_reuse_worktree recovers a reused worktree in detached HEAD."""
+    repo_path = tmp_path / "repo"
+    worktree_path = tmp_path / "issue-123"
+    repo = _git_init(repo_path)
+    _git_commit(repo, "initial")
+    subprocess.run(
+        ["git", "-C", str(repo), "checkout", "-b", "issue-123"],
+        check=True,
+        capture_output=True,
+    )
+    _git_commit(repo, "on branch")
+    subprocess.run(
+        ["git", "-C", str(repo), "checkout", "main"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repo), "worktree", "add", str(worktree_path), "issue-123"],
+        check=True,
+        capture_output=True,
+    )
+    detached_sha = _git_commit(worktree_path, "detached commit")
+    subprocess.run(
+        ["git", "-C", str(worktree_path), "checkout", detached_sha],
+        check=True,
+        capture_output=True,
+    )
+
+    from backend.infrastructure.process_runner import SubprocessRunner
+
+    config = AppConfig(
+        worktree=WorktreeConfig(
+            create_command="echo create-fail",
+            reuse_command="echo reused",
+            path_command=f"echo {worktree_path}",
+        )
+    )
+
+    result_path = create_or_reuse_worktree(
+        repo_path,
+        IssueSummary(number=123, title="T", url="U", body="B", labels=()),
+        config,
+        SubprocessRunner(),
+    )
+
+    assert result_path == worktree_path.resolve()
+    current_branch = subprocess.run(
+        ["git", "-C", str(worktree_path), "branch", "--show-current"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert current_branch == "issue-123"
+
+
+def test_create_or_reuse_worktree_heals_detached_head_before_remote_reconcile_real_git(
+    tmp_path: Path,
+) -> None:
+    """Detached reused worktree heals before remote reconciliation probes branch."""
+    remote_path = tmp_path / "remote.git"
+    local_path = tmp_path / "local"
+
+    _git_init_bare(remote_path)
+    local_repo = _git_init(local_path)
+    subprocess.run(
+        ["git", "-C", str(local_repo), "remote", "add", "origin", str(remote_path)],
+        check=True,
+        capture_output=True,
+    )
+    _git_commit(local_repo, "initial")
+    subprocess.run(
+        ["git", "-C", str(local_repo), "push", "-u", "origin", "main"],
+        check=True,
+        capture_output=True,
+    )
+
+    subprocess.run(
+        ["git", "-C", str(local_repo), "checkout", "-b", "issue-123"],
+        check=True,
+        capture_output=True,
+    )
+    issue_sha = _git_commit(local_repo, "issue start")
+    subprocess.run(
+        ["git", "-C", str(local_repo), "push", "-u", "origin", "issue-123"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(local_repo), "checkout", "main"],
+        check=True,
+        capture_output=True,
+    )
+
+    worktree_path = tmp_path / "issue-123"
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(local_repo),
+            "worktree",
+            "add",
+            str(worktree_path),
+            "issue-123",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(worktree_path), "checkout", "--detach", issue_sha],
+        check=True,
+        capture_output=True,
+    )
+
+    from backend.infrastructure.process_runner import SubprocessRunner
+
+    config = AppConfig(
+        worktree=WorktreeConfig(
+            create_command="echo create-fail",
+            reuse_command="echo reused",
+            path_command=f"echo {worktree_path}",
+        )
+    )
+
+    result_path = create_or_reuse_worktree(
+        local_path,
+        IssueSummary(number=123, title="T", url="U", body="B", labels=()),
+        config,
+        SubprocessRunner(),
+    )
+
+    assert result_path == worktree_path.resolve()
+    current_branch = subprocess.run(
+        ["git", "-C", str(worktree_path), "branch", "--show-current"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    current_head = subprocess.run(
+        ["git", "-C", str(worktree_path), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert current_branch == "issue-123"
+    assert current_head == issue_sha
+
+
+def test_commit_requested_changes_rejects_detached_head(tmp_path: Path) -> None:
+    """Commit proxy must refuse to commit when the worktree is detached."""
+    worktree_path = tmp_path / "wt"
+    worktree_path.mkdir()
+    commit_request_path = worktree_path / ".agent-runner" / "commit-request.json"
+    commit_request_path.parent.mkdir(parents=True, exist_ok=True)
+    commit_request_path.write_text('{"commit_message": "agent: commit"}', encoding="utf-8")
+    file_path = worktree_path / "file.txt"
+    file_path.write_text("change\n", encoding="utf-8")
+
+    fake_runner = FakeProcessRunner(
+        responses={
+            ("git", "branch", "--show-current"): CommandResult(
+                command=("git", "branch", "--show-current"),
+                return_code=0,
+                stdout="",
+                stderr="",
+            ),
+        }
+    )
+    config = AppConfig(
+        worktree=WorktreeConfig(
+            create_command="echo",
+            reuse_command="echo",
+            path_command="echo",
+        )
+    )
+
+    with pytest.raises(RuntimeError, match="detached HEAD"):
+        commit_requested_changes(
+            IssueSummary(number=1, title="T", url="U", body="B", labels=()),
+            worktree_path,
+            config,
+            fake_runner,
+            expected_branch="issue-1",
+        )
+
+
+def test_publish_changes_rejects_detached_head(tmp_path: Path) -> None:
+    """Publish must refuse to push when the worktree is detached."""
+    fake_client = FakeGitHubClient()
+    fake_runner = FakeProcessRunner(
+        responses={
+            ("git", "branch", "--show-current"): CommandResult(
+                command=("git", "branch", "--show-current"),
+                return_code=0,
+                stdout="",
+                stderr="",
+            ),
+        }
+    )
+    config = AppConfig(
+        worktree=WorktreeConfig(
+            create_command="echo",
+            reuse_command="echo",
+            path_command="echo",
+        )
+    )
+
+    with pytest.raises(RuntimeError, match="detached HEAD"):
+        publish_changes(
+            issue=IssueSummary(number=1, title="T", url="U", body="B", labels=()),
+            worktree_path=tmp_path / "wt",
+            config=config,
+            github_client=fake_client,
+            process_runner=fake_runner,
+        )
+
+
+def test_ensure_worktree_branch_resolves_conflicts_via_agent(tmp_path: Path) -> None:
+    """Active rebase with conflicts is resolved by the configured agent."""
+    worktree_path = tmp_path / "issue-123"
+    worktree_path.mkdir()
+    git_dir = worktree_path / ".git"
+    git_dir.mkdir()
+    rebase_merge = git_dir / "rebase-merge"
+    rebase_merge.mkdir()
+    head_name = rebase_merge / "head-name"
+    head_name.write_text("refs/heads/issue-123", encoding="utf-8")
+
+    class _AgentWritingRunner(FakeProcessRunner):
+        def run(
+            self,
+            command,
+            *,
+            cwd,
+            check=True,
+            timeout=None,
+            capture_output=True,
+            input_text=None,
+        ):
+            if command[0] in ("claude", "kimi", "codex"):
+                request_path = cwd / ".agent-runner" / "commit-request.json"
+                request_path.parent.mkdir(parents=True, exist_ok=True)
+                request_path.write_text(
+                    '{"commit_message": "agent: resolve rebase conflicts"}',
+                    encoding="utf-8",
+                )
+                (cwd / "file.txt").write_text("resolved\n", encoding="utf-8")
+                return CommandResult(tuple(command), 0, "", "")
+            if tuple(command) == ("git", "status", "--porcelain"):
+                return CommandResult(tuple(command), 0, " M file.txt\n", "")
+            return super().run(
+                command,
+                cwd=cwd,
+                check=check,
+                timeout=timeout,
+                capture_output=capture_output,
+                input_text=input_text,
+            )
+
+    fake_runner = _AgentWritingRunner(
+        responses={
+            ("git", "rev-parse", "--abbrev-ref", "HEAD"): CommandResult(
+                command=("git", "rev-parse", "--abbrev-ref", "HEAD"),
+                return_code=0,
+                stdout="HEAD\n",
+                stderr="",
+            ),
+            ("git", "rev-parse", "--git-path", "rebase-merge/head-name"): CommandResult(
+                command=("git", "rev-parse", "--git-path", "rebase-merge/head-name"),
+                return_code=0,
+                stdout=f"{head_name}\n",
+                stderr="",
+            ),
+            ("git", "diff", "--name-only", "--diff-filter", "U"): CommandResult(
+                command=("git", "diff", "--name-only", "--diff-filter", "U"),
+                return_code=0,
+                stdout="file.txt\n",
+                stderr="",
+            ),
+            ("git", "status", "--porcelain"): CommandResult(
+                command=("git", "status", "--porcelain"),
+                return_code=0,
+                stdout="",
+                stderr="",
+            ),
+            ("git", "add", "-A"): CommandResult(
+                command=("git", "add", "-A"),
+                return_code=0,
+                stdout="",
+                stderr="",
+            ),
+            (
+                "git",
+                "commit",
+                "-m",
+                "agent: resolve rebase conflicts",
+            ): CommandResult(
+                command=("git", "commit", "-m", "agent: resolve rebase conflicts"),
+                return_code=0,
+                stdout="",
+                stderr="",
+            ),
+            ("git", "-c", "core.editor=true", "rebase", "--continue"): CommandResult(
+                command=("git", "-c", "core.editor=true", "rebase", "--continue"),
+                return_code=0,
+                stdout="",
+                stderr="",
+            ),
+            ("echo", "ok"): CommandResult(
+                command=("echo", "ok"),
+                return_code=0,
+                stdout="ok\n",
+                stderr="",
+            ),
+            ("git", "branch", "--show-current"): CommandResult(
+                command=("git", "branch", "--show-current"),
+                return_code=0,
+                stdout="issue-123\n",
+                stderr="",
+            ),
+        }
+    )
+
+    from backend.core.use_cases.run_agent_once import _ensure_worktree_branch
+
+    issue = IssueSummary(number=123, title="T", url="U", body="B", labels=())
+    config = AppConfig(
+        runner=RunnerConfig(
+            default_agent="claude",
+            verification_commands=["echo ok"],
+        )
+    )
+
+    _ensure_worktree_branch(worktree_path, "issue-123", issue, config, fake_runner)
+
+    commands = [tuple(c) for c in fake_runner.calls]
+    assert ("git", "-c", "core.editor=true", "rebase", "--continue") in commands
+    assert ("git", "commit", "-m", "agent: resolve rebase conflicts") in commands

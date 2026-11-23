@@ -8,6 +8,7 @@ import subprocess
 import time
 from collections.abc import Callable
 from pathlib import Path
+from shlex import quote
 
 from backend.core.shared.interfaces.agent_runner import IGitHubClient, IProcessRunner
 from backend.core.shared.models.agent_runner import (
@@ -75,8 +76,10 @@ from backend.core.use_cases.agent_review_decisions import (
     parse_reviewer_decision,
 )
 from backend.core.use_cases.agent_daemon_shutdown import raise_if_agent_daemon_stopping
+from backend.core.use_cases.pr_supervisor_diff import _truncate_diff_text
 
 _logger = logging.getLogger(__name__)
+_REVIEW_DIFF_PREVIEW_CHARS = 8000
 
 
 def _resolve_review_prompt_template(config: AppConfig) -> tuple[str, ...]:
@@ -109,19 +112,41 @@ def build_review_packet(
     """
     prd_line = build_prd_review_reference(issue, worktree_path)
 
+    review_range = f"{config.git.base_branch}...{head_sha}"
     diff_result = process_runner.run(
-        ["git", "diff", f"{config.git.base_branch}...{head_sha}"],
+        ["git", "diff", review_range],
         cwd=worktree_path,
         check=False,
     )
     diff_text = diff_result.stdout if diff_result.return_code == 0 else "(diff unavailable)"
+    committed_files_lines: list[str] = []
+    if len(diff_text) > _REVIEW_DIFF_PREVIEW_CHARS:
+        changed_files_result = process_runner.run(
+            ["git", "-c", "core.quotepath=false", "diff", "--name-status", review_range, "--"],
+            cwd=worktree_path,
+            check=False,
+        )
+        if changed_files_result.return_code == 0 and changed_files_result.stdout.strip():
+            committed_files_lines = [
+                "Committed files:",
+                "```",
+                changed_files_result.stdout.strip(),
+                "```",
+                "",
+            ]
+        diff_preview_notice = [
+            "This committed diff preview is truncated. Review the complete change before "
+            f"giving a verdict: `git --no-pager diff {quote(review_range)} --`."
+        ]
+    else:
+        diff_preview_notice = []
 
     status_result = process_runner.run(
         ["git", "status", "--short"],
         cwd=worktree_path,
         check=False,
     )
-    changed_paths = status_result.stdout.strip() or "(no uncommitted changes)"
+    worktree_status = status_result.stdout.strip() or "(no uncommitted changes)"
 
     verification_lines = "\n".join(
         f"- `{' '.join(result.command)}`: exit {result.return_code}"
@@ -163,14 +188,16 @@ def build_review_packet(
             "Issue body:",
             issue.body,
             "",
-            "Changed paths:",
+            "Worktree status:",
             "```",
-            changed_paths,
+            worktree_status,
             "```",
             "",
+            *committed_files_lines,
             "Diff:",
+            *diff_preview_notice,
             "```diff",
-            diff_text[:8000] if len(diff_text) > 8000 else diff_text,
+            _truncate_diff_text(diff_text, _REVIEW_DIFF_PREVIEW_CHARS),
             "```",
             "",
             "Verification results:",

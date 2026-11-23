@@ -1,0 +1,32 @@
+diff --git a/src/backend/core/shared/interfaces/agent_output_protocol.py b/src/backend/core/shared/interfaces/agent_output_protocol.py
+index 530d3045..116e3f90 100644
+--- a/src/backend/core/shared/interfaces/agent_output_protocol.py
++++ b/src/backend/core/shared/interfaces/agent_output_protocol.py
+@@ -69,0 +70,2 @@ class OutputRelayRequest:
++        cancel_check: Issue 级 verifier 接管取消探针（Issue #278），由支持的协议
++            传给拥有子进程的 watchdog；未接入 watchdog 的协议不得声称支持接管取消。
+@@ -82,0 +85 @@ class OutputRelayRequest:
++    cancel_check: Callable[[], bool] | None = None
+diff --git a/src/backend/engines/agent_runner/output_protocols/claude_stream_json.py b/src/backend/engines/agent_runner/output_protocols/claude_stream_json.py
+index dd350a35..d3e498a3 100644
+--- a/src/backend/engines/agent_runner/output_protocols/claude_stream_json.py
++++ b/src/backend/engines/agent_runner/output_protocols/claude_stream_json.py
+@@ -50,0 +51 @@ class ClaudeStreamJsonOutputProtocol:
++            cancel_check=request.cancel_check,
+diff --git a/src/backend/engines/agent_runner/output_protocols/structured_json_lines.py b/src/backend/engines/agent_runner/output_protocols/structured_json_lines.py
+index 663a5240..ce194a3e 100644
+--- a/src/backend/engines/agent_runner/output_protocols/structured_json_lines.py
++++ b/src/backend/engines/agent_runner/output_protocols/structured_json_lines.py
+@@ -71,0 +72,2 @@ def relay_structured_json_lines(
++        attempt_key=request.attempt_key,
++        cancel_check=request.cancel_check,
+diff --git a/src/backend/engines/agent_runner/protocol_routing_runner.py b/src/backend/engines/agent_runner/protocol_routing_runner.py
+index 3016cc51..e753ea76 100644
+--- a/src/backend/engines/agent_runner/protocol_routing_runner.py
++++ b/src/backend/engines/agent_runner/protocol_routing_runner.py
+@@ -80,0 +81 @@ class ProtocolRoutingProcessRunner(IProcessRunner):
++        cancel_check: Callable[[], bool] | None = None,
+@@ -98,0 +100 @@ class ProtocolRoutingProcessRunner(IProcessRunner):
++                cancel_check=cancel_check,
+@@ -117,0 +120 @@ class ProtocolRoutingProcessRunner(IProcessRunner):
++                cancel_check=cancel_check,

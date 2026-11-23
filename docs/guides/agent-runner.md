@@ -404,6 +404,8 @@ core 侧 `agent_runner_session_store.py` 以 tmp + `os.replace` 原子写入 wor
 recovery 上下文；缺少阶段记录时会回退读取旧版未分阶段记录。记录包含续传资格和该 session
 已消耗的超时续跑轮数：失败/中断后的未完成执行链可以续传，implementation 或 review 完整成功后
 会标记为不可自动续传，避免下一次新执行接上已完成的旧会话。旧记录没有状态时按不可续传处理。
+准备 Issue worktree 时，runner 在该仓库的 `info/exclude` 补齐新旧会话目录的忽略规则。
+缺少对应 `.gitignore` 条目的历史分支也能保留本机会话记录，同时通过提交与发布前的工作区洁净检查。
 恢复领取、recovery 轮次和 pre-PR review 的 `run` / `deliberate` 用途经 `agent_spec` 的声明式
 `supports_resume` / `resume_args` 模板拼出续传命令行。Codex 用 profile 级 `resume_tail_args`
 将 `exec` 替换为 `exec resume <session_id>`；编排层不硬编码任何 CLI 的参数形态。
@@ -1845,7 +1847,7 @@ kc logs --repo-id keda-main --issue 42 --follow
 
 行为说明：
 
-- `--issue <N>` 与 `--kind` 互斥；不带 `--issue` 时保持原有进程日志语义。
+- `--issue <N>` 与任何显式的 `--kind` 互斥，包括 `--kind daemon`。省略 `--issue` 与 `--kind` 时默认查看 daemon 进程日志。
 - 首次输出给**尾部窗口**（默认最近 64 KiB，再按 `--lines` 截行），不会从头倾泻整份日志；之后按字节偏移增量续读。
 - 默认跟随该 Issue 的**最新尝试**；重试产生新文件时 CLI 会提示并切换。
 - Issue 尚未开始、日志已清理或仓库未注册时，显示明确的空态 / 不可用提示，不会回退到别的 Issue 或进程日志。
@@ -1997,13 +1999,20 @@ agent/ready
 1. RV 证据和仓库验证命令通过、PRD 执行侧条目完成并归档后，runner 将分支 push 到配置 remote，并创建或复用 Draft PR；此时不添加 `validation/verifier-passed`
 2. Draft PR 创建成功后，runner 尽力把人审材料上传到证据分支。看板按 PR 仓库刷新证据分支索引，同一仓库的远端查询至少间隔 30 秒，因此 `Review` 按钮通常可在 verifier 运行期间出现；材料发布失败只记录告警，不阻断 verifier。该入口表示可以提前查看材料，不表示验证通过或已经进入待人工评审状态
 3. 独立 verifier 对已提交工作树进行验证；失败时进入原有修复循环，后续合格提交更新同一个 Draft PR
-4. verifier 通过后，runner 写 Issue comment `Implementation Complete` 并构建 review packet（Issue、PRD、diff、changed paths、verification results、AI standards、review workflow）
+4. verifier 通过后，runner 写 Issue comment `Implementation Complete` 并构建 review packet（Issue、PRD、提交 diff、工作区状态、验证结果、AI standards、review workflow）
 5. **Reviewer 必须通过 Skill 工具调用 `code-reviewer` skill** 并把 skill 输出的 findings 写进响应的 `findings` JSON 数组；review packet 默认模板（`agent_review.DEFAULT_REVIEW_PROMPT_TEMPLATE`）会显式提示 reviewer 这一行为，并提供 findings schema（`category` / `severity` / `file` / `line` / `title` / `description` / `recommendation`）。仓库可在 `[agent_runner.pre_pr_review].review_prompt_template` 覆盖该模板，未配置时回退到代码默认。
 6. 若 reviewer 在当前 worktree / Issue 下已有可续传 session id，就接着该会话执行 review；没有记录时创建新会话。调用使用 `[agent_runner.pre_pr_review].timeout_seconds` 限制最长运行时间
 7. Reviewer 可直接修改 worktree；修改后写入 `.agent-runner/commit-request.json`
 8. Runner 通过 commit proxy 提交 reviewer 修改、重新运行 `verification_commands` 并 push 修复；更新 PR head 前先移除已有的 `validation/verifier-passed`，最终复核通过后再加回
 9. Runner 写 Issue comment `Pre-PR Review Result`（含 findings 表格）
 10. Review 通过后复用已创建的 Draft PR（或在提前发布失败时补建）；最终 head 的证据分支和 PR 证据评论在 verifier 结论发布阶段刷新；review 未收敛时走软失败路径并写 comment
+
+Review packet 单独标明未提交的工作区状态。提交 diff 超过 8,000 字符时，预览仍列出所有变更文件，并给出读取当前基线与待审提交之间完整差异的 Git 命令。
+默认审查规则要求从需求对应的正常入口核对实现。需求同时覆盖其他命令、配置分支或已有状态时，审查者应验证受影响的路径再作结论。
+
+可操作的问题必须有明确需求或既有契约作为依据。任务没有要求改变的优先级、默认值和
+兼容行为应保留；需求有歧义时说明不确定之处，不能自行发明新规则再据此修改代码。
+应用补丁因上下文不匹配被拒绝后，先重新读取受影响文件，再基于当前内容修订。
 
 提前出现的 `Review` 入口只允许预览验证材料：Issue 仍显示运行中，verifier 失败时仍按失败或阻塞状态呈现。PR 证据评论随最终 verifier 结论发布；`human/awaiting-review` 仍等 post-PR supervisor 通过且策略要求人工处理后才添加。
 
@@ -3775,7 +3784,9 @@ verifier 拿到的任务是"自己复跑真实入口 + 逐个跑 negative contro
 - `verifier_timeout_seconds`：墙钟上限，按最慢的真实工作量给足。
 - `verifier_inactivity_timeout_seconds`：连续无输出多久判卡死，语义与 builder 侧 `runner.inactivity_timeout_seconds` 相同。两条线并存后墙钟可以放宽，真卡死仍在静默期结束时被杀。
 
-带静默超时的捕获型调用会在等待直接子进程退出期间持续读取 stdout/stderr，进程退出后再有界等待读线程收尾。因此，verifier 即使只在退出前写入一次最终 verdict，也会被完整捕获；若退出后的孙进程仍持有输出管道，runner 最多等待 5 秒并返回已读内容，不会无限卡住。
+通用捕获型调用启用超时或通过 stdin 传入文本时，会并行处理 stdin、stdout 和 stderr。直接子进程退出后，runner 最多再读取 5 秒的输出，后代进程持有管道时也适用。没有换行符的输出尾部也会保留，stdin 投递继续只使用配置的总超时。
+
+在支持管道轮询的系统上，读取窗口结束后最多再等 250 毫秒，让捕获线程关闭本地 stdin、stdout 和 stderr 端口，然后返回已读内容。仍在工作的后代进程可以继续运行。
 
 超时按**运行事故**处理，不伪造 verdict：
 
@@ -4488,6 +4499,8 @@ kc console --api-only --no-browser
   顺延到过别的端口，再次调用也会找回它，而不是在缺省端口新开一个。
   要并行跑第二个 console（例如另一套状态目录）就显式指定一个空闲 `--port`；
   显式端口被**非 console** 的服务占用时仍按原样报错退出。
+- macOS/Linux 允许复用关闭后仍有 `TIME_WAIT` 连接的端口，但正在监听的服务仍算占用，
+  包括监听 `0.0.0.0` 的服务。Windows 保持原有端口探测行为。
 - 复用现有实例时 `--no-browser` 依旧有效：只打印 URL、不拉起浏览器，适合脚本
   里取 URL 或配合 SSH 端口转发（`ssh -L 8313:127.0.0.1:8313 <host>`）。
 - 源码开发模式缺少静态面板产物（整个目录不在，或目录在但缺 `index.html`
@@ -4713,6 +4726,9 @@ console SQLite 另加两张**追加式**账本表，把观测单位从"一次调
 
 两张表沿用现有旁路历史端口（`IRunHistoryStore` 族）的 WAL、迁移与
 错误策略，schema 通过 `PRAGMA user_version` 升级，不新增数据库或服务。
+Console 与 runner 打开同一个旧库时，SQLite 写事务串行执行版本升级。等待方获取写锁后
+重新读取版本。表结构与版本号一并提交，失败时一并回滚。并发首次启用 WAL 时，连接会
+在 SQLite 等待窗口内重试暂时的锁竞争。
 `run_records` 在 schema v13 追加可空 `issue_title` / `issue_url` 快照，升级前的
 运行记录两项数据为空；`attempt_records` 在 schema v11 附加可空 `failure_phase`
 列记录失败阶段，v12 附加 `phase_durations_json` 记录各生命周期阶段累计耗时；
@@ -5119,10 +5135,11 @@ cat logs/agent-runner/deliberations/test-001/workspaces/implementer/round-1-outp
 cat logs/agent-runner/deliberations/test-001/workspaces/synthesizer/synthesis-output.md
 ```
 
-若任一参与 agent 或 synthesizer 子进程返回非 0 退出码，默认行为不再整体失败，而是记录失败并继续；`--strict` 可恢复为失败即非 0。
+默认模式记录单次失败。只要任一参与者完成（包括回退成功）或 synthesizer 完成，`kc deliberate` 就返回 `0`。
+所有尝试均失败时返回 `1`。启用 `--strict` 后，任一尝试失败即返回 `1`。
 
 > **失败隔离与回退**：从本 PRD 起，`kc deliberate` 对单个 agent 失败默认隔离并继续。
-> - 失败 agent 的 `workspaces/<profile_id>/round-<n>-output.md` 保留 partial 输出。
+> - 失败 agent 的 `workspaces/<profile_id>/round-<n>-output.md` 保留已有输出，回退尝试的输出续写到同一个文件。
 > - TTY 下会提示选择回退模型，5 分钟无选择自动切换到下一个可用模型。
 > - 非 TTY / CI 下直接自动切换，不阻塞。
 > - 使用 `--strict` 或设置 `continue_on_agent_error = false` 时，任一 agent 失败即让 CLI 返回非 0。

@@ -1,0 +1,240 @@
+id: keda-history-expanded-v1
+version: 1.8.0
+title: Keda 历史扩展评测集
+repo_path: .
+base_ref: main
+rubric:
+  id: default-rubric
+  version: v1
+check:
+  timeout_seconds: 240
+cases:
+- id: deliberation-failure-isolation
+  prompt: Keep the historical iar deliberate command running after a participant fails.
+    Preserve its partial output, finish the other participants and synthesis, and
+    use the existing profile with a different registered agent if the injected fallback
+    resolver supplies one. The failure and fallback must appear in the result and
+    session.json failed_agents entries, including profile, original agent, fallback
+    agent if any, and reason. Fallback selection should be automatic in noninteractive
+    runs and offer a bounded choice in a terminal. A failed synthesizer with no fallback
+    should leave an empty synthesis while preserving other outputs. The default command
+    returns success when some work finishes; --strict returns nonzero for any failure,
+    and an entirely failed run also returns nonzero. Support the existing deliberation
+    settings layout with continue_on_agent_error defaulting to true and agent_failure_timeout_seconds
+    defaulting to 300. Keep old callers compatible. CLI roles can select registered
+    agents, and Kimi must be invoked without the unsupported --quiet flag.
+  check_recipe: uv-pytest
+  base_ref: f5e2c96b807f75a199b5951ed58470f07a3dee33
+  split: dev
+  check_targets:
+  - tests/test_eval_deliberation_cli_failures.py
+  held_out:
+  - tests/test_eval_deliberation_cli_failures.py
+  - tests/keda_eval_historical_cli.py
+  candidate_hidden:
+  - tasks/pending/P1-BUG-20260622-162748-deliberation-agent-failure-resilience.md
+  gold_patch: gold.patch
+- id: tty-repl-entry
+  prompt: Make bare iar open the conversational REPL in a terminal. Bare iar in a
+    pipe or script should show help and exit nonzero without a traceback. Preserve
+    named subcommands, accept explicit REPL agent selections but reject auto, and
+    require an initialized repository for REPL operations. The same terminal flow
+    must also be available through the named iar repl command. The user can select
+    claude, codex, or kimi. An explicit auto selection must never be passed to a REPL
+    runtime.
+  check_recipe: uv-pytest
+  base_ref: be393620b55cf30de3160414ee0107241c672d1c
+  split: dev
+  check_targets:
+  - tests/test_eval_tty_cli.py::test_no_terminal_shows_help_without_traceback
+  - tests/test_eval_tty_cli.py::test_tty_bare_entry_opens_session
+  - tests/test_eval_tty_cli.py::test_named_repl_accepts_explicit_agent
+  - tests/test_eval_tty_cli.py::test_named_help_still_works
+  - tests/test_eval_tty_cli.py::test_repl_explains_missing_repository_initialization
+  - tests/test_eval_tty_cli.py::test_repl_auto_is_rejected_or_falls_back
+  held_out:
+  - tests/test_eval_tty_cli.py
+  - tests/keda_eval_historical_cli.py
+  candidate_hidden:
+  - tasks/pending/P1-FEAT-20260622-152049-iar-repl-interactive-entry.md
+  gold_patch: gold.patch
+- id: repository-init-cli-gate
+  prompt: Commands that operate on a target repository must guide the operator to
+    initialize an unconfigured repository before running, publishing issues, changing
+    labels or creating a worktree. Keep command help and initialization reachable.
+    Initialized repositories, top-level repository selectors and explicit multi-repository
+    selection should continue to dispatch normally.
+  check_recipe: uv-pytest
+  base_ref: e21a5fb3ad8a61286c07a120bdc76ff512ddfad5
+  split: dev
+  check_targets:
+  - tests/test_eval_repository_init_gate.py::test_uninitialized_commands_explain_setup
+  - tests/test_eval_repository_init_gate.py::test_init_dry_run_and_help_remain_reachable
+  - tests/test_eval_repository_init_gate.py::test_initialized_repository_selected_at_root_does_not_fail_initialization
+  held_out:
+  - tests/test_eval_repository_init_gate.py
+  - tests/keda_eval_historical_cli.py
+  candidate_hidden:
+  - tasks/pending/P1-FEAT-20260612120000-prd-iar-init-check-gate.md
+  gold_patch: gold.patch
+- id: structured-evidence-opt-in
+  prompt: When an Issue is created from a PRD that requires Realistic Validation,
+    its generated body must opt the Issue into structured evidence. An Issue with
+    no validation checklist must retain its previous behavior. Existing Issues without
+    the opt-in must remain compatible with legacy evidence. Generate a version-1 iar:structured-evidence
+    HTML comment with the configured language. Honor an explicit opt-out requested
+    when constructing an Issue from a PRD.
+  check_recipe: uv-pytest
+  base_ref: cd9b843d5c7bb3465f354c2b9d82ed32e6082133
+  split: dev
+  check_targets:
+  - tests/test_eval_structured_evidence.py::test_validation_emits_versioned_marker
+  - tests/test_eval_structured_evidence.py::test_validation_marker_uses_requested_language
+  - tests/test_eval_structured_evidence.py::test_checklist_free_issue_keeps_legacy_body
+  - tests/test_eval_structured_evidence.py::test_explicit_opt_out_preserves_validation_but_skips_marker
+  held_out:
+  - tests/test_eval_structured_evidence.py
+  candidate_hidden: []
+  gold_patch: gold.patch
+- id: issue-log-resume-and-isolation
+  prompt: 'Expose visible execution output for one registered repository and Issue,
+    including single-Issue foreground runs. Persist independent attempts as logs/agent-runner/issues/<repo_id>/issue-<number>-<timestamp>.log.
+    The installed iar logs command must support --issue N and --lines N, show the
+    last N data lines by default, work without --follow, and return an empty success
+    for a missing Issue attempt without reading other logs. Explicit --issue and --kind
+    are mutually exclusive.
+
+
+    The Console GET route is /api/v1/agent-runner/console/repositories/{repo_id}/issues/{issue_number}/logs.
+    Read starting at byte offset 0 unless offset is supplied or tail=true is requested.
+    Support attempt_id, offset, max_bytes, and tail=true. Return repo_id, issue_number,
+    content, next_offset, eof, attempt_id, latest_attempt_id and a status of ok, no_attempt,
+    attempt_gone, or truncated. When polling an explicit existing old attempt, retain
+    its output while updating latest_attempt_id. When that attempt disappears or the
+    offset exceeds the file length, report the corresponding status. An unknown repository
+    returns HTTP 404 and a nonpositive Issue number returns HTTP 400.'
+  check_recipe: uv-pytest
+  base_ref: 5fac043246a261c8a8751faf19b49fb454ebaa34
+  split: dev
+  check_targets:
+  - tests/test_eval_agent_runner_console_api.py::test_issue_log_attempt_switch_and_truncation
+  - tests/test_eval_agent_runner_console_api.py::test_issue_log_empty_state_for_missing_attempt
+  - tests/test_eval_agent_runner_console_api.py::test_issue_log_offset_pagination
+  - tests/test_eval_agent_runner_console_api.py::test_issue_log_reads_registered_repo_issue
+  - tests/test_eval_agent_runner_console_api.py::test_issue_log_rejects_invalid_issue_number
+  - tests/test_eval_agent_runner_console_api.py::test_issue_log_requires_registered_repo
+  - tests/test_eval_agent_runner_console_api.py::test_issue_log_tail_window_returns_last_bytes
+  - tests/test_eval_agent_runner_console_api.py::test_issue_log_tail_window_with_explicit_attempt
+  - tests/test_eval_agent_runner_orchestrate.py::test_run_once_sequential_default_writes_per_issue_logs
+  - tests/test_eval_cli_registry.py::test_logs_command_issue_and_kind_are_mutually_exclusive
+  - tests/test_eval_cli_registry.py::test_logs_command_issue_no_attempt_is_clean_exit
+  - tests/test_eval_cli_registry.py::test_logs_command_issue_prints_tail_and_exits_without_follow
+  - tests/test_eval_cli_registry.py::test_logs_command_issue_tail_window_skips_large_history
+  held_out:
+  - tests/test_eval_agent_runner_console_api.py
+  - tests/test_eval_agent_runner_orchestrate.py
+  - tests/test_eval_cli_registry.py
+  candidate_hidden:
+  - tasks/pending/P1-FEAT-20260928-183700-issue-live-output-cli-console.md
+  gold_patch: gold.patch
+- id: issue-output-event-timestamps
+  prompt: Show the time of visible Agent events in per-Issue logs and the Console's
+    live output. Use a local HH:MM:SS prefix for new Agent lines that do not already
+    have a timestamp, preserving runner heartbeat timestamps. Where a foreground run
+    mirrors logs to the initial terminal and a log file, both should show the same
+    event time. Preserve output across single-Issue and parallel execution.
+  check_recipe: uv-pytest
+  base_ref: 58312b87500d2c8c643ab7288e22be743f76db71
+  split: holdout
+  check_targets:
+  - tests/test_eval_daemon_parallel_concurrency.py::test_issue_output_routing_end_to_end_log_file_timestamps_agent_lines
+  - tests/test_eval_daemon_parallel_concurrency.py::test_issue_output_routing_serial_mirror_writes_file_and_console
+  - tests/test_eval_daemon_parallel_concurrency.py::test_issue_output_routing_writes_file_and_view
+  held_out:
+  - tests/test_eval_daemon_parallel_concurrency.py
+  candidate_hidden: []
+  gold_patch: gold.patch
+- id: standalone-operator-skill-refresh
+  prompt: Add a supported kc skill install command to refresh packaged operator skills
+    in an already initialized repository, without replacing project configuration.
+    The command must be discoverable in machine-readable CLI schema. When kc init
+    finds an existing configuration, its guidance should point users who only need
+    a skill refresh to the new command. Keep the packaged Operator skill's read-only
+    command documentation in agreement with the runtime CLI schema.
+  check_recipe: uv-pytest
+  base_ref: 09ada0cdbf96b3c068efd777464480e2bc130f8a
+  split: dev
+  check_targets:
+  - tests/test_eval_skill_refresh_cli.py
+  - tests/test_eval_operator_schema.py::test_packaged_skill_whitelist_matches_runtime_schema
+  held_out:
+  - tests/test_eval_skill_refresh_cli.py
+  - tests/test_eval_operator_schema.py
+  candidate_hidden:
+  - tasks/pending/P2-BUG-20261008-145100-kc-skill-reinstall-entry.md
+  gold_patch: gold.patch
+- id: detached-rebase-recovery
+  prompt: A Git rebase paused on conflicts legitimately leaves the worktree detached.
+    Allow the runner's conflict recovery to stage the agent's resolution and continue
+    the rebase when local Git can prove it is rebasing the expected branch. Retain
+    the safety check for wrong or unknown branches and preserve ordinary commit behavior
+    outside that recovery.
+  check_recipe: uv-pytest
+  base_ref: 51d481b174d16623a09a4178ca2697e99e46cb36
+  split: holdout
+  check_targets:
+  - tests/test_eval_real_rebase.py::test_resolved_real_detached_rebase_pushes_expected_branch
+  held_out:
+  - tests/test_eval_real_rebase.py
+  candidate_hidden:
+  - tasks/pending/P1-BUG-20260528-095136-agent-runner-rebase-detached-head-branch-guard.md
+  gold_patch: gold.patch
+- id: validate-prd-issue-anchor
+  prompt: When reading an Issue to decide whether to create a new PRD or rewrite an
+    existing one, recognize a valid repository-relative PRD path, including the documented
+    Markdown formatting forms. Treat malformed or unrelated anchor text as absent
+    so it is never mistaken for an existing PRD.
+  check_recipe: uv-pytest
+  base_ref: 94e8bff6b09fde0baff59acde43ed7b65ebae16d
+  split: dev
+  check_targets:
+  - tests/test_run_agent.py::test_extract_prd_path_rejects_garbage_anchor
+  - tests/test_run_agent.py::test_extract_prd_path_finds_backtick_path
+  - tests/test_run_agent.py::test_extract_prd_path_ignores_inline_code_anchor
+  held_out:
+  - tests/test_run_agent.py
+  - tests/conftest.py
+  candidate_hidden:
+  - tasks/pending/P2-FEAT-20260527-190923-prd-from-issue.md
+  gold_patch: gold.patch
+- id: evidence-check-cli
+  prompt: Add a local kc evidence check command to re-run a worktree's evidence manifest
+    with the same parser, per-command timeout ceiling and stdout-assertion semantics
+    as the delivery gate. Run every valid item and report all failures, including
+    the expected assertion and closest output line. A timed-out item must not stop
+    later items. If the manifest is invalid, execute nothing. The explicit evidence
+    directory wins, a unique default candidate can be selected, and multiple candidates
+    are a usage error. Support machine-readable JSON and exit codes 0 for success,
+    1 for failed evidence, and 2 for invalid CLI usage including a timeout above the
+    configured ceiling. Keep delivery-gate pass criteria and legacy manifests compatible.
+    The gate must also aggregate all failing items. Synchronize the packaged operator
+    skill and runner evidence guidance. The CLI is exercised in an initialized Git
+    checkout. No specific spelling for the explicit evidence-directory option or JSON
+    field layout is required; discoverable options and machine-readable per-item outcomes
+    must express the stated behaviors.
+  check_recipe: uv-pytest
+  base_ref: e449728a8e38d7406a15e74d0e9f30e9888fa5c5
+  split: dev
+  check_targets:
+  - tests/test_eval_evidence_gate.py::test_ensure_validation_commands_pass_aggregates_assertion_and_timeout
+  - tests/test_eval_evidence_gate.py::test_ensure_validation_commands_pass_aggregates_assertion_failures
+  - tests/test_eval_evidence_gate.py::test_ensure_validation_commands_pass_reports_every_failing_item
+  - tests/test_eval_evidence_gate.py::test_ensure_validation_commands_pass_timeout_does_not_stop_remaining_items
+  - tests/test_eval_evidence_cli_behavior.py
+  held_out:
+  - tests/test_eval_evidence_gate.py
+  - tests/test_eval_evidence_cli_behavior.py
+  - tests/eval_evidence_fixtures.py
+  candidate_hidden:
+  - tasks/pending/P1-FEAT-20261030-163441-evidence-self-check.md
+  gold_patch: gold.patch

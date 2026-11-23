@@ -32,6 +32,10 @@ from backend.core.use_cases.agent_runner_repository_local import (
     GitignoreSyncOptions,
     ensure_gitignore_entries,
 )
+from backend.core.use_cases.agent_runner_session_store import (
+    AgentSessionScope,
+    save_agent_session_record,
+)
 from backend.infrastructure.process_runner import SubprocessRunner
 
 _PRD_STEM = "P1-FEAT-20990101-000000-demo"
@@ -193,3 +197,28 @@ def test_evidence_commit_semantics_legacy_config_unchanged(tmp_path: Path) -> No
     _git(repo_path, "add", "-f", f".iar/evidence/{_PRD_STEM}.evidence-report.md")
     with pytest.raises(RuntimeError, match="evidence"):
         ensure_no_evidence_paths_in_changes(repo_path, legacy_config, process_runner)
+
+
+@pytest.mark.parametrize("state_dir", [".kedacode", ".iar"])
+def test_runner_session_records_keep_legacy_worktree_clean(tmp_path: Path, state_dir: str) -> None:
+    """未维护忽略规则的旧仓库不会提交实现会话，也不会被评审会话弄脏。"""
+    repo_path = _init_repo(tmp_path)
+    worktree_path = tmp_path / "issue-worktree"
+    _git(repo_path, "config", "core.excludesFile", str(tmp_path / "no-global-ignore"))
+    _git(repo_path, "worktree", "add", "--detach", str(worktree_path))
+    (worktree_path / state_dir).mkdir()
+
+    ensure_evidence_dir_excluded(worktree_path, AppConfig(), SubprocessRunner())
+    save_agent_session_record(worktree_path, agent_name="codex", session_id="implementation")
+    (worktree_path / "src.py").write_text("value = 1\n", encoding="utf-8")
+    _git(worktree_path, "add", "-A")
+    assert _git(worktree_path, "diff", "--cached", "--name-only").splitlines() == ["src.py"]
+    _git(worktree_path, "commit", "-qm", "implement")
+
+    save_agent_session_record(
+        worktree_path,
+        agent_name="codex",
+        session_id="review",
+        scope=AgentSessionScope(phase="review"),
+    )
+    assert _git(worktree_path, "status", "--porcelain") == ""

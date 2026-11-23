@@ -294,7 +294,57 @@ def test_build_review_packet_includes_diff_and_verification() -> None:
     assert "M file.py" in packet
     assert "`just test`: exit 0" in packet
     assert "call the `code-reviewer` skill" in packet
+    assert "requested behavior through its normal entry point" in packet
+    assert "focused check to verify the affected route before approving" in packet
     assert "Findings JSON schema" in packet
+
+
+def test_build_review_packet_lists_files_outside_truncated_preview() -> None:
+    """干净工作树的长 diff 仍给审查者列出全部变更文件，并说明如何读取完整补丁。"""
+    diff_content = (
+        "diff --git a/long.py b/long.py\n+"
+        + "a" * 8500
+        + '\ndiff --git "a/late 中文.py" "b/late 中文.py"\n+late_change\n'
+    )
+    diff_command = ("git", "diff", "main...abc123")
+    files_command = (
+        "git",
+        "-c",
+        "core.quotepath=false",
+        "diff",
+        "--name-status",
+        "main...abc123",
+        "--",
+    )
+    fake_runner = FakeProcessRunner(
+        responses={
+            diff_command: CommandResult(
+                command=diff_command, return_code=0, stdout=diff_content, stderr=""
+            ),
+            files_command: CommandResult(
+                command=files_command,
+                return_code=0,
+                stdout="M\tlong.py\nA\tlate 中文.py\n",
+                stderr="",
+            ),
+        }
+    )
+
+    packet = build_review_packet(
+        issue=IssueSummary(number=1, title="Long review", url="", body="", labels=()),
+        worktree_path=Path("."),
+        config=AppConfig(),
+        process_runner=fake_runner,
+        verification_results=[],
+        head_sha="abc123",
+    )
+
+    assert "Worktree status:" in packet
+    assert "(no uncommitted changes)" in packet
+    assert "A\tlate 中文.py" in packet
+    assert "late_change" not in packet
+    assert "This committed diff preview is truncated" in packet
+    assert "git --no-pager diff main...abc123 --" in packet
 
 
 def _build_review_packet_for_prd(worktree_path: Path, prd_relative_path: str) -> str:

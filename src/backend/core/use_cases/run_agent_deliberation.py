@@ -258,7 +258,9 @@ def _run_round(
     # Register profiles with the output view for this round
     output_view.register_round_profiles(round_number, profiles)
 
-    def _run_profile(profile: DeliberationAgentProfile) -> AgentRunOutcome:
+    def _run_profile(
+        profile: DeliberationAgentProfile, *, preceding_output: str = ""
+    ) -> AgentRunOutcome:
         prompt = prompt_builder(profile)
         profile_workspace = workspace_root / profile.profile_id
         profile_workspace.mkdir(parents=True, exist_ok=True)
@@ -266,6 +268,8 @@ def _run_round(
         streaming_sink = _create_streaming_sink(
             output_path, output_view, round_number, profile.profile_id
         )
+        if preceding_output:
+            _write_workspace_output(output_path, f"{preceding_output}\n\n")
         display_sink = _create_display_sink(output_view, round_number, profile.profile_id)
         return _run_single_agent(
             agent_name=profile.agent,
@@ -315,7 +319,7 @@ def _run_round(
                 "agent_fallback",
                 f"fallback={fallback.agent}",
             )
-            fallback_outcome = _run_profile(fallback)
+            fallback_outcome = _run_profile(fallback, preceding_output=outcome.stdout)
             if fallback_outcome.success:
                 outputs[fallback.profile_id] = fallback_outcome.stdout
                 failed_agents.append(

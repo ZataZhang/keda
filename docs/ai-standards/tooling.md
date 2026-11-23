@@ -75,7 +75,7 @@ CI 只是异步门禁，不要守着它等。三条约定：
 
 ## CLI Surface And Packaged Skill Sync
 
-`kc` CLI 是给 agent 的一等机读执行面（定位见 `ROADMAP.md`）。任何改动 CLI 表面——新增或改名子命令、增加/修改旗标、调整退出码或机器可读输出——**必须同步**以下随包资产，否则 agent 侧知识会与真实命令树漂移：
+`kc` CLI 是给 agent 的一等机读执行面，定位见[产品边界](../project/product-boundaries.md)。改动子命令、旗标、退出码或机器可读输出时，必须同步以下随包资产：
 
 - 随包 operator skill：`src/backend/engines/agent_runner/templates/skills/kedacode-operator/`（主文件 `SKILL.md` 保留共享基线与 Safety 不变量、退出码说明，子命令流程移入 `references/*.md`，命令示例随各 reference 更新）。
 - 文档：`docs/`（CLI 参考与 guide），并保证 `uv run mkdocs build --strict` 通过。

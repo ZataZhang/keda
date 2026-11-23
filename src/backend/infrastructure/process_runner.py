@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import errno
 import os
+import select
 import shutil
 import signal
 import subprocess
@@ -10,6 +12,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable, Sequence
+from io import TextIOWrapper
 from pathlib import Path
 from typing import Any
 
@@ -109,6 +112,9 @@ _MAX_BUFFER_SIZE = 4096
 _MAX_ERROR_DETAIL_LEN = 4096
 _COMMAND_HEARTBEAT_SECONDS = 60
 _PROCESS_OUTPUT_JOIN_TIMEOUT_SECONDS = 5.0
+_CAPTURE_PIPE_POLL_MILLISECONDS = 100
+_CAPTURE_PIPE_CLEANUP_SECONDS = 0.25
+_CAN_POLL_CAPTURE_PIPES = hasattr(select, "poll") and hasattr(select, "PIPE_BUF")
 
 # 带超时的子进程都放进**自己的进程组**，超时时才能整组回收（见
 # :func:`_terminate_process_tree`）。用 ``process_group=0``（setpgid）而不是
@@ -127,9 +133,7 @@ def _terminate_process_tree(
 
     ``Popen.kill()`` 只向直接子进程发信号。对 ``bash -lc "script.sh | tee log"``
     这类命令，管道里的 ``tee`` 和脚本自己拉起的后台进程会活下来，并继续持有它们
-    继承到的 stdout 写端；于是 :func:`_run_captured_process` 的 ``communicate()``
-    永远读不到 EOF，超时后整个 runner 无限期阻塞——被 kill 的子进程连僵尸都没被
-    回收，daemon 也不再轮询任何 Issue。
+    继承到的 stdout 写端。整组终止会回收仍在工作的后代，并让读线程收到 EOF。
 
     子进程由 ``_OWN_PROCESS_GROUP_KWARGS`` 放进独立进程组（组 id 等于其 pid），
     向组发信号即可覆盖所有派生进程。若平台不支持而子进程仍留在 runner 自己的组
@@ -197,8 +201,7 @@ def _process_termination_identity(
     的结果，而不是再取一次组号。
 
     任一项读不到时返回 ``(None, None)``：调用方退回不带身份校验的既有路径——宁可沿用
-    旧的"按当前组号击杀"，也不能因为读不到身份就放弃拆除（管道写端会一直有人持有，
-    ``communicate()`` 于是永远等不到 EOF）。
+    旧的"按当前组号击杀"，也不能因为读不到身份就放弃回收进程。
     """
     if not hasattr(os, "getpgid"):  # pragma: no cover - Windows 没有 getpgid。
         return None, None
@@ -611,9 +614,7 @@ def _run_captured_process(
             时沿用 ``subprocess`` 的父环境继承语义，绕过 ``run()`` 直接调用
             本函数的调用方需自行保证环境已净化。
         attempt_key: 活跃 attempt 登记键（停滞监督的所有权证据来源）。
-        input_text: 经 stdin 投递的文本。传入时走 ``communicate(input=...)``
-            ——与 :meth:`SubprocessRunner.run` 原先用 ``subprocess.run`` 投递
-            stdin 的语义一致（捕获式、无输出活动跟踪）。
+        input_text: 由后台线程经 stdin 投递的文本，写完后关闭输入管道。
         usage_collector: 可选 agent 输出旁路观测器；捕获输出在返回或超时前解析。
         cancel_check: 人工接管取消探针，由 watchdog 秒级 tick 轮询；命中即
             终止进程组并在捕获返回后抛 InterruptedError（Issue #278）。
@@ -643,10 +644,9 @@ def _run_captured_process(
     )
     watchdog.start()
     try:
-        if input_text is not None or inactivity_timeout is None:
-            stdout, stderr = process.communicate(input=input_text)
-        else:
-            stdout, stderr = _communicate_with_activity_tracking(process, watchdog)
+        stdout, stderr = _communicate_with_activity_tracking(
+            process, watchdog, input_text=input_text
+        )
         if usage_collector is not None:
             usage_collector.observe_text(stdout)
             usage_collector.observe_text(stderr)
@@ -655,7 +655,7 @@ def _run_captured_process(
     except BaseException as exc:
         _observe_exception_output(exc, usage_collector)
         _attach_stream_observations(exc, usage_collector)
-        # 二次拆除必须用创建时刻读到的身份：走到这里时 communicate() 已经把子进程
+        # 二次拆除必须用创建时刻读到的身份：走到这里时 wait() 可能已经把子进程
         # 回收了（接管取消正是先杀后回收才抛的 InterruptedError），再按 pid 取一次
         # 进程组，读到的可能是复用该 pid 的别的进程。
         watchdog.terminate()
@@ -674,40 +674,100 @@ def _run_captured_process(
 def _communicate_with_activity_tracking(
     process: subprocess.Popen[str],
     watchdog: _ProcessWatchdog,
+    *,
+    input_text: str | None = None,
 ) -> tuple[str, str]:
-    """并行排空输出并跟踪活动,在子进程退出后有界等待读线程收尾。"""
-    stdout_lines: list[str] = []
-    stderr_lines: list[str] = []
+    """并行处理输入和输出，在直接子进程退出后有界等待管道收尾。"""
+    captured_stdout = bytearray()
+    captured_stderr = bytearray()
+    stop_pipe_io = threading.Event()
+    stdin_errors: list[OSError] = []
 
-    def _pump_stdout() -> None:
-        if process.stdout is None:
+    def _pipe_poller(pipe_fd: int, event_mask: int):
+        poller = select.poll()
+        poller.register(pipe_fd, event_mask)
+        return poller
+
+    def _pump_output(output_pipe: TextIOWrapper | None, captured_output: bytearray) -> None:
+        if output_pipe is None:
             return
-        for line in process.stdout:
-            watchdog.note_output()
-            stdout_lines.append(line)
+        with output_pipe:
+            poller = (
+                _pipe_poller(output_pipe.fileno(), select.POLLIN)
+                if _CAN_POLL_CAPTURE_PIPES
+                else None
+            )
+            # 管道写端可能仍被后代持有，按行读取会卡住没有换行的尾部输出。
+            while not stop_pipe_io.is_set():
+                if poller is not None and not poller.poll(_CAPTURE_PIPE_POLL_MILLISECONDS):
+                    continue
+                output_chunk = output_pipe.buffer.read1(_MAX_BUFFER_SIZE)
+                if not output_chunk:
+                    break
+                captured_output.extend(output_chunk)
+                watchdog.note_output()
 
-    def _pump_stderr() -> None:
-        if process.stderr is None:
-            return
-        for line in process.stderr:
-            watchdog.note_output()
-            stderr_lines.append(line)
+    def _write_stdin(stdin_pipe: TextIOWrapper, stdin_text: str) -> None:
+        try:
+            with stdin_pipe:
+                if not _CAN_POLL_CAPTURE_PIPES:
+                    stdin_pipe.write(stdin_text)
+                    return
+                pipe_fd = stdin_pipe.fileno()
+                poller = _pipe_poller(pipe_fd, select.POLLOUT)
+                input_bytes = stdin_text.encode(stdin_pipe.encoding, errors=stdin_pipe.errors)
+                bytes_written = 0
+                while bytes_written < len(input_bytes) and not stop_pipe_io.is_set():
+                    if not poller.poll(_CAPTURE_PIPE_POLL_MILLISECONDS):
+                        continue
+                    # 只有当前线程写入此端。每次最多写 PIPE_BUF，避免就绪后因大块写入阻塞。
+                    input_chunk = input_bytes[bytes_written : bytes_written + select.PIPE_BUF]
+                    bytes_written += os.write(pipe_fd, input_chunk)
+        except OSError as stdin_error:
+            # 与 Popen.communicate 一样，子进程提前关闭输入管道不算执行失败。
+            if isinstance(stdin_error, BrokenPipeError) or (
+                os.name == "nt" and stdin_error.errno == errno.EINVAL
+            ):
+                return
+            stdin_errors.append(stdin_error)
+            watchdog.terminate()
 
-    stdout_thread = threading.Thread(target=_pump_stdout, daemon=True)
-    stderr_thread = threading.Thread(target=_pump_stderr, daemon=True)
-    stdout_thread.start()
-    stderr_thread.start()
+    pipe_threads = [
+        threading.Thread(target=_pump_output, args=(process.stdout, captured_stdout), daemon=True),
+        threading.Thread(target=_pump_output, args=(process.stderr, captured_stderr), daemon=True),
+    ]
+    if input_text is not None and process.stdin is not None:
+        # 写入大于管道缓冲区的输入时，子进程仍可同时写出内容。
+        pipe_threads.append(
+            threading.Thread(target=_write_stdin, args=(process.stdin, input_text), daemon=True)
+        )
 
-    # 等待期间读线程持续排空管道,避免进程因 pipe 写满而停住。子进程退出后再
-    # 用一个共享时间上限收尾:孙进程若仍持有写端,此处返回目前已读到的内容。
-    process.wait()
-    join_deadline = time.monotonic() + _PROCESS_OUTPUT_JOIN_TIMEOUT_SECONDS
-    for reader_thread in (stdout_thread, stderr_thread):
-        remaining_join_seconds = join_deadline - time.monotonic()
-        if remaining_join_seconds <= 0:
-            break
-        reader_thread.join(timeout=remaining_join_seconds)
-    return "".join(stdout_lines), "".join(stderr_lines)
+    try:
+        for pipe_thread in pipe_threads:
+            pipe_thread.start()
+        process.wait()
+        join_deadline = time.monotonic() + _PROCESS_OUTPUT_JOIN_TIMEOUT_SECONDS
+        for pipe_thread in pipe_threads:
+            pipe_thread.join(timeout=max(0.0, join_deadline - time.monotonic()))
+    finally:
+        stop_pipe_io.set()
+        if _CAN_POLL_CAPTURE_PIPES:
+            cleanup_deadline = time.monotonic() + _CAPTURE_PIPE_CLEANUP_SECONDS
+            for pipe_thread in pipe_threads:
+                if pipe_thread.is_alive():
+                    pipe_thread.join(timeout=max(0.0, cleanup_deadline - time.monotonic()))
+    if stdin_errors:
+        raise stdin_errors[0]
+
+    # 一次解码保留跨读取块的 UTF-8 字符，并沿用捕获文本的通用换行语义。
+    def _decode_output(captured_output: bytearray) -> str:
+        return (
+            captured_output.decode("utf-8", errors="replace")
+            .replace("\r\n", "\n")
+            .replace("\r", "\n")
+        )
+
+    return _decode_output(captured_stdout), _decode_output(captured_stderr)
 
 
 class _ProcessWatchdog:

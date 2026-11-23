@@ -1,0 +1,333 @@
+diff --git a/docs/architecture/system-design.md b/docs/architecture/system-design.md
+index b86c89dd..1995fb23 100644
+--- a/docs/architecture/system-design.md
++++ b/docs/architecture/system-design.md
+@@ -197 +197 @@ Agent Runner 有两类只读日志，刻意分开：
+-- **Issue 实时输出**（`core/use_cases/issue_logs.py` + `infrastructure/console/issue_log_reader.py`）：面向「某个 Issue 正在被 Agent 处理」的可见输出，按 `(repo_id, issue_number, attempt_id, offset)` 续读。单次 `iar run`（串行）与并行 daemon 都把每个 Issue 的可见输出落到 `logs/agent-runner/issues/<repo_id>/issue-<N>-<时间戳>.log`，CLI（`iar logs --issue`）与 Console API 共享同一窄端口 `core/shared/interfaces/issue_log_reader.py`，读取范围被限制在已注册仓库的固定日志子树内，不接受客户端传入的任意路径。首次读取支持「尾部窗口」（`tail` 请求标记：忽略偏移、从文件末尾回推最多 `max_bytes` 字节），之后按返回的 `next_offset` 增量续读。
++- **Issue 实时输出**（`core/use_cases/issue_logs.py` + `infrastructure/console/issue_log_reader.py`）：面向「某个 Issue 正在被 Agent 处理」的可见输出，按 `(repo_id, issue_number, attempt_id, offset)` 续读。单次 `iar run`（串行）与并行 daemon 都把每个 Issue 的可见输出落到 `logs/agent-runner/issues/<repo_id>/issue-<N>-<时间戳>.log`，CLI（`iar logs --issue`）与 Console API 共享同一窄端口 `core/shared/interfaces/issue_log_reader.py`，读取范围被限制在已注册仓库的固定日志子树内，不接受客户端传入的任意路径。行首时间戳是**消费侧**契约，唯一落点是 per-Issue 输出路由 sink（`core/use_cases/agent_runner_output_routing.py`，格式化工具在 `core/shared/interfaces/output_timestamps.py`）：流式渲染层（`infrastructure/process_runner.py` 与 `engines/agent_runner/output_protocols/`）交给 `output_sink` 的始终是可读原文，sink 在分发给日志文件 / 实时看板 / 前台镜像前给每个物理行行首加 `[HH:MM:SS]`，因此同一 Issue 的三个消费端逐行一致，而合议 workspace 文件等原文消费方不受影响。读取端不解析该前缀，仍按纯文本如实渲染。首次读取支持「尾部窗口」（`tail` 请求标记：忽略偏移、从文件末尾回推最多 `max_bytes` 字节），之后按返回的 `next_offset` 增量续读。
+diff --git a/docs/guides/agent-runner.md b/docs/guides/agent-runner.md
+index d37ce73e..e7643eed 100644
+--- a/docs/guides/agent-runner.md
++++ b/docs/guides/agent-runner.md
+@@ -1473 +1473,2 @@ iar logs --repo-id keda-main --issue 42 --follow
+-- 单次 `iar run`（串行）与并行 daemon 使用同一归属规则；原启动终端的可读输出不受影响。
++- 单次 `iar run`（串行）与并行 daemon 使用同一归属规则；串行时启动终端收到的就是这条 per-Issue 流的镜像，因此**同样带行首时间戳**——与未经路由时终端实时视图的显示一致（TTY 与重定向都一样），不是「无前缀的原始输出」。
++- Agent 流式输出的每个物理行在写入 per-Issue 日志、实时看板与前台镜像时带 `[HH:MM:SS]` 行首时间戳，可与心跳行的完整日期时间前缀对照时间线。时间戳由**输出路由 sink** 统一添加（`core/use_cases/agent_runner_output_routing.py`）：agent 生产者交给 sink 的始终是可读原文，所以合议的 `workspaces/**/*.md` 等原文产物不会被塞进时间线。文本增量只在行首加一次时间戳，不会切断同一行；`[iar-attempt-end]` 终态标记不经 sink，保持裸行，`--follow` 仍能精确匹配它。
+@@ -2156,2 +2157,2 @@ iar daemon --concurrency 3
+-- **每 Issue 日志文件**（始终写）：`logs/agent-runner/issues/<repo_id>/issue-<N>-<时间戳>.log`，含该 Issue 的 agent 流式输出与处理日志，可在 detached / 托管模式下 `tail -f` 回看，互不交错。
+-- **实时看板**（前台 TTY）：在交互终端直接 `iar daemon --concurrency 3` 时，会显示一个仿 `iar deliberate` 的多列实时面板，每个运行中的 Issue 一列；非 TTY（重定向、`iar registry start` 托管、CI）自动退化为按行加 `[issue #N ...]` 前缀的纯文本 + 上述日志文件。
++- **每 Issue 日志文件**（始终写）：`logs/agent-runner/issues/<repo_id>/issue-<N>-<时间戳>.log`，含该 Issue 的 agent 流式输出与处理日志，可在 detached / 托管模式下 `tail -f` 回看，互不交错。agent 流式输出的每行行首带 `[HH:MM:SS]` 时间戳，与心跳行的时间前缀对得上。
++- **实时看板**（前台 TTY）：在交互终端直接 `iar daemon --concurrency 3` 时，会显示一个仿 `iar deliberate` 的多列实时面板，每个运行中的 Issue 一列；非 TTY（重定向、`iar registry start` 托管、CI）自动退化为按行加 `[issue #N ...]` 前缀的纯文本 + 上述日志文件。看板与纯文本视图收到的都是路由 sink 那份文本，因此每行顺序是 `[issue #N status=...] [HH:MM:SS] 原文`。
+diff --git a/src/backend/core/shared/interfaces/agent_output_protocol.py b/src/backend/core/shared/interfaces/agent_output_protocol.py
+index c9f012dc..a775beb2 100644
+--- a/src/backend/core/shared/interfaces/agent_output_protocol.py
++++ b/src/backend/core/shared/interfaces/agent_output_protocol.py
+@@ -57 +57,3 @@ class OutputRelayRequest:
+-        output_sink: 渲染文本块回调（驱动 live 面板 / 工作区文件）。
++        output_sink: 渲染文本块回调（驱动 live 面板 / 工作区文件）；
++            实现端只交**可读原文**，不加行首时间戳——需要时间线的消费方
++            （如 per-Issue 路由 sink）在自己的边界上加 ``[HH:MM:SS]``。
+diff --git a/src/backend/core/shared/interfaces/agent_runner.py b/src/backend/core/shared/interfaces/agent_runner.py
+index 07c9d6b1..137629cc 100644
+--- a/src/backend/core/shared/interfaces/agent_runner.py
++++ b/src/backend/core/shared/interfaces/agent_runner.py
+@@ -173,5 +173,8 @@ class IProcessRunner(ABC):
+-            output_sink: 可选的流式输出回调。提供时，Claude ``stream-json``
+-                的渲染文本块会逐块回传给该回调，而非直接 ``print`` 到当前
+-                终端——用于并行处理时把每个 Issue 的 agent 输出分流到独立
+-                面板/日志，避免多路输出在同一 stdout 交错。非 Claude 流式
+-                命令忽略该参数。
++            output_sink: 可选的流式输出回调。提供时，流式渲染文本块会逐块
++                回传给该回调，而非直接 ``print`` 到当前终端——用于并行处理
++                时把每个 Issue 的 agent 输出分流到独立面板/日志，避免多路
++                输出在同一 stdout 交错。回传块是**可读原文**：实现端不加
++                行首时间戳，需要时间线的消费方在自己的边界上加（per-Issue
++                实时输出由 ``core/use_cases/agent_runner_output_routing.py``
++                的 sink 统一加 ``[HH:MM:SS]``，见 Issue #223）。
++                通用捕获路径（``capture_output=True``）不使用该回调。
+@@ -247 +250,3 @@ class IAgentTranscriptRunner(ABC):
+-            output_sink: 可选回调，用于接收「可读的、已渲染的文本块」。
++            output_sink: 可选回调，用于接收「可读的、已渲染的文本块」
++                （可读原文，不带行首时间戳；时间线只在需要它的消费侧加，
++                见 :class:`IProcessRunner` 的 ``output_sink`` 说明）。
+@@ -249,2 +254,2 @@ class IAgentTranscriptRunner(ABC):
+-                流式展示并追加写入工作区文件。这部分内容会计入正式
+-                transcript。
++                流式展示并追加写入工作区文件。
++                这部分内容会计入正式 transcript。
+diff --git a/src/backend/core/shared/interfaces/output_timestamps.py b/src/backend/core/shared/interfaces/output_timestamps.py
+new file mode 100644
+index 00000000..a4231312
+--- /dev/null
++++ b/src/backend/core/shared/interfaces/output_timestamps.py
+@@ -0,0 +1,95 @@
++"""流式输出的行首时间戳格式化。
++
++Issue #223 要求 per-Issue 实时输出带上时间线，但时间戳属于**消费侧展示**，
++不是 agent 生产者的输出内容：谁需要时间线，谁在自己的边界上调用本模块。
++这样 ``output_sink`` 一路传递的始终是可读原文，落盘内容仍可被复制、被行首
++锚定的解析器读取。当前只有两个消费侧：
++
++- 终端实时视图：``infrastructure/process_runner.py`` 与
++  ``engines/agent_runner/output_protocols/`` 直接 ``print`` 的路径。
++- per-Issue 输出路由 sink：``core/use_cases/agent_runner_output_routing.py``
++  在写日志文件 / 上看板 / 镜像回前台之前统一加前缀，三个消费端因此逐行一致。
++
++合议（``iar deliberate``）的 workspace 文件与 live 面板读的是生产者原文，
++所以不带时间戳——那些文件是要能渲染、能复制的 markdown 答案。
++
++放在 ``core/shared/interfaces/`` 是因为两侧消费端都要用同一份实现：架构检查
++（``hooks/shared/check_architecture.py``）只允许 ``infrastructure`` 依赖
++``core.shared.interfaces`` / ``core.shared.models``，而终端打印路径住在
++``infrastructure``、路由 sink 住在 ``core``。两边各自实现同一套行首规则会立刻
++漂移，所以这里作为跨层共享的展示契约单点存在。
++"""
++
++from __future__ import annotations
++
++from datetime import datetime
++
++_LINE_TIMESTAMP_FORMAT = "%H:%M:%S"
++
++
++def _current_timestamp_text() -> str:
++    """返回当前时刻的 ``HH:MM:SS`` 文本。
++
++    Returns:
++        str: 已去掉日期部分、只保留时分秒的时间文本。
++    """
++    return datetime.now().strftime(_LINE_TIMESTAMP_FORMAT)
++
++
++def format_timestamped_line(text: str) -> str:
++    """在文本的每个非空物理行行首加时间戳前缀。
++
++    Args:
++        text (str): 待格式化的文本，可以是一行、多行或以换行结尾。
++
++    Returns:
++        str: 每个非空物理行行首带 ``[HH:MM:SS] `` 的文本；空行原样保留，
++            不会凭空生出只有前缀的空行。
++    """
++    timestamp_prefix = f"[{_current_timestamp_text()}] "
++    lines = text.split("\n")
++    formatted_lines: list[str] = []
++    for index, line in enumerate(lines):
++        prefix = timestamp_prefix if line else ""
++        if index == len(lines) - 1:
++            formatted_lines.append(f"{prefix}{line}")
++        else:
++            formatted_lines.append(f"{prefix}{line}\n")
++    return "".join(formatted_lines)
++
++
++class TimestampedStreamFormatter:
++    """跨流式碎片维护行首状态，保证每个物理行只加一次时间戳。
++
++    文本增量（agent 的 delta token、PTY 读到的半行）会以任意碎片到达，逐块
++    套用 :func:`format_timestamped_line` 会把同一行切断，并在每个碎片前塞一
++    条时间线。该状态机按字符跟踪行边界，因此同一物理行只有一行首前缀。
++    """
++
++    def __init__(self) -> None:
++        """初始化为「位于行首」状态：首个非换行字符前会加时间戳。"""
++        self._at_line_start = True
++
++    def format_chunk(self, text: str) -> str:
++        """返回只在物理行起点插入时间戳的碎片。
++
++        Args:
++            text (str): 流式输出的一个碎片，可能不含换行。
++
++        Returns:
++            str: 加前缀后的碎片文本；空碎片返回空串。
++        """
++        if not text:
++            return ""
++        timestamped_characters: list[str] = []
++        for character in text:
++            if self._at_line_start and character != "\n":
++                timestamped_characters.append(f"[{_current_timestamp_text()}] ")
++                self._at_line_start = False
++            timestamped_characters.append(character)
++            if character == "\n":
++                self._at_line_start = True
++        return "".join(timestamped_characters)
++
++
++__all__ = ["TimestampedStreamFormatter", "format_timestamped_line"]
+diff --git a/src/backend/core/use_cases/agent_runner_orchestration_runtime.py b/src/backend/core/use_cases/agent_runner_orchestration_runtime.py
+index 990dd7e6..6c659d53 100644
+--- a/src/backend/core/use_cases/agent_runner_orchestration_runtime.py
++++ b/src/backend/core/use_cases/agent_runner_orchestration_runtime.py
+@@ -851 +851 @@ def run_once(request: RunOnceRequest) -> int:
+-    # 串行路径：concurrency<=1 时逐个处理。与历史行为的唯一差异是——每个
++    # 串行路径：concurrency<=1 时逐个处理。与历史行为的差异有二——每个
+@@ -853,2 +853,4 @@ def run_once(request: RunOnceRequest) -> int:
+-    # 的 per-Issue 文件（供第二终端 / Console 按 Issue 续读），原启动终端
+-    # 的可读输出经 ``console_sink`` 原样保留（TTY 与重定向两种场景一致）。
++    # 的 per-Issue 文件（供第二终端 / Console 按 Issue 续读），且原启动终端
++    # 经 ``console_sink`` 收到的是路由 sink 的那一份文本，因此每行行首带
++    # ``[HH:MM:SS]``：与未经路由时的终端实时视图逐行一致（Issue #223），
++    # TTY 与重定向两种场景相同。
+diff --git a/src/backend/core/use_cases/agent_runner_output_routing.py b/src/backend/core/use_cases/agent_runner_output_routing.py
+index 778eb55b..8ec78684 100644
+--- a/src/backend/core/use_cases/agent_runner_output_routing.py
++++ b/src/backend/core/use_cases/agent_runner_output_routing.py
+@@ -15 +15,5 @@ imports), so the layering rule ``core -> engines -> infrastructure`` holds:
+-  worker thread's ``_logger`` lines also land in that Issue's file.
++  worker thread's ``_logger`` lines also land in that Issue's file. The sink is
++  also the **only** place that adds the ``[HH:MM:SS]`` line timestamp (Issue
++  #223): producers hand it readable raw text, so the per-Issue file, the live
++  board and the serial terminal mirror all show the same timeline while the
++  deliberation workspace files — fed by the same producers — stay clean.
+@@ -28,0 +33 @@ from typing import Sequence
++from backend.core.shared.interfaces.output_timestamps import TimestampedStreamFormatter
+@@ -159,0 +165,5 @@ def issue_output_routing(
++    该 sink 是行首 ``[HH:MM:SS]`` 时间戳的唯一落点（Issue #223）：生产者传入
++    的仍是可读原文，前缀在这里加上后再分发给日志文件、看板与前台镜像，三个
++    消费端因此逐行一致。日志末尾的 ``[iar-attempt-end]`` 终态标记由 writer
++    直接写入，不经 sink，因此保持裸行、可被 ``--follow`` 精确匹配。
++
+@@ -166,3 +176,3 @@ def issue_output_routing(
+-            让 sink 同时把可读文本写回启动终端（保持原有前台输出），并行
+-            daemon 则保持 ``None``（面板已承担展示）。只传**可读文本**，
+-            避免 Rich 控制字符污染日志文件。
++            让 sink 将同一份（带行首时间戳的）文本写回启动终端，与未经路由
++            时的终端实时视图逐行一致；并行 daemon 则保持 ``None``（面板已承担
++            展示）。只传**可读文本**，避免 Rich 控制字符污染日志文件。
+@@ -172,0 +183,3 @@ def issue_output_routing(
++    # 每次尝试一个 formatter：碎片可能在任意位置切断，状态机保证时间戳只
++    # 落在物理行首；作用域结束即丢弃，不会把上一行的状态漏到下一份日志。
++    line_timestamps = TimestampedStreamFormatter()
+@@ -175,2 +188,3 @@ def issue_output_routing(
+-        writer.write(chunk)
+-        output_view.append(issue_number, chunk)
++        timestamped_chunk = line_timestamps.format_chunk(chunk)
++        writer.write(timestamped_chunk)
++        output_view.append(issue_number, timestamped_chunk)
+@@ -178 +192 @@ def issue_output_routing(
+-            console_sink(chunk)
++            console_sink(timestamped_chunk)
+diff --git a/src/backend/engines/agent_runner/output_protocols/pi_json_lines.py b/src/backend/engines/agent_runner/output_protocols/pi_json_lines.py
+index 7bade82c..9db52eaf 100644
+--- a/src/backend/engines/agent_runner/output_protocols/pi_json_lines.py
++++ b/src/backend/engines/agent_runner/output_protocols/pi_json_lines.py
+@@ -21,0 +22 @@ from backend.core.shared.interfaces.agent_output_protocol import (
++from backend.core.shared.interfaces.output_timestamps import format_timestamped_line
+@@ -27 +27,0 @@ from backend.infrastructure.logging.logger import logger
+-from backend.infrastructure.process_runner import _format_timestamped_line
+@@ -133,0 +134,2 @@ def _relay_events(
++                        # sink 收可读原文：行首时间戳属于消费侧（per-Issue
++                        # 路由 sink）的展示，不在生产者这里加。
+@@ -137 +139 @@ def _relay_events(
+-                        print(_format_timestamped_line(rendered_text), end="", flush=True)
++                        print(format_timestamped_line(rendered_text), end="", flush=True)
+@@ -170 +172 @@ def _pump_stderr(
+-            print(_format_timestamped_line(line), end="", file=sys.stderr)
++            print(format_timestamped_line(line), end="", file=sys.stderr)
+diff --git a/src/backend/engines/agent_runner/output_protocols/plain.py b/src/backend/engines/agent_runner/output_protocols/plain.py
+index cf3db191..dbb62d2a 100644
+--- a/src/backend/engines/agent_runner/output_protocols/plain.py
++++ b/src/backend/engines/agent_runner/output_protocols/plain.py
+@@ -5,3 +5,3 @@
+-逐行把 stdout 交给 ``output_sink``（或终端 + logger），stderr 在后台
+-线程里泵给 ``display_sink``（仅展示、不进 transcript），提示词按需
+-写入 stdin。不做任何结构化渲染。
++逐行把 stdout 原文交给 ``output_sink``（或终端 + logger），stderr 在后台
++线程里泵给 ``display_sink``（仅展示、不进 transcript），提示词按需写入
++stdin。不做任何结构化渲染，也不加行首时间戳——时间戳属于消费侧展示。
+@@ -20,0 +21 @@ from backend.core.shared.interfaces.agent_output_protocol import (
++from backend.core.shared.interfaces.output_timestamps import format_timestamped_line
+@@ -25 +25,0 @@ from backend.infrastructure.logging.logger import logger
+-from backend.infrastructure.process_runner import _format_timestamped_line
+@@ -92 +92 @@ def _pump_stderr(
+-            print(_format_timestamped_line(line), end="", file=sys.stderr)
++            print(format_timestamped_line(line), end="", file=sys.stderr)
+@@ -112,0 +113,2 @@ def _relay_process_stdout(
++                    # sink 收可读原文：per-Issue 日志的时间戳由路由 sink 加，
++                    # 合议 workspace 文件因此保持可渲染、可复制。
+@@ -116 +118 @@ def _relay_process_stdout(
+-                    timestamped = _format_timestamped_line(line)
++                    timestamped = format_timestamped_line(line)
+diff --git a/src/backend/infrastructure/process_runner.py b/src/backend/infrastructure/process_runner.py
+index 822c93b2..b25639b5 100644
+--- a/src/backend/infrastructure/process_runner.py
++++ b/src/backend/infrastructure/process_runner.py
+@@ -15 +14,0 @@ from dataclasses import dataclass
+-from datetime import datetime
+@@ -26,0 +26,4 @@ from backend.core.shared.interfaces.agent_runner import (
++from backend.core.shared.interfaces.output_timestamps import (
++    TimestampedStreamFormatter,
++    format_timestamped_line,
++)
+@@ -144,42 +146,0 @@ def _terminate_process_tree(process: subprocess.Popen[Any]) -> None:
+-def _format_timestamped_line(text: str) -> str:
+-    """Prefix each line with HH:MM:SS timestamp.
+-
+-    Args:
+-        text: The text to prefix with timestamps.
+-
+-    Returns:
+-        Text with each line prefixed by [HH:MM:SS].
+-    """
+-    ts = datetime.now().strftime("%H:%M:%S")
+-    lines = text.split("\n")
+-    result: list[str] = []
+-    for idx, line in enumerate(lines):
+-        prefix = f"[{ts}] " if line else ""
+-        if idx == len(lines) - 1:
+-            result.append(f"{prefix}{line}")
+-        else:
+-            result.append(f"{prefix}{line}\n")
+-    return "".join(result)
+-
+-
+-class _TimestampedStreamFormatter:
+-    """Prefix non-empty output lines while preserving streaming chunks."""
+-
+-    def __init__(self) -> None:
+-        self._at_line_start = True
+-
+-    def format_chunk(self, text: str) -> str:
+-        """Return ``text`` with timestamps only at physical line starts."""
+-        if not text:
+-            return ""
+-        result: list[str] = []
+-        for character in text:
+-            if self._at_line_start and character != "\n":
+-                result.append(f"[{datetime.now().strftime('%H:%M:%S')}] ")
+-                self._at_line_start = False
+-            result.append(character)
+-            if character == "\n":
+-                self._at_line_start = True
+-        return "".join(result)
+-
+-
+@@ -385 +346 @@ class SubprocessRunner:
+-                            timestamped = _format_timestamped_line(line)
++                            timestamped = format_timestamped_line(line)
+@@ -395 +356 @@ class SubprocessRunner:
+-                            timestamped = _format_timestamped_line(line)
++                            timestamped = format_timestamped_line(line)
+@@ -778 +739,2 @@ def run_filtered_claude_stream(
+-        output_sink: Optional callback for rendered text chunks.
++        output_sink: Optional callback for rendered text chunks (raw readable
++            text; line timestamps are added by the consumers, not here).
+@@ -845 +807 @@ def run_filtered_claude_stream(
+-    stream_formatter = _TimestampedStreamFormatter()
++    stream_formatter = TimestampedStreamFormatter()
+@@ -859 +821,2 @@ def run_filtered_claude_stream(
+-                        # live region.
++                        # live region. sink 只收可读原文，时间戳由消费侧
++                        # （per-Issue 路由 sink）在自己的边界上加。
+@@ -928 +891,2 @@ def _run_pty_stream(
+-        output_sink: Optional callback for rendered text chunks.
++        output_sink: Optional callback for rendered text chunks (raw readable
++            text; line timestamps are added by the consumers, not here).
+@@ -963 +927 @@ def _run_pty_stream(
+-    stream_formatter = _TimestampedStreamFormatter()
++    stream_formatter = TimestampedStreamFormatter()
+@@ -989,0 +954,2 @@ def _run_pty_stream(
++            # sink 只收可读原文：时间戳属于消费侧展示，由 per-Issue 路由
++            # sink 在落盘 / 上屏前统一加，合议 workspace 文件因此保持干净。
