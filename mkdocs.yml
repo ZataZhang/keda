@@ -57,7 +57,7 @@ nav:
       - 架构规范: ai-standards/architecture.md
       - 代码复用规范: ai-standards/code-reuse.md
       - 命名规范: ai-standards/naming.md
-      - 前端设计、页面骨架与滚动规范: ai-standards/frontend-design.md
+      - 前端设计、品牌标识、页面骨架与滚动规范: ai-standards/frontend-design.md
       - 注释与 Docstring: ai-standards/comments-docstrings.md
       - 文档规范: ai-standards/documentation.md
       - 原型与 UI 草图: ai-standards/prototyping.md
