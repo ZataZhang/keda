@@ -37,8 +37,8 @@ Agent/模型效果对照）已落地为一条本地 Console 产品路径，下�
 
 ### 评测集（suite）
 
-- 版本化 YAML 存放在 `tasks/evaluation-suites/`，字段规范与维护流程见该目录的
-  `README.md`（样例：`tasks/evaluation-suites/example.yaml`）。
+- 题库 YAML、判分材料和参考补丁随 Git 保存在 `tasks/evaluation-suites/`。
+  新增题目按该目录 `README.md` 的「给题库加一道题」流程准备、校准并提交 PR。
 - `keda-history-v1` 冻结首批历史案例。`keda-history-expanded-v1` 增加了讨论失败恢复、
   终端入口、日志续读、技能更新和证据自检等公开历史任务。基线和来源列在评测集目录。
 - `keda-history-recovered-v1` 用真实子进程、本地 Git 远端及本机 HTTP 服务恢复三道旧归档题。

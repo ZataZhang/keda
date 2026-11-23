@@ -1,6 +1,27 @@
 # 评测集（Evaluation Suites）维护指南
 
-本目录是 Console 模型评测使用的版本化 suite registry。每个 YAML 文件定义一批固定样本；可选资料放在同级 `<yaml 文件名去掉后缀>.d/<case_id>/`。run 冻结 suite 内容摘要、每题基线、执行预设与重复次数，后续文件变化不影响已有 run。
+本目录由 Git 版本管理，是 `kc eval` 和 Console 模型评测共用的题库。每个 YAML 文件定义一批固定样本；每题资料放在同级 `<suite 文件名去掉后缀>.d/<case_id>/`。run 冻结 suite 内容摘要、每题基线、执行预设与重复次数，后续文件变化不影响已有 run。
+
+## 给题库加一道题
+
+1. **选定来源和基线。** 从一个真实变更提炼可复现的问题。逐题 `base_ref` 使用修复前的完整 commit SHA，并确认评测机器能从 Git 检出该提交。来源记录注明仓库、Issue/PR、基线及参考修复、复核状态。同一 Issue 拆出的相关切片按一个来源统计。
+2. **写清外部契约。** 在 suite YAML 新增稳定的 case ID，说明触发条件、预期结果和要保留的行为，包括有关的默认值、优先级与兼容性。给贡献者和调试流程使用的公开题标为 `dev`。用于独立验收的题及其补丁、测试由评测维护者保存在受限检出中，等候选方案冻结后再实跑。
+3. **准备判分材料。** 把新判分测试放入 `held_out/tests/test_eval_*.py`，保留基线已有的回归测试给候选使用。`kc eval` 支持 `pytest` 和 `uv-pytest`。通过真实 CLI、HTTP 或其他公开入口断言结果，覆盖最容易被半成品绕过的边界。只有契约明确规定时才断言输出格式。在 `gold.patch` 保存一份可通过判分的参考修复。在基线中发现答案材料时，用 `candidate_hidden` 声明相应路径。
+4. **格式化后校准。** 提升现有 suite 的 `version`，在有基线历史的仓库根运行下面的命令，将示例套件和题号换成自己的。校准使用空补丁和参考补丁，无需模型登录。三次空补丁都应因行为断言失败，三次参考补丁都应通过。检查 `report.md` 和逐格判分日志；测试收集错误、跳过和超时都需要单独排查。
+5. **提交题库 PR。** 提交 YAML、参考补丁、留出测试、来源记录，并在 PR 中附题目契约与校准结果。请另一位维护者核对题意、判分及答案暴露范围。修订已发布题目时保留旧版成绩，判分变化可以统一回放各组保存的补丁，题意变化需要让各组按新题面重新实跑。
+
+```bash
+uv run kc eval suites
+calibration_dir="$(mktemp -d)/calibration"
+uv run kc eval calibrate --suite keda-behavior-v2 \
+  --case console-port-reuse --output-dir "$calibration_dir"
+uv run kc eval report "$calibration_dir"
+```
+
+## 保存题库和结果
+
+- **题库源文件随 Git 提交。** 克隆能取得 YAML、判分测试和参考补丁，评测还需要历史基线提交。每次 CLI 实跑的 `manifest.json` 记录 suite 版本、内容摘要、基线 commit/tree 和执行器指纹，以便找回当时的输入。
+- **用于团队决策的实跑归档到共享存储。** 保留 `manifest.json`、`summary.json`、`report.md`，以及复判所需的逐格补丁和判分证据。原始提示和日志按访问权限归档。CLI 报告从产物目录读取，Console 使用现有 SQLite 账本保存运行状态和成绩。跨机器需要统一检索或趋势看板时，可从归档建立索引。
 
 ## 目录与兼容性
 
@@ -38,7 +59,7 @@ cases:
     gold_patch: gold.patch
 ```
 
-`held_out` 是资料目录内相对于 `<case_id>/` 的测试/辅助文件路径列表；这些文件会在候选完成后整文件覆盖到快照。`candidate_hidden` 是基线仓库内的相对路径列表，用于移除已经确认会泄露答案的文件；候选结束后，执行器恢复这些文件的冻结基线版本。`gold_patch` 是同一 case 资料目录内的相对路径，保存原修复中非判分文件的零上下文补丁；补丁只应用到 SHA 和 tree hash 已冻结的基线快照。判分文件与 `candidate_hidden` 路径都不会在候选运行期间可见。`split` 缺省为 `dev`。
+`held_out` 列出文件在判分快照中的目标路径，例如 `tests/test_example.py`；对应源文件放在 `<case_id>/held_out/tests/test_example.py`。这些文件会在候选完成后整文件覆盖到快照。`candidate_hidden` 是基线仓库内的相对路径列表，用于移除已经确认会泄露答案的文件；候选结束后，执行器恢复这些文件的冻结基线版本。`gold_patch` 是同一 case 资料目录内的相对路径，保存原修复中非判分文件的零上下文补丁；补丁只应用到 SHA 和 tree hash 已冻结的基线快照。`split` 缺省为 `dev`。
 
 ```text
 my-history-suite.yaml
