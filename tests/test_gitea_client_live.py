@@ -79,7 +79,7 @@ class LiveGiteaRepository:
 def _git(repository_path: Path, *arguments: str) -> str:
     """在 live test 仓库运行真实 Git 命令。"""
     git_process = subprocess.run(
-        ["git", *arguments],
+        ["git", "-c", "credential.helper=", *arguments],
         cwd=repository_path,
         check=True,
         capture_output=True,

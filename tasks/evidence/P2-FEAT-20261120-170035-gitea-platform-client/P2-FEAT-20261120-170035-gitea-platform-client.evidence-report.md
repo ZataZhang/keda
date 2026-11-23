@@ -10,7 +10,7 @@
 
 - Acceptance status: `⏸️ 验证阻塞` because rv-1's real Gitea UI screenshots and demo are missing, and rv-5's PRD screenshot-format marker is not satisfied.
 - `rv-1-gitea-full-loop.txt` records the real Gitea 1.21 runner flow, the unknown-check no-merge control, successful merge/Issue closure, and zero `gh` calls. `rv-1-browser-capture.txt` records why the UI artifacts could not be produced.
-- `rv-2` through `rv-4` and `rv-6` through `rv-8` have item-specific evidence files and executed negative controls. The rv-5 Gitea status tests and negative control passed, but its screenshot-format marker remains unsatisfied; `rv-5-browser-capture.txt` records the renderer failure. The complete test suite passed with testmon disabled: 5660 passed, 3 skipped in 427.80s. The ignored worktree-only `.kedacode.local.toml` sets the command replay timeout to 540s for this suite; no product or repository default changed. Reuse lint and full lint passed after rerun with the permitted temporary uv cache.
+- `rv-2` through `rv-4` and `rv-6` through `rv-8` have item-specific evidence files and executed negative controls. RV-6 was rerun against Gitea 1.21 after its Git test helper disabled the ambient `osxkeychain` credential helper; invalid-token control returned 401 and both live tests passed. The rv-5 Gitea status tests and negative control passed, but its screenshot-format marker remains unsatisfied; `rv-5-browser-capture.txt` records the renderer failure. RV-7 reran the full `tests/` collection with testmon disabled: 5663 node ids were assigned once across four file-preserving shards, resulting in 5660 passed and 3 skipped; the longest shard took 196.67s, under the runner's 300s command cap. Reuse lint and full lint passed after the changes.
 - The rv-3 script searched the complete evidence directory for the local Gitea test token value and found no match; the token value is not printed or included in this report.
 - The initial `just lint --reuse` attempt used the user's default uv cache and failed because that path was not accessible in the filesystem sandbox. Rerunning with `UV_CACHE_DIR=/private/tmp/issue416-uv-cache` passed.
 - Strict MkDocs build passed. It printed existing navigation notices for pages already outside `mkdocs.yml` navigation.
@@ -19,9 +19,9 @@
 
 - Structured manifest: [evidence.json](evidence.json)
 - Architecture and dependency search: [arch-search.txt](arch-search.txt)
-- Commit: `8b29d751471a8201825e3329745f2763d0c2303d`
-- `HEAD^{tree}` when collected: `033c8a364d6384e4f07dddeb6357da925d29c1c9`
-- Final worktree delivery fingerprint: `2ab4a8186931c230f16e348fa7996821906be05ad254763d21fabbfba2209d57` (33 changed delivery files; evidence directory excluded)
+- Commit at validation start: `bb1d4f3a` (`feat(gitea): add complete Gitea platform client`)
+- `HEAD^{tree}` at validation start: `f3d562c3141c3f7d35d405c97c0ecfb5506f05d0`
+- Final worktree delivery fingerprint: `e583c4d2addbaae5e5f5d840fd62ae6551612facac5b00f39ba2b15ddec49506` (2 changed delivery files; evidence directory excluded)
 - All Gitea UI test data was created in a disposable local `gitea/gitea:1.21` container on `127.0.0.1:3300`; no external business system was used.
 
 ## Reconciliation Notes

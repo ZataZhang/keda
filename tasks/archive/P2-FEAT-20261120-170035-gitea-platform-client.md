@@ -457,8 +457,8 @@ flowchart TD
 - id: rv-7
   behavior: PR 编号解析兼容两种链接，GitHub 仓库行为不变
   reviewer: verifier
-  real_entry: "uv run pytest -o addopts= tests/test_pull_request_url.py tests/test_gitea_instance_settings.py -q && uv run pytest -o addopts= -q tests"
-  expected: "两条命令退出码均为 0；全量测试只收集仓库的 tests/ 套件且不依赖 testmon 增量；仅更新原先断言 Gitea 未实现的工厂 dispatch 与 kc init 行为测试，使其验证新分发和配置错误行为；其余既有测试保持未修改"
+  real_entry: "bash tasks/evidence/P2-FEAT-20261120-170035-gitea-platform-client/scripts/rv7_pytest.sh"
+  expected: "退出码为 0；定向 URL/config 测试通过；全量测试只收集仓库的 tests/ 套件、关闭 testmon 且每个收集 node id 恰好执行一次；仅更新原先断言 Gitea 未实现的工厂 dispatch 与 kc init 行为测试，使其验证新分发和配置错误行为；其余既有测试保持未修改"
   mock_boundary: "现有测试各自的替身不变"
   tier: R1
   test_layer: unit
@@ -566,7 +566,7 @@ Failure triage:
 - [ ] 令牌缺失退出码 1，证据目录中搜不到令牌值，证据：`rv-3-missing-token.txt`
 - [ ] 地址规则与仓库级注入拒绝，证据：`rv-4-url-policy.txt`
 - [ ] 检查状态三种情形结论正确，证据：`rv-5-status.txt`
-- [ ] 接口逐项覆盖且覆盖集合等于抽象方法集合，证据：`rv-6-client-live.txt`
+- [x] 接口逐项覆盖且覆盖集合等于抽象方法集合，证据：`rv-6-client-live.txt`
 
 ### Documentation Acceptance
 
@@ -575,7 +575,7 @@ Failure triage:
 ### Validation Acceptance
 
 - [ ] rv-1 至 rv-4 经真实 `uv run kc` 入口执行，rv-1 对着真实 Gitea 容器，证据：各 `rv-*.txt` 首行命令
-- [ ] 全量测试（关闭 testmon）通过；仅原先断言 Gitea 未实现的工厂 dispatch 与 `kc init` 行为测试更新为新行为，其余既有测试未修改，证据：`rv-7-pytest.txt`
+- [x] 全量测试（关闭 testmon）通过；仅原先断言 Gitea 未实现的工厂 dispatch 与 `kc init` 行为测试更新为新行为，其余既有测试未修改，证据：`rv-7-pytest.txt`
 - [ ] 全部证据在最后一次影响相关代码的改动之后采集，证据报告记录 `git rev-parse HEAD` 与 `HEAD^{tree}`
 
 ### Delivery Readiness
@@ -628,12 +628,12 @@ Failure triage:
 - Interpretation: 保持 Part A 已确认的范围与信任边界；Gitea 使用机器级实例登记，GitHub 默认行为保留。
 - Public behavior and contracts: 新增 Gitea REST 客户端、Gitea 1.21 的 WIP 标题约定和提交状态读取；真实 CLI 流程覆盖标签、Issue、评论、PR、未知状态阻止合并、成功后合并并关闭 Issue。
 - Related PRD status: 本 PRD 仍依赖 #398；runner 负责归档，当前按验证阻塞路径交接。
-- Requirements and risks: rv-2 至 rv-4、rv-6 至 rv-8 的自动证据通过；rv-7 全套测试为 5660 passed、3 skipped，耗时 427.80 秒。为使该自终止检查能在交付门禁复跑，当前 worktree 的 gitignored 个人覆盖把单命令验证超时设为 540 秒，没有改变仓库或产品默认值。rv-5 的真实 Gitea 状态测试通过，但其截图格式标记未满足。rv-1 的 API 流程通过且记录 0 次 gh 调用，但必须由真实 Gitea UI 截图证明 WIP 合并保护并呈现最终合并状态，当前缺少所需截图和主演示视频。
+- Requirements and risks: rv-2 至 rv-4、rv-6 至 rv-8 的自动证据通过；rv-6 在隔离系统级 credential.helper 后重新通过真实 Gitea 1.21 验证（2 passed）。rv-7 执行完整收集的 5663 个 tests/ node id，四个文件级分片合计 5660 passed、3 skipped；最长分片 196.67 秒，整条可复跑命令低于 300 秒，未使用 xdist 或 marker 排除。rv-5 的真实 Gitea 状态测试通过，但其截图格式标记未满足。rv-1 的 API 流程通过且记录 0 次 gh 调用，但必须由真实 Gitea UI 截图证明 WIP 合并保护并呈现最终合并状态，当前缺少所需截图和主演示视频。
 - Reconciled differences:
   - `kc run` 不输出 PR 创建响应 URL，rv-1 在真实 `kc run` 后通过独立 Gitea GET `/pulls` 按 head branch 与 WIP 标题识别 PR，再按编号独立复读。
   - `kc init` 在本机登记命中发布 remote 时直接生成 `platform = "gitea"`，以支持首次标签同步且不经过 GitHub auth 检查。
   - Gitea 1.21 在 WIP 状态返回的 `mergeable=false` 被解释为未知，转正式后再读取实际合并性，避免把草稿门禁误判为分支冲突。
-  - rv-7 实际耗时 427.80 秒，高于默认的 300 秒单命令复跑上限；仅当前 worktree 的 gitignored `.kedacode.local.toml` 覆盖为 540 秒，便于同一真实命令在本机门禁中复跑。
+  - rv-7 为遵守 300 秒复跑上限，完整收集一次 `tests/` 后按测试文件划分四个并行 pytest 进程；每个 node id 执行一次，不使用 xdist、testmon 选择或 marker 排除。
 - Validation blocker: 无法生成 rv-1 要求的 Gitea UI 截图与 `rv-1-demo.mp4`，也无法满足 `<!-- kc:evidence-format item=5 kind=screenshot -->` 要求的 rv-5 图片证据。CUA 浏览器宿主不可用且 Edge 未获桌面控制授权；隔离 Chromium 因 `MachPortRendezvousServer` 权限拒绝中止，WebKit 也以 `Abort trap: 6` 退出。真实 rv-5 状态测试已通过，但 `.txt` 输出不能替代截图。未伪造截图或视频。
 - Validation follow-up: 在 #416 上跟进；待桌面浏览器宿主可用或隔离渲染器获得启动权限后，运行 `RV_CAPTURE_BROWSER=1 bash tasks/evidence/P2-FEAT-20261120-170035-gitea-platform-client/scripts/rv1_full_loop.sh`，生成两张真实 UI 截图和字幕主演示；重新运行 `rv5_status.sh` 后截取真实 Gitea 提交状态页面为 `rv-5-gitea-status.png`。随后更新证据 manifest、独立复核并重新运行交付验证。
 
@@ -734,3 +734,11 @@ Failure triage:
 - Reason: 保持全量测试与自终止命令要求，同时给门禁复跑留出有限余量。
 - Impact: 仅本机该 worktree 的证据复跑时限变化；提交内容和其他仓库的默认复跑上限不变。
 - Review: 执行期验证环境适配，需求方待复核
+
+### 让 rv-7 全量复跑满足交付时限
+- Type: validation
+- Before: 关闭 testmon 的完整 `tests/` 回归顺序运行需要 427.80 秒，超过 runner 的 300 秒单命令复跑上限；忽略配置的本地时限覆盖不被 runner 复跑采用。
+- After: rv-7 在完整收集一次 `tests/` 后，按测试文件分到四个 pytest 子进程并行执行；每个收集到的 node id 仅执行一次，关闭 testmon，不按 marker 排除用例，也不增加依赖。
+- Reason: runner 按 300 秒硬上限复跑 Realistic Validation 命令，需要保持全量范围且让命令自终止。
+- Impact: 完整测试范围与既有用例保持不变；实跑 5660 passed、3 skipped，最长分片 196.67 秒。文件内顺序保留，文件间并行是此验证方式的风险边界。
+- Review: 执行期验证适配，证据通过，需求方待复核
