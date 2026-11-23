@@ -50,11 +50,14 @@ def test_output_protocol_routes_claude_stream_to_filtered_renderer(tmp_path: Pat
     mock_process.wait.return_value = 0
     mock_process.returncode = 0
     mock_process.poll.return_value = None
-    mock_process.communicate.return_value = ("", "")
+    plain_process = MagicMock()
+    plain_process.stdout = None
+    plain_process.stderr = None
+    plain_process.returncode = 0
 
     runner = SubprocessRunner()
     with (
-        patch("subprocess.Popen", return_value=mock_process) as popen_mock,
+        patch("subprocess.Popen", side_effect=[mock_process, plain_process]) as popen_mock,
         patch(
             "backend.infrastructure.process_runner.run_filtered_claude_stream",
             wraps=run_filtered_claude_stream,
@@ -836,21 +839,18 @@ def test_subprocess_runner_claude_capture_uses_filtered_stream(
 def test_subprocess_runner_captured_timeout_path_uses_popen(
     tmp_path: Path,
 ) -> None:
-    """Captured non-Claude commands with timeout should use watchdog Popen path."""
-    from backend.infrastructure.process_runner import SubprocessRunner
-
-    mock_process = MagicMock()
-    mock_process.communicate.return_value = ("raw output\n", "raw error\n")
-    mock_process.returncode = 0
-    mock_process.poll.return_value = None
-
-    runner = SubprocessRunner()
+    """有超时的普通捕获命令经过 watchdog 的真实进程管道。"""
+    command = [
+        sys.executable,
+        "-c",
+        "import sys; print('raw output'); print('raw error', file=sys.stderr)",
+    ]
     with (
-        patch("subprocess.Popen", return_value=mock_process) as popen_mock,
+        patch("subprocess.Popen", wraps=subprocess.Popen) as popen_mock,
         patch("subprocess.run") as run_mock,
     ):
-        result = runner.run(
-            ["some", "command"],
+        result = SubprocessRunner().run(
+            command,
             cwd=tmp_path,
             capture_output=True,
             check=False,
@@ -1069,33 +1069,55 @@ def test_captured_output_includes_stdout_written_when_process_exits(tmp_path: Pa
     assert "progress 11" in completed_process.stderr
 
 
+@pytest.mark.parametrize(
+    ("stdin_mode", "inactivity_timeout"),
+    [("none", 5), ("none", None), ("read", None), ("ignored", None)],
+    ids=["with-inactivity-timeout", "wall-clock-only", "with-stdin", "unconsumed-stdin"],
+)
 def test_captured_output_returns_when_descendant_keeps_pipes_open(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    stdin_mode: str,
+    inactivity_timeout: int | None,
 ) -> None:
-    """直接子进程退出后,孙进程持有输出管道也不能让调用无限等待。"""
+    """后代持有管道时，有界保留尾部输出并回收支持轮询的本地管道线程。"""
     monkeypatch.setattr(process_runner_module, "_PROCESS_OUTPUT_JOIN_TIMEOUT_SECONDS", 0.1)
     grandchild_pid_path = tmp_path / "grandchild.pid"
+    stdin_prompt = "输入" * (128 * 1024) if stdin_mode != "none" else None
+    stdout_prefix = "x" * (128 * 1024)
     script = (
         "from pathlib import Path\n"
         "import subprocess, sys\n"
-        "grandchild = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])\n"
+        "sys.stdout.buffer.write(b'x' * (128 * 1024) + b'\\r\\n')\n"
+        "sys.stdout.buffer.flush()\n"
+        "input_length = len(sys.stdin.buffer.read().decode('utf-8')) if sys.argv[2] == 'read' else 0\n"
+        "grandchild = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(4)'])\n"
         "Path(sys.argv[1]).write_text(str(grandchild.pid), encoding='utf-8')\n"
+        "sys.stdout.buffer.write(f'输出{input_length}'.encode('utf-8'))\n"
+        "sys.stderr.buffer.write('错误'.encode('utf-8'))\n"
     )
     started_at = time.monotonic()
+    starting_threads = set(threading.enumerate())
 
     try:
         completed_process = SubprocessRunner().run(
-            [sys.executable, "-c", script, str(grandchild_pid_path)],
+            [sys.executable, "-c", script, str(grandchild_pid_path), stdin_mode],
             cwd=tmp_path,
             capture_output=True,
             timeout=10,
-            inactivity_timeout=5,
+            inactivity_timeout=inactivity_timeout,
+            input_text=stdin_prompt,
         )
 
-        assert time.monotonic() - started_at < 1
-        assert completed_process.stdout == ""
-        assert completed_process.stderr == ""
+        assert time.monotonic() - started_at < 2
+        consumed_length = len(stdin_prompt or "") if stdin_mode == "read" else 0
+        assert completed_process.stdout == f"{stdout_prefix}\n输出{consumed_length}"
+        assert completed_process.stderr == "错误"
+        if os.name == "posix":
+            grandchild_pid = int(grandchild_pid_path.read_text(encoding="utf-8"))
+            os.kill(grandchild_pid, 0)
+            capture_threads = set(threading.enumerate()) - starting_threads
+            assert not capture_threads, [thread.name for thread in capture_threads]
     finally:
         if grandchild_pid_path.exists():
             grandchild_pid = int(grandchild_pid_path.read_text(encoding="utf-8"))
@@ -1638,7 +1660,9 @@ def test_captured_keyboard_interrupt_tears_down_process_group(tmp_path: Path) ->
         fake_process = popen_mock.return_value
         # 真实 pid 才读得出真实进程组：替身的 pid 会让身份判定退回无校验路径。
         fake_process.pid = os.getpid()
-        fake_process.communicate.side_effect = KeyboardInterrupt
+        fake_process.stdout = None
+        fake_process.stderr = None
+        fake_process.wait.side_effect = [KeyboardInterrupt(), 0]
         with pytest.raises(KeyboardInterrupt):
             process_runner._run_captured_process(["sleep", "30"], cwd=tmp_path, timeout=5)
 

@@ -981,11 +981,12 @@ def test_logs_command_issue_no_attempt_is_clean_exit(tmp_path: Path, capsys) -> 
     assert "暂无可用输出" in output
 
 
-def test_logs_command_issue_and_kind_are_mutually_exclusive(tmp_path: Path) -> None:
-    """`--issue` 与显式非默认 `--kind` 互斥，抛用法错误的 :class:`CliError`。"""
+@pytest.mark.parametrize("kind", ["daemon", "supervise_daemon", "review_daemon"])
+def test_logs_command_issue_and_kind_are_mutually_exclusive(tmp_path: Path, kind: str) -> None:
+    """`--issue` 与任何显式 `--kind` 互斥，抛用法错误的 :class:`CliError`。"""
     context = MagicMock(repo_id="fixture-repo", repo_path=tmp_path)
     parsed = _FakeArgs(
-        kind="review_daemon",
+        kind=kind,
         lines=50,
         follow=False,
         repo_id="fixture-repo",

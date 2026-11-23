@@ -15,7 +15,7 @@ The user says 「看看 197 现在什么情况」「到哪了」「看下实时�
 
 Notes that keep expectations accurate:
 
-- `kc logs` without `--issue` keeps its old meaning: it tails the log of a *managed process* (`--kind daemon` or `--kind supervise_daemon`), not a specific Issue. `--issue` and `--kind` are mutually exclusive.
+- `kc logs` tails the daemon process by default. Select the supervisor with `--kind supervise_daemon`, or read one Issue with `--issue`. The flags `--issue` and `--kind` are mutually exclusive, including an explicit `--kind daemon`.
 - `/ps` reads whatever the background command writes to stdout. KedaCode keeps Issue number, attempt switches, and key actions recognizable on stdout, but `/ps` truncates to recent lines — complete history lives in `kc logs --issue` or the web console.
 - An exited Issue keeps its last log file; "no output yet" means the Issue has not started or its log was cleaned up, and the CLI says so explicitly instead of printing nothing.
 

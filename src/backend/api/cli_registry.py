@@ -1037,19 +1037,14 @@ def _run_logs_command(
         )
 
     issue_number = getattr(parsed, "issue", None)
-    if issue_number is not None:
-        # ``--kind`` 缺省为 daemon；只有用户显式传了非默认 kind 才与
-        # ``--issue`` 冲突（Typer 路径靠 ``kind_explicit``，argparse 路径靠
-        # ``parsed.kind is not None``）。
-        kind_explicit = bool(getattr(parsed, "kind_explicit", False)) or (
-            getattr(parsed, "kind", None) is not None and kind != _DAEMON_KIND
+    # Typer 保留默认值及来源，argparse 省略旗标时传入 None。
+    kind_explicit = getattr(parsed, "kind_explicit", requested_kind is not None)
+    if issue_number is not None and kind_explicit:
+        raise CliError(
+            "--issue and --kind are mutually exclusive; use one or the other.",
+            code=ExitCode.USAGE,
+            suggestion="kc logs --issue 1",
         )
-        if kind_explicit:
-            raise CliError(
-                "--issue and --kind are mutually exclusive; use one or the other.",
-                code=ExitCode.USAGE,
-                suggestion="kc logs --issue 1",
-            )
 
     lines = int(getattr(parsed, "lines", _LOGS_DEFAULT_LINES) or _LOGS_DEFAULT_LINES)
     follow = bool(getattr(parsed, "follow", False))

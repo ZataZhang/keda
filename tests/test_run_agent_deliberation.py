@@ -535,7 +535,8 @@ def test_run_agent_deliberation_fallback_resolver_retries_failed_agent(
     tmp_path: Path,
 ) -> None:
     """Resolver returning a fallback re-runs the failed profile with a new agent."""
-    request = _make_request(agents=("architect", "skeptic"), rounds=1)
+    output_dir = tmp_path / "deliberation"
+    request = _make_request(agents=("architect", "skeptic"), rounds=1, output_dir=str(output_dir))
     config = _make_config()
     events: list[DeliberationEvent] = []
     fake_runner = FakeTranscriptRunner(
@@ -574,6 +575,10 @@ def test_run_agent_deliberation_fallback_resolver_retries_failed_agent(
     assert failure.attempted_agent == "kimi"
     assert failure.fallback_agent == "codex"
     assert result.agent_outputs["round_1"]["skeptic"] == "skeptic fallback output"
+    workspace_output = (output_dir / "workspaces/skeptic/round-1-output.md").read_text(
+        encoding="utf-8"
+    )
+    assert workspace_output == "skeptic failed\n\nskeptic fallback output"
 
 
 def test_run_agent_deliberation_continues_when_synthesizer_fails(

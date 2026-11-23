@@ -41,6 +41,7 @@ from backend.core.shared.models.agent_runner import (
     evidence_dir_uses_task_subdirs,
 )
 from backend.core.shared.models.repository_paths import (
+    AGENT_SESSION_RECORD_DIRS,
     LEGACY_REPOSITORY_STATE_DIR_NAME,
     resolve_repository_state_path,
 )
@@ -435,7 +436,7 @@ def ensure_evidence_dir_excluded(
     config: AppConfig,
     process_runner: IProcessRunner,
 ) -> None:
-    """Idempotently exclude the evidence dir (legacy only) and RV cache via git ``info/exclude``.
+    """在本地 Git 配置排除旧证据目录、RV 缓存和执行器会话记录。
 
     新约定（默认 ``tasks/evidence``）下证据目录的 git 语义由 ``kc init``
     provision 的 ``.gitignore`` 白名单保证（只放行 ``*.md`` 报告），这里不再对
@@ -443,7 +444,8 @@ def ensure_evidence_dir_excluded(
     仓库保持原有的整目录排除行为，逐字节不变。
 
     无论哪种配置，都排除 RV 复跑缓存文件（:data:`_RV_REEXEC_CACHE_RELPATH`），
-    避免它让工作区显示为脏或泄漏进代码 diff。
+    以及新旧版本的会话记录目录。旧分支可能缺少 ``.kedacode/`` 的忽略规则，
+    会话记录一旦进入实现提交，审查阶段写入新记录就会让最终验证看到脏工作区。
 
     使用 ``git rev-parse --git-path info/exclude`` 解析排除文件位置
     （worktree 下指向 commondir，规则对主仓与所有 worktree 共享生效）。
@@ -480,6 +482,7 @@ def ensure_evidence_dir_excluded(
         desired_lines.append(f"/{config.validation.evidence_dir.strip('/')}/")
     desired_lines.append(f"/{_RV_REEXEC_CACHE_RELPATH}")
     desired_lines.append(f"/{_LEGACY_RV_REEXEC_CACHE_RELPATH}")
+    desired_lines.extend(f"/{record_dir.as_posix()}/" for record_dir in AGENT_SESSION_RECORD_DIRS)
     existing_text = ""
     if exclude_path.exists():
         existing_text = exclude_path.read_text(encoding="utf-8")

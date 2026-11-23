@@ -1987,9 +1987,8 @@ def test_main_deliberate_strict_returns_nonzero_on_failure(tmp_path) -> None:
     assert exit_code == 1
 
 
-def test_main_deliberate_default_returns_zero_with_failed_agents(
-    tmp_path,
-) -> None:
+@pytest.mark.parametrize("failed_profile", ("skeptic", "synthesizer"))
+def test_main_deliberate_default_returns_zero_with_failed_agents(tmp_path, failed_profile) -> None:
     """deliberate without --strict should return 0 when at least one agent succeeds."""
     from backend.api.cli import main
     from backend.core.shared.models.agent_deliberation import (
@@ -2042,8 +2041,8 @@ def test_main_deliberate_default_returns_zero_with_failed_agents(
             finished_at="2026-05-23T00:01:00+00:00",
             failed_agents=(
                 DeliberationAgentFailure(
-                    profile_id="skeptic",
-                    attempted_agent="kimi",
+                    profile_id=failed_profile,
+                    attempted_agent="kimi" if failed_profile == "skeptic" else "claude",
                     fallback_agent=None,
                     reason="exit=1",
                 ),
@@ -2078,7 +2077,7 @@ def test_main_deliberate_default_returns_zero_with_failed_agents(
 
 
 def test_main_deliberate_returns_one_when_all_agents_fail(tmp_path) -> None:
-    """deliberate should return 1 when all participants fail."""
+    """所有参与者和 synthesizer 都失败时，命令返回 1。"""
     from backend.api.cli import main
     from backend.core.shared.models.agent_deliberation import (
         DeliberationAgentFailure,
@@ -2125,6 +2124,12 @@ def test_main_deliberate_returns_one_when_all_agents_fail(tmp_path) -> None:
             failed_agents=(
                 DeliberationAgentFailure(
                     profile_id="architect",
+                    attempted_agent="claude",
+                    fallback_agent=None,
+                    reason="exit=1",
+                ),
+                DeliberationAgentFailure(
+                    profile_id="synthesizer",
                     attempted_agent="claude",
                     fallback_agent=None,
                     reason="exit=1",
@@ -4082,6 +4087,16 @@ def test_cli_parser_logs_issue_flag() -> None:
     parsed = parser.parse_args(["logs", "--repo-id", "keda", "--issue", "42"])
     assert parsed.issue == 42
     assert parsed.kind is None
+
+
+def test_main_logs_issue_rejects_explicit_default_kind(capsys) -> None:
+    """显式传入默认 kind 与 --issue 冲突，JSON 输出返回用法错误。"""
+    exit_code = main(["logs", "--issue", "42", "--kind", "daemon", "--json"])
+
+    assert exit_code == ExitCode.USAGE
+    captured = capsys.readouterr()
+    assert not captured.out
+    assert "mutually exclusive" in json.loads(captured.err)["message"]
 
 
 def test_main_logs_prints_last_n_lines(capsys, monkeypatch) -> None:

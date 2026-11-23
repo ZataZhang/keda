@@ -9,6 +9,10 @@ LEGACY_WORKTREE_DIR_NAME = ".iar-worktrees"
 
 DEFAULT_REPOSITORY_STATE_DIR_NAME = ".kedacode"
 LEGACY_REPOSITORY_STATE_DIR_NAME = ".iar"
+AGENT_SESSION_RECORD_DIRS = (
+    Path(DEFAULT_REPOSITORY_STATE_DIR_NAME) / "agent-runner" / "sessions",
+    Path(LEGACY_REPOSITORY_STATE_DIR_NAME) / "agent-runner" / "sessions",
+)
 
 
 def resolve_managed_worktree_root(repository_root_path: Path) -> Path:
@@ -46,6 +50,7 @@ def resolve_repository_state_path(
 
 
 __all__ = [
+    "AGENT_SESSION_RECORD_DIRS",
     "DEFAULT_REPOSITORY_STATE_DIR_NAME",
     "DEFAULT_WORKTREE_DIR_NAME",
     "LEGACY_REPOSITORY_STATE_DIR_NAME",

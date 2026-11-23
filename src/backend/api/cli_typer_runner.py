@@ -259,10 +259,9 @@ def logs_command(
     """
     selector_options = _typer_selector_options(ctx, repo=repo, repo_id=repo_id, config=config)
     fmt = output_format_of(output=_enum_value(output), as_json=as_json)
-    # Typer 的默认值与显式传参无法区分；``--issue`` 与 ``--kind`` 互斥，
-    # 用 ``--issue is not None`` 结合 ``kind != default`` 判断是否冲突，
-    # 避免把默认 ``daemon`` 当成用户显式选择。
-    kind_explicit = kind != LogsKindChoice.daemon
+    # 参数来源可区分显式的 ``--kind daemon`` 与省略旗标时的相同默认值。
+    kind_source = ctx.get_parameter_source("kind")
+    kind_explicit = kind_source is not None and kind_source.name == "COMMANDLINE"
     if issue is not None and kind_explicit:
         return render_cli_error(
             CliError(

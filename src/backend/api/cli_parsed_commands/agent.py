@@ -314,22 +314,19 @@ def run_deliberate_command(ctx: ParsedCommandContext) -> int:
                 f"reason={failure.reason}).[/]"
             )
     strict_mode = ctx.parsed.strict or not deliberation_config.continue_on_agent_error
-    all_participants_failed = len(selected_profile_ids) > 0 and all(
-        profile_id in {f.profile_id for f in result.failed_agents}
-        for profile_id in selected_profile_ids
-    )
-    synthesizer_failed = any(
-        failure.profile_id == "synthesizer" for failure in result.failed_agents
-    )
     if strict_mode and result.failed_agents:
         return 1
-    if all_participants_failed:
-        return 1
-    if synthesizer_failed and not any(
-        failure.profile_id != "synthesizer" for failure in result.failed_agents
-    ):
-        return 1
-    return 0
+    if not any(failure.profile_id == "synthesizer" for failure in result.failed_agents):
+        return 0
+    participant_attempts = sum(
+        len(round_outputs) for round_outputs in result.agent_outputs.values()
+    )
+    # 每轮的失败记录仍包括成功回退的参与者，只有未恢复的失败计入退出码。
+    unrecovered_failures = sum(
+        failure.profile_id != "synthesizer" and failure.fallback_agent is None
+        for failure in result.failed_agents
+    )
+    return int(unrecovered_failures >= participant_attempts)
 
 
 def run_agent_list_command(ctx: ParsedCommandContext) -> int:

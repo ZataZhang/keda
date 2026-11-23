@@ -4,7 +4,8 @@
 
 - 使用 stdlib ``sqlite3`` 而非 SQLAlchemy/alembic：CLI 直跑 ``kc run``
   也要写运行记录，不能要求 PostgreSQL 常驻；本地单文件零依赖。
-- WAL + busy_timeout 容忍多个 runner 进程并发收尾写库。
+- WAL + busy_timeout 容忍多个 runner 进程并发收尾写库。版本迁移持有 SQLite
+  写事务，在同一事务内升级表和 user_version。
 - 通过 ``PRAGMA user_version`` 做就地迁移（当前版本 17：v5 新增
   ``prd_lifecycle_runs`` 与 ``prd_lifecycle_events`` 两张 PRD 生命周期账本表；
   v6 为 ``attempt_records`` 附加可空 ``preset`` / ``model`` 观测列；
@@ -35,6 +36,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from time import monotonic, sleep
 from typing import cast
 
 from backend.infrastructure.persistence.console_store_evaluation import (
@@ -73,6 +75,8 @@ _logger = logging.getLogger(__name__)
 
 
 _SCHEMA_VERSION = 17
+_SQLITE_BUSY_TIMEOUT_SECONDS = 5
+_WAL_RETRY_DELAY_SECONDS = 0.05
 
 _RUN_V13_ADD_ISSUE_TITLE = "ALTER TABLE run_records ADD COLUMN issue_title TEXT"
 _RUN_V13_ADD_ISSUE_URL = "ALTER TABLE run_records ADD COLUMN issue_url TEXT"
@@ -285,9 +289,21 @@ class SqliteConsoleStore(
         Returns:
             开启 WAL 与 busy_timeout 的连接。
         """
-        connection = sqlite3.connect(str(self._db_path), timeout=10)
-        connection.execute("PRAGMA journal_mode=WAL")
-        connection.execute("PRAGMA busy_timeout=5000")
+        connection = sqlite3.connect(str(self._db_path), timeout=_SQLITE_BUSY_TIMEOUT_SECONDS)
+        try:
+            wal_deadline = monotonic() + _SQLITE_BUSY_TIMEOUT_SECONDS
+            while True:
+                try:
+                    connection.execute("PRAGMA journal_mode=WAL")
+                    break
+                except sqlite3.OperationalError as error:
+                    # 并发首次切换 journal mode 时，SQLite 可能立即返回 BUSY。
+                    if error.sqlite_errorcode != sqlite3.SQLITE_BUSY or monotonic() >= wal_deadline:
+                        raise
+                    sleep(_WAL_RETRY_DELAY_SECONDS)
+        except BaseException:
+            connection.close()
+            raise
         connection.row_factory = sqlite3.Row
         return connection
 
@@ -320,8 +336,12 @@ class SqliteConsoleStore(
         connection.execute(_CREATE_MODEL_PRICING_SETTINGS)
         connection.execute(CREATE_ISSUE_RUN_CONTROL)
         connection.execute(CREATE_ISSUE_RETRY_OVERRIDES)
-        current_version_row = connection.execute("PRAGMA user_version").fetchone()
-        current_version = int(current_version_row[0])
+        if int(connection.execute("PRAGMA user_version").fetchone()[0]) >= _SCHEMA_VERSION:
+            return
+
+        # Console 与 runner 可能同时打开旧库。拿到写锁后重读版本，再探测列和执行 DDL。
+        connection.execute("BEGIN IMMEDIATE")
+        current_version = int(connection.execute("PRAGMA user_version").fetchone()[0])
         if current_version >= _SCHEMA_VERSION:
             return
         if current_version < 1:
@@ -460,7 +480,6 @@ class SqliteConsoleStore(
                 for index_statement in CREATE_EVALUATION_INDEXES:
                     connection.execute(index_statement)
         connection.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
-        connection.commit()
 
     def append_run(self, run_record: RunRecord) -> None:
         """追加运行记录；失败时降级为日志警告，不阻断 runner。"""

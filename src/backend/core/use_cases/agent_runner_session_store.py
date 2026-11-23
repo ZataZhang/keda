@@ -25,17 +25,12 @@ from pathlib import Path
 
 from backend.core.shared.models.agent_runner import AppConfig
 from backend.core.shared.models.repository_paths import (
-    LEGACY_REPOSITORY_STATE_DIR_NAME,
+    AGENT_SESSION_RECORD_DIRS,
     resolve_repository_state_path,
 )
 
 _logger = logging.getLogger(__name__)
 
-#: 新会话目录；已有旧目录由路径解析器继续复用。
-_AGENT_SESSION_DIR_RELPATH = Path(".kedacode") / "agent-runner" / "sessions"
-_LEGACY_AGENT_SESSION_DIR_RELPATH = (
-    Path(LEGACY_REPOSITORY_STATE_DIR_NAME) / "agent-runner" / "sessions"
-)
 _SESSION_PHASE_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 
 
@@ -92,8 +87,7 @@ def agent_session_record_path(
         record_name = f"{agent_name}.{phase}.json"
     session_dir_path = resolve_repository_state_path(
         worktree_path,
-        _AGENT_SESSION_DIR_RELPATH,
-        _LEGACY_AGENT_SESSION_DIR_RELPATH,
+        *AGENT_SESSION_RECORD_DIRS,
     )
     return session_dir_path / record_name
 
