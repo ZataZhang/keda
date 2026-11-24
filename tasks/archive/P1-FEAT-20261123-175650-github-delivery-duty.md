@@ -429,7 +429,7 @@ Failure triage：
 #### Architecture And Dependency Acceptance
 
 - [x] 判断方法只写在 `references/duty.md` 一处，两份配方只引用不复写：`rg -n "duty" tasks/loops/keda-blocker-monitor-30m.md src/backend/core/use_cases/loop_builtin.py` 两处命中，且无第三份取证步骤副本（§7.3 检索结果附在证据报告 RV-4 自查记录）。
-- [ ] 未新增 `kc` 子命令、后端服务或存储：`git diff --name-only` 及工作树新增文件均只含 §7.2 Change Impact Tree 中列出的实现与交付记录。评审发现相对 main 的提交还包含独立的 Console 工作流和 supervisor 配置变更，须先厘清交付范围。
+- [ ] 未新增 `kc` 子命令、后端服务或存储：`git diff --name-only` 及工作树新增文件均只含 §7.2 Change Impact Tree 中列出的实现与交付记录。当前差异已重新核对，早期评审提到的 Console 工作流和 supervisor 配置文件已不在差异中，待独立复核。
 
 #### Documentation Acceptance
 
@@ -493,7 +493,7 @@ Failure triage：
   - 两份 recipe 步骤已收敛为引用 `duty.md` 并保留明确人工接管停止条件；SHA、Attempt History 和缺证判断细节只写在岗位参考中。
   - 验证事实与未完成项分别记录于 evidence report 和各 RV 文件；Human-Confirmed 项保持未勾。
 - Validation blocker: RV-1 的 `codex` 会话启动在 `workspace routing discovery timed out` 后退出 1，真实 Issue / PR 查询、负控和主演示无法完成；RV-2 缺少隔离仓库与专用 runner；RV-3 尚无冻结四题与盲评。完整 `just test` 首次耗时 481.44 秒并因旧的 12 份 references 断言失败；修复后目标套件 54 项通过，但完整命令超过默认 300 秒复跑上限，未取得最终树全量通过证据。
-- Validation follow-up: 在 GitHub Issue #430（https://github.com/ZataZhang/keda/issues/430）跟进：workspace routing 恢复后从真实 Issue / PR 入口重跑 RV-1 并录制主演示；准备隔离测试仓库与专用 daemon 完成 RV-2；冻结四个可核验历史现场并盲评 RV-3；在能于 300 秒预算内完成的 runner 环境重跑 `just test`，再请求独立 verifier 复核。之后仅勾选新证据实际证明的项并由 runner 处理归档。
+- Validation follow-up: 在 GitHub Issue #430（https://github.com/ZataZhang/keda/issues/430）跟进。新会话双入口已走通，仍需补齐 RV-1 指定现场、负控与主演示。隔离巡检和四个冻结案例已开展，结果与证据缺口见当前 evidence report。最终证据、可复跑命令与独立 verifier 结论齐备后，仅勾选有证据的项目。
 - Pre-PR review update: 仓库配方已恢复 `gh issue list --limit 1000` 要求并修正巡检自身标签模板变量；这改变了配方，先前 RV-1 / RV-2 / RV-4 证据不再覆盖最终树，须按原 oracle 重跑。评审修复后的目标测试 55 项、`just test` 和严格文档构建通过；独立 verifier 尚未执行。
 
 ## Change Log
@@ -545,3 +545,11 @@ Failure triage：
 - Reason: 避免超过默认 30 条时漏巡，以及巡检误处理自身。
 - Impact: 原有队列与权限范围不变；配方变更后需重跑相关真实入口证据。相对 main 的分支差异还含独立 Console 工作流与 supervisor 配置提交，范围清单暂不通过。
 - Review: 本地目标测试通过；真实入口和独立 verifier 待完成。
+
+### 真实交接复测修正
+- Type: implementation
+- Before: Live lookup 和离线回放可能沿用早期的范围判断；已关闭 Issue 也可能被分配当前动作。
+- After: 岗位参考要求复核当前 PR 差异；无新证据时把旧判断列为待核。已关闭或合并且没有未结事项时，明确无需接手。
+- Reason: 双入口真实查询和四个冻结现场均发现了可复现的交接误判。
+- Impact: 手动查询及巡检共用参考；权限规则与恢复命令保持既有定义。
+- Review: 真实双入口、冻结案例盲评与定向测试已有复测记录，独立验收保留原门槛。

@@ -1,10 +1,20 @@
 ## 人审导航 / Human Review Navigation
 
-**评审后状态：** 巡检配方已修复列表查询上限与自身标签变量。对提交 `79f80e67e554ae12fd4a39125407aa1a5e672043` 重跑 RV-4：移除模板引用的负控按预期失败，恢复后 55 项目标测试和严格文档构建通过，输出分别保存在 `rv-4-review-negative.txt` 和 `rv-4-review-positive.txt`。RV-1、RV-2 和 RV-3 仍未完成，尚无独立 verifier 结论；下方旧 RV-4 日志属于修复前的文件树。
+**本轮复核：** 交付分支已同步 `main`，`git diff main...HEAD` 只包含岗位说明、巡检配方、测试、文档和交付记录。早期评审提到的 Console 和 supervisor 文件已经不在差异中。通过实测修正了两个问题：先核实旧评审判断，再决定是否要求隔离改动；目标已关闭或合并且无可核验的未结事项时，不再分配当前责任人。
+
+| 验证 | 本轮结果 |
+|---|---|
+| RV-1 · 已安装技能的真实入口 | 新 Codex 会话分别读取 [Issue #430](https://github.com/ZataZhang/keda/issues/430) 和 [PR #436](https://github.com/ZataZhang/keda/pull/436)，两者关联及 head 匹配，命令轨迹无写入，前后时间线为 30 和 8 条。旧技能对比把历史范围判断列入待办。原 oracle 的待检查现场、发布失败 PR 入口与主演示仍需单独呈递。 |
+| RV-2 · 隔离巡检 | 已在私有测试仓库由专用 daemon 调度，人工接管目标的时间线保持一致。首轮恢复样例因缺少真实认领记录被拒绝，随后已用真实 runner 制造并修复一次推送故障，继续核对恢复回读及旧配方负控。 |
+| RV-3 · 冻结材料与独立盲评 | 四个现场、两组各四次新会话，评分者仅见随机化 X/Y。普通组误报 1/4，值班员组 0/3，均漏报 0/3。岗位组四题耗时 23.50、22.46、24.26、22.34 秒；普通组 16.08、15.17、14.51、13.39 秒。材料、分组映射和逐题评分保留于本地证据包。 |
+| RV-4 · 安装、配方与文档 | 在实现提交 `9da79d9b` 上，56 项定向测试和严格文档构建通过。将模板引用改成不存在的参考文件时，目标测试因缺少 `references/duty.md` 失败。 |
+| 默认测试命令 | `just test` 首轮受继承的 `KEDACODE_NO_UPDATE_CHECK` 干扰，升级提示的 6 条测试失败。移除该变量后在 `9da79d9b` 使用仓库默认增量档复跑并通过。 |
+
+下方为早期执行及评审记录，现状以上表和后续独立复核为准。
 
 | 呈递项 | 真实状态与应观察值 | 本地记录 | 打开方式 | 交叉核对 |
 |---|---|---|---|---|
-| RV-1 · Issue 与 PR 两个入口的真实会话 | **未呈递：`REVIEW_INCIDENT / INCONCLUSIVE`。** 期待看到观察时点、状态、来源、下一责任人与动作、复查条件；查询前后 timeline 一致且写调用为 0。 | `/Users/zata/code/keda/.kc-worktrees/issue-430/tasks/evidence/P1-FEAT-20261123-175650-github-delivery-duty/rv-1-duty-read.md` | `open "/Users/zata/code/keda/.kc-worktrees/issue-430/tasks/evidence/P1-FEAT-20261123-175650-github-delivery-duty/rv-1-duty-read.md"` | 尚未交叉核对；新 Codex 会话在 workspace routing discovery 阶段超时。Issue 线索：[GitHub #430](https://github.com/ZataZhang/keda/issues/430)、[问题描述中的历史现场 #416](https://github.com/ZataZhang/keda/issues/416)。没有交付 PR 或 CI 链接。 |
+| RV-1 · 首轮 Issue 与 PR 真实会话尝试 | **首轮 `REVIEW_INCIDENT / INCONCLUSIVE`。** 期待看到观察时点、状态、来源、下一责任人与动作、复查条件；查询前后 timeline 一致且写调用为 0。 | [rv-1-duty-read.md](rv-1-duty-read.md) | 打开同目录的记录 | 首轮 Codex 会话在 workspace routing discovery 阶段超时。Issue 线索：[GitHub #430](https://github.com/ZataZhang/keda/issues/430)。 |
 
 主演示脚本要求录制真实 Codex 会话与 GitHub 读数。本轮没有真实会话输出、截图或录屏，因此没有内嵌 mock 图片；本地 `rv-1-duty-read.md` 是阻塞记录，不是替代演示。需要人工看到的预期字段和零写入对照仍待 RV-1 完成。
 
