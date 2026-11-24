@@ -1,7 +1,7 @@
 /**
  * 桌面小窗系统通知的判定回归（mocked API + Tauri invoke 桩）。
  *
- * PRD：tasks/pending/P2-FEAT-20261120-145338-companion-human-action-notifications.md
+ * PRD：tasks/archive/P2-FEAT-20261120-145338-companion-human-action-notifications.md
  * 验证层级：production composition；从 /app/companion 真实页面入口进入，DesktopCompanion 轮询与
  * handleSummary 判定都是生产代码。浏览器里没有原生宿主，所以只顶替两处边界：
  * runtime/tasks 读响应（按轮次切换任务状态）与 Tauri invoke 桥（记录实际请求的通知）。
@@ -92,15 +92,16 @@ function tasksPayload(state: TaskState) {
 type InvokeCall = { cmd: string; args: { title?: string; body?: string } }
 
 /**
- * 注入 Tauri 宿主桩：让 `isTauri()` 为真，并把所有 invoke 记录到 `window.__invokeCalls`。
+ * 注入 Tauri 宿主桩：把所有 invoke 记录到 `window.__invokeCalls`，默认同时让 `isTauri()` 为真。
  *
  * @param page - Playwright 页面对象。
+ * @param markAsDesktopHost - 为 false 时只装记录器、不标记桌面宿主，用来证明普通浏览器不会调用 invoke。
  */
-async function installTauriStub(page: Page): Promise<void> {
-  await page.addInitScript(() => {
+async function installTauriStub(page: Page, markAsDesktopHost = true): Promise<void> {
+  await page.addInitScript((isDesktopHost: boolean) => {
     const recordedCalls: unknown[] = []
     Object.assign(window, {
-      isTauri: true,
+      ...(isDesktopHost ? { isTauri: true } : {}),
       __invokeCalls: recordedCalls,
       __TAURI_INTERNALS__: {
         invoke: async (cmd: string, args: unknown) => {
@@ -110,7 +111,7 @@ async function installTauriStub(page: Page): Promise<void> {
         transformCallback: () => 0,
       },
     })
-  })
+  }, markAsDesktopHost)
 }
 
 /** 读出页面里记录到的 notify_task 调用。 */
@@ -262,6 +263,8 @@ test.describe('desktop companion notifications (mocked API + Tauri stub)', () =>
   })
 
   test('a plain browser never requests notifications', async ({ page }) => {
+    // 只装 invoke 记录器、不标记桌面宿主：若页面漏掉宿主判断，记录器会收到调用。
+    await installTauriStub(page, false)
     await page.clock.install()
     const pageErrors: string[] = []
     page.on('pageerror', (error) => pageErrors.push(error.message))
