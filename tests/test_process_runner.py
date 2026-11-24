@@ -1607,14 +1607,30 @@ def test_terminate_process_tree_never_kills_init_group() -> None:
 def test_captured_timeout_reclaims_surviving_pipeline_member(tmp_path: Path) -> None:
     """超时命令留下的管道成员不得让 captured 路径永久阻塞。
 
-    这是 daemon 卡死的回归测试：``bash -lc "sleep 30 | tee ..."`` 超时后 ``tee``
+    这是 daemon 卡死的回归测试：``sleep 30 | tee ...`` 超时后 ``tee``
     仍持有继承来的 stdout 写端，只杀直接子进程会让 ``communicate()`` 永远读不到
     EOF，runner 线程无限期挂住（实测曾让 daemon 停止轮询任何 Issue）。
     """
     child_pid_path = tmp_path / "child-pid.txt"
     runner = SubprocessRunner()
-    command = ["bash", "-lc", f"echo $$ > {child_pid_path}; sleep 30 | tee /dev/null"]
+    command = [
+        "sh",
+        "-c",
+        'sleep 30 | { printf "%s\\n" "$$" > child-pid.tmp; '
+        'mv child-pid.tmp "$1"; exec tee /dev/null; }',
+        "pipeline",
+        str(child_pid_path),
+    ]
     run_outcomes: list[str] = []
+    check_timeouts = process_runner_module._ProcessWatchdog._check_timeouts
+
+    def _check_when_pipeline_ready(
+        watchdog: process_runner_module._ProcessWatchdog, elapsed_seconds: int
+    ) -> bool:
+        # 让管道成员先继承输出端。启动失败时仍在十秒内走真实回收路径。
+        if elapsed_seconds < 10 and not child_pid_path.is_file():
+            return False
+        return check_timeouts(watchdog, elapsed_seconds)
 
     def _invoke_runner() -> None:
         try:
@@ -1627,12 +1643,16 @@ def test_captured_timeout_reclaims_surviving_pipeline_member(tmp_path: Path) -> 
             run_outcomes.append("returned")
 
     runner_thread = threading.Thread(target=_invoke_runner, daemon=True)
-    runner_thread.start()
-    runner_thread.join(timeout=20)
+    with patch.object(
+        process_runner_module._ProcessWatchdog, "_check_timeouts", _check_when_pipeline_ready
+    ):
+        runner_thread.start()
+        runner_thread.join(timeout=20)
 
     assert not runner_thread.is_alive(), "超时命令仍在阻塞 runner：进程组没有被整组回收"
     assert run_outcomes == ["timeout"]
 
+    assert child_pid_path.is_file(), "测试管道未在十秒内启动"
     leaked_group_id = int(child_pid_path.read_text(encoding="utf-8").strip())
     group_gone_deadline = time.monotonic() + 10
     while time.monotonic() < group_gone_deadline:
