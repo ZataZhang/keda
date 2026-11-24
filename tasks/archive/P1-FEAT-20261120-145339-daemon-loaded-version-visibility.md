@@ -389,7 +389,7 @@ ER Diagram：不涉及数据库变化。状态文件是本机 JSON，只新增�
 - [x] 不一致：表格版本列与提示正确，退出码 0（rv-1）
 - [x] JSON：三字段齐全，`mismatch` / `current` / `unknown` 三态正确，stdout 可被解析（rv-2）
 - [x] 启动时版本不随磁盘变化（rv-3）
-- [x] supervise-daemon 行版本列为 `-`，JSON 中 `loaded_version` / `version_status` 为 null（`tests/test_cli_registry.py` 断言）
+- [x] supervise-daemon 行版本列为 `-`，JSON 中 `loaded_version` / `version_status` 为 null（表格经代码核对和直接调用确认，见 verifier 报告 C11；JSON 由 `tests/test_cli_registry.py` 断言）
 
 ### Architecture Acceptance
 
@@ -399,7 +399,7 @@ ER Diagram：不涉及数据库变化。状态文件是本机 JSON，只新增�
 ### Documentation Acceptance
 
 - [x] `rg -n "version_status" docs/guides/agent-runner.md src/backend/engines/agent_runner/templates/skills/kedacode-operator/references/daemon.md` 两个文件均有命中
-- [x] ~~`ROADMAP.md` 维护带对应条目已指向本 PRD~~ 不适用：`ROADMAP.md` 已于 2026-11-23 由 `10ca36c7` 重写为不列逐条条目的结构，任务状态以 PRD 为准（见 `docs/project/roadmap-history.md`），无条目可指向；见 Change Log「归档前复核」
+- ~~`ROADMAP.md` 维护带对应条目已指向本 PRD~~ 不适用。`ROADMAP.md` 已于 2026-11-23 由 `10ca36c7` 重写为不列逐条条目的结构，任务状态以 PRD 为准（见 `docs/project/roadmap-history.md`）。见 Change Log「归档前复核」。
 
 ### Validation Acceptance
 

@@ -421,6 +421,7 @@ ER Diagram：不涉及数据模型或持久化变化。
 - Requirements and risks: FR-1 至 FR-6 由 rv-1、rv-2、rv-4 与门禁检查证明。rv-3（真机系统通知截图，opt-in）未采集，不阻塞归档。
 - Reconciled differences:
   - 归档前于 main `616d0ea7` 重跑 e2e 4 passed；`frontend-public` 的 `tsc --noEmit` exit 0、eslint 0 错误（107 条既有警告）。证据在 `tasks/evidence/P2-FEAT-20261120-145338-companion-human-action-notifications/rerun-616d0ea7/`。
+  - 独立 verifier 的完成消息条件：在归档完成消息中原样附上 rv-1 八轮通知记录及证据路径。记录也已内联在 PR 正文的「§9.1 evidence (verbatim)」一节。[PR #435](https://github.com/ZataZhang/keda/pull/435)
   - 独立 verifier 发现“普通浏览器不发通知”用例未装 invoke 记录器、断言恒真。本次补强 spec：该用例只装记录器、不标记桌面宿主；补强后 4 passed（`rerun-616d0ea7/rv-1-e2e-run-after-d1-fix.txt`），临时去掉页面宿主判断时该用例变红（`rerun-616d0ea7/negative-control-guard-removed.txt`），`page.tsx` 已还原。spec 补强需随本次归档改动合入 main。
   - spec 除 runtime/tasks 与 invoke 桥外，还顶替了 status、auth/me、logs 读接口；不影响通知判定逻辑。
   - 非阻塞后续：首轮已处于 blocked 不补发、`已失败` 标题两点仅经代码阅读确认，没有 e2e 断言；`tests/playwright-e2e` 的 `tsc` 在 main 上已有一个与本 PRD 无关的错误（`tests/smoke/idea-inbox.spec.ts` TS2339），需另行处理。
