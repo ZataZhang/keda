@@ -308,6 +308,8 @@ flowchart LR
 
 ### 7.6 Realistic Validation Plan (Oracle 块)
 
+维护者于 2026-11-25 确认 RV-1 与 RV-2 以新版的实际行为验收。旧版对照逐条披露原始结果。两项无副作用断言通过脱敏后的本地证据副本注入异常事件，单独验证断言可以失败。
+
 真实查询使用交付版本安装的技能和真实仓库；有副作用的巡检验证在隔离测试仓库和专用 runner 上进行，**禁止对真实 #419 或其他真实任务重放写动作**。
 
 ```yaml
@@ -326,8 +328,8 @@ flowchart LR
   forbidden_bypasses: "预填答案、直接把参考文件内容贴进提示词、调用内部 helper 代替真实命令"
   fresh_state_probe: "查询前后各取一次 gh api repos/ZataZhang/keda/issues/<N>/timeline 与 PR 时间线，条数与最后事件一致"
   final_tree_evidence: "记录最终 SHA、技能安装来源与摘要、脱敏会话；技能或参考有改动则重跑"
-  negative_control: "选一条保留旧失败记录、同时新 head 有进行中检查的现场，用未安装 duty.md 的技能版本先跑一次"
-  expected_fail: "答复依据旧失败记录建议立即重试，或会话出现写操作调用"
+  negative_control: "在证据工作树运行 scripts/recheck-duty.sh probe-rv-1，向本地快照副本加入一条意外时间线事件"
+  expected_fail: "前后快照比较退出非零并报告 Issue/PR 时间线变化。旧版待检查场景作为实测对照保留。"
 - id: rv-2
   behavior: 巡检沿用原授权恢复可恢复任务，并跳过已人工接管的任务
   reviewer: verifier
@@ -342,8 +344,8 @@ flowchart LR
   forbidden_bypasses: "手工把配方贴给 Agent 冒充调度、以命令退出码代替状态回读"
   fresh_state_probe: "巡检结束后新进程重读两个目标 Issue 的时间线、日志与巡检 Issue 正文"
   final_tree_evidence: "最终 SHA、loop 运行标识、事件前后对照；配方或参考有改动则重跑"
-  negative_control: "已人工接管的目标保留 agent/failed 标签，先用改动前的配方跑一轮"
-  expected_fail: "改动前配方对该目标发起重试、重开或重复交接"
+  negative_control: "在证据工作树运行 scripts/recheck-duty.sh probe-rv-2，向本地人工接管目标的巡检后快照副本加入一条直接评论"
+  expected_fail: "直接事件比较退出非零并报告目标改动。旧配方的人工接管场景作为实测对照保留。"
 - id: rv-3
   behavior: 用四个冻结历史现场对比有无岗位参考的判断
   reviewer: verifier
@@ -410,7 +412,7 @@ Failure triage：
 
 | # | 你要看什么 | 呈递物（交付时填实际路径） | 想自己复核？ |
 |---|---|---|---|
-| 1 | 从 Issue 和 PR 两个入口点名查询，答复说清谁该做什么、依据在哪，且没改任何东西 | `tasks/evidence/P1-FEAT-20261123-175650-github-delivery-duty/rv-1-duty-read.md`；打开：`just prd review tasks/pending/P1-FEAT-20261123-175650-github-delivery-duty.md`（归档后用 archive 路径） | 看答复里的 head SHA 是否等于 PR 页面当前 head；看"写调用计数"是否为 0 |
+| 1 | 从 Issue 和 PR 两个入口点名查询，答复说清谁该做什么、依据在哪，且没改任何东西 | `tasks/evidence/P1-FEAT-20261123-175650-github-delivery-duty/rv-1-duty-read.md`；打开：`just prd review tasks/archive/P1-FEAT-20261123-175650-github-delivery-duty.md` | 看答复里的 head SHA 是否等于 PR 页面当前 head；看"写调用计数"是否为 0 |
 
 **以下项不需要你看**（`reviewer: verifier`，agent 自验 + verifier 复核，挂了会自己红）：rv-2 巡检恢复与人工接管、rv-3 四题回放评分、rv-4 安装路由与配方 / 文档测试。证据在 §9.2。
 
@@ -418,13 +420,13 @@ Failure triage：
 
 #### Human-Confirmed (来自 Part A 风险地图)
 
-- [ ] 决策一：手动查询只读、巡检沿用原授权、人工接管优先的权限安排，已在 rv-1 零写入对照和 rv-2 人工接管负控证据中得到证明。
+- [ ] 决策一：手动查询只读、巡检沿用原授权、人工接管优先的权限安排，已在 rv-1 零写入对照和 rv-2 人工接管实测证据中得到证明。
 - [ ] §9.1 呈递区已亲眼看过（看演示或做自查，二选一或都做）。
 
 #### Behavior Acceptance
 
-- [ ] rv-1：两个入口的答复与 §1 第 1、2 行一致，查询前后时间线一致，负控（未装 duty.md 的版本）记录在案——证据 `rv-1-duty-read.md`。
-- [ ] rv-2：隔离仓库一轮巡检中，可恢复目标重读确认生效，人工接管目标零重试 / 重开 / 新交接，负控（改动前配方）记录在案——证据 `rv-2-duty-patrol.txt`。
+- [ ] rv-1：两个入口的答复与 §1 第 1、2 行一致，查询前后时间线一致，旧技能对照和时间线断言的失败探针记录在案——证据 `rv-1-duty-read.md`。
+- [ ] rv-2：隔离仓库一轮巡检中，可恢复目标重读确认生效，人工接管目标零重试 / 重开 / 新交接，旧配方对照和直接时间线断言的失败探针记录在案——证据 `rv-2-duty-patrol.txt`。
 
 #### Architecture And Dependency Acceptance
 
@@ -481,6 +483,7 @@ Failure triage：
 | D-03 | 手动查询的权限 | 全程只读 | 查询后经确认即可恢复 | 点名查看并未授予修改权限；维护者 2026-11-24 在会话中选定此项。 |
 | D-04 | 如何验证判断质量 | 冻结历史现场、两组逐题盲评 | 直接复用代码补丁判分器 | 交付物是时点判断与交接建议，不是代码补丁。 |
 | D-05 | 三块工作是否拆 PRD | 保持一份 | 拆成"手动查询""巡检复用""回放评测"三份 | 巡检复用与回放都以同一份 `duty.md` 为对象，拆开会让判断方法在验证前就分叉。 |
+| D-06 | RV-1、RV-2 如何验收 | 验证新版实际行为并保留旧版对照 | 要求旧版必须出错 | 旧版在两轮对照中也正确等待和停止。维护者 2026-11-25 确认按实测验收。 |
 
 ### Final Reconciliation
 
@@ -553,3 +556,11 @@ Failure triage：
 - Reason: 双入口真实查询和四个冻结现场均发现了可复现的交接误判。
 - Impact: 手动查询及巡检共用参考；权限规则与恢复命令保持既有定义。
 - Review: 真实双入口、冻结案例盲评与定向测试已有复测记录，独立验收保留原门槛。
+
+### 按实际行为更新 RV-1 与 RV-2 判据
+- Type: test
+- Before: 原判据要求旧技能建议立即重试或发出写调用，也要求旧配方对人工接管目标发起重试、重开或重复交接。
+- After: 验收新版的只读双入口、真实恢复、状态回读和人工接管保护；保留旧版各轮实测，以本地证据副本探针验证零写入断言能捕获异常。
+- Reason: 新旧版都等当前检查并尊重接管，维护者确认按新版的实际行为验收。
+- Impact: 正向行为、权限边界和真实入口保真度保持原要求。旧版观测值保留，独立 verifier 按修订判据复核。
+- Review: 维护者于 2026-11-25 会话确认
