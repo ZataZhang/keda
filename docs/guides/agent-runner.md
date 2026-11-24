@@ -552,7 +552,7 @@ uv run --project /path/to/keda kc init
 
 `kc init` 成功写入本地配置后，还会自动把当前仓库注册（或更新路径）到全局 `config.toml` 的 `[agent_runner.repositories]` 中，使 `kc daemon` 默认即可在当前仓库启动。如果该 `repo_id` 已在 registry 中但指向不同路径，init 会自动更新 registry 路径到当前位置。
 
-`kc init` 若在标签同步时遇到尚未实现的仓库平台，会说明原因并以退出码 `1` 结束。
+`kc init` 会按仓库 `platform` 选择对应代码平台客户端；Gitea 仓库需先按[配置指南](configuration.md#agent-runner-repo-config)在本机登记 Gitea 地址和令牌变量。
 
 用户级 Skill 同步失败不会中断仓库注册与 GitHub 标签同步；`kc init` 会继续完成这些步骤，并在最终退出时仍以非零退出码报告 Skill 同步失败。
 
@@ -1653,7 +1653,7 @@ github_repo = "owner/backend-service"
 - 每个仓库必须有 `path`（本地绝对路径）。
 - `enabled = false` 可临时禁用某个仓库。
 - `github_repo` 是可选的 `owner/name` 字符串，供 `kc issue list` 的 PR 列以及 GitHub API 操作使用；缺省时，GitHub API 客户端从目标仓库的 Git remote URL 推断仓库身份。两处都无法提供仓库身份时会提示配置该字段，不会调用 `gh repo view` 查询 GitHub 元数据。
-- 与 `github_repo` 同属仓库身份信息的 `platform` 通过 `.kedacode.toml` 的 `[agent_runner.repository]` 段声明，省略时默认为 `github`；目前 `gitea` 尚未实现。配置格式、允许值与改回 GitHub 的方式见[配置指南](configuration.md#agent-runner-repo-config)。
+- 与 `github_repo` 同属仓库身份信息的 `platform` 通过 `.kedacode.toml` 的 `[agent_runner.repository]` 段声明，省略时默认为 `github`。Gitea 仓库使用 Gitea REST API 完成 Issue、标签、评论、PR、合并与提交状态操作；实例地址和 `token_env` 必须登记在本机 `config.toml`，仓库配置不得指定令牌去向。Gitea 草稿 PR 用 `WIP: ` 标题前缀表示，转正式时移除。`kc takeover`、预览环境模板和容器凭据转交仍直接使用 `gh`，不属于 Gitea 支持范围；本次支持范围以 Gitea 1.21 为基线，不承诺 Forgejo。配置格式、HTTPS 要求与改回 GitHub 的方式见[配置指南](configuration.md#agent-runner-repo-config)。
 - registry 配置中的 `github_repo` 仅供 `kc issue list` 查询 PR 列；GitHub API 操作仍从目标仓库自身的 `.kedacode.toml` 或 Git remote 解析仓库身份。
 - registry 通常只保留 `path` 和 `enabled`；仓库级 overrides 仍兼容，但建议迁移到目标仓库的 `.kedacode.toml`。
 - 未指定 `--repo`、`--repo-id` 或 `--all` 时，单仓库命令（如 `kc run`、`kc supervise`）只处理当前 Git 仓库；`kc daemon` 和 `kc supervise-daemon` 同样只处理当前已初始化注册仓库，未命中、未初始化或匹配多个时报错。如需监控所有 enabled registry entries，请显式使用 `--all`。
