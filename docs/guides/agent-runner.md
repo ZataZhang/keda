@@ -604,6 +604,8 @@ kc skill install --dry-run   # 预览全部安装根的安装计划，不写任�
 kc skill install             # 安装/刷新全部用户级 Skill
 ```
 
+远程模板 `prd` / `code-reviewer` 从发行包固定的仓库提交获取。Git fetch 遇到非零退出或超时会对同一提交重试一次；重试仍失败时不会写入不完整 Skill。此时 `kc init` 会明确警告、安装随包 operator Skill，并继续完成仓库登记与标签同步；需要远程模板 Skill 时，网络恢复后运行 `kc skill install`。显式执行 `kc skill install` 仍以非零退出码报告远程下载失败。
+
 远程模板 Skill 的冲突语义与 init 相同；随包 operator Skill 的旧版安全刷新和冲突语义为：
 
 - 能证明未被编辑的历史 operator Skill 自动刷新；改动过的受管文件默认保留并报告冲突；
