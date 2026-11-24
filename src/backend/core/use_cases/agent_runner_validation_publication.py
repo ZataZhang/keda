@@ -91,10 +91,12 @@ def _write_evidence_tree(
         )
         mktree_entries.append(f"040000 tree {subtree_sha}\t{directory_name}")
 
+    # 用 NUL 分隔条目：进程执行器以文本模式写 stdin，Windows 会把 "\n" 换成 "\r\n"，
+    # git 会把多出的 "\r" 当作文件名的一部分，证据链接因此全部 404。NUL 不受换行转换影响。
     tree_result = process_runner.run(
-        ["git", "mktree"],
+        ["git", "mktree", "-z"],
         cwd=worktree_path,
-        input_text="\n".join(mktree_entries) + "\n",
+        input_text="".join(f"{entry}\0" for entry in mktree_entries),
     )
     return tree_result.stdout.strip()
 

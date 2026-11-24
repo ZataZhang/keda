@@ -959,7 +959,7 @@ def _evidence_worktree(tmp_path: Path) -> tuple[Path, Path]:
 
 
 class _SequencedMktreeRunner(FakeProcessRunner):
-    """FakeProcessRunner 变体：``git mktree`` 按调用顺序返回不同 tree SHA。
+    """FakeProcessRunner 变体：``git mktree -z`` 按调用顺序返回不同 tree SHA。
 
     嵌套树要连续调用多次 ``mktree``（子树在前、根树在后），而基类按命令元组做
     单值映射，无法区分同一命令的第 N 次调用。
@@ -975,9 +975,9 @@ class _SequencedMktreeRunner(FakeProcessRunner):
         self._pending_mktree_shas = list(mktree_shas)
 
     def run(self, command: Sequence[str], **kwargs: object) -> CommandResult:  # type: ignore[override]
-        if list(command) == ["git", "mktree"]:
-            self.responses[("git", "mktree")] = CommandResult(
-                ("git", "mktree"), 0, f"{self._pending_mktree_shas.pop(0)}\n", ""
+        if list(command) == ["git", "mktree", "-z"]:
+            self.responses[("git", "mktree", "-z")] = CommandResult(
+                ("git", "mktree", "-z"), 0, f"{self._pending_mktree_shas.pop(0)}\n", ""
             )
         return super().run(command, **kwargs)  # type: ignore[arg-type]
 
@@ -1021,11 +1021,11 @@ def test_upload_evidence_branch_nests_oracle_subdirectory(tmp_path: Path) -> Non
     mktree_inputs = [
         fake_runner.input_texts[index]
         for index, call in enumerate(fake_runner.calls)
-        if call == ["git", "mktree"]
+        if call == ["git", "mktree", "-z"]
     ]
     assert len(mktree_inputs) == 2
     # 子树只含 basename，不含目录前缀。
-    assert mktree_inputs[0] == "100644 blob blob3\trv-1-oracle.py\n"
+    assert mktree_inputs[0] == "100644 blob blob3\trv-1-oracle.py\0"
     # 根树以 040000 tree 引用子树，模式位不是 40000 也不是 100644。
     assert "040000 tree subtree\tscripts" in mktree_inputs[1]
     assert "100644 blob blob1\trv-1-shot.png" in mktree_inputs[1]
@@ -1050,7 +1050,7 @@ def test_upload_evidence_branch_uses_orphan_plumbing(tmp_path: Path) -> None:
             "--",
             str(evidence_dir / "rv-2-cli.txt"),
         ): CommandResult(("git",), 0, "blob2\n", ""),
-        ("git", "mktree"): CommandResult(("git", "mktree"), 0, "tree1\n", ""),
+        ("git", "mktree", "-z"): CommandResult(("git", "mktree", "-z"), 0, "tree1\n", ""),
         (
             "git",
             "commit-tree",
@@ -1072,10 +1072,11 @@ def test_upload_evidence_branch_uses_orphan_plumbing(tmp_path: Path) -> None:
     assert upload.branch == "kc-evidence/issue-42"
     assert upload.commit_sha == "commit1"
     assert upload.file_names == ("rv-1-shot.png", "rv-2-cli.txt")
-    # mktree 输入两行 blob 条目
-    mktree_input = fake_runner.input_texts[fake_runner.calls.index(["git", "mktree"])]
-    assert mktree_input is not None
-    assert "100644 blob blob1\trv-1-shot.png" in mktree_input
+    # mktree 输入两条以 NUL 结尾的 blob 条目，不含换行（Windows 文本模式会把换行改成 CRLF）
+    mktree_input = fake_runner.input_texts[fake_runner.calls.index(["git", "mktree", "-z"])]
+    assert mktree_input == (
+        "100644 blob blob1\trv-1-shot.png\x00100644 blob blob2\trv-2-cli.txt\x00"
+    )
     # commit-tree 无 -p 参数（orphan 提交）
     commit_tree_call = next(
         call for call in fake_runner.calls if call[:2] == ["git", "commit-tree"]
@@ -1088,6 +1089,48 @@ def test_upload_evidence_branch_uses_orphan_plumbing(tmp_path: Path) -> None:
         config.git.remote,
         "commit1:refs/heads/kc-evidence/issue-42",
     ] in fake_runner.calls
+
+
+def test_upload_evidence_branch_keeps_exact_file_names_in_real_git(tmp_path: Path) -> None:
+    """真实 git 下证据分支的文件名与本地一致，不带尾随 ``\\r``。
+
+    回归：进程执行器以文本模式写 stdin，Windows 会把 ``mktree`` 输入里的换行改成
+    CRLF，git 把 ``\\r`` 收进文件名，PR 证据评论里的链接因此全部 404。
+    """
+    from backend.infrastructure.process_runner import SubprocessRunner
+
+    worktree_path, evidence_dir = _evidence_worktree(tmp_path / "worktree")
+    (evidence_dir / "scripts").mkdir()
+    (evidence_dir / "scripts" / "rv-1-oracle.py").write_text("assert True\n", encoding="utf-8")
+    remote_path = tmp_path / "remote.git"
+    for git_command, command_cwd in (
+        (["git", "init", "-q", "--bare", str(remote_path)], tmp_path),
+        (["git", "init", "-q"], worktree_path),
+        (["git", "remote", "add", "origin", str(remote_path)], worktree_path),
+    ):
+        subprocess.run(git_command, cwd=command_cwd, check=True, capture_output=True)
+    config = _legacy_config()
+
+    upload = upload_evidence_branch(
+        issue=_issue(),
+        worktree_path=worktree_path,
+        config=config,
+        process_runner=SubprocessRunner(),
+    )
+
+    assert upload is not None
+    assert config.git.remote == "origin"
+    tree_listing = subprocess.run(
+        ["git", "ls-tree", "-r", "-z", "--name-only", upload.branch],
+        cwd=remote_path,
+        check=True,
+        capture_output=True,
+    ).stdout
+    assert tree_listing.split(b"\0")[:-1] == [
+        b"rv-1-shot.png",
+        b"rv-2-cli.txt",
+        b"scripts/rv-1-oracle.py",
+    ]
 
 
 def test_upload_evidence_branch_returns_none_without_files(tmp_path: Path) -> None:
@@ -1182,7 +1225,7 @@ def test_publish_validation_evidence_posts_pr_comment(tmp_path: Path) -> None:
             "--",
             str(evidence_dir / "rv-2-cli.txt"),
         ): CommandResult(("git",), 0, "blob2\n", ""),
-        ("git", "mktree"): CommandResult(("git", "mktree"), 0, "tree1\n", ""),
+        ("git", "mktree", "-z"): CommandResult(("git", "mktree", "-z"), 0, "tree1\n", ""),
         (
             "git",
             "commit-tree",
@@ -1244,7 +1287,7 @@ def test_publish_validation_evidence_binds_stable_pr_identity(tmp_path: Path) ->
             "--",
             str(evidence_dir / "rv-2-cli.txt"),
         ): CommandResult(("git",), 0, "blob2\n", ""),
-        ("git", "mktree"): CommandResult(("git", "mktree"), 0, "tree1\n", ""),
+        ("git", "mktree", "-z"): CommandResult(("git", "mktree", "-z"), 0, "tree1\n", ""),
         (
             "git",
             "commit-tree",
@@ -1326,7 +1369,7 @@ def test_publish_validation_evidence_best_effort_swallows_comment_failure(
             "--",
             str(evidence_dir / "rv-2-cli.txt"),
         ): CommandResult(("git",), 0, "blob2\n", ""),
-        ("git", "mktree"): CommandResult(("git", "mktree"), 0, "tree1\n", ""),
+        ("git", "mktree", "-z"): CommandResult(("git", "mktree", "-z"), 0, "tree1\n", ""),
         (
             "git",
             "commit-tree",
