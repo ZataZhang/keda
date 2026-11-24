@@ -384,7 +384,7 @@ def test_golden_codebuddy_repl(app_config: AppConfig, plain_worktree: Path) -> N
 
 
 def test_golden_qoder_run(app_config: AppConfig, plain_worktree: Path) -> None:
-    """qoder 主执行：bin 是 qodercn，用 -o stream-json 走流式协议。"""
+    """qoder 主执行：长提示词走 stdin，-o stream-json 走流式协议。"""
     invocation = build_agent_invocation("qoder", "run", PROMPT, plain_worktree, app_config)
     assert invocation.argv == (
         "qodercn",
@@ -392,8 +392,8 @@ def test_golden_qoder_run(app_config: AppConfig, plain_worktree: Path) -> None:
         "-p",
         "-o",
         "stream-json",
-        PROMPT,
     )
+    assert invocation.prompt_delivery == "stdin"
     assert invocation.output_protocol == CLAUDE_STREAM_JSON_PROTOCOL_ID
 
 
