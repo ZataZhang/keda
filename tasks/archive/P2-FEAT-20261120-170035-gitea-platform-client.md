@@ -5,7 +5,7 @@
 > ⛔ **交付前置**：排在 `P2-FEAT-20261119-152718-repository-platform-selection-skeleton`（#398）之后开工。本 PRD 接入的就是 #398 定下的平台声明键和唯一分发点；先做本 PRD 就得自己临时造一个分发点，#398 落地时还要再拆掉。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> ⏸️ **验收状态**：验证阻塞。
+> 🧍 **验收状态**：待人工验收 — 执行侧已完成，仅剩 3 项 Human-Confirmed 未确认，证据包见 §9。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 > 本 PRD 分两个 altitude，分别服务不同读者，自上而下阅读：
@@ -494,6 +494,7 @@ Failure triage:
 
 - 本 PRD 编写时（2026-11-20）未做联网检索。§6 的操作映射、"WIP 前缀表示进行中且不能合并"、提交状态接口等关于 Gitea 的描述，来自作者对 Gitea 的既有了解，属于**待核实的推断**。
 - 核实方式：实现时以 `gitea/gitea:1.21` 容器自带的 `/swagger.v1.json` 与网页行为为准；rv-1、rv-5、rv-6 在真实容器上运行，会直接暴露差异。发现差异时更新本节与 §6，若影响 Part A 的决策二，须重新请人确认。
+- 核实结果（2026-11-24，最终代码 `59429463`）：客户端实际调用的 22 个接口（方法 + 路径）全部存在于 `gitea/gitea:1.21`（1.21.11）的 `/swagger.v1.json`，证据 `swagger-check.txt`。唯一行为差异是 WIP 标题期间 `mergeable=false`，已按 §13 Reconciled differences 处理为未知并在去掉前缀后重读，不影响决策二。
 
 ---
 
@@ -525,9 +526,17 @@ Failure triage:
 
 | # | 你要看什么 | 呈递物（交付时填实际路径） | 想自己复核？ |
 |---|---|---|---|
-| 1 | 演示录屏里 Gitea 上的 Issue、标签、PR 是否和用 GitHub 时一致 | `rv-1-demo.mp4`；打开方式：`just prd review tasks/pending/P2-FEAT-20261120-170035-gitea-platform-client.md` | 看第 3 步画面：PR 标题以 `WIP: ` 开头 |
+| 1 | 演示录屏里 Gitea 上的 Issue、标签、PR 是否和用 GitHub 时一致 | `tasks/evidence/P2-FEAT-20261120-170035-gitea-platform-client/rv-1-demo.mp4`；打开：`open tasks/evidence/P2-FEAT-20261120-170035-gitea-platform-client/rv-1-demo.mp4`，或 `just prd review tasks/archive/P2-FEAT-20261120-170035-gitea-platform-client.md` | 看第 3 步画面：PR 标题以 `WIP: ` 开头 |
 | 2 | 草稿 PR 的 `WIP: ` 前缀与合并保护（决策二） | `rv-1-gitea-pr-wip.png`、`rv-1-gitea-pr-merged.png` | 截图一合并按钮不可用；截图二显示 Merged |
 | 3 | 令牌去向保护（决策一）的结论摘要 | `rv-2-unregistered-host.txt` 中 `requests=0` 一行与负对照 `requests>0` 一行原文 | 两行对比即可 |
+
+![rv-1 草稿 PR：标题以 WIP: 开头，状态 Draft](../evidence/P2-FEAT-20261120-170035-gitea-platform-client/rv-1-gitea-pr-wip.png)
+
+![rv-1 合并后：标题去掉 WIP: 前缀，状态 Merged](../evidence/P2-FEAT-20261120-170035-gitea-platform-client/rv-1-gitea-pr-merged.png)
+
+![rv-5 检查状态：Some checks failed，列出 rv-failing-check](../evidence/P2-FEAT-20261120-170035-gitea-platform-client/rv-5-gitea-status.png)
+
+本地图片，GitHub 上不显示（证据目录只提交 `.md`）；原图在证据分支 `kc-evidence/issue-416`，本地打开：`open tasks/evidence/P2-FEAT-20261120-170035-gitea-platform-client/rv-1-gitea-pr-wip.png`（另两张同目录）。三张图与录屏均于 2026-11-24 在最终代码 `59429463` 上用 WebKit 重新采集。
 
 未在本区展示（verifier 已复核，失败时才呈递）：rv-3 令牌缺失、rv-4 地址规则、rv-5 检查状态、rv-6 接口逐项、rv-7 回归、rv-8 文档。
 
@@ -535,8 +544,8 @@ Failure triage:
 
 1. **人审决策与 R3 证据**：rv-2 → `rv-2-unregistered-host.txt`；rv-3 → `rv-3-missing-token.txt`；rv-4 → `rv-4-url-policy.txt`（决策一）；rv-1 → `rv-1-gitea-full-loop.txt` 与两张截图（决策二）。
 2. **R2 证据**：rv-5 → `rv-5-status.txt` 与本 PRD 的截图格式要求；rv-6 → `rv-6-client-live.txt`。
-3. **风险地图对账 Predicted → Reconciled**：交付时填写。
-4. **对 Gitea 接口推断的核实结果**（§7.9）：交付时列出与 swagger 不一致之处及处理。
+3. **风险地图对账 Predicted → Reconciled**：实现中未触发 §2 之外的高风险面；预测外的两处差异（Gitea WIP 期间 `mergeable=false`、`kc run` 不输出 PR URL）已在 §13 Reconciled differences 处理，均不改变决策一、决策二。
+4. **对 Gitea 接口推断的核实结果**（§7.9）：22/22 个调用接口存在于 swagger 1.21.11，无路径或方法差异 → `swagger-check.txt`；证据报告第 4 节。
 5. **低风险门禁（折叠）**：rv-7 → `rv-7-pytest.txt`；rv-8 → `rv-8-docs.txt`；`just lint` 结果。
 
 ### Human-Confirmed (来自 Part A 风险地图)
@@ -549,40 +558,40 @@ Failure triage:
 
 ### Architecture Acceptance
 
-- [ ] `rg -n "\"gh\"" src/backend/infrastructure/gitea_*.py` 无结果，证据：`arch-search.txt`
-- [ ] `rg -n 'pulls\?' src/backend/core/shared/models/pull_request_url.py` 只命中共享解析 helper，证据：`arch-search.txt`
-- [ ] 未新增依赖：`git diff -- pyproject.toml uv.lock` 为空，证据：`arch-search.txt`
-- [ ] `gitea_client.py`、`gitea_pr_ops.py` 各自非空行不超过 1000，证据：`arch-search.txt`
+- [x] `rg -n "\"gh\"" src/backend/infrastructure/gitea_*.py` 无结果，证据：`arch-search.txt`（最终代码复核：`final-tree-recheck.txt`）
+- [x] `rg -n 'pulls\?' src/backend/core/shared/models/pull_request_url.py` 只命中共享解析 helper，证据：`arch-search.txt`（最终代码复核：`final-tree-recheck.txt`）
+- [x] 未新增依赖：`git diff -- pyproject.toml uv.lock` 为空，证据：`arch-search.txt`（合并提交对父提交比较为空：`final-tree-recheck.txt`）
+- [x] `gitea_client.py`、`gitea_pr_ops.py` 各自非空行不超过 1000，证据：`arch-search.txt`（804 / 517：`final-tree-recheck.txt`）
 
 ### Dependency Acceptance
 
-- [ ] `IGitHubClient` 方法签名无改动：`git diff -- src/backend/core/shared/interfaces/agent_runner.py` 为空，证据：`arch-search.txt`
-- [ ] GitHub 客户端文件无改动：`git diff --stat -- src/backend/infrastructure/github_*.py` 为空，证据：`arch-search.txt`
+- [x] `IGitHubClient` 方法签名无改动：`git diff -- src/backend/core/shared/interfaces/agent_runner.py` 为空，证据：`arch-search.txt`（合并提交对父提交比较为空：`final-tree-recheck.txt`）
+- [x] GitHub 客户端文件无改动：`git diff --stat -- src/backend/infrastructure/github_*.py` 为空，证据：`arch-search.txt`（合并提交对父提交比较为空：`final-tree-recheck.txt`）
 
 ### Behavior Acceptance
 
-- [ ] 真实 Gitea 上完整跑通一轮，零 `gh` 调用，证据：`rv-1-gitea-full-loop.txt`
-- [ ] 未登记主机零请求且退出码 1，负对照能变红，证据：`rv-2-unregistered-host.txt`
-- [ ] 令牌缺失退出码 1，证据目录中搜不到令牌值，证据：`rv-3-missing-token.txt`
-- [ ] 地址规则与仓库级注入拒绝，证据：`rv-4-url-policy.txt`
-- [ ] 检查状态三种情形结论正确，证据：`rv-5-status.txt`
+- [x] 真实 Gitea 上完整跑通一轮，零 `gh` 调用，证据：`rv-1-gitea-full-loop.txt`（最终代码复跑 `RESULT=PASS`，`gh_invocations=0`）
+- [x] 未登记主机零请求且退出码 1，负对照能变红，证据：`rv-2-unregistered-host.txt`（最终代码复跑 PASSED：`final-tree-recheck.txt`）
+- [x] 令牌缺失退出码 1，证据目录中搜不到令牌值，证据：`rv-3-missing-token.txt`（最终代码复跑 PASSED：`final-tree-recheck.txt`）
+- [x] 地址规则与仓库级注入拒绝，证据：`rv-4-url-policy.txt`（最终代码复跑 PASSED：`final-tree-recheck.txt`）
+- [x] 检查状态三种情形结论正确，证据：`rv-5-status.txt`（最终代码复跑通过并截图 `rv-5-gitea-status.png`）
 - [x] 接口逐项覆盖且覆盖集合等于抽象方法集合，证据：`rv-6-client-live.txt`
 
 ### Documentation Acceptance
 
-- [ ] 配置指南、runner 指南、随包 operator skill 已同步，严格构建通过，证据：`rv-8-docs.txt`
+- [x] 配置指南、runner 指南、随包 operator skill 已同步，严格构建通过，证据：`rv-8-docs.txt`（最终代码复跑 PASSED：`final-tree-recheck.txt`）
 
 ### Validation Acceptance
 
-- [ ] rv-1 至 rv-4 经真实 `uv run kc` 入口执行，rv-1 对着真实 Gitea 容器，证据：各 `rv-*.txt` 首行命令
+- [x] rv-1 至 rv-4 经真实 `uv run kc` 入口执行，rv-1 对着真实 Gitea 容器，证据：各 `rv-*.txt` 首行命令（最终代码复跑同入口：`final-tree-recheck.txt`、`rv-1-gitea-full-loop.txt`）
 - [x] 全量测试（关闭 testmon）通过；仅原先断言 Gitea 未实现的工厂 dispatch 与 `kc init` 行为测试更新为新行为，其余既有测试未修改，证据：`rv-7-pytest.txt`
-- [ ] 全部证据在最后一次影响相关代码的改动之后采集，证据报告记录 `git rev-parse HEAD` 与 `HEAD^{tree}`
+- [x] 全部证据在最后一次影响相关代码的改动之后采集，证据报告记录 `git rev-parse HEAD` 与 `HEAD^{tree}`（2026-11-24 在合并提交 `59429463`、tree `bbf6fce0` 上全部重采）
 
 ### Delivery Readiness
 
-- [ ] §7.9 的推断已逐项对照 swagger 核实，差异已写回 §6/§7.9，证据：证据报告第 4 节
-- [ ] §9.1 呈递物路径已回填，录屏与截图在证据报告中内嵌展示，完成回复原样带上呈递表内容
-- [ ] 证据报告首节是「人审导航」
+- [x] §7.9 的推断已逐项对照 swagger 核实，差异已写回 §6/§7.9，证据：证据报告第 4 节（`swagger-check.txt`，22/22）
+- [x] §9.1 呈递物路径已回填，录屏与截图在证据报告中内嵌展示，完成回复原样带上呈递表内容（PRD §9.1 与证据报告人审导航均已内嵌三张截图）
+- [x] 证据报告首节是「人审导航」
 
 ---
 
@@ -627,15 +636,15 @@ Failure triage:
 
 - Interpretation: 保持 Part A 已确认的范围与信任边界；Gitea 使用机器级实例登记，GitHub 默认行为保留。
 - Public behavior and contracts: 新增 Gitea REST 客户端、Gitea 1.21 的 WIP 标题约定和提交状态读取；真实 CLI 流程覆盖标签、Issue、评论、PR、未知状态阻止合并、成功后合并并关闭 Issue。
-- Related PRD status: 本 PRD 仍依赖 #398；runner 负责归档，当前按验证阻塞路径交接。
-- Requirements and risks: rv-2 至 rv-4、rv-6 至 rv-8 的自动证据通过；rv-6 在隔离系统级 credential.helper 后重新通过真实 Gitea 1.21 验证（2 passed）。rv-7 执行完整收集的 5663 个 tests/ node id，四个文件级分片合计 5660 passed、3 skipped；最长分片 196.67 秒，整条可复跑命令低于 300 秒，未使用 xdist 或 marker 排除。rv-5 的真实 Gitea 状态测试通过，但其截图格式标记未满足。rv-1 的 API 流程通过且记录 0 次 gh 调用，但必须由真实 Gitea UI 截图证明 WIP 合并保护并呈现最终合并状态，当前缺少所需截图和主演示视频。
+- Related PRD status: #398 已落地；PR #422 于 2026-11-24 由协作者合并，#416 随之关闭。原按验证阻塞路径归档，2026-11-24 补验完成后转入待人工验收。
+- Requirements and risks: rv-2 至 rv-4、rv-6 至 rv-8 的自动证据通过；rv-6 在隔离系统级 credential.helper 后重新通过真实 Gitea 1.21 验证（2 passed）。rv-7 执行完整收集的 5663 个 tests/ node id，四个文件级分片合计 5660 passed、3 skipped；最长分片 196.67 秒，整条可复跑命令低于 300 秒，未使用 xdist 或 marker 排除。2026-11-24 补验在合并提交 `59429463`（tree `bbf6fce0`）上重跑全部 8 项：rv-2/3/4/6/7/8 经 `kc evidence check` 通过；rv-5 状态测试通过并用 WebKit 截到真实状态页；rv-1 直接运行 `RESULT=PASS`（替身 codex 调用 3 次、gh 0 次），截到 WIP 与合并两张真实页面并录制主演示；架构检查改为合并提交对父提交比较，依赖、`IGitHubClient`、GitHub 客户端均无改动；22 个调用接口对照 swagger 全部存在。
 - Reconciled differences:
   - `kc run` 不输出 PR 创建响应 URL，rv-1 在真实 `kc run` 后通过独立 Gitea GET `/pulls` 按 head branch 与 WIP 标题识别 PR，再按编号独立复读。
   - `kc init` 在本机登记命中发布 remote 时直接生成 `platform = "gitea"`，以支持首次标签同步且不经过 GitHub auth 检查。
   - Gitea 1.21 在 WIP 状态返回的 `mergeable=false` 被解释为未知，转正式后再读取实际合并性，避免把草稿门禁误判为分支冲突。
   - rv-7 为遵守 300 秒复跑上限，完整收集一次 `tests/` 后按测试文件划分四个并行 pytest 进程；每个 node id 执行一次，不使用 xdist、testmon 选择或 marker 排除。
-- Validation blocker: 无法生成 rv-1 要求的 Gitea UI 截图与 `rv-1-demo.mp4`，也无法满足 `<!-- kc:evidence-format item=5 kind=screenshot -->` 要求的 rv-5 图片证据。CUA 浏览器宿主不可用且 Edge 未获桌面控制授权；隔离 Chromium 因 `MachPortRendezvousServer` 权限拒绝中止，WebKit 也以 `Abort trap: 6` 退出。真实 rv-5 状态测试已通过，但 `.txt` 输出不能替代截图。未伪造截图或视频。
-- Validation follow-up: 在 #416 上跟进；待桌面浏览器宿主可用或隔离渲染器获得启动权限后，运行 `RV_CAPTURE_BROWSER=1 bash tasks/evidence/P2-FEAT-20261120-170035-gitea-platform-client/scripts/rv1_full_loop.sh`，生成两张真实 UI 截图和字幕主演示；重新运行 `rv5_status.sh` 后截取真实 Gitea 提交状态页面为 `rv-5-gitea-status.png`。随后更新证据 manifest、独立复核并重新运行交付验证。
+  - 补验发现证据分支把替身 `scripts/codex`、`scripts/gh` 存成 `100644`（无可执行位），`PATH` 查找会落到本机真实的 codex，并按回退顺序切到真实的 claude/kimi；首次补验因此作废，补上可执行位后重跑。
+  - rv-1 带截图与录屏的一轮在本机耗时 769 秒（视频转码占大头），超过 `kc evidence check` 的 300 秒复跑上限，因此该项由直接运行判定通过，不是由复跑门禁判定。
 
 ## Change Log
 
@@ -742,3 +751,11 @@ Failure triage:
 - Reason: runner 按 300 秒硬上限复跑 Realistic Validation 命令，需要保持全量范围且让命令自终止。
 - Impact: 完整测试范围与既有用例保持不变；实跑 5660 passed、3 skipped，最长分片 196.67 秒。文件内顺序保留，文件间并行是此验证方式的风险边界。
 - Review: 执行期验证适配，证据通过，需求方待复核
+
+### 补验 rv-1 与 rv-5 截图并转入待人工验收
+- Type: evidence
+- Before: 横幅为 ⏸️ 验证阻塞；rv-1 两张截图与主演示、rv-5 截图缺失；§7.9 swagger 核实未做；执行侧 17 项未勾
+- After: 在合并提交 `59429463` 上重跑全部 8 项并补采三张真实页面截图与主演示，swagger 22/22 核实；勾选有新证据的执行侧条目，横幅改为 🧍 待人工验收，Human-Confirmed 3 项保持未勾
+- Reason: Validation follow-up 登记的浏览器条件已满足（本机 WebKit 可用），维护者要求补齐证据
+- Impact: 代码与范围不变；补验记录了两个验证工具问题：证据分支替身缺可执行位、rv-1 全流程超过 300 秒复跑上限
+- Review: 待维护者对 Human-Confirmed 3 项验收

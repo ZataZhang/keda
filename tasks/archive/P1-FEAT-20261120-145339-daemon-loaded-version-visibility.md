@@ -3,7 +3,7 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> ⬜ **验收状态**：未开工。
+> 🧍 **验收状态**：待人工验收。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 > 本 PRD 分两个 altitude，分别服务不同读者，自上而下阅读：
@@ -386,31 +386,31 @@ ER Diagram：不涉及数据库变化。状态文件是本机 JSON，只新增�
 
 ### Behavior Acceptance
 
-- [ ] 不一致：表格版本列与提示正确，退出码 0（rv-1）
-- [ ] JSON：三字段齐全，`mismatch` / `current` / `unknown` 三态正确，stdout 可被解析（rv-2）
-- [ ] 启动时版本不随磁盘变化（rv-3）
-- [ ] supervise-daemon 行版本列为 `-`，JSON 中 `loaded_version` / `version_status` 为 null（`tests/test_cli_registry.py` 断言）
+- [x] 不一致：表格版本列与提示正确，退出码 0（rv-1）
+- [x] JSON：三字段齐全，`mismatch` / `current` / `unknown` 三态正确，stdout 可被解析（rv-2）
+- [x] 启动时版本不随磁盘变化（rv-3）
+- [x] supervise-daemon 行版本列为 `-`，JSON 中 `loaded_version` / `version_status` 为 null（表格经代码核对和直接调用确认，见 verifier 报告 C11；JSON 由 `tests/test_cli_registry.py` 断言）
 
 ### Architecture Acceptance
 
-- [ ] `core/` 不导入 `api/`：`rg -n "from backend.api" src/backend/core` 无输出；`just lint` 通过（输出存证）
-- [ ] 锁文件格式未改：`git diff main -- src/backend/core/use_cases/daemon_single_instance.py` 为空
+- [x] `core/` 不导入 `api/`：`rg -n "from backend.api" src/backend/core` 无输出；`just lint` 通过（输出存证）
+- [x] 锁文件格式未改：`git diff main -- src/backend/core/use_cases/daemon_single_instance.py` 为空
 
 ### Documentation Acceptance
 
-- [ ] `rg -n "version_status" docs/guides/agent-runner.md src/backend/engines/agent_runner/templates/skills/kedacode-operator/references/daemon.md` 两个文件均有命中
-- [ ] `ROADMAP.md` 维护带对应条目已指向本 PRD
+- [x] `rg -n "version_status" docs/guides/agent-runner.md src/backend/engines/agent_runner/templates/skills/kedacode-operator/references/daemon.md` 两个文件均有命中
+- ~~`ROADMAP.md` 维护带对应条目已指向本 PRD~~ 不适用。`ROADMAP.md` 已于 2026-11-23 由 `10ca36c7` 重写为不列逐条条目的结构，任务状态以 PRD 为准（见 `docs/project/roadmap-history.md`）。见 Change Log「归档前复核」。
 
 ### Validation Acceptance
 
-- [ ] 真实 `kc` 子进程验证 rv-1、rv-2 通过（终端输出存为 `rv-1-status-mismatch.txt`、`rv-2-status-json.txt`）
-- [ ] 负向对照：实现前 rv-1 为红（输出存证）
-- [ ] `uv run pytest tests/test_daemon_parallel_limit_status.py tests/test_cli_registry.py tests/test_agent_runner_cli.py -q` 中本 PRD 新增用例全部通过，且失败集合与改动前基线一致（无新增失败）
+- [x] 真实 `kc` 子进程验证 rv-1、rv-2 通过（终端输出存为 `rv-1-status-mismatch.txt`、`rv-2-status-json.txt`）
+- [x] 负向对照：实现前 rv-1 为红（输出存证）
+- [x] `uv run pytest tests/test_daemon_parallel_limit_status.py tests/test_cli_registry.py tests/test_agent_runner_cli.py -q` 中本 PRD 新增用例全部通过，且失败集合与改动前基线一致（无新增失败）
 
 ### Delivery Readiness
 
-- [ ] PR 证据评论或完成消息原样携带 9.1 内容（rv-1 关键行内联）
-- [ ] 独立 verifier 判定 PASS
+- [x] PR 证据评论或完成消息原样携带 9.1 内容（rv-1 关键行内联）（归档完成消息原样内联 rv-1 表格行与提示两行）
+- [x] 独立 verifier 判定 PASS（`P1-FEAT-20261120-145339-daemon-loaded-version-visibility.verifier-report.md`）
 
 ## 10. Functional Requirements
 
@@ -442,6 +442,18 @@ ER Diagram：不涉及数据库变化。状态文件是本机 JSON，只新增�
 | D-03 | 不一致时的退出码 | 保持 0，只提示 + JSON 字段 | 返回非零退出码 | status 是只读查询，非零会把“版本旧”误报为“查询失败”，打断现有自动化 |
 | D-04 | 比较规则 | 字符串不相等即 mismatch | 按语义版本只在“落后”时提示 | 降级同样意味着 daemon 跑的不是已安装版本，判断更简单 |
 
+### Final Reconciliation (Archive Only)
+
+- Interpretation: 与 §1 解读一致；版本不一致只提示、退出码保持 0（§2 推荐方案，用户 2026-11-20 聊天确认）。
+- Public behavior and contracts: `kc daemon status` 表格新增 `version` 列；`--json` 每行新增 `loaded_version`、`installed_version`、`version_status`（`current` / `mismatch` / `unknown` / null）；表格模式对 `mismatch` 或未上报版本的 daemon 打印重启提示；退出码与锁文件格式不变。
+- Related PRD status: 无关联 pending PRD。
+- Requirements and risks: FR-1 至 FR-5 由 rv-1 至 rv-4 证明；FR-6 的文档与 operator skill 部分已同步，ROADMAP 部分不适用（见下）。rv-5（真实 daemon，opt-in）未采集，不阻塞归档。
+- Reconciled differences:
+  - 归档前于 main `616d0ea7` 重跑：rv-1/rv-2 冒烟脚本 PASS；rv-3 3 passed；目标三文件 10 failed / 200 passed，失败集合与合并前 `e328acbe^` 逐行一致（均为 Windows 既有失败：POSIX 进程组、zsh 补全、路径等），无新增失败。证据在 `tasks/evidence/P1-FEAT-20261120-145339-daemon-loaded-version-visibility/rerun-616d0ea7/`。Change Log「执行侧实现完成」写的 14 个基线失败以本次数字为准。
+  - 合并后重启提示函数从 `cli_registry.py` 移到 `src/backend/api/cli_process_display.py` 的公开函数 `daemon_restart_hint`，行为与文案不变。
+  - `ROADMAP.md` 维护带条目不适用：ROADMAP 已在 `10ca36c7` 重写，不再列逐条条目。
+  - verifier 记录的非阻塞问题留作后续：supervise-daemon 行表格 `-` 无专门断言（JSON null 已测）；`references/daemon.md` 新段落插在“读取实际生效值”列表中间；指南对“已安装版本未知不提示”的措辞未覆盖“daemon 未上报版本仍提示”的情况。
+
 ## Change Log
 
 ### 用户在聊天中确认按推荐方案开工
@@ -459,3 +471,11 @@ ER Diagram：不涉及数据库变化。状态文件是本机 JSON，只新增�
 - Reason: 实现时按真实代码结构落点
 - Impact: 证据：rv-1/rv-2 隔离环境真实 kc 子进程 PASS（tasks/evidence/P1-FEAT-20261120-145339-daemon-loaded-version-visibility/rv-1-status-mismatch.txt、rv-2-status-json.txt），实现前同一脚本 FAIL（negative-control/）；目标测试文件改动前后失败集合一致（均为 14 个 Windows 环境既有失败：POSIX 进程组、TOML 反斜杠路径等）；pre-commit（ruff、架构检查）与 mkdocs --strict 通过。独立 verifier 尚未运行，§9 勾选与归档待其 PASS 后进行
 - Review: 待独立 verifier 与用户验收
+
+### 归档前复核
+- Type: evidence
+- Before: §9 全部未勾；横幅为“未开工”；独立 verifier 未运行
+- After: 在 main `616d0ea7` 重跑 rv-1 至 rv-4 并对比合并前失败基线；独立 verifier 判定 PASS；勾选有证据的执行侧条目，横幅改为“待人工验收”并归档。`ROADMAP.md` 条目一项改为不适用并保留原文删除线
+- Reason: 代码已随 #426 合并，PRD 未收尾；ROADMAP 已在 `10ca36c7` 重写为不列逐条条目的结构
+- Impact: Human-Confirmed 两项仍留给用户；rv-5 opt-in 未采集
+- Review: 待用户人工验收，并确认 ROADMAP 一项按不适用处理

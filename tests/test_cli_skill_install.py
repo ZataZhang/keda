@@ -25,6 +25,7 @@ from backend.api.cli_typer_app import app
 from backend.core.shared.models import product_identity
 from backend.engines.agent_runner import remote_template_skills
 from backend.engines.agent_runner.remote_template_skills import (
+    RemoteTemplateSkillFetchError,
     RemoteTemplateSkillInstallError,
     RemoteTemplateSkillInstallResult,
     install_packaged_operator_skill,
@@ -214,6 +215,28 @@ def test_skill_install_remote_template_failure_exits_one_like_init(
     assert main(["skill", "install"]) == 1
     assert main(["init"]) == 1
     assert not skills_root.exists()
+
+
+def test_skill_install_fetch_failure_is_fatal_after_packaged_skill_install(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """显式刷新保留远程失败退出码，但仍安装随包 operator Skill。"""
+    skills_root = tmp_path / "skills"
+    repo_path = _init_git_repository(tmp_path, "target")
+    monkeypatch.chdir(repo_path)
+    monkeypatch.setenv("KEDACODE_SKILLS_DIR", str(skills_root))
+    _isolate_global_config(tmp_path, monkeypatch)
+
+    def _fail_fetch(options: object) -> RemoteTemplateSkillInstallResult:  # noqa: ARG001
+        raise RemoteTemplateSkillFetchError("GitHub unavailable")
+
+    monkeypatch.setattr("backend.api.cli_skill.install_remote_template_skills", _fail_fetch)
+    _use_real_packaged_install(monkeypatch)
+
+    assert main(["skill", "install"]) == 1
+    assert (skills_root / product_identity.OPERATOR_SKILL_NAME / "SKILL.md").is_file()
+    assert not (skills_root / "prd").exists()
+    assert not (skills_root / "code-reviewer").exists()
 
 
 def test_skill_install_rejects_repository_selectors(

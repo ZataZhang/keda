@@ -3,7 +3,7 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> ⬜ **验收状态**：未开工。
+> 🧍 **验收状态**：待人工验收。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 > 本 PRD 分两个 altitude，分别服务不同读者，自上而下阅读：
@@ -358,30 +358,30 @@ ER Diagram：不涉及数据模型或持久化变化。
 
 ### Behavior Acceptance
 
-- [ ] running → human_review 恰好 1 条 `…#21 待你审阅`，同状态与 recheck 往返无新增，重新 running 后再进入新增 1 条（rv-1 证据文件）
-- [ ] 首轮已处于 human_review / blocked 的任务不补发（rv-1 断言）
-- [ ] 阻塞 / 失败提醒标题文案不变（`已阻塞` / `已失败`）（rv-4 断言）
+- [x] running → human_review 恰好 1 条 `…#21 待你审阅`，同状态与 recheck 往返无新增，重新 running 后再进入新增 1 条（rv-1 证据文件）
+- [x] 首轮已处于 human_review / blocked 的任务不补发（rv-1 断言）（human_review 由 e2e 断言；blocked 首轮与 human_review 共用同一基线分支，仅经代码阅读确认，见 Final Reconciliation）
+- [x] 阻塞 / 失败提醒标题文案不变（`已阻塞` / `已失败`）（rv-4 断言）（`已阻塞` 由 e2e 断言；`已失败` 仅经代码阅读确认，见 Final Reconciliation）
 
 ### Frontend Acceptance
 
-- [ ] 通知正文只来自 `issue_title ?? status_reason ?? 兜底文案`：`rg -n "blocking_reason|last_error_summary|failure_reason" "frontend-public/app/(companion)/app/companion/page.tsx"` 无输出
-- [ ] `pnpm --dir frontend-public typecheck` 与 `pnpm --dir frontend-public lint` 通过（输出存证）
-- [ ] 非桌面宿主 0 次 invoke、无 pageerror（rv-4）
+- [x] 通知正文只来自 `issue_title ?? status_reason ?? 兜底文案`：`rg -n "blocking_reason|last_error_summary|failure_reason" "frontend-public/app/(companion)/app/companion/page.tsx"` 无输出
+- [x] `pnpm --dir frontend-public typecheck` 与 `pnpm --dir frontend-public lint` 通过（输出存证）
+- [x] 非桌面宿主 0 次 invoke、无 pageerror（rv-4）（依赖本次补强的 spec：只装 invoke 记录器、不标记桌面宿主；去掉宿主判断时该用例变红）
 
 ### Documentation Acceptance
 
-- [ ] `docs/guides/desktop-companion.md` 两处“系统通知”说明列出四类提醒、防刷屏规则，并写明“已关闭”不区分合并与手动关闭
-- [ ] `tasks/inbox/summary.md` 把审阅邮件诉求指向本 PRD；`tasks/inbox/ideas.md` 原有条目未被改写（`git diff tasks/inbox/ideas.md` 为空）
+- [x] `docs/guides/desktop-companion.md` 两处“系统通知”说明列出四类提醒、防刷屏规则，并写明“已关闭”不区分合并与手动关闭
+- [x] `tasks/inbox/summary.md` 把审阅邮件诉求指向本 PRD；`tasks/inbox/ideas.md` 原有条目未被改写（`git diff tasks/inbox/ideas.md` 为空）
 
 ### Validation Acceptance
 
-- [ ] 真实页面入口 e2e 通过：`npm --prefix tests/playwright-e2e run test:no-auth -- tests/smoke/companion-notifications.no-auth.spec.ts`（终端输出存为 `rv-1-e2e-run.txt`）
-- [ ] 负向对照：实现前运行该 spec 为红（输出存证）
+- [x] 真实页面入口 e2e 通过：`npm --prefix tests/playwright-e2e run test:no-auth -- tests/smoke/companion-notifications.no-auth.spec.ts`（终端输出存为 `rv-1-e2e-run.txt`）
+- [x] 负向对照：实现前运行该 spec 为红（输出存证）
 
 ### Delivery Readiness
 
-- [ ] PR 证据评论或完成消息原样携带 9.1 内容（rv-1 调用记录内联）
-- [ ] 独立 verifier 判定 PASS
+- [x] PR 证据评论或完成消息原样携带 9.1 内容（rv-1 调用记录内联）（归档完成消息原样内联 rv-1 八轮调用记录与证据路径）
+- [x] 独立 verifier 判定 PASS（`P2-FEAT-20261120-145338-companion-human-action-notifications.verifier-report.md`，附完成消息与 spec 补强两项条件）
 
 ## 10. Functional Requirements
 
@@ -413,6 +413,19 @@ ER Diagram：不涉及数据模型或持久化变化。
 | D-02 | 防刷屏规则 | 每任务按类别记录，回到 running 复位 | 沿用“状态跃迁即提醒” | 待审阅与复查会因监督动作来回切换，按跃迁提醒会重复弹 |
 | D-03 | 判定逻辑放哪 | 留在 companion 页面文件 | 抽出独立通知模块 | frontend-public 无单测运行器，抽出不增加可测性，只增加文件 |
 
+### Final Reconciliation (Archive Only)
+
+- Interpretation: 与 §1 解读一致；§2 按推荐方案 A 执行（Issue 关闭时提醒“已关闭”），用户 2026-11-20 聊天确认。
+- Public behavior and contracts: 桌面宿主中任务进入“等待人工审阅”或 Issue 关闭时各提醒一次，标题为 `<仓库>#<编号> 待你审阅` / `已关闭`；`已阻塞` / `已失败` 保留；正文只取 `issue_title ?? status_reason ?? 兜底文案`；普通浏览器不调用通知。无后端或 CLI 变化。
+- Related PRD status: 无关联 pending PRD。
+- Requirements and risks: FR-1 至 FR-6 由 rv-1、rv-2、rv-4 与门禁检查证明。rv-3（真机系统通知截图，opt-in）未采集，不阻塞归档。
+- Reconciled differences:
+  - 归档前于 main `616d0ea7` 重跑 e2e 4 passed；`frontend-public` 的 `tsc --noEmit` exit 0、eslint 0 错误（107 条既有警告）。证据在 `tasks/evidence/P2-FEAT-20261120-145338-companion-human-action-notifications/rerun-616d0ea7/`。
+  - 独立 verifier 的完成消息条件：在归档完成消息中原样附上 rv-1 八轮通知记录及证据路径。记录也已内联在 PR 正文的「§9.1 evidence (verbatim)」一节。[PR #435](https://github.com/ZataZhang/keda/pull/435)
+  - 独立 verifier 发现“普通浏览器不发通知”用例未装 invoke 记录器、断言恒真。本次补强 spec：该用例只装记录器、不标记桌面宿主；补强后 4 passed（`rerun-616d0ea7/rv-1-e2e-run-after-d1-fix.txt`），临时去掉页面宿主判断时该用例变红（`rerun-616d0ea7/negative-control-guard-removed.txt`），`page.tsx` 已还原。spec 补强需随本次归档改动合入 main。
+  - spec 除 runtime/tasks 与 invoke 桥外，还顶替了 status、auth/me、logs 读接口；不影响通知判定逻辑。
+  - 非阻塞后续：首轮已处于 blocked 不补发、`已失败` 标题两点仅经代码阅读确认，没有 e2e 断言；`tests/playwright-e2e` 的 `tsc` 在 main 上已有一个与本 PRD 无关的错误（`tests/smoke/idea-inbox.spec.ts` TS2339），需另行处理。
+
 ## Change Log
 
 ### 用户在聊天中确认按推荐方案开工
@@ -430,3 +443,11 @@ ER Diagram：不涉及数据模型或持久化变化。
 - Reason: 按 §6 推荐方案实现
 - Impact: 证据：e2e 4 个用例在实现前 1 红 3 绿（负向对照，tasks/evidence/P2-FEAT-20261120-145338-companion-human-action-notifications/negative-control-run.txt），实现后 4 绿（rv-1-e2e-run.txt、rv-1-notification-calls.txt、rv-4-blocked-notification.txt）；现有 companion e2e 4 绿；tsc、eslint、pre-commit、mkdocs --strict 通过。rv-3 真机通知截图（opt-in）未采集；独立 verifier 尚未运行，§9 勾选与归档待其 PASS 后进行
 - Review: 待独立 verifier 与用户验收
+
+### 归档前复核
+- Type: evidence
+- Before: §9 全部未勾；横幅为“未开工”；独立 verifier 未运行
+- After: 在 main `616d0ea7` 重跑 e2e 与前端门禁；独立 verifier 首轮 REJECT（普通浏览器用例断言恒真；PR 未携带 9.1 内容），补强 spec 并补正反对照后复核 PASS（附条件：完成消息原样内联 rv-1 记录；spec 补强合入 main）；勾选有证据的执行侧条目，横幅改为“待人工验收”并归档
+- Reason: 代码已随 #427 合并，PRD 未收尾
+- Impact: 新增 spec 补强改动（`tests/playwright-e2e/tests/smoke/companion-notifications.no-auth.spec.ts`）；Human-Confirmed 两项仍留给用户；rv-3 opt-in 未采集
+- Review: 待用户人工验收

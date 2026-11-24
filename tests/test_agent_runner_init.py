@@ -16,6 +16,7 @@ from backend.core.shared.models import product_identity
 from backend.engines.agent_runner import remote_template_skills
 from backend.engines.agent_runner.remote_template_skills import (
     PackagedSkillInstallResult,
+    RemoteTemplateSkillFetchError,
     RemoteTemplateSkillInstallOptions,
     RemoteTemplateSkillInstallResult,
     install_packaged_operator_skill,
@@ -1323,3 +1324,46 @@ def test_iar_init_registers_repository_when_skill_sync_fails(
 
     assert main(["init"]) == 1, "Skill 失败仍应以非零退出码可见"
     assert "[agent_runner.repositories.target]" in config_path.read_text(encoding="utf-8")
+
+
+def test_iar_init_continues_when_remote_template_fetch_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """远程模板离线时 init 警告后继续登记仓库并同步标签。"""
+    repo_path = _init_git_repository(tmp_path, "target")
+    monkeypatch.chdir(repo_path)
+    config_path = _create_isolated_config(tmp_path)
+    skills_root = tmp_path / "skills"
+    monkeypatch.setenv("KEDACODE_CONFIG", str(config_path))
+    monkeypatch.setenv("KEDACODE_SKILLS_DIR", str(skills_root))
+
+    def _fail_fetch(options: object) -> RemoteTemplateSkillInstallResult:  # noqa: ARG001
+        raise RemoteTemplateSkillFetchError("GitHub unavailable")
+
+    label_sync_calls: list[bool] = []
+
+    def _record_label_sync(**_options: object) -> None:
+        label_sync_calls.append(True)
+
+    monkeypatch.setattr("backend.api.cli_skill.install_remote_template_skills", _fail_fetch)
+    monkeypatch.setattr(
+        "backend.api.cli_skill.install_packaged_operator_skill",
+        install_packaged_operator_skill,
+    )
+    monkeypatch.setattr(
+        "backend.api.cli_init.sync_labels",
+        _record_label_sync,
+    )
+
+    assert main(["init"]) == 0
+
+    captured = capsys.readouterr()
+    output = captured.out + captured.err
+    assert "Remote template Skills were not downloaded" in output
+    assert "kc skill install" in output
+    assert "[agent_runner.repositories.target]" in config_path.read_text(encoding="utf-8")
+    assert label_sync_calls
+    assert (skills_root / product_identity.OPERATOR_SKILL_NAME / "SKILL.md").is_file()
+    assert not (skills_root / "prd").exists()

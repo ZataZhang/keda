@@ -19,6 +19,7 @@ from backend.api.cli_console import console
 from backend.core.shared.models.agent_spec import AgentSpec
 from backend.core.use_cases.agent_runner_init_assets import (
     PackagedSkillInstallResult,
+    RemoteTemplateSkillFetchError,
     RemoteTemplateSkillInstallOptions,
     RemoteTemplateSkillInstallResult,
     install_packaged_operator_skill,
@@ -54,19 +55,27 @@ def sync_user_skills(
     Raises:
         RemoteTemplateSkillInstallError: 远程模板拉取失败，或远程模板 Skill 已被
             用户改动且未声明 ``force``（fail-closed，不覆盖），或随包目录缺少
-            ``SKILL.md`` / 目标是指向别处的符号链接。随包 operator Skill 的冲突
+            ``SKILL.md`` / 目标是指向别处的符号链接。远程拉取失败时仍先安装随包
+            operator Skill，再将失败交给入口处理；随包 operator Skill 的内容冲突
             不在此列：它默认保留用户内容并打印冲突提示。
     """
-    remote_skill_result = install_remote_template_skills(
-        RemoteTemplateSkillInstallOptions(
-            process_runner=process_runner,
-            dry_run=dry_run,
-            force=force,
-            agents=agents,
+    remote_fetch_error: RemoteTemplateSkillFetchError | None = None
+    try:
+        remote_skill_result = install_remote_template_skills(
+            RemoteTemplateSkillInstallOptions(
+                process_runner=process_runner,
+                dry_run=dry_run,
+                force=force,
+                agents=agents,
+            )
         )
-    )
-    _print_remote_template_skill_result(remote_skill_result)
-    for skills_root in remote_skill_result.target_skills_roots:
+    except RemoteTemplateSkillFetchError as exc:
+        remote_fetch_error = exc
+        target_skills_roots = resolve_user_skill_install_roots(agents=agents)
+    else:
+        _print_remote_template_skill_result(remote_skill_result)
+        target_skills_roots = remote_skill_result.target_skills_roots
+    for skills_root in target_skills_roots:
         _print_operator_skill_plan(
             install_packaged_operator_skill(
                 target_skills_root=skills_root,
@@ -74,6 +83,8 @@ def sync_user_skills(
                 force=force,
             )
         )
+    if remote_fetch_error is not None:
+        raise remote_fetch_error
 
 
 def sync_packaged_operator_skills(

@@ -41,7 +41,7 @@ _最后更新：2026-11-20 15:40_
 
 ## 已升级
 
-- **进入审阅环节时提醒（原“发邮件”诉求）** → [P2-FEAT-20261120-145338-companion-human-action-notifications](../pending/P2-FEAT-20261120-145338-companion-human-action-notifications.md)。先以桌面 App 系统通知承接：Draft PR 进入等待人工审阅、Issue 关闭时提醒；不接邮件等外部渠道，如仍需离开电脑时的提醒再单独立项。（来源：2026-06-15 00:41）
+- **进入审阅环节时提醒（原“发邮件”诉求）** → [P2-FEAT-20261120-145338-companion-human-action-notifications](../archive/P2-FEAT-20261120-145338-companion-human-action-notifications.md)。先以桌面 App 系统通知承接：Draft PR 进入等待人工审阅、Issue 关闭时提醒；不接邮件等外部渠道，如仍需离开电脑时的提醒再单独立项。（来源：2026-06-15 00:41）
 - **构想工作台与可替换客户端** → [P2-FEAT-20261120-012205-cli-first-concept-workbench](../pending/P2-FEAT-20261120-012205-cli-first-concept-workbench.md)。默认工作台、自定义产物提示词、同一会话的独立客户端与本机事件通知样例。（来源：2026-11-19 23:02、2026-11-20 00:19、2026-11-20 00:24）
 - **Console「计划 vs 产出」进度（验收证据 / 影响树）** → `tasks/pending/P1-FEAT-20261010-093054-console-prd-progress-signals.md`；运行中读数改为分支优先、主仓库兜底，计划取 §7.6 条目，产出优先 `evidence.json`、回退文件名前缀，影响树按 CLI 同口径移植（弱信号）。（来源：2026-10-10 09:25）
 - **Agent Runner 子进程环境净化** → `tasks/pending/P1-BUG-20260928-232844-agent-runner-child-env-sanitize.md`。（来源：2026-09-28 23:17）
