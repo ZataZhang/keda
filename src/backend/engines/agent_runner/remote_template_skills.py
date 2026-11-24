@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import shutil
+import subprocess
 import tempfile
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -44,6 +47,11 @@ REMOTE_TEMPLATE_SKILLS_REF = "cdf37ca81604d860bea6b9fba59aab01d84ca530"
 REMOTE_TEMPLATE_SKILL_NAMES: tuple[str, ...] = ("prd", "code-reviewer")
 """KedaCode 安装且仅安装的远程模板 Skills。"""
 
+_REMOTE_TEMPLATE_SKILLS_FETCH_MAX_ATTEMPTS = 2
+_REMOTE_TEMPLATE_SKILLS_FETCH_RETRY_DELAY_SECONDS = 1.0
+
+_logger = logging.getLogger(__name__)
+
 _PRE_RENAME_OPERATOR_SKILL_NAME = "iar-operator"
 """清理旧发行版安装过的 skill 副本；当前运行时不再加载它。"""
 
@@ -79,6 +87,10 @@ _LEGACY_OPERATOR_SKILL_DIGESTS: frozenset[str] = frozenset(
 
 class RemoteTemplateSkillInstallError(RuntimeError):
     """远程模板 Skill 拉取或同步失败时抛出。"""
+
+
+class RemoteTemplateSkillFetchError(RemoteTemplateSkillInstallError):
+    """固定提交的远程模板 Skill 拉取重试耗尽时抛出。"""
 
 
 @dataclass(frozen=True)
@@ -437,6 +449,7 @@ def install_remote_template_skills(
         RemoteTemplateSkillInstallError: 远程仓库缺少所需目录，目录包含符号链接，
             或任一目标存在 ``SKILL.md`` 与远程不同的同名 Skill 且 ``force`` 为
             False。
+        RemoteTemplateSkillFetchError: 固定提交的远程模板 fetch 在有限重试后仍失败。
     """
     target_skills_roots = resolve_user_skill_install_roots(
         options.user_home_path, agents=options.agents
@@ -457,18 +470,35 @@ def install_remote_template_skills(
             timeout=60,
             label="KedaCode remote template skill repository",
         )
-        options.process_runner.run(
-            (
-                "git",
-                "fetch",
-                "--depth=1",
-                REMOTE_TEMPLATE_SKILLS_REPOSITORY_URL,
-                REMOTE_TEMPLATE_SKILLS_REF,
-            ),
-            cwd=checkout_path,
-            timeout=120,
-            label="KedaCode remote template skill download",
-        )
+        for fetch_attempt_number in range(1, _REMOTE_TEMPLATE_SKILLS_FETCH_MAX_ATTEMPTS + 1):
+            try:
+                options.process_runner.run(
+                    (
+                        "git",
+                        "fetch",
+                        "--depth=1",
+                        REMOTE_TEMPLATE_SKILLS_REPOSITORY_URL,
+                        REMOTE_TEMPLATE_SKILLS_REF,
+                    ),
+                    cwd=checkout_path,
+                    timeout=120,
+                    label="KedaCode remote template skill download",
+                )
+                break
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as fetch_error:
+                if fetch_attempt_number == _REMOTE_TEMPLATE_SKILLS_FETCH_MAX_ATTEMPTS:
+                    raise RemoteTemplateSkillFetchError(
+                        "Could not fetch the pinned remote template Skills after "
+                        f"{_REMOTE_TEMPLATE_SKILLS_FETCH_MAX_ATTEMPTS} attempts; "
+                        "check GitHub network access."
+                    ) from fetch_error
+                _logger.warning(
+                    "远程模板 Skill 下载失败；%s 秒后重试（第 %s/%s 次）。",
+                    _REMOTE_TEMPLATE_SKILLS_FETCH_RETRY_DELAY_SECONDS,
+                    fetch_attempt_number,
+                    _REMOTE_TEMPLATE_SKILLS_FETCH_MAX_ATTEMPTS,
+                )
+                time.sleep(_REMOTE_TEMPLATE_SKILLS_FETCH_RETRY_DELAY_SECONDS)
         options.process_runner.run(
             (
                 "git",
