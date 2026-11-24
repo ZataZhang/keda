@@ -112,7 +112,9 @@ def test_create_github_client_resolves_registered_gitea_before_api_requests(
     repository_path.mkdir()
     config_path = repository_path / ".kedacode.toml"
     config_path.write_text(
-        '[agent_runner.repository]\nid = "platform-test"\nplatform = "gitea"\n',
+        # 显式声明发布 remote，避免测试结果依赖运行机器的个人 git.remote 配置。
+        '[agent_runner.repository]\nid = "platform-test"\nplatform = "gitea"\n'
+        '\n[agent_runner.git]\nremote = "zata"\n',
         encoding="utf-8",
     )
     token_environment_name = "KC_TEST_GITEA_TOKEN"
