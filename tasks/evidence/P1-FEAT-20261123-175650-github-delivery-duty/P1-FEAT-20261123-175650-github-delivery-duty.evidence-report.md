@@ -4,23 +4,25 @@
 
 | 验证 | 本轮结果 |
 |---|---|
-| RV-1 · 已安装技能的真实入口 | 新 Codex 会话分别读取 [Issue #430](https://github.com/ZataZhang/keda/issues/430) 和 [PR #436](https://github.com/ZataZhang/keda/pull/436)，两者关联及 head 匹配，命令轨迹无写入，前后时间线为 30 和 8 条。又在私有 GitHub 测试仓库完成两种指定现场：旧提交失败而新 head 检查待完成、从 PR 反查最新实现已完成而推送失败。两场查询均未改变 Issue 或 PR 时间线，实际终端呈递保留在本地。旧技能也等待新 head 的检查，本次未复现立即重试的负控。 |
-| RV-2 · 隔离巡检 | 私有测试仓库的专用 daemon 调度了新版配方，恢复同一实现提交并产生 Draft PR。巡检回读了恢复结果并留下摘要。人工接管目标原标签、状态和评论均保持一致；时间线只新增巡检摘要引用自动产生的交叉引用。后续监督受组织执行器访问策略阻塞。旧配方经专用 daemon 调度后也跳过同一接管目标，本次未复现预期负控错误。 |
+| RV-1 · 已安装技能的真实入口 | 新 Codex 会话分别读取 [Issue #430](https://github.com/ZataZhang/keda/issues/430) 和 [PR #436](https://github.com/ZataZhang/keda/pull/436)，两者关联及 head 匹配，命令轨迹无写入，前后时间线为 30 和 8 条。又在私有 GitHub 测试仓库完成两种指定现场：旧提交失败而新 head 检查待完成、从 PR 反查最新实现已完成而推送失败。两场查询均未改变 Issue 或 PR 时间线，实际终端呈递保留在本地。旧技能也等待新 head 的检查。补测保留了旧失败与当时的重试建议，两版仍等待当前检查。 [真实会话与时间线对照](rv-1-duty-read.md) |
+| RV-2 · 隔离巡检 | 私有测试仓库的专用 daemon 调度了新版配方，恢复同一实现提交并产生 Draft PR。巡检回读了恢复结果并留下摘要。人工接管目标原标签、状态和评论均保持一致；时间线只新增巡检摘要引用自动产生的交叉引用。后续监督受组织执行器访问策略阻塞。旧配方经专用 daemon 调度后也跳过同一接管目标，补测将确有待推送提交的目标交由维护者接管。新旧配方分别经 daemon 调度，目标 30 条直接事件和草稿 PR head 均一致。新版重读后复用上轮摘要并关闭本轮巡检。 |
 | RV-3 · 冻结材料与独立盲评 | 四个现场、两组各四次新会话，评分者仅见随机化 X/Y。普通组误报 1/4，值班员组 0/3，均漏报 0/3。岗位组四题耗时 23.50、22.46、24.26、22.34 秒；普通组 16.08、15.17、14.51、13.39 秒。材料、分组映射和逐题评分保留于本地证据包。 |
 | RV-4 · 安装、配方与文档 | 在实现提交 `9da79d9b` 上，56 项定向测试和严格文档构建通过。将模板引用改成不存在的参考文件时，目标测试因缺少 `references/duty.md` 失败。 |
 | 默认测试命令 | `just test` 首轮受继承的 `KEDACODE_NO_UPDATE_CHECK` 干扰，升级提示的 6 条测试失败。移除该变量后在 `9da79d9b` 使用仓库默认增量档复跑并通过。 |
 
 证据分支已把 RV-1 至 RV-3 的说明性占位文字替换成可执行复跑入口。复跑须显式指定准备好的隔离目录和被验证的 Git tree。私有仓库中的原始事件、会话和演示材料仅保存在本地。 [复跑清单](https://github.com/ZataZhang/keda/blob/iar-evidence/issue-430/evidence.json)
 
-该 PR 的 `Validate Template` 通过。PR 和基线 `main` 的 `Frontend Build` 均在 `app-sidebar.tsx` 导入 `@/app/apple-icon.png` 时触发 `TS2307`。 [PR 检查](https://github.com/ZataZhang/keda/actions/runs/45385269788/job/138414437761) · [main 检查](https://github.com/ZataZhang/keda/actions/runs/45370433706/job/138363037746)
+该 PR 的 `Validate Template` 通过。PR 和基线 `main` 的 `Frontend Build` 均在 `app-sidebar.tsx` 导入 `@/app/apple-icon.png` 时触发 `TS2307`。 修复由 #439 提交，干净 GitHub runner 上的 `Frontend Build` 已通过。 [原 PR 检查](https://github.com/ZataZhang/keda/actions/runs/45387514949/job/138422222422) · [修复的 CI](https://github.com/ZataZhang/keda/actions/runs/45391009867/job/138434388938)
 
-下方为早期执行及评审记录，现状以上表和后续独立复核为准。
+### 首轮记录
+
+以下记录首轮执行；当前结果见上表。
 
 | 呈递项 | 真实状态与应观察值 | 本地记录 | 打开方式 | 交叉核对 |
 |---|---|---|---|---|
 | RV-1 · 首轮 Issue 与 PR 真实会话尝试 | **首轮 `REVIEW_INCIDENT / INCONCLUSIVE`。** 期待看到观察时点、状态、来源、下一责任人与动作、复查条件；查询前后 timeline 一致且写调用为 0。 | [rv-1-duty-read.md](rv-1-duty-read.md) | 打开同目录的记录 | 首轮 Codex 会话在 workspace routing discovery 阶段超时。Issue 线索：[GitHub #430](https://github.com/ZataZhang/keda/issues/430)。 |
 
-主演示脚本要求录制真实 Codex 会话与 GitHub 读数。本轮没有真实会话输出、截图或录屏，因此没有内嵌 mock 图片；本地 `rv-1-duty-read.md` 是阻塞记录，不是替代演示。需要人工看到的预期字段和零写入对照仍待 RV-1 完成。
+首轮因会话路由故障未录制；后续真实终端呈递已保存在本地，当前摘录见上表。
 
 ### 执行器证据导航
 
@@ -40,6 +42,6 @@
 - 完整 `just test` 在首次执行时为 3 failed / 5633 passed / 1 skipped，失败原因均为新增 reference 后仍硬编码 12；修复后相关套件为 54 passed。因为完整执行耗时 481.44 秒（超出默认 300 秒复跑上限），最终树的完整 `just test` 保持未验收。
 - `just lint --reuse` 通过。最终全 lint 使用 `SKIP=check-test-flag` 绕开陈旧的测试标记检查，所有实际 lint hook 通过；首次格式化 hook 自动修正后复跑绿。严格文档构建完成，日志中的既有未列入导航页面和 mkdocstrings 提示不影响退出码 0。
 
-## 结论
+## 当前验收状态
 
-功能实现与 RV-4 本地门禁可复核。执行器验证尚未完成：RV-1 因会话路由故障，RV-2 因无隔离 runner，RV-3 因无冻结盲评材料；完整 `just test` 未在 300 秒预算内完成最终树复跑。此包不是 verifier `PASS`，也不表示 Human-Confirmed 已完成。
+独立 verifier 结果为 `BLOCKED`。手动查询及隔离巡检的正向行为已有证据，旧版对照仍未观测到验收要求的错误。维护者的呈递确认保持开放。
