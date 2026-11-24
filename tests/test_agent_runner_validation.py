@@ -1106,6 +1106,9 @@ def test_upload_evidence_branch_keeps_exact_file_names_in_real_git(tmp_path: Pat
     for git_command, command_cwd in (
         (["git", "init", "-q", "--bare", str(remote_path)], tmp_path),
         (["git", "init", "-q"], worktree_path),
+        # CI 机器没有全局 git 身份，commit-tree 需要仓库级身份。
+        (["git", "config", "user.name", "Evidence Test"], worktree_path),
+        (["git", "config", "user.email", "evidence-test@example.com"], worktree_path),
         (["git", "remote", "add", "origin", str(remote_path)], worktree_path),
     ):
         subprocess.run(git_command, cwd=command_cwd, check=True, capture_output=True)
