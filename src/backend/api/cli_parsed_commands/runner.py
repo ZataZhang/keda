@@ -30,6 +30,7 @@ from backend.api.cli_parsed_context import ParsedCommandContext
 from backend.api.cli_run_progress import RunProgressStream
 from backend.api.cli_registry import _run_daemon_status_command
 from backend.api.agent_runner_views.runner_live_view import create_runner_live_view
+from backend.api.version_info import resolve_keda_version
 from backend.core.shared.models.agent_runner import RepositoryRunContext
 from backend.core.shared.models.agent_runner_config import AppConfig
 from backend.core.shared.models.publish_stage import PublishStage
@@ -537,6 +538,7 @@ def run_daemon_command(ctx: ParsedCommandContext) -> int:
             code=ExitCode.USAGE,
             suggestion="kc daemon run --concurrency <N>",
         )
+    daemon_loaded_version = resolve_keda_version()
     contexts = _resolve_initialized_repository_contexts(ctx, anchored_stage="implementation")
     contexts = [_with_lifecycle_reload(context, ctx) for context in contexts]
     if contexts:
@@ -631,6 +633,9 @@ def run_daemon_command(ctx: ParsedCommandContext) -> int:
             # 实际生效的并行上限写到单实例锁旁，管理终端与 kc daemon status 据此显示
             # 包含 --concurrency 在内的真实值。
             parallel_limit_status_dir=daemon_locks_dir,
+            # 启动时解析一次版本并随状态文件原样写出：daemon 一直跑启动时的代码，
+            # 运行中重新读磁盘会在升级后谎报成新版本，掩盖「该重启了」。
+            loaded_version=daemon_loaded_version,
             # daemon 内置 PR 值守：发 PR 后的 supervising Issue 由 daemon 自己推进；
             # supervise-daemon 降为可选，本机开着它时 daemon 让出该阶段。
             review_stage=DaemonReviewStage(
