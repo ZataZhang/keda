@@ -59,8 +59,13 @@ from backend.core.use_cases.issue_logs import (
     describe_issue_log_status,
     read_issue_log,
 )
+from backend.api.version_info import resolve_keda_version
 from backend.core.use_cases.daemon_parallel_limit_status import (
     DaemonParallelLimitStatus,
+    DaemonVersionCheck,
+    check_daemon_version,
+    daemon_version_fields,
+    describe_daemon_version,
     describe_parallel_limit_status,
     parallel_limit_status_fields,
     read_daemon_parallel_limit_status,
@@ -500,6 +505,31 @@ def _resolve_executable_from_command(command: tuple[str, ...]) -> str:
     return first
 
 
+def _daemon_restart_hint(
+    record: RunnerProcessRecord, version_check: DaemonVersionCheck, *, is_managed: bool
+) -> str:
+    """生成某个 daemon 的重启提示：说明版本问题，并按托管 / 手动给出对应命令。"""
+    if version_check.loaded_version is None:
+        reason = (
+            f"无法确认 daemon ({record.repo_id}, pid {record.pid}) 运行的版本，"
+            "可能是升级前启动的旧进程，建议重启："
+        )
+    else:
+        reason = (
+            f"daemon ({record.repo_id}, pid {record.pid}) 运行的版本 "
+            f"{version_check.loaded_version} 与已安装版本 "
+            f"{version_check.installed_version} 不一致，请重启："
+        )
+    if is_managed:
+        command = (
+            f"kc registry stop --repo-id {record.repo_id} && "
+            f"kc registry start --repo-id {record.repo_id}"
+        )
+    else:
+        command = "结束该进程后重新运行 kc daemon"
+    return f"[yellow]提示：{reason}[/]\n  {command}"
+
+
 def _run_daemon_status_command(
     parsed: argparse.Namespace,
     process_runner: IProcessRunner,
@@ -572,12 +602,21 @@ def _run_daemon_status_command(
             parallel_limit_by_repo_id.get(record.repo_id) if record.kind == _DAEMON_KIND else None
         )
 
+    # 已安装版本取执行本命令的 kc；daemon 上报的是它启动时加载的版本。
+    installed_version = resolve_keda_version()
+
+    def _version_check_of(record: RunnerProcessRecord) -> DaemonVersionCheck | None:
+        if record.kind != _DAEMON_KIND:
+            return None
+        return check_daemon_version(_limit_status_of(record), installed_version)
+
     def _render_table() -> None:
         table = Table(title="Daemon status")
         table.add_column("repo_id", style="cyan")
         table.add_column("kind", style="green")
         table.add_column("status")
         table.add_column("pid", justify="right")
+        table.add_column("version")
         table.add_column("parallel_limit")
         table.add_column("process_id")
         table.add_column("started_at")
@@ -585,15 +624,24 @@ def _run_daemon_status_command(
         table.add_column("executable", overflow="fold")
         table.add_column("command", overflow="fold")
 
+        restart_hints: list[str] = []
         for record, is_managed in running_records:
             status_text = (
                 "[green]managed running[/]" if is_managed else "[yellow]unmanaged running[/]"
             )
+            version_check = _version_check_of(record)
+            version_text = describe_daemon_version(version_check)
+            if version_check is not None and version_check.restart_recommended:
+                version_text = f"[yellow]{version_text}[/]"
+                restart_hints.append(
+                    _daemon_restart_hint(record, version_check, is_managed=is_managed)
+                )
             table.add_row(
                 record.repo_id,
                 _display_process_kind(record.kind),
                 status_text,
                 str(record.pid),
+                version_text,
                 describe_parallel_limit_status(_limit_status_of(record)),
                 record.process_id,
                 format_local_display_time(record.started_at),
@@ -603,6 +651,8 @@ def _run_daemon_status_command(
             )
 
         console.print(table)
+        for restart_hint in restart_hints:
+            console.print(restart_hint)
 
     emit(
         [
@@ -618,6 +668,7 @@ def _run_daemon_status_command(
                 "executable": _resolve_executable_from_command(record.command),
                 "command": list(record.command),
                 **parallel_limit_status_fields(_limit_status_of(record)),
+                **daemon_version_fields(_version_check_of(record), installed_version),
             }
             for record, is_managed in running_records
         ]

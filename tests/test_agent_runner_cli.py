@@ -4344,6 +4344,41 @@ def test_main_daemon_passes_transcript_runner_factory(monkeypatch) -> None:
     assert callable(factory)
 
 
+def test_main_daemon_passes_version_resolved_once_at_startup(monkeypatch) -> None:
+    """daemon 入口在启动时解析一次版本并传给 daemon，供状态文件原样写出。"""
+    from backend.api.cli import main
+    from backend.core.shared.models.agent_runner import AppConfig, RepositoryRunContext
+
+    monkeypatch.setenv("KEDACODE_SKIP_GH_AUTH_CHECK", "1")
+    mock_context = RepositoryRunContext(
+        repo_path=Path("/tmp/repo"),
+        repo_id="repo",
+        display_name="Repo",
+        config=AppConfig(),
+    )
+
+    with (
+        patch(
+            "backend.api.cli_helpers.resolve_repository_targets",
+            return_value=[mock_context],
+        ),
+        patch(
+            "backend.api.cli_parsed_commands.runner.resolve_keda_version",
+            return_value="0.9.0",
+        ) as mock_resolve_version,
+        patch("backend.api.cli.run_agent_daemon") as mock_daemon,
+        patch("backend.api.cli.create_github_client"),
+        patch("backend.api.cli.require_repository_initialized"),
+        patch("backend.api.cli.acquire_daemon_locks", return_value=[]),
+        patch("backend.api.cli.release_daemon_locks"),
+    ):
+        exit_code = main(["daemon", "--all"])
+
+    assert exit_code == 0
+    assert mock_daemon.call_args.kwargs["loaded_version"] == "0.9.0"
+    assert mock_resolve_version.call_count == 1
+
+
 def test_main_run_phase0_deliberation_real_entry_point(monkeypatch, tmp_path: Path) -> None:
     """A ``agent/deliberate`` Issue encountered by ``kc run`` gets a question list."""
     from backend.api.cli import main

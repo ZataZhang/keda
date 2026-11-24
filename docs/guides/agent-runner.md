@@ -1798,6 +1798,13 @@ kc daemon status --all
 - `managed running`：通过 `kc registry start` / `kc takeover` / console 启动的托管进程。
 - `unmanaged running`：直接在命令行执行 `kc daemon` / `kc supervise-daemon` 启动的进程。
 - `log_path`：托管进程的真实日志文件路径；`-` 表示未托管进程（无独立日志文件）。
+- `version`：daemon **启动时**加载的 KedaCode 版本。daemon 一直按启动时的代码运行，升级 kc 后不重启就会继续跑旧代码，所以这里与当前已安装版本做对比：
+  - 一致时只显示版本号，例如 `0.9.1`；
+  - 不一致时显示为 `0.9.0 (installed 0.9.1)`，并在表格下方提示重启：托管进程给出 `kc registry stop --repo-id <id> && kc registry start --repo-id <id>`，手动启动的进程提示结束后重新运行 `kc daemon`；
+  - `unknown` 表示 daemon 没有上报版本（本功能上线前启动的旧进程，或刚启动、尚未完成首轮轮询），同样提示重启；
+  - supervise-daemon 行显示 `-`，不参与比对。
+
+  版本不一致只提示，退出码仍为 `0`。`--json` 每行带 `loaded_version`（未上报时为 `null`）、`installed_version` 与 `version_status`（`current` / `mismatch` / `unknown`；supervise-daemon 行为 `null`）；机器模式下 stdout 只输出 JSON，不打印提示。已安装版本本身取不到时（例如在源码树里直接运行，版本回退为 `0.0.0+unknown`），`version_status` 为 `unknown` 且不提示重启。
 
 #### 查看进程日志（`kc logs`）
 
