@@ -302,6 +302,7 @@ class AgentUnavailableError(AgentRunnerAttemptError):
         attempt_results: list[AttemptResult] | None = None,
         *,
         context: str | None = None,
+        reason: str = "command not found",
     ) -> None:
         """记录不可用的 agent 及发现它不可用的调用上下文。
 
@@ -309,9 +310,10 @@ class AgentUnavailableError(AgentRunnerAttemptError):
             agent: 找不到可执行文件的 agent 名称。
             attempt_results: 截至失败时的历次尝试结果，省略时为空。
             context: 哪一次调用发现它不可用（阶段 / profile / 可执行文件名）。
+            reason: 起跑失败的真实原因，默认 ``command not found``。
         """
         super().__init__(
-            f"Agent '{agent}' is unavailable (command not found).",
+            f"Agent '{agent}' is unavailable ({reason}).",
             attempt_results or [],
         )
         self.agent = agent
