@@ -58,10 +58,6 @@ from backend.infrastructure.config.agent_runner_settings import (
     AgentSessionSettings,
     load_agent_runner_local_settings,
 )
-from backend.infrastructure.config.gitea_settings import (
-    GiteaInstanceSettings,
-    validate_unique_gitea_hosts,
-)
 
 # 冗余别名（``X as X``）是 PEP 484 的显式再导出手法：这些名字迁到了
 # agent_runner_settings / settings_sources，但仍有消费者按
@@ -392,22 +388,11 @@ class AgentRunnerSettings(BaseSettings):
     lifecycle_presets: AgentRunnerLifecyclePresetsSettings = Field(
         default_factory=AgentRunnerLifecyclePresetsSettings
     )
-    # Gitea 凭据路由只由运行机器的全局配置声明；仓库本地设置会拒绝同名字段。
-    gitea_instances: list[GiteaInstanceSettings] = Field(default_factory=list)
     repositories: dict[str, AgentRunnerRepositorySettings] = Field(default_factory=dict)
     # agent 声明式注册表的配置覆盖层：[agent_runner.agents.<name>] 段。
     # 内置默认在 core.shared.models.agent_spec.BUILTIN_AGENT_SPECS；
     # 此处只存显式声明，逐字段覆盖内置值（见 factory_config_builder）。
     agents: dict[str, AgentRunnerAgentSettings] = Field(default_factory=dict)
-
-    @field_validator("gitea_instances")
-    @classmethod
-    def _validate_unique_gitea_hosts(
-        cls,
-        instances: list[GiteaInstanceSettings],
-    ) -> list[GiteaInstanceSettings]:
-        """确保同一主机只登记一个 Gitea 实例。"""
-        return validate_unique_gitea_hosts(instances)
 
     @model_validator(mode="before")
     @classmethod

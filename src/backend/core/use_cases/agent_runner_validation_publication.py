@@ -8,13 +8,10 @@ from pathlib import Path
 
 from backend.core.shared.interfaces.agent_runner import IGitHubClient, IProcessRunner
 from backend.core.shared.models.agent_runner import AppConfig, IssueSummary
-from backend.core.shared.models.pull_request_url import (
-    build_evidence_blob_url,
-    parse_pull_request_number,
-)
 from backend.core.use_cases.agent_runner_evidence_format import IMAGE_EVIDENCE_SUFFIXES
 from backend.core.use_cases.agent_runner_structured_evidence import (
     EvidenceUpload,
+    build_evidence_blob_url,
     has_structured_evidence_marker,
     validate_evidence_manifest,
 )
@@ -31,6 +28,9 @@ from backend.core.use_cases.agent_runner_validation_identity import (
 from backend.core.use_cases.agent_runner_video_evidence import VIDEO_EVIDENCE_SUFFIXES
 
 _logger = logging.getLogger(__name__)
+_PR_URL_PATTERN = re.compile(
+    r"https?://[^/]+/(?P<owner>[^/]+)/(?P<repo>[^/]+)/pull/(?P<number>\d+)"
+)
 _EVIDENCE_MARKER_PATTERN = re.compile(
     r"<!--\s*kc:validation-evidence\s+"
     r"version=(?P<version>\d+)\s+"
@@ -176,8 +176,11 @@ def upload_evidence_branch(
 
 
 def parse_pr_number(pr_url: str) -> int | None:
-    """从 GitHub 或 Gitea Pull Request URL 取编号。"""
-    return parse_pull_request_number(pr_url)
+    """Extract the PR number from a GitHub PR URL."""
+    url_match = _PR_URL_PATTERN.search(pr_url)
+    if not url_match:
+        return None
+    return int(url_match.group("number"))
 
 
 def publish_validation_evidence_artifacts(

@@ -132,19 +132,6 @@ def test_ensure_gh_auth_or_prompt_passes_when_authenticated(tmp_path: Path) -> N
     _ensure_gh_auth_or_prompt(tmp_path, fake_runner)
 
 
-def test_ensure_gh_auth_or_prompt_skips_gitea_client(tmp_path: Path) -> None:
-    """Gitea 客户端不提供 GitHub auth 检查，不得触发 gh 调用。"""
-    from unittest.mock import patch
-
-    from backend.api.cli import _ensure_gh_auth_or_prompt
-
-    fake_runner = FakeProcessRunner()
-    with patch("backend.api.cli_helpers.create_github_client", return_value=object()):
-        _ensure_gh_auth_or_prompt(tmp_path, fake_runner)
-
-    assert fake_runner.calls == []
-
-
 def test_main_labels_sync_exits_on_auth_failure(capsys) -> None:
     """gh 认证失败时 `iar labels sync` 以权限码 4 退出，并给出可跑的下一步。"""
     from backend.api.cli import main

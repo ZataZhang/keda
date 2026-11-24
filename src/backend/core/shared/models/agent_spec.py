@@ -298,9 +298,7 @@ def _claude_compatible_profiles() -> dict[str, AgentProfileSpec]:
             "stream-json",
             "--include-partial-messages",
         ),
-        # 经 stdin 投递：实现阶段的 prompt（内联 PRD + Issue 正文）可达 3 万字符以上，
-        # 放在 argv 尾部会超过 Windows CreateProcess 的 32,767 字符上限（WinError 206）。
-        prompt_delivery=PROMPT_DELIVERY_STDIN,
+        prompt_delivery=PROMPT_DELIVERY_ARGV_TAIL,
         output_protocol=CLAUDE_STREAM_JSON_PROTOCOL_ID,
         read_only=False,
     )

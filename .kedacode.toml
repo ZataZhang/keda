@@ -194,7 +194,7 @@ review_prompt_template = []
 # 是否启用 post-PR supervisor
 enabled = true
 # supervisor 要求修复时的最大修复 / rebase 次数
-max_repair_attempts = 2
+max_repair_attempts = 11
 # supervisor agent 进程崩溃（API / 网络等基础设施错误）时同一 cycle 内的最大重试次数
 max_agent_crash_retries = 5
 # 崩溃重试的初始退避秒数，之后每次重试翻倍
@@ -209,8 +209,6 @@ max_diff_chars = 6000
 previous_findings_injection_enabled = true
 # 跨 cycle finding artifact 落盘目录（worktree 相对路径，已被 .kedacode/ gitignore 排除）
 findings_artifact_dir = ".kedacode/state"
-# CI 失败时允许 supervisor 自动修复 PR 分支（受 max_repair_attempts 约束）
-auto_repair_ci = true
 
 # Daemon 轮询与崩溃对账配置（覆盖全局 [agent_runner.daemon] 默认）
 [agent_runner.daemon]

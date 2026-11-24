@@ -84,12 +84,12 @@
       ],
     },
     {
-      id: 'lifecycle-agent-matrix', title: '工作流与执行器设置', project: 'keda', module: 'Console 设置', system: 'Keda Console',
-      form: 'code-native', version: 'v3.3', updatedAt: '2026-11-24', availability: 'available', validationLevel: '交互原型',
-      primaryFlow: '从两条工作流点击角色，在右侧抽屉查看继承来源或换绑模型预设，然后预览保存差异。',
-      description: '沿用已有设置原型的全局与仓库作用域。代码交付展示修复和收尾回路，讨论与内容生成展示两个角色，独立问答另有入口。保存生成 TOML 差异预览。',
-      preview: './assets/lifecycle-agent-matrix/workflow-concepts/current-drawer.png', entry: './lifecycle-agent-matrix.html?screen=lifecycle-settings', source: './lifecycle-agent-matrix/',
-      provenance: ['./assets/lifecycle-agent-matrix/workflow-concepts/current-drawer.source.md', './assets/lifecycle-agent-matrix/workflow-concepts/variations/07.prompt.md'],
+      id: 'lifecycle-agent-matrix', title: '生命周期与执行器统一设置', project: 'keda', module: 'Console 设置', system: 'Keda Console',
+      form: 'code-native', version: 'v3.2', updatedAt: '2026-11-13', availability: 'available', validationLevel: '交互原型（设置细节）+ 设计概念（入口）',
+      primaryFlow: '生产入口位于 Repositories 顶层“执行器与模型”，与仓库列表平级；查看选中的入口概念图，并从历史交互原型演示生命周期、模型和执行器回退设置细节',
+      description: '生产页面已将生命周期矩阵、模型预设和执行器回退顺序放到 Repositories 顶层，与仓库列表平级；全局/仓库范围与 Backlog 仓库预选入口均保留。选中的 Repositories 入口布局见设计概念图。关联 HTML 交互原型沿用旧 Settings 外壳，只演示设置细节和状态交互，不代表当前产品导航；设置保存仍是概念性的 TOML 写入预览。',
+      preview: './assets/lifecycle-agent-matrix/repositories-lifecycle-settings-concept.png', entry: './lifecycle-agent-matrix.html', source: './lifecycle-agent-matrix/',
+      provenance: ['./assets/lifecycle-agent-matrix/repositories-lifecycle-settings-concept.prompt.md'],
       relationships: [{ id: 'prd-lifecycle-observability', label: '从配置页转到 PRD 执行过程与仓库统计' }],
     },
     {

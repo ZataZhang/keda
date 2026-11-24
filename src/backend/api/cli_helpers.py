@@ -46,14 +46,11 @@ if TYPE_CHECKING:
 
 
 def _ensure_gh_auth_or_prompt(repo_path: Path, process_runner: "IProcessRunner") -> None:
-    """仅对实现 GitHub CLI 认证检查的客户端验证 gh 登录状态。"""
+    """Check gh auth status and exit with a friendly message if not authenticated."""
     if product_identity.read_product_env_value("SKIP_GH_AUTH_CHECK") == "1":
         return
     github_client = create_github_client(repo_path, process_runner)
-    check_auth_status = getattr(github_client, "check_auth_status", None)
-    if not callable(check_auth_status):
-        return
-    auth_status = check_auth_status()
+    auth_status = github_client.check_auth_status()
     if auth_status.authenticated:
         return
     detail = auth_status.failure_reason or "GitHub CLI 未认证。"

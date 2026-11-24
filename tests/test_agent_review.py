@@ -2194,8 +2194,7 @@ class _SplitRepairRunner(FakeProcessRunner):
             )
             stdout = f'{{"verdict": "{verdict}", "summary": "s", "findings": {findings}}}'
         else:
-            # claude 的 run 用途经 stdin 投递，提示词不在 argv 里。
-            self.repairer_prompts.append(input_text or "")
+            self.repairer_prompts.append(str(command[-1]))
             if self.repairer_request_message is not None:
                 self._write_commit_request(self.repairer_request_message)
             stdout = '{"verdict": "approved", "summary": "fixed"}'
@@ -2383,7 +2382,6 @@ class _ReviewerFallbackRunner(FakeProcessRunner):
         check=True,
         timeout=None,
         capture_output=True,
-        input_text=None,
         label=None,
         output_protocol=None,
         attempt_key: str | None = None,

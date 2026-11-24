@@ -371,54 +371,6 @@ def test_spawn_boundary_names_phase_profile_and_bin(tmp_path: Path) -> None:
     assert exc_info.value.agent == "myagent"
 
 
-def test_spawn_boundary_reports_command_line_too_long(tmp_path: Path) -> None:
-    """Windows WinError 206（命令行过长）不能被误报成 command not found。"""
-    config = dataclasses.replace(
-        AppConfig(),
-        agents={**AppConfig().agents, "myagent": make_spec("myagent")},
-    )
-
-    class _CommandLineTooLongRunner(FakeProcessRunner):
-        def run(self, command, **kwargs):  # 替身签名与协议一致
-            error = FileNotFoundError(2, "The filename or extension is too long")
-            error.winerror = 206  # type: ignore[attr-defined]
-            raise error
-
-    with pytest.raises(AgentUnavailableError) as exc_info:
-        run_agent_with_prompt(
-            "myagent",
-            "Do the work.",
-            tmp_path,
-            _CommandLineTooLongRunner(),
-            config=config,
-            profile=AGENT_PROFILE_RUN,
-            invocation_phase=PHASE_IMPLEMENTATION,
-        )
-
-    message = str(exc_info.value)
-    assert "command line too long (WinError 206)" in message
-    assert "command not found" not in message
-
-
-def test_claude_run_delivers_long_prompt_via_stdin(tmp_path: Path) -> None:
-    """claude 实现阶段的 prompt 经 stdin 投递，不进 argv（避开 Windows 命令行上限）。"""
-    long_prompt = "x" * 40_000
-    runner = FakeProcessRunner()
-
-    run_agent_with_prompt(
-        "claude",
-        long_prompt,
-        tmp_path,
-        runner,
-        config=AppConfig(),
-        profile=AGENT_PROFILE_RUN,
-        invocation_phase=PHASE_IMPLEMENTATION,
-    )
-
-    assert runner.input_texts == [long_prompt]
-    assert long_prompt not in runner.raw_calls[0]
-
-
 def test_gate_reads_only_the_effective_registry(path_lookup: set[str]) -> None:
     """门禁与可用性判定同一份事实：仓库层覆盖进来的自定义 agent 同样被认识。"""
     base = _config()

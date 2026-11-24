@@ -5,13 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from backend.core.shared.models.agent_runner import AppConfig
-from backend.core.shared.models.pull_request_url import build_evidence_blob_url
 from backend.core.use_cases.agent_runner_primary_demo import PrimaryDemo
 from backend.core.use_cases.agent_runner_structured_evidence import (
     EvidenceUpload,
     StructuredEvidenceReport,
     _label,
     _render_evidence_file_lines,
+    build_evidence_blob_url,
 )
 from backend.core.use_cases.agent_runner_validation_identity import (
     EvidenceMarker,

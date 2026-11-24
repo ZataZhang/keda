@@ -6,27 +6,6 @@
     <title>生命周期与执行器设置 · 交互原型</title>
     <link rel="stylesheet" href="./assets/prototype-chrome.css" />
     <style>
-      .screen[data-screen="lifecycle-settings"] .overlay.panel { left: 0 !important; top: 0 !important; width: 100% !important; height: 100% !important; background: #f8f7fc; }
-      .workflow-nav [aria-current="page"] { color: #6944eb; border-bottom: 2px solid currentColor; }
-      .workflow-nav .btn { flex-shrink: 0; white-space: nowrap; }
-      [data-workflow-panel][hidden] { display: none !important; }
-      .workflow-board { padding: 16px; }
-      .workflow-board section { border: 1px solid #ded9f5; border-radius: 12px; padding: 16px; margin-bottom: 12px; background: #faf9ff; }
-      .workflow-board h3 { margin: 0 0 12px; }
-      .workflow-line { display: flex; align-items: start; gap: 8px; overflow-x: auto; padding: 4px; }
-      .workflow-line > * { flex-shrink: 0; }
-      .workflow-node, .workflow-step { display: grid; gap: 4px; padding: 9px 10px; border-radius: 8px; border: 1px solid #d8d3e7; background: white; color: #211943; font: inherit; }
-      .workflow-node { background: #f4efff; border-color: #9878ed; cursor: pointer; text-align: left; }
-      .workflow-node:hover, .workflow-node:focus-visible { background: #e9ddff; outline: 2px solid #6a40d2; }
-      .workflow-node small, .workflow-arrow, .workflow-branch { color: #5c507c; font-size: 12px; }
-      .workflow-arrow { padding-top: 10px; }
-      .workflow-branch { display: grid; gap: 6px; margin-top: 12px; text-align: center; }
-      #workflow-drawer { position: fixed; inset: 0 0 0 auto; margin: 0; width: min(420px, 100%); max-width: 100%; height: 100%; max-height: 100%; border: 0; border-left: 1px solid #ded9f5; padding: 24px; box-sizing: border-box; color: #211943; background: white; }
-      #workflow-drawer::backdrop { background: rgb(29 21 50 / 24%); }
-      #workflow-drawer header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-      #workflow-drawer label { display: grid; gap: 8px; margin-block: 20px; }
-    </style>
-    <style>
       /* ───────────────────────────────────────────────────────────────────
          真实截图 + HTML 覆盖层混合原型。
 
@@ -543,18 +522,19 @@
 
           <!-- ══ 专门页面：生命周期配置、模型预设与执行器回退 ══ -->
           <section class="screen" data-screen="lifecycle-settings">
-            <div class="overlay panel lifecycle-settings-scroll">
+            <img class="base" src="./assets/lifecycle-agent-matrix/settings-real.png" alt="frontend-public 设置页真实产品外壳" />
+            <span class="backlog-label-correction" aria-hidden="true">Backlog</span>
+            <a class="hotspot route-hotspot" href="./prd-lifecycle-observability.html#stats" target="_blank" rel="noopener noreferrer" aria-label="打开 PRD 执行统计原型" style="left:12px;top:188px;width:231px;height:36px" data-label="打开 PRD 执行统计 ↗" data-label-side></a>
+            <div class="overlay panel lifecycle-settings-scroll" style="left:256px;top:116px;width:1184px;height:1084px">
               <div class="admin-head" style="padding:12px 24px 0">
-                <nav class="workflow-nav" aria-label="仓库导航">
-                  <button class="btn ghost sm" type="button" id="lifecycle-settings-back" data-clickable>仓库列表</button>
-                  <span class="btn ghost sm" aria-current="page">执行器与模型</span>
-                </nav>
+                <button class="btn ghost sm" type="button" id="lifecycle-settings-back" data-clickable>← 设置</button>
+                <div class="admin-title" style="margin-top:6px">生命周期与执行器设置<span class="tag-new">统一设置页</span></div>
+                <div class="admin-desc">九个生命周期、模型预设和执行器回退集中在此管理。先定义预设，再绑定生命周期或回退候选；页面分别标明全局与仓库配置范围。</div>
               </div>
-              <nav class="lifecycle-section-nav workflow-nav" aria-label="设置区块导航">
-                <button class="btn ghost sm" type="button" data-workflow-tab="matrix" aria-current="page">生命周期矩阵</button>
-                <button class="btn ghost sm" type="button" data-workflow-tab="presets">模型预设</button>
-                <button class="btn ghost sm" type="button" data-workflow-tab="timeouts">内容生成时限</button>
-                <button class="btn ghost sm" type="button" data-workflow-tab="fallback">执行器回退</button>
+              <nav class="lifecycle-section-nav" aria-label="设置区块导航">
+                <a href="#lifecycle-matrix-scroll">生命周期 <span>9</span></a>
+                <a href="#lifecycle-preset-editor">模型预设 <span>7</span></a>
+                <a href="#lifecycle-fallback-card">执行器回退 <span>顺序</span></a>
               </nav>
               <div class="lifecycle-toolbar" id="lifecycle-toolbar">
                 <label class="lifecycle-field">配置范围
@@ -565,29 +545,13 @@
                 </label>
                 <p class="lifecycle-caption" id="lifecycle-scope-hint">全局设置供所有仓库继承。仓库层可逐阶段覆盖，未覆盖的行继续使用全局设置；每行同时显示绑定与预设的来源。</p>
               </div>
-              <section data-workflow-panel="matrix">
-              <div class="admin-head" style="padding:16px 24px 0">
-                <h2 class="admin-title">生命周期矩阵</h2>
-                <p class="admin-desc">查看各角色的生效 Agent、模型、推理深度与来源。修复和收尾未绑定预设时继承实现。PRD 声明与单次运行的 CLI 旗标优先于此处基线。</p>
-              </div>
               <div class="lifecycle-settings-scroll" id="lifecycle-matrix-scroll">
-                <div id="workflow-board" class="workflow-board"></div>
-                <div hidden>
                 <table class="lifecycle-config-table">
                   <thead><tr><th style="width:29%">生命周期 / 触发时机</th><th style="width:24%">模型预设</th><th style="width:29%">当前执行器与参数</th><th style="width:18%">配置来源</th></tr></thead>
                   <tbody id="lifecycle-settings-body"></tbody>
                 </table>
-                </div>
               </div>
-              <div class="lifecycle-footer" id="lifecycle-settings-footer">
-                <span class="hint" id="lifecycle-settings-hint">修改只保存在当前选择的作用域。</span>
-                <button class="btn default" type="button" id="lifecycle-settings-save" data-clickable>保存矩阵与预设</button>
-              </div>
-              <div class="card-body" id="lifecycle-settings-diff-wrap" style="display:none;padding:0 24px 20px">
-                <div class="diff"><header id="lifecycle-settings-diff-header">保存预览</header><pre id="lifecycle-settings-diff-code"></pre></div>
-              </div>
-              </section>
-              <section class="preset-editor" id="lifecycle-preset-editor" data-workflow-panel="presets" hidden>
+              <section class="preset-editor" id="lifecycle-preset-editor">
                 <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
                   <h3>模型预设</h3>
                   <button class="btn outline sm" id="lifecycle-preset-add" type="button" data-clickable>＋ 新建预设</button>
@@ -595,11 +559,14 @@
                 <p>预设集中定义 Agent、模型 ID 和推理深度；Agent 不支持推理深度参数时，该字段不能生效。</p>
                 <div class="preset-list" id="lifecycle-preset-list"></div>
               </section>
-              <section class="preset-editor" data-workflow-panel="timeouts" hidden>
-                <h3>内容生成时限</h3>
-                <p>生产页面按生成目标配置超时，超时后继续使用模板兜底。原型在此展示入口。</p>
-              </section>
-              <section class="card is-new" id="lifecycle-fallback-card" data-workflow-panel="fallback" hidden style="margin:0 24px 16px" aria-labelledby="lifecycle-fallback-title">
+              <div class="lifecycle-footer" id="lifecycle-settings-footer">
+                <span class="hint" id="lifecycle-settings-hint">修改只保存在当前选择的作用域。</span>
+                <button class="btn default" type="button" id="lifecycle-settings-save" data-clickable>保存当前作用域</button>
+              </div>
+              <div class="card-body" id="lifecycle-settings-diff-wrap" style="display:none;padding:0 24px 20px">
+                <div class="diff"><header id="lifecycle-settings-diff-header">保存预览</header><pre id="lifecycle-settings-diff-code"></pre></div>
+              </div>
+              <section class="card is-new" id="lifecycle-fallback-card" style="margin:0 24px 16px" aria-labelledby="lifecycle-fallback-title">
                 <div class="card-head">
                   <div>
                     <div class="card-title" id="lifecycle-fallback-title">执行器回退顺序 <span class="scope-pill global">全局 · config.toml</span></div>
@@ -695,13 +662,6 @@
 
     <div id="toast-root" class="toast-root" aria-live="polite"></div>
 
-    <dialog id="workflow-drawer" aria-labelledby="workflow-role">
-      <header><h2 id="workflow-role"></h2><form method="dialog"><button class="btn ghost" aria-label="关闭角色配置">关闭</button></form></header>
-      <p id="workflow-trigger"></p>
-      <label>本阶段绑定预设<select class="select" id="workflow-preset"></select></label>
-      <p id="workflow-effective" role="status"></p>
-      <p>关闭后可继续配置其他角色。用设置页底部的保存按钮查看当前作用域的变更。</p>
-    </dialog>
     <nav class="prototype-chrome" data-prototype-chrome aria-label="原型评审工具">
       <span class="prototype-chrome__label" aria-hidden="true">原型</span>
       <a href="./hub.html">返回 Hub</a>
@@ -783,9 +743,6 @@
         ];
         // 原型固定样例：预设声明完整的 agent/model/reasoning_effort 三元组。
         const INITIAL_PRESETS = {
-          'codex-luna-max': { agent: 'codex', model: 'gpt-6-luna', reasoning_effort: 'max' },
-          'codex-terra-medium': { agent: 'codex', model: 'gpt-6.1-terra', reasoning_effort: 'medium' },
-          'codebuddy-default': { agent: 'codebuddy' },
           plan: { agent: 'codebuddy', model: 'glm-5.3-flash', reasoning_effort: 'max' },
           work: { agent: 'codebuddy', model: 'deepseek-v4.1-flash', reasoning_effort: 'high' },
           review: { agent: 'qoder', model: 'glm-5.3-flash', reasoning_effort: 'high' },
@@ -795,8 +752,8 @@
           'fallback-codex': { agent: 'codex', model: 'gpt-5.4', reasoning_effort: 'xhigh' },
         };
         const INITIAL_PRESET_BINDINGS = {
-          implementation: 'codex-luna-max', verifier: 'codex-terra-medium', review: 'codex-terra-medium', supervisor: 'codex-terra-medium',
-          planner: 'codebuddy-default', content_generation: 'codebuddy-default', deliberate: 'codebuddy-default',
+          implementation: 'work', verifier: 'review', review: 'review', supervisor: 'review',
+          planner: 'plan', content_generation: 'work', deliberate: 'plan',
         };
 
         const blankMatrix = () => Object.fromEntries(LIFECYCLES.map((item) => [item.key, null]));
@@ -1118,80 +1075,11 @@
           return { ...(repositoryPreset ?? state.globalPresets[presetName] ?? {}) };
         };
 
-        const workflowTabs = [...document.querySelectorAll('[data-workflow-tab]')];
-        const workflowPanels = [...document.querySelectorAll('[data-workflow-panel]')];
-        workflowTabs.forEach((tab) => tab.addEventListener('click', () => {
-          workflowTabs.forEach((item) => item.toggleAttribute('aria-current', item === tab));
-          tab.setAttribute('aria-current', 'page');
-          workflowPanels.forEach((panel) => { panel.hidden = panel.dataset.workflowPanel !== tab.dataset.workflowTab; });
-        }));
-
-        const workflowDrawer = $('#workflow-drawer');
-        const workflowPreset = $('#workflow-preset');
-        const workflowArrow = '<span class="workflow-arrow" aria-hidden="true">→</span>';
-
-        const renderWorkflow = () => {
-          const role = (key) => {
-            const lifecycle = LIFECYCLES.find((stage) => stage.key === key);
-            const binding = effectivePresetName(key, state.lifecycleScope, state.repoId);
-            return `<button type="button" class="workflow-node" data-workflow-role="${key}" data-clickable>
-              <strong>${esc(lifecycle.name)} ›</strong><small>${esc(binding.source === '继承实现阶段' ? `继承实现 · ${binding.name}` : (binding.name ?? binding.source))}</small></button>`;
-          };
-          $('#workflow-board').innerHTML = `
-            <section aria-labelledby="delivery-workflow">
-              <h3 id="delivery-workflow">代码交付</h3>
-              <div class="workflow-line">
-                <span class="workflow-step">认领 Issue</span>${workflowArrow}${role('implementation')}${workflowArrow}
-                <div><span class="workflow-step">执行检查</span><div class="workflow-branch">↓ 失败 · 修复后复查 ↑${role('fix')}</div></div>
-                ${workflowArrow}${role('verifier')}${workflowArrow}
-                <div><span class="workflow-step">交付门禁</span><div class="workflow-branch">↓ 材料缺失 · 收尾后复查 ↑${role('closeout')}</div></div>
-                ${workflowArrow}${role('review')}${workflowArrow}<span class="workflow-step">Draft PR</span>${workflowArrow}${role('supervisor')}
-              </div>
-            </section>
-            <section aria-labelledby="discussion-workflow">
-              <h3 id="discussion-workflow">讨论与内容生成</h3>
-              <div class="workflow-line"><span class="workflow-step">待讨论 Issue</span>${workflowArrow}${role('deliberate')}
-                <span class="workflow-arrow">人工标记后 →</span>${role('content_generation')}${workflowArrow}<span class="workflow-step">PRD / Issue 正文</span>
-              </div>
-              <p>从提示词创建 Issue 时，可直接调用内容生成。</p>
-            </section>
-            <button type="button" class="btn ghost" data-workflow-role="planner" data-clickable>独立问答配置 · kc ask</button>`;
-        };
-
-        const updateWorkflowDrawer = (key) => {
-          const lifecycle = LIFECYCLES.find((stage) => stage.key === key);
-          const binding = effectivePresetName(key, state.lifecycleScope, state.repoId);
-          const preset = effectivePresetDefinition(binding.name, state.lifecycleScope, state.repoId);
-          const tableSelect = $(`[data-lifecycle-preset="${key}"]`);
-          workflowPreset.innerHTML = tableSelect.innerHTML;
-          workflowPreset.value = tableSelect.value;
-          $('#workflow-role').textContent = lifecycle.name;
-          $('#workflow-trigger').textContent = lifecycle.trigger;
-          $('#workflow-effective').textContent = [binding.source, binding.name, preset?.agent, preset?.model, preset?.reasoning_effort].filter(Boolean).join(' · ');
-        };
-
-        $('#workflow-board').addEventListener('click', (event) => {
-          const node = event.target.closest('[data-workflow-role]');
-          if (!node) return;
-          workflowDrawer.dataset.role = node.dataset.workflowRole;
-          updateWorkflowDrawer(node.dataset.workflowRole);
-          workflowDrawer.showModal();
-        });
-        workflowPreset.addEventListener('change', () => {
-          const tableSelect = $(`[data-lifecycle-preset="${workflowDrawer.dataset.role}"]`);
-          tableSelect.value = workflowPreset.value;
-          tableSelect.dispatchEvent(new Event('change', { bubbles: true }));
-          updateWorkflowDrawer(workflowDrawer.dataset.role);
-        });
-        workflowDrawer.addEventListener('close', () => {
-          $(`[data-workflow-role="${workflowDrawer.dataset.role}"]`)?.focus();
-        });
-
         const renderLifecycleSettings = () => {
           const scope = state.lifecycleScope;
           const repoId = state.repoId;
           const repositoryScope = scope === 'repository';
-          $('#lifecycle-settings-back').textContent = state.lifecycleReturnScreen === 'backlog' ? '← Backlog' : '仓库列表';
+          $('#lifecycle-settings-back').textContent = state.lifecycleReturnScreen === 'backlog' ? '← Backlog' : '← 设置';
           $('#lifecycle-scope').value = scope;
           $('#lifecycle-repo-field').style.display = repositoryScope ? 'grid' : 'none';
           $('#lifecycle-repo').innerHTML = REPOS.map((repo) => `<option value="${esc(repo.id)}"${repo.id === repoId ? ' selected' : ''}>${esc(repo.label)}</option>`).join('');
@@ -1230,7 +1118,6 @@
             return `<tr class="entry-group-row"><td colspan="4"><span class="entry-group-label">${esc(group.label)}</span><span class="entry-group-summary">${esc(group.summary)}</span></td></tr>${rows}`;
           }).join('');
 
-          renderWorkflow();
           const visiblePresetNames = [...new Set([...Object.keys(state.globalPresets), ...Object.keys(state.repoPresets)])];
           $('#lifecycle-preset-list').innerHTML = visiblePresetNames.map((presetName) => {
             const preset = effectivePresetDefinition(presetName, scope, repoId) ?? {};
@@ -1657,9 +1544,6 @@
         fitStage();
         const requestedScreen = new URLSearchParams(window.location.search).get('screen');
         setScreen(SCREEN_HINTS[requestedScreen] ? requestedScreen : 'settings');
-        if (requestedScreen === 'lifecycle-settings' && pageParams.get('capture') === '1' && pageParams.get('role') === 'fix') {
-          $('[data-workflow-role="fix"]').click();
-        }
         renderAgentLabels();
         renderFallback();
         renderRepoGears();

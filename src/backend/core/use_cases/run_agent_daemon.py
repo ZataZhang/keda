@@ -175,7 +175,6 @@ def run_agent_daemon(
     idle_backoff_max_factor: int = IDLE_BACKOFF_MAX_FACTOR,
     parallel_limit_status_dir: Path | None = None,
     review_stage: DaemonReviewStage | None = None,
-    loaded_version: str | None = None,
 ) -> None:
     """Run the queue poller forever across all target repositories.
 
@@ -235,9 +234,6 @@ def run_agent_daemon(
         review_stage: daemon 内置的 PR 值守阶段；传入时每轮 Phase 2 之后推进
             supervising / review 状态的 Issue，本机已有 supervise-daemon 的仓库跳过。
             省略时不做 PR 值守。
-        loaded_version: daemon 启动时由调用方解析一次的 KedaCode 版本；随状态文件
-            每轮原样写出，供 ``kc daemon status`` 与已安装版本比对。本函数不会重新
-            解析版本，升级后仍报告启动时的值。
     """
     require_posix_process_groups("kc daemon")
     previous_sigterm_handler: Any = signal.getsignal(signal.SIGTERM)
@@ -281,7 +277,6 @@ def run_agent_daemon(
                 idle_backoff_max_factor=idle_backoff_max_factor,
                 parallel_limit_status_dir=parallel_limit_status_dir,
                 review_stage=review_stage,
-                loaded_version=loaded_version,
             )
         )
     finally:
@@ -689,7 +684,6 @@ def _run_daemon_loop(request: _AgentDaemonLoopRequest) -> None:
                         source=ceiling_source,
                         in_flight=in_flight_count,
                         updated_at=datetime.now(timezone.utc).isoformat(),
-                        loaded_version=request.loaded_version,
                     ),
                 )
 

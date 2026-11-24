@@ -174,9 +174,6 @@ from backend.core.use_cases.agent_runner_resilient_invocation import (
 
 _logger = logging.getLogger(__name__)
 
-#: Windows ``ERROR_FILENAME_EXCED_RANGE``：命令行超过 CreateProcess 的长度上限。
-_WINERROR_FILENAME_EXCED_RANGE = 206
-
 _TIMEOUT_CONTINUATION_PROMPT = (
     "The previous agent process was stopped by the runner's execution timeout. "
     "Continue the existing task from this session and the current worktree state. "
@@ -706,16 +703,8 @@ def run_agent_with_prompt(
                 # 补进异常，让日志与失败评论不再只剩一句 command not found。不在起跑前
                 # 主动查 PATH——注入的 runner 与本机 PATH 无关，提前查会让 CI（不安装任何
                 # agent CLI）里的真实流程测试全线变红。
-                # Windows 命令行超过 32,767 字符时 CreateProcess 报 WinError 206，
-                # Python 同样映射成 FileNotFoundError；此时可执行文件其实存在，要写明真实原因。
-                reason = (
-                    "command line too long (WinError 206)"
-                    if getattr(exc, "winerror", None) == _WINERROR_FILENAME_EXCED_RANGE
-                    else "command not found"
-                )
                 raise AgentUnavailableError(
                     agent_name,
-                    reason=reason,
                     context=(
                         f"launching bin '{attempt_invocation.argv[0]}' for phase "
                         f"'{invocation_phase}' with profile '{profile}'"

@@ -38,7 +38,6 @@ from backend.core.shared.models.agent_runner import (
     IssueSummary,
     PullRequestContext,
 )
-from backend.core.shared.models.pull_request_url import parse_pull_request_number
 from backend.core.shared.prd_checklist import parse_prd_checklist
 from backend.core.use_cases.agent_runner_closeout import resolve_prd_worktree_path
 from backend.core.use_cases.agent_runner_dependencies import parse_dependency_marker
@@ -438,9 +437,10 @@ def _process_one(
     pr_context = github_client.get_pull_request_context(pr_branch)
     if pr_context is None:
         return MergeQueueOutcome(issue_number=issue.number, action="skipped_no_pr")
-    pr_number = parse_pull_request_number(pr_context.pr_url)
-    if pr_number is None:
+    pr_number_match = re.search(r"/pull/(\d+)", pr_context.pr_url)
+    if not pr_number_match:
         return MergeQueueOutcome(issue_number=issue.number, action="skipped_no_pr")
+    pr_number = int(pr_number_match.group(1))
 
     # Stack convergence: once the upstream branch has merged, retarget the
     # downstream PR's base onto the mainline so the rebase/merge steps below act

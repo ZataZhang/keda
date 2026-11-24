@@ -23,7 +23,6 @@ from backend.engines.agent_runner.repository_local_verification import (
     detect_verification_commands,
 )
 from backend.infrastructure.config.settings import (
-    AgentRunnerSettings,
     AgentRunnerAutopilotSettings,
     AgentRunnerBacklogSettings,
     AgentRunnerDaemonSettings,
@@ -48,16 +47,11 @@ from backend.infrastructure.config.settings import (
     load_agent_runner_local_settings,
 )
 from backend.infrastructure.config.toml_section_editor import config_write_lock
-from backend.infrastructure.gitea_client import parse_gitea_remote_url
 from backend.core.shared.interfaces.runner_console import (
     DiscoveredRepositoryEntry,
     IRepositoryRegistryEditor,
 )
 from backend.core.shared.models import product_identity
-from backend.core.shared.models.repository_platform import (
-    DEFAULT_REPOSITORY_PLATFORM,
-    GITEA_PLATFORM,
-)
 from backend.core.shared.models.repository_paths import (
     DEFAULT_REPOSITORY_STATE_DIR_NAME,
     DEFAULT_WORKTREE_DIR_NAME,
@@ -625,11 +619,6 @@ def build_repository_local_config_text(
     selected_base_branch = options.base_branch_override or _detect_default_base_branch(
         repo_root_path, selected_remote, process_runner
     )
-    repository_platform = _detect_registered_gitea_platform(
-        repo_root_path,
-        selected_remote,
-        process_runner,
-    )
 
     verification_commands = detect_verification_commands(repo_root_path)
     pre_commit_verification_command = detect_pre_commit_verification_command(repo_root_path)
@@ -638,7 +627,6 @@ def build_repository_local_config_text(
             id=selected_repo_id,
             enabled=True,
             display_name=selected_display_name,
-            platform=repository_platform,
         ),
         git=AgentRunnerGitSettings(
             remote=selected_remote,
@@ -673,29 +661,6 @@ def build_repository_local_config_text(
     )
 
     return repo_root_path, settings_to_toml_string(settings), verification_commands
-
-
-def _detect_registered_gitea_platform(
-    repo_root_path: Path,
-    remote_name: str,
-    process_runner: SubprocessRunner | None,
-) -> str:
-    """发布 remote 命中本机 Gitea 登记时选择 Gitea 平台。"""
-    remote_url_result = _run_git(
-        ["remote", "get-url", "--push", remote_name],
-        repo_root_path,
-        process_runner,
-    )
-    if remote_url_result.return_code != 0 or not remote_url_result.stdout.strip():
-        return DEFAULT_REPOSITORY_PLATFORM
-    parsed_remote = parse_gitea_remote_url(remote_url_result.stdout)
-    if parsed_remote is None:
-        return DEFAULT_REPOSITORY_PLATFORM
-    remote_hostname, _owner_repo = parsed_remote
-    registered_instances = AgentRunnerSettings().gitea_instances
-    if any(instance.hostname == remote_hostname for instance in registered_instances):
-        return GITEA_PLATFORM
-    return DEFAULT_REPOSITORY_PLATFORM
 
 
 def initialize_repository_local_config(

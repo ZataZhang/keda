@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 from backend.api.cli_console import console, error_console
 from backend.api.cli_skill import sync_user_skills
 from backend.core.shared.models.agent_spec import AgentSpec
-from backend.core.shared.models.repository_platform import RepositoryPlatformConfigurationError
+from backend.core.shared.models.repository_platform import RepositoryPlatformNotImplementedError
 from backend.core.use_cases.agent_onboarding import availability_available_agents
 from backend.core.use_cases.agent_runner_factory import (
     build_app_config,
@@ -153,7 +153,7 @@ def _run_init_command(parsed: argparse.Namespace, process_runner: IProcessRunner
             agent_registry=app_config.agents,
         )
         console.print(f"[green]Labels synced for:[/] {init_result.repo_root_path}")
-    except RepositoryPlatformConfigurationError as exc:
+    except RepositoryPlatformNotImplementedError as exc:
         error_console.print(f"Label sync failed: {exc}", markup=False)
         return 1
     except Exception as exc:  # noqa: BLE001

@@ -322,12 +322,12 @@ project_skills_dir = ".claude/skills"
 
 [agent_runner.agents.claude.profiles.run]
 args = ["--dangerously-skip-permissions", "--verbose", "-p", "--output-format", "stream-json", "--include-partial-messages"]
-prompt_delivery = "stdin"
+prompt_delivery = "argv_tail"
 output_protocol = "claude-stream-json"
 
 [agent_runner.agents.claude.profiles.deliberate]
 args = ["--dangerously-skip-permissions", "--verbose", "-p", "--output-format", "stream-json", "--include-partial-messages"]
-prompt_delivery = "stdin"
+prompt_delivery = "argv_tail"
 output_protocol = "claude-stream-json"
 
 [agent_runner.agents.claude.profiles.generate]
@@ -455,12 +455,12 @@ project_skills_dir = ".codebuddy/skills"
 
 [agent_runner.agents.codebuddy.profiles.run]
 args = ["--dangerously-skip-permissions", "--verbose", "-p", "--output-format", "stream-json", "--include-partial-messages"]
-prompt_delivery = "stdin"
+prompt_delivery = "argv_tail"
 output_protocol = "claude-stream-json"
 
 [agent_runner.agents.codebuddy.profiles.deliberate]
 args = ["--dangerously-skip-permissions", "--verbose", "-p", "--output-format", "stream-json", "--include-partial-messages"]
-prompt_delivery = "stdin"
+prompt_delivery = "argv_tail"
 output_protocol = "claude-stream-json"
 
 [agent_runner.agents.codebuddy.profiles.generate]

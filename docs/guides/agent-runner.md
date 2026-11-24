@@ -552,7 +552,7 @@ uv run --project /path/to/keda kc init
 
 `kc init` 成功写入本地配置后，还会自动把当前仓库注册（或更新路径）到全局 `config.toml` 的 `[agent_runner.repositories]` 中，使 `kc daemon` 默认即可在当前仓库启动。如果该 `repo_id` 已在 registry 中但指向不同路径，init 会自动更新 registry 路径到当前位置。
 
-`kc init` 会按仓库 `platform` 选择对应代码平台客户端；Gitea 仓库需先按[配置指南](configuration.md#agent-runner-repo-config)在本机登记 Gitea 地址和令牌变量。
+`kc init` 若在标签同步时遇到尚未实现的仓库平台，会说明原因并以退出码 `1` 结束。
 
 用户级 Skill 同步失败不会中断仓库注册与 GitHub 标签同步；`kc init` 会继续完成这些步骤，并在最终退出时仍以非零退出码报告 Skill 同步失败。
 
@@ -1653,7 +1653,7 @@ github_repo = "owner/backend-service"
 - 每个仓库必须有 `path`（本地绝对路径）。
 - `enabled = false` 可临时禁用某个仓库。
 - `github_repo` 是可选的 `owner/name` 字符串，供 `kc issue list` 的 PR 列以及 GitHub API 操作使用；缺省时，GitHub API 客户端从目标仓库的 Git remote URL 推断仓库身份。两处都无法提供仓库身份时会提示配置该字段，不会调用 `gh repo view` 查询 GitHub 元数据。
-- 与 `github_repo` 同属仓库身份信息的 `platform` 通过 `.kedacode.toml` 的 `[agent_runner.repository]` 段声明，省略时默认为 `github`。Gitea 仓库使用 Gitea REST API 完成 Issue、标签、评论、PR、合并与提交状态操作；实例地址和 `token_env` 必须登记在本机 `config.toml`，仓库配置不得指定令牌去向。Gitea 草稿 PR 用 `WIP: ` 标题前缀表示，转正式时移除。`kc takeover`、预览环境模板和容器凭据转交仍直接使用 `gh`，不属于 Gitea 支持范围；本次支持范围以 Gitea 1.21 为基线，不承诺 Forgejo。配置格式、HTTPS 要求与改回 GitHub 的方式见[配置指南](configuration.md#agent-runner-repo-config)。
+- 与 `github_repo` 同属仓库身份信息的 `platform` 通过 `.kedacode.toml` 的 `[agent_runner.repository]` 段声明，省略时默认为 `github`；目前 `gitea` 尚未实现。配置格式、允许值与改回 GitHub 的方式见[配置指南](configuration.md#agent-runner-repo-config)。
 - registry 配置中的 `github_repo` 仅供 `kc issue list` 查询 PR 列；GitHub API 操作仍从目标仓库自身的 `.kedacode.toml` 或 Git remote 解析仓库身份。
 - registry 通常只保留 `path` 和 `enabled`；仓库级 overrides 仍兼容，但建议迁移到目标仓库的 `.kedacode.toml`。
 - 未指定 `--repo`、`--repo-id` 或 `--all` 时，单仓库命令（如 `kc run`、`kc supervise`）只处理当前 Git 仓库；`kc daemon` 和 `kc supervise-daemon` 同样只处理当前已初始化注册仓库，未命中、未初始化或匹配多个时报错。如需监控所有 enabled registry entries，请显式使用 `--all`。
@@ -1798,13 +1798,6 @@ kc daemon status --all
 - `managed running`：通过 `kc registry start` / `kc takeover` / console 启动的托管进程。
 - `unmanaged running`：直接在命令行执行 `kc daemon` / `kc supervise-daemon` 启动的进程。
 - `log_path`：托管进程的真实日志文件路径；`-` 表示未托管进程（无独立日志文件）。
-- `version`：daemon **启动时**加载的 KedaCode 版本。daemon 一直按启动时的代码运行，升级 kc 后不重启就会继续跑旧代码，所以这里与当前已安装版本做对比：
-  - 一致时只显示版本号，例如 `0.9.1`；
-  - 不一致时显示为 `0.9.0 (installed 0.9.1)`，并在表格下方提示重启：托管进程给出 `kc registry stop --repo-id <id> && kc registry start --repo-id <id>`，手动启动的进程提示结束后重新运行 `kc daemon`；
-  - `unknown` 表示 daemon 没有上报版本（本功能上线前启动的旧进程，或刚启动、尚未完成首轮轮询），同样提示重启；
-  - supervise-daemon 行显示 `-`，不参与比对。
-
-  版本不一致只提示，退出码仍为 `0`。`--json` 每行带 `loaded_version`（未上报时为 `null`）、`installed_version` 与 `version_status`（`current` / `mismatch` / `unknown`；supervise-daemon 行为 `null`）；机器模式下 stdout 只输出 JSON，不打印提示。已安装版本本身取不到时（例如在源码树里直接运行，版本回退为 `0.0.0+unknown`），`version_status` 为 `unknown` 且不提示重启。
 
 #### 查看进程日志（`kc logs`）
 
@@ -3074,7 +3067,7 @@ kimi --help
 ```
 
 > 也可以把 API Key 写到 `.env` 文件里，kc 会自动加载。
-> `kc` 以无人值守方式调用 Claude Code，会使用 `--dangerously-skip-permissions` 跳过文件编辑权限确认，并启用 verbose `stream-json`。runner 会过滤原始 JSON，只显示工具调用摘要、assistant 文本和最终错误。提示词经 stdin 投递而不是放在命令行尾部：实现阶段的提示词（内联 PRD + Issue 正文）可能超过 3 万字符，超出 Windows 命令行 32,767 字符上限（WinError 206）。
+> `kc` 以无人值守方式调用 Claude Code，会使用 `--dangerously-skip-permissions` 跳过文件编辑权限确认，并启用 verbose `stream-json`。runner 会过滤原始 JSON，只显示工具调用摘要、assistant 文本和最终错误。
 
 #### 3. 单次执行（测试用）
 

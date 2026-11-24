@@ -5,37 +5,10 @@ import { useCallback, useRef, useState, useSyncExternalStore } from "react";
 
 import { DesktopCompanion, requestCompanionClose } from "@/components/dashboard/desktop-companion";
 import { runtimeTaskKey } from "@/components/dashboard/runtime-task-list";
-import type { RuntimeTaskEntry, RuntimeTaskSummary } from "@/lib/api/types";
+import type { RuntimeTaskStatus, RuntimeTaskSummary } from "@/lib/api/types";
 
 // Tauri 宿主身份在当前页面生命周期内固定，无需注册变更事件。
 const subscribeDesktopHost = () => () => {};
-
-/** 需要提醒用户的任务时刻：阻塞、失败、等待人工审阅、Issue 已关闭。 */
-type CompanionAttentionKind = "blocked" | "failed" | "human_review" | "closed";
-
-/** 各提醒类别在通知标题里的状态词。“已关闭”不区分合并与手动关闭，不得写成“已合并”。 */
-const ATTENTION_TITLE_WORDS: Record<CompanionAttentionKind, string> = {
-  blocked: "已阻塞",
-  failed: "已失败",
-  human_review: "待你审阅",
-  closed: "已关闭",
-};
-
-/**
- * 判断任务当前是否处在需要提醒用户的时刻。
- *
- * @param task - 看板上的一个任务。
- * @returns 提醒类别；不需要提醒时为 `null`。
- */
-function companionAttentionKind(task: RuntimeTaskEntry): CompanionAttentionKind | null {
-  if (task.status === "blocked" || task.status === "failed" || task.status === "closed") {
-    return task.status;
-  }
-  if (task.status === "waiting" && task.waiting_reason === "human_review") {
-    return "human_review";
-  }
-  return null;
-}
 
 /**
  * 把 Tauri 的 invoke 失败原因转成可读文案。
@@ -60,9 +33,8 @@ export default function CompanionPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const nativeDesktopApp = useSyncExternalStore(subscribeDesktopHost, isTauri, () => false);
   const [pinned, setPinned] = useState(false);
-  // 每个任务最近一次已提醒的类别；任务重新进入“运行中”时清空，首轮只建基线。
-  const notifiedKindsRef = useRef(new Map<string, CompanionAttentionKind>());
-  const baselineReadyRef = useRef(false);
+  // 上一轮的任务状态：只有跃迁到阻塞/失败才提示，首轮只建基线。
+  const previousStatusesRef = useRef(new Map<string, RuntimeTaskStatus>());
 
   /** 请求关窗并把后端返回的状态如实展示；请求失败也说明失败。 */
   async function handleClose() {
@@ -103,42 +75,31 @@ export default function CompanionPage() {
     }
   }
 
-  /**
-   * 任务进入需要人处理的时刻（阻塞、失败、等待人工审阅、Issue 已关闭）时发系统通知。
-   *
-   * 同一任务的同一类提醒，在任务重新进入“运行中”之前只发一次，避免“待审阅 ↔ 等待复查”
-   * 来回切换时反复弹出；首轮读数只建立基线，不补发打开 App 前就已存在的状态。
-   * 通知只含仓库名、编号、状态词和 Issue 标题，不带阻塞摘要、错误摘要或日志。
-   */
+  /** 任务跃迁到阻塞或失败时发系统通知；同一任务只提示一次跃迁。 */
   const handleSummary = useCallback(
     (next: RuntimeTaskSummary) => {
       if (!nativeDesktopApp) {
         return;
       }
-      const notifiedKinds = notifiedKindsRef.current;
-      const isBaselineRound = !baselineReadyRef.current;
+      const previousStatuses = previousStatusesRef.current;
+      const currentStatuses = new Map<string, RuntimeTaskStatus>();
       for (const task of next.tasks) {
         const key = runtimeTaskKey(task);
-        if (task.status === "running") {
-          notifiedKinds.delete(key);
+        currentStatuses.set(key, task.status);
+        const previousStatus = previousStatuses.get(key);
+        const escalated = task.status === "blocked" || task.status === "failed";
+        if (previousStatus === undefined || previousStatus === task.status || !escalated) {
           continue;
         }
-        const attentionKind = companionAttentionKind(task);
-        if (attentionKind === null || notifiedKinds.get(key) === attentionKind) {
-          continue;
-        }
-        notifiedKinds.set(key, attentionKind);
-        if (isBaselineRound) {
-          continue;
-        }
+        const label = task.status === "blocked" ? "已阻塞" : "已失败";
         void invoke("notify_task", {
-          title: `${task.repo_display_name ?? task.repo_id}#${task.issue_number} ${ATTENTION_TITLE_WORDS[attentionKind]}`,
+          title: `${task.repo_display_name ?? task.repo_id}#${task.issue_number} ${label}`,
           body: task.issue_title ?? task.status_reason ?? "打开控制台查看详情",
         }).catch((error: unknown) => {
           setNotice(`发送通知失败：${describeInvokeError(error)}`);
         });
       }
-      baselineReadyRef.current = true;
+      previousStatusesRef.current = currentStatuses;
     },
     [nativeDesktopApp],
   );

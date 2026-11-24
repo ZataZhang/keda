@@ -33,7 +33,6 @@ from backend.core.shared.models.agent_runner import (
     PullRequestContext,
     ReviewEventMarker,
 )
-from backend.core.shared.models.pull_request_url import parse_pull_request_number
 from backend.core.use_cases.agent_runner_claim_lease import latest_claim_record
 from backend.core.use_cases.agent_runner_events import (
     parse_latest_event_marker,
@@ -568,8 +567,14 @@ def _pr_context_to_dict(pr_context: PullRequestContext | None) -> dict | None:
 
 
 def _extract_pr_number(pr_url: str) -> int | None:
-    """从 GitHub 或 Gitea Pull Request URL 取编号。"""
-    return parse_pull_request_number(pr_url or "")
+    """Pull a PR number out of a ``https://.../pull/<n>`` URL."""
+    match = re.search(r"/pull/(\d+)", pr_url or "")
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return None
 
 
 # ─────────────────────────────────────────────────────────────────────────────

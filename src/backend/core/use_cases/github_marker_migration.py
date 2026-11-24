@@ -7,13 +7,14 @@ from dataclasses import dataclass
 
 from backend.core.shared.interfaces.agent_runner import IGitHubClient
 from backend.core.shared.models.agent_runner import IssueSummary
-from backend.core.shared.models.pull_request_url import parse_pull_request_number
 
 _LEGACY_HTML_MARKER_PATTERN = re.compile(r"(?P<opening><!--[ \t\r\n]*)iar:(?P<name>[a-z0-9-]+)")
 _LEGACY_EXEC_MARKER_PATTERN = re.compile(r"(?P<opening><<)(?P<ending>END_)?IAR_EXEC(?P<closing>>>)")
 _LEGACY_EXEC_RESULT_PATTERN = re.compile(
     r"(?P<opening>\[/?)(?P<name>IAR_EXEC_RESULT)(?P<closing>\])"
 )
+# GitHub 的 issues 列表把 PR 也当 Issue 返回，`html_url` 因此指向 ``/pull/<n>``。
+_PULL_REQUEST_URL_PATTERN = re.compile(r"/pull/\d+")
 
 
 @dataclass(frozen=True)
@@ -161,8 +162,8 @@ def _write_migration_entry(github_client: IGitHubClient, entry: GitHubMarkerMigr
 
 
 def _is_pull_request_item(item: IssueSummary) -> bool:
-    """仓库条目是否为 PR（GitHub 与 Gitea 的路径分别为 ``pull`` 与 ``pulls``）。"""
-    return parse_pull_request_number(item.url) is not None
+    """仓库条目是否为 PR（issues 列表里 PR 的 ``html_url`` 指向 ``/pull/<n>``）。"""
+    return bool(_PULL_REQUEST_URL_PATTERN.search(item.url))
 
 
 def _collect_migration_entries(

@@ -32,7 +32,6 @@ from backend.core.shared.models.backlog import (
     PrdLifecycleEventView,
 )
 from backend.core.shared.models.loop import LoopSchedule, LoopScheduleKind, LoopTask
-from backend.core.use_cases.daemon_parallel_limit_status import DaemonParallelLimitStatus
 
 #: 账本里的 UTC 瞬间，人读侧在 Asia/Shanghai 下应渲染成 ``_LOCAL_SAME_INSTANT``。
 _UTC_INSTANT = "2026-06-23T00:00:00+00:00"
@@ -304,20 +303,6 @@ def _run_daemon_status(fmt: str) -> str:
         patch("backend.api.cli_registry.create_process_supervisor", return_value=supervisor),
         patch("backend.api.cli_registry.create_registry_editor", return_value=editor),
         patch("backend.api.cli_registry.console.print", side_effect=_capture_print),
-        # 版本与已安装一致：不出重启提示，本测试只看时间显示。
-        patch("backend.api.cli_registry.resolve_keda_version", return_value="9.9.9"),
-        patch(
-            "backend.api.cli_registry.read_daemon_parallel_limit_status",
-            return_value=DaemonParallelLimitStatus(
-                repo_id="daemon-repo",
-                pid=1234,
-                parallel_limit=1,
-                source="config",
-                in_flight=0,
-                updated_at=_UTC_INSTANT,
-                loaded_version="9.9.9",
-            ),
-        ),
     ):
         exit_code = _run_daemon_status_command(
             parsed=parsed,

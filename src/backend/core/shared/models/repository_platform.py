@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 __all__ = [
     "DEFAULT_REPOSITORY_PLATFORM",
     "GITEA_PLATFORM",
     "GITHUB_PLATFORM",
-    "RepositoryPlatformConfigurationError",
     "SUPPORTED_REPOSITORY_PLATFORMS",
+    "RepositoryPlatformNotImplementedError",
     "validate_repository_platform",
 ]
 
@@ -15,17 +17,13 @@ GITHUB_PLATFORM = "github"
 """当前已实现的平台名称。"""
 
 GITEA_PLATFORM = "gitea"
-"""Gitea 平台名称。"""
+"""已登记但尚未实现的平台名称。"""
 
 DEFAULT_REPOSITORY_PLATFORM = GITHUB_PLATFORM
 """仓库配置未声明平台时使用的默认值。"""
 
 SUPPORTED_REPOSITORY_PLATFORMS = (GITHUB_PLATFORM, GITEA_PLATFORM)
 """仓库配置允许声明的平台名称。"""
-
-
-class RepositoryPlatformConfigurationError(ValueError):
-    """代码平台客户端无法根据本机与仓库配置安全完成装配。"""
 
 
 def validate_repository_platform(platform_value: object) -> str:
@@ -48,3 +46,23 @@ def validate_repository_platform(platform_value: object) -> str:
         f"Invalid repository.platform value {platform_value!r}; "
         f"expected one of: {allowed_platforms}."
     )
+
+
+class RepositoryPlatformNotImplementedError(RuntimeError):
+    """仓库声明的平台尚无客户端实现。"""
+
+    def __init__(self, *, platform_name: str, config_path: Path) -> None:
+        """初始化带有平台与配置文件定位信息的错误。
+
+        Args:
+            platform_name: 仓库声明的平台名称。
+            config_path: 声明平台的仓库配置文件路径。
+        """
+        self.platform_name = platform_name
+        self.config_path = config_path
+        super().__init__(
+            f"The repository platform {platform_name!r} is not implemented. "
+            f"Only {GITHUB_PLATFORM!r} is currently supported. "
+            f"To switch back to GitHub, edit {config_path} and set "
+            f"platform = {GITHUB_PLATFORM!r}."
+        )
