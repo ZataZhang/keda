@@ -5,7 +5,7 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> 🧍 **验收状态**：待人工验收 — 执行侧验证已完成，人审依据见 §9.1。
+> ✅ **验收状态**：已验收 — [PR #436](https://github.com/ZataZhang/keda/pull/436) 合并记录确认执行证据与可观察行为。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 > 本 PRD 分两个 altitude，分别服务不同读者，自上而下阅读：
@@ -420,8 +420,8 @@ Failure triage：
 
 #### Human-Confirmed (来自 Part A 风险地图)
 
-- [ ] 决策一：手动查询只读、巡检沿用原授权、人工接管优先的权限安排，已在 rv-1 零写入对照和 rv-2 人工接管实测证据中得到证明。
-- [ ] §9.1 呈递区已亲眼看过（看演示或做自查，二选一或都做）。
+- [x] 决策一：手动查询只读、巡检沿用原授权、人工接管优先的权限安排，已在 rv-1 零写入对照和 rv-2 人工接管实测证据中得到证明。
+- [x] §9.1 呈递区已亲眼看过（看演示或做自查，二选一或都做）。验收记录见 [PR #436](https://github.com/ZataZhang/keda/pull/436) 的合并声明与合并事件。
 
 #### Behavior Acceptance
 
@@ -495,7 +495,7 @@ Failure triage：
   - 旧版对照均观察到正确等待和停止。维护者确认实测口径，两项原判据保留于 Change Log。
   - 发布后监督的组织权限限制单独记录。恢复动作和 GitHub 回读均完成。
   - 独立 verdict 为 `PASS`，交付记录排除树为 `683915a16b3027d89a31f6540cdf9b95638dcedd`。 [证据清单](https://github.com/ZataZhang/keda/blob/3cb18e10ddd5a5affef4033c8083021cfb5311a7/evidence.json)
-  - Human-Confirmed 在本次合并前保持开放。 [人审呈递](https://github.com/ZataZhang/keda/blob/3cb18e10ddd5a5affef4033c8083021cfb5311a7/human-review-checklist.md)
+  - 维护者授权后由 [PR #436](https://github.com/ZataZhang/keda/pull/436) 记录 Human-Confirmed。 [人审呈递](https://github.com/ZataZhang/keda/blob/3cb18e10ddd5a5affef4033c8083021cfb5311a7/human-review-checklist.md)
 
 ## Change Log
 
@@ -570,3 +570,11 @@ Failure triage：
 - Reason: 完成维护者已确认的实测验收。
 - Impact: 归档横幅为 🧍 待人工验收。合并前保留 Human-Confirmed。
 - Review: 独立 verifier PASS，GitHub 合并门禁与确认记录另行核对。
+
+### 记录 #436 合并验收
+- Type: evidence
+- Before: 实现 PRD 归档为待人工验收，已发布独立验证和人审呈递。
+- After: [PR #436](https://github.com/ZataZhang/keda/pull/436) 以 squash 合并。GitHub 合并人 `ZataZhang`，时间 `2026-11-24T17:11:52Z`。验收状态更新为已验收。
+- Reason: 维护者确认按新版实测验收，PR 合并声明授权写回。独立 verifier 与最终 PR 的必需检查均通过。 此次合并时仍排队的非必需 macOS 安装检查，在安装输入一致的上一提交已通过。
+- Impact: 已验证提交 `a298e95fb090bbd754a58e6d66b04a0e44b6643e`，验收 PR head `c5a4c7bc88ff7a3e6ff741fddd3394a824bc4fb5`，主线合并提交 `c74f1ace75400c05d23007820df57a56e43f3b8f`。三者排除交付记录的 Git tree 一致，值为 `683915a16b3027d89a31f6540cdf9b95638dcedd`。
+- Review: [PR 验收呈递](https://github.com/ZataZhang/keda/pull/436#issuecomment-7138597691) · [最终检查](https://github.com/ZataZhang/keda/pull/436/checks) · [合并事件](https://github.com/ZataZhang/keda/pull/436)
