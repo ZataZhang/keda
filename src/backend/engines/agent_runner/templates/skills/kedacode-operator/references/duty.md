@@ -32,6 +32,8 @@ Keep three groups distinct:
 
 Name a person only when the evidence identifies them. Otherwise name the responsible role (Issue author, PR author, or repository maintainer) and the specific action. For a human decision, state what must be decided, who has authority to decide it, the smallest available options, and that the task remains blocked. Do not invent an approver or a deadline.
 
+When the target is closed or merged and there is no separately evidenced open blocker, say no one needs to act on it. Keep old failures in the history and give any recheck condition without assigning it as current work.
+
 Return the handoff in this order:
 
 1. Observation time and current state.
