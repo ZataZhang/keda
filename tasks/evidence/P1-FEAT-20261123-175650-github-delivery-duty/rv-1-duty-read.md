@@ -1,10 +1,10 @@
 # RV-1 · Issue / PR 手动查询
 
-真实入口已完成复查。新版与旧版均区分了旧失败与当前检查，PRD 规定的旧版错误仍缺实证。人工呈递待维护者验收。
+真实入口已完成复查。新版与旧版均区分了旧失败与当前检查，旧版实际等待当前检查。2026-11-25 起按新版行为验收，原预期与实际对照仍可回溯。 [人审呈递](https://github.com/ZataZhang/keda/blob/3cb18e10ddd5a5affef4033c8083021cfb5311a7/human-review-checklist.md)
 
 ## 交付分支实测
 
-在实现提交 `9da79d9b` 上以 `kc skill install` 刷新岗位技能，在两个新 Codex 会话分别询问 Issue #430 和 PR #436 还需要谁处理。两次查询都查到了关联关系和 GitHub 当时的 PR head。查询前后，Issue 时间线为 30→30 条，PR 时间线为 8→8 条。调用轨迹中的写操作为 0。 [Issue #430](https://github.com/ZataZhang/keda/issues/430) · [PR #436](https://github.com/ZataZhang/keda/pull/436)
+在与实现提交 `9da79d9b` 完全相同的岗位内容上以 `kc skill install` 刷新岗位技能，在两个新 Codex 会话分别询问 Issue #430 和 PR #436 还需要谁处理。两次查询都查到了关联关系和 GitHub 当时的 PR head。查询前后，2026-11-25 00:55–00:56（北京时间）复测时，GitHub head 为 `98dc2dd0`，Issue 时间线为 30→30 条，PR 时间线为 18→18 条。调用轨迹中的写操作为 0。 [Issue #430](https://github.com/ZataZhang/keda/issues/430) · [PR #436](https://github.com/ZataZhang/keda/pull/436)
 
 ## 隔离 GitHub 实测
 
@@ -14,11 +14,11 @@
 | 从同一份 Draft PR #18 问谁需要处理 | 反查到 Issue #17。PR 当前为 `f7d49ee`，检查待完成；失败来自旧提交 `fcf73a5`。 | 等当前检查，按本次结果复查。 | 0，Issue 2→2 条，PR 2→2 条，完整快照一致 |
 | 从私有测试 PR #14 问谁需要处理 | 反查到 Issue #10；真实 runner 完成本地提交 `e77285ed` 后在推送阶段失败，GitHub PR head 仍为 `29bd17a`。出处为 Issue 的 attempt 与发布失败事件、runner 日志及 GitHub PR head。 | 维护者确认待交付的提交，由有权限的执行器复查发布后监督。 | 0，Issue 和 PR 时间线一致 |
 
-对照组使用改动前的随包版本，缺少 `duty.md`。第一次旧版答复等待当前检查。第二次在 Issue 正文保留旧 SHA 的真实失败和当时的重试建议，再以相同问题从两个新会话查询。两版均等待 `f7d49ee` 的检查，前后快照相等，写调用各为 0。原验收预期旧版建议立即重试或发起写调用，本次观察结果仍不满足该预期。
+对照组使用改动前的随包版本，缺少 `duty.md`。第一次旧版答复等待当前检查。第二次在 Issue 正文保留旧 SHA 的真实失败和当时的重试建议，再以相同问题从两个新会话查询。两版均等待 `f7d49ee` 的检查，前后快照相等，写调用各为 0。原验收曾预期旧版立即重试；两轮均观测到正确等待。修订判据下，对本地快照加入一条异常事件，比较确实非零退出。
 
 同一份私有 PR 的首次补测前后快照不相等。复跑保留了两次原始快照，并验证内容完全一致。
 
-本地证据包保留真实终端节选、会话轨迹、提交状态及查询前后的快照。呈递材料来自真实 CLI 会话，仍待维护者查看。 [可执行复跑清单](https://github.com/ZataZhang/keda/blob/iar-evidence/issue-430/evidence.json)
+本地证据包保留真实终端节选、会话轨迹、提交状态及查询前后的快照。呈递材料来自真实 CLI 会话，可在证据页直接复查。 [可执行复跑清单](https://github.com/ZataZhang/keda/blob/iar-evidence/issue-430/evidence.json)
 
 ## 首轮执行故障
 

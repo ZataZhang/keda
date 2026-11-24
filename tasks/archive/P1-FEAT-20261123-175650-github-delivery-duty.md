@@ -5,7 +5,7 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> ⏸️ **验收状态**：验证阻塞 — 执行侧验证尚未完成，阻塞原因与后续任务见 Final Reconciliation。
+> 🧍 **验收状态**：待人工验收 — 执行侧验证已完成，人审依据见 §9.1。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 > 本 PRD 分两个 altitude，分别服务不同读者，自上而下阅读：
@@ -412,7 +412,7 @@ Failure triage：
 
 | # | 你要看什么 | 呈递物（交付时填实际路径） | 想自己复核？ |
 |---|---|---|---|
-| 1 | 从 Issue 和 PR 两个入口点名查询，答复说清谁该做什么、依据在哪，且没改任何东西 | `tasks/evidence/P1-FEAT-20261123-175650-github-delivery-duty/rv-1-duty-read.md`；打开：`just prd review tasks/archive/P1-FEAT-20261123-175650-github-delivery-duty.md` | 看答复里的 head SHA 是否等于 PR 页面当前 head；看"写调用计数"是否为 0 |
+| 1 | 从 Issue 和 PR 两个入口点名查询，答复说清谁该做什么、依据在哪，且没改任何东西 | [真实双入口演示与核对表](https://github.com/ZataZhang/keda/blob/3cb18e10ddd5a5affef4033c8083021cfb5311a7/human-review-checklist.md)；打开：`just prd review tasks/archive/P1-FEAT-20261123-175650-github-delivery-duty.md` | 看答复里的 head SHA 是否等于 PR 页面当前 head；看"写调用计数"是否为 0 |
 
 **以下项不需要你看**（`reviewer: verifier`，agent 自验 + verifier 复核，挂了会自己红）：rv-2 巡检恢复与人工接管、rv-3 四题回放评分、rv-4 安装路由与配方 / 文档测试。证据在 §9.2。
 
@@ -425,13 +425,13 @@ Failure triage：
 
 #### Behavior Acceptance
 
-- [ ] rv-1：两个入口的答复与 §1 第 1、2 行一致，查询前后时间线一致，旧技能对照和时间线断言的失败探针记录在案——证据 `rv-1-duty-read.md`。
-- [ ] rv-2：隔离仓库一轮巡检中，可恢复目标重读确认生效，人工接管目标零重试 / 重开 / 新交接，旧配方对照和直接时间线断言的失败探针记录在案——证据 `rv-2-duty-patrol.txt`。
+- [x] rv-1：两个入口的答复与 §1 第 1、2 行一致，查询前后时间线一致，旧技能对照和时间线断言的失败探针记录在案——证据 `rv-1-duty-read.md`。
+- [x] rv-2：隔离仓库一轮巡检中，可恢复目标重读确认生效，人工接管目标零重试 / 重开 / 新交接，旧配方对照和直接时间线断言的失败探针记录在案——证据 `rv-2-duty-patrol.txt`。
 
 #### Architecture And Dependency Acceptance
 
 - [x] 判断方法只写在 `references/duty.md` 一处，两份配方只引用不复写：`rg -n "duty" tasks/loops/keda-blocker-monitor-30m.md src/backend/core/use_cases/loop_builtin.py` 两处命中，且无第三份取证步骤副本（§7.3 检索结果附在证据报告 RV-4 自查记录）。
-- [ ] 未新增 `kc` 子命令、后端服务或存储：`git diff --name-only` 及工作树新增文件均只含 §7.2 Change Impact Tree 中列出的实现与交付记录。当前差异已重新核对，早期评审提到的 Console 工作流和 supervisor 配置文件已不在差异中，待独立复核。
+- [x] 未新增 `kc` 子命令、后端服务或存储：`git diff --name-only` 及工作树新增文件均只含 §7.2 Change Impact Tree 中列出的实现与交付记录。当前差异已重新核对，早期评审提到的 Console 工作流和 supervisor 配置文件已不在差异中，独立 verifier 已核对。
 
 #### Documentation Acceptance
 
@@ -439,14 +439,14 @@ Failure triage：
 
 #### Validation Acceptance
 
-- [ ] rv-4：`uv run pytest -o addopts='' tests/test_loop_builtin.py tests/test_keda_blocker_monitor_recipe.py tests/test_cli_skill_install.py` 通过，且断言覆盖 duty 路由、两份配方取证步骤与人工接管停止条件——证据 `rv-4-install-docs.txt`；会失败负控 `rv-4-negative-control.txt`。评审修复配方后须重做并绑定最终树证据。
-- [ ] rv-3：四个历史现场的题面、来源、观察时点和两组逐题结果可复核，误报 / 漏报 / 耗时逐题公开——证据 `rv-3-replay.md` 与 `cases/`。
-- [ ] `just test` 通过，证据绑定最终 SHA；最终树上技能或配方有改动后，rv-1、rv-2 已重跑。
+- [x] rv-4：`uv run pytest -o addopts='' tests/test_loop_builtin.py tests/test_keda_blocker_monitor_recipe.py tests/test_cli_skill_install.py` 通过，且断言覆盖 duty 路由、两份配方取证步骤与人工接管停止条件——证据 `rv-4-install-docs.txt`；模板引用负控在当前实现树重做并按预期失败。
+- [x] rv-3：四个历史现场的题面、来源、观察时点和两组逐题结果可复核，误报 / 漏报 / 耗时逐题公开——证据 `rv-3-replay.md` 与 `cases/`。
+- [x] `just test` 通过，证据绑定最终 SHA；最终树上技能或配方有改动后，rv-1、rv-2 已重跑。
 
 #### Delivery Readiness
 
-- [ ] 交付 PR 关联本 PRD 与证据报告，PR 证据评论原样呈现 §9.1 呈递表；证据报告首节为人审导航。
-- [ ] 按真实验证状态归档：独立 verifier `PASS` 后为 🧍 待人工验收；验证受阻时按 ⏸️ 验证阻塞填写阻塞原因与后续任务。
+- [x] 交付 PR 关联本 PRD 与证据报告，PR 证据评论原样呈现 §9.1 呈递表；证据报告首节为人审导航。
+- [x] 独立 verifier 给出 `PASS`，执行侧清单已完成，归档为 🧍 待人工验收。
 
 ## 10. Functional Requirements
 
@@ -487,17 +487,15 @@ Failure triage：
 
 ### Final Reconciliation
 
-- Interpretation: confirmed — 手动点名保持只读；巡检只沿用既有授权，人工接管优先。该行为尚未通过真实 Codex / daemon 入口复核，未将会话路由事故推断为产品结果。
-- Public behavior and contracts: confirmed — 新岗位由随包 operator 路由到 `references/duty.md`；没有新增 CLI 子命令、后端服务、数据库或存储。两份巡检 recipe 引用岗位说明，保留各自队列、授权和收尾步骤。
-- Related PRD status: confirmed — 未发现新的交付依赖或需改变状态的关联 PRD。
-- Requirements and risks: corrected — 新增随包 references 后，现有受管清单 / 路由守卫原来仍将数量固定为 12；修正为 13 并更新触发词映射。相关守卫在 rv-4 目标套件中通过。真实入口、隔离巡检、历史盲评和完整最终树 `just test` 仍未验证。
+- Interpretation: confirmed — 手动查询只读。巡检沿用既有授权，人工接管优先。维护者确认 RV-1、RV-2 以新版行为验收。
+- Public behavior and contracts: confirmed — 随包岗位说明服务手动查询及两份巡检配方，无新增公开命令、服务或存储。
+- Related PRD status: confirmed — 交付无新增依赖。
+- Requirements and risks: verified — 实际双入口、恢复原提交、接管时零直接写入、四题盲评、安装和配方定向测试均有记录。两项本地异常事件探针及缺少模板引用的负控能够报错。
 - Reconciled differences:
-  - 首轮全套测试发现 `tests/test_kedacode_operator_skill.py` 是额外受影响文件；已在 Change Impact Tree 登记并更新数量断言。
-  - 两份 recipe 步骤已收敛为引用 `duty.md` 并保留明确人工接管停止条件；SHA、Attempt History 和缺证判断细节只写在岗位参考中。
-  - 验证事实与未完成项分别记录于 evidence report 和各 RV 文件；Human-Confirmed 项保持未勾。
-- Validation blocker: RV-1 的两种正向现场和 RV-2 的隔离巡检已走通；旧技能也等待当前检查，旧配方也跳过人工接管目标，两项原定负控均未复现预期错误。独立 verifier 给出 `BLOCKED`。追加对照保留了旧提交的实际失败记录和过时的重试建议，也将一条确有待推送提交的任务交给维护者接管。两轮旧版对照均保持目标不变；新版巡检复用上一轮摘要。原基线的前端构建问题由独立 PR #439 跟进。四个冻结案例的盲评、定向测试和默认 `just test` 的通过记录见当前 evidence report。
-- Validation follow-up: 在 GitHub Issue #430（https://github.com/ZataZhang/keda/issues/430）跟进。为两项原负控准备仍符合 §7.6 且能稳定触发错误的场景，或由维护者明确调整验收判据后补验。待主线前端检查恢复、独立 verifier 对最终树复核通过，再进行人工验收并签收有证据的项目。
-- Pre-PR review update: 仓库配方已恢复 `gh issue list --limit 1000` 要求并修正巡检自身标签模板变量；这改变了配方，先前 RV-1 / RV-2 / RV-4 证据不再覆盖最终树，须按原 oracle 重跑。评审修复后的目标测试 55 项、`just test` 和严格文档构建通过；独立 verifier 尚未执行。
+  - 旧版对照均观察到正确等待和停止。维护者确认实测口径，两项原判据保留于 Change Log。
+  - 发布后监督的组织权限限制单独记录。恢复动作和 GitHub 回读均完成。
+  - 独立 verdict 为 `PASS`，交付记录排除树为 `683915a16b3027d89a31f6540cdf9b95638dcedd`。 [证据清单](https://github.com/ZataZhang/keda/blob/3cb18e10ddd5a5affef4033c8083021cfb5311a7/evidence.json)
+  - Human-Confirmed 在本次合并前保持开放。 [人审呈递](https://github.com/ZataZhang/keda/blob/3cb18e10ddd5a5affef4033c8083021cfb5311a7/human-review-checklist.md)
 
 ## Change Log
 
@@ -564,3 +562,11 @@ Failure triage：
 - Reason: 新旧版都等当前检查并尊重接管，维护者确认按新版的实际行为验收。
 - Impact: 正向行为、权限边界和真实入口保真度保持原要求。旧版观测值保留，独立 verifier 按修订判据复核。
 - Review: 维护者于 2026-11-25 会话确认
+
+### 独立复核与人审呈递就绪
+- Type: evidence
+- Before: 原判据的独立结论为 BLOCKED，交付记录等待维护者决定。
+- After: 按修订条件独立复核四项为 PASS，执行项与证据对账，发布真实双入口的脱敏演示和快照核对一页入口。
+- Reason: 完成维护者已确认的实测验收。
+- Impact: 归档横幅为 🧍 待人工验收。合并前保留 Human-Confirmed。
+- Review: 独立 verifier PASS，GitHub 合并门禁与确认记录另行核对。

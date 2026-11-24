@@ -1,52 +1,23 @@
 ## 人审导航 / Human Review Navigation
 
-**本轮复核：** 交付分支已同步 `main`，`git diff main...HEAD` 只包含岗位说明、巡检配方、测试、文档和交付记录。早期评审提到的 Console 和 supervisor 文件已经不在差异中。通过实测修正了两个问题：先核实旧评审判断，再决定是否要求隔离改动；目标已关闭或合并且无可核验的未结事项时，不再分配当前责任人。
+| 要确认的行为 | 呈递物 | 复查 |
+|---|---|---|
+| 从 Issue 和 PR 两个入口点名查询，答复说清谁该做什么、依据在哪，且没改任何东西 | [两条真实会话及并排快照](https://github.com/ZataZhang/keda/blob/3cb18e10ddd5a5affef4033c8083021cfb5311a7/human-review-checklist.md)；本地可运行 `just prd review tasks/archive/P1-FEAT-20261123-175650-github-delivery-duty.md` | 两份答复中的测试 PR head 同为 `f7d49ee`。GitHub 时间线 Issue、PR 各 2→2，写调用各为 0。 |
 
-| 验证 | 本轮结果 |
+执行器已交叉核对实际业务双入口、观察时点、GitHub PR head 和写调用计数。呈递材料可直接在 PR 中打开。 [PR 呈递评论](https://github.com/ZataZhang/keda/pull/436#issuecomment-7138597691)
+
+## 按确认后的判据验证
+
+维护者于 2026-11-25 确认依据新版实测验收并披露旧版对照。独立 verifier 对 RV-1 至 RV-4 给出 **PASS**。实现观察提交为 `98dc2dd0`，独立复核提交为 `a298e95f`，排除验收记录路径后的 tree 相同，为 `683915a16b3027d89a31f6540cdf9b95638dcedd`。 [证据清单和文件哈希](https://github.com/ZataZhang/keda/blob/3cb18e10ddd5a5affef4033c8083021cfb5311a7/evidence.json)
+
+| 验证 | 观察结果 |
 |---|---|
-| RV-1 · 已安装技能的真实入口 | 新 Codex 会话分别读取 [Issue #430](https://github.com/ZataZhang/keda/issues/430) 和 [PR #436](https://github.com/ZataZhang/keda/pull/436)，两者关联及 head 匹配，命令轨迹无写入，前后时间线为 30 和 8 条。又在私有 GitHub 测试仓库完成两种指定现场：旧提交失败而新 head 检查待完成、从 PR 反查最新实现已完成而推送失败。两场查询均未改变 Issue 或 PR 时间线，实际终端呈递保留在本地。旧技能也等待新 head 的检查。补测保留了旧失败与当时的重试建议，两版仍等待当前检查。 [真实会话与时间线对照](rv-1-duty-read.md) |
-| RV-2 · 隔离巡检 | 私有测试仓库的专用 daemon 调度了新版配方，恢复同一实现提交并产生 Draft PR。巡检回读了恢复结果并留下摘要。人工接管目标原标签、状态和评论均保持一致；时间线只新增巡检摘要引用自动产生的交叉引用。后续监督受组织执行器访问策略阻塞。旧配方经专用 daemon 调度后也跳过同一接管目标，补测将确有待推送提交的目标交由维护者接管。新旧配方分别经 daemon 调度，目标 30 条直接事件和草稿 PR head 均一致。新版重读后复用上轮摘要并关闭本轮巡检。 |
-| RV-3 · 冻结材料与独立盲评 | 四个现场、两组各四次新会话，评分者仅见随机化 X/Y。普通组误报 1/4，值班员组 0/3，均漏报 0/3。岗位组四题耗时 23.50、22.46、24.26、22.34 秒；普通组 16.08、15.17、14.51、13.39 秒。材料、分组映射和逐题评分保留于本地证据包。 [逐题盲评结果](rv-3-replay.md) |
-| RV-4 · 安装、配方与文档 | 在实现提交 `9da79d9b` 上，56 项定向测试和严格文档构建通过。将模板引用改成不存在的参考文件时，目标测试因缺少 `references/duty.md` 失败。 |
-| 默认测试命令 | `just test` 首轮受继承的 `KEDACODE_NO_UPDATE_CHECK` 干扰，升级提示的 6 条测试失败。移除该变量后在 `9da79d9b` 使用仓库默认增量档复跑并通过。 |
+| RV-1 双入口只读 | 00:55–00:56 的实际业务查询读取同一提交，Issue 30→30 条，PR 18→18 条，零写入。隔离仓库实测两入口均等待当前检查，并识别另一个场景的真实推送故障。补入异常事件的本地探针按预期失败。 [双入口证据](rv-1-duty-read.md) |
+| RV-2 隔离巡检 | 恢复原提交并从 GitHub 读回草稿 PR。已接管目标在补测中保留相同的 30 条直接事件和同一草稿 head；新版复用上轮摘要并关闭自己的巡检。旧版同样停止目标动作。追加本地直接评论的探针按预期失败。[隔离巡检报告](https://github.com/ZataZhang/keda/blob/3cb18e10ddd5a5affef4033c8083021cfb5311a7/rv-2-duty-patrol.txt) |
+| RV-3 四题盲评 | 普通组误报 1/4，岗位组 0/3，两组漏报 0/3。按同一模型与材料执行，数据仅代表这四个场景。 [逐题结果](rv-3-replay.md) |
+| RV-4 分发和配方 | 56 项定向用例及严格 MkDocs 构建通过。缺失模板引用时，真实安装测试按预期失败。 |
+| 默认 `just test` | 同步主线后在实现提交增量跑了 72 项并通过。相同产品树的后续默认增量未选中用例，lint 和命令均通过。 |
 
-证据分支已把 RV-1 至 RV-3 的说明性占位文字替换成可执行复跑入口。复跑须显式指定准备好的隔离目录和被验证的 Git tree。私有仓库中的原始事件、会话和演示材料仅保存在本地。 [复跑清单](https://github.com/ZataZhang/keda/blob/iar-evidence/issue-430/evidence.json)
+两轮旧版对照均等待当前检查并尊重明确接管。接管只写在 PR review 的补测中，旧版多留了一份巡检复核清单，现版记录结论并关闭自己的巡检单。两版都未改目标。成功发布之后的独立执行器监督受组织权限限制，核心发布与读回已完成。
 
-该 PR 的 `Validate Template` 通过。PR 和基线 `main` 的 `Frontend Build` 均在 `app-sidebar.tsx` 导入 `@/app/apple-icon.png` 时触发 `TS2307`。 修复由 #439 提交，干净 GitHub runner 上的 `Frontend Build` 已通过。 [原 PR 检查](https://github.com/ZataZhang/keda/actions/runs/45387514949/job/138422222422) · [修复的 CI](https://github.com/ZataZhang/keda/actions/runs/45391009867/job/138434388938)
-
-### 首轮记录
-
-以下记录首轮执行；当前结果见上表。
-
-| 呈递项 | 真实状态与应观察值 | 本地记录 | 打开方式 | 交叉核对 |
-|---|---|---|---|---|
-| RV-1 · 首轮 Issue 与 PR 真实会话尝试 | **首轮 `REVIEW_INCIDENT / INCONCLUSIVE`。** 期待看到观察时点、状态、来源、下一责任人与动作、复查条件；查询前后 timeline 一致且写调用为 0。 | [rv-1-duty-read.md](rv-1-duty-read.md) | 打开同目录的记录 | 首轮 Codex 会话在 workspace routing discovery 阶段超时。Issue 线索：[GitHub #430](https://github.com/ZataZhang/keda/issues/430)。 |
-
-首轮因会话路由故障未录制；后续真实终端呈递已保存在本地，当前摘录见上表。
-
-### 首轮执行器证据导航
-
-| RV / 检查 | 结果 | 证据 | 已交叉核对 |
-|---|---|---|---|
-| RV-1 · 手动只读查询 | `REVIEW_INCIDENT / INCONCLUSIVE`；真实查询、timeline 对照、负控和主演示未执行。 | [rv-1-duty-read.md](rv-1-duty-read.md) | 否 |
-| RV-2 · 隔离巡检 | `BLOCKED / INCONCLUSIVE`；无隔离仓库与专用 runner，未对业务 Issue 写入。 | [rv-2-duty-patrol.txt](rv-2-duty-patrol.txt) | 否 |
-| RV-3 · 四题盲评 | `INCONCLUSIVE`；未冻结四题，未运行两组盲评。 | [rv-3-replay.md](rv-3-replay.md) | 否 |
-| RV-4 · 安装路由、配方和文档 | 负控让目标测试按预期失败；修复后 54 个相关测试通过，MkDocs strict 与 full lint 通过。 | [rv-4-negative-control.txt](rv-4-negative-control.txt)、[rv-4-install-docs.txt](rv-4-install-docs.txt)、[rv-4-architecture-audit.txt](rv-4-architecture-audit.txt)、[rv-4-tree-identity.txt](rv-4-tree-identity.txt) | 是；见下方检索与测试结果 |
-
-### RV-4 自查记录
-
-- 两份 recipe 的 `duty` 检索各命中一次：模板在 `src/backend/core/use_cases/loop_builtin.py`，仓库配方在 `tasks/loops/keda-blocker-monitor-30m.md`。两处只引用岗位说明并保留人工接管停止条件；SHA、Attempt History、缺证与交接判断细节只保存在 `references/duty.md`。模板和仓库配方测试还断言不复写 SHA / Attempt History 检查。
-- `references/` 现有 13 个 Markdown 文件；`docs/guides/agent-runner.md` 写明 13 份。测试核验路由表、受管文件集合、全部说明可安装，和触发词可由 frontmatter 发现。
-- 变更路径已核对：implementation paths 都在 §7.2 Change Impact Tree，包括根据首次全套测试失败补入的 `tests/test_kedacode_operator_skill.py`。未新增 CLI 子命令、后端服务、数据库或存储。PRD 与本证据包属于交付记录。
-- `rv-4-tree-identity.txt` 记录了验证所基于的 worktree HEAD 和实现 / 测试文件的 SHA-256；最终提交 SHA 由 runner 提交后生成，目前尚不可得。
-- 完整 `just test` 在首次执行时为 3 failed / 5633 passed / 1 skipped，失败原因均为新增 reference 后仍硬编码 12；修复后相关套件为 54 passed。因为完整执行耗时 481.44 秒（超出默认 300 秒复跑上限），最终树的完整 `just test` 保持未验收。
-- `just lint --reuse` 通过。最终全 lint 使用 `SKIP=check-test-flag` 绕开陈旧的测试标记检查，所有实际 lint hook 通过；首次格式化 hook 自动修正后复跑绿。严格文档构建完成，日志中的既有未列入导航页面和 mkdocstrings 提示不影响退出码 0。
-
-## 2026-11-25 补充复核
-
-- RV-2 将接管决定分别放在 PR 评论和 PR review 中。两版均识别接管。仅 review 的场景中，旧版生成额外复核清单且留下未结的巡检单，新版在自己的巡检单记录结论并关闭。目标 Issue 状态、标签、评论、PR head 和本地待推提交都未改变，因此未复现 §7.6 指定的目标动作。
-- RV-4 在 PR head `57308e62` 执行 §7.6 列出的三个定向套件，26 项通过，严格文档构建通过。默认 `just test` 的 lint 通过，增量选测没有选中用例。
-
-## 当前验收状态
-
-独立 verifier 结果为 `BLOCKED`。手动查询及隔离巡检的正向行为已有证据，旧版对照仍未观测到验收要求的错误。维护者的呈递确认保持开放。
+[独立 verifier 报告](P1-FEAT-20261123-175650-github-delivery-duty.verifier-report.md) · [最新 GitHub 检查](https://github.com/ZataZhang/keda/pull/436/checks)
