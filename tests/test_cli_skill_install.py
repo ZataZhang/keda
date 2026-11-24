@@ -100,8 +100,18 @@ def test_skill_install_writes_packaged_skill_into_every_user_root(
 
     output = " ".join(capsys.readouterr().out.split())
     for skills_root in skills_roots:
-        installed_contract_path = skills_root / product_identity.OPERATOR_SKILL_NAME / "SKILL.md"
+        installed_skill_path = skills_root / product_identity.OPERATOR_SKILL_NAME
+        installed_contract_path = installed_skill_path / "SKILL.md"
         assert installed_contract_path.is_file(), f"未安装到 {skills_root}"
+        installed_duty_path = installed_skill_path / "references" / "duty.md"
+        assert installed_duty_path.is_file(), f"未安装 duty reference 到 {skills_root}"
+        installed_duty_text = installed_duty_path.read_text(encoding="utf-8")
+        assert "A manually named query is read-only." in installed_duty_text
+        assert "current head" in installed_duty_text
+        assert "explicit current takeover" in installed_duty_text
+        installed_route_text = installed_contract_path.read_text(encoding="utf-8")
+        assert "谁该接手" in installed_route_text
+        assert "references/duty.md" in installed_route_text
         # CLI 的安装回显指向 skill 目录本身（不含 SKILL.md）。
         assert str(installed_contract_path.parent) in output
 

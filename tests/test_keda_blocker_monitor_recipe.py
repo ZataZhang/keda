@@ -40,3 +40,16 @@ esac
     )
 
     assert pre_command_result.stdout == ("blocked_count=37\nfailed_count=12\nneeds_attention=49\n")
+
+
+def test_blocker_monitor_uses_duty_evidence_and_respects_takeover() -> None:
+    """仓库巡检配方引用岗位说明并在人工接管后停止。"""
+    recipe_text = BLOCKER_MONITOR_RECIPE.read_text(encoding="utf-8")
+    assert "references/duty.md" in recipe_text
+    assert "explicit human takeover" in recipe_text
+    assert "current head" not in recipe_text
+    assert "SHA for each check" not in recipe_text
+    assert "Attempt History" not in recipe_text
+    assert "when the input is unchanged and there is no new progress" in recipe_text
+    assert "Patrol result and PR description" in recipe_text
+    assert "## Constraints" in recipe_text

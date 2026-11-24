@@ -1,6 +1,6 @@
 ---
 name: kedacode-operator
-description: Use KedaCode (kc) for CLI and hosted Runner operation: 装环境、升级迁移、查 Agent 配置、建 issue、查 issue、查生命周期、看其他机器 (`kc peers`)、跑一次、看进度、卡住了、后台跑、托管 Runner/hosted runner、定时任务、CI 交付. Hosted routes cover credentials, maintenance, and Linux desktop. Read-only requests never start execution.
+description: Use KedaCode (kc) for CLI and hosted Runner operation: 装环境、升级迁移、查 Agent 配置、建 issue、查 issue、查生命周期、看其他机器 (`kc peers`)、跑一次、看进度、谁该接手、卡住了、后台跑、托管 Runner/hosted runner、定时任务、CI 交付. Hosted routes cover credentials, maintenance, and Linux desktop. Read-only requests never start execution.
 ---
 
 # KedaCode Operator
@@ -17,6 +17,7 @@ Use this skill when the user asks to operate the KedaCode CLI or its managed run
 | 看其他机器 | 另一台机器在做什么 / 哪些机器在线 / kc peers / 同仓机器 | `${CODEBUDDY_SKILL_DIR}/references/peers.md` |
 | 跑一次或聚合已完成批次 | 跑一下 / 跑一次 / 执行这个 Issue / run this / 快速通道发 PR / 直接发 PR / 夜间任务总 PR / 聚合来源 PR / 重试批次 PR | `${CODEBUDDY_SKILL_DIR}/references/run-once.md` |
 | 看进度 | 看看 197 现在什么情况 / 到哪了 / 实时输出 / logs / tail / `/ps` | `${CODEBUDDY_SKILL_DIR}/references/watch.md` |
+| 谁该接手 | 还需要谁处理 / 谁该接手 / 现在卡在谁那 / 交接一下这条 PR | `${CODEBUDDY_SKILL_DIR}/references/duty.md` |
 | 卡住了 | 怎么不动了 / 卡住了 / 失败了 / agent/blocked / 恢复 / 人工接管这个 Issue 的验证 | `${CODEBUDDY_SKILL_DIR}/references/triage.md` |
 | 定时任务 | 每天几点跑 / 定时检查 / 周期性任务 / 夜间巡检 / 内置 blocker-monitor 模板（显式启用） / loop / kc loop | `${CODEBUDDY_SKILL_DIR}/references/loop.md` |
 | 后台跑 | 挂后台 / 让它自己跑 / daemon / 起守护 / 停掉它 / 并行上限 / 最多同时跑几个 / 并发调成 N | `${CODEBUDDY_SKILL_DIR}/references/daemon.md` |

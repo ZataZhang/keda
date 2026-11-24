@@ -5,7 +5,7 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，**那里是唯一事实源**。
 
-> ⬜ **验收状态**：未开工。
+> ⏸️ **验收状态**：验证阻塞 — 执行侧验证尚未完成，阻塞原因与后续任务见 Final Reconciliation。
 > 本行是 §9 Acceptance Checklist 的投影，**那里是唯一事实源**。
 
 > 本 PRD 分两个 altitude，分别服务不同读者，自上而下阅读：
@@ -240,17 +240,28 @@ This section is a living implementation guide based on current repository analys
 │   ├── tests/test_keda_blocker_monitor_recipe.py
 │   │   [修改]
 │   │   【总结】断言仓库配方同样包含，且原有段落仍在。
-│   └── tests/test_cli_skill_install.py
+│   ├── tests/test_cli_skill_install.py
+│   │   [修改]
+│   │   【总结】断言安装后的 operator 目录含 references/duty.md 且 SKILL.md 路由指向它。
+│   └── tests/test_kedacode_operator_skill.py
 │       [修改]
-│       【总结】断言安装后的 operator 目录含 references/duty.md 且 SKILL.md 路由指向它。
+│       【总结】更新 references 数量断言，并覆盖受管文件集合及路由表中的新增说明。
 │
-└── Docs
-    ├── docs/guides/loop-blocker-monitor.md
+├── Docs
+│   ├── docs/guides/loop-blocker-monitor.md
+│   │   [修改]
+│   │   【总结】说明巡检按值班员方法取证、人工接管优先，并写明旧配方升级步骤。
+│   └── docs/guides/agent-runner.md
+│       [修改]
+│       【总结】operator references 清单与数量对齐实际（含 duty.md）。
+
+└── Delivery records
+    ├── tasks/pending/P1-FEAT-20261123-175650-github-delivery-duty.md
     │   [修改]
-    │   【总结】说明巡检按值班员方法取证、人工接管优先，并写明旧配方升级步骤。
-    └── docs/guides/agent-runner.md
-        [修改]
-        【总结】operator references 清单与数量对齐实际（含 duty.md）。
+    │   【总结】记录实施后的验收状态、证据、阻塞项与 Change Log。
+    └── tasks/evidence/P1-FEAT-20261123-175650-github-delivery-duty/*.md
+        [新增]
+        【总结】按 PRD 机器契约保存验证计划、证据导航和独立验证状态报告。
 ```
 
 以上是当前分析得到的起点，不保证穷尽；用 §7.3 的检索兜底。四题回放的题面、来源和评分说明放在证据目录 `tasks/evidence/P1-FEAT-20261123-175650-github-delivery-duty/cases/`，不进代码 diff。
@@ -417,16 +428,16 @@ Failure triage：
 
 #### Architecture And Dependency Acceptance
 
-- [ ] 判断方法只写在 `references/duty.md` 一处，两份配方只引用不复写：`rg -n "duty" tasks/loops/keda-blocker-monitor-30m.md src/backend/core/use_cases/loop_builtin.py` 两处命中，且无第三份取证步骤副本（§7.3 检索结果附在证据报告）。
-- [ ] 未新增 `kc` 子命令、后端服务或存储：`git diff --name-only` 只含 §7.2 列出的文件。
+- [x] 判断方法只写在 `references/duty.md` 一处，两份配方只引用不复写：`rg -n "duty" tasks/loops/keda-blocker-monitor-30m.md src/backend/core/use_cases/loop_builtin.py` 两处命中，且无第三份取证步骤副本（§7.3 检索结果附在证据报告 RV-4 自查记录）。
+- [x] 未新增 `kc` 子命令、后端服务或存储：`git diff --name-only` 及工作树新增文件均只含 §7.2 Change Impact Tree 中列出的实现与交付记录（见证据报告 RV-4 自查记录）。
 
 #### Documentation Acceptance
 
-- [ ] `docs/guides/loop-blocker-monitor.md` 写明值班员取证、人工接管优先和旧配方升级步骤；`docs/guides/agent-runner.md` 的 references 清单与数量和实际一致；`uv run mkdocs build --strict` 通过——证据 `rv-4-install-docs.txt`。
+- [x] `docs/guides/loop-blocker-monitor.md` 写明值班员取证、人工接管优先和旧配方升级步骤；`docs/guides/agent-runner.md` 的 references 清单与数量和实际一致；`uv run mkdocs build --strict` 通过——证据 `rv-4-install-docs.txt`。
 
 #### Validation Acceptance
 
-- [ ] rv-4：`uv run pytest -o addopts='' tests/test_loop_builtin.py tests/test_keda_blocker_monitor_recipe.py tests/test_cli_skill_install.py` 通过，且断言覆盖 duty 路由、两份配方取证步骤与人工接管停止条件——证据 `rv-4-install-docs.txt`。
+- [x] rv-4：`uv run pytest -o addopts='' tests/test_loop_builtin.py tests/test_keda_blocker_monitor_recipe.py tests/test_cli_skill_install.py` 通过，且断言覆盖 duty 路由、两份配方取证步骤与人工接管停止条件——证据 `rv-4-install-docs.txt`；会失败负控 `rv-4-negative-control.txt`。
 - [ ] rv-3：四个历史现场的题面、来源、观察时点和两组逐题结果可复核，误报 / 漏报 / 耗时逐题公开——证据 `rv-3-replay.md` 与 `cases/`。
 - [ ] `just test` 通过，证据绑定最终 SHA；最终树上技能或配方有改动后，rv-1、rv-2 已重跑。
 
@@ -473,7 +484,16 @@ Failure triage：
 
 ### Final Reconciliation
 
-待实施后记录实际范围、证据、独立验证结论与偏差。
+- Interpretation: confirmed — 手动点名保持只读；巡检只沿用既有授权，人工接管优先。该行为尚未通过真实 Codex / daemon 入口复核，未将会话路由事故推断为产品结果。
+- Public behavior and contracts: confirmed — 新岗位由随包 operator 路由到 `references/duty.md`；没有新增 CLI 子命令、后端服务、数据库或存储。两份巡检 recipe 引用岗位说明，保留各自队列、授权和收尾步骤。
+- Related PRD status: confirmed — 未发现新的交付依赖或需改变状态的关联 PRD。
+- Requirements and risks: corrected — 新增随包 references 后，现有受管清单 / 路由守卫原来仍将数量固定为 12；修正为 13 并更新触发词映射。相关守卫在 rv-4 目标套件中通过。真实入口、隔离巡检、历史盲评和完整最终树 `just test` 仍未验证。
+- Reconciled differences:
+  - 首轮全套测试发现 `tests/test_kedacode_operator_skill.py` 是额外受影响文件；已在 Change Impact Tree 登记并更新数量断言。
+  - 两份 recipe 步骤已收敛为引用 `duty.md` 并保留明确人工接管停止条件；SHA、Attempt History 和缺证判断细节只写在岗位参考中。
+  - 验证事实与未完成项分别记录于 evidence report 和各 RV 文件；Human-Confirmed 项保持未勾。
+- Validation blocker: RV-1 的 `codex` 会话启动在 `workspace routing discovery timed out` 后退出 1，真实 Issue / PR 查询、负控和主演示无法完成；RV-2 缺少隔离仓库与专用 runner；RV-3 尚无冻结四题与盲评。完整 `just test` 首次耗时 481.44 秒并因旧的 12 份 references 断言失败；修复后目标套件 54 项通过，但完整命令超过默认 300 秒复跑上限，未取得最终树全量通过证据。
+- Validation follow-up: 在 GitHub Issue #430（https://github.com/ZataZhang/keda/issues/430）跟进：workspace routing 恢复后从真实 Issue / PR 入口重跑 RV-1 并录制主演示；准备隔离测试仓库与专用 daemon 完成 RV-2；冻结四个可核验历史现场并盲评 RV-3；在能于 300 秒预算内完成的 runner 环境重跑 `just test`，再请求独立 verifier 复核。之后仅勾选新证据实际证明的项并由 runner 处理归档。
 
 ## Change Log
 
@@ -500,3 +520,19 @@ Failure triage：
 - Reason: 维护者要求交给 kc 执行，并以会话确认代替逐框勾选
 - Impact: 实现可按推荐项开工；范围与验收标准不变
 - Review: 维护者会话确认
+
+### 纳入随包技能受管清单守卫
+- Type: test
+- Before: §7.2 未列出断言 operator references 数量及受管清单的 `tests/test_kedacode_operator_skill.py`
+- After: 将该测试纳入 Change Impact Tree，用于验证新增 references 已进入受管文件清单与路由表
+- Reason: 首轮 `just test` 发现该守卫仍将 references 数量固定为 12；新增 duty.md 后数量为 13
+- Impact: 实现影响文件增加一个既有测试文件；功能范围与验收标准不变
+- Review: 已由 rv-4 目标测试复核通过；完整测试仍受 Final Reconciliation 所述验证阻塞影响
+
+### 实施与验证状态对账
+- Type: evidence
+- Before: PRD 横幅为未开工；实现和验证证据尚不存在
+- After: 登记最终实现范围、已执行的 RV-4 正负控与本地门禁；横幅标记验证阻塞，未证明的清单项保持未勾
+- Reason: 按维护者要求修复 Issue #430，并遵守 PRD 对真实入口、负控、独立验证和阻塞归档的证据要求
+- Impact: 代码已具备人工查询路由和巡检共享判断；RV-1 / RV-2 / RV-3、完整最终树 `just test`、独立 verifier 和 Human-Confirmed 仍开放
+- Review: 执行器证据已记录；独立 verifier 与人审待完成
