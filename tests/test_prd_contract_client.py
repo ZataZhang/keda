@@ -85,6 +85,15 @@ class TestRunContractScript:
 
         assert client._run_contract_script(script_path, []) == payload
 
+    def test_non_ascii_output_is_decoded_on_any_locale(self, tmp_path: Path) -> None:
+        """含中文的输出在本地代码页非 UTF-8 的系统（如中文 Windows）上也能读回。"""
+        script_path = _write_script(
+            tmp_path,
+            "import json\nprint(json.dumps({'title': '中文 PRD'}, ensure_ascii=False))\n",
+        )
+
+        assert client._run_contract_script(script_path, []) == {"title": "中文 PRD"}
+
 
 class TestParsePrdContract:
     """``parse_prd_contract`` 对 payload 形状的处理。"""
