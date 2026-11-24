@@ -19,6 +19,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { toast } from "sonner";
@@ -58,6 +59,8 @@ import type {
   LifecycleSettingsView,
 } from "@/lib/api/types";
 
+import { LifecycleWorkflowGraphs } from "./lifecycle-workflow-graphs";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { MatrixRow } from "@/components/agent-runner/lifecycle-matrix-row";
 import {
   agentOptionLabel,
@@ -501,6 +504,9 @@ export function LifecycleSettingsPage({
       .map((preset) => ({ value: preset.name, label: preset.name }));
   }
 
+  const [selectedRole, setSelectedRole] = useState<LifecycleSettingsRow["key"] | null>(null);
+  const roleTrigger = useRef<HTMLButtonElement | null>(null);
+
   /** 渲染生命周期矩阵区块（九阶段生效值 + 绑定预设 + 保存）。 */
   function renderMatrixSection(currentView: LifecycleSettingsView) {
     return (
@@ -514,37 +520,61 @@ export function LifecycleSettingsPage({
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          {currentView.lifecycles.map((row) => (
-            <MatrixRow
-              key={row.key}
-              row={row}
-              scope={scope}
-              presetOptions={presetOptions}
-              bindingValue={bindingValueFor(row.key, row)}
-              bindingChanged={
-                row.key in bindingDraft &&
-                bindingDraft[row.key] !== (row.preset_name ?? null)
-              }
-              vocabulary={currentView.field_source_vocabulary}
-              availability={availabilityFor(row.effective_agent)}
-              onBindingChange={(presetName) => {
-                if (
-                  !presetName &&
-                  scope === "repository" &&
-                  row.field_sources.preset === "global"
-                ) {
-                  toast.info(
-                    `仓库 ${repoId} 已继承全局预设 ${row.preset_name}，无需更改。`,
-                  );
-                  return;
-                }
-                setBindingDraft((current) => ({
-                  ...current,
-                  [row.key]: presetName || null,
-                }));
+          <LifecycleWorkflowGraphs
+            rows={currentView.lifecycles}
+            bindings={bindingDraft}
+            onRoleSelect={(role, trigger) => {
+              roleTrigger.current = trigger;
+              setSelectedRole(role);
+            }}
+          />
+          <Sheet open={selectedRole !== null} onOpenChange={(open) => { if (!open) setSelectedRole(null); }}>
+            <SheetContent
+              className="w-full overflow-y-auto sm:max-w-2xl"
+              onCloseAutoFocus={(event) => {
+                event.preventDefault();
+                roleTrigger.current?.focus();
               }}
-            />
-          ))}
+            >
+              <SheetHeader>
+                <SheetTitle>{currentView.lifecycles.find((row) => row.key === selectedRole)?.label}</SheetTitle>
+                <SheetDescription>预设变更在「保存矩阵与预设」后写入当前配置范围。</SheetDescription>
+              </SheetHeader>
+              <div className="px-4 pb-4">
+                {currentView.lifecycles.filter((row) => row.key === selectedRole).map((row) => (
+                  <MatrixRow
+                    key={row.key}
+                    row={row}
+                    scope={scope}
+                    presetOptions={presetOptions}
+                    bindingValue={bindingValueFor(row.key, row)}
+                    bindingChanged={
+                      row.key in bindingDraft &&
+                      bindingDraft[row.key] !== (row.preset_name ?? null)
+                    }
+                    vocabulary={currentView.field_source_vocabulary}
+                    availability={availabilityFor(row.effective_agent)}
+                    onBindingChange={(presetName) => {
+                      if (
+                        !presetName &&
+                        scope === "repository" &&
+                        row.field_sources.preset === "global"
+                      ) {
+                        toast.info(
+                          `仓库 ${repoId} 已继承全局预设 ${row.preset_name}，无需更改。`,
+                        );
+                        return;
+                      }
+                      setBindingDraft((current) => ({
+                        ...current,
+                        [row.key]: presetName || null,
+                      }));
+                    }}
+                  />
+                ))}
+              </div>
+            </SheetContent>
+          </Sheet>
 
           {matrixPreviewLines.length > 0 ? (
             <div

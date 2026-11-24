@@ -28,6 +28,7 @@ from backend.core.shared.models.agent_runner import (
     DeliveryGateError,
     DeliveryGateFailureKind,
 )
+from backend.core.shared.models.pull_request_url import build_evidence_blob_url
 from backend.core.use_cases.agent_runner_primary_demo import (
     PRIMARY_DEMO_PROMPT_EN,
     PRIMARY_DEMO_PROMPT_ZH,
@@ -48,9 +49,6 @@ _EVIDENCE_ITEM_FILE_PATTERN = re.compile(r"^rv-(?P<item>\d+)[-.]", re.IGNORECASE
 _EVIDENCE_ITEM_SECTION_PATTERN = re.compile(
     r"\[\s*Item\s+(?P<item>\d+)(?P<sub>[a-z]?)\s*\]",
     re.IGNORECASE,
-)
-_PR_URL_PATTERN = re.compile(
-    r"https?://[^/]+/(?P<owner>[^/]+)/(?P<repo>[^/]+)/pull/(?P<number>\d+)"
 )
 _MAX_INLINE_EVIDENCE_CHARS = 3000
 
@@ -853,16 +851,6 @@ def validate_evidence_manifest(
         items=tuple(item_reports),
         primary_demo=manifest.primary_demo,
     )
-
-
-def build_evidence_blob_url(pr_url: str, branch: str, file_name: str) -> str | None:
-    """Build the repository blob URL for an evidence file."""
-    url_match = _PR_URL_PATTERN.search(pr_url)
-    if not url_match:
-        return None
-    owner = url_match.group("owner")
-    repo = url_match.group("repo")
-    return f"https://github.com/{owner}/{repo}/blob/{branch}/{file_name}"
 
 
 def _short_sha(sha256_hex: str) -> str:

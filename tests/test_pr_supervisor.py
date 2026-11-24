@@ -3121,6 +3121,7 @@ class _SupervisorDispatchRunner(FakeProcessRunner):
         check=True,
         timeout=None,
         capture_output=True,
+        input_text=None,
         label=None,
         output_protocol=None,
         attempt_key: str | None = None,

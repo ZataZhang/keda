@@ -88,9 +88,10 @@ def test_run_agent_with_prompt_uses_claude_yolo_mode(tmp_path: Path) -> None:
             "--output-format",
             "stream-json",
             "--include-partial-messages",
-            "Implement the issue.",
         ]
     ]
+    # 提示词经 stdin 投递，不进 argv（避开 Windows 命令行长度上限）。
+    assert fake_runner.input_texts == ["Implement the issue."]
 
 
 def test_run_agent_with_prompt_can_capture_output(tmp_path: Path) -> None:
@@ -422,9 +423,9 @@ class TestSessionResumeInvocation:
 
         agent_argv = fake_runner.calls[0]
         assert agent_argv[agent_argv.index("--resume") + 1] == "sess-abc"
-        # 原有 run profile 与 prompt 尾递送不受影响。
+        # 原有 run profile 与 prompt 的 stdin 投递不受影响。
         assert "--dangerously-skip-permissions" in agent_argv
-        assert agent_argv[-1] == "Continue."
+        assert fake_runner.input_texts == ["Continue."]
 
     def test_codex_resume_uses_profile_tail_subcommand(self, tmp_path: Path) -> None:
         """Codex 续传用 profile 尾部子命令替换正常的 ``exec``。"""
