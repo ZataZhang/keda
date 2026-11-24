@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from backend.engines.agent_runner.remote_template_skills import (
     PackagedSkillInstallResult,
+    RemoteTemplateSkillFetchError,
     RemoteTemplateSkillInstallError,
     RemoteTemplateSkillInstallOptions,
     RemoteTemplateSkillInstallResult,
@@ -32,6 +33,7 @@ from backend.engines.agent_runner.workflow_install import (
 __all__ = [
     "ExistingFileRefusedError",
     "PackagedSkillInstallResult",
+    "RemoteTemplateSkillFetchError",
     "RemoteTemplateSkillInstallError",
     "RemoteTemplateSkillInstallOptions",
     "RemoteTemplateSkillInstallResult",

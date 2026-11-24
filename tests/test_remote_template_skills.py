@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -10,10 +11,12 @@ import pytest
 from backend.core.shared.models.agent_runner import CommandResult
 from backend.core.shared.models.agent_spec import BUILTIN_AGENT_SPECS
 from backend.core.shared.prd_skill_location import keda_owned_skills_root
+from backend.engines.agent_runner import remote_template_skills
 from backend.engines.agent_runner.remote_template_skills import (
     REMOTE_TEMPLATE_SKILL_NAMES,
     REMOTE_TEMPLATE_SKILLS_REF,
     REMOTE_TEMPLATE_SKILLS_REPOSITORY_URL,
+    RemoteTemplateSkillFetchError,
     RemoteTemplateSkillInstallError,
     RemoteTemplateSkillInstallOptions,
     install_remote_template_skills,
@@ -25,9 +28,13 @@ class FakeRemoteTemplateProcessRunner:
     """模拟 sparse checkout，并在克隆目录写入受控的远程 Skill 内容。"""
 
     def __init__(
-        self, *, include_skill_names: tuple[str, ...] = REMOTE_TEMPLATE_SKILL_NAMES
+        self,
+        *,
+        include_skill_names: tuple[str, ...] = REMOTE_TEMPLATE_SKILL_NAMES,
+        fetch_errors: tuple[Exception, ...] = (),
     ) -> None:
         self.include_skill_names = include_skill_names
+        self.fetch_errors = list(fetch_errors)
         self.command_tuples: list[tuple[str, ...]] = []
 
     def run(
@@ -41,6 +48,8 @@ class FakeRemoteTemplateProcessRunner:
         self.command_tuples.append(command_tuple)
         if command_tuple[:2] == ("git", "init"):
             Path(command_tuple[-1]).mkdir()
+        if command_tuple[:2] == ("git", "fetch") and self.fetch_errors:
+            raise self.fetch_errors.pop(0)
         if command_tuple[:2] == ("git", "checkout"):
             checkout_path = cwd
             for skill_name in self.include_skill_names:
@@ -182,6 +191,81 @@ def test_install_remote_template_skills_downloads_only_required_user_skills(tmp_
     # 清空整个目录,因此 stale.md 这种 iar 不拥有的副产物应原样保留。
     assert stale_skill_file.exists()
     assert set(second_install_result.skipped_skill_names) == {"prd", "code-reviewer"}
+
+
+@pytest.mark.parametrize(
+    "fetch_error",
+    [
+        subprocess.CalledProcessError(
+            128,
+            ("git", "fetch"),
+            stderr="fatal: Recv failure: Operation timed out",
+        ),
+        subprocess.TimeoutExpired(("git", "fetch"), timeout=120),
+    ],
+    ids=("network-exit", "timeout"),
+)
+def test_install_remote_template_skills_retries_transient_fetch_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fetch_error: Exception,
+) -> None:
+    """远程 pinned fetch 的一次网络失败或超时会重试并继续安装。"""
+    user_home_path = tmp_path / "home"
+    fake_process_runner = FakeRemoteTemplateProcessRunner(fetch_errors=(fetch_error,))
+    sleep_intervals: list[float] = []
+    monkeypatch.setattr(remote_template_skills.time, "sleep", sleep_intervals.append)
+
+    install_remote_template_skills(
+        RemoteTemplateSkillInstallOptions(
+            process_runner=fake_process_runner,
+            user_home_path=user_home_path,
+        )
+    )
+
+    fetch_commands = [
+        command_tuple
+        for command_tuple in fake_process_runner.command_tuples
+        if command_tuple[:2] == ("git", "fetch")
+    ]
+    assert len(fetch_commands) == 2
+    assert sleep_intervals == [
+        remote_template_skills._REMOTE_TEMPLATE_SKILLS_FETCH_RETRY_DELAY_SECONDS
+    ]
+    assert (keda_owned_skills_root(user_home_path) / "prd" / "SKILL.md").is_file()
+
+
+def test_install_remote_template_skills_stops_after_retry_is_exhausted(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """重试耗尽后保留最后的 fetch 错误，且不写入不完整 Skill。"""
+    user_home_path = tmp_path / "home"
+    timeout_error = subprocess.TimeoutExpired(("git", "fetch"), timeout=120)
+    fake_process_runner = FakeRemoteTemplateProcessRunner(
+        fetch_errors=(
+            subprocess.CalledProcessError(128, ("git", "fetch")),
+            timeout_error,
+        )
+    )
+    monkeypatch.setattr(remote_template_skills.time, "sleep", lambda _delay: None)
+
+    with pytest.raises(RemoteTemplateSkillFetchError) as raised_error:
+        install_remote_template_skills(
+            RemoteTemplateSkillInstallOptions(
+                process_runner=fake_process_runner,
+                user_home_path=user_home_path,
+            )
+        )
+    assert isinstance(raised_error.value.__cause__, subprocess.TimeoutExpired)
+
+    fetch_commands = [
+        command_tuple
+        for command_tuple in fake_process_runner.command_tuples
+        if command_tuple[:2] == ("git", "fetch")
+    ]
+    assert len(fetch_commands) == remote_template_skills._REMOTE_TEMPLATE_SKILLS_FETCH_MAX_ATTEMPTS
+    assert not keda_owned_skills_root(user_home_path).exists()
 
 
 def test_install_remote_template_skills_rejects_missing_remote_skill(tmp_path: Path) -> None:
