@@ -492,8 +492,8 @@ Failure triage：
   - 首轮全套测试发现 `tests/test_kedacode_operator_skill.py` 是额外受影响文件；已在 Change Impact Tree 登记并更新数量断言。
   - 两份 recipe 步骤已收敛为引用 `duty.md` 并保留明确人工接管停止条件；SHA、Attempt History 和缺证判断细节只写在岗位参考中。
   - 验证事实与未完成项分别记录于 evidence report 和各 RV 文件；Human-Confirmed 项保持未勾。
-- Validation blocker: RV-1 的 `codex` 会话启动在 `workspace routing discovery timed out` 后退出 1，真实 Issue / PR 查询、负控和主演示无法完成；RV-2 缺少隔离仓库与专用 runner；RV-3 尚无冻结四题与盲评。完整 `just test` 首次耗时 481.44 秒并因旧的 12 份 references 断言失败；修复后目标套件 54 项通过，但完整命令超过默认 300 秒复跑上限，未取得最终树全量通过证据。
-- Validation follow-up: 在 GitHub Issue #430（https://github.com/ZataZhang/keda/issues/430）跟进。新会话双入口已走通，仍需补齐 RV-1 指定现场、负控与主演示。隔离巡检和四个冻结案例已开展，结果与证据缺口见当前 evidence report。最终证据、可复跑命令与独立 verifier 结论齐备后，仅勾选有证据的项目。
+- Validation blocker: RV-1 的两种正向现场和 RV-2 的隔离巡检已走通；旧技能也等待当前检查，旧配方也跳过人工接管目标，两项原定负控均未复现预期错误。独立 verifier 给出 `BLOCKED`。此外，基线与当前 PR 的 `Frontend Build` 同报 PNG 导入 `TS2307`。四个冻结案例的盲评、定向测试和默认 `just test` 的通过记录见当前 evidence report。
+- Validation follow-up: 在 GitHub Issue #430（https://github.com/ZataZhang/keda/issues/430）跟进。为两项原负控准备仍符合 §7.6 且能稳定触发错误的场景，或由维护者明确调整验收判据后补验。待主线前端检查恢复、独立 verifier 对最终树复核通过，再进行人工验收并签收有证据的项目。
 - Pre-PR review update: 仓库配方已恢复 `gh issue list --limit 1000` 要求并修正巡检自身标签模板变量；这改变了配方，先前 RV-1 / RV-2 / RV-4 证据不再覆盖最终树，须按原 oracle 重跑。评审修复后的目标测试 55 项、`just test` 和严格文档构建通过；独立 verifier 尚未执行。
 
 ## Change Log

@@ -4,11 +4,15 @@
 
 | 验证 | 本轮结果 |
 |---|---|
-| RV-1 · 已安装技能的真实入口 | 新 Codex 会话分别读取 [Issue #430](https://github.com/ZataZhang/keda/issues/430) 和 [PR #436](https://github.com/ZataZhang/keda/pull/436)，两者关联及 head 匹配，命令轨迹无写入，前后时间线为 30 和 8 条。旧技能对比把历史范围判断列入待办。原 oracle 的待检查现场、发布失败 PR 入口与主演示仍需单独呈递。 |
-| RV-2 · 隔离巡检 | 已在私有测试仓库由专用 daemon 调度，人工接管目标的时间线保持一致。首轮恢复样例因缺少真实认领记录被拒绝，随后已用真实 runner 制造并修复一次推送故障，继续核对恢复回读及旧配方负控。 |
+| RV-1 · 已安装技能的真实入口 | 新 Codex 会话分别读取 [Issue #430](https://github.com/ZataZhang/keda/issues/430) 和 [PR #436](https://github.com/ZataZhang/keda/pull/436)，两者关联及 head 匹配，命令轨迹无写入，前后时间线为 30 和 8 条。又在私有 GitHub 测试仓库完成两种指定现场：旧提交失败而新 head 检查待完成、从 PR 反查最新实现已完成而推送失败。两场查询均未改变 Issue 或 PR 时间线，实际终端呈递保留在本地。旧技能也等待新 head 的检查，本次未复现立即重试的负控。 |
+| RV-2 · 隔离巡检 | 私有测试仓库的专用 daemon 调度了新版配方，恢复同一实现提交并产生 Draft PR。巡检回读了恢复结果并留下摘要。人工接管目标原标签、状态和评论均保持一致；时间线只新增巡检摘要引用自动产生的交叉引用。后续监督受组织执行器访问策略阻塞。旧配方经专用 daemon 调度后也跳过同一接管目标，本次未复现预期负控错误。 |
 | RV-3 · 冻结材料与独立盲评 | 四个现场、两组各四次新会话，评分者仅见随机化 X/Y。普通组误报 1/4，值班员组 0/3，均漏报 0/3。岗位组四题耗时 23.50、22.46、24.26、22.34 秒；普通组 16.08、15.17、14.51、13.39 秒。材料、分组映射和逐题评分保留于本地证据包。 |
 | RV-4 · 安装、配方与文档 | 在实现提交 `9da79d9b` 上，56 项定向测试和严格文档构建通过。将模板引用改成不存在的参考文件时，目标测试因缺少 `references/duty.md` 失败。 |
 | 默认测试命令 | `just test` 首轮受继承的 `KEDACODE_NO_UPDATE_CHECK` 干扰，升级提示的 6 条测试失败。移除该变量后在 `9da79d9b` 使用仓库默认增量档复跑并通过。 |
+
+证据分支已把 RV-1 至 RV-3 的说明性占位文字替换成可执行复跑入口。复跑须显式指定准备好的隔离目录和被验证的 Git tree。私有仓库中的原始事件、会话和演示材料仅保存在本地。 [复跑清单](https://github.com/ZataZhang/keda/blob/iar-evidence/issue-430/evidence.json)
+
+该 PR 的 `Validate Template` 通过。PR 和基线 `main` 的 `Frontend Build` 均在 `app-sidebar.tsx` 导入 `@/app/apple-icon.png` 时触发 `TS2307`。 [PR 检查](https://github.com/ZataZhang/keda/actions/runs/45385269788/job/138414437761) · [main 检查](https://github.com/ZataZhang/keda/actions/runs/45370433706/job/138363037746)
 
 下方为早期执行及评审记录，现状以上表和后续独立复核为准。
 
