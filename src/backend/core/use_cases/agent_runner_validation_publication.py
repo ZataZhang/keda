@@ -8,11 +8,13 @@ from pathlib import Path
 
 from backend.core.shared.interfaces.agent_runner import IGitHubClient, IProcessRunner
 from backend.core.shared.models.agent_runner import AppConfig, IssueSummary
-from backend.core.shared.models.pull_request_url import parse_pull_request_number
+from backend.core.shared.models.pull_request_url import (
+    build_evidence_blob_url,
+    parse_pull_request_number,
+)
 from backend.core.use_cases.agent_runner_evidence_format import IMAGE_EVIDENCE_SUFFIXES
 from backend.core.use_cases.agent_runner_structured_evidence import (
     EvidenceUpload,
-    build_evidence_blob_url,
     has_structured_evidence_marker,
     validate_evidence_manifest,
 )
