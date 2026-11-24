@@ -1,0 +1,26 @@
+SOURCE=http://127.0.0.1:3300/swagger.v1.json (gitea/gitea:1.21, version 1.21.11)
+CALLS=method+path pairs extracted from src/backend/infrastructure/gitea_client.py and gitea_pr_ops.py at 59429463
+OK GET /user
+OK GET /repos/{o}/{r}
+OK GET /repos/{o}/{r}/labels
+OK POST /repos/{o}/{r}/labels
+OK PATCH /repos/{o}/{r}/labels/{id}
+OK GET /repos/{o}/{r}/issues
+OK POST /repos/{o}/{r}/issues
+OK GET /repos/{o}/{r}/issues/{n}
+OK PATCH /repos/{o}/{r}/issues/{n}
+OK POST /repos/{o}/{r}/issues/{n}/labels
+OK DELETE /repos/{o}/{r}/issues/{n}/labels/{id}
+OK GET /repos/{o}/{r}/issues/{n}/comments
+OK POST /repos/{o}/{r}/issues/{n}/comments
+OK PATCH /repos/{o}/{r}/issues/comments/{id}
+OK DELETE /repos/{o}/{r}/issues/comments/{id}
+OK GET /repos/{o}/{r}/collaborators/{u}/permission
+OK GET /repos/{o}/{r}/commits/{sha}/status
+OK GET /repos/{o}/{r}/pulls
+OK POST /repos/{o}/{r}/pulls
+OK GET /repos/{o}/{r}/pulls/{n}
+OK PATCH /repos/{o}/{r}/pulls/{n}
+OK POST /repos/{o}/{r}/pulls/{n}/merge
+RESULT=PASS 22/22 endpoints present in swagger
+BEHAVIOR_DIFF=Gitea 1.21 returns mergeable=false while the PR title has the WIP prefix; the adapter reads it as unknown and rereads after the prefix is removed (already in PRD Reconciled differences).
