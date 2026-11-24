@@ -3067,7 +3067,7 @@ kimi --help
 ```
 
 > 也可以把 API Key 写到 `.env` 文件里，kc 会自动加载。
-> `kc` 以无人值守方式调用 Claude Code，会使用 `--dangerously-skip-permissions` 跳过文件编辑权限确认，并启用 verbose `stream-json`。runner 会过滤原始 JSON，只显示工具调用摘要、assistant 文本和最终错误。
+> `kc` 以无人值守方式调用 Claude Code，会使用 `--dangerously-skip-permissions` 跳过文件编辑权限确认，并启用 verbose `stream-json`。runner 会过滤原始 JSON，只显示工具调用摘要、assistant 文本和最终错误。提示词经 stdin 投递而不是放在命令行尾部：实现阶段的提示词（内联 PRD + Issue 正文）可能超过 3 万字符，超出 Windows 命令行 32,767 字符上限（WinError 206）。
 
 #### 3. 单次执行（测试用）
 

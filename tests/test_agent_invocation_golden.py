@@ -133,7 +133,7 @@ def test_golden_codex_repl(app_config: AppConfig, plain_worktree: Path) -> None:
 
 
 def test_golden_claude_run(app_config: AppConfig, plain_worktree: Path) -> None:
-    """claude 主执行：流式事件流 + argv 尾提示词，协议 claude-stream-json。"""
+    """claude 主执行：流式事件流，提示词经 stdin 投递（避开 Windows 命令行长度上限）。"""
     invocation = build_agent_invocation("claude", "run", PROMPT, plain_worktree, app_config)
     assert invocation.argv == (
         "claude",
@@ -143,9 +143,8 @@ def test_golden_claude_run(app_config: AppConfig, plain_worktree: Path) -> None:
         "--output-format",
         "stream-json",
         "--include-partial-messages",
-        PROMPT,
     )
-    assert invocation.prompt_delivery == "argv_tail"
+    assert invocation.prompt_delivery == "stdin"
     assert invocation.output_protocol == "claude-stream-json"
     assert invocation.read_only is False
 
@@ -161,9 +160,8 @@ def test_golden_claude_deliberate(app_config: AppConfig, plain_worktree: Path) -
         "--output-format",
         "stream-json",
         "--include-partial-messages",
-        PROMPT,
     )
-    assert invocation.prompt_delivery == "argv_tail"
+    assert invocation.prompt_delivery == "stdin"
     assert invocation.output_protocol == "claude-stream-json"
     assert invocation.read_only is False
 
@@ -352,7 +350,6 @@ def test_golden_codebuddy_run(app_config: AppConfig, plain_worktree: Path) -> No
         "--output-format",
         "stream-json",
         "--include-partial-messages",
-        PROMPT,
     )
     assert invocation.output_protocol == CLAUDE_STREAM_JSON_PROTOCOL_ID
 
@@ -370,7 +367,6 @@ def test_golden_codebuddy_deliberate(app_config: AppConfig, plain_worktree: Path
         "--output-format",
         "stream-json",
         "--include-partial-messages",
-        PROMPT,
     )
 
 

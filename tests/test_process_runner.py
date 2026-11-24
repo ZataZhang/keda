@@ -204,9 +204,9 @@ def test_transcript_runner_builds_claude_command() -> None:
     cmd = invocation.argv
     assert cmd[0] == "claude"
     assert "--dangerously-skip-permissions" in cmd
-    # 提示词在 argv 尾部；协议层（claude-stream-json）执行时再剥离改走 stdin。
-    assert cmd[-1] == "hello"
-    assert invocation.prompt_delivery == "argv_tail"
+    # 提示词不进 argv，由协议层（claude-stream-json）经 stdin 投递。
+    assert "hello" not in cmd
+    assert invocation.prompt_delivery == "stdin"
 
 
 def test_transcript_runner_builds_kimi_command() -> None:
