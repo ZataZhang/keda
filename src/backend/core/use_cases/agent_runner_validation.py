@@ -180,9 +180,6 @@ from backend.core.use_cases.agent_runner_video_evidence import (
 )
 
 _logger = logging.getLogger(__name__)
-_PR_URL_PATTERN = re.compile(
-    r"https?://[^/]+/(?P<owner>[^/]+)/(?P<repo>[^/]+)/pull/(?P<number>\d+)"
-)
 
 _INLINE_TEXT_SUFFIXES = {".txt", ".log", ".md", ".out"}
 _MAX_INLINE_EVIDENCE_CHARS = 3000

@@ -119,9 +119,8 @@ def test_doctor_json_all_profiles_matches_golden(
         "--output-format",
         "stream-json",
         "--include-partial-messages",
-        "golden-prompt",
     ]
-    assert run_entry["prompt_delivery"] == "argv_tail"
+    assert run_entry["prompt_delivery"] == "stdin"
 
 
 def test_doctor_human_output_prints_argv_and_delivery(

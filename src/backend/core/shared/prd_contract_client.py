@@ -18,6 +18,7 @@ keda 不再自带 PRD 格式解析：格式定义与实现都归 prd skill 的
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -60,6 +61,9 @@ def _run_contract_script(script_path: Path, arguments: list[str]) -> dict[str, A
             capture_output=True,
             text=True,
             encoding="utf-8",
+            # 子进程写管道默认用本地代码页（中文 Windows 为 GBK），与上面的 utf-8
+            # 解码不一致：含中文的 PRD 会让读线程解码失败、stdout 变成 None。
+            env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"},
             timeout=DEFAULT_TIMEOUT_SECONDS,
             check=False,
         )

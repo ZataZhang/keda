@@ -1,9 +1,10 @@
 "use client"
 
+import Image from "next/image"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useTheme } from "next-themes"
-import { cn } from "@/lib/utils"
+import kedaAppIcon from "@/app/apple-icon.png"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -14,6 +15,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { CONSOLE_NAV_COLLAPSED_KEY, usePersistedBoolean } from "@/lib/console-ui-prefs"
+import { cn } from "@/lib/utils"
 import {
   Activity,
   BarChart3,
@@ -64,19 +66,13 @@ export function AppSidebar() {
       >
         {collapsed ? null : (
           <>
-            <span className="flex size-6 items-center justify-center rounded-md bg-primary">
-              <svg
-                aria-hidden="true"
-                viewBox="224 224 576 576"
-                className="size-5 text-primary-foreground"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="48"
-              >
-                <path d="M570 290H410c-66 0-120 54-120 120v204c0 66 54 120 120 120h204c66 0 120-54 120-120V454" />
-                <path d="M469 567V459h108" strokeLinejoin="round" />
-              </svg>
-            </span>
+            <Image
+              src={kedaAppIcon}
+              alt=""
+              aria-hidden="true"
+              unoptimized
+              className="size-6 shrink-0"
+            />
             <span className="font-semibold text-sidebar-foreground">KedaCode</span>
             <div className="flex-1" />
           </>

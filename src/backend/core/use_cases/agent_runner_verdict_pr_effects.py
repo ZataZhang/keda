@@ -8,28 +8,22 @@ pre-PR 门禁只产出 verdict；这些副作用必须在 PR 创建**之后**才
 from __future__ import annotations
 
 import logging
-import re
 
 from backend.core.shared.interfaces.agent_runner import IGitHubClient
+from backend.core.shared.models.pull_request_url import parse_pull_request_number
 from backend.core.use_cases.agent_runner_verdict import ValidationVerdict
 
 # 拆分前这些诊断由 ``run_verifier_agent`` 记录，操作者的 grep 与 docs/guides/agent-runner.md
 # 的排查顺序都按那个名字找；保持 logger 身份不随模块搬家漂走。
 _logger = logging.getLogger("backend.core.use_cases.run_verifier_agent")
 
-_PR_URL_NUMBER_PATTERN = re.compile(r"/pull/(?P<number>\d+)")
-
 
 def _extract_pr_number(pr_url: str) -> int | None:
-    """Extract the PR number from a GitHub PR URL.
+    """从 GitHub 或 Gitea Pull Request URL 取编号。
 
-    Returns ``None`` when the URL does not contain a parseable PR number,
-    so callers can skip the post-PR verifier side effects gracefully.
+    无法解析时返回 ``None``，verifier 的 PR 副作用会按既有语义跳过。
     """
-    match = _PR_URL_NUMBER_PATTERN.search(pr_url)
-    if match is None:
-        return None
-    return int(match.group("number"))
+    return parse_pull_request_number(pr_url)
 
 
 def build_verifier_yellow_comment(verdict: ValidationVerdict, issue_number: int) -> str:

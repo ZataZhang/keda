@@ -2986,13 +2986,13 @@ def test_main_init_succeeds_when_repository_not_initialized(
     assert exit_code == 0
 
 
-def test_main_init_returns_failure_for_unsupported_label_sync_platform(
+def test_main_init_returns_failure_for_unconfigured_gitea_label_sync(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """标签同步遇到尚未实现的平台时，init 应返回非零退出码。"""
+    """Gitea 仓库无法解析发布 remote 时，init 应以非零退出码结束。"""
     from backend.api import cli_init
 
-    repo_path = _init_bare_git_repository(tmp_path, "unsupported-platform")
+    repo_path = _init_bare_git_repository(tmp_path, "unconfigured-gitea")
     monkeypatch.chdir(repo_path)
     config_path = repo_path / ".kedacode.toml"
     config_text = '[agent_runner.repository]\nplatform = "gitea"\n'
@@ -3012,7 +3012,7 @@ def test_main_init_returns_failure_for_unsupported_label_sync_platform(
 
     assert main(["init", "--no-update-gitignore"]) == 1
     stderr = capsys.readouterr().err
-    assert "The repository platform 'gitea' is not implemented." in stderr
+    assert "Cannot read publishing Git remote" in stderr
     assert "Traceback" not in stderr
 
 
@@ -4342,6 +4342,41 @@ def test_main_daemon_passes_transcript_runner_factory(monkeypatch) -> None:
     assert exit_code == 0
     factory = mock_daemon.call_args.kwargs["transcript_runner_factory"]
     assert callable(factory)
+
+
+def test_main_daemon_passes_version_resolved_once_at_startup(monkeypatch) -> None:
+    """daemon 入口在启动时解析一次版本并传给 daemon，供状态文件原样写出。"""
+    from backend.api.cli import main
+    from backend.core.shared.models.agent_runner import AppConfig, RepositoryRunContext
+
+    monkeypatch.setenv("KEDACODE_SKIP_GH_AUTH_CHECK", "1")
+    mock_context = RepositoryRunContext(
+        repo_path=Path("/tmp/repo"),
+        repo_id="repo",
+        display_name="Repo",
+        config=AppConfig(),
+    )
+
+    with (
+        patch(
+            "backend.api.cli_helpers.resolve_repository_targets",
+            return_value=[mock_context],
+        ),
+        patch(
+            "backend.api.cli_parsed_commands.runner.resolve_keda_version",
+            return_value="0.9.0",
+        ) as mock_resolve_version,
+        patch("backend.api.cli.run_agent_daemon") as mock_daemon,
+        patch("backend.api.cli.create_github_client"),
+        patch("backend.api.cli.require_repository_initialized"),
+        patch("backend.api.cli.acquire_daemon_locks", return_value=[]),
+        patch("backend.api.cli.release_daemon_locks"),
+    ):
+        exit_code = main(["daemon", "--all"])
+
+    assert exit_code == 0
+    assert mock_daemon.call_args.kwargs["loaded_version"] == "0.9.0"
+    assert mock_resolve_version.call_count == 1
 
 
 def test_main_run_phase0_deliberation_real_entry_point(monkeypatch, tmp_path: Path) -> None:

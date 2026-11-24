@@ -19,6 +19,7 @@ from backend.core.shared.models.agent_runner import (
     PullRequestContext,
     SupervisorActionResult,
 )
+from backend.core.shared.models.pull_request_url import parse_pull_request_number
 from backend.core.use_cases.agent_candidate_fallback import build_agent_candidates
 from backend.core.use_cases.agent_runner_merge_authorization import (
     issue_carries_prd_auto_merge_label,
@@ -842,10 +843,10 @@ def run_post_pr_supervisor_cycle(
     """
     issue_comments = github_client.list_issue_comments(issue.number)
     # PR URL 中解析 PR number；Issue 与 PR 通常一一对应，但 PR 评论需单独拉取
-    pr_number_match = re.search(r"/pull/(\d+)", pr_context.pr_url)
     pr_comments: list[str] = []
-    if pr_number_match:
-        pr_comments = github_client.list_pr_comments(int(pr_number_match.group(1)))
+    pr_number = parse_pull_request_number(pr_context.pr_url)
+    if pr_number is not None:
+        pr_comments = github_client.list_pr_comments(pr_number)
 
     # 获取远程 base 分支最新 SHA，用于判断 PR 是否落后于 base，
     # 并在提示词中给模型提供合并基线参考

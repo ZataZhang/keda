@@ -13,6 +13,7 @@ from backend.core.shared.interfaces.agent_runner import (
     IGitHubClient,
 )
 from backend.core.shared.models.agent_runner import IssueSummary
+from backend.core.shared.models.pull_request_url import parse_pull_request_number
 from backend.core.use_cases.agent_runner_dependencies import parse_direct_pr_marker
 
 _ROUND_MARKER = re.compile(r"<!-- kc:direct-pr-round (\{[^\n]*\}) -->")
@@ -245,7 +246,8 @@ def lookup_associated_direct_pr(
         or context.head_sha != candidate.head
         or context.pr_url != existing_url
         or (record.pr_url is not None and record.pr_url != context.pr_url)
-        or not context.pr_url.lower().startswith(record.repo + "/pull/")
+        or not context.pr_url.lower().startswith(record.repo + "/pull")
+        or parse_pull_request_number(context.pr_url) is None
     ):
         raise DirectPrRoundError("Existing PR does not belong to this unfinished Direct PR round.")
     return context.pr_url

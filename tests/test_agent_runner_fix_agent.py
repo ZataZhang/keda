@@ -202,7 +202,7 @@ def test_run_agent_until_committed_calls_fix_agent_before_recovery(
                 self._agent_calls += 1
                 self.timeouts.append(timeout)
                 self.inactivity_timeouts.append(inactivity_timeout)
-                prompt = command_tuple[-1]
+                prompt = input_text or ""
                 if self._agent_calls == 1:
                     # Normal agent: leave changes and a failing commit-request.
                     return CommandResult(command_tuple, 0, "", "")
@@ -412,7 +412,7 @@ def test_run_agent_until_committed_recovery_uses_recovery_timeout_seconds(
                 if self._agent_calls == 1:
                     return CommandResult(command_tuple, 0, "", "")
                 # Recovery attempt.
-                assert "Recovery attempt: 1/1" in command_tuple[-1]
+                assert "Recovery attempt: 1/1" in (input_text or "")
                 return CommandResult(command_tuple, 0, "", "")
             if command_tuple == ("git", "rev-parse", "HEAD"):
                 return CommandResult(command_tuple, 0, "same-sha\n", "")

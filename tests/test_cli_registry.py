@@ -833,8 +833,10 @@ def test_daemon_status_table_includes_log_path_column(tmp_path: Path) -> None:
     captured_table = None
 
     def _capture_print(value) -> None:
+        # 表格之后还可能打印重启提示（字符串）；只保留表格本身。
         nonlocal captured_table
-        captured_table = value
+        if not isinstance(value, str):
+            captured_table = value
 
     with (
         patch(
@@ -868,6 +870,173 @@ def test_daemon_status_table_includes_log_path_column(tmp_path: Path) -> None:
     assert "log_path" in rendered
     # Unmanaged record has empty log_path and must render as "-" placeholder.
     assert " - " in rendered or rendered.endswith("-")
+
+
+# ── `kc daemon status` 的 daemon 启动版本（PRD P1-FEAT-20261120-145339）────────
+
+
+def _daemon_status_with_versions(
+    *,
+    records: list[tuple[MagicMock, bool]],
+    loaded_version_by_repo_id: dict[str, str | None],
+    installed_version: str,
+    as_json: bool,
+) -> tuple[int, list[object], str]:
+    """以给定的进程记录与 daemon 上报版本运行 status，返回退出码、打印内容与 JSON 输出。"""
+    import json
+
+    from backend.core.use_cases.daemon_parallel_limit_status import DaemonParallelLimitStatus
+
+    def _read_status(_lock_dir, repo_id: str):
+        if repo_id not in loaded_version_by_repo_id:
+            return None
+        return DaemonParallelLimitStatus(
+            repo_id=repo_id,
+            pid=1234,
+            parallel_limit=2,
+            source="config",
+            in_flight=0,
+            updated_at="2026-11-20T00:00:00+00:00",
+            loaded_version=loaded_version_by_repo_id[repo_id],
+        )
+
+    supervisor = MagicMock()
+    supervisor.list_processes.return_value = [record for record, managed in records if managed]
+    supervisor.list_unmanaged_processes.return_value = [
+        record for record, managed in records if not managed
+    ]
+    editor = MagicMock()
+    editor.list_repositories.return_value = []
+    contexts = [MagicMock(repo_id=record.repo_id) for record, _managed in records]
+    parsed = _FakeArgs(repo_id=None, all_repositories=True, output="json" if as_json else "table")
+
+    printed: list[object] = []
+    emitted: list[str] = []
+
+    def _fake_emit(payload, *, fmt, human_renderer=None) -> None:
+        if fmt == "json":
+            emitted.append(json.dumps(payload))
+        elif human_renderer is not None:
+            human_renderer()
+
+    with (
+        patch("backend.api.cli_registry.resolve_repository_targets", return_value=contexts),
+        patch("backend.api.cli_registry.create_process_supervisor", return_value=supervisor),
+        patch("backend.api.cli_registry.create_registry_editor", return_value=editor),
+        patch("backend.api.cli_registry.read_daemon_parallel_limit_status", _read_status),
+        patch("backend.api.cli_registry.resolve_keda_version", return_value=installed_version),
+        patch("backend.api.cli_registry.console.print", side_effect=printed.append),
+        patch("backend.api.cli_registry.emit", _fake_emit),
+    ):
+        exit_code = _run_daemon_status_command(
+            parsed=parsed,
+            process_runner=MagicMock(),
+            runner_settings=MagicMock(),
+            repo_id=None,
+            repo_override=None,
+        )
+    return exit_code, printed, "".join(emitted)
+
+
+def test_daemon_status_json_reports_loaded_and_installed_versions() -> None:
+    """--json 每行带 loaded_version / installed_version / version_status；不一致时退出码仍为 0。"""
+    import json
+
+    stale = _make_process_record(
+        process_id="p-stale", repo_id="stale-repo", kind=RunnerProcessKind.DAEMON.value, log_path=""
+    )
+    fresh = _make_process_record(
+        process_id="p-fresh", repo_id="fresh-repo", kind=RunnerProcessKind.DAEMON.value, log_path=""
+    )
+    legacy = _make_process_record(
+        process_id="p-legacy",
+        repo_id="legacy-repo",
+        kind=RunnerProcessKind.DAEMON.value,
+        log_path="",
+    )
+    supervise = _make_process_record(
+        process_id="p-review",
+        repo_id="stale-repo",
+        kind=RunnerProcessKind.REVIEW_DAEMON.value,
+        log_path="",
+    )
+
+    exit_code, _printed, stdout = _daemon_status_with_versions(
+        records=[(stale, True), (fresh, True), (legacy, False), (supervise, True)],
+        loaded_version_by_repo_id={"stale-repo": "0.9.0", "fresh-repo": "0.9.1"},
+        installed_version="0.9.1",
+        as_json=True,
+    )
+
+    assert exit_code == 0
+    rows = json.loads(stdout)
+    by_process_id = {row["process_id"]: row for row in rows}
+    assert by_process_id["p-stale"]["loaded_version"] == "0.9.0"
+    assert by_process_id["p-stale"]["installed_version"] == "0.9.1"
+    assert by_process_id["p-stale"]["version_status"] == "mismatch"
+    assert by_process_id["p-fresh"]["version_status"] == "current"
+    assert by_process_id["p-legacy"]["loaded_version"] is None
+    assert by_process_id["p-legacy"]["version_status"] == "unknown"
+    # supervise-daemon 不上报版本：运行版本与状态为 null，已安装版本照常给出。
+    assert by_process_id["p-review"]["loaded_version"] is None
+    assert by_process_id["p-review"]["version_status"] is None
+    assert by_process_id["p-review"]["installed_version"] == "0.9.1"
+
+
+def test_daemon_status_table_shows_version_and_restart_hints() -> None:
+    """表格显示运行版本；不一致或未上报时按托管 / 手动给出重启命令；一致时不提示。"""
+    stale = _make_process_record(
+        process_id="p-stale", repo_id="stale-repo", kind=RunnerProcessKind.DAEMON.value, log_path=""
+    )
+    fresh = _make_process_record(
+        process_id="p-fresh", repo_id="fresh-repo", kind=RunnerProcessKind.DAEMON.value, log_path=""
+    )
+    legacy = _make_process_record(
+        process_id="p-legacy",
+        repo_id="legacy-repo",
+        kind=RunnerProcessKind.DAEMON.value,
+        log_path="",
+    )
+
+    exit_code, printed, _stdout = _daemon_status_with_versions(
+        records=[(stale, True), (fresh, True), (legacy, False)],
+        loaded_version_by_repo_id={"stale-repo": "0.9.0", "fresh-repo": "0.9.1"},
+        installed_version="0.9.1",
+        as_json=False,
+    )
+
+    assert exit_code == 0
+    table = next(value for value in printed if not isinstance(value, str))
+    rendered = _render_table(table)
+    assert "version" in rendered
+    assert "0.9.0 (installed 0.9.1)" in rendered
+    assert "unknown" in rendered
+
+    hints = "\n".join(value for value in printed if isinstance(value, str))
+    assert "stale-repo" in hints and "0.9.0" in hints
+    assert (
+        "kc registry stop --repo-id stale-repo && kc registry start --repo-id stale-repo" in hints
+    )
+    assert "legacy-repo" in hints and "可能是升级前启动的旧进程" in hints
+    assert "结束该进程后重新运行 kc daemon" in hints
+    assert "fresh-repo" not in hints
+
+
+def test_daemon_status_does_not_hint_when_installed_version_is_unknown() -> None:
+    """已安装版本不可知（如源码树直接运行）时只显示，不提示重启。"""
+    record = _make_process_record(
+        process_id="p-1", repo_id="repo-a", kind=RunnerProcessKind.DAEMON.value, log_path=""
+    )
+
+    exit_code, printed, _stdout = _daemon_status_with_versions(
+        records=[(record, True)],
+        loaded_version_by_repo_id={"repo-a": "0.9.0"},
+        installed_version="0.0.0+unknown",
+        as_json=False,
+    )
+
+    assert exit_code == 0
+    assert not [value for value in printed if isinstance(value, str)]
 
 
 # ── `iar logs --issue`（按 Issue 读取实时输出） ──────────────────────────────

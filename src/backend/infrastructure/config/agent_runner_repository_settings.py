@@ -217,6 +217,20 @@ def _read_repository_toml(config_path: Path) -> dict[str, Any]:
         raise ValueError(f"Invalid KedaCode local config at {config_path}: {exc}") from exc
 
 
+def _reject_repository_gitea_instances(
+    repository_toml_data: dict[str, Any],
+    config_path: Path,
+) -> None:
+    """拒绝仓库或个人覆盖文件指定 Gitea 地址与令牌变量。"""
+    agent_runner_section = repository_toml_data.get("agent_runner")
+    if isinstance(agent_runner_section, dict) and "gitea_instances" in agent_runner_section:
+        raise ValueError(
+            f"Invalid KedaCode local config at {config_path}: "
+            "[agent_runner.gitea_instances] is machine-only; register it in the local "
+            "KedaCode config.toml instead."
+        )
+
+
 def _main_checkout_root(repo_root_path: Path) -> Path | None:
     """linked worktree 内返回主检出根目录；主检出或无法判断时返回 ``None``。
 
@@ -283,6 +297,7 @@ def _apply_local_override(
     if override_path is None:
         return repository_toml_data
     override_toml_data = _read_repository_toml(override_path)
+    _reject_repository_gitea_instances(override_toml_data, override_path)
     override_agent_runner_section = override_toml_data.get("agent_runner", {})
     if not isinstance(override_agent_runner_section, dict):
         raise ValueError(
@@ -351,9 +366,9 @@ def load_agent_runner_local_settings(
     if not local_config_path.is_file():
         return None
 
-    local_toml_data: dict[str, Any] = _apply_local_override(
-        _read_repository_toml(local_config_path), resolved_repo_path
-    )
+    repository_toml_data = _read_repository_toml(local_config_path)
+    _reject_repository_gitea_instances(repository_toml_data, local_config_path)
+    local_toml_data = _apply_local_override(repository_toml_data, resolved_repo_path)
 
     agent_runner_section = local_toml_data.get("agent_runner")
     if not isinstance(agent_runner_section, dict):

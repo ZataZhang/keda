@@ -11,14 +11,17 @@ from backend.core.shared.models.repository_platform import (
     DEFAULT_REPOSITORY_PLATFORM,
     GITEA_PLATFORM,
     GITHUB_PLATFORM,
-    RepositoryPlatformNotImplementedError,
 )
+from backend.core.shared.models.agent_runner import CommandResult
 from backend.engines.agent_runner import factories
 from backend.infrastructure.config.agent_runner_repository_settings import (
     AgentRunnerRepositoryMetadataSettings,
     AgentRunnerRepositorySettings,
     load_agent_runner_local_settings,
 )
+from backend.infrastructure.config.gitea_settings import GiteaInstanceSettings
+from backend.infrastructure.config.settings import AgentRunnerSettings
+from backend.infrastructure.gitea_client import GiteaApiClient
 from tests.conftest import FakeProcessRunner
 
 
@@ -100,26 +103,51 @@ def test_create_github_client_uses_github_for_default_and_explicit_platforms(
     assert process_runner.calls == []
 
 
-def test_create_github_client_stops_before_process_for_gitea(tmp_path: Path) -> None:
-    """Gitea 声明在构造客户端及执行 gh 命令前抛出可操作错误。"""
+def test_create_github_client_resolves_registered_gitea_before_api_requests(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Gitea 声明按本机登记和发布 remote 装配，不运行 gh。"""
     repository_path = tmp_path / "gitea-repository"
     repository_path.mkdir()
     config_path = repository_path / ".kedacode.toml"
     config_path.write_text(
-        '[agent_runner.repository]\nid = "platform-test"\nplatform = "gitea"\n',
+        # 显式声明发布 remote，避免测试结果依赖运行机器的个人 git.remote 配置。
+        '[agent_runner.repository]\nid = "platform-test"\nplatform = "gitea"\n'
+        '\n[agent_runner.git]\nremote = "zata"\n',
         encoding="utf-8",
     )
-    process_runner = FakeProcessRunner()
+    token_environment_name = "KC_TEST_GITEA_TOKEN"
+    token_value = "test-token-value"
+    monkeypatch.setenv(token_environment_name, token_value)
+    monkeypatch.setattr(
+        factories,
+        "load_fresh_agent_runner_settings",
+        lambda: AgentRunnerSettings(
+            gitea_instances=[
+                GiteaInstanceSettings(
+                    base_url="https://git.example.com",
+                    token_env=token_environment_name,
+                )
+            ]
+        ),
+    )
+    process_runner = FakeProcessRunner(
+        {
+            ("git", "remote", "get-url", "--push", "zata"): CommandResult(
+                command=("git", "remote", "get-url", "--push", "zata"),
+                return_code=0,
+                stdout="https://git.example.com/platform/repository.git\n",
+                stderr="",
+            )
+        }
+    )
 
-    with pytest.raises(RepositoryPlatformNotImplementedError) as error_info:
-        factories.create_github_client(repository_path, process_runner)
+    client = factories.create_github_client(repository_path, process_runner)
 
-    error_message = str(error_info.value)
-    assert error_info.value.platform_name == GITEA_PLATFORM
-    assert error_info.value.config_path == config_path
-    assert GITEA_PLATFORM in error_message
-    assert "platform" in error_message
-    assert "not implemented" in error_message
-    assert GITHUB_PLATFORM in error_message
-    assert "set platform = 'github'" in error_message
-    assert process_runner.calls == []
+    assert isinstance(client, GiteaApiClient)
+    assert client.host == "git.example.com"
+    assert client.owner_repo == "platform/repository"
+    assert client._session.headers["Authorization"] == f"token {token_value}"
+    assert token_value not in repr(client)
+    assert process_runner.calls == [["git", "remote", "get-url", "--push", "zata"]]
