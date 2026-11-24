@@ -143,6 +143,8 @@ CI 只是异步门禁，不要守着它等。三条约定：
 
 `just run`（以及 `just run frontend`、`just run frontend-public`）在启动前端服务前会检查对应目录是否存在 `node_modules/`。若缺失且系统已安装 `pnpm`，则自动运行 `pnpm install` 安装依赖；若 `pnpm` 未安装，会给出明确提示并退出。这样新克隆仓库或清理依赖后首次运行无需手动执行安装步骤。
 
+在新检出的工作树中可直接运行 `pnpm --dir frontend-public run typecheck`。`next typegen` 先生成 `next-env.d.ts` 和路由声明，随后 `tsc --noEmit` 检查代码及 PNG 等静态导入。
+
 ## PRD Workflow Hooks
 
 本仓库通过 `pre-commit` 调用项目本地 `hooks/shared/check_prd_acceptance_checklist.py` 维护 PRD 交付状态；PRD skill 另带 `scripts/check_prd_acceptance_checklist.py`，供 agent 按 skill 相对路径运行，或由其他仓库自行接入：
