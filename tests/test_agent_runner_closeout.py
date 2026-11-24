@@ -162,7 +162,8 @@ class _CloseoutScenarioRunner(FakeProcessRunner):
         command_tuple = tuple(command)
         self.calls.append(list(command))
         if command_tuple[:1] == ("claude",):
-            prompt = command_tuple[-1]
+            # claude 的 run 用途经 stdin 投递，提示词不在 argv 里。
+            prompt = input_text or ""
             self.agent_prompts.append(prompt)
             self.agent_timeouts.append(timeout)
             if "Finish the delivery closeout" in prompt:

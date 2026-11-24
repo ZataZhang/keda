@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -21,6 +20,7 @@ from backend.core.shared.models.agent_runner import (
     ReviewEventMarker,
     TokenUsage,
 )
+from backend.core.shared.models.pull_request_url import parse_pull_request_number
 from backend.core.use_cases.agent_runner_claim_arbitration import ClaimArbitrationLost
 from backend.core.use_cases.agent_runner_events import (
     extract_pr_branch_from_comments,
@@ -400,10 +400,10 @@ def _process_review_candidate(
             )
             return "skipped_no_open_pr"
 
-    pr_number_match = re.search(r"/pull/(\d+)", pr_context.pr_url)
     pr_comments: list[str] = []
-    if pr_number_match:
-        pr_comments = github_client.list_pr_comments(int(pr_number_match.group(1)))
+    pr_number = parse_pull_request_number(pr_context.pr_url)
+    if pr_number is not None:
+        pr_comments = github_client.list_pr_comments(pr_number)
 
     base_sha_remote = github_client.get_remote_base_sha(config.git.remote, config.git.base_branch)
 

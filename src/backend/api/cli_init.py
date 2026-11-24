@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 from backend.api.cli_console import console, error_console
 from backend.api.cli_skill import sync_user_skills
 from backend.core.shared.models.agent_spec import AgentSpec
-from backend.core.shared.models.repository_platform import RepositoryPlatformNotImplementedError
+from backend.core.shared.models.repository_platform import RepositoryPlatformConfigurationError
 from backend.core.use_cases.agent_onboarding import availability_available_agents
 from backend.core.use_cases.agent_runner_factory import (
     build_app_config,
@@ -19,7 +19,10 @@ from backend.core.use_cases.agent_runner_factory import (
     create_registry_editor,
     logger,
 )
-from backend.core.use_cases.agent_runner_init_assets import RemoteTemplateSkillInstallError
+from backend.core.use_cases.agent_runner_init_assets import (
+    RemoteTemplateSkillFetchError,
+    RemoteTemplateSkillInstallError,
+)
 from backend.core.use_cases.agent_runner_repository_local import (
     GITIGNORE_BLOCK_FOOTER,
     GITIGNORE_BLOCK_HEADER,
@@ -125,9 +128,8 @@ def _run_init_command(parsed: argparse.Namespace, process_runner: IProcessRunner
         force=parsed.force,
         agents=app_config.agents,
     )
-    # Skill 同步失败不拦后续步骤：注册表登记与标签同步是 init 的主要产物，
-    # 曾经在这里直接 return 导致仓库没进注册表、控制台里看不到它，而报错只提 Skill。
-    # 退出码在最后统一返回，让失败仍然可见。
+    # 远程模板下载失败会在上面呈现为可恢复警告；随包 operator Skill 已安装，
+    # 继续登记仓库并同步标签。其它 Skill 冲突仍保留非零退出码。
     if init_result.repo_id:
         try:
             registry_result = upsert_repository(
@@ -153,7 +155,7 @@ def _run_init_command(parsed: argparse.Namespace, process_runner: IProcessRunner
             agent_registry=app_config.agents,
         )
         console.print(f"[green]Labels synced for:[/] {init_result.repo_root_path}")
-    except RepositoryPlatformNotImplementedError as exc:
+    except RepositoryPlatformConfigurationError as exc:
         error_console.print(f"Label sync failed: {exc}", markup=False)
         return 1
     except Exception as exc:  # noqa: BLE001
@@ -175,9 +177,17 @@ def _sync_user_skills_or_report_error(
     force: bool,
     agents: Mapping[str, AgentSpec] | None = None,
 ) -> int:
-    """同步用户级 Skills，远程模板不可用或冲突时报告原因并以失败退出。"""
+    """同步用户级 Skills；远程模板下载失败时允许 init 继续并发出恢复提示。"""
     try:
         sync_user_skills(process_runner=process_runner, dry_run=dry_run, force=force, agents=agents)
+    except RemoteTemplateSkillFetchError as exc:
+        error_console.print(
+            f"[yellow]Remote template Skills were not downloaded:[/] {exc}\n"
+            "kc init will continue with the packaged operator Skill and repository setup. "
+            "Retry with `kc skill install` after GitHub access is available.",
+            markup=False,
+        )
+        return 0
     except RemoteTemplateSkillInstallError as exc:
         error_console.print(f"[red]Remote template skill installation failed:[/] {exc}")
         return 1

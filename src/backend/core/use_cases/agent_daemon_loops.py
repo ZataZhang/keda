@@ -68,6 +68,7 @@ class _AgentDaemonLoopRequest:
     idle_backoff_max_factor: int
     parallel_limit_status_dir: Path | None = None
     review_stage: DaemonReviewStage | None = None
+    loaded_version: str | None = None
 
 
 @dataclass(frozen=True)

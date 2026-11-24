@@ -17,6 +17,11 @@ from backend.api.cli_console import console, error_console
 from backend.api.cli_exit_codes import ExitCode
 from backend.api.cli_helpers import repository_selector_error
 from backend.api.cli_utils import format_local_display_time
+from backend.api.cli_process_display import (
+    daemon_restart_hint,
+    display_process_kind,
+    resolve_executable_from_command,
+)
 from backend.api.cli_output import (
     OUTPUT_FORMAT_JSON,
     OUTPUT_FORMAT_TABLE,
@@ -29,7 +34,6 @@ from backend.core.shared.interfaces.runner_console import (
     RunnerProcessKind,
     RunnerProcessRecord,
 )
-from backend.core.shared.models import product_identity
 from backend.core.use_cases.agent_runner_factory import (
     create_process_supervisor,
     create_registry_editor,
@@ -59,8 +63,13 @@ from backend.core.use_cases.issue_logs import (
     describe_issue_log_status,
     read_issue_log,
 )
+from backend.api.version_info import resolve_keda_version
 from backend.core.use_cases.daemon_parallel_limit_status import (
     DaemonParallelLimitStatus,
+    DaemonVersionCheck,
+    check_daemon_version,
+    daemon_version_fields,
+    describe_daemon_version,
     describe_parallel_limit_status,
     parallel_limit_status_fields,
     read_daemon_parallel_limit_status,
@@ -74,25 +83,6 @@ from backend.core.use_cases.repository_registry import remove_registry_repositor
 # literal values directly.
 _DAEMON_KIND = RunnerProcessKind.DAEMON.value
 _REVIEW_DAEMON_KIND = RunnerProcessKind.REVIEW_DAEMON.value
-_PROCESS_KIND_DISPLAY_NAMES = {
-    _DAEMON_KIND: "daemon",
-    _REVIEW_DAEMON_KIND: "supervise-daemon",
-}
-
-
-def _display_process_kind(process_kind: RunnerProcessKind | str) -> str:
-    """把稳定的内部进程类型转换为面向用户的显示名称。
-
-    Args:
-        process_kind: 进程类型枚举或其稳定字符串值。
-
-    Returns:
-        面向用户的进程名称；未知类型原样返回。
-    """
-    kind_name = process_kind if isinstance(process_kind, str) else process_kind.value
-    return _PROCESS_KIND_DISPLAY_NAMES.get(kind_name, kind_name)
-
-
 if TYPE_CHECKING:
     import argparse
 
@@ -347,13 +337,13 @@ def _run_registry_start_command(parsed: argparse.Namespace, process_runner: IPro
                     spawn_cwd=spawn_cwd,
                 )
                 console.print(
-                    f"[green]Started {_display_process_kind(kind)}[/] for {repo_id} "
+                    f"[green]Started {display_process_kind(kind)}[/] for {repo_id} "
                     f"(process {record.process_id})"
                 )
             except Exception as exc:  # noqa: BLE001 - best effort start.
                 repo_success = False
                 error_console.print(
-                    f"[yellow]Failed to start {_display_process_kind(kind)} for {repo_id}:[/] {exc}"
+                    f"[yellow]Failed to start {display_process_kind(kind)} for {repo_id}:[/] {exc}"
                 )
         if not repo_success:
             exit_code = 1
@@ -384,7 +374,7 @@ def _run_registry_stop_command(parsed: argparse.Namespace, process_runner: IProc
 
     exit_code = 0
     for record in matched_records:
-        display_kind = _display_process_kind(record.kind)
+        display_kind = display_process_kind(record.kind)
         if record.status != "running":
             console.print(
                 f"[dim]Skipped[/] {display_kind} {record.process_id} for {record.repo_id} "
@@ -450,12 +440,12 @@ def _restart_daemons(repo_id: str, repo_path: Path, process_runner) -> int:
                     stop_timeout_seconds=30,
                 )
                 console.print(
-                    f"[green]Stopped old[/] {_display_process_kind(record.kind)} "
+                    f"[green]Stopped old[/] {display_process_kind(record.kind)} "
                     f"{record.process_id}"
                 )
             except Exception as exc:  # noqa: BLE001 - best effort stop.
                 error_console.print(
-                    f"[yellow]Failed to stop old {_display_process_kind(record.kind)} "
+                    f"[yellow]Failed to stop old {display_process_kind(record.kind)} "
                     f"{record.process_id}:[/] {exc}"
                 )
 
@@ -472,32 +462,15 @@ def _restart_daemons(repo_id: str, repo_path: Path, process_runner) -> int:
                 spawn_cwd=spawn_cwd,
             )
             console.print(
-                f"[green]Started {_display_process_kind(kind)}[/] for {repo_id} "
+                f"[green]Started {display_process_kind(kind)}[/] for {repo_id} "
                 f"(process {record.process_id})"
             )
         except Exception as exc:  # noqa: BLE001 - daemon start is best effort.
             error_console.print(
-                f"[yellow]Failed to start {_display_process_kind(kind)} for {repo_id}:[/] {exc}"
+                f"[yellow]Failed to start {display_process_kind(kind)} for {repo_id}:[/] {exc}"
             )
             return 1
     return 0
-
-
-def _resolve_executable_from_command(command: tuple[str, ...]) -> str:
-    """Return the executable script path from a process command line.
-
-    For direct invocations such as ``/path/bin/kc daemon ...`` the first
-    argument is returned. For Python wrapper invocations such as
-    ``/path/python /path/bin/kc daemon ...`` the KedaCode script path is returned.
-    """
-    if not command:
-        return ""
-    first = command[0]
-    if len(command) >= 2 and ("python" in Path(first).name.lower()):
-        second = command[1]
-        if product_identity.is_own_command_name(second):
-            return second
-    return first
 
 
 def _run_daemon_status_command(
@@ -572,12 +545,21 @@ def _run_daemon_status_command(
             parallel_limit_by_repo_id.get(record.repo_id) if record.kind == _DAEMON_KIND else None
         )
 
+    # 已安装版本取执行本命令的 kc；daemon 上报的是它启动时加载的版本。
+    installed_version = resolve_keda_version()
+
+    def _version_check_of(record: RunnerProcessRecord) -> DaemonVersionCheck | None:
+        if record.kind != _DAEMON_KIND:
+            return None
+        return check_daemon_version(_limit_status_of(record), installed_version)
+
     def _render_table() -> None:
         table = Table(title="Daemon status")
         table.add_column("repo_id", style="cyan")
         table.add_column("kind", style="green")
         table.add_column("status")
         table.add_column("pid", justify="right")
+        table.add_column("version")
         table.add_column("parallel_limit")
         table.add_column("process_id")
         table.add_column("started_at")
@@ -585,24 +567,35 @@ def _run_daemon_status_command(
         table.add_column("executable", overflow="fold")
         table.add_column("command", overflow="fold")
 
+        restart_hints: list[str] = []
         for record, is_managed in running_records:
             status_text = (
                 "[green]managed running[/]" if is_managed else "[yellow]unmanaged running[/]"
             )
+            version_check = _version_check_of(record)
+            version_text = describe_daemon_version(version_check)
+            if version_check is not None and version_check.restart_recommended:
+                version_text = f"[yellow]{version_text}[/]"
+                restart_hints.append(
+                    daemon_restart_hint(record, version_check, is_managed=is_managed)
+                )
             table.add_row(
                 record.repo_id,
-                _display_process_kind(record.kind),
+                display_process_kind(record.kind),
                 status_text,
                 str(record.pid),
+                version_text,
                 describe_parallel_limit_status(_limit_status_of(record)),
                 record.process_id,
                 format_local_display_time(record.started_at),
                 record.log_path or "-",
-                _resolve_executable_from_command(record.command),
+                resolve_executable_from_command(record.command),
                 " ".join(record.command),
             )
 
         console.print(table)
+        for restart_hint in restart_hints:
+            console.print(restart_hint)
 
     emit(
         [
@@ -615,9 +608,10 @@ def _run_daemon_status_command(
                 "process_id": record.process_id,
                 "started_at": record.started_at,
                 "log_path": record.log_path,
-                "executable": _resolve_executable_from_command(record.command),
+                "executable": resolve_executable_from_command(record.command),
                 "command": list(record.command),
                 **parallel_limit_status_fields(_limit_status_of(record)),
+                **daemon_version_fields(_version_check_of(record), installed_version),
             }
             for record, is_managed in running_records
         ]
