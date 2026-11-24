@@ -602,10 +602,9 @@ BUILTIN_AGENT_SPECS: dict[str, AgentSpec] = {
     # 2. 没有 ``--verbose`` / ``--include-partial-messages``，运行用途改用
     #    ``-o stream-json``：其包内 schema 就是 claude 的信封形状
     #    （type=stream_event / assistant / result），故复用 claude-stream-json。
-    # deliberate 走 stdin + plain 而非 claude 的 argv_tail + 流式：流式协议会把
-    # ``-p`` 从 argv 剥离再经 stdin 投递，而 qoder 在缺 ``-p`` 时的行为未经验证；
-    # 保留 ``-p`` 并用 stdin 投递，既避免依赖未验证行为，也避免长 transcript
-    # 撑爆 argv。配置与凭据在 ~/.qoder-cn/。
+    # run 走 stdin + stream-json，避免实现阶段长 prompt 撑爆 argv；qodercn 1.1.89
+    # 实测可在 stdin 输入下不带 ``-p`` 完成非交互调用，故可复用会剥离 ``-p`` 的流协议。
+    # deliberate 使用 plain，仍保留 ``-p`` 并走 stdin。配置与凭据在 ~/.qoder-cn/。
     "qoder": AgentSpec(
         bin="qodercn",
         label="agent/qoder",
@@ -633,7 +632,7 @@ BUILTIN_AGENT_SPECS: dict[str, AgentSpec] = {
         profiles={
             AGENT_PROFILE_RUN: AgentProfileSpec(
                 args=("--dangerously-skip-permissions", "-p", "-o", "stream-json"),
-                prompt_delivery=PROMPT_DELIVERY_ARGV_TAIL,
+                prompt_delivery=PROMPT_DELIVERY_STDIN,
                 output_protocol=CLAUDE_STREAM_JSON_PROTOCOL_ID,
                 read_only=False,
             ),

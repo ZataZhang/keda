@@ -400,13 +400,17 @@ def test_spawn_boundary_reports_command_line_too_long(tmp_path: Path) -> None:
     assert "command not found" not in message
 
 
-def test_claude_run_delivers_long_prompt_via_stdin(tmp_path: Path) -> None:
-    """claude 实现阶段的 prompt 经 stdin 投递，不进 argv（避开 Windows 命令行上限）。"""
+@pytest.mark.parametrize("agent_name", ("claude", "qoder"))
+def test_streaming_run_delivers_long_prompt_via_stdin(
+    agent_name: str,
+    tmp_path: Path,
+) -> None:
+    """Claude 与 Qoder 实现阶段的长 prompt 经 stdin 投递，不进 argv。"""
     long_prompt = "x" * 40_000
     runner = FakeProcessRunner()
 
     run_agent_with_prompt(
-        "claude",
+        agent_name,
         long_prompt,
         tmp_path,
         runner,

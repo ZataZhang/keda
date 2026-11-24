@@ -485,8 +485,9 @@ output_protocol = "plain"
 # 无 --verbose / --include-partial-messages；-o/--output-format 接受
 # text / json / stream-json，且包内 schema 与 claude 同形
 # （type=stream_event / assistant / result），故 run 用途复用
-# claude-stream-json；deliberate 保留 -p 改走 stdin + plain（流式协议会剥离
-# -p，而 qoder 缺 -p 时的行为未经验证）；配置与凭据在 ~/.qoder-cn/；
+# claude-stream-json；run 的长 prompt 走 stdin（qodercn 1.1.89 已实测可在 stdin 输入下
+# 不带 -p 完成 stream-json 非交互调用）；deliberate 保留 -p 并走 stdin + plain；
+# 配置与凭据在 ~/.qoder-cn/；
 # 项目级 skills 目录 .qoder-cn/skills/。
 [agent_runner.agents.qoder]
 bin = "qodercn"
@@ -507,7 +508,7 @@ resume_args = ["--resume", "{session_id}"]
 
 [agent_runner.agents.qoder.profiles.run]
 args = ["--dangerously-skip-permissions", "-p", "-o", "stream-json"]
-prompt_delivery = "argv_tail"
+prompt_delivery = "stdin"
 output_protocol = "claude-stream-json"
 
 [agent_runner.agents.qoder.profiles.deliberate]

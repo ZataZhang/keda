@@ -6223,7 +6223,7 @@ pi · run
 | agent | bin | 形态要点 |
 |---|---|---|
 | `codebuddy` | `codebuddy` | 与 `claude` 完全同构（`-p` + `--output-format stream-json` + `--include-partial-messages`），四用途齐备，`run` / `deliberate` 复用内置 `claude-stream-json` 协议，并声明 `--resume <id>`。配置与凭据在 `~/.codebuddy/`。 |
-| `qoder` | **`qodercn`** | 注册名与可执行名**不一致**：`qoder` 只是本机 shell 别名，`bin` 必须写 `qodercn`，否则 doctor 报 executable not found。它**没有** `--verbose` / `--include-partial-messages`；`run` 用 `-o stream-json`（包内 schema 与 claude 同形）走 `claude-stream-json`；`deliberate` 刻意保留 `-p` 并改用 `stdin` + `plain`。续传参数为 `--resume <id>`。配置在 `~/.qoder-cn/`。 |
+| `qoder` | **`qodercn`** | 注册名与可执行名**不一致**：`qoder` 只是本机 shell 别名，`bin` 必须写 `qodercn`，否则 doctor 报 executable not found。它**没有** `--verbose` / `--include-partial-messages`；`run` 用 `-o stream-json`（包内 schema 与 claude 同形）走 `claude-stream-json`，prompt 经 stdin 投递（qodercn 1.1.89 已实测可不带 `-p` 非交互运行）；`deliberate` 保留 `-p` 并使用 `stdin` + `plain`。续传参数为 `--resume <id>`。配置在 `~/.qoder-cn/`。 |
 | `opencode` | `opencode` | 非交互入口是 `run` 子命令（消息为位置参数）。**只声明 `run` / `deliberate` / `repl` 三个用途，刻意没有 `generate`**：它没有任何沙箱或只读开关，而 planner / `kc ask` 依赖 `generate` 用途上的只读声明做 fail-fast 门禁。输出用 `--format json` 走内置 `opencode-json-lines` 并提取 sessionID，续传参数为 `--session <id>`。配置在 `~/.config/opencode/`（XDG 路径）。 |
 
 > 三者的容器支持不在本轮范围内：runner 镜像目前只预装 claude / codex / kimi，容器里选中它们会在启动子进程时报可执行文件不存在。
