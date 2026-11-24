@@ -35,6 +35,7 @@ from backend.core.shared.models.agent_spec import (
     AGENT_PROFILE_DELIBERATE,
     AGENT_PROFILE_GENERATE,
     AGENT_PROFILE_RUN,
+    CLAUDE_STREAM_JSON_PROTOCOL_ID,
     PROMPT_DELIVERY_STDIN,
 )
 from backend.core.use_cases.agent_invocation import (
@@ -173,6 +174,9 @@ from backend.core.use_cases.agent_runner_resilient_invocation import (
 )
 
 _logger = logging.getLogger(__name__)
+
+#: Windows ``ERROR_FILENAME_EXCED_RANGE``：命令行超过 32,767 字符时 CreateProcess 报它。
+_WINERROR_FILENAME_EXCED_RANGE = 206
 
 _TIMEOUT_CONTINUATION_PROMPT = (
     "The previous agent process was stopped by the runner's execution timeout. "
@@ -669,7 +673,13 @@ def run_agent_with_prompt(
             # 条件传递：与 inactivity_timeout 同理，老 FakeProcessRunner 签名里没有
             # 这个参数，默认调用路径的 argv 与 run_kwargs 必须逐字节不变。
             run_kwargs["cancel_check"] = cancel_check
-        if attempt_invocation.prompt_delivery == PROMPT_DELIVERY_STDIN:
+        if (
+            attempt_invocation.prompt_delivery == PROMPT_DELIVERY_STDIN
+            or attempt_invocation.output_protocol == CLAUDE_STREAM_JSON_PROTOCOL_ID
+        ):
+            # claude 流式协议收到 input_text 会从 argv 剥离尾部提示词改经 stdin 投递
+            # （辩论路径早已如此）；留在 argv 里，长 PRD 的提示词会超过 Windows
+            # 32,767 字符的命令行上限，进程根本起不来。
             run_kwargs["input_text"] = prompt
         # 监督上下文每次进入都新建：attempt_key 唯一到"这一次真实进程调用"，
         # 因此遗留 observer 不可能在后续 recovery 轮次里找到可取消的同名进程。
@@ -703,11 +713,18 @@ def run_agent_with_prompt(
                 # 补进异常，让日志与失败评论不再只剩一句 command not found。不在起跑前
                 # 主动查 PATH——注入的 runner 与本机 PATH 无关，提前查会让 CI（不安装任何
                 # agent CLI）里的真实流程测试全线变红。
+                # Windows 命令行超长（WinError 206）也以 FileNotFoundError 抛出，
+                # 照实写明，不再误报成"没装"。
                 raise AgentUnavailableError(
                     agent_name,
                     context=(
                         f"launching bin '{attempt_invocation.argv[0]}' for phase "
                         f"'{invocation_phase}' with profile '{profile}'"
+                    ),
+                    reason=(
+                        "command line too long, WinError 206"
+                        if getattr(exc, "winerror", None) == _WINERROR_FILENAME_EXCED_RANGE
+                        else "command not found"
                     ),
                 ) from exc
 

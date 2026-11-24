@@ -2,11 +2,10 @@
 
 包裹现有 :func:`run_filtered_claude_stream`，行为不变：
 
-- 提供 ``prompt_text`` 时（辩论/transcript 路径），先从 argv 剥离
-  ``-p`` 与尾部提示词，再经 stdin 投递，避免 transcript 增长后
-  ``Argument list too long``；
-- 未提供 ``prompt_text`` 时（主执行路径），提示词留在 argv 尾部，
-  stdin 直接关闭——与历史 ``SubprocessRunner`` 内部分支一致。
+- 提供 ``prompt_text`` 时（辩论/transcript 路径与主执行路径），先从 argv 剥离
+  ``-p`` 与尾部提示词，再经 stdin 投递，避免长提示词触发
+  ``Argument list too long`` 或 Windows 32,767 字符命令行上限；
+- 未提供 ``prompt_text`` 时，提示词留在 argv 尾部，stdin 直接关闭。
 """
 
 from __future__ import annotations
