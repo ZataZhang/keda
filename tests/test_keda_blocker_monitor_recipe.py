@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import os
 import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 
-from backend.core.use_cases.loop_recipe import parse_loop_recipe
+from backend.core.use_cases.loop_recipe import parse_loop_recipe, render_loop_recipe
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BLOCKER_MONITOR_RECIPE = REPO_ROOT / "tasks" / "loops" / "keda-blocker-monitor-30m.md"
@@ -53,3 +54,17 @@ def test_blocker_monitor_uses_duty_evidence_and_respects_takeover() -> None:
     assert "when the input is unchanged and there is no new progress" in recipe_text
     assert "Patrol result and PR description" in recipe_text
     assert "## Constraints" in recipe_text
+
+
+def test_blocker_monitor_renders_its_label_and_lists_the_full_queue() -> None:
+    """真实配方渲染后排除自身，并保留超过 gh 默认上限的查询要求。"""
+    loop_recipe = parse_loop_recipe(BLOCKER_MONITOR_RECIPE)
+    rendered_recipe = render_loop_recipe(
+        loop_recipe,
+        fire_at=datetime(2026, 11, 24, tzinfo=UTC),
+        extra_variables={"blocked_count": "37", "failed_count": "12", "needs_attention": "49"},
+    )
+
+    assert "loop/keda-blocker-monitor-30m" in rendered_recipe
+    assert "loop/{loop_id}" not in rendered_recipe
+    assert "`gh issue list` queries must pass `--limit 1000`" in rendered_recipe

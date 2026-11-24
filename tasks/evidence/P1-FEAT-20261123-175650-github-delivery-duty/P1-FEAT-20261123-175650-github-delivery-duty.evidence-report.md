@@ -1,5 +1,7 @@
 ## 人审导航 / Human Review Navigation
 
+**评审后状态：** 巡检配方已修复列表查询上限与自身标签变量。以下 RV-4 记录属于修复前的文件树，不作为修复后的验收证据；RV-1、RV-2 和 RV-4 仍需按 PRD 在最终树上重跑。修复后的本地目标测试 55 项、`just test` 与严格文档构建通过，尚无独立 verifier 结论。
+
 | 呈递项 | 真实状态与应观察值 | 本地记录 | 打开方式 | 交叉核对 |
 |---|---|---|---|---|
 | RV-1 · Issue 与 PR 两个入口的真实会话 | **未呈递：`REVIEW_INCIDENT / INCONCLUSIVE`。** 期待看到观察时点、状态、来源、下一责任人与动作、复查条件；查询前后 timeline 一致且写调用为 0。 | `/Users/zata/code/keda/.kc-worktrees/issue-430/tasks/evidence/P1-FEAT-20261123-175650-github-delivery-duty/rv-1-duty-read.md` | `open "/Users/zata/code/keda/.kc-worktrees/issue-430/tasks/evidence/P1-FEAT-20261123-175650-github-delivery-duty/rv-1-duty-read.md"` | 尚未交叉核对；新 Codex 会话在 workspace routing discovery 阶段超时。Issue 线索：[GitHub #430](https://github.com/ZataZhang/keda/issues/430)、[问题描述中的历史现场 #416](https://github.com/ZataZhang/keda/issues/416)。没有交付 PR 或 CI 链接。 |

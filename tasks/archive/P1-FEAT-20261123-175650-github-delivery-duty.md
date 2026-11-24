@@ -429,7 +429,7 @@ Failure triage：
 #### Architecture And Dependency Acceptance
 
 - [x] 判断方法只写在 `references/duty.md` 一处，两份配方只引用不复写：`rg -n "duty" tasks/loops/keda-blocker-monitor-30m.md src/backend/core/use_cases/loop_builtin.py` 两处命中，且无第三份取证步骤副本（§7.3 检索结果附在证据报告 RV-4 自查记录）。
-- [x] 未新增 `kc` 子命令、后端服务或存储：`git diff --name-only` 及工作树新增文件均只含 §7.2 Change Impact Tree 中列出的实现与交付记录（见证据报告 RV-4 自查记录）。
+- [ ] 未新增 `kc` 子命令、后端服务或存储：`git diff --name-only` 及工作树新增文件均只含 §7.2 Change Impact Tree 中列出的实现与交付记录。评审发现相对 main 的提交还包含独立的 Console 工作流和 supervisor 配置变更，须先厘清交付范围。
 
 #### Documentation Acceptance
 
@@ -437,7 +437,7 @@ Failure triage：
 
 #### Validation Acceptance
 
-- [x] rv-4：`uv run pytest -o addopts='' tests/test_loop_builtin.py tests/test_keda_blocker_monitor_recipe.py tests/test_cli_skill_install.py` 通过，且断言覆盖 duty 路由、两份配方取证步骤与人工接管停止条件——证据 `rv-4-install-docs.txt`；会失败负控 `rv-4-negative-control.txt`。
+- [ ] rv-4：`uv run pytest -o addopts='' tests/test_loop_builtin.py tests/test_keda_blocker_monitor_recipe.py tests/test_cli_skill_install.py` 通过，且断言覆盖 duty 路由、两份配方取证步骤与人工接管停止条件——证据 `rv-4-install-docs.txt`；会失败负控 `rv-4-negative-control.txt`。评审修复配方后须重做并绑定最终树证据。
 - [ ] rv-3：四个历史现场的题面、来源、观察时点和两组逐题结果可复核，误报 / 漏报 / 耗时逐题公开——证据 `rv-3-replay.md` 与 `cases/`。
 - [ ] `just test` 通过，证据绑定最终 SHA；最终树上技能或配方有改动后，rv-1、rv-2 已重跑。
 
@@ -494,6 +494,7 @@ Failure triage：
   - 验证事实与未完成项分别记录于 evidence report 和各 RV 文件；Human-Confirmed 项保持未勾。
 - Validation blocker: RV-1 的 `codex` 会话启动在 `workspace routing discovery timed out` 后退出 1，真实 Issue / PR 查询、负控和主演示无法完成；RV-2 缺少隔离仓库与专用 runner；RV-3 尚无冻结四题与盲评。完整 `just test` 首次耗时 481.44 秒并因旧的 12 份 references 断言失败；修复后目标套件 54 项通过，但完整命令超过默认 300 秒复跑上限，未取得最终树全量通过证据。
 - Validation follow-up: 在 GitHub Issue #430（https://github.com/ZataZhang/keda/issues/430）跟进：workspace routing 恢复后从真实 Issue / PR 入口重跑 RV-1 并录制主演示；准备隔离测试仓库与专用 daemon 完成 RV-2；冻结四个可核验历史现场并盲评 RV-3；在能于 300 秒预算内完成的 runner 环境重跑 `just test`，再请求独立 verifier 复核。之后仅勾选新证据实际证明的项并由 runner 处理归档。
+- Pre-PR review update: 仓库配方已恢复 `gh issue list --limit 1000` 要求并修正巡检自身标签模板变量；这改变了配方，先前 RV-1 / RV-2 / RV-4 证据不再覆盖最终树，须按原 oracle 重跑。评审修复后的目标测试 55 项、`just test` 和严格文档构建通过；独立 verifier 尚未执行。
 
 ## Change Log
 
@@ -536,3 +537,11 @@ Failure triage：
 - Reason: 按维护者要求修复 Issue #430，并遵守 PRD 对真实入口、负控、独立验证和阻塞归档的证据要求
 - Impact: 代码已具备人工查询路由和巡检共享判断；RV-1 / RV-2 / RV-3、完整最终树 `just test`、独立 verifier 和 Human-Confirmed 仍开放
 - Review: 执行器证据已记录；独立 verifier 与人审待完成
+
+### 评审后修正巡检配方
+- Type: implementation
+- Before: 仓库配方删除了 `gh issue list --limit 1000` 要求，且使用不会展开的 `loop/{loop_id}`。
+- After: 恢复列表上限要求，并使用配方渲染支持的 `loop/{{loop_id}}`；增加真实配方渲染测试。
+- Reason: 避免超过默认 30 条时漏巡，以及巡检误处理自身。
+- Impact: 原有队列与权限范围不变；配方变更后需重跑相关真实入口证据。相对 main 的分支差异还含独立 Console 工作流与 supervisor 配置提交，范围清单暂不通过。
+- Review: 本地目标测试通过；真实入口和独立 verifier 待完成。
