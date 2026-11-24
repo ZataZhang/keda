@@ -71,7 +71,7 @@ nav:
       - Agent Runner:
           - Agent Runner 与看板同步指南: guides/agent-runner.md
       - 目标仓库 Issue 与 PR 模板: guides/repository-templates.md
-      - 生命周期 Agent 矩阵: guides/lifecycle-agent-matrix.md
+      - 生命周期 Agent 矩阵与工作流图: guides/lifecycle-agent-matrix.md
       - Agent 模型预设: guides/model-presets.md
       - PRD 编写规范: guides/prd-standard.md
       - 想法收集（Idea Inbox）: guides/idea-inbox.md

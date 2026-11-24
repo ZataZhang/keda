@@ -212,3 +212,13 @@ PRD 原文 · 覆盖抽屉
 | `docs/prototypes/assets/lifecycle-agent-matrix/roadmap-real.source.md` | Modify | 记录历史 `/app/roadmap/` 和 2026-09-18 截图 | 记录现行 `/app/backlog/` 路由、历史截图与原型内 Backlog 标签覆盖层 | 文档对齐现行产品名，同时披露静态底图与覆盖层边界 |
 | `docs/prototypes/index.md` | Modify | 两份旧草图标题显示 Roadmap | 目录标题改为 Backlog，链接文件名保持兼容 | 让原型索引使用现行产品术语 |
 | `mkdocs.yml` | Modify | 导航标题有历史/不一致命名 | 原型目录标题统一使用 Backlog 与新生命周期页面名称 | 文档站导航与产品命名一致 |
+
+## 工作流与角色配置抽屉
+
+[打开交互原型](./lifecycle-agent-matrix.html?screen=lifecycle-settings)，或从 [Prototype Hub](./hub.html) 进入。布局依据 [07 设计概念](./assets/lifecycle-agent-matrix/workflow-concepts/variations/07.png) 和 [生成提示词](./assets/lifecycle-agent-matrix/workflow-concepts/variations/07.prompt.md)。
+
+流程图由 HTML 实现，角色名称与预设一起作为抽屉入口。切换预设后，抽屉显示生效配置与来源，关闭后回到所选角色。修复和收尾沿用原型的实现阶段继承规则。作用域和保存预览复用原有设置原型。顶部按当前 Console 展示四个设置标签，内容生成时限仅展示入口。三组预设示例来自当前页面截图。仓库列表按钮沿用原型的返回路径。
+
+验证层级为交互原型。数据来自页面内的模拟配置，保存动作展示 TOML 差异。
+
+当前原型截图：[工作流总览](./assets/lifecycle-agent-matrix/workflow-concepts/current-overview.png)、[修复配置抽屉](./assets/lifecycle-agent-matrix/workflow-concepts/current-drawer.png)。Hub 使用抽屉截图预览。
