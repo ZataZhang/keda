@@ -1,0 +1,6 @@
+Gitea 1.21 is ready at http://127.0.0.1:3300; repository keda-rv is available.
+NEGATIVE_CONTROL=Run the live integration test with an intentionally invalid API token.
+EXPECTED_FAIL=The real Gitea API returned HTTP 401 for the invalid token; pytest exited 1.
+GREEN_COMMAND=UV_CACHE_DIR=/private/tmp/issue416-uv-cache uv run --no-sync pytest -o addopts= tests/test_gitea_client_live.py -q
+..                                                                       [100%]
+2 passed in 16.49s

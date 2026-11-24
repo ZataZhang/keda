@@ -1,0 +1,20 @@
+TREE_HASH=f3d562c3141c3f7d35d405c97c0ecfb5506f05d0
+NEGATIVE_CONTROL=The inverted expectation that a Gitea /pulls/ URL is unsupported must fail against the real parser.
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    from backend.core.shared.models.pull_request_url import parse_pull_request_number; assert parse_pull_request_number("https://git.example.com/o/r/pulls/7") is None
+                                                                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError
+EXPECTED_FAIL=the obsolete behavior assertion failed with exit_code=1
+TARGETED_COMMAND=uv run --no-sync pytest -o addopts= tests/test_pull_request_url.py tests/test_gitea_instance_settings.py -q
+.......................                                                  [100%]
+23 passed in 0.13s
+FULL_COMMAND=uv run --no-sync python tasks/evidence/P2-FEAT-20261120-170035-gitea-platform-client/scripts/rv7_parallel.py
+COLLECTED_NODE_IDS=5663
+COLLECTED_TEST_FILES=311
+PARALLEL_SHARDS=4; assignment preserves each test file
+SHARD_1_EXIT=0; 1415 passed, 1 skipped in 103.12s (0:01:43); elapsed=104.54s
+SHARD_2_EXIT=0; 1416 passed in 56.04s; elapsed=56.89s
+SHARD_3_EXIT=0; 1416 passed in 67.41s (0:01:07); elapsed=68.20s
+SHARD_4_EXIT=0; 1413 passed, 2 skipped in 195.90s (0:03:15); elapsed=196.67s
+FULL_SUITE_RESULT=PASS; every collected node id from tests/ was executed

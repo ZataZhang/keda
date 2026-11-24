@@ -1,0 +1,16 @@
+TREE_HASH=033c8a364d6384e4f07dddeb6357da925d29c1c9
+ENTRY_POINT=uv run --no-sync kc --repo <repo> issue list --output json
+[WARN] Repository 'rv2-unregistered' has no github_repo configured; PR column will be empty. Set github_repo = "owner/name" in [agent_runner.repositories.<id>] or .kedacode.toml.
+[]
+Error fetching <repo>: /private/tmp/issue416-gitea/rv2/repository: Gitea host 
+'127.0.0.1' is not registered in the machine config. Add 
+agent_runner.gitea_instances entries with base_url and token_env to your local 
+KedaCode config.toml before using this repository.
+UNREGISTERED_EXIT_CODE=1 requests=0
+[WARN] Repository 'rv2-unregistered' has no github_repo configured; PR column will be empty. Set github_repo = "owner/name" in [agent_runner.repositories.<id>] or .kedacode.toml.
+[]
+Error fetching <repo>: /private/tmp/issue416-gitea/rv2/repository: Gitea GET 
+http://127.0.0.1:3399/api/v1/repos/o/r/issues?state=all&limit=50&page=1 returned
+HTTP 404: request counter only
+NEGATIVE_CONTROL=registered host reached listener; requests=1 exit_code=1
+EXPECTED_FAIL=if the request counter control is working, registration causes requests>0

@@ -1,0 +1,10 @@
+ITEM=rv-5 required screenshot format
+EXPECTED_ARTIFACT=rv-5-gitea-status.png showing the real Gitea commit status on the failure-status Pull Request
+ENTRY_POINT=RV_CAPTURE_BROWSER=1 bash tasks/evidence/P2-FEAT-20261120-170035-gitea-platform-client/scripts/rv5_status.sh
+
+ENVIRONMENT=Linux container (mcr.microsoft.com/playwright:v1.50.1-noble), Playwright 1.50.1 Chromium headless; Gitea 1.21.11.
+METHOD=After the live status test passes, rv5_status_screenshot.mjs reads the failure-status PR left by the test through the Gitea API, opens its real Gitea page, waits until the failing check name is visible, and captures the screenshot.
+API_STATUS=state=failure contexts=["rv-failing-check:failure"] (see rv-5-status.txt).
+PAGE=The PR page shows "Some checks failed" with "rv-failing-check failure status fixture" and a red cross on the head commit.
+PREVIOUS_BLOCKER=The original macOS host could not start a browser renderer; that blocker does not apply to this capture environment.
+RESULT=PASS screenshot format satisfied.

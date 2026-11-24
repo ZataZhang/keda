@@ -1,0 +1,23 @@
+TREE_HASH=033c8a364d6384e4f07dddeb6357da925d29c1c9
+NEGATIVE_CONTROL=Check the baseline configuration guide from HEAD; it must lack the new Gitea registration entry.
+EXPECTED_FAIL=baseline guide has no Gitea instance registration entry; rg exit_code=1
+BUILD_COMMAND=uv run --no-sync mkdocs build --strict
+CONFIG_GUIDE_COMMAND=rg -n "agent_runner.gitea_instances" docs/guides/configuration.md
+120:[[agent_runner.gitea_instances]]
+RUNNER_GUIDE_COMMAND=rg -n -i "Gitea|WIP|Forgejo" docs/guides/agent-runner.md
+555:`kc init` 会按仓库 `platform` 选择对应代码平台客户端；Gitea 仓库需先按[配置指南](configuration.md#agent-runner-repo-config)在本机登记 Gitea 地址和令牌变量。
+852:### WIP checkpoint 不合并
+854:在实现阶段或 recovery 阶段，runner 可能调用 `checkpoint_uncommitted_progress` 把当前未提交进度保存为 `[Agent][WIP] Issue #N checkpoint` 形式的临时 commit，作为崩溃恢复点和跨 claim 续作的基础。这些 WIP checkpoint 不会被单独推送到远程分支上——它们只在本地分支存在，最终随功能 commit 一起被 push。
+856:runner **不在 publish 前对 WIP checkpoint 做 squash**：
+858:- 正常成功流程中，最终功能 commit 已经位于 WIP checkpoint 之上，`git reset --soft` 式的压平无法触发或会引入历史重写风险。
+859:- WIP checkpoint 的历史噪音在最终合并 PR 时，由 GitHub/GitLab 的 squash merge 收敛为一条干净历史。
+866:recovery 预算耗尽不是终点，而是**交班点**。此前只有同一个 claim 内的重试带着失败上下文（`run_agent_execution_loop` 每轮把 `recovery_failure_summary` 拼进 recovery prompt）；跨 claim 的唯一入口 `build_progress_continuation_prompt` 既不读 Issue 评论、也不读 attempt 历史与 agent 自述，而 `_reuse_existing_local_commit` 又**不跑 verifier gate**——于是"上一轮 verifier 为什么判红"没有任何路径跨过 claim 边界，接手的新 claim 只能从 WIP 快照与 PRD 反推，同一个坑反复踩。
+883:- **快照是 WIP 中途进度**，可能连编译都不过，不是"实现做完了但没过验收"。交接记录与 PR 正文都显式写明这一点。
+1656:- 与 `github_repo` 同属仓库身份信息的 `platform` 通过 `.kedacode.toml` 的 `[agent_runner.repository]` 段声明，省略时默认为 `github`。Gitea 仓库使用 Gitea REST API 完成 Issue、标签、评论、PR、合并与提交状态操作；实例地址和 `token_env` 必须登记在本机 `config.toml`，仓库配置不得指定令牌去向。Gitea 草稿 PR 用 `WIP: ` 标题前缀表示，转正式时移除。`kc takeover`、预览环境模板和容器凭据转交仍直接使用 `gh`，不属于 Gitea 支持范围；本次支持范围以 Gitea 1.21 为基线，不承诺 Forgejo。配置格式、HTTPS 要求与改回 GitHub 的方式见[配置指南](configuration.md#agent-runner-repo-config)。
+2631:体量较大的 PRD 往往无法在单次 claim 的 `max_recovery_attempts` 轮内完成。为避免每次 claim 都从零开始、永远收敛不了，runner 在一轮实现失败（耗尽重试、交付门禁仍未通过）时，会把 Agent 已经产出的在途改动提交成一个 **WIP checkpoint**：
+2633:- 提交信息形如 `[Agent][WIP] Issue #<N> checkpoint (delivery gates not yet satisfied; not for merge)`，使用 `git commit --no-verify`（在途工作可能还不过 lint），但仍执行 forbidden-path 安全校验，绝不提交 `.env` / `secrets/*` 等敏感文件。
+2639:- 已有提交**尚未达标**（典型：上一次的 WIP checkpoint）→ runner 不再硬失败，而是带着 “continue from committed progress” 的 prompt 重新调用 Agent，在已提交进度上补齐剩余工作。
+2643:因此对体量大的 Issue，反复 `agent/failed → agent/ready` 会让进度逐轮累积，而不是空转；合并时这些 WIP commit 可通过 squash 收敛为干净历史。
+5668:- **不替换** checkpoint / WIP commit 机制：短期记忆只存上下文摘要，文件状态仍由 git 与 checkpoint 负责。
+OPERATOR_SKILL_COMMAND=rg -n "Gitea|agent_runner.gitea_instances" src/backend/engines/agent_runner/templates/skills/kedacode-operator/SKILL.md
+80:- Repositories may declare `platform = "github"` (the default) or `platform = "gitea"` in `.kedacode.toml`. Gitea uses the REST API and requires a machine-local `[[agent_runner.gitea_instances]]` entry in `~/.kedacode/config.toml` with `base_url` and `token_env`; set the named token environment variable before running `kc`. Gitea draft PRs use the `WIP: ` title prefix. See the configuration and Agent Runner guides for HTTPS rules and supported-scope limits.

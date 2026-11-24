@@ -1,0 +1,138 @@
+{
+  "version": 1,
+  "language": "zh-CN",
+  "items": [
+    {
+      "item_number": 1,
+      "item_name": "真实 Gitea runner 完整流程",
+      "command": "RV_CAPTURE_BROWSER=1 bash tasks/evidence/P2-FEAT-20261120-170035-gitea-platform-client/scripts/rv1_full_loop.sh",
+      "evidence_files": [
+        "rv-1-gitea-full-loop.txt",
+        "rv-1-gitea-pr-wip.png",
+        "rv-1-gitea-pr-merged.png",
+        "rv-1-demo.mp4",
+        "rv-1-browser-capture.txt"
+      ],
+      "output_summary": "真实 Gitea 1.21.11 与 kc CLI 完成标签同步、就绪 Issue 创建、认领评论、WIP 草稿 PR、无状态检查时阻止合并、成功状态后转正式并合并关闭 Issue；进程探针记录 codex_invocations=3、gh_invocations=0，RESULT=PASS。同一轮运行用 Chromium 拍下 WIP 草稿页与合并页截图，并录制约 56 秒的主演示。",
+      "explanation": "脚本通过真实 kc 命令执行流程，并在每个关键阶段以新的 Gitea API 请求复读持久化状态；未知检查的负向控制阻止合并，随后成功状态使真实 supervise 合并。",
+      "risks": "在 Linux 容器（Playwright 1.50.1 Chromium）内复跑：Gitea 与复跑容器共享网络命名空间，保持 http://127.0.0.1:3300 与本机登记一致。执行器与评审为 PRD 约定的确定性替身，不代表真实模型行为。原 macOS 主机的浏览器启动阻塞不适用于本次采集环境。",
+      "negative_control": "在真实 PR head 上保持 Gitea 状态集合为空，运行真实 kc supervise；如果未知状态被误当作通过，该步骤会提前合并并使后续断言失败。",
+      "expected_fail": "真实输出为 EXPECTED_FAIL=unknown checks must not merge; observed merged=false issue_state=open；随后添加 success 状态才得到 merged=true、Issue closed。"
+    },
+    {
+      "item_number": 2,
+      "item_name": "未登记主机零请求",
+      "command": "bash tasks/evidence/P2-FEAT-20261120-170035-gitea-platform-client/scripts/rv2_unregistered_host.sh",
+      "evidence_files": [
+        "rv-2-unregistered-host.txt"
+      ],
+      "output_summary": "未登记的 127.0.0.1 主机导致 CLI 退出码 1、提示 agent_runner.gitea_instances，监听请求数为 0；登记该主机的负向控制使监听请求数变为 1。",
+      "explanation": "测试走真实 kc CLI、配置加载和工厂装配，并从独立监听器计数文件检查请求数量。",
+      "risks": "使用本地 HTTP 监听器隔离验证，覆盖真实 CLI 的装配边界；未访问外部主机。",
+      "negative_control": "临时登记监听主机并重跑 CLI；若请求计数仍为零，监听控制或客户端请求路径异常，脚本失败。",
+      "expected_fail": "负向控制观察到 requests=1；未登记场景观察到 requests=0 且 exit_code=1。"
+    },
+    {
+      "item_number": 3,
+      "item_name": "缺失或空令牌发请求前停止",
+      "command": "bash tasks/evidence/P2-FEAT-20261120-170035-gitea-platform-client/scripts/rv3_missing_token.sh",
+      "evidence_files": [
+        "rv-3-missing-token.txt"
+      ],
+      "output_summary": "RV_ABSENT_TOKEN 未设置和设为空串时均 exit_code=1、requests=0，错误包含变量名；设置临时令牌的控制请求到达监听器；对整个 evidence 目录的本机 Gitea 测试令牌扫描无匹配。",
+      "explanation": "真实 CLI 在客户端构造前验证环境变量；监听器计数证明两种缺失情况没有网络请求，证据没有包含任何令牌值。",
+      "risks": "临时令牌仅用于本地监听器控制，输出中不记录其值。",
+      "negative_control": "设置登记的令牌变量，使请求到达本地计数监听器；若监听器没有收到请求，控制路径失败。",
+      "expected_fail": "令牌存在时 requests=1；令牌缺失或为空时两次都 requests=0，提示 RV_ABSENT_TOKEN。"
+    },
+    {
+      "item_number": 4,
+      "item_name": "Gitea URL 安全策略",
+      "command": "bash tasks/evidence/P2-FEAT-20261120-170035-gitea-platform-client/scripts/rv4_url_policy.sh",
+      "evidence_files": [
+        "rv-4-url-policy.txt"
+      ],
+      "output_summary": "非本机 HTTP 地址在配置加载时报错并要求 HTTPS；127.0.0.1 HTTP 通过；仓库级 gitea_instances 注入被拒绝。",
+      "explanation": "真实 CLI 分别读取机器配置和仓库本地配置，错误发生在任何 Gitea API 请求前；同一脚本验证了允许的 loopback HTTP 情形。",
+      "risks": "非本机 HTTP 案例按真实配置解析错误退出，堆栈输出不含令牌值。",
+      "negative_control": "尝试接受 http://git.example.com，或尝试让仓库配置声明 gitea_instances；任一边界不再拒绝即使脚本失败。",
+      "expected_fail": "非本机 HTTP 报 agent_runner.gitea_instances.base_url must use https://；仓库注入报 machine-only；本机 HTTP 退出码为 0。"
+    },
+    {
+      "item_number": 5,
+      "item_name": "提交状态失败、成功与未知汇总",
+      "command": "RV_CAPTURE_BROWSER=1 bash tasks/evidence/P2-FEAT-20261120-170035-gitea-platform-client/scripts/rv5_status.sh",
+      "evidence_files": [
+        "rv-5-status.txt",
+        "rv-5-gitea-status.png",
+        "rv-5-browser-capture.txt"
+      ],
+      "output_summary": "真实 Gitea 状态接口测试通过：失败状态携带 context 名称、全部成功为 SUCCESS、无状态为未知；1 passed。API 复读 state=failure、contexts=[rv-failing-check:failure]；真实 Gitea PR 页面截图显示 Some checks failed 与 rv-failing-check。",
+      "explanation": "真实 Gitea 1.21 提供状态数据，客户端读取并汇总；错误断言的 AssertionError 负向控制证明测试能识别失败被误判为成功。另记录了图片证据无法生成的具体环境错误。",
+      "risks": "截图在 Linux 容器内用 Chromium 采集，页面与数据均来自本次测试创建的真实 Gitea 仓库；未访问外部主机。",
+      "negative_control": "把失败状态的预期错误地设为 SUCCESS，pytest.raises(AssertionError) 要求该断言失败。",
+      "expected_fail": "错误 SUCCESS 期望触发 AssertionError；修复后真实状态用例 1 passed。"
+    },
+    {
+      "item_number": 6,
+      "item_name": "真实 Gitea 客户端操作覆盖",
+      "command": "bash tasks/evidence/P2-FEAT-20261120-170035-gitea-platform-client/scripts/rv6_client_live.sh",
+      "evidence_files": [
+        "rv-6-client-live.txt"
+      ],
+      "output_summary": "rv-6 重新运行通过：真实 Gitea 1.21 的 live 测试 2 passed；无效令牌负向控制收到 HTTP 401。测试 Git 操作显式清空该进程的 credential.helper，确保 GIT_ASKPASS 使用本测试令牌。",
+      "explanation": "每个抽象操作通过 GiteaApiClient 调用真实服务端；测试额外用新的 requests 会话核对服务端保存的 Issue、标签、评论、PR 与合并状态。测试只对自身 git 子进程禁用机器级 credential.helper，因此凭据取自夹具的 GIT_ASKPASS。",
+      "risks": "验证固定在 Gitea 1.21，符合 PRD 最低版本；不承诺 Forgejo。credential.helper 覆盖仅在 live test 的 git 命令上生效，不修改本机 Git 配置。",
+      "negative_control": "使用故意无效的 API 令牌运行真实 live test；如果服务端或测试未拒绝该令牌，控制脚本失败。",
+      "expected_fail": "真实 Gitea 返回 HTTP 401，pytest 退出非零；随后使用本机令牌重跑为 2 passed。"
+    },
+    {
+      "item_number": 7,
+      "item_name": "PR URL 解析与完整回归",
+      "command": "bash tasks/evidence/P2-FEAT-20261120-170035-gitea-platform-client/scripts/rv7_pytest.sh",
+      "evidence_files": [
+        "rv-7-pytest.txt"
+      ],
+      "output_summary": "负向控制按旧行为断言 Gitea /pulls/ 不受支持并以 AssertionError 变红；23 项定向测试通过。完整收集的 5663 个 tests/ node id 按文件分配到四个分片，合计 5660 passed、3 skipped；最长分片约 197 秒，脚本在 300 秒复跑上限内结束。",
+      "explanation": "定向测试覆盖 GitHub /pull/ 与 Gitea /pulls/；完整 pytest 收集只运行仓库正式 tests/ 套件并关闭 testmon。每个测试文件完整分配给单一分片，全部收集 node id 恰好执行一次；tasks/evaluation-suites 的历史 held_out 夹具仍不属于产品测试范围。",
+      "risks": "按文件分片保留同一测试文件内的顺序；跨文件并行运行不验证测试彼此之间的并发交互。此处目标是执行完整现有回归集，四个分片均为 0 退出码，且没有新增依赖或按 marker 排除测试。",
+      "negative_control": "对真实 helper 断言 Gitea /pulls/ URL 不受支持；新实现应使这一错误断言触发 AssertionError。",
+      "expected_fail": "旧行为期望以 exit_code=1 与 AssertionError 失败；定向用例和关闭 testmon、执行全部收集 node id 的四分片 tests/ 套件通过。"
+    },
+    {
+      "item_number": 8,
+      "item_name": "配置与 runner 文档同步",
+      "command": "bash tasks/evidence/P2-FEAT-20261120-170035-gitea-platform-client/scripts/rv8_docs.sh",
+      "evidence_files": [
+        "rv-8-docs.txt"
+      ],
+      "output_summary": "MkDocs strict build 通过；配置指南、runner 指南和随包 operator skill 均命中 Gitea 登记或支持差异说明。",
+      "explanation": "脚本逐个检查三个指定文档入口，并运行严格文档构建。",
+      "risks": "MkDocs 打印仓库已有未加入导航的页面提示；严格构建仍以退出码 0 完成。",
+      "negative_control": "从 HEAD 读取改动前配置指南，搜索 agent_runner.gitea_instances；基线应无匹配。",
+      "expected_fail": "基线搜索返回 exit_code=1；当前三份文档均有 Gitea 相关命中且 MkDocs build 通过。"
+    }
+  ],
+  "primary_demo": {
+    "file": "rv-1-demo.mp4",
+    "steps": [
+      {
+        "caption": "kc init 完成，Gitea 仓库标签已同步",
+        "result": "Gitea 标签页列出 agent/* 等由 kc labels sync 创建的标签"
+      },
+      {
+        "caption": "kc issue create 创建了带就绪标签的 Issue",
+        "result": "Issue #1 带 agent/ready 标签，并出现 Agent Runner Claimed 认领评论"
+      },
+      {
+        "caption": "kc run 创建了 WIP 草稿 PR；执行器使用确定性替身",
+        "result": "PR #2 标题为 WIP: [Agent] Gitea runner full-loop validation，状态 Draft，正文 Closes #1",
+        "mock": true
+      },
+      {
+        "caption": "检查通过后 PR 已合并，WIP 前缀已移除，Issue 已关闭",
+        "result": "PR #2 标题去掉 WIP 前缀，状态 Merged"
+      }
+    ]
+  }
+}

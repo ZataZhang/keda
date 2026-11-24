@@ -1,0 +1,9 @@
+NEGATIVE_CONTROL=The live test first asserts that a Gitea failure status is not SUCCESS; pytest.raises(AssertionError) requires this wrong expectation to fail.
+EXPECTED_FAIL=An incorrect SUCCESS expectation raises AssertionError; the test fails if that assertion unexpectedly passes.
+GREEN_COMMAND=bash tasks/evidence/P2-FEAT-20261120-170035-gitea-platform-client/scripts/gitea_up.sh && source /private/tmp/issue416-gitea/runtime.env && UV_CACHE_DIR=/private/tmp/issue416-uv-cache uv run --no-sync pytest -o addopts= tests/test_gitea_client_live.py -k status -q
+Gitea 1.21 is ready at http://127.0.0.1:3300; repository keda-rv is available.
+.                                                                        [100%]
+1 passed, 1 deselected in 13.12s
+API_STATUS=state=failure contexts=["rv-failing-check:failure"]
+STATUS_PAGE=engine=chromium pr=1 failing_check_visible=true screenshot=rv-5-gitea-status.png
+exit=0

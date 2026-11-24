@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+working_directory=""
+sandbox_profile="unknown"
+command_arguments=("$@")
+for ((argument_index = 0; argument_index < ${#command_arguments[@]}; argument_index += 1)); do
+  case "${command_arguments[$argument_index]}" in
+    --cd)
+      working_directory="${command_arguments[$((argument_index + 1))]:-}"
+      ;;
+    --sandbox)
+      sandbox_profile="${command_arguments[$((argument_index + 1))]:-unknown}"
+      ;;
+  esac
+done
+
+last_argument_index=$((${#command_arguments[@]} - 1))
+prompt=""
+if (( last_argument_index >= 0 )); then
+  prompt="${command_arguments[$last_argument_index]}"
+fi
+if [[ -z "$prompt" || "$prompt" == "--json" ]]; then
+  prompt="$(cat)"
+fi
+
+export RV_AGENT_CWD="$working_directory"
+export RV_AGENT_PROFILE="$sandbox_profile"
+export RV_AGENT_PROMPT_HEAD="${prompt:0:220}"
+python3 - <<'PY'
+import json
+import os
+from datetime import datetime, timezone
+
+probe_path = os.environ["RV_AGENT_PROBE"]
+probe_entry = {
+    "agent": "codex",
+    "cwd": os.environ["RV_AGENT_CWD"],
+    "profile": os.environ["RV_AGENT_PROFILE"],
+    "prompt_head": os.environ["RV_AGENT_PROMPT_HEAD"],
+    "timestamp": datetime.now(timezone.utc).isoformat(),
+}
+with open(probe_path, "a", encoding="utf-8") as probe_file:
+    probe_file.write(json.dumps(probe_entry, ensure_ascii=False) + "\n")
+PY
+
+emit_agent_message() {
+  python3 - "$1" <<'PY'
+import json
+import sys
+
+print(
+    json.dumps(
+        {"type": "item.completed", "item": {"type": "agent_message", "text": sys.argv[1]}}
+    )
+)
+PY
+}
+
+if [[ "$prompt" == *"Pre-PR Review for Issue"* ]]; then
+  emit_agent_message '{"verdict":"approved","summary":"Deterministic review found no findings.","findings":[]}'
+  exit 0
+fi
+
+if [[ "$prompt" == *"Post-PR Supervisor Review for Issue"* ]]; then
+  emit_agent_message '{"action":"approve_for_human_review","summary":"Deterministic post-PR review found no findings."}'
+  exit 0
+fi
+
+if [[ "$sandbox_profile" == "workspace-write" ]]; then
+  if [[ -z "$working_directory" || ! -d "$working_directory" ]]; then
+    printf 'Unexpected workspace-write Codex invocation without a valid --cd directory.\n' >&2
+    exit 97
+  fi
+  mkdir -p "$working_directory/tasks/evidence/rv-runner"
+  printf 'The real kc runner invoked the deterministic executor for this Gitea Issue.\n' \
+    > "$working_directory/tasks/evidence/rv-runner/runner-proof.txt"
+  mkdir -p "$working_directory/.agent-runner"
+  cat > "$working_directory/.agent-runner/commit-request.json" <<'EOF'
+{"commit_message":"test(rv): add deterministic Gitea runner proof"}
+EOF
+  emit_agent_message 'Created the deterministic Gitea runner proof file.'
+  exit 0
+fi
+
+printf 'Unrecognized Codex fixture invocation: profile=%s prompt_head=%s\n' \
+  "$sandbox_profile" "${prompt:0:160}" >&2
+exit 97

@@ -1,0 +1,102 @@
+TREE_HASH=033c8a364d6384e4f07dddeb6357da925d29c1c9
+ENTRY_POINT=uv run --no-sync kc --repo <repo> agent lifecycle list --scope repository
+NONLOCAL_HTTP_OUTPUT=Traceback (most recent call last):
+  File "/Users/zata/code/keda/.kc-worktrees/issue-416/.venv/bin/kc", line 10, in <module>
+    sys.exit(main())
+             ~~~~^^
+  File "/Users/zata/code/keda/.kc-worktrees/issue-416/src/backend/api/cli_entry.py", line 92, in main
+    from backend.api.cli import main as cli_main
+  File "/Users/zata/code/keda/.kc-worktrees/issue-416/src/backend/api/cli.py", line 23, in <module>
+    from backend.api.cli_helpers import (
+    ...<3 lines>...
+    )
+  File "/Users/zata/code/keda/.kc-worktrees/issue-416/src/backend/api/cli_helpers.py", line 25, in <module>
+    from backend.core.use_cases.agent_runner_factory import (
+    ...<6 lines>...
+    )
+  File "/Users/zata/code/keda/.kc-worktrees/issue-416/src/backend/core/use_cases/agent_runner_factory.py", line 13, in <module>
+    from backend.engines.agent_runner.factory import (
+    ...<38 lines>...
+    )
+  File "/Users/zata/code/keda/.kc-worktrees/issue-416/src/backend/engines/agent_runner/factory.py", line 24, in <module>
+    from backend.engines.agent_runner.factories import (
+    ...<27 lines>...
+    )
+  File "/Users/zata/code/keda/.kc-worktrees/issue-416/src/backend/engines/agent_runner/factories/__init__.py", line 44, in <module>
+    from backend.engines.agent_runner.factories.content_generators import (
+    ...<2 lines>...
+    )
+  File "/Users/zata/code/keda/.kc-worktrees/issue-416/src/backend/engines/agent_runner/factories/content_generators.py", line 34, in <module>
+    from backend.infrastructure.process_runner import SubprocessRunner
+  File "/Users/zata/code/keda/.kc-worktrees/issue-416/src/backend/infrastructure/process_runner.py", line 46, in <module>
+    from backend.infrastructure.child_env import build_e2e_child_env, build_sanitized_child_env
+  File "/Users/zata/code/keda/.kc-worktrees/issue-416/src/backend/infrastructure/child_env.py", line 23, in <module>
+    from backend.infrastructure.logging.logger import logger
+  File "/Users/zata/code/keda/.kc-worktrees/issue-416/src/backend/infrastructure/logging/__init__.py", line 3, in <module>
+    from .logger import Logger, logger
+  File "/Users/zata/code/keda/.kc-worktrees/issue-416/src/backend/infrastructure/logging/logger.py", line 12, in <module>
+    from backend.infrastructure.config.settings import config
+  File "/Users/zata/code/keda/.kc-worktrees/issue-416/src/backend/infrastructure/config/__init__.py", line 3, in <module>
+    from .settings import AppSettings, config
+  File "/Users/zata/code/keda/.kc-worktrees/issue-416/src/backend/infrastructure/config/settings.py", line 679, in <module>
+    config: AppSettings = AppSettings()
+                          ~~~~~~~~~~~^^
+  File "/Users/zata/code/keda/.kc-worktrees/issue-416/.venv/lib/python3.13/site-packages/pydantic_settings/main.py", line 194, in __init__
+    super().__init__(
+    ~~~~~~~~~~~~~~~~^
+        **__pydantic_self__._settings_build_values(
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<27 lines>...
+        )
+        ^
+    )
+    ^
+  File "/Users/zata/code/keda/.kc-worktrees/issue-416/.venv/lib/python3.13/site-packages/pydantic/main.py", line 250, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+  File "/Users/zata/code/keda/.kc-worktrees/issue-416/.venv/lib/python3.13/site-packages/pydantic_settings/main.py", line 194, in __init__
+    super().__init__(
+    ~~~~~~~~~~~~~~~~^
+        **__pydantic_self__._settings_build_values(
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<27 lines>...
+        )
+        ^
+    )
+    ^
+  File "/Users/zata/code/keda/.kc-worktrees/issue-416/.venv/lib/python3.13/site-packages/pydantic/main.py", line 250, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+pydantic_core._pydantic_core.ValidationError: 1 validation error for AgentRunnerSettings
+gitea_instances.0
+  Value error, agent_runner.gitea_instances.base_url must use https://; http:// is allowed only for localhost or 127.0.0.1. [type=value_error, input_value={'base_url': 'http://git....n_env': 'RV_HTTP_TOKEN'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.12/v/value_error
+EXPECTED_FAIL=non-local http base_url must be rejected at configuration load; exit_code=1
+lifecycle settings · scope=repository · repo=rv4-url-policy
+stages:
+  implementation       agent=claude preset=- model=- effort=-  
+[effort:unsupported]
+  fix                  agent=claude preset=- model=- effort=-  
+[follows-implementation effort:unsupported]
+  closeout             agent=claude preset=- model=- effort=-  
+[follows-implementation effort:unsupported]
+  verifier             agent=claude preset=- model=- effort=-  
+[effort:unsupported]
+  review               agent=codex preset=- model=- effort=-  
+[effort:unsupported]
+  supervisor           agent=claude preset=- model=- effort=-  
+[effort:unsupported]
+  planner              agent=claude preset=- model=- effort=-  
+[effort:unsupported]
+  content_generation   agent=claude preset=- model=- effort=-  
+[effort:unsupported]
+  deliberate           agent=claude preset=- model=- effort=-  
+[effort:unsupported]
+presets (0):
+fallback · max_agent_switches=2 budget_by_candidate_step=True
+  1. agent=claude preset=- model=- effort=-
+  2. agent=kimi preset=- model=- effort=-
+  3. agent=codex preset=- model=- effort=-
+LOOPBACK_HTTP_RESULT=exit_code=0
+REPOSITORY_INJECTION_OUTPUT=error: Invalid KedaCode local config at /private/tmp/issue416-gitea/rv4/repository/.kedacode.toml: [agent_runner.gitea_instances] is machine-only; register it in the local KedaCode config.toml instead.
+next: kc registry list
+REPOSITORY_INJECTION_RESULT=exit_code=1 rejected=true
+EXPECTED_FAIL=if either configuration boundary regresses, its invalid configuration command will exit 0

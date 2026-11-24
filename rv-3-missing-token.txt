@@ -1,0 +1,19 @@
+TREE_HASH=033c8a364d6384e4f07dddeb6357da925d29c1c9
+ENTRY_POINT=uv run --no-sync kc --repo <repo> issue list --output json
+TOKEN_CASE=missing
+[WARN] Repository 'rv3-missing-token' has no github_repo configured; PR column will be empty. Set github_repo = "owner/name" in [agent_runner.repositories.<id>] or .kedacode.toml.
+[]
+Error fetching <repo>: /private/tmp/issue416-gitea/rv3/repository: Gitea token 
+environment variable 'RV_ABSENT_TOKEN' is unset or empty; set it before making 
+Gitea requests.
+TOKEN_CASE_RESULT=missing exit_code=1 requests=0
+TOKEN_CASE=empty
+[WARN] Repository 'rv3-missing-token' has no github_repo configured; PR column will be empty. Set github_repo = "owner/name" in [agent_runner.repositories.<id>] or .kedacode.toml.
+[]
+Error fetching <repo>: /private/tmp/issue416-gitea/rv3/repository: Gitea token 
+environment variable 'RV_ABSENT_TOKEN' is unset or empty; set it before making 
+Gitea requests.
+TOKEN_CASE_RESULT=empty exit_code=1 requests=0
+NEGATIVE_CONTROL=setting the registered token allows a local API request; requests=1 exit_code=1
+EXPECTED_FAIL=if the token-presence control is working, the registered token reaches the listener
+TOKEN_EVIDENCE_SCAN=passed no token value found in the evidence directory.

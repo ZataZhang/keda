@@ -1,0 +1,12 @@
+ITEM=rv-1 real Gitea UI presentation
+EXPECTED_ARTIFACTS=rv-1-gitea-pr-wip.png, rv-1-gitea-pr-merged.png, rv-1-demo.mp4
+ENTRY_POINT=RV_CAPTURE_BROWSER=1 bash tasks/evidence/P2-FEAT-20261120-170035-gitea-platform-client/scripts/rv1_full_loop.sh
+
+ENVIRONMENT=Linux container (mcr.microsoft.com/playwright:v1.50.1-noble), Playwright 1.50.1 Chromium headless, ffmpeg for MP4 encoding.
+NETWORK=Gitea 1.21.11 runs with --network container:<runner> and HTTP_PORT=3300, so the runner, kc and the browser all reach the same http://127.0.0.1:3300 base URL that the machine-local registry declares.
+PREVIOUS_BLOCKER=On the original macOS host Chromium was denied at MachPortRendezvousServer and WebKit exited with Abort trap: 6; that blocker does not apply to this capture environment.
+
+WIP_PAGE=PR #2 rendered "WIP: [Agent] Gitea runner full-loop validation" with the Draft badge and "Closes #1"; screenshot rv-1-gitea-pr-wip.png.
+MERGED_PAGE=The same PR rendered "[Agent] Gitea runner full-loop validation" with the Merged badge (WIP prefix removed); screenshot rv-1-gitea-pr-merged.png.
+DEMO=rv-1-demo.mp4 (about 56s) shows the labels page, the ready Issue with the claim comment, the WIP Draft PR, and the merged PR, each with a Chinese caption held for at least 3s.
+RESULT=PASS visual presentation captured from the same rv-1 run recorded in rv-1-gitea-full-loop.txt.

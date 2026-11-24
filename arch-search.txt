@@ -1,0 +1,15 @@
+COMMIT=8b29d751471a8201825e3329745f2763d0c2303d
+COMMIT_TREE=033c8a364d6384e4f07dddeb6357da925d29c1c9
+GITEA_GH_SEARCH=rg -n "gh" src/backend/infrastructure/gitea_*.py
+RESULT=PASS no gh command literal in Gitea adapters.
+PR_NUMBER_HELPER_SEARCH=rg -n 'pulls?' src/backend/core/shared/models/pull_request_url.py
+8:_PULL_REQUEST_NUMBER_PATTERN = re.compile(r"/pulls?/(\d+)(?:/|$)", re.IGNORECASE)
+DEPENDENCY_DIFF=git diff --quiet -- pyproject.toml uv.lock
+RESULT=PASS no dependency manifest changes.
+FILE_NONEMPTY_LINES=
+src/backend/infrastructure/gitea_client.py=800
+src/backend/infrastructure/gitea_pr_ops.py=517
+INTERFACE_DIFF=git diff --quiet -- src/backend/core/shared/interfaces/agent_runner.py
+RESULT=PASS IGitHubClient interface signatures unchanged.
+GITHUB_CLIENT_DIFF=git diff --quiet -- src/backend/infrastructure/github_*.py
+RESULT=PASS GitHub client files unchanged.
