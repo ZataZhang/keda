@@ -98,6 +98,12 @@ def test_cli_template_registers_without_firing_or_overwriting(
     assert "example/product" in recipe.body_template
     assert "custom/blocked" in recipe.body_template
     assert "ZataZhang" not in recipe.body_template
+    assert "references/duty.md" in recipe.body_template
+    assert "已由人工接管" in recipe.body_template
+    assert "不恢复、不重开、不重复交接" in recipe.body_template
+    assert "各项检查对应的 SHA" not in recipe.body_template
+    assert "Attempt History" not in recipe.body_template
+    assert "相同输入且无新进展时复用原摘要" in recipe.body_template
     assert "technical-blocker" in cli_result.output
     original_text = task.recipe_path.read_text(encoding="utf-8")
     repeated = CliRunner().invoke(app, [*cli_args, "--force"], standalone_mode=False)

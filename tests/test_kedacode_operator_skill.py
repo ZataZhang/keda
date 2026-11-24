@@ -43,8 +43,8 @@ _PACKAGED_SKILL = _PACKAGED_SKILL_DIR / "SKILL.md"
 #: 子命令说明子目录。
 _PACKAGED_REFERENCES_DIR = _PACKAGED_SKILL_DIR / "references"
 
-#: 子命令说明的当前份数；新增路由时须同步受管集合与此契约。
-_EXPECTED_REFERENCE_COUNT = 12
+#: operator references 的当前份数；新增路由时须同步受管集合与此契约。
+_EXPECTED_REFERENCE_COUNT = 13
 
 #: 改名前随包发行的旧名 skill 目录（安装根里遗留的副本，只用于清理判定）。
 _LEGACY_SKILL_NAME = "iar-operator"
@@ -103,7 +103,7 @@ def test_packaged_skill_managed_set_matches_release_directory_one_to_one() -> No
     assert reference_names == observed_reference_names
     assert (
         len(observed_reference_names) == _EXPECTED_REFERENCE_COUNT
-    ), f"references/ 应恰好有 {_EXPECTED_REFERENCE_COUNT} 份子命令说明"
+    ), f"references/ 应恰好有 {_EXPECTED_REFERENCE_COUNT} 份岗位说明"
 
 
 def test_packaged_skill_reinstall_reports_up_to_date(tmp_path: Path) -> None:
@@ -795,8 +795,8 @@ def test_packaged_skill_whitelist_matches_runtime_schema() -> None:
 
 # ── 路由与自我描述（rv-4）────────────────────────────────────────────────────
 
-#: 每条子命令说明的口语关键词：自动触发只认 frontmatter description，路由表对
-#: 模型不可见，因此每条子命令各自至少一个关键词必须出现在 description 里。
+#: 每份参考说明的口语关键词：自动触发只认 frontmatter description，路由表对
+#: 模型不可见，因此每份说明各自至少一个关键词必须出现在 description 里。
 _ROUTE_KEYWORDS_BY_REFERENCE: dict[str, tuple[str, ...]] = {
     "create-issue.md": ("建 issue", "create an Issue"),
     "issue-inspect.md": ("查 issue", "inspect Issues"),
@@ -805,6 +805,7 @@ _ROUTE_KEYWORDS_BY_REFERENCE: dict[str, tuple[str, ...]] = {
     "run-once.md": ("跑一次", "run one execution pass"),
     "watch.md": ("看进度", "live agent output"),
     "triage.md": ("卡住了", "triage stuck"),
+    "duty.md": ("谁该接手", "还需要谁处理"),
     "daemon.md": ("后台跑", "daemons"),
     "hosted-runner.md": ("托管 Runner", "hosted runner", "kc container gc"),
     "loop.md": ("定时任务", "recurring loops"),
@@ -845,13 +846,13 @@ def test_packaged_skill_routes_table_points_at_existing_references() -> None:
     header_row, data_rows = rows[0], rows[1:]
     assert (
         len(data_rows) == _EXPECTED_REFERENCE_COUNT
-    ), f"路由表应有 {_EXPECTED_REFERENCE_COUNT} 条子命令"
+    ), f"路由表应有 {_EXPECTED_REFERENCE_COUNT} 条路由"
     assert "The user may say" in header_row
 
     referenced_names: set[str] = set()
     for row in data_rows:
         matches = re.findall(r"references/([A-Za-z0-9._-]+\.md)", row)
-        assert len(matches) == 1, f"路由行应恰好指向一份子命令说明：{row}"
+        assert len(matches) == 1, f"路由行应恰好指向一份参考说明：{row}"
         reference_name = matches[0]
         assert (
             _PACKAGED_REFERENCES_DIR / reference_name

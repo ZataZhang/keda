@@ -42,6 +42,27 @@ kc daemon --repo-id my-repo
   维护者须处理该 Issue 后关闭或合并对应 PR，调度才会继续。
 - daemon 停止或机器关机期间不执行；配置持久保存，恢复运行后按现有 loop 规则补发一次。
 
+### 值班员取证与人工接管
+
+巡检处理每个目标前，使用随包 `kedacode-operator` Skill 的
+`references/duty.md` 核对 Issue/PR 的真实关联、PR 当前 head 和检查对应的 SHA、最新
+Attempt History、执行日志与人工处理决定。旧提交的检查结果不能代表当前 head；日志安静
+不能单独证明失败。找不到 GitHub 或本机日志时，要记录缺失来源和补查入口，不能当作空队列。
+
+若 Issue 时间线里有最新、明确的人工接管决定，巡检停止该目标的自动跟进：不重试、不重开、
+不再次交接。正在运行的任务交给停滞监控。人工接管优先于旧失败标签；值班员参考只改进取证，
+不会扩大巡检现有恢复授权。输入和证据没有新变化时，复用上一轮摘要，不重复留言。
+
+已注册的旧配方不会自动更新。先手动把现有 `tasks/loops/<loop-id>.md` 的取证和停止条件
+更新到与 blocker-monitor 模板一致，再用该文件刷新注册；`--force` 只替换调度注册，不会改写
+配方文件：
+
+```bash
+kc loop create <loop-id> --recipe tasks/loops/<loop-id>.md --force
+```
+
+检查更新后的配方保留原队列、授权和收尾规则，再通过 `kc loop list` 确认已注册。
+
 预览一次触发：
 
 ```bash

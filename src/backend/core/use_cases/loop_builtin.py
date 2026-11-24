@@ -105,9 +105,10 @@ def render_blocker_monitor_recipe(context: RepositoryRunContext, *, loop_id: str
 并在验证成功后恢复原任务。代码修改走仓库现有规范与 Draft PR 流程。
 产品取舍、权限、密钥、受保护路径和外部审批需要人工决定，不能猜测或绕过。
 
-1. fresh read 当前 open 的 `{labels.blocked}` / `{labels.failed}` Issues，排除
-   带 `loop/{loop_id}` 的本巡检 Issue；读取正文、Attempt History、相关 PR 和
-   `kc logs --repo-id {repo_selector} --issue <N>`。不接管仍在运行的任务。
+1. 逐条 fresh read 当前 open 的 `{labels.blocked}` / `{labels.failed}` Issues；排除带
+   `loop/{loop_id}` 的本巡检 Issue。按已安装 `kedacode-operator` Skill 的
+   `references/duty.md` 取证和判断；若其确认目标已由人工接管，立即停止自动跟进，
+   不恢复、不重开、不重复交接。其余目标仅按本配方原有授权处理。
 2. 计数为 unknown 时，先复现并诊断 GitHub 访问故障，保留错误证据，不能据此重试任务。
 3. 对失败任务分类：发布收尾使用 `kc recover --repo-id {repo_selector} --issue <N>`；
    执行失败须先修复根因并验证，再按恢复流程重新排队。禁止无依据地反复重试。
@@ -116,7 +117,8 @@ def render_blocker_monitor_recipe(context: RepositoryRunContext, *, loop_id: str
    恢复原任务并读回状态。需要人工决定时，在原 Issue 留下证据和最小待决项，保留 blocked；
    本巡检 Issue 也进入 blocked，等待维护者处理，不重复造票。
 5. 将处置摘要写进本巡检 Issue 正文：目标 Issue/PR、根因、修复、验证结果、最新状态及
-   待决事项。没有剩余工作时关闭本巡检 Issue；有修复 PR 时保留至交付。
+   待决事项。先与上一轮摘要比较；相同输入且无新进展时复用原摘要，不新增重复交接。
+   没有剩余工作时关闭本巡检 Issue；有修复 PR 时保留至交付。
    PR 使用 `Closes #<本巡检 Issue>`，未完成的目标仅用 `Addresses` / `Related to` 关联。
 
 空队列由 pre_command 跳过，不创建 Issue、不调用 Agent。后台 `kc daemon` 停止时不调度；

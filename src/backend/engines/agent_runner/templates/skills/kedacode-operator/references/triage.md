@@ -2,7 +2,7 @@
 
 ## When to use
 
-The user says 「怎么不动了」「卡住了」「失败了怎么办」「为什么没跑」, asks about a label like `agent/blocked`, or wants to retry a failed Issue. Reading live output alone is 看进度; starting work is 跑一次.
+The user says 「怎么不动了」「卡住了」「失败了怎么办」「为什么没跑」, asks about a label like `agent/blocked`, or wants to retry a failed Issue. Reading live output alone is 看进度; starting work is 跑一次. If they only want the current owner and next handoff, use `references/duty.md` instead.
 
 ## Confirm before acting
 
