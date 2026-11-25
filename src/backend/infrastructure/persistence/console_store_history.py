@@ -147,6 +147,55 @@ class RunHistoryReadMixin:
             record_rows = connection.execute(query, query_params).fetchall()
         return [_run_record_from_row(record_row) for record_row in record_rows]
 
+    def list_runs_in_window(
+        self,
+        *,
+        repo_id: str | None,
+        since_started_at: str,
+        before_started_at: str,
+        limit: int = 10000,
+    ) -> list[RunRecord]:
+        """按开始时间读取指定 UTC 半开区间内的运行记录。
+
+        Args:
+            repo_id: 仓库过滤；``None`` 表示全部仓库。
+            since_started_at: 包含的 ISO-8601 UTC 下界。
+            before_started_at: 不包含的 ISO-8601 UTC 上界。
+            limit: 最多返回的运行条数。
+
+        Returns:
+            按开始时间倒序排列的运行记录。
+        """
+        query = (
+            f"SELECT {_RUN_RECORD_COLUMNS} "
+            "FROM run_records WHERE started_at >= ? AND started_at < ?"
+        )
+        query_params: list[object] = [since_started_at, before_started_at]
+        if repo_id is not None:
+            query += " AND repo_id = ?"
+            query_params.append(repo_id)
+        query += " ORDER BY started_at DESC, id DESC LIMIT ?"
+        query_params.append(max(1, limit))
+        with self._connection() as connection:
+            record_rows = connection.execute(query, query_params).fetchall()
+        return [_run_record_from_row(record_row) for record_row in record_rows]
+
+    def list_runs_overlapping_window_start(
+        self, *, repo_id: str | None, start_at: str
+    ) -> list[RunRecord]:
+        """读取窗口开始前启动且在窗口内仍存续的执行。"""
+        query = (
+            f"SELECT {_RUN_RECORD_COLUMNS} "
+            "FROM run_records WHERE started_at < ? AND (finished_at IS NULL OR finished_at >= ?)"
+        )
+        query_params: list[object] = [start_at, start_at]
+        if repo_id is not None:
+            query += " AND repo_id = ?"
+            query_params.append(repo_id)
+        with self._connection() as connection:
+            record_rows = connection.execute(query, query_params).fetchall()
+        return [_run_record_from_row(record_row) for record_row in record_rows]
+
     def list_recent_runs_by_issue(
         self, *, repo_id: str, since_started_at: str, limit: int = 100
     ) -> list[RunRecord]:

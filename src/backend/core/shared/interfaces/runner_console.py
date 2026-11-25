@@ -326,6 +326,28 @@ class IRunHistoryStore(ABC):
         return [], []
 
     @abstractmethod
+    def list_runs_in_window(
+        self,
+        *,
+        repo_id: str | None,
+        since_started_at: str,
+        before_started_at: str,
+        limit: int = 10000,
+    ) -> list[RunRecord]:
+        """按开始时间读取 UTC 半开区间内的运行记录，并按最近开始时间倒序返回。
+
+        Args:
+            repo_id: 仓库过滤；``None`` 表示全部仓库。
+            since_started_at: 包含的 ISO-8601 UTC 下界。
+            before_started_at: 不包含的 ISO-8601 UTC 上界。
+            limit: 最多返回的运行条数。
+
+        Returns:
+            指定时间窗口内的运行历史记录。
+        """
+        ...
+
+    @abstractmethod
     def list_recent_runs_by_issue(
         self, *, repo_id: str, since_started_at: str, limit: int = 100
     ) -> list[RunRecord]:

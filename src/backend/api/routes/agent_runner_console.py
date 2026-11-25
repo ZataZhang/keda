@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Sequence
 from dataclasses import asdict, is_dataclass
+from datetime import date, datetime, time, timedelta, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any, cast
@@ -55,7 +56,12 @@ from backend.core.use_cases.console_processes import (
 from backend.core.use_cases.console_stats import (
     build_agent_performance_stats,
     build_completion_stats_overview,
+    build_repository_issue_status,
     build_run_history_trend,
+)
+from backend.core.use_cases.issue_cost_stats import (
+    IssueCostQuery,
+    build_issue_cost_ledger,
 )
 from backend.core.use_cases.issue_logs import (
     DEFAULT_TAIL_BYTES,
@@ -440,32 +446,238 @@ def get_console_stats_history(repo_id: str | None = None, days: int = 30) -> dic
     }
 
 
+def _resolve_stats_period(
+    *, start_date: date | None, end_date: date | None, days: int
+) -> tuple[int, datetime | None]:
+    """解析 Stats 诊断端点的天数窗口或显式 UTC 日期窗口。"""
+    if (start_date is None) != (end_date is None):
+        raise HTTPException(
+            status_code=422,
+            detail="start_date 和 end_date 必须同时提供。",
+        )
+    if start_date is None or end_date is None:
+        return min(max(days, 1), 365), None
+    if end_date < start_date:
+        raise HTTPException(status_code=422, detail="end_date 不能早于 start_date。")
+    window_days = (end_date - start_date).days + 1
+    if window_days > 365:
+        raise HTTPException(status_code=422, detail="统计区间最多为 365 天。")
+    window_end = datetime.combine(end_date + timedelta(days=1), time.min, tzinfo=timezone.utc)
+    return window_days, window_end
+
+
+@router.get("/agent-runner/console/stats/issues")
+def get_console_issue_cost_stats(
+    repo_id: str | None = None,
+    start_date: date | None = None,
+    end_date: date | None = None,
+) -> dict:
+    """组合 GitHub 当前状态与本地 Issue 执行及调用账本。"""
+    if (start_date is None) != (end_date is None):
+        raise HTTPException(
+            status_code=422,
+            detail="start_date 和 end_date 必须同时提供。",
+        )
+    if start_date is None or end_date is None:
+        current_utc_date = datetime.now(timezone.utc).date()
+        end_date = current_utc_date
+        start_date = current_utc_date - timedelta(days=29)
+    if end_date < start_date:
+        raise HTTPException(status_code=422, detail="end_date 不能早于 start_date。")
+    if (end_date - start_date).days >= 365:
+        raise HTTPException(status_code=422, detail="统计区间最多为 365 天。")
+
+    start_at = datetime.combine(start_date, time.min, tzinfo=timezone.utc)
+    before_at = datetime.combine(end_date + timedelta(days=1), time.min, tzinfo=timezone.utc)
+    contexts = [
+        context for context in _resolve_contexts() if repo_id is None or context.repo_id == repo_id
+    ]
+    ledger = build_issue_cost_ledger(
+        store=create_console_store(),
+        query=IssueCostQuery(repo_id=repo_id, start_at=start_at, before_at=before_at),
+    )
+    ledger_by_issue = {(entry.repo_id, entry.issue_number): entry for entry in ledger.entries}
+    repositories = []
+    for context in contexts:
+        try:
+            issue_status = build_repository_issue_status(
+                context=context,
+                github_client=create_github_client(context.repo_path),
+            )
+        except Exception as exc:  # noqa: BLE001 - one repo lookup must not hide other repos.
+            issue_status = None
+            issue_status_error = str(exc)
+        else:
+            issue_status_error = issue_status.error
+
+        tracked_issue_by_number = (
+            {issue.issue_number: issue for issue in issue_status.issues}
+            if issue_status is not None
+            else {}
+        )
+        repository_history = {
+            issue_number: history_entry
+            for (history_repo_id, issue_number), history_entry in ledger_by_issue.items()
+            if history_repo_id == context.repo_id
+        }
+        issue_numbers = sorted(
+            set(tracked_issue_by_number) | set(repository_history),
+            key=lambda issue_number: (
+                repository_history[issue_number].executions[-1].started_at
+                if issue_number in repository_history
+                and repository_history[issue_number].executions
+                else "",
+                issue_number,
+            ),
+            reverse=True,
+        )
+        issue_rows = []
+        status_counts = {
+            "blocked": 0,
+            "failed": 0,
+            "in_progress": 0,
+            "completed": 0,
+        }
+        for issue_number in issue_numbers:
+            tracked_issue = tracked_issue_by_number.get(issue_number)
+            history_entry = repository_history.get(issue_number)
+            current_status = (
+                tracked_issue.current_status if tracked_issue is not None else "unknown"
+            )
+            status_filters = (
+                tracked_issue.status_filters if tracked_issue is not None else ("unknown",)
+            )
+            for status_filter in status_filters:
+                if status_filter in status_counts:
+                    status_counts[status_filter] += 1
+            issue_rows.append(
+                {
+                    "repo_id": context.repo_id,
+                    "repository_name": context.display_name,
+                    "issue_number": issue_number,
+                    "title": (
+                        tracked_issue.title
+                        if tracked_issue is not None
+                        else (history_entry.issue_title if history_entry is not None else "")
+                    ),
+                    "issue_url": (
+                        tracked_issue.issue_url
+                        if tracked_issue is not None
+                        else (history_entry.issue_url if history_entry is not None else None)
+                    ),
+                    "github_state": (
+                        tracked_issue.github_state if tracked_issue is not None else "unknown"
+                    ),
+                    "current_status": current_status,
+                    "status_filters": list(status_filters),
+                    "period_run_count": (
+                        len(history_entry.executions) if history_entry is not None else 0
+                    ),
+                    "totals": (
+                        _serialize(history_entry.totals)
+                        if history_entry is not None
+                        else {
+                            "input_tokens": 0,
+                            "output_tokens": 0,
+                            "cache_read_input_tokens": 0,
+                            "cache_creation_input_tokens": 0,
+                            "total_tokens": 0,
+                            "usage_count": 0,
+                        }
+                    ),
+                    "model_usage": (
+                        _serialize(history_entry.model_usage) if history_entry is not None else []
+                    ),
+                    "executions": (
+                        _serialize(history_entry.executions) if history_entry is not None else []
+                    ),
+                    "missing_usage_count": (
+                        history_entry.missing_usage_count if history_entry is not None else 0
+                    ),
+                    "period_data_available": bool(
+                        history_entry is not None and history_entry.executions
+                    ),
+                    "truncated": bool(history_entry and history_entry.truncated),
+                }
+            )
+        repositories.append(
+            {
+                "repo_id": context.repo_id,
+                "display_name": context.display_name,
+                "github_available": issue_status_error is None,
+                "github_error": issue_status_error,
+                "github_truncated": bool(issue_status and issue_status.truncated),
+                "issue_count": len(tracked_issue_by_number),
+                "status_counts": status_counts,
+                "issues": issue_rows,
+                "unlinked_invocation_count": ledger.unlinked_counts_by_repo.get(context.repo_id, 0),
+                "unlinked_missing_usage_count": ledger.unlinked_missing_usage_by_repo.get(
+                    context.repo_id, 0
+                ),
+                "unlinked_model_usage": _serialize(
+                    ledger.unlinked_by_repo.get(context.repo_id, ())
+                ),
+            }
+        )
+    return {
+        "repo_id": repo_id,
+        "start_date": start_date.isoformat(),
+        "end_date": end_date.isoformat(),
+        "repositories": repositories,
+        "unlinked_invocation_count": ledger.unlinked_invocation_count,
+        "truncated_run_history": ledger.truncated_run_history,
+    }
+
+
 @router.get("/agent-runner/console/stats/agent-performance")
 def get_console_agent_performance_stats(
     repo_id: str | None = None,
     days: int = 30,
+    start_date: date | None = None,
+    end_date: date | None = None,
 ) -> dict:
     """按 attempt 与 run 最终结果返回 Agent 执行表现统计。
 
     ``days`` 会由 core 截断到 1–365 天，与其他 Stats 统计端点一致。
     """
+    window_days, window_end = _resolve_stats_period(
+        start_date=start_date,
+        end_date=end_date,
+        days=days,
+    )
     stats = build_agent_performance_stats(
         store=create_console_store(),
         repo_id=repo_id,
-        days=days,
+        days=window_days,
+        reference_now=window_end,
     )
     return _serialize(stats)
 
 
 @router.get("/agent-runner/console/stats/prd-lifecycle")
-def get_console_prd_lifecycle_stats(repo_id: str | None = None, days: int = 30) -> dict:
+def get_console_prd_lifecycle_stats(
+    repo_id: str | None = None,
+    days: int = 30,
+    start_date: date | None = None,
+    end_date: date | None = None,
+) -> dict:
     """PRD 维度端到端统计（平均值 / 中位数 / P90 / 阻塞时长 / 阶段瓶颈 / 明细）。
 
     与 ``stats/history``（单次 runner 调用口径）刻意分开：本端点是完整 PRD
     生命周期口径，进行中记录与无法关联 PRD 的旧记录都明确披露、不进入完成
     分位数。窗口与仓库过滤语义与既有 Stats 页面一致（7/30/90 天）。
     """
-    stats = build_prd_lifecycle_stats(store=create_console_store(), repo_id=repo_id, days=days)
+    window_days, window_end = _resolve_stats_period(
+        start_date=start_date,
+        end_date=end_date,
+        days=days,
+    )
+    stats = build_prd_lifecycle_stats(
+        store=create_console_store(),
+        repo_id=repo_id,
+        days=window_days,
+        now=window_end,
+    )
     return _serialize(stats)
 
 

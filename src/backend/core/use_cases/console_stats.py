@@ -60,6 +60,100 @@ class RepositoryCompletionStats:
 
 
 @dataclass(frozen=True)
+class RepositoryIssueStatus:
+    """一个仓库从 GitHub 读取到的 workflow Issue 当前状态集合。"""
+
+    repo_id: str
+    display_name: str
+    issues: tuple[TrackedIssueStatus, ...]
+    truncated: bool
+    error: str | None = None
+
+
+@dataclass(frozen=True)
+class TrackedIssueStatus:
+    """单个 GitHub Issue 的状态与链接快照。"""
+
+    issue_number: int
+    title: str
+    issue_url: str
+    github_state: str
+    current_status: str
+    status_filters: tuple[str, ...]
+
+
+def _load_tracked_issues(
+    *, context: RepositoryRunContext, github_client: IGitHubClient
+) -> tuple[dict[int, IssueSummary], bool, str | None]:
+    """按现有 workflow label 集合读取 GitHub Issue，并记录截断或失败。"""
+    tracked_issues: dict[int, IssueSummary] = {}
+    truncated = False
+    try:
+        for workflow_label in _workflow_labels(context):
+            labeled_issues = github_client.list_issues_by_label(
+                workflow_label, _PER_LABEL_QUERY_LIMIT, state="all"
+            )
+            if len(labeled_issues) >= _PER_LABEL_QUERY_LIMIT:
+                truncated = True
+            for issue in labeled_issues:
+                tracked_issues[issue.number] = issue
+    except Exception as exc:  # noqa: BLE001 - isolate per-repo stats failures.
+        _logger.warning("Completion stats unavailable for '%s': %s", context.repo_id, exc)
+        return {}, False, str(exc)
+    return tracked_issues, truncated, None
+
+
+def build_repository_issue_status(
+    *, context: RepositoryRunContext, github_client: IGitHubClient
+) -> RepositoryIssueStatus:
+    """读取仓库当前被 workflow 跟踪的 GitHub Issue。
+
+    Args:
+        context: 仓库运行上下文。
+        github_client: 该仓库的 GitHub 客户端。
+
+    Returns:
+        当前 Issue 集合；GitHub 查询失败时保留错误并返回空集合。
+    """
+    tracked_issues, truncated, error = _load_tracked_issues(
+        context=context, github_client=github_client
+    )
+    issue_statuses = []
+    for issue in sorted(tracked_issues.values(), key=lambda tracked_issue: tracked_issue.number):
+        has_blocked = context.config.labels.blocked in issue.labels
+        has_failed = context.config.labels.failed in issue.labels
+        if _is_closed(issue):
+            status_filters = ("completed",)
+            current_status = "completed"
+        elif has_blocked:
+            status_filters = ("blocked",) + (("failed",) if has_failed else ())
+            current_status = "blocked"
+        elif has_failed:
+            status_filters = ("failed",)
+            current_status = "failed"
+        else:
+            status_filters = ("in_progress",)
+            current_status = "in_progress"
+        issue_statuses.append(
+            TrackedIssueStatus(
+                issue_number=issue.number,
+                title=issue.title,
+                issue_url=issue.url,
+                github_state=issue.state,
+                current_status=current_status,
+                status_filters=status_filters,
+            )
+        )
+    return RepositoryIssueStatus(
+        repo_id=context.repo_id,
+        display_name=context.display_name,
+        issues=tuple(issue_statuses),
+        truncated=truncated,
+        error=error,
+    )
+
+
+@dataclass(frozen=True)
 class FailureTypeCount:
     """一类非成功 attempt 的数量。"""
 
@@ -147,19 +241,10 @@ def build_completion_stats(
         RepositoryCompletionStats: 实时完成度统计；GitHub 查询失败时
         返回带 ``error`` 的空统计，不让单仓库失败拖死整个统计页。
     """
-    tracked_issues: dict[int, IssueSummary] = {}
-    truncated = False
-    try:
-        for workflow_label in _workflow_labels(context):
-            labeled_issues = github_client.list_issues_by_label(
-                workflow_label, _PER_LABEL_QUERY_LIMIT, state="all"
-            )
-            if len(labeled_issues) >= _PER_LABEL_QUERY_LIMIT:
-                truncated = True
-            for issue in labeled_issues:
-                tracked_issues[issue.number] = issue
-    except Exception as exc:  # noqa: BLE001 - isolate per-repo stats failures.
-        _logger.warning("Completion stats unavailable for '%s': %s", context.repo_id, exc)
+    tracked_issues, truncated, error = _load_tracked_issues(
+        context=context, github_client=github_client
+    )
+    if error is not None:
         return RepositoryCompletionStats(
             repo_id=context.repo_id,
             display_name=context.display_name,
@@ -170,7 +255,7 @@ def build_completion_stats(
             open_in_pipeline=0,
             completion_rate=None,
             truncated=False,
-            error=str(exc),
+            error=error,
         )
 
     failed_label = context.config.labels.failed

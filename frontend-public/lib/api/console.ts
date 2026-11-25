@@ -23,6 +23,7 @@ import type {
   EvaluationRun,
   EvaluationRunDetail,
   EvaluationSuiteEntry,
+  IssueCostStats,
   IssueLabelSnapshot,
   IssueLogChunk,
   LaunchOptionsView,
@@ -313,6 +314,31 @@ export async function fetchCompletionStats(): Promise<
   return response.repositories;
 }
 
+/**
+ * 读取 GitHub 当前 Issue 状态及指定 UTC 日期区间内的本机执行费用账本。
+ *
+ * @param params.repoId - 仓库标识；省略表示全部仓库。
+ * @param params.startDate - UTC 日期区间起点（包含）。
+ * @param params.endDate - UTC 日期区间终点（包含）。
+ * @returns 当前状态与期间执行记录按仓库和 Issue 合并后的统计。
+ */
+export async function fetchIssueCostStats(params: {
+  repoId?: string;
+  startDate: string;
+  endDate: string;
+}): Promise<IssueCostStats> {
+  const searchParams = new URLSearchParams({
+    start_date: params.startDate,
+    end_date: params.endDate,
+  });
+  if (params.repoId) {
+    searchParams.set("repo_id", params.repoId);
+  }
+  return get<IssueCostStats>(
+    `${BASE_PATH}/console/stats/issues?${searchParams.toString()}`,
+  );
+}
+
 export async function fetchRunHistoryTrend(params: {
   repoId?: string;
   days?: number;
@@ -328,6 +354,26 @@ export async function fetchRunHistoryTrend(params: {
   return response.trend;
 }
 
+/** 为统计读接口组装共享仓库筛选及日期窗口查询参数。 */
+function buildStatsSearchParams(params: {
+  repoId?: string;
+  days?: number;
+  startDate?: string;
+  endDate?: string;
+}): URLSearchParams {
+  const searchParams = new URLSearchParams();
+  if (params.repoId) {
+    searchParams.set("repo_id", params.repoId);
+  }
+  if (params.startDate && params.endDate) {
+    searchParams.set("start_date", params.startDate);
+    searchParams.set("end_date", params.endDate);
+  } else {
+    searchParams.set("days", String(params.days ?? 30));
+  }
+  return searchParams;
+}
+
 /**
  * 读取按 Agent / preset attempt 和最终任务结果汇总的执行表现。
  *
@@ -338,12 +384,10 @@ export async function fetchRunHistoryTrend(params: {
 export async function fetchAgentPerformanceStats(params: {
   repoId?: string;
   days?: number;
+  startDate?: string;
+  endDate?: string;
 }): Promise<AgentPerformanceStats> {
-  const searchParams = new URLSearchParams();
-  if (params.repoId) {
-    searchParams.set("repo_id", params.repoId);
-  }
-  searchParams.set("days", String(params.days ?? 30));
+  const searchParams = buildStatsSearchParams(params);
   return get<AgentPerformanceStats>(
     `${BASE_PATH}/console/stats/agent-performance?${searchParams.toString()}`,
   );
@@ -362,12 +406,10 @@ export async function fetchAgentPerformanceStats(params: {
 export async function fetchPrdLifecycleStats(params: {
   repoId?: string;
   days?: number;
+  startDate?: string;
+  endDate?: string;
 }): Promise<PrdLifecycleStats> {
-  const searchParams = new URLSearchParams();
-  if (params.repoId) {
-    searchParams.set("repo_id", params.repoId);
-  }
-  searchParams.set("days", String(params.days ?? 30));
+  const searchParams = buildStatsSearchParams(params);
   return get<PrdLifecycleStats>(
     `${BASE_PATH}/console/stats/prd-lifecycle?${searchParams.toString()}`,
   );

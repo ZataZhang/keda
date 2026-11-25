@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from collections.abc import Sequence
 from datetime import datetime, timedelta
@@ -22,6 +23,7 @@ from backend.core.shared.interfaces.runner_console import (
 )
 from backend.core.shared.models.agent_runner import (
     AppConfig,
+    IssueSummary,
     RepositoryRunContext,
 )
 from backend.core.use_cases.console_actions import ConsoleActionResult
@@ -858,6 +860,419 @@ def test_stats_history_empty(console_environment) -> None:
     response = client.get("/api/v1/agent-runner/console/stats/history?days=7")
     assert response.status_code == 200
     assert response.json()["trend"] == []
+
+
+def test_issue_cost_stats_reads_sqlite_and_console_http_with_repo_issue_key(
+    console_environment, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """真实 Console HTTP 路由按仓库 + Issue 汇总重试与模型明细。"""
+    from datetime import datetime, time, timedelta, timezone
+
+    from tests.support.relative_time import utc_days_ago
+
+    store = console_environment["store"]
+    now = utc_now()
+    started_at = [utc_days_ago(2) + timedelta(hours=index) for index in range(3)]
+    first_repo_runs = [
+        RunRecord(
+            repo_id="keda-main",
+            repo_path="/tmp/keda-main",
+            issue_number=7,
+            trigger="cli_run",
+            agent="codex",
+            outcome=outcome,
+            error_summary="retry after model failure" if outcome == "failed" else None,
+            started_at=run_start.isoformat(),
+            finished_at=(run_start + timedelta(minutes=2)).isoformat(),
+            duration_seconds=120,
+            issue_title="Issue seven",
+            issue_url="https://github.com/example/keda/issues/7",
+        )
+        for outcome, run_start in zip(("completed", "failed", "completed"), started_at, strict=True)
+    ]
+    first_repo_runs.append(
+        RunRecord(
+            repo_id="keda-main",
+            repo_path="/tmp/keda-main",
+            issue_number=8,
+            trigger="console_run",
+            agent="claude",
+            outcome="failed",
+            error_summary="usage not reported",
+            started_at=(now - timedelta(hours=1)).isoformat(),
+            finished_at=(now - timedelta(minutes=58)).isoformat(),
+            duration_seconds=120,
+            issue_title="Missing usage",
+            issue_url="https://github.com/example/keda/issues/8",
+        )
+    )
+    second_repo_run = RunRecord(
+        repo_id="other-repo",
+        repo_path="/tmp/other-repo",
+        issue_number=7,
+        trigger="cli_run",
+        agent="codex",
+        outcome="completed",
+        error_summary=None,
+        started_at=(now - timedelta(hours=2)).isoformat(),
+        finished_at=(now - timedelta(hours=1, minutes=58)).isoformat(),
+        duration_seconds=120,
+        issue_title="Other repository issue seven",
+        issue_url="https://github.com/example/other/issues/7",
+    )
+    for run_record in [*first_repo_runs, second_repo_run]:
+        store.append_run(run_record)
+
+    boundary_start = datetime.combine(
+        now.date() - timedelta(days=1), time(23, 59), tzinfo=timezone.utc
+    )
+    store.append_run(
+        RunRecord(
+            repo_id="keda-main",
+            repo_path="/tmp/keda-main",
+            issue_number=10,
+            trigger="cli_run",
+            agent="codex",
+            outcome="completed",
+            error_summary=None,
+            started_at=boundary_start.isoformat(),
+            finished_at=(boundary_start + timedelta(minutes=2)).isoformat(),
+            duration_seconds=120,
+            issue_title="Boundary crossing Issue",
+            issue_url="https://github.com/example/keda/issues/10",
+        )
+    )
+    store.append_run(
+        RunRecord(
+            repo_id="offline-repo",
+            repo_path="/tmp/offline-repo",
+            issue_number=12,
+            trigger="cli_run",
+            agent="codex",
+            outcome="completed",
+            error_summary=None,
+            started_at=(now - timedelta(hours=1)).isoformat(),
+            finished_at=(now - timedelta(minutes=58)).isoformat(),
+            duration_seconds=120,
+            issue_title="GitHub unavailable Issue",
+            issue_url="https://github.com/example/offline/issues/12",
+        )
+    )
+
+    first_repo_usage = (
+        {
+            "input_tokens": 100,
+            "output_tokens": 50,
+            "cache_read_input_tokens": 10,
+            "cache_creation_input_tokens": 5,
+        },
+        {
+            "input_tokens": 80,
+            "output_tokens": 40,
+            "cache_read_input_tokens": 5,
+            "cache_creation_input_tokens": 0,
+        },
+        {
+            "input_tokens": 20,
+            "output_tokens": 10,
+            "cache_read_input_tokens": 0,
+            "cache_creation_input_tokens": 0,
+        },
+    )
+    for run_index, (run_record, usage_summary) in enumerate(
+        zip(first_repo_runs[:3], first_repo_usage, strict=True)
+    ):
+        run_start = datetime.fromisoformat(run_record.started_at)
+        event_detail = {
+            "token_usage": usage_summary,
+            "reported_model": "model-a" if run_index < 2 else None,
+            "prd_path": f"tasks/pending/retry-{run_index}.md",
+        }
+        invocation_event = InvocationEventRecord(
+            run_id="keda-main#7",
+            event_key=f"call-{run_index}:invocation_finished",
+            event_type="invocation_finished",
+            invocation_id=f"call-{run_index}",
+            repo_id="keda-main",
+            issue_number=7,
+            phase="implementation",
+            role="primary",
+            agent="codex",
+            occurred_at=(run_start + timedelta(seconds=30)).isoformat(),
+            detail_json=json.dumps(event_detail),
+        )
+        assert store.append_invocation_event(invocation_event) is True
+        assert store.append_invocation_event(invocation_event) is False
+
+    store.append_invocation_event(
+        InvocationEventRecord(
+            run_id="keda-main#8",
+            event_key="missing-usage:invocation_finished",
+            event_type="invocation_finished",
+            invocation_id="missing-usage",
+            repo_id="keda-main",
+            issue_number=8,
+            phase="implementation",
+            role="primary",
+            agent="claude",
+            occurred_at=(now - timedelta(minutes=59)).isoformat(),
+            detail_json="{}",
+        )
+    )
+    store.append_invocation_event(
+        InvocationEventRecord(
+            run_id="other-repo#7",
+            event_key="other-call:invocation_finished",
+            event_type="invocation_finished",
+            invocation_id="other-call",
+            repo_id="other-repo",
+            issue_number=7,
+            phase="implementation",
+            role="primary",
+            agent="codex",
+            occurred_at=(now - timedelta(hours=1, minutes=59)).isoformat(),
+            detail_json=json.dumps(
+                {
+                    "token_usage": {"input_tokens": 10, "output_tokens": 0},
+                    "reported_model": "model-a",
+                }
+            ),
+        )
+    )
+    store.append_invocation_event(
+        InvocationEventRecord(
+            run_id="keda-main#10",
+            event_key="boundary-call:invocation_finished",
+            event_type="invocation_finished",
+            invocation_id="boundary-call",
+            repo_id="keda-main",
+            issue_number=10,
+            phase="implementation",
+            role="primary",
+            agent="codex",
+            occurred_at=(boundary_start + timedelta(minutes=1)).isoformat(),
+            detail_json=json.dumps(
+                {
+                    "token_usage": {"input_tokens": 40, "output_tokens": 15},
+                    "reported_model": "model-a",
+                }
+            ),
+        )
+    )
+
+    store.append_invocation_event(
+        InvocationEventRecord(
+            run_id="orphan",
+            event_key="orphan-finished",
+            event_type="invocation_finished",
+            invocation_id="orphan",
+            repo_id="keda-main",
+            issue_number=None,
+            phase="implementation",
+            role="primary",
+            agent="codex",
+            occurred_at=now.isoformat(),
+            detail_json=json.dumps(
+                {
+                    "token_usage": {"input_tokens": 25, "output_tokens": 0},
+                    "reported_model": "orphan-model",
+                }
+            ),
+        )
+    )
+    store.append_invocation_event(
+        InvocationEventRecord(
+            run_id="orphan-no-usage",
+            event_key="orphan-no-usage-finished",
+            event_type="invocation_finished",
+            invocation_id="orphan-no-usage",
+            repo_id="keda-main",
+            issue_number=None,
+            phase="implementation",
+            role="primary",
+            agent="codex",
+            occurred_at=now.isoformat(),
+            detail_json="{}",
+        )
+    )
+
+    second_repo_path = console_environment["tmp_path"] / "other-repo"
+    second_repo_path.mkdir()
+    offline_repo_path = console_environment["tmp_path"] / "offline-repo"
+    offline_repo_path.mkdir()
+    monkeypatch.setattr(
+        console_routes,
+        "_resolve_contexts",
+        lambda: [
+            RepositoryRunContext(
+                repo_id="keda-main",
+                display_name="Keda Main",
+                repo_path=console_environment["tmp_path"] / "repo",
+                config=AppConfig(),
+            ),
+            RepositoryRunContext(
+                repo_id="other-repo",
+                display_name="Other Repo",
+                repo_path=second_repo_path,
+                config=AppConfig(),
+            ),
+            RepositoryRunContext(
+                repo_id="offline-repo",
+                display_name="Offline Repo",
+                repo_path=offline_repo_path,
+                config=AppConfig(),
+            ),
+        ],
+    )
+
+    class FakeGithubClient:
+        def __init__(self, issues: list[IssueSummary]):
+            self._issues = issues
+
+        def list_issues_by_label(self, label: str, limit: int, state: str = "open"):
+            del limit, state
+            return [issue for issue in self._issues if label in issue.labels]
+
+    github_issues_by_repo = {
+        "repo": [
+            IssueSummary(
+                number=7,
+                title="Issue seven current title",
+                url="https://github.com/example/keda/issues/7",
+                body="",
+                labels=("agent/ready", "agent/blocked", "agent/failed"),
+                state="CLOSED",
+            ),
+            IssueSummary(
+                number=9,
+                title="Blocked with no period run",
+                url="https://github.com/example/keda/issues/9",
+                body="",
+                labels=("agent/blocked",),
+                state="OPEN",
+            ),
+        ],
+        "other-repo": [
+            IssueSummary(
+                number=7,
+                title="Other issue seven",
+                url="https://github.com/example/other/issues/7",
+                body="",
+                labels=("agent/running",),
+                state="OPEN",
+            )
+        ],
+    }
+
+    def fake_create_github_client(repo_path):
+        if repo_path.name == "offline-repo":
+            raise RuntimeError("GitHub unavailable")
+        return FakeGithubClient(github_issues_by_repo[repo_path.name])
+
+    monkeypatch.setattr(console_routes, "create_github_client", fake_create_github_client)
+    start_date = (now.date() - timedelta(days=3)).isoformat()
+    end_date = now.date().isoformat()
+
+    response = client.get(
+        "/api/v1/agent-runner/console/stats/issues",
+        params={"start_date": start_date, "end_date": end_date},
+    )
+
+    assert response.status_code == 200, response.text
+    repeated_response = client.get(
+        "/api/v1/agent-runner/console/stats/issues",
+        params={"start_date": start_date, "end_date": end_date},
+    )
+    assert repeated_response.status_code == 200, repeated_response.text
+    assert repeated_response.json() == response.json()
+    fixture_path = os.environ.get("KC_ISSUE_COST_HTTP_FIXTURE")
+    if fixture_path:
+        pricing_path = "/api/v1/agent-runner/console/model-pricing"
+        pricing_response = client.put(
+            pricing_path,
+            json={
+                "models": [
+                    {
+                        "model_id": "model-a",
+                        "input_usd_per_million": 2,
+                        "output_usd_per_million": 4,
+                        "cache_read_usd_per_million": 1,
+                        "cache_creation_usd_per_million": 3,
+                    }
+                ]
+            },
+        )
+        assert pricing_response.status_code == 200, pricing_response.text
+        saved_pricing = client.get(pricing_path)
+        assert saved_pricing.status_code == 200, saved_pricing.text
+        Path(fixture_path).write_text(
+            json.dumps({"stats": response.json(), "pricing": saved_pricing.json()}),
+            encoding="utf-8",
+        )
+    repository_rows = {row["repo_id"]: row for row in response.json()["repositories"]}
+    assert response.json()["unlinked_invocation_count"] >= 1
+    assert repository_rows["keda-main"]["unlinked_invocation_count"] >= 1
+    assert repository_rows["keda-main"]["unlinked_missing_usage_count"] == 1
+    orphan_usage = repository_rows["keda-main"]["unlinked_model_usage"]
+    assert (
+        next(row for row in orphan_usage if row["model_id"] == "orphan-model")["totals"][
+            "total_tokens"
+        ]
+        == 25
+    )
+    first_repo_issues = {
+        issue_row["issue_number"]: issue_row for issue_row in repository_rows["keda-main"]["issues"]
+    }
+    first_repo_issue = first_repo_issues[7]
+    assert first_repo_issue["period_run_count"] == 3
+    assert first_repo_issue["current_status"] == "completed"
+    assert first_repo_issue["status_filters"] == ["completed"]
+    assert first_repo_issue["totals"]["total_tokens"] == 320
+    assert first_repo_issue["totals"]["usage_count"] == 3
+    assert first_repo_issue["model_usage"][0]["model_id"] == "model-a"
+    assert first_repo_issue["model_usage"][0]["totals"]["total_tokens"] == 290
+    assert first_repo_issue["model_usage"][1]["model_id"] == "unknown"
+    assert [execution["outcome"] for execution in first_repo_issue["executions"]] == [
+        "completed",
+        "failed",
+        "completed",
+    ]
+    assert first_repo_issues[8]["period_run_count"] == 1
+    assert first_repo_issues[8]["missing_usage_count"] == 1
+    assert first_repo_issues[8]["totals"]["usage_count"] == 0
+    assert first_repo_issues[9]["period_run_count"] == 0
+    assert first_repo_issues[9]["period_data_available"] is False
+    assert repository_rows["other-repo"]["issues"][0]["totals"]["total_tokens"] == 10
+    assert repository_rows["offline-repo"]["github_available"] is False
+    assert repository_rows["offline-repo"]["issues"][0]["current_status"] == "unknown"
+
+    boundary_date = (now.date() - timedelta(days=1)).isoformat()
+    boundary_response = client.get(
+        "/api/v1/agent-runner/console/stats/issues",
+        params={"start_date": boundary_date, "end_date": boundary_date},
+    )
+    assert boundary_response.status_code == 200, boundary_response.text
+    boundary_issues = {
+        issue_row["issue_number"]: issue_row
+        for repository_row in boundary_response.json()["repositories"]
+        if repository_row["repo_id"] == "keda-main"
+        for issue_row in repository_row["issues"]
+    }
+    assert boundary_issues[7]["period_run_count"] == 0
+    assert boundary_issues[7]["current_status"] == "completed"
+    assert boundary_issues[10]["period_run_count"] == 1
+    assert boundary_issues[10]["totals"]["total_tokens"] == 55
+
+    next_day_response = client.get(
+        "/api/v1/agent-runner/console/stats/issues",
+        params={"start_date": end_date, "end_date": end_date},
+    )
+    assert next_day_response.status_code == 200
+    next_day_repo = next(
+        row for row in next_day_response.json()["repositories"] if row["repo_id"] == "keda-main"
+    )
+    assert next_day_repo["unlinked_invocation_count"] == 2
+    assert all(row["model_id"] != "model-a" for row in next_day_repo["unlinked_model_usage"])
 
 
 def test_agent_performance_stats_reads_fresh_sqlite_rows_through_api(console_environment) -> None:

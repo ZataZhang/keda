@@ -109,6 +109,8 @@ async function fulfillJson(route: Route, payload: object): Promise<void> {
 async function openStatsPage(page: Page): Promise<void> {
   await page.goto('/app/stats')
   await expect(page.getByTestId('stats-prd-lifecycle')).toBeVisible()
+  await page.getByRole('tab', { name: '模型与计价' }).click()
+  await expect(page.getByTestId('stats-token-usage')).toBeVisible()
 }
 
 test.describe('Stats token usage by PRD', () => {
