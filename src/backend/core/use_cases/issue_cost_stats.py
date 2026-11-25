@@ -237,6 +237,25 @@ def build_issue_cost_ledger(*, store: object, query: IssueCostQuery) -> IssueCos
                     unresolved_model_alias=unresolved_model_alias is not None,
                 )
 
+    overlap_reader = getattr(store, "list_runs_overlapping_window_start", None)
+    overlapping_runs = (
+        overlap_reader(
+            repo_id=query.repo_id,
+            start_at=query.start_at.astimezone(timezone.utc).isoformat(timespec="seconds"),
+        )
+        if callable(overlap_reader)
+        else ()
+    )
+    overlapping_windows: dict[tuple[str, int], list[tuple[datetime, datetime | None]]] = {}
+    for run_record in overlapping_runs:
+        started_at = parse_event_timestamp(getattr(run_record, "started_at", None))
+        issue_number = getattr(run_record, "issue_number", None)
+        if started_at is not None and isinstance(issue_number, int):
+            issue_key = (str(getattr(run_record, "repo_id", "") or ""), issue_number)
+            overlapping_windows.setdefault(issue_key, []).append(
+                (started_at, parse_event_timestamp(getattr(run_record, "finished_at", None)))
+            )
+
     window_reader = getattr(store, "list_invocation_events_in_window", None)
     if callable(window_reader):
         for event in window_reader(
@@ -246,6 +265,16 @@ def build_issue_cost_ledger(*, store: object, query: IssueCostQuery) -> IssueCos
         ):
             event_key = (str(getattr(event, "run_id", "")), str(getattr(event, "event_key", "")))
             if event_key in linked_events:
+                continue
+            event_time = parse_event_timestamp(getattr(event, "occurred_at", None))
+            issue_key = (
+                str(getattr(event, "repo_id", "") or ""),
+                getattr(event, "issue_number", None),
+            )
+            if event_time is not None and any(
+                start <= event_time and (finish is None or event_time <= finish)
+                for start, finish in overlapping_windows.get(issue_key, ())
+            ):
                 continue
             unlinked_invocation_count += 1
             repo = str(getattr(event, "repo_id", "") or "")

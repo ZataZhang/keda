@@ -1,3 +1,5 @@
+> 2026-11-25 修复复验：当前树 RV-1 SQLite/HTTP 部分通过；RV-2/RV-3 与美元页面 oracle 因浏览器权限阻塞，独立 verifier 未运行。详见 evidence report 顶部；以下为历史记录。
+
 # 验证计划与执行状态
 
 PRD：[P1-FEAT-20261125-175656-console-issue-cost-stats.md](../../pending/P1-FEAT-20261125-175656-console-issue-cost-stats.md)

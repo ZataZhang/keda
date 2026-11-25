@@ -174,6 +174,23 @@ class RunHistoryReadMixin:
             record_rows = connection.execute(query, query_params).fetchall()
         return [_run_record_from_row(record_row) for record_row in record_rows]
 
+    def list_runs_overlapping_window_start(
+        self, *, repo_id: str | None, start_at: str
+    ) -> list[RunRecord]:
+        """读取窗口开始前启动且在窗口内仍存续的执行。"""
+        query = (
+            "SELECT repo_id, repo_path, issue_number, trigger, agent, outcome, "
+            "error_summary, started_at, finished_at, duration_seconds, issue_title, issue_url "
+            "FROM run_records WHERE started_at < ? AND (finished_at IS NULL OR finished_at >= ?)"
+        )
+        query_params: list[object] = [start_at, start_at]
+        if repo_id is not None:
+            query += " AND repo_id = ?"
+            query_params.append(repo_id)
+        with self._connection() as connection:
+            record_rows = connection.execute(query, query_params).fetchall()
+        return [_run_record_from_row(record_row) for record_row in record_rows]
+
     def list_recent_runs_by_issue(
         self, *, repo_id: str, since_started_at: str, limit: int = 100
     ) -> list[RunRecord]:

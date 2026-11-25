@@ -122,15 +122,15 @@ def build_repository_issue_status(
     for issue in sorted(tracked_issues.values(), key=lambda tracked_issue: tracked_issue.number):
         has_blocked = context.config.labels.blocked in issue.labels
         has_failed = context.config.labels.failed in issue.labels
-        if has_blocked:
+        if _is_closed(issue):
+            status_filters = ("completed",)
+            current_status = "completed"
+        elif has_blocked:
             status_filters = ("blocked",) + (("failed",) if has_failed else ())
             current_status = "blocked"
         elif has_failed:
             status_filters = ("failed",)
             current_status = "failed"
-        elif _is_closed(issue):
-            status_filters = ("completed",)
-            current_status = "completed"
         else:
             status_filters = ("in_progress",)
             current_status = "in_progress"

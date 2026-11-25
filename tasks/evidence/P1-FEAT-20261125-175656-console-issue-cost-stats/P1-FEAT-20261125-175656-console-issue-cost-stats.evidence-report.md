@@ -1,3 +1,11 @@
+> 2026-11-25 修复复验：下方历史树摘要和历史测试结果已过期，以本段为准。实现树 SHA-256：`f219ac97d68894ee007135562bc27bf435006a2104dae133db756ce00c1b2311`（原摘要脚本，排除 PRD、evidence 和 .agent-runner）。
+>
+> RV-1 原始输出：`UV_CACHE_DIR=/private/tmp/uv-cache-issue-449 uv run pytest tests/test_agent_runner_console_api.py::test_issue_cost_stats_reads_sqlite_and_console_http_with_repo_issue_key -q --no-testmon` → `. [100%]`，`1 passed in 0.81s`。真实临时 SQLite、Console HTTP 和独立重复读取；仅 GitHub 客户端替身。手算：Issue #7 为 100+50+80+40+20+10 = 300 输入输出 Token，加缓存读取 10+5 与创建 5，共 320；model-a 290、unknown 30。跨午夜 Issue #10 为 40+15=55，归属前一日；次日仅两条真正未关联调用，无 model-a。关闭 Issue 带 blocked 和 failed 标签仍仅列入 completed。此测试不证明美元展示。
+>
+> RV-2/RV-3 未通过：真实路由重试因 Next Watchpack EMFILE 无法进入测试体；独立 Chromium 启动复现 `bootstrap_check_in ... Permission denied (1100)`，无截图。已终止测试并停止服务。独立 verifier 未运行；本环境和本次授权不允许启动独立代理。截图、美元展示、最终树独立验收仍阻塞。原始产物外部发布须由 runner 完成，本任务禁止 push / 创建 PR。
+>
+> 检查：`just lint --reuse`、`SKIP=check-test-flag just lint --full` 通过（格式化后重跑）；`just test` 报告 90 passed、123 deselected。最后新增的测试断言已用上述定向测试重跑。
+
 ## 人审导航 / Human Review Navigation
 
 PRD：[P1-FEAT-20261125-175656-console-issue-cost-stats.md](../../pending/P1-FEAT-20261125-175656-console-issue-cost-stats.md)

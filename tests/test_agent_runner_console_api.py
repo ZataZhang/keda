@@ -854,7 +854,7 @@ def test_issue_cost_stats_reads_sqlite_and_console_http_with_repo_issue_key(
                 title="Issue seven current title",
                 url="https://github.com/example/keda/issues/7",
                 body="",
-                labels=("agent/ready",),
+                labels=("agent/ready", "agent/blocked", "agent/failed"),
                 state="CLOSED",
             ),
             IssueSummary(
@@ -916,6 +916,7 @@ def test_issue_cost_stats_reads_sqlite_and_console_http_with_repo_issue_key(
     first_repo_issue = first_repo_issues[7]
     assert first_repo_issue["period_run_count"] == 3
     assert first_repo_issue["current_status"] == "completed"
+    assert first_repo_issue["status_filters"] == ["completed"]
     assert first_repo_issue["totals"]["total_tokens"] == 320
     assert first_repo_issue["totals"]["usage_count"] == 3
     assert first_repo_issue["model_usage"][0]["model_id"] == "model-a"
@@ -960,6 +961,7 @@ def test_issue_cost_stats_reads_sqlite_and_console_http_with_repo_issue_key(
     next_day_repo = next(
         row for row in next_day_response.json()["repositories"] if row["repo_id"] == "keda-main"
     )
+    assert next_day_repo["unlinked_invocation_count"] == 2
     assert all(row["model_id"] != "model-a" for row in next_day_repo["unlinked_model_usage"])
 
 
