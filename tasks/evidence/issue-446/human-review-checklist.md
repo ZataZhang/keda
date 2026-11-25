@@ -24,3 +24,9 @@
 **Next human action:** choose the repair path above and have the authorized runner resolve PR #444's merge conflict, reconcile the local fix, run the real `/app/stats/` validation, update the PR review checklist, and reread #443 and #444. The unresolved branch state and current review finding require that decision before recovery.
 
 **Issue closing condition:** keep #446 open and blocked until #443 no longer has an actionable `agent/blocked` or `agent/failed` state, PR #444 reflects the verified fix (or a human takeover is explicitly recorded), and a fresh `--limit 1000` sweep finds no other blocker needing this patrol.
+
+## Review correction — 2026-11-25 09:18Z
+
+The decision requested above is withdrawn: branch reconciliation is a technical task within the patrol's authorization, and the conflict and local repair have not yet been inspected or verified. A fresh read of #443 found two renewing claims, last renewed at 09:18:50Z and 09:17:05Z with 1200-second leases. `kc peers` did not list them, but its offline presence records do not override the fresh lease markers. The existing execution and stall supervisor retain ownership; do not start a second execution, recover, or continue #443 while a claim remains active.
+
+Once ownership is no longer active, reread #443, PR #444, logs and the claims; inspect the current conflict and existing repair, complete and verify the authorized technical fix through the real Console Stats entry point, then use the appropriate recovery flow and recheck the result. Escalate only a specifically evidenced human decision. The prior comments linked above are historical and their request for a maintainer choice is superseded by this correction. The patrol is not resolved; the required repair and verification remain pending.
