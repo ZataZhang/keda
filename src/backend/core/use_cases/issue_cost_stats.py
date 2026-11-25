@@ -80,6 +80,8 @@ class IssueCostLedger:
     entries: tuple[IssueCostHistoryEntry, ...]
     unlinked_invocation_count: int
     truncated_run_history: bool
+    unlinked_by_repo: dict[str, tuple[IssueModelUsage, ...]] = field(default_factory=dict)
+    unlinked_counts_by_repo: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -167,6 +169,9 @@ def build_issue_cost_ledger(*, store: object, query: IssueCostQuery) -> IssueCos
         executions_by_issue.setdefault(issue_key, []).append(execution_usage)
 
     unlinked_invocation_count = 0
+    linked_events: set[tuple[str, str]] = set()
+    unlinked_by_repo: dict[str, dict[str, _MutableModelUsage]] = {}
+    unlinked_counts_by_repo: dict[str, int] = {}
     truncated_issue_keys: set[tuple[str, int]] = set()
     if callable(event_reader):
         for issue_key, execution_usages in executions_by_issue.items():
@@ -204,13 +209,17 @@ def build_issue_cost_ledger(*, store: object, query: IssueCostQuery) -> IssueCos
                     and (execution_window[2] is None or occurred_at <= execution_window[2])
                 ]
                 if not matching_executions:
-                    if query.start_at <= occurred_at < query.before_at:
-                        unlinked_invocation_count += 1
                     continue
                 execution_usage = max(
                     matching_executions,
                     key=lambda execution_window: execution_window[1],
                 )[0]
+                linked_events.add(
+                    (
+                        str(getattr(invocation_event, "run_id", "")),
+                        str(getattr(invocation_event, "event_key", "")),
+                    )
+                )
                 detail = _parse_detail_json(getattr(invocation_event, "detail_json", "") or "")
                 token_totals = _totals_from_payload(detail.get("token_usage"))
                 if token_totals is None:
@@ -225,6 +234,33 @@ def build_issue_cost_ledger(*, store: object, query: IssueCostQuery) -> IssueCos
                     configuration_fallback=configuration_fallback,
                     unresolved_model_alias=unresolved_model_alias is not None,
                 )
+
+    window_reader = getattr(store, "list_invocation_events_in_window", None)
+    if callable(window_reader):
+        for event in window_reader(
+            repo_id=query.repo_id,
+            since=query.start_at.astimezone(timezone.utc).isoformat(timespec="seconds"),
+            before=query.before_at.astimezone(timezone.utc).isoformat(timespec="seconds"),
+        ):
+            event_key = (str(getattr(event, "run_id", "")), str(getattr(event, "event_key", "")))
+            if event_key in linked_events:
+                continue
+            unlinked_invocation_count += 1
+            repo = str(getattr(event, "repo_id", "") or "")
+            unlinked_counts_by_repo[repo] = unlinked_counts_by_repo.get(repo, 0) + 1
+            detail = _parse_detail_json(getattr(event, "detail_json", "") or "")
+            totals = _totals_from_payload(detail.get("token_usage"))
+            if totals is None:
+                continue
+            model_id, fallback, alias = resolve_invocation_model(detail)
+            bucket = unlinked_by_repo.setdefault(repo, {}).setdefault(
+                model_id, _MutableModelUsage()
+            )
+            bucket.add(
+                totals=totals,
+                configuration_fallback=fallback,
+                unresolved_model_alias=alias is not None,
+            )
 
     history_entries: list[IssueCostHistoryEntry] = []
     for issue_key, execution_usages in executions_by_issue.items():
@@ -300,6 +336,10 @@ def build_issue_cost_ledger(*, store: object, query: IssueCostQuery) -> IssueCos
         entries=tuple(history_entries),
         unlinked_invocation_count=unlinked_invocation_count,
         truncated_run_history=truncated_run_history,
+        unlinked_by_repo={
+            repo: _to_model_usage_entries(models) for repo, models in unlinked_by_repo.items()
+        },
+        unlinked_counts_by_repo=unlinked_counts_by_repo,
     )
 
 

@@ -939,6 +939,8 @@ export type IssueCostStatsRepository = {
   issue_count: number;
   status_counts: Record<"blocked" | "failed" | "in_progress" | "completed", number>;
   issues: IssueCostStatsIssue[];
+  unlinked_invocation_count?: number;
+  unlinked_model_usage?: IssueCostStatsIssue["model_usage"];
 };
 
 /** Stats Issue 账本端点的响应。日期范围使用 UTC 日历日。 */

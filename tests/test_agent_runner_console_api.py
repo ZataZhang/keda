@@ -774,6 +774,27 @@ def test_issue_cost_stats_reads_sqlite_and_console_http_with_repo_issue_key(
         )
     )
 
+    store.append_invocation_event(
+        InvocationEventRecord(
+            run_id="orphan",
+            event_key="orphan-finished",
+            event_type="invocation_finished",
+            invocation_id="orphan",
+            repo_id="keda-main",
+            issue_number=None,
+            phase="implementation",
+            role="primary",
+            agent="codex",
+            occurred_at=now.isoformat(),
+            detail_json=json.dumps(
+                {
+                    "token_usage": {"input_tokens": 25, "output_tokens": 0},
+                    "reported_model": "orphan-model",
+                }
+            ),
+        )
+    )
+
     second_repo_path = console_environment["tmp_path"] / "other-repo"
     second_repo_path.mkdir()
     offline_repo_path = console_environment["tmp_path"] / "offline-repo"
@@ -864,6 +885,15 @@ def test_issue_cost_stats_reads_sqlite_and_console_http_with_repo_issue_key(
     assert repeated_response.status_code == 200, repeated_response.text
     assert repeated_response.json() == response.json()
     repository_rows = {row["repo_id"]: row for row in response.json()["repositories"]}
+    assert response.json()["unlinked_invocation_count"] >= 1
+    assert repository_rows["keda-main"]["unlinked_invocation_count"] >= 1
+    orphan_usage = repository_rows["keda-main"]["unlinked_model_usage"]
+    assert (
+        next(row for row in orphan_usage if row["model_id"] == "orphan-model")["totals"][
+            "total_tokens"
+        ]
+        == 25
+    )
     first_repo_issues = {
         issue_row["issue_number"]: issue_row for issue_row in repository_rows["keda-main"]["issues"]
     }

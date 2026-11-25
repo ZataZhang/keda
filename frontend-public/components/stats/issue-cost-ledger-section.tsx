@@ -288,9 +288,10 @@ function ExecutionUsageTable({ issue, pricingModels }: { issue: IssueCostStatsIs
             const executionEstimate = estimateModelUsageCost(Object.fromEntries(execution.model_usage.map((modelUsage) => [modelUsage.model_id, modelUsage.totals])), pricingModels)
             const outcomeLabel = execution.outcome === "completed" ? "已完成" : execution.outcome === "failed" ? "失败" : execution.outcome === "blocked" ? "阻塞" : execution.outcome
             const outcomeVariant = execution.outcome === "completed" ? "ready" : execution.outcome === "failed" ? "failed" : execution.outcome === "blocked" ? "blocked" : "default"
-            const costLabel = (execution.missing_usage_count > 0 || issue.truncated) && executionEstimate.usageCount > 0
-              ? `${formatUsdCost(executionEstimate.costUsd)} · 部分计价`
-              : formatEstimate(executionEstimate)
+            const baseCostLabel = formatEstimate(executionEstimate)
+            const costLabel = (execution.missing_usage_count > 0 || issue.truncated) && executionEstimate.pricedTokenCount > 0 && executionEstimate.unpricedModelIds.length === 0
+              ? `${baseCostLabel} · 部分计价`
+              : baseCostLabel
             return (
               <tr key={execution.execution_id} className="border-t" data-testid="stats-issue-execution-row">
                 <td className="px-3 py-2.5 font-mono text-xs">#{index + 1}<span className="ml-2 text-muted-foreground">{execution.agent}</span></td>

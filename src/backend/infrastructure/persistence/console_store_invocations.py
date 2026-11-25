@@ -125,6 +125,20 @@ class InvocationEventStoreMixin:
         )
         return self._read_invocation_events(query, (repo_id, issue_number, bounded_limit))
 
+    def list_invocation_events_in_window(
+        self, *, repo_id: str | None, since: str, before: str
+    ) -> list[InvocationEventRecord]:
+        """读取区间内全部调用完成事件，用于披露无法归属的用量。"""
+        query = (
+            f"SELECT {_INVOCATION_EVENT_COLUMNS} FROM agent_invocation_events "
+            "WHERE event_type = 'invocation_finished' AND occurred_at >= ? AND occurred_at < ?"
+        )
+        params: tuple[object, ...] = (since, before)
+        if repo_id is not None:
+            query += " AND repo_id = ?"
+            params += (repo_id,)
+        return self._read_invocation_events(query, params)
+
     def _read_invocation_events(
         self, query: str, params: tuple[object, ...]
     ) -> list[InvocationEventRecord]:

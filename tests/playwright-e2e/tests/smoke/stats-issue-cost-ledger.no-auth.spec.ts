@@ -81,10 +81,10 @@ const ISSUE_STATS = {
           ],
           executions: [
             execution('run-1', 'completed', '2026-11-22T10:00:00+00:00', 'model-a', 1_000_000),
-            execution('run-2', 'failed', '2026-11-23T10:00:00+00:00', 'unknown', 2_000_000),
+            { ...execution('run-2', 'failed', '2026-11-23T10:00:00+00:00', 'unknown', 2_000_000), missing_usage_count: 1 },
             execution('run-3', 'completed', '2026-11-24T10:00:00+00:00', null, 0),
           ],
-          missing_usage_count: 1,
+          missing_usage_count: 2,
           period_data_available: true,
           truncated: false,
         },
@@ -414,6 +414,8 @@ test.describe('Stats Issue cost ledger', () => {
     await page.getByTestId('stats-issue-expand-keda-main-318').click()
     const executionRows = page.getByTestId('stats-issue-execution-row')
     await expect(executionRows).toHaveCount(3)
+    await expect(executionRows.nth(1)).toContainText('暂无估价')
+    await expect(executionRows.nth(1)).not.toContainText('$0.000000')
     await expect(page.getByTestId('stats-issue-executions')).toContainText('失败')
     await expect(page.getByTestId('stats-issue-executions')).toContainText('用量缺失 1')
     await captureEvidenceScreenshot(page, 'rv-2-issue-stats.png')

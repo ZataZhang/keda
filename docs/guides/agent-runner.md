@@ -4458,6 +4458,8 @@ Runner 完成发布交接后切换到监督，GitHub 的 PR 可以在等待合�
 | 总览 | `/app/dashboard` | 队列监控 + 每仓库完成度摘要 + failed Issue 的普通重试或执行器切换续跑、blocked Issue 继续按钮 |
 | 进程 | `/app/processes` | 启停每个仓库的 runner 进程，实时查看进程日志（offset 轮询） |
 | 统计 | `/app/stats` | 默认按 Issue 查看期间执行、Token 与当前价格估算；另有仓库状态、用量趋势、模型计价视图，并保留 Agent 表现与 PRD 生命周期分析 |
+
+统计页将无法关联到期间执行的调用单独披露，不分摊到 Issue；有已记录 Token 的未关联调用仍计入模型计价覆盖率。价格缺失或 usage 不完整时，估价保留未知或部分计价状态。
 | 项目 | `/app/repositories` | 仓库 registry 列表 / 添加 / 启停（写回 `config.toml`）+ 审计日志 |
 | 想法 | `/app/ideas` | 跨项目想法采集、AI 总结、PRD 草稿人审 |
 

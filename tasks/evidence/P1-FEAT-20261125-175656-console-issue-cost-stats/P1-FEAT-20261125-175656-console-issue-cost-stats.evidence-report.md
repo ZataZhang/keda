@@ -69,3 +69,7 @@ PR/CI：Draft PR 与 CI 由 runner 创建；本次执行没有生成 PR/CI 链�
 ## 人工和 runner 后续
 
 自动实现已完成，但验收仍阻塞。runner 需在授权浏览器可用的执行环境重跑 just e2e tests/smoke/stats-issue-cost-ledger.no-auth.spec.ts，生成 5 张截图，与以上目标原型配对，然后运行独立 verifier。未生成的页面截图和 PR/CI 链接不会由本报告虚构。
+
+### Pre-PR 审查修复后续
+
+审查修复补充了未关联调用的覆盖披露和执行明细的未知估价处理。上述实现树摘要及先前验证结果不适用于此修复后的代码；SQLite + Console HTTP 定向测试和前端类型检查已重新运行。RV-2/RV-3 的真实浏览器证据及独立 verifier 仍需针对最终树重新执行，验收继续阻塞。

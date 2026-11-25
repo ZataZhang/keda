@@ -184,7 +184,7 @@ export default function StatsPage() {
   const selectedIssueStats = useMemo(
     () =>
       issueStats
-        ? { ...issueStats, repo_id: repositoryId || null, repositories: selectedRepositories }
+        ? { ...issueStats, repo_id: repositoryId || null, repositories: selectedRepositories, unlinked_invocation_count: repositoryId ? selectedRepositories.reduce((sum, repository) => sum + (repository.unlinked_invocation_count ?? 0), 0) : issueStats.unlinked_invocation_count }
         : null,
     [issueStats, repositoryId, selectedRepositories],
   )

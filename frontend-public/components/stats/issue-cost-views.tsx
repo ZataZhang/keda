@@ -132,7 +132,7 @@ export function ModelPricingOverviewSection({
 }) {
   if (!stats) return <LoadingCard title="模型与计价" />
   const issues = stats.repositories.flatMap((repository) => repository.issues)
-  const modelUsage = combineModelUsage(issues)
+  const modelUsage = combineModelUsage([...issues, ...stats.repositories.map((repository) => ({ model_usage: repository.unlinked_model_usage ?? [] }))])
   const allModelTotals = Object.fromEntries(modelUsage.map((modelRow) => [modelRow.model_id, modelRow.totals]))
   const estimate = estimateModelUsageCost(allModelTotals, pricingModels)
   const missingUsageCount = issues.reduce((sum, issue) => sum + issue.missing_usage_count, 0)
@@ -164,7 +164,7 @@ export function ModelPricingOverviewSection({
             <ModelUsageTable modelUsage={modelUsage} pricingModels={pricingModels} emptyLabel="当前没有模型用量。" />
           </div>
         )}
-        <p className="text-xs text-muted-foreground">覆盖率分母为账本中全部已记录 Token，未识别模型也计入分母。缺少 usage 的调用不计入 Token 分母；已知模型价格为 $0 时会明确显示 $0。</p>
+        <p className="text-xs text-muted-foreground">覆盖率分母为账本中全部已记录 Token，包含未关联执行和未识别模型的用量。缺少 usage 的调用不计入 Token 分母；已知模型价格为 $0 时会明确显示 $0。</p>
       </CardContent>
     </Card>
   )
@@ -201,7 +201,7 @@ function formatDailyCost(dailyTotal: ReturnType<typeof buildDailyIssueTotals>[nu
 }
 
 /** 合并所选 Issue 的模型用量，作为覆盖率分母及模型表来源。 */
-function combineModelUsage(issues: IssueCostStatsIssue[]): IssueCostStatsIssue["model_usage"] {
+function combineModelUsage(issues: Pick<IssueCostStatsIssue, "model_usage">[]): IssueCostStatsIssue["model_usage"] {
   const modelBuckets = new Map<string, { totals: TokenUsageTotals; configurationFallbackCount: number; unresolvedAliasCount: number }>()
   for (const issue of issues) {
     for (const modelUsage of issue.model_usage) {
