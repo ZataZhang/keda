@@ -160,8 +160,11 @@ def run_verifier_agent(
             "human takeover; no verdict was produced."
         ) from cancelled_error
     response_text = extract_agent_response_text(result)
+    # 优先展示最终报告，避免工具调用流水占满失败摘要。
+    report_start = list(re.finditer(r"(?im)^## Verdict\b[^\n]*\n", response_text))
+    report = response_text[report_start[-1].end() :] if report_start else response_text
     verdict = replace(
-        parse_verifier_verdict(response_text, findings=response_text.strip()[:4000]),
+        parse_verifier_verdict(response_text, findings=report.strip()[:4000]),
         # 观测回填：真实跑完的 agent 名（候选回退后 ≠ 配置值）与其自报用量。
         agent=verifier_agent,
         token_usage=result.token_usage,
@@ -389,9 +392,8 @@ def _format_verifier_block_message(
         )
     return (
         f"Independent verifier (agent '{verifier_agent}') returned RED for "
-        f"issue #{issue_number}: it could not independently confirm the change "
-        "does what the issue asks. Findings:\n"
-        f"{verdict.findings}\n"
+        f"issue #{issue_number}. {verdict.findings}\n"
+        f"Full verifier report: {response_log_path}\n"
         "Fix what the verifier found, or correct the Realistic Validation "
         "oracle if the check itself is wrong."
     )

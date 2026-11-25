@@ -209,7 +209,9 @@ def build_verifier_prompt(
             "Be a skeptic. If you cannot independently confirm it works, the verdict",
             "is RED — do not give the builder the benefit of the doubt.",
             "",
-            "End your report with concrete findings (what you ran, what you observed,",
+            'Start the final report with "## Verdict: <GREEN|YELLOW|RED>" and put the',
+            "main reason for the verdict directly below that heading in one short sentence.",
+            "Then give concrete findings (what you ran, what you observed,",
             "any gap between intent and behavior), then exactly one final line:",
             "<!-- kc:verifier-verdict risk=green -->   (or yellow, or red)",
         ]
