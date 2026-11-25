@@ -860,11 +860,12 @@ def test_reused_lifecycle_uses_the_new_session_events(tmp_path, has_terminal: bo
                 phase=phase,
                 actor="runner",
                 occurred_at=_iso(minute),
-                detail_json="{}",
+                detail_json='{"invocation_run":"current-session"}',
             )
         )
     task = _summary(store, ["keda"]).tasks[0]
     assert task.started_at == _iso(-30)
+    assert task.invocation_run_id == "current-session"
     assert task.agent is None
     if has_terminal:
         assert task.status is RuntimeTaskStatus.UNKNOWN

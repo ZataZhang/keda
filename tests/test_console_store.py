@@ -288,6 +288,8 @@ def test_v12_run_records_migrate_with_empty_issue_metadata(tmp_path: Path) -> No
     assert migrated_run.outcome == "failed"
     assert migrated_run.issue_title is None
     assert migrated_run.issue_url is None
+    assert migrated_run.invocation_run_id is None
+    assert migrated_run.record_id == 1
 
 
 def _make_attempt_record(

@@ -36,6 +36,7 @@ __all__ = [
     "DEFAULT_INVOCATION_READ_LIMIT",
     "INVOCATION_RUN_DETAIL_KEY",
     "build_prd_invocation_detail",
+    "invocation_run_from_detail",
     "with_invocation_run_detail",
 ]
 
@@ -97,6 +98,19 @@ def _parse_event_detail(detail_json: str) -> dict[str, Any]:
     except (TypeError, ValueError):
         return {}
     return parsed_detail if isinstance(parsed_detail, dict) else {}
+
+
+def invocation_run_from_detail(detail_json: str) -> str | None:
+    """读取生命周期事件持久化的调用会话 ID。
+
+    Args:
+        detail_json: 事件的结构化详情。
+
+    Returns:
+        已记录的调用会话 ID，缺失或无效时为空。
+    """
+    invocation_run_id = _parse_event_detail(detail_json).get(INVOCATION_RUN_DETAIL_KEY)
+    return invocation_run_id if isinstance(invocation_run_id, str) and invocation_run_id else None
 
 
 def _display_field(

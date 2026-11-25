@@ -322,6 +322,7 @@ export type AgentPerformanceStats = {
 };
 
 export type RunRecordEntry = {
+  record_id?: number | null;
   repo_id: string;
   repo_path: string;
   issue_number: number;
@@ -329,6 +330,7 @@ export type RunRecordEntry = {
   issue_url: string | null;
   trigger: string;
   agent: string;
+  executors: string[];
   outcome: "completed" | "failed" | "blocked" | "deferred";
   error_summary: string | null;
   started_at: string;
@@ -1696,6 +1698,7 @@ export type RuntimeTaskEntry = {
   model: string | null;
   attempt_number: number | null;
   prd_path: string | null;
+  invocation_run_id?: string | null;
   started_at: string | null;
   finished_at: string | null;
   duration_seconds: number | null;

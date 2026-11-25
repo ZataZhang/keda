@@ -96,6 +96,7 @@ class RuntimeTask:
         model: 最近一次 attempt 上报的模型名；旧记录为 ``None``。
         attempt_number: 最近一次 attempt 序号。
         prd_path: 该 Issue 关联的 PRD 相对路径；未关联时为 ``None``。
+        invocation_run_id: 生命周期或运行汇总确认的调用会话 ID。
         started_at: 最近一次运行开始时间（ISO-8601 UTC）。
         finished_at: 最近一次运行结束时间；仍在运行时为 ``None``。
         duration_seconds: 最近一次运行耗时；无法计算时为 ``None``。
@@ -134,6 +135,7 @@ class RuntimeTask:
     model: str | None = None
     attempt_number: int | None = None
     prd_path: str | None = None
+    invocation_run_id: str | None = None
     started_at: str | None = None
     finished_at: str | None = None
     duration_seconds: float | None = None

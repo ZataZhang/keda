@@ -6,6 +6,18 @@ import { Badge } from "@/components/ui/badge";
 import type { RunRecordEntry } from "@/lib/api/types";
 import { formatLocalDateTime } from "@/lib/utils";
 
+const EXECUTOR_LABELS = new Map([
+  ["claude", "Claude"],
+  ["codex", "Codex"],
+  ["kimi", "Kimi"],
+  ["pi", "Pi"],
+  ["codebuddy", "CodeBuddy"],
+  ["qoder", "Qoder"],
+  ["opencode", "OpenCode"],
+  ["mcode", "MCode"],
+  ["dsh", "DSH"],
+]);
+
 type RecentRunGroupsProps = {
   recentRuns: RunRecordEntry[];
   onSelectRun: (run: RunRecordEntry) => void;
@@ -95,13 +107,14 @@ export function RecentRunGroups({
                     <th className="py-2 pr-3">结果</th>
                     <th className="py-2 pr-3">触发</th>
                     <th className="py-2 pr-3">Agent</th>
+                    <th className="py-2 pr-3">执行器</th>
                     <th className="py-2 pr-3">耗时</th>
                   </tr>
                 </thead>
                 <tbody>
                   {group.runs.map((run, index) => (
                     <tr
-                      key={`${run.started_at}-${index}`}
+                      key={run.record_id ?? `${run.started_at}-${index}`}
                       className="border-b border-slate-100 last:border-0 dark:border-slate-800"
                     >
                       <td className="py-2 pr-3 font-mono text-[11px] text-slate-500">
@@ -122,6 +135,13 @@ export function RecentRunGroups({
                       </td>
                       <td className="py-2 pr-3 text-xs">{run.trigger}</td>
                       <td className="py-2 pr-3 text-xs">{run.agent}</td>
+                      <td className="py-2 pr-3 text-xs">
+                        {run.executors.length > 0
+                          ? run.executors
+                              .map((executorName) => EXECUTOR_LABELS.get(executorName) ?? executorName)
+                              .join(" → ")
+                          : "未记录"}
+                      </td>
                       <td className="py-2 pr-3 text-xs">
                         {run.duration_seconds < 60
                           ? `${Math.round(run.duration_seconds)}s`

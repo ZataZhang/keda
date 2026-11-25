@@ -4356,7 +4356,7 @@ job 约每 5 秒查一次，同时最多轮询 3 个 job；这个限制只约束
 仓库级「跑一轮 / 复核一轮」和同步设置都在那一侧）。看板以 Issue 运行为单位列出
 生命周期分桶（运行中 / 等待处理 / 阻塞 / 失败 / 已完成 / 已关闭 / 状态未知）、仓库与 Issue 身份、
 阶段及其简明说明、执行者与耗时，可按状态筛选、按仓库 / 编号 / 标题搜索，选中项复用既有的 Issue 增量日志与
-调用账本端点。结构化调用默认展开，运行中每隔约 5 秒刷新，收起后停止查询。原始日志继续独立更新。
+调用账本端点。结构化调用默认展开，运行中每隔约 5 秒刷新，收起后停止查询。有生命周期或运行汇总提供该轮会话 ID 时，汇总落库前后都按同一个 ID 读取调用。旧记录仍支持按时间窗口查询。原始日志继续独立更新。
 详情页顶部在阶段旁显示尚未记录结束事件的调用执行器和请求模型，或显示最近一次选择的执行器。
 未结束调用标记来自调用账本，进程存活状态需另行确认。
 
@@ -4679,8 +4679,11 @@ daemon 进程**即获得多项目并发——不同仓库的 Issue 同时执行�
   `GET .../console/stats/history` 返回按天聚合趋势。
 - **最近运行记录**：Stats 页将最近 30 条运行按仓库与 Issue 分组，组按最近一次运行时间排序；
   分组标题显示任务名，点击任务名会在新标签页打开对应 GitHub Issue；每条运行仍是一次独立 runner 调用。
-  展开分组可查看该 Issue 的运行时间、结果、触发方式、Agent 与耗时，并打开单次 failed / blocked
-  运行的失败详情。运行记录会保存执行时的 Issue 标题和 URL；升级前的历史记录没有这两项快照。
+  展开分组可查看该 Issue 的运行时间、结果、触发方式、Agent、执行器与耗时，并打开单次 failed / blocked
+  运行的失败详情。执行器列和调用时间线共用已持久化的调用会话，按实际调用开始顺序展示；
+  执行器列折叠连续重复，保留切换后回切，自定义执行器显示保存时的名称。批量查询只读取当前展示
+  的会话及旧记录的候选会话，其他轮次的大量事件不会挤掉当前运行的调用记录。旧记录没有会话 ID 时，仅在候选会话能唯一归属时展示。只发生在交接秒、又缺少归属证据的调用显示「未记录」。
+  运行记录会保存执行时的 Issue 标题和 URL；升级前的历史记录没有这两项快照。
 - **运行详情**：结果、失败阶段与面向人的失败解释优先展示；原始错误日志收在可展开区域。
   例如 GitHub 因远端分支更新而拒绝推送时，详情会说明这是推送阶段失败，并建议先整合远端提交，
   并明确区分「Agent 进程正常退出」与「整次运行失败」：前者只描述单次 Agent 调用，后者包含
@@ -4688,14 +4691,15 @@ daemon 进程**即获得多项目并发——不同仓库的 Issue 同时执行�
   执行器、调用结果、开始/结束时间与耗时；模型名称会说明是 KC 实际下发还是执行器上报。
   未保存的模型或生命周期数据会明确标记为未知，不用总耗时推算。重试与阶段统计作为技术明细折叠展示。
   详情顶部也显示任务标题与 GitHub Issue 链接；没有快照的旧记录会明确显示标题或链接未记录。
-  尝试详情来自同一 SQLite 的 `attempt_records`，调用详情来自 `agent_invocation_events`；两者都按
-  本次运行的仓库、Issue 与起止时间筛选，不会混入同一 Issue 的其他运行。新数据库升级后会为 attempt
-  增加阶段耗时列，v13 为运行记录追加可空的 Issue 标题和 URL，升级前的运行记录保持为空。
+  尝试详情按运行窗口读取 SQLite 的 `attempt_records`。v18 起运行记录保存
+  `agent_invocation_events` 的调用会话 ID；同一秒交接的运行也能独立查询。旧记录按整次会话核对
+  时间范围。只有能确定已在边界前创建的会话，才会把结束所在秒内开始的调用归入旧记录。
+  没有调用数据或旧数据无法确定唯一归属时显示「未记录」。
   既有尝试的阶段耗时保持为空。没有 Agent 尝试汇总记录时，仍可单独展示已记录的
   Agent 进程调用；两种记录的含义和覆盖范围不同。
-  前端通过 `GET .../console/runs/attempts?repo_id=&issue_number=&started_at=&finished_at=`
-  读取尝试与调用详情，其中时间参数必须为带时区的 ISO-8601。值守看板查询运行中的调用时省略
-  `finished_at`，由服务端使用当前时间作为查询上界。
+  前端通过 `GET .../console/runs/attempts?repo_id=&issue_number=&started_at=&finished_at=&record_id=`
+  读取尝试与调用详情。时间参数必须为带时区的 ISO-8601，`record_id` 用于区分起止时间相同的运行。
+  值守看板查询运行中的调用时省略 `finished_at`，由服务端使用当前时间作为查询上界。
 
 新增的 Agent 执行表现区与趋势、PRD 生命周期和 Token 汇总共用仓库及时间筛选，
 通过独立只读端点读取：
@@ -4999,7 +5003,7 @@ GET    /api/v1/agent-runner/console/stats/history?repo_id=&days=30
 GET    /api/v1/agent-runner/console/stats/prd-lifecycle?repo_id=&days=30
 GET    /api/v1/agent-runner/console/stats/agent-performance?repo_id=&days=30
 GET    /api/v1/agent-runner/console/runs?repo_id=&limit=100
-GET    /api/v1/agent-runner/console/runs/attempts?repo_id=&issue_number=&started_at=&finished_at=
+GET    /api/v1/agent-runner/console/runs/attempts?repo_id=&issue_number=&started_at=&finished_at=&record_id=
 GET    /api/v1/agent-runner/console/runtime/tasks                      值守看板任务摘要（只读）
 GET    /api/v1/agent-runner/console/desktop-companion/status            桌面小窗状态探针（只读，不要求 Origin）
 POST   /api/v1/agent-runner/console/desktop-companion/window            开启/聚焦桌面小窗（要求同源 Origin）

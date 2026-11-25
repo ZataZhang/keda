@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from backend.core.shared.interfaces.runner_console import (
     AttemptRecord,
+    InvocationEventRecord,
     IRunHistoryStore,
+    RunInvocationLookup,
     RunRecord,
 )
 from backend.core.shared.models.agent_runner import (
@@ -19,11 +22,10 @@ from backend.core.shared.models.agent_runner import (
     PhaseDuration,
 )
 from backend.core.use_cases.agent_invocation_tracing import (
-    EVENT_INVOCATION_FINISHED,
     EVENT_INVOCATION_STARTED,
     InvocationTimelineRow,
+    active_invocation_trace_context,
     build_invocation_timeline,
-    resolve_invocation_store,
 )
 
 _logger = logging.getLogger(__name__)
@@ -33,7 +35,6 @@ ATTEMPT_HISTORY_MAX_ROWS = 50
 
 # 单次运行详情查询的历史扫描上限，避免 Issue 长期重试导致无界读取。
 _RUN_ATTEMPT_DETAIL_LIMIT = 5000
-_RUN_INVOCATION_DETAIL_LIMIT = 5000
 
 __all__ = [
     "ATTEMPT_HISTORY_MAX_ROWS",
@@ -42,6 +43,7 @@ __all__ = [
     "append_run_record",
     "load_run_attempt_details",
     "load_run_invocation_details",
+    "load_run_executor_summaries",
     "load_issue_attempt_trail",
 ]
 
@@ -74,6 +76,13 @@ def append_run_record(
     if run_history_store is None:
         return
     finished_at = datetime.now(timezone.utc)
+    trace_context = active_invocation_trace_context()
+    invocation_run_id = (
+        trace_context.run_id
+        if trace_context is not None
+        and (trace_context.repo_id, trace_context.issue_number) == (repo_id, issue.number)
+        else None
+    )
     try:
         run_history_store.append_run(
             RunRecord(
@@ -89,6 +98,7 @@ def append_run_record(
                 duration_seconds=(finished_at - started_at).total_seconds(),
                 issue_title=issue.title or None,
                 issue_url=issue.url or None,
+                invocation_run_id=invocation_run_id,
             )
         )
     except Exception as record_exc:  # noqa: BLE001 - side channel only.
@@ -120,6 +130,45 @@ class RunAttemptWindow:
     issue_number: int
     started_at: datetime
     finished_at: datetime
+    record_id: int | None = None
+    invocation_run_id: str | None = None
+
+    def invocation_lookup(self) -> RunInvocationLookup:
+        """组装调用会话查询条件。
+
+        Returns:
+            仓库、Issue、UTC 起止时间和可选的调用会话 ID。
+        """
+        return (
+            self.repo_id,
+            self.issue_number,
+            self.started_at.astimezone(timezone.utc).isoformat(),
+            self.finished_at.astimezone(timezone.utc).isoformat(),
+            self.invocation_run_id,
+        )
+
+    @classmethod
+    def from_record(cls, run: RunRecord) -> RunAttemptWindow | None:
+        """从存储记录还原带时区的运行窗口。
+
+        Args:
+            run: 持久化的运行记录。
+
+        Returns:
+            运行窗口；时间值无效时为空。
+        """
+        started_at = _parse_attempt_timestamp(run.started_at)
+        finished_at = _parse_attempt_timestamp(run.finished_at)
+        if started_at is None or finished_at is None or finished_at < started_at:
+            return None
+        return cls(
+            repo_id=run.repo_id,
+            issue_number=run.issue_number,
+            started_at=started_at,
+            finished_at=finished_at,
+            record_id=run.record_id,
+            invocation_run_id=run.invocation_run_id,
+        )
 
 
 def load_issue_attempt_trail(
@@ -221,59 +270,187 @@ def load_run_invocation_details(
     *,
     run_history_store: IRunHistoryStore | None,
     run_window: RunAttemptWindow,
+    open_window: bool = False,
 ) -> list[InvocationTimelineRow]:
-    """读取指定运行时间窗口内 Agent 进程调用的执行器、模型与耗时。
+    """读取指定运行的调用详情，与 Stats 的执行器摘要共用会话归属。
 
     Args:
-        run_history_store: 运行历史存储；不支持调用观测时返回空列表。
-        run_window: 本次运行的仓库、Issue 和带时区起止时间。
+        run_history_store: 运行历史存储。
+        run_window: 详情请求中的运行窗口和可选记录主键。
+        open_window: 未指定结束时间的实时查询，按开始时间识别随后写入的汇总。
 
     Returns:
-        按调用开始顺序排列的 Agent 调用详情；旧库或读取失败时为空列表。
+        按开始时间排列的调用详情；没有可归属的会话时为空。
     """
-    if (
-        run_history_store is None
-        or run_window.started_at.utcoffset() is None
-        or run_window.finished_at.utcoffset() is None
-        or run_window.finished_at < run_window.started_at
-    ):
+    if run_history_store is None:
         return []
-    invocation_store = resolve_invocation_store(run_history_store)
-    if invocation_store is None:
-        return []
+    if run_window.record_id is None and run_window.invocation_run_id is not None:
+        return _load_run_invocation_timelines(run_history_store, [run_window])[0]
+
+    open_window = open_window and run_window.record_id is None
+    # 汇总可能在查找记录和读取事件之间提交。兼容查询为空时重新查找一次。
+    for lookup_attempt in range(2 if open_window else 1):
+        try:
+            stored_runs = run_history_store.find_runs_for_invocation_lookup(
+                run_window.invocation_lookup(), open_window=open_window
+            )
+        except Exception as lookup_error:  # noqa: BLE001 - 旁路读取失败不阻断详情。
+            _logger.warning("Failed to find run for invocation details: %s", lookup_error)
+            return []
+        matched_runs = [
+            run
+            for run in stored_runs
+            if run_window.record_id is None or run.record_id == run_window.record_id
+        ]
+        if len(matched_runs) == 1:
+            selected_window = RunAttemptWindow.from_record(matched_runs[0])
+            return _load_run_invocation_timelines(run_history_store, [selected_window])[0]
+        if stored_runs or run_window.record_id is not None:
+            return []
+        timeline = _load_run_invocation_timelines(run_history_store, [run_window])[0]
+        if timeline or lookup_attempt == 1:
+            return timeline
+    return []
+
+
+def load_run_executor_summaries(
+    *,
+    run_history_store: IRunHistoryStore | None,
+    runs: Sequence[RunRecord],
+) -> list[list[str]]:
+    """汇总各次运行的真实执行器顺序，折叠连续重复并保留回切。
+
+    Args:
+        run_history_store: 运行历史存储。
+        runs: Stats 当前批次的运行记录。
+
+    Returns:
+        与运行记录一一对应的执行器序列。
+    """
+    run_windows = [RunAttemptWindow.from_record(run) for run in runs]
+    invocation_timelines = _load_run_invocation_timelines(run_history_store, run_windows)
+    executor_summaries: list[list[str]] = []
+    for invocation_timeline in invocation_timelines:
+        executor_names: list[str] = []
+        for invocation_row in invocation_timeline:
+            if not executor_names or invocation_row.executor != executor_names[-1]:
+                executor_names.append(invocation_row.executor)
+        executor_summaries.append(executor_names)
+    return executor_summaries
+
+
+def _load_run_invocation_timelines(
+    run_history_store: IRunHistoryStore | None,
+    run_windows: Sequence[RunAttemptWindow | None],
+) -> list[list[InvocationTimelineRow]]:
+    """用同一批读取与会话归属生成列表和详情时间线。"""
+    lookups = [window.invocation_lookup() for window in run_windows if window is not None]
+    if run_history_store is None or not lookups:
+        return [[] for _ in run_windows]
     try:
-        invocation_events = invocation_store.list_issue_invocation_events(
-            repo_id=run_window.repo_id,
-            issue_number=run_window.issue_number,
-            limit=_RUN_INVOCATION_DETAIL_LIMIT,
-        )
-    except Exception as invocation_read_error:  # noqa: BLE001 - 观测读取失败不阻断详情页。
-        _logger.warning(
-            "Failed to load invocation details for Issue #%d: %s",
-            run_window.issue_number,
-            invocation_read_error,
-        )
-        return []
+        invocation_events, peer_runs = run_history_store.read_run_invocation_events(lookups)
+    except Exception as read_error:  # noqa: BLE001 - 旁路读取失败不阻断 Stats。
+        _logger.warning("Failed to read run invocations: %s", read_error)
+        return [[] for _ in run_windows]
 
-    normalized_run_start = run_window.started_at.astimezone(timezone.utc)
-    normalized_run_end = run_window.finished_at.astimezone(timezone.utc)
-    selected_invocation_ids: set[str] = set()
-    for invocation_event in invocation_events:
-        if invocation_event.event_type != EVENT_INVOCATION_STARTED:
+    sessions: dict[tuple[str, int, str], list[InvocationEventRecord]] = {}
+    for event in invocation_events:
+        if event.issue_number is not None:
+            sessions.setdefault((event.repo_id, event.issue_number, event.run_id), []).append(event)
+
+    linked_sessions = {
+        (window.repo_id, window.issue_number, window.invocation_run_id)
+        for window in run_windows
+        if window is not None and window.invocation_run_id is not None
+    }
+    legacy_windows: dict[tuple[str, int], set[RunAttemptWindow]] = {}
+    for window in [*run_windows, *(RunAttemptWindow.from_record(run) for run in peer_runs)]:
+        if window is not None and window.invocation_run_id is None:
+            legacy_windows.setdefault((window.repo_id, window.issue_number), set()).add(window)
+
+    legacy_sessions: dict[RunAttemptWindow, list[list[InvocationEventRecord]]] = {}
+    for session_key, session_events in sessions.items():
+        if session_key in linked_sessions:
             continue
-        invocation_started_at = _parse_attempt_timestamp(invocation_event.occurred_at)
-        if invocation_started_at is not None and (
-            normalized_run_start <= invocation_started_at <= normalized_run_end
-        ):
-            selected_invocation_ids.add(invocation_event.invocation_id)
+        owner = _find_legacy_session_owner(
+            session_events, legacy_windows.get(session_key[:2], set())
+        )
+        if owner is not None:
+            legacy_sessions.setdefault(owner, []).append(session_events)
 
-    selected_invocation_events = [
-        invocation_event
-        for invocation_event in invocation_events
-        if invocation_event.invocation_id in selected_invocation_ids
-        and invocation_event.event_type in (EVENT_INVOCATION_STARTED, EVENT_INVOCATION_FINISHED)
+    timelines: list[list[InvocationTimelineRow]] = []
+    for window in run_windows:
+        selected_events: list[InvocationEventRecord] = []
+        if window is not None and window.invocation_run_id is not None:
+            selected_events = sessions.get(
+                (window.repo_id, window.issue_number, window.invocation_run_id), []
+            )
+        elif window is not None and len(legacy_sessions.get(window, [])) == 1:
+            selected_events = legacy_sessions[window][0]
+        timelines.append(build_invocation_timeline(selected_events))
+    return timelines
+
+
+def _find_legacy_session_owner(
+    session_events: Sequence[InvocationEventRecord],
+    candidates: set[RunAttemptWindow],
+) -> RunAttemptWindow | None:
+    """只在完整调用会话能唯一归入一个旧窗口时返回归属。"""
+    started_times = [
+        event_time
+        for event in session_events
+        if event.event_type == EVENT_INVOCATION_STARTED
+        and (event_time := _parse_attempt_timestamp(event.occurred_at)) is not None
     ]
-    return build_invocation_timeline(selected_invocation_events)
+    if not started_times:
+        return None
+    earliest_call, latest_call = min(started_times), max(started_times)
+    last_observed_call = max(
+        (
+            event_time
+            for event in session_events
+            if (event_time := _parse_attempt_timestamp(event.occurred_at)) is not None
+        ),
+        default=latest_call,
+    )
+
+    # 旧 run_id 中的 UTC 秒取自进入 Issue 锁后、记录运行开始时间之前。
+    session_stamp = session_events[0].run_id.rsplit("#", 1)[-1].split("-", 1)[0]
+    try:
+        created_at = datetime.strptime(session_stamp, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+    except ValueError:
+        created_at = None
+    matching_windows: list[RunAttemptWindow] = []
+    for window in candidates:
+        # 结束时间曾截断到秒，末秒内的毫秒级调用同样属于候选窗口。
+        end_precision = (
+            timedelta(seconds=1) if window.finished_at.microsecond == 0 else timedelta.resolution
+        )
+        if earliest_call < window.started_at or latest_call >= window.finished_at + end_precision:
+            continue
+        # 交接秒内才创建的会话可能来自尚未写入汇总的下一轮运行。
+        if window.finished_at <= earliest_call and (
+            created_at is None or created_at >= window.finished_at
+        ):
+            continue
+        start_second = window.started_at.replace(microsecond=0)
+        if created_at is not None and created_at > start_second:
+            continue
+        # 会话可能在运行开始前一秒创建。只落在起始秒且不能确认身份的调用，
+        # 有可能属于这一秒内结束但没有写入汇总的前轮。
+        if (
+            window.started_at == start_second
+            and last_observed_call < start_second + timedelta(seconds=1)
+            and (
+                created_at != start_second
+                or not any(
+                    peer.started_at < start_second == peer.finished_at for peer in candidates
+                )
+            )
+        ):
+            continue
+        matching_windows.append(window)
+    return matching_windows[0] if len(matching_windows) == 1 else None
 
 
 def _parse_attempt_timestamp(timestamp: str) -> datetime | None:
