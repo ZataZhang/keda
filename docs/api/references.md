@@ -564,3 +564,7 @@ run 详情：`run`、`results`（逐候选执行）、`scores`（逐评审评分
 - 语义：该 PR 经快速通道发布，builder 提交后**跳过了 Phase 4.5 的 rv re-exec 与独立 verifier 两道验证门禁**，未经自动化验证；正文同时附人读「合并前请人工验证」说明。
 - 判别：**无此 marker 的 PR 才代表走了完整验证**。下游工具（merge queue / CI）可据此拦截或降级处理未验证 PR。
 - 拒绝面：`--fast-merge` 与 `--all-ready` 组合、或目标 Issue 声明 `stack` 顺序依赖（`kc:depends-on ... mode="stack"`）时，以 `USAGE`（退出码 `2`）拒绝，不启动 agent、不产生 PR。该旗标不进入 daemon、无配置项，仅作用于当次显式调用。
+
+## Console 单 Issue 刷新版本
+
+`GET /api/v1/agent-runner/overview/issue-revision` 返回 `{"revision": "0"}` 形状。版本是本地观察状态的比较令牌，客户端只比较相等性。这个端点不访问 GitHub。

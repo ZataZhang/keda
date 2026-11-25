@@ -236,7 +236,9 @@ def _companion_payload(snapshot: DesktopCompanionSnapshot, console_origin: str) 
 
 
 @router.get("/agent-runner/console/runtime/tasks")
-def get_runtime_tasks(background_tasks: BackgroundTasks) -> dict[str, Any]:
+def get_runtime_tasks(
+    background_tasks: BackgroundTasks, refresh_evidence: bool = True
+) -> dict[str, Any]:
     """返回统一运行看板任务摘要：状态分桶、身份、阶段、执行者与耗时。
 
     改动树触达读数**不在本响应里**：唯一来源仍是现有
@@ -245,6 +247,7 @@ def get_runtime_tasks(background_tasks: BackgroundTasks) -> dict[str, Any]:
 
     Args:
         background_tasks: 在摘要响应发送后刷新证据分支索引。
+        refresh_evidence: 是否允许调度远端证据索引更新。
 
     Returns:
         dict[str, Any]: 可序列化的运行看板摘要。
@@ -263,10 +266,11 @@ def get_runtime_tasks(background_tasks: BackgroundTasks) -> dict[str, Any]:
             repository_paths, task, evidence_branch_refresh_by_repo
         ),
     )
-    for repo_id, refresh in evidence_branch_refresh_by_repo.items():
-        repo_path = repository_paths.get(repo_id)
-        if repo_path is not None:
-            background_tasks.add_task(list_evidence_branches, repo_path, refresh=refresh)
+    if refresh_evidence:
+        for repo_id, refresh in evidence_branch_refresh_by_repo.items():
+            repo_path = repository_paths.get(repo_id)
+            if repo_path is not None:
+                background_tasks.add_task(list_evidence_branches, repo_path, refresh=refresh)
     try:
         supervisor = create_process_supervisor()
         process_records = [

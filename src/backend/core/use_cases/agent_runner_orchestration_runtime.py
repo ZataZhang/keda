@@ -179,7 +179,7 @@ def _process_single_issue(
         trigger=run_trigger,
         event_type=LifecycleEventType.STARTED,
         actor="runner",
-        occurred_at=run_started_at.isoformat(timespec="seconds"),
+        occurred_at=run_started_at.isoformat(),
         detail={"agent": selected_agent, "issue_kind": issue_kind, "run_trigger": run_trigger},
     )
     record_lifecycle_event(
@@ -190,7 +190,7 @@ def _process_single_issue(
         trigger=run_trigger,
         event_type=LifecycleEventType.CLAIMED,
         actor="runner",
-        occurred_at=run_started_at.isoformat(timespec="seconds"),
+        occurred_at=run_started_at.isoformat(),
         detail={"agent": selected_agent, "issue_kind": issue_kind, "run_trigger": run_trigger},
     )
 

@@ -257,7 +257,8 @@ PR/CI：Draft PR 与 CI 由 runner 创建，本次没有生成 PR/CI 链接。�
 - Related PRD status: 无前置依赖。已进入人工验收，合并仍需 GitHub 必需检查通过。
 - Requirements/risks: SQLite/HTTP 1 条和生产 Console 浏览器 4 条通过。独立复核 PASS。全套 E2E 类型检查仅余既有 idea-inbox.spec.ts 类型错误。
 - Reconciled differences: 通过静态生产构建和 kc console 完成浏览器补验。RV-1 将真实 SQLite 驱动的 HTTP 响应与保存价格送入生产页面计价。详见 [补验报告](../evidence/P1-FEAT-20261125-175656-console-issue-cost-stats/2026-11-26-browser-revalidation.md)。
-- Verified tree: `27ace7be56801ff9dc0886a13e96c9fc9bec9fe9`（排除本 PRD 及证据目录）。
+- Integration tree: `522a7e21cffc6cdb739f212df77b190ecc60ef65`；同步 main 后补验通过，详见补验报告。
+- Independently verified tree before main sync: `27ace7be56801ff9dc0886a13e96c9fc9bec9fe9`（排除本 PRD 及证据目录）。
 
 ## Change Log
 

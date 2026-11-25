@@ -460,6 +460,8 @@ export async function fetchRecentRuns(params: {
  * @param params.issueNumber - Issue 编号。
  * @param params.startedAt - ISO-8601 运行开始时间。
  * @param params.finishedAt - ISO-8601 运行结束时间，省略时查到服务端当前时刻。
+ * @param params.recordId - 区分起止时间相同的运行记录主键。
+ * @param params.invocationRunId - 生命周期或运行汇总确认的调用会话 ID。
  * @returns 所选运行窗口内的尝试详情。
  */
 export async function fetchRunExecutionDetails(params: {
@@ -467,6 +469,8 @@ export async function fetchRunExecutionDetails(params: {
   issueNumber: number;
   startedAt: string;
   finishedAt?: string;
+  recordId?: number | null;
+  invocationRunId?: string | null;
   signal?: AbortSignal;
 }): Promise<{
   attempts: RunAttemptDetailEntry[];
@@ -477,6 +481,12 @@ export async function fetchRunExecutionDetails(params: {
     issue_number: String(params.issueNumber),
     started_at: params.startedAt,
   });
+  if (params.recordId != null) {
+    searchParams.set("record_id", String(params.recordId));
+  }
+  if (params.invocationRunId) {
+    searchParams.set("invocation_run_id", params.invocationRunId);
+  }
   if (params.finishedAt !== undefined) {
     searchParams.set("finished_at", params.finishedAt);
   }
@@ -492,8 +502,9 @@ export async function fetchRunExecutionDetails(params: {
 // ── 统一运行时看板与桌面 companion ──────────────────────────────────────────
 
 /** 读取看板任务摘要（只来自已注册仓库的 Console 观测路径）。 */
-export async function fetchRuntimeTasks(): Promise<RuntimeTaskSummary> {
-  return get<RuntimeTaskSummary>(`${BASE_PATH}/console/runtime/tasks`);
+export async function fetchRuntimeTasks(refreshEvidence = true): Promise<RuntimeTaskSummary> {
+  const query = refreshEvidence ? "" : "?refresh_evidence=false";
+  return get<RuntimeTaskSummary>(`${BASE_PATH}/console/runtime/tasks${query}`);
 }
 
 /** 读取桌面 companion 状态；helper 与网页看板共用这个只读探针。 */

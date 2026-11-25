@@ -85,6 +85,8 @@ class RunRecord:
         duration_seconds (float): 本次运行耗时秒数。
         issue_title (str | None): 运行时保存的 Issue 标题；旧记录为空。
         issue_url (str | None): 运行时保存的 Issue 网页链接；旧记录为空。
+        record_id (int | None): 本地运行记录主键，写入前为空。
+        invocation_run_id (str | None): 调用账本的会话标识，旧记录为空。
     """
 
     repo_id: str
@@ -99,6 +101,12 @@ class RunRecord:
     duration_seconds: float
     issue_title: str | None = None
     issue_url: str | None = None
+    record_id: int | None = None
+    invocation_run_id: str | None = None
+
+
+# 仓库、Issue、ISO 起止时间、调用会话标识；未关联会话的运行使用时间范围读取。
+type RunInvocationLookup = tuple[str, int, str, str, str | None]
 
 
 @dataclass(frozen=True)
@@ -289,6 +297,33 @@ class IRunHistoryStore(ABC):
     def list_recent_runs(self, *, repo_id: str | None = None, limit: int = 100) -> list[RunRecord]:
         """倒序列出最近的运行记录。"""
         ...
+
+    def find_runs_for_invocation_lookup(
+        self, lookup: RunInvocationLookup, *, open_window: bool = False
+    ) -> list[RunRecord]:
+        """读取详情请求起止时间对应的持久化运行。
+
+        Args:
+            lookup: 详情请求的仓库、Issue 和 UTC 起止时间。
+            open_window: 仅匹配开始时间，用于未指定结束时间的实时查询。
+
+        Returns:
+            匹配该窗口的运行记录。
+        """
+        return []
+
+    def read_run_invocation_events(
+        self, lookups: Sequence[RunInvocationLookup]
+    ) -> tuple[list[InvocationEventRecord], list[RunRecord]]:
+        """批量读取目标调用会话及与旧窗口重叠的运行记录。
+
+        Args:
+            lookups: 通过会话 ID 或旧时间窗口限定范围的查询条件。
+
+        Returns:
+            按发生顺序排列的调用事件，以及用于消解旧窗口歧义的运行记录。
+        """
+        return [], []
 
     @abstractmethod
     def list_runs_in_window(
@@ -891,6 +926,7 @@ class MonitorSnapshotEntry:
     repo_id: str
     payload_json: str
     scanned_at: str
+    scan_started_ns: int | None = None
 
 
 @dataclass(frozen=True)
@@ -904,6 +940,16 @@ class MonitorSettingsEntry:
     sync_enabled: bool
     sync_interval_seconds: int
     updated_at: str
+
+
+@dataclass(frozen=True)
+class MonitorIssueRefresh:
+    """独立观察到的 Issue 卡片，和全仓快照分开存储。"""
+
+    repo_id: str
+    issue_number: int
+    payload_json: str
+    observed_ns: int
 
 
 class IMonitorSnapshotStore(ABC):

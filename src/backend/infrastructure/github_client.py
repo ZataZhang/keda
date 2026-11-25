@@ -92,6 +92,7 @@ from backend.infrastructure.github_pr_ops import (
     find_open_pr_by_head,
     get_pull_request_context,
     get_pull_request_context_by_number,
+    get_pull_request_monitor_state,
     get_remote_base_sha,
     list_pr_comments,
     list_pull_requests_for_issue,
@@ -853,6 +854,10 @@ class GitHubCliClient:
             RuntimeError: 严格查询无法证明 PR 状态。
         """
         return get_pull_request_context(self, branch, require_success=require_success)
+
+    def get_pull_request_monitor_state(self, pr_number: int) -> dict:
+        """用一次 REST 请求读取看板需要的 PR 字段。"""
+        return get_pull_request_monitor_state(self, pr_number)
 
     def get_pull_request_context_by_number(
         self, pr_number: int, *, require_success: bool = False

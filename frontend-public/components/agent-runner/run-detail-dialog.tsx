@@ -141,7 +141,7 @@ export function RunDetailDialog({
   const [loadedRunDetails, setLoadedRunDetails] =
     useState<RunExecutionDetailsState | null>(null);
   const requestKey = run
-    ? JSON.stringify([run.repo_id, run.issue_number, run.started_at, run.finished_at])
+    ? JSON.stringify([run.record_id, run.repo_id, run.issue_number, run.started_at, run.finished_at])
     : null;
   const currentRunDetails =
     requestKey !== null && loadedRunDetails?.requestKey === requestKey
@@ -163,6 +163,7 @@ export function RunDetailDialog({
       issueNumber: run.issue_number,
       startedAt: run.started_at,
       finishedAt: run.finished_at,
+      recordId: run.record_id,
     })
       .then((loadedRunDetails) => {
         if (isCurrentRequest) {
@@ -193,18 +194,15 @@ export function RunDetailDialog({
   const failureExplanation = run
     ? getRunFailureExplanation(run, attemptDetails, invocationDetails)
     : null;
-  const chronologicalInvocations = [...invocationDetails].sort((first, second) =>
-    (first.started_at ?? "").localeCompare(second.started_at ?? ""),
-  );
-  const recordedInvocationSeconds = chronologicalInvocations.reduce(
+  const recordedInvocationSeconds = invocationDetails.reduce(
     (totalSeconds, invocationDetail) =>
       totalSeconds + (invocationDetail.duration_seconds ?? 0),
     0,
   );
-  const hasUnrecordedInvocationDuration = chronologicalInvocations.some(
+  const hasUnrecordedInvocationDuration = invocationDetails.some(
     (invocationDetail) => invocationDetail.duration_seconds === null,
   );
-  const hasRecordedInvocationDuration = chronologicalInvocations.some(
+  const hasRecordedInvocationDuration = invocationDetails.some(
     (invocationDetail) => invocationDetail.duration_seconds !== null,
   );
 
@@ -346,9 +344,9 @@ export function RunDetailDialog({
                 <p className="mt-1 text-xs leading-5 text-slate-500">
                   按开始时间排列。每张卡片只表示该次 Agent 进程是否正常退出；整次运行结果和失败原因请看上方。
                 </p>
-                {chronologicalInvocations.length > 0 && (
+                {invocationDetails.length > 0 && (
                   <p className="mt-1 text-xs font-medium text-slate-600 dark:text-slate-300">
-                    已记录 {chronologicalInvocations.length} 次调用
+                    已记录 {invocationDetails.length} 次调用
                     {hasRecordedInvocationDuration
                       ? ` · Agent 调用累计耗时${hasUnrecordedInvocationDuration ? "至少" : ""} ${formatLifecycleDuration(recordedInvocationSeconds)}`
                       : " · 调用耗时未记录"}
@@ -363,12 +361,12 @@ export function RunDetailDialog({
                   {loadError}
                 </p>
               )}
-              {!isLoading && loadError === null && chronologicalInvocations.length === 0 && (
+              {!isLoading && loadError === null && invocationDetails.length === 0 && (
                 <p className="rounded-md border border-slate-200 p-3 text-sm text-slate-600 dark:border-slate-800 dark:text-slate-300">
                   没有保存 Agent 调用明细。若任务在 Agent 启动前失败，这是正常情况；否则可能是历史记录不完整。
                 </p>
               )}
-              {chronologicalInvocations.map((invocationDetail, index) => {
+              {invocationDetails.map((invocationDetail, index) => {
                 const invocationFinishedNormally = invocationDetail.outcome === "ok";
                 const invocationOutcomeLabel = invocationFinishedNormally
                   ? "Agent 进程正常退出"
@@ -435,10 +433,8 @@ export function RunDetailDialog({
                   </article>
                 );
               })}
-              {!isLoading &&
-                loadError === null &&
-                chronologicalInvocations.length > 0 &&
-                attemptDetails.length === 0 && (
+              {!isLoading && loadError === null &&
+                invocationDetails.length > 0 && attemptDetails.length === 0 && (
                   <p className="text-xs text-slate-500">
                     本次没有保存完整的生命周期阶段统计；上方只列出了已记录的 Agent 调用，不能据此拆分运行总耗时。
                   </p>

@@ -13,3 +13,7 @@
 ## 独立复核
 
 **PASS**。独立复核重新导出真实 HTTP 数据并运行测试，复算最终树为 `27ace7be56801ff9dc0886a13e96c9fc9bec9fe9`。最终浏览器输出 4 条通过，覆盖率分母断言精确核对 0 / 2000.0k。全套 Playwright TypeScript 检查仅保留既有的 idea-inbox.spec.ts(124,40) TS2339。人工验收尚未完成。
+
+## 同步 main 后补验
+
+整合 main 的 f3ae998a 后，两条 SQLite 时间窗查询复用运行记录列清单，保留主线新增的记录 ID 与调用会话字段。API 和运行历史相关测试 51 条通过；生产 Console 浏览器测试 4 条通过。合并候选实现树为 `522a7e21cffc6cdb739f212df77b190ecc60ef65`。

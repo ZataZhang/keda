@@ -136,6 +136,15 @@ export async function fetchOverviewSnapshots(): Promise<MonitorSnapshotsResponse
   return get<MonitorSnapshotsResponse>(`${BASE_PATH}/overview/snapshots`);
 }
 
+/** 读取本地单 Issue 刷新版本，不触发远端扫描。 */
+export async function fetchMonitorIssueRevision(signal?: AbortSignal): Promise<string> {
+  const snapshot = await get<{ revision: string }>(
+    `${BASE_PATH}/overview/issue-revision`,
+    { signal },
+  );
+  return snapshot.revision;
+}
+
 /**
  * 读取 runner 配置摘要（daemon 模式、全局 runner 设置与仓库清单）。
  *
