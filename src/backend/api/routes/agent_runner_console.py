@@ -611,6 +611,9 @@ def get_console_issue_cost_stats(
                 "status_counts": status_counts,
                 "issues": issue_rows,
                 "unlinked_invocation_count": ledger.unlinked_counts_by_repo.get(context.repo_id, 0),
+                "unlinked_missing_usage_count": ledger.unlinked_missing_usage_by_repo.get(
+                    context.repo_id, 0
+                ),
                 "unlinked_model_usage": _serialize(
                     ledger.unlinked_by_repo.get(context.repo_id, ())
                 ),

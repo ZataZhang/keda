@@ -135,7 +135,8 @@ export function ModelPricingOverviewSection({
   const modelUsage = combineModelUsage([...issues, ...stats.repositories.map((repository) => ({ model_usage: repository.unlinked_model_usage ?? [] }))])
   const allModelTotals = Object.fromEntries(modelUsage.map((modelRow) => [modelRow.model_id, modelRow.totals]))
   const estimate = estimateModelUsageCost(allModelTotals, pricingModels)
-  const missingUsageCount = issues.reduce((sum, issue) => sum + issue.missing_usage_count, 0)
+  const missingUsageCount = issues.reduce((sum, issue) => sum + issue.missing_usage_count, 0) +
+    stats.repositories.reduce((sum, repository) => sum + (repository.unlinked_missing_usage_count ?? 0), 0)
   const coveragePercent = estimate.tokenCount > 0 ? Math.round((estimate.pricedTokenCount / estimate.tokenCount) * 100) : null
   return (
     <Card className="gap-4" data-testid="stats-model-pricing">

@@ -794,6 +794,21 @@ def test_issue_cost_stats_reads_sqlite_and_console_http_with_repo_issue_key(
             ),
         )
     )
+    store.append_invocation_event(
+        InvocationEventRecord(
+            run_id="orphan-no-usage",
+            event_key="orphan-no-usage-finished",
+            event_type="invocation_finished",
+            invocation_id="orphan-no-usage",
+            repo_id="keda-main",
+            issue_number=None,
+            phase="implementation",
+            role="primary",
+            agent="codex",
+            occurred_at=now.isoformat(),
+            detail_json="{}",
+        )
+    )
 
     second_repo_path = console_environment["tmp_path"] / "other-repo"
     second_repo_path.mkdir()
@@ -887,6 +902,7 @@ def test_issue_cost_stats_reads_sqlite_and_console_http_with_repo_issue_key(
     repository_rows = {row["repo_id"]: row for row in response.json()["repositories"]}
     assert response.json()["unlinked_invocation_count"] >= 1
     assert repository_rows["keda-main"]["unlinked_invocation_count"] >= 1
+    assert repository_rows["keda-main"]["unlinked_missing_usage_count"] == 1
     orphan_usage = repository_rows["keda-main"]["unlinked_model_usage"]
     assert (
         next(row for row in orphan_usage if row["model_id"] == "orphan-model")["totals"][
@@ -935,6 +951,16 @@ def test_issue_cost_stats_reads_sqlite_and_console_http_with_repo_issue_key(
     assert boundary_issues[7]["current_status"] == "completed"
     assert boundary_issues[10]["period_run_count"] == 1
     assert boundary_issues[10]["totals"]["total_tokens"] == 55
+
+    next_day_response = client.get(
+        "/api/v1/agent-runner/console/stats/issues",
+        params={"start_date": end_date, "end_date": end_date},
+    )
+    assert next_day_response.status_code == 200
+    next_day_repo = next(
+        row for row in next_day_response.json()["repositories"] if row["repo_id"] == "keda-main"
+    )
+    assert all(row["model_id"] != "model-a" for row in next_day_repo["unlinked_model_usage"])
 
 
 def test_agent_performance_stats_reads_fresh_sqlite_rows_through_api(console_environment) -> None:

@@ -128,12 +128,21 @@ class InvocationEventStoreMixin:
     def list_invocation_events_in_window(
         self, *, repo_id: str | None, since: str, before: str
     ) -> list[InvocationEventRecord]:
-        """读取区间内全部调用完成事件，用于披露无法归属的用量。"""
+        """读取区间内调用，排除仅属于区间前开始的跨界运行的事件。"""
         query = (
             f"SELECT {_INVOCATION_EVENT_COLUMNS} FROM agent_invocation_events "
-            "WHERE event_type = 'invocation_finished' AND occurred_at >= ? AND occurred_at < ?"
+            "WHERE event_type = 'invocation_finished' AND occurred_at >= ? AND occurred_at < ? "
+            "AND (NOT EXISTS (SELECT 1 FROM run_records r "
+            "WHERE r.repo_id = agent_invocation_events.repo_id "
+            "AND r.issue_number = agent_invocation_events.issue_number "
+            "AND r.started_at < ? AND r.finished_at >= agent_invocation_events.occurred_at) "
+            "OR EXISTS (SELECT 1 FROM run_records r "
+            "WHERE r.repo_id = agent_invocation_events.repo_id "
+            "AND r.issue_number = agent_invocation_events.issue_number "
+            "AND r.started_at >= ? AND r.started_at <= agent_invocation_events.occurred_at "
+            "AND r.finished_at >= agent_invocation_events.occurred_at))"
         )
-        params: tuple[object, ...] = (since, before)
+        params: tuple[object, ...] = (since, before, since, since)
         if repo_id is not None:
             query += " AND repo_id = ?"
             params += (repo_id,)

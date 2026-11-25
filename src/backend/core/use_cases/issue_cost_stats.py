@@ -82,6 +82,7 @@ class IssueCostLedger:
     truncated_run_history: bool
     unlinked_by_repo: dict[str, tuple[IssueModelUsage, ...]] = field(default_factory=dict)
     unlinked_counts_by_repo: dict[str, int] = field(default_factory=dict)
+    unlinked_missing_usage_by_repo: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -172,6 +173,7 @@ def build_issue_cost_ledger(*, store: object, query: IssueCostQuery) -> IssueCos
     linked_events: set[tuple[str, str]] = set()
     unlinked_by_repo: dict[str, dict[str, _MutableModelUsage]] = {}
     unlinked_counts_by_repo: dict[str, int] = {}
+    unlinked_missing_usage_by_repo: dict[str, int] = {}
     truncated_issue_keys: set[tuple[str, int]] = set()
     if callable(event_reader):
         for issue_key, execution_usages in executions_by_issue.items():
@@ -251,6 +253,9 @@ def build_issue_cost_ledger(*, store: object, query: IssueCostQuery) -> IssueCos
             detail = _parse_detail_json(getattr(event, "detail_json", "") or "")
             totals = _totals_from_payload(detail.get("token_usage"))
             if totals is None:
+                unlinked_missing_usage_by_repo[repo] = (
+                    unlinked_missing_usage_by_repo.get(repo, 0) + 1
+                )
                 continue
             model_id, fallback, alias = resolve_invocation_model(detail)
             bucket = unlinked_by_repo.setdefault(repo, {}).setdefault(
@@ -340,6 +345,7 @@ def build_issue_cost_ledger(*, store: object, query: IssueCostQuery) -> IssueCos
             repo: _to_model_usage_entries(models) for repo, models in unlinked_by_repo.items()
         },
         unlinked_counts_by_repo=unlinked_counts_by_repo,
+        unlinked_missing_usage_by_repo=unlinked_missing_usage_by_repo,
     )
 
 

@@ -940,6 +940,7 @@ export type IssueCostStatsRepository = {
   status_counts: Record<"blocked" | "failed" | "in_progress" | "completed", number>;
   issues: IssueCostStatsIssue[];
   unlinked_invocation_count?: number;
+  unlinked_missing_usage_count?: number;
   unlinked_model_usage?: IssueCostStatsIssue["model_usage"];
 };
 
