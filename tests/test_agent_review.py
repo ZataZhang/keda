@@ -296,6 +296,7 @@ def test_build_review_packet_includes_diff_and_verification() -> None:
     assert "call the `code-reviewer` skill" in packet
     assert "requested behavior through its normal entry point" in packet
     assert "focused check to verify the affected route before approving" in packet
+    assert "Prepare the code patch even when you cannot run a platform-specific check" in packet
     assert "Findings JSON schema" in packet
 
 
@@ -1428,16 +1429,19 @@ def test_run_pre_pr_review_soft_fails_with_findings_on_last_cycle(
     assert "reviewer reported findings but produced no commit request" in body
 
 
+@pytest.mark.parametrize("first_request_is_empty", [False, True], ids=["missing", "empty"])
 def test_run_pre_pr_review_reminds_reviewer_then_commits(
     tmp_path: Path,
+    first_request_is_empty: bool,
 ) -> None:
-    """Findings without commit request trigger a reminder; a follow-up patch commits."""
+    """审核只报问题或写出空请求时，同轮继续修复和提交实际补丁。"""
     import json
 
     issue = IssueSummary(number=1, title="T", url="U", body="B", labels=())
     fake_client = FakeGitHubClient()
     worktree_path = tmp_path / "fake-worktree"
     worktree_path.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "-q"], cwd=worktree_path, check=True)
 
     class _ReminderThenPatchRunner(FakeProcessRunner):
         def __init__(self) -> None:
@@ -1484,6 +1488,8 @@ def test_run_pre_pr_review_reminds_reviewer_then_commits(
                 self._review_calls += 1
                 self.last_prompt = " ".join(command)
                 if self._review_calls == 1:
+                    if first_request_is_empty:
+                        _write_commit_request(cwd)
                     return CommandResult(
                         command=command_tuple,
                         return_code=0,
@@ -1503,6 +1509,7 @@ def test_run_pre_pr_review_reminds_reviewer_then_commits(
                     )
                 # Second call: write commit request and return approved.
                 request_path = cwd / ".agent-runner" / "commit-request.json"
+                assert not request_path.exists()
                 request_path.parent.mkdir(parents=True, exist_ok=True)
                 request_path.write_text(
                     json.dumps({"commit_message": "reviewer fix"}),
@@ -1513,6 +1520,16 @@ def test_run_pre_pr_review_reminds_reviewer_then_commits(
                     return_code=0,
                     stdout='{"verdict": "approved", "summary": "fixed"}',
                     stderr="",
+                )
+            if command_tuple[:4] == ("git", "status", "--porcelain", "--"):
+                status_result = subprocess.run(
+                    command, cwd=cwd, check=True, capture_output=True, text=True
+                )
+                return CommandResult(
+                    command=command_tuple,
+                    return_code=status_result.returncode,
+                    stdout=status_result.stdout,
+                    stderr=status_result.stderr,
                 )
             return super().run(
                 command,
@@ -1638,6 +1655,14 @@ def test_run_pre_pr_review_last_cycle_final_patch_is_accepted(
 
     class _FinalPatchReviewer(FakeProcessRunner):
         def __init__(self) -> None:
+            patch_status_command = (
+                "git",
+                "status",
+                "--porcelain",
+                "--",
+                ".",
+                ":(exclude,literal).agent-runner/commit-request.json",
+            )
             super().__init__(
                 responses={
                     ("git", "branch", "--show-current"): CommandResult(
@@ -1648,6 +1673,12 @@ def test_run_pre_pr_review_last_cycle_final_patch_is_accepted(
                     ),
                     ("git", "status", "--porcelain"): CommandResult(
                         command=("git", "status", "--porcelain"),
+                        return_code=0,
+                        stdout=" M file.py\n",
+                        stderr="",
+                    ),
+                    patch_status_command: CommandResult(
+                        command=patch_status_command,
                         return_code=0,
                         stdout=" M file.py\n",
                         stderr="",
@@ -2271,7 +2302,7 @@ def test_run_pre_pr_review_split_mode_repairer_applies_findings(tmp_path: Path) 
     final_sha, _verification = run_pre_pr_review(
         issue=issue,
         worktree_path=worktree_path,
-        config=_split_mode_config(max_attempts=2),
+        config=_split_mode_config(max_attempts=2, commit_request_reminder_attempts=1),
         github_client=fake_client,
         process_runner=fake_runner,
         selected_agent="codex",
@@ -2281,11 +2312,13 @@ def test_run_pre_pr_review_split_mode_repairer_applies_findings(tmp_path: Path) 
     )
 
     assert final_sha == "after-sha"
+    assert fake_runner.agent_bin_sequence == ["codex", "claude", "codex"]
     # 只有修复者的提交请求触发了提交
     commit_calls = [call for call in fake_runner.calls if tuple(call[:2]) == ("git", "commit")]
     assert commit_calls == [["git", "commit", "-m", "repairer-fix"]]
     # 审核者拿到只读约束，修复者拿到本轮 findings 清单
     assert "Read-only review mode" in fake_runner.reviewer_prompts[0]
+    assert "Repair findings in this worktree" not in fake_runner.reviewer_prompts[0]
     assert fake_runner.finding_title in fake_runner.repairer_prompts[0]
     # 评论里点名本轮谁审、谁修
     assert any(

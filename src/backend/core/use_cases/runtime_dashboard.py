@@ -81,6 +81,11 @@ _OUTCOME_STATUS_MAP: dict[str, RuntimeTaskStatus] = {
     "deferred": RuntimeTaskStatus.DEFERRED,
 }
 
+#: 当前 Issue 处于阻塞时，可作为直接原因展示的 PR 监督动作。
+_BLOCKING_SUPERVISOR_ACTIONS = frozenset(
+    {"request_human_input", "repair_pr_branch", "rebase_pr_branch", "resolve_conflict"}
+)
+
 #: ``unavailable_sources`` 的取值：前端据此把对应面板标为不可用。
 SOURCE_MONITOR_SNAPSHOT = "monitor_snapshot"
 SOURCE_RUN_HISTORY = "run_history"
@@ -317,22 +322,24 @@ def _latest_timeline_action(issue_entry: Mapping[str, Any]) -> str | None:
     return None
 
 
-def _latest_human_input_summary(issue_entry: Mapping[str, Any]) -> str | None:
-    """取最近一次 PR 监督请求人工处理时记录的摘要。"""
+def _latest_blocking_summary(issue_entry: Mapping[str, Any]) -> str | None:
+    """取当前阻塞可用的最近监督摘要或远端失败摘要。"""
     timeline = issue_entry.get("timeline")
-    if not isinstance(timeline, list):
-        return None
-    for event_entry in reversed(timeline):
-        if not isinstance(event_entry, dict):
-            continue
-        if event_entry.get("phase") != "post_pr_supervisor":
-            continue
-        if event_entry.get("action") != "request_human_input":
-            return None
-        summary = event_entry.get("summary")
-        if isinstance(summary, str) and summary.strip():
-            return summary.strip()
-        return None
+    if isinstance(timeline, list):
+        for event_entry in reversed(timeline):
+            if not isinstance(event_entry, dict):
+                continue
+            if event_entry.get("phase") != "post_pr_supervisor":
+                continue
+            if event_entry.get("action") in _BLOCKING_SUPERVISOR_ACTIONS:
+                summary = event_entry.get("summary")
+                if isinstance(summary, str) and summary.strip():
+                    return summary.strip()
+            break
+
+    remote_failure_summary = issue_entry.get("latest_failure_summary")
+    if isinstance(remote_failure_summary, str) and remote_failure_summary.strip():
+        return remote_failure_summary.strip()
     return None
 
 
@@ -413,7 +420,7 @@ def _snapshot_task(
                 status_reason = "监控快照没有可判定的生命周期标签"
 
     blocking_reason = (
-        _latest_human_input_summary(issue_entry) if status is RuntimeTaskStatus.BLOCKED else None
+        _latest_blocking_summary(issue_entry) if status is RuntimeTaskStatus.BLOCKED else None
     )
 
     waiting_reason = None

@@ -586,7 +586,7 @@ Attempt    Started (UTC)    Agent    Failure Type    Recovered    Duration    De
 - ROI 与最小范围（AI 建议）：先打通“获取默认前端 → 修改与预览 → 加载自定义版本”的最小闭环，复用既有控制台与 API；后续按真实需求考虑 SDK 或扩展机制。
 - 待澄清：源码交付和版本匹配方式；自定义前端的开发、构建与加载方式；公开接口兼容承诺以及定制前端升级和维护的责任边界。上述建议尚未作为实施规格拍板。
 
-## 2026-11-19 23:02 · live-concept-workbench (idea-20261119230200-002e76) <!-- idea-status: pending -->
+## 2026-11-19 23:02 · live-concept-workbench (idea-20261119230200-002e76) <!-- idea-status: in_progress -->
 
 > 我发现我有个想法，我现在KC里面已经有关于PID讨论的代码什么东西了，但是我想到我有一个想法，我讨论的时候，其实一个概念还没有成型。能不能让我在讨论的时候，比如左边Agent实时去生成一个HTML网页，然后右边是我的对话框。Agent实时地用具有感染力的东西去把我描述的东西去生成渲染出来。或者左边是一个画图的东西，把它渲染出来。或者说我的想法什么东西，实时地去更改，去加载出来。你觉得怎么样？相当于是对于KC的一个扩充。原本KC的这个能力是相当于通过一个想法，然后生成PRD，对吧？但是现在我想跟它实时对话的方式呢？那有没有类似于我们环境里面安装的ZView的这种方式？输入KC的一行命令，然后调起一个界面。界面左边一开始是空的，右边是一个输入框。然后在我在输入框里面输入内容的同时，左边这个空白实时渲染一些图片，或者说不仅是图片，就是类似于我们PRD这种的，你觉得怎么样？
 
@@ -611,7 +611,7 @@ Attempt    Started (UTC)    Agent    Failure Type    Recovered    Duration    De
 - 收敛建议（AI 提出，用户尚未拍板）：先设计 Agent Runner 范围内的可编排能力，再由第二个真实流程验证是否扩展成通用平台。临时方案说明页已生成在 `/tmp/keda-workflow-orchestration-proposal.html`，它是静态提案，不代表生产功能。
 - 待澄清：第一版是否只覆盖 Issue → PR Runner，还是目标从一开始就是 Keda 内任意进程的通用编排；AI 是否只起草待审核的图，还是还要在运行时选择后续节点。
 
-## 2026-11-20 00:19 · concept-workbench-user-prompt (idea-20261120001900-aead32) <!-- idea-status: pending -->
+## 2026-11-20 00:19 · concept-workbench-user-prompt (idea-20261120001900-aead32) <!-- idea-status: in_progress -->
 
 > 我的意思是让用户自己去创建这个左侧的产物怎么样去生产的提示词，你懂我这个意思吗？我们尽量只是做的通用，给他一个展示的地方。
 
@@ -622,7 +622,7 @@ Attempt    Started (UTC)    Agent    Failure Type    Recovered    Duration    De
 - 与既有原型的关系：`docs/prototypes/live-concept-workbench/` 中六张图是可能的产物形态示例；不应据此理解为 KC 必须内置六种固定生成模式，也不代表页面布局配置是用户需求重点。
 - 待澄清：提示词是每个工作区各自保存、按项目复用，还是可分享的模板；自定义提示词与展示组件之间采用怎样的输出约定；默认提示词是否可直接编辑并另存为用户版本。
 
-## 2026-11-20 00:24 · cli-first-capability-platform (idea-20261120002400-55366e) <!-- idea-status: pending -->
+## 2026-11-20 00:24 · cli-first-capability-platform (idea-20261120002400-55366e) <!-- idea-status: in_progress -->
 
 > 然后这个产品怎么设计的？你明白吗？我想了一个，就是我们是以CRI为主的，然后用户可以自定义他的前端，我们只提供他的能力。就比如说这个提示词。
 

@@ -157,9 +157,10 @@ def parse_latest_failure_summary(comments: list[str]) -> str | None:
     """取最近一条 ``## Agent Runner … Failed`` 评论的一行摘要。
 
     失败评论由出错的那台机器发出、不带 ``kc:event`` 标记，因此不进事件时间线。
-    摘要为标题加首个代码块里最后一条错误行（``error:`` / ``fatal:`` 或
-    ``XxxError:``，避开堆栈之后的 git ``hint:`` 之类说明）；代码块里没有错误行时
-    取其最后一个非空行，评论没有代码块时取标题后的第一个非空行。
+    摘要为标题加首个代码块中的一行说明；Realistic Validation 重执行失败时优先取
+    门禁的失败总述，否则取最后一条错误行（``error:`` / ``fatal:`` 或 ``XxxError:``，
+    避开堆栈之后的 git ``hint:`` 之类说明）。代码块里没有错误行时取最后一个非空行，
+    评论没有代码块时取标题后的第一个非空行。
 
     Args:
         comments: Issue 评论正文，按时间从旧到新排列。
@@ -182,7 +183,15 @@ def parse_latest_failure_summary(comments: list[str]) -> str | None:
         if fence_match is None:
             detail_line = detail_lines[0]
         else:
-            detail_line = next(
+            validation_failure_line = next(
+                (
+                    line
+                    for line in detail_lines
+                    if line.startswith("Realistic Validation re-execution failed")
+                ),
+                None,
+            )
+            detail_line = validation_failure_line or next(
                 (line for line in reversed(detail_lines) if _ERROR_LINE_PATTERN.search(line)),
                 detail_lines[-1],
             )

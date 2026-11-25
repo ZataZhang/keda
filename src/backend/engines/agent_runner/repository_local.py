@@ -365,7 +365,7 @@ _CONFIG_FIELD_COMMENTS: dict[str, str] = {
     "pre_pr_review.allow_same_agent": "是否允许实现 agent 与 reviewer 为同一个",
     "pre_pr_review.max_attempts": "review 不通过时的最大修复轮数",
     "pre_pr_review.timeout_seconds": "review agent 最长运行秒数",
-    "pre_pr_review.commit_request_reminder_attempts": "reviewer 报出问题但未写 commit request 时，同一轮内追加提醒的最大次数",
+    "pre_pr_review.commit_request_reminder_attempts": "审核发现问题后，缺少补丁或提交请求时，同轮提醒修复者的最大次数",
     "post_pr_supervisor.enabled": "是否启用 post-PR supervisor",
     "post_pr_supervisor.supervisor_agent": "执行 supervisor 的 agent",
     "post_pr_supervisor.repair_agent": "谁执行 supervisor 判定后的代码修复：self（supervisor 自己修，默认）/ executor（交回实现者）/ 任意已注册 agent 名",

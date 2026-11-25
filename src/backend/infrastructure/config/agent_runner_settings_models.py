@@ -687,9 +687,7 @@ class AgentRunnerPrePrReviewSettings(BaseModel):
     repair_agent: str = "self"
     max_attempts: int = 2
     timeout_seconds: int = 1800
-    # When the reviewer reports findings but fails to write a commit request,
-    # the runner appends a reminder and re-invokes the reviewer up to this
-    # many times within the same review cycle.
+    # 报出 findings 后缺少提交请求或实际补丁时，同轮提醒修复者的次数。
     commit_request_reminder_attempts: int = 1
     # Review rules template; supports either a single string or a list of
     # lines. When the field is omitted from TOML the embedded default in

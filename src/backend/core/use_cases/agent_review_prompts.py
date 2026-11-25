@@ -1,5 +1,29 @@
 """提交前代码审查的默认提示词，与审查执行逻辑分离。"""
 
+REPAIR_VALIDATION_GUIDANCE = (
+    "Prepare the code patch even when you cannot run a platform-specific check. "
+    "Run available checks, report which required checks are still unverified, "
+    "and follow the Issue and repository rules for requesting a commit."
+)
+
+SELF_REPAIR_MODE_LINES = (
+    "",
+    "Repair findings in this worktree before returning:",
+    "- Apply fixes for confirmed defects.",
+    f"- {REPAIR_VALIDATION_GUIDANCE}",
+    "- When requesting a commit for the actual patch, write "
+    "`.agent-runner/commit-request.json` with a descriptive `commit_message`.",
+)
+
+READ_ONLY_REVIEW_MODE_LINES = (
+    "",
+    "Read-only review mode:",
+    "- Do NOT modify any file in the worktree.",
+    "- Do NOT write `.agent-runner/commit-request.json`; a separate repair agent "
+    "applies the fixes and any commit request you write is discarded.",
+    "- Only report findings (a structured JSON verdict with findings).",
+)
+
 # 默认规则调用 code-reviewer skill，并将结论交给 runner 的结构化输出契约。
 DEFAULT_REVIEW_PROMPT_TEMPLATE: tuple[str, ...] = (
     "Before writing your verdict, call the `code-reviewer` skill using the Skill tool "
@@ -7,8 +31,8 @@ DEFAULT_REVIEW_PROMPT_TEMPLATE: tuple[str, ...] = (
     "Use the skill's findings to populate the `findings` array in your response.",
     (
         "Complete the review of the current diff and requirement/evidence boundaries "
-        "before editing; collect all actionable findings in this pass, consolidate "
-        "duplicate root causes, and then repair the complete set together."
+        "before giving a verdict or starting a repair. Collect all actionable findings "
+        "in this pass and consolidate duplicate root causes."
     ),
     (
         "Trace the requested behavior through its normal entry point. If the requirement "
@@ -37,8 +61,6 @@ DEFAULT_REVIEW_PROMPT_TEMPLATE: tuple[str, ...] = (
         "reuse a verdict or test flag for a different tree."
     ),
     "If the skill reports no findings, verdict must be `approved`.",
-    "If findings exist, apply fixes in the worktree and write "
-    "`.agent-runner/commit-request.json` with a descriptive `commit_message`.",
     "Do not leave findings unaddressed while returning `approved`.",
     "",
     "CRITICAL: The `code-reviewer` skill's Chinese text report is input for your "

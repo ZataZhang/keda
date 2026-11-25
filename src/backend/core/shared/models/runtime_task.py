@@ -80,7 +80,7 @@ class RuntimeTask:
         pr_label_warning: PR 与 Issue 标签不一致的原因；未确认时为空。
         status: 生命周期分桶。
         status_reason: 当前分桶的直接来源，例如监控标签或 Issue 关闭状态。
-        blocking_reason: 最近一次 PR 监督请求人工处理时给出的摘要；无法确认时为空。
+        blocking_reason: 阻塞时最近的监督摘要或远端失败摘要；无法确认时为空。
         sync_error: GitHub 快照同步失败原因；非空时同步状态仍在自动重试。
         last_observed_status: 最近一次成功同步观察到的状态；当前同步失败时保留。
         last_observed_at: 最近一次成功同步时间；故障时与 ``last_observed_status`` 一起表示过期状态。

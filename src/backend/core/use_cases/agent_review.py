@@ -29,9 +29,14 @@ from backend.core.use_cases.agent_invocation_tracing import (
 from backend.core.use_cases.agent_review_prompts import (
     DEFAULT_REVIEW_PROMPT_TEMPLATE as DEFAULT_REVIEW_PROMPT_TEMPLATE,
 )
+from backend.core.use_cases.agent_review_prompts import (
+    READ_ONLY_REVIEW_MODE_LINES,
+    SELF_REPAIR_MODE_LINES,
+)
 from backend.core.use_cases.agent_review_repair import (
     COMMIT_REQUEST_RELATIVE_PATH,
     build_commit_request_reminder_prompt,
+    prepare_review_patch_retry,
     resolve_reviewer_profile,
     run_review_repair_agent,
 )
@@ -167,16 +172,7 @@ def build_review_packet(
             "```",
         ]
 
-    read_only_lines: list[str] = []
-    if read_only_review:
-        read_only_lines = [
-            "",
-            "Read-only review mode:",
-            "- Do NOT modify any file in the worktree.",
-            "- Do NOT write `.agent-runner/commit-request.json`; a separate repair agent "
-            "applies the fixes and any commit request you write is discarded.",
-            "- Only report findings (a structured JSON verdict with findings).",
-        ]
+    review_mode_lines = READ_ONLY_REVIEW_MODE_LINES if read_only_review else SELF_REPAIR_MODE_LINES
 
     return "\n".join(
         [
@@ -206,7 +202,7 @@ def build_review_packet(
             "",
             "Review rules:",
             review_rules,
-            *read_only_lines,
+            *review_mode_lines,
         ]
     )
 
@@ -488,16 +484,16 @@ def run_pre_pr_review(
                 len(reviewer_decision.findings),
             )
 
-            request_path_was_present = request_path.is_file()
-            missing_commit_request = (
-                reviewer_decision.has_findings
+            if (
+                not split_repair
+                and inner_attempt < max_inner_attempts
+                and reviewer_decision.has_findings
                 and reviewer_decision.verdict == "changes_requested"
-                and not request_path_was_present
-            )
-            if missing_commit_request and inner_attempt < max_inner_attempts:
+                and prepare_review_patch_retry(worktree_path, process_runner)
+            ):
                 _logger.info(
                     "Pre-PR review cycle %d/%d for Issue #%d: reviewer reported "
-                    "%d finding(s) without a commit request; re-prompting.",
+                    "%d finding(s) without a patch and commit request; re-prompting.",
                     cycle,
                     max_attempts,
                     issue.number,

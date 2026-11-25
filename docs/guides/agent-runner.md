@@ -988,7 +988,7 @@ allow_same_agent = true
 max_attempts = 2
 # review agent 最长运行秒数
 timeout_seconds = 1800
-# reviewer 报出 findings 但未写 commit request 时，同一轮内追加提醒的最大次数（默认 1）
+# 有 findings 但缺少补丁或提交请求时，同一轮内提醒修复者的最大次数（默认 1）
 commit_request_reminder_attempts = 1
 # 自定义 review 提示词；空列表走代码默认模板，默认模板会调用 code-reviewer skill 并要求输出 findings JSON 数组
 review_prompt_template = []
@@ -2027,7 +2027,9 @@ Review packet 单独标明未提交的工作区状态。提交 diff 超过 8,000
 
 提前创建的 Draft PR 正文是首次发布时的快照；verifier 修复会更新 PR 分支，但复用已有 PR 时不会重写正文。审查时以 PR 当前 head 和 diff 为准。
 
-review packet 现在是 **修复-再审查收敛模式**：轮数由 `[agent_runner.pre_pr_review].max_attempts` 控制，默认 2 轮。每一轮 reviewer 都可以通过 `commit-request.json` 自修复（runner 仅负责 commit proxy + verification 重新执行 + push callback 把修复推送到远程）。如果 reviewer 在一轮内报出了 findings 却未写 `commit-request.json`，runner 会追加一条提醒并把该轮内重新调用 reviewer 最多 `[agent_runner.pre_pr_review].commit_request_reminder_attempts` 次（默认 1 次），让 reviewer 有机会把 findings 落实为补丁，而不是直接放弃。最后一轮结束后若仍未 `approved` 但 reviewer 已写最终修复 commit request，runner 接受该最终修复并继续发布；否则写一条 findings 评论并走软失败路径（runner 不再抛出硬错误，但调用方会按 `agent/failed` 处理）。Reviewer 解析器会基于 findings 数组重新统计 `critical`/`high`/`medium`/`low` 计数，避免 reviewer 自填数字被信任；若 verdict 为 `approved` 但 findings 非空，verdict 会被降级为 `changes_requested` 以避免漏报。
+Pre-PR review 默认由 reviewer 在工作树里修复确认的缺陷，再通过 `commit-request.json` 请求提交。目标平台暂时不可用时，仍先写可做的补丁，运行当前环境能跑的检查，并如实记录待验证项。能否提交由 Issue 和仓库规则决定，Runner 按原有提交与验证流程处理补丁。
+
+审核发现问题后，缺少提交请求或提交请求没有实际补丁都会触发同轮修复提醒。`[agent_runner.pre_pr_review].commit_request_reminder_attempts` 控制提醒次数，默认 1 次。`max_attempts` 控制审核轮数，默认 2 轮。最后一轮若仍未 `approved`，通过提交检查的最终补丁仍可进入后续验证与发布流程。若未产出补丁，Runner 记录 findings 并标记 `agent/failed`。Reviewer 解析器根据 findings 重新统计各级问题，且会把带有 findings 的 `approved` 降级为 `changes_requested`。
 
 > **执行事故的换人回退**：reviewer **进程层面**的失败不是「review 未通过」，也不会把 Issue 判死。墙钟或静默期超时（`pre_pr_review.timeout_seconds`，默认 1800s）会先按 `timeout_resume_attempts` 尝试在同一 session 增加执行窗口；没有可续传的 session 或预算耗尽后，才与 agent 进程非零退出、启动 I/O 错误及 provider 容量失败（429/529）一样，升级为可换人错误 `AgentExecutionError`，交由跨 agent fallback 链换下一个候选 agent 重试。只有 `UnrecoverableError`（安全/分支违规）与 `ForbiddenBlockedError`（禁改路径）这类每个 agent 都会撞同一堵墙的失败才直接冒泡，不换人。此前 `subprocess.TimeoutExpired` 等异常会一路冒到顶层 `except Exception` 直接落 `agent/failed`；现在超时优先尝试续跑。
 
@@ -2048,7 +2050,7 @@ review packet 现在是 **修复-再审查收敛模式**：轮数由 `[agent_run
 1. review packet 追加 `Read-only review mode` 段（禁止改文件、禁止写 `.agent-runner/commit-request.json`），审核者以 `deliberate` 用途启动——对声明了该用途的 agent（如 codex）是沙箱级硬只读；未声明该用途的 agent 回落到 `run` 用途并打 WARNING，此时只读约束仅由提示词与下面的丢弃规则兜底。
 2. 审核者若仍写出 `commit-request.json`，该文件被**直接删除、不触发任何提交**，Issue 评论里会写明这件事；它已经改掉的**文件**不回滚（回滚是破坏性的），而是并入修复者本轮的提交。
 3. verdict 为 `changes_requested` 且有 findings 时，runner 用共享构建器 `build_repair_prompt` 生成修复提示词（Issue 上下文 + 本轮 findings 清单 + 既有的提交请求约束），以解析出的修复者、`run` 用途启动。
-4. 修复者没写出提交请求时，沿用 `commit_request_reminder_attempts` 的同轮提醒重试（提醒对象从审核者换成修复者）。
+4. 修复者缺少实际补丁或提交请求时，沿用 `commit_request_reminder_attempts` 的同轮提醒重试。
 5. 后续提交代理、验证重跑、push callback、轮数上限、收敛与软失败语义全部不变：最后一轮仍未通过但本轮已产生可提交修复 → 接受并继续发布；否则软失败进入失败标签。
 
 Issue 评论结构随之增加 `- Repairer: <agent>` 一行（仅非 `self` 模式），便于在 GitHub 上直接看出这一轮谁审、谁修。
@@ -2067,7 +2069,7 @@ Pre-PR review 不产生独立的 durable label，整个过程仍在 `agent/runni
 > **空 commit request 行为**：当 reviewer 写出了 `.agent-runner/commit-request.json` 但工作树已无任何可提交改动（例如 reviewer 的建议与现状一致，或上一轮 cycle 已经提交过修复），runner 会按 reviewer 解析出的真实 verdict 处理：
 >
 > - `approved` → 写一条 `Pre-PR Review Result` 评论（action summary 为 `reviewer approved with an empty commit request`），循环正常收敛。
-> - `changes_requested` → 写一条评论（action summary 为 `reviewer requested changes but produced no committable diff`）并继续下一轮 cycle；用尽 `max_attempts` 后走 `Pre-PR review did not approve after N attempt(s): ...` 软失败路径。
+> - `changes_requested` 且有 findings → 还有同轮提醒次数时，清理空请求，把 findings 带给修复者继续改。用尽同轮提醒次数后，Runner 记录 `reviewer requested changes but produced no committable diff` 并进入下一轮；用尽 `max_attempts` 后按审核失败处理。
 >
 > 若 reviewer stdout 没有可解析的 JSON verdict，runner 会在 commit request 中读取可选的 `verdict`、`summary`、`findings_high`、`findings_medium`、`findings_low` 元数据作为兜底。空提交信号由 `EmptyCommitRequestError`（`RuntimeError` 的子类，message 保持 `"Agent requested a commit but produced no file changes."`）承载，因此 `is_recoverable_commit_request_error(...)` 仍把它分类为可恢复，且不会被升级为 `Pre-PR review repair failed` 硬失败。
 
@@ -4371,11 +4373,12 @@ PR 的入口，不再把「没有开放 PR」误显示成「从未交付 PR」�
 「失败」；前者表示需要人工决策，后者表示本轮执行失败，两者应分别排查。「已完成」仅表示运行账本
 记录了成功终态。快照未收录该 Issue 或缺少可判定的状态标签时，本地运行账本记录的失败会直接显示为「失败」，
 无需等 GitHub 同步。本地账本记录了比上次失败和监控快照都更新的执行会话时，下一次刷新看板就显示「运行中」。
-状态来源根据 Issue 关闭状态、当前监控标签或运行账本终态显示；当最近一次
-`post_pr_supervisor` 事件动作为 `request_human_input` 时，看板另显示该事件评论的 `Summary` 作为
-「阻塞原因」。Issue 带 `agent/failed` 而本机运行账本没有错误摘要时（典型是在另一台机器上失败），
-看板从最近一条 `## Agent Runner … Failed` 评论取一行摘要作为失败原因：标题加代码块里最后一条错误行
-（如 `ModuleNotFoundError: …`、`error: failed to push …`）；本机账本已有错误摘要时以账本为准。监控异常类型单独放在
+状态来源根据 Issue 关闭状态、当前监控标签或运行账本终态显示；阻塞任务优先显示最近一次阻塞型
+`post_pr_supervisor` 动作（`request_human_input`、`repair_pr_branch`、`rebase_pr_branch`、
+`resolve_conflict`）的事件摘要；缺少这类摘要时，回退显示远端最近一条 `## Agent Runner … Failed`
+评论的一行摘要。Issue 带 `agent/failed` 而本机运行账本没有错误摘要时（典型是在另一台机器上失败），
+看板从最近一条 `## Agent Runner … Failed` 评论取一行摘要作为失败原因：Realistic Validation 重执行失败时取门禁总述，
+否则取代码块里最后一条错误行（如 `ModuleNotFoundError: …`、`error: failed to push …`）；本机账本已有错误摘要时以账本为准。监控异常类型单独放在
 `anomaly_types`，不会替换状态来源，也不直接充当失败原因。失败任务若调用账本确认了失败的 Agent 调用，
 阶段显示该调用所属的生命周期阶段；否则阶段优先采用最近一次 attempt 记录的失败环节，再回退到 Issue 时间线
 最后一条阶段事件。阶段说明描述该环节的职责，例如

@@ -5,8 +5,7 @@
 只读审核者的用途解析、同轮提交请求提醒、以及修复者的启动循环都在这里，
 ``agent_review.py`` 只负责把它们编排进收敛循环。
 
-配置开关是 ``[agent_runner.pre_pr_review].repair_agent``；``self``（默认）时
-本模块全部不被使用，行为与历史一致。
+自修和审-修分工共用实际补丁检查与同轮提醒。
 """
 
 from __future__ import annotations
@@ -24,17 +23,38 @@ from backend.core.shared.models.agent_spec import (
     AGENT_PROFILE_DELIBERATE,
     AGENT_PROFILE_RUN,
 )
+from backend.core.use_cases.agent_invocation_tracing import PHASE_REVIEW_REPAIR
+from backend.core.use_cases.agent_review_prompts import REPAIR_VALIDATION_GUIDANCE
 from backend.core.use_cases.agent_runner_feedback import (
     build_finding_bullet_lines,
     build_repair_prompt,
 )
-from backend.core.use_cases.agent_invocation_tracing import PHASE_REVIEW_REPAIR
+from backend.core.use_cases.agent_runner_git import has_changes
 from backend.core.use_cases.run_agent_once import run_agent_with_prompt_resilient
 
 _logger = logging.getLogger(__name__)
 
 COMMIT_REQUEST_RELATIVE_PATH = Path(".agent-runner/commit-request.json")
 """agent 表达提交意图的文件（worktree 相对路径）；本模块与 review 主体共用一份。"""
+
+
+def prepare_review_patch_retry(worktree_path: Path, process_runner: IProcessRunner) -> bool:
+    """在缺少补丁时清理空提交请求并准备同轮重试。
+
+    Args:
+        worktree_path: Git 工作树根目录。
+        process_runner: 命令执行器。
+
+    Returns:
+        提交请求缺失或没有实际改动时返回 True。
+    """
+    request_path = worktree_path / COMMIT_REQUEST_RELATIVE_PATH
+    if not request_path.is_file():
+        return True
+    if has_changes(worktree_path, process_runner, exclude_path=COMMIT_REQUEST_RELATIVE_PATH):
+        return False
+    request_path.unlink()
+    return True
 
 
 def resolve_reviewer_profile(reviewer_agent: str, config: AppConfig) -> str:
@@ -61,31 +81,24 @@ def build_commit_request_reminder_prompt(
     base_prompt: str,
     findings: tuple[ReviewFinding, ...],
     reminder_index: int,
-    *,
-    for_repairer: bool = False,
 ) -> str:
-    """在同一轮内追加一条"你还没写 commit request"的提醒。
+    """在同一轮内提醒 Agent 产出实际补丁和提交请求。
 
-    ``for_repairer`` 切换提醒对象：审-修分工模式下被提醒的是修复者（它收到的
-    prompt 本身就是修复提示词），而不是审核者。
+    Args:
+        base_prompt: 审核或修复提示词。
+        findings: 本轮需要处理的审核发现。
+        reminder_index: 从 1 开始的同轮提醒序号。
+
+    Returns:
+        附有修复指令和 findings 的提示词。
     """
     findings_block = "\n".join(build_finding_bullet_lines(findings)) or "(no structured findings)"
-    if for_repairer:
-        opening = (
-            f"\n\nREMINDER #{reminder_index}: You did not create "
-            "`.agent-runner/commit-request.json`. You MUST now apply concrete fixes "
-            "in the worktree and write `.agent-runner/commit-request.json` with a "
-            "descriptive `commit_message`. Do not just describe the changes; produce "
-            "a patch that addresses every item."
-        )
-    else:
-        opening = (
-            f"\n\nREMINDER #{reminder_index}: The review above reported findings "
-            "but did not create `.agent-runner/commit-request.json`. "
-            "You MUST now apply concrete fixes in the worktree and write "
-            "`.agent-runner/commit-request.json` with a descriptive `commit_message`. "
-            "Do not just list findings; produce a patch that addresses every item."
-        )
+    opening = (
+        f"\n\nREMINDER #{reminder_index}: The findings still need an actual patch and a "
+        "commit request. Apply fixes for actionable findings in the worktree and write "
+        "`.agent-runner/commit-request.json` with a descriptive `commit_message` for the patch. "
+        f"{REPAIR_VALIDATION_GUIDANCE}"
+    )
     return base_prompt + opening + "\n\nFindings that must be addressed:\n" + findings_block
 
 
@@ -100,7 +113,7 @@ def run_review_repair_agent(
 ) -> None:
     """让解析出的修复者按本轮 findings 改代码并写提交请求。
 
-    修复者以普通用途启动，收到共享修复提示词；没写出
+    修复者以普通用途启动，收到共享修复提示词。没有实际补丁或未写出
     ``.agent-runner/commit-request.json`` 时沿用现有的"同轮提醒重试"上限
     （``commit_request_reminder_attempts``），只是提醒对象从审核者变成修复者。
     提交仍由调用方的提交代理完成。
@@ -111,7 +124,7 @@ def run_review_repair_agent(
         worktree_path=worktree_path,
         findings=findings,
     )
-    request_path = worktree_path / COMMIT_REQUEST_RELATIVE_PATH
+    repair_prompt += f"\n- {REPAIR_VALIDATION_GUIDANCE}"
     max_reminder_attempts = max(0, review_config.commit_request_reminder_attempts)
     for repair_attempt in range(max_reminder_attempts + 1):
         _logger.info(
@@ -135,11 +148,13 @@ def run_review_repair_agent(
             invocation_phase=PHASE_REVIEW_REPAIR,
             invocation_attempt=repair_attempt + 1,
         )
-        if request_path.is_file() or repair_attempt >= max_reminder_attempts:
+        if repair_attempt >= max_reminder_attempts or not prepare_review_patch_retry(
+            worktree_path, process_runner
+        ):
             break
         _logger.info(
-            "Pre-PR review repair for Issue #%d: repairer '%s' wrote no commit "
-            "request; re-prompting.",
+            "Pre-PR review repair for Issue #%d: repairer '%s' did not produce "
+            "a patch with a commit request; re-prompting.",
             issue.number,
             repair_agent,
         )
@@ -147,13 +162,13 @@ def run_review_repair_agent(
             repair_prompt,
             findings,
             reminder_index=repair_attempt + 1,
-            for_repairer=True,
         )
 
 
 __all__ = [
     "COMMIT_REQUEST_RELATIVE_PATH",
     "build_commit_request_reminder_prompt",
+    "prepare_review_patch_retry",
     "resolve_reviewer_profile",
     "run_review_repair_agent",
 ]

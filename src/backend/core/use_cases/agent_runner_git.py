@@ -153,9 +153,23 @@ def run_verification(
     return verification_results
 
 
-def has_changes(worktree_path: Path, process_runner: IProcessRunner) -> bool:
-    """Return whether the worktree has uncommitted changes."""
-    result = process_runner.run(["git", "status", "--porcelain"], cwd=worktree_path)
+def has_changes(
+    worktree_path: Path, process_runner: IProcessRunner, *, exclude_path: Path | None = None
+) -> bool:
+    """检查工作树是否存在未提交改动。
+
+    Args:
+        worktree_path: Git 工作树根目录。
+        process_runner: 命令执行器。
+        exclude_path: 可排除的单个工作树相对路径。
+
+    Returns:
+        Git 是否报告未提交的改动。
+    """
+    status_command = ["git", "status", "--porcelain"]
+    if exclude_path is not None:
+        status_command.extend(["--", ".", f":(exclude,literal){exclude_path.as_posix()}"])
+    result = process_runner.run(status_command, cwd=worktree_path)
     return bool(result.stdout.strip())
 
 
