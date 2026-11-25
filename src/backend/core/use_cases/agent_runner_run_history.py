@@ -284,6 +284,9 @@ def load_run_invocation_details(
     """
     if run_history_store is None:
         return []
+    if run_window.record_id is None and run_window.invocation_run_id is not None:
+        return _load_run_invocation_timelines(run_history_store, [run_window])[0]
+
     open_window = open_window and run_window.record_id is None
     # 汇总可能在查找记录和读取事件之间提交。兼容查询为空时重新查找一次。
     for lookup_attempt in range(2 if open_window else 1):
@@ -402,6 +405,14 @@ def _find_legacy_session_owner(
     if not started_times:
         return None
     earliest_call, latest_call = min(started_times), max(started_times)
+    last_observed_call = max(
+        (
+            event_time
+            for event in session_events
+            if (event_time := _parse_attempt_timestamp(event.occurred_at)) is not None
+        ),
+        default=latest_call,
+    )
 
     # 旧 run_id 中的 UTC 秒取自进入 Issue 锁后、记录运行开始时间之前。
     session_stamp = session_events[0].run_id.rsplit("#", 1)[-1].split("-", 1)[0]
@@ -422,8 +433,21 @@ def _find_legacy_session_owner(
             created_at is None or created_at >= window.finished_at
         ):
             continue
-        # UTC 秒不同就无法确认归属。前轮甚至可能没有汇总可供交叉检查。
-        if created_at is not None and created_at != window.started_at.replace(microsecond=0):
+        start_second = window.started_at.replace(microsecond=0)
+        if created_at is not None and created_at > start_second:
+            continue
+        # 会话可能在运行开始前一秒创建。只落在起始秒且不能确认身份的调用，
+        # 有可能属于这一秒内结束但没有写入汇总的前轮。
+        if (
+            window.started_at == start_second
+            and last_observed_call < start_second + timedelta(seconds=1)
+            and (
+                created_at != start_second
+                or not any(
+                    peer.started_at < start_second == peer.finished_at for peer in candidates
+                )
+            )
+        ):
             continue
         matching_windows.append(window)
     return matching_windows[0] if len(matching_windows) == 1 else None

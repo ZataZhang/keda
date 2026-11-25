@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from backend.core.shared.interfaces.runner_console import IPrdLifecycleStore, PrdLifecycleRunRecord
 from backend.core.shared.models.runtime_task import RuntimeTask, RuntimeTaskStatus
 from backend.core.use_cases.agent_runner_lifecycle import derive_current_phase, is_terminal_event
+from backend.core.use_cases.prd_invocation_detail import invocation_run_from_detail
 
 SOURCE_PRD_LIFECYCLE = "prd_lifecycle"
 _logger = logging.getLogger(__name__)
@@ -82,16 +83,16 @@ def reconcile_runtime_task(
 
     recorded_finish = parse_runtime_timestamp(task.finished_at)
     session_starts = [
-        parsed_start
+        (parsed_start, invocation_run_from_detail(event.detail_json))
         for event in lifecycle_events
         if event.event_type in {"started", "claimed"}
         if (parsed_start := parse_runtime_timestamp(event.occurred_at)) is not None
     ]
     # 生命周期 run 的 started_at 是 Issue 的首次开始时间，重试必须优先取新会话事件。
-    session_start = (
-        max(session_starts)
+    session_start, invocation_run_id = (
+        max(reversed(session_starts), key=lambda session: session[0])
         if session_starts
-        else (parse_runtime_timestamp(lifecycle_run.started_at) if lifecycle_run else None)
+        else (parse_runtime_timestamp(lifecycle_run.started_at) if lifecycle_run else None, None)
     )
     session_events = [
         event
@@ -99,6 +100,10 @@ def reconcile_runtime_task(
         if (event_time := parse_runtime_timestamp(event.occurred_at)) is not None
         and session_start is not None
         and event_time >= session_start
+        and (
+            invocation_run_id is None
+            or invocation_run_from_detail(event.detail_json) == invocation_run_id
+        )
     ]
     terminal_events = [event for event in session_events if is_terminal_event(event.event_type)]
     session_terminal = max(terminal_events, key=lambda event: event.occurred_at, default=None)
@@ -125,7 +130,15 @@ def reconcile_runtime_task(
         and not lifecycle_run.finished_at
         and session_terminal is None
         and session_start is not None
-        and (recorded_finish is None or session_start > recorded_finish)
+        and (
+            recorded_finish is None
+            or session_start > recorded_finish
+            or (
+                session_start == recorded_finish
+                and invocation_run_id is not None
+                and invocation_run_id != task.invocation_run_id
+            )
+        )
         and (
             task.status is not RuntimeTaskStatus.FAILED
             or (
@@ -142,6 +155,7 @@ def reconcile_runtime_task(
             status_reason="生命周期记录了未收口的执行会话",
             started_at=session_start.isoformat(timespec="seconds"),
             finished_at=None,
+            invocation_run_id=invocation_run_id,
             duration_seconds=max(0.0, (context.reference_time - session_start).total_seconds()),
             last_outcome=None,
             last_error_summary=None,
@@ -167,6 +181,7 @@ def reconcile_runtime_task(
                 task,
                 started_at=session_start.isoformat(timespec="seconds"),
                 finished_at=lifecycle_finish.isoformat(timespec="seconds"),
+                invocation_run_id=invocation_run_id,
                 last_outcome=(
                     derive_current_phase(lifecycle_run, [session_terminal]).value
                     if session_terminal

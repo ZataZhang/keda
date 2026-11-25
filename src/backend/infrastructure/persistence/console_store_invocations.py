@@ -75,7 +75,8 @@ _INVOCATION_EVENT_COLUMNS = (
 
 
 # 先按会话标识或旧窗口选会话，再读取其完整事件。旧窗口多查最后一秒，由 core
-# 确认精确的边界及唯一归属；整次执行已显式绑定到其他记录的会话不参与兼容匹配。
+# 确认精确的边界及唯一归属；日期粗范围使用索引并容纳带偏移的时间表示。
+# 整次执行已显式绑定到其他记录的会话不参与兼容匹配。
 _SCOPED_EVENTS_SQL = """
 , sessions AS (
     SELECT repo_id, issue_number, run_id FROM requested WHERE run_id IS NOT NULL
@@ -83,14 +84,19 @@ _SCOPED_EVENTS_SQL = """
     SELECT e.repo_id, e.issue_number, e.run_id
     FROM requested AS w JOIN agent_invocation_events AS e USING (repo_id, issue_number)
     WHERE w.run_id IS NULL AND e.event_type = 'invocation_started'
+      AND e.occurred_at >= date(w.started_at, '-1 day')
+      AND e.occurred_at < date(w.finished_at, '+2 days')
       AND julianday(e.occurred_at) >= julianday(w.started_at)
       AND julianday(e.occurred_at) < julianday(w.finished_at, '+1 second')
       AND NOT EXISTS (
-          SELECT 1 FROM run_records AS r WHERE r.invocation_run_id = e.run_id
+          SELECT 1 FROM run_records AS r INDEXED BY idx_run_records_invocation_run
+          WHERE r.invocation_run_id = e.run_id
             AND r.repo_id = e.repo_id AND r.issue_number = e.issue_number
       )
 )
-SELECT e.* FROM sessions JOIN agent_invocation_events AS e USING (run_id, repo_id, issue_number)
+SELECT e.* FROM sessions
+JOIN agent_invocation_events AS e INDEXED BY idx_agent_invocation_events_run
+USING (run_id, repo_id, issue_number)
 ORDER BY julianday(e.occurred_at), e.id
 """
 

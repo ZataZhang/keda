@@ -190,6 +190,7 @@ def _without_superseded_local_run(
     return replace(
         task,
         local_run_superseded=True,
+        invocation_run_id=None,
         agent=None,
         preset=None,
         model=None,
@@ -487,6 +488,7 @@ def _snapshot_task(
         waiting_reason=waiting_reason,
         phase=_timeline_phase(issue_entry),
         agent=run_record.agent if run_record else None,
+        invocation_run_id=run_record.invocation_run_id if run_record else None,
         started_at=run_record.started_at if run_record else None,
         finished_at=run_record.finished_at if run_record else None,
         duration_seconds=run_record.duration_seconds if run_record else None,
@@ -518,6 +520,7 @@ def _run_record_task(run_record: RunRecord, prd_path: str | None) -> RuntimeTask
         ),
         sync_error=(run_record.error_summary if run_record.outcome == "deferred" else None),
         agent=run_record.agent,
+        invocation_run_id=run_record.invocation_run_id,
         started_at=run_record.started_at,
         finished_at=run_record.finished_at,
         duration_seconds=run_record.duration_seconds,
@@ -624,10 +627,15 @@ def _enrich_from_latest_invocation(
         return task
 
     try:
-        invocation_events = invocation_store.list_issue_invocation_events(
-            repo_id=task.repo_id,
-            issue_number=task.issue_number,
-        )
+        if task.invocation_run_id is not None:
+            invocation_events = invocation_store.list_invocation_events(
+                run_id=task.invocation_run_id
+            )
+        else:
+            invocation_events = invocation_store.list_issue_invocation_events(
+                repo_id=task.repo_id,
+                issue_number=task.issue_number,
+            )
     except Exception as exc:  # noqa: BLE001 - 调用账本读失败只降级阶段与执行器字段。
         _logger.warning(
             "Runtime summary failed to read invocation ledger for %s#%d: %s",
@@ -641,6 +649,11 @@ def _enrich_from_latest_invocation(
     session_finished_at = parse_runtime_timestamp(task.finished_at)
     session_events: list[InvocationEventRecord] = []
     for event in invocation_events:
+        if (event.repo_id, event.issue_number) != (task.repo_id, task.issue_number):
+            continue
+        if task.invocation_run_id is not None:
+            session_events.append(event)
+            continue
         event_time = parse_runtime_timestamp(event.occurred_at)
         if event_time is None or event_time < session_started_at:
             continue

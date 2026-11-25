@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.encoders import jsonable_encoder
 
 from backend.core.use_cases.agent_runner_factory import create_console_store
@@ -41,6 +42,7 @@ def list_console_run_attempts(
     started_at: str,
     finished_at: str | None = None,
     record_id: int | None = None,
+    invocation_run_id: Annotated[str | None, Query(min_length=1, max_length=256)] = None,
 ) -> dict:
     """读取运行窗口内的尝试与进程调用详情，未传结束时间时查询到当前时刻。"""
     if issue_number <= 0:
@@ -64,6 +66,7 @@ def list_console_run_attempts(
         started_at=parsed_started_at,
         finished_at=parsed_finished_at,
         record_id=record_id,
+        invocation_run_id=invocation_run_id if record_id is None else None,
     )
     attempts = load_run_attempt_details(
         run_history_store=run_history_store,

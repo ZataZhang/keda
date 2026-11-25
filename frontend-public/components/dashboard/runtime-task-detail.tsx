@@ -324,14 +324,29 @@ export function RuntimeTaskDetail({
 }: RuntimeTaskDetailProps) {
   const presentation = runtimeStatusPresentation(task.status, task.waiting_reason);
   const [invocationsOpen, setInvocationsOpen] = useState(true);
-  const [invocations, setInvocations] = useState<RunInvocationDetailEntry[] | null>(null);
-  const [invocationError, setInvocationError] = useState<string | null>(null);
+  const [invocationResult, setInvocationResult] = useState<{
+    key: string;
+    rows: RunInvocationDetailEntry[] | null;
+    error: string | null;
+  } | null>(null);
   const [executorChooserOpen, setExecutorChooserOpen] = useState(false);
   const [executorChoices, setExecutorChoices] = useState<AgentAvailabilityEntry[] | null>(null);
   const [executorChoice, setExecutorChoice] = useState("");
   const [executorChoiceError, setExecutorChoiceError] = useState<string | null>(null);
   const [executorChoicesLoading, setExecutorChoicesLoading] = useState(false);
-  const { started_at: startedAt, finished_at: finishedAt } = task;
+  const {
+    started_at: startedAt,
+    finished_at: finishedAt,
+    invocation_run_id: invocationRunId,
+  } = task;
+  const invocationKey = JSON.stringify([
+    task.repo_id,
+    task.issue_number,
+    invocationRunId ?? [startedAt, finishedAt],
+  ]);
+  const currentResult = invocationResult?.key === invocationKey ? invocationResult : null;
+  const invocations = currentResult?.rows ?? null;
+  const invocationError = currentResult?.error ?? null;
   const liveInvocations = task.status === "running" && !finishedAt;
   const hasRunWindow = Boolean(startedAt && (finishedAt || liveInvocations));
 
@@ -348,15 +363,19 @@ export function RuntimeTaskDetail({
           issueNumber: task.issue_number,
           startedAt,
           finishedAt: finishedAt ?? undefined,
+          invocationRunId,
           signal: controller.signal,
         });
         if (!controller.signal.aborted) {
-          setInvocations(details.invocations);
-          setInvocationError(null);
+          setInvocationResult({ key: invocationKey, rows: details.invocations, error: null });
         }
       } catch (error: unknown) {
         if (!controller.signal.aborted) {
-          setInvocationError(error instanceof Error ? error.message : "结构化调用读取失败");
+          setInvocationResult({
+            key: invocationKey,
+            rows: null,
+            error: error instanceof Error ? error.message : "结构化调用读取失败",
+          });
         }
       } finally {
         if (liveInvocations && !controller.signal.aborted) {
@@ -369,7 +388,16 @@ export function RuntimeTaskDetail({
       controller.abort();
       window.clearTimeout(refreshTimer);
     };
-  }, [invocationsOpen, liveInvocations, task.repo_id, task.issue_number, startedAt, finishedAt]);
+  }, [
+    invocationsOpen,
+    liveInvocations,
+    task.repo_id,
+    task.issue_number,
+    startedAt,
+    finishedAt,
+    invocationRunId,
+    invocationKey,
+  ]);
 
   const identity = `${task.repo_display_name ?? task.repo_id}#${task.issue_number}`;
   const issueUrl = task.issue_url;

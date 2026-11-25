@@ -1698,6 +1698,7 @@ export type RuntimeTaskEntry = {
   model: string | null;
   attempt_number: number | null;
   prd_path: string | null;
+  invocation_run_id?: string | null;
   started_at: string | null;
   finished_at: string | null;
   duration_seconds: number | null;

@@ -1,5 +1,10 @@
 # Issue #443 人工审阅清单
 
+## 当前提交的定向复验
+
+- [最终验证报告](issue-443.evidence-report.md#定向修复复验)覆盖真实 Stats 六行验收、两个同秒无汇总反例和真实值守看板抽屉。看板从生产任务摘要取得生命周期会话 ID，汇总写入前后沿用同一调用会话。
+- [最终截图与复跑脚本](https://github.com/ZataZhang/keda/tree/iar-evidence/issue-443/targeted-repair)已与当前交付提交绑定。早期证据以下保留供追溯。
+
 ## 人工决策
 
 - [ ] 确认 Stats 的 Issue 分组保留 Agent 列，执行器列按实际调用顺序呈现；单执行器、切换回切、连续重复折叠和旧记录「未记录」符合预期。

@@ -264,6 +264,45 @@ def test_run_attempt_details_are_scoped_to_selected_run(console_environment) -> 
     assert closed_response.status_code == 200
     assert closed_response.json()["invocations"] == invocations
 
+    # 旧摘要与当前会话共享起始秒时，实时详情用生命周期确认的会话 ID。
+    current_run_id = "keda-main#issue-263#20261010T045124Z-current"
+    store.append_invocation_event(
+        InvocationEventRecord(
+            run_id=current_run_id,
+            event_key="current:start",
+            event_type="invocation_started",
+            invocation_id="current",
+            repo_id="keda-main",
+            issue_number=263,
+            phase="implementation",
+            role="implementer",
+            agent="codex",
+            occurred_at="2026-10-10T04:51:24.500+00:00",
+            detail_json="{}",
+        )
+    )
+    stable_url = live_response.request.url.copy_merge_params({"invocation_run_id": current_run_id})
+    current_rows = client.get(stable_url).json()["invocations"]
+    assert [row["executor"] for row in current_rows] == ["codex"]
+    store.append_run(
+        RunRecord(
+            repo_id="keda-main",
+            repo_path="/tmp/keda-main",
+            issue_number=263,
+            trigger="console_run",
+            agent="codex",
+            outcome="completed",
+            error_summary=None,
+            started_at="2026-10-10T04:51:24+00:00",
+            finished_at="2026-10-10T04:52:52+00:00",
+            duration_seconds=88,
+            invocation_run_id=current_run_id,
+        )
+    )
+    assert client.get(stable_url).json()["invocations"] == current_rows
+    foreign_url = stable_url.copy_merge_params({"issue_number": 264})
+    assert client.get(foreign_url).json()["invocations"] == []
+
 
 @pytest.mark.parametrize(
     ("started_at", "finished_at", "other_run_id"),
@@ -282,6 +321,11 @@ def test_run_attempt_details_are_scoped_to_selected_run(console_environment) -> 
             "2026-10-10T06:00:01+00:00",
             "2026-10-10T06:00:02+00:00",
             "keda-main#issue-314#20261010T060000Z-previous",
+        ),
+        (
+            "2026-10-10T06:00:01+00:00",
+            "2026-10-10T06:00:02+00:00",
+            "keda-main#issue-314#20261010T060001Z-previous-in-same-second",
         ),
     ],
 )
@@ -372,7 +416,8 @@ def test_console_run_list_summarizes_persisted_executors_per_run(
     )
     run_ids: dict[str, str] = {}
     for run_suffix, recorded_agent, started_at, finished_at in run_specs:
-        run_id = f"keda-main#issue-314#20261010T{run_suffix}"
+        created_at = datetime.fromisoformat(started_at) - timedelta(seconds=1)
+        run_id = f"keda-main#issue-314#{created_at:%Y%m%dT%H%M%SZ}-{run_suffix}"
         run_ids[run_suffix] = run_id
         store.append_run(
             RunRecord(
