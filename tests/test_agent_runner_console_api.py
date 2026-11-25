@@ -124,6 +124,7 @@ def test_process_lifecycle_via_api(console_environment) -> None:
 def test_run_attempt_details_are_scoped_to_selected_run(console_environment) -> None:
     """按运行时间窗口读取同一 Issue 的尝试详情，不混入其他运行。"""
     store = console_environment["store"]
+    invocation_run_id = "keda-main#issue-263#20261010T045124Z-test"
     store.append_attempt(
         AttemptRecord(
             repo_id="keda-main",
@@ -147,7 +148,7 @@ def test_run_attempt_details_are_scoped_to_selected_run(console_environment) -> 
     )
     store.append_invocation_event(
         InvocationEventRecord(
-            run_id="keda-main#issue-263#20261010T045124Z-test",
+            run_id=invocation_run_id,
             event_key="inv-run-details:invocation_started",
             event_type="invocation_started",
             invocation_id="inv-run-details",
@@ -165,7 +166,7 @@ def test_run_attempt_details_are_scoped_to_selected_run(console_environment) -> 
     )
     store.append_invocation_event(
         InvocationEventRecord(
-            run_id="keda-main#issue-263#20261010T045124Z-test",
+            run_id=invocation_run_id,
             event_key="inv-run-details:invocation_finished",
             event_type="invocation_finished",
             invocation_id="inv-run-details",
@@ -243,22 +244,55 @@ def test_run_attempt_details_are_scoped_to_selected_run(console_environment) -> 
     assert live_response.status_code == 200
     assert live_response.json()["invocations"] == invocations
 
+    # 值守看板还沿用打开抽屉时的查询参数，汇总已绑定到同一个调用会话。
+    store.append_run(
+        RunRecord(
+            repo_id="keda-main",
+            repo_path="/tmp/keda-main",
+            issue_number=263,
+            trigger="console_run",
+            agent="qoder",
+            outcome="completed",
+            error_summary=None,
+            started_at="2026-10-10T04:51:24+00:00",
+            finished_at="2026-10-10T05:11:52+00:00",
+            duration_seconds=1228,
+            invocation_run_id=invocation_run_id,
+        )
+    )
+    closed_response = client.get(live_response.request.url)
+    assert closed_response.status_code == 200
+    assert closed_response.json()["invocations"] == invocations
+
 
 @pytest.mark.parametrize(
-    ("started_at", "next_run_id"),
+    ("started_at", "finished_at", "other_run_id"),
     [
-        ("2026-10-10T06:00:00+00:00", "legacy-next"),
-        ("2026-10-10T06:00:01+00:00", "keda-main#issue-314#20261010T060001Z-next"),
+        (
+            "2026-10-10T06:00:00+00:00",
+            "2026-10-10T06:00:01+00:00",
+            "legacy-next",
+        ),
+        (
+            "2026-10-10T06:00:01+00:00",
+            "2026-10-10T06:00:01+00:00",
+            "keda-main#issue-314#20261010T060001Z-next",
+        ),
+        (
+            "2026-10-10T06:00:01+00:00",
+            "2026-10-10T06:00:02+00:00",
+            "keda-main#issue-314#20261010T060000Z-previous",
+        ),
     ],
 )
-def test_console_legacy_run_excludes_activity_from_unfinished_same_second_successor(
+def test_console_legacy_run_excludes_unrecorded_peer_at_same_second(
     console_environment,
     started_at: str,
-    next_run_id: str,
+    finished_at: str,
+    other_run_id: str,
 ) -> None:
-    """同秒交接时，新运行尚无汇总，旧记录的列表和详情仍保持无调用。"""
+    """同秒交接缺少一轮汇总时，列表和详情仍排除另一轮的调用。"""
     store = console_environment["store"]
-    finished_at = "2026-10-10T06:00:01+00:00"
     store.append_run(
         RunRecord(
             repo_id="keda-main",
@@ -279,7 +313,7 @@ def test_console_legacy_run_excludes_activity_from_unfinished_same_second_succes
     )
     store.append_invocation_event(
         InvocationEventRecord(
-            run_id=next_run_id,
+            run_id=other_run_id,
             event_key="next:start",
             event_type="invocation_started",
             invocation_id="next",

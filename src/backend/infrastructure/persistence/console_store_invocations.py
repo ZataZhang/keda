@@ -157,15 +157,19 @@ class InvocationEventStoreMixin:
         )
         return self._read_invocation_events(query, (repo_id, issue_number, max(1, limit)))
 
-    def find_runs_for_invocation_lookup(self, lookup: RunInvocationLookup) -> list[RunRecord]:
+    def find_runs_for_invocation_lookup(
+        self, lookup: RunInvocationLookup, *, open_window: bool = False
+    ) -> list[RunRecord]:
         """查找详情端点指定的运行记录，接受等价的 ISO 时区表示。"""
         query = (
             "SELECT * FROM run_records WHERE repo_id = ? AND issue_number = ? "
             "AND julianday(started_at) = julianday(?) "
-            "AND julianday(finished_at) = julianday(?)"
         )
+        if not open_window:
+            query += " AND julianday(finished_at) = julianday(?)"
+        params = lookup[:3] if open_window else lookup[:4]
         with self._connection() as connection:
-            return [_run_record_from_row(row) for row in connection.execute(query, lookup[:4])]
+            return [_run_record_from_row(row) for row in connection.execute(query, params)]
 
     def read_run_invocation_events(
         self, lookups: Sequence[RunInvocationLookup]

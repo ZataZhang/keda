@@ -298,11 +298,14 @@ class IRunHistoryStore(ABC):
         """倒序列出最近的运行记录。"""
         ...
 
-    def find_runs_for_invocation_lookup(self, lookup: RunInvocationLookup) -> list[RunRecord]:
+    def find_runs_for_invocation_lookup(
+        self, lookup: RunInvocationLookup, *, open_window: bool = False
+    ) -> list[RunRecord]:
         """读取详情请求起止时间对应的持久化运行。
 
         Args:
             lookup: 详情请求的仓库、Issue 和 UTC 起止时间。
+            open_window: 仅匹配开始时间，用于未指定结束时间的实时查询。
 
         Returns:
             匹配该窗口的运行记录。

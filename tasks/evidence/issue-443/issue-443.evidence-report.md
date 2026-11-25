@@ -1,5 +1,18 @@
 # Issue #443 验证证据
 
+## 第二次恢复复验
+
+| 入口 | 结果 |
+| --- | --- |
+| Stats → 展开 Issue → 查看详情 | 两个方向的同秒交接均验证通过。任一轮缺少汇总时，另一轮显示「未记录」，详情没有串入 Codex 调用。 |
+| 值守看板 → 打开任务抽屉 → 等待轮询 | 汇总落库前后请求 URL 相同，API 返回相同的 Codex 调用，抽屉继续显示该调用。 |
+
+生产 Console 构建通过。Chromium 经真实页面及 FastAPI 调用详情路由读取隔离 SQLite。值守看板任务摘要使用固定运行中状态，以保留原查询并单独验证汇总落库；原始日志与真实 GitHub 同步不在本轮验证范围内。
+
+在原 PR head `f8b92d42`，两个 API 回归断言按预期失败：后轮返回了前轮的 Codex 调用，实时轮询在汇总写入后返回空。修复后，Console API、运行历史和 SQLite 存储定向测试共 83 项通过，本地核心测试 537 项通过。`just lint --repo`、严格文档构建和生产 Console 构建通过。
+
+[Chromium 输出、截图与负控](https://github.com/ZataZhang/keda/tree/iar-evidence/issue-443/recovery-polling)
+
 ## 人审导航
 
 | 真实用户流程 | 核对结果 |

@@ -8,7 +8,7 @@
 
 - Issue: [#443](https://github.com/ZataZhang/keda/issues/443)
 - PR：[#444](https://github.com/ZataZhang/keda/pull/444)（`issue-443` → `main`）：已公开、开启，非 draft，尚未合并。
-- 状态核对日期：2026-11-25；合并前以 PR 页面实时状态为准。
+- 状态核对日期：2026-11-26；合并前以 PR 页面实时状态为准。
 - 列表和详情共享调用会话归属。新记录保存会话 ID，旧记录按完整会话核对秒级边界。Stats 保留 Agent 列，并显示自定义执行器的持久化名称。
 
 ## 审阅修复证据
@@ -22,6 +22,11 @@
 - 在旧 PR head `f53d51be` 上，新增的两个 API 回归用例按预期失败。旧行错误返回 `["codex"]`。两个用例分别覆盖旧会话 ID 无时间戳、旧记录的起止时间落在同一秒。
 - 在修复后的工作树上，真实生产构建的 `/app/stats/` 浏览器验证通过。使用隔离 SQLite，逐行核对 6 条运行及详情请求，覆盖缺汇总、两个已有汇总的同秒交接、可区分的相同窗口、回切、未知执行器和 5000 条后续事件。值守看板仍可查询运行中的调用。
 - [Chromium 输出](https://github.com/ZataZhang/keda/blob/iar-evidence/issue-443/recovery-same-second/chromium.txt)、[列表截图](https://github.com/ZataZhang/keda/blob/iar-evidence/issue-443/recovery-same-second/rv-1-console-stats-repair.png)、[旧记录详情截图](https://github.com/ZataZhang/keda/blob/iar-evidence/issue-443/recovery-same-second/rv-3-pending-handoff-detail.png)、[负控](https://github.com/ZataZhang/keda/blob/iar-evidence/issue-443/recovery-same-second/baseline.txt)。
+
+## 第二次恢复复验
+
+- [复验报告](issue-443.evidence-report.md#第二次恢复复验)记录两种同秒串轮以及值守看板在汇总写入前后的轮询结果。
+- 审阅时可以直接对照 [Chromium 输出、截图与 API 负控](https://github.com/ZataZhang/keda/tree/iar-evidence/issue-443/recovery-polling)。
 
 ## 尚未验证与下一步
 

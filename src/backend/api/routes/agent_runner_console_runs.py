@@ -72,6 +72,7 @@ def list_console_run_attempts(
     invocations = load_run_invocation_details(
         run_history_store=run_history_store,
         run_window=run_window,
+        open_window=finished_at is None,
     )
     return {
         "attempts": jsonable_encoder(attempts),

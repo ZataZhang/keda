@@ -270,38 +270,44 @@ def load_run_invocation_details(
     *,
     run_history_store: IRunHistoryStore | None,
     run_window: RunAttemptWindow,
+    open_window: bool = False,
 ) -> list[InvocationTimelineRow]:
     """读取指定运行的调用详情，与 Stats 的执行器摘要共用会话归属。
 
     Args:
         run_history_store: 运行历史存储。
         run_window: 详情请求中的运行窗口和可选记录主键。
+        open_window: 未指定结束时间的实时查询，按开始时间识别随后写入的汇总。
 
     Returns:
         按开始时间排列的调用详情；没有可归属的会话时为空。
     """
     if run_history_store is None:
         return []
-    try:
-        stored_runs = run_history_store.find_runs_for_invocation_lookup(
-            run_window.invocation_lookup()
-        )
-    except Exception as lookup_error:  # noqa: BLE001 - 旁路读取失败不阻断详情。
-        _logger.warning("Failed to find run for invocation details: %s", lookup_error)
-        return []
-    matched_runs = [
-        run
-        for run in stored_runs
-        if run_window.record_id is None or run.record_id == run_window.record_id
-    ]
-    if len(matched_runs) == 1:
-        selected_window = RunAttemptWindow.from_record(matched_runs[0])
-    elif not stored_runs and run_window.record_id is None:
-        # 兼容只传窗口且尚无运行汇总记录的详情调用方。
-        selected_window = run_window
-    else:
-        return []
-    return _load_run_invocation_timelines(run_history_store, [selected_window])[0]
+    open_window = open_window and run_window.record_id is None
+    # 汇总可能在查找记录和读取事件之间提交。兼容查询为空时重新查找一次。
+    for lookup_attempt in range(2 if open_window else 1):
+        try:
+            stored_runs = run_history_store.find_runs_for_invocation_lookup(
+                run_window.invocation_lookup(), open_window=open_window
+            )
+        except Exception as lookup_error:  # noqa: BLE001 - 旁路读取失败不阻断详情。
+            _logger.warning("Failed to find run for invocation details: %s", lookup_error)
+            return []
+        matched_runs = [
+            run
+            for run in stored_runs
+            if run_window.record_id is None or run.record_id == run_window.record_id
+        ]
+        if len(matched_runs) == 1:
+            selected_window = RunAttemptWindow.from_record(matched_runs[0])
+            return _load_run_invocation_timelines(run_history_store, [selected_window])[0]
+        if stored_runs or run_window.record_id is not None:
+            return []
+        timeline = _load_run_invocation_timelines(run_history_store, [run_window])[0]
+        if timeline or lookup_attempt == 1:
+            return timeline
+    return []
 
 
 def load_run_executor_summaries(
@@ -416,15 +422,8 @@ def _find_legacy_session_owner(
             created_at is None or created_at >= window.finished_at
         ):
             continue
-        if created_at is not None and created_at > window.started_at:
-            continue
-        if (
-            created_at is not None
-            and created_at < window.started_at
-            and window.started_at.microsecond == 0
-            and any(peer.started_at < window.started_at == peer.finished_at for peer in candidates)
-        ):
-            # 本会话在交接秒之前已取得 Issue 锁，不可能属于随后才进锁的运行。
+        # UTC 秒不同就无法确认归属。前轮甚至可能没有汇总可供交叉检查。
+        if created_at is not None and created_at != window.started_at.replace(microsecond=0):
             continue
         matching_windows.append(window)
     return matching_windows[0] if len(matching_windows) == 1 else None
