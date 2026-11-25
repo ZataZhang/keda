@@ -460,8 +460,9 @@ export async function fetchRunExecutionDetails(params: {
 // ── 统一运行时看板与桌面 companion ──────────────────────────────────────────
 
 /** 读取看板任务摘要（只来自已注册仓库的 Console 观测路径）。 */
-export async function fetchRuntimeTasks(): Promise<RuntimeTaskSummary> {
-  return get<RuntimeTaskSummary>(`${BASE_PATH}/console/runtime/tasks`);
+export async function fetchRuntimeTasks(refreshEvidence = true): Promise<RuntimeTaskSummary> {
+  const query = refreshEvidence ? "" : "?refresh_evidence=false";
+  return get<RuntimeTaskSummary>(`${BASE_PATH}/console/runtime/tasks${query}`);
 }
 
 /** 读取桌面 companion 状态；helper 与网页看板共用这个只读探针。 */

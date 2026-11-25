@@ -36,6 +36,7 @@ from backend.core.use_cases.agent_runner_monitor import (
     build_issue_snapshot,
     build_overview,
 )
+from backend.core.use_cases.monitor_issue_refresh import IssueRefreshStore
 from backend.core.use_cases.monitor_snapshots import (
     MonitorSyncCoordinator,
     MonitorSyncError,
@@ -169,6 +170,7 @@ def _scan_repository_and_persist(repo_id: str) -> None:
     once and hands the **same** payload to :func:`persist_monitoring_result`,
     never re-scanning GitHub just to write to the database.
     """
+    scan_started_ns = time.time_ns()
     try:
         payload = _build_overview_response(repo_ids=[repo_id], include_tracked_issues=True)
     except Exception as exc:
@@ -179,7 +181,9 @@ def _scan_repository_and_persist(repo_id: str) -> None:
         if sync_error:
             _record_monitor_sync_failure_best_effort(repo_id, str(sync_error))
             raise MonitorSyncError(f"Repository '{repo_id}' scan was incomplete: {sync_error}")
-    report = persist_monitoring_result(create_console_store(), payload)
+    report = persist_monitoring_result(
+        create_console_store(), payload, scan_started_ns=scan_started_ns
+    )
     if not report.ok:
         failed_detail = "; ".join(
             f"{failed_repo_id}: {reason}"
@@ -585,6 +589,13 @@ def get_agent_runner_overview(
         }
 
     return _get_cached_overview_response(repo_ids=parsed_repo_ids)
+
+
+@router.get("/agent-runner/overview/issue-revision")
+def get_agent_runner_issue_refresh_revision() -> dict[str, str]:
+    """只读本地单 Issue 刷新版本，不访问 GitHub。"""
+    store = cast(IssueRefreshStore, create_console_store())
+    return {"revision": store.monitor_issue_refresh_revision()}
 
 
 @router.get("/agent-runner/overview/snapshots")

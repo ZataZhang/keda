@@ -20,11 +20,11 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Sequence
+from collections.abc import Callable, Sequence
 
 from backend.core.shared.interfaces.agent_runner import IGitHubClient
 from backend.core.shared.models.agent_labels import standard_label_names
-from backend.core.shared.models.agent_runner import RepositoryRunContext
+from backend.core.shared.models.agent_runner import IssueSummary, RepositoryRunContext
 
 _logger = logging.getLogger(__name__)
 
@@ -117,6 +117,7 @@ def update_issue_labels(
     remove: Sequence[str],
     context: RepositoryRunContext,
     github_client: IGitHubClient,
+    observe_issue: Callable[[IssueSummary], None] | None = None,
 ) -> IssueLabelSnapshot:
     """在已同步标签集内增删标签，写回后以 GitHub 的 fresh read 返回状态。
 
@@ -126,6 +127,7 @@ def update_issue_labels(
         remove: 需要移除的标签名序列。
         context: 仓库运行上下文（决定允许的标签集合）。
         github_client: 该仓库的 GitHub 客户端。
+        observe_issue: 成功写入后，复用返回结果更新本地观察值。
 
     Returns:
         写入后的 :class:`IssueLabelSnapshot`。
@@ -160,6 +162,8 @@ def update_issue_labels(
     github_client.edit_issue_labels(issue_number, add=add_names, remove=remove_names)
     _logger.info("Issue #%s labels updated: +%s -%s", issue_number, add_names, remove_names)
     refreshed_issue = github_client.get_issue(issue_number)
+    if observe_issue is not None:
+        observe_issue(refreshed_issue)
     return IssueLabelSnapshot(
         issue_number=issue_number,
         labels=tuple(refreshed_issue.labels),

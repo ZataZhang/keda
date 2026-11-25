@@ -15,13 +15,13 @@ import logging
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any
+from typing import Any, cast
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from backend.core.shared.interfaces.runner_console import AuditEntry
-from backend.core.shared.models.agent_runner import RepositoryRunContext
+from backend.core.shared.models.agent_runner import IssueSummary, RepositoryRunContext
 from backend.core.use_cases.agent_runner_factory import (
     create_console_store,
     create_github_client,
@@ -43,6 +43,11 @@ from backend.core.use_cases.issue_label_actions import (
     IssueLabelNotAllowedError,
     read_issue_labels,
     update_issue_labels,
+)
+
+from backend.core.use_cases.monitor_issue_refresh import (
+    IssueRefreshStore,
+    record_confirmed_monitor_issue,
 )
 
 _logger = logging.getLogger(__name__)
@@ -201,6 +206,17 @@ def put_console_issue_labels(
         raise HTTPException(status_code=400, detail="issue_number must be a positive integer.")
     context = _resolve_enabled_context(repo_id)
     github_client = create_github_client(context.repo_path, create_process_runner())
+
+    def observe_issue(issue: IssueSummary) -> None:
+        try:
+            record_confirmed_monitor_issue(
+                cast(IssueRefreshStore, create_console_store()), context, issue
+            )
+        except Exception as exc:  # noqa: BLE001 - 远端写入已成功，保留其结果。
+            _logger.warning(
+                "Could not refresh local card for %s#%d: %s", repo_id, issue_number, exc
+            )
+
     try:
         snapshot = update_issue_labels(
             issue_number=issue_number,
@@ -208,6 +224,7 @@ def put_console_issue_labels(
             remove=request.remove,
             context=context,
             github_client=github_client,
+            observe_issue=observe_issue,
         )
     except IssueLabelNotAllowedError as exc:
         _audit_write(result="rejected", reason=str(exc))

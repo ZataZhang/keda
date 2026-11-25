@@ -37,6 +37,8 @@ from backend.core.shared.interfaces.runner_console import (
     MonitorSnapshotEntry,
 )
 
+from backend.core.use_cases.monitor_issue_refresh import apply_issue_refresh
+
 _logger = logging.getLogger(__name__)
 
 
@@ -75,6 +77,8 @@ class MonitorPersistReport:
 def persist_monitoring_result(
     store: IMonitorSnapshotStore,
     payload: Mapping[str, Any],
+    *,
+    scan_started_ns: int | None = None,
 ) -> MonitorPersistReport:
     """把已构建好的 overview payload 写入本地快照。
 
@@ -87,6 +91,7 @@ def persist_monitoring_result(
         store: 快照存储端口实现。
         payload: ``GET /agent-runner/overview`` 同构的响应体，必须含
             ``repositories`` 列表。
+        scan_started_ns: 全仓扫描开始时刻，用于保留扫描期间的新观察。
 
     Returns:
         MonitorPersistReport: 成功与失败的仓库清单。
@@ -106,6 +111,7 @@ def persist_monitoring_result(
                     repo_id=repo_id,
                     payload_json=json.dumps(repository_payload, ensure_ascii=False),
                     scanned_at=scanned_at,
+                    scan_started_ns=scan_started_ns,
                 )
             )
         except Exception as exc:  # noqa: BLE001 - 记录后继续其他仓库。
@@ -238,7 +244,11 @@ def get_snapshot_overview(
     enabled_order = [str(repo_id) for repo_id in enabled_repo_ids]
     enabled_lookup = set(enabled_order)
     snapshot_payloads: dict[str, tuple[str, dict[str, Any]]] = {}
-    for snapshot_entry in store.list_monitor_snapshots():
+    read_state = getattr(store, "read_monitor_snapshot_state", None)
+    snapshots, issue_refreshes = (
+        read_state() if read_state is not None else (store.list_monitor_snapshots(), [])
+    )
+    for snapshot_entry in snapshots:
         if snapshot_entry.repo_id not in enabled_lookup:
             continue
         try:
@@ -263,6 +273,34 @@ def get_snapshot_overview(
             snapshot_entry.scanned_at,
             overview_payload,
         )
+
+    for refresh in issue_refreshes:
+        if refresh.repo_id not in enabled_lookup:
+            continue
+        observed = json.loads(refresh.payload_json)
+        if refresh.repo_id not in snapshot_payloads:
+            snapshot_payloads[refresh.repo_id] = (
+                "",
+                {
+                    "repo_id": refresh.repo_id,
+                    "display_name": observed["display_name"],
+                    "base_branch": observed["base_branch"],
+                    "remote": observed["remote"],
+                    "labels": observed["labels"],
+                    "enabled": True,
+                    "health": {
+                        "gh_available": True,
+                        "repo_path_exists": True,
+                        "publish_remote_exists": True,
+                    },
+                    "issues": [],
+                    "queue_counts": dict.fromkeys(observed["labels"].values(), 0),
+                    "anomaly_count": 0,
+                    "anomaly_summary": {"warning": 0, "error": 0},
+                    "scanned_at": "",
+                },
+            )
+        apply_issue_refresh(snapshot_payloads[refresh.repo_id][1], observed["issue"])
 
     repositories: list[MonitorSnapshotOverview] = []
     missing_repo_ids: list[str] = []

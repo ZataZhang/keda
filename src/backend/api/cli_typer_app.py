@@ -243,6 +243,11 @@ evidence_app = typer.Typer(
     no_args_is_help=True,
     context_settings=_HELP_CONTEXT,
 )
+monitor_app = typer.Typer(
+    help="Refresh GitHub state in the local Console snapshot.",
+    no_args_is_help=True,
+    context_settings=_HELP_CONTEXT,
+)
 eval_app = typer.Typer(
     help="校准题库、运行本地等时限模型对照并查看报告。",
     no_args_is_help=True,
@@ -270,6 +275,7 @@ app.add_typer(skill_app, name="skill")
 app.add_typer(preview_app, name="preview")
 app.add_typer(evidence_app, name="evidence")
 app.add_typer(eval_app, name="eval")
+app.add_typer(monitor_app, name="monitor")
 
 RepoOption = Annotated[str | None, typer.Option("--repo", help="Target repository path.")]
 RepoIdOption = Annotated[
@@ -460,6 +466,7 @@ from backend.api import (  # noqa: E402,F401
     cli_typer_registry,
     cli_typer_labels,
     cli_typer_issue,
+    cli_typer_monitor,
     cli_typer_pr,
     cli_typer_runner,
     cli_typer_recover,
