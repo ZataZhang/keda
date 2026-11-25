@@ -418,6 +418,7 @@ export async function fetchRecentRuns(params: {
  * @param params.issueNumber - Issue 编号。
  * @param params.startedAt - ISO-8601 运行开始时间。
  * @param params.finishedAt - ISO-8601 运行结束时间。
+ * @param params.recordId - 区分起止时间相同的运行记录主键。
  * @returns 所选运行窗口内的尝试详情。
  */
 export async function fetchRunExecutionDetails(params: {
@@ -425,6 +426,7 @@ export async function fetchRunExecutionDetails(params: {
   issueNumber: number;
   startedAt: string;
   finishedAt: string;
+  recordId?: number | null;
   signal?: AbortSignal;
 }): Promise<{
   attempts: RunAttemptDetailEntry[];
@@ -436,6 +438,9 @@ export async function fetchRunExecutionDetails(params: {
     started_at: params.startedAt,
     finished_at: params.finishedAt,
   });
+  if (params.recordId != null) {
+    searchParams.set("record_id", String(params.recordId));
+  }
   return get<{
     attempts: RunAttemptDetailEntry[];
     invocations: RunInvocationDetailEntry[];

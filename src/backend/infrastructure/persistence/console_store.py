@@ -6,7 +6,7 @@
   也要写运行记录，不能要求 PostgreSQL 常驻；本地单文件零依赖。
 - WAL + busy_timeout 容忍多个 runner 进程并发收尾写库。版本迁移持有 SQLite
   写事务，在同一事务内升级表和 user_version。
-- 通过 ``PRAGMA user_version`` 做就地迁移（当前版本 17：v5 新增
+- 通过 ``PRAGMA user_version`` 做就地迁移（当前版本 18：v5 新增
   ``prd_lifecycle_runs`` 与 ``prd_lifecycle_events`` 两张 PRD 生命周期账本表；
   v6 为 ``attempt_records`` 附加可空 ``preset`` / ``model`` 观测列；
   v7 把队列与设置两张表按新功能名重建；v8 为 ``prd_lifecycle_events`` 附加
@@ -17,7 +17,8 @@
   追加可空的 Issue 标题与 URL 快照；v14 新增单行模型 token 价格设置表；
   v15 新增模型评测三表 ``evaluation_run`` / ``evaluation_result`` /
   ``evaluation_score``；v16 为评测 run 增加重复次数与逐题冻结基线，结果表增加
-  ``repeat_index`` 并按重复序号重建唯一约束；v17 新增单次重试执行器覆盖表）。
+  ``repeat_index`` 并按重复序号重建唯一约束；v17 新增单次重试执行器覆盖表；
+  v18 为运行记录追加可空的调用会话标识）。
 - 旁路记录（运行历史 / 审计 / attempt）的写入失败不允许向上抛出阻断
   runner 主流程，降级为日志警告；而 dashboard 事实读取路径（监控快照
   与同步设置）的写入失败必须抛给调用方，避免"刷新成功但数据没更新"。
@@ -74,7 +75,7 @@ from backend.infrastructure.persistence.console_store_retry_override import (
 _logger = logging.getLogger(__name__)
 
 
-_SCHEMA_VERSION = 17
+_SCHEMA_VERSION = 18
 _SQLITE_BUSY_TIMEOUT_SECONDS = 5
 _WAL_RETRY_DELAY_SECONDS = 0.05
 
@@ -93,7 +94,10 @@ CREATE TABLE IF NOT EXISTS run_records (
     error_summary TEXT,
     started_at TEXT NOT NULL,
     finished_at TEXT NOT NULL,
-    duration_seconds REAL NOT NULL
+    duration_seconds REAL NOT NULL,
+    issue_title TEXT,
+    issue_url TEXT,
+    invocation_run_id TEXT
 )
 """
 
@@ -479,6 +483,22 @@ class SqliteConsoleStore(
                 connection.execute("ALTER TABLE evaluation_result_v16 RENAME TO evaluation_result")
                 for index_statement in CREATE_EVALUATION_INDEXES:
                     connection.execute(index_statement)
+        if current_version < 18:
+            connection.execute(_CREATE_RUN_RECORDS)
+            run_columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(run_records)").fetchall()
+            }
+            if "invocation_run_id" not in run_columns:
+                connection.execute("ALTER TABLE run_records ADD COLUMN invocation_run_id TEXT")
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_run_records_invocation_run "
+                "ON run_records (invocation_run_id) WHERE invocation_run_id IS NOT NULL"
+            )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_run_records_issue "
+                "ON run_records (repo_id, issue_number)"
+            )
         connection.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
 
     def append_run(self, run_record: RunRecord) -> None:
@@ -489,8 +509,8 @@ class SqliteConsoleStore(
                     "INSERT INTO run_records "
                     "(repo_id, repo_path, issue_number, trigger, agent, outcome, "
                     " error_summary, started_at, finished_at, duration_seconds, "
-                    " issue_title, issue_url) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    " issue_title, issue_url, invocation_run_id) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         run_record.repo_id,
                         run_record.repo_path,
@@ -504,6 +524,7 @@ class SqliteConsoleStore(
                         run_record.duration_seconds,
                         run_record.issue_title,
                         run_record.issue_url,
+                        run_record.invocation_run_id,
                     ),
                 )
                 connection.commit()

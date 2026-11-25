@@ -6,17 +6,17 @@ import { Badge } from "@/components/ui/badge";
 import type { RunRecordEntry } from "@/lib/api/types";
 import { formatLocalDateTime } from "@/lib/utils";
 
-const EXECUTOR_LABELS: Record<string, string> = {
-  claude: "Claude",
-  codex: "Codex",
-  kimi: "Kimi",
-  pi: "Pi",
-  codebuddy: "CodeBuddy",
-  qoder: "Qoder",
-  opencode: "OpenCode",
-  mcode: "MCode",
-  dsh: "DSH",
-};
+const EXECUTOR_LABELS = new Map([
+  ["claude", "Claude"],
+  ["codex", "Codex"],
+  ["kimi", "Kimi"],
+  ["pi", "Pi"],
+  ["codebuddy", "CodeBuddy"],
+  ["qoder", "Qoder"],
+  ["opencode", "OpenCode"],
+  ["mcode", "MCode"],
+  ["dsh", "DSH"],
+]);
 
 type RecentRunGroupsProps = {
   recentRuns: RunRecordEntry[];
@@ -114,7 +114,7 @@ export function RecentRunGroups({
                 <tbody>
                   {group.runs.map((run, index) => (
                     <tr
-                      key={`${run.started_at}-${index}`}
+                      key={run.record_id ?? `${run.started_at}-${index}`}
                       className="border-b border-slate-100 last:border-0 dark:border-slate-800"
                     >
                       <td className="py-2 pr-3 font-mono text-[11px] text-slate-500">
@@ -138,7 +138,7 @@ export function RecentRunGroups({
                       <td className="py-2 pr-3 text-xs">
                         {run.executors.length > 0
                           ? run.executors
-                              .map((executorName) => EXECUTOR_LABELS[executorName] ?? executorName)
+                              .map((executorName) => EXECUTOR_LABELS.get(executorName) ?? executorName)
                               .join(" → ")
                           : "未记录"}
                       </td>

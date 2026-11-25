@@ -28,7 +28,7 @@ def list_console_runs(repo_id: str | None = None, limit: int = 100) -> dict:
         run_history_store=run_history_store,
         runs=runs,
     )
-    run_payloads = jsonable_encoder(runs)
+    run_payloads = jsonable_encoder(runs, exclude={"invocation_run_id"})
     for run_payload, executor_names in zip(run_payloads, executor_summaries, strict=True):
         run_payload["executors"] = executor_names
     return {"runs": run_payloads}
@@ -40,6 +40,7 @@ def list_console_run_attempts(
     issue_number: int,
     started_at: str,
     finished_at: str,
+    record_id: int | None = None,
 ) -> dict:
     """读取某条运行记录时间窗口内的 Agent 尝试与实际进程调用详情。"""
     if issue_number <= 0:
@@ -60,6 +61,7 @@ def list_console_run_attempts(
         issue_number=issue_number,
         started_at=parsed_started_at,
         finished_at=parsed_finished_at,
+        record_id=record_id,
     )
     attempts = load_run_attempt_details(
         run_history_store=run_history_store,

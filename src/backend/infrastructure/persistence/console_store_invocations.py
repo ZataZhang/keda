@@ -17,7 +17,11 @@ import sqlite3
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from backend.infrastructure.persistence.console_store_history import RunRecord, _run_record_from_row
+
 _logger = logging.getLogger(__name__)
+
+type RunInvocationLookup = tuple[str, int, str, str, str | None]
 
 
 @dataclass(frozen=True)
@@ -70,6 +74,34 @@ _INVOCATION_EVENT_COLUMNS = (
 )
 
 
+# 先按会话标识或旧窗口选会话，再读取其完整事件。旧窗口多查最后一秒，由 core
+# 确认精确的边界及唯一归属；整次执行已显式绑定到其他记录的会话不参与兼容匹配。
+_SCOPED_EVENTS_SQL = """
+, sessions AS (
+    SELECT repo_id, issue_number, run_id FROM requested WHERE run_id IS NOT NULL
+    UNION
+    SELECT e.repo_id, e.issue_number, e.run_id
+    FROM requested AS w JOIN agent_invocation_events AS e USING (repo_id, issue_number)
+    WHERE w.run_id IS NULL AND e.event_type = 'invocation_started'
+      AND julianday(e.occurred_at) >= julianday(w.started_at)
+      AND julianday(e.occurred_at) < julianday(w.finished_at, '+1 second')
+      AND NOT EXISTS (
+          SELECT 1 FROM run_records AS r WHERE r.invocation_run_id = e.run_id
+            AND r.repo_id = e.repo_id AND r.issue_number = e.issue_number
+      )
+)
+SELECT e.* FROM sessions JOIN agent_invocation_events AS e USING (run_id, repo_id, issue_number)
+ORDER BY julianday(e.occurred_at), e.id
+"""
+
+_LEGACY_PEERS_SQL = """
+SELECT DISTINCT r.* FROM requested AS w JOIN run_records AS r USING (repo_id, issue_number)
+WHERE w.run_id IS NULL AND r.invocation_run_id IS NULL
+  AND julianday(r.started_at) < julianday(w.finished_at, '+1 second')
+  AND julianday(r.finished_at, '+1 second') > julianday(w.started_at)
+"""
+
+
 class InvocationEventStoreMixin:
     """为 :class:`SqliteConsoleStore` 补齐调用观测账本的读写方法。
 
@@ -117,46 +149,56 @@ class InvocationEventStoreMixin:
         旧库没有这张表时降级为空列表而不是抛出：读取侧据此显式披露历史不完整，
         不回填推测字段。
         """
-        return self.list_issue_invocation_events_for_issues(
-            issue_keys=((repo_id, issue_number),),
-            limit_per_issue=limit,
+        query = (
+            f"SELECT {_INVOCATION_EVENT_COLUMNS} FROM ("
+            f"SELECT id, {_INVOCATION_EVENT_COLUMNS} FROM agent_invocation_events "
+            "WHERE repo_id = ? AND issue_number = ? ORDER BY id DESC LIMIT ?"
+            ") ORDER BY occurred_at ASC, id ASC"
         )
+        return self._read_invocation_events(query, (repo_id, issue_number, max(1, limit)))
 
-    def list_issue_invocation_events_for_issues(
-        self,
-        *,
-        issue_keys: Sequence[tuple[str, int]],
-        limit_per_issue: int = 500,
-    ) -> list[InvocationEventRecord]:
-        """单批查询多个 Issue 最近的调用事件，并按发生顺序返回。
+    def find_runs_for_invocation_lookup(self, lookup: RunInvocationLookup) -> list[RunRecord]:
+        """查找详情端点指定的运行记录，接受等价的 ISO 时区表示。"""
+        query = (
+            "SELECT * FROM run_records WHERE repo_id = ? AND issue_number = ? "
+            "AND julianday(started_at) = julianday(?) "
+            "AND julianday(finished_at) = julianday(?)"
+        )
+        with self._connection() as connection:
+            return [_run_record_from_row(row) for row in connection.execute(query, lookup[:4])]
 
-        SQLite 查询按 ``id`` 为每个 Issue 保留最近记录，再按时间线顺序输出；
-        分块保持绑定参数数量低于旧版 SQLite 的默认上限。
-        """
-        distinct_issue_keys = list(dict.fromkeys(issue_keys))
-        if not distinct_issue_keys:
-            return []
-        bounded_limit = max(1, limit_per_issue)
-        invocation_events: list[InvocationEventRecord] = []
-        issue_batch_size = 400
-        for batch_start in range(0, len(distinct_issue_keys), issue_batch_size):
-            issue_batch = distinct_issue_keys[batch_start : batch_start + issue_batch_size]
-            issue_values_sql = ", ".join("(?, ?)" for _ in issue_batch)
-            query = (
-                "WITH ranked_events AS ("
-                f"SELECT id, {_INVOCATION_EVENT_COLUMNS}, "
-                "ROW_NUMBER() OVER (PARTITION BY repo_id, issue_number ORDER BY id DESC) "
-                "AS issue_event_rank FROM agent_invocation_events "
-                f"WHERE (repo_id, issue_number) IN ({issue_values_sql})"
-                ") "
-                f"SELECT {_INVOCATION_EVENT_COLUMNS} FROM ranked_events "
-                "WHERE issue_event_rank <= ? ORDER BY occurred_at ASC, id ASC"
-            )
-            query_params = tuple(value for issue_key in issue_batch for value in issue_key) + (
-                bounded_limit,
-            )
-            invocation_events.extend(self._read_invocation_events(query, query_params))
-        return invocation_events
+    def read_run_invocation_events(
+        self, lookups: Sequence[RunInvocationLookup]
+    ) -> tuple[list[InvocationEventRecord], list[RunRecord]]:
+        """批量读取指定会话和旧运行候选会话，保留完整配对事件。"""
+        distinct_lookups = list(dict.fromkeys(lookups))
+        invocation_events: dict[tuple[str, int | None, str, str], InvocationEventRecord] = {}
+        legacy_runs: dict[int | None, RunRecord] = {}
+        batch_size = 150  # 每个窗口五个参数，低于 SQLite 的旧版默认绑定上限。
+        with self._connection() as connection:
+            connection.execute("BEGIN")
+            for batch_start in range(0, len(distinct_lookups), batch_size):
+                batch = distinct_lookups[batch_start : batch_start + batch_size]
+                values_sql = ", ".join("(?, ?, ?, ?, ?)" for _ in batch)
+                requested = (
+                    "WITH requested(repo_id, issue_number, started_at, finished_at, run_id) AS "
+                    f"(VALUES {values_sql}) "
+                )
+                bound_values = tuple(value for lookup in batch for value in lookup)
+                for event_row in connection.execute(requested + _SCOPED_EVENTS_SQL, bound_values):
+                    event = _row_to_invocation_event(event_row)
+                    event_identity = (
+                        event.repo_id,
+                        event.issue_number,
+                        event.run_id,
+                        event.event_key,
+                    )
+                    invocation_events[event_identity] = event
+                if any(lookup[-1] is None for lookup in batch):
+                    for run_row in connection.execute(requested + _LEGACY_PEERS_SQL, bound_values):
+                        peer = _run_record_from_row(run_row)
+                        legacy_runs[peer.record_id] = peer
+        return list(invocation_events.values()), list(legacy_runs.values())
 
     def _read_invocation_events(
         self, query: str, params: tuple[object, ...]

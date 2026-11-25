@@ -26,6 +26,8 @@ class RunRecord:
     duration_seconds: float
     issue_title: str | None = None
     issue_url: str | None = None
+    record_id: int | None = None
+    invocation_run_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -102,6 +104,13 @@ class AgentPerformanceRecords:
     runs: tuple[PerformanceRunRecord, ...]
 
 
+_RUN_RECORD_COLUMNS = (
+    "id, repo_id, repo_path, issue_number, trigger, agent, outcome, "
+    "error_summary, started_at, finished_at, duration_seconds, issue_title, issue_url, "
+    "invocation_run_id"
+)
+
+
 def _run_record_from_row(record_row: sqlite3.Row) -> RunRecord:
     """把 SQLite 运行记录行转换为接口模型。"""
     return RunRecord(
@@ -117,6 +126,8 @@ def _run_record_from_row(record_row: sqlite3.Row) -> RunRecord:
         duration_seconds=float(record_row["duration_seconds"]),
         issue_title=record_row["issue_title"],
         issue_url=record_row["issue_url"],
+        record_id=int(record_row["id"]),
+        invocation_run_id=record_row["invocation_run_id"],
     )
 
 
@@ -125,11 +136,7 @@ class RunHistoryReadMixin:
 
     def list_recent_runs(self, *, repo_id: str | None = None, limit: int = 100) -> list[RunRecord]:
         """倒序列出最近的运行记录。"""
-        query = (
-            "SELECT repo_id, repo_path, issue_number, trigger, agent, outcome, "
-            "error_summary, started_at, finished_at, duration_seconds, issue_title, issue_url "
-            "FROM run_records"
-        )
+        query = f"SELECT {_RUN_RECORD_COLUMNS} FROM run_records"
         query_params: list[object] = []
         if repo_id is not None:
             query += " WHERE repo_id = ?"
@@ -145,10 +152,7 @@ class RunHistoryReadMixin:
     ) -> list[RunRecord]:
         """按起始时间筛选，并为每个 Issue 返回最新写入的一条运行记录。"""
         query = (
-            "SELECT recent_run.repo_id, recent_run.repo_path, recent_run.issue_number, "
-            "recent_run.trigger, recent_run.agent, recent_run.outcome, "
-            "recent_run.error_summary, recent_run.started_at, recent_run.finished_at, "
-            "recent_run.duration_seconds, recent_run.issue_title, recent_run.issue_url "
+            "SELECT recent_run.* "
             "FROM run_records AS recent_run "
             "JOIN ("
             "SELECT MAX(id) AS latest_id FROM run_records "

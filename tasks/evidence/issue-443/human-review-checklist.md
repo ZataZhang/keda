@@ -9,9 +9,14 @@
 - Issue: [#443](https://github.com/ZataZhang/keda/issues/443)
 - PR：[#444](https://github.com/ZataZhang/keda/pull/444)（`issue-443` → `main`）：已公开、开启，非 draft，尚未合并。
 - 状态核对日期：2026-11-25；合并前以 PR 页面实时状态为准。
-- API 按不同 Issue 批量读取持久化调用事件，再按每条运行的时间窗口和 `run_id` 归属；Stats 保留 Agent 并新增执行器列。指南已更新。
+- 列表和详情共享调用会话归属。新记录保存会话 ID，旧记录按完整会话核对秒级边界。Stats 保留 Agent 列，并显示自定义执行器的持久化名称。
 
-## 证据
+## 审阅修复证据
+
+- [复验报告](issue-443.evidence-report.md#人审导航)记录最终工作树的 Stats 表格与详情截图。Chromium 逐行核对 `constructor`、同秒交接、后续 5000 条事件及每次详情请求携带的记录主键。
+- 修复前的运行列表、详情 API 和标签查表均复现审阅问题。输出保存在本地 `rv-1-console-stats-repair-baseline.txt`。
+
+## 首轮实现证据
 
 - [负控：基线表头缺少执行器列](https://github.com/ZataZhang/keda/blob/iar-evidence/issue-443/rv-1-negative-control.txt)
 - [绿验证终端记录：真实 Stats 页面、运行列表 API、详情时间线与 Chromium 浏览器断言](https://github.com/ZataZhang/keda/blob/iar-evidence/issue-443/rv-1-console-stats.txt)
@@ -41,6 +46,6 @@
 ## 尚未验证与下一步
 
 - 当前浏览器证据为真实入口流程：生产构建的 `/app/stats/` → 展开 Issue 分组 → 真实 FastAPI API 与隔离 SQLite；Chromium 视口 1440×1000、默认主题。Stats overview 使用不可解析的本地 registry fixture 返回空统计，以避免访问 GitHub；没有验证窄视口或其他浏览器。
-- 自动证据自检和独立验证已通过；仍需人工检查截图、代码与证据，特别确认目标浏览器中的列宽和长执行器顺序。独立验证使用同一 Issue 的非重叠运行窗口；每个 Issue 最近 500 条事件的读取上限可能使更旧的运行显示「未记录」。
+- 上述独立验证覆盖旧提交的非重叠窗口。修复前的读取上限是每个 Issue 最近 5000 条事件。修复后按目标会话和旧记录的候选范围批量读取；旧记录仅在归属唯一时展示。列宽和长执行器序列仍属于人工审阅项。
 - 下一步：审阅 PR #444 的代码、已发布证据及最新 checks，完成人工决策；接受后将 PR 合入 `main`。
 - 关闭条件：以 `main` 为 base 的 PR 包含 `Closes #443` 并合入。

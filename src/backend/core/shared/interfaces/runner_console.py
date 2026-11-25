@@ -85,6 +85,8 @@ class RunRecord:
         duration_seconds (float): 本次运行耗时秒数。
         issue_title (str | None): 运行时保存的 Issue 标题；旧记录为空。
         issue_url (str | None): 运行时保存的 Issue 网页链接；旧记录为空。
+        record_id (int | None): 本地运行记录主键，写入前为空。
+        invocation_run_id (str | None): 调用账本的会话标识，旧记录为空。
     """
 
     repo_id: str
@@ -99,6 +101,12 @@ class RunRecord:
     duration_seconds: float
     issue_title: str | None = None
     issue_url: str | None = None
+    record_id: int | None = None
+    invocation_run_id: str | None = None
+
+
+# 仓库、Issue、ISO 起止时间、调用会话标识；未关联会话的运行使用时间范围读取。
+type RunInvocationLookup = tuple[str, int, str, str, str | None]
 
 
 @dataclass(frozen=True)
@@ -289,6 +297,30 @@ class IRunHistoryStore(ABC):
     def list_recent_runs(self, *, repo_id: str | None = None, limit: int = 100) -> list[RunRecord]:
         """倒序列出最近的运行记录。"""
         ...
+
+    def find_runs_for_invocation_lookup(self, lookup: RunInvocationLookup) -> list[RunRecord]:
+        """读取详情请求起止时间对应的持久化运行。
+
+        Args:
+            lookup: 详情请求的仓库、Issue 和 UTC 起止时间。
+
+        Returns:
+            匹配该窗口的运行记录。
+        """
+        return []
+
+    def read_run_invocation_events(
+        self, lookups: Sequence[RunInvocationLookup]
+    ) -> tuple[list[InvocationEventRecord], list[RunRecord]]:
+        """批量读取目标调用会话及与旧窗口重叠的运行记录。
+
+        Args:
+            lookups: 通过会话 ID 或旧时间窗口限定范围的查询条件。
+
+        Returns:
+            按发生顺序排列的调用事件，以及用于消解旧窗口歧义的运行记录。
+        """
+        return [], []
 
     @abstractmethod
     def list_recent_runs_by_issue(
@@ -595,28 +627,6 @@ class IInvocationEventStore(ABC):
         让读取侧显式披露"历史不完整"，不回填推测字段。
         """
         ...
-
-    def list_issue_invocation_events_for_issues(
-        self,
-        *,
-        issue_keys: Sequence[tuple[str, int]],
-        limit_per_issue: int = 500,
-    ) -> list[InvocationEventRecord]:
-        """批量读取多个 Issue 的近期调用事件，供运行列表做内存归属。
-
-        实现可以覆盖此默认版本以合并为一条数据库查询。回退实现按 Issue
-        读取，不按每条运行读取。
-        """
-        invocation_events: list[InvocationEventRecord] = []
-        for repo_id, issue_number in dict.fromkeys(issue_keys):
-            invocation_events.extend(
-                self.list_issue_invocation_events(
-                    repo_id=repo_id,
-                    issue_number=issue_number,
-                    limit=limit_per_issue,
-                )
-            )
-        return invocation_events
 
 
 @dataclass(frozen=True)

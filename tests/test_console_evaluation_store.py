@@ -121,7 +121,7 @@ def test_fresh_database_migrates_to_current_schema_with_repeatable_evaluation_ta
             row[0]
             for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
         }
-    assert version == _SCHEMA_VERSION == 17
+    assert version == _SCHEMA_VERSION
     assert {"evaluation_run", "evaluation_result", "evaluation_score"} <= tables
     assert "issue_retry_overrides" in tables
     with sqlite3.connect(tmp_path / "console.db") as connection:

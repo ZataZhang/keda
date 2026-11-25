@@ -322,6 +322,7 @@ export type AgentPerformanceStats = {
 };
 
 export type RunRecordEntry = {
+  record_id?: number | null;
   repo_id: string;
   repo_path: string;
   issue_number: number;

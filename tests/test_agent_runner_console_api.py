@@ -17,6 +17,7 @@ from backend.api.app import app
 from backend.core.shared.interfaces.runner_console import (
     AttemptRecord,
     InvocationEventRecord,
+    RunInvocationLookup,
     RunRecord,
 )
 from backend.core.shared.models.agent_runner import (
@@ -324,16 +325,16 @@ def test_console_run_list_summarizes_persisted_executors_per_run(
             started_at=started_at,
         )
 
-    batch_issue_keys: list[tuple[tuple[str, int], ...]] = []
-    batch_reader = store.list_issue_invocation_events_for_issues
+    lookup_batches: list[tuple[RunInvocationLookup, ...]] = []
+    batch_reader = store.read_run_invocation_events
 
     def track_batch_read(
-        *, issue_keys: Sequence[tuple[str, int]], limit_per_issue: int
-    ) -> list[InvocationEventRecord]:
-        batch_issue_keys.append(tuple(issue_keys))
-        return batch_reader(issue_keys=issue_keys, limit_per_issue=limit_per_issue)
+        lookups: Sequence[RunInvocationLookup],
+    ) -> tuple[list[InvocationEventRecord], list[RunRecord]]:
+        lookup_batches.append(tuple(lookups))
+        return batch_reader(lookups)
 
-    monkeypatch.setattr(store, "list_issue_invocation_events_for_issues", track_batch_read)
+    monkeypatch.setattr(store, "read_run_invocation_events", track_batch_read)
 
     response = client.get("/api/v1/agent-runner/console/runs?repo_id=keda-main&limit=30")
 
@@ -345,7 +346,11 @@ def test_console_run_list_summarizes_persisted_executors_per_run(
         ["claude", "codex", "claude"],
         ["claude"],
     ]
-    assert batch_issue_keys == [(("keda-main", 314),)]
+    assert len(lookup_batches) == 1
+    assert lookup_batches[0] == tuple(
+        ("keda-main", 314, started_at, finished_at, None)
+        for _, _, started_at, finished_at in reversed(run_specs)
+    )
 
     detail_response = client.get(
         "/api/v1/agent-runner/console/runs/attempts",
