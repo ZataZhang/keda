@@ -289,6 +289,24 @@ def get_pull_request_context(
     return pr_context
 
 
+def get_pull_request_monitor_state(client: _ClientProtocol, pr_number: int) -> dict:
+    """读取单个 PR 的轻量看板投影，保留已知关联。"""
+    raw_pr = _request_rest_json(client, f"repos/{client._get_owner_repo()}/pulls/{pr_number}")
+    if not isinstance(raw_pr, dict) or raw_pr.get("number") != pr_number:
+        raise RuntimeError(f"Invalid GitHub response for PR #{pr_number}.")
+    return {
+        "number": pr_number,
+        "url": raw_pr["html_url"],
+        "is_draft": raw_pr["draft"],
+        "branch": raw_pr["head"]["ref"],
+        "head_sha": raw_pr["head"]["sha"],
+        "base_sha": raw_pr["base"]["sha"],
+        "mergeable": raw_pr.get("mergeable"),
+        "state": raw_pr["state"],
+        "merged": raw_pr.get("merged", False),
+    }
+
+
 def get_pull_request_context_by_number(
     client: _ClientProtocol, pr_number: int, *, require_success: bool = False
 ) -> PullRequestContext | None:

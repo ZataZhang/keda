@@ -28,6 +28,7 @@ import { formatLocalDateTime } from "@/lib/utils";
 import { confirmAction } from "@/lib/confirm-action";
 import {
   fetchIssueDetail,
+  fetchMonitorIssueRevision,
   fetchOverviewJobsByRepo,
   fetchOverviewSnapshots,
   pollOverviewJob,
@@ -56,6 +57,7 @@ import type {
 
 /** 轻量轮询本地快照的间隔：纯本地读，后台同步完成后界面自动跟上。 */
 const POLL_INTERVAL_MS = 15_000;
+const ISSUE_REVISION_POLL_MS = 3_000;
 
 type LoadState =
   | { kind: "loading" }
@@ -202,9 +204,9 @@ export default function DashboardPage() {
    *
    * 失败只影响这块面板，仓库监控视图继续可用。
    */
-  const loadRuntimeSummary = useCallback(async (signal?: AbortSignal) => {
+  const loadRuntimeSummary = useCallback(async (signal?: AbortSignal, refreshEvidence = true) => {
     try {
-      const summary = await fetchRuntimeTasks();
+      const summary = await fetchRuntimeTasks(refreshEvidence);
       if (signal?.aborted) return;
       setRuntimeSummary(summary);
       // 选中项跟着新一轮摘要刷新（按 task_key 对位）：否则右侧详情的状态 /
@@ -325,8 +327,8 @@ export default function DashboardPage() {
   }, []);
 
   /** 扫描落库后同时重读仓库快照与任务摘要，确保刷新结束时任务状态也已更新。 */
-  const reloadMonitoringViews = useCallback(async (signal?: AbortSignal) => {
-    await Promise.all([loadSnapshots(signal), loadRuntimeSummary(signal)]);
+  const reloadMonitoringViews = useCallback(async (signal?: AbortSignal, refreshEvidence = true) => {
+    await Promise.all([loadSnapshots(signal), loadRuntimeSummary(signal, refreshEvidence)]);
   }, [loadSnapshots, loadRuntimeSummary]);
 
   /** 首屏进入后自动选中第一个 issue，避免右侧详情空着。 */
@@ -357,19 +359,39 @@ export default function DashboardPage() {
 
   useEffect(() => {
     const controller = new AbortController();
-    void loadSnapshots(controller.signal);
+    let revision: string | undefined;
+    let lastReadAt = 0;
+    let pending = false;
+
+    const poll = async () => {
+      if (document.hidden || controller.signal.aborted || pending) return;
+      pending = true;
+      try {
+        const nextRevision = await fetchMonitorIssueRevision(controller.signal).catch(
+          () => undefined,
+        );
+        if (controller.signal.aborted) return;
+        const periodicReadDue = Date.now() - lastReadAt >= POLL_INTERVAL_MS;
+        if (periodicReadDue || nextRevision !== revision) {
+          await reloadMonitoringViews(controller.signal, nextRevision === revision || revision === undefined);
+          lastReadAt = Date.now();
+          revision = nextRevision;
+        }
+      } finally {
+        pending = false;
+      }
+    };
+
     void loadCompletionStats(controller.signal);
-    void loadRuntimeSummary(controller.signal);
-    // 轻量轮询本地快照：后台同步一写回，界面最多 15 秒内自动跟上。
-    const timer = window.setInterval(() => {
-      void loadSnapshots(controller.signal);
-      void loadRuntimeSummary(controller.signal);
-    }, POLL_INTERVAL_MS);
+    void poll();
+    const timer = window.setInterval(() => void poll(), ISSUE_REVISION_POLL_MS);
+    document.addEventListener("visibilitychange", poll);
     return () => {
       controller.abort();
       window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", poll);
     };
-  }, [loadSnapshots, loadCompletionStats, loadRuntimeSummary]);
+  }, [loadCompletionStats, reloadMonitoringViews]);
 
   // 详情加载逻辑（点 issue 时拉一次）。
   useEffect(() => {

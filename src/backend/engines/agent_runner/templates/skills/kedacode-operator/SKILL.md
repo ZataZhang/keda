@@ -27,6 +27,10 @@ Use this skill when the user asks to operate the KedaCode CLI or its managed run
 
 Use the repository guide as the authoritative command reference. Start with `kc --help` or the relevant subcommand `--help` when command details differ by KedaCode version. Do not claim `--dry-run` executes work. The supported command names are `kc` and `kedacode`; the old `iar` command is no longer installed. Update old scripts and CI commands to use `kc`.
 
+## Refresh a Console card after a GitHub write
+
+After external GitHub writes, run `kc monitor refresh --repo-id <id> --issue <number> --pr <number>` once. Omit the PR option if already known. This refreshes only that local card.
+
 ## Shared baselines (apply to every route)
 
 - **Reference paths**: use `${CODEBUDDY_SKILL_DIR}` when available; otherwise resolve the absolute parent directory of the installed `SKILL.md` you actually read, then append `references/<file>.md`. Never resolve from the working directory or assume another Agent exposes this variable.

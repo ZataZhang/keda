@@ -6,7 +6,7 @@
   也要写运行记录，不能要求 PostgreSQL 常驻；本地单文件零依赖。
 - WAL + busy_timeout 容忍多个 runner 进程并发收尾写库。版本迁移持有 SQLite
   写事务，在同一事务内升级表和 user_version。
-- 通过 ``PRAGMA user_version`` 做就地迁移（当前版本 18：v5 新增
+- 通过 ``PRAGMA user_version`` 做就地迁移（当前版本 19：v5 新增
   ``prd_lifecycle_runs`` 与 ``prd_lifecycle_events`` 两张 PRD 生命周期账本表；
   v6 为 ``attempt_records`` 附加可空 ``preset`` / ``model`` 观测列；
   v7 把队列与设置两张表按新功能名重建；v8 为 ``prd_lifecycle_events`` 附加
@@ -18,7 +18,7 @@
   v15 新增模型评测三表 ``evaluation_run`` / ``evaluation_result`` /
   ``evaluation_score``；v16 为评测 run 增加重复次数与逐题冻结基线，结果表增加
   ``repeat_index`` 并按重复序号重建唯一约束；v17 新增单次重试执行器覆盖表；
-  v18 为运行记录追加可空的调用会话标识）。
+  v18 为运行记录追加可空的调用会话标识，v19 新增单 Issue 监控观察）。
 - 旁路记录（运行历史 / 审计 / attempt）的写入失败不允许向上抛出阻断
   runner 主流程，降级为日志警告；而 dashboard 事实读取路径（监控快照
   与同步设置）的写入失败必须抛给调用方，避免"刷新成功但数据没更新"。
@@ -62,6 +62,9 @@ from backend.infrastructure.persistence.console_store_invocations import (
 from backend.infrastructure.persistence.console_store_lifecycle import (
     PrdLifecycleStoreMixin,
 )
+from backend.infrastructure.persistence.console_store_monitor import (
+    MonitorIssueRefreshStoreMixin,
+)
 from backend.infrastructure.persistence.console_store_retention import RunSummaryRetentionMixin
 from backend.infrastructure.persistence.console_store_takeover import (
     CREATE_ISSUE_RUN_CONTROL,
@@ -75,7 +78,7 @@ from backend.infrastructure.persistence.console_store_retry_override import (
 _logger = logging.getLogger(__name__)
 
 
-_SCHEMA_VERSION = 18
+_SCHEMA_VERSION = 19
 _SQLITE_BUSY_TIMEOUT_SECONDS = 5
 _WAL_RETRY_DELAY_SECONDS = 0.05
 
@@ -256,6 +259,7 @@ _CREATE_PRD_LIFECYCLE_INDEXES = (
 
 
 class SqliteConsoleStore(
+    MonitorIssueRefreshStoreMixin,
     RunHistoryReadMixin,
     PrdLifecycleStoreMixin,
     InvocationEventStoreMixin,
@@ -499,6 +503,17 @@ class SqliteConsoleStore(
                 "CREATE INDEX IF NOT EXISTS idx_run_records_issue "
                 "ON run_records (repo_id, issue_number)"
             )
+        if current_version < 19:
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS monitoring_issue_refreshes ("
+                "repo_id TEXT NOT NULL, issue_number INTEGER NOT NULL, "
+                "payload_json TEXT NOT NULL, observed_ns INTEGER NOT NULL, "
+                "PRIMARY KEY (repo_id, issue_number))"
+            )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_monitoring_issue_refresh_revision "
+                "ON monitoring_issue_refreshes (observed_ns)"
+            )
         connection.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
 
     def append_run(self, run_record: RunRecord) -> None:
@@ -731,6 +746,21 @@ class SqliteConsoleStore(
                 "payload_json=excluded.payload_json, scanned_at=excluded.scanned_at",
                 (entry.repo_id, entry.payload_json, entry.scanned_at),
             )
+            if entry.scan_started_ns is not None:
+                connection.execute(
+                    "DELETE FROM monitoring_issue_refreshes WHERE repo_id = ? AND observed_ns <= ? "
+                    "AND (observed_ns < ? OR issue_number IN ("
+                    "SELECT json_extract(value, '$.number') FROM json_each(?, '$.issues') "
+                    "UNION ALL SELECT json_extract(value, '$.number') "
+                    "FROM json_each(?, '$.tracked_issues')))",
+                    (
+                        entry.repo_id,
+                        entry.scan_started_ns,
+                        entry.scan_started_ns - 86_400_000_000_000,
+                        entry.payload_json,
+                        entry.payload_json,
+                    ),
+                )
             connection.commit()
 
     def list_monitor_snapshots(self) -> list[MonitorSnapshotEntry]:
@@ -892,6 +922,7 @@ class MonitorSnapshotEntry:
     repo_id: str
     payload_json: str
     scanned_at: str
+    scan_started_ns: int | None = None
 
 
 @dataclass(frozen=True)

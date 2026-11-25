@@ -904,6 +904,7 @@ class MonitorSnapshotEntry:
     repo_id: str
     payload_json: str
     scanned_at: str
+    scan_started_ns: int | None = None
 
 
 @dataclass(frozen=True)
@@ -917,6 +918,16 @@ class MonitorSettingsEntry:
     sync_enabled: bool
     sync_interval_seconds: int
     updated_at: str
+
+
+@dataclass(frozen=True)
+class MonitorIssueRefresh:
+    """独立观察到的 Issue 卡片，和全仓快照分开存储。"""
+
+    repo_id: str
+    issue_number: int
+    payload_json: str
+    observed_ns: int
 
 
 class IMonitorSnapshotStore(ABC):

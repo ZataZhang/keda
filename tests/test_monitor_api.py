@@ -396,3 +396,133 @@ def test_overview_job_fails_when_snapshot_write_fails(
     assert "db locked" in job["error"]
     # 旧快照未被清空：独立连接里仍是失败前的那一份 scanned_at。
     assert _read_snapshot_scanned_at(monitor_environment.db_path, "repo-a") == (old_scanned_at,)
+
+
+def test_cli_issue_refresh_updates_local_snapshot_without_remote_scan(
+    monitor_environment: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """实际 CLI 入口只读两条远端记录，旧全仓扫描无法覆盖其结果。"""
+    from typer.testing import CliRunner
+
+    from backend.api import cli_typer_monitor
+    from backend.api.cli_typer_app import app as cli_app
+    from backend.core.shared.models.agent_runner import (
+        AppConfig,
+        IssueSummary,
+        RepositoryRunContext,
+    )
+    from backend.core.use_cases.monitor_snapshots import persist_monitoring_result
+
+    store = monitor_environment.store
+    config = AppConfig()
+    repository = RepositoryRunContext("repo-a", "Repo A", Path("."), config)
+    calls: list[tuple[str, int]] = []
+
+    def get_issue(number: int) -> IssueSummary:
+        calls.append(("issue", number))
+        return IssueSummary(
+            number, "Updated", "https://example.test/issues/448", "", (config.labels.supervising,)
+        )
+
+    def get_pr(number: int) -> dict:
+        calls.append(("pr", number))
+        return {"number": number, "url": "https://example.test/pull/451", "is_draft": False}
+
+    github_client = SimpleNamespace(get_issue=get_issue, get_pull_request_monitor_state=get_pr)
+    monkeypatch.setattr(cli_typer_monitor, "create_console_store", lambda: store)
+    monkeypatch.setattr(cli_typer_monitor, "create_github_client", lambda _path: github_client)
+    monkeypatch.setattr(
+        cli_typer_monitor,
+        "resolve_repository_targets_with_diagnostics",
+        lambda _: ([repository], []),
+    )
+    old_issue = {
+        "number": 448,
+        "title": "Before",
+        "url": "https://example.test/issues/448",
+        "labels": [config.labels.blocked],
+        "state": "OPEN",
+        "primary_label": config.labels.blocked,
+        "pr": {"number": 451, "is_draft": True},
+    }
+    old_snapshot = {
+        **_REPO_A_SNAPSHOT,
+        "issues": [old_issue],
+        "labels": {"blocked": config.labels.blocked, "supervising": config.labels.supervising},
+    }
+    overview = {"repositories": [old_snapshot]}
+    assert persist_monitoring_result(store, overview).ok
+    revision_url = "/api/v1/agent-runner/overview/issue-revision"
+    original_revision = client.get(revision_url).json()["revision"]
+    old_scan_start = time.time_ns()
+
+    result = CliRunner().invoke(
+        cli_app, ["monitor", "refresh", "--repo-id", "repo-a", "--issue", "448"]
+    )
+    assert result.exit_code == 0, result.output
+    assert calls == [("issue", 448), ("pr", 451)]
+    assert client.get(revision_url).json()["revision"] != original_revision
+    assert persist_monitoring_result(store, overview, scan_started_ns=old_scan_start).ok
+
+    response = client.get(SNAPSHOTS_URL).json()
+    row = response["repositories"][0]["overview"]["issues"][0]
+    assert row["labels"] == [config.labels.supervising]
+    assert row["pr"]["is_draft"] is False
+    assert response["scanned_at"] == old_snapshot["scanned_at"]
+    assert calls == [("issue", 448), ("pr", 451)]
+
+    assert persist_monitoring_result(
+        store,
+        {"repositories": [{**old_snapshot, "issues": [row]}]},
+        scan_started_ns=time.time_ns(),
+    ).ok
+    assert store.get_monitor_issue_refresh("repo-a", 448) is None
+
+
+def test_simultaneous_issue_refreshes_share_remote_reads(tmp_path: Path) -> None:
+    """两个存储实例收到同一 Issue 的并发请求时只观察远端一次。"""
+    from concurrent.futures import ThreadPoolExecutor
+    from contextlib import contextmanager
+    from threading import Event
+
+    from backend.core.shared.models.agent_runner import (
+        AppConfig,
+        IssueSummary,
+        RepositoryRunContext,
+    )
+    from backend.core.use_cases.monitor_issue_refresh import (
+        IssueRefreshTarget,
+        refresh_monitor_issue,
+    )
+
+    first_store = SqliteConsoleStore(tmp_path / "console.db")
+    second_store = SqliteConsoleStore(tmp_path / "console.db")
+    first_read_started = Event()
+    second_waiting = Event()
+    calls: list[int] = []
+
+    def get_issue(number: int) -> IssueSummary:
+        calls.append(number)
+        first_read_started.set()
+        assert second_waiting.wait(timeout=5)
+        return IssueSummary(number, "Concurrent refresh", "https://example.test/issues/448", "", ())
+
+    original_lock = second_store.monitor_issue_refresh_lock
+
+    @contextmanager
+    def second_lock(repo_id: str, issue_number: int):
+        second_waiting.set()
+        with original_lock(repo_id, issue_number):
+            yield
+
+    second_store.monitor_issue_refresh_lock = second_lock
+    target = IssueRefreshTarget(
+        RepositoryRunContext("repo-a", "Repo A", tmp_path, AppConfig()), 448
+    )
+    github_client = SimpleNamespace(get_issue=get_issue)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(refresh_monitor_issue, first_store, github_client, target)
+        assert first_read_started.wait(timeout=5)
+        second = pool.submit(refresh_monitor_issue, second_store, github_client, target)
+        assert first.result(timeout=5).observed_ns == second.result(timeout=5).observed_ns
+    assert calls == [448]
