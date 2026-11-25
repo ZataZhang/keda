@@ -3773,6 +3773,7 @@ verifier 以 `capture_output` 运行，输出不进 stdout、也不逐行落日�
 - **原始响应落盘**：每次 verifier 跑完，完整响应写到 `<证据目录>/verifier-response.txt`（默认 `tasks/evidence/<prd-stem>/verifier-response.txt`），文件头记录 issue、verifier agent、builder sha、解析出的 risk、**是否找到 verdict marker**、响应字符数。候选因漏 marker 被替换时，另留 `verifier-response-<agent>.txt`，以免下一位候选覆盖前一位的诊断材料。写盘失败只降级为告警，不影响门禁本身。
 - **无 verdict 时顺延独立候选**：缺少 verdict marker 仍 fail-closed，不会被当成通过；runner 把该候选视作 verifier 协议故障，按 `agent_fallback_order` 尝试下一个与 builder 不同的 agent。若候选池耗尽仍无可解析结果，run 以 verifier-side failure 结束，不触发 builder repair 循环，也不把无依据的发现交给 builder 修。
 - **为什么必须区分**：`ValidationVerdict.findings` 总会被填入响应文本，所以"findings 是否为空"无法用来判断有没有 verdict——唯一可靠信号是 `marker_found`。混在一起时，verifier 只是漏了最后那行 marker，builder 却被指使去修一个不存在的发现，白烧一轮 attempt。
+- **RED 摘要**：优先显示最终报告 `## Verdict` 下的结论和发现，完整响应仍可通过 `verifier-response.txt` 查看。
 - **排查顺序**：daemon 被 verifier 挡下时，先读 `verifier-response.txt`；若里面没有任何实际发现，问题在 verifier agent（考虑用 `verifier_agent` 显式指定一个稳定的 agent，而不是 `auto`），不在被验的代码。
 
 ### verifier agent 跑不起来：顺延候选，全失败才降级阻断

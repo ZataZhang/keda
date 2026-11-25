@@ -200,6 +200,53 @@ def test_run_verifier_agent_returns_parsed_verdict(
     assert "INDEPENDENT verifier" in captured["prompt"]
 
 
+def test_red_report_prioritizes_final_finding_after_tool_output(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """失败摘要优先展示最终报告，完整响应保留工具输出。"""
+    from backend.core.use_cases import run_verifier_agent as rva
+
+    report = "The update API accepted a forbidden transport."
+    response = (
+        "[agent tool] "
+        + "x" * 5000
+        + "\n\n## Verdict: RED\n\n"
+        + report
+        + "\n"
+        + format_verifier_verdict_marker("red")
+        + "\n"
+    )
+    monkeypatch.setattr(
+        rva,
+        "run_agent_with_prompt_resilient",
+        lambda *args, **kwargs: CommandResult(
+            command=("kimi",), return_code=0, stdout=response, stderr=""
+        ),
+    )
+    response_log_path = tmp_path / "verifier-response.txt"
+    verdict = rva.run_verifier_agent(
+        _issue(),
+        tmp_path,
+        "abc1234",
+        _manifest(),
+        "kimi",
+        FakeProcessRunner(),
+        response_log_path=response_log_path,
+    )
+    message = rva._format_verifier_block_message(
+        verdict=verdict,
+        verifier_agent="kimi",
+        issue_number=42,
+        response_log_path=response_log_path,
+    )
+
+    assert message.splitlines()[0] == (
+        f"Independent verifier (agent 'kimi') returned RED for issue #42. {report}"
+    )
+    assert "[agent tool]" not in message
+    assert "[agent tool]" in response_log_path.read_text(encoding="utf-8")
+
+
 def test_run_verifier_agent_fails_safe_when_no_marker(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
