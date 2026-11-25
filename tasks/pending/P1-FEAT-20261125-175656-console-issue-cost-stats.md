@@ -1,5 +1,7 @@
 # PRD: Console 统计与成本按 Issue 汇总
 
+- GitHub Issue: https://github.com/ZataZhang/keda/issues/449
+
 > ✅ **交付前置**：无，可立即开工。
 >
 > ⬜ **验收状态**：未开工。
