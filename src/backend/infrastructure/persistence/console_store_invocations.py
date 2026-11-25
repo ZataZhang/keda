@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 _logger = logging.getLogger(__name__)
@@ -116,14 +117,46 @@ class InvocationEventStoreMixin:
         旧库没有这张表时降级为空列表而不是抛出：读取侧据此显式披露历史不完整，
         不回填推测字段。
         """
-        bounded_limit = max(1, limit)
-        query = (
-            f"SELECT {_INVOCATION_EVENT_COLUMNS} FROM ("
-            f"SELECT id, {_INVOCATION_EVENT_COLUMNS} FROM agent_invocation_events "
-            "WHERE repo_id = ? AND issue_number = ? ORDER BY id DESC LIMIT ?"
-            ") ORDER BY occurred_at ASC, id ASC"
+        return self.list_issue_invocation_events_for_issues(
+            issue_keys=((repo_id, issue_number),),
+            limit_per_issue=limit,
         )
-        return self._read_invocation_events(query, (repo_id, issue_number, bounded_limit))
+
+    def list_issue_invocation_events_for_issues(
+        self,
+        *,
+        issue_keys: Sequence[tuple[str, int]],
+        limit_per_issue: int = 500,
+    ) -> list[InvocationEventRecord]:
+        """单批查询多个 Issue 最近的调用事件，并按发生顺序返回。
+
+        SQLite 查询按 ``id`` 为每个 Issue 保留最近记录，再按时间线顺序输出；
+        分块保持绑定参数数量低于旧版 SQLite 的默认上限。
+        """
+        distinct_issue_keys = list(dict.fromkeys(issue_keys))
+        if not distinct_issue_keys:
+            return []
+        bounded_limit = max(1, limit_per_issue)
+        invocation_events: list[InvocationEventRecord] = []
+        issue_batch_size = 400
+        for batch_start in range(0, len(distinct_issue_keys), issue_batch_size):
+            issue_batch = distinct_issue_keys[batch_start : batch_start + issue_batch_size]
+            issue_values_sql = ", ".join("(?, ?)" for _ in issue_batch)
+            query = (
+                "WITH ranked_events AS ("
+                f"SELECT id, {_INVOCATION_EVENT_COLUMNS}, "
+                "ROW_NUMBER() OVER (PARTITION BY repo_id, issue_number ORDER BY id DESC) "
+                "AS issue_event_rank FROM agent_invocation_events "
+                f"WHERE (repo_id, issue_number) IN ({issue_values_sql})"
+                ") "
+                f"SELECT {_INVOCATION_EVENT_COLUMNS} FROM ranked_events "
+                "WHERE issue_event_rank <= ? ORDER BY occurred_at ASC, id ASC"
+            )
+            query_params = tuple(value for issue_key in issue_batch for value in issue_key) + (
+                bounded_limit,
+            )
+            invocation_events.extend(self._read_invocation_events(query, query_params))
+        return invocation_events
 
     def _read_invocation_events(
         self, query: str, params: tuple[object, ...]

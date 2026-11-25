@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
 from backend.core.shared.interfaces.runner_console import (
     AttemptRecord,
+    InvocationEventRecord,
     IRunHistoryStore,
     RunRecord,
 )
@@ -42,6 +44,7 @@ __all__ = [
     "append_run_record",
     "load_run_attempt_details",
     "load_run_invocation_details",
+    "load_run_executor_summaries",
     "load_issue_attempt_trail",
 ]
 
@@ -255,9 +258,82 @@ def load_run_invocation_details(
         )
         return []
 
+    selected_invocation_events = _select_run_invocation_events(invocation_events, run_window)
+    return build_invocation_timeline(selected_invocation_events)
+
+
+def load_run_executor_summaries(
+    *,
+    run_history_store: IRunHistoryStore | None,
+    runs: Sequence[RunRecord],
+) -> list[list[str]]:
+    """为每条运行记录汇总实际调用过的执行器。
+
+    Args:
+        run_history_store: 运行历史存储；不支持调用观测时返回空摘要。
+        runs: Stats 运行列表，顺序会在返回的摘要中保持不变。
+
+    Returns:
+        与 ``runs`` 一一对应的执行器序列；连续相同执行器折叠，旧数据返回空序列。
+    """
+    empty_summaries = [[] for _ in runs]
+    if not runs or run_history_store is None:
+        return empty_summaries
+    invocation_store = resolve_invocation_store(run_history_store)
+    if invocation_store is None:
+        return empty_summaries
+
+    issue_keys = list(dict.fromkeys((run.repo_id, run.issue_number) for run in runs))
+    try:
+        invocation_events = invocation_store.list_issue_invocation_events_for_issues(
+            issue_keys=issue_keys,
+            limit_per_issue=_RUN_INVOCATION_DETAIL_LIMIT,
+        )
+    except Exception as invocation_read_error:  # noqa: BLE001 - 旁路观测读取失败不阻断列表。
+        _logger.warning("Failed to load run executor summaries: %s", invocation_read_error)
+        return empty_summaries
+
+    events_by_issue: dict[tuple[str, int], list[InvocationEventRecord]] = {}
+    for invocation_event in invocation_events:
+        if invocation_event.issue_number is None:
+            continue
+        issue_key = (invocation_event.repo_id, invocation_event.issue_number)
+        events_by_issue.setdefault(issue_key, []).append(invocation_event)
+
+    executor_summaries: list[list[str]] = []
+    for run_record in runs:
+        run_started_at = _parse_attempt_timestamp(run_record.started_at)
+        run_finished_at = _parse_attempt_timestamp(run_record.finished_at)
+        if run_started_at is None or run_finished_at is None or run_finished_at < run_started_at:
+            executor_summaries.append([])
+            continue
+        run_window = RunAttemptWindow(
+            repo_id=run_record.repo_id,
+            issue_number=run_record.issue_number,
+            started_at=run_started_at,
+            finished_at=run_finished_at,
+        )
+        selected_invocation_events = _select_run_invocation_events(
+            events_by_issue.get((run_record.repo_id, run_record.issue_number), []),
+            run_window,
+        )
+        invocation_timeline = build_invocation_timeline(selected_invocation_events)
+        executor_names: list[str] = []
+        for invocation_row in invocation_timeline:
+            if not executor_names or invocation_row.executor != executor_names[-1]:
+                executor_names.append(invocation_row.executor)
+        executor_summaries.append(executor_names)
+    return executor_summaries
+
+
+def _select_run_invocation_events(
+    invocation_events: Sequence[InvocationEventRecord],
+    run_window: RunAttemptWindow,
+) -> list[InvocationEventRecord]:
+    """按窗口内开始事件选调用，并用 ``run_id`` 隔离其结束事件。"""
     normalized_run_start = run_window.started_at.astimezone(timezone.utc)
     normalized_run_end = run_window.finished_at.astimezone(timezone.utc)
-    selected_invocation_ids: set[str] = set()
+    selected_invocation_keys: set[tuple[str, str]] = set()
     for invocation_event in invocation_events:
         if invocation_event.event_type != EVENT_INVOCATION_STARTED:
             continue
@@ -265,15 +341,14 @@ def load_run_invocation_details(
         if invocation_started_at is not None and (
             normalized_run_start <= invocation_started_at <= normalized_run_end
         ):
-            selected_invocation_ids.add(invocation_event.invocation_id)
+            selected_invocation_keys.add((invocation_event.run_id, invocation_event.invocation_id))
 
-    selected_invocation_events = [
+    return [
         invocation_event
         for invocation_event in invocation_events
-        if invocation_event.invocation_id in selected_invocation_ids
+        if (invocation_event.run_id, invocation_event.invocation_id) in selected_invocation_keys
         and invocation_event.event_type in (EVENT_INVOCATION_STARTED, EVENT_INVOCATION_FINISHED)
     ]
-    return build_invocation_timeline(selected_invocation_events)
 
 
 def _parse_attempt_timestamp(timestamp: str) -> datetime | None:

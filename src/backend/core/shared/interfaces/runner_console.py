@@ -596,6 +596,28 @@ class IInvocationEventStore(ABC):
         """
         ...
 
+    def list_issue_invocation_events_for_issues(
+        self,
+        *,
+        issue_keys: Sequence[tuple[str, int]],
+        limit_per_issue: int = 500,
+    ) -> list[InvocationEventRecord]:
+        """批量读取多个 Issue 的近期调用事件，供运行列表做内存归属。
+
+        实现可以覆盖此默认版本以合并为一条数据库查询。回退实现按 Issue
+        读取，不按每条运行读取。
+        """
+        invocation_events: list[InvocationEventRecord] = []
+        for repo_id, issue_number in dict.fromkeys(issue_keys):
+            invocation_events.extend(
+                self.list_issue_invocation_events(
+                    repo_id=repo_id,
+                    issue_number=issue_number,
+                    limit=limit_per_issue,
+                )
+            )
+        return invocation_events
+
 
 @dataclass(frozen=True)
 class RegistryRepositoryEntry:

@@ -329,6 +329,7 @@ export type RunRecordEntry = {
   issue_url: string | null;
   trigger: string;
   agent: string;
+  executors: string[];
   outcome: "completed" | "failed" | "blocked" | "deferred";
   error_summary: string | null;
   started_at: string;

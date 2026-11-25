@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Sequence
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -15,6 +17,7 @@ from backend.api.app import app
 from backend.core.shared.interfaces.runner_console import (
     AttemptRecord,
     InvocationEventRecord,
+    RunRecord,
 )
 from backend.core.shared.models.agent_runner import (
     AppConfig,
@@ -227,6 +230,138 @@ def test_run_attempt_details_are_scoped_to_selected_run(console_environment) -> 
     assert invocations[0]["requested_model"] == "claude-sonnet-4-5"
     assert invocations[0]["reported_model"] is None
     assert invocations[0]["duration_seconds"] == 9.0
+
+
+def test_console_run_list_summarizes_persisted_executors_per_run(
+    console_environment, monkeypatch
+) -> None:
+    """运行列表读取同 Issue 的持久化执行器，并与详情时间线按 run 隔离。"""
+    store = console_environment["store"]
+    run_specs = (
+        (
+            "single-executor",
+            "codex",
+            "2026-10-10T06:00:00+00:00",
+            "2026-10-10T06:01:00+00:00",
+        ),
+        (
+            "switching-executors",
+            "codex",
+            "2026-10-10T06:02:00+00:00",
+            "2026-10-10T06:03:00+00:00",
+        ),
+        (
+            "legacy-without-events",
+            "qoder",
+            "2026-10-10T06:04:00+00:00",
+            "2026-10-10T06:05:00+00:00",
+        ),
+    )
+    run_ids: dict[str, str] = {}
+    for run_suffix, recorded_agent, started_at, finished_at in run_specs:
+        run_id = f"keda-main#issue-314#20261010T{run_suffix}"
+        run_ids[run_suffix] = run_id
+        store.append_run(
+            RunRecord(
+                repo_id="keda-main",
+                repo_path="/tmp/keda-main",
+                issue_number=314,
+                trigger="console_run",
+                agent=recorded_agent,
+                outcome="completed",
+                error_summary=None,
+                started_at=started_at,
+                finished_at=finished_at,
+                duration_seconds=60,
+            )
+        )
+
+    def append_invocation(
+        *,
+        run_id: str,
+        invocation_id: str,
+        executor_name: str,
+        started_at: str,
+    ) -> None:
+        started = datetime.fromisoformat(started_at)
+        for event_type, occurred_at in (
+            ("invocation_started", started),
+            ("invocation_finished", started + timedelta(seconds=5)),
+        ):
+            store.append_invocation_event(
+                InvocationEventRecord(
+                    run_id=run_id,
+                    event_key=f"{invocation_id}:{event_type}",
+                    event_type=event_type,
+                    invocation_id=invocation_id,
+                    repo_id="keda-main",
+                    issue_number=314,
+                    phase="implementation",
+                    role="agent",
+                    agent=executor_name,
+                    occurred_at=occurred_at.isoformat(),
+                    detail_json="{}",
+                )
+            )
+
+    # 两次运行复用同一个 invocation_id，证明归属由事件的 run_id 隔离。
+    append_invocation(
+        run_id=run_ids["single-executor"],
+        invocation_id="shared-invocation-id",
+        executor_name="claude",
+        started_at="2026-10-10T06:00:10+00:00",
+    )
+    for invocation_id, executor_name, started_at in (
+        ("shared-invocation-id", "claude", "2026-10-10T06:02:10+00:00"),
+        ("switch-to-codex", "codex", "2026-10-10T06:02:20+00:00"),
+        ("repeat-codex", "codex", "2026-10-10T06:02:30+00:00"),
+        ("switch-back-to-claude", "claude", "2026-10-10T06:02:40+00:00"),
+    ):
+        append_invocation(
+            run_id=run_ids["switching-executors"],
+            invocation_id=invocation_id,
+            executor_name=executor_name,
+            started_at=started_at,
+        )
+
+    batch_issue_keys: list[tuple[tuple[str, int], ...]] = []
+    batch_reader = store.list_issue_invocation_events_for_issues
+
+    def track_batch_read(
+        *, issue_keys: Sequence[tuple[str, int]], limit_per_issue: int
+    ) -> list[InvocationEventRecord]:
+        batch_issue_keys.append(tuple(issue_keys))
+        return batch_reader(issue_keys=issue_keys, limit_per_issue=limit_per_issue)
+
+    monkeypatch.setattr(store, "list_issue_invocation_events_for_issues", track_batch_read)
+
+    response = client.get("/api/v1/agent-runner/console/runs?repo_id=keda-main&limit=30")
+
+    assert response.status_code == 200
+    returned_runs = response.json()["runs"]
+    assert [run["agent"] for run in returned_runs] == ["qoder", "codex", "codex"]
+    assert [run["executors"] for run in returned_runs] == [
+        [],
+        ["claude", "codex", "claude"],
+        ["claude"],
+    ]
+    assert batch_issue_keys == [(("keda-main", 314),)]
+
+    detail_response = client.get(
+        "/api/v1/agent-runner/console/runs/attempts",
+        params={
+            "repo_id": "keda-main",
+            "issue_number": 314,
+            "started_at": "2026-10-10T06:02:00+00:00",
+            "finished_at": "2026-10-10T06:03:00+00:00",
+        },
+    )
+
+    assert detail_response.status_code == 200
+    detail_executors = [
+        invocation["executor"] for invocation in detail_response.json()["invocations"]
+    ]
+    assert detail_executors == ["claude", "codex", "codex", "claude"]
 
 
 def test_run_attempt_details_reject_invalid_time_window(console_environment) -> None:

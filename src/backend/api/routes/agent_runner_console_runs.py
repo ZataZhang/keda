@@ -11,6 +11,7 @@ from backend.core.use_cases.agent_runner_factory import create_console_store
 from backend.core.use_cases.agent_runner_run_history import (
     RunAttemptWindow,
     load_run_attempt_details,
+    load_run_executor_summaries,
     load_run_invocation_details,
 )
 
@@ -21,8 +22,16 @@ router = APIRouter(tags=["agent-runner-console-runs"])
 def list_console_runs(repo_id: str | None = None, limit: int = 100) -> dict:
     """倒序列出最近的运行记录。"""
     bounded_limit = min(max(limit, 1), 500)
-    runs = create_console_store().list_recent_runs(repo_id=repo_id, limit=bounded_limit)
-    return {"runs": jsonable_encoder(runs)}
+    run_history_store = create_console_store()
+    runs = run_history_store.list_recent_runs(repo_id=repo_id, limit=bounded_limit)
+    executor_summaries = load_run_executor_summaries(
+        run_history_store=run_history_store,
+        runs=runs,
+    )
+    run_payloads = jsonable_encoder(runs)
+    for run_payload, executor_names in zip(run_payloads, executor_summaries, strict=True):
+        run_payload["executors"] = executor_names
+    return {"runs": run_payloads}
 
 
 @router.get("/agent-runner/console/runs/attempts")
