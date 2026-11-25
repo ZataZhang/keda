@@ -1,3 +1,36 @@
+## 2026-11-25 审查复验与可复现绑定
+
+RV-1 在当前实现树重跑，原始标准输出如下（完整本地产物 `rv-1-cost-api.txt` 由 runner 按证据发布流程上传）：
+
+```text
+$ UV_CACHE_DIR=/private/tmp/uv-cache-issue-449 uv run pytest tests/test_agent_runner_console_api.py::test_issue_cost_stats_reads_sqlite_and_console_http_with_repo_issue_key -q --no-testmon
+.                                                                        [100%]
+1 passed in 0.39s
+```
+
+实现树 SHA-256：`f219ac97d68894ee007135562bc27bf435006a2104dae133db756ce00c1b2311`，1996 个文件。以下命令从 Git 已跟踪和未忽略的未跟踪文件重算；排除该 PRD、证据目录和 runner 请求，按路径排序并对路径与文件内容分别加入 8 字节大端长度及原始字节：
+
+```bash
+python3 - <<'TREE'
+import hashlib
+import subprocess
+from pathlib import Path
+root = Path.cwd()
+paths = subprocess.check_output(['git', 'ls-files', '--cached', '--others', '--exclude-standard', '-z']).split(b'\0')
+excluded = b'tasks/pending/P1-FEAT-20261125-175656-console-issue-cost-stats.md'
+h = hashlib.sha256()
+selected = sorted(p for p in paths if p and p != excluded and not p.startswith((b'tasks/evidence/', b'.agent-runner/')))
+for path in selected:
+    content = (root / path.decode('utf-8')).read_bytes()
+    for value in (path, content):
+        h.update(len(value).to_bytes(8, 'big'))
+        h.update(value)
+print('SHA-256:', h.hexdigest(), 'Files:', len(selected))
+TREE
+```
+
+RV-2/RV-3 重试 `just e2e tests/smoke/stats-issue-cost-ledger.no-auth.spec.ts` 退出 1：后端启动因默认 uv 缓存 `Operation not permitted` 失败，Next Watchpack 报 `EMFILE`；测试体未执行且无截图。完整本地日志为 `rv-2-browser-launch.txt`。筛选、跳转、趋势、覆盖率和美元展示仍未验证；须在可用环境重跑并由 runner 发布原始证据与截图。独立 verifier 未运行，验收仍阻塞。
+
 > 2026-11-25 修复复验：下方历史树摘要和历史测试结果已过期，以本段为准。实现树 SHA-256：`f219ac97d68894ee007135562bc27bf435006a2104dae133db756ce00c1b2311`（原摘要脚本，排除 PRD、evidence 和 .agent-runner）。
 >
 > RV-1 原始输出：`UV_CACHE_DIR=/private/tmp/uv-cache-issue-449 uv run pytest tests/test_agent_runner_console_api.py::test_issue_cost_stats_reads_sqlite_and_console_http_with_repo_issue_key -q --no-testmon` → `. [100%]`，`1 passed in 0.81s`。真实临时 SQLite、Console HTTP 和独立重复读取；仅 GitHub 客户端替身。手算：Issue #7 为 100+50+80+40+20+10 = 300 输入输出 Token，加缓存读取 10+5 与创建 5，共 320；model-a 290、unknown 30。跨午夜 Issue #10 为 40+15=55，归属前一日；次日仅两条真正未关联调用，无 model-a。关闭 Issue 带 blocked 和 failed 标签仍仅列入 completed。此测试不证明美元展示。
