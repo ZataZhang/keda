@@ -1,0 +1,3 @@
+## Patrol result — 2026-11-25
+
+The initial fresh sweep found no `agent/blocked` Issues and one `agent/failed` target, #443. #443 is now `agent/blocked`; its evidence and the required maintainer decision are recorded in [the target handoff comment](https://github.com/ZataZhang/keda/issues/443#issuecomment-7157414521). PR #444 remains open at `f53d51be0c69f88fb2fa910b0a4522588b3e4fb7` with an unresolved same-second run-attribution finding. A local repair commit exists on a sibling branch, so this patrol did not recover or requeue it. #446 remains open and blocked pending the maintainer's branch-reconciliation decision.

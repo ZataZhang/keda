@@ -1,0 +1,7 @@
+## Patrol handoff — 2026-11-25
+
+Issue #443 remains open and `agent/blocked`. No explicit maintainer takeover appears in its current timeline. PR #444 is open, non-draft, based on `main`, and mergeable at `f53d51be0c69f88fb2fa910b0a4522588b3e4fb7`. Its current checks completed with 13 successes and 2 skips, but the latest supervisor cycle (08:35Z) still reports 1 high and 1 medium finding: a same-second run handoff can attribute a new run's invocation to the previous record. It asks for an attribution fix, real Console Stats revalidation, and an updated review checklist. Automatic repair stopped after 2/2 rounds.
+
+The 08:25Z push-failure comment records `fatal: bad object f53d51be0c69f88fb2fa910b0a4522588b3e4fb7` and a `fetch first` rejection. The local `issue-443` worktree is clean at `999bf87649285635a64bc70f56fa0bf322f45a85`, whose parent is `9e88852f16e069ac2dc89ea725f81be53c4afa2c`; the GitHub PR head `f53d51be0c69f88fb2fa910b0a4522588b3e4fb7` has the same parent. The local commit contains run-attribution/history changes and regression tests, but is not on the current PR branch and was not verified in this patrol.
+
+**Maintainer decision needed:** choose whether to reconcile the existing local repair onto the current PR head, or supersede it with a fresh repair from that head. Keep the PR unmerged until the finding is fixed and verified. `kc logs --issue 443` returned no output, `kc lifecycle --issue 443 --json` could not open the local ledger, and `kc peers` showed no active #443 claim.
