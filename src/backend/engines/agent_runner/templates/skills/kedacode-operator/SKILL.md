@@ -29,7 +29,7 @@ Use the repository guide as the authoritative command reference. Start with `kc 
 
 ## Refresh a Console card after a GitHub write
 
-After changing an Issue or its PR outside Console, run `kc monitor refresh --repo-id <id> --issue <number>` once after the related writes finish. Add `--pr <number>` for a newly linked PR. This refreshes the local card with one Issue read and one PR read when known. It leaves the normal repository-wide sync interval in place.
+After external GitHub writes, run `kc monitor refresh --repo-id <id> --issue <number> --pr <number>` once. Omit the PR option if already known. This refreshes only that local card.
 
 ## Shared baselines (apply to every route)
 

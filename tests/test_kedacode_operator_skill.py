@@ -645,6 +645,7 @@ _ALLOWED_FLAGS: dict[tuple[str, ...], set[str]] = {
         "--config",
     },
     ("schema",): {"--json", "--output"},
+    ("monitor", "refresh"): {"--repo-id", "--issue", "--pr"},
     # ``kc lifecycle`` 是只读查询；旗标集合取自 ``kc schema --json`` 的真实命令树。
     ("lifecycle",): {"--issue", "--repo-id", "--phase", "--reached", "--output", "--json"},
     # `kc backlog ci` 子组（P1-FEAT-20260916-134008）：policy 的 --global 与
