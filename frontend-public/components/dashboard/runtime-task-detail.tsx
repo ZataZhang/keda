@@ -414,6 +414,21 @@ export function RuntimeTaskDetail({
             <Badge variant={presentation.variant}>{presentation.label}</Badge>
             <RuntimeTaskExecutor task={task} />
             <RuntimeTaskPhase task={task} />
+            <Badge
+              variant="outline"
+              className="whitespace-normal break-all"
+              data-testid="runtime-detail-agent"
+              title={task.unclosed_invocation_executor
+                ? "调用账本尚未记录结束事件，进程存活状态需另行确认。"
+                : undefined}
+            >
+              {task.unclosed_invocation_executor
+                ? `未结束调用：${task.unclosed_invocation_executor}`
+                : `最近执行：${task.agent ?? "未知"}`}
+              {task.unclosed_invocation_executor && task.unclosed_invocation_model
+                ? ` · ${task.unclosed_invocation_model}`
+                : null}
+            </Badge>
             <RuntimeTaskWatch task={task} />
             <span>{identity}</span>
             {issueUrl ? (
@@ -560,11 +575,8 @@ export function RuntimeTaskDetail({
           <RuntimeTaskAnomalies task={task} />
           <div className="flex flex-wrap gap-x-4 gap-y-1">
             <RuntimeTaskLocalRunSuperseded task={task} />
-            <span>
-              最近执行：{task.agent ?? "未知"}
-              {task.preset ? ` · preset ${task.preset}` : ""}
-              {task.model ? ` · 模型 ${task.model}` : ""}
-            </span>
+            {task.preset ? <span>Preset：{task.preset}</span> : null}
+            {task.model ? <span>最近上报模型：{task.model}</span> : null}
             <span>尝试：{task.attempt_number ?? "—"}</span>
             <span>
               开始：
