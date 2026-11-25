@@ -72,7 +72,7 @@ class InvocationTokenUsageSummary:
     token_usage_by_model: ModelTokenUsageStats
 
 
-def _parse_event_timestamp(raw_timestamp: object) -> datetime | None:
+def parse_event_timestamp(raw_timestamp: object) -> datetime | None:
     """解析调用 / lifecycle 时间戳；无效值返回 ``None``。"""
     if not isinstance(raw_timestamp, str):
         return None
@@ -83,6 +83,34 @@ def _parse_event_timestamp(raw_timestamp: object) -> datetime | None:
     if parsed_timestamp.tzinfo is None:
         return None
     return parsed_timestamp.astimezone(timezone.utc)
+
+
+def resolve_invocation_model(detail: dict) -> tuple[str, bool, str | None]:
+    """按调用时实际模型、请求模型与可信具体配置依次解析模型身份。"""
+    model_id = next(
+        (
+            model_value.strip()
+            for model_value in (detail.get("reported_model"), detail.get("requested_model"))
+            if isinstance(model_value, str) and model_value.strip()
+        ),
+        "unknown",
+    )
+    config_snapshot = detail.get("model_config_snapshot")
+    configured_model = (
+        config_snapshot.get("model_id") if isinstance(config_snapshot, dict) else None
+    )
+    configuration_fallback = False
+    unresolved_model_alias = None
+    if model_id == "unknown" and isinstance(configured_model, str) and configured_model.strip():
+        configured_model = configured_model.strip()
+        if config_snapshot.get("is_alias") is False and is_concrete_configured_model(
+            configured_model
+        ):
+            model_id = configured_model
+            configuration_fallback = True
+        else:
+            unresolved_model_alias = configured_model
+    return model_id, configuration_fallback, unresolved_model_alias
 
 
 @dataclass(frozen=True)
@@ -185,8 +213,8 @@ def _build_run_window_index(
             run_records_by_id[run_id] = run_record
         repo_id = str(getattr(run_record, "repo_id", ""))
         issue_number = getattr(run_record, "issue_number", None)
-        started_at = _parse_event_timestamp(getattr(run_record, "started_at", None))
-        finished_at = _parse_event_timestamp(getattr(run_record, "finished_at", None))
+        started_at = parse_event_timestamp(getattr(run_record, "started_at", None))
+        finished_at = parse_event_timestamp(getattr(run_record, "finished_at", None))
         if not repo_id or not isinstance(issue_number, int) or started_at is None:
             continue
         issue_key = (repo_id, issue_number)
@@ -225,7 +253,7 @@ def _read_invocation_usage_records(
                 _INVOCATION_FINISHED_EVENT_TYPE
             ):
                 continue
-            occurred_at = _parse_event_timestamp(getattr(invocation_event, "occurred_at", None))
+            occurred_at = parse_event_timestamp(getattr(invocation_event, "occurred_at", None))
             if occurred_at is None:
                 continue
             matching_run_windows = [
@@ -244,37 +272,10 @@ def _read_invocation_usage_records(
                 agent_name = str(getattr(invocation_event, "agent", "") or "unknown")
                 missing_usage_by_agent[agent_name] = missing_usage_by_agent.get(agent_name, 0) + 1
                 continue
-            model_id = next(
-                (
-                    model_value.strip()
-                    for model_value in (
-                        detail.get("reported_model"),
-                        detail.get("requested_model"),
-                    )
-                    if isinstance(model_value, str) and model_value.strip()
-                ),
-                "unknown",
+            model_id, configuration_fallback, unresolved_model_alias = resolve_invocation_model(
+                detail
             )
             phase_name = str(getattr(invocation_event, "phase", "") or detail.get("phase") or "")
-            config_snapshot = detail.get("model_config_snapshot")
-            configured_model = (
-                config_snapshot.get("model_id") if isinstance(config_snapshot, dict) else None
-            )
-            configuration_fallback = False
-            unresolved_model_alias = None
-            if (
-                model_id == "unknown"
-                and isinstance(configured_model, str)
-                and configured_model.strip()
-            ):
-                configured_model = configured_model.strip()
-                if config_snapshot.get("is_alias") is False and is_concrete_configured_model(
-                    configured_model
-                ):
-                    model_id = configured_model
-                    configuration_fallback = True
-                else:
-                    unresolved_model_alias = configured_model
             usage_records.append(
                 _InvocationUsageRecord(
                     run_record=run_record,

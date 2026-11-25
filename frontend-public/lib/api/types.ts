@@ -888,6 +888,69 @@ export type TokenUsageTotals = {
   usage_count: number;
 };
 
+/** 单次调用账本中可确认的模型用量。 */
+export type IssueModelUsage = {
+  model_id: string;
+  totals: TokenUsageTotals;
+  configuration_fallback_count: number;
+  unresolved_model_alias_count: number;
+};
+
+/** Issue 账本中的一次本机执行及其调用用量。 */
+export type IssueExecutionUsage = {
+  execution_id: string;
+  outcome: string;
+  trigger: string;
+  agent: string;
+  started_at: string;
+  finished_at: string;
+  duration_seconds: number;
+  error_summary: string | null;
+  model_usage: IssueModelUsage[];
+  missing_usage_count: number;
+};
+
+/** GitHub 当前状态与所选期间账本合并后的 Issue 行。 */
+export type IssueCostStatsIssue = {
+  repo_id: string;
+  repository_name: string;
+  issue_number: number;
+  title: string;
+  issue_url: string | null;
+  github_state: string;
+  current_status: "blocked" | "failed" | "in_progress" | "completed" | "unknown";
+  status_filters: string[];
+  period_run_count: number;
+  totals: TokenUsageTotals;
+  model_usage: IssueModelUsage[];
+  executions: IssueExecutionUsage[];
+  missing_usage_count: number;
+  period_data_available: boolean;
+  truncated: boolean;
+};
+
+/** 一个仓库的 GitHub 当前状态与期间 Issue 账本。 */
+export type IssueCostStatsRepository = {
+  repo_id: string;
+  display_name: string;
+  github_available: boolean;
+  github_error: string | null;
+  github_truncated: boolean;
+  issue_count: number;
+  status_counts: Record<"blocked" | "failed" | "in_progress" | "completed", number>;
+  issues: IssueCostStatsIssue[];
+};
+
+/** Stats Issue 账本端点的响应。日期范围使用 UTC 日历日。 */
+export type IssueCostStats = {
+  repo_id: string | null;
+  start_date: string;
+  end_date: string;
+  repositories: IssueCostStatsRepository[];
+  unlinked_invocation_count: number;
+  truncated_run_history: boolean;
+};
+
 /**
  * 仓库窗口内的 token 用量汇总（Stats 页 Token 汇总区的数据源）。
  *

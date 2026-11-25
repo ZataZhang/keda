@@ -1,10 +1,17 @@
 import type { NextConfig } from "next"
+import { dirname, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
+
+const frontendDirectory = dirname(fileURLToPath(import.meta.url))
+const repositoryRoot = resolve(frontendDirectory, "..")
 
 const backendUrl = process.env.BACKEND_URL || "http://localhost:8000"
 
 const nextConfig: NextConfig = {
   devIndicators: false,
   allowedDevOrigins: ["127.0.0.1"],
+  // 固定在当前 worktree 根目录，避免嵌套 worktree 错误扫描到外层主仓库。
+  turbopack: { root: repositoryRoot },
   // 静态导出：产物由 `kc console` 内置的 FastAPI 直接托管（同源访问 /api）。
   // trailingSlash 让产物是 out/app/backlog/index.html 这种目录形态，
   // 才能被 StaticFiles(html=True) 正确解析深层路由。

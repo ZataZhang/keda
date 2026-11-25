@@ -4457,7 +4457,7 @@ Runner 完成发布交接后切换到监督，GitHub 的 PR 可以在等待合�
 | Backlog | `/app/backlog` | **首屏落点**。左侧受管理仓库栏 + 右侧当前仓库的 PRD 队列（依赖图 / 时间轴 / 列表三视图） |
 | 总览 | `/app/dashboard` | 队列监控 + 每仓库完成度摘要 + failed Issue 的普通重试或执行器切换续跑、blocked Issue 继续按钮 |
 | 进程 | `/app/processes` | 启停每个仓库的 runner 进程，实时查看进程日志（offset 轮询） |
-| 统计 | `/app/stats` | 实时完成度、运行趋势、Agent / 预设 attempt 表现、整项任务耗时、PRD 生命周期与 Token 用量 |
+| 统计 | `/app/stats` | 默认按 Issue 查看期间执行、Token 与当前价格估算；另有仓库状态、用量趋势、模型计价视图，并保留 Agent 表现与 PRD 生命周期分析 |
 | 项目 | `/app/repositories` | 仓库 registry 列表 / 添加 / 启停（写回 `config.toml`）+ 审计日志 |
 | 想法 | `/app/ideas` | 跨项目想法采集、AI 总结、PRD 草稿人审 |
 
@@ -4526,6 +4526,8 @@ kc console --api-only --no-browser
   该选项仍按默认行为挂载面板。库模式（直接 `import backend.api.app` 或自行起
   uvicorn）不走强校验，只在 import 时记一条 warning。
   前后端并行开发仍可沿用 `just run` / `pnpm --filter frontend-public dev`。
+- `frontend-public/next.config.ts` 将 Turbopack 根目录固定到当前仓库根目录；在嵌套 worktree
+  中启动前端时，避免自动发现外层主仓库并扫描无关文件。
 - 面板与 API 同源，开发代理仅在 `frontend-public dev` 模式生效。
 - 改后端路由后必须**重启** `kc console` 才生效；`just console-sync` 只替换
   静态前端产物，不重载后端代码。注意复用逻辑发生在这次重启之前——旧版本进程
@@ -4662,25 +4664,31 @@ daemon 进程**即获得多项目并发——不同仓库的 Issue 同时执行�
 - 进程 stdout/stderr 写入 `logs/agent-runner/processes/<repo_id>/`，
   面板通过 offset 轮询续读，无 WebSocket/SSE。
 
-### 运行历史与完成度统计
+### 运行历史与按 Issue 成本统计
 
-- **区块导航**：Stats 页在标题与筛选区下方提供顶部 Tab 导航「总览 / Token 成本 /
-  Agent 表现 / PRD 执行分析」；点击 Tab 定位到对应区块，页面滚动时同步高亮并吸顶，
-  窄屏可横向浏览，方向键 / Home / End 键盘可操作。仅重组页面信息组织，
-  不改变任何统计 API 与计算口径；总览包含指标卡片、仓库完成度、运行趋势与最近运行记录。
-- **实时口径（GitHub）**：`GET /api/v1/agent-runner/console/stats/overview`
-  以 `state=all` 查询全部 workflow label 的 Issue 并去重。closed 且不含
-  failed/blocked label 计为 `completed`；单 label 查询命中 200 上限时
-  响应标记 `truncated: true`。
-- **历史口径（本地 SQLite）**：`run_once` 编排在每个 Issue 处理收尾时
-  写入一条运行记录（outcome：completed / failed / blocked / deferred）。`deferred`
-  表示 GitHub API 暂不可用，任务会等待恢复后重试，不计为代码失败。CLI 直跑
-  与面板托管共用 `~/.kedacode/console.db`（`history_db_path` 可配）。
-  `GET .../console/stats/history` 返回按天聚合趋势。
-- **最近运行记录**：Stats 页将最近 30 条运行按仓库与 Issue 分组，组按最近一次运行时间排序；
-  分组标题显示任务名，点击任务名会在新标签页打开对应 GitHub Issue；每条运行仍是一次独立 runner 调用。
-  展开分组可查看该 Issue 的运行时间、结果、触发方式、Agent 与耗时，并打开单次 failed / blocked
-  运行的失败详情。运行记录会保存执行时的 Issue 标题和 URL；升级前的历史记录没有这两项快照。
+- **Stats 页面视图**：`/app/stats` 默认打开「按 Issue」。页面提供「仓库状态」「用量趋势」和
+  「模型与计价」独立视图，并保留 Agent 表现、PRD 执行分析入口。账本可按 Issue 标题或编号搜索，
+  按仓库、日期和 GitHub 当前状态筛选，按最近执行、估价、Token 或执行次数排序。展开行内详情可在
+  「执行记录」和「模型用量」之间切换。
+- **GitHub 当前状态**：`GET .../console/stats/issues` 读取仓库当前 workflow Issue 标签与开放/关闭状态，
+  与所选日期范围无关。阻塞、失败标签优先于 GitHub closed 状态；closed 且无失败或阻塞标签的 Issue
+  显示为已完成；其余已跟踪的开放 Issue 显示为进行中。GitHub 读取失败时状态显示为未知。仓库状态视图
+  的状态数量可跳回该仓库和状态的 Issue 集合，期间没有运行的 Issue 仍会显示并标注「无期间数据」。
+- **本机运行与调用账本**：同一接口从 Console SQLite 读取运行和 `invocation_finished` 调用记录，以
+  `repo_id + issue_number` 汇总。期间按 UTC 日历日选择执行开始时间，开始时间落在范围内的失败尝试也计入；
+  同一执行时间窗内的每次调用只计一次。没有可关联执行的调用不会摊到 Issue，并在账本中披露；有运行但
+  没有有效 usage 的行仍保留。日期范围最多 365 天，运行历史最多读取 10,000 条；单个 Issue 最多读取
+  500 条调用事件，达到上限时明细和估价会提示可能不完整。
+- **期间切片和趋势**：开始、结束日期均为包含端点的 UTC 日期。用量趋势按执行开始日汇总，并与 Issue
+  账本使用相同日期范围；改动日期后两者同时刷新。Agent 表现和 PRD 生命周期分析也接收同一仓库与日期范围，
+  不再仅用相对 `days` 推算边界。
+- **费用估算**：调用模型身份沿用已有解析规则——执行器上报模型优先，其次请求模型，再使用可信的具体配置
+  快照；无法确认时显示未识别模型。费用使用本机当前价格配置，不代表供应商账单，也不保留历史价格快照。
+  有些模型已计价时显示已知金额并标注部分计价；Token 尚无可用价格时显示「暂无估价」；已保存的零单价
+  仍按确认的 $0 显示。模型计价视图的覆盖率分母为账本中全部已记录 Token（包括未识别模型），缺少 usage
+  的调用另行披露，不会被当作零 Token。
+- **历史趋势接口**：`GET .../console/stats/history` 仍提供按天聚合的本机运行趋势。运行记录仍保存执行时的
+  Issue 标题和 URL；升级前的历史记录没有这两项快照。
 - **运行详情**：结果、失败阶段与面向人的失败解释优先展示；原始错误日志收在可展开区域。
   例如 GitHub 因远端分支更新而拒绝推送时，详情会说明这是推送阶段失败，并建议先整合远端提交，
   并明确区分「Agent 进程正常退出」与「整次运行失败」：前者只描述单次 Agent 调用，后者包含
@@ -4702,6 +4710,8 @@ daemon 进程**即获得多项目并发——不同仓库的 Issue 同时执行�
 
 ```text
 GET .../console/stats/agent-performance?repo_id=&days=30
+GET .../console/stats/agent-performance?repo_id=&start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
+GET .../console/stats/prd-lifecycle?repo_id=&start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
 ```
 
 - **Agent / 预设成功率按 attempt 计算**：只有 `failure_type=success` 计为成功；
