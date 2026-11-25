@@ -28,3 +28,7 @@ Keep #443 blocked and do not start a second run. Its claim for host `zatadeMacBo
 ## Next action and closing condition
 
 The maintainer should check PID `16223` on its host and post the handoff above; if active, let it finish, and if not, let the stall supervisor reconcile the lease before deciding on a repair. #448 remains `agent/running`; the maintainer should move it to `agent/blocked` while this decision is pending. Re-read #443 and #444 after a new attempt, commit, or check result. Close #448 only after fresh blocked/failed queue reads show no target requiring recovery or a human decision.
+
+## Pre-PR review recheck — 2026-11-25 11:22 UTC
+
+GitHub reads confirm #443 remains open with `agent/blocked` and #448 remains open with `agent/running`. The latest #443 comments still report that automatic repair stopped and require human handling; no later handoff appears in the Issue comments. The previously rejected comment and the #448 label change have not been performed. The connector's automatic approval rejection prevents completing those writes in this environment; this local record is not a substitute for the required GitHub handoff. A maintainer or an environment with approved GitHub write access must perform the next action above and re-read both Issues.
