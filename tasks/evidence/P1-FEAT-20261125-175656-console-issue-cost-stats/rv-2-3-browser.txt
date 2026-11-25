@@ -1,0 +1,12 @@
+
+Running 3 tests using 1 worker
+
+(node:43852) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:43852) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  1 [no-auth] › tests/smoke/stats-issue-cost-ledger.no-auth.spec.ts:394:3 › Stats Issue cost ledger › opens by Issue and expands executions and model usage (848ms)
+  ✓  2 [no-auth] › tests/smoke/stats-issue-cost-ledger.no-auth.spec.ts:431:3 › Stats Issue cost ledger › searches, sorts, filters, and opens repository status rows with no period run (740ms)
+  ✓  3 [no-auth] › tests/smoke/stats-issue-cost-ledger.no-auth.spec.ts:465:3 › Stats Issue cost ledger › uses the selected UTC date window for trends and token coverage (784ms)
+
+  3 passed (3.2s)

@@ -498,7 +498,9 @@ test.describe('Stats Issue cost ledger', () => {
     await expect(page.getByTestId('stats-model-pricing')).toContainText('0%')
     await expect(page.getByTestId('stats-model-pricing')).toContainText('2000.0k')
     await expect(page.getByTestId('stats-model-pricing')).toContainText('暂无估价')
-    await expect(page.getByRole('link', { name: '设置模型价格' })).toHaveAttribute('href', '/app/settings/')
+    await expect(
+      page.getByTestId('stats-model-pricing').getByRole('link', { name: '设置模型价格' }),
+    ).toHaveAttribute('href', '/app/settings/')
     await captureEvidenceScreenshot(page, 'rv-3-trend-and-coverage-pricing.png')
   })
 })
