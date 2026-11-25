@@ -1,0 +1,5 @@
+# 仓库状态
+2026-11-25 · OpenAI ImageGen · 16:10 · 静态设计概念 · 示意数据
+参考选中的第 10 号方案的文字规格，保留 Stats 外壳。此图只展示 GitHub 当前状态。
+
+Generate exactly ONE polished 16:10 desktop screenshot of KedaCode 统计与成本. Use restrained visual style with pale lilac-gray background, slim left KedaCode rail (Dashboard, Processes, Repositories, Stats selected, Evaluations, Backlog, Ideas, Settings), main tabs 按 Issue / 仓库状态 / 用量趋势 / 模型与计价 with 仓库状态 active, secondary links Agent 表现 and PRD 执行分析 top right. Main area contains exactly one card called GitHub 当前状态, one filter 全部仓库 and ONE table. Table has columns 仓库, 阻塞, 失败, 进行中, 已完成. Data keda 15 31 1 45; freshai 4 7 0 11; AI Assistant 2 6 0 8; docir 0 0 0 1; fsense 0 1 0 1; rust-study 2 0 0 0. Purple links for nonzero 阻塞 and 失败 counts, 15 has subtle hover highlight with short tooltip 查看阻塞 Issue. The link leads out of this view. There is no Issue list, no second table, no cost or usage, no date filter. Show all 6 rows in the single repository table. Crisp Chinese UI, no device frame.

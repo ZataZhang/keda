@@ -1,6 +1,15 @@
 (() => {
   const prototypeRegistry = [
     {
+      id: 'issue-cost-stats', title: '统计与成本：按 Issue', project: 'keda', module: 'Console / Stats', system: 'Keda Console',
+      form: 'image-state', version: 'v2.0', updatedAt: '2026-11-25', availability: 'available', validationLevel: '概念原型',
+      primaryFlow: '按 Issue 查 Token 和费用，行内切换执行记录与模型用量',
+      description: '五张静态目标图，覆盖 Issue 账本、仓库状态、用量趋势和模型计价。',
+      preview: './issue-cost-stats/assets/01-issue-runs.png', entry: './issue-cost-stats/index.html', source: './issue-cost-stats/prototype.md',
+      provenance: ['./issue-cost-stats/assets/01-issue-runs.prompt.md', './issue-cost-stats/assets/02-repository-status.prompt.md', './issue-cost-stats/assets/03-usage-trend.prompt.md', './issue-cost-stats/assets/04-model-pricing.prompt.md', './issue-cost-stats/assets/05-issue-models.prompt.md'],
+      relationships: [],
+    },
+    {
       id: 'tailscale-machine-management', title: 'Keda 多机连接与远程文档', project: 'keda', module: 'Console / 机器管理', system: 'Keda Console',
       form: 'code-native', version: 'v1.0', updatedAt: '2026-10-18', availability: 'available', validationLevel: '交互原型',
       primaryFlow: '从机器管理开始添加电脑，查看 Tailscale 入网、系统远程登录和授权目录三个步骤；再浏览远程文档或管理指定机器上的 Runner',
