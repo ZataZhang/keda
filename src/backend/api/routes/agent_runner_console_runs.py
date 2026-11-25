@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException
 from fastapi.encoders import jsonable_encoder
@@ -39,14 +39,16 @@ def list_console_run_attempts(
     repo_id: str,
     issue_number: int,
     started_at: str,
-    finished_at: str,
+    finished_at: str | None = None,
     record_id: int | None = None,
 ) -> dict:
-    """读取某条运行记录时间窗口内的 Agent 尝试与实际进程调用详情。"""
+    """读取运行窗口内的尝试与进程调用详情，未传结束时间时查询到当前时刻。"""
     if issue_number <= 0:
         raise HTTPException(status_code=400, detail="issue_number must be a positive integer.")
     parsed_started_at = _parse_timestamp(started_at)
-    parsed_finished_at = _parse_timestamp(finished_at)
+    parsed_finished_at = (
+        _parse_timestamp(finished_at) if finished_at is not None else datetime.now(timezone.utc)
+    )
     if parsed_started_at is None or parsed_finished_at is None:
         raise HTTPException(
             status_code=422,

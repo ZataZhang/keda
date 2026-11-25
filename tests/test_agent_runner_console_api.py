@@ -232,6 +232,84 @@ def test_run_attempt_details_are_scoped_to_selected_run(console_environment) -> 
     assert invocations[0]["reported_model"] is None
     assert invocations[0]["duration_seconds"] == 9.0
 
+    live_response = client.get(
+        "/api/v1/agent-runner/console/runs/attempts",
+        params={
+            "repo_id": "keda-main",
+            "issue_number": 263,
+            "started_at": "2026-10-10T04:51:24+00:00",
+        },
+    )
+    assert live_response.status_code == 200
+    assert live_response.json()["invocations"] == invocations
+
+
+@pytest.mark.parametrize(
+    ("started_at", "next_run_id"),
+    [
+        ("2026-10-10T06:00:00+00:00", "legacy-next"),
+        ("2026-10-10T06:00:01+00:00", "keda-main#issue-314#20261010T060001Z-next"),
+    ],
+)
+def test_console_legacy_run_excludes_activity_from_unfinished_same_second_successor(
+    console_environment,
+    started_at: str,
+    next_run_id: str,
+) -> None:
+    """同秒交接时，新运行尚无汇总，旧记录的列表和详情仍保持无调用。"""
+    store = console_environment["store"]
+    finished_at = "2026-10-10T06:00:01+00:00"
+    store.append_run(
+        RunRecord(
+            repo_id="keda-main",
+            repo_path="/tmp/keda-main",
+            issue_number=314,
+            trigger="console_run",
+            agent="claude",
+            outcome="completed",
+            error_summary=None,
+            started_at=started_at,
+            finished_at=finished_at,
+            duration_seconds=int(
+                (
+                    datetime.fromisoformat(finished_at) - datetime.fromisoformat(started_at)
+                ).total_seconds()
+            ),
+        )
+    )
+    store.append_invocation_event(
+        InvocationEventRecord(
+            run_id=next_run_id,
+            event_key="next:start",
+            event_type="invocation_started",
+            invocation_id="next",
+            repo_id="keda-main",
+            issue_number=314,
+            phase="implementation",
+            role="implementer",
+            agent="codex",
+            occurred_at="2026-10-10T06:00:01.250+00:00",
+            detail_json="{}",
+        )
+    )
+    url = "/api/v1/agent-runner/console/runs"
+    response = client.get(url, params={"repo_id": "keda-main"})
+    assert response.status_code == 200
+    [old_run] = response.json()["runs"]
+    assert old_run["executors"] == []
+    detail = client.get(
+        f"{url}/attempts",
+        params={
+            "repo_id": "keda-main",
+            "issue_number": 314,
+            "started_at": started_at,
+            "finished_at": finished_at,
+            "record_id": old_run["record_id"],
+        },
+    )
+    assert detail.status_code == 200
+    assert detail.json()["invocations"] == []
+
 
 def test_console_run_list_summarizes_persisted_executors_per_run(
     console_environment, monkeypatch

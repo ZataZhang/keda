@@ -411,6 +411,11 @@ def _find_legacy_session_owner(
         )
         if earliest_call < window.started_at or latest_call >= window.finished_at + end_precision:
             continue
+        # 交接秒内才创建的会话可能来自尚未写入汇总的下一轮运行。
+        if window.finished_at <= earliest_call and (
+            created_at is None or created_at >= window.finished_at
+        ):
+            continue
         if created_at is not None and created_at > window.started_at:
             continue
         if (

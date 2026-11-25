@@ -129,6 +129,7 @@ interface RuntimeTaskImpactProps {
 }
 
 /** 触达读数刷新节奏：与看板摘要用同一 15 秒轮询，旧读数留到新一轮落地。 */
+const INVOCATION_REFRESH_MS = 5_000;
 const IMPACT_REFRESH_MS = 15_000;
 
 /**
@@ -330,51 +331,45 @@ export function RuntimeTaskDetail({
   const [executorChoice, setExecutorChoice] = useState("");
   const [executorChoiceError, setExecutorChoiceError] = useState<string | null>(null);
   const [executorChoicesLoading, setExecutorChoicesLoading] = useState(false);
-  // 调用账本要有一段收口的运行窗口才能按时间窗查询；没窗口不是读取失败，
-  // 而是「现在还没法读」，所以留在渲染层说明，不进状态机。
-  const hasRunWindow = Boolean(task.started_at && task.finished_at);
+  const { started_at: startedAt, finished_at: finishedAt } = task;
+  const liveInvocations = task.status === "running" && !finishedAt;
+  const hasRunWindow = Boolean(startedAt && (finishedAt || liveInvocations));
 
-  // 换任务由父级用 task_key 重新挂载本组件完成：展开态与上一次读数天然归零，
-  // 不需要在 effect 里同步 setState 清空（React 19 会把重置放大成额外渲染）。
   useEffect(() => {
-    if (!invocationsOpen || invocations !== null || invocationError) {
-      return;
-    }
-    if (!hasRunWindow) {
+    if (!invocationsOpen || !startedAt || (!finishedAt && !liveInvocations)) {
       return;
     }
     const controller = new AbortController();
-    void (async () => {
+    let refreshTimer: number | undefined;
+    const readInvocations = async () => {
       try {
         const details = await fetchRunExecutionDetails({
           repoId: task.repo_id,
           issueNumber: task.issue_number,
-          startedAt: task.started_at as string,
-          finishedAt: task.finished_at as string,
+          startedAt,
+          finishedAt: finishedAt ?? undefined,
           signal: controller.signal,
         });
-        if (controller.signal.aborted) {
-          return;
+        if (!controller.signal.aborted) {
+          setInvocations(details.invocations);
+          setInvocationError(null);
         }
-        setInvocations(details.invocations);
       } catch (error: unknown) {
-        if (controller.signal.aborted) {
-          return;
+        if (!controller.signal.aborted) {
+          setInvocationError(error instanceof Error ? error.message : "结构化调用读取失败");
         }
-        setInvocationError(error instanceof Error ? error.message : "结构化调用读取失败");
+      } finally {
+        if (liveInvocations && !controller.signal.aborted) {
+          refreshTimer = window.setTimeout(() => void readInvocations(), INVOCATION_REFRESH_MS);
+        }
       }
-    })();
-    return () => controller.abort();
-  }, [
-    invocationsOpen,
-    invocations,
-    invocationError,
-    hasRunWindow,
-    task.repo_id,
-    task.issue_number,
-    task.started_at,
-    task.finished_at,
-  ]);
+    };
+    void readInvocations();
+    return () => {
+      controller.abort();
+      window.clearTimeout(refreshTimer);
+    };
+  }, [invocationsOpen, liveInvocations, task.repo_id, task.issue_number, startedAt, finishedAt]);
 
   const identity = `${task.repo_display_name ?? task.repo_id}#${task.issue_number}`;
   const issueUrl = task.issue_url;
@@ -414,6 +409,21 @@ export function RuntimeTaskDetail({
             <Badge variant={presentation.variant}>{presentation.label}</Badge>
             <RuntimeTaskExecutor task={task} />
             <RuntimeTaskPhase task={task} />
+            <Badge
+              variant="outline"
+              className="whitespace-normal break-all"
+              data-testid="runtime-detail-agent"
+              title={task.unclosed_invocation_executor
+                ? "调用账本尚未记录结束事件，进程存活状态需另行确认。"
+                : undefined}
+            >
+              {task.unclosed_invocation_executor
+                ? `未结束调用：${task.unclosed_invocation_executor}`
+                : `最近执行：${task.agent ?? "未知"}`}
+              {task.unclosed_invocation_executor && task.unclosed_invocation_model
+                ? ` · ${task.unclosed_invocation_model}`
+                : null}
+            </Badge>
             <RuntimeTaskWatch task={task} />
             <span>{identity}</span>
             {issueUrl ? (
@@ -560,11 +570,8 @@ export function RuntimeTaskDetail({
           <RuntimeTaskAnomalies task={task} />
           <div className="flex flex-wrap gap-x-4 gap-y-1">
             <RuntimeTaskLocalRunSuperseded task={task} />
-            <span>
-              最近执行：{task.agent ?? "未知"}
-              {task.preset ? ` · preset ${task.preset}` : ""}
-              {task.model ? ` · 模型 ${task.model}` : ""}
-            </span>
+            {task.preset ? <span>Preset：{task.preset}</span> : null}
+            {task.model ? <span>最近上报模型：{task.model}</span> : null}
             <span>尝试：{task.attempt_number ?? "—"}</span>
             <span>
               开始：
@@ -610,7 +617,7 @@ export function RuntimeTaskDetail({
               </p>
             ) : !hasRunWindow ? (
               <p className="text-xs text-slate-500">
-                该任务尚无收口的运行窗口，结构化调用要等本次运行结束后可读。
+                该任务暂无可查询的运行记录。
               </p>
             ) : invocations === null ? (
               <p className="text-xs text-slate-500">读取中…</p>

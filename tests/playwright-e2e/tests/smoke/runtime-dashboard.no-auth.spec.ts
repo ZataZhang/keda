@@ -550,6 +550,33 @@ test.describe('runtime board (mocked API)', () => {
     await expect(page.getByTestId('runtime-invocation-row')).toHaveCount(1)
   })
 
+  test('structured calls refresh before the run finishes', async ({ page }) => {
+    await mockBoardApi(page)
+    let invocationFinished = false
+    await page.route(ATTEMPTS_ENDPOINT, (route) => {
+      expect(new URL(route.request().url()).searchParams.has('finished_at')).toBe(false)
+      return route.fulfill({
+        json: {
+          attempts: [],
+          invocations: [{
+            invocation_id: 'inv-live',
+            phase: 'implementation',
+            role: 'implementer',
+            executor: 'codex',
+            outcome: invocationFinished ? 'ok' : 'unclosed',
+            duration_seconds: invocationFinished ? 15 : null,
+          }],
+        },
+      })
+    })
+    await page.goto('/app/dashboard')
+    await page.getByTestId('runtime-task-row-keda-main-21').click()
+    const row = page.getByTestId('runtime-invocation-row')
+    await expect(row).toContainText('未闭合')
+    invocationFinished = true
+    await expect(row).toContainText('15s', { timeout: 10_000 })
+  })
+
   test('unreadable PRD link says so instead of drawing an empty bar', async ({ page }) => {
     await mockBoardApi(page)
     await page.goto('/app/dashboard')

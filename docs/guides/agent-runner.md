@@ -3773,6 +3773,7 @@ verifier 以 `capture_output` 运行，输出不进 stdout、也不逐行落日�
 - **原始响应落盘**：每次 verifier 跑完，完整响应写到 `<证据目录>/verifier-response.txt`（默认 `tasks/evidence/<prd-stem>/verifier-response.txt`），文件头记录 issue、verifier agent、builder sha、解析出的 risk、**是否找到 verdict marker**、响应字符数。候选因漏 marker 被替换时，另留 `verifier-response-<agent>.txt`，以免下一位候选覆盖前一位的诊断材料。写盘失败只降级为告警，不影响门禁本身。
 - **无 verdict 时顺延独立候选**：缺少 verdict marker 仍 fail-closed，不会被当成通过；runner 把该候选视作 verifier 协议故障，按 `agent_fallback_order` 尝试下一个与 builder 不同的 agent。若候选池耗尽仍无可解析结果，run 以 verifier-side failure 结束，不触发 builder repair 循环，也不把无依据的发现交给 builder 修。
 - **为什么必须区分**：`ValidationVerdict.findings` 总会被填入响应文本，所以"findings 是否为空"无法用来判断有没有 verdict——唯一可靠信号是 `marker_found`。混在一起时，verifier 只是漏了最后那行 marker，builder 却被指使去修一个不存在的发现，白烧一轮 attempt。
+- **RED 摘要**：优先显示最终报告 `## Verdict` 下的结论和发现，完整响应仍可通过 `verifier-response.txt` 查看。
 - **排查顺序**：daemon 被 verifier 挡下时，先读 `verifier-response.txt`；若里面没有任何实际发现，问题在 verifier agent（考虑用 `verifier_agent` 显式指定一个稳定的 agent，而不是 `auto`），不在被验的代码。
 
 ### verifier agent 跑不起来：顺延候选，全失败才降级阻断
@@ -4355,7 +4356,9 @@ job 约每 5 秒查一次，同时最多轮询 3 个 job；这个限制只约束
 仓库级「跑一轮 / 复核一轮」和同步设置都在那一侧）。看板以 Issue 运行为单位列出
 生命周期分桶（运行中 / 等待处理 / 阻塞 / 失败 / 已完成 / 已关闭 / 状态未知）、仓库与 Issue 身份、
 阶段及其简明说明、执行者与耗时，可按状态筛选、按仓库 / 编号 / 标题搜索，选中项复用既有的 Issue 增量日志与
-调用账本端点（结构化调用默认展开；收起只改变展示，原始日志不做截断）。
+调用账本端点。结构化调用默认展开，运行中每隔约 5 秒刷新，收起后停止查询。原始日志继续独立更新。
+详情页顶部在阶段旁显示尚未记录结束事件的调用执行器和请求模型，或显示最近一次选择的执行器。
+未结束调用标记来自调用账本，进程存活状态需另行确认。
 
 任务行的 **Review** 按钮打开证据目录中的 `human-review-checklist.md` 等人审页。点击正文中的
 Issue、PR 等网页外链时，桌面端使用系统默认浏览器，网页端打开新标签页。**Video** 只播放
@@ -4690,11 +4693,13 @@ daemon 进程**即获得多项目并发——不同仓库的 Issue 同时执行�
   详情顶部也显示任务标题与 GitHub Issue 链接；没有快照的旧记录会明确显示标题或链接未记录。
   尝试详情按运行窗口读取 SQLite 的 `attempt_records`。v18 起运行记录保存
   `agent_invocation_events` 的调用会话 ID；同一秒交接的运行也能独立查询。旧记录按整次会话核对
-  时间范围，计入结束所在秒的小数部分。没有调用数据或旧数据无法确定唯一归属时显示「未记录」。
+  时间范围。只有能确定已在边界前创建的会话，才会把结束所在秒内开始的调用归入旧记录。
+  没有调用数据或旧数据无法确定唯一归属时显示「未记录」。
   既有尝试的阶段耗时保持为空。没有 Agent 尝试汇总记录时，仍可单独展示已记录的
   Agent 进程调用；两种记录的含义和覆盖范围不同。
   前端通过 `GET .../console/runs/attempts?repo_id=&issue_number=&started_at=&finished_at=&record_id=`
-  读取尝试与调用详情。时间参数必须为带时区的 ISO-8601；`record_id` 用于区分起止时间相同的运行。
+  读取尝试与调用详情。时间参数必须为带时区的 ISO-8601，`record_id` 用于区分起止时间相同的运行。
+  值守看板查询运行中的调用时省略 `finished_at`，由服务端使用当前时间作为查询上界。
 
 新增的 Agent 执行表现区与趋势、PRD 生命周期和 Token 汇总共用仓库及时间筛选，
 通过独立只读端点读取：
