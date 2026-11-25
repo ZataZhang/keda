@@ -1,7 +1,2 @@
-Using CPython 3.13.13
-Creating virtual environment at: .venv
-   Building kedacode @ file:///private/tmp/keda-449-verify.5pHNke
-      Built kedacode @ file:///private/tmp/keda-449-verify.5pHNke
-Installed 115 packages in 1.92s
 .                                                                        [100%]
-1 passed in 3.08s
+1 passed in 0.80s

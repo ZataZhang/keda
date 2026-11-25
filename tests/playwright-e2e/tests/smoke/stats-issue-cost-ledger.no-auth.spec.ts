@@ -7,7 +7,7 @@
  */
 
 import { expect, test } from '../../fixtures/session.fixture'
-import { mkdir } from 'node:fs/promises'
+import { mkdir, readFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Page, Route } from '@playwright/test'
@@ -301,9 +301,13 @@ async function fulfillJson(route: Route, responseBody: object): Promise<void> {
   })
 }
 
-async function routeStatsApi(page: Page): Promise<void> {
+async function routeStatsApi(
+  page: Page,
+  stats: object = ISSUE_STATS,
+  pricing: object = MODEL_PRICING,
+): Promise<void> {
   await page.route('**/api/v1/agent-runner/console/stats/issues*', (route) =>
-    fulfillJson(route, ISSUE_STATS),
+    fulfillJson(route, stats),
   )
   await page.route('**/api/v1/agent-runner/console/stats/agent-performance*', (route) =>
     fulfillJson(route, AGENT_PERFORMANCE),
@@ -312,7 +316,7 @@ async function routeStatsApi(page: Page): Promise<void> {
     fulfillJson(route, PRD_LIFECYCLE),
   )
   await page.route('**/api/v1/agent-runner/console/model-pricing', (route) =>
-    fulfillJson(route, MODEL_PRICING),
+    fulfillJson(route, pricing),
   )
 }
 
@@ -484,11 +488,11 @@ test.describe('Stats Issue cost ledger', () => {
     await page.goto('/app/stats')
     await expect(page.getByTestId('stats-issue-ledger')).toBeVisible()
 
-    await page.getByLabel('统计开始日期').fill('2026-11-23')
-    await page.getByLabel('统计结束日期').fill('2026-11-23')
+    await page.getByRole('tab', { name: '用量趋势' }).click()
+    await page.getByRole('button', { name: /查看 2026-11-23 的 Issue/ }).click()
     await expect.poll(() => requestedDateRanges.at(-1)).toBe('2026-11-23..2026-11-23')
     await expect(page.getByTestId('stats-issue-row-keda-main-318')).toContainText('1')
-    await page.getByRole('tab', { name: '用量趋势' }).click()
+    await expect(page.getByTestId('stats-issue-row-freshai-318')).toHaveCount(0)
     await expect(page.getByTestId('stats-usage-trend')).toContainText('2026-11-23 至 2026-11-23')
     await page.getByTestId('stats-trend-measure-tokens').click()
     await expect(page.getByTestId('stats-trend-measure-tokens')).toHaveAttribute('aria-pressed', 'true')
@@ -496,11 +500,33 @@ test.describe('Stats Issue cost ledger', () => {
 
     await page.getByRole('tab', { name: '模型与计价' }).click()
     await expect(page.getByTestId('stats-model-pricing')).toContainText('0%')
-    await expect(page.getByTestId('stats-model-pricing')).toContainText('2000.0k')
+    await expect(page.getByTestId('stats-model-pricing')).toContainText('0 / 2000.0k 已配置价格')
     await expect(page.getByTestId('stats-model-pricing')).toContainText('暂无估价')
     await expect(
       page.getByTestId('stats-model-pricing').getByRole('link', { name: '设置模型价格' }),
     ).toHaveAttribute('href', '/app/settings/')
     await captureEvidenceScreenshot(page, 'rv-3-trend-and-coverage-pricing.png')
   })
+  test('prices the SQLite-backed Console HTTP response in the production ledger', async ({ page }) => {
+    const fixturePath = process.env.KC_ISSUE_COST_HTTP_FIXTURE
+    test.skip(!fixturePath, 'Export the Console HTTP fixture from the SQLite integration test first.')
+    const fixture = JSON.parse(await readFile(fixturePath!, 'utf8'))
+    await routeStatsApi(page, fixture.stats, fixture.pricing)
+    await page.goto('/app/stats')
+    const issue = page.getByTestId('stats-issue-row-keda-main-7')
+    await expect(issue).toContainText('320')
+    await expect(issue).toContainText('$0.000750')
+    await expect(issue).toContainText('部分计价')
+    await page.getByTestId('stats-issue-expand-keda-main-7').click()
+    const executions = page.getByTestId('stats-issue-execution-row')
+    await expect(executions).toHaveCount(3)
+    await expect(executions.filter({ hasText: '$0.000425' })).toHaveCount(1)
+    await expect(executions.filter({ hasText: '$0.000325' })).toContainText('失败')
+    await expect(executions.filter({ hasText: '暂无估价' })).toHaveCount(1)
+    await page.getByTestId('stats-issue-detail-tab-models').click()
+    const models = page.getByTestId('stats-issue-model-usage')
+    await expect(models.getByRole('row').filter({ hasText: 'model-a' })).toContainText('$0.000750')
+    await expect(models.getByRole('row').filter({ hasText: '未识别模型' })).toContainText('暂无估价')
+  })
+
 })

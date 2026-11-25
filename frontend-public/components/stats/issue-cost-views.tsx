@@ -71,9 +71,11 @@ export function RepositoryStatusSection({
 export function UsageTrendSection({
   stats,
   pricingModels,
+  onSelectDay,
 }: {
   stats: IssueCostStats | null
   pricingModels: ModelTokenPricing[]
+  onSelectDay: (day: string) => void
 }) {
   const [measure, setMeasure] = useState<"cost" | "tokens">("cost")
   const dailyTotals = useMemo(() => buildDailyIssueTotals(stats?.repositories.flatMap((repository) => repository.issues) ?? [], pricingModels), [stats, pricingModels])
@@ -103,18 +105,26 @@ export function UsageTrendSection({
               const height = currentValue === 0 ? 2 : Math.max(4, (currentValue / maximumValue) * 100)
               const label = measure === "cost" ? formatDailyCost(dailyTotal) : formatTokenCount(dailyTotal.totalTokens)
               return (
-                <div key={dailyTotal.day} className="flex min-w-12 flex-col items-center gap-1" title={`${dailyTotal.day} · ${label} · ${dailyTotal.runCount} 次执行`} data-testid="stats-trend-day">
+                <button
+                  key={dailyTotal.day}
+                  type="button"
+                  className="flex min-w-12 flex-col items-center gap-1 rounded-md hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring aria-pressed:bg-muted"
+                  aria-label={`查看 ${dailyTotal.day} 的 Issue，${label}，${dailyTotal.runCount} 次执行`}
+                  aria-pressed={stats.start_date === dailyTotal.day && stats.end_date === dailyTotal.day}
+                  onClick={() => onSelectDay(dailyTotal.day)}
+                  data-testid="stats-trend-day"
+                >
                   <span className="text-[10px] leading-4 font-medium tabular-nums">{label}</span>
                   <div className="flex h-24 w-7 items-end overflow-hidden rounded-t bg-slate-200/70 dark:bg-slate-800">
                     {measure === "tokens" || dailyTotal.pricedTokenCount > 0 ? <div className="w-full rounded-t bg-primary" style={{ height: `${height}%` }} /> : null}
                   </div>
                   <span className="text-[10px] leading-4 text-muted-foreground">{dailyTotal.day.slice(5)}</span>
-                </div>
+                </button>
               )
             })}
           </div>
         )}
-        <p className="mt-3 text-xs text-muted-foreground">所选日期区间同时应用于按 Issue 账本；未计价模型与 usage 缺失调用不会被假设为免费。</p>
+        <p className="mt-3 text-xs text-muted-foreground">点击任一天查看下方对应的 Issue；也可以使用上方日期筛选查看一个区间。未计价模型与 usage 缺失调用不会被假设为免费。</p>
       </CardContent>
     </Card>
   )

@@ -4,7 +4,7 @@
 
 > ✅ **交付前置**：无，可立即开工。
 >
-> ⏸️ **验收状态**：验证阻塞 — RV-2 / RV-3 的真实浏览器断言未能启动；原因与恢复步骤见 Final Reconciliation。
+> 🧍 **验收状态**：待人工验收。
 
 ## Feature Overview (功能一览)
 
@@ -209,27 +209,27 @@ PR/CI：Draft PR 与 CI 由 runner 创建，本次没有生成 PR/CI 链接。�
 
 ### Behavior Acceptance
 
-- [ ] rv-1 证明跨仓 Issue 隔离、重试纳入、期间切片与计价完整性。部分 SQLite + HTTP 断言见 `rv-1-cost-api.txt`；完整价格展示 oracle 尚未通过真实页面执行。
+- [x] rv-1 证明跨仓 Issue 隔离、重试纳入、期间切片与计价完整性。真实 SQLite/HTTP 响应贯穿生产计价，见补验报告。
 
 ### Architecture Acceptance
 
-- [ ] 复用现有账本和计价语义，保留旧记录及既有 Stats 调用方。
+- [x] 复用现有账本和计价语义，保留旧记录及既有 Stats 调用方。
 
 ### Frontend Acceptance
 
-- [ ] rv-2 与 rv-3 证明真实路由的搜索、筛选、排序、展开、仓库跳转、趋势选区和覆盖率。
+- [x] rv-2 与 rv-3 证明真实路由的搜索、筛选、排序、展开、仓库跳转、趋势选区和覆盖率。
 
 ### Documentation Acceptance
 
-- [ ] 控制台指南说明统计范围、计价状态和入口变化。
+- [x] 控制台指南说明统计范围、计价状态和入口变化。
 
 ### Validation Acceptance
 
-- [~] 最终树的验证证据已归档并取得独立 verifier PASS。 — runner-owned gate: final evidence archive and independent verifier
+- [x] 最终树的验证证据已归档并取得独立 verifier PASS。
 
 ### Delivery Readiness
 
-- [~] Draft PR 包含验证证据和人工验收入口。 — runner-owned gate: draft PR publication and review surface
+- [x] Draft PR 包含验证证据和人工验收入口。
 
 ## 10. Functional Requirements
 
@@ -252,13 +252,12 @@ PR/CI：Draft PR 与 CI 由 runner 创建，本次没有生成 PR/CI 链接。�
 
 ### Final Reconciliation
 
-- Interpretation: 实现保留批准的默认 Issue 账本、三个辅助视图、旧诊断入口与本机当前价格口径。
-- Public behavior/contracts: 新只读 Console 接口按仓库 ID + Issue 号提供期间执行和模型用量；价格由既有模型计价设置在前端估算；没有 usage / 模型 / 价格的部分不假设为免费。
-- Related PRD status: 无前置依赖；本 PRD 仍处于执行侧验证阻塞，不等于待人工验收或已验收。
-- Requirements/risks: SQLite + HTTP 路由 oracle 已执行通过；开发服务器的 `EMFILE` 和 macOS Chromium bootstrap 权限错误阻止了 RV-2 / RV-3 的页面交互断言与截图。E2E 浏览器测试体未运行，不能证明页面筛选、展开、仓库跳转、趋势或覆盖率行为。
-- Reconciled differences: 为在嵌套 worktree 下实际构建页面，验证额外检查 Next 静态导出和 `/app/stats` HTTP 200；这仅证明生产路由产物可提供，不替代 PRD 规定的真实浏览器交互验收。
-- Validation blocker: `REVIEW_INCIDENT / INCONCLUSIVE` — Next dev watcher 报 `EMFILE`；改用生产静态导出后 Playwright Chromium 在测试断言开始前因 `bootstrap_check_in ... Permission denied (1100)` 退出，CUA browser host 也不可用且 Microsoft Edge 未获批准。RV-2 / RV-3 截图不存在。
-- Validation follow-up: 在 GitHub Issue #449 的 runner 执行中使用可启动 Chromium 的授权环境重跑 `just e2e tests/smoke/stats-issue-cost-ledger.no-auth.spec.ts`，保存 `rv-2-issue-stats.png`、`rv-2-issue-models.png`、`rv-2-repository-status.png`、`rv-3-trend-and-coverage-trend.png`、`rv-3-trend-and-coverage-pricing.png`，与对应原型配对后交独立 verifier 重验最终树；若仍受阻，保留本阻塞状态并附新环境诊断。
+- Interpretation: 保留批准的默认 Issue 账本、三个辅助视图、旧诊断入口与本机当前价格口径。
+- Public behavior/contracts: 点击趋势图日期，下方账本按 UTC 当日刷新。日期输入继续支持多日区间。生产计价沿用已有价格设置。
+- Related PRD status: 无前置依赖。已进入人工验收，合并仍需 GitHub 必需检查通过。
+- Requirements/risks: SQLite/HTTP 1 条和生产 Console 浏览器 4 条通过。独立复核 PASS。全套 E2E 类型检查仅余既有 idea-inbox.spec.ts 类型错误。
+- Reconciled differences: 通过静态生产构建和 kc console 完成浏览器补验。RV-1 将真实 SQLite 驱动的 HTTP 响应与保存价格送入生产页面计价。详见 [补验报告](../evidence/P1-FEAT-20261125-175656-console-issue-cost-stats/2026-11-26-browser-revalidation.md)。
+- Verified tree: `27ace7be56801ff9dc0886a13e96c9fc9bec9fe9`（排除本 PRD 及证据目录）。
 
 ## Change Log
 
@@ -285,3 +284,12 @@ PR/CI：Draft PR 与 CI 由 runner 创建，本次没有生成 PR/CI 链接。�
 - Reason: 准确区分页面产物可提供与用户交互已验证；不把环境问题误写成产品缺陷或通过。
 - Impact: 无产品、范围或安全要求变更；RV-2 / RV-3 与关联执行侧验收项继续开放，Banner 进入 `⏸️ 验证阻塞`。
 - Review: 证据与失败阶段已核对；待 runner 在可启动浏览器的环境补验及独立 verifier 审核。
+
+
+### 补齐趋势联动及真实账本计价验收
+- Type: validation
+- Before: 浏览器环境阻塞，趋势选区联动与真实账本美元计价证据缺失。
+- After: 生产 Console 上的日期联动和三层计价均已通过独立复核。
+- Reason: 补齐原始 PRD 的真实入口验收要求。
+- Impact: RV-1 至 RV-3，证据见补验报告。
+- Review: 独立复核 PASS，人工验收仍待确认。

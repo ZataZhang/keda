@@ -280,9 +280,20 @@ export default function StatsPage() {
 
       {dateRangeError ? <p className="text-sm text-red-700 dark:text-red-300" role="alert">{dateRangeError}</p> : null}
       <div id="stats-view-panel" role="tabpanel" aria-label={STATS_VIEWS.find((view) => view.key === activeView)?.label}>
-        {activeView === "issues" ? (
+        {activeView === "trend" ? (
+          <UsageTrendSection
+            stats={selectedIssueStats}
+            pricingModels={modelPricing}
+            onSelectDay={(day) => {
+              setStartDate(day)
+              setEndDate(day)
+              setIssueStatusFilter("all")
+            }}
+          />
+        ) : null}
+        {activeView === "issues" || activeView === "trend" ? (
           <IssueCostLedgerSection
-            issues={selectedIssues}
+            issues={activeView === "trend" ? selectedIssues.filter((issue) => issue.period_run_count > 0) : selectedIssues}
             pricingModels={modelPricing}
             loading={issueStatsLoading}
             error={issueStatsError}
@@ -294,9 +305,6 @@ export default function StatsPage() {
         ) : null}
         {activeView === "repositories" ? (
           <RepositoryStatusSection stats={selectedIssueStats} onSelectStatus={chooseRepositoryStatus} />
-        ) : null}
-        {activeView === "trend" ? (
-          <UsageTrendSection stats={selectedIssueStats} pricingModels={modelPricing} />
         ) : null}
         {activeView === "pricing" ? (
           <div className="space-y-4">

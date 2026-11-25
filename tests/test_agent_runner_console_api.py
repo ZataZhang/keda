@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -899,6 +900,30 @@ def test_issue_cost_stats_reads_sqlite_and_console_http_with_repo_issue_key(
     )
     assert repeated_response.status_code == 200, repeated_response.text
     assert repeated_response.json() == response.json()
+    fixture_path = os.environ.get("KC_ISSUE_COST_HTTP_FIXTURE")
+    if fixture_path:
+        pricing_path = "/api/v1/agent-runner/console/model-pricing"
+        pricing_response = client.put(
+            pricing_path,
+            json={
+                "models": [
+                    {
+                        "model_id": "model-a",
+                        "input_usd_per_million": 2,
+                        "output_usd_per_million": 4,
+                        "cache_read_usd_per_million": 1,
+                        "cache_creation_usd_per_million": 3,
+                    }
+                ]
+            },
+        )
+        assert pricing_response.status_code == 200, pricing_response.text
+        saved_pricing = client.get(pricing_path)
+        assert saved_pricing.status_code == 200, saved_pricing.text
+        Path(fixture_path).write_text(
+            json.dumps({"stats": response.json(), "pricing": saved_pricing.json()}),
+            encoding="utf-8",
+        )
     repository_rows = {row["repo_id"]: row for row in response.json()["repositories"]}
     assert response.json()["unlinked_invocation_count"] >= 1
     assert repository_rows["keda-main"]["unlinked_invocation_count"] >= 1
