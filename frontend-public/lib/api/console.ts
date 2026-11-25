@@ -417,14 +417,14 @@ export async function fetchRecentRuns(params: {
  * @param params.repoId - 仓库标识。
  * @param params.issueNumber - Issue 编号。
  * @param params.startedAt - ISO-8601 运行开始时间。
- * @param params.finishedAt - ISO-8601 运行结束时间。
+ * @param params.finishedAt - ISO-8601 运行结束时间，省略时查到服务端当前时刻。
  * @returns 所选运行窗口内的尝试详情。
  */
 export async function fetchRunExecutionDetails(params: {
   repoId: string;
   issueNumber: number;
   startedAt: string;
-  finishedAt: string;
+  finishedAt?: string;
   signal?: AbortSignal;
 }): Promise<{
   attempts: RunAttemptDetailEntry[];
@@ -434,8 +434,10 @@ export async function fetchRunExecutionDetails(params: {
     repo_id: params.repoId,
     issue_number: String(params.issueNumber),
     started_at: params.startedAt,
-    finished_at: params.finishedAt,
   });
+  if (params.finishedAt !== undefined) {
+    searchParams.set("finished_at", params.finishedAt);
+  }
   return get<{
     attempts: RunAttemptDetailEntry[];
     invocations: RunInvocationDetailEntry[];

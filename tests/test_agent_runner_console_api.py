@@ -228,6 +228,17 @@ def test_run_attempt_details_are_scoped_to_selected_run(console_environment) -> 
     assert invocations[0]["reported_model"] is None
     assert invocations[0]["duration_seconds"] == 9.0
 
+    live_response = client.get(
+        "/api/v1/agent-runner/console/runs/attempts",
+        params={
+            "repo_id": "keda-main",
+            "issue_number": 263,
+            "started_at": "2026-10-10T04:51:24+00:00",
+        },
+    )
+    assert live_response.status_code == 200
+    assert live_response.json()["invocations"] == invocations
+
 
 def test_run_attempt_details_reject_invalid_time_window(console_environment) -> None:
     """拒绝无时区或倒置的运行时间窗口。"""
