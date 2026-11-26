@@ -1,0 +1,3 @@
+## PR #444 state update — 2026-11-25 08:47Z
+
+Correction to the earlier patrol read: a fresh GitHub API read now reports PR #444 as `mergeable=false` / `dirty`, with base `main` at `f6c1255b3717ee32515886d4f40f3e7c01c6aaa6` and unchanged head `f53d51be0c69f88fb2fa910b0a4522588b3e4fb7`. The 08:42Z read had reported it mergeable, so the state changed during this patrol. The 15 checks remain attached to head `f53d51be` (13 success, 2 skipped). I did not inspect the conflicting file list; the local repair commit `999bf876` remains a sibling of the PR head. This adds a branch-conflict repair to the existing maintainer decision; no recovery or requeue was run.
