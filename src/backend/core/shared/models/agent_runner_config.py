@@ -237,7 +237,7 @@ class RunnerConfig:
             ``None`` 时的回退链同上。
     """
 
-    max_concurrent_issues: int = 1
+    max_concurrent_issues: int = 3
     default_agent: str = "auto"
     max_recovery_attempts: int = 5
     recovery_retry_delay_seconds: int = 30

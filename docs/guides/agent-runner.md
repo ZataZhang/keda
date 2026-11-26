@@ -691,9 +691,9 @@ provision_database = true
 
 # Runner 行为配置：并行上限、默认 agent、提交前验证命令
 [agent_runner.runner]
-# 并行上限：该仓库最多同时运行几个自动领取的 Issue（默认 1 = 串行）。
+# 并行上限：该仓库最多同时运行几个自动领取的 Issue（默认 3，设为 1 时串行）。
 # 优先级：kc daemon run --concurrency > Backlog 页面设置 > 本值。daemon 执行期间按轮询间隔补位。
-max_concurrent_issues = 1
+max_concurrent_issues = 3
 # 默认使用的 AI agent：auto / 任意已注册 agent 名（内置 codex / claude / kimi / pi / codebuddy / qoder / opencode / mcode / dsh）
 default_agent = "auto"
 # Agent 失败后的最大重试次数
@@ -1389,7 +1389,7 @@ kc pr aggregate --issue 101 --issue 102
 
   手动入口仅接受同仓库、仍符合门禁（见下节「批次聚合的资格门与两次调用」）且每个 Issue 唯一的来源 PR；自动入口和手动入口都至少需要两个 Issue。系统不跨调用猜测批次、不自动合并总 PR。真实 GitHub PR 创建、checks、关闭评论及远端分支保留状态需在真实服务上确认，不能由本地测试代替。
 - 定向 run 只处理目标 Issue（仍走依赖门禁与 claim）；队列里其他 ready Issue 原封不动。
-- `run` 没有 `--autopilot`，也没有 `--concurrency`：手动调度用 `kc backlog advance`。并行有两个来源——**进程内**归 daemon 的 `--concurrency`（未指定时各仓库使用合并配置中的 `max_concurrent_issues`，默认 `1` 即串行），**进程间**就是给每个 Issue 各发一条 `kc run --issue <N>`。显式 run（定向与 `--all-ready`）**不受 Backlog「并发」策略约束**：统一并发上限只闸门自动执行路径。
+- `run` 没有 `--autopilot`，也没有 `--concurrency`：手动调度用 `kc backlog advance`。并行有两个来源——**进程内**归 daemon 的 `--concurrency`（未指定时各仓库使用合并配置中的 `max_concurrent_issues`，默认 `3`），**进程间**就是给每个 Issue 各发一条 `kc run --issue <N>`。显式 run（定向与 `--all-ready`）**不受 Backlog「并发」策略约束**：统一并发上限只闸门自动执行路径。
 
 **迁移**：旧脚本/文档里"无目标的 `kc run`"改为 `kc run --all-ready`（行为等价）；想精确跑某条 Issue 用 `--issue`。Console「开始此 PRD」已随本变更改为传 `--issue`，仓库级 run_once 动作改为传 `--all-ready`。
 
@@ -2607,14 +2607,14 @@ Issue 执行失败后会被标记为 `agent/failed`，runner 不会再自动处�
 
 ### 并行处理 Issue（`kc daemon --concurrency`）
 
-默认 `kc daemon` 同一时刻只跑一个 Issue。机器空闲、队列较多时，可以提高**并行上限**，让同一仓库同时跑多个 Issue：
+默认 `kc daemon` 每个仓库最多同时跑三个 Issue。机器空闲、队列较多时，可以提高**并行上限**，让同一仓库同时跑多个 Issue：
 
 ```bash
 # 本次 daemon 每个仓库最多同时运行 3 个 Issue
 kc daemon --concurrency 3
 ```
 
-- **只有一个数字**：每个仓库只有一个生效并行上限，按优先级取第一个给出的值：`kc daemon run --concurrency` > Backlog 页面保存的并行上限 > 配置文件 `[agent_runner.runner].max_concurrent_issues` > `1`。页面设置覆盖配置文件，不再与之取较小值。旧配置项 `max_issues` 已退役：读到时只告警，不参与任何计算，`kc config migrate` 会删除它；daemon 也不再接受 `--max-issues`（传入即报用法错误并提示改用 `--concurrency`）。
+- **只有一个数字**：每个仓库只有一个生效并行上限，按优先级取第一个给出的值：`kc daemon run --concurrency` > Backlog 页面保存的并行上限 > 配置文件 `[agent_runner.runner].max_concurrent_issues` > `3`。页面设置覆盖配置文件，不再与之取较小值。旧配置项 `max_issues` 已退役：读到时只告警，不参与任何计算，`kc config migrate` 会删除它；daemon 也不再接受 `--max-issues`（传入即报用法错误并提示改用 `--concurrency`）。
 - **执行期间持续补位**：daemon 不再等一轮里的 Issue 全部跑完才看队列。领到的 Issue 在后台线程里执行，主循环照常按轮询间隔运行：每次先清理已结束的任务，再按空位补领新的就绪 Issue。所以长任务执行期间新进入就绪队列的 Issue，会在出现空位后的下一次轮询被领取。对账、审议、PRD 返工、Backlog 推进等阶段在执行期间也照常运行；有 Issue 在执行时 daemon 不进入空闲退避，始终按基础间隔轮询。
 - **空位怎么算**：本轮可新领取数 = `max(0, 上限 − max(本机在执行数, 仓库内 open agent/running 标签数))`，取两者较大值是因为本机刚提交的 Issue 可能还没带上 running 标签。计数查询最多取到上限 + 1，超出时日志标为「至少 上限 + 1」；计数失败按 fail-closed 处理，本次不领新 Issue，已在执行的不受影响。running / blocked 恢复及 `direct_pr_cleanup` 收尾不受这个上限压低，但同样占用本机执行名额。
 - **资源准入**：daemon 可在处理前使用可选资源检查暂停新任务。检查拒绝时 Issue 保持排队，不创建 claim 或 worktree；已在执行的任务不受影响。
@@ -5522,7 +5522,7 @@ Backlog 顶部的「并行上限」是仓库级页面设置（1–10，可以从
 并行上限 = kc daemon run --concurrency（仅该 daemon 进程）
         > Backlog 页面设置
         > 配置文件 max_concurrent_issues
-        > 1
+        > 内置默认 3
 ```
 
 - 页面从未保存 = 使用配置文件值（存储层就是「没有设置行」，不落一行伪造默认值）；页面设置高于或低于配置文件都直接生效；「恢复为配置文件值」= 删除该仓设置行（副作用：默认视图一并回到「列表」，且在该行重新建立之前视图偏好无法再持久，见上文「视图说明」）。
@@ -5540,7 +5540,7 @@ Backlog 顶部的「并行上限」是仓库级页面设置（1–10，可以从
    - FAILED → `failed` 并写入 `error_detail`（**失败泊车**），槽位释放；泊车条目不会被重试，需要人工在 `/backlog` 页面处理后再回到调度。
    - BLOCKED → 保留为 `running`，但**不占槽也不晋升**，等人工解除阻塞。
    - WAITING → 不动，依赖未满足的 PRD 继续等待。
-2. **槽位核算**：`free_slots = max(0, ceiling - open agent/running 标签数)`。计数覆盖整个仓库，不要求 Issue 有 Backlog PRD 锚点；查询最多读到 ceiling + 1，用于显示超额下限。计数失败时保留对账、跳过本轮新补位，并把失败原因单独放在报告的 `running_count_error` 字段（`kc backlog advance` 输出为 `running count failed ...`）；`skipped` 只装被拒绝的 PRD 路径，错误句不会伪装成「某个 PRD 被跳过」。`ceiling` 走统一解析函数 `resolve_execution_ceiling`，优先级为 `kc daemon run --concurrency` > Backlog 页面设置的并行上限 > 配置文件 `max_concurrent_issues` > 1，页面设置直接覆盖配置文件、不再与之取较小值；daemon 同一轮把同一个结果分发给补位闸门与 Phase 2 认领闸门。这里的命令行覆盖来自显式 `--concurrency`（若提供），否则来自页面设置与仓库配置；控制台显示与「全局开始」读页面设置与仓库配置，所以使用旗标覆盖时它们可能显示更高的 ceiling。「全局开始」与不带显式上限的 `kc backlog advance` 按仓库配置容量自解析。
+2. **槽位核算**：`free_slots = max(0, ceiling - open agent/running 标签数)`。计数覆盖整个仓库，不要求 Issue 有 Backlog PRD 锚点；查询最多读到 ceiling + 1，用于显示超额下限。计数失败时保留对账、跳过本轮新补位，并把失败原因单独放在报告的 `running_count_error` 字段（`kc backlog advance` 输出为 `running count failed ...`）；`skipped` 只装被拒绝的 PRD 路径，错误句不会伪装成「某个 PRD 被跳过」。`ceiling` 走统一解析函数 `resolve_execution_ceiling`，优先级为 `kc daemon run --concurrency` > Backlog 页面设置的并行上限 > 配置文件 `max_concurrent_issues` > 内置默认 3，页面设置直接覆盖配置文件、不再与之取较小值；daemon 同一轮把同一个结果分发给补位闸门与 Phase 2 认领闸门。这里的命令行覆盖来自显式 `--concurrency`（若提供），否则来自页面设置与仓库配置；控制台显示与「全局开始」读页面设置与仓库配置，所以使用旗标覆盖时它们可能显示更高的 ceiling。「全局开始」与不带显式上限的 `kc backlog advance` 按仓库配置容量自解析。
 3. **晋升（promote）**：候选集 = 队列中 `queued` 的条目 ∪ 新发现的未入队 pending PRD（**发现式入队**）。候选经依赖重算后过滤出 `NOT_STARTED` 且无 `block_reason` 的 PRD，按 `P0 > P1 > P2 > P3`、再按 `updated_at` 升序排序，最多晋升 `free_slots` 个。
 
 排序与过滤复用 `_select_eligible_prds` 这一个共享 helper，手动「全局开始」与自动调度走的是同一段代码，两条路径不会漂移。

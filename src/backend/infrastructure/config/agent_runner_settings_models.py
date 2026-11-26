@@ -382,7 +382,7 @@ class AgentRunnerRunnerSettings(BaseModel):
 
     # 该仓库最多同时运行几个自动领取的 Issue（并行上限的配置文件来源）；
     # Backlog 页面设置与 kc daemon run --concurrency 优先于它。
-    max_concurrent_issues: int = 1
+    max_concurrent_issues: int = 3
     default_agent: str = "auto"
     max_recovery_attempts: int = 5
     recovery_retry_delay_seconds: int = 30

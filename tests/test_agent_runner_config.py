@@ -198,9 +198,9 @@ def test_runner_settings_escalation_ladder_defaults() -> None:
 
 
 def test_max_concurrent_issues_default_and_factory_mapping() -> None:
-    """max_concurrent_issues defaults to 1 and maps into the domain RunnerConfig."""
-    assert AgentRunnerRunnerSettings().max_concurrent_issues == 1
-    assert RunnerConfig().max_concurrent_issues == 1
+    """max_concurrent_issues defaults to 3 and maps into the domain RunnerConfig."""
+    assert AgentRunnerRunnerSettings().max_concurrent_issues == 3
+    assert RunnerConfig().max_concurrent_issues == 3
 
     # Build the domain config from settings; mutate the nested field directly to
     # avoid pydantic-settings sources (repo config.toml) shadowing an init kwarg.
@@ -233,7 +233,7 @@ def test_iar_toml_renders_max_concurrent_issues_comment() -> None:
     rendered = settings_to_toml_string(settings)
 
     assert "runner.max_concurrent_issues" in _CONFIG_FIELD_COMMENTS
-    assert "max_concurrent_issues = 1" in rendered
+    assert "max_concurrent_issues = 3" in rendered
     comment = _CONFIG_FIELD_COMMENTS["runner.max_concurrent_issues"]
     assert any(comment in line for line in rendered.splitlines())
 

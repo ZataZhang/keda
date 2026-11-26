@@ -161,17 +161,17 @@ def test_load_autopilot_state_reports_real_conditions(tmp_path: Path) -> None:
         repo_id=REPO_ID,
         contexts=_contexts_for(repo_root, auto_merge=True)(),
         supervisor=_FakeSupervisor([_daemon_record(REPO_ID)]),
-        policy_max_parallel=3,
+        policy_max_parallel=4,
         editor=_make_editor(),
     )
     assert state.enabled is False
     assert state.persisted_enabled is False
     assert state.auto_merge_enabled is False
     assert state.daemon_running is True
-    # AppConfig() 默认配置文件值为 1：页面设置 3 覆盖它（不再被压低），来源如实标注。
-    assert state.policy_max_parallel == 3
-    assert state.runner_capacity == 1
-    assert state.effective_max_parallel == 3
+    # AppConfig() 默认配置文件值为 3：页面设置 4 覆盖它（不再被压低），来源如实标注。
+    assert state.policy_max_parallel == 4
+    assert state.runner_capacity == 3
+    assert state.effective_max_parallel == 4
     assert state.ceiling_source == "policy"
     assert state.config_source == ".kedacode.toml"
 
@@ -401,10 +401,10 @@ def test_get_autopilot_endpoint(autopilot_environment) -> None:
     assert data["enabled"] is False
     assert data["auto_merge_enabled"] is False
     assert data["daemon_running"] is False
-    # 无设置行 = 页面未保存：页面设置为 null，生效值取配置文件值（AppConfig 默认 1）。
+    # 无设置行 = 页面未保存：页面设置为 null，生效值取配置文件值（AppConfig 默认 3）。
     assert data["max_parallel"] is None
-    assert data["effective_max_parallel"] == 1
-    assert data["runner_capacity"] == 1
+    assert data["effective_max_parallel"] == 3
+    assert data["runner_capacity"] == 3
     assert data["ceiling_source"] == "config"
     assert data["config_source"] == ".kedacode.toml"
     # 本机没有存活 daemon：实际生效值未知，页面以 effective_max_parallel 为准。
@@ -435,7 +435,7 @@ def test_get_autopilot_reports_live_daemon_cli_override(
 
     data = client.get(f"/api/v1/agent-runner/backlog/autopilot?repo_id={REPO_ID}").json()
 
-    assert data["effective_max_parallel"] == 1
+    assert data["effective_max_parallel"] == 3
     assert data["daemon_parallel_limit"] == 5
     assert data["daemon_parallel_limit_source"] == "cli_override"
 

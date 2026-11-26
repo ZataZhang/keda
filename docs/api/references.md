@@ -66,7 +66,7 @@
 {
   "daemon_mode": false,
   "config": {
-    "max_concurrent_issues": 1,
+    "max_concurrent_issues": 3,
     "default_agent": "auto",
     "max_recovery_attempts": 5,
     "recovery_retry_delay_seconds": 30,
