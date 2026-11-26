@@ -26,11 +26,11 @@ fi
 console_ppid="$(ps -o ppid= -p "$console_pid" | tr -d ' ')"
 parent_command="$(ps -o command= -p "$console_ppid" 2>/dev/null || true)"
 
-if [[ "$parent_command" == *"kedacode-desktop"* ]]; then
+if [[ "$parent_command" == *"kedacode-desktop"* || "$parent_command" == *"/KedaCode.app/Contents/MacOS/KedaCode"* ]]; then
     echo "🔄 Console（pid $console_pid）由菜单栏 App 拉起，退出并重开 KedaCode.app…"
     osascript -e 'quit app "KedaCode"' >/dev/null 2>&1 || kill "$console_ppid" 2>/dev/null || true
     for _ in $(seq 1 20); do
-        pgrep -f 'kedacode-desktop' >/dev/null || break
+        kill -0 "$console_ppid" 2>/dev/null || break
         sleep 0.5
     done
     # open 紧跟 quit 时偶尔会因 LaunchServices 还没回收进程返回 -600，重试几次即可。

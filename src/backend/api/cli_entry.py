@@ -23,8 +23,12 @@ _OWN_TOP_LEVEL_PACKAGE = "backend"
 _BROKEN_ENVIRONMENT_EXIT_CODE = 1
 
 
-def _editable_source_directory() -> str | None:
-    """可编辑安装时返回源码目录；非可编辑或读不到 PEP 610 安装记录时返回 ``None``。"""
+def editable_source_directory() -> str | None:
+    """读取 PEP 610 安装记录中的可编辑源码目录。
+
+    Returns:
+        源码目录。普通安装或记录不可用时返回 ``None``。
+    """
     try:
         direct_url_text = importlib_metadata.distribution(_DISTRIBUTION_NAME).read_text(
             "direct_url.json"
@@ -52,14 +56,14 @@ def _reinstall_hint() -> str:
     """按当前安装方式给出重装依赖的命令。"""
     normalized_prefix = sys.prefix.replace("\\", "/").casefold().rstrip("/") + "/"
     is_uv_tool_install = "/uv/tools/" in normalized_prefix
-    editable_source_directory = _editable_source_directory()
-    if editable_source_directory is not None:
+    editable_directory = editable_source_directory()
+    if editable_directory is not None:
         if is_uv_tool_install:
-            return f'uv tool install --reinstall --editable "{editable_source_directory}"'
-        project_venv_prefix = f"{editable_source_directory}/.venv".replace("\\", "/").casefold()
+            return f'uv tool install --reinstall --editable "{editable_directory}"'
+        project_venv_prefix = f"{editable_directory}/.venv".replace("\\", "/").casefold()
         if normalized_prefix.rstrip("/") == project_venv_prefix:
-            return f'uv sync  (run inside "{editable_source_directory}")'
-        return f'uv pip install --python "{sys.executable}" -e "{editable_source_directory}"'
+            return f'uv sync  (run inside "{editable_directory}")'
+        return f'uv pip install --python "{sys.executable}" -e "{editable_directory}"'
     if is_uv_tool_install:
         return f"uv tool install --reinstall {_DISTRIBUTION_NAME}"
     return f"reinstall {_DISTRIBUTION_NAME} with the installer you used (uv / pipx / pip)"

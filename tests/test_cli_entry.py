@@ -81,7 +81,7 @@ def test_editable_source_directory_reads_pep610_record(
         lambda name: SimpleNamespace(read_text=lambda file_name: direct_url_text),
     )
 
-    source_directory = cli_entry._editable_source_directory()
+    source_directory = cli_entry.editable_source_directory()
 
     assert source_directory is not None
     assert Path(source_directory) == tmp_path
@@ -124,6 +124,6 @@ def test_reinstall_hint_matches_install_method(
 ) -> None:
     """修复命令按 uv tool / 项目 venv、可编辑与否给出。"""
     monkeypatch.setattr(sys, "prefix", tool_prefix)
-    monkeypatch.setattr(cli_entry, "_editable_source_directory", lambda: editable_directory)
+    monkeypatch.setattr(cli_entry, "editable_source_directory", lambda: editable_directory)
 
     assert expected_fragment in cli_entry._reinstall_hint()

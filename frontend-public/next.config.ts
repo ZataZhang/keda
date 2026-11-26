@@ -1,4 +1,5 @@
 import type { NextConfig } from "next"
+import { execFileSync } from "node:child_process"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -7,7 +8,20 @@ const repositoryRoot = resolve(frontendDirectory, "..")
 
 const backendUrl = process.env.BACKEND_URL || "http://localhost:8000"
 
+let consoleBuildCommit = ""
+try {
+  consoleBuildCommit = execFileSync("git", ["rev-parse", "--verify", "HEAD"], {
+    cwd: repositoryRoot,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+    timeout: 1000,
+  }).trim()
+} catch {
+  // 源码归档和缺少 Git 的构建仍可正常使用。
+}
+
 const nextConfig: NextConfig = {
+  env: { KEDA_CONSOLE_BUILD_COMMIT: consoleBuildCommit },
   devIndicators: false,
   allowedDevOrigins: ["127.0.0.1"],
   // 固定在当前 worktree 根目录，避免嵌套 worktree 错误扫描到外层主仓库。

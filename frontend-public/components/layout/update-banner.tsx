@@ -5,7 +5,7 @@ import { ArrowUpCircle, X } from "lucide-react"
 
 import { CopyableCommand } from "@/components/agent-runner/copyable-command"
 import { Button } from "@/components/ui/button"
-import { fetchConsoleVersion, fetchLatestPyPiVersion, isNewerVersion, upgradeConsole } from "@/lib/api/version"
+import { type ConsoleSourceVersion, fetchConsoleVersion, fetchLatestPyPiVersion, isNewerVersion, upgradeConsole } from "@/lib/api/version"
 import {
   readSkippedUpdateVersion,
   writeSkippedUpdateVersion,
@@ -17,8 +17,11 @@ const RELEASES_URL = "https://github.com/ZataZhang/keda/releases"
 /** PyPI 查询的超时上限：超过就当作「查不到」，静默降级。 */
 const PYPI_TIMEOUT_MS = 5000
 
+const BANNER_CLASS_NAME = "mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-100"
+
 /** Top-of-page banner announcing an available KedaCode update. */
 export function UpdateBanner() {
+  const [source, setSource] = useState<ConsoleSourceVersion | null>(null)
   const [currentVersion, setCurrentVersion] = useState<string | null>(null)
   const [latestVersion, setLatestVersion] = useState<string | null>(null)
   // 本次会话内点过「×」后不再出现；「跳过此版本」则按版本号长期记忆。
@@ -31,14 +34,18 @@ export function UpdateBanner() {
   useEffect(() => {
     let cancelled = false
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), PYPI_TIMEOUT_MS)
+    let timeout: ReturnType<typeof setTimeout> | undefined
 
     void (async () => {
       try {
-        const [installation, latest] = await Promise.all([
-          fetchConsoleVersion(),
-          fetchLatestPyPiVersion(controller.signal),
-        ])
+        const installation = await fetchConsoleVersion()
+        if (cancelled) return
+        if (installation.source) {
+          setSource(installation.source)
+          return
+        }
+        timeout = setTimeout(() => controller.abort(), PYPI_TIMEOUT_MS)
+        const latest = await fetchLatestPyPiVersion(controller.signal)
         const current = installation.version
         // 拿不到任一侧、当前版本是占位值（源码树 / 未打包）、该版本已被跳过、
         // 或最新版并不更新时，一律不显示。
@@ -81,12 +88,34 @@ export function UpdateBanner() {
     }
   }
 
+  const checkoutCommit = source?.checkout_commit
+  const frontendStale = process.env.NODE_ENV === "production"
+    && process.env.KEDA_CONSOLE_BUILD_COMMIT !== checkoutCommit
+  const backendStale = Boolean(source?.startup_commit && source.startup_commit !== checkoutCommit)
+
+  if (checkoutCommit && (frontendStale || backendStale) && !dismissed) {
+    return (
+      <div role="status" className={BANNER_CLASS_NAME}>
+        <ArrowUpCircle className="size-4 shrink-0" aria-hidden="true" />
+        <span>
+          当前源码提交为 <code>{checkoutCommit.slice(0, 8)}</code>。
+          {frontendStale ? "请重新构建前端并重启 Console。" : "请重启 Console 以加载当前源码。"}
+        </span>
+        {frontendStale && <CopyableCommand command="just refresh-kc restart" className="max-w-xs" />}
+        <div className="flex-1" />
+        <Button type="button" variant="ghost" size="icon-sm" aria-label="关闭源码更新提示" onClick={() => setDismissed(true)}>
+          <X className="size-4" />
+        </Button>
+      </div>
+    )
+  }
+
   if (!currentVersion || !latestVersion || dismissed) {
     return null
   }
 
   return (
-    <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-100">
+    <div className={BANNER_CLASS_NAME}>
       <ArrowUpCircle className="size-4 shrink-0" aria-hidden="true" />
       <span className="font-medium">
         {installedVersion

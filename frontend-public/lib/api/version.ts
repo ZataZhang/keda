@@ -12,8 +12,13 @@ const PYPI_PACKAGE_NAME = "kedacode";
 /** PyPI JSON API：`info.version` 即最新版本。 */
 const PYPI_JSON_URL = `https://pypi.org/pypi/${PYPI_PACKAGE_NAME}/json`;
 
+export type ConsoleSourceVersion = {
+  startup_commit: string | null
+  checkout_commit: string | null
+}
+
 /** 读取运行时版本和当前安装器对应的升级命令。 */
-export function fetchConsoleVersion(): Promise<{ version: string; upgrade_command?: string | null }> {
+export function fetchConsoleVersion(): Promise<{ version: string; upgrade_command?: string | null; source?: ConsoleSourceVersion | null }> {
   return get("/v1/agent-runner/console/version");
 }
 
