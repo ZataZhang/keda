@@ -4439,7 +4439,7 @@ macOS 菜单栏版需要从 `~/Applications/KedaCode.app` 启动，点击顶部�
 
 Overview 还会按 severity 汇总 `anomaly_count` 和 `anomaly_summary`（`warning` / `error`），并把 `has_anomaly` 标在对应 Issue 行上。
 
-Runner 可以在独立校验和审核前创建 Draft PR。值守看板在链接旁显示「草稿」，草稿或草稿状态未知时不触发 `label_pr_mismatch`。
+Runner 可以在独立校验和审核前创建 Draft PR。值守看板在链接旁显示「draft」，草稿或草稿状态未知时不触发 `label_pr_mismatch`。
 Runner 完成发布交接后切换到监督，GitHub 的 PR 可以在等待合并队列期间继续保持草稿。
 确认 PR 已转为 Ready 后若仍有标签不一致，告警会写明 PR 编号和当前 Issue 标签。
 

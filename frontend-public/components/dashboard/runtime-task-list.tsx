@@ -90,10 +90,10 @@ export function runtimeTaskKey(task: RuntimeTaskEntry): string {
   return `${task.repo_id}#${task.issue_number}`;
 }
 
-/** PR 链接文案，只有确认是草稿时才加上「草稿」标记。 */
+/** PR 链接文案，只有确认是草稿时才加上「draft」标记。 */
 export function runtimeTaskPrLabel(task: RuntimeTaskEntry): string {
   const prName = task.pr_number ? `PR #${task.pr_number}` : "PR";
-  return task.pr_is_draft === true ? `${prName} · 草稿` : prName;
+  return task.pr_is_draft === true ? `${prName} · draft` : prName;
 }
 
 interface RuntimeTaskListProps {

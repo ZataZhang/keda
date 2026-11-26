@@ -345,7 +345,7 @@ test.describe('runtime board (mocked API)', () => {
     // 行内直接给出 Issue / PR 入口：有 PR 时两个都在，无 PR 时只有 Issue。
     await expect(page.getByTestId('runtime-task-issue-link')).toHaveCount(2)
     await expect(page.getByTestId('runtime-task-pr-link')).toHaveCount(1)
-    await expect(page.getByTestId('runtime-task-pr-link')).toContainText('PR #21 · 草稿')
+    await expect(page.getByTestId('runtime-task-pr-link')).toContainText('PR #21 · draft')
     await expect(page.getByTestId('runtime-task-pr-link')).toHaveAttribute(
       'href',
       'https://example.test/pr/21',
@@ -476,7 +476,7 @@ test.describe('runtime board (mocked API)', () => {
     await page.goto('/app/dashboard')
 
     await page.getByTestId('runtime-task-row-keda-main-21').click()
-    await expect(page.getByTestId('runtime-detail-pr-link')).toHaveText('PR #21 · 草稿')
+    await expect(page.getByTestId('runtime-detail-pr-link')).toHaveText('PR #21 · draft')
     await expect(page.getByTestId('runtime-task-anomalies')).toHaveCount(0)
     await page.keyboard.press('Escape')
     await expect(page.getByTestId('runtime-task-detail-sheet')).toBeHidden()
