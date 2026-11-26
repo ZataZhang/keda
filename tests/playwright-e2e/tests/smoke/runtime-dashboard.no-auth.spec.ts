@@ -697,6 +697,8 @@ test.describe('runtime board (mocked API)', () => {
             executor: 'codex',
             outcome: invocationFinished ? 'ok' : 'unclosed',
             duration_seconds: invocationFinished ? 15 : null,
+            requested_model: 'gpt-6-luna',
+            reported_model: invocationFinished ? 'gpt-6-luna-20261126' : null,
           }],
         },
       })
@@ -705,8 +707,10 @@ test.describe('runtime board (mocked API)', () => {
     await page.getByTestId('runtime-task-row-keda-main-21').click()
     const row = page.getByTestId('runtime-invocation-row')
     await expect(row).toContainText('未闭合')
+    await expect(row).toContainText('KC 下发：gpt-6-luna')
     invocationFinished = true
     await expect(row).toContainText('15s', { timeout: 10_000 })
+    await expect(row).toContainText('执行器报告：gpt-6-luna-20261126')
   })
 
   test('unreadable PRD link says so instead of drawing an empty bar', async ({ page }) => {

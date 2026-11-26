@@ -25,6 +25,7 @@ import pytest
 
 from backend.core.shared.interfaces.agent_runner import AGENT_REPORTED_MODEL_ATTR_NAME
 from backend.core.shared.interfaces.runner_console import InvocationEventRecord
+from backend.core.shared.models.agent_model_observation import AgentModelConfigSnapshot
 from backend.core.shared.models.agent_runner import CommandResult, TokenUsage
 from backend.core.use_cases.agent_invocation_tracing import (
     COVERAGE_REASON_STORE_WRITE_FAILED,
@@ -584,6 +585,9 @@ class TestTimeline:
                     "",
                     "",
                     reported_model="claude-sonnet-4-5-20250929",
+                    model_config_snapshot=AgentModelConfigSnapshot(
+                        model_id="sonnet", source="cli_config", is_alias=True
+                    ),
                 ),
             )
         rows = build_invocation_timeline(self._events(store))
@@ -593,6 +597,11 @@ class TestTimeline:
         assert rows[0].duration_seconds is not None
         assert rows[0].requested_model == "claude-sonnet-4-5"
         assert rows[0].reported_model == "claude-sonnet-4-5-20250929"
+        assert rows[0].model_config_snapshot == {
+            "model_id": "sonnet",
+            "source": "cli_config",
+            "is_alias": True,
+        }
 
     def test_start_only_defaults_to_unclosed_without_inventing_times(self) -> None:
         store = _FakeInvocationStore()

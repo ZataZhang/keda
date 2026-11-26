@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { PrdIssueOutputView } from "@/components/backlog/prd-issue-output-view";
 import {
+  describeInvocationModel,
   formatLifecycleDuration,
   invocationOutcomeBadge,
 } from "@/components/backlog/prd-lifecycle-format";
@@ -258,9 +259,9 @@ function RuntimeTaskRunContent({
                       {invocation.retry_of ? (
                         <span className="text-slate-500">重试自 {invocation.retry_of}</span>
                       ) : null}
-                      {invocation.reported_model ? (
-                        <span className="text-slate-500">{invocation.reported_model}</span>
-                      ) : null}
+                      <span className="min-w-0 break-words text-slate-600 dark:text-slate-300">
+                        {describeInvocationModel(invocation)}
+                      </span>
                     </li>
                   );
                 })}

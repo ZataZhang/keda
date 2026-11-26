@@ -810,6 +810,7 @@ class InvocationTimelineRow:
         requested_model: 该调用实际下发的模型 id；未下发时为 ``None``。
         reported_model: 执行器自报的实际模型 id；未报告时为 ``None``。
         model_source: 实际模型信息来源；没有自报时为 ``None``。
+        model_config_snapshot: 调用时读取的工具默认模型配置。
     """
 
     invocation_id: str
@@ -824,6 +825,7 @@ class InvocationTimelineRow:
     requested_model: str | None = None
     reported_model: str | None = None
     model_source: str | None = None
+    model_config_snapshot: dict[str, object] | None = None
 
 
 def build_invocation_timeline(
@@ -868,6 +870,7 @@ def build_invocation_timeline(
             outcome = OUTCOME_INCOMPLETE if process_confirmed_exited else OUTCOME_UNCLOSED
             finished_at = None
             duration_seconds = None
+        model_config_snapshot = finish_detail.get("model_config_snapshot")
         rows.append(
             InvocationTimelineRow(
                 invocation_id=invocation_id,
@@ -893,6 +896,9 @@ def build_invocation_timeline(
                     finish_detail.get("model_source")
                     if isinstance(finish_detail.get("model_source"), str)
                     else None
+                ),
+                model_config_snapshot=(
+                    model_config_snapshot if isinstance(model_config_snapshot, dict) else None
                 ),
             )
         )

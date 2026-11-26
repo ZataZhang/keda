@@ -369,6 +369,7 @@ export type RunInvocationDetailEntry = {
   requested_model: string | null;
   reported_model: string | null;
   model_source: string | null;
+  model_config_snapshot?: AgentModelConfigSnapshot | null;
 };
 
 export type AuditEntry = {
