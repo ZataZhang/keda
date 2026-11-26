@@ -1,6 +1,15 @@
 (() => {
   const prototypeRegistry = [
     {
+      id: 'configurable-workflows', title: 'CLI 可配置节点与可恢复工作流', project: 'keda', module: 'Console / 工作流',
+      system: 'Keda Console', form: 'code-native', version: 'v1.2', updatedAt: '2026-11-26', availability: 'available', validationLevel: 'component preview',
+      primaryFlow: '查看 CLI 管理的完整现有节点、只读配置以及监控等待与恢复位置。',
+      description: '基于真实生命周期设置页的 DOM、构建样式和初始流程图。保留 AppSidebar、页面标题、范围和页签，在矩阵中增加 CLI 定义查看及节点抽屉。扩展状态使用示例数据。',
+      preview: './configurable-workflows/assets/overview.png', entry: './configurable-workflows/index.html', source: './configurable-workflows/prototype.md',
+      provenance: ['./configurable-workflows/assets/overview.source.md', './configurable-workflows/assets/delivered.source.md', './configurable-workflows/assets/unknown.source.md', './configurable-workflows/assets/discussion.source.md', './configurable-workflows/assets/monitor.source.md', './assets/console-page-shell.source.md', './configurable-workflows/assets/actual-page-desktop.source.md'],
+      relationships: [{ id: 'lifecycle-agent-matrix', label: '查看当前生命周期与预设设置原型' }],
+    },
+    {
       id: 'issue-cost-stats', title: '统计与成本：按 Issue', project: 'keda', module: 'Console / Stats', system: 'Keda Console',
       form: 'image-state', version: 'v2.0', updatedAt: '2026-11-25', availability: 'available', validationLevel: '概念原型',
       primaryFlow: '按 Issue 查 Token 和费用，行内切换执行记录与模型用量',
@@ -129,6 +138,9 @@
       provenance: ['./assets/kc-terminal-agent-preview.prompt/'],
     },
   ];
+
+  window.KEDA_PROTOTYPE_REGISTRY = Object.freeze(prototypeRegistry);
+  if (!document.getElementById('prototype-list')) return;
 
   const formLabels = { 'image-state': '图片原型', 'code-native': '交互原型' };
   const availabilityLabels = { available: '可用', archived: '已归档' };

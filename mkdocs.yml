@@ -89,6 +89,7 @@ nav:
       - Prototype Hub: prototypes/hub.html
       - Console 运行时看板与模型评测基线: prototypes/prd-lifecycle-observability.md
       - 生命周期与执行器统一设置: prototypes/lifecycle-agent-matrix.md
+      - 可配置工作流目标原型: prototypes/configurable-workflows/prototype.md
       - 构想工作台设计概念: prototypes/live-concept-workbench/prototype.md
       - Assets 命名规范: prototypes/assets/README.md
   - 核心概念:

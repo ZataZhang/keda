@@ -1,0 +1,36 @@
+<div data-slot="console-page" class="flex min-w-0 flex-col gap-4" data-testid="lifecycle-settings-page">
+<header data-slot="console-page-header" class="min-w-0 shrink-0">
+<h1 class="text-xl leading-7 font-semibold text-foreground">生命周期与模型设置</h1>
+<p class="mt-1 text-sm leading-6 text-muted-foreground">配置全局或仓库的阶段 Agent、模型预设与执行器回退。</p>
+</header>
+<nav data-slot="console-section-tabs" class="sticky top-0 z-20 -mx-4 flex gap-1 overflow-x-auto overflow-y-hidden border-b border-border bg-background/95 px-4 pt-2 whitespace-nowrap backdrop-blur lg:-mx-6 lg:px-6" aria-label="Repositories" data-testid="repositories-workspace-tabs">
+<a data-testid="repositories-tab-list" class="-mb-px shrink-0 border-b-2 px-3 py-2 text-sm transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none border-transparent text-muted-foreground hover:text-foreground" href="/app/repositories/">仓库列表</a>
+<a aria-current="page" data-testid="repositories-tab-lifecycle" class="-mb-px shrink-0 border-b-2 px-3 py-2 text-sm transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none border-primary font-medium text-primary" href="/app/repositories/lifecycle/">执行器与模型</a>
+</nav>
+<div data-slot="console-toolbar" class="flex min-w-0 flex-wrap items-center gap-2">
+<div class="inline-flex rounded-md border border-border p-0.5">
+<button type="button" data-testid="scope-global" class="h-8 rounded-md px-3 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring bg-primary text-primary-foreground">全局</button>
+<button type="button" data-testid="scope-repository" class="h-8 rounded-md px-3 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring text-muted-foreground hover:text-foreground">仓库</button>
+</div>
+</div>
+<p class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-200">正在编辑：全局 config.toml。 本页展示磁盘上的配置。Runner 在领取新任务，以及进入修复、收尾、校验、审核或监督阶段时读取最新的执行器设置。已开始的阶段继续使用启动时的执行器。</p>
+<p class="text-xs text-slate-500 dark:text-slate-400">本页展示全局 / 仓库基线；PRD 头部声明与单次运行的 CLI 旗标（--preset / --model / --reasoning-effort）对单个 PRD / 运行优先生效。</p>
+<nav data-slot="console-section-tabs" class="sticky top-0 z-20 -mx-4 flex gap-1 overflow-x-auto overflow-y-hidden border-b border-border bg-background/95 px-4 pt-2 whitespace-nowrap backdrop-blur lg:-mx-6 lg:px-6" role="tablist" aria-label="生命周期设置区块" data-testid="block-nav">
+<button id="lifecycle-settings-tab-matrix" type="button" role="tab" aria-selected="true" aria-controls="lifecycle-settings-panel-matrix" data-testid="settings-tab-matrix" class="-mb-px shrink-0 border-b-2 px-3 py-2 text-sm transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none border-primary font-medium text-primary">生命周期矩阵</button>
+<button id="lifecycle-settings-tab-presets" type="button" role="tab" aria-selected="false" aria-controls="lifecycle-settings-panel-presets" data-testid="settings-tab-presets" class="-mb-px shrink-0 border-b-2 px-3 py-2 text-sm transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none border-transparent text-muted-foreground hover:text-foreground">模型预设</button>
+<button id="lifecycle-settings-tab-content-timeouts" type="button" role="tab" aria-selected="false" aria-controls="lifecycle-settings-panel-content-timeouts" data-testid="settings-tab-content-timeouts" class="-mb-px shrink-0 border-b-2 px-3 py-2 text-sm transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none border-transparent text-muted-foreground hover:text-foreground">内容生成时限</button>
+<button id="lifecycle-settings-tab-fallback" type="button" role="tab" aria-selected="false" aria-controls="lifecycle-settings-panel-fallback" data-testid="settings-tab-fallback" class="-mb-px shrink-0 border-b-2 px-3 py-2 text-sm transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none border-transparent text-muted-foreground hover:text-foreground">执行器回退</button>
+</nav>
+<div id="lifecycle-settings-panel-matrix" role="tabpanel" aria-labelledby="lifecycle-settings-tab-matrix" tabindex="0" class="focus:outline-none" data-testid="settings-tab-panel-matrix">
+<div data-slot="card" class="flex flex-col gap-6 rounded-xl border border-border bg-card py-6 text-card-foreground shadow-sm" id="lifecycle-matrix">
+<div data-slot="card-header" class="grid grid-cols-1 auto-rows-min grid-rows-[auto_auto] items-start gap-2 px-6">
+<div data-slot="card-title" class="text-sm leading-5 font-semibold">生命周期矩阵</div>
+<div data-slot="card-description" class="text-sm text-muted-foreground">查看由 CLI 创建的节点、连接和当前配置。点击节点查看 Agent 预设或工具代码能力，以及等待与恢复记录。</div>
+</div>
+<div data-slot="card-content" class="px-6 space-y-3">
+<div data-workflow-mount="">
+</div>
+</div>
+</div>
+</div>
+</div>

@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>生命周期工作流 · 基于实际 Console 的目标原型</title>
+    <link rel="stylesheet" href="../assets/prototype-chrome.css" />
+    <style>
+      #workflow-prototype { display: grid; gap: 16px; min-width: 0; padding-bottom: 76px; color: var(--foreground); font-size: 14px; }
+      #workflow-prototype > *, #actual-graphs, #actual-graphs > div, #lifecycle-matrix [data-slot="card-content"] { min-width: 0; max-width: 100%; }
+      #workflow-prototype button, #workflow-prototype select { font: inherit; }
+      #workflow-prototype button { cursor: pointer; }
+      .workflow-toolbar, .workflow-tabs { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+      .workflow-toolbar select { height: 32px; max-width: 100%; padding: 3px 10px; background: var(--background); border: 1px solid var(--border); border-radius: 6px; }
+      .workflow-meta { color: var(--muted-foreground); font-size: 12px; }
+      .workflow-tabs { gap: 20px; border-bottom: 1px solid var(--border); }
+      .workflow-tabs button { border: 0; background: transparent; padding: 8px 0; color: var(--muted-foreground); }
+      .workflow-tabs button[aria-selected="true"] { color: var(--primary); border-bottom: 2px solid var(--primary); }
+      .workflow-group { padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: color-mix(in srgb, var(--muted) 20%, transparent); }
+      .workflow-group h3 { margin: 0 0 8px; font-size: 14px; font-weight: 600; }
+      .workflow-scroll { overflow-x: auto; }
+      .workflow-canvas { position: relative; height: 270px; }
+      .workflow-canvas svg { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
+      .workflow-node { position: absolute; width: 150px; min-height: 54px; padding: 8px 10px; display: grid; gap: 3px; text-align: left; border: 1px solid var(--border); border-radius: 3px; background: var(--card); color: var(--card-foreground); }
+      .workflow-node[data-kind="agent"] { background: #f5f2ff; }
+      .workflow-node small { font-size: 12px; overflow-wrap: anywhere; }
+      .workflow-node strong { font-size: 14px; font-weight: 600; }
+      .workflow-node:hover { border-color: var(--primary); }
+      .workflow-node::before, .workflow-node::after { content: ''; position: absolute; top: 25px; width: 4px; height: 4px; border-radius: 50%; background: #272436; }
+      .workflow-node::before { left: -3px; }
+      .workflow-node::after { right: -3px; }
+      .workflow-node:focus-visible, #workflow-prototype button:focus-visible, #workflow-prototype select:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+      .workflow-canvas text { fill: var(--foreground); font-size: 11px; paint-order: stroke; stroke: var(--background); stroke-width: 6px; stroke-linejoin: round; }
+      .workflow-canvas path { stroke: #afadb7; stroke-width: 1.2px; fill: none; }
+      .workflow-statuses { display: flex; flex-wrap: wrap; gap: 12px; }
+      .workflow-statuses section { flex: 1; min-width: 190px; padding: 16px; border: 1px solid var(--border); border-radius: 8px; }
+      .workflow-statuses h3 { margin-bottom: 8px; font-weight: 600; }
+      .workflow-statuses p { margin-top: 8px; }
+      .status { display: inline-block; padding: 3px 8px; border-radius: 6px; font-size: 12px; background: #eef1f6; color: #475569; }
+      .status.success { background: #e7f5ed; color: #126d4c; }
+      .status.waiting { background: #fff3da; color: #955b0b; }
+      .workflow-table-scroll { overflow-x: auto; }
+      .workflow-table { min-width: 550px; width: 100%; border-collapse: collapse; text-align: left; }
+      .workflow-table td, .workflow-table th { padding: 10px 8px; border-bottom: 1px solid var(--border); }
+      .workflow-table th { font-weight: 500; color: var(--muted-foreground); }
+      .workflow-button { padding: 5px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--background); }
+      .workflow-sheet { position: fixed; inset: 0 0 0 auto; margin: 0; width: min(672px, 100%); max-width: 100%; height: 100%; max-height: 100%; padding: 0; border: 0; border-left: 1px solid var(--border); background: var(--background); color: var(--foreground); box-shadow: -10px 0 32px #18132d16; overflow-y: auto; }
+      .workflow-sheet::backdrop { background: #0008; }
+      .workflow-sheet-body { padding: 0 24px 24px; display: grid; gap: 16px; font-size: 14px; }
+      .workflow-sheet-body pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 16px; border: 1px solid var(--border); border-radius: 6px; font-family: ui-monospace, monospace; font-size: 12px; }
+      .workflow-sheet-close { position: absolute; right: 16px; top: 16px; width: 24px; height: 24px; border: 0; background: transparent; cursor: pointer; }
+      .workflow-sheet-close:focus-visible { outline: 2px solid var(--primary); }
+      .hotspots-on [data-prototype-node] { outline: 1px dashed #9a7ce6; outline-offset: 2px; }
+      [data-prototype-page-slot] [aria-disabled="true"] { cursor: default; }
+      #workflow-prototype [hidden] { display: none !important; }
+      .prototype-chrome select { max-width: 172px; font-size: 12px; padding: 3px 5px; }
+      @media (max-width: 767px) { .prototype-chrome { max-width: calc(100% - 16px); flex-wrap: wrap; justify-content: center; } #workflow-prototype { padding-bottom: 110px; } }
+    </style>
+  </head>
+  <body>
+    <p id="loading-note" style="padding:24px">正在加载实际 Console 页面布局…</p>
+    <template id="workflow-content-template">
+      <section id="workflow-prototype">
+        <div class="workflow-toolbar">
+          <select id="workflow-select" aria-label="查看工作流"></select>
+          <span class="workflow-meta">CLI 维护节点和连接 · 只读定义 v1 · 目标示例</span>
+        </div>
+        <div class="workflow-tabs" role="tablist" aria-label="工作流视图">
+          <button id="definition-tab" role="tab" aria-selected="true" aria-controls="definition-panel" type="button">流程定义</button>
+          <button id="run-tab" role="tab" aria-selected="false" aria-controls="run-panel" type="button">运行记录</button>
+        </div>
+        <section id="definition-panel" role="tabpanel" aria-labelledby="definition-tab">
+          <div id="actual-graphs"></div>
+          <section class="workflow-group" id="custom-graph" hidden>
+            <h3 id="graph-title"></h3>
+            <div class="workflow-scroll"><div id="graph" class="workflow-canvas"></div></div>
+          </section>
+        </section>
+        <section id="run-panel" role="tabpanel" aria-labelledby="run-tab" hidden>
+          <div class="workflow-statuses">
+            <section><h3>交付</h3><span id="delivery-status" class="status success"></span><p class="workflow-meta">交付提交 · a81c2f0</p></section>
+            <section><h3>验证与监控</h3><span id="validation-status" class="status waiting"></span><p id="worker-status" class="workflow-meta"></p></section>
+            <section><h3>运行快照</h3><p>v1 · 先交付后验证</p><p class="workflow-meta">节点定义与能力版本固定</p></section>
+          </div>
+          <div class="workflow-toolbar" style="justify-content:space-between;margin-top:20px"><h3>节点执行记录</h3><button id="refresh" class="workflow-button" type="button">刷新状态</button></div>
+          <div class="workflow-table-scroll"><table class="workflow-table"><thead><tr><th>节点</th><th>激活轮次</th><th>状态</th><th>结果与恢复依据</th></tr></thead><tbody id="run-rows"></tbody></table></div>
+          <p id="run-note" class="workflow-meta" style="margin-top:12px"></p>
+        </section>
+      </section>
+    </template>
+    <dialog id="node-dialog" class="workflow-sheet" aria-labelledby="selected-title">
+      <div data-sheet-heading></div>
+      <button id="close-node" class="workflow-sheet-close" type="button" aria-label="关闭节点详情">✕</button>
+      <div class="workflow-sheet-body">
+        <p id="node-description" class="workflow-meta"></p>
+        <pre id="node-definition"></pre>
+        <h3>执行与恢复</h3><p id="recovery-note"></p>
+      </div>
+    </dialog>
+    <nav class="prototype-chrome" data-prototype-chrome aria-label="原型评审工具">
+      <span class="prototype-chrome__label">原型</span>
+      <a href="../hub.html">返回 Hub</a>
+      <a href="./prototype.md">原型说明</a>
+      <button type="button" data-hotspot-toggle>可点击区域</button>
+      <button type="button" data-prototype-reset>重置</button>
+      <label>演示场景<select id="scenario"><option value="config">实际页面与现有节点</option><option value="cli-added">CLI 添加节点后</option><option value="delivered">已交付待验证</option><option value="unknown">工具结果待核对</option><option value="monitor">监控等待与接续</option></select></label>
+    </nav>
+    <script src="../assets/prototype-chrome.js"></script>
+    <script src="../assets/prototype-hub.js"></script>
+    <script src="./page-shell.js"></script>
+  </body>
+</html>
