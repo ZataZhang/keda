@@ -395,6 +395,44 @@ function emptyIssue(
 }
 
 test.describe('Stats Issue cost ledger', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.route('**/api/auth/me', (route) =>
+      fulfillJson(route, { user_id: 'local-operator', display_name: 'operator', email: 'operator@localhost' }),
+    )
+  })
+
+  test('shows the local ledger while GitHub status is pending', async ({ page }) => {
+    await routeStatsApi(page)
+    let finishGitHubResponse = () => {}
+    const githubResponse = new Promise<void>((resolve) => {
+      finishGitHubResponse = resolve
+    })
+    await page.route('**/api/v1/agent-runner/console/stats/issues*', async (route) => {
+      if (new URL(route.request().url()).searchParams.get('include_github') === 'false') {
+        await fulfillJson(route, {
+          ...ISSUE_STATS,
+          repositories: ISSUE_STATS.repositories.map((repository) => ({
+            ...repository,
+            issues: repository.issues.filter((issue) => issue.period_run_count > 0),
+          })),
+        })
+        return
+      }
+      await githubResponse
+      await fulfillJson(route, ISSUE_STATS)
+    })
+    await page.goto('/app/stats')
+    try {
+      await expect(page.getByText('已读取本机账本，正在补充 GitHub Issue 状态…')).toBeVisible()
+      await expect(page.getByTestId('stats-issue-row-keda-main-318')).toBeVisible()
+      await expect(page.getByTestId('stats-issue-row-keda-main-309')).toHaveCount(0)
+    } finally {
+      finishGitHubResponse()
+    }
+    await expect(page.getByTestId('stats-issue-row-keda-main-309')).toBeVisible()
+    await expect(page.getByText('已读取本机账本，正在补充 GitHub Issue 状态…')).toHaveCount(0)
+  })
+
   test('opens by Issue and expands executions and model usage', async ({ page }) => {
     await page.setViewportSize({ width: 1586, height: 992 })
     await routeStatsApi(page)

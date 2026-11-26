@@ -61,6 +61,7 @@ type IssueStatsQueryState = {
   filterKey: string
   stats: IssueCostStats | null
   error: string | null
+  githubPending: boolean
 }
 
 const STATS_VIEWS: { key: StatsViewKey; label: string }[] = [
@@ -106,23 +107,41 @@ export default function StatsPage() {
   useEffect(() => {
     if (dateRangeError) return
     let isCancelled = false
-    fetchIssueCostStats({ startDate, endDate })
-      .then((result) => {
-        if (!isCancelled) {
-          setIssueStatsQueryState({
-            filterKey: issueStatsFilterKey,
-            stats: result,
-            error: null,
-          })
-        }
-      })
-      .catch((error: unknown) => {
-        if (isCancelled) return
+    let hasFullResult = false
+    const localLedger = fetchIssueCostStats({ startDate, endDate, includeGitHub: false })
+      .then((stats) => {
+        if (isCancelled || hasFullResult) return
         setIssueStatsQueryState({
           filterKey: issueStatsFilterKey,
-          stats: null,
-          error: error instanceof Error ? error.message : "无法读取 Issue 账本。",
+          stats,
+          error: null,
+          githubPending: true,
         })
+      })
+      .catch(() => {
+        // 完整请求仍可返回账本或给出错误。
+      })
+
+    fetchIssueCostStats({ startDate, endDate })
+      .then((stats) => {
+        if (isCancelled) return
+        hasFullResult = true
+        setIssueStatsQueryState({
+          filterKey: issueStatsFilterKey,
+          stats,
+          error: null,
+          githubPending: false,
+        })
+      })
+      .catch(async (error: unknown) => {
+        await localLedger
+        if (isCancelled) return
+        setIssueStatsQueryState((previous) => ({
+          filterKey: issueStatsFilterKey,
+          stats: previous?.filterKey === issueStatsFilterKey ? previous.stats : null,
+          error: error instanceof Error ? error.message : "无法读取 Issue 账本。",
+          githubPending: false,
+        }))
       })
     return () => {
       isCancelled = true
@@ -291,12 +310,21 @@ export default function StatsPage() {
             }}
           />
         ) : null}
+        {currentIssueStatsQueryState?.githubPending ? (
+          <p className="text-sm text-muted-foreground" role="status">
+            已读取本机账本，正在补充 GitHub Issue 状态…
+          </p>
+        ) : issueStats && issueStatsError ? (
+          <p className="text-sm text-amber-700 dark:text-amber-300" role="status">
+            GitHub Issue 状态读取失败，当前显示本机账本。{issueStatsError}
+          </p>
+        ) : null}
         {activeView === "issues" || activeView === "trend" ? (
           <IssueCostLedgerSection
             issues={activeView === "trend" ? selectedIssues.filter((issue) => issue.period_run_count > 0) : selectedIssues}
             pricingModels={modelPricing}
             loading={issueStatsLoading}
-            error={issueStatsError}
+            error={issueStats ? null : issueStatsError}
             statusFilter={issueStatusFilter}
             onStatusFilterChange={setIssueStatusFilter}
             truncatedRunHistory={Boolean(selectedIssueStats?.truncated_run_history)}

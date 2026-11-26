@@ -472,6 +472,7 @@ def get_console_issue_cost_stats(
     repo_id: str | None = None,
     start_date: date | None = None,
     end_date: date | None = None,
+    include_github: bool = True,
 ) -> dict:
     """组合 GitHub 当前状态与本地 Issue 执行及调用账本。"""
     if (start_date is None) != (end_date is None):
@@ -500,16 +501,18 @@ def get_console_issue_cost_stats(
     ledger_by_issue = {(entry.repo_id, entry.issue_number): entry for entry in ledger.entries}
     repositories = []
     for context in contexts:
-        try:
-            issue_status = build_repository_issue_status(
-                context=context,
-                github_client=create_github_client(context.repo_path),
-            )
-        except Exception as exc:  # noqa: BLE001 - one repo lookup must not hide other repos.
-            issue_status = None
-            issue_status_error = str(exc)
-        else:
-            issue_status_error = issue_status.error
+        issue_status = None
+        issue_status_error = None
+        if include_github:
+            try:
+                issue_status = build_repository_issue_status(
+                    context=context,
+                    github_client=create_github_client(context.repo_path),
+                )
+            except Exception as exc:  # noqa: BLE001 - one repo lookup must not hide other repos.
+                issue_status_error = str(exc)
+            else:
+                issue_status_error = issue_status.error
 
         tracked_issue_by_number = (
             {issue.issue_number: issue for issue in issue_status.issues}
@@ -605,7 +608,7 @@ def get_console_issue_cost_stats(
             {
                 "repo_id": context.repo_id,
                 "display_name": context.display_name,
-                "github_available": issue_status_error is None,
+                "github_available": include_github and issue_status_error is None,
                 "github_error": issue_status_error,
                 "github_truncated": bool(issue_status and issue_status.truncated),
                 "issue_count": len(tracked_issue_by_number),

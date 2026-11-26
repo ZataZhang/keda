@@ -320,10 +320,12 @@ export async function fetchCompletionStats(): Promise<
  * @param params.repoId - 仓库标识；省略表示全部仓库。
  * @param params.startDate - UTC 日期区间起点（包含）。
  * @param params.endDate - UTC 日期区间终点（包含）。
+ * @param params.includeGitHub - 设为 false 时只读取本机账本。
  * @returns 当前状态与期间执行记录按仓库和 Issue 合并后的统计。
  */
 export async function fetchIssueCostStats(params: {
   repoId?: string;
+  includeGitHub?: boolean;
   startDate: string;
   endDate: string;
 }): Promise<IssueCostStats> {
@@ -333,6 +335,9 @@ export async function fetchIssueCostStats(params: {
   });
   if (params.repoId) {
     searchParams.set("repo_id", params.repoId);
+  }
+  if (params.includeGitHub === false) {
+    searchParams.set("include_github", "false");
   }
   return get<IssueCostStats>(
     `${BASE_PATH}/console/stats/issues?${searchParams.toString()}`,

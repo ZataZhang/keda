@@ -1173,6 +1173,22 @@ def test_issue_cost_stats_reads_sqlite_and_console_http_with_repo_issue_key(
     start_date = (now.date() - timedelta(days=3)).isoformat()
     end_date = now.date().isoformat()
 
+    def fail_on_github_access(_repo_path):
+        pytest.fail("local Issue stats must skip GitHub")
+
+    with monkeypatch.context() as local_only:
+        local_only.setattr(console_routes, "create_github_client", fail_on_github_access)
+        local_response = client.get(
+            "/api/v1/agent-runner/console/stats/issues",
+            params={"start_date": start_date, "end_date": end_date, "include_github": "false"},
+        )
+    assert local_response.status_code == 200, local_response.text
+    local_repositories = local_response.json()["repositories"]
+    assert all(not repo["github_available"] for repo in local_repositories)
+    assert any(
+        issue["period_run_count"] > 0 for repo in local_repositories for issue in repo["issues"]
+    )
+
     response = client.get(
         "/api/v1/agent-runner/console/stats/issues",
         params={"start_date": start_date, "end_date": end_date},
