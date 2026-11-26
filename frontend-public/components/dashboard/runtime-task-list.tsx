@@ -70,6 +70,9 @@ export function runtimeStatusPresentation(
   label: string;
   variant: BadgeVariant;
 } {
+  if (status === "waiting" && waitingReason === "ci") {
+    return { ...STATUS_PRESENTATION.waiting, label: "等待 CI" };
+  }
   if (status === "waiting") {
     const label =
       waitingReason === "queued"

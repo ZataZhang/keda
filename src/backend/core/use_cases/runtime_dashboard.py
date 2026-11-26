@@ -430,7 +430,7 @@ def _snapshot_task(
         if "agent/ready" in labels:
             waiting_reason = "queued"
         elif latest_action == "wait_for_checks":
-            waiting_reason = "recheck"
+            waiting_reason = "ci"
         elif "human/awaiting-review" in labels or latest_action == "approve_for_human_review":
             waiting_reason = "human_review"
         else:

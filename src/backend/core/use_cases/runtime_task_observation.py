@@ -223,8 +223,8 @@ def reconcile_runtime_task(
             return replace(
                 task,
                 status=RuntimeTaskStatus.WAITING,
-                status_reason="最近 PR 监督动作要求等待再次检查",
-                waiting_reason="recheck",
+                status_reason="最近一轮 PR 监督正在等待 CI 检查结果",
+                waiting_reason="ci",
             )
         return replace(
             task,

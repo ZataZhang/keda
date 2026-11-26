@@ -1722,7 +1722,7 @@ export type RuntimePipelineStage =
  */
 export type RuntimeTaskEntry = {
   /** 等待原因来自最近监督动作与当前标签；缺失时保守显示待再次检查。 */
-  waiting_reason?: "queued" | "human_review" | "recheck" | null;
+  waiting_reason?: "queued" | "human_review" | "ci" | "recheck" | null;
   /** 仅表示本机 PR 值守进程存活，不保证任务会自动合并。 */
   review_daemon_running?: boolean | null;
   repo_id: string;

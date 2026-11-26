@@ -742,8 +742,8 @@ def test_finished_run_is_not_live_unless_a_new_lifecycle_started(
         assert task.waiting_reason is None
     elif scenario.expected_status is RuntimeTaskStatus.WAITING:
         assert task.status is RuntimeTaskStatus.WAITING
-        assert task.waiting_reason == "recheck"
-        assert task.status_reason == "最近 PR 监督动作要求等待再次检查"
+        assert task.waiting_reason == "ci"
+        assert task.status_reason == "最近一轮 PR 监督正在等待 CI 检查结果"
         assert task.duration_seconds == 1200
         assert task.finished_at == _iso(-100)
         assert task.last_outcome == "completed"

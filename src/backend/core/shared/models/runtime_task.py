@@ -85,7 +85,7 @@ class RuntimeTask:
         last_observed_status: 最近一次成功同步观察到的状态；当前同步失败时保留。
         last_observed_at: 最近一次成功同步时间；故障时与 ``last_observed_status`` 一起表示过期状态。
         anomaly_types: 监控快照发现的异常类型；异常与任务状态分开记录。
-        waiting_reason: 等待原因：queued、human_review 或 recheck；非等待时为空。
+        waiting_reason: 等待原因：queued、human_review、ci 或 recheck；非等待时为空。
         review_daemon_running: 本机 PR 值守进程是否存活；未探测或读取失败时为空。
         phase: 最近一次观测到的生命周期阶段名。
         pipeline_stage: 最近一次 Agent 调用映射到的六个流水线节点之一；无法映射时为空。
