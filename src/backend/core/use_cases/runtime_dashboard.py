@@ -448,7 +448,9 @@ def _snapshot_task(
 
     last_observed_status = status
     if sync_error:
-        if run_record_is_unobserved or status is RuntimeTaskStatus.UNKNOWN:
+        if not issue_is_closed and (
+            run_record_is_unobserved or status is RuntimeTaskStatus.UNKNOWN
+        ):
             status = RuntimeTaskStatus.DEFERRED
             status_reason = "GitHub 状态读取暂缓，恢复后会自动重试。"
         elif status_reason:
@@ -832,6 +834,7 @@ def build_runtime_task_summary(
 
     tasks: list[RuntimeTask] = []
     seen_keys: set[tuple[str, int]] = set()
+    closed_with_merged_pr: set[tuple[str, int]] = set()
     latest_actions_by_issue: dict[tuple[str, int], str | None] = {}
     claim_started_at_by_issue: dict[tuple[str, int], datetime | None] = {}
 
@@ -853,6 +856,13 @@ def build_runtime_task_summary(
             if task is None:
                 continue
             seen_keys.add(key)
+            pr_snapshot = issue_entry.get("pr")
+            if (
+                task.status is RuntimeTaskStatus.CLOSED
+                and isinstance(pr_snapshot, Mapping)
+                and pr_snapshot.get("merged") is True
+            ):
+                closed_with_merged_pr.add(key)
             latest_actions_by_issue[key] = _latest_timeline_action(issue_entry)
             claim_started_at_by_issue[key] = _claim_started_at(issue_entry)
             tasks.append(task)
@@ -888,6 +898,25 @@ def build_runtime_task_summary(
             context=observation_context,
             latest_supervisor_action=latest_actions_by_issue.get((task.repo_id, task.issue_number)),
         )
+        for task in tasks
+    ]
+
+    tasks = [
+        replace(
+            task,
+            status=RuntimeTaskStatus.COMPLETED,
+            status_reason=(
+                "GitHub Issue 已关闭，关联 PR 已合并"
+                + (
+                    "；执行记录未收口"
+                    if lifecycle_by_issue.get(key) and not lifecycle_by_issue[key].finished_at
+                    else ""
+                )
+                + ("；当前同步失败，状态可能已过期" if task.sync_error else "")
+            ),
+        )
+        if (key := (task.repo_id, task.issue_number)) in closed_with_merged_pr
+        else task
         for task in tasks
     ]
 

@@ -298,6 +298,46 @@ def test_tracked_issue_state_marks_closed_task(tmp_path) -> None:
     assert summary.status_counts["unknown"] == 0
 
 
+def test_closed_issue_with_merged_pr_does_not_resume_unfinished_execution(tmp_path) -> None:
+    """#448 的本地失败历史仍可查，已确认合并的卡片保持完成。"""
+    store = _store(tmp_path)
+    issue_snapshot = _issue(448, labels=["agent/running"], state="closed")
+    issue_snapshot["pr"] = {"number": 451, "merged": True}
+    _seed_snapshot(store, "keda", [], tracked_issues=[issue_snapshot])
+    store.upsert_lifecycle_run(
+        PrdLifecycleRunRecord(
+            run_id="patrol",
+            repo_id="keda",
+            prd_path="",
+            issue_number=448,
+            trigger="console_run",
+            started_at=_iso(-45),
+            finished_at=None,
+            outcome=None,
+            history_complete=True,
+        )
+    )
+    store.append_lifecycle_event(
+        PrdLifecycleEventRecord(
+            run_id="patrol",
+            event_key="review_failed",
+            event_type="review_failed",
+            phase="reviewing",
+            actor="runner",
+            occurred_at=_iso(-30),
+            detail_json="{}",
+        )
+    )
+
+    summary = _summary(store, ["keda"])
+    task = summary.tasks[0]
+    assert task.status is RuntimeTaskStatus.COMPLETED
+    assert task.status_reason == "GitHub Issue 已关闭，关联 PR 已合并；执行记录未收口"
+    assert task.finished_at is None
+    assert summary.status_counts["running"] == 0
+    assert store.list_lifecycle_events(run_id="patrol")[0].event_type == "review_failed"
+
+
 @pytest.mark.parametrize("outcome", ["failed", "blocked"])
 @pytest.mark.parametrize("snapshot_labels", [None, [], ["agent/automated-review-passed"]])
 def test_local_failure_fills_missing_snapshot_status(
