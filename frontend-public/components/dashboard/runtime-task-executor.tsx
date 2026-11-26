@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import type { BadgeVariant } from "@/components/ui/badge";
 import type { RuntimeTaskEntry } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
+import { isQueuedRuntimeTask } from "@/lib/runtime-task";
 
 /**
  * 计算机器胶囊的文案、颜色与悬停说明。
@@ -18,7 +19,7 @@ export function runtimeTaskExecutorPresentation(
   task: RuntimeTaskEntry,
 ): { label: string; variant: BadgeVariant; title: string } | null {
   const host = task.executor_host;
-  if (!host) return null;
+  if (!host || isQueuedRuntimeTask(task)) return null;
   const byHostname = task.executor_basis === "hostname";
   const marker = byHostname ? "?" : "";
   const role = task.executor_role === "running" ? "执行机器" : "最近认领";
@@ -36,7 +37,11 @@ export function runtimeTaskExecutorPresentation(
       title: `${role}：${host}${byHostname ? "（旧版认领，按主机名判断）" : ""}`,
     };
   }
-  return { label: `未知 · ${host}`, variant: "default", title: `${role}：${host}（无法判断是否本机）` };
+  return {
+    label: `未知 · ${host}`,
+    variant: "default",
+    title: `${role}：${host}（无法判断是否本机）`,
+  };
 }
 
 /**

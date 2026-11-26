@@ -169,6 +169,12 @@ def _process_single_issue(
     output_view.register_issue(issue.number, selected_agent)
     run_started_at = datetime.now(timezone.utc)
     used_agent = selected_agent
+    lifecycle_start_detail = {
+        "agent": selected_agent,
+        "issue_kind": issue_kind,
+        "run_trigger": run_trigger,
+        "issue_url": issue.url,
+    }
 
     # run id 与 backlog 启动侧一致，避免重复创建生命周期记录。
     record_lifecycle_event(
@@ -180,7 +186,7 @@ def _process_single_issue(
         event_type=LifecycleEventType.STARTED,
         actor="runner",
         occurred_at=run_started_at.isoformat(),
-        detail={"agent": selected_agent, "issue_kind": issue_kind, "run_trigger": run_trigger},
+        detail=lifecycle_start_detail,
     )
     record_lifecycle_event(
         store=run_history_store,
@@ -191,7 +197,7 @@ def _process_single_issue(
         event_type=LifecycleEventType.CLAIMED,
         actor="runner",
         occurred_at=run_started_at.isoformat(),
-        detail={"agent": selected_agent, "issue_kind": issue_kind, "run_trigger": run_trigger},
+        detail=lifecycle_start_detail,
     )
 
     def _on_attempt_recorded(result: AttemptResult, attempt_results: list[AttemptResult]) -> None:

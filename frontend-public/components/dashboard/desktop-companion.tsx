@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { closeDesktopCompanionWindow, fetchRuntimeTasks } from "@/lib/api/console";
 import type { RuntimeTaskEntry, RuntimeTaskSummary } from "@/lib/api/types";
 import { formatLocalDateTime } from "@/lib/utils";
+import { isQueuedRuntimeTask } from "@/lib/runtime-task";
 
 import { RuntimeTaskPhaseDescription, RuntimeTaskPhase } from "./runtime-task-phase";
 import { RuntimeTaskExecutor, RuntimeTaskLocalRunSuperseded } from "./runtime-task-executor";
@@ -318,16 +319,18 @@ function CompanionTaskRow({
       />
       <RuntimeTaskObservation task={task} />
       <RuntimeTaskBlockingReason task={task} compact />
-      <span className="flex flex-wrap gap-x-2 text-[11px] text-slate-500">
-        <RuntimeTaskLocalRunSuperseded task={task} />
-        {task.agent ? (
-          <span>
-            最近执行：{task.agent}
-            {task.preset ? ` · ${task.preset}` : ""}
-          </span>
-        ) : null}
-        <RuntimeTaskDuration task={task} />
-      </span>
+      {!isQueuedRuntimeTask(task) ? (
+        <span className="flex flex-wrap gap-x-2 text-[11px] text-slate-500">
+          <RuntimeTaskLocalRunSuperseded task={task} />
+          {task.agent ? (
+            <span>
+              最近执行：{task.agent}
+              {task.preset ? ` · ${task.preset}` : ""}
+            </span>
+          ) : null}
+          <RuntimeTaskDuration task={task} />
+        </span>
+      ) : null}
       {["blocked", "failed", "deferred"].includes(task.status) ? (
         <p
           className={

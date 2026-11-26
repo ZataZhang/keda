@@ -65,8 +65,8 @@ _STATUS_DISPLAY_ORDER: dict["RuntimeTaskStatus", int] = {
 class RuntimeTask:
     """一个 Issue Agent 任务的只读摘要行。
 
-    身份固定为 ``repo_id + issue_number``，与 Console 现有 Issue 日志、
-    invocation ledger 的读取键一致，前端据此续读详情而不必再猜。
+    展示键为 ``repo_id + issue_number``，但账本关联还必须校验完整远端 Issue URL。
+    本机别名可能复用，不能据此把不同 owner 下同名仓库的同号记录视为同一任务。
 
     Attributes:
         repo_id: 注册仓库标识。

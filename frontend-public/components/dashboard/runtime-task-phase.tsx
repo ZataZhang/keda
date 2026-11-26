@@ -1,5 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import type { RuntimeTaskEntry, RuntimePipelineStage } from "@/lib/api/types";
+import { isQueuedRuntimeTask } from "@/lib/runtime-task";
 import {
   EVENT_TYPE_LABELS,
   INVOCATION_PHASE_LABELS,
@@ -126,8 +127,14 @@ const PIPELINE_STAGE_KEYS = new Set<string>([
   "supervisor",
 ]);
 
-function runtimeTaskPhaseValue(task: RuntimeTaskEntry): RuntimePipelineStage | null {
-  const stage = task.pipeline_stage ?? (task.status === "failed" ? task.failure_stage : null);
+/** 选择当前或历史阶段；待认领任务的当前区域不使用历史阶段。 */
+function runtimeTaskPhaseValue(
+  task: RuntimeTaskEntry,
+  historical = false,
+): RuntimePipelineStage | null {
+  if (!historical && isQueuedRuntimeTask(task)) return null;
+  const stage =
+    task.pipeline_stage ?? (historical || task.status === "failed" ? task.failure_stage : null);
   if (!stage || !PIPELINE_STAGE_KEYS.has(stage)) return null;
   return stage as RuntimePipelineStage;
 }
@@ -161,31 +168,50 @@ export function runtimePhaseDescription(phase: string | null): string {
 }
 
 /** 在状态旁只呈现六个主流水线节点；没有可映射的调用时不显示占位徽章。 */
-export function RuntimeTaskPhase({ task }: { task: RuntimeTaskEntry }) {
-  const phase = runtimeTaskPhaseValue(task);
+export function RuntimeTaskPhase({
+  task,
+  historical = false,
+}: {
+  task: RuntimeTaskEntry;
+  historical?: boolean;
+}) {
+  const phase = runtimeTaskPhaseValue(task, historical);
   if (!phase) return null;
+  const phaseLabel = historical ? "上次运行阶段" : "最近阶段";
   const phaseDescription = runtimePhaseDescription(phase);
   return (
     <Badge
       variant="review"
       className="break-words whitespace-normal"
       title={`${phase ?? "账本未记录阶段"}：${phaseDescription} ${PHASE_CONTEXT_HINT}`}
-      aria-label={`最近阶段：${runtimePhaseLabel(phase)}。${phaseDescription}${PHASE_CONTEXT_HINT}`}
+      aria-label={`${phaseLabel}：${runtimePhaseLabel(phase)}。${phaseDescription}${PHASE_CONTEXT_HINT}`}
       data-testid="runtime-task-phase"
     >
-      最近阶段：{runtimePhaseLabel(phase)}
+      {phaseLabel}：{runtimePhaseLabel(phase)}
     </Badge>
   );
 }
 
 /** 阶段解释始终描述记录的环节；历史任务缺少阶段时不铺重复的未知提示。 */
-export function RuntimeTaskPhaseDescription({ task, className }: { task: RuntimeTaskEntry; className?: string }) {
-  const phase = runtimeTaskPhaseValue(task);
+export function RuntimeTaskPhaseDescription({
+  task,
+  className,
+  historical = false,
+}: {
+  task: RuntimeTaskEntry;
+  className?: string;
+  historical?: boolean;
+}) {
+  const phase = runtimeTaskPhaseValue(task, historical);
   if (!phase && (task.status === "closed" || task.status === "completed")) return null;
   const description = phase
-    ? `环节说明：${runtimePhaseDescription(phase)}`
-    : task.status === "waiting" && task.waiting_reason === "queued"
-      ? "等待 Runner 认领，尚无执行阶段记录。"
+    ? `${historical ? "上次运行环节说明" : "环节说明"}：${runtimePhaseDescription(phase)}`
+    : isQueuedRuntimeTask(task)
+      ? "等待 Runner 认领，本轮尚未开始。"
       : "暂无阶段记录；可在任务详情中查看运行记录。";
-  return <span className={className} data-testid="runtime-task-phase-description">{description}</span>;
+  return (
+    <span className={className} data-testid="runtime-task-phase-description">
+      {description}
+    </span>
+  );
 }

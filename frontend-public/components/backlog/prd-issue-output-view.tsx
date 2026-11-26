@@ -22,6 +22,8 @@ type IssueLogViewMode = "latest" | "full";
 interface PrdIssueOutputViewProps {
   repoId: string;
   issueNumber: number;
+  /** 历史查看只读取一次，不跟随新尝试或轮询。 */
+  mode?: "live" | "history";
 }
 
 /**
@@ -29,9 +31,21 @@ interface PrdIssueOutputViewProps {
  *
  * @param props.repoId - 已注册仓库标识。
  * @param props.issueNumber - 要跟随的 Issue 编号。
+ * @param props.mode - 实时跟随或历史单次读取，默认实时跟随。
  * @returns Issue 实时输出面板。
  */
-export function PrdIssueOutputView({ repoId, issueNumber }: PrdIssueOutputViewProps) {
+export function PrdIssueOutputView(props: PrdIssueOutputViewProps) {
+  return (
+    <IssueOutputSession
+      key={`${props.repoId}:${props.issueNumber}:${props.mode ?? "live"}`}
+      {...props}
+    />
+  );
+}
+
+/** 按仓库、Issue 和查看模式重建缓冲，避免切换后保留上一份输出。 */
+function IssueOutputSession({ repoId, issueNumber, mode = "live" }: PrdIssueOutputViewProps) {
+  const historical = mode === "history";
   const logIdentity = `${repoId}:${issueNumber}`;
   const [logContent, setLogContent] = useState("");
   const [logViewSelection, setLogViewSelection] = useState<{
@@ -45,8 +59,7 @@ export function PrdIssueOutputView({ repoId, issueNumber }: PrdIssueOutputViewPr
   const attemptIdRef = useRef<string | null>(null);
   const containerRef = useRef<HTMLPreElement | null>(null);
   const fullLogFollowRef = useRef(true);
-  const logViewMode =
-    logViewSelection.identity === logIdentity ? logViewSelection.mode : "latest";
+  const logViewMode = logViewSelection.identity === logIdentity ? logViewSelection.mode : "latest";
   const latestOutput = logContent
     .split("\n")
     .filter((line) => line.length > 0)
@@ -85,8 +98,7 @@ export function PrdIssueOutputView({ repoId, issueNumber }: PrdIssueOutputViewPr
         if (cancelled) {
           return;
         }
-        // 首次成功响应后才清旧 Issue 的显示状态：失败时保留上一屏内容，
-        // 避免网络抖动把已读输出闪成空白。
+        // 首次成功响应清空本次会话；跨 Issue 的缓冲由组件 key 隔离。
         if (attemptIdRef.current === null) {
           setLogContent("");
           setNotice(null);
@@ -123,6 +135,7 @@ export function PrdIssueOutputView({ repoId, issueNumber }: PrdIssueOutputViewPr
 
         // 检测是否出现了新尝试（重试/新执行）。
         if (
+          !historical &&
           chunk.latest_attempt_id &&
           chunk.attempt_id &&
           chunk.latest_attempt_id !== chunk.attempt_id
@@ -151,19 +164,21 @@ export function PrdIssueOutputView({ repoId, issueNumber }: PrdIssueOutputViewPr
       } catch (error) {
         if (!cancelled) {
           setNotice(
-            error instanceof Error ? `读取 Issue 输出失败：${error.message}` : "读取 Issue 输出失败。",
+            error instanceof Error
+              ? `读取 Issue 输出失败：${error.message}`
+              : "读取 Issue 输出失败。",
           );
         }
       }
     }
 
     void pollLog();
-    const timer = setInterval(() => void pollLog(), LOG_POLL_INTERVAL_MS);
+    const timer = historical ? undefined : setInterval(() => void pollLog(), LOG_POLL_INTERVAL_MS);
     return () => {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [repoId, issueNumber, paused]);
+  }, [repoId, issueNumber, paused, historical]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -183,22 +198,31 @@ export function PrdIssueOutputView({ repoId, issueNumber }: PrdIssueOutputViewPr
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
         <div className="flex flex-wrap items-center gap-2">
           <span data-testid="prd-issue-output-attempt">
-            {attemptId ? `本次尝试：${attemptId}` : "等待第一次输出…"}
+            {attemptId
+              ? `${historical ? "历史日志文件" : "本次尝试"}：${attemptId}`
+              : historical
+                ? "读取历史输出…"
+                : "等待第一次输出…"}
           </span>
           {notice ? (
-            <span className="text-amber-600 dark:text-amber-400" data-testid="prd-issue-output-notice">
+            <span
+              className="text-amber-600 dark:text-amber-400"
+              data-testid="prd-issue-output-notice"
+            >
               {notice}
             </span>
           ) : null}
         </div>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => setPaused((current) => !current)}
-          data-testid="prd-issue-output-toggle"
-        >
-          {paused ? "继续" : "暂停"}
-        </Button>
+        {!historical ? (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setPaused((current) => !current)}
+            data-testid="prd-issue-output-toggle"
+          >
+            {paused ? "继续" : "暂停"}
+          </Button>
+        ) : null}
       </div>
       {/* 行前缀 [HH:MM:SS] 由 runner 机器写入，缺日期与时区信息，浏览器无法
           可靠换算，故原样展示、不做时区转换（见 docs/guides/agent-runner.md）。 */}
@@ -238,7 +262,7 @@ export function PrdIssueOutputView({ repoId, issueNumber }: PrdIssueOutputViewPr
       </div>
       <pre
         ref={containerRef}
-        className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-all rounded-md border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-800 dark:bg-slate-950"
+        className="min-h-0 flex-1 overflow-auto rounded-md border border-slate-200 bg-slate-50 p-3 text-xs break-all whitespace-pre-wrap dark:border-slate-800 dark:bg-slate-950"
         aria-label={logViewMode === "latest" ? "Issue 最新输出" : "Issue 完整日志"}
         onScroll={(event) => {
           if (logViewMode !== "full") {

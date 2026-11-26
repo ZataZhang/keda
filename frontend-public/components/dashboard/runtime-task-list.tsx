@@ -19,6 +19,7 @@ import { prettyLabel } from "@/components/agent-runner/label-variant";
 import type { RuntimeTaskEntry, RuntimeTaskStatus } from "@/lib/api/types";
 import { handleExternalLinkClick } from "@/lib/open-external";
 import { cn, formatLocalDateTime } from "@/lib/utils";
+import { isQueuedRuntimeTask } from "@/lib/runtime-task";
 
 import { RuntimeTaskHumanReviewPage } from "./runtime-task-evidence-page";
 import { RuntimeTaskExecutor, RuntimeTaskLocalRunSuperseded } from "./runtime-task-executor";
@@ -377,6 +378,7 @@ function RuntimeTaskRow({
           </span>
         ) : null}
         <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
+          {!isQueuedRuntimeTask(task) ? <>
           <RuntimeTaskLocalRunSuperseded task={task} />
           {task.unclosed_invocation_executor ? (
             <span title="调用账本尚未记录该调用的结束事件；此信息不能单独证明执行进程仍存活。">
@@ -391,6 +393,7 @@ function RuntimeTaskRow({
           ) : null}
           <RuntimeTaskDuration task={task} />
           {task.started_at ? <span>开始：{formatLocalDateTime(task.started_at)}</span> : null}
+          </> : null}
           {task.labels.length > 0 ? (
             <span className="truncate">标签：{task.labels.map(prettyLabel).join(" ")}</span>
           ) : null}
@@ -615,7 +618,8 @@ export function RuntimeTaskWatch({ task }: { task: RuntimeTaskEntry }) {
 }
 
 /** 共享运行耗时口径，区分历史运行和当前轮次。 */
-export function RuntimeTaskDuration({ task }: { task: RuntimeTaskEntry }) {
+export function RuntimeTaskDuration({ task, historical = false }: { task: RuntimeTaskEntry; historical?: boolean }) {
+  if (!historical && isQueuedRuntimeTask(task)) return null;
   if (task.duration_seconds === null) return null;
   const label = task.finished_at ? "上次运行耗时" : task.status === "running" ? "本轮耗时" : "记录耗时";
   return <span>{label}：{formatLifecycleDuration(task.duration_seconds)}</span>;
@@ -659,7 +663,14 @@ export function isActiveRuntimeTask(task: RuntimeTaskEntry): boolean {
 }
 
 /** 在列表、小窗和详情中直接披露运行依据及历史终态。 */
-export function RuntimeTaskObservation({ task }: { task: RuntimeTaskEntry }) {
+export function RuntimeTaskObservation({
+  task,
+  showLastOutcome = !isQueuedRuntimeTask(task),
+}: {
+  task: RuntimeTaskEntry;
+  /** 当前状态区域可隐藏历史结果，历史区域和列表默认保留。 */
+  showLastOutcome?: boolean;
+}) {
   const outcomeLabels: Record<string, string> = {
     completed: "成功",
     failed: "失败",
@@ -683,12 +694,13 @@ export function RuntimeTaskObservation({ task }: { task: RuntimeTaskEntry }) {
       : task.status === "unknown" || task.status === "closed" || task.status === "deferred"
         ? task.status_reason
         : null;
-  if (!reason && !task.last_outcome) return null;
+  const lastOutcome = showLastOutcome ? task.last_outcome : null;
+  if (!reason && !lastOutcome) return null;
   return (
     <span className="mt-1 block text-xs text-slate-500" data-testid="runtime-task-observation">
       {reason}
-      {reason && task.last_outcome ? " · " : ""}
-      {task.last_outcome ? `上次运行结果：${outcomeLabels[task.last_outcome] ?? task.last_outcome}` : ""}
+      {reason && lastOutcome ? " · " : ""}
+      {lastOutcome ? `上次运行结果：${outcomeLabels[lastOutcome] ?? lastOutcome}` : ""}
     </span>
   );
 }

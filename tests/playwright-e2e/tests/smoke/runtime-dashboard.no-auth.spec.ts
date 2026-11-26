@@ -550,6 +550,138 @@ test.describe('runtime board (mocked API)', () => {
     await expect(page.getByTestId('runtime-invocation-row')).toHaveCount(1)
   })
 
+  test('queued tasks isolate historical failures and only load history on demand', async ({ page }) => {
+    await page.clock.install()
+    const queuedTask = {
+      ...FAILED_TASK,
+      status: 'waiting',
+      waiting_reason: 'queued',
+      status_reason: '当前监控标签：agent/ready',
+      labels: ['agent/ready'],
+      pipeline_stage: 'fix',
+      preset: 'old-preset',
+      model: 'old-model',
+      executor_host: 'old-host',
+      unclosed_invocation_executor: 'old-executor',
+      last_error_summary: 'Old run requested a commit but produced no file changes.',
+      failure_stage: 'fix',
+      failure_reason: 'Old executor failure',
+    }
+    await mockBoardApi(page, { tasks: { tasks: [queuedTask] } })
+    let logReads = 0
+    let invocationReads = 0
+    await page.route(ATTEMPTS_ENDPOINT, (route) => {
+      invocationReads += 1
+      return route.fulfill({ json: { attempts: [], invocations: [] } })
+    })
+    await page.route('**/api/v1/agent-runner/console/repositories/*/issues/*/logs*', (route) => {
+      logReads += 1
+      return route.fulfill({ json: {
+        status: 'ok', content: 'Historical failure log', next_offset: 22,
+        attempt_id: 'old-attempt.log', latest_attempt_id: 'old-attempt.log', eof: true,
+      } })
+    })
+    await page.goto('/app/dashboard')
+    const openQueuedTask = async () => {
+      const row = page.getByTestId('runtime-task-row-keda-main-19')
+      await expect(row).toContainText('本轮尚未开始')
+      await expect(row.getByTestId('runtime-task-phase')).toHaveCount(0)
+      for (const historicalLabel of ['最近执行', '上次运行结果', 'old-preset', 'old-host', 'old-executor', '开始：', '耗时']) {
+        await expect(row).not.toContainText(historicalLabel)
+      }
+      await row.click()
+      await expect(page.getByTestId('runtime-task-queued-notice')).toContainText('本轮尚未开始')
+      await expect(page.getByTestId('runtime-task-history-toggle')).toHaveAttribute('aria-expanded', 'false')
+      await expect(page.getByTestId('runtime-task-history')).toHaveText('查看历史运行记录')
+      await expect(page.getByTestId('runtime-task-detail')).not.toContainText('上次运行结果')
+      await expect(page.getByTestId('runtime-task-error-summary')).toHaveCount(0)
+      await expect(page.getByTestId('runtime-task-diagnosed-failure')).toHaveCount(0)
+      await expect(page.getByTestId('runtime-task-current')).not.toContainText('上次运行结果')
+      await expect(page.getByTestId('runtime-task-current').getByTestId('runtime-task-phase')).toHaveCount(0)
+      await expect(page.getByTestId('runtime-detail-agent')).toHaveCount(0)
+      await expect(page.getByRole('heading', { name: '实时输出' })).toHaveCount(0)
+      expect(logReads).toBe(0)
+      expect(invocationReads).toBe(0)
+    }
+    await openQueuedTask()
+    await page.reload()
+    await openQueuedTask()
+    await page.getByTestId('runtime-task-detail-sheet').screenshot({ path: '/tmp/keda-queued-history-isolation.png' })
+    await page.setViewportSize({ width: 440, height: 900 })
+    await expect(page.getByTestId('runtime-task-queued-notice')).toBeVisible()
+    await page.getByTestId('runtime-task-detail-sheet').screenshot({ path: '/tmp/keda-queued-history-isolation-narrow.png' })
+
+    await page.getByTestId('runtime-task-history-toggle').click()
+    await expect(page.getByTestId('runtime-task-history').getByTestId('runtime-task-phase')).toHaveText('上次运行阶段：修复')
+    await expect(page.getByTestId('runtime-task-history')).toContainText('执行器：claude')
+    await expect(page.getByTestId('runtime-task-history')).toContainText('Preset：old-preset')
+    await expect(page.getByTestId('runtime-task-error-summary')).toContainText('上次运行失败原因')
+    await expect(page.getByRole('heading', { name: '历史输出' })).toBeVisible()
+    await expect(page.getByTestId('prd-issue-output-content')).toContainText('Historical failure log')
+    await expect(page.getByTestId('prd-issue-output-attempt')).toContainText('历史日志文件')
+    await expect(page.getByTestId('prd-issue-output-toggle')).toHaveCount(0)
+    await expect.poll(() => invocationReads).toBeGreaterThan(0)
+    // 开发模式 StrictMode 可重复执行首次 effect；验证后续时间推进不产生轮询。
+    const initialLogReads = logReads
+    const initialInvocationReads = invocationReads
+    await page.clock.runFor(6000)
+    expect(logReads).toBe(initialLogReads)
+    expect(invocationReads).toBe(initialInvocationReads)
+    await page.getByTestId('runtime-task-history-toggle').click()
+    await expect(page.getByTestId('runtime-task-history')).toHaveText('查看历史运行记录')
+    await expect(page.getByTestId('runtime-task-detail')).not.toContainText('上次运行结果')
+    await expect(page.getByTestId('runtime-task-error-summary')).toHaveCount(0)
+    await page.goto('/app/companion')
+    const companionRow = page.getByTestId('desktop-companion-row-keda-main-19')
+    await expect(companionRow).toContainText('本轮尚未开始')
+    await expect(companionRow.getByTestId('runtime-task-phase')).toHaveCount(0)
+    for (const historicalLabel of ['最近执行', '上次运行结果', 'old-preset', 'old-host', '耗时']) {
+      await expect(companionRow).not.toContainText(historicalLabel)
+    }
+  })
+
+  test('a new run replaces the open historical output in the same task drawer', async ({ page }) => {
+    await page.clock.install()
+    await mockBoardApi(page)
+    let currentTask: Record<string, unknown> = FAILED_TASK
+    let currentLog = 'Previous run output'
+    let runtimeReads = 0
+    await page.route(TASKS_ENDPOINT, (route) => {
+      runtimeReads += 1
+      return route.fulfill({ json: tasksPayload({ tasks: [currentTask] }) })
+    })
+    await page.route('**/api/v1/agent-runner/overview/issue-revision', (route) =>
+      route.fulfill({ json: { revision: currentTask.invocation_run_id ?? 'old-run' } }),
+    )
+    await page.route('**/api/v1/agent-runner/overview/snapshots', (route) => route.fulfill({ json: {
+      repositories: [], missing_repo_ids: [], sync_status: 'ready', scanned_at: null,
+    } }))
+    await page.route('**/api/v1/agent-runner/console/repositories/*/issues/*/logs*', (route) =>
+      route.fulfill({ json: {
+        status: 'ok', content: currentLog, next_offset: currentLog.length,
+        attempt_id: `${currentTask.invocation_run_id ?? 'old'}.log`, eof: true,
+      } }),
+    )
+    await page.goto('/app/dashboard')
+    await page.getByTestId('runtime-task-row-keda-main-19').click()
+    await expect(page.getByTestId('prd-issue-output-content')).toContainText('Previous run output')
+    const readsBeforeRestart = runtimeReads
+    currentTask = {
+      ...RUNNING_TASK, issue_number: 19, task_key: FAILED_TASK.task_key,
+      invocation_run_id: 'new-run', started_at: '2026-06-11T10:00:00+00:00',
+    }
+    currentLog = 'New run output'
+    await expect.poll(async () => {
+      await page.clock.runFor(2000)
+      return runtimeReads
+    }).toBeGreaterThan(readsBeforeRestart)
+    await expect(page.getByRole('heading', { name: '实时输出' })).toBeVisible()
+    await expect(page.getByTestId('runtime-task-history')).toHaveCount(0)
+    await expect(page.getByTestId('prd-issue-output-content')).toContainText('New run output')
+    await expect(page.getByTestId('prd-issue-output-content')).not.toContainText('Previous run output')
+    await expect(page.getByTestId('prd-issue-output-attempt')).toContainText('new-run.log')
+  })
+
   test('structured calls refresh before the run finishes', async ({ page }) => {
     await mockBoardApi(page)
     let invocationFinished = false
