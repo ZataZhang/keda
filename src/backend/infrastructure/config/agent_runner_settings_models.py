@@ -300,6 +300,15 @@ class AgentRunnerWorktreeSettings(BaseModel):
     # 默认开启;目标仓需含 scripts/shared/template/setup_copied_database.py,缺脚本或无关系型
     # DB 时 provision 会告警并回退到共享库(见 use_cases.worktree_database)。
     provision_database: bool = True
+    migration_command: tuple[str, ...] | None = Field(default=None, min_length=1)
+
+    @field_validator("migration_command")
+    @classmethod
+    def validate_migration_command(cls, command: tuple[str, ...] | None) -> tuple[str, ...] | None:
+        """配置迁移命令时，首个参数必须是可执行程序。"""
+        if command is not None and not command[0].strip():
+            raise ValueError("migration_command must start with an executable")
+        return command
 
 
 class AgentRunnerE2eArtifactSettings(BaseModel):

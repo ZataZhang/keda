@@ -53,8 +53,21 @@ worktree 意外共用同一数据库。开发服务与 E2E 测试共用该 workt
 
 `kc daemon` 也可通过 `[agent_runner.worktree]` 的 `provision_database = true` 在领取
 Issue 后执行同一流程。数据库 URL 支持 PostgreSQL（`postgresql...`）和 MySQL
-（`mysql...`）；两者均要求数据库账号有创建数据库的权限。SQLite 不支持 worktree
-隔离，严格模式下会阻止 daemon 开始执行，避免多个 Issue 共享同一个数据库文件。
+（`mysql...`），两者均要求数据库账号有创建数据库的权限。
+
+仓库可以在同一配置段设置 `migration_command`，用参数数组指定迁移入口。例如：
+
+```toml
+[agent_runner.worktree]
+provision_database = true
+migration_command = ["uv", "run", "python", "-m", "scripts.migrate_worktree", "{database_identifier}"]
+```
+
+Runner 在独立库创建成功后，从目标 worktree 运行命令，并用建库时的同一个标识替换
+`{database_identifier}`。脚本可以从工作树的 `.env.local` 读取并校验专用连接地址。
+建库或自定义迁移失败时，当前任务在启动 Agent 前失败，日志记录失败阶段与退出码，
+工作树保留供重试。省略 `migration_command` 时，有 `alembic.ini` 的工作树运行
+`uv run alembic upgrade head`，数据库准备失败时记录警告并继续。
 
 对包含多个前端子项目的仓库，默认策略会覆盖类似 `demo-frontend/`、`admin-frontend/` 这类嵌套目录，而不是只处理仓库根目录。
 

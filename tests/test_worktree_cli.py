@@ -277,6 +277,7 @@ def test_create_or_reuse_worktree_provisions_database_when_enabled(
             path_command=f"echo {worktree_path}",
             provision_database=True,
             base_branch="main",
+            migration_command=("migration", "{database_identifier}"),
         )
     )
     issue = IssueSummary(
@@ -301,6 +302,7 @@ def test_create_or_reuse_worktree_provisions_database_when_enabled(
     assert len(provision_requests) == 1
     assert provision_requests[0].issue_number == issue.number
     assert provision_requests[0].worktree_path == worktree_path.resolve()
+    assert provision_requests[0].migration_command == config.worktree.migration_command
 
 
 def test_create_or_reuse_worktree_links_frontend_node_modules(

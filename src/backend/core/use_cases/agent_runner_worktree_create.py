@@ -297,12 +297,16 @@ def create_or_reuse_worktree(
             worktree_path,
             ", ".join(str(env_path) for env_path in copied_env_paths),
         )
+    expected_branch = f"issue-{issue.number}"
+    _ensure_worktree_branch(worktree_path, expected_branch, issue, config, process_runner)
+    _reconcile_worktree_with_remote_branch(worktree_path, config, process_runner)
     if config.worktree.provision_database:
         provision_worktree_database(
             WorktreeDatabaseProvisionRequest(
                 repository_path=repo_path,
                 worktree_path=worktree_path,
                 issue_number=issue.number,
+                migration_command=config.worktree.migration_command,
             ),
             process_runner,
         )
@@ -333,9 +337,6 @@ def create_or_reuse_worktree(
             worktree_path,
             ", ".join(f"{record.project_path} ({record.reason})" for record in unprepared_records),
         )
-    expected_branch = f"issue-{issue.number}"
-    _ensure_worktree_branch(worktree_path, expected_branch, issue, config, process_runner)
-    _reconcile_worktree_with_remote_branch(worktree_path, config, process_runner)
     return worktree_path
 
 
