@@ -57,6 +57,10 @@ from backend.core.use_cases.runtime_task_observation import (
     parse_runtime_timestamp,
     reconcile_runtime_task,
 )
+from backend.core.use_cases.runtime_history_identity import (
+    can_attach_runtime_history,
+    select_runtime_history,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -827,9 +831,23 @@ def build_runtime_task_summary(
     if snapshot_overview.sync_status in _UNTRUSTED_SYNC_STATUSES:
         unavailable_sources.add(SOURCE_MONITOR_SNAPSHOT)
 
-    runs_by_issue = _latest_run_by_issue(runs)
-    prd_path_by_issue = _latest_prd_path_by_issue(lifecycle_runs)
-    lifecycle_by_issue = _latest_lifecycle_by_issue(lifecycle_runs)
+    current_issue_urls = {
+        (repo_snapshot.repo_id, issue_entry["number"]): issue_entry["url"]
+        for repo_snapshot in snapshot_overview.repositories
+        for issue_entry in _overview_issues(repo_snapshot.overview)
+        if isinstance(issue_entry.get("number"), int) and isinstance(issue_entry.get("url"), str)
+    }
+    matched_history = select_runtime_history(
+        current_issue_urls=current_issue_urls,
+        runs=runs,
+        lifecycle_runs=lifecycle_runs,
+        lifecycle_store=prd_lifecycle_store,
+    )
+    if matched_history.lifecycle_unavailable:
+        unavailable_sources.add(SOURCE_PRD_LIFECYCLE)
+    runs_by_issue = _latest_run_by_issue(matched_history.runs)
+    prd_path_by_issue = _latest_prd_path_by_issue(matched_history.lifecycle_runs)
+    lifecycle_by_issue = _latest_lifecycle_by_issue(matched_history.lifecycle_runs)
     window_start = reference_time - timedelta(seconds=RUNTIME_TASK_WINDOW_SECONDS)
 
     tasks: list[RuntimeTask] = []
@@ -928,6 +946,8 @@ def build_runtime_task_summary(
                 unavailable_sources=unavailable_sources,
                 reference_time=reference_time,
             )
+            if can_attach_runtime_history(task, matched_history.conflicting_keys)
+            else task
             for task in tasks
         ]
 
@@ -944,7 +964,15 @@ def build_runtime_task_summary(
     ]
 
     if evidence_media is not None:
-        tasks = [_with_evidence_flags(task, evidence_media(task)) for task in tasks]
+        tasks = [
+            _with_evidence_flags(
+                task,
+                evidence_media(task)
+                if can_attach_runtime_history(task, matched_history.conflicting_keys)
+                else None,
+            )
+            for task in tasks
+        ]
 
     tasks.sort(key=_task_sort_key)
     truncated = len(tasks) > max_rows

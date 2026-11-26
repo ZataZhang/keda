@@ -169,30 +169,26 @@ def _process_single_issue(
     output_view.register_issue(issue.number, selected_agent)
     run_started_at = datetime.now(timezone.utc)
     used_agent = selected_agent
+    lifecycle_start_detail = {
+        "agent": selected_agent,
+        "issue_kind": issue_kind,
+        "run_trigger": run_trigger,
+        "issue_url": issue.url,
+    }
 
     # run id 与 backlog 启动侧一致，避免重复创建生命周期记录。
-    record_lifecycle_event(
-        store=run_history_store,
-        repo_id=effective_repo_id,
-        prd_path=lifecycle_prd_path,
-        issue_number=issue.number,
-        trigger=run_trigger,
-        event_type=LifecycleEventType.STARTED,
-        actor="runner",
-        occurred_at=run_started_at.isoformat(),
-        detail={"agent": selected_agent, "issue_kind": issue_kind, "run_trigger": run_trigger},
-    )
-    record_lifecycle_event(
-        store=run_history_store,
-        repo_id=effective_repo_id,
-        prd_path=lifecycle_prd_path,
-        issue_number=issue.number,
-        trigger=run_trigger,
-        event_type=LifecycleEventType.CLAIMED,
-        actor="runner",
-        occurred_at=run_started_at.isoformat(),
-        detail={"agent": selected_agent, "issue_kind": issue_kind, "run_trigger": run_trigger},
-    )
+    for event_type in (LifecycleEventType.STARTED, LifecycleEventType.CLAIMED):
+        record_lifecycle_event(
+            store=run_history_store,
+            repo_id=effective_repo_id,
+            prd_path=lifecycle_prd_path,
+            issue_number=issue.number,
+            trigger=run_trigger,
+            event_type=event_type,
+            actor="runner",
+            occurred_at=run_started_at.isoformat(),
+            detail=lifecycle_start_detail,
+        )
 
     def _on_attempt_recorded(result: AttemptResult, attempt_results: list[AttemptResult]) -> None:
         _persist_attempt_result(

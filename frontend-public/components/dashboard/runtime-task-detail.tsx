@@ -1,11 +1,11 @@
 "use client";
 
-// 运行看板单任务详情：身份与运行观测 + Issue 实时输出 + 默认展开的结构化调用。
+// 运行看板单任务详情：当前状态 + 当前运行输出或按需展开的历史运行。
 //
 // 三条口径：
 // 1. 日志走**既有** Issue 增量日志端点（复用 `PrdIssueOutputView` 的 offset 续读
 //    状态机），本组件不新造日志通道，也不过滤/截断原始文本；
-// 2. 结构化调用来自既有 invocation ledger，**默认展开**——选中任务后读取，收起不轮询；
+// 2. 结构化调用来自既有 invocation ledger；历史未展开时不读取，当前运行才轮询；
 // 3. 改动树触达只读现有 progress 契约：可比时画真实比例条，不可比时逐条说明
 //    原因，绝不把「读不到」画成 0% 或空条。
 //
@@ -16,13 +16,7 @@ import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { PrdIssueOutputView } from "@/components/backlog/prd-issue-output-view";
-import {
-  formatLifecycleDuration,
-  invocationOutcomeBadge,
-} from "@/components/backlog/prd-lifecycle-format";
 import { explainImpactStatus } from "@/components/backlog/prd-progress-strip";
-import { fetchRunExecutionDetails } from "@/lib/api/console";
 import { fetchLifecycleSettings } from "@/lib/api/lifecycleSettings";
 import { fetchPrdProgress } from "@/lib/api/backlog";
 import { openExternalUrl } from "@/lib/open-external";
@@ -31,19 +25,15 @@ import type {
   AgentAvailabilityEntry,
   AnomalyType,
   RuntimeTaskEntry,
-  RunInvocationDetailEntry,
 } from "@/lib/api/types";
-import { cn, formatLocalDateTime } from "@/lib/utils";
+import { cn } from "@/lib/utils";
+import { isQueuedRuntimeTask } from "@/lib/runtime-task";
 
-import {
-  RuntimeTaskPhaseDescription,
-  RuntimeTaskPhase,
-  runtimePhaseLabel,
-} from "./runtime-task-phase";
-import { RuntimeTaskExecutor, RuntimeTaskLocalRunSuperseded } from "./runtime-task-executor";
+import { RuntimeTaskPhaseDescription, RuntimeTaskPhase } from "./runtime-task-phase";
+import { RuntimeTaskExecutor } from "./runtime-task-executor";
+import { RuntimeTaskRun } from "./runtime-task-run";
 import {
   RuntimeTaskBlockingReason,
-  RuntimeTaskDuration,
   RuntimeTaskObservation,
   RuntimeTaskWatch,
   runtimeStatusPresentation,
@@ -97,8 +87,8 @@ interface RuntimeTaskAnomaliesProps {
 export function RuntimeTaskAnomalies({ task, compact = false }: RuntimeTaskAnomaliesProps) {
   const descriptions = (task.anomaly_types ?? []).map((anomalyType) =>
     anomalyType === "label_pr_mismatch"
-      ? task.pr_label_warning ?? ANOMALY_DESCRIPTIONS[anomalyType]
-      : ANOMALY_DESCRIPTIONS[anomalyType] ?? "监控发现状态不一致，请查看仓库监控",
+      ? (task.pr_label_warning ?? ANOMALY_DESCRIPTIONS[anomalyType])
+      : (ANOMALY_DESCRIPTIONS[anomalyType] ?? "监控发现状态不一致，请查看仓库监控"),
   );
   if (descriptions.length === 0) {
     return null;
@@ -129,7 +119,6 @@ interface RuntimeTaskImpactProps {
 }
 
 /** 触达读数刷新节奏：与看板摘要用同一 15 秒轮询，旧读数留到新一轮落地。 */
-const INVOCATION_REFRESH_MS = 5_000;
 const IMPACT_REFRESH_MS = 15_000;
 
 /**
@@ -233,12 +222,14 @@ export function RuntimeTaskImpact({
   const progress = current.progress;
   const reason = describeImpactUnavailability(progress);
   const impact = progress.impact;
-  const archiveInfo = !compact && progress.prd_source && progress.prd_path.startsWith("tasks/archive/") ? (
-    <p className="break-words text-xs text-slate-500">
-      PRD 已归档（{progress.prd_source === "worktree" ? "执行工作区" : "主仓库"}）：
-      <code>{progress.prd_path}</code>
-    </p>
-  ) : null;
+  const archiveInfo =
+    !compact && progress.prd_source && progress.prd_path.startsWith("tasks/archive/") ? (
+      <p className="text-xs break-words text-slate-500">
+        PRD 已归档（
+        {progress.prd_source === "worktree" ? "执行工作区" : "主仓库"}）：
+        <code>{progress.prd_path}</code>
+      </p>
+    ) : null;
   // 可比且分母非零才画条：judgeable=0 属于「无法判定」，画成 0% 会被读成「没改对」。
   if (!reason && impact && impact.judgeable > 0) {
     const percent = Math.min(100, Math.round((impact.touched / impact.judgeable) * 100));
@@ -313,7 +304,7 @@ interface RuntimeTaskDetailProps {
  * 渲染选中任务的详情面板。
  *
  * @param props - 选中任务。
- * @returns 详情面板（观测摘要、触达弱信号、实时输出、折叠的结构化调用）。
+ * @returns 详情面板（当前状态、触达弱信号、实时输出或历史运行记录）。
  */
 export function RuntimeTaskDetail({
   task,
@@ -323,93 +314,26 @@ export function RuntimeTaskDetail({
   className,
 }: RuntimeTaskDetailProps) {
   const presentation = runtimeStatusPresentation(task.status, task.waiting_reason);
-  const [invocationsOpen, setInvocationsOpen] = useState(true);
-  const [invocationResult, setInvocationResult] = useState<{
-    key: string;
-    rows: RunInvocationDetailEntry[] | null;
-    error: string | null;
-  } | null>(null);
   const [executorChooserOpen, setExecutorChooserOpen] = useState(false);
   const [executorChoices, setExecutorChoices] = useState<AgentAvailabilityEntry[] | null>(null);
   const [executorChoice, setExecutorChoice] = useState("");
   const [executorChoiceError, setExecutorChoiceError] = useState<string | null>(null);
   const [executorChoicesLoading, setExecutorChoicesLoading] = useState(false);
-  const {
-    started_at: startedAt,
-    finished_at: finishedAt,
-    invocation_run_id: invocationRunId,
-  } = task;
-  const invocationKey = JSON.stringify([
-    task.repo_id,
-    task.issue_number,
-    invocationRunId ?? [startedAt, finishedAt],
-  ]);
-  const currentResult = invocationResult?.key === invocationKey ? invocationResult : null;
-  const invocations = currentResult?.rows ?? null;
-  const invocationError = currentResult?.error ?? null;
-  const liveInvocations = task.status === "running" && !finishedAt;
-  const hasRunWindow = Boolean(startedAt && (finishedAt || liveInvocations));
-
-  useEffect(() => {
-    if (!invocationsOpen || !startedAt || (!finishedAt && !liveInvocations)) {
-      return;
-    }
-    const controller = new AbortController();
-    let refreshTimer: number | undefined;
-    const readInvocations = async () => {
-      try {
-        const details = await fetchRunExecutionDetails({
-          repoId: task.repo_id,
-          issueNumber: task.issue_number,
-          startedAt,
-          finishedAt: finishedAt ?? undefined,
-          invocationRunId,
-          signal: controller.signal,
-        });
-        if (!controller.signal.aborted) {
-          setInvocationResult({ key: invocationKey, rows: details.invocations, error: null });
-        }
-      } catch (error: unknown) {
-        if (!controller.signal.aborted) {
-          setInvocationResult({
-            key: invocationKey,
-            rows: null,
-            error: error instanceof Error ? error.message : "结构化调用读取失败",
-          });
-        }
-      } finally {
-        if (liveInvocations && !controller.signal.aborted) {
-          refreshTimer = window.setTimeout(() => void readInvocations(), INVOCATION_REFRESH_MS);
-        }
-      }
-    };
-    void readInvocations();
-    return () => {
-      controller.abort();
-      window.clearTimeout(refreshTimer);
-    };
-  }, [
-    invocationsOpen,
-    liveInvocations,
-    task.repo_id,
-    task.issue_number,
-    startedAt,
-    finishedAt,
-    invocationRunId,
-    invocationKey,
-  ]);
-
   const identity = `${task.repo_display_name ?? task.repo_id}#${task.issue_number}`;
   const issueUrl = task.issue_url;
   const prUrl = task.pr_url;
 
+  /** 读取该阶段可切换且尚未失败过的执行器。 */
   async function openExecutorChooser() {
     setExecutorChooserOpen(true);
     setExecutorChoices(null);
     setExecutorChoiceError(null);
     setExecutorChoicesLoading(true);
     try {
-      const settings = await fetchLifecycleSettings({ scope: "repository", repoId: task.repo_id });
+      const settings = await fetchLifecycleSettings({
+        scope: "repository",
+        repoId: task.repo_id,
+      });
       const failedExecutors = new Set(task.failed_executors ?? []);
       const choices = settings.agent_availability.filter(
         (entry) =>
@@ -431,27 +355,31 @@ export function RuntimeTaskDetail({
 
   return (
     <div className={cn("flex min-h-0 flex-col gap-3", className)} data-testid="runtime-task-detail">
-      <Card>
+      <Card data-testid="runtime-task-current">
         <CardHeader className="pb-2">
           <CardTitle className="flex flex-wrap items-center gap-2 text-sm">
             <Badge variant={presentation.variant}>{presentation.label}</Badge>
             <RuntimeTaskExecutor task={task} />
             <RuntimeTaskPhase task={task} />
-            <Badge
-              variant="outline"
-              className="whitespace-normal break-all"
-              data-testid="runtime-detail-agent"
-              title={task.unclosed_invocation_executor
-                ? "调用账本尚未记录结束事件，进程存活状态需另行确认。"
-                : undefined}
-            >
-              {task.unclosed_invocation_executor
-                ? `未结束调用：${task.unclosed_invocation_executor}`
-                : `最近执行：${task.agent ?? "未知"}`}
-              {task.unclosed_invocation_executor && task.unclosed_invocation_model
-                ? ` · ${task.unclosed_invocation_model}`
-                : null}
-            </Badge>
+            {!isQueuedRuntimeTask(task) ? (
+              <Badge
+                variant="outline"
+                className="break-all whitespace-normal"
+                data-testid="runtime-detail-agent"
+                title={
+                  task.unclosed_invocation_executor
+                    ? "调用账本尚未记录结束事件，进程存活状态需另行确认。"
+                    : undefined
+                }
+              >
+                {task.unclosed_invocation_executor
+                  ? `未结束调用：${task.unclosed_invocation_executor}`
+                  : `最近执行：${task.agent ?? "未知"}`}
+                {task.unclosed_invocation_executor && task.unclosed_invocation_model
+                  ? ` · ${task.unclosed_invocation_model}`
+                  : null}
+              </Badge>
+            ) : null}
             <RuntimeTaskWatch task={task} />
             <span>{identity}</span>
             {issueUrl ? (
@@ -493,30 +421,7 @@ export function RuntimeTaskDetail({
           <p data-testid="runtime-task-status-reason">状态来源：{task.status_reason ?? "未提供"}</p>
           <RuntimeTaskBlockingReason task={task} />
           <RuntimeTaskPhaseDescription task={task} />
-          <RuntimeTaskObservation task={task} />
-          {task.last_error_summary ? (
-            <p
-              className="whitespace-pre-wrap break-words text-amber-800 dark:text-amber-300"
-              data-testid="runtime-task-error-summary"
-            >
-              {task.last_outcome === "blocked"
-                ? "阻塞原因"
-                : task.last_outcome === "failed"
-                  ? "失败原因"
-                  : task.last_outcome === "deferred"
-                    ? "暂缓原因"
-                    : "最近运行错误"}
-              ：{task.last_error_summary}
-            </p>
-          ) : null}
-          {task.failure_reason ? (
-            <p
-              className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200"
-              data-testid="runtime-task-diagnosed-failure"
-            >
-              失败阶段：{task.failure_stage ? runtimePhaseLabel(task.failure_stage) : "未知"}。{task.failure_reason}
-            </p>
-          ) : null}
+          <RuntimeTaskObservation task={task} showLastOutcome={false} />
           {task.status === "failed" && task.failure_stage && onRetryWithExecutor ? (
             <div className="rounded-md border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950">
               <p className="text-sm text-amber-900 dark:text-amber-100">
@@ -545,7 +450,9 @@ export function RuntimeTaskDetail({
               ) : (
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   {executorChoicesLoading ? (
-                    <span className="text-sm text-amber-800 dark:text-amber-200">读取可用执行器…</span>
+                    <span className="text-sm text-amber-800 dark:text-amber-200">
+                      读取可用执行器…
+                    </span>
                   ) : executorChoices && executorChoices.length > 0 ? (
                     <>
                       <label className="sr-only" htmlFor="runtime-retry-executor">
@@ -567,7 +474,9 @@ export function RuntimeTaskDetail({
                       <Button
                         size="sm"
                         disabled={retryPending || !executorChoice}
-                        onClick={() => onRetryWithExecutor(task.failure_stage as string, executorChoice)}
+                        onClick={() =>
+                          onRetryWithExecutor(task.failure_stage as string, executorChoice)
+                        }
                         data-testid="runtime-task-retry-with-executor"
                       >
                         {retryPending ? "排入续跑…" : "使用该执行器续跑"}
@@ -596,22 +505,6 @@ export function RuntimeTaskDetail({
             </div>
           ) : null}
           <RuntimeTaskAnomalies task={task} />
-          <div className="flex flex-wrap gap-x-4 gap-y-1">
-            <RuntimeTaskLocalRunSuperseded task={task} />
-            {task.preset ? <span>Preset：{task.preset}</span> : null}
-            {task.model ? <span>最近上报模型：{task.model}</span> : null}
-            <span>尝试：{task.attempt_number ?? "—"}</span>
-            <span>
-              开始：
-              {task.started_at ? formatLocalDateTime(task.started_at) : "未知"}
-            </span>
-            <span>
-              结束：
-              {task.finished_at ? formatLocalDateTime(task.finished_at) : task.started_at ? "未记录结束时间" : "无运行记录"}
-            </span>
-            <RuntimeTaskDuration task={task} />
-            <span>运行记录终态：{task.last_outcome ?? (task.started_at ? "未收口" : "无运行记录")}</span>
-          </div>
           {task.prd_path ? (
             <p className="text-slate-500">
               PRD 原始路径：<code>{task.prd_path}</code>
@@ -621,73 +514,16 @@ export function RuntimeTaskDetail({
         </CardContent>
       </Card>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-2">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-sm font-medium text-slate-900 dark:text-slate-100">实时输出</h3>
-          <Button
-            size="sm"
-            variant={invocationsOpen ? "default" : "outline"}
-            aria-expanded={invocationsOpen}
-            onClick={() => setInvocationsOpen((open) => !open)}
-            data-testid="runtime-invocation-toggle"
-          >
-            {invocationsOpen ? "收起结构化调用" : "展开结构化调用"}
-          </Button>
-        </div>
-        {invocationsOpen ? (
-          <div
-            className="rounded-md border border-slate-200 p-3 dark:border-slate-800"
-            data-testid="runtime-invocation-panel"
-          >
-            {invocationError ? (
-              <p className="text-xs text-amber-700 dark:text-amber-300">
-                结构化调用读取失败：{invocationError}
-              </p>
-            ) : !hasRunWindow ? (
-              <p className="text-xs text-slate-500">
-                该任务暂无可查询的运行记录。
-              </p>
-            ) : invocations === null ? (
-              <p className="text-xs text-slate-500">读取中…</p>
-            ) : invocations.length === 0 ? (
-              <p className="text-xs text-slate-500" data-testid="runtime-invocation-empty">
-                本次运行窗口内没有持久化的结构化调用记录。
-              </p>
-            ) : (
-              <ul className="flex flex-col gap-1">
-                {invocations.map((invocation) => {
-                  const outcome = invocationOutcomeBadge(invocation.outcome);
-                  return (
-                    <li
-                      key={invocation.invocation_id}
-                      className="flex flex-wrap items-center gap-2 text-xs"
-                      data-testid="runtime-invocation-row"
-                    >
-                      <Badge variant={outcome.variant}>{outcome.label}</Badge>
-                      <span className="text-slate-600 dark:text-slate-300">
-                        {invocation.phase} · {invocation.role} · {invocation.executor}
-                      </span>
-                      <span className="text-slate-500">
-                        {formatLifecycleDuration(invocation.duration_seconds)}
-                      </span>
-                      {invocation.retry_of ? (
-                        <span className="text-slate-500">重试自 {invocation.retry_of}</span>
-                      ) : null}
-                      {invocation.reported_model ? (
-                        <span className="text-slate-500">{invocation.reported_model}</span>
-                      ) : null}
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </div>
-        ) : null}
-        {/* 日志面板自带 offset 续读、暂停与新尝试切换，原始文本不做任何过滤。 */}
-        <div className="flex min-h-[16rem] flex-1 flex-col">
-          <PrdIssueOutputView repoId={task.repo_id} issueNumber={task.issue_number} />
-        </div>
-      </div>
+      <RuntimeTaskRun
+        key={JSON.stringify([
+          task.task_key,
+          task.invocation_run_id,
+          task.started_at,
+          task.finished_at,
+          task.status,
+        ])}
+        task={task}
+      />
     </div>
   );
 }
