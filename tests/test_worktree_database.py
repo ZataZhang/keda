@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from hashlib import sha256
 from pathlib import Path
+
+import pytest
 
 from backend.core.shared.models.agent_runner import CommandResult
 from backend.core.use_cases.worktree_database import (
@@ -17,6 +20,7 @@ class FakeProcessRunner:
     def __init__(self, command_results: list[CommandResult]) -> None:
         self._command_results = command_results
         self.commands: list[list[str]] = []
+        self.working_directories: list[Path] = []
 
     def run(
         self,
@@ -27,6 +31,7 @@ class FakeProcessRunner:
         **_: object,
     ) -> CommandResult:
         self.commands.append(command)
+        self.working_directories.append(cwd)
         return self._command_results.pop(0)
 
 
@@ -94,3 +99,54 @@ def test_provision_worktree_database_skips_when_setup_fails(tmp_path: Path) -> N
 
     assert len(process_runner.commands) == 1
     assert process_runner.commands[0][:3] == ["uv", "run", "python"]
+
+
+def test_configured_worktree_migration_reuses_setup_identifier(tmp_path: Path) -> None:
+    """自定义命令在建库后取得同一标识，且可用于无 Alembic 配置的项目。"""
+    repository_path, worktree_path = _make_repo_with_script(tmp_path, 42)
+    (worktree_path / "alembic.ini").unlink()
+    process_runner = FakeProcessRunner([_command_result(), _command_result()])
+
+    provision_worktree_database(
+        WorktreeDatabaseProvisionRequest(
+            repository_path,
+            worktree_path,
+            issue_number=42,
+            migration_command=("migration", "{database_identifier}", "one argument"),
+        ),
+        process_runner,
+    )
+
+    digest = sha256(str(repository_path.resolve()).encode("utf-8")).hexdigest()[:8]
+    assert process_runner.commands[0][4] == f"keda_kc_issue_42_{digest}"
+    assert process_runner.commands[1] == [
+        "migration",
+        process_runner.commands[0][4],
+        "one argument",
+    ]
+    assert process_runner.working_directories == [worktree_path, worktree_path]
+
+
+@pytest.mark.parametrize(
+    ("exit_codes", "failure_message"),
+    [
+        ([7], "database setup failed"),
+        ([0, 9], "database migration failed"),
+    ],
+)
+def test_configured_worktree_migration_stops_preparation_on_failure(
+    tmp_path: Path, exit_codes: list[int], failure_message: str
+) -> None:
+    """显式配置的仓库在建库或迁移失败时停止，异常只呈递阶段与退出码。"""
+    repository_path, worktree_path = _make_repo_with_script(tmp_path, 42)
+    process_runner = FakeProcessRunner([_command_result(code) for code in exit_codes])
+
+    with pytest.raises(RuntimeError, match=f"{failure_message}.*exit code {exit_codes[-1]}"):
+        provision_worktree_database(
+            WorktreeDatabaseProvisionRequest(
+                repository_path, worktree_path, issue_number=42, migration_command=("migration",)
+            ),
+            process_runner,
+        )
+
+    assert len(process_runner.commands) == len(exit_codes)

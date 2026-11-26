@@ -175,6 +175,7 @@ class WorktreeConfig:
     # 默认开启;缺建库脚本或无关系型 DB 时告警回退到共享库(见 use_cases.worktree_database)。
     provision_database: bool = True
     base_branch: str = "main"
+    migration_command: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)

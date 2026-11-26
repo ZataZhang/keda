@@ -686,6 +686,8 @@ path_command = "kc worktree path --branch issue-{issue_number}"
 # daemon 在 Agent 运行前为 worktree 配置独立 PostgreSQL/MySQL 数据库；
 # 需要 worktree 的 .env.local 包含 DATABASE_URL。
 provision_database = true
+# 可选：在独立库创建后，在 worktree 目录执行 argv 数组。支持 {database_identifier}。
+# migration_command = ["uv", "run", "python", "-m", "scripts.migrate_worktree", "{database_identifier}"]
 
 # Runner 行为配置：并行上限、默认 agent、提交前验证命令
 [agent_runner.runner]

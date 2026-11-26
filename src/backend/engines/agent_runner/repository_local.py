@@ -293,6 +293,9 @@ _CONFIG_FIELD_COMMENTS: dict[str, str] = {
         "alembic upgrade head);默认开启,需目标仓含 "
         "scripts/shared/template/setup_copied_database.py,缺脚本或无关系型 DB 时告警并回退到共享库"
     ),
+    "worktree.migration_command": (
+        "独立库建成后的迁移命令（argv 数组），可用 {database_identifier}；配置后准备失败会停止任务"
+    ),
     "runner.max_concurrent_issues": (
         "并行上限：该仓库最多同时运行几个自动领取的 Issue（默认 1）。优先级为 "
         "kc daemon run --concurrency > Backlog 页面设置 > 本值；daemon 执行期间按轮询间隔补位，"

@@ -733,6 +733,7 @@ def build_app_config_from_settings(
             path_command=worktree_settings.path_command,
             provision_database=worktree_settings.provision_database,
             base_branch=git_settings.base_branch,
+            migration_command=worktree_settings.migration_command,
         ),
         runner=RunnerConfig(
             max_concurrent_issues=runner_settings.max_concurrent_issues,
