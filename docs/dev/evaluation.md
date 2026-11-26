@@ -41,6 +41,8 @@ Agent/模型效果对照）已落地为一条本地 Console 产品路径，下�
   新增题目按该目录 `README.md` 的「给题库加一道题」流程准备、校准并提交 PR。
 - `keda-history-v1` 冻结首批历史案例。`keda-history-expanded-v1` 增加了讨论失败恢复、
   终端入口、日志续读、技能更新和证据自检等公开历史任务。基线和来源列在评测集目录。
+- `keda-history-v1` 1.4.0 的日志题使用真实子进程检查启动和文件写入，并用受控时钟
+  验证跨日轮转与保留期清理。原有 CLI 日志路径回退检查继续参与判分。
 - `keda-history-recovered-v1` 用真实子进程、本地 Git 远端及本机 HTTP 服务恢复三道旧归档题。
   新增判分文件与基线已有的回归测试分开，候选仍可执行基线测试。
 - 必填字段：`id`、`version`（semver）、`repo_path`、`base_ref`、非空 `cases`；

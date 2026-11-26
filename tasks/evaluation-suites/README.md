@@ -107,6 +107,8 @@ v2 suite 必须通过三次重复校准才能用于真实执行：每题 `@noop`
 
 1.3.0 使用真实 Git 工作区调用 Draft PR 发布入口，以接收的标题和正文判分。GitHub API 与生成文本使用测试替身。候选可以在生成或发布阶段满足同一外部契约。
 
+1.4.0 扩展 `daemon-safe-logging` 的隐藏判分。原先两项检查只覆盖 CLI 回退路径，保留这些检查，并增加真实子进程启动、非法级别降级、正常级别过滤、跨日切换与清理，以及第三方 handler 共存检查。题面、基线与参考补丁保持不变。此前成绩沿用原判分版本。
+
 | case id | sample id | 输入来源、复核与 split 依据 | base → final | 合并日期 | 旧离线校准记录 |
 |---|---|---|---|---|---|
 | `supervisor-check-decisions` | `keda#issue-156` | 原始 Issue 正文；7 次 attempt、1 次 run，归 dev。 | `f6c51fdc8a58bfab1a21f3dcf28b8d4a80b1498e` → `3f324938af0c10512ac43ff6717b7e1c401faf6d` | 2026-09-29 | 数据集校准记录：9 个行为 fail-to-pass，gold 82 passed。 |
