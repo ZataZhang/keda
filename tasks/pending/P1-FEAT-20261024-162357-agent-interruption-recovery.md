@@ -1,5 +1,7 @@
 # PRD: Agent Runner 分域故障恢复、阶段续跑与副作用账本
 
+- GitHub Issue: https://github.com/ZataZhang/keda/issues/457
+
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，那里是唯一事实源。
 
