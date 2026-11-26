@@ -1,5 +1,7 @@
 # PRD: CLI 可配置节点与可恢复工作流
 
+- GitHub Issue: https://github.com/ZataZhang/keda/issues/458
+
 > ⛔ **交付前置**需要先完成 `P1-FEAT-20261024-162357-agent-interruption-recovery`。节点执行复用其严格步骤记录与副作用账本，避免重复维护恢复事实。
 > 本提示投影自 §8 Delivery Dependencies，该节为顺序声明的唯一事实源。
 
