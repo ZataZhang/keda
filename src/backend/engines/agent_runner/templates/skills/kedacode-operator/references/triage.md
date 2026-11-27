@@ -59,6 +59,9 @@ Cancelling is not a new recovery path: the cancelled attempt flows into the exis
 ## Recover
 
 - **Failed publish** — the work is fine but the push, PR, or state update was not: `kc recover --issue <N>` resumes it. Do not re-queue and redo the work.
+- **Network interruption or an uncertain write** — the runner records recovery budget and controlled GitHub writes in the local Console SQLite database. A daemon retry resumes after the saved delay. If a write result is unknown, it queries GitHub before retrying; a failed or incomplete query does not prove the object is absent. Do not re-queue to clear this state. Read `kc logs --issue <N>` and the local handoff report named there; resolve the remote state, then use `kc run --issue <N>` or `kc recover --issue <N>` as directed.
+- **Permission denied** — rate limiting is handled separately from authorization failure. Do not rotate credentials or broaden permissions automatically. Fix the repository access, then resume through the entry point in the local handoff report; unresolved writes are reconciled first.
+- **A local recovery report is pending delivery** — the report remains on disk when GitHub is unavailable. The daemon retries delivery of that same report after connectivity returns. Check its delivery marker before posting a duplicate manually.
 - **Back to the queue** — after fixing the cause, `gh issue edit <N> --add-label agent/ready --remove-label agent/failed` lets the next pass pick it up.
 - **Where the code is** — `kc worktree path --branch issue-<N>` prints the worktree root. A re-run reuses that worktree, so uncommitted work in it is usually still wanted.
 - **Ambiguous target** — when the working directory matches more than one registered repository, several commands refuse to guess; pass `--repo-id <id>` (or `--repo`).

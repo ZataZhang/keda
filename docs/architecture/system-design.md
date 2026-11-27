@@ -193,6 +193,19 @@ Agent Runner 有两类只读日志，刻意分开：
 
 Issue 日志不登记为托管进程，也不伪造 `process_id`；两者在 API 上是独立端点，避免把「进程还活着」误当成「任务有实时输出」。
 
+### Runner 恢复状态与副作用账本
+
+Agent Runner 的严格恢复事实保存在 Console 共用 SQLite 文件中的独立恢复表，由
+`infrastructure/persistence/runner_recovery_store.py` 实现 `core/shared/interfaces/runner_recovery.py`
+定义的端口。恢复账本与 best-effort 审计分开：预算、阶段和外部写入意图的事务失败必须传播，
+不能继续执行后续副作用，也不能把审计日志的吞错策略套用到恢复状态。
+
+`core/use_cases/agent_runner_recovery_policy.py` 分类故障并决定是否短重试、挂起、对账或交给人；
+`core/use_cases/agent_runner_recovery.py` 编排稳定操作身份和未知结果处理。基础设施适配器执行
+GitHub/Git 操作并按远端事实对账。崩溃遗留的 `in_flight` 写入按未知结果处理，先只读查询；本地
+账本不提供第三方 exactly-once 保证，也不解决跨机器锁。阶段结果只有在工作树、base 与验证前提
+匹配时才复用。装配仍由现有 Agent Runner factory 完成，不新增服务边界。
+
 ## 认证与会话域
 
 系统采用**两套物理隔离的认证域**，互不穿透：

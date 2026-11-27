@@ -16,13 +16,30 @@ import json
 import logging
 import subprocess
 import tempfile
+import time
+from functools import partial
 from pathlib import Path
 from typing import Protocol, Sequence
 from urllib.parse import urlencode
 
 from backend.core.shared.interfaces.agent_runner import (
+    GitHubApiPermissionError,
     GitHubApiRateLimitError,
     GitHubApiUnavailableError,
+)
+from backend.core.shared.interfaces.runner_recovery import IRunnerRecoveryStore
+from backend.core.shared.models.runner_recovery_policy import classify_recovery_failure
+from backend.core.shared.models.runner_recovery_operations import (
+    build_operation_intent,
+    execute_journaled_write,
+)
+from backend.core.shared.models.runner_recovery import RecoveryFailureCategory
+from backend.infrastructure.github_helpers import sanitize_github_body
+from backend.infrastructure.github_issue_ops import list_issue_comment_entries
+from backend.infrastructure.github_operation_recovery import (
+    operation_marker,
+    post_comment_with_recovery,
+    send_github_write_command,
 )
 from backend.infrastructure.github_helpers import (
     _STATE_ORDER,
@@ -43,6 +60,7 @@ class _ClientProtocol(Protocol):
     """
 
     repo_path: Path
+    recovery_store: IRunnerRecoveryStore | None
 
     def _get_owner_repo(self) -> str: ...
 
@@ -69,9 +87,24 @@ def _request_rest_json(
         command.extend(["-F", "per_page=100"])
     result = client._run_with_retry(command, cwd=client.repo_path, check=False)
     if result.return_code != 0:
-        raise RuntimeError(
-            result.stderr.strip() or result.stdout.strip() or "GitHub REST query failed"
+        diagnostic_text = result.stderr.strip() or result.stdout.strip()
+        if not diagnostic_text:
+            raise GitHubApiUnavailableError(
+                "GitHub REST query failed without a diagnostic; remote state remains unknown."
+            )
+        failure_decision = classify_recovery_failure(
+            diagnostic_text=diagnostic_text,
+            is_write=False,
         )
+        if failure_decision.category is RecoveryFailureCategory.AUTH:
+            raise GitHubApiPermissionError(
+                "GitHub API permission was denied while reading authoritative recovery state."
+            )
+        if failure_decision.category is RecoveryFailureCategory.TRANSIENT_NETWORK:
+            raise GitHubApiUnavailableError(
+                f"GitHub API read remained unavailable after bounded retries: {diagnostic_text}"
+            )
+        raise RuntimeError(diagnostic_text)
     if not result.stdout.strip():
         raise RuntimeError("GitHub REST query returned an empty response.")
     try:
@@ -124,7 +157,7 @@ def _load_rest_check_rollup(
         commit_statuses = [
             status for status in combined_status["statuses"] if isinstance(status, dict)
         ]
-    except (GitHubApiRateLimitError, GitHubApiUnavailableError):
+    except (GitHubApiPermissionError, GitHubApiRateLimitError, GitHubApiUnavailableError):
         raise
     except Exception as exc:  # noqa: BLE001 - unknown checks stay unknown outside strict reads.
         if require_success:
@@ -218,26 +251,102 @@ def create_draft_pr(
     body: str,
     base_branch: str,
     cwd: Path,
+    issue_number: int = 0,
 ) -> str:
-    """Create a draft pull request from the current branch."""
+    """Create a draft PR with a stable operation marker and conservative recovery."""
+    owner_repo = client._get_owner_repo()
+    recovery_store = getattr(client, "recovery_store", None)
+    branch_result = client._run_with_retry(["git", "branch", "--show-current"], cwd=cwd)
+    branch = branch_result.stdout.strip()
+    if not branch:
+        raise RuntimeError("Cannot identify the branch for a journaled Draft PR.")
+    safe_body = sanitize_github_body(body)
+    intent = build_operation_intent(
+        repository_id=owner_repo,
+        issue_number=issue_number,
+        operation_kind="draft_pull_request_create",
+        target=f"repos/{owner_repo}/pulls:{branch}:{base_branch}",
+        payload_text=json.dumps(
+            [title, safe_body, base_branch, branch], ensure_ascii=False, separators=(",", ":")
+        ),
+    )
+    marker = operation_marker(intent.operation_key) if recovery_store is not None else ""
+    request_body = f"{safe_body}\n\n{marker}" if marker else safe_body
     with tempfile.TemporaryDirectory(prefix="kc-pr-") as temp_dir:
-        body_path = client._write_body_file(temp_dir, "pr.md", body)
-        result = client._run_with_retry(
-            [
-                "gh",
-                "pr",
-                "create",
-                "--draft",
-                "--base",
-                base_branch,
-                "--title",
-                title,
-                "--body-file",
-                str(body_path),
-            ],
-            cwd=cwd,
-        )
-    return result.stdout.strip().splitlines()[-1]
+        body_path = client._write_body_file(temp_dir, "pr.md", request_body)
+        command = [
+            "gh",
+            "pr",
+            "create",
+            "--draft",
+            "--base",
+            base_branch,
+            "--title",
+            title,
+            "--body-file",
+            str(body_path),
+        ]
+
+        def send_pr_creation() -> str | None:
+            command_output = send_github_write_command(client, command, cwd=cwd)
+            lines = (command_output or "").strip().splitlines()
+            return lines[-1] if lines else None
+
+        def reconcile_pr_creation() -> str | None:
+            if not marker:
+                return None
+            query = urlencode(
+                {
+                    "state": "all",
+                    "head": f"{owner_repo.split('/', 1)[0]}:{branch}",
+                    "base": base_branch,
+                }
+            )
+            raw_pr_pages = _request_rest_json(
+                client,
+                f"repos/{owner_repo}/pulls?{query}",
+                paginate=True,
+            )
+            matching_prs = [
+                raw_pr
+                for raw_pr in _flatten_rest_pages(raw_pr_pages)
+                if marker in str(raw_pr.get("body", ""))
+            ]
+            if len(matching_prs) > 1:
+                raise RuntimeError("Draft PR operation marker matches multiple remote PRs.")
+            if not matching_prs:
+                if _flatten_rest_pages(raw_pr_pages):
+                    raise RuntimeError(
+                        "A PR exists for this head/base without the operation marker; "
+                        "creation outcome is ambiguous."
+                    )
+                return None
+            pr_url = matching_prs[0].get("html_url")
+            if not isinstance(pr_url, str) or not pr_url.startswith("https://"):
+                raise RuntimeError("Matched Draft PR lacks an authoritative URL.")
+            return pr_url
+
+        def confirm_pr_creation_absence() -> str | None:
+            # 第二次完整分页核对用于吸收服务端短暂的 PR 可见性延迟。
+            time.sleep(1)
+            return reconcile_pr_creation()
+
+        if recovery_store is None:
+            pr_url = send_pr_creation()
+        else:
+            pr_url = execute_journaled_write(
+                recovery_store=recovery_store,
+                intent=intent,
+                send=send_pr_creation,
+                reconcile=reconcile_pr_creation,
+                # PR 列表没有标记仍可能是传播延迟；结果未知时不自动重发。
+                # 传输层能证明请求尚未发送时，execute_journaled_write 会直接安全重试。
+                safe_to_retry_after_confirmed_absence=False,
+                reconcile_after_absence=confirm_pr_creation_absence,
+            )
+    if not pr_url:
+        raise RuntimeError("GitHub Draft PR creation returned no URL.")
+    return pr_url
 
 
 def get_pull_request_context(
@@ -265,7 +374,7 @@ def get_pull_request_context(
             f"repos/{owner_repo}/pulls?{query}",
             per_page=True,
         )
-    except (GitHubApiRateLimitError, GitHubApiUnavailableError):
+    except (GitHubApiPermissionError, GitHubApiRateLimitError, GitHubApiUnavailableError):
         raise
     except Exception as exc:  # noqa: BLE001 - non-strict callers keep their best-effort behavior.
         if require_success:
@@ -328,7 +437,7 @@ def get_pull_request_context_by_number(
             client,
             f"repos/{client._get_owner_repo()}/pulls/{pr_number}",
         )
-    except (GitHubApiRateLimitError, GitHubApiUnavailableError):
+    except (GitHubApiPermissionError, GitHubApiRateLimitError, GitHubApiUnavailableError):
         raise
     except Exception as exc:  # noqa: BLE001 - non-strict callers keep their best-effort behavior.
         if require_success:
@@ -343,37 +452,69 @@ def get_pull_request_context_by_number(
 
 
 def comment_pr(client: _ClientProtocol, pr_number: int, body: str) -> None:
-    """Post a Markdown comment to a Pull Request."""
-    with tempfile.TemporaryDirectory(prefix="kc-pr-comment-") as temp_dir:
-        comment_path = client._write_body_file(temp_dir, "comment.md", body)
-        client._run_with_retry(
-            [
-                "gh",
-                "pr",
-                "comment",
-                str(pr_number),
-                "--body-file",
-                str(comment_path),
-            ],
-            cwd=client.repo_path,
-        )
+    """向 PR 发布带稳定身份的 Markdown 评论。"""
+    owner_repo = client._get_owner_repo()
+    safe_body = sanitize_github_body(body)
+    post_comment_with_recovery(
+        client=client,
+        repository_id=owner_repo,
+        issue_number=pr_number,
+        operation_kind="pull_request_comment",
+        target=f"repos/{owner_repo}/issues/{pr_number}/comments",
+        body=safe_body,
+        command_for_body_file=lambda comment_path: [
+            "gh",
+            "pr",
+            "comment",
+            str(pr_number),
+            "--body-file",
+            str(comment_path),
+        ],
+        comment_entries_for_marker=lambda marker: list_issue_comment_entries(
+            client,
+            pr_number,
+            trusted_only=True,
+            body_contains=marker,
+            require_success=True,
+        ),
+    )
 
 
 def update_pull_request_body(client: _ClientProtocol, pr_number: int, body: str) -> None:
-    """Replace the description body of a Pull Request."""
+    """更新 PR 正文，并在结果不确定时只读核对远端正文。"""
+    owner_repo = client._get_owner_repo()
+    safe_body = sanitize_github_body(body)
+    recovery_store = getattr(client, "recovery_store", None)
     with tempfile.TemporaryDirectory(prefix="kc-pr-body-") as temp_dir:
-        body_path = client._write_body_file(temp_dir, "body.md", body)
-        client._run_with_retry(
-            [
-                "gh",
-                "pr",
-                "edit",
-                str(pr_number),
-                "--body-file",
-                str(body_path),
-            ],
-            cwd=client.repo_path,
-        )
+        body_path = client._write_body_file(temp_dir, "body.md", safe_body)
+        command = ["gh", "pr", "edit", str(pr_number), "--body-file", str(body_path)]
+
+        send_body_update = partial(send_github_write_command, client, command)
+
+        def reconcile_body_update() -> str | None:
+            raw_pr = _request_rest_json(
+                client,
+                f"repos/{owner_repo}/pulls/{pr_number}",
+            )
+            if not isinstance(raw_pr, dict) or raw_pr.get("number") != pr_number:
+                raise RuntimeError("PR body reconciliation returned an invalid identity.")
+            return f"pr:{pr_number}" if raw_pr.get("body") == safe_body else None
+
+        if recovery_store is None:
+            send_body_update()
+        else:
+            execute_journaled_write(
+                recovery_store=recovery_store,
+                intent=build_operation_intent(
+                    repository_id=owner_repo,
+                    issue_number=pr_number,
+                    operation_kind="pull_request_body_update",
+                    target=f"repos/{owner_repo}/pulls/{pr_number}:body",
+                    payload_text=safe_body,
+                ),
+                send=send_body_update,
+                reconcile=reconcile_body_update,
+            )
 
 
 def set_pull_request_base(client: _ClientProtocol, pr_number: int, base_branch: str) -> None:
@@ -387,30 +528,73 @@ def set_pull_request_base(client: _ClientProtocol, pr_number: int, base_branch: 
         pr_number: Target Pull Request number.
         base_branch: New base branch name (e.g. ``main``).
     """
-    client._run_with_retry(
-        [
-            "gh",
-            "pr",
-            "edit",
-            str(pr_number),
-            "--base",
-            base_branch,
-        ],
-        cwd=client.repo_path,
-    )
+    owner_repo = client._get_owner_repo()
+    recovery_store = getattr(client, "recovery_store", None)
+    command = ["gh", "pr", "edit", str(pr_number), "--base", base_branch]
+
+    send_base_update = partial(send_github_write_command, client, command)
+
+    def reconcile_base_update() -> str | None:
+        raw_pr = _request_rest_json(client, f"repos/{owner_repo}/pulls/{pr_number}")
+        if not isinstance(raw_pr, dict) or raw_pr.get("number") != pr_number:
+            raise RuntimeError("PR base reconciliation returned an invalid identity.")
+        base = raw_pr.get("base")
+        return (
+            f"pr:{pr_number}" if isinstance(base, dict) and base.get("ref") == base_branch else None
+        )
+
+    if recovery_store is None:
+        send_base_update()
+    else:
+        execute_journaled_write(
+            recovery_store=recovery_store,
+            intent=build_operation_intent(
+                repository_id=owner_repo,
+                issue_number=pr_number,
+                operation_kind="pull_request_base_update",
+                target=f"repos/{owner_repo}/pulls/{pr_number}:base",
+                payload_text=base_branch,
+            ),
+            send=send_base_update,
+            reconcile=reconcile_base_update,
+        )
 
 
 def mark_pull_request_ready(client: _ClientProtocol, pr_number: int) -> None:
     """将 Draft Pull Request 转为 Ready for review。"""
-    result = client._run_with_retry(
-        ["gh", "pr", "ready", str(pr_number)],
-        cwd=client.repo_path,
-        check=False,
+    owner_repo = client._get_owner_repo()
+    recovery_store = getattr(client, "recovery_store", None)
+
+    ready_command = ["gh", "pr", "ready", str(pr_number)]
+    send_ready_update = partial(
+        send_github_write_command,
+        client,
+        ready_command,
+        accept_failure=lambda _: False,
     )
-    if result.return_code != 0:
-        raise RuntimeError(
-            f"gh pr ready failed for PR #{pr_number}: "
-            f"{result.stderr.strip() or result.stdout.strip()}"
+
+    def reconcile_ready_update() -> str | None:
+        pr_state = get_pull_request_monitor_state(client, pr_number)
+        return f"pr:{pr_number}" if pr_state["is_draft"] is False else None
+
+    if recovery_store is None:
+        try:
+            send_ready_update()
+        except subprocess.CalledProcessError as exc:
+            detail = (exc.stderr or exc.output or "").strip()
+            raise RuntimeError(f"gh pr ready failed for PR #{pr_number}: {detail or exc}") from exc
+    else:
+        execute_journaled_write(
+            recovery_store=recovery_store,
+            intent=build_operation_intent(
+                repository_id=owner_repo,
+                issue_number=pr_number,
+                operation_kind="pull_request_ready",
+                target=f"repos/{owner_repo}/pulls/{pr_number}:draft",
+                payload_text="draft=false",
+            ),
+            send=send_ready_update,
+            reconcile=reconcile_ready_update,
         )
 
 
@@ -435,24 +619,36 @@ def merge_pull_request(client: _ClientProtocol, pr_number: int, *, method: str =
     """
     if method != "squash":
         raise ValueError(f"merge_pull_request method must be 'squash'; got {method!r}.")
-    try:
-        client._run_with_retry(
-            ["gh", "pr", "merge", str(pr_number), "--squash"],
-            cwd=client.repo_path,
-            check=False,
-        )
-    except subprocess.CalledProcessError as exc:
-        combined_output = (exc.stdout or "") + "\n" + (exc.stderr or "")
-        if "Already merged" in combined_output or "already merged" in combined_output:
-            _logger.info(
-                "PR #%d is already merged; treating merge request as no-op.",
-                pr_number,
-            )
-            return
-        raise RuntimeError(
-            f"gh pr merge failed for PR #{pr_number}: "
-            f"{(exc.stderr or '').strip() or (exc.stdout or '').strip()}"
-        ) from exc
+    owner_repo = client._get_owner_repo()
+    recovery_store = getattr(client, "recovery_store", None)
+    command = ["gh", "pr", "merge", str(pr_number), "--squash"]
+
+    send_merge = partial(
+        send_github_write_command,
+        client,
+        command,
+        accept_failure=lambda diagnostic_text: "already merged" in diagnostic_text.lower(),
+    )
+
+    def reconcile_merge() -> str | None:
+        pr_state = get_pull_request_monitor_state(client, pr_number)
+        return f"pr:{pr_number}:merged" if pr_state["merged"] is True else None
+
+    if recovery_store is None:
+        send_merge()
+        return
+    execute_journaled_write(
+        recovery_store=recovery_store,
+        intent=build_operation_intent(
+            repository_id=owner_repo,
+            issue_number=pr_number,
+            operation_kind="pull_request_merge",
+            target=f"repos/{owner_repo}/pulls/{pr_number}:merge",
+            payload_text=method,
+        ),
+        send=send_merge,
+        reconcile=reconcile_merge,
+    )
 
 
 def close_pull_request(
@@ -474,19 +670,42 @@ def close_pull_request(
     Raises:
         RuntimeError: ``gh pr close`` 失败且不是“已经关闭”的幂等情况时。
     """
-    command = ["gh", "pr", "close", str(pr_number)]
     if comment is not None:
-        command.extend(["--comment", comment])
-    result = client._run_with_retry(command, cwd=client.repo_path, check=False)
-    if result.return_code != 0:
-        combined_output = f"{result.stdout}\n{result.stderr}"
-        if "already closed" in combined_output.lower():
-            _logger.info("PR #%d is already closed; treating close request as no-op.", pr_number)
-            return
-        raise RuntimeError(
-            f"gh pr close failed for PR #{pr_number}: "
-            f"{result.stderr.strip() or result.stdout.strip()}"
+        comment_pr(client, pr_number, comment)
+    owner_repo = client._get_owner_repo()
+    recovery_store = getattr(client, "recovery_store", None)
+    command = ["gh", "pr", "close", str(pr_number)]
+
+    send_close = partial(
+        send_github_write_command,
+        client,
+        command,
+        accept_failure=lambda diagnostic_text: "already closed" in diagnostic_text.lower(),
+    )
+
+    def reconcile_close() -> str | None:
+        pr_state = get_pull_request_monitor_state(client, pr_number)
+        return (
+            f"pr:{pr_number}:closed"
+            if pr_state["state"] == "closed" or pr_state["merged"] is True
+            else None
         )
+
+    if recovery_store is None:
+        send_close()
+        return
+    execute_journaled_write(
+        recovery_store=recovery_store,
+        intent=build_operation_intent(
+            repository_id=owner_repo,
+            issue_number=pr_number,
+            operation_kind="pull_request_close",
+            target=f"repos/{owner_repo}/pulls/{pr_number}:state",
+            payload_text="closed",
+        ),
+        send=send_close,
+        reconcile=reconcile_close,
+    )
 
 
 def list_pr_comments(client: _ClientProtocol, pr_number: int) -> list[str]:
@@ -499,7 +718,7 @@ def list_pr_comments(client: _ClientProtocol, pr_number: int) -> list[str]:
             paginate=True,
         )
         comments = _flatten_rest_pages(raw_pages)
-    except (GitHubApiRateLimitError, GitHubApiUnavailableError):
+    except (GitHubApiPermissionError, GitHubApiRateLimitError, GitHubApiUnavailableError):
         raise
     except Exception as exc:  # noqa: BLE001 - preserve best-effort comment reads.
         _logger.warning("Unable to load comments for PR #%d: %s", pr_number, exc)
@@ -539,7 +758,7 @@ def _find_pr_by_head_state(
             f"repos/{owner_repo}/pulls?{query}",
             per_page=True,
         )
-    except (GitHubApiRateLimitError, GitHubApiUnavailableError):
+    except (GitHubApiPermissionError, GitHubApiRateLimitError, GitHubApiUnavailableError):
         raise
     except Exception as exc:  # noqa: BLE001 - preserve the existing strict/best-effort split.
         if require_success:

@@ -510,15 +510,20 @@ def _process_ready_issue(
     )
     issue = _adopt_fresh_issue_snapshot(stage_decision.issue, issue)
     publish_stage = stage_decision.publish_stage
-    pre_verifier_publication = PreVerifierDraftPublicationRequest(
-        issue=issue,
-        worktree_path=worktree_path,
-        config=config,
-        github_client=github_client,
-        process_runner=process_runner,
-        expected_branch=expected_branch,
-        publish_stage=publish_stage,
-        content_generator=content_generator,
+    local_commit_reuse_request = LocalCommitReuseRequest(
+        issue,
+        worktree_path,
+        config,
+        process_runner,
+        publish_stage,
+        repo_id or repo_path.name,
+        getattr(github_client, "recovery_store", None),
+    )
+    pre_verifier_publication = PreVerifierDraftPublicationRequest.from_local_commit_reuse(
+        local_commit_reuse_request,
+        github_client,
+        expected_branch,
+        content_generator,
     )
 
     # 步骤 3: 检查恢复路径
@@ -530,13 +535,17 @@ def _process_ready_issue(
     # - 无本地提交 → 全新实现。
     continuation_prompt: str | None = None
     try:
-        commit_result = (
-            _reuse_local_commit(
-                LocalCommitReuseRequest(issue, worktree_path, config, process_runner, publish_stage)
+        if publish_stage is PublishStage.DIRECT:
+            commit_result = _reuse_local_commit(local_commit_reuse_request)
+        else:
+            commit_result = _reuse_existing_local_commit(
+                issue,
+                worktree_path,
+                config,
+                process_runner,
+                local_commit_reuse_request.repo_id,
+                local_commit_reuse_request.recovery_store,
             )
-            if publish_stage is PublishStage.DIRECT
-            else _reuse_existing_local_commit(issue, worktree_path, config, process_runner)
-        )
     except (VerificationFailedError, PrdDeliveryError, ValidationEvidenceError) as exc:
         _logger.info(
             "Issue #%d has partial local commits not yet delivery-ready (%s); "
@@ -940,15 +949,27 @@ def _process_running_publish_recovery(
             return
         issue = _adopt_fresh_issue_snapshot(stage_decision.issue, issue)
         publish_stage = stage_decision.publish_stage
-
-        # 检查是否有可复用的本地 commit
-        commit_result = (
-            _reuse_local_commit(
-                LocalCommitReuseRequest(issue, worktree_path, config, process_runner, publish_stage)
-            )
-            if publish_stage is PublishStage.DIRECT
-            else _reuse_existing_local_commit(issue, worktree_path, config, process_runner)
+        local_commit_reuse_request = LocalCommitReuseRequest(
+            issue,
+            worktree_path,
+            config,
+            process_runner,
+            publish_stage,
+            repo_id or repo_path.name,
+            getattr(github_client, "recovery_store", None),
         )
+        # 检查是否有可复用的本地 commit
+        if publish_stage is PublishStage.DIRECT:
+            commit_result = _reuse_local_commit(local_commit_reuse_request)
+        else:
+            commit_result = _reuse_existing_local_commit(
+                issue,
+                worktree_path,
+                config,
+                process_runner,
+                local_commit_reuse_request.repo_id,
+                local_commit_reuse_request.recovery_store,
+            )
         if commit_result is None:
             raise RuntimeError(
                 f"Issue #{issue.number} has no clean local commit ready for publication."

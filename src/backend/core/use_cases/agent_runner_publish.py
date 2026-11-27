@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from fnmatch import fnmatch
 from pathlib import Path
+from urllib.parse import urlparse
 
 from backend.core.shared.interfaces.agent_runner import (
     GitHubApiRateLimitError,
@@ -13,8 +14,10 @@ from backend.core.shared.interfaces.agent_runner import (
     IGitHubClient,
     IProcessRunner,
 )
+from backend.core.shared.interfaces.runner_recovery import IRunnerRecoveryStore
 from backend.core.shared.models.agent_runner import AppConfig, IssueSummary
 from backend.core.shared.models.publish_stage import PublishStage
+from backend.core.shared.models.runner_recovery import OperationIntent, OperationState
 from backend.core.use_cases.agent_runner_dependencies import (
     format_direct_pr_marker,
     format_fast_merge_marker,
@@ -38,6 +41,7 @@ from backend.core.use_cases.agent_runner_pr_body_contract import (
     load_prd_publish_contract,
 )
 from backend.core.use_cases.agent_runner_pr_fallback import build_pr_fallback_body
+from backend.core.use_cases.agent_runner_recovery import build_operation_intent, operation_marker
 from backend.core.use_cases.agent_runner_validation import (
     build_validation_checklist_block,
     ensure_no_evidence_paths_in_changes,
@@ -51,6 +55,7 @@ from backend.core.use_cases.generated_content import (
 )
 from backend.core.use_cases.generated_prd_content import ensure_prd_machine_contract_available
 from backend.core.use_cases.lifecycle_agent_resolution import effective_prd_overrides
+from backend.core.use_cases.agent_runner_recovery import execute_journaled_write
 
 
 class DraftPRCreationError(RuntimeError):
@@ -243,9 +248,105 @@ def push_changes(
                 f"Issue #{issue.number} has no GitHub client for the claim ownership check."
             )
         heartbeat.assert_claim_owned(github_client=github_client, issue_number=issue.number)
+    recovery_store = getattr(github_client, "recovery_store", None)
+    if recovery_store is None:
+        try:
+            process_runner.run(
+                ["git", "push", "-u", publish_remote_name, branch], cwd=worktree_path
+            )
+        except (RuntimeError, OSError) as exc:
+            raise PushChangesError(str(exc)) from exc
+        return branch
+
+    head_result = process_runner.run(["git", "rev-parse", "HEAD"], cwd=worktree_path, check=False)
+    expected_head = head_result.stdout.strip()
+    if head_result.return_code != 0 or not expected_head:
+        raise RuntimeError("Cannot determine the commit to publish.")
+
+    def read_remote_ref() -> str | None:
+        result = process_runner.run(
+            [
+                "git",
+                "ls-remote",
+                "--heads",
+                publish_remote_name,
+                f"refs/heads/{branch}",
+            ],
+            cwd=worktree_path,
+            check=False,
+            timeout=30,
+        )
+        if result.return_code != 0:
+            detail = result.stderr.strip() or result.stdout.strip()
+            raise RuntimeError(f"Cannot reconcile remote branch {branch}: {detail}")
+        output_lines = result.stdout.splitlines()
+        if not output_lines:
+            return None
+        remote_sha, remote_ref = output_lines[0].split(maxsplit=1)
+        if remote_ref != f"refs/heads/{branch}":
+            raise RuntimeError(f"Remote returned an unexpected ref while reconciling {branch}.")
+        return remote_sha
+
+    def is_fast_forwardable(remote_sha: str | None) -> bool:
+        if remote_sha is None:
+            return True
+        if remote_sha == expected_head:
+            return False
+        ancestry = process_runner.run(
+            ["git", "merge-base", "--is-ancestor", remote_sha, expected_head],
+            cwd=worktree_path,
+            check=False,
+        )
+        return ancestry.return_code == 0
+
+    def reconcile_push() -> str | None:
+        remote_sha = read_remote_ref()
+        if remote_sha == expected_head:
+            return f"refs/heads/{branch}@{remote_sha}"
+        if is_fast_forwardable(remote_sha):
+            return None
+        raise RuntimeError(
+            f"Remote branch {branch} advanced to {remote_sha}; it is not an ancestor "
+            f"of the expected commit {expected_head}. Manual reconciliation is required."
+        )
+
+    def send_push() -> str | None:
+        result = process_runner.run(
+            ["git", "push", "-u", publish_remote_name, branch],
+            cwd=worktree_path,
+            check=False,
+            timeout=120,
+        )
+        if result.return_code != 0:
+            raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "git push failed.")
+        return f"refs/heads/{branch}@{expected_head}"
+
+    def can_retry_push() -> bool:
+        return is_fast_forwardable(read_remote_ref())
+
     try:
-        process_runner.run(["git", "push", "-u", publish_remote_name, branch], cwd=worktree_path)
+        repository_id = worktree_path.resolve().as_posix()
+        get_owner_repo = getattr(github_client, "_get_owner_repo", None)
+        if callable(get_owner_repo):
+            repository_id = get_owner_repo()
+        intent: OperationIntent = build_operation_intent(
+            repository_id=repository_id,
+            issue_number=issue.number,
+            operation_kind="git_push",
+            target=f"{publish_remote_name}:refs/heads/{branch}",
+            payload_text=expected_head,
+        )
+        execute_journaled_write(
+            recovery_store=recovery_store,
+            intent=intent,
+            send=send_push,
+            reconcile=reconcile_push,
+            safe_to_retry_after_confirmed_absence=True,
+            can_retry_after_absence=can_retry_push,
+        )
     except (RuntimeError, OSError) as exc:
+        if isinstance(exc, GitHubApiUnavailableError):
+            raise
         raise PushChangesError(str(exc)) from exc
     return branch
 
@@ -369,6 +470,13 @@ def create_draft_pr(
     except Exception as exc:
         raise DraftPRCreationError(str(exc)) from exc
     if existing_pr_url is not None:
+        _confirm_existing_draft_pr_operation(
+            github_client=github_client,
+            issue=issue,
+            branch=branch,
+            base_branch=config.git.base_branch,
+            existing_pr_url=existing_pr_url,
+        )
         return branch, existing_pr_url
 
     fallback_title = f"[Agent] {issue.title}"
@@ -470,6 +578,7 @@ def create_draft_pr(
             body=pr_body,
             base_branch=config.git.base_branch,
             cwd=worktree_path,
+            issue_number=issue.number,
         )
     except (GitHubApiRateLimitError, GitHubApiUnavailableError):
         raise
@@ -487,6 +596,66 @@ def create_draft_pr(
                 "Direct PR was created but its current-round association is pending."
             )
     return branch, pr_url
+
+
+def _confirm_existing_draft_pr_operation(
+    *,
+    github_client: IGitHubClient,
+    issue: IssueSummary,
+    branch: str,
+    base_branch: str,
+    existing_pr_url: str,
+) -> None:
+    """仅在远端正文带匹配标记时确认此前结果未知的 PR 创建。"""
+    recovery_store = getattr(github_client, "recovery_store", None)
+    if not isinstance(recovery_store, IRunnerRecoveryStore):
+        return
+    issue_path_parts = [part for part in urlparse(issue.url).path.split("/") if part]
+    if len(issue_path_parts) < 4 or issue_path_parts[-2] != "issues":
+        return
+    repository_id = "/".join(issue_path_parts[-4:-2])
+    run_key = f"repo:{repository_id}:issue:{issue.number}"
+    expected_target = f"repos/{repository_id}/pulls:{branch}:{base_branch}"
+    unresolved_records = recovery_store.list_unresolved_operations(run_key)
+    matching_records = [
+        record
+        for record in unresolved_records
+        if record.intent.operation_kind == "draft_pull_request_create"
+        and record.intent.target == expected_target
+        and record.state in {OperationState.UNKNOWN, OperationState.IN_FLIGHT}
+    ]
+    if not matching_records:
+        return
+    if len(matching_records) != 1:
+        raise RuntimeError(
+            f"Issue #{issue.number} has multiple unresolved Draft PR operations for {branch}."
+        )
+    pull_request_context = github_client.get_pull_request_context(
+        branch,
+        require_success=True,
+    )
+    if (
+        pull_request_context is None
+        or pull_request_context.pr_url != existing_pr_url
+        or operation_marker(matching_records[0].intent.operation_key)
+        not in pull_request_context.body
+    ):
+        raise RuntimeError(
+            f"Issue #{issue.number} has an existing PR but its unresolved creation operation "
+            "cannot be matched safely."
+        )
+    confirmed = recovery_store.transition_operation(
+        matching_records[0].intent.operation_key,
+        [matching_records[0].state],
+        OperationState.CONFIRMED,
+        remote_reference=pull_request_context.pr_url,
+    )
+    if not confirmed:
+        current_record = recovery_store.get_operation(matching_records[0].intent.operation_key)
+        if current_record is None or current_record.state is not OperationState.CONFIRMED:
+            raise RuntimeError(
+                f"Issue #{issue.number} found its Draft PR but could not confirm the operation ledger."
+            )
 
 
 def publish_changes(

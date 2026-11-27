@@ -98,7 +98,15 @@ class LocalEvaluationGitHub(IGitHubClient):
         """禁止评测流程创建额外 Issue。"""
         raise RuntimeError("本地评测不创建额外 Issue")
 
-    def create_draft_pr(self, *, title: str, body: str, base_branch: str, cwd: Path) -> str:
+    def create_draft_pr(
+        self,
+        *,
+        title: str,
+        body: str,
+        base_branch: str,
+        cwd: Path,
+        issue_number: int = 0,
+    ) -> str:
         """保存 Draft PR 内容以判断本地交付完成。"""
         self.draft = {
             "url": _LOCAL_PR_URL,

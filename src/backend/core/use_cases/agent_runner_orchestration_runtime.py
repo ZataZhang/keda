@@ -2,15 +2,26 @@
 
 from __future__ import annotations
 
+import re
+import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from functools import partial
 from pathlib import Path
+from urllib.parse import urlparse
 
 from backend.core.shared.interfaces.agent_runner import (
+    GitHubApiPermissionError,
     GitHubApiRateLimitError,
     GitHubApiUnavailableError,
+    GitHubOperationOutcomeUnknownError,
+)
+from backend.core.shared.interfaces.runner_claim_guard import clear_active_runner_claim_guard
+from backend.core.shared.models.runner_recovery import (
+    RecoveryFailureCategory,
+    RecoveryFailureRecord,
+    RecoveryRunRecord,
 )
 from backend.core.shared.interfaces.runner_live_view import NoOpRunnerLiveView
 from backend.core.shared.models.agent_runner import TokenUsage
@@ -93,6 +104,7 @@ from backend.core.use_cases.agent_runner_prd_activity import (
 from backend.core.use_cases.agent_runner_queue import issue_priority, sort_ready_issues
 from backend.core.use_cases.agent_runner_validation_gate import process_validation_gate
 from backend.core.use_cases.agent_runner_workflow import claim_blocked_issue
+from backend.core.use_cases.agent_runner_recovery_policy import classify_recovery_failure
 from backend.core.use_cases.issue_retry_overrides import (
     IssueRetryOverrideRequest,
     prepare_issue_retry_override,
@@ -118,6 +130,162 @@ RUNTIME_DEPENDENCY_NAMES = (
     "_worktree_needs_rebase_recovery",
     "_has_existing_local_commit_ready_for_publish",
 )
+
+_RECOVERY_BUDGET_SECONDS = 30 * 60
+_RECOVERY_MAX_ATTEMPTS = 6
+
+
+def _sanitize_recovery_diagnostic(diagnostic: str) -> str:
+    """移除常见凭据形式并限制恢复报告中的诊断长度。"""
+    sanitized = re.sub(
+        r"(?i)(authorization:\s*bearer\s+|(?:gh[pousr]_|github_pat_))[A-Za-z0-9_./-]+",
+        "[REDACTED]",
+        diagnostic,
+    )
+    return sanitized[:1500]
+
+
+def _recovery_retry_after(
+    *,
+    category: RecoveryFailureCategory,
+    occurred_at: datetime,
+    previous_attempts: int,
+    github_client: IGitHubClient,
+) -> datetime:
+    """优先遵从共享 API 预算中的服务端重置时间。"""
+    retry_delay_seconds = min(60 * (2**previous_attempts), 300)
+    if category is RecoveryFailureCategory.RATE_LIMITED:
+        api_budget = getattr(github_client, "_api_budget", None)
+        pause_remaining_seconds = getattr(api_budget, "pause_remaining_seconds", None)
+        if callable(pause_remaining_seconds):
+            try:
+                remaining_seconds = pause_remaining_seconds()
+            except (OSError, ValueError):
+                remaining_seconds = 0
+            if isinstance(remaining_seconds, (int, float)) and remaining_seconds > 0:
+                retry_delay_seconds = max(retry_delay_seconds, remaining_seconds)
+    return occurred_at + timedelta(seconds=retry_delay_seconds)
+
+
+def _local_recovery_report_path(
+    *,
+    repo_path: Path,
+    issue_number: int,
+    stored_path: str | None = None,
+) -> Path | None:
+    """只接受仓库内固定位置的报告，防止损坏记录把任意文件作为通知正文。"""
+    expected_path = repo_path / ".agent-runner" / "recovery" / f"issue-{issue_number}.md"
+    if stored_path:
+        candidate_path = Path(stored_path)
+        if not candidate_path.is_absolute():
+            candidate_path = repo_path / candidate_path
+        if candidate_path.resolve(strict=False) != expected_path.resolve(strict=False):
+            return None
+    try:
+        repository_root = repo_path.resolve(strict=True)
+        report_parent = expected_path.parent.resolve(strict=False)
+        if not report_parent.is_relative_to(repository_root) or expected_path.is_symlink():
+            return None
+    except OSError:
+        return None
+    return expected_path
+
+
+def _write_recovery_report(
+    *,
+    repo_path: Path,
+    issue: IssueSummary,
+    issue_kind: str,
+    recovery_run: RecoveryRunRecord,
+    recovery_store: object,
+    storage_error: str | None = None,
+) -> tuple[Path, str]:
+    """持久化可执行的本地故障交接报告。"""
+    issue_path_parts = [part for part in urlparse(issue.url).path.split("/") if part]
+    if len(issue_path_parts) >= 4 and issue_path_parts[-2] == "issues":
+        operation_repository_id = "/".join(issue_path_parts[-4:-2])
+    else:
+        operation_repository_id = recovery_run.repository_id
+    run_key = f"repo:{operation_repository_id}:issue:{issue.number}"
+    unresolved_operations = []
+    if storage_error is None:
+        list_unresolved = getattr(recovery_store, "list_unresolved_operations", None)
+        if callable(list_unresolved):
+            unresolved_operations = list_unresolved(run_key)
+    report_path = _local_recovery_report_path(
+        repo_path=repo_path,
+        issue_number=issue.number,
+    )
+    if report_path is None:
+        raise OSError("本地恢复报告路径不在仓库内或经过符号链接。")
+    if storage_error is not None:
+        status_line = "⏸️ 本地恢复账本不可用；已停止后续外部写入。"
+        next_step = (
+            "修复本机存储空间或 SQLite 文件后，先核对 GitHub 上的现存对象，再使用 `kc run --issue "
+        )
+        f"{issue.number}` 继续。"
+    elif recovery_run.recovery_state == "needs_human":
+        status_line = "⏸️ 自动恢复预算耗尽或需要人工处理；业务写入已停止。"
+        next_step = _recovery_next_step(recovery_run.failure_category, issue.number)
+    else:
+        resume_at_utc = (
+            recovery_run.resume_at.astimezone(timezone.utc).isoformat()
+            if recovery_run.resume_at
+            else "下次 daemon 调度"
+        )
+        status_line = f"⏳ 暂停至 {resume_at_utc} UTC；现有成果与操作账本已保留。"
+        next_step = "daemon 到期后会从失败阶段继续；显式运行 `kc run --issue "
+        f"{issue.number}` 也会先对账未决写入。"
+    operation_lines = [
+        f"- `{record.intent.operation_kind}` `{_sanitize_recovery_diagnostic(record.intent.target)}`："
+        f"`{record.state.value}`，操作键 `{record.intent.operation_key}`"
+        for record in unresolved_operations
+    ] or ["- 无未决操作记录；仍需先确认远端目标状态。"]
+    diagnostic = _sanitize_recovery_diagnostic(storage_error or recovery_run.error_summary)
+    report_text = "\n".join(
+        [
+            f"# Agent Runner Issue #{issue.number} 恢复报告",
+            "",
+            f"- 状态：{status_line}",
+            f"- 失败步骤：`{issue_kind}` / `{recovery_run.failure_category.value}`",
+            f"- 诊断：{diagnostic}",
+            "- 已完成成果：保留故障前已落盘的 worktree、commit 与通过验证的阶段；未持久化的内容不会被视为已完成。",
+            "- 未知或未完成的对外写入：",
+            *operation_lines,
+            "- 已尝试处理：单次 gh 调用最多 5 次 / 60 秒；恢复总预算最多 30 分钟、6 次调度恢复。",
+            f"- 下一步：{next_step}",
+            f"- 恢复入口：`kc run --issue {issue.number}`；发布恢复也可用 `kc recover --issue {issue.number}`。",
+            "- 通知状态：待投递；本地报告已保存，通知成功前不会标记为已送达。",
+        ]
+    )
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = report_path.with_suffix(f"{report_path.suffix}.tmp")
+    temp_path.write_text(report_text, encoding="utf-8")
+    temp_path.replace(report_path)
+    return report_path, report_text
+
+
+def _recovery_next_step(category: RecoveryFailureCategory, issue_number: int) -> str:
+    """根据故障类别给出人工可执行的恢复建议。"""
+    if category is RecoveryFailureCategory.AUTH:
+        return (
+            "检查 `gh auth status`、组织 SSO 与仓库写权限；恢复权限后先查看未决操作，"
+            f"再运行 `kc run --issue {issue_number}`。"
+        )
+    if category is RecoveryFailureCategory.OUTCOME_UNKNOWN:
+        return (
+            "按操作键核对 GitHub 对端对象；确认已创建则保留现状，确认未创建且目标可安全补发后，"
+            f"运行 `kc run --issue {issue_number}`。"
+        )
+    if category is RecoveryFailureCategory.FATAL_STATE:
+        return (
+            "检查恢复 SQLite 文件和磁盘状态；先备份现场并核对未知写入，修复存储后再运行 "
+            f"`kc run --issue {issue_number}`。"
+        )
+    return (
+        "检查 GitHub 服务状态、网络与限流恢复时间；故障恢复后运行 "
+        f"`kc run --issue {issue_number}`，runner 会先对账未决操作。"
+    )
 
 
 def _process_single_issue(
@@ -146,6 +314,8 @@ def _process_single_issue(
     Returns:
         ``0`` on success or skip, ``1`` on a recorded failure/block.
     """
+    # 同步 worker 线程可能复用；先清除上一条 Issue 的上下文认领核验。
+    clear_active_runner_claim_guard()
     # 在 worktree 创建前从 Issue 引用的 PRD 解析 lifecycle_agents 覆盖。
     issue = attach_prd_lifecycle_overrides(
         issue,
@@ -175,6 +345,10 @@ def _process_single_issue(
         "run_trigger": run_trigger,
         "issue_url": issue.url,
     }
+    recovery_store = getattr(github_client, "recovery_store", None)
+    recovery_run_key = f"repo:{effective_repo_id}:issue:{issue.number}"
+    storage_write_failed = False
+    release_claim_on_exit = True
 
     # run id 与 backlog 启动侧一致，避免重复创建生命周期记录。
     for event_type in (LifecycleEventType.STARTED, LifecycleEventType.CLAIMED):
@@ -269,6 +443,144 @@ def _process_single_issue(
             },
         )
 
+    def _record_recovery_failure(
+        exc: Exception,
+    ) -> tuple[RecoveryRunRecord | None, Path | None]:
+        """严格保存外部故障预算与人工交接报告。"""
+        nonlocal storage_write_failed, release_claim_on_exit
+        if recovery_store is None:
+            return None, None
+        occurred_at = datetime.now(timezone.utc)
+        safe_diagnostic = _sanitize_recovery_diagnostic(str(exc))
+        if isinstance(exc, GitHubApiRateLimitError):
+            category = RecoveryFailureCategory.RATE_LIMITED
+        elif isinstance(exc, GitHubApiPermissionError):
+            category = RecoveryFailureCategory.AUTH
+        elif isinstance(exc, GitHubOperationOutcomeUnknownError):
+            category = RecoveryFailureCategory.OUTCOME_UNKNOWN
+        elif isinstance(exc, sqlite3.Error) or "conflict" in safe_diagnostic.lower():
+            category = RecoveryFailureCategory.FATAL_STATE
+        else:
+            category = classify_recovery_failure(
+                diagnostic_text=safe_diagnostic,
+                is_write=True,
+            ).category
+        report_path = repo_path / ".agent-runner" / "recovery" / f"issue-{issue.number}.md"
+        try:
+            previous_run = recovery_store.get_run(recovery_run_key)
+            previous_attempts = (
+                previous_run.recovery_attempts
+                if previous_run is not None and previous_run.recovery_state == "waiting"
+                else 0
+            )
+            retry_after = (
+                _recovery_retry_after(
+                    category=category,
+                    occurred_at=occurred_at,
+                    previous_attempts=previous_attempts,
+                    github_client=github_client,
+                )
+                if category
+                in {
+                    RecoveryFailureCategory.TRANSIENT_NETWORK,
+                    RecoveryFailureCategory.RATE_LIMITED,
+                    RecoveryFailureCategory.OUTCOME_UNKNOWN,
+                }
+                else None
+            )
+            recovery_run = recovery_store.record_failure(
+                RecoveryFailureRecord(
+                    run_key=recovery_run_key,
+                    repository_id=effective_repo_id,
+                    issue_number=issue.number,
+                    occurred_at=occurred_at,
+                    retry_after=retry_after,
+                    max_attempts=_RECOVERY_MAX_ATTEMPTS,
+                    budget_seconds=_RECOVERY_BUDGET_SECONDS,
+                    category=category,
+                    error_summary=safe_diagnostic,
+                    report_path=report_path.as_posix(),
+                )
+            )
+            saved_path, report_text = _write_recovery_report(
+                repo_path=repo_path,
+                issue=issue,
+                issue_kind=issue_kind,
+                recovery_run=recovery_run,
+                recovery_store=recovery_store,
+            )
+        except sqlite3.Error as store_error:
+            storage_write_failed = True
+            release_claim_on_exit = False
+            diagnostic = _sanitize_recovery_diagnostic(str(store_error))
+            fallback_run = RecoveryRunRecord(
+                run_key=recovery_run_key,
+                repository_id=effective_repo_id,
+                issue_number=issue.number,
+                first_failure_at=occurred_at,
+                budget_deadline=occurred_at,
+                resume_at=None,
+                recovery_attempts=0,
+                recovery_state="needs_human",
+                failure_category=RecoveryFailureCategory.FATAL_STATE,
+                error_summary=diagnostic,
+                report_path=report_path.as_posix(),
+            )
+            try:
+                saved_path, _ = _write_recovery_report(
+                    repo_path=repo_path,
+                    issue=issue,
+                    issue_kind=issue_kind,
+                    recovery_run=fallback_run,
+                    recovery_store=recovery_store,
+                    storage_error=diagnostic,
+                )
+            except OSError as report_error:
+                _logger.error(
+                    "Issue #%d recovery storage and local report both failed: %s",
+                    issue.number,
+                    report_error,
+                )
+                return fallback_run, None
+            _logger.error(
+                "Issue #%d strict recovery storage failed; business writes stopped. Report: %s",
+                issue.number,
+                saved_path,
+            )
+            return fallback_run, saved_path
+        except OSError as report_error:
+            storage_write_failed = True
+            release_claim_on_exit = False
+            _logger.error(
+                "Issue #%d recovery state was saved but local report could not be written: %s",
+                issue.number,
+                report_error,
+            )
+            return recovery_run, None
+
+        _logger.warning(
+            "Issue #%d recovery state=%s category=%s report=%s",
+            issue.number,
+            recovery_run.recovery_state,
+            recovery_run.failure_category.value,
+            saved_path,
+        )
+        if (
+            recovery_run.recovery_state == "needs_human"
+            and recovery_run.failure_category is not RecoveryFailureCategory.FATAL_STATE
+        ):
+            release_claim_on_exit = False
+            try:
+                github_client.comment_issue(issue.number, report_text)
+            except Exception as notification_error:  # noqa: BLE001 - 同一报告留待后续续投。
+                _logger.warning(
+                    "Issue #%d handoff notification was not delivered; local report remains at %s: %s",
+                    issue.number,
+                    saved_path,
+                    notification_error,
+                )
+        return recovery_run, saved_path
+
     prd_activity_lease = PrdActivityLease(
         repo_path, lifecycle_prd_path, issue.number, selected_agent
     )
@@ -280,6 +592,53 @@ def _process_single_issue(
 
     stage_selection = PublishStageSelection()
     try:
+        if recovery_store is not None:
+            persisted_recovery = recovery_store.get_run(recovery_run_key)
+            is_daemon_trigger = "daemon" in run_trigger.lower()
+            if (
+                persisted_recovery is not None
+                and persisted_recovery.recovery_state == "needs_human"
+            ):
+                if is_daemon_trigger:
+                    safe_report_path = _local_recovery_report_path(
+                        repo_path=repo_path,
+                        issue_number=issue.number,
+                        stored_path=persisted_recovery.report_path,
+                    )
+                    if (
+                        safe_report_path is not None
+                        and persisted_recovery.failure_category
+                        is not RecoveryFailureCategory.FATAL_STATE
+                    ):
+                        try:
+                            report_body = safe_report_path.read_text(encoding="utf-8")
+                            github_client.comment_issue(issue.number, report_body)
+                        except Exception as notification_error:  # noqa: BLE001 - 本地报告保留续投。
+                            _logger.warning(
+                                "Issue #%d handoff report remains undelivered at %s: %s",
+                                issue.number,
+                                persisted_recovery.report_path,
+                                notification_error,
+                            )
+                    elif safe_report_path is None:
+                        _logger.error(
+                            "Issue #%d recovery report path is invalid; refusing to read or post it.",
+                            issue.number,
+                        )
+                    output_view.update_status(issue.number, "blocked")
+                    return 0
+                # 显式 CLI 重跑代表人已处理阻塞；预算开启新周期，未决副作用身份不变，
+                # 各写入口仍须先对账旧 operation_key。
+                recovery_store.finish_run(recovery_run_key)
+            elif (
+                persisted_recovery is not None
+                and persisted_recovery.recovery_state == "waiting"
+                and persisted_recovery.resume_at is not None
+                and persisted_recovery.resume_at > datetime.now(timezone.utc)
+                and is_daemon_trigger
+            ):
+                output_view.update_status(issue.number, "deferred")
+                return 0
         # Ready Issue 先完成 claim election，再取得 PRD 锁。并发的 daemon 与
         # 定向 run 只有赢家会持锁，落败者不会误报失败或释放赢家的锁。
         if issue_kind != "ready":
@@ -459,44 +818,38 @@ def _process_single_issue(
             error_summary=None,
             started_at=run_started_at,
         )
+        if recovery_store is not None:
+            recovery_store.finish_run(recovery_run_key)
         return 0
     except AgentDaemonShutdownInterrupt:
         _skip_issue_on_daemon_shutdown(issue.number, output_view)
         return 0
-    except GitHubApiRateLimitError:
+    except (GitHubApiRateLimitError, GitHubApiUnavailableError, GitHubApiPermissionError) as exc:
         if _skip_issue_on_daemon_shutdown(issue.number, output_view):
             return 0
-        output_view.update_status(issue.number, "skipped")
-        raise
-    except GitHubApiUnavailableError as exc:
-        if _skip_issue_on_daemon_shutdown(issue.number, output_view):
+        recovery_run, report_path = _record_recovery_failure(exc)
+        if recovery_run is None:
+            if isinstance(exc, GitHubApiPermissionError):
+                _logger.error(
+                    "Blocked Issue #%d on GitHub permission failure: %s", issue.number, exc
+                )
+                output_view.update_status(issue.number, "blocked")
+                return 1
+            _logger.warning("Deferred Issue #%d after GitHub API failure: %s", issue.number, exc)
+            output_view.update_status(issue.number, "deferred")
             return 0
-        error_summary = f"GitHub API 暂不可用，任务已暂缓并等待自动重试：{exc}"
-        _logger.warning("Deferred Issue #%d after GitHub API retries: %s", issue.number, exc)
-        output_view.update_status(issue.number, "deferred")
-        record_lifecycle_terminal(
-            store=run_history_store,
-            repo_id=effective_repo_id,
-            prd_path=lifecycle_prd_path,
-            issue_number=issue.number,
-            trigger=run_trigger,
-            event_type=LifecycleEventType.DEFERRED,
-            outcome="deferred",
-            actor="runner",
-            detail={"error_summary": error_summary},
+        if report_path is None:
+            storage_write_failed = True
+            release_claim_on_exit = False
+        needs_human = recovery_run.recovery_state == "needs_human"
+        output_view.update_status(issue.number, "blocked" if needs_human else "deferred")
+        _logger.warning(
+            "Issue #%d %s; recovery report: %s",
+            issue.number,
+            "requires human action" if needs_human else "deferred for recovery",
+            report_path or "unavailable",
         )
-        _append_run_record_locked(
-            run_history_store=run_history_store,
-            repo_id=effective_repo_id,
-            repo_path=repo_path,
-            issue=issue,
-            trigger=run_trigger,
-            agent=selected_agent,
-            outcome="deferred",
-            error_summary=error_summary,
-            started_at=run_started_at,
-        )
-        return 0
+        return 1 if needs_human else 0
 
     except (
         ForbiddenBlockedError,
@@ -566,6 +919,18 @@ def _process_single_issue(
         )
         output_view.update_status(issue.number, "skipped")
         return 0
+    except sqlite3.Error as exc:
+        # 严格恢复账本不可写时禁止继续用 best-effort GitHub 标记掩盖故障。
+        storage_write_failed = True
+        release_claim_on_exit = False
+        _record_recovery_failure(exc)
+        _logger.error(
+            "Issue #%d stopped because strict recovery storage is unavailable: %s",
+            issue.number,
+            exc,
+        )
+        output_view.update_status(issue.number, "blocked")
+        return 1
     except Exception as exc:  # noqa: BLE001 - report queue failures and continue.
         if _skip_issue_on_daemon_shutdown(issue.number, output_view):
             return 0
@@ -602,9 +967,10 @@ def _process_single_issue(
         return 1
 
     finally:
+        clear_active_runner_claim_guard()
         prd_activity_lease.close()
         heartbeat = active_coordination_heartbeat()
-        if heartbeat is not None:
+        if heartbeat is not None and release_claim_on_exit and not storage_write_failed:
             heartbeat.release_claim(github_client=github_client, issue_number=issue.number)
 
 

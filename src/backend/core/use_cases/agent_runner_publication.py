@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from backend.core.shared.interfaces.agent_runner import (
+    GitHubApiPermissionError,
     GitHubApiRateLimitError,
     GitHubApiUnavailableError,
     IContentGenerator,
@@ -38,6 +39,7 @@ from backend.core.shared.models.agent_runner import (
     PublishFailureCategory,
 )
 from backend.core.shared.models.publish_stage import PublishStage
+from backend.core.shared.interfaces.runner_recovery import IRunnerRecoveryStore
 from backend.core.use_cases.agent_review import run_pre_pr_review
 from backend.core.use_cases.agent_runner_direct_pr_label import (
     DirectPrLabelPublicationRequest,
@@ -50,6 +52,11 @@ from backend.core.use_cases.agent_runner_direct_pr_round import (
 from backend.core.use_cases.agent_runner_events import format_event_marker
 from backend.core.use_cases.agent_runner_failure import PublishFailureError
 from backend.core.use_cases.agent_runner_claim_lease import ClaimLeaseLost
+from backend.core.use_cases.agent_runner_recovery import (
+    find_reusable_validation_stage,
+    persist_validation_stage_success,
+    resolve_validation_stage_context,
+)
 from backend.core.use_cases.agent_runner_final_verification import (
     FinalVerificationRequest,
     ensure_final_verifier_verdict,
@@ -142,6 +149,49 @@ class PreVerifierDraftPublicationRequest:
     expected_branch: str
     publish_stage: PublishStage
     content_generator: IContentGenerator | None = None
+
+    @classmethod
+    def from_local_commit_reuse(
+        cls,
+        reuse_request: LocalCommitReuseRequest,
+        github_client: IGitHubClient,
+        expected_branch: str,
+        content_generator: IContentGenerator | None,
+    ) -> PreVerifierDraftPublicationRequest:
+        """从已有提交复用上下文构建发布前置请求。
+
+        Args:
+            reuse_request: 本地提交复用所需的 Issue 与 worktree 上下文。
+            github_client: 当前仓库的 GitHub 客户端。
+            expected_branch: 预期的 Issue 分支。
+            content_generator: 可选的 PR 描述生成器。
+
+        Returns:
+            同一工作现场对应的 Draft PR 发布前置请求。
+        """
+        return cls(
+            issue=reuse_request.issue,
+            worktree_path=reuse_request.worktree_path,
+            config=reuse_request.config,
+            github_client=github_client,
+            process_runner=reuse_request.process_runner,
+            expected_branch=expected_branch,
+            publish_stage=reuse_request.publish_stage,
+            content_generator=content_generator,
+        )
+
+
+@dataclass(frozen=True)
+class ExistingCommitPublicationRequest:
+    """从本地提交复用上下文恢复已有提交所需的附加信息。"""
+
+    reuse_request: LocalCommitReuseRequest
+    selected_agent: str
+    github_client: IGitHubClient
+    expected_branch: str
+    commit_result: AgentCommitResult
+    content_generator: IContentGenerator | None
+    direct_pr_label: str | None
 
 
 def build_implementation_complete_comment(
@@ -254,7 +304,10 @@ def _push_changes_with_recovery_context(request: _PushChangesRequest) -> str:
     except ClaimLeaseLost:
         raise
     except Exception as exc:  # 标签清理与 push 都是发布边界。
-        if isinstance(exc, (GitHubApiRateLimitError, GitHubApiUnavailableError)):
+        if isinstance(
+            exc,
+            (GitHubApiPermissionError, GitHubApiRateLimitError, GitHubApiUnavailableError),
+        ):
             raise
         raise PublishFailureError(
             str(exc),
@@ -315,7 +368,7 @@ def publish_draft_pr_before_verifier(request: PreVerifierDraftPublicationRequest
                     request.issue.number,
                     evidence_upload.branch,
                 )
-    except (GitHubApiRateLimitError, GitHubApiUnavailableError):
+    except (GitHubApiPermissionError, GitHubApiRateLimitError, GitHubApiUnavailableError):
         raise
     except ClaimLeaseLost:
         raise
@@ -352,7 +405,10 @@ def _create_draft_pr_with_recovery_context(
             publish_stage=publish_stage,
         )
     except DraftPRCreationError as exc:
-        if isinstance(exc.__cause__, (GitHubApiRateLimitError, GitHubApiUnavailableError)):
+        if isinstance(
+            exc.__cause__,
+            (GitHubApiPermissionError, GitHubApiRateLimitError, GitHubApiUnavailableError),
+        ):
             raise exc.__cause__ from exc
         raise PublishFailureError(
             str(exc),
@@ -362,7 +418,10 @@ def _create_draft_pr_with_recovery_context(
     except ClaimLeaseLost:
         raise
     except (RuntimeError, OSError, subprocess.CalledProcessError) as exc:
-        if isinstance(exc, (GitHubApiRateLimitError, GitHubApiUnavailableError)):
+        if isinstance(
+            exc,
+            (GitHubApiPermissionError, GitHubApiRateLimitError, GitHubApiUnavailableError),
+        ):
             raise
         raise PublishFailureError(
             str(exc),
@@ -600,6 +659,8 @@ def _reuse_existing_local_commit(
     worktree_path: Path,
     config: AppConfig,
     process_runner: IProcessRunner,
+    repo_id: str | None = None,
+    recovery_store: IRunnerRecoveryStore | None = None,
 ) -> AgentCommitResult | None:
     """检查并复用 worktree 中已有的本地提交。
 
@@ -622,7 +683,14 @@ def _reuse_existing_local_commit(
         包含验证结果的 AgentCommitResult，或 None（不满足复用条件）
     """
     return _reuse_local_commit(
-        LocalCommitReuseRequest(issue, worktree_path, config, process_runner)
+        LocalCommitReuseRequest(
+            issue,
+            worktree_path,
+            config,
+            process_runner,
+            repo_id=repo_id,
+            recovery_store=recovery_store,
+        )
     )
 
 
@@ -635,6 +703,8 @@ class LocalCommitReuseRequest:
     config: AppConfig
     process_runner: IProcessRunner
     publish_stage: PublishStage = PublishStage.NORMAL
+    repo_id: str | None = None
+    recovery_store: IRunnerRecoveryStore | None = None
 
 
 def _reuse_local_commit(request: LocalCommitReuseRequest) -> AgentCommitResult | None:
@@ -652,14 +722,61 @@ def _reuse_local_commit(request: LocalCommitReuseRequest) -> AgentCommitResult |
     validate_safe_changes(worktree_path, config, process_runner)
     verification_results: list[CommandResult] = []
     if not request.publish_stage.skips_review_and_repo_verification:
-        verification_results = run_verification(worktree_path, config, process_runner)
-        ensure_verification_passed(verification_results)
+        stage_context = (
+            resolve_validation_stage_context(
+                repository_id=request.repo_id,
+                issue_number=issue.number,
+                worktree_path=worktree_path,
+                config=config,
+                process_runner=process_runner,
+            )
+            if request.repo_id
+            else None
+        )
+        reusable_stage = find_reusable_validation_stage(
+            recovery_store=request.recovery_store,
+            stage_context=stage_context,
+        )
+        if reusable_stage is not None:
+            verification_results = [
+                CommandResult(
+                    command=("kc-recovery-cache", repr(validation_command)),
+                    return_code=0,
+                    stdout=(
+                        "Reused a passed validation result because the Git tree, base SHA, "
+                        "and validation contract still match."
+                    ),
+                    stderr="",
+                )
+                for validation_command in config.runner.verification_commands
+            ]
+        else:
+            verification_results = run_verification(worktree_path, config, process_runner)
+            ensure_verification_passed(verification_results)
         ensure_prd_delivery_ready(issue, worktree_path, process_runner)
         ensure_validation_evidence_ready(issue, worktree_path, config)
 
     # 二次检查：验证后可能有新变更
     if has_changes(worktree_path, process_runner):
         return None
+
+    if (
+        not request.publish_stage.skips_review_and_repo_verification
+        and request.repo_id
+        and verification_results
+    ):
+        current_stage_context = resolve_validation_stage_context(
+            repository_id=request.repo_id,
+            issue_number=issue.number,
+            worktree_path=worktree_path,
+            config=config,
+            process_runner=process_runner,
+        )
+        if current_stage_context == stage_context and reusable_stage is None:
+            persist_validation_stage_success(
+                recovery_store=request.recovery_store,
+                stage_context=current_stage_context,
+            )
 
     base_ref_name = f"{config.git.remote}/{config.git.base_branch}"
     head_sha = get_head_sha(worktree_path, process_runner)
@@ -682,6 +799,42 @@ def _reuse_local_commit(request: LocalCommitReuseRequest) -> AgentCommitResult |
                 ),
             )
         ],
+    )
+
+
+def _persist_verified_stage_before_publication(
+    *,
+    issue: IssueSummary,
+    worktree_path: Path,
+    config: AppConfig,
+    process_runner: IProcessRunner,
+    commit_result: AgentCommitResult,
+    publish_stage: PublishStage,
+    repo_id: str | None,
+    github_client: IGitHubClient,
+) -> None:
+    """在任何发布写入前严格保存通过验证的阶段前提。"""
+    if (
+        publish_stage.skips_review_and_repo_verification
+        or not repo_id
+        or not config.runner.verification_commands
+        or len(commit_result.verification_results) != len(config.runner.verification_commands)
+        or any(result.return_code != 0 for result in commit_result.verification_results)
+    ):
+        return
+    recovery_store = getattr(github_client, "recovery_store", None)
+    if recovery_store is None:
+        return
+    stage_context = resolve_validation_stage_context(
+        repository_id=repo_id,
+        issue_number=issue.number,
+        worktree_path=worktree_path,
+        config=config,
+        process_runner=process_runner,
+    )
+    persist_validation_stage_success(
+        recovery_store=recovery_store,
+        stage_context=stage_context,
     )
 
 
@@ -827,6 +980,16 @@ def _finish_implementation_publication(
     """
     verification_results = commit_result.verification_results
     after_sha = get_head_sha(worktree_path, process_runner)
+    _persist_verified_stage_before_publication(
+        issue=issue,
+        worktree_path=worktree_path,
+        config=config,
+        process_runner=process_runner,
+        commit_result=commit_result,
+        publish_stage=publish_stage,
+        repo_id=repo_id,
+        github_client=github_client,
+    )
 
     # 步骤 0: 蒸馏 skill 草稿。失败仅记录日志，不阻塞后续 push / review / PR。
     _try_distill_skill_after_success(
@@ -932,6 +1095,31 @@ def _finish_implementation_publication(
     )
 
 
+def _finish_existing_commit_publication_from_request(
+    request: ExistingCommitPublicationRequest,
+) -> None:
+    """使用已有的发布上下文完成已提交成果的恢复发布。
+
+    Args:
+        request: 预 verifier 发布上下文、已验证提交与认领信息。
+    """
+    reuse_request = request.reuse_request
+    _finish_existing_commit_publication(
+        issue=reuse_request.issue,
+        worktree_path=reuse_request.worktree_path,
+        config=reuse_request.config,
+        selected_agent=request.selected_agent,
+        github_client=request.github_client,
+        process_runner=reuse_request.process_runner,
+        expected_branch=request.expected_branch,
+        commit_result=request.commit_result,
+        content_generator=request.content_generator,
+        publish_stage=reuse_request.publish_stage,
+        direct_pr_label=request.direct_pr_label,
+        repo_id=reuse_request.repo_id,
+    )
+
+
 def _finish_existing_commit_publication(
     *,
     publish_stage: PublishStage = PublishStage.NORMAL,
@@ -979,6 +1167,16 @@ def _finish_existing_commit_publication(
     """
     verification_results = commit_result.verification_results
     head_sha = get_head_sha(worktree_path, process_runner)
+    _persist_verified_stage_before_publication(
+        issue=issue,
+        worktree_path=worktree_path,
+        config=config,
+        process_runner=process_runner,
+        commit_result=commit_result,
+        publish_stage=publish_stage,
+        repo_id=repo_id,
+        github_client=github_client,
+    )
 
     # 步骤 1: 评论实现完成信息（attempt_results 会显示 recovered=True）
     github_client.comment_issue(

@@ -312,7 +312,15 @@ class FakeGitHubClient(IGitHubClient):
         )
         return self._issue_url
 
-    def create_draft_pr(self, *, title: str, body: str, base_branch: str, cwd: Path) -> str:
+    def create_draft_pr(
+        self,
+        *,
+        title: str,
+        body: str,
+        base_branch: str,
+        cwd: Path,
+        issue_number: int = 0,
+    ) -> str:
         pull_request_url = "https://github.com/example/repo/pull/1"
         self._open_prs[cwd.name] = pull_request_url
         self.calls.append(
