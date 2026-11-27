@@ -6,9 +6,9 @@ Choose the next execution context for Issue #457: a recovery run with write acce
 
 ## State and changes
 
-- Patrol [Issue #461](https://github.com/ZataZhang/keda/issues/461) is open/`agent/blocked`. Branch: `issue-461` (one commit behind upstream `main` at capture); no PR existed at capture. Its [handoff comment](https://github.com/ZataZhang/keda/issues/461#issuecomment-7211509517) links the target evidence.
+- Patrol [Issue #461](https://github.com/ZataZhang/keda/issues/461) is open/`agent/supervising`; [PR #462](https://github.com/ZataZhang/keda/pull/462) is open as a draft. Its [handoff comment](https://github.com/ZataZhang/keda/issues/461#issuecomment-7211509517) links the target evidence.
 - Target [Issue #457](https://github.com/ZataZhang/keda/issues/457) is open/`agent/failed`; [PR #459](https://github.com/ZataZhang/keda/pull/459) is open at `85dc6f6b12d611b279bf615982a2a1b66fad6b46`, with no reported checks.
-- This checklist is the only change. The affected code exists only in PR #459, outside this run's writable `issue-461` worktree.
+- This PR records the handoff and its review corrections; it does not change the target code. The affected code exists only in PR #459, outside this run's writable `issue-461` worktree.
 
 ## Evidence
 
@@ -23,11 +23,12 @@ Choose the next execution context for Issue #457: a recovery run with write acce
 - `gh issue view 457 --repo ZataZhang/keda --json number,title,state,url,labels,updatedAt,assignees` / `gh issue view 461 --repo ZataZhang/keda --json number,state,url,labels,updatedAt`: #457 remained open/failed; #461 changed from open/running to open/blocked. Comments and timeline showed no explicit human takeover before this patrol's comments.
 - `gh pr view 459 --repo ZataZhang/keda --json number,title,state,url,headRefName,headRefOid,baseRefName,mergeStateStatus,statusCheckRollup,updatedAt`: open at `85dc6f6…`, no checks; `gh pr checks 459 --repo ZataZhang/keda`: exit 1, “no checks reported”.
 - `kc logs --issue 457 --lines 200 --repo /Users/zata/code/keda/.kc-worktrees/issue-457`: no output available. `kc logs --issue 457 --lines 200`: exit 3; patrol worktree is not an enabled registry target.
-- `git diff --name-status main...85dc6f6b12d611b279bf615982a2a1b66fad6b46`: affected recovery modules are new in PR #459. No tests or verifier were run from this worktree.
-- `jq empty .agent-runner/commit-request.json`: exit 0.
+- `git diff --name-status main...85dc6f6b12d611b279bf615982a2a1b66fad6b46`: affected recovery modules are new in PR #459. No target-branch tests or independent reproduction were run from this worktree.
+- The [runner implementation report](https://github.com/ZataZhang/keda/issues/461) recorded exit 0 for `git diff --check`, `SKIP=check-test-flag uv run pre-commit run --all-files --show-diff-on-failure`, `just test all`, and `uv run mkdocs build --strict` at PR head `2d7aa0779ec465d2165cbe53770cfcb0a9c90066`. These checks precede the review corrections and do not verify the target fix.
+- At that head, PR #462 CI reported 13 successful jobs and two skipped jobs; subsequent commits require fresh CI.
 
 ## Remaining verification and next action
 
 The verifier report and source review support the cause, but no independent reproduction was run on PR #459's head. A runner with target-branch access must preserve the permission error type, add a regression test, run `uv run pytest tests/test_github_client.py tests/test_agent_runner_recovery.py tests/test_agent_runner_publish.py tests/test_recover_publish.py tests/test_runner_recovery_store.py -q --no-testmon` and `uv run python tasks/evidence/P1-FEAT-20261024-162357-agent-interruption-recovery/scripts/run_recovery_rv.py --scene human-handoff`, obtain an independent verifier result, then re-read #457 and its logs before requeueing.
 
-Close #461 only after a fresh queue read shows no eligible open `agent/blocked` or `agent/failed` Issues and #457's recovery is confirmed. Until then, keep this patrol open and blocked.
+Keep #461 open while the handoff is reviewed. As required by the patrol instructions, merging PR #462 closes #461 and allows the next patrol to run; this does not resolve or close #457. Keep #457 failed until the target fix and verification pass, then re-read its state and logs before requeueing.
