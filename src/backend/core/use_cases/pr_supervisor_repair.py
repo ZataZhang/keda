@@ -6,7 +6,7 @@ import logging
 import subprocess
 from pathlib import Path
 
-from backend.core.shared.interfaces.agent_runner import IProcessRunner
+from backend.core.shared.interfaces.agent_runner import IGitHubClient, IProcessRunner
 from backend.core.shared.models.agent_runner import (
     AppConfig,
     CommandResult,
@@ -42,6 +42,10 @@ from backend.core.use_cases.agent_runner_validation import (
     resolve_issue_evidence_relpath,
 )
 from backend.core.shared.models.agent_model_preset import ModelSelection
+from backend.core.use_cases.agent_runner_git_recovery import (
+    GitRefMutationRequest,
+    mutate_git_ref_with_recovery,
+)
 from backend.core.use_cases.run_agent_once import (
     EmptyCommitRequestError,
     commit_requested_changes,
@@ -65,6 +69,7 @@ def execute_repair(
     pr_branch: str,
     expected_head: str,
     repair_agent: str,
+    github_client: IGitHubClient | None = None,
     findings: tuple[FindingDetail, ...] = (),
     model_selection: ModelSelection | None = None,
 ) -> list[CommandResult]:
@@ -79,6 +84,7 @@ def execute_repair(
         worktree_path: Agent worktree 路径。
         config: 应用配置。
         process_runner: 命令执行器。
+        github_client: 可选 GitHub 端口；提供时 PR 分支 push 使用严格恢复账本。
         pr_branch: PR 分支名称。
         expected_head: 修复前预期的 HEAD SHA。
         repair_agent: 执行修复的 Agent。
@@ -218,9 +224,22 @@ def execute_repair(
     else:
         ensure_verification_passed(verification_results)
 
-    process_runner.run(
-        ["git", "push", config.git.remote, pr_branch],
-        cwd=worktree_path,
-    )
+    if github_client is None:
+        process_runner.run(
+            ["git", "push", config.git.remote, pr_branch],
+            cwd=worktree_path,
+        )
+    else:
+        mutate_git_ref_with_recovery(
+            GitRefMutationRequest(
+                issue=issue,
+                worktree_path=worktree_path,
+                process_runner=process_runner,
+                github_client=github_client,
+                remote_name=config.git.remote,
+                target_ref=f"refs/heads/{pr_branch}",
+                desired_sha=get_head_sha(worktree_path, process_runner),
+            )
+        )
 
     return verification_results

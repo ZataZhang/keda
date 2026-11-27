@@ -19,6 +19,7 @@ from backend.core.shared.interfaces.agent_runner import (
     IGitHubClient,
     IProcessRunner,
 )
+from backend.core.shared.interfaces.runner_claim_guard import clear_active_runner_claim_guard
 from backend.core.shared.interfaces.runner_console import (
     AuditEntry,
     IBacklogStore,
@@ -45,6 +46,14 @@ def _ensure_project_root_on_path() -> None:
 _ensure_project_root_on_path()
 
 _PRD_CONTRACT_SCRIPT_RELATIVE_PATH = Path("scripts") / "prd_contract.py"
+
+
+@pytest.fixture(autouse=True)
+def _isolate_active_runner_claim_guard() -> Iterator[None]:
+    """让每个测试从干净的线程认领上下文开始，并在结束时清理。"""
+    clear_active_runner_claim_guard()
+    yield
+    clear_active_runner_claim_guard()
 
 
 def _find_usable_prd_skill() -> Path | None:

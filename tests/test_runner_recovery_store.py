@@ -20,9 +20,19 @@ from backend.core.shared.models.runner_recovery import (
     RecoveryFailureCategory,
     RecoveryFailureRecord,
 )
+from backend.core.shared.models.agent_runner import CommandResult, IssueSummary
 from backend.core.shared.models.runner_recovery_policy import classify_recovery_failure
+from backend.core.shared.models.runner_recovery_operations import build_operation_intent
+from backend.core.use_cases.agent_runner_git_recovery import (
+    GitRefMutationRequest,
+    mutate_git_ref_with_recovery,
+)
 from backend.core.use_cases.agent_runner_recovery import execute_journaled_write
-from backend.infrastructure.persistence.runner_recovery_store import SqliteRunnerRecoveryStore
+from backend.infrastructure.persistence.runner_recovery_store import (
+    RecoveryOperationIdentityConflict,
+    SqliteRunnerRecoveryStore,
+)
+from tests.conftest import FakeGitHubClient, FakeProcessRunner
 
 
 def _intent() -> OperationIntent:
@@ -110,6 +120,169 @@ def test_stale_in_flight_operation_becomes_unknown_and_reconciles_without_resend
 
     assert result == "comment-91"
     assert store.get_operation(intent.operation_key).state is OperationState.CONFIRMED
+
+
+def test_runner_git_push_persists_confirmation(tmp_path: Path) -> None:
+    """Issue 关联的 runner Git push 在严格账本确认后才返回成功。"""
+    worktree_path = tmp_path / "worktree"
+    worktree_path.mkdir()
+    store = SqliteRunnerRecoveryStore(tmp_path / "console.db")
+    github_client = FakeGitHubClient()
+    github_client.recovery_store = store
+    issue = IssueSummary(
+        number=73,
+        title="Recovery",
+        url="https://github.com/example/repo/issues/73",
+        body="",
+        labels=("agent/running",),
+    )
+    process_runner = FakeProcessRunner()
+
+    remote_reference = mutate_git_ref_with_recovery(
+        GitRefMutationRequest(
+            issue=issue,
+            worktree_path=worktree_path,
+            process_runner=process_runner,
+            github_client=github_client,
+            remote_name="origin",
+            target_ref="refs/heads/issue-73",
+            desired_sha="abc123",
+        )
+    )
+
+    operation_intent = build_operation_intent(
+        repository_id=worktree_path.resolve().as_posix(),
+        issue_number=73,
+        operation_kind="git_push",
+        target="origin:refs/heads/issue-73",
+        payload_text="abc123",
+    )
+    operation_record = store.get_operation(operation_intent.operation_key)
+    assert remote_reference == "refs/heads/issue-73@abc123"
+    assert operation_record is not None
+    assert operation_record.state is OperationState.CONFIRMED
+    assert (
+        process_runner.calls.count(["git", "push", "-u", "origin", "abc123:refs/heads/issue-73"])
+        == 1
+    )
+
+
+def test_runner_git_push_keeps_unknown_remote_result_without_resending(
+    tmp_path: Path,
+) -> None:
+    """远端 push 回应丢失且对账无结果时保留 unknown，不盲目重发。"""
+    worktree_path = tmp_path / "worktree"
+    worktree_path.mkdir()
+    store = SqliteRunnerRecoveryStore(tmp_path / "console.db")
+    github_client = FakeGitHubClient()
+    github_client.recovery_store = store
+    issue = IssueSummary(
+        number=73,
+        title="Recovery",
+        url="https://github.com/example/repo/issues/73",
+        body="",
+        labels=("agent/running",),
+    )
+
+    class LostPushResponseRunner(FakeProcessRunner):
+        def run(self, command, *, cwd, check=True, **kwargs):  # type: ignore[override]
+            command_list = list(command)
+            if command_list[:2] == ["git", "push"]:
+                result = CommandResult(
+                    command=tuple(command_list),
+                    return_code=1,
+                    stdout="",
+                    stderr="connection reset by peer",
+                )
+                self.calls.append(command_list)
+                return result
+            if command_list[:3] == ["git", "ls-remote", "--heads"]:
+                result = CommandResult(
+                    command=tuple(command_list),
+                    return_code=0,
+                    stdout="",
+                    stderr="",
+                )
+                self.calls.append(command_list)
+                return result
+            return super().run(command, cwd=cwd, check=check, **kwargs)
+
+    process_runner = LostPushResponseRunner()
+    with pytest.raises(GitHubOperationOutcomeUnknownError):
+        mutate_git_ref_with_recovery(
+            GitRefMutationRequest(
+                issue=issue,
+                worktree_path=worktree_path,
+                process_runner=process_runner,
+                github_client=github_client,
+                remote_name="origin",
+                target_ref="refs/heads/issue-73",
+                desired_sha="abc123",
+            )
+        )
+
+    operation_intent = build_operation_intent(
+        repository_id=worktree_path.resolve().as_posix(),
+        issue_number=73,
+        operation_kind="git_push",
+        target="origin:refs/heads/issue-73",
+        payload_text="abc123",
+    )
+    operation_record = store.get_operation(operation_intent.operation_key)
+    assert operation_record is not None
+    assert operation_record.state is OperationState.UNKNOWN
+    assert sum(command[:2] == ["git", "push"] for command in process_runner.calls) == 1
+
+
+def test_runner_force_push_persists_the_original_remote_lease(tmp_path: Path) -> None:
+    """PR rebase 的 ledgered force push 必须显式使用 rebase 前的 head lease。"""
+    worktree_path = tmp_path / "worktree"
+    worktree_path.mkdir()
+    store = SqliteRunnerRecoveryStore(tmp_path / "console.db")
+    github_client = FakeGitHubClient()
+    github_client.recovery_store = store
+    issue = IssueSummary(
+        number=73,
+        title="Recovery",
+        url="https://github.com/example/repo/issues/73",
+        body="",
+        labels=("agent/running",),
+    )
+    process_runner = FakeProcessRunner()
+
+    remote_reference = mutate_git_ref_with_recovery(
+        GitRefMutationRequest(
+            issue=issue,
+            worktree_path=worktree_path,
+            process_runner=process_runner,
+            github_client=github_client,
+            remote_name="origin",
+            target_ref="refs/heads/issue-73",
+            desired_sha="rebased123",
+            expected_remote_sha="before123",
+            force_with_lease=True,
+        )
+    )
+
+    assert remote_reference == "refs/heads/issue-73@rebased123"
+    assert [
+        "git",
+        "push",
+        "--force-with-lease=refs/heads/issue-73:before123",
+        "-u",
+        "origin",
+        "rebased123:refs/heads/issue-73",
+    ] in process_runner.calls
+    operation_intent = build_operation_intent(
+        repository_id=worktree_path.resolve().as_posix(),
+        issue_number=73,
+        operation_kind="git_push",
+        target="origin:refs/heads/issue-73",
+        payload_text="rebased123",
+    )
+    operation_record = store.get_operation(operation_intent.operation_key)
+    assert operation_record is not None
+    assert operation_record.state is OperationState.CONFIRMED
 
 
 def test_known_not_sent_failure_can_retry_but_unknown_failure_cannot(
@@ -248,6 +421,42 @@ def test_operation_compare_and_swap_allows_only_one_sender(tmp_path: Path) -> No
         claims = list(pool.map(lambda _index: claim_send_right(), range(8)))
 
     assert sum(claims) == 1
+
+
+def test_operation_key_cannot_be_reused_for_changed_payload(tmp_path: Path) -> None:
+    """载荷改变时必须换用新修订身份，不能让旧确认吞掉新内容。"""
+    store = SqliteRunnerRecoveryStore(tmp_path / "console.db")
+    original_intent = _intent()
+    store.begin_operation(original_intent)
+    changed_payload_intent = OperationIntent(
+        **{
+            **original_intent.__dict__,
+            "payload_digest": "changed-payload-sha256",
+        }
+    )
+
+    with pytest.raises(RecoveryOperationIdentityConflict, match="不同目标或载荷摘要"):
+        store.begin_operation(changed_payload_intent)
+
+    assert store.get_operation(original_intent.operation_key).intent == original_intent
+
+
+@pytest.mark.parametrize(
+    ("diagnostic_text", "expected_category"),
+    [
+        ("HTTP 403: API rate limit exceeded", RecoveryFailureCategory.RATE_LIMITED),
+        ("HTTP 403: Resource not accessible by integration", RecoveryFailureCategory.AUTH),
+    ],
+    ids=["rate-limit-403", "permission-403"],
+)
+def test_forbidden_status_distinguishes_rate_limit_from_permission(
+    diagnostic_text: str,
+    expected_category: RecoveryFailureCategory,
+) -> None:
+    """限流型 403 等待，权限型 403 转人工。"""
+    decision = classify_recovery_failure(diagnostic_text=diagnostic_text, is_write=True)
+
+    assert decision.category is expected_category
 
 
 def test_sqlite_transition_failure_is_not_swallowed(tmp_path: Path) -> None:

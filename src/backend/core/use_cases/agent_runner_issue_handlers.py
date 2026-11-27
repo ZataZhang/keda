@@ -797,6 +797,7 @@ def _process_running_rework(
             pr_branch=pr_branch,
             expected_head=expected_head,
             supervisor_agent=supervisor_agent,
+            github_client=github_client,
         )
         rebase_sha = get_head_sha(worktree_path, process_runner)
         github_client.comment_issue(
@@ -816,6 +817,7 @@ def _process_running_rework(
             pr_branch=pr_branch,
             expected_head=expected_head,
             repair_agent=repair_agent,
+            github_client=github_client,
             findings=_load_previous_findings(worktree_path, config, issue.number),
         )
         repair_sha = get_head_sha(worktree_path, process_runner)

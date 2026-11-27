@@ -308,6 +308,7 @@ def _run_supervisor_with_repair_loop(
                     pr_branch=current_pr_context.branch,
                     expected_head=current_pr_context.head_sha,
                     supervisor_agent=supervisor_agent,
+                    github_client=github_client,
                     model_selection=repair_model_selection,
                 )
             else:
@@ -319,6 +320,7 @@ def _run_supervisor_with_repair_loop(
                     pr_branch=current_pr_context.branch,
                     expected_head=current_pr_context.head_sha,
                     repair_agent=repair_agent,
+                    github_client=github_client,
                     findings=action_result.findings_detail,
                     model_selection=repair_model_selection,
                 )

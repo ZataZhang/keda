@@ -539,6 +539,7 @@ def _process_one(
             pr_branch=pr_branch,
             expected_head=head_before or pr_context.head_sha,
             supervisor_agent=supervisor_agent,
+            github_client=github_client,
         )
     except Exception as exc:  # noqa: BLE001 - rebase failures route through supervising.
         _logger.warning(

@@ -351,6 +351,7 @@ def publish_draft_pr_before_verifier(request: PreVerifierDraftPublicationRequest
                 worktree_path=request.worktree_path,
                 config=request.config,
                 process_runner=request.process_runner,
+                github_client=request.github_client,
             )
         except ClaimLeaseLost:
             raise

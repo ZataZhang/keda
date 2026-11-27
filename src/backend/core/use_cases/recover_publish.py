@@ -29,6 +29,7 @@ from backend.core.shared.models.agent_runner import (
 from backend.core.use_cases.agent_runner_failure import (
     build_publish_failure_comment_body,
 )
+from backend.core.use_cases.agent_runner_publish import PushChangesError, push_changes
 from backend.core.use_cases.agent_runner_validation import (
     publish_validation_evidence_best_effort,
 )
@@ -509,16 +510,18 @@ def _recover_publish_issue_owned(
     heartbeat = active_coordination_heartbeat()
     if heartbeat is not None:
         heartbeat.assert_claim_owned(github_client=github_client, issue_number=issue_number)
-    push_result = process_runner.run(
-        ["git", "push", "-u", configured_remote, branch],
-        cwd=worktree_path,
-        check=False,
-    )
-    if push_result.return_code != 0:
+    try:
+        push_changes(
+            issue=recovered_issue,
+            worktree_path=worktree_path,
+            config=config,
+            process_runner=process_runner,
+            github_client=github_client,
+            expected_branch=branch,
+        )
+    except PushChangesError as push_error:
         exc = PublishRecoveryError(
-            f"Failed to push branch '{branch}' to remote '{configured_remote}'. "
-            f"Exit code: {push_result.return_code}. "
-            f"Stderr: {push_result.stderr}",
+            f"Failed to push branch '{branch}' to remote '{configured_remote}'. " f"{push_error}",
             worktree_path=worktree_path,
             failure_category=PublishFailureCategory.PUSH.value,
         )

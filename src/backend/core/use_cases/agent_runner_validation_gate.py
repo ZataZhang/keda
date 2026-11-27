@@ -9,6 +9,10 @@ from pathlib import Path
 
 from backend.core.shared.interfaces.agent_runner import IGitHubClient, IProcessRunner
 from backend.core.shared.models.agent_runner import AppConfig, IssueSummary, PullRequestContext
+from backend.core.use_cases.agent_runner_git_recovery import (
+    GitRefMutationRequest,
+    mutate_git_ref_with_recovery,
+)
 from backend.core.use_cases.agent_runner_events import (
     format_event_marker,
     parse_latest_event_marker,
@@ -303,7 +307,11 @@ def cleanup_closed_issue_evidence_branches(
         return
     branch_issue_pattern = re.compile(rf"refs/heads/({re.escape(branch_prefix)}issue-(\d+))$")
     for ls_remote_line in ls_remote_result.stdout.splitlines():
-        branch_match = branch_issue_pattern.search(ls_remote_line.strip())
+        remote_fields = ls_remote_line.strip().split(maxsplit=1)
+        if len(remote_fields) != 2:
+            continue
+        remote_sha, remote_ref = remote_fields
+        branch_match = branch_issue_pattern.fullmatch(remote_ref)
         if not branch_match:
             continue
         branch_ref_name = branch_match.group(1)
@@ -315,10 +323,17 @@ def cleanup_closed_issue_evidence_branches(
             continue
         if tracked_issue.state.upper() != "CLOSED":
             continue
-        process_runner.run(
-            ["git", "push", config.git.remote, "--delete", branch_ref_name],
-            cwd=repo_path,
-            check=False,
+        mutate_git_ref_with_recovery(
+            GitRefMutationRequest(
+                issue=tracked_issue,
+                worktree_path=repo_path,
+                process_runner=process_runner,
+                github_client=github_client,
+                remote_name=config.git.remote,
+                target_ref=remote_ref,
+                desired_sha=None,
+                expected_remote_sha=remote_sha,
+            )
         )
         _logger.info(
             "Deleted evidence branch %s for closed Issue #%d.", branch_ref_name, issue_number

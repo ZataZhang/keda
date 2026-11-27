@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -23,6 +24,7 @@ from backend.core.use_cases.recover_publish import (
     validate_branch_safety,
     validate_worktree_clean,
 )
+from backend.infrastructure.persistence.runner_recovery_store import SqliteRunnerRecoveryStore
 from tests.conftest import FakeContentGenerator, FakeGitHubClient, FakeProcessRunner
 
 
@@ -333,6 +335,43 @@ class TestValidateBranchSafety:
 
 class TestRecoverPublishIssue:
     """Tests for recover_publish_issue."""
+
+    def test_push_uses_strict_recovery_ledger(self, tmp_path: Path) -> None:
+        """手动发布恢复的 git push 也必须经严格副作用账本。"""
+        config = _make_config(supervisor_enabled=False)
+        worktree_path = tmp_path / "issue-42"
+        worktree_path.mkdir()
+        config = AppConfig(
+            labels=config.labels,
+            worktree=config.worktree.__class__(path_command=f"echo {worktree_path}"),
+            post_pr_supervisor=PostPrSupervisorConfig(enabled=False),
+        )
+        recovery_database_path = tmp_path / "console.db"
+        github_client = FakeGitHubClient()
+        github_client.recovery_store = SqliteRunnerRecoveryStore(recovery_database_path)
+        github_client._open_prs["issue-42"] = None
+        process_runner = _make_process_runner_with_worktree(worktree_path, branch="issue-42")
+
+        result = recover_publish_issue(
+            request=PublishRecoveryRequest(issue_number=42),
+            repo_path=tmp_path,
+            config=config,
+            github_client=github_client,
+            process_runner=process_runner,
+        )
+
+        assert result.pr_url == "https://github.com/example/repo/pull/1"
+        assert any(command[:2] == ["git", "push"] for command in process_runner.calls)
+
+        connection = sqlite3.connect(recovery_database_path)
+        try:
+            operation_rows = connection.execute(
+                "SELECT operation_kind, state FROM runner_external_operations "
+                "WHERE issue_number = 42"
+            ).fetchall()
+        finally:
+            connection.close()
+        assert operation_rows == [("git_push", "confirmed")]
 
     def test_success_creates_new_pr_supervisor_disabled(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

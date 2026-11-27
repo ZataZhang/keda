@@ -8,6 +8,10 @@ from pathlib import Path
 
 from backend.core.shared.interfaces.agent_runner import IGitHubClient, IProcessRunner
 from backend.core.shared.models.agent_runner import AppConfig, IssueSummary
+from backend.core.use_cases.agent_runner_git_recovery import (
+    GitRefMutationRequest,
+    mutate_git_ref_with_recovery,
+)
 from backend.core.shared.models.pull_request_url import (
     build_evidence_blob_url,
     parse_pull_request_number,
@@ -107,6 +111,7 @@ def upload_evidence_branch(
     worktree_path: Path,
     config: AppConfig,
     process_runner: IProcessRunner,
+    github_client: IGitHubClient | None = None,
 ) -> EvidenceUpload | None:
     """Push evidence files to the orphan evidence branch.
 
@@ -160,16 +165,30 @@ def upload_evidence_branch(
     )
     commit_sha = commit_result.stdout.strip()
     branch = evidence_branch_name(issue.number, config)
-    process_runner.run(
-        [
-            "git",
-            "push",
-            "--force",
-            config.git.remote,
-            f"{commit_sha}:refs/heads/{branch}",
-        ],
-        cwd=worktree_path,
-    )
+    if github_client is None:
+        process_runner.run(
+            [
+                "git",
+                "push",
+                "--force",
+                config.git.remote,
+                f"{commit_sha}:refs/heads/{branch}",
+            ],
+            cwd=worktree_path,
+        )
+    else:
+        mutate_git_ref_with_recovery(
+            GitRefMutationRequest(
+                issue=issue,
+                worktree_path=worktree_path,
+                process_runner=process_runner,
+                github_client=github_client,
+                remote_name=config.git.remote,
+                target_ref=f"refs/heads/{branch}",
+                desired_sha=commit_sha,
+                force_with_lease=True,
+            )
+        )
     return EvidenceUpload(
         branch=branch,
         commit_sha=commit_sha,
@@ -188,6 +207,7 @@ def publish_validation_evidence_artifacts(
     worktree_path: Path,
     config: AppConfig,
     process_runner: IProcessRunner,
+    github_client: IGitHubClient | None = None,
 ) -> EvidenceUpload | None:
     """提前发布验证证据分支，供 Draft PR 阶段的人预览。
 
@@ -210,6 +230,7 @@ def publish_validation_evidence_artifacts(
         worktree_path=worktree_path,
         config=config,
         process_runner=process_runner,
+        github_client=github_client,
     )
     if upload is None:
         _logger.warning(
@@ -407,6 +428,7 @@ def publish_validation_evidence(
         worktree_path=worktree_path,
         config=config,
         process_runner=process_runner,
+        github_client=github_client,
     )
     if upload is None:
         return None

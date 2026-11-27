@@ -709,16 +709,18 @@ def test_run_once_rebase_conflict_detached_head(
         (
             "git",
             "push",
-            "--force-with-lease",
+            "--force-with-lease=refs/heads/issue-73:abc123",
+            "-u",
             "origin",
-            "issue-73",
+            "abc123:refs/heads/issue-73",
         ): CommandResult(
             command=(
                 "git",
                 "push",
-                "--force-with-lease",
+                "--force-with-lease=refs/heads/issue-73:abc123",
+                "-u",
                 "origin",
-                "issue-73",
+                "abc123:refs/heads/issue-73",
             ),
             return_code=0,
             stdout="",
@@ -771,8 +773,9 @@ def test_run_once_rebase_conflict_detached_head(
     assert (
         "git",
         "push",
-        "--force-with-lease",
+        "--force-with-lease=refs/heads/issue-73:abc123",
+        "-u",
         "origin",
-        "issue-73",
+        "abc123:refs/heads/issue-73",
     ) in commands
     assert not any(c[:2] == ("git", "commit") for c in commands)

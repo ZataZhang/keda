@@ -5,10 +5,10 @@
 > ✅ **交付前置**：无，可立即开工。
 > 结构化声明见 §8 Delivery Dependencies，那里是唯一事实源。
 
-> ⬜ **验收状态**：未开工。
+> ⏸️ **验收状态**：验证阻塞。
 > 本行是 §9 Acceptance Checklist 的投影，那里是唯一事实源。
 
-Part A 用于核对行为与验收结果；Part B 用于实施。本次只编写 PRD，尚未实施或取得运行证据。
+Part A 用于核对行为与验收结果；Part B 用于实施。当前已有 WIP 实现和真实入口运行证据；执行侧验证、独立 verifier 与人工验收尚未完成，Acceptance Checklist 保持未勾选。
 
 ## Feature Overview (功能一览)
 
@@ -335,7 +335,7 @@ erDiagram
 
 采用隔离临时仓库、真实 Git 本地 bare remote、真实 CLI / daemon 与 SQLite；只在测试侧替换外部 Agent 和 gh 网络边界。至少一组必须穿过真实 gh 子进程与测试侧 TCP / HTTP 代理，实际断开 socket，不能仅用假 gh 打印 EOF 冒充网络验证。代理路由方式在 harness 中先做能力探测；若当前 gh 难以重定向，允许测试侧传输适配器调用真实本地 socket 并另测真实 gh 返回的错误分类，必须披露未穿透边界，不能把较低保真度当成完整验收通过。
 
-执行者实现前阅读 skill 的 `references/rv-harness-cookbook.md`。为本 PRD 生成忽略提交的 `tasks/evidence/P1-FEAT-20261024-162357-agent-interruption-recovery/scripts/run_recovery_rv.py`，支持以下命令与 scene；其职责是准备现场、启动真实入口并做独立探测，不直接调用被测恢复 helper。该脚本当前尚未创建。
+执行者实现前阅读 skill 的 `references/rv-harness-cookbook.md`。本 PRD 的忽略提交脚本 `tasks/evidence/P1-FEAT-20261024-162357-agent-interruption-recovery/scripts/run_recovery_rv.py` 支持以下命令与 scene；其职责是准备现场、启动真实入口并做独立探测，不直接调用被测恢复 helper。
 
 ```yaml
 - id: rv-1
@@ -417,7 +417,7 @@ No external validation required; repository evidence was sufficient. 本设计�
 |---|---|---|
 | 无法自动恢复时，报告能指导人处理；离线通知不会假成功 | `open tasks/evidence/P1-FEAT-20261024-162357-agent-interruption-recovery/rv-3-human-handoff.txt`；交付报告摘录真实报告关键段。归档后用 `just prd review tasks/archive/P1-FEAT-20261024-162357-agent-interruption-recovery.md` 集中查看 | 找到“失败步骤、已完成成果、结果未知操作、已尝试处理、需要人做什么、恢复入口”；通知未送达明确标注。 |
 
-rv-1 阶段恢复与 rv-2 副作用去重由 verifier 审核；迁移、分支矩阵、lint 与文档构建不要求人逐条查看。当前没有运行产物，表内为交付要求。
+rv-1 阶段恢复与 rv-2 副作用去重由 verifier 审核；迁移、分支矩阵、lint 与文档构建不要求人逐条查看。`rv-3-human-handoff.txt` 已收录真实 runner 生成的报告原文和通知重投观察；人审尚未记录，Acceptance Checklist 仍保持未勾选。
 
 ### 9.2 Acceptance Evidence Package
 
@@ -447,13 +447,13 @@ rv-1 阶段恢复与 rv-2 副作用去重由 verifier 审核；迁移、分支�
 
 - [ ] 三条 oracle 均通过真实入口，证据包含关键值来源、实际边界、fresh process 探测、最终源码 tree 与 harness hash；至少一组实际 socket 断连。
 - [ ] 定向 pytest 使用 `--no-testmon` 且非零用例，`just lint --repo` 与文档检查通过；不以 local 档退出码代替执行证据。
-- [ ] verification-plan、evidence-report、独立 verifier-report 三份报告齐备，verifier 有效结论为 PASS；review infrastructure 故障记 INCONCLUSIVE 而非产品失败或通过。
+- [~] verification-plan、evidence-report、独立 verifier-report 三份报告齐备，verifier 有效结论为 PASS；review infrastructure 故障记 INCONCLUSIVE 而非产品失败或通过。 — runner-owned gate: 独立 verifier verdict
 
 #### Delivery Readiness
 
 - [ ] 无未解决阻断问题，§13 Final Reconciliation 完成，主文、功能一览、实际实现与证据一致。
-- [ ] 完成消息呈递 §9.1 的实际报告；若另获授权创建 PR，PR 内发布相同呈递与证据，不把文件落盘当作交付。
-- [ ] 独立 verifier PASS 后勾选有证据的执行侧项目，随交付归档，横幅与人工待验收项一致；本 PRD 创建不等于功能完成。
+- [~] 完成消息呈递 §9.1 的实际报告；若另获授权创建 PR，PR 内发布相同呈递与证据，不把文件落盘当作交付。 — runner-owned gate: PR 创建与交付呈递
+- [~] 独立 verifier PASS 后勾选有证据的执行侧项目，随交付归档，横幅与人工待验收项一致；本 PRD 创建不等于功能完成。 — runner-owned gate: verifier 后置清单更新与 PRD 归档
 
 ## 10. Functional Requirements
 
@@ -496,12 +496,14 @@ rv-1 阶段恢复与 rv-2 副作用去重由 verifier 审核；迁移、分支�
 
 ### Final Reconciliation
 
-- Interpretation: 待实施后核对；当前依据用户已同意的讨论结论。
-- Public behavior and contracts: 待核对最终 CLI 退出码、报告与兼容性实测。
-- Related PRD status: 待交付前复查租约 PRD。
-- Requirements and risks: 待最终实现、三条 oracle 与独立 verifier 核对。
+- Interpretation: 交付边界仍是 keda runner 的分域故障恢复、阶段续跑与受控副作用账本；三条行为 oracle 未修改。
+- Public behavior and contracts: 没有新增 CLI 子命令、旗标、退出码或机器输出字段；既有 `kc run`、daemon 与 `kc recover` 路径保留。真实入口证据显示实现 Agent 未重跑，未知 PR 创建未重复，通知离线后使用相同报告补投。
+- Related PRD status: `P1-FEAT-20261024-161425-cross-machine-presence-and-claim-lease` 已归档并标记 `✅ 已验收`；当前租约准入与失权检查仍由既有入口执行。
+- Requirements and risks: 核心 runner 发布、监督 push、验证证据分支更新与关闭 Issue 后的证据分支删除已使用严格账本或远端 ref lease。rv-1、rv-2、rv-3 已由 executor 通过本地真实 CLI/daemon 和测试 TLS forge 采集；但 rv-2 与 rv-3 要求的并发/失权/存储失败/权限/取消矩阵未全跑，PRD 创建发布与独立证据清理的 Git 写入口仍需边界审查，独立 verifier 尚无有效 verdict。
 - Reconciled differences:
-  - 尚未实施，不宣称完成。
+  - 没有修改用户可见范围、行为 oracle 或验证要求；按当前代码审计同步了手动恢复、监督与验证分支写入行为，并在证据报告中逐项披露未覆盖的写入口和矩阵。
+- Validation blocker: 尚未执行完整 rv-2 / rv-3 故障矩阵，未解决 PRD 创建发布及证据清理 Git 写入是否属于本期范围的审查问题，且没有独立 verifier 可形成 PASS；因此不得勾选 executor-owned Acceptance Checklist 项或宣称完成。
+- Validation follow-up: GitHub Issue #457 仍 open，作为本次验证债务的跟踪项；下一恢复轮完成 PRD 创建发布与证据清理写入口范围审查、rv-2/rv-3 剩余故障矩阵，并在独立 verifier 会话可用后复核本证据报告记录的最终源码 tree，再按实际证据更新 Acceptance Checklist。此 PRD 保持 pending，未由执行者归档。
 
 ## Change Log
 
@@ -520,3 +522,35 @@ rv-1 阶段恢复与 rv-2 副作用去重由 verifier 审核；迁移、分支�
 - Reason: GitHub 的评论/PR 列表没有为普通创建请求提供权威的未执行回执；请求到达后查无对象可能来自传播延迟，盲目补发会造成无法判断的重复副作用。
 - Impact: 收紧未知写入时的自动补发范围；同步 §1 oracle、§7.1、§7.2 与 rv-2。代码、测试与证据按此边界实现；不代表 rv-2 已验收。
 - Review: 执行器安全澄清，尚待独立 verifier 与人工审阅；Acceptance Checklist 保持未勾选。
+
+### 继续 WIP 并采集真实入口证据
+- Type: evidence
+- Before: §9.1 说明尚无运行产物；当前工作仍基于未完成的 WIP checkpoint。
+- After: `rv-1`、`rv-2`、`rv-3` 已通过真实 CLI/daemon、Git、SQLite 与测试侧 TLS forge 收集本轮产物；执行侧 Acceptance Checklist 未勾选。
+- Reason: 继续 GitHub Issue #457 的现有 WIP，并提供可供独立 verifier 和人工审阅的证据。
+- Impact: 更新 §9.1 的产物状态和 evidence package；没有删除或弱化任何验收标准，没有归档 PRD，也没有记录人工验收。
+- Review: 执行者验证通过；独立 verifier 尚无 verdict，Human-Confirmed 项仍待人工审阅；证据报告保留未覆盖的写入口与 RV 矩阵。
+
+### 扩展 Issue 关联 Git ref 写入记账
+- Type: implementation
+- Before: 普通发布与 `kc recover` 的 push 使用严格账本；post-PR 修复/rebase、验证证据分支更新与关闭 Issue 后的证据分支清理仍有直接 Git 写入。
+- After: 这些 Issue 关联写入共用 `agent_runner_git_recovery`：push 先记录稳定意图，未知结果按远端 ref 对账且不盲目重发；rebase、证据分支更新与删除保留显式 lease。
+- Reason: 补齐 Agent Runner 交付、监督与验证清理路径中的受控 Git 副作用恢复。
+- Impact: 修改 runner 监督、验证发布与清理实现及相应文档；增加 confirmed/unknown Git push 定向测试。其余 PRD 发布 Git 写入口与完整故障矩阵仍需审计，验收清单不变。
+- Review: 代码和定向测试已执行；三条真实入口 oracle 随实现变化重采，独立 verifier 无 verdict，所有 Acceptance Checklist 项保持未勾选。
+
+### 记录当前验证阻塞状态
+- Type: evidence
+- Before: WIP Change Log 要求重采三条 oracle；PRD 顶部和 Final Reconciliation 仍写着尚未开工、尚未实施或待取得证据。
+- After: 三条真实入口 oracle 已按当前源码与测试 diff 重采；Acceptance Status Banner 与 Final Reconciliation 反映缺少完整 rv-2/rv-3 矩阵、写入口边界审查和独立 verifier 的阻塞。
+- Reason: 避免 PRD 状态投影与已存在的实现、证据及未关闭的验收门禁相矛盾。
+- Impact: 仅更新状态、证据指针和最终对账；没有改写或勾选 Acceptance Checklist，没有归档 PRD。
+- Review: executor 记录，待独立 verifier 和后续人工复核；Human-Confirmed 项保持未勾选。
+
+### 补全阻塞跟进与 runner-owned 清单门禁
+- Type: evidence
+- Before: Final Reconciliation 有验证跟进说明，但 delivery check 未接受该字段；Acceptance Checklist 将独立 verifier、PR 创建呈递和归档后置工作保留为 executor 空框。
+- After: Validation follow-up 明确指向仍 open 的 GitHub Issue #457 与下一恢复轮的具体工作；仅 verifier verdict、PR 呈递及归档后置项改为 `[~]` 并标注 runner-owned gate，其余未证实的 executor 项和 Human-Confirmed 项继续保持 `[ ]`。新增的结构化 evidence manifest 按 rv-1/rv-2/rv-3 分组，分别记录实际负控和通过命令。
+- Reason: 让阻塞债务有可追踪的后续工作，并遵守归档前无法由执行器完成的 runner-owned gate 语义。
+- Impact: 不改变行为 oracle、不弱化未完成的产品验证要求、不代替 runner 执行独立 verifier / PR / 归档，也不勾选任何未取得证据的项目。
+- Review: 执行器记录；待 runner 独立 verifier 与后续人工审阅。

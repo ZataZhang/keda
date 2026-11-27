@@ -2827,7 +2827,7 @@ agent/blocked ── 人工处理 + blocked-continue ──→ agent/running ─
 
 ### 与 pre-PR review 和 post-PR supervisor 的关系
 
-`kc recover` 只做发布收尾：校验 worktree 干净、校验分支、push、创建或复用 Draft PR、更新 Issue label 和 comment。它不会运行 pre-PR review（因为恢复路径要求本地 commit 已经由正常 runner 路径完成过 pre-PR review）。
+`kc recover` 只做发布收尾：校验 worktree 干净、校验分支、push、创建或复用 Draft PR、更新 Issue label 和 comment。push 与普通 runner 发布共用严格恢复账本：发送前记录操作意图，结果不确定时查询远端 ref；只有确认目标 commit 尚未到达且可安全快进时才补发。它不会运行 pre-PR review（因为恢复路径要求本地 commit 已经由正常 runner 路径完成过 pre-PR review）。
 
 新建 Draft PR 时，正文复用正常发布路径的 `create_draft_pr` 用例，因此和正常发布一致：内容生成（LLM 正文）+ contract anchors + validation checklist + contract block。内容生成需要内容生成器（`run_recover_command` 装配），生成失败时按 `generated_content` 配置退回 template / fallback。仅当 `get_issue` 失败、拿不到 Issue 标题与正文上下文时才退回确定性极简正文（`Recovered by issue-agent-runner.`）。复用已存在的 PR 时不会改写其正文。
 
@@ -2890,7 +2890,7 @@ uv run kc recover --issue 42 --branch issue-421
 2. 校验工作区干净（无未提交变更）
 3. 校验分支安全（非 base branch、分支名精确引用 issue 编号或显式 `--branch` 确认）
 4. 校验配置的 remote 存在
-5. Push 当前分支到配置 remote
+5. 通过严格恢复账本 Push 当前分支到配置 remote；未知结果先查询远端 ref，不能安全确认或补发时停止并交由人工处理
 6. 检查是否已有 open PR，有则复用，无则创建 draft PR（正文复用正常发布路径生成；见上文）
 7. 发布成功 comment，记录分支、HEAD SHA、PR URL 和是否复用已有 PR
 8. 更新 Issue labels：
@@ -6377,6 +6377,10 @@ Runner 管理的 GitHub 写入先保存稳定操作身份、目标与载荷摘�
 `in_flight` 状态按未知处理：runner 先只读对账，确认远端已完成时复用；只有 fresh read 与操作
 语义都证明安全时才补发。查询失败、分页不完整或对象暂不可见时不据此判断“未创建”，而是挂起
 并交给人。该账本不覆盖任意 Agent shell 写请求，也不声称提供 GitHub exactly-once 保证。
+Issue 关联的 post-PR 修复分支推送和已关闭 Issue 的证据分支删除也记录在同一账本；删除使用
+观测到的远端 SHA 作为 lease，避免清理过程中删掉其他参与者刚更新的分支。未知 push 结果只
+查询远端 ref，不会仅凭失败输出重发。验证证据分支更新和 post-PR rebase 使用显式
+`--force-with-lease`；rebase lease 固定为处理前已知的 PR head。
 
 需要人工处理或通知暂不可达时，runner 在本地保留包含失败步骤、已有成果、未决写入、尝试动作和
 恢复入口的报告。通知恢复后投递同一报告，不把失败通知记为成功，也不递归创建通知失败报告。

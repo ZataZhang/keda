@@ -1908,16 +1908,16 @@ def test_cleanup_deletes_branches_for_closed_issues(tmp_path: Path) -> None:
     assert [
         "git",
         "push",
+        "--force-with-lease=refs/heads/kc-evidence/issue-41:sha1",
         config.git.remote,
-        "--delete",
-        "kc-evidence/issue-41",
+        ":refs/heads/kc-evidence/issue-41",
     ] in fake_runner.calls
     assert [
         "git",
         "push",
+        "--force-with-lease=refs/heads/kc-evidence/issue-42:sha2",
         config.git.remote,
-        "--delete",
-        "kc-evidence/issue-42",
+        ":refs/heads/kc-evidence/issue-42",
     ] not in fake_runner.calls
 
 

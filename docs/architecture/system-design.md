@@ -204,7 +204,10 @@ Agent Runner 的严格恢复事实保存在 Console 共用 SQLite 文件中的�
 `core/use_cases/agent_runner_recovery.py` 编排稳定操作身份和未知结果处理。基础设施适配器执行
 GitHub/Git 操作并按远端事实对账。崩溃遗留的 `in_flight` 写入按未知结果处理，先只读查询；本地
 账本不提供第三方 exactly-once 保证，也不解决跨机器锁。阶段结果只有在工作树、base 与验证前提
-匹配时才复用。装配仍由现有 Agent Runner factory 完成，不新增服务边界。
+匹配时才复用。普通发布与人工 `kc recover` 共用 journaled push 用例；post-PR 修复分支 push 与
+关闭 Issue 后的证据分支删除也先记录操作，再按远端 ref 确认。验证证据分支更新与 post-PR
+rebase push 保留显式 `--force-with-lease`，删除用 lease 限定原 SHA；未知 push 结果不会盲目重发。
+装配仍由现有 Agent Runner factory 完成，不新增服务边界。
 
 ## 认证与会话域
 

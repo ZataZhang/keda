@@ -68,6 +68,10 @@ from backend.core.use_cases.agent_runner_verification_recovery import (
 )
 from backend.core.use_cases.agent_review import ReviewerDecision, parse_reviewer_decision
 from backend.core.shared.models.agent_model_preset import ModelSelection
+from backend.core.use_cases.agent_runner_git_recovery import (
+    GitRefMutationRequest,
+    mutate_git_ref_with_recovery,
+)
 from backend.core.use_cases.run_agent_once import (
     extract_agent_response_text,
     get_current_branch,
@@ -602,6 +606,7 @@ def execute_rebase(
     pr_branch: str,
     expected_head: str,
     supervisor_agent: str,
+    github_client: IGitHubClient | None = None,
     model_selection: ModelSelection | None = None,
 ) -> list[CommandResult]:
     """Rebase the PR branch onto the latest remote base safely.
@@ -614,12 +619,36 @@ def execute_rebase(
         pr_branch: Name of the PR branch.
         expected_head: Expected current HEAD SHA before rebase.
         supervisor_agent: Agent to run for conflict resolution.
+        github_client: 可选 GitHub 端口；提供时重写 PR 分支经严格恢复账本发布。
 
     Returns:
         Verification results after rebase.
     """
     remote = config.git.remote
     base_branch = config.git.base_branch
+    expected_remote_head = expected_head
+
+    def push_rebased_branch() -> None:
+        """用 rebase 前的远端 head 作为 lease 发布重写后的分支。"""
+        if github_client is None:
+            process_runner.run(
+                ["git", "push", "--force-with-lease", remote, pr_branch],
+                cwd=worktree_path,
+            )
+            return
+        mutate_git_ref_with_recovery(
+            GitRefMutationRequest(
+                issue=issue,
+                worktree_path=worktree_path,
+                process_runner=process_runner,
+                github_client=github_client,
+                remote_name=remote,
+                target_ref=f"refs/heads/{pr_branch}",
+                desired_sha=get_head_sha(worktree_path, process_runner),
+                expected_remote_sha=expected_remote_head,
+                force_with_lease=True,
+            )
+        )
 
     # 校验 HEAD 与分支，防止在错误状态上执行 rebase。
     current_head = get_head_sha(worktree_path, process_runner)
@@ -700,10 +729,7 @@ def execute_rebase(
                         supervisor_agent=supervisor_agent,
                         pr_branch=pr_branch,
                     )
-                    process_runner.run(
-                        ["git", "push", "--force-with-lease", remote, pr_branch],
-                        cwd=worktree_path,
-                    )
+                    push_rebased_branch()
                     return verification_results
                 # continue 失败说明仍有未解决冲突，进入下一轮让 agent 处理
                 reset_attempt_budget_for_next_commit()
@@ -777,10 +803,7 @@ def execute_rebase(
                     supervisor_agent=supervisor_agent,
                     pr_branch=pr_branch,
                 )
-                process_runner.run(
-                    ["git", "push", "--force-with-lease", remote, pr_branch],
-                    cwd=worktree_path,
-                )
+                push_rebased_branch()
                 return verification_results
             reset_attempt_budget_for_next_commit()
 
@@ -803,10 +826,7 @@ def execute_rebase(
     )
 
     # 用 force-with-lease 推送到 PR 分支
-    process_runner.run(
-        ["git", "push", "--force-with-lease", remote, pr_branch],
-        cwd=worktree_path,
-    )
+    push_rebased_branch()
 
     return verification_results
 
