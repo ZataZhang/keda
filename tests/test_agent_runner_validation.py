@@ -2343,6 +2343,43 @@ def test_ensure_validation_commands_pass_rejects_failing_command(
     assert "demo run" in str(exc_info.value)
 
 
+def test_rv_failure_points_to_redirected_output(tmp_path: Path) -> None:
+    """真实命令重定向输出时，反馈仍指出本轮更新的本地证据。"""
+    from backend.infrastructure.process_runner import SubprocessRunner
+
+    evidence_dir = tmp_path / ".iar" / "evidence"
+    _write_manifest(
+        evidence_dir,
+        items=[
+            {
+                "item_number": 1,
+                "item_name": "redirected failure",
+                "command": "printf 'prepare timed out' > .iar/evidence/rv-1-run.txt; exit 1",
+                "evidence_files": ["rv-1-run.txt", "rv-1-old.txt"],
+                "output_summary": "验证输出",
+                "explanation": "验证命令",
+                "risks": "无",
+                "negative_control": "退出 1",
+                "expected_fail": "非零退出",
+            },
+        ],
+    )
+    (evidence_dir / "rv-1-old.txt").write_text("old", encoding="utf-8")
+
+    with pytest.raises(ValidationEvidenceError) as exc_info:
+        ensure_validation_commands_pass(
+            _issue(body=_STRUCTURED_ISSUE_BODY),
+            tmp_path,
+            _legacy_config(reexecute_cache_enabled=False),
+            SubprocessRunner(),
+        )
+
+    feedback = str(exc_info.value)
+    assert "`.iar/evidence/rv-1-run.txt` (written by this check)" in feedback
+    assert "`.iar/evidence/rv-1-old.txt` (unchanged)" in feedback
+    assert (evidence_dir / "rv-1-run.txt").read_text(encoding="utf-8") == "prepare timed out"
+
+
 def test_ensure_validation_commands_pass_accepts_passing_commands(
     tmp_path: Path,
 ) -> None:

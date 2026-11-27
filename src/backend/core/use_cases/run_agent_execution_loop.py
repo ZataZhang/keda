@@ -926,11 +926,13 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                 if attempt_index >= max_recovery_attempts:
                     raise MaxRetriesExceededError(attempt_results) from exc
                 recovery_failure_summary = format_validation_evidence_failure(
-                    str(exc), resolve_issue_evidence_relpath(config, issue)
+                    f"Failed phase: {current_failure_phase}\n"
+                    f"HEAD: {get_head_sha(worktree_path, process_runner)}\n{exc}",
+                    resolve_issue_evidence_relpath(config, issue),
                 )
                 recovery_failure_type = failure_type.value
                 _logger.warning(
-                    "Independent verifier failed for Issue #%d at committed HEAD; "
+                    "Validation failed for Issue #%d at committed HEAD; "
                     "asking agent to recover (%d/%d).",
                     issue.number,
                     attempt_index + 1,

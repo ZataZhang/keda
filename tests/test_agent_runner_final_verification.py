@@ -246,3 +246,63 @@ def test_failed_final_verifier_prevents_draft_pr(
                 content_generator=None,
             )
         )
+
+
+@pytest.mark.parametrize("recheck_passes", [True, False])
+def test_final_rv_failure_reaches_recovery_agent_once(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, recheck_passes: bool
+) -> None:
+    """最终 RV 失败后将当前 HEAD 与证据路径交给真正的 Agent 调用边界。"""
+    from backend.core.shared.models.agent_runner import CommandResult
+    from backend.core.use_cases import agent_runner_publication as publication
+    from backend.core.use_cases import agent_runner_verification_recovery as recovery
+    from backend.core.use_cases.agent_runner_validation import ValidationCommandFailure
+
+    calls: list[str] = []
+    evidence_path = tmp_path / ".iar" / "evidence" / "rv-1-run.txt"
+    evidence_path.parent.mkdir(parents=True)
+    evidence_path.write_text("prepare timed out", encoding="utf-8")
+    failure = ValidationCommandFailure("RV 1 exited 1. Read .iar/evidence/rv-1-run.txt.")
+
+    def verify(*args: object) -> ValidationVerdict:
+        calls.append("verify")
+        if calls == ["verify"] or not recheck_passes:
+            raise failure
+        return ValidationVerdict(risk="green")
+
+    def invoke(
+        agent: str, prompt: str, cwd: Path, *args: object, **kwargs: object
+    ) -> CommandResult:
+        calls.append("agent")
+        assert agent == "codex"
+        assert "HEAD: review-sha" in prompt
+        assert ".iar/evidence/rv-1-run.txt" in prompt
+        assert (cwd / ".iar/evidence/rv-1-run.txt").read_text(
+            encoding="utf-8"
+        ) == "prepare timed out"
+        return CommandResult(command=("codex",), return_code=0, stdout="", stderr="")
+
+    monkeypatch.setattr(publication, "ensure_final_verifier_verdict", verify)
+    monkeypatch.setattr(publication, "get_head_sha", lambda *args: "review-sha")
+    monkeypatch.setattr(recovery, "get_head_sha", lambda *args: "review-sha")
+    monkeypatch.setattr(recovery, "get_current_branch", lambda *args: "issue-7")
+    monkeypatch.setattr(recovery, "run_agent_with_prompt", invoke)
+    monkeypatch.setattr(recovery, "has_changes", lambda *args: False)
+    monkeypatch.setattr(recovery, "run_verification", lambda *args: [])
+    request = publication._PublicationReviewRequest(
+        verification_request=_request(tmp_path, verified_sha="builder-sha"),
+        github_client=FakeGitHubClient(),
+        expected_branch="issue-7",
+        verification_results=[],
+        push_callback=lambda: pytest.fail("unchanged HEAD does not need another push"),
+        content_generator=None,
+    )
+
+    if recheck_passes:
+        verdict = publication._verify_reviewed_head(request)
+        assert verdict is not None and verdict.risk == "green"
+    else:
+        with pytest.raises(ValidationCommandFailure, match="RV 1 exited 1"):
+            publication._verify_reviewed_head(request)
+
+    assert calls == ["verify", "agent", "verify"]
