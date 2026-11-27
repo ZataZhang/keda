@@ -425,6 +425,18 @@ class GitHubApiUnavailableError(RuntimeError):
     """
 
 
+class GitHubOperationOutcomeUnknownError(GitHubApiUnavailableError):
+    """写请求可能已生效但响应丢失，完成远端对账前禁止再次发送。"""
+
+
+class GitHubOperationInProgressError(GitHubApiUnavailableError):
+    """同一稳定写操作正在由另一个本机进程发送。"""
+
+
+class GitHubApiPermissionError(RuntimeError):
+    """GitHub 明确拒绝认证或仓库权限；需要人工修复访问权限。"""
+
+
 class IGitHubClient(ABC):
     """与 GitHub 交互的端口。
 
@@ -562,6 +574,7 @@ class IGitHubClient(ABC):
         body: str,
         base_branch: str,
         cwd: Path,
+        issue_number: int = 0,
     ) -> str:
         """基于当前分支创建一个草稿（draft）Pull Request。
 
@@ -570,6 +583,7 @@ class IGitHubClient(ABC):
             body: PR 描述，支持 Markdown。
             base_branch: 合并目标（基线）分支名。
             cwd: 工作目录，用于确定 PR 的来源（head）分支所在仓库。
+            issue_number: 关联的 Issue 编号；批次级 PR 可使用默认值 ``0``。
 
         Returns:
             str: 新建 PR 的网页 URL。

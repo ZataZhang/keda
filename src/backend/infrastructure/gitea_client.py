@@ -775,6 +775,7 @@ class GiteaApiClient(IGitHubClient):
         body: str,
         base_branch: str,
         cwd: Path,
+        issue_number: int = 0,
     ) -> str:
         """从当前分支创建带 WIP 标题前缀的 Gitea 草稿 PR。"""
         return _create_draft_pr(

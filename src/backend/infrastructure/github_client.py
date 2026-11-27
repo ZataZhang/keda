@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 import re
 import subprocess
 import time
@@ -37,6 +38,7 @@ import tomllib
 from collections.abc import Iterator
 from contextlib import AbstractContextManager, ExitStack, contextmanager
 from datetime import datetime, timedelta, timezone
+from functools import partial
 from pathlib import Path
 from typing import Sequence
 from urllib.parse import urlsplit
@@ -44,7 +46,10 @@ from urllib.parse import urlsplit
 from backend.core.shared.interfaces.agent_runner import (
     GitHubApiRateLimitError,
     GitHubApiUnavailableError,
+    GitHubApiPermissionError,
 )
+from backend.core.shared.interfaces.runner_recovery import IRunnerRecoveryStore
+from backend.core.shared.models.runner_recovery_operations import build_operation_intent
 from backend.core.shared.interfaces.github_api_budget import (
     API_KIND_GRAPHQL,
     API_KIND_REST,
@@ -84,6 +89,8 @@ from backend.infrastructure.github_models import (
     PullRequestContext,
     PullRequestSummary,
 )
+from backend.core.shared.models.runner_recovery_operations import execute_journaled_write
+from backend.infrastructure.github_operation_recovery import send_github_write_command
 from backend.infrastructure.github_pr_ops import (
     close_pull_request,
     comment_pr,
@@ -119,10 +126,11 @@ __all__ = [
 ]
 
 # Number of attempts for transient GitHub CLI network failures.
-_MAX_GH_RETRIES = 3
+_MAX_GH_RETRIES = 5
 
-# Delay between retries in seconds.
+# 首次等待时长；后续按指数增长并加入抖动。
 _GH_RETRY_DELAY_SECONDS = 1.0
+_GH_RETRY_BUDGET_SECONDS = 60
 
 # 未单独指定超时的 gh 命令默认时限：网络卡死时不能让一条请求无限挂住整个 Issue。
 _DEFAULT_GH_REQUEST_TIMEOUT_SECONDS = 120
@@ -154,6 +162,18 @@ _GH_API_VALUE_OPTIONS = frozenset(
     }
 )
 _REPO_PREFIX_PATTERN = re.compile(r"^repos/[^/]+/[^/]+/")
+_GITHUB_AUTH_REJECTION_PATTERN = re.compile(
+    r"(?:http\s+(401|403)\b|non-200 OK status code:\s*(401|403)\b)",
+    re.IGNORECASE,
+)
+
+
+def _retry_delay_for_attempt(attempt_number: int, retry_deadline: float) -> float:
+    """计算不超过总 deadline 的指数退避时间。"""
+    remaining_seconds = max(0.0, retry_deadline - time.monotonic())
+    base_delay_seconds = min(_GH_RETRY_DELAY_SECONDS * (2 ** (attempt_number - 1)), 12.0)
+    jittered_delay_seconds = base_delay_seconds * random.uniform(0.75, 1.25)
+    return min(jittered_delay_seconds, remaining_seconds)
 
 
 def _gh_operation_label(command: Sequence[str]) -> str:
@@ -225,6 +245,7 @@ class GitHubCliClient:
         process_runner: SubprocessRunner | None = None,
         api_budget: IGitHubApiBudget | None = None,
         *,
+        recovery_store: IRunnerRecoveryStore | None = None,
         bypass_budget_pause: bool = False,
         request_timeout_seconds: int | None = None,
     ) -> None:
@@ -233,6 +254,7 @@ class GitHubCliClient:
         Args:
             repo_path: Target repository path.
             process_runner: Optional process runner to use for gh commands.
+            recovery_store: 严格操作账本；写操作必须先持久化意图再发送。
             api_budget: 跨进程共享的额度预算；省略时不记账也不受暂停闸门约束。
             bypass_budget_pause: 心跳续期等安全收尾请求继续计费，但忽略共享暂停闸门。
             request_timeout_seconds: 未单独指定超时的 gh 命令默认时限；省略时用
@@ -240,6 +262,7 @@ class GitHubCliClient:
         """
         self.repo_path = repo_path
         self._runner = process_runner or SubprocessRunner()
+        self.recovery_store = recovery_store
         self._api_budget = api_budget
         self._bypass_budget_pause = bypass_budget_pause
         self._request_timeout_seconds = (
@@ -284,6 +307,19 @@ class GitHubCliClient:
             raise GitHubApiRateLimitError(
                 "GitHub API rate limit exceeded; the Issue was deferred for a later poll."
             )
+
+    @staticmethod
+    def _raise_if_permission_denied(output_text: str, *, check: bool) -> None:
+        """把明确的 401/403 与限流分开；非严格查询保留返回契约。"""
+        if not check:
+            return
+        status_match = _GITHUB_AUTH_REJECTION_PATTERN.search(output_text)
+        if status_match is None:
+            return
+        status_code = status_match.group(1) or status_match.group(2)
+        raise GitHubApiPermissionError(
+            f"GitHub API returned HTTP {status_code}; check authentication and repository permissions."
+        )
 
     def _fetch_rate_limit_resources(self) -> dict[str, dict[str, object]] | None:
         """读取 ``gh api rate_limit``；该端点本身不消耗额度，限流期间也能调用。"""
@@ -370,8 +406,14 @@ class GitHubCliClient:
             self._api_budget.ensure_available(api_kind)
 
         last_exc: subprocess.CalledProcessError | None = None
-        effective_timeout = timeout if timeout is not None else self._request_timeout_seconds
-        for attempt in range(1, attempts + 1):
+        retry_deadline = time.monotonic() + _GH_RETRY_BUDGET_SECONDS
+        requested_attempts = max(1, min(attempts, _MAX_GH_RETRIES))
+        for attempt in range(1, requested_attempts + 1):
+            remaining_seconds = retry_deadline - time.monotonic()
+            if remaining_seconds <= 0:
+                break
+            configured_timeout = timeout if timeout is not None else self._request_timeout_seconds
+            effective_timeout = min(configured_timeout, max(1, int(remaining_seconds)))
             if self._api_budget is not None and api_kind is not None:
                 self._api_budget.record_call(api_kind, _gh_operation_label(command))
             try:
@@ -388,6 +430,7 @@ class GitHubCliClient:
                         (command_result.stdout or "") + "\n" + (command_result.stderr or "")
                     )
                     self._raise_if_rate_limited(combined_output, command)
+                    self._raise_if_permission_denied(combined_output, check=check)
                     last_exc = subprocess.CalledProcessError(
                         command_result.return_code,
                         list(command),
@@ -395,7 +438,9 @@ class GitHubCliClient:
                         stderr=command_result.stderr,
                     )
                     if self._is_retryable_gh_error(last_exc):
-                        if attempt >= attempts:
+                        if attempt >= requested_attempts or time.monotonic() >= retry_deadline:
+                            if not check:
+                                return command_result
                             failure_detail = (
                                 command_result.stderr or command_result.stdout or str(last_exc)
                             ).strip()
@@ -403,16 +448,17 @@ class GitHubCliClient:
                                 "GitHub API remained unavailable after "
                                 f"{attempts} attempts: {failure_detail}"
                             ) from last_exc
+                        retry_delay_seconds = _retry_delay_for_attempt(attempt, retry_deadline)
                         _logger.warning(
                             "GitHub CLI transient error (attempt %d/%d), retrying in %.1fs: %s",
                             attempt,
-                            attempts,
-                            _GH_RETRY_DELAY_SECONDS,
+                            requested_attempts,
+                            retry_delay_seconds,
                             command_result.stderr.strip()
                             if command_result.stderr
                             else command_result.stdout.strip(),
                         )
-                        time.sleep(_GH_RETRY_DELAY_SECONDS)
+                        time.sleep(retry_delay_seconds)
                         continue
                 return command_result
             except subprocess.TimeoutExpired as timeout_exc:
@@ -425,18 +471,26 @@ class GitHubCliClient:
                     stderr=f"gh command operation timed out after {effective_timeout}s",
                 )
                 last_exc = exc
-                if attempt >= attempts:
+                if attempt >= requested_attempts or time.monotonic() >= retry_deadline:
+                    if not check:
+                        return CommandResult(
+                            command=tuple(command),
+                            return_code=124,
+                            stdout=timeout_exc.output or "",
+                            stderr=f"gh command operation timed out after {effective_timeout}s",
+                        )
                     raise GitHubApiUnavailableError(
-                        f"GitHub API connection timed out after {attempts} attempts: {exc.stderr}"
+                        "GitHub API connection timed out after " f"{attempt} attempts: {exc.stderr}"
                     ) from timeout_exc
+                retry_delay_seconds = _retry_delay_for_attempt(attempt, retry_deadline)
                 _logger.warning(
                     "GitHub CLI timed out (attempt %d/%d), retrying in %.1fs: %s",
                     attempt,
-                    attempts,
-                    _GH_RETRY_DELAY_SECONDS,
+                    requested_attempts,
+                    retry_delay_seconds,
                     _gh_operation_label(command),
                 )
-                time.sleep(_GH_RETRY_DELAY_SECONDS)
+                time.sleep(retry_delay_seconds)
             except subprocess.CalledProcessError as exc:
                 last_exc = exc
                 combined_output = (exc.stdout or "") + "\n" + (exc.stderr or "")
@@ -444,25 +498,38 @@ class GitHubCliClient:
                     self._raise_if_rate_limited(combined_output, command)
                 except GitHubApiRateLimitError as rate_limit_exc:
                     raise rate_limit_exc from exc
+                self._raise_if_permission_denied(combined_output, check=check)
                 is_retryable = self._is_retryable_gh_error(exc)
                 if not is_retryable:
                     raise
-                if attempt >= attempts:
+                if attempt >= requested_attempts or time.monotonic() >= retry_deadline:
+                    if not check:
+                        return CommandResult(
+                            command=tuple(command),
+                            return_code=exc.returncode,
+                            stdout=exc.stdout or "",
+                            stderr=exc.stderr or "",
+                        )
                     failure_detail = (exc.stderr or exc.stdout or str(exc)).strip()
                     raise GitHubApiUnavailableError(
                         "GitHub API remained unavailable after "
-                        f"{attempts} attempts: {failure_detail}"
+                        f"{attempt} attempts: {failure_detail}"
                     ) from exc
+                retry_delay_seconds = _retry_delay_for_attempt(attempt, retry_deadline)
                 _logger.warning(
                     "GitHub CLI transient error (attempt %d/%d), retrying in %.1fs: %s",
                     attempt,
-                    attempts,
-                    _GH_RETRY_DELAY_SECONDS,
+                    requested_attempts,
+                    retry_delay_seconds,
                     exc.stderr.strip() if exc.stderr else str(exc),
                 )
-                time.sleep(_GH_RETRY_DELAY_SECONDS)
+                time.sleep(retry_delay_seconds)
         # pragma: no cover - loop always returns or raises before exhausting.
-        raise last_exc  # type: ignore[misc]
+        if last_exc is not None:
+            raise last_exc
+        raise GitHubApiUnavailableError(
+            "GitHub API retry budget expired before the request could be attempted."
+        )
 
     def _write_body_file(self, temp_dir: str, filename: str, body: str) -> Path:
         """清理 Markdown 正文并写入临时文件，供 GitHub CLI 文件字段读取。
@@ -715,17 +782,30 @@ class GitHubCliClient:
 
     def close_issue(self, issue_number: int) -> None:
         """通过 GitHub REST API 关闭指定 Issue。"""
-        self._run_with_retry(
-            [
-                "gh",
-                "api",
-                "-X",
-                "PATCH",
-                f"repos/{self._get_owner_repo()}/issues/{issue_number}",
-                "-f",
-                "state=closed",
-            ],
-            cwd=self.repo_path,
+        owner_repo = self._get_owner_repo()
+        endpoint = f"repos/{owner_repo}/issues/{issue_number}"
+        command = ["gh", "api", "-X", "PATCH", endpoint, "-f", "state=closed"]
+
+        send_close_issue = partial(send_github_write_command, self, command)
+
+        def reconcile_closed_issue() -> str | None:
+            issue = get_issue(self, issue_number)
+            return f"issue:{issue_number}" if issue.state == "closed" else None
+
+        if self.recovery_store is None:
+            send_close_issue()
+            return
+        execute_journaled_write(
+            recovery_store=self.recovery_store,
+            intent=build_operation_intent(
+                repository_id=owner_repo,
+                issue_number=issue_number,
+                operation_kind="issue_close",
+                target=endpoint,
+                payload_text="state=closed",
+            ),
+            send=send_close_issue,
+            reconcile=reconcile_closed_issue,
         )
 
     def create_issue(self, *, title: str, body: str, labels: Sequence[str]) -> str:
@@ -824,7 +904,15 @@ class GitHubCliClient:
 
     # --- PR delegations -------------------------------------------------
 
-    def create_draft_pr(self, *, title: str, body: str, base_branch: str, cwd: Path) -> str:
+    def create_draft_pr(
+        self,
+        *,
+        title: str,
+        body: str,
+        base_branch: str,
+        cwd: Path,
+        issue_number: int = 0,
+    ) -> str:
         """基于当前分支创建 Draft PR 并返回其 URL。
 
         Args:
@@ -832,11 +920,19 @@ class GitHubCliClient:
             body: PR 正文。
             base_branch: PR 目标分支。
             cwd: 执行 GitHub CLI 的仓库工作目录。
+            issue_number: 关联的 Issue 编号；批次级 PR 可省略。
 
         Returns:
             新建 Draft PR 的 URL。
         """
-        return create_draft_pr(self, title=title, body=body, base_branch=base_branch, cwd=cwd)
+        return create_draft_pr(
+            self,
+            title=title,
+            body=body,
+            base_branch=base_branch,
+            cwd=cwd,
+            issue_number=issue_number,
+        )
 
     def get_pull_request_context(
         self, branch: str, *, require_success: bool = False

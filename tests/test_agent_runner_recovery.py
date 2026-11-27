@@ -6,7 +6,9 @@ checkpoint on the way out."""
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -28,6 +30,106 @@ from tests.support.agent_runner import (
     worktree_path_response,
     write_commit_request,
 )
+
+
+def test_validation_stage_is_saved_before_pre_verifier_publication(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """RV 与仓库验证完成后，外部 Draft PR 写入前必须严格保存阶段结果。"""
+    from backend.core.use_cases import run_agent_execution_loop as execution_loop
+
+    events: list[str] = []
+    recovery_store = object()
+    stage_context = object()
+    request = SimpleNamespace(
+        issue=SimpleNamespace(number=73),
+        worktree_path=tmp_path,
+        config=SimpleNamespace(runner=SimpleNamespace(verification_commands=("git diff --check",))),
+        process_runner=object(),
+        repo_id="rv-demo",
+        github_client=SimpleNamespace(recovery_store=recovery_store),
+        before_verifier_callback=lambda: events.append("pre-verifier-publication"),
+    )
+
+    monkeypatch.setattr(
+        execution_loop,
+        "ensure_validation_evidence_ready",
+        lambda *_args: events.append("validation-evidence"),
+    )
+    monkeypatch.setattr(
+        execution_loop,
+        "ensure_validation_commands_pass",
+        lambda *_args: events.append("repository-verification"),
+    )
+
+    def _resolve_stage_context(**_kwargs: object) -> object:
+        events.append("resolve-stage-context")
+        return stage_context
+
+    def _persist_stage_success(*, recovery_store: object, stage_context: object) -> None:
+        assert recovery_store is request.github_client.recovery_store
+        assert stage_context is not None
+        events.append("persist-validation-stage")
+
+    monkeypatch.setattr(execution_loop, "resolve_validation_stage_context", _resolve_stage_context)
+    monkeypatch.setattr(execution_loop, "persist_validation_stage_success", _persist_stage_success)
+
+    execution_loop._complete_validation_before_verifier(request)
+
+    assert events == [
+        "validation-evidence",
+        "repository-verification",
+        "resolve-stage-context",
+        "persist-validation-stage",
+        "pre-verifier-publication",
+    ]
+
+
+def test_rate_limit_recovery_uses_shared_reset_deadline() -> None:
+    """恢复调度沿用服务端重置时间，避免限流窗口内反复探测。"""
+    from backend.core.shared.models.runner_recovery import RecoveryFailureCategory
+    from backend.core.use_cases.agent_runner_orchestration_runtime import _recovery_retry_after
+
+    first_failure_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    github_client = SimpleNamespace(
+        _api_budget=SimpleNamespace(pause_remaining_seconds=lambda: 1800.0)
+    )
+
+    retry_after = _recovery_retry_after(
+        category=RecoveryFailureCategory.RATE_LIMITED,
+        occurred_at=first_failure_at,
+        previous_attempts=0,
+        github_client=github_client,
+    )
+
+    assert retry_after == first_failure_at + timedelta(seconds=1800)
+
+
+def test_corrupt_recovery_report_path_cannot_select_external_file(tmp_path: Path) -> None:
+    """损坏的账本路径和指向仓库外的符号链接都不能作为 GitHub 通知正文。"""
+    from backend.core.use_cases.agent_runner_orchestration_runtime import (
+        _local_recovery_report_path,
+    )
+
+    repository_path = tmp_path / "repo"
+    repository_path.mkdir()
+    expected_report_path = repository_path / ".agent-runner" / "recovery" / "issue-73.md"
+    external_file_path = tmp_path / "secret.txt"
+    external_file_path.write_text("must not be posted", encoding="utf-8")
+
+    assert (
+        _local_recovery_report_path(
+            repo_path=repository_path,
+            issue_number=73,
+            stored_path=str(external_file_path),
+        )
+        is None
+    )
+
+    expected_report_path.parent.mkdir(parents=True)
+    expected_report_path.symlink_to(external_file_path)
+    assert _local_recovery_report_path(repo_path=repository_path, issue_number=73) is None
 
 
 @pytest.mark.parametrize(

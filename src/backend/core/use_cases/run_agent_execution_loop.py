@@ -96,6 +96,10 @@ from backend.core.use_cases.lifecycle_agent_resolution import (
 )
 from backend.core.shared.models.agent_model_preset import ModelSelection
 from backend.core.shared.models.publish_stage import PublishStage
+from backend.core.use_cases.agent_runner_recovery import (
+    persist_validation_stage_success,
+    resolve_validation_stage_context,
+)
 from backend.core.use_cases.run_agent_once import drop_model_selection_for_agent
 
 
@@ -141,6 +145,37 @@ class AgentExecutionRequest:
         if self.fast_merge and self.publish_stage is PublishStage.NORMAL:
             object.__setattr__(self, "publish_stage", PublishStage.FAST)
         object.__setattr__(self, "fast_merge", self.publish_stage is PublishStage.FAST)
+
+
+def _complete_validation_before_verifier(request: AgentExecutionRequest) -> None:
+    """完成验证并在预 verifier 外部写入前严格保存阶段结果。"""
+    ensure_validation_evidence_ready(
+        request.issue,
+        request.worktree_path,
+        request.config,
+        request.process_runner,
+    )
+    ensure_validation_commands_pass(
+        request.issue,
+        request.worktree_path,
+        request.config,
+        request.process_runner,
+    )
+    if request.repo_id and request.config.runner.verification_commands:
+        stage_context = resolve_validation_stage_context(
+            repository_id=request.repo_id,
+            issue_number=request.issue.number,
+            worktree_path=request.worktree_path,
+            config=request.config,
+            process_runner=request.process_runner,
+        )
+        if stage_context is not None:
+            persist_validation_stage_success(
+                recovery_store=getattr(request.github_client, "recovery_store", None),
+                stage_context=stage_context,
+            )
+    if request.before_verifier_callback is not None:
+        request.before_verifier_callback()
 
 
 def _attempt_resume_session_id(
@@ -887,10 +922,7 @@ def run_agent_until_committed(request: AgentExecutionRequest) -> AgentCommitResu
                 from backend.core.use_cases.run_verifier_agent import run_verifier_gate
 
                 with attempt_phases.measure("rv_reexec"):
-                    ensure_validation_evidence_ready(issue, worktree_path, config, process_runner)
-                    ensure_validation_commands_pass(issue, worktree_path, config, process_runner)
-                if request.before_verifier_callback is not None:
-                    request.before_verifier_callback()
+                    _complete_validation_before_verifier(request)
                 if publish_stage.skips_independent_verification:
                     verifier_verdict = None
                     _logger.info(

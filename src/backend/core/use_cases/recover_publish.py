@@ -312,6 +312,7 @@ def _create_recovery_draft_pr(
             body=f"Closes #{issue_number}\n\nRecovered by issue-agent-runner.\n",
             base_branch=config.git.base_branch,
             cwd=worktree_path,
+            issue_number=issue_number,
         )
     except ClaimLeaseLost:
         raise

@@ -9,12 +9,18 @@ from unittest.mock import patch
 
 import pytest
 
-from backend.core.shared.interfaces.agent_runner import GitHubApiUnavailableError
+from backend.core.shared.interfaces.agent_runner import (
+    GitHubApiPermissionError,
+    GitHubApiUnavailableError,
+)
 from backend.core.shared.models.agent_runner import CommandResult, LabelConfig
+from backend.core.shared.models.runner_recovery import OperationState
+from backend.core.use_cases.agent_runner_recovery import build_operation_intent
 from backend.infrastructure.github_client import (
     GitHubCliClient,
     sanitize_github_body,
 )
+from backend.infrastructure.persistence.runner_recovery_store import SqliteRunnerRecoveryStore
 from tests.conftest import FakeProcessRunner as _FakeProcessRunner
 
 
@@ -127,6 +133,117 @@ def test_comment_issue_sanitizes_body_before_posting(tmp_path: Path) -> None:
     github_client.comment_issue(84, "## Agent Runner Failed\x00\x1b bad bytes")
 
     assert capturing_runner.body_files == ["## Agent Runner Failed bad bytes"]
+
+
+def test_journaled_draft_pr_create_uses_supplied_worktree_directory(tmp_path: Path) -> None:
+    """账本包装的 Draft PR 命令必须在实际 Issue worktree 中运行。"""
+
+    class CwdCapturingRunner(FakeProcessRunner):
+        def __init__(self) -> None:
+            super().__init__()
+            self.cwd_by_command: list[tuple[tuple[str, ...], Path]] = []
+
+        def run(self, command, *, cwd, check=True, **kwargs):  # type: ignore[override]
+            command_tuple = tuple(command)
+            self.cwd_by_command.append((command_tuple, cwd))
+            if command_tuple == ("git", "branch", "--show-current"):
+                return CommandResult(
+                    command=command_tuple,
+                    return_code=0,
+                    stdout="issue-73\n",
+                    stderr="",
+                )
+            if command_tuple[:3] == ("gh", "pr", "create"):
+                return CommandResult(
+                    command=command_tuple,
+                    return_code=0,
+                    stdout="https://github.com/owner/repo/pull/73\n",
+                    stderr="",
+                )
+            return super().run(command, cwd=cwd, check=check, **kwargs)
+
+    repository_path = tmp_path / "repository"
+    worktree_path = tmp_path / "worktrees" / "issue-73"
+    process_runner = CwdCapturingRunner()
+    recovery_store = SqliteRunnerRecoveryStore(tmp_path / "runner.db")
+    github_client = GitHubCliClient(
+        repository_path,
+        process_runner,
+        recovery_store=recovery_store,
+    )
+
+    pull_request_url = github_client.create_draft_pr(
+        title="[Agent] preserve the worktree branch",
+        body="Recovery regression.",
+        base_branch="main",
+        cwd=worktree_path,
+        issue_number=73,
+    )
+
+    create_call = next(
+        cwd
+        for command, cwd in process_runner.cwd_by_command
+        if command[:3] == ("gh", "pr", "create")
+    )
+    assert create_call == worktree_path
+    assert create_call != repository_path
+    assert pull_request_url == "https://github.com/owner/repo/pull/73"
+
+
+def test_journaled_comment_retries_when_gh_proves_request_was_not_sent(tmp_path: Path) -> None:
+    """严格账本把 gh 非零返回诊断交给恢复分类器后可安全补发。"""
+
+    class ConnectionRefusedThenSuccessRunner(_BodyCapturingRunner):
+        def __init__(self) -> None:
+            super().__init__()
+            self.comment_attempts = 0
+
+        def run(self, command, *, cwd, check=True, **kwargs):  # type: ignore[override]
+            command_list = list(command)
+            if (
+                command_list[:4] == ["gh", "api", "-X", "POST"]
+                and "repos/owner/repo/issues/84/comments" in command_list
+            ):
+                self.comment_attempts += 1
+                if self.comment_attempts == 1:
+                    return CommandResult(
+                        command=tuple(command),
+                        return_code=1,
+                        stdout="",
+                        stderr="dial tcp 127.0.0.1:443: connect: connection refused",
+                    )
+                return CommandResult(
+                    command=tuple(command),
+                    return_code=0,
+                    stdout=json.dumps({"id": 91}),
+                    stderr="",
+                )
+            return super().run(command, cwd=cwd, check=check, **kwargs)
+
+    runner = ConnectionRefusedThenSuccessRunner()
+    recovery_store = SqliteRunnerRecoveryStore(tmp_path / "runner.db")
+    github_client = GitHubCliClient(
+        tmp_path,
+        runner,
+        recovery_store=recovery_store,
+    )
+
+    github_client.comment_issue(84, "A recoverable report")
+
+    operation_rows = recovery_store.list_unresolved_operations("repo:owner/repo:issue:84")
+    assert runner.comment_attempts == 2
+    assert operation_rows == []
+    intent = build_operation_intent(
+        repository_id="owner/repo",
+        issue_number=84,
+        operation_kind="issue_comment",
+        target="repos/owner/repo/issues/84/comments",
+        payload_text="A recoverable report",
+    )
+    confirmed_comment = recovery_store.get_operation(intent.operation_key)
+    assert confirmed_comment is not None
+    assert confirmed_comment.state is OperationState.CONFIRMED
+    assert confirmed_comment.remote_reference == "91"
 
 
 def test_edit_issue_comment_passes_body_as_gh_api_file_field(tmp_path: Path) -> None:
@@ -982,7 +1099,7 @@ def test_create_issue_does_not_retry_permanent_errors(tmp_path: Path) -> None:
     github_client = GitHubCliClient(tmp_path, runner)
 
     with patch("backend.infrastructure.github_client.time.sleep") as mock_sleep:
-        with pytest.raises(subprocess.CalledProcessError):
+        with pytest.raises(GitHubApiPermissionError):
             github_client.create_issue(title="title", body="body", labels=[])
 
     assert runner.attempts == 1
@@ -1001,7 +1118,7 @@ def test_create_issue_reports_unavailable_after_max_retries(tmp_path: Path) -> N
         with pytest.raises(GitHubApiUnavailableError, match="TLS handshake timeout"):
             github_client.create_issue(title="title", body="body", labels=[])
 
-    assert runner.attempts == 3
+    assert runner.attempts == 5
 
 
 def test_create_issue_retries_on_read_operation_timed_out(tmp_path: Path) -> None:
@@ -1042,7 +1159,8 @@ def test_gh_command_uses_default_timeout_and_retries_on_timeout(tmp_path: Path) 
     with patch("backend.infrastructure.github_client.time.sleep"):
         github_client._run_with_retry(["gh", "api", "repos/o/r/issues/10"], cwd=tmp_path)
 
-    assert runner.timeouts == [120, 120]
+    assert len(runner.timeouts) == 2
+    assert all(1 <= timeout <= 120 for timeout in runner.timeouts)
 
 
 def test_gh_command_timeout_exhaustion_raises_unavailable_error(tmp_path: Path) -> None:
@@ -1051,10 +1169,10 @@ def test_gh_command_timeout_exhaustion_raises_unavailable_error(tmp_path: Path) 
     github_client = GitHubCliClient(tmp_path, runner)  # type: ignore[arg-type]
 
     with patch("backend.infrastructure.github_client.time.sleep"):
-        with pytest.raises(GitHubApiUnavailableError, match="timed out after 3 attempts"):
+        with pytest.raises(GitHubApiUnavailableError, match="timed out after 5 attempts"):
             github_client._run_with_retry(["gh", "api", "repos/o/r/issues/10"], cwd=tmp_path)
 
-    assert len(runner.timeouts) == 3
+    assert len(runner.timeouts) == 5
 
 
 def test_gh_command_retries_transient_result_when_check_is_false(tmp_path: Path) -> None:
@@ -1211,7 +1329,7 @@ def test_create_issue_does_not_create_label_on_unrelated_error(tmp_path: Path) -
     github_client = GitHubCliClient(tmp_path, runner)
 
     with patch("backend.infrastructure.github_client.time.sleep"):
-        with pytest.raises(subprocess.CalledProcessError):
+        with pytest.raises(GitHubApiPermissionError):
             github_client.create_issue(title="title", body="body", labels=["type/feature"])
 
     assert not any(call[:3] == ["gh", "label", "create"] for call in runner.calls)
@@ -1564,7 +1682,7 @@ def test_edit_issue_labels_defers_transient_unavailable_error(tmp_path: Path) ->
 
     ensure_calls = [call for call in fake_runner.calls if call[:3] == ["gh", "label", "create"]]
     assert ensure_calls == []
-    assert fake_runner.attempts == 3
+    assert fake_runner.attempts == 5
     # The failed label add is not recorded because the fake raises before delegating.
     add_calls = [call for call in fake_runner.calls if call[:4] == ["gh", "api", "-X", "POST"]]
     assert add_calls == []

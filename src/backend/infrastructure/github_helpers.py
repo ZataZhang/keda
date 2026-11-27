@@ -40,8 +40,12 @@ _RETRYABLE_GH_ERROR_PATTERNS = (
     re.compile(r"operation timed out", re.IGNORECASE),
     re.compile(r"no such host", re.IGNORECASE),
     re.compile(r"temporary failure in name resolution", re.IGNORECASE),
+    re.compile(r"connection refused", re.IGNORECASE),
+    re.compile(r"connection reset by peer", re.IGNORECASE),
+    re.compile(r"broken pipe", re.IGNORECASE),
     # GitHub CLI 的 Go HTTP 客户端读到不完整响应时会返回 `unexpected EOF`。
     re.compile(r"unexpected\s+EOF", re.IGNORECASE),
+    re.compile(r"\bEOF\b", re.IGNORECASE),
     re.compile(r"500\s+Internal Server Error", re.IGNORECASE),
     re.compile(r"502\s+Bad Gateway", re.IGNORECASE),
     re.compile(r"503\s+Service Unavailable", re.IGNORECASE),

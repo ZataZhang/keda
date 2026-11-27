@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Callable, ContextManager
 
 from backend.core.shared.interfaces.agent_runner import IGitHubClient, IProcessRunner
+from backend.core.shared.interfaces.runner_claim_guard import set_active_runner_claim_guard
 from backend.core.shared.models.agent_runner import AppConfig, RepositoryRunContext
 from backend.core.shared.models.machine_identity import MachineIdentity
 from backend.core.use_cases.agent_runner_claim_lease import (
@@ -228,6 +229,12 @@ class CoordinationHeartbeat:
         with self._lock:
             existing_claim = self._claims.get(claim_key)
             if existing_claim is not None and existing_claim.comment_id == bid.comment_id:
+                set_active_runner_claim_guard(
+                    lambda: self.assert_claim_owned(
+                        github_client=github_client,
+                        issue_number=issue_number,
+                    )
+                )
                 return
             self._claims[claim_key] = _TrackedClaim(
                 repo_id=repo_context.repo_id,
@@ -244,6 +251,12 @@ class CoordinationHeartbeat:
                 last_renewal_attempt_monotonic=time.monotonic(),
             )
         self._refresh_presence(repo_context.repo_id, process_state="online")
+        set_active_runner_claim_guard(
+            lambda: self.assert_claim_owned(
+                github_client=github_client,
+                issue_number=issue_number,
+            )
+        )
 
     def release_claim(self, *, github_client: IGitHubClient, issue_number: int) -> None:
         """停止续期并清除状态板上的任务引用。"""
@@ -367,6 +380,12 @@ class CoordinationHeartbeat:
                 machine_id=self.machine_id,
                 host=self._host,
             )
+            set_active_runner_claim_guard(
+                lambda: self.assert_claim_owned(
+                    github_client=github_client,
+                    issue_number=issue_number,
+                )
+            )
             return
         assert_claim_still_owned(
             github_client=claim.github_client,
@@ -374,6 +393,12 @@ class CoordinationHeartbeat:
             own_comment_id=claim.comment_id,
             machine_id=self.machine_id,
             was_lost=claim.lost,
+        )
+        set_active_runner_claim_guard(
+            lambda: self.assert_claim_owned(
+                github_client=github_client,
+                issue_number=issue_number,
+            )
         )
 
     def _run(self) -> None:

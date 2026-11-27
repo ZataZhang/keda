@@ -28,6 +28,7 @@ from backend.core.shared.interfaces.runner_console import (
     IRunHistoryStore,
     IRunnerProcessSupervisor,
 )
+from backend.core.shared.interfaces.runner_recovery import IRunnerRecoveryStore
 from backend.core.shared.models.agent_deliberation import DeliberationEvent
 from backend.core.shared.models.agent_decision import ReplConfig
 from backend.core.shared.models.agent_runner import (
@@ -83,6 +84,7 @@ from backend.infrastructure.gitea_client import (
 )
 from backend.infrastructure.logging.logger import logger
 from backend.infrastructure.persistence.console_store import SqliteConsoleStore
+from backend.infrastructure.persistence.runner_recovery_store import SqliteRunnerRecoveryStore
 from backend.infrastructure.process_runner import SubprocessRunner
 
 if TYPE_CHECKING:
@@ -94,6 +96,7 @@ __all__ = [
     "build_deliberation_config_from_settings",
     "create_content_generator",
     "create_console_store",
+    "create_runner_recovery_store",
     "create_event_sink",
     "create_foreground_session_launcher",
     "create_github_client",
@@ -234,6 +237,12 @@ def create_console_store() -> IRunHistoryStore:
     """创建管理终端的运行历史 / 审计 SQLite 存储。"""
     console_settings = get_agent_runner_settings().console
     return SqliteConsoleStore(console_settings.history_db_path)
+
+
+def create_runner_recovery_store() -> IRunnerRecoveryStore:
+    """创建与运行历史共用文件的严格恢复账本。"""
+    console_settings = get_agent_runner_settings().console
+    return SqliteRunnerRecoveryStore(console_settings.history_db_path)
 
 
 def create_backlog_store() -> IBacklogStore:
@@ -497,6 +506,7 @@ def create_github_client(
     return GitHubCliClient(
         repo_path,
         process_runner,
+        recovery_store=create_runner_recovery_store(),
         api_budget=create_github_api_budget(),
         bypass_budget_pause=bypass_budget_pause,
         request_timeout_seconds=request_timeout_seconds,

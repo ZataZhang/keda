@@ -145,7 +145,15 @@ class _DurableGitHub(FakeGitHubClient):
         super().edit_issue_comment(comment_id, body)
         self._persist()
 
-    def create_draft_pr(self, *, title: str, body: str, base_branch: str, cwd: Path) -> str:
+    def create_draft_pr(
+        self,
+        *,
+        title: str,
+        body: str,
+        base_branch: str,
+        cwd: Path,
+        issue_number: int = 0,
+    ) -> str:
         """先提交 PR，再可选丢失创建响应，模拟最危险的崩溃窗口。"""
         self.create_count += 1
         self.install_pr(

@@ -17,7 +17,9 @@ import json
 import logging
 import subprocess
 import tempfile
+import time
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, Sequence
 from urllib.parse import quote
@@ -26,9 +28,19 @@ from backend.core.shared.interfaces.agent_runner import (
     GitHubApiRateLimitError,
     GitHubApiUnavailableError,
 )
+from backend.core.shared.interfaces.runner_recovery import IRunnerRecoveryStore
 from backend.core.shared.models.agent_labels import KEDACODE_PRESENCE_LABEL
 from backend.core.shared.models.agent_runner import IssueCommentRecord
+from backend.core.shared.models.runner_recovery_operations import (
+    build_operation_intent,
+    execute_journaled_write,
+)
 from backend.infrastructure.github_models import IssueSummary
+from backend.infrastructure.github_helpers import sanitize_github_body
+from backend.infrastructure.github_operation_recovery import (
+    post_comment_with_recovery,
+    send_github_write_command,
+)
 
 if TYPE_CHECKING:
     pass
@@ -44,6 +56,7 @@ class _ClientProtocol(Protocol):
     """
 
     repo_path: Path
+    recovery_store: IRunnerRecoveryStore | None
 
     def _run_with_retry(
         self, command: Sequence[str], *, cwd: Path, check: bool = True, attempts: int = ...
@@ -208,12 +221,39 @@ def edit_issue_labels(
 
     owner_repo = client._get_owner_repo()
     labels_endpoint = f"repos/{owner_repo}/issues/{issue_number}/labels"
+    recovery_store = getattr(client, "recovery_store", None)
     if labels_to_add:
         command = ["gh", "api", "-X", "POST", labels_endpoint]
         for label in labels_to_add:
             command.extend(["-f", f"labels[]={label}"])
+
+        send_label_addition = partial(send_github_write_command, client, command)
+
+        def reconcile_label_addition() -> str | None:
+            current_label_names = client._list_issue_label_names(issue_number)
+            return (
+                f"issue:{issue_number}"
+                if set(labels_to_add).issubset(current_label_names)
+                else None
+            )
+
         try:
-            client._run_with_retry(command, cwd=client.repo_path)
+            if recovery_store is None:
+                send_label_addition()
+            else:
+                execute_journaled_write(
+                    recovery_store=recovery_store,
+                    intent=build_operation_intent(
+                        repository_id=owner_repo,
+                        issue_number=issue_number,
+                        operation_kind="issue_labels_add",
+                        target=f"{labels_endpoint}:add",
+                        payload_text="\n".join(sorted(labels_to_add)),
+                    ),
+                    send=send_label_addition,
+                    reconcile=reconcile_label_addition,
+                    safe_to_retry_after_confirmed_absence=True,
+                )
         except subprocess.CalledProcessError as exc:
             if not _is_missing_label_error(exc):
                 raise
@@ -224,17 +264,40 @@ def edit_issue_labels(
                 ", ".join(labels_to_add),
             )
             for label in labels_to_add:
+                create_label_command = _build_ensure_label_command(label)
                 client._run_with_retry(
-                    _build_ensure_label_command(label),
+                    create_label_command,
                     cwd=client.repo_path,
+                    **({"attempts": 1} if recovery_store is not None else {}),
                 )
-            client._run_with_retry(command, cwd=client.repo_path)
+            send_label_addition()
     for label in labels_to_remove:
         encoded_label = quote(label, safe="")
-        client._run_with_retry(
-            ["gh", "api", "-X", "DELETE", f"{labels_endpoint}/{encoded_label}"],
-            cwd=client.repo_path,
-        )
+        delete_endpoint = f"{labels_endpoint}/{encoded_label}"
+        delete_command = ["gh", "api", "-X", "DELETE", delete_endpoint]
+
+        send_label_removal = partial(send_github_write_command, client, delete_command)
+
+        def reconcile_label_removal() -> str | None:
+            current_label_names = client._list_issue_label_names(issue_number)
+            return f"issue:{issue_number}" if label not in current_label_names else None
+
+        if recovery_store is None:
+            send_label_removal()
+        else:
+            execute_journaled_write(
+                recovery_store=recovery_store,
+                intent=build_operation_intent(
+                    repository_id=owner_repo,
+                    issue_number=issue_number,
+                    operation_kind="issue_label_remove",
+                    target=delete_endpoint,
+                    payload_text=label,
+                ),
+                send=send_label_removal,
+                reconcile=reconcile_label_removal,
+                safe_to_retry_after_confirmed_absence=True,
+            )
 
 
 def _is_missing_label_error(exc: subprocess.CalledProcessError) -> bool:
@@ -288,41 +351,73 @@ def list_issue_label_names(client: _ClientProtocol, issue_number: int) -> set[st
 
 
 def comment_issue(client: _ClientProtocol, issue_number: int, body: str) -> None:
-    """向 Issue 发布 Markdown 评论。"""
+    """向 Issue 发布带稳定身份的 Markdown 评论。"""
     owner_repo = client._get_owner_repo()
-    with tempfile.TemporaryDirectory(prefix="kc-comment-") as temp_dir:
-        comment_path = client._write_body_file(temp_dir, "comment.md", body)
-        client._run_with_retry(
-            [
-                "gh",
-                "api",
-                "-X",
-                "POST",
-                f"repos/{owner_repo}/issues/{issue_number}/comments",
-                "-F",
-                f"body=@{comment_path}",
-            ],
-            cwd=client.repo_path,
-        )
+    safe_body = sanitize_github_body(body)
+    post_comment_with_recovery(
+        client=client,
+        repository_id=owner_repo,
+        issue_number=issue_number,
+        operation_kind="issue_comment",
+        target=f"repos/{owner_repo}/issues/{issue_number}/comments",
+        body=safe_body,
+        command_for_body_file=lambda comment_path: [
+            "gh",
+            "api",
+            "-X",
+            "POST",
+            f"repos/{owner_repo}/issues/{issue_number}/comments",
+            "-F",
+            f"body=@{comment_path}",
+        ],
+        comment_entries_for_marker=lambda marker: list_issue_comment_entries(
+            client,
+            issue_number,
+            trusted_only=True,
+            body_contains=marker,
+            require_success=True,
+        ),
+    )
 
 
 def edit_issue_body(client: _ClientProtocol, issue_number: int, body: str) -> None:
     """替换 Issue 正文。"""
     owner_repo = client._get_owner_repo()
+    safe_body = sanitize_github_body(body)
+    recovery_store = getattr(client, "recovery_store", None)
     with tempfile.TemporaryDirectory(prefix="kc-issue-body-") as temp_dir:
-        body_path = client._write_body_file(temp_dir, "issue_body.md", body)
-        client._run_with_retry(
-            [
-                "gh",
-                "api",
-                "-X",
-                "PATCH",
-                f"repos/{owner_repo}/issues/{issue_number}",
-                "-F",
-                f"body=@{body_path}",
-            ],
-            cwd=client.repo_path,
-        )
+        body_path = client._write_body_file(temp_dir, "issue_body.md", safe_body)
+        command = [
+            "gh",
+            "api",
+            "-X",
+            "PATCH",
+            f"repos/{owner_repo}/issues/{issue_number}",
+            "-F",
+            f"body=@{body_path}",
+        ]
+
+        send_body_update = partial(send_github_write_command, client, command)
+
+        def reconcile_body_update() -> str | None:
+            current_issue = get_issue(client, issue_number)
+            return f"issue:{issue_number}" if current_issue.body == safe_body else None
+
+        if recovery_store is None:
+            send_body_update()
+        else:
+            execute_journaled_write(
+                recovery_store=recovery_store,
+                intent=build_operation_intent(
+                    repository_id=owner_repo,
+                    issue_number=issue_number,
+                    operation_kind="issue_body_update",
+                    target=f"repos/{owner_repo}/issues/{issue_number}:body",
+                    payload_text=safe_body,
+                ),
+                send=send_body_update,
+                reconcile=reconcile_body_update,
+            )
 
 
 def create_issue(
@@ -342,8 +437,53 @@ def create_issue(
     ``could not add label: '...' not found`` error. Other failures (network,
     auth, validation) bubble up unchanged.
     """
+    safe_body = sanitize_github_body(body)
+    recovery_store = getattr(client, "recovery_store", None)
+    # 未装配严格账本的轻量客户端（如旧版集成与隔离单测）保留旧调用契约；
+    # 正式 runner 客户端总是装配账本，并走下面的稳定身份与对账路径。
+    if recovery_store is None:
+        with tempfile.TemporaryDirectory(prefix="kc-issue-") as temp_dir:
+            body_path = client._write_body_file(temp_dir, "issue.md", safe_body)
+            command = [
+                "gh",
+                "issue",
+                "create",
+                "--title",
+                title,
+                "--body-file",
+                str(body_path),
+            ]
+            for label in labels:
+                command.extend(["--label", label])
+            retry_options = {"attempts": 1} if KEDACODE_PRESENCE_LABEL in labels else {}
+            try:
+                result = client._run_with_retry(command, cwd=client.repo_path, **retry_options)
+            except subprocess.CalledProcessError as exc:
+                if not _is_missing_label_error(exc) or not labels:
+                    raise
+                for label in labels:
+                    client._run_with_retry(_build_ensure_label_command(label), cwd=client.repo_path)
+                result = client._run_with_retry(command, cwd=client.repo_path, **retry_options)
+            output_lines = result.stdout.strip().splitlines()
+            if not output_lines:
+                raise RuntimeError("gh issue create returned no issue URL.")
+            return output_lines[-1]
+
+    owner_repo = client._get_owner_repo()
+    intent = build_operation_intent(
+        repository_id=owner_repo,
+        issue_number=0,
+        operation_kind="issue_create",
+        target=f"repos/{owner_repo}/issues",
+        payload_text=json.dumps(
+            [title, safe_body, sorted(labels)], ensure_ascii=False, separators=(",", ":")
+        ),
+    )
+    marker = f"<!-- kc:runner-operation id={intent.operation_key} -->" if recovery_store else ""
+    issue_body = f"{safe_body}\n\n{marker}" if marker else safe_body
+
     with tempfile.TemporaryDirectory(prefix="kc-issue-") as temp_dir:
-        body_path = client._write_body_file(temp_dir, "issue.md", body)
+        body_path = client._write_body_file(temp_dir, "issue.md", issue_body)
         command = [
             "gh",
             "issue",
@@ -355,23 +495,85 @@ def create_issue(
         ]
         for label in labels:
             command.extend(["--label", label])
-        retry_options = {"attempts": 1} if KEDACODE_PRESENCE_LABEL in labels else {}
-        try:
-            result = client._run_with_retry(command, cwd=client.repo_path, **retry_options)
-        except subprocess.CalledProcessError as exc:
-            if not _is_missing_label_error(exc) or not labels:
-                raise
-            _logger.info(
-                "gh issue create reported missing label(s); creating %s and retrying.",
-                ", ".join(labels),
-            )
-            for label in labels:
-                client._run_with_retry(
-                    _build_ensure_label_command(label),
-                    cwd=client.repo_path,
+        retry_options = {"attempts": 1}
+
+        def send_issue_creation() -> str | None:
+            try:
+                command_result = client._run_with_retry(
+                    command, cwd=client.repo_path, **retry_options
                 )
-            result = client._run_with_retry(command, cwd=client.repo_path, **retry_options)
-    return result.stdout.strip().splitlines()[-1]
+            except subprocess.CalledProcessError as exc:
+                if not _is_missing_label_error(exc) or not labels:
+                    raise
+                _logger.info(
+                    "gh issue create reported missing label(s); creating %s and retrying.",
+                    ", ".join(labels),
+                )
+                for label in labels:
+                    client._run_with_retry(
+                        _build_ensure_label_command(label),
+                        cwd=client.repo_path,
+                        **({"attempts": 1} if recovery_store is not None else {}),
+                    )
+                command_result = client._run_with_retry(
+                    command, cwd=client.repo_path, **retry_options
+                )
+            return command_result.stdout.strip().splitlines()[-1]
+
+        def reconcile_issue_creation() -> str | None:
+            if not marker:
+                return None
+            query_result = client._run_with_retry(
+                [
+                    "gh",
+                    "api",
+                    "-X",
+                    "GET",
+                    "--paginate",
+                    "--slurp",
+                    f"repos/{owner_repo}/issues?state=all",
+                    "-F",
+                    "per_page=100",
+                ],
+                cwd=client.repo_path,
+            )
+            issue_pages = json.loads(query_result.stdout or "[]")
+            if not isinstance(issue_pages, list) or any(
+                not isinstance(issue_page, list) for issue_page in issue_pages
+            ):
+                raise RuntimeError("Issue creation reconciliation returned incomplete pages.")
+            for issue_page in issue_pages:
+                for issue_payload in issue_page:
+                    if not isinstance(issue_payload, dict):
+                        raise RuntimeError("Issue creation reconciliation returned malformed data.")
+                    if marker in str(issue_payload.get("body", "")):
+                        issue_url = issue_payload.get("html_url")
+                        if not isinstance(issue_url, str) or not issue_url.startswith("https://"):
+                            raise RuntimeError("Matched Issue lacks an authoritative URL.")
+                        return issue_url
+            return None
+
+        def confirm_issue_creation_absence() -> str | None:
+            # 再次完整分页读取，避免把短暂的 Issue 索引延迟误判为未创建。
+            time.sleep(1)
+            return reconcile_issue_creation()
+
+        if recovery_store is None:
+            issue_url = send_issue_creation()
+        else:
+            issue_url = execute_journaled_write(
+                recovery_store=recovery_store,
+                intent=intent,
+                send=send_issue_creation,
+                reconcile=reconcile_issue_creation,
+                # Issue 列表暂时没有标记并不能证明创建未提交；保留 unknown，
+                # 只有连接失败发生在请求发送前时才由传输分类器自动补发。
+                safe_to_retry_after_confirmed_absence=False,
+                reconcile_after_absence=confirm_issue_creation_absence,
+            )
+        if not issue_url:
+            raise RuntimeError("GitHub issue create did not return an authoritative URL.")
+        return issue_url
 
 
 def list_issue_comments(
@@ -573,37 +775,86 @@ def _list_issue_comment_payloads(
 
 
 def edit_issue_comment(client: _ClientProtocol, comment_id: int, body: str) -> None:
-    """Edit an existing Issue comment."""
+    """更新已有评论，未知结果只通过该评论 ID 的 fresh read 对账。"""
     owner_repo = client._get_owner_repo()
+    safe_body = sanitize_github_body(body)
+    recovery_store = getattr(client, "recovery_store", None)
     with tempfile.TemporaryDirectory(prefix="kc-comment-edit-") as temp_dir:
-        body_path = client._write_body_file(temp_dir, "comment.md", body)
-        client._run_with_retry(
-            [
-                "gh",
-                "api",
-                f"repos/{owner_repo}/issues/comments/{comment_id}",
-                "-X",
-                "PATCH",
-                "-F",
-                f"body=@{body_path}",
-            ],
-            cwd=client.repo_path,
-        )
+        body_path = client._write_body_file(temp_dir, "comment.md", safe_body)
+        endpoint = f"repos/{owner_repo}/issues/comments/{comment_id}"
+        command = ["gh", "api", endpoint, "-X", "PATCH", "-F", f"body=@{body_path}"]
+
+        send_comment_edit = partial(send_github_write_command, client, command)
+
+        def reconcile_comment_edit() -> str | None:
+            result = client._run_with_retry(
+                ["gh", "api", endpoint],
+                cwd=client.repo_path,
+                **({"check": False} if recovery_store is not None else {}),
+            )
+            if result.return_code != 0:
+                raise RuntimeError(result.stderr.strip() or result.stdout.strip())
+            raw_comment = json.loads(result.stdout or "{}")
+            return (
+                f"comment:{comment_id}"
+                if isinstance(raw_comment, dict) and raw_comment.get("body") == safe_body
+                else None
+            )
+
+        if recovery_store is None:
+            send_comment_edit()
+        else:
+            execute_journaled_write(
+                recovery_store=recovery_store,
+                intent=build_operation_intent(
+                    repository_id=owner_repo,
+                    issue_number=0,
+                    operation_kind="issue_comment_edit",
+                    target=endpoint,
+                    payload_text=safe_body,
+                ),
+                send=send_comment_edit,
+                reconcile=reconcile_comment_edit,
+            )
 
 
 def delete_issue_comment(client: _ClientProtocol, comment_id: int) -> None:
     """删除 GitHub Issue 评论。"""
     owner_repo = client._get_owner_repo()
-    client._run_with_retry(
-        [
-            "gh",
-            "api",
-            "-X",
-            "DELETE",
-            f"repos/{owner_repo}/issues/comments/{comment_id}",
-        ],
-        cwd=client.repo_path,
-    )
+    endpoint = f"repos/{owner_repo}/issues/comments/{comment_id}"
+    command = ["gh", "api", "-X", "DELETE", endpoint]
+    recovery_store = getattr(client, "recovery_store", None)
+
+    send_comment_delete = partial(send_github_write_command, client, command)
+
+    def reconcile_comment_delete() -> str | None:
+        result = client._run_with_retry(
+            ["gh", "api", endpoint],
+            cwd=client.repo_path,
+            check=False,
+        )
+        if result.return_code != 0 and "404" in f"{result.stderr}\n{result.stdout}":
+            return f"comment:{comment_id}:deleted"
+        if result.return_code != 0:
+            raise RuntimeError(result.stderr.strip() or result.stdout.strip())
+        return None
+
+    if recovery_store is None:
+        send_comment_delete()
+    else:
+        execute_journaled_write(
+            recovery_store=recovery_store,
+            intent=build_operation_intent(
+                repository_id=owner_repo,
+                issue_number=0,
+                operation_kind="issue_comment_delete",
+                target=endpoint,
+                payload_text="deleted",
+            ),
+            send=send_comment_delete,
+            reconcile=reconcile_comment_delete,
+            safe_to_retry_after_confirmed_absence=True,
+        )
 
 
 __all__ = [
