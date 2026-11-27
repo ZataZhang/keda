@@ -24,8 +24,8 @@ Choose the next execution context for Issue #457: a recovery run with write acce
 - `gh pr view 459 --repo ZataZhang/keda --json number,title,state,url,headRefName,headRefOid,baseRefName,mergeStateStatus,statusCheckRollup,updatedAt`: open at `85dc6f6…`, no checks; `gh pr checks 459 --repo ZataZhang/keda`: exit 1, “no checks reported”.
 - `kc logs --issue 457 --lines 200 --repo /Users/zata/code/keda/.kc-worktrees/issue-457`: no output available. `kc logs --issue 457 --lines 200`: exit 3; patrol worktree is not an enabled registry target.
 - `git diff --name-status main...85dc6f6b12d611b279bf615982a2a1b66fad6b46`: affected recovery modules are new in PR #459. No target-branch tests or independent reproduction were run from this worktree.
-- The [runner implementation report](https://github.com/ZataZhang/keda/issues/461) recorded exit 0 for `git diff --check`, `SKIP=check-test-flag uv run pre-commit run --all-files --show-diff-on-failure`, `just test all`, and `uv run mkdocs build --strict` at PR head `2d7aa0779ec465d2165cbe53770cfcb0a9c90066`. These checks precede the review corrections and do not verify the target fix.
-- At that head, PR #462 CI reported 13 successful jobs and two skipped jobs; subsequent commits require fresh CI.
+- The [runner supervisor report](https://github.com/ZataZhang/keda/issues/461) reports the supplied final verification results passing at repair head `5406a4a8031842e448637791139c4bef6e51e6c2`: `git diff --check`, `SKIP=check-test-flag uv run pre-commit run --all-files --show-diff-on-failure`, `just test all`, and `uv run mkdocs build --strict`. These patrol-branch checks do not verify a fix for #457.
+- At that published head, PR #462's GitHub checks completed with 13 successful jobs and two skipped jobs ([CI](https://github.com/ZataZhang/keda/actions/runs/45957488024), [Install smoke](https://github.com/ZataZhang/keda/actions/runs/45957487951), [Validation Gate](https://github.com/ZataZhang/keda/actions/runs/45957488089)). Any later published head needs its own checks.
 
 ## Remaining verification and next action
 
