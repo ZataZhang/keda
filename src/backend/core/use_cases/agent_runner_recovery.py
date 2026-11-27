@@ -60,6 +60,11 @@ def resolve_validation_stage_context(
     Returns:
         可核验的阶段前提；Git 信息不完整时为 ``None``。
     """
+    status_result = process_runner.run(
+        ["git", "status", "--porcelain"], cwd=worktree_path, check=False
+    )
+    if status_result.return_code != 0 or status_result.stdout.strip():
+        return None
     tree_result = process_runner.run(
         ["git", "rev-parse", "HEAD^{tree}"],
         cwd=worktree_path,
@@ -93,7 +98,7 @@ def resolve_validation_stage_context(
     run_key = f"repo:{repository_id}:issue:{issue_number}"
     return ValidationStageContext(
         run_key=run_key,
-        stage_key=f"{run_key}:validation",
+        stage_key=f"{run_key}:validation:clean-tree-v2",
         artifact_tree=artifact_tree,
         base_sha=base_sha,
         validation_digest=validation_digest,

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import subprocess
 from types import SimpleNamespace
 
 import pytest
@@ -30,6 +31,64 @@ from tests.support.agent_runner import (
     worktree_path_response,
     write_commit_request,
 )
+
+
+def test_dirty_validation_cannot_be_reused_for_clean_head(tmp_path: Path) -> None:
+    """脏工作树验证不能绑定旧 HEAD，旧格式阶段记录也不能复用。"""
+    from backend.core.shared.models.runner_recovery import RecoveryStageRecord
+    from backend.core.use_cases.agent_runner_recovery import (
+        find_reusable_validation_stage,
+        resolve_validation_stage_context,
+    )
+    from backend.infrastructure.persistence.runner_recovery_store import SqliteRunnerRecoveryStore
+    from backend.infrastructure.process_runner import SubprocessRunner
+
+    def git(*args: str) -> None:
+        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+
+    git("init", "-b", "main")
+    git("config", "user.email", "test@example.com")
+    git("config", "user.name", "Test")
+    source = tmp_path / "source.txt"
+    source.write_text("old", encoding="utf-8")
+    git("add", "source.txt")
+    git("commit", "-m", "initial")
+    git("update-ref", "refs/remotes/origin/main", "HEAD")
+    runner = SubprocessRunner()
+    config = config_with_review_disabled()
+
+    def context():
+        return resolve_validation_stage_context(
+            repository_id="example",
+            issue_number=73,
+            worktree_path=tmp_path,
+            config=config,
+            process_runner=runner,
+        )
+
+    clean_context = context()
+    assert clean_context is not None
+    store = SqliteRunnerRecoveryStore(tmp_path.parent / "recovery.db")
+    store.save_stage(
+        RecoveryStageRecord(
+            stage_key=f"{clean_context.run_key}:validation",
+            run_key=clean_context.run_key,
+            stage="validation",
+            artifact_tree=clean_context.artifact_tree,
+            base_sha=clean_context.base_sha,
+            validation_digest=clean_context.validation_digest,
+            status="passed",
+            completed_at=datetime.now(timezone.utc),
+        )
+    )
+    source.write_text("validated dirty content", encoding="utf-8")
+    assert context() is None
+    git("checkout", "--", "source.txt")
+    restored_context = context()
+    assert restored_context == clean_context
+    assert (
+        find_reusable_validation_stage(recovery_store=store, stage_context=restored_context) is None
+    )
 
 
 def test_validation_stage_is_saved_before_pre_verifier_publication(
