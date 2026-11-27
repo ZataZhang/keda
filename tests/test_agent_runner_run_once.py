@@ -6,6 +6,8 @@ the commit."""
 
 from __future__ import annotations
 
+from tests.support.agent_runner import confirm_legacy_workspace
+
 import logging
 from pathlib import Path
 
@@ -97,8 +99,9 @@ def test_run_once_preflight_rejects_missing_configured_remote(
     assert "Available remotes: zata" in caplog.text
 
 
-def test_run_once_no_new_commits_fails() -> None:
+def test_run_once_no_new_commits_fails(tmp_path: Path) -> None:
     """run_once should fail when the agent produces no new commits."""
+    confirm_legacy_workspace(tmp_path, tmp_path, 123)
     fake_client = FakeGitHubClient()
     issue = make_ready_issue()
     fake_client.list_ready_issues = lambda ready_label, limit: [issue]
@@ -123,10 +126,13 @@ def test_run_once_no_new_commits_fails() -> None:
     )
     config = AppConfig(runner=RunnerConfig(recovery_retry_delay_seconds=0))
 
+    branch_command = ("git", "branch", "--show-current")
+    fake_runner.responses[branch_command] = CommandResult(branch_command, 0, "issue-123\n", "")
+
     from backend.core.use_cases.agent_runner_orchestrate import run_once
 
     exit_code = run_once(
-        repo_path=Path("."),
+        repo_path=tmp_path,
         config=config,
         dry_run=False,
         agent="auto",
@@ -184,6 +190,7 @@ def test_run_once_success(tmp_path: Path) -> None:
     )
     worktree_path = tmp_path / "issue-123"
     worktree_path.mkdir()
+    confirm_legacy_workspace(tmp_path, worktree_path, 123)
 
     class _SuccessRunner(FakeProcessRunner):
         def __init__(self) -> None:
@@ -302,6 +309,7 @@ def test_run_once_failure_removes_supervising_label(tmp_path: Path) -> None:
     )
     worktree_path = tmp_path / "issue-123"
     worktree_path.mkdir()
+    confirm_legacy_workspace(tmp_path, worktree_path, 123)
 
     class _SupervisorFailureRunner(FakeProcessRunner):
         def __init__(self) -> None:
@@ -502,7 +510,7 @@ def test_run_once_git_mv_prd_before_commit(tmp_path: Path) -> None:
     from backend.core.use_cases.run_agent_once import run_once
 
     exit_code = run_once(
-        repo_path=Path("."),
+        repo_path=tmp_path,
         config=config,
         dry_run=False,
         agent="auto",
@@ -618,7 +626,7 @@ def test_run_once_recovers_after_prd_delivery_failure(tmp_path: Path) -> None:
     from backend.core.use_cases.run_agent_once import run_once
 
     exit_code = run_once(
-        repo_path=Path("."),
+        repo_path=tmp_path,
         config=config,
         dry_run=False,
         agent="auto",
@@ -799,7 +807,7 @@ def test_run_once_passes_prd_baseline_to_change_log_gate(tmp_path: Path) -> None
     from backend.core.use_cases.run_agent_once import run_once
 
     exit_code = run_once(
-        repo_path=Path("."),
+        repo_path=tmp_path,
         config=config,
         dry_run=False,
         agent="auto",

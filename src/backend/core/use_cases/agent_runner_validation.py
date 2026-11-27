@@ -474,6 +474,7 @@ def ensure_evidence_dir_excluded(
         )
         return
     desired_lines = []
+    desired_lines.append("/.agent-runner/issue-workspace.json")
     if not evidence_dir_uses_task_subdirs(config.validation.evidence_dir):
         # legacy/自定义目录：整目录排除，行为与历史版本一致。
         desired_lines.append(f"/{config.validation.evidence_dir.strip('/')}/")

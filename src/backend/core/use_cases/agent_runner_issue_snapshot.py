@@ -31,6 +31,7 @@ from backend.core.shared.interfaces.agent_runner import IProcessRunner
 from backend.core.shared.models import product_identity
 from backend.core.shared.models.agent_runner import AppConfig, IssueSummary
 from backend.core.use_cases.agent_runner_dependencies import parse_dependency_marker
+from backend.core.use_cases.issue_workspace import resolve_issue_branch, related_issue
 
 _logger = logging.getLogger(__name__)
 
@@ -116,7 +117,9 @@ def _candidate_base_refs(request: IssueSnapshotRequest) -> list[str]:
     remote = request.config.git.remote
     declaration = parse_dependency_marker(request.issue.body)
     if declaration is not None and declaration.sequence == "stack" and declaration.issue_numbers:
-        branch_name = f"issue-{declaration.issue_numbers[0]}"
+        branch_name = resolve_issue_branch(
+            request.worktree_path, related_issue(request.issue, declaration.issue_numbers[0])
+        )
     else:
         branch_name = request.config.worktree.base_branch or request.config.git.base_branch
     return [f"{remote}/{branch_name}", branch_name]

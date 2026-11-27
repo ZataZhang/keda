@@ -24,6 +24,8 @@ PR 状态 + marker 查重"即可。
 
 from __future__ import annotations
 
+from backend.core.use_cases.issue_workspace import issue_branch_candidates
+
 import logging
 import os
 import re
@@ -418,7 +420,11 @@ def _process_one(
     if declaration is not None and declaration.sequence == "stack" and declaration.issue_numbers:
         upstream_branch = f"issue-{declaration.issue_numbers[0]}"
         try:
-            upstream_merged = bool(github_client.find_merged_pr_by_head(upstream_branch))
+            upstream_issue = github_client.get_issue(declaration.issue_numbers[0])
+            upstream_merged = any(
+                github_client.find_merged_pr_by_head(branch)
+                for branch in issue_branch_candidates(upstream_issue)
+            )
         except Exception as exc:  # noqa: BLE001 - treat unknown as not merged (skip).
             _logger.warning("Merge queue could not check upstream '%s': %s", upstream_branch, exc)
             upstream_merged = False

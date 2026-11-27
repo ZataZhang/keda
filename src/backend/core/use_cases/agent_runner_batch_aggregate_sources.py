@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from backend.core.use_cases.issue_workspace import resolve_issue_branch
+
 import logging
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
@@ -218,11 +220,6 @@ def resolve_batch_repo_identifier(*, repo_path: Path, repo_id: str, config: AppC
     return repo_identifier
 
 
-def _source_branch(issue_number: int) -> str:
-    """返回 Runner 为 Issue 发布的固定来源分支名。"""
-    return f"issue-{issue_number}"
-
-
 def build_superseded_marker(total_pr_number: int) -> str:
     """构造可供聚合重试验证的来源 PR 取代 marker。"""
     return f"<!-- kc:aggregate-superseded version=1 total_pr={total_pr_number} -->"
@@ -241,6 +238,10 @@ def _read_source_pr_context(
         source_context = request.github_client.get_pull_request_context(
             source_branch, require_success=True
         )
+        if source_context is None and source_branch.startswith("kc/"):
+            source_context = request.github_client.get_pull_request_context(
+                source_branch.rsplit("/", 1)[-1], require_success=True
+            )
         if source_context is None or source_context.number != source_pr_number:
             raise BatchAggregateError(
                 f"source PR #{source_pr_number} is not the unique PR on {source_branch}",
@@ -263,7 +264,10 @@ def _read_source_pr_context(
     source_context = request.github_client.get_pull_request_context_by_number(
         source_pr_number, require_success=True
     )
-    if source_context is None or source_context.branch != source_branch:
+    allowed_branches = {source_branch}
+    if source_branch.startswith("kc/"):
+        allowed_branches.add(source_branch.rsplit("/", 1)[-1])
+    if source_context is None or source_context.branch not in allowed_branches:
         raise BatchAggregateError(
             f"closed source PR #{source_pr_number} no longer matches {source_branch}",
             failure_category="eligibility",
@@ -356,7 +360,7 @@ def resolve_batch_sources(request: BatchSourceResolutionRequest) -> tuple[BatchS
                     f"Issue #{issue_number} source PR #{source_pr.number} is merged or unsupported",
                     failure_category="eligibility",
                 )
-            source_branch = _source_branch(issue_number)
+            source_branch = resolve_issue_branch(request.repo_path, issue)
             source_context, source_pr_was_closed = _read_source_pr_context(
                 request=request,
                 source_pr_number=source_pr.number,
@@ -364,6 +368,7 @@ def resolve_batch_sources(request: BatchSourceResolutionRequest) -> tuple[BatchS
                 source_branch=source_branch,
                 total_pr_context=existing_total_context,
             )
+            source_branch = source_context.branch
             if (
                 source_context.checks_state != _REQUIRED_CHECKS_STATE
                 or not source_context.head_sha

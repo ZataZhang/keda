@@ -18,7 +18,7 @@ from backend.core.use_cases.blocked_continue import (
     _extract_blocked_paths_from_comments,
 )
 from tests.conftest import FakeGitHubClient, FakeProcessRunner
-from tests.support.agent_runner import default_worktree_path_response
+from tests.support.agent_runner import default_worktree_path_response, confirm_legacy_workspace
 
 
 def _make_blocked_issue(number: int) -> IssueSummary:
@@ -69,7 +69,8 @@ def test_blocked_continue_missing_blocked_label_fails() -> None:
         )
 
 
-def test_blocked_continue_dirty_worktree_fails() -> None:
+def test_blocked_continue_dirty_worktree_fails(tmp_path: Path) -> None:
+    confirm_legacy_workspace(tmp_path, tmp_path, 1)
     fake_client = FakeGitHubClient()
     fake_client.get_issue = lambda n: _make_blocked_issue(n)
     responses = {
@@ -86,7 +87,7 @@ def test_blocked_continue_dirty_worktree_fails() -> None:
     with pytest.raises(BlockedContinueError, match="uncommitted changes"):
         blocked_continue_issue(
             issue_number=1,
-            repo_path=Path("."),
+            repo_path=tmp_path,
             config=AppConfig(),
             agent="auto",
             github_client=fake_client,
@@ -94,7 +95,8 @@ def test_blocked_continue_dirty_worktree_fails() -> None:
         )
 
 
-def test_blocked_continue_wrong_branch_fails() -> None:
+def test_blocked_continue_wrong_branch_fails(tmp_path: Path) -> None:
+    confirm_legacy_workspace(tmp_path, tmp_path, 1)
     fake_client = FakeGitHubClient()
     fake_client.get_issue = lambda n: _make_blocked_issue(n)
     responses = {
@@ -111,7 +113,7 @@ def test_blocked_continue_wrong_branch_fails() -> None:
     with pytest.raises(BlockedContinueError, match="main"):
         blocked_continue_issue(
             issue_number=1,
-            repo_path=Path("."),
+            repo_path=tmp_path,
             config=AppConfig(),
             agent="auto",
             github_client=fake_client,
@@ -119,7 +121,8 @@ def test_blocked_continue_wrong_branch_fails() -> None:
         )
 
 
-def test_blocked_continue_already_claimed_returns_false() -> None:
+def test_blocked_continue_already_claimed_returns_false(tmp_path: Path) -> None:
+    confirm_legacy_workspace(tmp_path, tmp_path, 99)
     fake_client = FakeGitHubClient()
     # First get_issue returns blocked; later returns running+blocked (simulating another runner claimed it)
     call_count = 0
@@ -154,7 +157,7 @@ def test_blocked_continue_already_claimed_returns_false() -> None:
 
     result = blocked_continue_issue(
         issue_number=99,
-        repo_path=Path("."),
+        repo_path=tmp_path,
         config=AppConfig(),
         agent="auto",
         github_client=fake_client,

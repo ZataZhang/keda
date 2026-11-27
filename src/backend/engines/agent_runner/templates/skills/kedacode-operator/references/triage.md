@@ -60,7 +60,7 @@ Cancelling is not a new recovery path: the cancelled attempt flows into the exis
 
 - **Failed publish** — the work is fine but the push, PR, or state update was not: `kc recover --issue <N>` resumes it. Do not re-queue and redo the work.
 - **Back to the queue** — after fixing the cause, `gh issue edit <N> --add-label agent/ready --remove-label agent/failed` lets the next pass pick it up.
-- **Where the code is** — `kc worktree path --branch issue-<N>` prints the worktree root. A re-run reuses that worktree, so uncommitted work in it is usually still wanted.
+- **Where the code is** — new tasks use `kc/<owner>/<repo>/issue-<N>` and `.kc-worktrees/<full-branch>`. Use the actual branch from the run log with `kc worktree path --branch <full-branch>`. The complete Issue URL, not its number, owns the workspace. Old `issue-<N>` worktrees are reused only with matching ownership records or the exact Issue's PRD header link. For a confirmed legacy task, `kc worktree path --branch issue-<N>` remains supported. Preserve unknown or foreign old worktrees and their uncommitted files; never delete them just to retry. Legacy `issue-{issue_number}` command templates resolve to the scoped branch automatically.
 - **Ambiguous target** — when the working directory matches more than one registered repository, several commands refuse to guess; pass `--repo-id <id>` (or `--repo`).
 
 Label edits (`gh issue edit`) and `kc blocked-continue` change what the runner may execute next — confirm the decision with the user before applying them, and never use them to talk a read-only question into a re-run.

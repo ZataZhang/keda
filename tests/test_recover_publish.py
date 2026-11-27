@@ -24,6 +24,7 @@ from backend.core.use_cases.recover_publish import (
     validate_worktree_clean,
 )
 from tests.conftest import FakeContentGenerator, FakeGitHubClient, FakeProcessRunner
+from tests.support.agent_runner import confirm_legacy_workspace
 
 
 def _make_config(*, supervisor_enabled: bool = False) -> AppConfig:
@@ -49,6 +50,8 @@ def _make_process_runner_with_worktree(
     push_succeeds: bool = True,
 ) -> FakeProcessRunner:
     """Create a process runner that simulates a valid worktree."""
+    if worktree_path.is_dir():
+        confirm_legacy_workspace(worktree_path.parent, worktree_path, 42)
     responses = {
         # Tests pair this runner with ``path_command=f"echo {worktree_path}"``;
         # register the same argv -> stdout so path resolution reads the real

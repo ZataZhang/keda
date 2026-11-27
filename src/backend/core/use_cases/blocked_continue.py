@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from backend.core.use_cases.issue_workspace import resolve_issue_branch
+
 import logging
 from pathlib import Path
 
@@ -78,7 +80,7 @@ def blocked_continue_issue(
         ) from exc
 
     current_branch = get_current_branch(worktree_path, process_runner)
-    expected_branch = f"issue-{issue_number}"
+    expected_branch = resolve_issue_branch(repo_path, issue, worktree_path=worktree_path)
     if current_branch != expected_branch:
         raise BlockedContinueError(
             f"Worktree is on branch {current_branch}, expected {expected_branch}."

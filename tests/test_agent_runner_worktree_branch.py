@@ -6,6 +6,8 @@ in the commit proxy."""
 
 from __future__ import annotations
 
+from tests.support.agent_runner import confirm_legacy_workspace
+
 import subprocess
 from pathlib import Path
 
@@ -571,6 +573,7 @@ def test_run_once_rebase_conflict_detached_head(
     )
     worktree_path = tmp_path / "issue-73"
     worktree_path.mkdir()
+    confirm_legacy_workspace(tmp_path, worktree_path, 73)
 
     marker = format_event_marker(
         phase="post_pr_rework_requested",

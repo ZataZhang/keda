@@ -151,7 +151,7 @@ def test_unresolvable_base_keeps_head_and_leaves_base_null(tmp_path: Path) -> No
 def test_stack_sequencing_uses_upstream_issue_branch_as_base(tmp_path: Path) -> None:
     repo_path = init_git_repo(tmp_path / "repo")
     create_commit(repo_path, "base")
-    _git(repo_path, "checkout", "-b", "issue-42")
+    _git(repo_path, "checkout", "-b", "kc/example/repo/issue-42")
     upstream_sha = create_commit(repo_path, "upstream work")
     _git(repo_path, "checkout", "-b", "issue-43")
     create_commit(repo_path, "downstream work")
@@ -159,7 +159,7 @@ def test_stack_sequencing_uses_upstream_issue_branch_as_base(tmp_path: Path) -> 
 
     snapshot = build_issue_snapshot(_request(repo_path, stacked_issue))
 
-    assert snapshot.base_ref == "issue-42"
+    assert snapshot.base_ref == "kc/example/repo/issue-42"
     assert snapshot.base_sha == upstream_sha
 
 

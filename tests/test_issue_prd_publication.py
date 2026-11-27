@@ -75,10 +75,10 @@ def _create_git_remote(repo_path: Path, remote_path: Path) -> None:
 
 
 def _set_protected_branch_hook(remote_path: Path, *, reject_issue_branch: bool = False) -> Path:
-    """安装 bare remote 钩子，拒绝 main 和可选的 issue-42 写入。"""
+    """安装 bare remote 钩子，拒绝 main 和可选的 kc/example/repo/issue-42 写入。"""
     hook_path = remote_path / "hooks" / "pre-receive"
     reject_issue_rule = (
-        '  case "$ref" in refs/heads/issue-42) echo "task branch rejected" >&2; exit 1;; esac\n'
+        '  case "$ref" in refs/heads/kc/example/repo/issue-42) echo "task branch rejected" >&2; exit 1;; esac\n'
         if reject_issue_branch
         else ""
     )
@@ -194,7 +194,7 @@ def test_real_cli_publishes_issue_branch_when_main_rejects_push(
 
     assert exit_code == 0
     assert _remote_ref_sha(remote_path, "main") == base_sha
-    issue_branch_sha = _remote_ref_sha(remote_path, "issue-42")
+    issue_branch_sha = _remote_ref_sha(remote_path, "kc/example/repo/issue-42")
     changed_paths = subprocess.run(
         [
             "git",
@@ -219,7 +219,8 @@ def test_real_cli_publishes_issue_branch_when_main_rejects_push(
     assert "agent/ready" in github_client._issue_labels[42]
     final_body = github_client._issue_get_bodies[42]
     assert (
-        f"state=published queue_ready=true branch=issue-42 commit={issue_branch_sha}" in final_body
+        f"state=published queue_ready=true branch=kc/example/repo/issue-42 commit={issue_branch_sha}"
+        in final_body
     )
     assert f"/blob/{issue_branch_sha}/tasks/pending/feature.md" in final_body
     assert "Created GitHub Issue" in capsys.readouterr().out
@@ -256,7 +257,12 @@ def test_recovery_reuses_issue_is_idempotent_and_rejects_remote_conflict(
     assert "Resume this Issue with:" in caplog.text
     assert "--recover-issue 42" in caplog.text
     assert "agent/ready" not in github_client._issue_labels[42]
-    assert _run_git(repo_path, "ls-remote", "--heads", "origin", "refs/heads/issue-42").stdout == ""
+    assert (
+        _run_git(
+            repo_path, "ls-remote", "--heads", "origin", "refs/heads/kc/example/repo/issue-42"
+        ).stdout
+        == ""
+    )
 
     hook_path.write_text(
         "#!/bin/sh\nwhile read old new ref; do\n"
@@ -268,10 +274,10 @@ def test_recovery_reuses_issue_is_idempotent_and_rejects_remote_conflict(
     recovery_args = ["tasks/pending/feature.md", "--recover-issue", "42"]
     first_recovery = _run_issue_cli(repo_path, github_client, monkeypatch, recovery_args)
     assert first_recovery == 0
-    initial_issue_branch_sha = _remote_ref_sha(remote_path, "issue-42")
+    initial_issue_branch_sha = _remote_ref_sha(remote_path, "kc/example/repo/issue-42")
     second_recovery = _run_issue_cli(repo_path, github_client, monkeypatch, recovery_args)
     assert second_recovery == 0
-    assert _remote_ref_sha(remote_path, "issue-42") == initial_issue_branch_sha
+    assert _remote_ref_sha(remote_path, "kc/example/repo/issue-42") == initial_issue_branch_sha
 
     prd_path.write_text(
         f"{prd_path.read_text(encoding='utf-8')}\nLocal conflicting edit.\n",
@@ -283,7 +289,7 @@ def test_recovery_reuses_issue_is_idempotent_and_rejects_remote_conflict(
     assert conflict_exit_code != 0
     assert "different content" in conflict_text
     assert "remote content was preserved" in conflict_text
-    assert _remote_ref_sha(remote_path, "issue-42") == initial_issue_branch_sha
+    assert _remote_ref_sha(remote_path, "kc/example/repo/issue-42") == initial_issue_branch_sha
     assert sum(call["method"] == "create_issue" for call in github_client.calls) == 1
 
 

@@ -8,6 +8,7 @@ copying fixtures around.
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import subprocess
 from collections.abc import Iterator
@@ -159,6 +160,11 @@ def config_with_review_disabled(
     recovery loop are not affected by the global default fallback chain.
     """
     commands = verification_commands or ("just test",)
+    if worktree_path is not None and worktree_path.is_dir():
+        branch_match = re.fullmatch(r"issue-(\d+)", worktree_path.name)
+        confirm_legacy_workspace(
+            worktree_path.parent, worktree_path, int(branch_match.group(1)) if branch_match else 123
+        )
     worktree_cfg = (
         WorktreeConfig(path_command=f"echo {worktree_path}") if worktree_path else WorktreeConfig()
     )
@@ -173,6 +179,27 @@ def config_with_review_disabled(
         pre_pr_review=PrePrReviewConfig(enabled=False),
         post_pr_supervisor=PostPrSupervisorConfig(enabled=False),
     )
+
+
+def confirm_legacy_workspace(repo_path: Path, worktree_path: Path, issue_number: int) -> None:
+    """为明确模拟旧任务的测试现场补齐完整 URL 归属，不绕过生产校验。"""
+    from backend.core.use_cases.issue_workspace import bind_issue_workspace
+
+    issue = IssueSummary(
+        issue_number,
+        "legacy fixture",
+        f"https://github.com/example/repo/issues/{issue_number}",
+        "",
+        (),
+    )
+    bind_issue_workspace(repo_path, issue, worktree_path, branch=f"issue-{issue_number}")
+    git_directory = (
+        worktree_path / ".git" if (worktree_path / ".git").is_dir() else repo_path / ".git"
+    )
+    exclude_path = git_directory / "info/exclude"
+    exclude_path.parent.mkdir(parents=True, exist_ok=True)
+    existing = exclude_path.read_text(encoding="utf-8") if exclude_path.exists() else ""
+    exclude_path.write_text(existing + "\n/.agent-runner/issue-workspace.json\n", encoding="utf-8")
 
 
 def worktree_path_response(
@@ -465,6 +492,7 @@ def worktree_site_response(root: Path, issue_number: int) -> dict[tuple[str, ...
     site = worktree_site(root, issue_number)
     site.mkdir(parents=True, exist_ok=True)
     (site / ".git").write_text("gitdir: /nonexistent/worktrees/issue-1/.git\n", encoding="utf-8")
+    confirm_legacy_workspace(root, site, issue_number)
     command = default_worktree_path_argv(issue_number)
     return {
         command: CommandResult(

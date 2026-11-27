@@ -26,6 +26,7 @@ from pathlib import Path
 
 from backend.core.shared.models.agent_model_preset import ModelSelection
 from backend.core.shared.models.agent_runner import AppConfig
+from backend.core.shared.models.repository_paths import resolve_git_pointer_directory
 from backend.core.shared.models.agent_spec import (
     INTERACTIVE_PROFILE_ID,
     PROMPT_DELIVERY_ARGV_TAIL,
@@ -157,28 +158,21 @@ def _resolve_worktree_git_writable_roots(worktree_path: Path) -> list[str]:
     if not git_pointer_path.is_file():
         return []
     try:
-        pointer_text = git_pointer_path.read_text(encoding="utf-8").strip()
+        worktree_git_dir = resolve_git_pointer_directory(git_pointer_path, prefix="gitdir:")
     except OSError:
         return []
-    gitdir_prefix = "gitdir:"
-    if not pointer_text.startswith(gitdir_prefix):
+    if worktree_git_dir is None:
         return []
-    worktree_git_dir = Path(pointer_text[len(gitdir_prefix) :].strip())
-    if not worktree_git_dir.is_absolute():
-        worktree_git_dir = worktree_path / worktree_git_dir
     writable_roots = [worktree_git_dir]
     common_dir_pointer_path = worktree_git_dir / "commondir"
     if common_dir_pointer_path.is_file():
         try:
-            common_dir = Path(common_dir_pointer_path.read_text(encoding="utf-8").strip())
+            common_dir = resolve_git_pointer_directory(common_dir_pointer_path)
         except OSError:
             common_dir = None
         if common_dir is not None:
-            if not common_dir.is_absolute():
-                common_dir = worktree_git_dir / common_dir
             writable_roots.append(common_dir)
-    resolved_roots = (root.resolve() for root in writable_roots)
-    return [str(root) for root in dict.fromkeys(resolved_roots)]
+    return [str(root) for root in dict.fromkeys(writable_roots)]
 
 
 def _expand_git_writable_roots(worktree_path: Path) -> list[str]:

@@ -14,6 +14,7 @@ from backend.core.use_cases.agent_runner_git import (
 )
 from backend.core.use_cases.run_agent_once import format_command
 from backend.core.use_cases.worktree_path_output import parse_worktree_path_stdout
+from backend.core.use_cases.issue_workspace import resolve_issue_branch, validate_issue_workspace
 
 _logger = logging.getLogger(__name__)
 
@@ -39,7 +40,11 @@ def _find_worktree_path_for_issue(
         worktree 的绝对路径
     """
     path_result = process_runner.run(
-        format_command(config.worktree.path_command, issue_number=issue.number),
+        format_command(
+            config.worktree.path_command,
+            issue_number=issue.number,
+            issue_branch=resolve_issue_branch(repo_path, issue),
+        ),
         cwd=repo_path,
     )
     # path_command runs with cwd=repo_path, so a relative output must be
@@ -64,6 +69,7 @@ def _find_worktree_path_for_issue(
             f"{worktree_path}. path_command return_code={path_result.return_code}, "
             f"stdout={path_result.stdout!r}."
         )
+    validate_issue_workspace(worktree_path, issue)
     return worktree_path
 
 

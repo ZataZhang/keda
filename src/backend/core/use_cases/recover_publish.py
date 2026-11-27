@@ -33,6 +33,7 @@ from backend.core.use_cases.agent_runner_validation import (
     publish_validation_evidence_best_effort,
 )
 from backend.core.use_cases.worktree_path_output import parse_worktree_path_stdout
+from backend.core.use_cases.issue_workspace import resolve_issue_branch, validate_issue_workspace
 
 _logger = logging.getLogger(__name__)
 
@@ -74,7 +75,7 @@ class PublishRecoveryError(RuntimeError):
 
 def resolve_existing_worktree(
     repo_path: Path,
-    issue_number: int,
+    issue_number: int | IssueSummary,
     config: AppConfig,
     process_runner: IProcessRunner,
 ) -> Path:
@@ -85,7 +86,7 @@ def resolve_existing_worktree(
 
     Args:
         repo_path (Path): 主仓库路径。
-        issue_number (int): GitHub Issue 编号。
+        issue_number (int | IssueSummary): 带完整远端身份的任务；整数仅兼容旧离线调用。
         config (AppConfig): 应用配置。
         process_runner (IProcessRunner): 用于执行命令的进程执行器。
 
@@ -98,10 +99,17 @@ def resolve_existing_worktree(
     """
     from backend.core.use_cases.run_agent_once import format_command
 
+    issue = issue_number if isinstance(issue_number, IssueSummary) else None
+    target_number = issue.number if issue is not None else issue_number
+
     # 通过配置中的 path_command 模板（注入 issue_number）计算工作树路径，
     # 复用与正常发布流程相同的路径推导逻辑，保证两条路径一致。
     path_result = process_runner.run(
-        format_command(config.worktree.path_command, issue_number=issue_number),
+        format_command(
+            config.worktree.path_command,
+            issue_number=target_number,
+            issue_branch=resolve_issue_branch(repo_path, issue) if issue else None,
+        ),
         cwd=repo_path,
     )
     try:
@@ -127,6 +135,8 @@ def resolve_existing_worktree(
     if git_dir_result.return_code != 0:
         raise PublishRecoveryError(f"Path is not a valid git worktree: {worktree_path}")
 
+    if issue is not None:
+        validate_issue_workspace(worktree_path, issue)
     return worktree_path
 
 
@@ -389,7 +399,9 @@ def _recover_publish_issue_owned(
     issue_number = request.issue_number
 
     # 第一步：解析已存在的工作树（不创建）。
-    worktree_path = resolve_existing_worktree(repo_path, issue_number, config, process_runner)
+    worktree_path = resolve_existing_worktree(
+        repo_path, github_client.get_issue(issue_number), config, process_runner
+    )
 
     # 第二步：确认工作树干净，保证只发布已有提交。
     validate_worktree_clean(worktree_path, process_runner)
@@ -834,9 +846,13 @@ def recover_publish_issue(
     with github_client.issue_supervision_lock(request.issue_number) as owns_supervision:
         if not owns_supervision:
             raise RuntimeError(f"Issue #{request.issue_number} already has a local supervisor.")
-        worktree_path = resolve_existing_worktree(
-            repo_path, request.issue_number, config, process_runner
-        )
+        try:
+            recovery_issue = github_client.get_issue(request.issue_number)
+        except Exception as exc:  # noqa: BLE001 - 保持发布恢复入口的统一失败类型。
+            raise PublishRecoveryError(
+                f"Could not read Issue #{request.issue_number}: {exc}"
+            ) from exc
+        worktree_path = resolve_existing_worktree(repo_path, recovery_issue, config, process_runner)
         lock_path = worktree_claim_lock_path(worktree_path)
         _acquire_blocked_claim_lock(lock_path, request.issue_number)
         try:

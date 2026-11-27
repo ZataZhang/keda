@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+from backend.core.use_cases.issue_workspace import resolve_issue_branch
+
 import logging
 import re
 from dataclasses import dataclass
@@ -50,8 +52,8 @@ class CreatePrdFromIssueRequest:
         generated_content_config: 内容生成配置；为 ``None`` 时使用 fallback。
         content_generator: AI 内容生成器；agent 模式必需。
         queue_ready: 成功后在 Issue 上添加 ``agent/ready`` label。
-        worktree_path: ``issue-<N>`` worktree 路径。提供时 PRD 在 worktree 内生成、
-            commit 进 ``issue-<N>`` 分支并经 draft PR 落地；为 ``None`` 时仅在
+        worktree_path: ``kc/<owner>/<repo>/issue-<N>`` worktree 路径。提供时 PRD 在 worktree 内生成、
+            commit 进 ``kc/<owner>/<repo>/issue-<N>`` 分支并经 draft PR 落地；为 ``None`` 时仅在
             ``repo_path`` 内生成而不发布（供隔离单测）。
         process_runner: git 命令执行器；与 ``worktree_path`` 一同提供时启用
             commit + 发布路径。
@@ -279,7 +281,7 @@ def _commit_and_publish_prd(
     github_client: IGitHubClient,
     process_runner: IProcessRunner,
 ) -> str | None:
-    """把生成的 PRD commit 进 ``issue-<N>`` 分支并经 draft PR 落地。
+    """把生成的 PRD commit 进 ``kc/<owner>/<repo>/issue-<N>`` 分支并经 draft PR 落地。
 
     复用既有 worktree+publish 基础设施，不新增并行抽象：commit 走
     :func:`commit_runner_authored_paths`（runner 直接产出的文档提交），发布走
@@ -289,7 +291,7 @@ def _commit_and_publish_prd(
     Args:
         request: 创建 PRD 的请求参数。
         issue: 当前处理的 Issue。
-        worktree_path: ``issue-<N>`` worktree 路径。
+        worktree_path: ``kc/<owner>/<repo>/issue-<N>`` worktree 路径。
         relative_prd_path: PRD 相对 worktree 的路径。
         is_rewrite: 是否为重写（影响 commit message 文案）。
         github_client: GitHub 客户端。
@@ -300,7 +302,7 @@ def _commit_and_publish_prd(
         返回 ``None``。
     """
     config = request.config
-    expected_branch = f"issue-{issue.number}"
+    expected_branch = resolve_issue_branch(request.repo_path, issue, worktree_path=worktree_path)
     commit_message = f"docs(prd): {'update' if is_rewrite else 'add'} PRD for issue #{issue.number}"
     committed_sha = commit_runner_authored_paths(
         worktree_path,
@@ -366,7 +368,7 @@ def create_prd_from_issue(
     3. 获取 Issue 评论列表。
     4. 调用 ``generate_prd_content`` 生成 PRD 文本（支持 template/agent/fallback）。
     5. 写入文件（覆盖或新建）。
-    6. 若提供了 worktree + process_runner：commit 进 ``issue-<N>`` 分支并经
+    6. 若提供了 worktree + process_runner：commit 进 ``kc/<owner>/<repo>/issue-<N>`` 分支并经
        ``publish_changes`` 开/复用 draft PR（push 前不污染主工作树）。
     7. 更新 Issue body 添加/更新 ``PRD path`` 锚点。
     8. 更新 labels：移除 ``agent/rework-prd``，添加 ``source/prd``，可选添加

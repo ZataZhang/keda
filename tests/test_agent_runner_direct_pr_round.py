@@ -333,6 +333,9 @@ def test_completed_round_never_authorizes_cleanup(tmp_path: Path) -> None:
 
 def _published_storage(storage: Path, *, label_present: bool = True) -> _DurableGitHub:
     """提交一个发布成功、交接尚未完成的轮次，再改变当前正文。"""
+    from tests.support.agent_runner import confirm_legacy_workspace
+
+    confirm_legacy_workspace(storage.parent, storage.parent, _NUMBER)
     client = _DurableGitHub(storage)
     client.set_issue_labels(_NUMBER, _ISSUE.labels)
     client.set_issue_body(_NUMBER, _ISSUE.body)

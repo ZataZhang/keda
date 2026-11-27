@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from backend.core.use_cases.issue_workspace import local_issue_worktree_paths
 from urllib.parse import quote
 
 #: 可播放的视频后缀，顺序即优先级。
@@ -69,16 +70,16 @@ def _candidate_dirs(repo_path: Path, issue_number: int, stem: str) -> tuple[Path
     执行侧的证据目录既可能按 PRD 名（或 issue-<N>）命名，也可能只用 Issue 编号，
     两种都查，避免因为命名差异看不到刚采到的证据。
     """
-    worktree = repo_path / ".kc-worktrees" / f"issue-{issue_number}"
+    worktrees = local_issue_worktree_paths(repo_path, issue_number)
     names = tuple(dict.fromkeys((stem, str(issue_number))))
     return tuple(
         directory
         for name in names
         for directory in (
             repo_path / ".iar" / "evidence" / name,
-            worktree / ".iar" / "evidence" / name,
+            *(worktree / ".iar" / "evidence" / name for worktree in worktrees),
             repo_path / "tasks" / "evidence" / name,
-            worktree / "tasks" / "evidence" / name,
+            *(worktree / "tasks" / "evidence" / name for worktree in worktrees),
         )
     )
 
@@ -105,11 +106,11 @@ def local_evidence_attachments(
     repo_path: Path, issue_number: int, prd_path: str | None
 ) -> dict[str, Path]:
     """查找任务证据报告和可预览的原始附件。"""
-    worktree = repo_path / ".kc-worktrees" / f"issue-{issue_number}"
+    worktrees = local_issue_worktree_paths(repo_path, issue_number)
     stem = evidence_stem(issue_number, prd_path)
     directories = (
         *_candidate_dirs(repo_path, issue_number, stem),
-        worktree / ".iar" / "evidence",
+        *(worktree / ".iar" / "evidence" for worktree in worktrees),
     )
     attachments: dict[str, Path] = {}
     resolved_repo = repo_path.resolve()

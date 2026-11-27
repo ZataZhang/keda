@@ -47,7 +47,7 @@ class IssueFromPrdRequest:
             而不是抛出 ``ValueError``。
         publish_prd: 为 ``True`` 时在 Issue 创建后对 PRD 文件执行 stage、commit、push。
         publish_to_issue_branch: 为 ``True`` 时使用隔离 Git worktree 将 PRD 发布到
-            ``issue-<N>`` 任务分支；ready 在分支推送和 Issue 元数据写回后添加。
+            ``kc/<owner>/<repo>/issue-<N>`` 任务分支；ready 在分支推送和 Issue 元数据写回后添加。
         git_remote: 要 push 到的 Git remote 名称（默认 ``"origin"``）。
         git_base_branch: 基础分支名称。当 ``queue_ready=True`` 且 ``publish_prd=True`` 时必需。
         generated_content_config: 可选的 AI 内容生成配置。

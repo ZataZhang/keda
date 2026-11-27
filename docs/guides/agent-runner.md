@@ -1283,6 +1283,9 @@ CI 容器镜像预装浏览器运行时是后续工作；首版只保证本地 r
 
 ## worktree 分支安全与自动修复
 
+任务分支与工作区现在按完整 GitHub 仓库身份隔离，详见 [Issue 分支与工作区归属](issue-workspaces.md)。
+下文的 `issue-<number>` 表示兼容的旧分支；新任务使用 `kc/<owner>/<repo>/issue-<number>`。
+
 `kc run` 在把 agent 放入 worktree 前会执行两项准备：
 
 1. **远程分支对齐**：如果 `refs/remotes/<remote>/issue-<number>` 存在，则 fetch 并仅当本地分支是其祖先、且 worktree 干净时做 fast-forward；dirty、diverged 或本地领先场景会保留本地状态并失败/继续，不会 destructive reset。

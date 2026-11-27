@@ -155,6 +155,9 @@ def test_resolve_fork_base_stack_falls_back_to_local_when_fetch_fails(tmp_path: 
     # No remote configured named "origin": the fetch fails.
 
     from backend.infrastructure.process_runner import SubprocessRunner
+    from tests.support.agent_runner import confirm_legacy_workspace
+
+    confirm_legacy_workspace(repo_path, repo_path, 42)
 
     fork_base = _resolve_fork_base(repo_path, _stack_issue(42), AppConfig(), SubprocessRunner())
     assert fork_base == "issue-42"

@@ -410,7 +410,7 @@ def test_run_once_reuses_existing_clean_local_commit(tmp_path: Path) -> None:
     from backend.core.use_cases.agent_runner_orchestrate import run_once
 
     exit_code = run_once(
-        repo_path=Path("."),
+        repo_path=tmp_path,
         config=config,
         dry_run=False,
         agent="auto",
@@ -493,7 +493,7 @@ def test_run_once_recovers_running_issue_with_existing_local_commit(
     from backend.core.use_cases.agent_runner_orchestrate import run_once
 
     exit_code = run_once(
-        repo_path=Path("."),
+        repo_path=tmp_path,
         config=config,
         dry_run=False,
         agent="auto",

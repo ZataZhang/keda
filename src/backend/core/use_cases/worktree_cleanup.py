@@ -11,6 +11,7 @@ from backend.core.shared.interfaces.agent_runner import IGitHubClient, IProcessR
 from backend.core.shared.models.repository_paths import (
     resolve_managed_worktree_root,
 )
+from backend.core.use_cases.issue_workspace import resolve_issue_branch, validate_issue_workspace
 
 
 DEFAULT_ISSUE_BRANCH_PREFIX = "issue-"
@@ -159,11 +160,16 @@ def _evaluate_issue_branch(
 
     issue_closed, issue_reason = _issue_is_closed(
         github_client,
-        issue_number,
-        active_issue_label=request.active_issue_label,
+        candidate,
+        request,
     )
     if not issue_closed:
         return _skipped(candidate, issue_reason, candidate_worktree_path)
+    if candidate_worktree_path is not None and candidate_worktree_path.exists():
+        try:
+            validate_issue_workspace(candidate_worktree_path, github_client.get_issue(issue_number))
+        except ValueError as exc:
+            return _skipped(candidate, str(exc), candidate_worktree_path)
 
     if candidate_worktree_path is not None and not _path_is_inside(
         candidate_worktree_path, managed_worktree_root_path
@@ -240,6 +246,10 @@ def _local_issue_branches(
     for branch_line in branch_list_result.stdout.splitlines():
         branch_name = branch_line.strip()
         branch_match = branch_pattern.fullmatch(branch_name)
+        if branch_match is None and branch_prefix == DEFAULT_ISSUE_BRANCH_PREFIX:
+            branch_match = re.fullmatch(
+                r"kc/(?:[\w.%+-]+/){2,3}issue-(?P<issue_number>[1-9]\d*)", branch_name
+            )
         if branch_match is None:
             continue
         branch_candidates.append(
@@ -286,13 +296,16 @@ def _remote_branch_exists(
 
 def _issue_is_closed(
     github_client: IGitHubClient,
-    issue_number: int,
-    *,
-    active_issue_label: str,
+    candidate: IssueBranchCandidate,
+    request: WorktreeCleanupRequest,
 ) -> tuple[bool, str]:
     """仅允许关闭且不再标记为活动执行的 Issue 进入清理。"""
+    issue_number = candidate.issue_number
+    active_issue_label = request.active_issue_label
     try:
         issue_summary = github_client.get_issue(issue_number)
+        if candidate.branch != resolve_issue_branch(request.repo_path, issue_summary):
+            return False, "branch ownership does not match the current repository Issue"
     except Exception as exc:  # noqa: BLE001 - cleanup should continue per branch.
         return False, f"Issue #{issue_number} lookup failed: {exc}"
 

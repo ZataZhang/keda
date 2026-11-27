@@ -317,8 +317,7 @@ def format_failure_comment(
                     f"--add-label {transition_label} --remove-label agent/failed",
                     "```",
                     "",
-                    "If the worktree is dirty, remove it first "
-                    f"(`git worktree remove <repo>-worktrees/tasks/issue-{issue_number}`). "
+                    "Preserve dirty or unknown worktrees and confirm their full Issue URL ownership before retrying. "
                     "See the 失败重跑 section in `docs/guides/agent-runner.md` "
                     "for the full procedure.",
                     "",
@@ -359,8 +358,7 @@ def format_failure_comment(
                     "--add-label agent/ready --remove-label agent/failed",
                     "```",
                     "",
-                    "If the worktree is dirty, remove it first "
-                    f"(`git worktree remove <repo>-worktrees/tasks/issue-{issue_number}`). "
+                    "Preserve dirty or unknown worktrees and confirm their full Issue URL ownership before retrying. "
                     "See the 失败重跑 section in `docs/guides/agent-runner.md` "
                     "for the full procedure.",
                     "",

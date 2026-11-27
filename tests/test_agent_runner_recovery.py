@@ -117,7 +117,7 @@ def test_run_once_completes_recovery_or_hands_off_no_change_issue(
     from backend.core.use_cases.agent_runner_orchestrate import run_once
 
     exit_code = run_once(
-        repo_path=Path("."),
+        repo_path=tmp_path,
         config=config,
         dry_run=False,
         agent="auto",
@@ -206,10 +206,13 @@ def test_recovery_loop_exhausted_raises_max_retries(tmp_path: Path) -> None:
         worktree_path, max_recovery_attempts=1, recovery_retry_delay_seconds=0
     )
 
+    branch_command = ("git", "branch", "--show-current")
+    fake_runner.responses[branch_command] = CommandResult(branch_command, 0, "issue-123\n", "")
+
     from backend.core.use_cases.agent_runner_orchestrate import run_once
 
     exit_code = run_once(
-        repo_path=Path("."),
+        repo_path=tmp_path,
         config=config,
         dry_run=False,
         agent="auto",
@@ -301,7 +304,7 @@ def test_attempt_history_in_issue_comment(tmp_path: Path) -> None:
     from backend.core.use_cases.agent_runner_orchestrate import run_once
 
     exit_code = run_once(
-        repo_path=Path("."),
+        repo_path=tmp_path,
         config=config,
         dry_run=False,
         agent="auto",
@@ -415,7 +418,7 @@ def test_scenario_b_precommit_lint_failure_recovery(tmp_path: Path) -> None:
     from backend.core.use_cases.agent_runner_orchestrate import run_once
 
     exit_code = run_once(
-        repo_path=Path("."),
+        repo_path=tmp_path,
         config=config,
         dry_run=False,
         agent="auto",
@@ -532,7 +535,7 @@ def test_scenario_e_repeated_lint_failure_stops_without_progress(tmp_path: Path)
     from backend.core.use_cases.agent_runner_orchestrate import run_once
 
     exit_code = run_once(
-        repo_path=Path("."),
+        repo_path=tmp_path,
         config=config,
         dry_run=False,
         agent="auto",
@@ -643,7 +646,7 @@ def test_keyboard_interrupt_checkpoints_in_flight_work_before_exit(
 
     with pytest.raises(KeyboardInterrupt):
         run_once(
-            repo_path=Path("."),
+            repo_path=tmp_path,
             config=config,
             dry_run=False,
             agent="auto",
@@ -1229,7 +1232,7 @@ def test_exhaustion_with_only_forbidden_changes_publishes_nothing(
     with pytest.raises(MaxRetriesExceededError):
         handlers._process_ready_issue(
             issue=issue,
-            repo_path=Path("."),
+            repo_path=tmp_path,
             config=config,
             agent="auto",
             github_client=fake_client,

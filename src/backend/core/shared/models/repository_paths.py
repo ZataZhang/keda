@@ -27,6 +27,26 @@ def resolve_managed_worktree_root(repository_root_path: Path) -> Path:
     return repository_root_path / DEFAULT_WORKTREE_DIR_NAME
 
 
+def resolve_git_pointer_directory(pointer_path: Path, *, prefix: str = "") -> Path | None:
+    """读取 Git 目录指针，并相对指针文件所在目录解析路径。
+
+    Args:
+        pointer_path: 工作树的 .git 文件或 Git 元数据中的 commondir 文件。
+        prefix: .git 文件使用 gitdir: 前缀；commondir 文件省略。
+
+    Returns:
+        指向的绝对目录；要求的前缀不匹配时返回 None。
+
+    Raises:
+        OSError: 指针不可读；由调用方保留原有错误处理策略。
+    """
+    pointer_text = pointer_path.read_text(encoding="utf-8").strip()
+    if not pointer_text.startswith(prefix):
+        return None
+    directory_text = pointer_text.removeprefix(prefix).strip()
+    return (pointer_path.parent / directory_text).resolve()
+
+
 def resolve_repository_state_path(
     repository_root_path: Path,
     current_relative_path: Path,
@@ -55,6 +75,7 @@ __all__ = [
     "DEFAULT_WORKTREE_DIR_NAME",
     "LEGACY_REPOSITORY_STATE_DIR_NAME",
     "LEGACY_WORKTREE_DIR_NAME",
+    "resolve_git_pointer_directory",
     "resolve_managed_worktree_root",
     "resolve_repository_state_path",
 ]

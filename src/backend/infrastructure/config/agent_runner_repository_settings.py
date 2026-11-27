@@ -8,6 +8,7 @@ from typing import Any
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from backend.core.shared.models import product_identity
+from backend.core.shared.models.repository_paths import resolve_git_pointer_directory
 from backend.core.shared.models.repository_platform import (
     DEFAULT_REPOSITORY_PLATFORM,
     validate_repository_platform,
@@ -240,22 +241,16 @@ def _main_checkout_root(repo_root_path: Path) -> Path | None:
     git_pointer_path = repo_root_path / ".git"
     if not git_pointer_path.is_file():
         return None
-    pointer_text = git_pointer_path.read_text(encoding="utf-8").strip()
-    if not pointer_text.startswith("gitdir:"):
+    worktree_git_dir = resolve_git_pointer_directory(git_pointer_path, prefix="gitdir:")
+    if worktree_git_dir is None:
         return None
-    worktree_git_dir = Path(pointer_text.removeprefix("gitdir:").strip())
-    if not worktree_git_dir.is_absolute():
-        worktree_git_dir = repo_root_path / worktree_git_dir
     commondir_path = worktree_git_dir / "commondir"
     if not commondir_path.is_file():
         return None
-    common_git_dir = Path(commondir_path.read_text(encoding="utf-8").strip())
-    if not common_git_dir.is_absolute():
-        common_git_dir = worktree_git_dir / common_git_dir
-    resolved_common_git_dir = common_git_dir.resolve()
-    if resolved_common_git_dir.name != ".git":
+    common_git_dir = resolve_git_pointer_directory(commondir_path)
+    if common_git_dir is None or common_git_dir.name != ".git":
         return None
-    return resolved_common_git_dir.parent
+    return common_git_dir.parent
 
 
 def _find_local_override_path(repo_root_path: Path) -> Path | None:

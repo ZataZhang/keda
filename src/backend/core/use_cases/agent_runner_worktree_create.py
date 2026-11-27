@@ -51,6 +51,13 @@ from backend.core.use_cases.worktree_frontend import (
     exclude_frontend_node_modules_from_git,
 )
 from backend.core.use_cases.worktree_path_output import parse_worktree_path_stdout
+from backend.core.use_cases.issue_workspace import (
+    bind_issue_workspace,
+    resolve_issue_branch,
+    related_issue,
+    issue_branch_candidates,
+    validate_issue_workspace,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -66,26 +73,36 @@ def format_command(
     *,
     issue_number: int,
     base_branch: str | None = None,
+    issue_branch: str | None = None,
 ) -> list[str]:
-    """Format a configured command template for an Issue.
+    """渲染任务命令，并兼容旧版 issue-{issue_number} 模板。
 
     Args:
-        template: Command template string. May reference ``{issue_number}``
-            and optionally ``{base_branch}`` placeholders.
-        issue_number: GitHub issue number the runner is processing.
-        base_branch: Repository base branch. Required when ``template``
-            contains the ``{base_branch}`` placeholder; ignored otherwise.
+        template: 可含 issue_number、issue_branch 和 base_branch 占位符的命令。
+        issue_number: GitHub Issue 编号。
+        base_branch: 创建工作树的起点；模板引用该占位符时必须提供。
+        issue_branch: 已解析的完整任务分支；省略时保留离线兼容行为。
 
     Returns:
-        Tokenized command list ready for subprocess execution.
+        可直接交给进程端口执行的参数列表。
+
+    Raises:
+        ValueError: 模板需要基础分支但调用方未提供。
     """
-    if "{base_branch}" in template:
-        if base_branch is None:
-            raise ValueError(
-                "Command template references {base_branch} but no base_branch was provided."
-            )
-        return shlex.split(template.format(issue_number=issue_number, base_branch=base_branch))
-    return shlex.split(template.format(issue_number=issue_number))
+    if "{base_branch}" in template and base_branch is None:
+        raise ValueError(
+            "Command template references {base_branch} but no base_branch was provided."
+        )
+    normalized_template = (
+        template.replace("issue-{issue_number}", "{issue_branch}") if issue_branch else template
+    )
+    return shlex.split(
+        normalized_template.format(
+            issue_number=issue_number,
+            base_branch=base_branch,
+            issue_branch=issue_branch or f"issue-{issue_number}",
+        )
+    )
 
 
 # Serializes the shared-repository git mutation in worktree creation across
@@ -94,6 +111,24 @@ def format_command(
 # several issues are set up at once. Uncontended (no overhead) in the default
 # sequential path. The long agent run happens after this lock is released.
 _SHARED_GIT_LOCK = threading.Lock()
+
+
+def _fetch_issue_ref(
+    repo_path: Path, remote: str, branch: str, process_runner: IProcessRunner
+) -> str | None:
+    """刷新指定远端任务分支，不使用旧的 remote-tracking 缓存代替成功 fetch。"""
+    remote_ref = f"{remote}/{branch}"
+    fetched = process_runner.run(
+        ["git", "fetch", remote, f"+{branch}:refs/remotes/{remote}/{branch}"],
+        cwd=repo_path,
+        check=False,
+    )
+    if fetched.return_code != 0:
+        return None
+    verified = process_runner.run(
+        ["git", "rev-parse", "--verify", "--quiet", remote_ref], cwd=repo_path, check=False
+    )
+    return remote_ref if verified.return_code == 0 else None
 
 
 def _resolve_fork_base(
@@ -119,59 +154,32 @@ def _resolve_fork_base(
     declaration = parse_dependency_marker(issue.body)
     remote = config.git.remote
     local_base = config.worktree.base_branch or config.git.base_branch
-    issue_branch = f"issue-{issue.number}"
+    issue_branch = resolve_issue_branch(repo_path, issue)
     published_prd_branch = published_issue_prd_branch(
         issue_number=issue.number,
         issue_body=issue.body,
+        issue_url=issue.url,
     )
-    issue_remote_ref = f"{remote}/{issue_branch}"
-    issue_fetch_result = process_runner.run(
-        [
-            "git",
-            "fetch",
-            remote,
-            f"+{issue_branch}:refs/remotes/{remote}/{issue_branch}",
-        ],
-        cwd=repo_path,
-        check=False,
-    )
-    if issue_fetch_result.return_code == 0:
-        issue_remote_exists = process_runner.run(
-            ["git", "rev-parse", "--verify", "--quiet", issue_remote_ref],
-            cwd=repo_path,
-            check=False,
-        )
-        if issue_remote_exists.return_code == 0:
-            return issue_remote_ref
+    issue_ref = _fetch_issue_ref(repo_path, remote, issue_branch, process_runner)
+    if issue_ref is not None:
+        return issue_ref
     if published_prd_branch is not None:
+        published_ref = _fetch_issue_ref(repo_path, remote, published_prd_branch, process_runner)
+        if published_ref is not None:
+            return published_ref
         raise RuntimeError(
             f"Issue #{issue.number} publishes its PRD on '{remote}/{published_prd_branch}', "
             "but the task branch could not be fetched."
         )
 
     if declaration is not None and declaration.sequence == "stack" and declaration.issue_numbers:
-        upstream_branch = f"issue-{declaration.issue_numbers[0]}"
-        remote_ref = f"{remote}/{upstream_branch}"
-        # Refresh the upstream branch from the remote *before* querying the
-        # local branch: a local copy can lag commits another daemon pushed, and
-        # forking from a stale upstream would silently omit upstream changes.
-        fetch_result = process_runner.run(
-            [
-                "git",
-                "fetch",
-                remote,
-                f"+{upstream_branch}:refs/remotes/{remote}/{upstream_branch}",
-            ],
-            cwd=repo_path,
-            check=False,
-        )
-        if fetch_result.return_code == 0:
-            verify_remote = process_runner.run(
-                ["git", "rev-parse", "--verify", "--quiet", remote_ref],
-                cwd=repo_path,
-                check=False,
-            )
-            if verify_remote.return_code == 0:
+        upstream_issue = related_issue(issue, declaration.issue_numbers[0])
+        upstream_branch = resolve_issue_branch(repo_path, upstream_issue)
+        for candidate_branch in dict.fromkeys(
+            (upstream_branch, *issue_branch_candidates(upstream_issue))
+        ):
+            remote_ref = _fetch_issue_ref(repo_path, remote, candidate_branch, process_runner)
+            if remote_ref is not None:
                 return remote_ref
         local_exists = process_runner.run(
             ["git", "rev-parse", "--verify", "--quiet", f"refs/heads/{upstream_branch}"],
@@ -187,7 +195,7 @@ def _resolve_fork_base(
             return upstream_branch
         raise RuntimeError(
             f"Stack sequencing requires upstream branch '{upstream_branch}' to exist "
-            f"on '{remote}' (or locally); fetch failed: {fetch_result.stderr.strip()}"
+            f"on '{remote}' (or in a confirmed local workspace); fetch failed."
         )
 
     fetch_base = process_runner.run(
@@ -218,31 +226,28 @@ def create_or_reuse_worktree(
     config: AppConfig,
     process_runner: IProcessRunner,
 ) -> Path:
-    """Create or reuse a worktree for the Issue.
+    """创建或续用完整远端身份对应的工作树。
 
-    The three configured commands are run in sequence:
+    先解析稳定任务分支，再依次执行 create、失败时的 reuse 和 path 命令。
+    在分支自愈、复制环境与准备依赖前核对归属；新建成功后保存完整 Issue URL。
+    归属不明的旧任务保留原目录，新任务使用独立命名空间。
 
-    1. ``create_command`` (best effort, ``check=False``) attempts to create
-       the worktree. Failures are tolerated here because the next command
-       may be able to recover.
-    2. ``reuse_command`` runs only when ``create_command`` failed. It
-       usually re-resolves the worktree path and is a no-op on disk.
-    3. ``path_command`` always runs to obtain the canonical absolute path.
+    Args:
+        repo_path: 主仓库路径。
+        issue: 当前任务及其完整 URL。
+        config: 工作树、Git 与依赖准备配置。
+        process_runner: 命令执行端口。
 
-    After the three commands complete, the returned path is verified to
-    exist. If it does not, a :class:`FileNotFoundError` is raised that
-    carries the three commands' return codes and stdout excerpts so the
-    next engineer can see exactly which step went wrong.
+    Returns:
+        已确认归属、准备好运行环境的工作树绝对路径。
 
-    Finally, gitignored artifacts that ``git worktree add`` never
-    materializes are restored from the main checkout: missing ``.env*``
-    files are copied (so agent commands see the same configuration), and
-    each frontend project's ``node_modules`` is symlinked from the main
-    checkout (so worktree builds like ``vite`` work without a per-worktree
-    install). Reused worktrees are healed the same way; existing files and
-    ``node_modules`` are not touched.
+    Raises:
+        FileNotFoundError: 创建、复用与定位后目录仍不存在。
+        ValueError: 归属记录无效或属于其他任务。
+        RuntimeError: 分支不匹配或存在不能自动恢复的分叉。
     """
     fork_base = _resolve_fork_base(repo_path, issue, config, process_runner)
+    expected_branch = resolve_issue_branch(repo_path, issue)
     # Hold the shared-git lock only for the worktree-add writes; the agent run
     # (the long pole) happens later in the caller, outside this lock.
     with _SHARED_GIT_LOCK:
@@ -251,6 +256,7 @@ def create_or_reuse_worktree(
                 config.worktree.create_command,
                 issue_number=issue.number,
                 base_branch=fork_base,
+                issue_branch=expected_branch,
             ),
             cwd=repo_path,
             check=False,
@@ -260,6 +266,7 @@ def create_or_reuse_worktree(
                 format_command(
                     config.worktree.reuse_command,
                     issue_number=issue.number,
+                    issue_branch=expected_branch,
                 ),
                 cwd=repo_path,
                 check=False,
@@ -267,7 +274,11 @@ def create_or_reuse_worktree(
         else:
             reuse_result = None
         path_result = process_runner.run(
-            format_command(config.worktree.path_command, issue_number=issue.number),
+            format_command(
+                config.worktree.path_command,
+                issue_number=issue.number,
+                issue_branch=expected_branch,
+            ),
             cwd=repo_path,
         )
     # path_command runs with cwd=repo_path, so a relative output must be
@@ -287,8 +298,12 @@ def create_or_reuse_worktree(
             f"path_command return_code={path_result.return_code}, "
             f"path_command stdout={path_result.stdout!r}."
         )
-    # 先排除本地验证产物与会话记录，避免旧分支把 runner 写入的状态加入提交。
+    validate_issue_workspace(worktree_path, issue, allow_unbound=create_result.return_code == 0)
+    expected_branch = resolve_issue_branch(repo_path, issue, worktree_path=worktree_path)
+    # 分支恢复可能提交修复，先排除已经核对归属的本地状态，避免其混入提交。
     ensure_evidence_dir_excluded(worktree_path, config, process_runner)
+    _ensure_worktree_branch(worktree_path, expected_branch, issue, config, process_runner)
+    bind_issue_workspace(repo_path, issue, worktree_path, branch=expected_branch)
     copied_env_paths = copy_missing_env_files(repo_path, worktree_path)
     if copied_env_paths:
         _logger.info(
@@ -297,8 +312,6 @@ def create_or_reuse_worktree(
             worktree_path,
             ", ".join(str(env_path) for env_path in copied_env_paths),
         )
-    expected_branch = f"issue-{issue.number}"
-    _ensure_worktree_branch(worktree_path, expected_branch, issue, config, process_runner)
     _reconcile_worktree_with_remote_branch(worktree_path, config, process_runner)
     if config.worktree.provision_database:
         provision_worktree_database(
@@ -307,6 +320,7 @@ def create_or_reuse_worktree(
                 worktree_path=worktree_path,
                 issue_number=issue.number,
                 migration_command=config.worktree.migration_command,
+                workspace_key=expected_branch if expected_branch.startswith("kc/") else None,
             ),
             process_runner,
         )

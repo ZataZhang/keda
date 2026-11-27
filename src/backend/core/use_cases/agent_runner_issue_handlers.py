@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+from backend.core.use_cases.issue_workspace import resolve_issue_branch
+
 import logging
 from collections.abc import Callable
 from dataclasses import replace
@@ -267,7 +269,7 @@ def _process_blocked_resolution(
 
     # 定位 worktree 并确认分支
     worktree_path = _find_worktree_path_for_issue(repo_path, issue, config, process_runner)
-    expected_branch = f"issue-{issue.number}"
+    expected_branch = resolve_issue_branch(repo_path, issue, worktree_path=worktree_path)
     _ensure_worktree_branch(worktree_path, expected_branch, issue, config, process_runner)
     current_branch = get_current_branch(worktree_path, process_runner)
     if current_branch != expected_branch:
@@ -904,7 +906,7 @@ def _process_running_publish_recovery(
 
     # 定位 worktree 并确认分支
     worktree_path = _find_worktree_path_for_issue(repo_path, issue, config, process_runner)
-    expected_branch = f"issue-{issue.number}"
+    expected_branch = resolve_issue_branch(repo_path, issue, worktree_path=worktree_path)
 
     # 原子锁：恢复路径会对 worktree 做 rebase 治愈与发布等写操作，必须与其他
     # runner（含 blocked 恢复）在同一 worktree 上互斥，否则并发 git 操作会互相

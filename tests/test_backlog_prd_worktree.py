@@ -16,6 +16,7 @@ from backend.core.shared.models.agent_runner import CommandResult
 from backend.core.use_cases.backlog_prd_worktree import (
     WorktreeMatchStatus,
     WorktreeQueryStatus,
+    extract_prd_issue_urls,
     extract_unique_issue_number,
     list_worktrees,
     match_prd_worktree,
@@ -175,3 +176,18 @@ def test_parse_prd_slug_falls_back_to_stem() -> None:
 def test_extract_unique_issue_number(body: str, expected: int | None) -> None:
     """唯一 Issue 锚点解析出编号；多个不同编号视为歧义返回 None。"""
     assert extract_unique_issue_number(body) == expected
+
+
+def test_prd_issue_urls_preserve_different_repositories_with_the_same_number() -> None:
+    """保留同号任务的两个完整归属，避免编号提取把跨仓库歧义折叠掉。"""
+    personal_url = "https://github.com/ZataZhang/freshai/issues/142"
+    organization_url = "https://github.com/dewell-ai-assistant-team/freshai/issues/142"
+    prd_text = (
+        f"- GitHub Issue: {personal_url}\n"
+        f"* GitHub Issue: {organization_url}\n"
+        f"- GitHub Issue: {organization_url}\n"
+        "相关背景：https://github.com/other/repository/issues/999\n"
+    )
+
+    assert extract_prd_issue_urls(prd_text) == frozenset((personal_url, organization_url))
+    assert extract_unique_issue_number(prd_text) == 142

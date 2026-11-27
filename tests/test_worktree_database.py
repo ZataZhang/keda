@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from hashlib import sha256
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -125,6 +126,28 @@ def test_configured_worktree_migration_reuses_setup_identifier(tmp_path: Path) -
         "one argument",
     ]
     assert process_runner.working_directories == [worktree_path, worktree_path]
+
+
+def test_namespaced_tasks_with_same_number_do_not_share_a_database(tmp_path: Path) -> None:
+    """不同完整任务身份隔离数据库，同一身份重试稳定，旧任务标识保留。"""
+    repository_path, worktree_path = _make_repo_with_script(tmp_path, 42)
+    base_request = WorktreeDatabaseProvisionRequest(repository_path, worktree_path, 42)
+    identifiers = []
+    for workspace_key in (
+        None,
+        "kc/zatazhang/freshai/issue-42",
+        "kc/dewell-ai-assistant-team/freshai/issue-42",
+        "kc/dewell-ai-assistant-team/freshai/issue-42",
+    ):
+        process_runner = FakeProcessRunner([_command_result(), _command_result()])
+        provision_worktree_database(
+            replace(base_request, workspace_key=workspace_key), process_runner
+        )
+        identifiers.append(process_runner.commands[0][4])
+    assert len(set(identifiers[:3])) == 3
+    assert identifiers[2] == identifiers[3]
+    legacy_digest = sha256(str(repository_path.resolve()).encode("utf-8")).hexdigest()[:8]
+    assert identifiers[0] == f"keda_kc_issue_42_{legacy_digest}"
 
 
 @pytest.mark.parametrize(

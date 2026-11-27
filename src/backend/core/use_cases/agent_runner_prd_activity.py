@@ -6,6 +6,8 @@ import json
 import subprocess
 import threading
 from pathlib import Path
+from backend.core.shared.models.agent_runner import IssueSummary
+from backend.core.use_cases.issue_workspace import resolve_issue_branch
 
 _HEARTBEAT_SECONDS = 60
 _WORKTREE_POLL_SECONDS = 10
@@ -18,11 +20,21 @@ class PrdActivityConflictError(RuntimeError):
 class PrdActivityLease:
     """为带 PRD 锚点的 Issue 维持看板兼容的执行锁。"""
 
-    def __init__(self, repo_path: Path, prd_relative_path: str, issue_number: int, agent: str):
+    def __init__(
+        self, repo_path: Path, prd_relative_path: str, issue_number: int | IssueSummary, agent: str
+    ):
         """记录仓库、PRD 和 Issue 身份。"""
         self._repo_path = repo_path
         self._prd_relative_path = prd_relative_path
-        self._issue_number = issue_number
+        self._issue_number = (
+            issue_number.number if isinstance(issue_number, IssueSummary) else issue_number
+        )
+        self._issue = issue_number if isinstance(issue_number, IssueSummary) else None
+        self._branch = (
+            resolve_issue_branch(repo_path, issue_number)
+            if isinstance(issue_number, IssueSummary)
+            else f"issue-{issue_number}"
+        )
         self._agent = agent
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
@@ -52,7 +64,7 @@ class PrdActivityLease:
             else self._repo_path
         )
         claim_result = self._run_lock_command(
-            "claim", "--tool", f"kc/{self._agent}", "--branch", f"issue-{self._issue_number}"
+            "claim", "--tool", f"kc/{self._agent}", "--branch", self._branch
         )
         if claim_result.returncode != 0:
             detail = (claim_result.stderr or claim_result.stdout).strip()
@@ -94,7 +106,7 @@ class PrdActivityLease:
                     "--tool",
                     f"kc/{self._agent}",
                     "--branch",
-                    f"issue-{self._issue_number}",
+                    self._branch,
                 )
             elapsed_seconds += _WORKTREE_POLL_SECONDS
             if elapsed_seconds >= _HEARTBEAT_SECONDS:
@@ -102,6 +114,8 @@ class PrdActivityLease:
                 elapsed_seconds = 0
 
     def _find_worktree(self) -> Path | None:
+        if self._issue is not None:
+            self._branch = resolve_issue_branch(self._repo_path, self._issue)
         git_result = subprocess.run(
             ["git", "worktree", "list", "--porcelain"],
             cwd=self._repo_path,
@@ -113,7 +127,7 @@ class PrdActivityLease:
         for line in git_result.stdout.splitlines():
             if line.startswith("worktree "):
                 current_path = Path(line.removeprefix("worktree "))
-            elif line == f"branch refs/heads/issue-{self._issue_number}":
+            elif line == f"branch refs/heads/{self._branch}":
                 return current_path
         return None
 

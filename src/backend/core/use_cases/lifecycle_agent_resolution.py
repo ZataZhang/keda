@@ -32,6 +32,8 @@ agent、键本身也是 ``auto`` 时才展开成回退链 / 不同人优先 / �
 
 from __future__ import annotations
 
+from backend.core.use_cases.issue_workspace import resolve_issue_branch
+
 import dataclasses
 import logging
 import re
@@ -507,6 +509,7 @@ def attach_prd_lifecycle_overrides(
     published_issue_branch = published_issue_prd_branch(
         issue_number=issue.number,
         issue_body=issue.body,
+        issue_url=issue.url,
     )
     has_published_prd = published_issue_branch is not None
     prd_relative_path = extract_prd_path(issue.body)
@@ -583,7 +586,7 @@ def attach_prd_lifecycle_overrides(
             )
             return issue
     elif process_runner is not None:
-        issue_branch = f"issue-{issue.number}"
+        issue_branch = resolve_issue_branch(resolved_repo_path, issue)
         fetch_result = process_runner.run(
             [
                 "git",

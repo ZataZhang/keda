@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from backend.core.use_cases.issue_workspace import issue_branch_name
+
 import logging
 import re
 import shlex
@@ -27,7 +29,7 @@ _PUBLICATION_MARKER_PREFIX = "<!-- kc:prd-publication"
 _PUBLICATION_MARKER_RE = re.compile(
     r"<!-- kc:prd-publication version=1 state=(?P<state>pending|published) "
     r"queue_ready=(?P<queue_ready>true|false)"
-    r"(?: branch=(?P<branch>issue-\d+) commit=(?P<commit>[0-9a-f]{7,64}))? -->"
+    r"(?: branch=(?P<branch>(?:kc/(?:[A-Za-z0-9_.%_-]+/){2,3})?issue-\d+) commit=(?P<commit>[0-9a-f]{7,64}))? -->"
 )
 _ISSUE_URL_RE = re.compile(r"^https?://github\.com/([^/]+)/([^/]+)/issues/(\d+)/?$", re.I)
 _PRD_PATH_ANCHOR_LINE_RE = re.compile(r"^\s*(?:[-*]\s+)?PRD path:")
@@ -158,27 +160,43 @@ def _published_issue_prd_reference(
     *,
     issue_number: int,
     issue_body: str,
+    issue_url: str = "",
 ) -> tuple[str, str] | None:
     """验证发布 marker 并返回固定的任务分支和提交。"""
     publication_metadata = parse_prd_publication_metadata(issue_body)
     if publication_metadata is None or publication_metadata.state != "published":
         return None
-    expected_branch = f"issue-{issue_number}"
-    if publication_metadata.branch != expected_branch:
+    expected_branch = issue_branch_name(IssueSummary(issue_number, "", issue_url, "", ()))
+    if publication_metadata.branch not in {expected_branch, f"issue-{issue_number}"}:
         raise ValueError(
             f"Issue #{issue_number} publication marker must point to "
             f"'{expected_branch}', got {publication_metadata.branch!r}."
         )
     if publication_metadata.commit_sha is None:
         raise ValueError(f"Issue #{issue_number} published PRD marker is missing its commit SHA.")
-    return expected_branch, publication_metadata.commit_sha
+    return publication_metadata.branch, publication_metadata.commit_sha
 
 
-def published_issue_prd_branch(*, issue_number: int, issue_body: str) -> str | None:
-    """返回已发布 PRD 所属的任务分支，并验证分支编号与 Issue 一致。"""
+def published_issue_prd_branch(
+    *, issue_number: int, issue_body: str, issue_url: str = ""
+) -> str | None:
+    """返回已发布 PRD 的分支，核对完整仓库身份并兼容旧发布标记。
+
+    Args:
+        issue_number: 当前任务编号。
+        issue_body: 含发布标记的 Issue 正文。
+        issue_url: 当前任务完整 URL；旧离线调用可省略。
+
+    Returns:
+        已发布分支名；尚未发布时返回 None。
+
+    Raises:
+        ValueError: 发布标记损坏，或分支不属于当前任务。
+    """
     published_reference = _published_issue_prd_reference(
         issue_number=issue_number,
         issue_body=issue_body,
+        issue_url=issue_url,
     )
     return published_reference[0] if published_reference is not None else None
 
@@ -194,6 +212,7 @@ def read_published_issue_prd_text(
     published_reference = _published_issue_prd_reference(
         issue_number=issue.number,
         issue_body=issue.body,
+        issue_url=issue.url,
     )
     if published_reference is None:
         return None
@@ -385,13 +404,16 @@ def _publish_and_finalize_issue_prd(
     process_runner: IProcessRunner,
 ) -> IssuePrdPublicationResult:
     """发布目标 PRD、固定 Issue 链接并在最后恢复 ready 标签。"""
-    issue_branch = f"issue-{issue.number}"
+    issue_branch = published_issue_prd_branch(
+        issue_number=issue.number, issue_body=issue.body, issue_url=issue.url
+    ) or issue_branch_name(issue)
     try:
         current_metadata = parse_prd_publication_metadata(issue.body)
         if current_metadata is not None and current_metadata.state == "published":
             published_issue_prd_branch(
                 issue_number=issue.number,
                 issue_body=issue.body,
+                issue_url=issue.url,
             )
         publication_is_current = (
             current_metadata is not None

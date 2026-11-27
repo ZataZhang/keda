@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from tests.support.agent_runner import confirm_legacy_workspace
+
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -710,6 +712,7 @@ def test_review_once_moves_review_label_to_supervising_on_change() -> None:
 
 def test_review_once_recovers_branch_from_draft_pr_comment(tmp_path: Path) -> None:
     """Review polling should use the original Draft PR branch comment."""
+    confirm_legacy_workspace(tmp_path, tmp_path, 23)
     config = AppConfig()
     issue = IssueSummary(
         number=23,
@@ -767,7 +770,14 @@ def test_review_once_recovers_branch_from_draft_pr_comment(tmp_path: Path) -> No
         agent="auto",
         max_issues=1,
         github_client=fake_client,
-        process_runner=FakeProcessRunner(responses=default_worktree_path_response(issue.number)),
+        process_runner=FakeProcessRunner(
+            responses={
+                **default_worktree_path_response(issue.number),
+                ("git", "branch", "--show-current"): CommandResult(
+                    ("git", "branch", "--show-current"), 0, "issue-23\n", ""
+                ),
+            }
+        ),
     )
 
     assert exit_code == 0

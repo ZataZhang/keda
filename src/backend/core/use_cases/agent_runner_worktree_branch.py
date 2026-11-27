@@ -57,6 +57,11 @@ def _ensure_worktree_branch(
       so a human can decide which history to keep.
     """
     if not is_detached_head(worktree_path, process_runner):
+        current_branch = get_current_branch(worktree_path, process_runner)
+        if current_branch != expected_branch:
+            raise RuntimeError(
+                f"Worktree {worktree_path} is on '{current_branch}', expected '{expected_branch}'."
+            )
         return
 
     rebase_target = get_active_rebase_target(worktree_path, process_runner)

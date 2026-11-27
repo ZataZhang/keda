@@ -6,6 +6,8 @@ diverged and no-op paths, plus how ``create_or_reuse_worktree`` and
 
 from __future__ import annotations
 
+from tests.support.agent_runner import confirm_legacy_workspace
+
 from pathlib import Path
 
 import pytest
@@ -484,6 +486,7 @@ def test_worktree_reconcile_run_once(tmp_path: Path) -> None:
     fake_client.list_ready_issues = lambda ready_label, limit: [issue]
     worktree_path = tmp_path / "issue-123"
     worktree_path.mkdir()
+    confirm_legacy_workspace(tmp_path, worktree_path, 123)
     write_commit_request(worktree_path, "agent: run once reconcile")
 
     class _ReconcileOrderRunner(FakeProcessRunner):
@@ -612,7 +615,7 @@ def test_worktree_reconcile_run_once(tmp_path: Path) -> None:
     from backend.core.use_cases.agent_runner_orchestrate import run_once
 
     exit_code = run_once(
-        repo_path=Path("."),
+        repo_path=tmp_path,
         config=config,
         dry_run=False,
         agent="auto",

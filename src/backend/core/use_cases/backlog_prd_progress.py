@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+from backend.core.shared.models.agent_runner import IssueSummary
+
 import logging
 import re
 from collections.abc import Sequence
@@ -43,6 +45,7 @@ from backend.core.use_cases.backlog_prd_worktree import (
     WorktreeMatchStatus,
     WorktreeEntry,
     WorktreeMatchResult,
+    extract_prd_issue_urls,
     extract_unique_issue_number,
     list_worktrees,
     match_prd_worktree,
@@ -346,6 +349,12 @@ def resolve_prd_source(
     # Issue 锚点只用于匹配兜底；从主仓库 pending 副本取（列表来源，必然存在），稳定可靠。
     main_text, _main_read_error = _resolve_main_prd_text(repo_path, prd_path)
     issue_number = extract_unique_issue_number(main_text) if main_text is not None else None
+    if issue_number is not None and main_text is not None:
+        issue_urls = extract_prd_issue_urls(main_text)
+        if len(issue_urls) == 1:
+            issue_number = IssueSummary(
+                issue_number, "", next(iter(issue_urls)), f"PRD path: `{prd_path}`", ()
+            )
 
     worktree_list = list_worktrees(process_runner, repo_path)
     match_result = match_prd_worktree(

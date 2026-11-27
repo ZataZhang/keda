@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from tests.support.agent_runner import confirm_legacy_workspace
+
 import shutil
 import subprocess
 from pathlib import Path
@@ -52,6 +54,7 @@ def _create_issue_worktree(repo_path: Path, issue_number: int) -> Path:
     worktree_path = repo_path / WORKTREE_DIR_NAME / branch
     worktree_path.parent.mkdir(parents=True, exist_ok=True)
     _run_git(repo_path, "worktree", "add", "-b", branch, str(worktree_path), "main")
+    confirm_legacy_workspace(repo_path, worktree_path, issue_number)
     return worktree_path
 
 

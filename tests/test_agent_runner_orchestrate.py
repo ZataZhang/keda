@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from tests.support.agent_runner import confirm_legacy_workspace
+
 import logging
 import subprocess
 import threading
@@ -886,6 +888,7 @@ def test_process_prd_rework_issues_lands_pr_in_worktree(tmp_path: Path) -> None:
     worktree_path = tmp_path / "worktrees" / "issue-87"
     worktree_path.parent.mkdir(parents=True)
     _git(["worktree", "add", "-b", "issue-87", str(worktree_path), "main"], repo_path)
+    confirm_legacy_workspace(repo_path, worktree_path, 87)
 
     issue = _make_ready_issue(87, "Generate PRD", "Need a feature.", ("agent/rework-prd",))
     fake_client = FakeGitHubClient()
@@ -1680,6 +1683,7 @@ def _record_missing_pnpm_worktree(worktree_path: Path) -> None:
             ),
         ),
     )
+    confirm_legacy_workspace(worktree_path.parent, worktree_path, 123)
 
 
 def _missing_tool_error() -> FileNotFoundError:

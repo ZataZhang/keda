@@ -121,7 +121,7 @@ def test_run_once_uncommitted_changes_runner_commits(
     from backend.core.use_cases.agent_runner_orchestrate import run_once
 
     exit_code = run_once(
-        repo_path=Path("."),
+        repo_path=tmp_path,
         config=config,
         dry_run=False,
         agent="auto",
@@ -255,7 +255,7 @@ def test_run_once_recovers_after_staged_verification_failure(
     from backend.core.use_cases.agent_runner_orchestrate import run_once
 
     exit_code = run_once(
-        repo_path=Path("."),
+        repo_path=tmp_path,
         config=config,
         dry_run=False,
         agent="auto",
@@ -369,7 +369,7 @@ def test_run_once_recovers_after_agent_command_failure(
     from backend.core.use_cases.agent_runner_orchestrate import run_once
 
     exit_code = run_once(
-        repo_path=Path("."),
+        repo_path=tmp_path,
         config=config,
         dry_run=False,
         agent="auto",
@@ -432,10 +432,13 @@ def test_run_once_uncommitted_changes_validation_failure_does_not_stage(
     )
     config = config_with_review_disabled(worktree_path)
 
+    branch_command = ("git", "branch", "--show-current")
+    fake_runner.responses[branch_command] = CommandResult(branch_command, 0, "issue-123\n", "")
+
     from backend.core.use_cases.agent_runner_orchestrate import run_once
 
     exit_code = run_once(
-        repo_path=Path("."),
+        repo_path=tmp_path,
         config=config,
         dry_run=False,
         agent="auto",
@@ -514,7 +517,7 @@ def test_run_once_uncommitted_changes_missing_request_fails(tmp_path: Path) -> N
     from backend.core.use_cases.agent_runner_orchestrate import run_once
 
     exit_code = run_once(
-        repo_path=Path("."),
+        repo_path=tmp_path,
         config=config,
         dry_run=False,
         agent="auto",
@@ -605,7 +608,7 @@ def test_run_once_uncommitted_changes_commit_failure_fails(tmp_path: Path) -> No
     from backend.core.use_cases.agent_runner_orchestrate import run_once
 
     exit_code = run_once(
-        repo_path=Path("."),
+        repo_path=tmp_path,
         config=config,
         dry_run=False,
         agent="auto",

@@ -269,9 +269,7 @@ def _process_single_issue(
             },
         )
 
-    prd_activity_lease = PrdActivityLease(
-        repo_path, lifecycle_prd_path, issue.number, selected_agent
-    )
+    prd_activity_lease = PrdActivityLease(repo_path, lifecycle_prd_path, issue, selected_agent)
 
     def _on_issue_claimed() -> None:
         if retry_override_claim is not None:

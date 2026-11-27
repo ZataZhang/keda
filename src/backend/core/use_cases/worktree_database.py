@@ -14,12 +14,21 @@ _logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class WorktreeDatabaseProvisionRequest:
-    """描述一次 Issue worktree 数据库准备请求。"""
+    """描述一次 Issue worktree 数据库准备请求。
+
+    Attributes:
+        repository_path: 主仓库路径，参与本机数据库隔离。
+        worktree_path: 目标工作树路径。
+        issue_number: 当前任务编号。
+        migration_command: 仓库显式选择的迁移命令。
+        workspace_key: 新任务的完整命名空间；None 保留旧数据库标识。
+    """
 
     repository_path: Path
     worktree_path: Path
     issue_number: int
     migration_command: tuple[str, ...] | None = None
+    workspace_key: str | None = None
 
 
 def provision_worktree_database(
@@ -54,9 +63,14 @@ def provision_worktree_database(
         )
         return
 
-    repository_digest = sha256(str(request.repository_path.resolve()).encode("utf-8")).hexdigest()[
-        :8
-    ]
+    repository_identity = str(request.repository_path.resolve())
+    # 新任务增加完整命名空间；旧任务不改原标识，避免重试时切走已有数据库。
+    database_identity = (
+        f"{repository_identity}\n{request.workspace_key}"
+        if request.workspace_key
+        else repository_identity
+    )
+    repository_digest = sha256(database_identity.encode("utf-8")).hexdigest()[:8]
     database_identifier = (
         f"{request.repository_path.name}_kc_issue_{request.issue_number}_{repository_digest}"
     )

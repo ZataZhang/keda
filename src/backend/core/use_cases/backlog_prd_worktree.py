@@ -14,6 +14,9 @@
 
 from __future__ import annotations
 
+from backend.core.shared.models.agent_runner import IssueSummary
+from backend.core.use_cases.issue_workspace import validate_issue_workspace
+
 import re
 from dataclasses import dataclass
 from enum import Enum
@@ -28,7 +31,7 @@ _PRD_FILENAME_PATTERN = re.compile(
 )
 #: PRD 正文里的 GitHub Issue 锚点行（与 prd_locator 同一条正则），用于 ``issue-<N>`` 兜底。
 _ISSUE_ANCHOR_PATTERN = re.compile(
-    r"(?im)^\s*[-*]?\s*GitHub Issue:\s*https://[^\s]+/issues/(\d+)\s*$"
+    r"(?im)^\s*[-*]?\s*GitHub Issue:\s*(https://[^\s]+/issues/\d+)\s*$"
 )
 
 
@@ -114,6 +117,18 @@ def parse_prd_slug(prd_file_name: str) -> str:
     return filename_match.group("slug") or Path(prd_file_name).stem
 
 
+def extract_prd_issue_urls(prd_text: str) -> frozenset[str]:
+    """提取 PRD 元数据中的 Issue 链接，供编号与完整仓库归属共用。
+
+    Args:
+        prd_text: PRD 全文。
+
+    Returns:
+        去重后的元数据链接；忽略正文引用和非链接占位符。
+    """
+    return frozenset(_ISSUE_ANCHOR_PATTERN.findall(prd_text))
+
+
 def extract_unique_issue_number(prd_text: str) -> int | None:
     """从 PRD 正文解析**唯一**的 GitHub Issue 编号。
 
@@ -126,7 +141,9 @@ def extract_unique_issue_number(prd_text: str) -> int | None:
     Returns:
         唯一的 Issue 编号；没有或存在多个不同编号时为 ``None``。
     """
-    found_numbers = {int(match) for match in _ISSUE_ANCHOR_PATTERN.findall(prd_text)}
+    found_numbers = {
+        int(issue_url.rsplit("/", 1)[-1]) for issue_url in extract_prd_issue_urls(prd_text)
+    }
     if len(found_numbers) != 1:
         return None
     return found_numbers.pop()
@@ -179,7 +196,7 @@ def match_prd_worktree(
     entries: tuple[WorktreeEntry, ...],
     *,
     slug: str,
-    issue_number: int | None,
+    issue_number: int | IssueSummary | None,
     query_available: bool = True,
 ) -> WorktreeMatchResult:
     """按 slug 优先、``issue-<N>`` 兜底把 PRD 匹配到唯一工作区。
@@ -200,6 +217,16 @@ def match_prd_worktree(
     """
     if not query_available:
         return WorktreeMatchResult(WorktreeMatchStatus.UNAVAILABLE, None)
+    if isinstance(issue_number, IssueSummary):
+        confirmed_entries = []
+        for entry in entries:
+            try:
+                validate_issue_workspace(entry.path, issue_number)
+            except ValueError:
+                continue
+            confirmed_entries.append(entry)
+        entries = tuple(confirmed_entries)
+        issue_number = issue_number.number
 
     slug_hits = [entry for entry in entries if _matches_branch_key(entry, slug)]
     if len(slug_hits) == 1:

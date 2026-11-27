@@ -34,6 +34,12 @@ def _make_issue() -> IssueSummary:
     return IssueSummary(number=1, title="T", url="U", body="B", labels=("agent/running",))
 
 
+def _make_rework_runner() -> FakeProcessRunner:
+    """模拟位于预期分支的工作树，分支安全校验仍走生产函数。"""
+    command = ("git", "branch", "--show-current")
+    return FakeProcessRunner({command: CommandResult(command, 0, "issue-1\n", "")})
+
+
 @pytest.mark.parametrize(
     "finish_function_name",
     ("_finish_implementation_publication", "_finish_existing_commit_publication"),
@@ -205,7 +211,7 @@ def test_running_rework_defers_supervisor_without_full_pr_context(
             config=config,
             agent="auto",
             github_client=github_client,
-            process_runner=FakeProcessRunner(),
+            process_runner=_make_rework_runner(),
             marker=_make_rework_marker(),
         )
 
@@ -245,7 +251,7 @@ def test_running_rework_without_supervisor_does_not_require_pr_context(
             config=config,
             agent="auto",
             github_client=github_client,
-            process_runner=FakeProcessRunner(),
+            process_runner=_make_rework_runner(),
             marker=_make_rework_marker(),
         )
 

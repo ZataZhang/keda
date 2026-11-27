@@ -27,7 +27,7 @@ RUNTIME_DEPENDENCY_NAMES = ("create_or_reuse_worktree",)
 def process_prd_rework_issues(request: PrdReworkRequest) -> None:
     """处理标记为 PRD rework 的 Issue。
 
-    ready 执行前为每个 Issue 建/复用 ``issue-<N>`` worktree，生成/重写 PRD，
+    ready 执行前为每个 Issue 建/复用 ``kc/<owner>/<repo>/issue-<N>`` worktree，生成/重写 PRD，
     提交到对应分支并经 draft PR 发布，再更新 Issue；失败只记录并继续，不影响主工作树和 ready 队列。
 
     Args:

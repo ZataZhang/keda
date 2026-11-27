@@ -16,6 +16,7 @@ import logging
 import re
 
 from backend.core.shared.interfaces.agent_runner import IGitHubClient
+from backend.core.use_cases.issue_workspace import issue_branch_candidates
 from backend.core.shared.markdown_code_fence import strip_code_fences
 from backend.core.shared.models.agent_runner import (
     DependencyBlocker,
@@ -596,10 +597,20 @@ def evaluate_dependencies(
         for issue_number in declaration.issue_numbers:
             branch = f"issue-{issue_number}"
             try:
-                pushed = bool(
-                    github_client.find_open_pr_by_head(branch)
-                    or github_client.find_merged_pr_by_head(branch)
+                try:
+                    upstream_issue = github_client.get_issue(issue_number)
+                except Exception:  # noqa: BLE001 - 旧远端分支仍可通过 PR 独立确认。
+                    upstream_issue = None
+                pushed = False
+                candidates = (
+                    issue_branch_candidates(upstream_issue) if upstream_issue else (branch,)
                 )
+                for branch in candidates:
+                    if github_client.find_open_pr_by_head(
+                        branch
+                    ) or github_client.find_merged_pr_by_head(branch):
+                        pushed = True
+                        break
             except Exception as exc:  # noqa: BLE001
                 _logger.warning("Failed to query branch '%s': %s", branch, exc)
                 pushed = False
