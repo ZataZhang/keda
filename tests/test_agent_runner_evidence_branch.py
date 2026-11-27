@@ -189,3 +189,23 @@ def test_find_branch_media_marks_source(monkeypatch: pytest.MonkeyPatch) -> None
     assert media is not None
     assert media.source == "iar-evidence/issue-49"
     assert media.page_ref == "human-review-checklist.md"
+
+
+def test_branch_with_artifacts_and_no_review_page(monkeypatch: pytest.MonkeyPatch) -> None:
+    """证据分支只有日志和截图时，仍提供可打开的证据索引。"""
+    monkeypatch.setattr(
+        branch_module, "list_evidence_branches", lambda repo: {140: "iar-evidence/issue-140"}
+    )
+    monkeypatch.setattr(branch_module, "_fetch_branch", lambda repo, branch: "a123")
+    monkeypatch.setattr(
+        branch_module, "_git", lambda repo, *args: "capture.png\nvalidation.txt\nunsafe.html\n"
+    )
+
+    page = branch_module.read_branch_page(Path("/tmp/repo"), 140)
+
+    assert page is not None
+    assert page.is_evidence_overview
+    assert page.revision == "a123"
+    assert "(capture.png)" in page.markdown
+    assert "(validation.txt)" in page.markdown
+    assert "unsafe.html" not in page.markdown

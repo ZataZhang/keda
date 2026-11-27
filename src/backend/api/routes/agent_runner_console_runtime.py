@@ -47,7 +47,14 @@ from backend.core.use_cases.agent_runner_evidence_branch import (
     read_branch_file,
     read_branch_page,
 )
-from backend.core.use_cases.agent_runner_evidence_media import EvidenceMedia, find_evidence_media
+from backend.core.use_cases.agent_runner_evidence_media import (
+    EVIDENCE_ATTACHMENT_SUFFIXES,
+    EVIDENCE_IMAGE_SUFFIXES,
+    EvidenceMedia,
+    evidence_overview,
+    find_evidence_media,
+    local_evidence_attachments,
+)
 from backend.core.use_cases.agent_runner_factory import (
     create_console_store,
     create_process_supervisor,
@@ -107,6 +114,8 @@ def _evidence_media(
         return None
     if media.page_ref is not None:
         return media
+    if local_evidence_attachments(repo_path, task.issue_number, task.prd_path):
+        return replace(media, page_ref="evidence")
     # 首屏只读索引缓存；缺失或过期索引在响应发送后刷新，真正读取页面仍留到点击时进行。
     try:
         evidence_branch_refresh_by_repo[task.repo_id] = evidence_branch_refresh_by_repo.get(
@@ -327,9 +336,6 @@ def get_runtime_evidence_video(
     return FileResponse(media.video_path)
 
 
-#: 人审页里允许内联的图片后缀；页面正文只按 Markdown 返回，不执行任何脚本。
-_EVIDENCE_IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp"})
-
 #: 人审页正文上限：超过说明这是数据文件而不是给人看的页面。
 _EVIDENCE_PAGE_MAX_BYTES = 512 * 1024
 
@@ -391,9 +397,17 @@ def get_runtime_evidence_page(
             "image_base": _image_url_base(repo_id, issue, prd_path, source="local"),
             "source": "local",
         }
-    if not allow_branch_fallback:
-        raise HTTPException(status_code=404, detail="No human review page for this task.")
-    branch_page = read_branch_page(repo_path, issue)
+    attachments = local_evidence_attachments(repo_path, issue, prd_path)
+    overview = evidence_overview(list(attachments))
+    branch_page = read_branch_page(repo_path, issue) if allow_branch_fallback else None
+    if overview and (branch_page is None or branch_page.is_evidence_overview):
+        return {
+            "path": "证据文件",
+            "markdown": overview,
+            "image_base": _image_url_base(repo_id, issue, prd_path, source="local-evidence"),
+            "source": "local",
+            "is_evidence_overview": True,
+        }
     if branch_page is None:
         raise HTTPException(status_code=404, detail="No human review page for this task.")
     if len(branch_page.markdown.encode("utf-8")) > _EVIDENCE_PAGE_MAX_BYTES:
@@ -403,6 +417,7 @@ def get_runtime_evidence_page(
         "markdown": branch_page.markdown,
         "image_base": _image_url_base(repo_id, issue, prd_path, source=branch_page.branch),
         "source": branch_page.branch,
+        "is_evidence_overview": branch_page.is_evidence_overview,
     }
 
 
@@ -414,38 +429,54 @@ def get_runtime_evidence_file(
     prd_path: str | None = None,
     source: str = "local",
 ) -> Response:
-    """返回人审页内联的图片，本地没有时按 source 从证据分支读取。
+    """返回人审页图片或证据索引中的附件。
 
-    只允许图片后缀、且 name 必须是纯文件名，因此不构成任意文件读取。
+    附件类型使用白名单，文本以纯文本返回，name 必须是纯文件名。
 
     Args:
         repo_id: 注册仓库标识。
         issue: Issue 编号。
         name: 页面里写的相对文件名。
         prd_path: 该 Issue 关联的 PRD 相对路径。
-        source: 证据来源；local 读本地，其他值视为证据分支名。
+        source: 证据来源；local 读清单图片，local-evidence 读本地附件，其他值读证据分支。
 
     Returns:
-        Response: 图片字节流。
+        Response: 图片或纯文本附件。
     """
-    if Path(name).name != name or Path(name).suffix.lower() not in _EVIDENCE_IMAGE_SUFFIXES:
+    suffix = Path(name).suffix.lower()
+    if Path(name).name != name or "\\" in name or suffix not in EVIDENCE_ATTACHMENT_SUFFIXES:
         raise HTTPException(status_code=400, detail="Unsupported evidence file name.")
     repo_path = _repository_paths().get(repo_id)
     if repo_path is None:
         raise HTTPException(status_code=404, detail="Repository is not registered.")
-    media_type = mimetypes.guess_type(name)[0] or "application/octet-stream"
+    media_type = (
+        mimetypes.guess_type(name)[0] if suffix in EVIDENCE_IMAGE_SUFFIXES else "text/plain"
+    )
+    if source == "local-evidence":
+        attachment = local_evidence_attachments(repo_path, issue, prd_path).get(name)
+        if attachment is None:
+            raise HTTPException(status_code=404, detail="Evidence file not found.")
+        return FileResponse(
+            attachment, media_type=media_type, headers={"X-Content-Type-Options": "nosniff"}
+        )
     if source == "local":
         page_path = find_evidence_media(repo_path, issue, prd_path).page_path
         if page_path is None:
             raise HTTPException(status_code=404, detail="No human review page for this task.")
         image_path = page_path.parent / name
-        if not image_path.is_file():
+        if (
+            suffix not in EVIDENCE_IMAGE_SUFFIXES
+            or image_path.is_symlink()
+            or not image_path.is_file()
+        ):
             raise HTTPException(status_code=404, detail="Evidence image not found.")
         return FileResponse(image_path)
     payload = read_branch_file(repo_path, issue, name)
     if payload is None:
         raise HTTPException(status_code=404, detail="Evidence image not found.")
-    return Response(content=payload, media_type=media_type)
+    return Response(
+        content=payload, media_type=media_type, headers={"X-Content-Type-Options": "nosniff"}
+    )
 
 
 @router.get("/agent-runner/console/desktop-companion/status")

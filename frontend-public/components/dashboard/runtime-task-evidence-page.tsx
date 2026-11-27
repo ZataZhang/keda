@@ -1,6 +1,6 @@
 "use client";
 
-// 人审页模态框：把证据目录里的 human-review-checklist.md 就地渲染出来。
+// 交付证据模态框：渲染人工验收清单或已有证据索引。
 //
 // 只看 Markdown 正文，不执行仓库里的 HTML——证据文件不能拿到 Console 同源上下文
 // 的脚本能力。页面内的相对图片路径改写到证据取图端点，否则在弹窗里必然是坏图。
@@ -14,7 +14,7 @@ import { handleExternalLinkClick } from "@/lib/open-external";
 
 type HumanReviewPageState =
   | { status: "loading" }
-  | { status: "ready"; markdown: string; imageBase: string; path: string; source: string }
+  | { status: "ready"; markdown: string; imageBase: string; path: string; source: string; isEvidenceOverview: boolean }
   | { status: "error"; message: string };
 
 /** 人审页正文接口的响应形状。 */
@@ -24,6 +24,7 @@ type HumanReviewPagePayload = {
   image_base: string;
   /** 证据来源：local 表示仓库本地目录，其他值是证据分支名。 */
   source?: string;
+  is_evidence_overview?: boolean;
 };
 
 /**
@@ -79,7 +80,7 @@ async function fetchHumanReviewPage(
     { credentials: "include" },
   );
   if (!response.ok) {
-    throw new Error(`读取人审页失败（HTTP ${response.status}）`);
+    throw new Error(`读取证据失败（HTTP ${response.status}）`);
   }
   return (await response.json()) as HumanReviewPagePayload;
 }
@@ -117,6 +118,7 @@ export function RuntimeTaskHumanReviewPage({
             imageBase: payload.image_base,
             path: payload.path,
             source: payload.source ?? "local",
+            isEvidenceOverview: payload.is_evidence_overview ?? false,
           });
         }
       })
@@ -124,7 +126,7 @@ export function RuntimeTaskHumanReviewPage({
         if (!cancelled) {
           setState({
             status: "error",
-            message: error instanceof Error ? error.message : "读取人审页失败。",
+            message: error instanceof Error ? error.message : "读取证据失败。",
           });
         }
       });
@@ -174,7 +176,7 @@ export function RuntimeTaskHumanReviewPage({
       className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/70 p-6"
       role="dialog"
       aria-modal="true"
-      aria-label={`${identity} 人审页`}
+      aria-label={`${identity} 交付证据`}
       data-testid="runtime-task-evidence-page-dialog"
       onClick={onClose}
     >
@@ -184,7 +186,7 @@ export function RuntimeTaskHumanReviewPage({
       >
         <div className="mb-3 flex items-center justify-between gap-3 text-sm">
           <span className="font-medium text-slate-900 dark:text-slate-100">
-            {identity} 人审页
+            {identity} {state.status === "ready" && !state.isEvidenceOverview ? "人工验收" : "交付证据"}
             {state.status === "ready" ? (
               <span className="ml-2 text-xs font-normal text-slate-500">
                 {state.path}
@@ -201,7 +203,7 @@ export function RuntimeTaskHumanReviewPage({
           </button>
         </div>
         {state.status === "loading" ? (
-          <p className="py-8 text-center text-sm text-slate-500">正在读取人审页…</p>
+          <p className="py-8 text-center text-sm text-slate-500">正在读取证据…</p>
         ) : null}
         {state.status === "error" ? (
           <p className="py-8 text-center text-sm text-red-600">{state.message}</p>
@@ -211,10 +213,20 @@ export function RuntimeTaskHumanReviewPage({
             className="prd-markdown max-w-none text-sm"
             data-testid="runtime-task-evidence-page-body"
           >
+            {state.isEvidenceOverview ? (
+              <p>已有证据 · 验证待确认</p>
+            ) : null}
             <Markdown
               remarkPlugins={[remarkGfm]}
               components={{
                 a: ({ href, title, children }) => {
+                  if (state.isEvidenceOverview && href) {
+                    return (
+                      <a href={`${state.imageBase}${href}`} target="_blank" rel="noreferrer">
+                        {children}
+                      </a>
+                    );
+                  }
                   const isExternal = /^(?:https?:|\/\/)/i.test(href ?? "");
                   return (
                     <a

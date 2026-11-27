@@ -437,10 +437,10 @@ function RuntimeTaskRow({
               type="button"
               onClick={() => setReviewPageOpen(true)}
               className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 leading-4 text-amber-700 hover:bg-amber-100 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-300 dark:hover:bg-amber-900/60"
-              title="打开该任务的人审页"
+              title="查看该任务的交付证据"
               data-testid="runtime-task-evidence-page"
             >
-              Review
+              查看证据
             </button>
           ) : null}
         </div>

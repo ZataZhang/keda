@@ -782,3 +782,27 @@ def test_windows_installed_detection_checks_executable(
     installed_executable.write_bytes(b"executable")
 
     assert installer_module.is_desktop_companion_installed() is True
+
+
+def test_runtime_evidence_page_falls_back_to_worktree_artifacts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """验证阻塞时仍可从看板打开工作树中的证据。"""
+    evidence_dir = tmp_path / ".kc-worktrees" / "issue-140" / ".iar" / "evidence"
+    evidence_dir.mkdir(parents=True)
+    evidence_log = evidence_dir / "validation.txt"
+    evidence_log.write_text("validation blocked", encoding="utf-8")
+    monkeypatch.setattr(runtime_routes, "_repository_paths", lambda: {"freshai": tmp_path})
+
+    payload = runtime_routes.get_runtime_evidence_page(
+        "freshai", 140, "tasks/pending/optional-rag.md", allow_branch_fallback=False
+    )
+
+    assert payload["is_evidence_overview"] is True
+    assert "(validation.txt)" in payload["markdown"]
+    assert "source=local-evidence" in payload["image_base"]
+    response = runtime_routes.get_runtime_evidence_file(
+        "freshai", 140, "validation.txt", source="local-evidence"
+    )
+    assert response.path == evidence_log
+    assert response.headers["content-type"].startswith("text/plain")

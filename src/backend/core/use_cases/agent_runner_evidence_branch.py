@@ -18,6 +18,7 @@ from threading import Lock
 from backend.core.use_cases.agent_runner_evidence_media import (
     PAGE_FILENAMES,
     EvidenceMedia,
+    evidence_overview,
 )
 
 #: 证据分支清单的缓存秒数：同一次看板浏览里不该重复打远端。
@@ -43,13 +44,17 @@ class BranchPage:
         branch: 分支名，例如 iar-evidence/issue-49。
         page_name: 人审页文件名。
         markdown: 页面正文。
-        siblings: 同目录下的其余文件名，用于解析内联图片。
+        siblings: 同目录下的其余文件名，用于解析附件。
+        is_evidence_overview: 是否为没有人审清单时生成的证据索引。
+        revision: 本次读取绑定的 Git 提交。
     """
 
     branch: str
     page_name: str
     markdown: str
     siblings: tuple[str, ...]
+    is_evidence_overview: bool = False
+    revision: str = ""
 
 
 def _git(repo_path: Path, *args: str) -> str | None:
@@ -152,9 +157,21 @@ def _fetch_branch(repo_path: Path, branch: str) -> str | None:
     remote = _github_remote(repo_path)
     if remote is None:
         return None
-    if _git(repo_path, "fetch", "--depth=1", remote, branch) is None:
+    ref = f"refs/kedacode/evidence/{remote}/{branch}"
+    if (
+        _git(
+            repo_path,
+            "fetch",
+            "--depth=1",
+            "--no-write-fetch-head",
+            remote,
+            f"+refs/heads/{branch}:{ref}",
+        )
+        is None
+    ):
         return None
-    return "FETCH_HEAD"
+    revision = _git(repo_path, "rev-parse", "--verify", ref)
+    return revision.strip() if revision else None
 
 
 def _declared_page(siblings: list[str], manifest_text: str | None) -> str | None:
@@ -198,7 +215,12 @@ def read_branch_page(repo_path: Path, issue_number: int) -> BranchPage | None:
     if page_name is None:
         page_name = next((name for name in PAGE_FILENAMES if name in siblings), None)
     if page_name is None:
-        return None
+        overview = evidence_overview(siblings)
+        if not overview:
+            return None
+        return BranchPage(
+            branch, "证据文件", overview, tuple(siblings), is_evidence_overview=True, revision=ref
+        )
     markdown = _git(repo_path, "show", f"{ref}:{page_name}")
     if markdown is None:
         return None
@@ -207,6 +229,7 @@ def read_branch_page(repo_path: Path, issue_number: int) -> BranchPage | None:
         page_name=page_name,
         markdown=markdown,
         siblings=tuple(siblings),
+        revision=ref,
     )
 
 
@@ -228,12 +251,12 @@ def read_branch_file(repo_path: Path, issue_number: int, name: str) -> bytes | N
         return None
     try:
         completed = run(
-            ["git", "-C", str(repo_path), "show", f"FETCH_HEAD:{name}"],
+            ["git", "-C", str(repo_path), "show", f"{page.revision}:{name}"],
             capture_output=True,
             timeout=GIT_TIMEOUT_SECONDS,
             check=True,
         )
-    except (CalledProcessError, OSError):
+    except (CalledProcessError, OSError, TimeoutExpired):
         return None
     return completed.stdout
 

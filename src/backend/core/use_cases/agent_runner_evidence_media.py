@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import quote
 
 #: 可播放的视频后缀，顺序即优先级。
 VIDEO_SUFFIXES: tuple[str, ...] = (".mp4", ".webm", ".mov", ".gif")
@@ -58,7 +59,7 @@ def evidence_stem(issue_number: int, prd_path: str | None) -> str:
     """
     if prd_path:
         name = Path(prd_path).name
-        return name[:-3] if name.endswith(".md") else name
+        return name.removesuffix(".md") or f"issue-{issue_number}"
     return f"issue-{issue_number}"
 
 
@@ -77,8 +78,55 @@ def _candidate_dirs(repo_path: Path, issue_number: int, stem: str) -> tuple[Path
             repo_path / ".iar" / "evidence" / name,
             worktree / ".iar" / "evidence" / name,
             repo_path / "tasks" / "evidence" / name,
+            worktree / "tasks" / "evidence" / name,
         )
     )
+
+
+EVIDENCE_IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp"})
+EVIDENCE_ATTACHMENT_SUFFIXES = EVIDENCE_IMAGE_SUFFIXES | {".txt", ".log", ".md", ".json"}
+
+
+def evidence_overview(names: list[str]) -> str:
+    """生成已有证据的 Markdown 入口。"""
+    entries = []
+    for name in sorted(names):
+        suffix = Path(name).suffix.lower()
+        if suffix not in EVIDENCE_ATTACHMENT_SUFFIXES:
+            continue
+        if not name.replace("-", "").replace("_", "").replace(".", "").isalnum():
+            continue
+        marker = "!" if suffix in EVIDENCE_IMAGE_SUFFIXES else ""
+        entries.append(f"- {marker}[{name}]({quote(name, safe='')})")
+    return "\n".join(entries)
+
+
+def local_evidence_attachments(
+    repo_path: Path, issue_number: int, prd_path: str | None
+) -> dict[str, Path]:
+    """查找任务证据报告和可预览的原始附件。"""
+    worktree = repo_path / ".kc-worktrees" / f"issue-{issue_number}"
+    stem = evidence_stem(issue_number, prd_path)
+    directories = (
+        *_candidate_dirs(repo_path, issue_number, stem),
+        worktree / ".iar" / "evidence",
+    )
+    attachments: dict[str, Path] = {}
+    resolved_repo = repo_path.resolve()
+    for directory in directories:
+        try:
+            if not directory.is_dir() or not directory.resolve().is_relative_to(resolved_repo):
+                continue
+            for candidate in directory.iterdir():
+                if (
+                    candidate.suffix.lower() in EVIDENCE_ATTACHMENT_SUFFIXES
+                    and not candidate.is_symlink()
+                    and candidate.is_file()
+                ):
+                    attachments.setdefault(candidate.name, candidate)
+        except OSError:
+            continue
+    return attachments
 
 
 def _first_video(directory: Path) -> Path | None:
