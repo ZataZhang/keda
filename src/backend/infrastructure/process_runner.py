@@ -282,6 +282,8 @@ class SubprocessRunner:
     ``backend.core.shared.interfaces.agent_runner`` via duck typing.
     """
 
+    supports_browser_host = True
+
     @observe_process_model_config
     def run(
         self,

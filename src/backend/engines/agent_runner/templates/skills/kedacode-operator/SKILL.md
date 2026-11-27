@@ -1,6 +1,6 @@
 ---
 name: kedacode-operator
-description: Use KedaCode (kc) for CLI and hosted Runner operation: 装环境、升级迁移、查 Agent 配置、建 issue、查 issue、查生命周期、看其他机器 (`kc peers`)、跑一次、看进度、谁该接手、卡住了、后台跑、托管 Runner/hosted runner、定时任务、CI 交付. Hosted routes cover credentials, maintenance, and Linux desktop. Read-only requests never start execution.
+description: Use KedaCode (kc) for CLI and hosted Runner operation: 装环境、升级迁移、查 Agent 配置、建 issue、查 issue、查生命周期、看其他机器 (`kc peers`)、跑一次、看进度、谁该接手、卡住了、后台跑、托管 Runner/hosted runner、定时任务、CI 交付、浏览器. Read-only requests never start execution.
 ---
 
 # KedaCode Operator
@@ -11,6 +11,7 @@ Use this skill when the user asks to operate the KedaCode CLI or its managed run
 
 | Route | The user may say | Read first |
 |---|---|---|
+| 浏览器 | 页面操作 / 截图 | `${CODEBUDDY_SKILL_DIR}/references/browser.md` |
 | 建 issue | 建个 issue / 把 tasks/pending/xxx.md 建成 issue / 开个 Issue / issue create / main 受保护时发布 PRD / 恢复已创建 Issue 的 PRD / `--publish-to-issue-branch` / `--recover-issue <N>` | `${CODEBUDDY_SKILL_DIR}/references/create-issue.md` |
 | 查 issue | 查 issue / issue list / 看看有哪些 Issue / 这个 PRD 有 issue 吗 | `${CODEBUDDY_SKILL_DIR}/references/issue-inspect.md` |
 | 查生命周期 | 当前到哪个 lifecycle / 哪些 Issue 已通过某个阶段 / 看 Issue 的生命周期时间线 | `${CODEBUDDY_SKILL_DIR}/references/lifecycle.md` |

@@ -1194,6 +1194,8 @@ uv run kc workflow install preview --force
 
 ## 浏览器 E2E 验证命令形态（browser_e2e）
 
+Agent 临场操作网页和采集截图使用 [按需浏览器操作](browser-validation.md) 中的 `kc browser`。runner 在第一次 `open` 时于宿主启动 Chromium，各执行器通过同一入口操作当前调用的隔离会话。
+
 UI 类 Issue 的验证不能只看"测试绿了"——需要真实启动应用、真实操作页面、产出可门禁的浏览器产物。为此 `[agent_runner.runner].verification_commands` 在纯 shell 字符串之外支持**结构化 E2E 条目**（PRD：`tasks/archive/P1-FEAT-20260930-225500-browser-e2e-verification.md`，交付后归档于 `tasks/archive/`）。两类条目在同一队列按序执行，任一失败短路进入既有 `VERIFICATION_FAILED` recovery 通道；**纯字符串条目的解析与执行行为逐字段不变**，未配置 E2E 条目的仓库零变化。
 
 ### 配置形态
@@ -6352,6 +6354,9 @@ PR 值守状态独立探测本机托管及手动启动的监督进程，失败�
 仅确认 Issue 关闭时，显示「已关闭」。如需立即同步远端状态，可单独刷新该卡片。
 
 ### 运行看板证据加载降级
+
+看板「查看证据」优先打开人工验收清单。清单尚未生成时，入口会列出已有的报告、截图和日志，
+并提示「已有证据 · 验证待确认」。文件可单独打开，查看证据不会改变任务的验证或验收状态。
 
 任务摘要会先检查本地证据；本地没有人审页时，再查询仓库的 GitHub 证据分支。查询失败或超过 8 秒
 都会按“暂时没有远端证据”处理，只影响证据入口是否显示，不会阻断任务列表或改变任务状态。远端查询

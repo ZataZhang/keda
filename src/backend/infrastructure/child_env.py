@@ -19,8 +19,12 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterable
+from contextvars import ContextVar
 
 from backend.infrastructure.logging.logger import logger
+
+# 仅由宿主为当前调用绑定，线程之间及只读诊断调用之间相互隔离。
+AGENT_BROWSER_ENV: ContextVar[dict[str, str] | None] = ContextVar("agent_browser_env", default=None)
 
 # agent 子进程必须剔除的会话私有变量名单（2026-09-28 与用户拍板的 8 变量）：
 # - SERVER__PORT：交互式 CodeBuddy 会话 daemon 的监听端口，子进程继承后
@@ -63,6 +67,9 @@ def build_sanitized_child_env() -> dict[str, str]:
         剔除名单变量后的环境副本（新 dict，不修改 ``os.environ``）。
     """
     child_env = dict(os.environ)
+    child_env.pop("KC_BROWSER_URL", None)
+    child_env.pop("KC_BROWSER_TOKEN", None)
+    child_env.update(AGENT_BROWSER_ENV.get() or {})
     for key in sorted(AGENT_CHILD_ENV_DENYLIST):
         if key not in child_env:
             continue

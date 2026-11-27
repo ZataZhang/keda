@@ -135,6 +135,9 @@ class IProcessRunner(ABC):
     从而避免真正启动子进程。
     """
 
+    # 同机执行且透传调用级环境的适配器显式声明此能力，远端或替身默认关闭。
+    supports_browser_host: bool = False
+
     # 端口声明与适配器的参数注解必须一致；仅从重复检测中排除签名，方法体仍参与扫描。
     # jscpd:ignore-start
     @abstractmethod

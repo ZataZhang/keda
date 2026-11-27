@@ -23,6 +23,13 @@ def add_session_commands(subparsers: argparse._SubParsersAction) -> None:
     Args:
         subparsers: 顶层 parser 的 subparsers action（就地注册，不返回）。
     """
+    browser_parser = subparsers.add_parser(
+        "browser", help="Operate the invocation's on-demand browser via the runner host."
+    )
+    add_machine_output_options(browser_parser)
+    browser_parser.add_argument("--filename", help="Screenshot output inside this worktree.")
+    browser_parser.add_argument("--full-page", action="store_true")
+    browser_parser.add_argument("browser_args", nargs=argparse.REMAINDER)
     ask_parser = subparsers.add_parser(
         "ask", help="Ask the agent runner to decide the next safe action."
     )

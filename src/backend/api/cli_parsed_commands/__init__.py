@@ -72,6 +72,7 @@ from backend.api.cli_parsed_commands.preview import (
     run_preview_status_command,
     run_preview_stop_command,
 )
+from backend.api.cli_parsed_commands.browser import run_browser_command
 from backend.api.cli_parsed_commands.runner import (
     run_blocked_continue_command,
     run_daemon_command,
@@ -119,6 +120,7 @@ _DISPATCH_TABLE: dict[str, callable] = {
     "ask": run_ask_command,
     "session": run_session_command,
     "repl": run_repl_command,
+    "browser": run_browser_command,
     "preview start": run_preview_start_command,
     "preview status": run_preview_status_command,
     "preview stop": run_preview_stop_command,

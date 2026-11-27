@@ -51,6 +51,7 @@ class ProtocolRoutingProcessRunner(IProcessRunner):
         """注入内层通用执行器与输出协议注册表。"""
         self._inner = inner
         self._protocol_registry = protocol_registry
+        self.supports_browser_host = getattr(inner, "supports_browser_host", False)
 
     def probe_live_attempt(self, attempt_key: str) -> AttemptOwnership:
         """把进程归属复核委托给内层执行器。"""

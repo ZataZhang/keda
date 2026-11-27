@@ -44,7 +44,7 @@ _PACKAGED_SKILL = _PACKAGED_SKILL_DIR / "SKILL.md"
 _PACKAGED_REFERENCES_DIR = _PACKAGED_SKILL_DIR / "references"
 
 #: operator references 的当前份数；新增路由时须同步受管集合与此契约。
-_EXPECTED_REFERENCE_COUNT = 13
+_EXPECTED_REFERENCE_COUNT = 14
 
 #: 改名前随包发行的旧名 skill 目录（安装根里遗留的副本，只用于清理判定）。
 _LEGACY_SKILL_NAME = "iar-operator"
@@ -360,6 +360,7 @@ def _flags_of(tokens: list[str]) -> set[str]:
 #: ``test_packaged_skill_whitelist_matches_runtime_schema`` 对 ``kc schema --json``
 #: 的运行时派生结果断言），CLI 删掉 Skill 仍在用的旗标必须让守卫红。
 _ALLOWED_FLAGS: dict[tuple[str, ...], set[str]] = {
+    ("browser",): {"--filename", "--full-page", "--json", "--output"},
     ("peers",): {"--json", "--output", "--repo", "--repo-id", "--config"},
     ("run",): {
         "--dry-run",
@@ -799,6 +800,7 @@ def test_packaged_skill_whitelist_matches_runtime_schema() -> None:
 #: 每份参考说明的口语关键词：自动触发只认 frontmatter description，路由表对
 #: 模型不可见，因此每份说明各自至少一个关键词必须出现在 description 里。
 _ROUTE_KEYWORDS_BY_REFERENCE: dict[str, tuple[str, ...]] = {
+    "browser.md": ("浏览器", "截图"),
     "create-issue.md": ("建 issue", "create an Issue"),
     "issue-inspect.md": ("查 issue", "inspect Issues"),
     "peers.md": ("看其他机器", "machine presence", "kc peers"),

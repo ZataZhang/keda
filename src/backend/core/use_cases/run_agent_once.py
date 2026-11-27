@@ -19,6 +19,9 @@ import logging
 from collections.abc import Callable
 from pathlib import Path
 
+from backend.core.shared.models.browser_session import BROWSER_GUIDANCE
+from backend.core.use_cases.browser_runtime_composition import browser_host_session
+
 from backend.core.shared.interfaces.agent_runner import (
     AGENT_SESSION_ID_ATTR_NAME,
     IGitHubClient,
@@ -484,6 +487,12 @@ def run_agent_with_prompt(
         )
     label = f"Issue #{issue.number}: {issue.url}" if issue is not None else None
     effective_config = config or AppConfig()
+    browser_enabled = (
+        getattr(process_runner, "supports_browser_host", False)
+        and not resolve_profile_spec(agent_name, profile, effective_config).read_only
+    )
+    if browser_enabled:
+        prompt = f"{prompt}\n\n{BROWSER_GUIDANCE}"
 
     def _run_stall_diagnosis(diagnosis: StallDiagnosisRequest) -> str:
         """跑一次只读诊断：走被诊断 agent 声明的 generate profile，取回作答文本。
@@ -699,7 +708,8 @@ def run_agent_with_prompt(
 
         def _run_attempt() -> CommandResult:
             try:
-                return process_runner.run(**run_kwargs)
+                with browser_host_session(worktree_path, enabled=browser_enabled):
+                    return process_runner.run(**run_kwargs)
             except FileNotFoundError as exc:
                 # 进程边界兜底：PATH 的判定权留给 claim 之前的门禁与用户可见的
                 # ``kc agent setup``，这里只在真实起跑失败时把阶段、用途与可执行文件名

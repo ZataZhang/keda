@@ -483,6 +483,7 @@ from backend.api import (  # noqa: E402,F401
     cli_typer_lifecycle,
     cli_typer_skill,
     cli_typer_preview,
+    cli_typer_browser,
     cli_typer_peers,
     cli_typer_evidence,
     cli_typer_eval,

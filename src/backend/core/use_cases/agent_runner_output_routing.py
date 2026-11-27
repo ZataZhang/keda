@@ -93,6 +93,7 @@ class _OutputRoutedProcessRunner:
     def __init__(self, wrapped: object, sink: Callable[[str], None]) -> None:
         self._wrapped = wrapped
         self._sink = sink
+        self.supports_browser_host = getattr(wrapped, "supports_browser_host", False)
         # 测试 fake 与自定义 runner 常用精简签名（缺 output_sink /
         # output_protocol 等新参数）。预先探测被包装 run 接受的参数集，
         # 委托时只传它声明得起的部分，避免包装器比接口「多嘴」炸 TypeError。
