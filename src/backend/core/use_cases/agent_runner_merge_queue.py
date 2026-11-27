@@ -469,10 +469,16 @@ def _process_one(
         and config.autopilot.require_verifier_pass
         and validation_required(issue.body, config)
     ):
-        if config.labels.verifier_passed not in issue.labels:
+        try:
+            verified_pr = github_client.get_issue(pr_number)
+        except Exception as exc:  # noqa: BLE001 - 验证标签不可读时保留队列项等待重试。
+            _logger.warning("Could not read verifier label on PR #%d: %s", pr_number, exc)
+            return MergeQueueOutcome(issue_number=issue.number, action="skipped_verifier_missing")
+        if config.labels.verifier_passed not in verified_pr.labels:
             _logger.info(
-                "Issue #%d requires validation but is missing %s label; skipping.",
+                "Issue #%d requires validation but PR #%d is missing %s; skipping.",
                 issue.number,
+                pr_number,
                 config.labels.verifier_passed,
             )
             return MergeQueueOutcome(issue_number=issue.number, action="skipped_verifier_missing")

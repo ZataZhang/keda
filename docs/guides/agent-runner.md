@@ -783,7 +783,7 @@ Agent command failed for Issue #19; asking agent to recover (1/5).
 
 这一分层修复的目的是把大量常见的 lint/类型错误（如 agent 遗漏 import、简单单测失败）用更短的超时和更聚焦的 prompt 解决，避免动辄调用一次完整的 recovery agent。
 
-默认 Fix/Recovery prompt 先要求定位失败命令与受影响范围，以证据区分环境问题、既有失败和本次回归；先跑最小相关检查修复根因，再执行现有最终门禁。分类不会自动豁免失败或修改测试缓存策略。默认 pre-PR review 要求完整收集 findings 后集中修复；共享 review/supervisor 修复 prompt 要求逐项说明修复或有证据的异议。后续审查聚焦修复与受影响边界，仍核对最终代码树所需的验证与独立证据。自定义 `pre_pr_review.review_prompt_template` 会覆盖默认审查规则，维护方需同步这些约定。
+默认 Fix/Recovery prompt 先要求定位失败命令与受影响范围，以证据区分环境问题、既有失败和本次回归；先跑最小相关检查修复根因，再执行现有最终门禁。分类不会自动豁免失败或修改测试缓存策略。默认 pre-PR review 要求完整收集问题后，在同一会话逐项修复、自验并报告实际结果；共享 review/supervisor 修复 prompt 要求逐项说明修复或有证据的异议。后续审查聚焦修复与受影响边界，仍核对最终代码树所需的验证与独立证据。自定义 `pre_pr_review.review_prompt_template` 会覆盖默认审查规则，维护方需同步这些约定。
 
 Fix Agent 的每次启动、修复成功、修复失败以及被配置关闭跳过都会写入 runner 日志（`Starting Fix Agent` / `Fix Agent repaired` / `Fix Agent failed` / `Fix Agent disabled`），可以据此统计这一层的实际触发率与成功率，评估是否值得为仓库保留或关闭。
 
@@ -932,7 +932,7 @@ forbidden_path_exceptions = [
 enabled = true
 # 仅支持 "squash"。非法值在配置加载期直接拒绝。
 merge_method = "squash"
-# 当 Issue 需要 validation 时，是否要求 validation/verifier-passed 标签先存在；
+# 当 Issue 需要 validation 时，是否要求关联 PR 的 validation/verifier-passed 标签先存在；
 # 缺失则本轮跳过，留给 verifier / repair 流程。
 require_verifier_pass = true
 # verifier 绿灯后自动替人工勾选 PR body 的 Realistic Validation sign-off 清单
@@ -2016,7 +2016,7 @@ agent/ready
 2. Draft PR 创建成功后，runner 尽力把人审材料上传到证据分支。看板按 PR 仓库刷新证据分支索引，同一仓库的远端查询至少间隔 30 秒，因此 `Review` 按钮通常可在 verifier 运行期间出现；材料发布失败只记录告警，不阻断 verifier。该入口表示可以提前查看材料，不表示验证通过或已经进入待人工评审状态
 3. 独立 verifier 对已提交工作树进行验证；失败时进入原有修复循环，后续合格提交更新同一个 Draft PR
 4. verifier 通过后，runner 写 Issue comment `Implementation Complete` 并构建 review packet（Issue、PRD、提交 diff、工作区状态、验证结果、AI standards、review workflow）
-5. **Reviewer 必须通过 Skill 工具调用 `code-reviewer` skill** 并把 skill 输出的 findings 写进响应的 `findings` JSON 数组；review packet 默认模板（`agent_review.DEFAULT_REVIEW_PROMPT_TEMPLATE`）会显式提示 reviewer 这一行为，并提供 findings schema（`category` / `severity` / `file` / `line` / `title` / `description` / `recommendation`）。仓库可在 `[agent_runner.pre_pr_review].review_prompt_template` 覆盖该模板，未配置时回退到代码默认。
+5. **Reviewer 必须通过 Skill 工具调用 `code-reviewer` skill**，完整收集已确认的问题，在同一会话逐项修复并验证。默认自修节点最终交付 `summary` 和 `repairs` JSON 报告，记录发现的问题、实际修改和验证结果。仓库可在 `[agent_runner.pre_pr_review].review_prompt_template` 覆盖公共审查规则，节点仍会追加对应模式的执行与输出约定。
 6. 若 reviewer 在当前 worktree / Issue 下已有可续传 session id，就接着该会话执行 review；没有记录时创建新会话。调用使用 `[agent_runner.pre_pr_review].timeout_seconds` 限制最长运行时间
 7. Reviewer 可直接修改 worktree；修改后写入 `.agent-runner/commit-request.json`
 8. Runner 通过 commit proxy 提交 reviewer 修改、重新运行 `verification_commands` 并 push 修复；更新 PR head 前先移除已有的 `validation/verifier-passed`，最终复核通过后再加回
@@ -2036,7 +2036,22 @@ Review packet 单独标明未提交的工作区状态。提交 diff 超过 8,000
 
 Pre-PR review 默认由 reviewer 在工作树里修复确认的缺陷，再通过 `commit-request.json` 请求提交。目标平台暂时不可用时，仍先写可做的补丁，运行当前环境能跑的检查，并如实记录待验证项。能否提交由 Issue 和仓库规则决定，Runner 按原有提交与验证流程处理补丁。
 
-审核发现问题后，缺少提交请求或提交请求没有实际补丁都会触发同轮修复提醒。`[agent_runner.pre_pr_review].commit_request_reminder_attempts` 控制提醒次数，默认 1 次。`max_attempts` 控制审核轮数，默认 2 轮。最后一轮若仍未 `approved`，通过提交检查的最终补丁仍可进入后续验证与发布流程。若未产出补丁，Runner 记录 findings 并标记 `agent/failed`。Reviewer 解析器根据 findings 重新统计各级问题，且会把带有 findings 的 `approved` 降级为 `changes_requested`。
+自修节点的最终 JSON 使用 `summary` 和 `repairs`，每项保留问题字段（`category` / `severity` / `file` / `line` / `title` / `description`），并填写实际结果。
+
+| 字段 | 含义 |
+|---|---|
+| `status` | `fixed` 表示已修并验证，`blocked` 表示尝试可行方案后仍受具体障碍阻塞 |
+| `fix` | 实际修改及涉及文件，阻塞时写已尝试的方案和部分修复 |
+| `verification` | 最终代码树上的检查命令与实际结果 |
+| `blocker` | 无法继续的障碍及继续所需条件，已修项留空 |
+
+没有发现问题时返回空 `repairs`。Reviewer 应持续处理所有已确认问题，失败命令需要继续诊断修复；外部依赖阻塞时继续完成其他能做的代码修改。全部修复并通过检查后，Runner 提交补丁并结束这轮审查，随后执行最终 HEAD 的既有验证。报告仍有阻塞项时，Runner 保存可提交的部分补丁、发布逐项修复记录，并以 `pre_pr_review_repair` 转入 `agent/blocked`，待解除障碍后继续。
+
+解析器兼容旧版 `verdict` / `findings` 报告，并在内部将修复结果转换为既有编排信号。自修节点无需输出 `approved` 或 `changes_requested`。旧报告中的未解决 findings 仍会阻止正常发布，通过提交检查的部分补丁也不能覆盖这个结果。只读审核节点继续使用原有 verdict 与 findings 契约。
+
+旧版报告缺少提交请求或没有实际补丁时，仍按 `commit_request_reminder_attempts`（默认 1 次）提醒。新版报告明确记录的阻塞直接交接。`max_attempts`（默认 2 轮）继续限制提交失败等恢复轮数。
+
+解除阻塞后的续跑会携带 Issue 需求、最近的修复报告和具体阻塞原因，从已有提交继续处理剩余问题。有禁改路径时仍保留路径处理要求。通过 `kc blocked-continue` 直接续跑再次遇到修复阻塞时，恢复 `agent/blocked` 并发布新的阻塞说明，避免停留在 `agent/running`。
 
 > **执行事故的换人回退**：reviewer **进程层面**的失败不是「review 未通过」，也不会把 Issue 判死。墙钟或静默期超时（`pre_pr_review.timeout_seconds`，默认 1800s）会先按 `timeout_resume_attempts` 尝试在同一 session 增加执行窗口；没有可续传的 session 或预算耗尽后，才与 agent 进程非零退出、启动 I/O 错误及 provider 容量失败（429/529）一样，升级为可换人错误 `AgentExecutionError`，交由跨 agent fallback 链换下一个候选 agent 重试。只有 `UnrecoverableError`（安全/分支违规）与 `ForbiddenBlockedError`（禁改路径）这类每个 agent 都会撞同一堵墙的失败才直接冒泡，不换人。此前 `subprocess.TimeoutExpired` 等异常会一路冒到顶层 `except Exception` 直接落 `agent/failed`；现在超时优先尝试续跑。
 
@@ -2048,7 +2063,7 @@ Pre-PR review 默认由 reviewer 在工作树里修复确认的缺陷，再通�
 
 | 取值 | 含义 |
 |---|---|
-| `self`（默认） | 审核者既出 findings 又自己打补丁，与历史行为逐字节一致 |
+| `self`（默认） | 审核者在同一会话逐项修复并自验，返回修复结果报告 |
 | `executor` | 审核者只出 findings；改代码交回本次实现者（拿不到时按 Issue 标签回落并写日志） |
 | `<agent 名>` | 审核者只出 findings，改代码交给这个名字；未注册则在该阶段开始前 fail-fast |
 
@@ -2058,7 +2073,7 @@ Pre-PR review 默认由 reviewer 在工作树里修复确认的缺陷，再通�
 2. 审核者若仍写出 `commit-request.json`，该文件被**直接删除、不触发任何提交**，Issue 评论里会写明这件事；它已经改掉的**文件**不回滚（回滚是破坏性的），而是并入修复者本轮的提交。
 3. verdict 为 `changes_requested` 且有 findings 时，runner 用共享构建器 `build_repair_prompt` 生成修复提示词（Issue 上下文 + 本轮 findings 清单 + 既有的提交请求约束），以解析出的修复者、`run` 用途启动。
 4. 修复者缺少实际补丁或提交请求时，沿用 `commit_request_reminder_attempts` 的同轮提醒重试。
-5. 后续提交代理、验证重跑、push callback、轮数上限、收敛与软失败语义全部不变：最后一轮仍未通过但本轮已产生可提交修复 → 接受并继续发布；否则软失败进入失败标签。
+5. 后续仍由提交代理验证并推送补丁。只读审核的 findings 需要在后续审核轮次确认已解决；轮次用尽仍要求修改时保留补丁并停止正常发布。
 
 Issue 评论结构随之增加 `- Repairer: <agent>` 一行（仅非 `self` 模式），便于在 GitHub 上直接看出这一轮谁审、谁修。
 
@@ -5299,7 +5314,7 @@ enabled = true               # 默认开启；关闭后合并队列 no-op
 
 每条进入合并队列的 PR 都按下列顺序执行；门禁未满足时不合并，并按情况进入既有修复/阻塞路径或等待下一轮，不阻塞队列中其余 PR：
 
-1. **verifier 门禁**：普通 Issue 若需要 validation（`validation_required`）且 `autopilot.require_verifier_pass = true`，要求 Issue 已带 `validation/verifier-passed` 标签；缺失则本轮跳过。带 `prd-auto-merge` 的单 PRD 按显式授权跳过独立 verifier，不伪造该标签。
+1. **verifier 门禁**：普通 Issue 若需要 validation（`validation_required`）且 `autopilot.require_verifier_pass = true`，要求关联 PR 已带发布阶段写入的 `validation/verifier-passed` 标签；按 PR 编号回读，缺失或不可读则本轮跳过。Issue 上的同名标签不作为通过依据。带 `prd-auto-merge` 的单 PRD 按显式授权跳过独立 verifier，不伪造该标签。
 2. **签收清单**：若 `autopilot.auto_sign_off = true`，普通队列在 verifier 通过后签收；单 PRD 自动合并路径在仓库验证命令通过后签收并写审计评论。GitHub check 只检查 PR body 清单是否完成；清单必须对应已经实际完成的验证。这个 PR body 清单不等于 PRD 的 `Human-Confirmed` 清单。
 3. **rebase**：复用 `pr_supervisor.execute_rebase` 把 PR 分支 rebase 到最新 remote base；冲突走既有 conflict-resolution agent 路径。失败→转 `agent/supervising`，本 PR 跳过。
 4. **全量验证**：在该 Issue 的 worktree 内调用 `agent_runner_git.run_verification(...)` 重跑 `runner.verification_commands`；红→转验证修复路径，本 PR 跳过不合并。

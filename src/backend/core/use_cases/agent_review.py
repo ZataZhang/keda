@@ -316,7 +316,6 @@ def run_pre_pr_review(
     last_decision: ReviewerDecision | None = None
     last_action_summary = last_failure_summary
     last_cycle_verdict = "changes_requested"
-    last_cycle_applied_patch = False
     last_cycle_reviewer_patch_ignored = False
     last_cycle_reviewer_left_changes = False
     # 上一轮补丁在提交门禁上失败时的命令与输出，回喂给下一轮 reviewer；成功或首轮为 None
@@ -486,6 +485,7 @@ def run_pre_pr_review(
 
             if (
                 not split_repair
+                and reviewer_decision.repairs is None
                 and inner_attempt < max_inner_attempts
                 and reviewer_decision.has_findings
                 and reviewer_decision.verdict == "changes_requested"
@@ -605,7 +605,6 @@ def run_pre_pr_review(
                 else:
                     action_summary = "reviewer patched and runner committed follow-up changes"
                 last_failure_summary = action_summary
-                last_cycle_applied_patch = True
                 _logger.info(
                     "Pre-PR review cycle %d/%d for Issue #%d: %s " "changes committed at head %s.",
                     cycle,
@@ -726,6 +725,7 @@ def run_pre_pr_review(
             repairer=repair_agent if split_repair else None,
             reviewer_patch_ignored=reviewer_patch_ignored,
             reviewer_left_changes=reviewer_left_changes,
+            repair_report=reviewer_decision,
         )
         github_client.comment_issue(issue.number, comment_body)
         _logger.info(
@@ -740,9 +740,23 @@ def run_pre_pr_review(
         last_decision = reviewer_decision
         last_action_summary = action_summary
         last_cycle_verdict = cycle_verdict
-        last_cycle_had_commit_request = bool(request_path_was_present)
         last_cycle_reviewer_patch_ignored = reviewer_patch_ignored
         last_cycle_reviewer_left_changes = reviewer_left_changes
+        if reviewer_decision.repairs is not None and reviewer_decision.has_findings:
+            blocker_summary = "\n".join(
+                f"{repair.finding.title}: {repair.blocker}"
+                for repair in reviewer_decision.repairs
+                if repair.status != "fixed"
+            )
+            raise HumanActionRequiredError(
+                issue.number,
+                CheckActionDirective(
+                    block_type="pre_pr_review_repair",
+                    summary=f"{reviewer_decision.summary}\n{blocker_summary}".strip(),
+                    next_action="Resolve the recorded repair blockers, then continue the Issue.",
+                ),
+                [],
+            )
         if action_summary.startswith("reviewer approved") and all(
             result.return_code == 0 for result in current_verification
         ):
@@ -761,37 +775,13 @@ def run_pre_pr_review(
             )
             return current_head, current_verification
 
-    # 最后一轮仍未收敛：若 reviewer 已提供最终修复 commit request，runner
-    # 必须接受并继续发布；否则软失败并保留 findings 详情。
+    # 最后一轮仍有未解决问题时保留补丁和报告，不能将提交成功视为修复完成。
     final_decision = last_decision
     if final_decision is None:
         final_decision = ReviewerDecision(
             verdict="changes_requested",
             summary="Pre-PR review produced no parseable decision.",
         )
-    # 收敛兜底：最后一轮 reviewer 写出了 commit request 且 verification 全部通过，
-    # 即便 verdict 不是 "approved"，runner 也必须接受该最终修复并继续发布流程。
-    if (
-        last_cycle_had_commit_request
-        and last_cycle_applied_patch
-        and last_cycle_verdict == "changes_requested"
-        and all(result.return_code == 0 for result in current_verification)
-    ):
-        _logger.info(
-            "Pre-PR review accepted final commit-request fixes for "
-            "Issue #%d after exhausting %d cycle(s).",
-            issue.number,
-            max_attempts,
-        )
-        mark_agent_session_complete(
-            worktree_path,
-            agent_name=reviewer_agent,
-            scope=AgentSessionScope(
-                issue_number=issue.number,
-                phase=PHASE_REVIEW,
-            ),
-        )
-        return current_head, current_verification
     # The per-cycle comment above already recorded findings for the last
     # attempt; only emit the trailing summary comment when no per-cycle
     # comment has been written yet (defensive guard for harness coverage

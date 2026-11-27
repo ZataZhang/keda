@@ -69,7 +69,7 @@ nav:
       - 部署指南: guides/deployment.md
       - 发布流程: guides/release-process.md
       - Agent Runner:
-          - Agent Runner、仓库身份与运行历史隔离指南: guides/agent-runner.md
+          - Agent Runner、仓库隔离与审查修复指南: guides/agent-runner.md
       - 目标仓库 Issue 与 PR 模板: guides/repository-templates.md
       - Issue 分支与工作区归属: guides/issue-workspaces.md
       - 生命周期 Agent 矩阵与工作流图: guides/lifecycle-agent-matrix.md

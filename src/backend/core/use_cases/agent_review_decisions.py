@@ -5,12 +5,31 @@ from __future__ import annotations
 import json
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from backend.core.shared.models.agent_runner import ReviewFinding
 
 _VALID_REVIEW_VERDICTS = {"approved", "changes_requested"}
 _logger = logging.getLogger("backend.core.use_cases.agent_review")
+
+
+@dataclass(frozen=True)
+class ReviewRepair:
+    """记录一个已确认问题的实际修复、验证和阻塞情况。
+
+    Attributes:
+        finding: 已确认的问题。
+        status: 已修复为 fixed，无法继续为 blocked。
+        fix: 实际修改及已尝试的方案。
+        verification: 最终代码树的验证命令与结果。
+        blocker: 无法继续的具体障碍和解除条件。
+    """
+
+    finding: ReviewFinding
+    status: str = "blocked"
+    fix: str = ""
+    verification: str = ""
+    blocker: str = ""
 
 
 @dataclass(frozen=True)
@@ -25,6 +44,7 @@ class ReviewerDecision:
     findings_medium: int = 0
     findings_low: int = 0
     parseable: bool = True
+    repairs: tuple[ReviewRepair, ...] | None = None
 
     @property
     def has_findings(self) -> bool:
@@ -48,9 +68,45 @@ class ReviewerDecision:
 
 
 def parse_reviewer_decision(text: str) -> ReviewerDecision:
-    """Parse reviewer verdict and findings from agent output."""
+    """解析逐项修复报告，兼容旧版 verdict 与 findings 输出。
+
+    Args:
+        text: Agent 的原始响应文本。
+
+    Returns:
+        包含完整修复记录和未解决问题的编排决策。
+    """
     payload = _extract_json_payload(text)
     if payload is not None:
+        raw_repairs = payload.get("repairs")
+        if isinstance(raw_repairs, list) and all(isinstance(entry, dict) for entry in raw_repairs):
+            repairs = tuple(
+                ReviewRepair(
+                    finding=finding,
+                    status=str(entry.get("status", "blocked")),
+                    fix=str(entry.get("fix", "")),
+                    verification=str(entry.get("verification", "")),
+                    blocker=str(entry.get("blocker", "")),
+                )
+                for finding, entry in zip(_parse_findings_array(raw_repairs), raw_repairs)
+            )
+            unresolved = tuple(repair.finding for repair in repairs if repair.status != "fixed")
+            # 兼容混合输出时保留旧字段中的未解决问题。
+            unresolved += _parse_findings_array(payload.get("findings"))
+            return _finalize_decision_counts(
+                ReviewerDecision(
+                    verdict="changes_requested" if unresolved else "approved",
+                    summary=str(payload.get("summary", "")),
+                    findings=unresolved,
+                    repairs=repairs,
+                )
+            )
+        if "repairs" in payload:
+            return ReviewerDecision(
+                verdict="changes_requested",
+                summary="Reviewer returned a malformed repair report.",
+                parseable=False,
+            )
         verdict = _normalize_review_verdict(payload.get("verdict"))
         if verdict in _VALID_REVIEW_VERDICTS:
             findings = _parse_findings_array(payload.get("findings"))
@@ -182,25 +238,19 @@ def _finalize_decision_counts(
     ):
         return decision
 
-    return ReviewerDecision(
+    return replace(
+        decision,
         verdict=new_verdict,
         summary=new_summary,
-        findings=decision.findings,
         findings_critical=critical,
         findings_high=high,
         findings_medium=medium,
         findings_low=low,
-        parseable=decision.parseable,
     )
 
 
 def _extract_json_payload(text: str) -> dict[str, object] | None:
-    r"""Recover a JSON object from reviewer output, tolerating nested objects.
-
-    Prefers fenced ``\`\`\`json\`\`\`` blocks, then tries the outermost balanced
-    brace pair following ``"verdict"`` so reviews that emit nested finding
-    objects (which break the greedy regex fallback) still parse.
-    """
+    """优先提取 JSON 代码块，否则提取包含修复报告或旧 verdict 的完整对象。"""
     match = re.search(r"```json\s*(\{.*?\})\s*```", text, re.DOTALL)
     if match:
         json_text = match.group(1)
@@ -236,8 +286,8 @@ def _loads_with_trailing_comma_fix(json_text: str) -> dict[str, object] | None:
 
 
 def _extract_outermost_json_object(text: str) -> str | None:
-    """Return the substring of the outermost ``{...}`` containing ``"verdict"``."""
-    verdict_match = re.search(r'"verdict"\s*:\s*"', text)
+    """从修复报告或旧版 verdict 的字段位置提取完整 JSON 对象。"""
+    verdict_match = re.search(r'"(?:verdict|repairs)"\s*:', text)
     if verdict_match is None:
         return None
     start = text.rfind("{", 0, verdict_match.start())

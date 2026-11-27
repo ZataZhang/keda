@@ -8,11 +8,29 @@ REPAIR_VALIDATION_GUIDANCE = (
 
 SELF_REPAIR_MODE_LINES = (
     "",
-    "Repair findings in this worktree before returning:",
-    "- Apply fixes for confirmed defects.",
+    "Complete the review and repairs in this same session before returning:",
+    "- Collect all confirmed problems, then fix every one in this worktree. Continue "
+    "through the remaining problems after each patch and verify your own repairs.",
+    "- Return only after all confirmed problems are fixed and checked, or you have "
+    "exhausted feasible approaches to a concrete blocker. For each blocked problem, "
+    "describe what you tried, the observed obstacle, and what is needed to continue.",
+    "- A partial patch or a failed validation command is a reason to keep diagnosing "
+    "and repairing. Continue other repairs while an external dependency is blocked.",
     f"- {REPAIR_VALIDATION_GUIDANCE}",
     "- When requesting a commit for the actual patch, write "
     "`.agent-runner/commit-request.json` with a descriptive `commit_message`.",
+    "",
+    "Final response: one JSON object in a markdown code block with `summary` and "
+    "`repairs`. Record every confirmed problem in `repairs`, including those you fixed. "
+    "Use an empty array only when the review found no problems.",
+    "Each repair uses the problem fields above plus:",
+    '- "status": "fixed" or "blocked".',
+    '- "fix": actual changes made, including affected files; for a blocked problem, '
+    "include attempted approaches and any partial repair.",
+    '- "verification": commands/checks and observed results for the final code tree.',
+    '- "blocker": concrete obstacle and what is needed to proceed; empty when fixed.',
+    "Mark a repair fixed after verifying it. If a required check remains impossible, "
+    "report that problem as blocked and retain the completed code patch.",
 )
 
 READ_ONLY_REVIEW_MODE_LINES = (
@@ -22,22 +40,26 @@ READ_ONLY_REVIEW_MODE_LINES = (
     "- Do NOT write `.agent-runner/commit-request.json`; a separate repair agent "
     "applies the fixes and any commit request you write is discarded.",
     "- Only report findings (a structured JSON verdict with findings).",
+    "Final response: one JSON object in a markdown code block with `summary`, "
+    "`verdict` (approved or changes_requested), and `findings` (problem fields above). "
+    "Use approved only when there are no unresolved findings.",
+    "Each finding also includes `recommendation`, describing how to fix it.",
 )
 
 # 默认规则调用 code-reviewer skill，并将结论交给 runner 的结构化输出契约。
 DEFAULT_REVIEW_PROMPT_TEMPLATE: tuple[str, ...] = (
-    "Before writing your verdict, call the `code-reviewer` skill using the Skill tool "
+    "Before completing your report, call the `code-reviewer` skill using the Skill tool "
     "with the diff and PRD context above.",
-    "Use the skill's findings to populate the `findings` array in your response.",
+    "Use the skill's findings as the confirmed problems to address in this session.",
     (
         "Complete the review of the current diff and requirement/evidence boundaries "
-        "before giving a verdict or starting a repair. Collect all actionable findings "
+        "before starting a repair. Collect all actionable findings "
         "in this pass and consolidate duplicate root causes."
     ),
     (
         "Trace the requested behavior through its normal entry point. If the requirement "
         "also applies to an alternate command, configuration, or existing state, use a "
-        "focused check to verify the affected route before approving."
+        "focused check to verify the affected route before finishing."
     ),
     (
         "Ground each actionable finding in an explicit requirement or an existing contract "
@@ -60,16 +82,9 @@ DEFAULT_REVIEW_PROMPT_TEMPLATE: tuple[str, ...] = (
         "verification and independent evidence apply to the final code tree; never "
         "reuse a verdict or test flag for a different tree."
     ),
-    "If the skill reports no findings, verdict must be `approved`.",
-    "Do not leave findings unaddressed while returning `approved`.",
+    "After using the skill, produce the final JSON report for the review mode below.",
     "",
-    "CRITICAL: The `code-reviewer` skill's Chinese text report is input for your "
-    "judgment, NOT your final answer to the runner. After calling the skill, you "
-    "MUST still produce a final ```json code block with the verdict/summary/findings "
-    "schema below. The runner parses only that JSON block; without it the review "
-    "fails with 'no parseable verdict'.",
-    "",
-    "Findings JSON schema:",
+    "Problem fields for each entry in the report:",
     "```json",
     "[",
     "  {",
@@ -78,14 +93,8 @@ DEFAULT_REVIEW_PROMPT_TEMPLATE: tuple[str, ...] = (
     '    "file": "path/to/file.py",',
     '    "line": 42,',
     '    "title": "short title",',
-    '    "description": "why this is a problem",',
-    '    "recommendation": "how to fix"',
+    '    "description": "why this is a problem"',
     "  }",
     "]",
     "```",
-    "",
-    "Final response must be a single JSON object in a markdown code block with:",
-    "- verdict: one of `approved`, `changes_requested`.",
-    "- summary: short rationale.",
-    "- findings: array of objects matching the schema above (may be empty).",
 )

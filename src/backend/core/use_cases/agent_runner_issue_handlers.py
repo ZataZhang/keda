@@ -326,7 +326,10 @@ def _process_blocked_resolution(
 
         # 构建并发送 continuation prompt
         continuation_prompt = build_blocked_continuation_prompt(
-            issue, worktree_path, marker.blocked_paths
+            issue,
+            worktree_path,
+            marker.blocked_paths,
+            issue_comments=github_client.list_issue_comments(issue.number),
         )
         before_sha = get_head_sha(worktree_path, process_runner)
 

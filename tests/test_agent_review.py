@@ -295,9 +295,11 @@ def test_build_review_packet_includes_diff_and_verification() -> None:
     assert "`just test`: exit 0" in packet
     assert "call the `code-reviewer` skill" in packet
     assert "requested behavior through its normal entry point" in packet
-    assert "focused check to verify the affected route before approving" in packet
+    assert "focused check to verify the affected route before finishing" in packet
     assert "Prepare the code patch even when you cannot run a platform-specific check" in packet
-    assert "Findings JSON schema" in packet
+    assert "`summary` and `repairs`" in packet
+    assert "exhausted feasible approaches to a concrete blocker" in packet
+    assert "- verdict: one of" not in packet
 
 
 def test_build_review_packet_lists_files_outside_truncated_preview() -> None:
@@ -914,7 +916,7 @@ def test_run_pre_pr_review_approved_with_patch_converges(tmp_path: Path) -> None
 def test_run_pre_pr_review_patched_soft_fail_reports_last_cycle_summary(
     tmp_path: Path,
 ) -> None:
-    """Last cycle with a successful patch must commit and continue publish."""
+    """旧版输出仍要求修改时，保留补丁并停止正常发布。"""
     issue = IssueSummary(number=1, title="T", url="U", body="B", labels=())
     fake_client = FakeGitHubClient()
     worktree_path = tmp_path / "fake-worktree"
@@ -929,20 +931,18 @@ def test_run_pre_pr_review_patched_soft_fail_reports_last_cycle_summary(
         runner=RunnerConfig(verification_commands=("just test",)),
     )
 
-    final_sha, _verification = run_pre_pr_review(
-        issue=issue,
-        worktree_path=worktree_path,
-        config=config,
-        github_client=fake_client,
-        process_runner=fake_runner,
-        selected_agent="codex",
-        head_sha_before="before-sha",
-        expected_branch="issue-1",
-        verification_results=[],
-    )
-    # Per the PRD: the last cycle accepts the reviewer-supplied final patch
-    # instead of hard-failing, so the runner converges and publishes.
-    assert final_sha == "after-sha"
+    with pytest.raises(RuntimeError, match="did not approve"):
+        run_pre_pr_review(
+            issue=issue,
+            worktree_path=worktree_path,
+            config=config,
+            github_client=fake_client,
+            process_runner=fake_runner,
+            selected_agent="codex",
+            head_sha_before="before-sha",
+            expected_branch="issue-1",
+            verification_results=[],
+        )
     comment_calls = [c for c in fake_client.calls if c["method"] == "comment_issue"]
     assert len(comment_calls) == 1
     assert "reviewer patched and runner committed follow-up changes" in (comment_calls[0]["body"])
@@ -1643,10 +1643,10 @@ def test_run_pre_pr_review_zero_reminder_attempts_fails_fast(
     assert "reviewer reported findings but produced no commit request" in comment_calls[0]["body"]
 
 
-def test_run_pre_pr_review_last_cycle_final_patch_is_accepted(
+def test_run_pre_pr_review_last_cycle_partial_patch_preserves_findings(
     tmp_path: Path,
 ) -> None:
-    """Final cycle with findings + commit request must commit and continue publish."""
+    """最后一轮有补丁且检查通过时，未修问题仍阻止正常发布。"""
     issue = IssueSummary(number=1, title="T", url="U", body="B", labels=())
     fake_client = FakeGitHubClient()
     worktree_path = tmp_path / "fake-worktree"
@@ -1733,18 +1733,18 @@ def test_run_pre_pr_review_last_cycle_final_patch_is_accepted(
 
     config = AppConfig(pre_pr_review=PrePrReviewConfig(enabled=True, max_attempts=1))
 
-    final_sha, _verification = run_pre_pr_review(
-        issue=issue,
-        worktree_path=worktree_path,
-        config=config,
-        github_client=fake_client,
-        process_runner=_FinalPatchReviewer(),
-        selected_agent="codex",
-        head_sha_before="before-sha",
-        expected_branch="issue-1",
-        verification_results=[],
-    )
-    assert final_sha == "after-sha"
+    with pytest.raises(RuntimeError, match="did not approve"):
+        run_pre_pr_review(
+            issue=issue,
+            worktree_path=worktree_path,
+            config=config,
+            github_client=fake_client,
+            process_runner=_FinalPatchReviewer(),
+            selected_agent="codex",
+            head_sha_before="before-sha",
+            expected_branch="issue-1",
+            verification_results=[],
+        )
     comment_calls = [c for c in fake_client.calls if c["method"] == "comment_issue"]
     assert len(comment_calls) == 1
     assert "reviewer patched and runner committed follow-up changes" in (comment_calls[0]["body"])

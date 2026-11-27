@@ -1,4 +1,4 @@
-"""Blocked-continue CLI use case for forbidden path resolution."""
+"""解除禁改路径或修复阻塞后，从保留的工作树继续执行。"""
 
 from __future__ import annotations
 
@@ -14,6 +14,8 @@ from backend.core.use_cases.agent_runner_events import (
     format_event_marker,
 )
 from backend.core.use_cases.agent_runner_git import get_current_branch, has_changes
+from backend.core.use_cases.agent_runner_failure import HumanActionRequiredError
+from backend.core.use_cases.agent_runner_failure_marking import _mark_issue_blocked
 from backend.core.use_cases.agent_runner_orchestrate import (
     BlockedWorktreeClaimedError,
     _find_worktree_path_for_issue,
@@ -42,7 +44,7 @@ def blocked_continue_issue(
     process_runner: IProcessRunner,
     repo_id: str | None = None,
 ) -> bool:
-    """操作员处理完禁止路径后，继续执行被阻塞的 Issue。
+    """操作员解除阻塞后，从已有进度继续执行 Issue。
 
     流程如下：
     1. 检查 worktree 是否干净，并确认禁止路径已处理。
@@ -136,6 +138,9 @@ def blocked_continue_issue(
     except BlockedWorktreeClaimedError:
         _logger.info("Issue #%d worktree claimed by another runner.", issue_number)
         return False
+    except HumanActionRequiredError as exc:
+        _mark_issue_blocked(issue=issue, config=config, github_client=github_client, exc=exc)
+        raise BlockedContinueError(str(exc)) from exc
     return True
 
 

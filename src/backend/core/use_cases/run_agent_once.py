@@ -274,28 +274,47 @@ def build_blocked_continuation_prompt(
     issue: IssueSummary,
     worktree_path: Path,
     blocked_paths: tuple[str, ...],
+    issue_comments: list[str] | None = None,
 ) -> str:
-    """Build a continuation prompt for a blocked Issue that has been resolved.
+    """携带原始需求和最近修复记录，继续处理已解除阻塞的 Issue。
 
     Args:
-        issue: Issue being processed.
-        worktree_path: Path to the agent worktree.
-        blocked_paths: The forbidden paths that were previously blocked.
+        issue: 当前 Issue。
+        worktree_path: 保留已有进度的工作树。
+        blocked_paths: 已由操作员处理的禁改路径。
+        issue_comments: Issue 评论中的审查修复报告和阻塞原因。
 
     Returns:
-        A prompt instructing the agent to continue the remaining work.
+        包含需求、修复上下文和继续执行指令的提示词。
     """
     lines = [
         f"Continue working on Issue #{issue.number}: {issue.title}",
         f"Issue URL: {issue.url}",
         f"Worktree: {worktree_path}",
         "",
-        "The following files were previously blocked by forbidden-path rules and have now been resolved by a human operator.",
-        "Please continue to complete the remaining tasks without modifying these files again unless explicitly required:",
+        "Issue body:",
+        issue.body,
         "",
+        "An operator has requested continuation after addressing the recorded blocker. "
+        "Inspect the existing commits and the reports below, recheck the blocker, and "
+        "complete all remaining repairs and verification from the preserved progress.",
     ]
-    for path in blocked_paths:
-        lines.append(f"- {path}")
+    if blocked_paths:
+        lines.extend(
+            [
+                "",
+                "These files were blocked by forbidden-path rules and have been resolved. "
+                "Preserve that resolution while completing the remaining work:",
+                *(f"- {path}" for path in blocked_paths),
+            ]
+        )
+    repair_comments = [
+        comment
+        for comment in issue_comments or []
+        if "## Agent Runner Pre-PR Review" in comment or "## Agent Runner Blocked" in comment
+    ]
+    if repair_comments:
+        lines.extend(["", "Recent repair and blocker reports:", *repair_comments[-2:]])
     lines.extend(
         [
             "",

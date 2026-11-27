@@ -532,6 +532,53 @@ def test_fifo_ordering_processes_lowest_issue_first(tmp_path, worktree_path, mon
     assert processed_numbers == [100, 101, 102]
 
 
+@pytest.mark.parametrize("label_target", ["pr", "issue"])
+def test_merge_queue_reads_verifier_label_from_the_publication_target(
+    tmp_path, worktree_path, monkeypatch, label_target: str
+) -> None:
+    """Issue 与 PR 编号不同时，消费发布函数实际写入的 PR 通过标签。"""
+    from backend.core.use_cases.agent_runner_verdict_pr_effects import apply_verifier_verdict_to_pr
+    from backend.core.use_cases.run_verifier_agent import ValidationVerdict
+
+    github = FakeGitHubClient()
+    config = _make_config(require_verifier_pass=True, auto_sign_off=False)
+    issue = IssueSummary(
+        number=40,
+        title="RAG",
+        url="https://github.com/example/repo/issues/40",
+        body="## Realistic Validation\n\n- [ ] rv-1: smoke\n",
+        labels=(config.labels.review,),
+    )
+    branch = "issue-40"
+    github._issue_labels[issue.number] = issue.labels
+    github._issue_get_bodies[issue.number] = issue.body
+    github._issue_comments[issue.number] = [f"PR Branch: `{branch}`"]
+    github.set_pr_context(branch, _make_pr_context(branch=branch, number=99))
+    assert merge_queue_module.validation_required(issue.body, config)
+    if label_target == "pr":
+        apply_verifier_verdict_to_pr(
+            "https://github.com/example/repo/pull/99",
+            ValidationVerdict(risk="green"),
+            issue.number,
+            verifier_passed_label=config.labels.verifier_passed,
+            github_client=github,
+        )
+    else:
+        github.edit_issue_labels(issue.number, add=(config.labels.verifier_passed,))
+        issue = github.get_issue(issue.number)
+    monkeypatch.setattr(merge_queue_module, "execute_rebase", lambda **kwargs: [])
+    monkeypatch.setattr(merge_queue_module, "_diff_paths", lambda *args: (["src/main.py"], False))
+    outcome = merge_queue_module._process_one(
+        repo_path=tmp_path,
+        config=config,
+        issue=issue,
+        github_client=github,
+        process_runner=FakeProcessRunner(),
+        supervisor_agent="auto",
+    )
+    assert outcome.action == ("merged" if label_target == "pr" else "skipped_verifier_missing")
+
+
 def test_verifier_missing_label_skips_issue(tmp_path, worktree_path, monkeypatch) -> None:
     """When validation is required and the verifier-passed label is missing, skip."""
     monkeypatch.setattr(

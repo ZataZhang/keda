@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 from backend.core.shared.models.agent_runner import ReviewFinding
+from backend.core.use_cases.agent_review_decisions import ReviewerDecision
 from backend.core.use_cases.agent_runner_events import format_event_marker
 
 
@@ -28,6 +29,7 @@ def build_pre_pr_review_result_comment(
     repairer: str | None = None,
     reviewer_patch_ignored: bool = False,
     reviewer_left_changes: bool = False,
+    repair_report: ReviewerDecision | None = None,
 ) -> str:
     """Build the human-readable comment for a pre-PR review result.
 
@@ -63,6 +65,20 @@ def build_pre_pr_review_result_comment(
         counts_line,
         f"- Action: {action_summary}",
     ]
+    if repair_report is not None and repair_report.repairs is not None:
+        sections.extend(["", repair_report.summary, "", "### Repair results", ""])
+        sections.append("| Problem | File | Status | Changes | Verification | Blocker |")
+        sections.append("|---|---|---|---|---|---|")
+        for repair in repair_report.repairs:
+            cells = (
+                repair.finding.title,
+                repair.finding.file,
+                repair.status,
+                repair.fix,
+                repair.verification,
+                repair.blocker,
+            )
+            sections.append("| " + " | ".join(_escape_cell(cell) for cell in cells) + " |")
     if reviewer_patch_ignored:
         sections.extend(
             [
