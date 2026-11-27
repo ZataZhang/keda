@@ -15,25 +15,27 @@ from backend.core.shared.models.agent_runner import (
     CommandResult,
     IssueSummary,
 )
+from backend.core.use_cases.agent_invocation_tracing import PHASE_VERIFICATION_RECOVERY
 from backend.core.use_cases.agent_runner_commit import (
     commit_requested_changes,
+)
+from backend.core.use_cases.agent_runner_failure import (
+    format_recovery_failure_summary,
 )
 from backend.core.use_cases.agent_runner_feedback import (
     VerificationFailedError,
     build_recovery_prompt,
     ensure_verification_passed,
 )
-from backend.core.use_cases.agent_runner_failure import (
-    format_recovery_failure_summary,
-)
 from backend.core.use_cases.agent_runner_git import (
+    get_current_branch,
+    get_head_sha,
     has_changes,
     run_verification,
 )
 from backend.core.use_cases.agent_runner_validation import (
     resolve_issue_evidence_relpath,
 )
-from backend.core.use_cases.agent_invocation_tracing import PHASE_VERIFICATION_RECOVERY
 from backend.core.use_cases.run_agent_once import run_agent_with_prompt
 
 
@@ -58,6 +60,8 @@ def run_recovery_after_verification_failure(
     pr_branch: str,
     recovery_attempt: int,
     max_recovery_attempts: int,
+    failure_summary_override: str | None = None,
+    expected_head: str | None = None,
 ) -> list[CommandResult]:
     """Run a recovery agent to fix verification failures and commit the result.
 
@@ -66,7 +70,7 @@ def run_recovery_after_verification_failure(
     commit. The runner then commits the changes and returns the new verification
     results (which may themselves fail, to be handled by the caller).
     """
-    failure_summary = format_recovery_failure_summary(
+    failure_summary = failure_summary_override or format_recovery_failure_summary(
         "Verification failed after rebase/repair.",
         verification_results,
     )
@@ -78,7 +82,7 @@ def run_recovery_after_verification_failure(
         failure_summary=failure_summary,
         evidence_dir=resolve_issue_evidence_relpath(config, issue),
     )
-    run_agent_with_prompt(
+    agent_result = run_agent_with_prompt(
         supervisor_agent,
         recovery_prompt,
         worktree_path,
@@ -86,7 +90,24 @@ def run_recovery_after_verification_failure(
         config=config,
         issue=issue,
         invocation_phase=PHASE_VERIFICATION_RECOVERY,
+        **(
+            {
+                "timeout_seconds": config.runner.recovery_timeout_seconds
+                or config.runner.timeout_seconds,
+                "inactivity_timeout_seconds": config.runner.inactivity_timeout_seconds,
+            }
+            if expected_head is not None
+            else {}
+        ),
     )
+    if expected_head is not None:
+        if agent_result.return_code != 0:
+            raise RuntimeError(f"Recovery agent exited with code {agent_result.return_code}.")
+        if (
+            get_current_branch(worktree_path, process_runner) != pr_branch
+            or get_head_sha(worktree_path, process_runner) != expected_head
+        ):
+            raise RuntimeError("Recovery agent unexpectedly changed the branch or HEAD.")
 
     request_path = worktree_path / ".agent-runner" / "commit-request.json"
     if request_path.is_file():

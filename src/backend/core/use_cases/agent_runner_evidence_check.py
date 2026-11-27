@@ -18,9 +18,9 @@
 from __future__ import annotations
 
 import subprocess
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Callable
 
 from backend.core.shared.interfaces.agent_runner import IProcessRunner
 from backend.core.shared.models.agent_runner import (
@@ -28,13 +28,13 @@ from backend.core.shared.models.agent_runner import (
     CommandResult,
     DeliveryGateFailureKind,
 )
+from backend.core.use_cases import agent_runner_evidence_assertions
 from backend.core.use_cases.agent_runner_feedback import format_result_for_recovery
 from backend.core.use_cases.agent_runner_structured_evidence import (
     EvidenceBlock,
     ValidationEvidenceError,
     load_evidence_manifest,
 )
-from backend.core.use_cases import agent_runner_evidence_assertions
 
 STATUS_PASSED = "passed"
 STATUS_SKIPPED = "skipped"
@@ -168,6 +168,7 @@ class EvidenceCheckItemResult:
     duration_seconds: float = 0.0
     assertion_failures: tuple[agent_runner_evidence_assertions.StdoutAssertionFailure, ...] = ()
     detail: str = ""
+    evidence_references: tuple[str, ...] = ()
 
     @property
     def passed(self) -> bool:
@@ -309,6 +310,12 @@ class EvidenceCheckReport:
         sections = [
             f"=== Item {item_result.block.item_number} ({item_result.status}) ===\n"
             f"{item_result.detail}"
+            + (
+                "\n\nLocal evidence (relative to the Issue worktree):\n"
+                + "\n".join(item_result.evidence_references)
+                if item_result.evidence_references
+                else ""
+            )
             for item_result in failed_results
         ]
         return "\n\n".join([header, *sections])
@@ -459,6 +466,17 @@ def _run_single_block(
     )
 
 
+def _evidence_file_stamp(path: Path) -> tuple[int, int, int, int] | None:
+    """记录普通文件的身份与修改时间，忽略符号链接。"""
+    try:
+        if path.is_symlink() or not path.is_file():
+            return None
+        stat = path.stat()
+    except OSError:
+        return None
+    return stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns
+
+
 def run_evidence_check(
     worktree_path: Path,
     config: AppConfig,
@@ -504,7 +522,25 @@ def run_evidence_check(
         if request.skip_block is not None and request.skip_block(block):
             item_results.append(EvidenceCheckItemResult(block=block, status=STATUS_SKIPPED))
             continue
+        evidence_paths = tuple(request.evidence_dir / name for name in block.evidence_files)
+        before_stamps = tuple(_evidence_file_stamp(path) for path in evidence_paths)
         item_result = _run_single_block(worktree_path, process_runner, request, block)
+        if not item_result.passed:
+            references = []
+            for path, before_stamp in zip(evidence_paths, before_stamps, strict=True):
+                after_stamp = _evidence_file_stamp(path)
+                if not path.resolve().is_relative_to(worktree_path.resolve()):
+                    continue
+                status = (
+                    "unavailable"
+                    if after_stamp is None
+                    else "unchanged"
+                    if after_stamp == before_stamp
+                    else "written by this check"
+                )
+                relative_path = path.resolve().relative_to(worktree_path.resolve())
+                references.append(f"- `{relative_path}` ({status})")
+            item_result = replace(item_result, evidence_references=tuple(references))
         if item_result.passed and request.record_pass is not None:
             request.record_pass(block)
         item_results.append(item_result)

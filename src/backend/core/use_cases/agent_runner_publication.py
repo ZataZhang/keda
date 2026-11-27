@@ -39,6 +39,7 @@ from backend.core.shared.models.agent_runner import (
 )
 from backend.core.shared.models.publish_stage import PublishStage
 from backend.core.use_cases.agent_review import run_pre_pr_review
+from backend.core.use_cases.agent_runner_claim_lease import ClaimLeaseLost
 from backend.core.use_cases.agent_runner_direct_pr_label import (
     DirectPrLabelPublicationRequest,
     consume_label_after_publication,
@@ -49,10 +50,16 @@ from backend.core.use_cases.agent_runner_direct_pr_round import (
 )
 from backend.core.use_cases.agent_runner_events import format_event_marker
 from backend.core.use_cases.agent_runner_failure import PublishFailureError
-from backend.core.use_cases.agent_runner_claim_lease import ClaimLeaseLost
 from backend.core.use_cases.agent_runner_final_verification import (
     FinalVerificationRequest,
     ensure_final_verifier_verdict,
+)
+from backend.core.use_cases.agent_runner_issue_control import (
+    VerifierCancelledByHumanError,
+    clear_verifier_hold_after_green,
+    discard_stale_verdict,
+    finalize_verifier_takeover,
+    mark_verifier_pr_merged,
 )
 from backend.core.use_cases.agent_runner_publish import (
     DraftPRCreationError,
@@ -64,16 +71,12 @@ from backend.core.use_cases.agent_runner_skill_distillation import (
     _try_distill_skill_after_success,
 )
 from backend.core.use_cases.agent_runner_validation import (
+    ValidationCommandFailure,
     ensure_validation_evidence_ready,
+    format_validation_evidence_failure,
     publish_validation_evidence_artifacts,
     publish_validation_evidence_best_effort,
-)
-from backend.core.use_cases.agent_runner_issue_control import (
-    VerifierCancelledByHumanError,
-    clear_verifier_hold_after_green,
-    discard_stale_verdict,
-    finalize_verifier_takeover,
-    mark_verifier_pr_merged,
+    resolve_issue_evidence_relpath,
 )
 from backend.core.use_cases.agent_runner_verifier_publication import (
     VerifierPublicationDependencies,
@@ -95,6 +98,7 @@ from backend.core.use_cases.run_agent_once import (
     run_verification,
 )
 from backend.core.use_cases.run_verifier_agent import (
+    ValidationVerdict,
     apply_verifier_verdict_to_pr,
 )
 
@@ -467,6 +471,45 @@ class _PublicationReviewRequest:
     content_generator: IContentGenerator | None
 
 
+def _verify_reviewed_head(request: _PublicationReviewRequest) -> ValidationVerdict | None:
+    """最终提交的 RV 命令失败时，从当前工作树定向恢复一次。"""
+    verification = request.verification_request
+    try:
+        return ensure_final_verifier_verdict(verification)
+    except ValidationCommandFailure as failure:
+        if verification.config.runner.max_recovery_attempts <= 0:
+            raise
+        from backend.core.use_cases.agent_runner_verification_recovery import (
+            run_recovery_after_verification_failure,
+        )
+
+        head_sha = get_head_sha(verification.worktree_path, verification.process_runner)
+        _logger.warning(
+            "Final RV failed at HEAD %s; requesting one recovery.\n%s", head_sha, failure
+        )
+        results = run_recovery_after_verification_failure(
+            issue=verification.issue,
+            worktree_path=verification.worktree_path,
+            config=verification.config,
+            process_runner=verification.process_runner,
+            supervisor_agent=verification.selected_agent,
+            verification_results=[],
+            pr_branch=request.expected_branch,
+            recovery_attempt=1,
+            max_recovery_attempts=1,
+            expected_head=head_sha,
+            failure_summary_override=format_validation_evidence_failure(
+                f"Failed phase: final RV after pre-PR review\nHEAD: {head_sha}\n{failure}",
+                resolve_issue_evidence_relpath(verification.config, verification.issue),
+            ),
+        )
+        ensure_verification_passed(results)
+        verdict = ensure_final_verifier_verdict(verification)
+        if get_head_sha(verification.worktree_path, verification.process_runner) != head_sha:
+            request.push_callback()
+        return verdict
+
+
 def _review_verify_create_pr(request: _PublicationReviewRequest) -> _VerifiedPrPublication:
     """审核、复核最终提交，随后创建 Draft PR。"""
     verification_request = request.verification_request
@@ -495,7 +538,7 @@ def _review_verify_create_pr(request: _PublicationReviewRequest) -> _VerifiedPrP
             verification_results=request.verification_results,
             push_callback=request.push_callback,
         )
-    final_verdict = ensure_final_verifier_verdict(verification_request)
+    final_verdict = _verify_reviewed_head(request)
     branch, pr_url = _create_draft_pr_with_recovery_context(
         issue=verification_request.issue,
         worktree_path=verification_request.worktree_path,
