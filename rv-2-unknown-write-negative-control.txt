@@ -1,0 +1,4 @@
+Negative control unique-object assertion: FAILED as expected
+Direct gh exit: 0
+Remote object count after unsafe direct write: 2
+Source identity: {"fixture_server_sha256": "38fdb61698b305478bdb5687f565cd6f08324084002ca3f0548eda6cc864e9b0", "fixture_setup_sha256": "67b53f0abebb32a036e94879312d135a0372384918fc14f1a08363fbd3b9ea86", "head_tree": "3076e113312f05ffb0249a1f6f46aaaebed01e54", "runner_harness_sha256": "0a4764459e17fbc42e4b856efffeace6b498c9ce511f34cd68be00dbb837b7c2", "working_tree_diff_sha256": "c6a91ae436c337c147cc53d0a4c262096d6a5dfc53f0d8152e4364a8666a6973"}

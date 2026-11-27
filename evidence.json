@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "language": "zh-CN",
+  "items": [
+    {
+      "item_number": 1,
+      "item_name": "阶段续跑：发布故障后复用未变成果",
+      "command": "UV_CACHE_DIR=/private/tmp/uv-cache uv run python tasks/evidence/P1-FEAT-20261024-162357-agent-interruption-recovery/scripts/run_recovery_rv.py --scene stage-resume",
+      "evidence_files": [
+        "rv-1-stage-resume.txt",
+        "rv-1-stage-resume-negative-control.txt"
+      ],
+      "output_summary": "真实 kc run 在 HTTPS socket 断连后挂起；新 daemon 恢复后 Agent 调用仍为 1，未变验证契约被复用，契约变化后重新验证，最终远端只有 1 个 PR。命令 stdout 输出稳定 PASS 摘要。",
+      "explanation": "证据由真实 kc CLI/daemon、真实 Git worktree、SQLite 和测试侧 TLS forge 产生；rv-1 文件记录实际 socket 断开、持久预算与阶段、独立新进程的 Git/SQLite 探测。负控将测试侧 Agent 调用观测从 1 注入为 2，复用同一单调用断言并按预期失败。",
+      "risks": "TLS forge 不代表 GitHub 内部传播或真实公网链路；rv-1 的红控仅验证重复调用 oracle 对错误观测敏感，不是生产故障注入。认领失权和取消矩阵仍未完成，因此该行为验收项保持开放。",
+      "negative_control": "UV_CACHE_DIR=/private/tmp/uv-cache uv run python tasks/evidence/P1-FEAT-20261024-162357-agent-interruption-recovery/scripts/run_recovery_rv.py --scene stage-resume --negative-control；在完成真实场景后，将 test-side 调用观测注入为 2，运行与绿路径相同的单 Agent 断言。",
+      "expected_fail": "命令以 exit 1 失败，报 `Expected negative-control failure observed: duplicate Agent invocation was rejected.`；rv-1-stage-resume-negative-control.txt 记录观测从 1 到 2 及原断言失败。",
+      "stdout_assertions": [
+        {
+          "severity": "high",
+          "pattern": "PASS: one Agent invocation; unchanged validation reused; changed contract revalidated.",
+          "source": "stdout",
+          "must_match": true
+        }
+      ]
+    },
+    {
+      "item_number": 2,
+      "item_name": "未知写入：对账、保守挂起与安全补发",
+      "command": "UV_CACHE_DIR=/private/tmp/uv-cache uv run python tasks/evidence/P1-FEAT-20261024-162357-agent-interruption-recovery/scripts/run_recovery_rv.py --scene unknown-write",
+      "evidence_files": [
+        "rv-2-unknown-write.txt",
+        "rv-2-unknown-write-negative-control.txt"
+      ],
+      "output_summary": "真实 gh 创建 PR 后丢失响应时，新进程对账并确认唯一 PR；无权威未执行证明和查询失败分支均保持 unknown 且没有第二次创建；连接建立前拒绝后仅安全补发一次。命令 stdout 输出稳定 PASS 摘要。",
+      "explanation": "服务端 forge 独立记录请求和 PR 对象，SQLite 新连接探测 operation_key、payload_digest、状态和 deadline；另外验证评论分页、延迟可见和查询故障。负控绕过账本直接再次调用真实 gh，远端出现两个 PR，唯一对象断言按预期变红。",
+      "risks": "测试侧 TLS forge 不代表 GitHub 内部传播。当前 evidence 未覆盖完整并发、跨机器失权、载荷变更和严格存储失败矩阵，所以不能据此勾选完整 rv-2 验收项。",
+      "negative_control": "UV_CACHE_DIR=/private/tmp/uv-cache uv run python tasks/evidence/P1-FEAT-20261024-162357-agent-interruption-recovery/scripts/run_recovery_rv.py --scene unknown-write --negative-control；测试侧绕过账本，以真实 gh 对同一目标再创建一个 PR。",
+      "expected_fail": "命令以 exit 1 失败，唯一对象断言观察到 2 个远端 PR；rv-2-unknown-write-negative-control.txt 记录 `Direct gh exit: 0` 与 `Remote object count after unsafe direct write: 2`。",
+      "stdout_assertions": [
+        {
+          "severity": "high",
+          "pattern": "PASS: unknown PR writes reconciled safely; one PR per successful create path.",
+          "source": "stdout",
+          "must_match": true
+        }
+      ]
+    },
+    {
+      "item_number": 3,
+      "item_name": "人工交接：本地报告持久化与通知续投",
+      "command": "UV_CACHE_DIR=/private/tmp/uv-cache uv run python tasks/evidence/P1-FEAT-20261024-162357-agent-interruption-recovery/scripts/run_recovery_rv.py --scene human-handoff",
+      "evidence_files": [
+        "rv-3-human-handoff.txt",
+        "rv-3-human-handoff-negative-control.txt"
+      ],
+      "output_summary": "真实 runner 落盘包含失败步骤、已完成成果、未知 PR 操作、已尝试处理、下一步及恢复入口的报告；通知首次被 429 拒绝后，新 daemon 将同一正文仅投递一次。命令 stdout 输出稳定 PASS 摘要。",
+      "explanation": "报告来自真实 kc run 和 SQLite 恢复状态；独立 forge 观察到通知拒绝后只成功投递一次，恢复过程没有重发未知 PR 创建。负控删除测试副本中的真实 runner 报告，再运行与绿路径相同的报告完整性断言，断言按预期失败。",
+      "risks": "TLS forge 不证明真实 GitHub 通知传输。权限拒绝、持续预算、严格存储失败和取消矩阵仍有未覆盖项；人审也尚未完成，因此只记录已运行行为，不代替人工验收。",
+      "negative_control": "UV_CACHE_DIR=/private/tmp/uv-cache uv run python tasks/evidence/P1-FEAT-20261024-162357-agent-interruption-recovery/scripts/run_recovery_rv.py --scene human-handoff --negative-control；先运行真实交接并验证实际报告，再删除报告测试副本，复跑报告存在性断言。",
+      "expected_fail": "命令以 exit 1 失败，报 `Expected negative-control failure observed: missing local report was rejected.`；rv-3-human-handoff-negative-control.txt 记录被删除的是实际 runner 报告的测试副本及缺失报告断言失败。",
+      "stdout_assertions": [
+        {
+          "severity": "high",
+          "pattern": "PASS: local handoff saved; same report delivered once after notification recovery.",
+          "source": "stdout",
+          "must_match": true
+        }
+      ]
+    }
+  ]
+}
