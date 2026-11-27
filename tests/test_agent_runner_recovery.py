@@ -45,9 +45,7 @@ def test_validation_stage_is_saved_before_pre_verifier_publication(
     request = SimpleNamespace(
         issue=SimpleNamespace(number=73),
         worktree_path=tmp_path,
-        config=SimpleNamespace(
-            runner=SimpleNamespace(verification_commands=("git diff --check",))
-        ),
+        config=SimpleNamespace(runner=SimpleNamespace(verification_commands=("git diff --check",))),
         process_runner=object(),
         repo_id="rv-demo",
         github_client=SimpleNamespace(recovery_store=recovery_store),
@@ -116,9 +114,7 @@ def test_corrupt_recovery_report_path_cannot_select_external_file(tmp_path: Path
 
     repository_path = tmp_path / "repo"
     repository_path.mkdir()
-    expected_report_path = (
-        repository_path / ".agent-runner" / "recovery" / "issue-73.md"
-    )
+    expected_report_path = repository_path / ".agent-runner" / "recovery" / "issue-73.md"
     external_file_path = tmp_path / "secret.txt"
     external_file_path.write_text("must not be posted", encoding="utf-8")
 
