@@ -6,10 +6,23 @@
 
 执行者已交叉核对该呈递产物。当前尚无 PR 或 CI 链接：发布由 runner 负责，文件落盘不代表人工验收。
 
+**证据可访问性限制：** 上表中的原始文件和重放脚本仅存在于执行机器，不包含在 Git 提交中；干净检出无法打开或重放。尚未提供可访问的证据分支或等效产物，不能将下方摘要视为独立验证。下面是本地 rv-3 文件中实际保存的报告摘录，供审阅时直接阅读：
+
+> - 状态：⏸️ 自动恢复预算耗尽或需要人工处理；业务写入已停止。
+> - 失败步骤：`ready` / `outcome_unknown`
+> - 已完成成果：保留故障前已落盘的 worktree、commit 与通过验证的阶段；未持久化的内容不会被视为已完成。
+> - 未知或未完成的对外写入：`draft_pull_request_create` `repos/owner/repo/pulls:issue-73:main`：`unknown`。
+> - 已尝试处理：单次 gh 调用最多 5 次 / 60 秒；恢复总预算最多 30 分钟、6 次调度恢复。
+> - 下一步：按操作键核对 GitHub 对端对象；确认已创建则保留现状，确认未创建且目标可安全补发后，运行 `kc run --issue 73`。
+> - 恢复入口：`kc run --issue 73`；发布恢复也可用 `kc recover --issue 73`。
+> - 通知状态：待投递；本地报告已保存，通知成功前不会标记为已送达。
+
+本摘录只改善可读性，不替代完整原始证据、最终代码树重验或独立 verifier 的结论。
+
 ## Delivery and source identity
 
 - Issue #457 continues from the existing WIP checkpoint `6328f89ddb762a22fbcdcc9d7a54ae954709bf9b`; no prior commits were reverted.
-- All three green RV files and three red-control files were recollected against the same final identity:
+- The following identity describes the earlier executor collection, not the current committed tree; it must not be reused as final-tree evidence:
   - `HEAD` tree: `3076e113312f05ffb0249a1f6f46aaaebed01e54`
   - Worktree diff SHA-256: `c6a91ae436c337c147cc53d0a4c262096d6a5dfc53f0d8152e4364a8666a6973`
   - `run_recovery_rv.py`: `0a4764459e17fbc42e4b856efffeace6b498c9ce511f34cd68be00dbb837b7c2`
@@ -73,4 +86,4 @@ The table is a source scan, not a claim that every runner-managed write is compl
 
 - No Acceptance Checklist item has been marked complete. These RVs do not execute the full rv-2 cross-machine claim-loss/concurrency/payload-update/strict-storage-failure matrix or the rv-3 permission-denied, sustained-budget, strict-storage-failure and cancellation matrix.
 - No independent verifier verdict is available in this session. The separate report records `REVIEW_INCIDENT / INCONCLUSIVE`; executor-run tests are not represented as independent verification.
-- Human-Confirmed items remain for the human reviewer. No PR, CI run, archive move or automatic-merge acceptance was performed. The canonical PRD is marked `⏸️ 验证阻塞` with a tracked follow-up; it remains in `tasks/pending/` for the runner to handle.
+- Human-Confirmed items remain for the human reviewer. The runner has since archived the canonical PRD under `tasks/archive/` with `⏸️ 验证阻塞`; this does not establish validation or human acceptance.

@@ -503,7 +503,7 @@ rv-1 阶段恢复与 rv-2 副作用去重由 verifier 审核；迁移、分支�
 - Reconciled differences:
   - 没有修改用户可见范围、行为 oracle 或验证要求；按当前代码审计同步了手动恢复、监督与验证分支写入行为，并在证据报告中逐项披露未覆盖的写入口和矩阵。
 - Validation blocker: 尚未执行完整 rv-2 / rv-3 故障矩阵，未解决 PRD 创建发布及证据清理 Git 写入是否属于本期范围的审查问题，且没有独立 verifier 可形成 PASS；因此不得勾选 executor-owned Acceptance Checklist 项或宣称完成。
-- Validation follow-up: GitHub Issue #457 仍 open，作为本次验证债务的跟踪项；下一恢复轮完成 PRD 创建发布与证据清理写入口范围审查、rv-2/rv-3 剩余故障矩阵，并在独立 verifier 会话可用后复核本证据报告记录的最终源码 tree，再按实际证据更新 Acceptance Checklist。此 PRD 保持 pending，未由执行者归档。
+- Validation follow-up: GitHub Issue #457 仍 open，作为本次验证债务的跟踪项；下一恢复轮完成 PRD 创建发布与证据清理写入口范围审查、rv-2/rv-3 剩余故障矩阵，并对最终源码 tree 重新采集证据，在独立 verifier 会话可用后复核，再按实际证据更新 Acceptance Checklist。runner 已按验证阻塞路径归档；原始证据目前仅存在本机，还需通过证据分支或等效机制提供给审阅者。
 
 ## Change Log
 
