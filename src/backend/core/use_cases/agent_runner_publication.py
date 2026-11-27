@@ -479,19 +479,14 @@ def _verify_reviewed_head(request: _PublicationReviewRequest) -> ValidationVerdi
     except ValidationCommandFailure as failure:
         if verification.config.runner.max_recovery_attempts <= 0:
             raise
-        # 恢复模块经 run_agent_once 重用现有提交代理，延迟导入避免装配环。
         from backend.core.use_cases.agent_runner_verification_recovery import (
             run_recovery_after_verification_failure,
         )
 
         head_sha = get_head_sha(verification.worktree_path, verification.process_runner)
         _logger.warning(
-            "Final RV failed for Issue #%d at HEAD %s; requesting one recovery.\n%s",
-            verification.issue.number,
-            head_sha,
-            failure,
+            "Final RV failed at HEAD %s; requesting one recovery.\n%s", head_sha, failure
         )
-        evidence_dir = resolve_issue_evidence_relpath(verification.config, verification.issue)
         results = run_recovery_after_verification_failure(
             issue=verification.issue,
             worktree_path=verification.worktree_path,
@@ -505,7 +500,7 @@ def _verify_reviewed_head(request: _PublicationReviewRequest) -> ValidationVerdi
             expected_head=head_sha,
             failure_summary_override=format_validation_evidence_failure(
                 f"Failed phase: final RV after pre-PR review\nHEAD: {head_sha}\n{failure}",
-                evidence_dir,
+                resolve_issue_evidence_relpath(verification.config, verification.issue),
             ),
         )
         ensure_verification_passed(results)
